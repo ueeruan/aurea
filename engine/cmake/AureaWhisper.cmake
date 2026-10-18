@@ -21,10 +21,13 @@ foreach(_whisper_target whisper ggml ggml-base ggml-cpu)
             $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-fexceptions>)
     endif()
 endforeach()
-target_sources(aurea_core PRIVATE src/text/LocalWhisper.cpp)
+# WhisperQuality: VAD por energia, janelas e filtros de alucinação, sem
+# depender do whisper.h (os testes do motor exercitam sem modelo). Roda dentro
+# da transcrição, que traduz bad_alloc em Status: também precisa de unwind.
+target_sources(aurea_core PRIVATE src/text/LocalWhisper.cpp src/text/WhisperQuality.cpp)
 target_link_libraries(aurea_core PRIVATE whisper)
 if(MSVC)
-    set_source_files_properties(src/text/LocalWhisper.cpp PROPERTIES COMPILE_OPTIONS /EHsc)
+    set_source_files_properties(src/text/LocalWhisper.cpp src/text/WhisperQuality.cpp PROPERTIES COMPILE_OPTIONS /EHsc)
 else()
-    set_source_files_properties(src/text/LocalWhisper.cpp PROPERTIES COMPILE_OPTIONS -fexceptions)
+    set_source_files_properties(src/text/LocalWhisper.cpp src/text/WhisperQuality.cpp PROPERTIES COMPILE_OPTIONS -fexceptions)
 endif()

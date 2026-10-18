@@ -149,7 +149,7 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
             FGTexture output;
             if (!scene3d_.build(graph_, arena_, group, w, h, frame.frameNumber, output)) {
                 incompleteStage = true;
-                incomplete_ = true;
+                mark_incomplete(__FILE__, __LINE__);
                 return finish(OkStatus);
             }
             TextureDesc desc; desc.width = w; desc.height = h; desc.format = kWorkFormat;
@@ -165,7 +165,7 @@ Status Renderer::render_staged_scene_targets(const FrameSnapshot& root, const Re
                 return finish(Status{Errc::PipelineCompileFailed, "copia 3D da captura"});
             graph_.set_output(target, ResourceState::ShaderRead);
             Status status = graph_.compile(pool_);
-            if (scene3d_.incomplete()) incomplete_ = true;
+            if (scene3d_.incomplete()) mark_incomplete(__FILE__, __LINE__);
             if (status.ok() && cancelled()) status = Errc::Cancelled;
             if (status.ok() && !frame.commands) status = Errc::InvalidState;
             if (status.ok()) {

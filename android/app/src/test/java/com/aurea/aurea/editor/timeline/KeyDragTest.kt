@@ -77,7 +77,7 @@ class KeyDragTest {
         assertEquals(HitKind.KEYFRAME, hit(212f, 13f, atStart))   // núcleo dentro da alça
         assertEquals(HitKind.TRIM_START, hit(185f, 13f, atStart)) // folga sobre a alça → alça
         assertEquals(HitKind.KEYFRAME, hit(185f, 13f, atStart, handles = false))
-        assertEquals(HitKind.KEYFRAME, hit(178f, 13f, atStart))   // fora da alça, ainda na folga
+        assertEquals(HitKind.TRIM_START, hit(178f, 13f, atStart)) // alça agora externa, além do núcleo da chave
         // Compacto: a tampa ‹ continua alcançável sob a folga.
         assertEquals(HitKind.CAP_BACK, hit(180f, 10f, atStart, handles = false, compact = true))
         assertEquals(HitKind.KEYFRAME, hit(190f, 10f, atStart, handles = false, compact = true))
@@ -94,7 +94,7 @@ class KeyDragTest {
         handles: Boolean = true, compact: Boolean = false, keys: Boolean = true,
     ): HitKind {
         val x0 = TimeAxis.xOf(100.0, VIEW, PPF, CX)
-        val x1 = maxOf(TimeAxis.xOf(150.0, VIEW, PPF, CX), x0 + m.barMinWidth)
+        val x1 = TimeAxis.xOf(150.0, VIEW, PPF, CX)
         return RowHit.hit(m, x, y, WIDTH, x0, x1, handles, compact, keys, instants, VIEW, PPF, CX, out)
     }
 

@@ -1,6 +1,7 @@
 #include "aurea/export/ExportRecovery.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "aurea/project/Serialization.hpp"
+#include "aurea/core/Log.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/Text3D.hpp"
 #include "aurea/text/FontManager.hpp"
@@ -15,6 +16,11 @@
 #include <filesystem>
 #include <new>
 #include <unordered_set>
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace aurea::export_recovery {
 namespace {
@@ -209,10 +215,21 @@ Status capture(const Project& project, CompositionId composition, const ExportSe
                const PathResolver& resolve, std::unique_ptr<Project>& frozen, Package& package,
                bool requirePersistentSources) noexcept {
     try {
-        Package candidate; candidate.settings = settings; candidate.composition = composition;
         SaveOptions save; save.writeThumbnail = false;
         std::vector<u8> initial;
         if (const Status s = ProjectSerializer::encode(project, save, initial); !s.ok()) return s;
+        return capture_snapshot(std::move(initial), composition, settings, resolve, frozen, package,
+                                requirePersistentSources);
+    } catch (const std::bad_alloc&) { return Errc::OutOfMemory; }
+      catch (...) { return Errc::IoError; }
+}
+
+Status capture_snapshot(std::vector<u8> initial, CompositionId composition, const ExportSettings& settings,
+               const PathResolver& resolve, std::unique_ptr<Project>& frozen, Package& package,
+               bool requirePersistentSources) noexcept {
+    try {
+        Package candidate; candidate.settings = settings; candidate.composition = composition;
+        SaveOptions save; save.writeThumbnail = false;
         if (initial.size() > kMaxProjectBytes) return Errc::BudgetExceeded;
         std::unique_ptr<Project> copy;
         if (const Status s = clone(initial, copy); !s.ok()) return s;
@@ -349,5 +366,68 @@ Status read(const std::string& path, Package& package, std::unique_ptr<Project>&
 }
 Status write_project(const std::string& path, const Package& package) noexcept {
     return fileio::write_atomic(path, package.projectBytes.data(), package.projectBytes.size(), {true, false});
+}
+
+Result<u32> cleanup_temporary_outputs(const std::string& directory, const std::string& currentOutput,
+                                     const std::atomic<bool>* cancel) noexcept {
+    try {
+        if (directory.empty()) return u32{0};
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const fs::path requested = fs::u8path(directory);
+        const auto status = fs::symlink_status(requested, ec);
+        if (ec || !fs::exists(status)) return u32{0};
+        if (!fs::is_directory(status) || fs::is_symlink(status)) {
+            AUREA_LOG_WARN("export cleanup: root status rejected requested=%s type=%d directory=%d symlink=%d",
+                directory.c_str(), static_cast<int>(status.type()), fs::is_directory(status), fs::is_symlink(status));
+            return Status{Errc::InvalidArgument};
+        }
+        const fs::path root = fs::canonical(requested, ec);
+        if (ec || root.empty() || root == root.root_path()) {
+            AUREA_LOG_WARN("export cleanup: canonical root rejected requested=%s root=%s error=%d",
+                directory.c_str(), utf8(root).c_str(), ec.value());
+            return Status{Errc::InvalidArgument};
+        }
+        const fs::path absoluteRoot = fs::absolute(requested, ec).lexically_normal();
+        if (ec || root != absoluteRoot) {
+            AUREA_LOG_WARN("export cleanup: redirected root rejected requested=%s canonical=%s absolute=%s error=%d",
+                directory.c_str(), utf8(root).c_str(), utf8(absoluteRoot).c_str(), ec.value());
+            return Status{Errc::InvalidArgument}; // Reject redirected ancestors/junctions too.
+        }
+        const fs::path output = fs::weakly_canonical(fs::u8path(currentOutput), ec);
+        if (ec) return Status{Errc::IoError};
+        const auto pid =
+#if defined(_WIN32)
+            _getpid();
+#else
+            getpid();
+#endif
+        const std::string liveStaging = ".aurea-startup-" + std::to_string(pid) + "-";
+        u32 removed = 0;
+        for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+            if (cancel && cancel->load(std::memory_order_acquire)) return Status{Errc::Cancelled};
+            const fs::path candidate = it->path();
+            const auto entryStatus = it->symlink_status(ec);
+            if (ec) break;
+            if (!fs::is_regular_file(entryStatus) || fs::is_symlink(entryStatus)) continue;
+            const fs::path real = fs::canonical(candidate, ec);
+            if (ec) break;
+            if (real.parent_path() != root || real == output) continue;
+            const std::string name = utf8(candidate.filename());
+            if (name.find(liveStaging) != std::string::npos) continue;
+            std::string ext = utf8(candidate.extension());
+            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (ext != ".mp4" && ext != ".png" && ext != ".gif" && ext != ".zip") continue;
+            // A recovery package holds an immutable project/source manifest.
+            // Keep both it and its output companion, even when the MP4 failed.
+            if (fs::exists(fs::u8path(utf8(candidate) + ".aurea-export"), ec)) continue;
+            if (ec) break;
+            if (fs::remove(candidate, ec)) ++removed;
+            if (ec) break;
+        }
+        if (ec) return Status{Errc::IoError};
+        return removed;
+    } catch (const std::bad_alloc&) { return Status{Errc::OutOfMemory}; }
+      catch (...) { return Status{Errc::IoError}; }
 }
 } // namespace aurea::export_recovery

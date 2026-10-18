@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,7 +49,10 @@ import androidx.core.content.pm.PackageInfoCompat
 import com.aurea.aurea.R
 import com.aurea.aurea.diagnostics.StressSheet
 import com.aurea.aurea.engine.DeviceProfile
+import com.aurea.aurea.engine.ProxyMode
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.state.ProxyState
+import com.aurea.aurea.ui.i18n.AppText
 import com.aurea.aurea.ui.ds.AureaActionSheet
 import com.aurea.aurea.ui.ds.SheetAction
 import com.aurea.aurea.ui.i18n.AppLanguage
@@ -189,6 +193,7 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
             Group { DeviceRow(store) }
             GroupNote(stringResource(R.string.settings_device_auto_note))
         }
+        item(key = "proxy") { ProxyGroup(store) }
         item(key = "geral") {
             Spacer(Modifier.height(AureaDims.S5))
             GroupHeader(stringResource(R.string.settings_group_general))
@@ -234,7 +239,7 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
                     subtitle = stringResource(R.string.home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo),
                 )
                 GroupDivider()
-                TapRow(stringResource(R.string.licenses_title), "Real-ESRGAN · MiDaS · Tencent/ncnn") { licenses = true }
+                TapRow(stringResource(R.string.licenses_title), "MiDaS · U2-Net · Tencent/ncnn") { licenses = true }
             }
             Spacer(Modifier.height(AureaDims.S4))
             BetaBanner(version, onTap = {
@@ -279,6 +284,37 @@ private fun DeviceRow(store: EditorStore) {
         DeviceProfile.forget(context)
         store.showToast(context.getString(R.string.settings_device_analysed))
     }
+}
+
+/**
+ * "Otimizar vídeos pesados" (0.2.5): o modo do proxy de edição e a limpeza da
+ * mídia otimizada. O QUE otimizar é decisão do motor (custo de decodificar a
+ * fonte, em qualquer aparelho); aqui só a escolha, gravada e mandada ao motor,
+ * e o tamanho real em disco. O export usa o original em qualquer modo.
+ */
+@Composable
+private fun ProxyGroup(store: EditorStore) {
+    val context = LocalContext.current
+    val proxies = store.proxies
+    LaunchedEffect(Unit) { proxies.refreshCacheSize() }
+    val labels = mapOf(
+        ProxyMode.AUTOMATIC to stringResource(R.string.proxy_mode_auto),
+        ProxyMode.ALWAYS to stringResource(R.string.proxy_mode_always),
+        ProxyMode.OFF to stringResource(R.string.proxy_mode_off),
+    )
+    Group {
+        SegmentedRow(stringResource(R.string.proxy_settings_title), ProxyMode.entries, proxies.mode, { labels.getValue(it) }, proxies::select)
+        GroupDivider()
+        val bytes = proxies.cacheBytes
+        TapRow(
+            if (bytes >= 0) stringResource(R.string.proxy_clear_title, ProxyState.megabytes(bytes))
+            else stringResource(R.string.proxy_clear_title_unknown),
+            stringResource(R.string.proxy_clear_note),
+        ) {
+            proxies.clearCache { mb -> store.showToast(AppText.get(context, R.string.proxy_cleared, mb)) }
+        }
+    }
+    GroupNote(stringResource(R.string.proxy_settings_note))
 }
 
 /**

@@ -396,13 +396,13 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             val (layer, sel) = store.selectedKeyframe ?: return@derivedStateOf null
             val keys = store.keyframes[layer] ?: return@derivedStateOf null
             val track = keys.track(sel)
-            var i = track.indexOfFirst { it.time == sel.time }
-            if (track.size < 2) return@derivedStateOf null
-            // The engine publishes on its next frame; keep the gesture mounted
-            // while the selected key's new time is still in the command queue.
-            if (i < 0) i = track.indexOfLast { it.time <= sel.time }.coerceAtLeast(0)
-            if (i == track.lastIndex) i-- // a última marca não abre trecho: mostra o que chega nela
-            Triple(layer, track[i], track[i + 1])
+            val detail = store.queryDetail(layer) ?: return@derivedStateOf null
+            val target = com.aurea.aurea.engine.TrackKey(sel.property, sel.effectIndex, sel.paramIndex)
+            val navigation = store.keyframeNavigation(layer, target, detail.timelineFrame(sel.time)) ?: return@derivedStateOf null
+            if (!navigation.hasSegment) return@derivedStateOf null
+            val a = track.firstOrNull { it.time == navigation.segmentStart } ?: return@derivedStateOf null
+            val b = track.firstOrNull { it.time == navigation.segmentEnd } ?: return@derivedStateOf null
+            Triple(layer, a, b)
         }
     }
     val seg = segment
@@ -436,6 +436,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     // A curva que se desenha é a do MOTOR (a mesma conta que anima o projeto).
     val samples = remember(ease) { engineEaseSamples(ease) }
     val graphMode = store.curveGraphMode
+    val copiedMsg = stringResource(R.string.curve_copied)
     var menu by remember { mutableStateOf(false) }
     var savePrompt by remember { mutableStateOf(false) }
     var presetMenu by remember { mutableStateOf(false) }
@@ -461,21 +462,33 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     }
 
     fun jump(dir: Int) {
-        val track = (store.keyframes[layer] ?: emptyList()).track(start)
-        val i = track.indexOfFirst { it.time == start.time }
-        val target = (i + dir).coerceIn(0, max(0, track.size - 2))
-        if (target == i || target >= track.lastIndex) return
-        val a = track[target]
-        val b = track[target + 1]
+        val detail = store.queryDetail(layer) ?: return
+        val target = com.aurea.aurea.engine.TrackKey(start.property, start.effectIndex, start.paramIndex)
+        val edge = detail.timelineFrame(if (dir < 0) start.time else end.time)
+        val navigation = store.keyframeNavigation(layer, target, edge) ?: return
+        val frame = if (dir < 0) {
+            if (!navigation.hasPrevious) return
+            navigation.previousFrame
+        } else {
+            if (!navigation.hasNext) return
+            edge
+        }
+        val segment = store.keyframeNavigation(layer, target, frame)?.takeIf { it.hasSegment } ?: return
+        val a = store.keyframes[layer].orEmpty().track(start).firstOrNull { it.time == segment.segmentStart } ?: return
         store.selectKeyframe(layer, a)
-        // Trocar de trecho é escolha da pessoa: aqui mover o cabeçote é legítimo
-        // (pausado, para não disputar com o relógio).
         store.pause()
-        store.detail?.let { d -> store.seek(d.timelineFrame(a.time + (b.time - a.time) / 2)) }
+        store.seek(frame)
     }
+
+    val trackTarget = com.aurea.aurea.engine.TrackKey(start.property, start.effectIndex, start.paramIndex)
+    val curveDetail = store.queryDetail(layer)
+    val before = curveDetail?.let { store.keyframeNavigation(layer, trackTarget, it.timelineFrame(start.time)) }?.hasPrevious == true
+    val after = curveDetail?.let { store.keyframeNavigation(layer, trackTarget, it.timelineFrame(end.time)) }?.hasNext == true
 
     val symmetricMsg = stringResource(R.string.pn_curve_symmetric)
     val needTwoMsg = stringResource(R.string.pn_curve_need_two_keys)
+    val previousLabel = stringResource(R.string.panel_keyframe_anterior)
+    val nextLabel = stringResource(R.string.panel_proximo_keyframe)
     Column(Modifier.fillMaxSize().background(CurvePanelFill)) {
     Row(Modifier.fillMaxWidth().height(48.dp).background(CurveRailFill)) {
         listOf(R.string.panel_easing_curve, R.string.particular_curve_value, R.string.panel_velocidade).forEachIndexed { index, label ->
@@ -508,9 +521,43 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             ) {
                 CupertinoIcon(CupertinoGlyph.ArrowRightArrowLeft, 20.dp, Color.White.copy(alpha = if (ease.supportsInversion) 1f else .35f))
             }
-            Spacer(Modifier.height(4.dp))
+            // Copiar e colar à mão (pedido da beta): sem abrir o menu.
+            Box(Modifier.size(44.dp).testTag("curve.copy").tocavel {
+                CurveClipboard.ease = ease
+                store.showToast(copiedMsg)
+            }, contentAlignment = Alignment.Center) {
+                CupertinoIcon(CupertinoGlyph.DocOnDoc, 18.dp, Color.White)
+            }
+            Box(Modifier.size(44.dp).testTag("curve.paste").tocavel(enabled = CurveClipboard.ease != null) {
+                CurveClipboard.ease?.let {
+                    store.beginGesture("colar curva")
+                    applyEase(store, layer, start, it)
+                    store.endGesture()
+                }
+            }, contentAlignment = Alignment.Center) {
+                CupertinoIcon(CupertinoGlyph.DocOnClipboard, 18.dp, Color.White.copy(alpha = if (CurveClipboard.ease != null) 1f else .35f))
+            }
             Box(Modifier.size(48.dp).tocavel { menu = true }, contentAlignment = Alignment.Center) {
                 CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, Color.White)
+                // Menu PEQUENO ao lado dos três pontos (antes: folha que cobria a tela).
+                CurveCompactMenu(menu, onDismiss = { menu = false }, items = listOf(
+                    stringResource(R.string.panel_curva) to { store.curveGraphMode = 0 },
+                    stringResource(R.string.particular_curve_value) to { store.curveGraphMode = 1 },
+                    stringResource(R.string.panel_velocidade) to { store.curveGraphMode = 2 },
+                    stringResource(if (expanded) R.string.editor_sair_tela_cheia else R.string.panel_expandir) to { if (expanded) collapse() else fullscreen = true },
+                    stringResource(R.string.panel_copiar_curva) to { CurveClipboard.ease = ease },
+                    stringResource(R.string.panel_colar_curva) to {
+                        CurveClipboard.ease?.let {
+                            store.beginGesture("colar curva")
+                            applyEase(store, layer, start, it)
+                            store.endGesture()
+                        }
+                    },
+                    stringResource(R.string.panel_curve_apply_property) to {
+                        if (!applyEaseToProperty(store, layer, start, ease)) store.showToast(needTwoMsg)
+                    },
+                    stringResource(R.string.panel_salvar_curva_como_preset) to { savePrompt = true },
+                ))
             }
             Spacer(Modifier.height(8.dp))
         }
@@ -583,12 +630,10 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             }
             // ‹ trecho anterior · próximo ›: no sentido do tempo, LTR como o gráfico.
             KeepLtr { Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(48.dp).tocavel { jump(-1) }, contentAlignment = Alignment.Center) {
-                    CupertinoIcon(CupertinoGlyph.ChevronLeft, 16.dp, Color.White)
+                Box(Modifier.size(48.dp).semantics { contentDescription = previousLabel }.tocavel(enabled = before) { jump(-1) }, contentAlignment = Alignment.Center) {
+                    CupertinoIcon(CupertinoGlyph.ChevronLeft, 16.dp, if (before) Color.White else AureaColors.Disabled)
                 }
                 Spacer(Modifier.width(4.dp))
-                val track = (store.keyframes[layer] ?: emptyList()).track(start)
-                val n = track.indexOfFirst { it.time == start.time }
                 // A curva do trecho em números; tocar troca a força (×1 → ×2 → ×3).
                 val powered = graphMode == 0 && ease.hasHandles
                 Text(
@@ -609,8 +654,8 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                     style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, fontWeight = FontWeight.W400, color = Color.White.copy(alpha = .6f), textAlign = TextAlign.Center)),
                 )
                 Spacer(Modifier.width(4.dp))
-                Box(Modifier.size(48.dp).tocavel { jump(1) }, contentAlignment = Alignment.Center) {
-                    CupertinoIcon(CupertinoGlyph.ChevronRight, 16.dp, Color.White)
+                Box(Modifier.size(48.dp).semantics { contentDescription = nextLabel }.tocavel(enabled = after) { jump(1) }, contentAlignment = Alignment.Center) {
+                    CupertinoIcon(CupertinoGlyph.ChevronRight, 16.dp, if (after) Color.White else AureaColors.Disabled)
                 }
             } }
         }
@@ -646,30 +691,20 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
         )
     }
 
-    if (menu) {
-        AureaActionSheet(
-            title = stringResource(R.string.panel_curva),
-            actions = listOf(
-                SheetAction(stringResource(R.string.panel_curva)) { store.curveGraphMode = 0 },
-                SheetAction(stringResource(R.string.particular_curve_value)) { store.curveGraphMode = 1 },
-                SheetAction(stringResource(R.string.panel_velocidade)) { store.curveGraphMode = 2 },
-                SheetAction(stringResource(if (expanded) R.string.editor_sair_tela_cheia else R.string.panel_expandir)) { if (expanded) collapse() else fullscreen = true },
-                SheetAction(stringResource(R.string.panel_copiar_curva)) { CurveClipboard.ease = ease },
-                SheetAction(stringResource(R.string.panel_salvar_curva_como_preset)) { savePrompt = true },
-                SheetAction(stringResource(R.string.panel_colar_curva), enabled = CurveClipboard.ease != null) {
-                    CurveClipboard.ease?.let {
-                        store.beginGesture("colar curva")
-                        applyEase(store, layer, start, it)
-                        store.endGesture()
-                    }
-                },
-                // Todos os trechos da propriedade (e dos eixos do grupo): um desfazer.
-                SheetAction(stringResource(R.string.panel_curve_apply_property)) {
-                    if (!applyEaseToProperty(store, layer, start, ease)) store.showToast(needTwoMsg)
-                },
-            ),
-            onDismiss = { menu = false },
-        )
+}
+
+/** Menu pequeno que abre AO LADO do botão (texto 13 sp, largura do conteúdo). */
+@Composable
+private fun CurveCompactMenu(open: Boolean, onDismiss: () -> Unit, items: List<Pair<String, () -> Unit>>) {
+    androidx.compose.material3.DropdownMenu(
+        expanded = open, onDismissRequest = onDismiss,
+        offset = androidx.compose.ui.unit.DpOffset(44.dp, 0.dp),
+        modifier = Modifier.background(Color(0xF0292E3D)).testTag("curve.menu"),
+    ) {
+        items.forEach { (label, action) ->
+            Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = Color.White)),
+                modifier = Modifier.tocavel { onDismiss(); action() }.padding(horizontal = 14.dp, vertical = 9.dp))
+        }
     }
 }
 
@@ -987,7 +1022,8 @@ private fun followGraphPlayhead(store: EditorStore) {
     val (layer, sel) = store.selectedKeyframe ?: return
     if (layer != store.primary) return
     val track = store.keyframes[layer].orEmpty().track(sel)
-    val local = localPlayhead(store, layer) ?: return
-    val want = segmentIndexAt(track, local)
-    if (want >= 0 && want != segmentIndexOf(track, sel.time)) store.selectKeyframe(layer, track[want])
+    val target = com.aurea.aurea.engine.TrackKey(sel.property, sel.effectIndex, sel.paramIndex)
+    val navigation = store.keyframeNavigation(layer, target)?.takeIf { it.hasSegment } ?: return
+    val start = track.firstOrNull { it.time == navigation.segmentStart } ?: return
+    if (start.time != sel.time) store.selectKeyframe(layer, start)
 }

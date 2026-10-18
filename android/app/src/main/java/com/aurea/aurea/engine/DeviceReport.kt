@@ -66,8 +66,12 @@ class DeviceReport(private val v: LongArray) {
     /** 0 normal · 1 morno · 2 quente · 3 crítico. */
     val thermalTier: Int get() = v[28].toInt()
     val shadowSize: Int get() = v[29].toInt()
-    /** Fonte com lado menor acima disto prefere proxy (0 = nunca). */
-    val proxyAboveShort: Int get() = v[30].toInt()
+    /**
+     * Lado menor da versão leve de edição (720; 540 no LOW). QUANDO usar não
+     * depende da classe: o motor otimiza o vídeo pesado de decodificar em
+     * qualquer aparelho ("Otimizar vídeos pesados", ProxyState).
+     */
+    val proxyShortSide: Int get() = v[30].toInt()
     val maxFrequencyMhz: Int get() = v[31].toInt()
 
     /** Maior resolução de export (lado menor) que este aparelho aguenta, entre as oferecidas. */
@@ -178,7 +182,7 @@ class DeviceReport(private val v: LongArray) {
         append(" · efeitos pesados a ").append(heavyPercent).append("%")
         append(" · sombra ").append(shadowSize).append(" px")
         append(" · ").append(decodeCachePercent).append("% da memória para vídeo decodificado")
-        if (proxyAboveShort > 0) append(" · versão leve (proxy) para vídeos acima de ${shortLabel(proxyAboveShort)}")
+        if (proxyShortSide > 0) append(" · vídeo pesado editado numa versão leve de ${shortLabel(proxyShortSide)}")
     }
 
     private fun gb(mb: Int): String = "%.1f GB".format(mb / 1024f)

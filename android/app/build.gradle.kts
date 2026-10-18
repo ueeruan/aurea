@@ -99,9 +99,9 @@ android {
         // duas — trocar de piso é consequência da arquitetura nova.
         minSdk = 26
         targetSdk = 36
-        // Deve superar também os APKs 0.1.4 build 2174 já distribuídos.
-        versionCode = 2175
-        versionName = "0.1.4 BETA 2"
+        // Deve superar os builds 2181–2183 já distribuídos; nunca reduzir o código.
+        versionCode = 2193
+        versionName = "0.2.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -139,6 +139,14 @@ android {
                 )
                 if (aureaFFmpegRoot != null) {
                     arguments += "-DAUREA_FFMPEG_ANDROID_ROOT=$aureaFFmpegRoot"
+                }
+                // Compilador de shaders GLES já construído (host). Sem ele o
+                // CMake configura e COMPILA o tool de host durante o build
+                // Android — o que exige Visual Studio na máquina. Numa máquina
+                // só com o NDK, aponte para
+                // engine/build/shader-compilers/Release/aurea-gles-compiler.exe.
+                providers.gradleProperty("aureaGlesCompiler").orNull?.let {
+                    arguments += "-DAUREA_GLES_COMPILER=$it"
                 }
             }
         }
@@ -275,6 +283,7 @@ val ffmpegPrepareTasks = (aureaAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "a
     tasks.register<Exec>("prepareAureaFFmpeg" + abi.replace("-", "").replace("_", "")) {
         val prefix = File(aureaFFmpegRoot ?: rootProject.file("../build/ffmpeg/android").absolutePath, abi)
         inputs.file(rootProject.file("../tools/build_ffmpeg.py"))
+        inputs.file(rootProject.file("../tools/patches/ffmpeg-8.0.3-mediacodec-safety.patch"))
         outputs.files(File(prefix, "lib/libavformat.a"), File(prefix, "lib/libavcodec.a"),
             File(prefix, "lib/libswscale.a"), File(prefix, "lib/libswresample.a"),
             File(prefix, "lib/libavutil.a"), File(prefix, "lib/libopenh264.a"), File(prefix, "lib/libkvazaar.a"),
@@ -333,6 +342,22 @@ dependencies {
     implementation(libs.play.services.ads)
     implementation(libs.ump)
     implementation(libs.appset)
+    // GoogleApiHandler can hold the service map during Binder IPC while the
+    // supervisor's main-thread Handler waits for it (reported ANR). Keep the
+    // documented background-callback fix even when Ads/AppSet request older
+    // transitive libraries. Constraints do not add unused Google components.
+    // https://developers.google.com/android/guides/releases#january_12_2026
+    constraints {
+        implementation(libs.play.services.base) {
+            because("Google service-binding callbacks must not share the UI message queue")
+        }
+        implementation(libs.play.services.basement) {
+            because("Use the supervisor with background callbacks enabled by default")
+        }
+        implementation(libs.play.services.tasks) {
+            because("Match the documented 18.10 service-binding dependency family")
+        }
+    }
     // Unity LevelPlay (mediação) — o provedor ATIVO no Android. O AdMob acima
     // fica para entrar depois como rede mediada pelo LevelPlay; o UMP segue
     // sendo o consentimento (TCF) que o LevelPlay e as redes leem.

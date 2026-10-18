@@ -35,6 +35,10 @@ import UIKit
         let readiness = (try? Data(contentsOf: file))
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
         let ready = (readiness["uiTestRunID"] as? String) == runID && (readiness["scene"] as? String) == scene
+        var projectProbe: Any = NSNull()
+        if let report = readiness["projectProbe"] as? [String: Any], !report.isEmpty {
+            projectProbe = report
+        }
         let primary = model.primarySelection
         let detail = primary.flatMap { model.engine.layerDetail($0) } ?? [:]
         let shape = primary.map { model.engine.shapeParams($0) } ?? []
@@ -48,6 +52,15 @@ import UIKit
         let textAnimatorCount = primary.map { model.engine.textAnimators($0).count / 40 } ?? 0
         // Deslocamento (parâmetro 5) do primeiro Text Transform da escolhida, lido no motor.
         var textTransformOffset: [Float] = []
+        var rasterEffectId: UInt32 = 0
+        var rasterDepth: Float = -1
+        if let primary, let effect = model.engine.effects(forLayer: primary).first(where: {
+            ($0["typeId"] as? NSNumber)?.uint32Value == fxEffectTypeId("aurea.generate.raster_extrude")
+        }), let effectId = (effect["effectId"] as? NSNumber)?.uint32Value,
+           let depth = model.engine.effectParams(forLayer: primary, effectId: effectId).first(where: { ($0["index"] as? NSNumber)?.uint32Value == 0 }) {
+            rasterEffectId = effectId
+            rasterDepth = (depth["value"] as? [NSNumber])?.first?.floatValue ?? -1
+        }
         if let primary, let effect = model.engine.effects(forLayer: primary).first(where: {
             ($0["typeId"] as? NSNumber)?.uint32Value == fxEffectTypeId("aurea.text.transform")
         }), let effectId = (effect["effectId"] as? NSNumber)?.uint32Value,
@@ -57,6 +70,9 @@ import UIKit
         let packet: [String: Any] = [
             "textAnimatorCount": textAnimatorCount,
             "textTransformOffset": textTransformOffset,
+            "rasterEffectId": rasterEffectId, "rasterDepth": rasterDepth,
+            "projectName": model.projectName, "projectFile": model.projectURL?.lastPathComponent ?? "",
+            "projectProbe": projectProbe,
             "layerNames": model.layers.map(\.name),
             "layerCenters": model.layers.map { (row: LayerItem) -> [Float] in
                 var c: [Float] = []

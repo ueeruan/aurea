@@ -160,6 +160,11 @@ struct ProjectSettingsPanel: View {
                                 Text(AureaText.t("editor_projeto_cbe9")).font(.aurea(size: 16, weight: .bold))
                                 Spacer()
                             }.padding(.leading, 6).padding(.trailing, 18)
+                            // Interface do projeto (0.2.5): Composição ou Edição, trocável a qualquer momento.
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(AureaText.t("ui_mode_label")).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.muted)
+                                UiModeChoice(selected: model.uiMode) { model.setUiMode($0) }
+                            }.padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 4)
                             aspectRow
                             if free {
                                 settingLine("editor_tamanho") {

@@ -136,7 +136,7 @@ AudioAnalysisResult Renderer::audio_analysis(const AudioAnalysisRequest& request
     audio::MixStats stats;
     audio::mix(*snap, first, frames, blocks, pcm.data(), &stats, vs.mix.get());
     const bool complete = stats.missingBlocks == 0;
-    if (!complete && !sync) incomplete_ = true;
+    if (!complete && !sync) mark_incomplete(__FILE__, __LINE__);
 
     std::vector<f32> values(count, 0.0f);
     f32 peak = 0.0f;

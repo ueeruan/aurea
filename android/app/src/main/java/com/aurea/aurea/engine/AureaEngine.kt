@@ -202,6 +202,36 @@ class AureaEngine private constructor() {
     /** "Adreno (TM) 740 · driver 0x…" — o aparelho, não um rótulo genérico. */
     fun deviceSummary(): String = nativeDeviceSummary(nativeHandle) ?: ""
 
+    // --- Proxy de edição ("Otimizar vídeos pesados", 0.2.5) -----------------
+    // Política, fila e cache são do motor (PreviewProxyService). Daqui só o
+    // modo escolhido, o progresso e a limpeza. Par do AureaEngine.mm.
+
+    /** [ProxyMode]: 0 Automático · 1 Sempre · 2 Desligado. */
+    fun setProxyMode(mode: Int) = nativeWork.run(Unit) { nativeSetProxyMode(nativeHandle, mode) }
+    fun proxyMode(): Int = nativeWork.run(0) { nativeProxyMode(nativeHandle) }
+    /** Pedidos desta sessão de projeto. Nulo = motor fora do ar. */
+    fun proxySummary(): ProxySummary? = nativeWork.run<ProxySummary?>(null) {
+        val out = LongArray(ProxySummary.SLOTS)
+        if (nativeProxySummary(nativeHandle, out)) ProxySummary.decode(out) else null
+    }
+    /** Proxy do vídeo da camada [layer]. */
+    fun proxyStatus(layer: Long): ProxyClipStatus =
+        nativeWork.run(ProxyClipStatus.NONE) { ProxyClipStatus.decode(nativeProxyStatus(nativeHandle, layer)) }
+    fun regenerateProxy(layer: Long): Boolean = nativeWork.run(false) { nativeRegenerateProxy(nativeHandle, layer) }
+    fun cancelProxy(layer: Long): Boolean = nativeWork.run(false) { nativeCancelProxy(nativeHandle, layer) }
+    /** Bytes da mídia otimizada (percorre a pasta: chamar fora da main thread). */
+    fun proxyCacheBytes(): Long = nativeWork.run(0L) { nativeProxyCacheBytes(nativeHandle) }
+    /** Apaga a mídia otimizada; devolve os bytes liberados. O export segue no original. */
+    fun clearProxyCache(): Long = nativeWork.run(0L) { nativeClearProxyCache(nativeHandle) }
+    private external fun nativeSetProxyMode(handle: Long, mode: Int)
+    private external fun nativeProxyMode(handle: Long): Int
+    private external fun nativeProxySummary(handle: Long, out: LongArray): Boolean
+    private external fun nativeProxyStatus(handle: Long, layer: Long): Int
+    private external fun nativeRegenerateProxy(handle: Long, layer: Long): Boolean
+    private external fun nativeCancelProxy(handle: Long, layer: Long): Boolean
+    private external fun nativeProxyCacheBytes(handle: Long): Long
+    private external fun nativeClearProxyCache(handle: Long): Long
+
     /** Foto de base das prévias de efeito (RGBA8, alfa reto). */
     fun setEffectPreviewSource(rgba: ByteArray, width: Int, height: Int): Boolean =
         nativeWork.run(false) { nativeSetEffectPreviewSource(nativeHandle, rgba, width, height) }
@@ -210,6 +240,7 @@ class AureaEngine private constructor() {
         if (nativeHandle != 0L) {
             nativeCancelModelImport(nativeHandle)
             nativeCancelExport(nativeHandle)
+            nativeCancelPreRender(nativeHandle)
             nativeCaptionProgress(nativeHandle, true)
         }
     }) { if (nativeHandle != 0L) nativeShutdown(nativeHandle) }
@@ -490,6 +521,17 @@ class AureaEngine private constructor() {
 
     // Pré-composição.
     fun precompose(ids: LongArray): Long = nativePrecompose(nativeHandle, ids)
+    fun groupAndMask(ids: LongArray, exclude: Boolean, name: String? = null): Long = nativeGroupAndMask(nativeHandle, ids, exclude, name)
+    fun queryKeyframeNavigation(layer: Long, property: Int, effect: Int, param: Int, compositionFrame: Int): KeyframeNavigation? {
+        val out = LongArray(7)
+        if (!nativeQueryKeyframeNavigation(nativeHandle, layer, property, effect, param, compositionFrame.toLong(), out)) return null
+        return KeyframeNavigation(out[0].toInt(), out[1].toInt(), out[2].toInt(), out[3].toInt(), out[4].toInt(), out[5].toInt(), out[6].toInt())
+    }
+    /** Null means no marker/selected-layer key lies strictly in that direction. */
+    fun queryTimelineNavigation(layer: Long?, compositionFrame: Int, direction: Int): Int? =
+        nativeQueryTimelineNavigation(nativeHandle, layer ?: 0L, compositionFrame.toLong(), direction)
+            .takeIf { it in 0..Int.MAX_VALUE.toLong() }?.toInt()
+    fun seekTimelineEvent(compositionFrame: Int): Boolean = nativeSeekTimelineEvent(nativeHandle, compositionFrame.toLong())
     fun openPrecomp(layer: Long): Boolean = nativeOpenPrecomp(nativeHandle, layer)
     /** null = desagrupou; senão o motivo da recusa. */
     fun ungroupPrecomp(layer: Long): String? = nativeUngroupPrecomp(nativeHandle, layer)
@@ -575,6 +617,10 @@ class AureaEngine private constructor() {
     fun queryText3d(layer: Long, out: FloatArray): String? = nativeQueryText3d(nativeHandle, layer, out)
     fun applyText3dPreset(layer: Long, preset: Int): Boolean = nativeApplyText3dPreset(nativeHandle, layer, preset)
 
+    /** Real Camera: andar (m/s, + frente, 0 parado) e profundidade (× do frente/trás medido). */
+    fun realCameraWalk(speed: Float, depth: Float): Boolean = nativeWork.run(false) { nativeRealCameraWalk(nativeHandle, speed, depth) }
+    private external fun nativeRealCameraWalk(handle: Long, speed: Float, depth: Float): Boolean
+
     /** Sombras do objeto 3D: projeta / recebe. */
     fun setModelShadows(layer: Long, cast: Boolean, receive: Boolean): Boolean =
         nativeSetModelShadows(nativeHandle, layer, cast, receive)
@@ -659,6 +705,13 @@ class AureaEngine private constructor() {
     fun importFont(path: String): String? = nativeWork.run(null) { nativeImportFont(nativeHandle, path) }
     fun importColorLut(layer: Long, effect: Int, path: String): Int = nativeWork.run(5) { nativeImportColorLut(nativeHandle, layer, effect, path) }
     fun colorLutName(layer: Long, effect: Int): String = nativeColorLutName(nativeHandle, layer, effect)
+    /** Efeito de parte 3D já apontando para a parte `part` (0 = a 1ª). −1 = não entrou. */
+    fun addPartEffect(layer: Long, type: Int, part: Int): Int = nativeAddPartEffect(nativeHandle, layer, type, part)
+    /** Imagem do "Trocar textura 3D" (arquivo já copiado para o app). */
+    fun setEffectImage(layer: Long, effect: Int, path: String): Boolean = nativeWork.run(false) { nativeSetEffectImage(nativeHandle, layer, effect, path) }
+    fun effectImageName(layer: Long, effect: Int): String = nativeEffectImageName(nativeHandle, layer, effect)
+    /** Nome de cada parte da camada 3D (vazio = sem nome no arquivo). */
+    fun modelPartNames(layer: Long): Array<String> = nativeModelPartNames(nativeHandle, layer) ?: emptyArray()
     fun setTextFont(layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean =
         nativeSetTextFont(nativeHandle, layer, family, weight, italic, path)
     fun textFont(layer: Long): String? = nativeTextFont(nativeHandle, layer)
@@ -813,6 +866,7 @@ class AureaEngine private constructor() {
     /** PowerManager.THERMAL_STATUS_* → o preview reduz o que é caro sob calor. */
     fun setThermal(status: Int) = nativeSetThermal(nativeHandle, status)
     fun queryTimeRemap(layer: Long, out: FloatArray): Int = nativeQueryTimeRemap(nativeHandle, layer, out)
+    fun timeRemapCurrentSource(layer: Long): Double = nativeWork.run(Double.NaN) { nativeQueryTimeRemapCurrentSource(nativeHandle, layer) }
 
     // Rastreio de câmera 3D.
     fun startMotionTrack(layer: Long, tool: Int, model: Int, backward: Boolean, points: FloatArray, feature: Float, search: Float): Boolean = nativeStartMotionTrack(nativeHandle, layer, tool, model, backward, points, feature, search)
@@ -847,6 +901,24 @@ class AureaEngine private constructor() {
     fun editTimeRemapKey(layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int =
         nativeEditTimeRemapKey(nativeHandle, layer, index, frame, value, interp)
     fun removeTimeRemapKey(layer: Long, index: Int): Boolean = nativeRemoveTimeRemapKey(nativeHandle, layer, index)
+    /** Gráfico de velocidade (`query_speed_curve`): cabeçalho de 8, amostras e chaves (tempo, ×, interpolação). */
+    fun querySpeedCurve(layer: Long, samples: Int, out: FloatArray): Int = nativeQuerySpeedCurve(nativeHandle, layer, samples, out)
+    /** Curva pronta: 0 plana, 1 montagem, 2 herói, 3 bala, 4 entrada rápida, 5 saída rápida, 6 pulo, 7 suavizar, 8 tirar. */
+    fun applySpeedCurve(layer: Long, preset: Int): Boolean = nativeApplySpeedCurve(nativeHandle, layer, preset)
+    fun editSpeedKey(layer: Long, index: Int, frame: Long, speed: Float, interp: Int): Int =
+        nativeEditSpeedKey(nativeHandle, layer, index, frame, speed, interp)
+    fun removeSpeedKey(layer: Long, index: Int): Boolean = nativeRemoveSpeedKey(nativeHandle, layer, index)
+    /** Câmeras do arquivo do modelo 3D (glTF/FBX); a importação já as põe na timeline. */
+    fun modelCameraCount(layer: Long): Int = nativeModelCameraCount(nativeHandle, layer)
+    /** Ossos posáveis do modelo (`query_model_bones`, BONE_FLOATS por osso); array curto devolve o tamanho pedido. */
+    fun queryModelBones(layer: Long, out: FloatArray?): Int = nativeQueryModelBones(nativeHandle, layer, out)
+    /** Dedo na cena 3D: gira o osso como trackball (px da composição; twist em graus em volta do olhar). */
+    fun dragBone(layer: Long, node: Int, dx: Float, dy: Float, twist: Float, continuing: Boolean): Boolean =
+        nativeDragBone(nativeHandle, layer, node, dx, dy, twist, continuing)
+    /** Keyframe do osso no cabeçote (node −1 = todos): 1 marcou, 0 tirou, −1 fora da camada. */
+    fun toggleBoneKey(layer: Long, node: Int): Int = nativeToggleBoneKey(nativeHandle, layer, node)
+    fun resetBonePose(layer: Long, node: Int): Boolean = nativeResetBonePose(nativeHandle, layer, node)
+    fun addModelCameras(layer: Long): Int = nativeAddModelCameras(nativeHandle, layer)
     /** Ao contrário: espelha a curva de tempo no clipe (liga o remapeamento se preciso). */
     fun reverseTimeRemap(layer: Long): Boolean = nativeReverseTimeRemap(nativeHandle, layer)
     fun setKeepPitch(layer: Long, on: Boolean): Boolean = nativeSetKeepPitch(nativeHandle, layer, on)
@@ -866,6 +938,19 @@ class AureaEngine private constructor() {
     /** Modo Edição (timeline magnética) da composição atual. */
     fun setEditMode(on: Boolean) = nativeSetEditMode(nativeHandle, on)
     fun editMode(): Boolean = nativeEditMode(nativeHandle)
+    /** Interface do projeto (0.2.5): 0 = Composição (padrão), 1 = Edição. Ligar a Edição liga o ímã. */
+    fun setProjectUiMode(mode: Int): Boolean = nativeSetProjectUiMode(nativeHandle, mode)
+    fun projectUiMode(): Int = nativeProjectUiMode(nativeHandle)
+    /** O trecho de mídia mais fundo: a linha dele é a trilha principal da Edição (0 = nenhum). */
+    fun mainTrackAnchor(): Long = nativeMainTrackAnchor(nativeHandle)
+    /** "Para camada": linha própria acima da trilha principal; [atFrame] >= 0 leva ao quadro. Um passo de desfazer. */
+    fun moveClipToOverlay(layer: Long, atFrame: Long = -1): Boolean = nativeMoveClipToOverlay(nativeHandle, layer, atFrame)
+    /** "Para trilha principal": entra no fim dela, magnético. Um passo de desfazer. */
+    fun moveClipToMainTrack(layer: Long): Boolean = nativeMoveClipToMainTrack(nativeHandle, layer)
+    /** Transição num corte: saída de [outgoing] e entrada de [incoming] (0 nenhuma … 5 girar). Um passo de desfazer. */
+    fun setCutTransition(outgoing: Long, incoming: Long, type: Int, frames: Int): Boolean =
+        nativeSetCutTransition(nativeHandle, outgoing, incoming, type, frames)
+    fun cutTransition(incoming: Long): Int = nativeCutTransition(nativeHandle, incoming)
     /** Exclui e fecha só os buracos criados (um passo de desfazer). */
     fun rippleDelete(ids: LongArray): Boolean = nativeRippleDelete(nativeHandle, ids)
     /** Fecha todos os espaços vazios. Devolve os frames removidos. */
@@ -941,8 +1026,8 @@ class AureaEngine private constructor() {
     private external fun nativeRealCameraStatus(handle: Long): LongArray
 
     fun addCamera(): Long = nativeAddCamera(nativeHandle)
-    /** Lente da câmera 3D (9 valores, ver `nativeQueryCameraLens`); null se a camada não é câmera. */
-    fun cameraLens(layer: Long): FloatArray? = FloatArray(9).takeIf { nativeQueryCameraLens(nativeHandle, layer, it) }
+    /** Lente da câmera 3D (10 valores, ver `nativeQueryCameraLens`; [9] = afeta camadas abaixo); null se não é câmera. */
+    fun cameraLens(layer: Long): FloatArray? = FloatArray(10).takeIf { nativeQueryCameraLens(nativeHandle, layer, it) }
     /** Pick Focus: distância no eixo ótico até o 3D sob o ponto (px da composição); < 0 = nada ali. */
     fun pickFocusDistance(layer: Long, compX: Float, compY: Float): Float = nativePickFocusDistance(nativeHandle, layer, compX, compY)
     /** LayerSetCameraParam: 0 mm, 1 DOF, 2 distância de foco, 3 f/, 4 desfoque ×. */
@@ -1002,6 +1087,16 @@ class AureaEngine private constructor() {
 
     fun exportDuration(trimToContent: Boolean = true): Long = nativeExportDuration(nativeHandle, trimToContent)
 
+    /** Native startup may freeze a document; call from the lifecycle worker. */
+    fun startPreRender(direction: Int): Int =
+        nativeWork.run(5) { nativeStartPreRender(nativeHandle, if (direction < 0) -1 else 1) }
+
+    fun cancelPreRender() = nativeWork.run(Unit) { nativeCancelPreRender(nativeHandle) }
+
+    /** Atomic counters only: no file access or GPU wait. */
+    fun preRenderProgress(): PreRenderProgress =
+        PreRenderProgress.from(nativeWork.run(longArrayOf()) { nativePreRenderProgress(nativeHandle) })
+
     /**
      * Export como imagem (motor: export/ImageEncode.hpp). `format` 0 = quadro do
      * playhead em PNG, 1 = sequência PNG num .zip, 2 = GIF. `shortSide` 0 = a
@@ -1018,6 +1113,7 @@ class AureaEngine private constructor() {
     /** Explicit recovery restores the frozen project and restarts at frame zero. */
     fun restartExport(recoveryPath: String, outputPath: String): Int =
         nativeWork.run(5) { nativeRestartExport(nativeHandle, recoveryPath, outputPath) }
+
 
     /**
      * Importa um glTF/GLB (arquivo no sandbox do app). Bloqueia: chamar fora da
@@ -1052,6 +1148,7 @@ class AureaEngine private constructor() {
     fun reloadModelTextures(layer: Long, detail: Array<String?>): Int = nativeWork.run(-5) { nativeReloadModelTextures(nativeHandle, layer, detail) }
     fun cancelModelImport() = nativeWork.run(Unit) { nativeCancelModelImport(nativeHandle) }
     fun exportProgress(out: ByteBuffer): Boolean = nativeWork.run(false) { nativeExportProgress(nativeHandle, out) }
+    fun exportDiagnostics(): String = nativeWork.run("{}") { nativeExportDiagnostics(nativeHandle) ?: "{}" }
     /** Copies absolute [start, end) pairs; returns the number of ranges, at most 30. */
     fun localAiStatus(): Int = nativeWork.run(0) { nativeLocalAiStatus(nativeHandle) }
     fun previewBufferRanges(out: LongArray): Int = nativeWork.run(0) { nativePreviewBufferRanges(nativeHandle, out) }
@@ -1140,6 +1237,13 @@ class AureaEngine private constructor() {
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
     private external fun nativeMarkBeatLive(handle: Long): Long
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
+    private external fun nativeSetProjectUiMode(handle: Long, mode: Int): Boolean
+    private external fun nativeProjectUiMode(handle: Long): Int
+    private external fun nativeMainTrackAnchor(handle: Long): Long
+    private external fun nativeMoveClipToOverlay(handle: Long, layer: Long, atFrame: Long): Boolean
+    private external fun nativeMoveClipToMainTrack(handle: Long, layer: Long): Boolean
+    private external fun nativeSetCutTransition(handle: Long, outgoing: Long, incoming: Long, type: Int, frames: Int): Boolean
+    private external fun nativeCutTransition(handle: Long, incoming: Long): Int
     private external fun nativeSetMotionBlur(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetLayerAdjustment(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetLayerGuide(handle: Long, layer: Long, on: Boolean): Boolean
@@ -1151,6 +1255,10 @@ class AureaEngine private constructor() {
     private external fun nativeImportFont(handle: Long, path: String): String?
     private external fun nativeImportColorLut(handle: Long, layer: Long, effect: Int, path: String): Int
     private external fun nativeColorLutName(handle: Long, layer: Long, effect: Int): String
+    private external fun nativeAddPartEffect(handle: Long, layer: Long, type: Int, part: Int): Int
+    private external fun nativeSetEffectImage(handle: Long, layer: Long, effect: Int, path: String): Boolean
+    private external fun nativeEffectImageName(handle: Long, layer: Long, effect: Int): String
+    private external fun nativeModelPartNames(handle: Long, layer: Long): Array<String>?
     private external fun nativeSetTextFont(handle: Long, layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean
     private external fun nativeSetTextStyle(handle: Long, layer: Long, v: FloatArray): Boolean
     private external fun nativeQueryTextStyle(handle: Long, layer: Long, out: FloatArray): Boolean
@@ -1241,8 +1349,19 @@ class AureaEngine private constructor() {
     private external fun nativeSelectCameraTrackPoints(handle: Long, ids: IntArray, operation: Int): Int
     private external fun nativeCreateCameraTrackObject(handle: Long, kind: Int): Long
     private external fun nativeQueryTimeRemap(handle: Long, layer: Long, out: FloatArray): Int
+    private external fun nativeQueryTimeRemapCurrentSource(handle: Long, layer: Long): Double
     private external fun nativeEditTimeRemapKey(handle: Long, layer: Long, index: Int, frame: Long, value: Float, interp: Int): Int
     private external fun nativeRemoveTimeRemapKey(handle: Long, layer: Long, index: Int): Boolean
+    private external fun nativeQuerySpeedCurve(handle: Long, layer: Long, samples: Int, out: FloatArray): Int
+    private external fun nativeApplySpeedCurve(handle: Long, layer: Long, preset: Int): Boolean
+    private external fun nativeEditSpeedKey(handle: Long, layer: Long, index: Int, frame: Long, speed: Float, interp: Int): Int
+    private external fun nativeRemoveSpeedKey(handle: Long, layer: Long, index: Int): Boolean
+    private external fun nativeModelCameraCount(handle: Long, layer: Long): Int
+    private external fun nativeQueryModelBones(handle: Long, layer: Long, out: FloatArray?): Int
+    private external fun nativeDragBone(handle: Long, layer: Long, node: Int, dx: Float, dy: Float, twist: Float, continuing: Boolean): Boolean
+    private external fun nativeToggleBoneKey(handle: Long, layer: Long, node: Int): Int
+    private external fun nativeResetBonePose(handle: Long, layer: Long, node: Int): Boolean
+    private external fun nativeAddModelCameras(handle: Long, layer: Long): Int
     private external fun nativeReverseTimeRemap(handle: Long, layer: Long): Boolean
     private external fun nativeSetKeepPitch(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean
@@ -1317,6 +1436,10 @@ class AureaEngine private constructor() {
     private external fun nativeQueryParticleCurve(handle: Long, layer: Long, kind: Int, out: FloatArray): Int
     private external fun nativeApplySpeedRamp(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativePrecompose(handle: Long, ids: LongArray): Long
+    private external fun nativeGroupAndMask(handle: Long, ids: LongArray, exclude: Boolean, name: String?): Long
+    private external fun nativeQueryKeyframeNavigation(handle: Long, layer: Long, property: Int, effect: Int, param: Int, frame: Long, out: LongArray): Boolean
+    private external fun nativeQueryTimelineNavigation(handle: Long, layer: Long, frame: Long, direction: Int): Long
+    private external fun nativeSeekTimelineEvent(handle: Long, frame: Long): Boolean
     private external fun nativeUngroupPrecomp(handle: Long, layer: Long): String?
     private external fun nativeImportHdri(handle: Long, path: String): Long
     private external fun nativeQueryGizmo(handle: Long, layer: Long, length: Float, out: FloatArray, localSpace: Boolean): Boolean
@@ -1388,6 +1511,9 @@ class AureaEngine private constructor() {
     private external fun nativeRecoverSession(handle: Long): Int
     private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int, trimToContent: Boolean, quality: Int, rateMode: Int, safeMode: Int): Int
     private external fun nativeExportDuration(handle: Long, trimToContent: Boolean): Long
+    private external fun nativeStartPreRender(handle: Long, direction: Int): Int
+    private external fun nativeCancelPreRender(handle: Long)
+    private external fun nativePreRenderProgress(handle: Long): LongArray
     private external fun nativeCancelExport(handle: Long): Int
     private external fun nativeRestartExport(handle: Long, recoveryPath: String, outputPath: String): Int
     private external fun nativeStartImageExport(handle: Long, outputPath: String, format: Int, shortSide: Int, maxWidth: Int, fps: Double, trimToContent: Boolean): Int
@@ -1401,6 +1527,7 @@ class AureaEngine private constructor() {
     private external fun nativeReloadModelTextures(handle: Long, layer: Long, detail: Array<String?>): Int
     private external fun nativeCancelModelImport(handle: Long)
     private external fun nativeExportProgress(handle: Long, out: ByteBuffer): Boolean
+    private external fun nativeExportDiagnostics(handle: Long): String?
     private external fun nativeLocalAiStatus(handle: Long): Int
     private external fun nativePreviewBufferRanges(handle: Long, out: LongArray): Int
 
@@ -1467,4 +1594,29 @@ class AureaEngine private constructor() {
     private external fun nativeImportSvg(handle: Long, bytes: ByteArray, name: String): Long
     private external fun nativeSetTextPath(handle: Long, layer: Long, pathLayer: Long, offset: Float, perpendicular: Boolean, reverse: Boolean): Boolean
     private external fun nativeQueryTextPath(handle: Long, layer: Long): LongArray?
+}
+
+/** The ten-slot JNI contract uses integers, including cache byte counters. */
+data class PreRenderProgress(
+    val running: Boolean = false,
+    val complete: Boolean = false,
+    val framesDone: Long = 0,
+    val framesTotal: Long = 0,
+    val width: Int = 0,
+    val height: Int = 0,
+    val direction: Int = 1,
+    val error: Int = 0,
+    val diskBytes: Long = 0,
+    val residentBytes: Long = 0,
+) {
+    val fraction: Float get() = if (framesTotal > 0) (framesDone.toDouble() / framesTotal).coerceIn(0.0, 1.0).toFloat() else 0f
+    companion object {
+        fun from(values: LongArray): PreRenderProgress {
+            if (values.size < 10) return PreRenderProgress()
+            return PreRenderProgress(values[0] != 0L, values[1] != 0L,
+                values[2].coerceAtLeast(0), values[3].coerceAtLeast(0),
+                values[4].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(), values[5].coerceIn(0, Int.MAX_VALUE.toLong()).toInt(),
+                if (values[6] < 0) -1 else 1, values[7].toInt(), values[8].coerceAtLeast(0), values[9].coerceAtLeast(0))
+        }
+    }
 }

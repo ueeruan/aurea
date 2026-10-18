@@ -1,6 +1,7 @@
 #include "aurea/export/FFmpegExportSink.hpp"
 #include "aurea/export/NV12Copy.hpp"
 #include "aurea/core/Time.hpp"
+#include "aurea/core/Log.hpp"
 #include "aurea/project/FileIO.hpp"
 
 #include <algorithm>
@@ -85,22 +86,28 @@ bool has_pixel_format(const AVCodec* codec, AVPixelFormat wanted) noexcept {
 // platform classification and size/rate support select the exact codec passed
 // to FFmpeg. Missing JVM/API/support simply takes the software path.
 #if defined(__ANDROID__)
-bool android_codec(AVCodecID id, const VideoStreamConfig& config, bool wantHardware,
-                   char* output, usize capacity) noexcept {
-    output[0] = '\0';
+struct AndroidCodecCandidate {
+    char name[256]{};
+    AVPixelFormat pixel = AV_PIX_FMT_NONE;
+};
+constexpr usize maxAndroidCandidates = 32;
+
+usize android_codecs(AVCodecID id, const VideoStreamConfig& config, bool wantHardware,
+                     std::array<AndroidCodecCandidate, maxAndroidCandidates>& output) noexcept {
+    usize found = 0;
     auto* vm = static_cast<JavaVM*>(av_jni_get_java_vm(nullptr));
-    if (!vm) return false;
+    if (!vm) return 0;
     JNIEnv* env = nullptr;
     bool detach = false;
     const jint state = vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
     if (state == JNI_EDETACHED) {
-        if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return false;
+        if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return 0;
         detach = true;
-    } else if (state != JNI_OK || !env) return false;
+    } else if (state != JNI_OK || !env) return 0;
     if (env->PushLocalFrame(64) < 0) {
         env->ExceptionClear();
         if (detach) vm->DetachCurrentThread();
-        return false;
+        return 0;
     }
     do {
         const jclass version = env->FindClass("android/os/Build$VERSION");
@@ -111,33 +118,52 @@ bool android_codec(AVCodecID id, const VideoStreamConfig& config, bool wantHardw
         const jclass infoClass = env->FindClass("android/media/MediaCodecInfo");
         const jclass capClass = env->FindClass("android/media/MediaCodecInfo$CodecCapabilities");
         const jclass videoClass = env->FindClass("android/media/MediaCodecInfo$VideoCapabilities");
-        if (!listClass || !infoClass || !capClass || !videoClass) break;
+        const jclass encoderClass = env->FindClass("android/media/MediaCodecInfo$EncoderCapabilities");
+        const jclass formatClass = env->FindClass("android/media/MediaFormat");
+        if (!listClass || !infoClass || !capClass || !videoClass || !encoderClass || !formatClass) break;
         const auto ctor = env->GetMethodID(listClass, "<init>", "(I)V");
         const auto infos = env->GetMethodID(listClass, "getCodecInfos", "()[Landroid/media/MediaCodecInfo;");
         const auto encoder = env->GetMethodID(infoClass, "isEncoder", "()Z");
         const auto hardware = env->GetMethodID(infoClass, "isHardwareAccelerated", "()Z");
         const auto software = env->GetMethodID(infoClass, "isSoftwareOnly", "()Z");
+        const auto alias = env->GetMethodID(infoClass, "isAlias", "()Z");
         const auto types = env->GetMethodID(infoClass, "getSupportedTypes", "()[Ljava/lang/String;");
         const auto name = env->GetMethodID(infoClass, "getName", "()Ljava/lang/String;");
         const auto capabilities = env->GetMethodID(infoClass, "getCapabilitiesForType",
             "(Ljava/lang/String;)Landroid/media/MediaCodecInfo$CodecCapabilities;");
         const auto videoCaps = env->GetMethodID(capClass, "getVideoCapabilities",
             "()Landroid/media/MediaCodecInfo$VideoCapabilities;");
+        const auto encoderCaps = env->GetMethodID(capClass, "getEncoderCapabilities",
+            "()Landroid/media/MediaCodecInfo$EncoderCapabilities;");
         const auto supports = env->GetMethodID(videoClass, "areSizeAndRateSupported", "(IID)Z");
-        if (!ctor || !infos || !encoder || !hardware || !software || !types || !name ||
-            !capabilities || !videoCaps || !supports) break;
+        const auto modeSupported = env->GetMethodID(encoderClass, "isBitrateModeSupported", "(I)Z");
+        const auto formatSupported = env->GetMethodID(capClass, "isFormatSupported", "(Landroid/media/MediaFormat;)Z");
+        const auto formatCtor = env->GetMethodID(formatClass, "<init>", "()V");
+        const auto setInteger = env->GetMethodID(formatClass, "setInteger", "(Ljava/lang/String;I)V");
+        const auto setString = env->GetMethodID(formatClass, "setString", "(Ljava/lang/String;Ljava/lang/String;)V");
+        if (!ctor || !infos || !encoder || !hardware || !software || !alias || !types || !name ||
+            !capabilities || !videoCaps || !encoderCaps || !supports || !modeSupported ||
+            !formatSupported || !formatCtor || !setInteger || !setString) break;
         const jobject list = env->NewObject(listClass, ctor, 1 /* ALL_CODECS */);
         if (!list) break;
         const auto array = static_cast<jobjectArray>(env->CallObjectMethod(list, infos));
         if (!array || env->ExceptionCheck()) break;
         const char* mime = id == AV_CODEC_ID_HEVC ? "video/hevc" : "video/avc";
+        // FFmpeg's byte-buffer adapter configures 16-pixel storage, then uses
+        // an SPS conformance window for the exact visible dimensions. Probe
+        // the configuration actually sent to MediaCodec, including its color.
+        const jint width = static_cast<jint>((config.width + 15u) & ~15u);
+        const jint height = static_cast<jint>((config.height + 15u) & ~15u);
+        const jint fps = config.fps >= 1 ? static_cast<jint>(config.fps) : 30;
+        const jint bitrate = static_cast<jint>(config.bitrateBps ? config.bitrateBps : 12'000'000);
+        const jint mode = config.rateMode == 0 ? 2 /* CBR */ : 1 /* VBR */;
         const jsize n = env->GetArrayLength(array);
-        for (jsize i = 0; i < n && !output[0]; ++i) {
-            if (env->PushLocalFrame(16) < 0) { env->ExceptionClear(); break; }
+        for (jsize i = 0; i < n && found < output.size(); ++i) {
+            if (env->PushLocalFrame(32) < 0) { env->ExceptionClear(); break; }
             const jobject info = env->GetObjectArrayElement(array, i);
-            if (info && env->CallBooleanMethod(info, encoder) &&
-                (wantHardware ? env->CallBooleanMethod(info, hardware)
-                              : env->CallBooleanMethod(info, software)) && !env->ExceptionCheck()) {
+            if (info && env->CallBooleanMethod(info, encoder) && !env->CallBooleanMethod(info, alias) &&
+                (wantHardware ? env->CallBooleanMethod(info, hardware) : env->CallBooleanMethod(info, software)) &&
+                !env->ExceptionCheck()) {
                 const auto supported = static_cast<jobjectArray>(env->CallObjectMethod(info, types));
                 if (supported && !env->ExceptionCheck()) {
                     for (jsize t = 0; t < env->GetArrayLength(supported); ++t) {
@@ -148,12 +174,36 @@ bool android_codec(AVCodecID id, const VideoStreamConfig& config, bool wantHardw
                         if (matches) {
                             const jobject cap = env->CallObjectMethod(info, capabilities, type);
                             const jobject vc = cap ? env->CallObjectMethod(cap, videoCaps) : nullptr;
-                            if (vc && env->CallBooleanMethod(vc, supports, static_cast<jint>(config.width),
-                                static_cast<jint>(config.height), config.fps) && !env->ExceptionCheck()) {
+                            const jobject ec = cap ? env->CallObjectMethod(cap, encoderCaps) : nullptr;
+                            if (vc && ec && env->CallBooleanMethod(vc, supports, width, height, config.fps) &&
+                                env->CallBooleanMethod(ec, modeSupported, mode) && !env->ExceptionCheck()) {
                                 const auto codecName = static_cast<jstring>(env->CallObjectMethod(info, name));
                                 const char* textName = codecName ? env->GetStringUTFChars(codecName, nullptr) : nullptr;
-                                if (textName && std::strlen(textName) < capacity)
-                                    std::snprintf(output, capacity, "%s", textName);
+                                for (jint color : {21 /* NV12 */, 19 /* I420 */}) {
+                                    const jobject format = env->NewObject(formatClass, formatCtor);
+                                    auto integer = [&](const char* key, jint value) noexcept {
+                                        const jstring k = env->NewStringUTF(key);
+                                        if (k) { env->CallVoidMethod(format, setInteger, k, value); env->DeleteLocalRef(k); }
+                                    };
+                                    if (!format || env->ExceptionCheck()) break;
+                                    const jstring mimeKey = env->NewStringUTF("mime");
+                                    if (!mimeKey) break;
+                                    env->CallVoidMethod(format, setString, mimeKey, type);
+                                    env->DeleteLocalRef(mimeKey);
+                                    integer("width", width); integer("height", height);
+                                    integer("frame-rate", fps); integer("bitrate", bitrate);
+                                    integer("color-format", color); integer("bitrate-mode", mode);
+                                    if (id == AV_CODEC_ID_H264 && config.profile == 1) integer("profile", 1 /* AVC Baseline */);
+                                    const bool accepted = !env->ExceptionCheck() && env->CallBooleanMethod(cap, formatSupported, format);
+                                    env->DeleteLocalRef(format);
+                                    if (accepted && !env->ExceptionCheck() && textName && std::strlen(textName) < sizeof(output[found].name)) {
+                                        std::snprintf(output[found].name, sizeof(output[found].name), "%s", textName);
+                                        output[found].pixel = color == 21 ? AV_PIX_FMT_NV12 : AV_PIX_FMT_YUV420P;
+                                        ++found;
+                                        break;
+                                    }
+                                    if (env->ExceptionCheck()) { env->ExceptionClear(); break; }
+                                }
                                 if (textName) env->ReleaseStringUTFChars(codecName, textName);
                             }
                             break;
@@ -169,7 +219,7 @@ bool android_codec(AVCodecID id, const VideoStreamConfig& config, bool wantHardw
     if (env->ExceptionCheck()) env->ExceptionClear();
     env->PopLocalFrame(nullptr);
     if (detach) vm->DetachCurrentThread();
-    return output[0] != '\0';
+    return found;
 }
 #endif
 
@@ -178,6 +228,9 @@ public:
     ~FFmpegSink() override { abort(); }
     void set_cancel_flag(const std::atomic<bool>* flag) noexcept override { cancel_ = flag; }
     void set_heartbeat(std::atomic<u64>* beat) noexcept override { heartbeat_ = beat; }
+    void set_diagnostics(std::shared_ptr<ExportDiagnostics> diagnostics) noexcept override {
+        diagnostics_ = std::move(diagnostics);
+    }
     EncoderInfo encoder_info() const noexcept override { return encoder_; }
 
     Status open(const char* output, const VideoStreamConfig& video,
@@ -200,6 +253,7 @@ private:
     struct FrameTiming { i64 pts = 0, duration = 0; };
     const std::atomic<bool>* cancel_ = nullptr;
     std::atomic<u64>* heartbeat_ = nullptr;
+    std::shared_ptr<ExportDiagnostics> diagnostics_;
     AVFormatContext* format_ = nullptr;
     AVCodecContext* videoCodec_ = nullptr;
     AVCodecContext* audioCodec_ = nullptr;
@@ -233,6 +287,12 @@ private:
     void beat() noexcept {
         if (heartbeat_) heartbeat_->store(monotonic_ns(), std::memory_order_release);
     }
+    void phase(ExportDiagnostics::Stage stage) noexcept {
+        if (diagnostics_) diagnostics_->stage(ExportDiagnostics::Lane::Encoder, stage);
+    }
+    void event(ExportDiagnostics::Counter counter) noexcept {
+        if (diagnostics_) diagnostics_->event(counter);
+    }
     bool cancelled() const noexcept { return cancel_ && cancel_->load(std::memory_order_acquire); }
     static int interrupted(void* user) noexcept { return static_cast<FFmpegSink*>(user)->cancelled() ? 1 : 0; }
     Status error(Errc code, const char* what, int result = 0) noexcept {
@@ -246,6 +306,8 @@ private:
         if (cancelled() || result == AVERROR_EXIT) code = Errc::Cancelled;
         state_ = State::Failed;
         lastError_ = Status{code, detail_};
+        phase(ExportDiagnostics::Stage::Failed);
+        if (diagnostics_) diagnostics_->result(static_cast<i32>(code));
         return lastError_;
     }
     Status ready() noexcept {
@@ -256,7 +318,8 @@ private:
     }
     void release() noexcept;
     Status open_video() noexcept;
-    Status try_video(const char* name, bool hardware, const char* nativeName = nullptr) noexcept;
+    Status try_video(const char* name, bool hardware, const char* nativeName = nullptr,
+                     AVPixelFormat requestedPixel = AV_PIX_FMT_NONE) noexcept;
     Status open_audio() noexcept;
     Status write_video_with_fallback(const u8*, u32, const u8*, u32, i64, i64, bool) noexcept;
     Status write_video_impl(const u8*, u32, const u8*, u32, i64, i64, bool) noexcept;
@@ -290,6 +353,8 @@ void FFmpegSink::release() noexcept {
 }
 
 void FFmpegSink::abort() noexcept {
+    if (state_ != State::Empty && state_ != State::Published)
+        phase(ExportDiagnostics::Stage::Abort);
     release();
     if (!staged_.empty()) fileio::remove_file(staged_);
     staged_.clear();
@@ -377,16 +442,17 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     av_dict_free(&options); beat();
     if (result < 0) return error(Errc::EncodeFailed, "escrever cabecalho FFmpeg", result);
     state_ = State::Open;
+    phase(ExportDiagnostics::Stage::Idle);
     return OkStatus;
 }
 
-Status FFmpegSink::try_video(const char* name, bool hardware, const char* nativeName) noexcept {
+Status FFmpegSink::try_video(const char* name, bool hardware, const char* nativeName, AVPixelFormat requestedPixel) noexcept {
     const AVCodec* codec = avcodec_find_encoder_by_name(name);
     if (!codec) return Status{Errc::EncoderUnavailable, "encoder FFmpeg ausente nesta compilacao"};
     avcodec_free_context(&videoCodec_);
     videoCodec_ = avcodec_alloc_context3(codec);
     if (!videoCodec_) return error(Errc::OutOfMemory, "contexto de video FFmpeg");
-    AVPixelFormat pixel = AV_PIX_FMT_NV12;
+    AVPixelFormat pixel = requestedPixel == AV_PIX_FMT_NONE ? AV_PIX_FMT_NV12 : requestedPixel;
     if (!has_pixel_format(codec, pixel)) {
         pixel = video_.codec == ExportCodec::ProRes ? AV_PIX_FMT_YUV422P10LE : AV_PIX_FMT_YUV420P;
         if (!has_pixel_format(codec, pixel)) {
@@ -454,15 +520,26 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
         av_dict_set(&options, "cpu-used", "8", 0);
         av_dict_set(&options, "lag-in-frames", "0", 0);
     }
+    if (diagnostics_) diagnostics_->codec(nativeName ? nativeName : name, name,
+        std::strstr(name, "mediacodec") ? pixel == AV_PIX_FMT_NV12 ? 21 : 19 : -1,
+        std::strstr(name, "mediacodec") ? (ctx->width + 15u) & ~15u : ctx->width,
+        std::strstr(name, "mediacodec") ? (ctx->height + 15u) & ~15u : ctx->height);
+    phase(ExportDiagnostics::Stage::CodecOpen);
     const int result = avcodec_open2(ctx, codec, &options);
     const bool unused = av_dict_count(options) != 0;
     av_dict_free(&options); beat();
     if (result < 0 || unused) {
+        AUREA_LOG_WARN("export encoder=%s backend=%s input=%s size=%dx%d fps=%.6f open=%d unused=%d",
+            nativeName ? nativeName : name, name, av_get_pix_fmt_name(pixel),
+            ctx->width, ctx->height, video_.fps, result, unused ? 1 : 0);
         avcodec_free_context(&videoCodec_);
         return Status{Errc::EncoderUnavailable, "encoder FFmpeg recusou configuracao solicitada"};
     }
     std::snprintf(encoder_.name, sizeof(encoder_.name), "%s", nativeName ? nativeName : name);
     encoder_.acceleration = hardware ? Acceleration::Hardware : Acceleration::Software;
+    AUREA_LOG_INFO("export encoder=%s backend=%s input=%s size=%dx%d fps=%.6f acceleration=%d",
+        encoder_.name, name, av_get_pix_fmt_name(pixel), ctx->width, ctx->height,
+        video_.fps, static_cast<int>(encoder_.acceleration));
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     // Upstream FFmpeg does not enforce allow_sw=0 on iOS. Do not claim an
     // encoder-session hardware property that this API cannot actually query.
@@ -475,14 +552,18 @@ Status FFmpegSink::open_video() noexcept {
     Status selected{Errc::EncoderUnavailable, "nenhum encoder FFmpeg compativel disponivel"};
     if (!video_.preferSoftware && (video_.codec == ExportCodec::H264 || video_.codec == ExportCodec::HEVC)) {
 #if defined(__ANDROID__)
-        char hardwareName[256]{};
-        if (android_codec(codec_id(video_.codec), video_, true, hardwareName, sizeof(hardwareName)))
-            selected = try_video(video_.codec == ExportCodec::HEVC ? "hevc_mediacodec" : "h264_mediacodec", true, hardwareName);
+        std::array<AndroidCodecCandidate, maxAndroidCandidates> hardware{};
+        const usize count = android_codecs(codec_id(video_.codec), video_, true, hardware);
+        for (usize i = 0; i < count && !cancelled(); ++i) {
+            selected = try_video(video_.codec == ExportCodec::HEVC ? "hevc_mediacodec" : "h264_mediacodec",
+                                 true, hardware[i].name, hardware[i].pixel);
+            if (selected.ok() || selected.code() == Errc::OutOfMemory) break;
+        }
 #elif defined(__APPLE__)
         selected = try_video(video_.codec == ExportCodec::HEVC ? "hevc_videotoolbox" : "h264_videotoolbox", true);
 #endif
     }
-    if (!selected.ok()) {
+    if (!selected.ok() && selected.code() != Errc::OutOfMemory) {
         const char* candidates[4]{};
         switch (video_.codec) {
             case ExportCodec::H264: candidates[0] = "libopenh264"; candidates[1] = "libx264"; break;
@@ -501,9 +582,13 @@ Status FFmpegSink::open_video() noexcept {
         // encoded/muxed through the same shared FFmpeg pipeline.
         if (!selected.ok() && selected.code() != Errc::OutOfMemory && !cancelled() &&
             (video_.codec == ExportCodec::H264 || video_.codec == ExportCodec::HEVC)) {
-            char softwareName[256]{};
-            if (android_codec(codec_id(video_.codec), video_, false, softwareName, sizeof(softwareName)))
-                selected = try_video(video_.codec == ExportCodec::HEVC ? "hevc_mediacodec" : "h264_mediacodec", false, softwareName);
+            std::array<AndroidCodecCandidate, maxAndroidCandidates> software{};
+            const usize count = android_codecs(codec_id(video_.codec), video_, false, software);
+            for (usize i = 0; i < count && !cancelled(); ++i) {
+                selected = try_video(video_.codec == ExportCodec::HEVC ? "hevc_mediacodec" : "h264_mediacodec",
+                                     false, software[i].name, software[i].pixel);
+                if (selected.ok() || selected.code() == Errc::OutOfMemory) break;
+            }
         }
 #endif
     }
@@ -604,6 +689,7 @@ Status FFmpegSink::mux(AVPacket* packet, AVCodecContext* codec, AVStream* stream
     if (result < 0) return error(Errc::EncodeFailed, "multiplexar pacote FFmpeg", result);
     if (format_->pb && format_->pb->error < 0)
         return error(Errc::IoError, "gravar pacote FFmpeg", format_->pb->error);
+    event(codec == videoCodec_ ? ExportDiagnostics::Counter::VideoPackets : ExportDiagnostics::Counter::AudioPackets);
     return OkStatus;
 }
 
@@ -616,6 +702,7 @@ Status FFmpegSink::drain(AVCodecContext* codec, AVStream* stream, bool video,
         const int result = avcodec_receive_packet(codec, packet_); beat();
         if (result == AVERROR_EOF) return OkStatus;
         if (result == AVERROR(EAGAIN)) {
+            event(ExportDiagnostics::Counter::OutputAgain);
             if (!flushing) return OkStatus;
             // Real-time hardware wrappers may need another poll after EOS.
             // A bounded timeout is an error, never a discarded final frame.
@@ -663,6 +750,7 @@ Status FFmpegSink::send(AVCodecContext* codec, AVStream* stream, const AVFrame* 
         if (cancelled()) return error(Errc::Cancelled, "encoder FFmpeg cancelado");
         const int result = avcodec_send_frame(codec, frame); beat();
         if (result == AVERROR(EAGAIN)) {
+            event(ExportDiagnostics::Counter::InputAgain);
             unsigned produced = 0;
             if (const Status status = drain(codec, stream, video, false, produced); !status.ok()) return status;
             if (!produced && monotonic_ns() - started > codecStallNs)
@@ -701,6 +789,7 @@ Status FFmpegSink::write_video_with_fallback(const u8* y, u32 ys, const u8* uv, 
 
 Status FFmpegSink::write_video_impl(const u8* y, u32 ys, const u8* uv, u32 uvs,
                                    i64 pts, i64 duration, bool timed) noexcept {
+    phase(ExportDiagnostics::Stage::VideoInput);
     if (const Status status = ready(); !status.ok()) return status;
     if (!y || !uv || ys < video_.width || uvs < video_.width || ys > INT_MAX || uvs > INT_MAX || pts < 0 ||
         (timed && (duration <= 0 || duration > INT64_MAX - pts)) || (videoFrames_ == 0 && pts != 0) ||
@@ -757,6 +846,7 @@ Status FFmpegSink::write_video_impl(const u8* y, u32 ys, const u8* uv, u32 uvs,
     }
     videoFrame_->pts = framePts; videoFrame_->duration = frameDuration;
     if (const Status status = send(videoCodec_, videoStream_, videoFrame_, true); !status.ok()) return status;
+    event(ExportDiagnostics::Counter::Submitted);
     pendingVideo_[(pendingHead_ + pendingCount_) % maxPendingVideo] = {framePts, frameDuration};
     ++pendingCount_; ++videoFrames_;
     videoHash_ = timestamp_hash(videoHash_, framePts);
@@ -822,6 +912,7 @@ Status FFmpegSink::append_audio(const i16* pcm, int samples) noexcept {
 }
 
 Status FFmpegSink::write_audio(const i16* pcm, u32 frames, i64 pts) noexcept {
+    phase(ExportDiagnostics::Stage::AudioInput);
     if (const Status status = ready(); !status.ok()) return status;
     if (!hasAudio_) return Status{Errc::InvalidState, "exportacao FFmpeg nao possui faixa de audio"};
     if ((!pcm && frames) || pts < 0 || audioInputSamples_ > INT64_MAX - static_cast<i64>(frames))
@@ -865,6 +956,7 @@ Status FFmpegSink::flush_resampler() noexcept {
 }
 
 Status FFmpegSink::finish() noexcept {
+    phase(ExportDiagnostics::Stage::Drain);
     if (const Status status = ready(); !status.ok()) return status;
     if (!videoFrames_ || (hasAudio_ && !audioInputSamples_))
         return error(Errc::EncodeFailed, "exportacao FFmpeg sem frames ou amostras esperadas");
@@ -925,11 +1017,13 @@ Status FFmpegSink::finish() noexcept {
 }
 
 Status FFmpegSink::publish() noexcept {
+    phase(ExportDiagnostics::Stage::Publish);
     if (cancelled()) return error(Errc::Cancelled, "publicacao FFmpeg cancelada");
     const Status result = fileio::commit_file(staged_, target_);
     beat();
     if (!result.ok()) return error(result.code(), "publicar exportacao FFmpeg atomicamente");
     staged_.clear(); state_ = State::Published;
+    phase(ExportDiagnostics::Stage::Complete);
     return OkStatus;
 }
 
@@ -941,6 +1035,7 @@ Status FFmpegSink::validate_output(const ExportOutputValidation& expected) noexc
 }
 
 Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexcept {
+    phase(ExportDiagnostics::Stage::Validation);
     if (!expected.frames || expected.frames != videoFrames_ || expected.width != video_.width ||
         expected.height != video_.height || expected.audio != hasAudio_ ||
         !std::isfinite(expected.fps) || std::abs(expected.fps - video_.fps) > 0.000001)

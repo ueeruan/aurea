@@ -436,6 +436,7 @@ public:
     void defer_until_gpu_done(void (*fn)(void*), void* ctx) noexcept override;
 
     void wait_idle() noexcept override;
+    [[nodiscard]] Status poll_export_work(Status* completedFailure = nullptr) noexcept override;
     [[nodiscard]] u64 last_submitted_frame() const noexcept override;
     [[nodiscard]] Status wait_frame(u64 frameNumber, u64 timeoutNs) noexcept override;
     /// Mensagens da camada de validação (erros / avisos) desde o início do
@@ -552,7 +553,11 @@ private:
     VkFence recoveryFence_ = VK_NULL_HANDLE;
     // Bound temporal 3D batches without changing resolution or sample count.
     // end_frame completes each primary before admitting the next GPU batch.
-    u32 passesPerCommandBuffer_ = 8;
+    // Export (quadro offscreen): UM pass por envio. O driver Qualcomm (KGSL)
+    // reseta a GPU quando um único envio passa de ~2 s, e um quadro 3D pesado
+    // leva ~2 s numa Adreno 610: com 8 passes por envio o export morria com
+    // VK_ERROR_DEVICE_LOST no meio (moto g52, Project 13, quadro 42/300).
+    u32 passesPerCommandBuffer_ = 1;
     u32 trimCountdown_ = 0;   ///< begin_frame: blocos vazios devolvidos a cada ~90 quadros, nao a cada um
     bool debugUtils_ = false;
     bool timersEnabled_ = false;

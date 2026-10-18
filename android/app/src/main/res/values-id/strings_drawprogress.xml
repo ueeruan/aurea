@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.2.5: Progres Gambar (nama efek tetap bahasa Inggris di semua bahasa; nama terjemahan dipakai untuk pencarian). -->
+    <string name="fx_name_drawing_progress">Progres Gambar</string>
+    <string name="drawing_progress_desc">Menggambar gambar goresan demi goresan: pada vektor, setiap garis tepi tumbuh mengikuti jalurnya sendiri, satu per satu atau semuanya sekaligus, dan isian muncul saat garis tepi tertutup. Pada gambar biasa, efek ini menampilkan dengan sapuan: tinta gelap lebih dulu daripada kertas terang.</string>
+    <string name="fxl_draw_order">Urutan</string>
+    <string name="fxo_simultaneous">Serentak</string>
+    <string name="fxl_tip_softness">Kelembutan ujung</string>
+    <string name="drawprog_reverse">Balik arah</string>
+</resources>

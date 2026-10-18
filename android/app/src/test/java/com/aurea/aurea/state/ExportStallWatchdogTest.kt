@@ -57,7 +57,7 @@ class ExportStallWatchdogTest {
     }
 
     @Test fun uiWaitsLongerThanEveryEngineDeadline() {
-        // GPU 120 s, quadro 60 s, worker do encoder 45 s (ExportWatchdog.hpp).
+        // GPU 120 s, worker do encoder por fase até 45 s (ExportWatchdog.hpp).
         assertTrue(stall > 120_000L + 45_000L)
         assertEquals(180_000L, stall)
         assertEquals(15_000L, giveUp)
@@ -65,10 +65,12 @@ class ExportStallWatchdogTest {
 
     @Test fun safeModeOnlyClimbsToTheEngineSuggestionUpToTwo() {
         assertEquals(1, ExportStallWatchdog.nextSafeMode(0, 1))
+        assertEquals(2, ExportStallWatchdog.nextSafeMode(0, 2))
         assertEquals(2, ExportStallWatchdog.nextSafeMode(1, 2))
         assertEquals(0, ExportStallWatchdog.nextSafeMode(0, 0))   // motor não sugeriu
         assertEquals(0, ExportStallWatchdog.nextSafeMode(1, 1))   // nunca repete o mesmo nível
         assertEquals(0, ExportStallWatchdog.nextSafeMode(2, 1))   // nunca volta
+        assertEquals(0, ExportStallWatchdog.nextSafeMode(2, 2))   // nunca repete software
         assertEquals(0, ExportStallWatchdog.nextSafeMode(2, 3))   // acima do máximo
     }
 
@@ -82,5 +84,26 @@ class ExportStallWatchdogTest {
         assertEquals(com.aurea.aurea.engine.ExportProgress.FAILURE_ENCODER_STALLED, p.failure)
         assertTrue(p.safeMode)
         assertFalse(p.softwareEncoder)
+    }
+
+    /**
+     * BETA 2: o conselho do motor (bits 16..18) vira a próxima tentativa — o
+     * nível só sobe, e o decoder preso pede também a decodificação compatível.
+     */
+    @Test fun nextAttemptCarriesLevelAndSoftwareDecode() {
+        val shift = com.aurea.aurea.engine.ExportProgress.RETRY_SHIFT
+        val sw = com.aurea.aurea.engine.ExportProgress.RETRY_SOFTWARE_DECODE
+        assertEquals(2, ExportStallWatchdog.nextAttempt(0, 2 shl shift))
+        assertEquals(2 or ExportStallWatchdog.ATTEMPT_SOFTWARE_DECODE, ExportStallWatchdog.nextAttempt(0, (2 shl shift) or sw))
+        assertEquals(0, ExportStallWatchdog.nextAttempt(2, (2 shl shift) or sw))   // uma vez só
+        assertEquals(0, ExportStallWatchdog.nextAttempt(0, sw))                      // sem nível, sem tentativa
+        val p = com.aurea.aurea.engine.ExportProgress()
+        p.flags = (2 shl shift) or sw or (com.aurea.aurea.engine.ExportProgress.FAILURE_CODEC_HUNG shl
+            com.aurea.aurea.engine.ExportProgress.FAILURE_SHIFT)
+        assertEquals(2, p.retrySafeMode)
+        assertTrue(p.retrySoftwareDecode)
+        assertEquals(9, p.failure)
+        assertEquals(1 shl 18, sw)
+        assertEquals(1 shl 7, com.aurea.aurea.engine.ExportProgress.FLAG_SOFTWARE_DECODE)
     }
 }

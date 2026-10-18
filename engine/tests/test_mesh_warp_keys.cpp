@@ -120,6 +120,11 @@ AUREA_TEST(MeshWarpKeys, OffsetKeysRemainLocalAndHiddenEndpointsAreReportedWitho
     bridge::KeyframeIndexRow index{}; index.count = 1234; u32 layers = 0;
     AUREA_CHECK_EQ(f.engine.query_all_keyframes(&index, 1, keys, 1, &layers), 2u);
     AUREA_CHECK_EQ(index.count, 1234u); // retry contract: insufficient capacity writes nothing
+    i64 target = -1;
+    AUREA_CHECK(f.engine.query_timeline_navigation(f.layer, 14, 1, target));
+    AUREA_CHECK_EQ(target, i64{15});
+    AUREA_CHECK(!f.engine.query_timeline_navigation(f.layer, 15, 1, target)); // The trimmed mesh key is hidden.
+    AUREA_CHECK_EQ(target, i64{15});
 }
 
 AUREA_TEST(MeshWarpKeys, ScalarEditsAndExpressionsCannotCreateASecondFakeMeshAnimation) {

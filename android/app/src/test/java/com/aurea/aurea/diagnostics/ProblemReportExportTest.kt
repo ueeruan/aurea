@@ -25,4 +25,13 @@ class ProblemReportExportTest {
         assertTrue(s.contains("codigo=12"))
         assertEquals("motivo=5 quadro=3/90", ProblemReport.sanitize("motivo=5 quadro=3/90"))
     }
+
+    @Test fun diagnosticsSurviveLongUserStepsAndRemainWithinTheReportLimit() {
+        val evidence = "{\"encoder\":\"c2.vendor.avc.encoder\",\"firstPacketMs\":-1,\"encoderStage\":\"codec_open\"}"
+        val combined = ProblemReport.stepsWithExportDiagnostics("x".repeat(4000), "codigo=26", evidence)
+        assertTrue(combined.endsWith(evidence))
+        assertTrue(combined.contains("[export] codigo=26"))
+        assertTrue(combined.length <= ProblemReport.STEPS_MAX)
+        assertEquals("texto", ProblemReport.stepsWithExportDiagnostics("texto", null, null))
+    }
 }

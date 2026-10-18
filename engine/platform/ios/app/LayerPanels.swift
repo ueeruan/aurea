@@ -1,7 +1,7 @@
 import SwiftUI
 
 var extraTextPresetNames: [String] { [AureaText.t("ios_textpreset_x_bounce"), AureaText.t("ios_textpreset_x_soft_in"), AureaText.t("ios_textpreset_x_reveal"), AureaText.t("ios_textpreset_x_slide"),
-                          AureaText.t("ios_textpreset_x_fast_in"), AureaText.t("ios_textpreset_x_elastic_jump"), AureaText.t("ios_textpreset_x_word_jump"), AureaText.t("ios_textpreset_x_smooth_motion")] + ["pack_text_0", "pack_text_1", "pack_text_2", "pack_text_3", "pack_text_4", "pack_text_5"].map { AureaText.t($0) }
+                          AureaText.t("ios_textpreset_x_fast_in"), AureaText.t("ios_textpreset_x_elastic_jump"), AureaText.t("ios_textpreset_x_word_jump"), AureaText.t("ios_textpreset_x_smooth_motion")] + ["pack_text_0", "pack_text_1", "pack_text_2", "pack_text_3", "pack_text_4", "pack_text_5", "app_text_preset_explosion"].map { AureaText.t($0) }
 }
 import UIKit
 import UniformTypeIdentifiers
@@ -217,6 +217,7 @@ struct NativePanelColorWell: View {
 }
 struct NativePanelRuler: View {
     @EnvironmentObject private var model: AureaModel
+    @Environment(\.isEnabled) private var enabled
     let label: String
     let value: Float
     let step: Float
@@ -250,40 +251,50 @@ struct NativePanelRuler: View {
             else {
                 PropertyLabelChip(label, expression: expression, keyframe: look, onTap: { onSelect?() })
                     .transformEnvironment(\.aureaSelectedProperty) { if onSelect != nil { $0 = selected ? label : nil } }
-                    .onLongPressGesture(minimumDuration: 0.5) { onExpression?() }
+                    .onLongPressGesture(minimumDuration: 0.5) { if reset == nil { onExpression?() } }
+                    .contextMenu {
+                        if let reset {
+                            Button(AureaText.t("panel_voltar_padrao")) { set(reset) }
+                                .disabled(abs(shown - reset) <= 0.001 * max(1, abs(reset)))
+                            if let onExpression { Button(AureaText.t("panel_expressao"), action: onExpression) }
+                        }
+                    }
             }
             Color.clear.frame(width: plainLabelWidth != nil ? 0 : keypad ? 6 : 8)
-            TickRuler(value: { shown }, unitsPerDp: step, active: true, height: controlHeight).frame(maxWidth: .infinity).frame(height: controlHeight)
-                .valueDrag(enabled: true, start: { value }, unitsPerDp: { step }, min: range.lowerBound, max: range.upperBound,
-                           onStart: { live = value; dragging = true; model.beginGesture(label) }, onValue: { live = $0; set($0) }, onEnd: { dragging = false; model.endGesture() })
+            TickRuler(value: { shown }, unitsPerDp: step, active: enabled && (selected || dragging), height: ParamRowDims.labelH).frame(maxWidth: .infinity).frame(minWidth: 30, minHeight: ParamRowDims.labelH)
+                .valueDrag(enabled: enabled, start: { value }, unitsPerDp: { step }, min: range.lowerBound, max: range.upperBound,
+                           onStart: { live = value; dragging = true; onSelect?(); model.beginGesture(label) }, onValue: { live = $0; set($0) }, onEnd: finish)
                 .accessibilityElement()
                 .accessibilityLabel(accessibilityName ?? label)
                 .accessibilityValue(comUnidade(numeroPtBr(shown, casas: decimals), unit))
                 .accessibilityAdjustableAction { direction in
                     let delta = step * 10 * (direction == .increment ? 1 : direction == .decrement ? -1 : 0)
-                    guard delta != 0 else { return }
-                    model.beginGesture(label); set((value + delta).clamped(to: range)); model.endGesture()
+                    guard enabled, delta != 0 else { return }
+                    onSelect?(); model.beginGesture(label); set((value + delta).clamped(to: range)); model.endGesture()
                 }
                 .accessibilityIdentifier(identifier)
             Color.clear.frame(width: keypad ? 6 : 8)
-            ValueBox(compactUnit ? numeroPtBr(shown, casas: decimals) + unit : comUnidade(numeroPtBr(shown, casas: decimals), unit), onTap: keypad ? openKeypad : nil)
+            ParamValueBox(compactUnit ? numeroPtBr(shown, casas: decimals) + unit : comUnidade(numeroPtBr(shown, casas: decimals), unit), enabled: enabled, onTap: keypad ? openKeypad : nil)
                 .accessibilityLabel(accessibilityName ?? label)
                 .accessibilityValue(comUnidade(numeroPtBr(shown, casas: decimals), unit))
                 .accessibilityIdentifier(identifier.isEmpty ? "" : identifier + ".value")
-            if let reset {
-                Button { set(reset) } label: { CupertinoGlyph.text(CupertinoGlyph.ArrowCounterclockwise, size: 16, color: AureaColors.muted).frame(width: 34, height: 44) }
-                    .buttonStyle(.plain).opacity(abs(shown - reset) > 0.001 * max(1, abs(reset)) ? 1 : 0).disabled(abs(shown - reset) <= 0.001 * max(1, abs(reset)))
-            }
             if let toggleKey {
                 Color.clear.frame(width: 4)
-                Button(action: toggleKey) { KeyframeDiamondIcon(look: look, enabled: true).frame(width: max(40, controlHeight), height: 44) }.buttonStyle(.plain)
+                Button(action: toggleKey) { KeyframeDiamondIcon(look: look, enabled: enabled).frame(width: max(44, controlHeight), height: ParamRowDims.labelH) }.buttonStyle(.plain)
                     .accessibilityLabel(AureaText.t(look == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui") + " · " + label)
             }
-        }.frame(height: 48).onDisappear { if dragging { dragging = false; model.endGesture() } }
+        }.frame(height: ParamRowDims.row).onDisappear(perform: finish)
     }
+    private func finish() { if dragging { dragging = false; model.endGesture() } }
     private func openKeypad() {
+        guard enabled, !dragging else { return }
+        onSelect?()
         let limits = typedRange ?? range
+        let project = model.projectGeneration, layer = model.primarySelection
+        let composition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value
         let request = KeypadRequest(title: label, value: value, unit: unit, min: limits.lowerBound, max: limits.upperBound, decimals: decimals, percentBase: range.upperBound) {
+            guard model.projectGeneration == project, model.primarySelection == layer,
+                  (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition else { return }
             model.beginGesture(label); set($0.clamped(to: limits)); model.endGesture()
         }
         if let presentKeypad { presentKeypad(request) } else { model.numericKeypad = request }
@@ -300,8 +311,10 @@ let builtinPresetNameKeys: [String: [String]] = [
                  "app_preset_anim_zoom_in", "app_preset_anim_pulse", "app_preset_anim_spin_in"],
     "curva": ["app_preset_curve_cubic", "app_preset_curve_strong_inout", "app_preset_curve_expo_out", "app_preset_curve_expo_in",
               "app_preset_curve_back_out", "app_preset_curve_back_in"],
+    // "" = fica o nome do arquivo (os de marca: "CC · Detail", "Omino · Diffusion").
     "efeitos": ["app_preset_fx_soft_blur", "app_preset_fx_focus_in", "app_preset_fx_neon_glow", "app_preset_fx_bw",
-                "app_preset_fx_strong_contrast", "app_preset_fx_sepia", "app_preset_fx_dream", "app_preset_fx_turbulence"],
+                "app_preset_fx_strong_contrast", "app_preset_fx_sepia", "app_preset_fx_dream", "app_preset_fx_turbulence",
+                "", "", "", "", "app_preset_fx_luma_in", "app_preset_fx_luma_out"],
     "legenda": ["app_preset_caption_viral", "app_preset_caption_karaoke", "app_preset_caption_subtle", "pack_text_4", "pack_text_5"],
 ]
 
@@ -361,7 +374,7 @@ extension PanelPresetEntry {
                     if let bytes = AureaJSONData(object, false), let json = String(data: bytes, encoding: .utf8) {
                         // Nome no idioma do app (o JSON fala pt-BR); sem recurso, o do arquivo.
                         let keys = builtinPresetNameKeys[kind.rawValue] ?? []
-                        let name = index < keys.count ? AureaText.t(keys[index]) : object["name"] as? String ?? ""
+                        let name = index < keys.count && !keys[index].isEmpty ? AureaText.t(keys[index]) : object["name"] as? String ?? ""
                         result.append(PanelPresetEntry(id: "b:\(kind.rawValue):\(index)", name: name.isEmpty ? AureaText.t("pn_preset_n", index + 1) : name, kind: kind, json: json))
                     }
                 }
@@ -1213,42 +1226,52 @@ struct SpeedPanel: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if kind != 1 && kind != 3 {
                         hint("panel_velocidade_vale_video_audio_nas_outras", size: 13)
-                    } else if speed == 0 && !animated {
-                        Text(AureaText.t("ios_frozen_frame_at", clock)).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
-                        hint("panel_este_trecho_quadro_parado_apare_bordas", size: 13).padding(.top, 8)
                     } else {
-                        Text(speedText(speed) + " · " + clock).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
-                        hint(animated ? "panel_velocidade_keyframes_duracao_fica" : "panel_inicio_camada_fica_lugar_fim_acompanha", size: 12).padding(.top, 10)
-                        // ◇ na etiqueta: grava/apaga o keyframe de velocidade no cabeçote.
-                        PropertyCustomRow(AureaText.t("editor_velocidade"), selected: animated, onSelect: toggleSpeedKey, keyframe: speedKeyLook) {
-                            HStack(spacing: 6) {
-                                CupertinoGlyph.text(CupertinoGlyph.Tortoise, size: 20, color: AureaColors.muted)
-                                TickRuler(value: { logarithm }, unitsPerDp: 1, active: true, height: 40)
-                                    .valueDrag(enabled: true, start: { logarithm }, unitsPerDp: { 1 }, min: -332, max: 332,
-                                        onStart: { model.engine.beginUndoGroup() }, onValue: { setSpeed(snap(pow(2, $0 / 100))) },
-                                        onEnd: { model.engine.endUndoGroup() })
-                                CupertinoGlyph.text(CupertinoGlyph.Hare, size: 20, color: AureaColors.muted)
-                                ValueBox(speedText(speed), width: 64).padding(.leading, 2)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                speedChip(AureaText.t("remap_normal"), on: !remap) { change { $0.setTimeRemap(false, forLayer: id) } }
+                                speedChip(AureaText.t("remap_linha_tempo"), on: remap) { change { $0.setTimeRemap(true, forLayer: id) } }
                             }
-                        }.padding(.top, 12)
-                        HStack(spacing: 6) {
-                            ForEach(Array([Float(0.25), 0.5, 1, 2, 4].enumerated()), id: \.offset) { index, value in
-                                speedChip(["0,25x", "0,5x", "1x", "2x", "4x"][index], on: abs(speed - value) < 0.005) { setSpeed(value) }
-                            }
-                        }.padding(.top, 12)
-                        if kind == 1 {
-                            HStack {
-                                Text(AureaText.t("panel_passar_tras_frente")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-                                AureaToggle(checked: flags & 1 != 0) { v in change { $0.setLayer(id, reversed: v) } }
-                            }.frame(height: 48).padding(.top, 8)
-                            HStack(spacing: 6) {
-                                Text(AureaText.t("panel_quadros_camera_lenta")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-                                ForEach(Array(["panel_repetir_quadro", "panel_misturar", "panel_movimento_suave"].enumerated()), id: \.offset) { index, key in
-                                    speedChip(AureaText.t(key), on: (flags & 16 != 0 ? 2 : flags & 8 != 0 ? 1 : 0) == index, padding: 10) {
-                                        change { $0.setFrameBlendForLayer(id, mode: UInt32(index)) }
-                                    }
+                        }.padding(.bottom, 12)
+                        if remap {
+                            TimeRemapEffectEditor(effectId: .max)
+                        } else if speed == 0 && !animated {
+                            Text(AureaText.t("ios_frozen_frame_at", clock)).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
+                            hint("panel_este_trecho_quadro_parado_apare_bordas", size: 13).padding(.top, 8)
+                        } else {
+                            Text(speedText(speed) + " · " + clock).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
+                            hint(animated ? "panel_velocidade_keyframes_duracao_fica" : "panel_inicio_camada_fica_lugar_fim_acompanha", size: 12).padding(.top, 10)
+                            // ◇ na etiqueta: grava/apaga o keyframe de velocidade no cabeçote.
+                            PropertyCustomRow(AureaText.t("editor_velocidade"), selected: animated, onSelect: toggleSpeedKey, keyframe: speedKeyLook) {
+                                HStack(spacing: 6) {
+                                    CupertinoGlyph.text(CupertinoGlyph.Tortoise, size: 20, color: AureaColors.muted)
+                                    TickRuler(value: { logarithm }, unitsPerDp: 1, active: true, height: 40)
+                                        .valueDrag(enabled: true, start: { logarithm }, unitsPerDp: { 1 }, min: -332, max: 332,
+                                            onStart: { model.engine.beginUndoGroup() }, onValue: { setSpeed(snap(pow(2, $0 / 100))) },
+                                            onEnd: { model.engine.endUndoGroup() })
+                                    CupertinoGlyph.text(CupertinoGlyph.Hare, size: 20, color: AureaColors.muted)
+                                    ValueBox(speedText(speed), width: 64).padding(.leading, 2)
                                 }
-                            }.frame(height: 48)
+                            }.padding(.top, 12)
+                            HStack(spacing: 6) {
+                                ForEach(Array([Float(0.25), 0.5, 1, 2, 4].enumerated()), id: \.offset) { index, value in
+                                    speedChip(["0,25x", "0,5x", "1x", "2x", "4x"][index], on: abs(speed - value) < 0.005) { setSpeed(value) }
+                                }
+                            }.padding(.top, 12)
+                            if kind == 1 {
+                                HStack {
+                                    Text(AureaText.t("panel_passar_tras_frente")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                                    AureaToggle(checked: flags & 1 != 0) { v in change { $0.setLayer(id, reversed: v) } }
+                                }.frame(height: 48).padding(.top, 8)
+                                HStack(spacing: 6) {
+                                    Text(AureaText.t("panel_quadros_camera_lenta")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                                    ForEach(Array(["panel_repetir_quadro", "panel_misturar", "panel_movimento_suave"].enumerated()), id: \.offset) { index, key in
+                                        speedChip(AureaText.t(key), on: (flags & 16 != 0 ? 2 : flags & 8 != 0 ? 1 : 0) == index, padding: 10) {
+                                            change { $0.setFrameBlendForLayer(id, mode: UInt32(index)) }
+                                        }
+                                    }
+                                }.frame(height: 48)
+                            }
                         }
                     }
                 }.padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
@@ -1258,8 +1281,8 @@ struct SpeedPanel: View {
     private func speedChip(_ label: String, on: Bool, padding: CGFloat = 12, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
-                .padding(.horizontal, padding).padding(.vertical, 6).background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(.plain)
+                .padding(.horizontal, padding).frame(minHeight: 44).background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+        }.buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
     }
     private func hint(_ key: String, size: CGFloat) -> some View {
         Text(AureaText.t(key)).font(.aurea(size: size)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
@@ -1772,12 +1795,12 @@ private struct ShapeEditGlyph: View {
     }
 }
 
-// MaskPanel.kt: masks, path steps and track matte keep their original order.
+// MaskPanel.kt: máscaras numa tela só (três botões de criar sempre à vista,
+// chips das máscaras e, da escolhida, Caminho, Modo, Borda, Seguir objeto e
+// Apagar) e o recorte por outra camada na segunda aba.
 struct MaskPanel: View {
     @EnvironmentObject private var model: AureaModel
     @State private var tab = 0
-    @State private var step = 0
-    @State private var adding = false
     @State private var matte: Int64 = 0
     @State private var mode = 0
     private var id: Int64 { model.primarySelection ?? 0 }
@@ -1806,95 +1829,93 @@ struct MaskPanel: View {
                     }.accessibilityIdentifier("mask.scroll")
                 }
             }
-        }.foregroundStyle(AureaColors.text).onAppear {
-            load()
-            if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == mask?.id }) == true { step = 2 }
-        }
-            .onChange(of: id) { _ in adding = false; step = 0; load() }
+        }.foregroundStyle(AureaColors.text).onAppear { load() }
+            .onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }
             .onChange(of: model.timelineFocus) { focus in
-                if focus?.contains(where: { $0.property == 43 && $0.effect == mask?.id }) == true { tab = 0; step = 2 }
+                if focus?.contains(where: { $0.property == 43 && $0.effect == mask?.id }) == true { tab = 0 }
             }
     }
     @ViewBuilder private var masksBody: some View {
+        Color.clear.frame(height: 6)
+        // Os três jeitos de criar uma máscara: sempre à vista, um toque cada.
+        HStack(spacing: 6) {
+            MaskShapeTool(kind: 0, label: AureaText.t("panel_desenhar_mao"), selected: model.maskDrawing && mask?.closed == false) { model.addMask(2) }
+                .accessibilityIdentifier("mask.add.draw")
+            MaskShapeTool(kind: 1, label: AureaText.t("panel_retangulo"), selected: false) { model.addMask(0) }
+                .accessibilityIdentifier("mask.add.rect")
+            MaskShapeTool(kind: 2, label: AureaText.t("panel_elipse"), selected: false) { model.addMask(1) }
+                .accessibilityIdentifier("mask.add.ellipse")
+        }
         if model.masks.isEmpty {
-            Color.clear.frame(height: 6)
+            Color.clear.frame(height: 10)
             hint("panel_mascara_mostra_so_parte_camada_escolha")
-            Color.clear.frame(height: 8)
-            addChoices
         } else {
+            Color.clear.frame(height: 4)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(Array(model.masks.enumerated()), id: \.element.id) { entry in
                         NativePanelChip(AureaText.t(entry.element.closed ? "pn_mask_n" : "pn_mask_n_open", entry.offset + 1), selected: mask?.id == entry.element.id, horizontal: 12, height: 36, radius: 9, fontSize: 12.5) {
-                            model.selectedMask = entry.element.id; model.selectedMaskPoint = nil; model.maskDrawing = !entry.element.closed; adding = false
+                            model.selectedMask = entry.element.id; model.selectedMaskPoint = nil; model.maskDrawing = !entry.element.closed
                         }
                     }
-                    NativePanelChip(AureaText.t(adding ? "panel_fechar" : "panel_adicionar_mascara"), selected: adding, horizontal: 12, height: 36, radius: 9, fontSize: 12.5) { adding.toggle() }
                 }.frame(height: 44)
             }
-            if adding { addChoices }
-            else if let mask { maskSteps(mask) }
+            if let mask { maskEditor(mask) }
             else { hint("panel_escolha_mascara_acima_editar_palco") }
         }
     }
-    private var addChoices: some View {
-        VStack(spacing: 6) {
-            NativePanelAction("panel_desenhar_mao", detail: AureaText.t("panel_toque_palco_pontos_arraste_curvar")) { model.addMask(2); adding = false; step = 0 }
-            NativePanelAction("panel_retangulo", detail: AureaText.t("panel_retangulo_meio_camada_pronto_ajustar")) { model.addMask(0); adding = false; step = 0 }
-            NativePanelAction("panel_elipse", detail: AureaText.t("panel_elipse_meio_camada_pronta_ajustar")) { model.addMask(1); adding = false; step = 0 }
-        }
-    }
-    @ViewBuilder private func maskSteps(_ m: MaskItem) -> some View {
-        let labels = ["panel_1_caminho", "panel_2_modo", "panel_3_borda"] + (model.selectedLayer?.kind == 1 ? ["panel_4_rastrear"] : [])
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(Array(labels.enumerated()), id: \.offset) { n, key in
-                    NativePanelChip(AureaText.t(key), selected: step == n, horizontal: 14, height: 36, radius: 9, fontSize: 12.5, bold: true) { step = n }
-                }
-            }.padding(.horizontal, 6).frame(height: 48)
-        }
-        switch min(step, labels.count - 1) {
-        case 0:
-            if model.maskDrawing {
-                hint("panel_toque_palco_pontos_arraste_curvar_toque")
-                Color.clear.frame(height: 8)
-                NativePanelAction("panel_fechar_caminho", detail: AureaText.plural("pn_mask_points_so_far", m.points.count / 6)) {
-                    if m.points.count >= 18 { model.setMaskPoints(m.points, closed: true); model.maskDrawing = false }
-                    else { model.toast = AureaText.t("msg_ponha_pelo_menos_3_pontos") }
-                }
-            } else {
-                hint("panel_arraste_pontos_palco_toque_num_ponto")
-                HStack(spacing: 8) {
-                    PropertyLabelChip(AureaText.t("panel_caminho"), expression: .none, keyframe: look, onTap: {})
-                    Text(m.keyCount == 0 ? AureaText.t("panel_parado_toque_trilho_animar") : AureaText.plural("pn_keyframes_edit_at_playhead", Int(m.keyCount)))
-                        .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .leading)
-                }.frame(height: 48).aureaSelectedProperty(AureaText.t("panel_caminho"))
+    /// A máscara escolhida, tudo numa tela só, na ordem de uso.
+    @ViewBuilder private func maskEditor(_ m: MaskItem) -> some View {
+        title("panel_caminho")
+        if model.maskDrawing {
+            hint("panel_toque_palco_pontos_arraste_curvar_toque")
+            Color.clear.frame(height: 8)
+            NativePanelAction("panel_fechar_caminho", detail: AureaText.plural("pn_mask_points_so_far", m.points.count / 6)) {
+                if m.points.count >= 18 { model.setMaskPoints(m.points, closed: true); model.maskDrawing = false }
+                else { model.toast = AureaText.t("msg_ponha_pelo_menos_3_pontos") }
             }
+            // Sem caminho fechado ainda não há modo/borda para ajustar.
             Color.clear.frame(height: 10)
-            NativePanelAction("panel_apagar_mascara", danger: true) {
-                guard model.engine.removeMask(id, mask: m.id) else { return }
-                if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == m.id }) == true { model.timelineFocus = nil }
-                if model.curveProperty == 43 && model.curveEffect == m.id { model.curveSelectedTime = nil }
-                model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false; model.refreshModel(force: true)
-            }
-        case 1:
-            title("panel_como_esta_mascara_combina_outras")
+            deleteAction(m)
+        } else {
+            hint("panel_arraste_pontos_palco_toque_num_ponto")
+            HStack(spacing: 8) {
+                PropertyLabelChip(AureaText.t("panel_caminho"), expression: .none, keyframe: look, onTap: {})
+                Text(m.keyCount == 0 ? AureaText.t("panel_parado_toque_trilho_animar") : AureaText.plural("pn_keyframes_edit_at_playhead", Int(m.keyCount)))
+                    .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(height: 48).aureaSelectedProperty(AureaText.t("panel_caminho"))
+
+            title("panel_mask_mode")
             ChoiceChips(["panel_somar", "panel_subtrair", "panel_intersecao", "panel_diferenca", "panel_desligada"].map { AureaText.t($0) }, selected: Int(m.operation)) { update(m, operation: UInt32($0)) }
             NativePanelToggle(AureaText.t("panel_inverter_mostrar_lado_fora"), checked: m.inverted) { update(m, inverted: $0) }
-        case 2:
+
+            title("panel_mask_edge")
             maskRuler(m, param: 0, label: "panel_suavizar", value: m.feather, range: 0...500, unit: "px", reset: 0)
             maskRuler(m, param: 1, label: "panel_expandir", value: m.expansion, range: -500...500, unit: "px", reset: 0)
             maskRuler(m, param: 2, label: "panel_opacidade", value: m.opacity * 100, range: 0...100, unit: "%", reset: 100)
-        default:
-            if model.importingMedia { hint("panel_rastreando") }
-            else {
-                hint("panel_mascara_segue_esta_embaixo_dela_cabecote")
-                Color.clear.frame(height: 8)
-                NativePanelAction("panel_seguir_posicao", detail: AureaText.t("panel_objetos_so_andam_pela_tela")) { track(m.id, mode: 0) }
-                Color.clear.frame(height: 6)
-                NativePanelAction("panel_seguir_posicao_tamanho_giro", detail: AureaText.t("panel_objetos_aproximam_ou_giram")) { track(m.id, mode: 1) }
+
+            if model.selectedLayer?.kind == 1 {
+                title("panel_mask_follow")
+                if model.importingMedia { hint("panel_rastreando") }
+                else {
+                    hint("panel_mascara_segue_esta_embaixo_dela_cabecote")
+                    Color.clear.frame(height: 8)
+                    NativePanelAction("panel_seguir_posicao", detail: AureaText.t("panel_objetos_so_andam_pela_tela")) { track(m.id, mode: 0) }
+                    Color.clear.frame(height: 6)
+                    NativePanelAction("panel_seguir_posicao_tamanho_giro", detail: AureaText.t("panel_objetos_aproximam_ou_giram")) { track(m.id, mode: 1) }
+                }
             }
+            Color.clear.frame(height: 14)
+            deleteAction(m)
+        }
+    }
+    private func deleteAction(_ m: MaskItem) -> some View {
+        NativePanelAction("panel_apagar_mascara", danger: true) {
+            guard model.engine.removeMask(id, mask: m.id) else { return }
+            if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == m.id }) == true { model.timelineFocus = nil }
+            if model.curveProperty == 43 && model.curveEffect == m.id { model.curveSelectedTime = nil }
+            model.selectedMask = nil; model.selectedMaskPoint = nil; model.maskDrawing = false; model.refreshModel(force: true)
         }
     }
     private func maskRuler(_ mask: MaskItem, param: UInt32, label: String, value: Float, range: ClosedRange<Float>, unit: String, reset: Float) -> some View {
@@ -1974,6 +1995,42 @@ struct MaskPanel: View {
     }
 }
 
+
+/// Botão grande de criar máscara: 0 desenhar, 1 retângulo, 2 elipse. Mesmo
+/// visual da ferramenta do Vetor e do `ToolTile` do Android (MaskPanel.kt).
+private struct MaskShapeTool: View {
+    let kind: Int
+    let label: String
+    let selected: Bool
+    let action: () -> Void
+    var body: some View {
+        let color = selected ? AureaColors.accent : AureaColors.text
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Canvas { context, size in draw(context, width: size.width, color: color) }.frame(width: 22, height: 22)
+                Text(label).font(.aurea(size: 10, weight: .semibold)).foregroundStyle(color).lineLimit(2).multilineTextAlignment(.center)
+            }.padding(.horizontal, 2).padding(.vertical, 6).frame(maxWidth: .infinity).frame(height: 60)
+                .background(selected ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                .overlay { if selected { RoundedRectangle(cornerRadius: 10).stroke(AureaColors.accent, lineWidth: 1.5) } }
+        }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(label)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+    private func draw(_ ctx: GraphicsContext, width w: CGFloat, color: Color) {
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: w * x, y: w * y) }
+        switch kind {
+        case 0:
+            var path = Path()
+            path.move(to: p(0.06, 0.82)); path.addCurve(to: p(0.94, 0.2), control1: p(0.22, 0.18), control2: p(0.62, 0.98))
+            ctx.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            let r = w * 0.09
+            ctx.fill(Path(CGRect(x: w * 0.06 - r, y: w * 0.82 - r, width: r * 2, height: r * 2)), with: .color(color))
+            ctx.fill(Path(CGRect(x: w * 0.94 - r, y: w * 0.2 - r, width: r * 2, height: r * 2)), with: .color(color))
+        default:
+            let box = CGRect(x: w * 0.1, y: w * 0.2, width: w * 0.8, height: w * 0.6)
+            ctx.stroke(kind == 2 ? Path(ellipseIn: box) : Path(box), with: .color(color), lineWidth: 1.7)
+        }
+    }
+}
 
 struct CurvePanel: View {
     var body: some View { NativeCurvePanel() }
@@ -2171,25 +2228,27 @@ struct NativeAnimationTrackActions: View {
     let track: TimelineTrack
     let curveTag: String
     private var id: Int64 { model.primarySelection ?? 0 }
-    private var keys: [KeyframeItem] { (model.keyframes[id] ?? []).filter { Int($0.property) == track.property && $0.effectIndex == track.effect && $0.paramIndex == track.param }.sorted { $0.time < $1.time } }
     var body: some View {
-            let previous = keys.last { $0.time < model.localPlayhead }
-            let next = keys.first { $0.time > model.localPlayhead }
+            let navigation = model.engine.keyframeNavigation(id, property: UInt32(track.property), effect: track.effect,
+                param: track.param, compositionFrame: model.status.playhead)
+            let flags = navigation?["flags"]?.uint32Value ?? 0
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    Button(AureaText.t("panel_keyframe_anterior")) { if let previous { seek(previous) } }.disabled(previous == nil)
-                    Button(AureaText.t("panel_proximo_keyframe")) { if let next { seek(next) } }.disabled(next == nil)
+                    Button(AureaText.t("panel_keyframe_anterior")) {
+                        if let frame = navigation?["previousFrame"]?.int64Value { model.seek(toFrame: frame) }
+                    }.disabled(flags & 2 == 0).frame(minHeight: 44)
+                        .accessibilityIdentifier(curveTag + ".previous")
+                    Button(AureaText.t("panel_proximo_keyframe")) {
+                        if let frame = navigation?["nextFrame"]?.int64Value { model.seek(toFrame: frame) }
+                    }.disabled(flags & 4 == 0).frame(minHeight: 44)
+                        .accessibilityIdentifier(curveTag + ".next")
                     Button(AureaText.t("panel_curva")) {
-                        let key = keys.dropLast().last { $0.time <= model.localPlayhead } ?? keys.first
-                        model.openCurve(property: UInt32(track.property), effect: track.effect, param: track.param, time: key?.time)
-                    }.disabled(keys.count < 2).accessibilityIdentifier(curveTag)
+                        guard let start = navigation?["segmentStart"]?.int64Value else { return }
+                        model.openCurve(property: UInt32(track.property), effect: track.effect, param: track.param,
+                                        time: Int32(clamping: start))
+                    }.disabled(flags & 8 == 0).frame(minHeight: 44).accessibilityIdentifier(curveTag)
                 }.buttonStyle(.borderless).frame(minHeight: 44)
             }
-    }
-    private func seek(_ key: KeyframeItem) {
-        guard let detail = model.engine.layerDetail(id), let start = (detail["startFrame"] as? NSNumber)?.int64Value,
-              let offset = (detail["offsetFrames"] as? NSNumber)?.int64Value else { return }
-        model.seek(toFrame: Int64(key.time) + start - offset)
     }
 }
 

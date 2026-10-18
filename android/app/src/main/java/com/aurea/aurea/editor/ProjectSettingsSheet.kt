@@ -110,6 +110,13 @@ internal fun ProjectSettingsSheet(store: EditorStore, onDismiss: () -> Unit) {
             )
         }
 
+        // Interface do projeto (0.2.5): Composição ou Edição, trocável a qualquer momento.
+        androidx.compose.foundation.layout.Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 4.dp)) {
+            Text(stringResource(R.string.ui_mode_label), style = AureaType.of(12f, FontWeight.W600, color = AureaColors.Muted))
+            androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+            com.aurea.aurea.home.UiModeChoice(store.uiMode) { store.setUiMode(it) }
+        }
+
         // Proporção: caixinhas no formato de cada uma; ✎ = tamanho livre.
         Row(
             Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 18.dp),

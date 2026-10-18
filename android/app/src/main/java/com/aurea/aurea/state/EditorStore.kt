@@ -55,6 +55,7 @@ import com.aurea.aurea.engine.ParamType
 import com.aurea.aurea.engine.PerfStats
 import com.aurea.aurea.engine.PodLayout
 import com.aurea.aurea.engine.PreviewBufferRange
+import com.aurea.aurea.engine.PreRenderProgress
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.engine.directBuffer
@@ -68,6 +69,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -190,6 +192,8 @@ internal fun humanErrorResource(code: Int): Int = when (code) {
     29 -> R.string.msg_o_arquivo_de_midia_esta_danificado
     30 -> R.string.msg_o_projeto_esta_danificado_e_nao
     31 -> R.string.msg_este_aparelho_nao_tem_codificador_para
+    // CodecHung: o codec do aparelho travou (antes saía como 9 = "memória").
+    33 -> R.string.msg_codec_do_aparelho_travou
     else -> R.string.msg_erro_inesperado_codigo
 }
 
@@ -238,6 +242,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * Criadas no primeiro uso (8I): a abertura não lê o cofre da chave.
      */
     val captions by lazy { com.aurea.aurea.captions.CaptionsState(app, engine, viewModelScope) { refreshNow() } }
+
+    /**
+     * "Otimizar vídeos pesados" (0.2.5): modo gravado, fila do proxy de edição
+     * e cache (ver `ProxyState`). A decisão e a geração são do motor.
+     */
+    val proxies by lazy {
+        ProxyState(
+            app, engine, viewModelScope,
+            onOptimized = { showToast(appText(R.string.proxy_ready)) },
+            onFailed = { showToast(appText(R.string.proxy_failed)) },
+        )
+    }
 
     /**
      * Aurea AI (Fase 9.4): geracao remota de video.
@@ -290,7 +306,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Export (tela Exportar). O motor renderiza; aqui só acompanha e publica. */
-    val exporter = Exporter(app, engine, viewModelScope) { project.path }
+    val exporter = Exporter(app, engine, viewModelScope, releaseUiCaches = { releaseExportUiCaches() }) { project.path }
 
     /**
      * O motor cru, só para o teste de estresse. Ele captura quadro por quadro e
@@ -428,7 +444,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 project.path?.let { path -> withContext(Dispatchers.IO) { engine.saveProject(path) } }
                 upscaleStage = UpscaleStage.Idle
                 exporter.start(title, w, h, media.fps.toDouble(),
-                    ExportOptions(shortSide = kotlin.math.min(w, h) * factor, aiUpscale = factor, trimToContent = true))
+                    // Encoder de celular vai até 4K: 4x de um 1080p (8K) sai em 2x (4K).
+                    run {
+                        val short = kotlin.math.min(w, h)
+                        val f = if (factor == 4 && short * 4 > 2160) 2 else factor
+                        ExportOptions(shortSide = short * f, aiUpscale = f, trimToContent = true)
+                    })
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
@@ -454,6 +475,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var playhead by mutableIntStateOf(0)
         private set
     var playing by mutableStateOf(false)
+    var preRenderPreparing by mutableStateOf(false)
+        private set
+    var preRenderProgress by mutableStateOf(PreRenderProgress())
+        private set
+    private var preRenderRequest: AtomicBoolean? = null
+    private var preRenderCancelled = false
         private set
     var preview by mutableStateOf(PreviewState())
         private set
@@ -834,6 +861,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // =========================================================================
     // Ciclo de vida do motor
     // =========================================================================
+    /**
+     * Guarda ready/pendingSurface/surfaceOwner e a ordem init × attach/detach.
+     * A main entra aqui nos callbacks do SurfaceHolder: NUNCA segure este lock
+     * durante trabalho nativo longo (trim, suspend, PreRender, rastreio, export).
+     */
     private val lifecycleLock = Any()
     private val lifecycleThread = Executors.newSingleThreadExecutor { r -> Thread(r, "aurea-ciclo") }
     @Volatile private var ready = false
@@ -855,6 +887,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private var systemMem: android.app.ActivityManager.MemoryInfo? = null
     private val vsyncNs: Long by lazy { (1e9f / displayRefreshRate().coerceAtLeast(30f)).toLong() }
     private var scrubbing = false
+    /** Último passo do dedo no scrub (nanoTime). Scrub parado se fecha sozinho. */
+    private var lastScrubStepNs = 0L
     private var pendingPlayhead: Int? = null
     private var pendingPlayheadUntil = 0L
 
@@ -914,6 +948,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 // Fechou por crash nativo com vídeo aberto na sessão anterior:
                 // sem zero-copy daqui em diante neste aparelho (qualquer marca).
                 if (ok && ExitDiagnostics.safeVideoMode(app)) engine.useReadableVideoPlanes()
+                // O modo de "Otimizar vídeos pesados" vale antes do primeiro projeto abrir.
+                if (ok) proxies.pushModeToEngine()
                 if (ok) ExitDiagnostics.mark(app, Phase.ENGINE_READY)
                 if (ok) pendingSurface?.let { (s, w, h) -> engine.attachSurface(s, w, h) }
                 pendingSurface = null
@@ -930,6 +966,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         // thread em toda abertura); sobe na primeira prévia.
                         effectPreviews = EffectPreviewStore(dirs.cache, installStamp() + "-compare-v2", ::renderEffectPreview)
                         startStatusLoop()
+                        proxies.startTracking()
                     } else {
                         errorMessage = appText(R.string.msg_nao_foi_possivel_iniciar_o_motor) +
                             "\n\n${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE}" +
@@ -1057,6 +1094,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun onEnterForeground() {
         enqueueLifecycle { synchronized(lifecycleLock) { if (ready) engine.resume() } }
         if (ready) startStatusLoop()
+        // Um export que a suspensão parou continua do trecho salvo.
     }
 
     /**
@@ -1091,7 +1129,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 Log.i(TAG, "gravacao ao sair (suspende=$suspendAfter): codigo $code, ${(System.nanoTime() - t0) / 1_000_000} ms fora da main")
                 if (code != 0) main.post { if (!destroyed) errorMessage = appText(R.string.msg_salvamento_automatico_falhou, humanError(code)) }
             }
-            if (suspendAfter) synchronized(lifecycleLock) { if (ready) engine.suspend() }
+            // suspend junta a thread do export: fora do lifecycleLock, senão o
+            // surfaceDestroyed do onStop espera o export terminar na main.
+            if (suspendAfter && ready) engine.suspend()
         }
     }
 
@@ -1119,6 +1159,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return writeHomeCard(path, withThumbnail = true)
     }
 
+    /** Release only recreatable UI bitmaps before native export preparation. */
+    private fun releaseExportUiCaches() {
+        com.aurea.aurea.engine.UiImageCaches.trim()
+        thumbnails.clear()
+        effectPreviews?.trimMemory()
+    }
+
     /**
      * Pressão de memória do SISTEMA (ComponentCallbacks2.onTrimMemory, Fase 8B
      * §13). A UI solta os bitmaps dela (miniaturas e prévias fora da tela) e o
@@ -1141,11 +1188,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             level >= TRIM_RUNNING_LOW -> thumbnails.trimTo(0.5f)
         }
         enqueueLifecycle {
-            synchronized(lifecycleLock) {
-                if (!ready) return@synchronized
-                val freed = engine.trimMemory(level)
-                if (freed > 0) android.util.Log.i("Aurea", "onTrimMemory($level): motor liberou ${freed / 1024} KB")
-            }
+            // Sem lifecycleLock: o trim espera a GPU (e o export) e a main
+            // trava nesse lock em surfaceDestroyed/surfaceChanged (ANR vivo 1938,
+            // build 2185). A fila serial e o NativeWorkGate já mantêm o motor vivo.
+            if (!ready) return@enqueueLifecycle
+            val freed = engine.trimMemory(level)
+            if (freed > 0) android.util.Log.i("Aurea", "onTrimMemory($level): motor liberou ${freed / 1024} KB")
         }
     }
 
@@ -1195,6 +1243,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (destroyed) return
         val path = project.path.takeIf { screen == Screen.Editor && ready }
         destroyed = true
+        preRenderRequest?.set(true)
+        preRenderRequest = null
+        preRenderPreparing = false
         ready = false
         engineReady = false
         stopStatusLoop()
@@ -1267,6 +1318,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Lê o status do motor e publica. Devolve se algo que a UI mostra mudou. */
     private fun pollStatus(): Boolean {
+        if (exporter.state.preparing || preRenderPreparing) return false
         engine.readStatus(statusBuffer)
         status.readFrom(statusBuffer)
         val n = statusSigNow
@@ -1293,7 +1345,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         statusSlow = false
         statusIdleFrames = 0
         statusLoop = RenderLoop { frameTimeNanos ->
-            if (!ready) return@RenderLoop
+            if (!ready || exporter.state.preparing || preRenderPreparing) return@RenderLoop
             checkMemoryPressure()
             engine.readStatus(statusBuffer)
             status.readFrom(statusBuffer)
@@ -1368,6 +1420,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun updateIdle() {
         val loop = statusLoop ?: return
+        // Scrub abandonado (gesto cancelado, tela trocada): o motor fecha o
+        // dele sozinho, mas a flag daqui prendia a releitura do estado e o
+        // cabeçote da timeline ("a timeline congela o preview").
+        if (scrubbing && System.nanoTime() - lastScrubStepNs > 1_500_000_000L) scrubEnd()
         val sig = statusSignature()
         val busy = status.playing || status.previewBufferStatus and Int.MIN_VALUE != 0 || scrubbing || gestureDepth > 0 || hudVisible || sig != lastSignature
         lastSignature = sig
@@ -1431,6 +1487,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (status.modelRevision != lastPreviewAuxRevision || auxNow - lastPreviewAuxNs >= 200_000_000L) {
             previewBufferRanges = readPreviewBufferRanges()
             localAiActivity = engine.localAiStatus()
+            updatePreRenderProgress()
             lastPreviewAuxNs = auxNow
             lastPreviewAuxRevision = status.modelRevision
         }
@@ -1530,6 +1587,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         captionTracks = com.aurea.aurea.captions.parseCaptionTracks(engine.captionTracks())
         refreshMarkers()
         editMode = engine.editMode()
+        uiMode = engine.projectUiMode()
+        mainTrackAnchor = engine.mainTrackAnchor()
         precompDepth = engine.precompDepth()
         run {
             val out = FloatArray(6)
@@ -1641,6 +1700,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         } else {
             null
         }
+        speedCurve = if (id != null && (detail?.kind == com.aurea.aurea.ui.theme.LayerType.Video.kind || detail?.kind == com.aurea.aurea.ui.theme.LayerType.Audio.kind)) {
+            val out = FloatArray(8 + SPEED_GRAPH_SAMPLES + 3 * 128)
+            val n = engine.querySpeedCurve(id, SPEED_GRAPH_SAMPLES, out)
+            same(speedCurve, if (n >= 8) out.copyOf(n) else null)
+        } else {
+            null
+        }
         // Receita pendente de OUTRA camada (a seleção mudou no meio do arrasto):
         // vai para a dona agora, antes de `text3d` passar a ser a da nova.
         if (text3dPending && text3dPendingLayer != 0L && text3dPendingLayer != id) {
@@ -1657,6 +1723,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
         }
         refreshShape3d(id)
+        refreshRigPose(id)
         modelShadows = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
             val sh = FloatArray(2)
             if (engine.queryModelShadows(id, sh)) (sh[0] >= 0.5f) to (sh[1] >= 0.5f) else null
@@ -2098,6 +2165,66 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (info == null || id != shapePartLayer || shapePart >= info.partCount) shapePart = -1
     }
 
+    // --- Pose do rig 3D (0.1.8): só na Cena 3D, como o modo de pose do Blender --------
+    /** Ossos do modelo principal (`query_model_bones`, BONE_FLOATS por osso); nulo = sem rig. */
+    var poseBones by mutableStateOf<FloatArray?>(null)
+        private set
+    /** Modo de pose ligado (a Cena 3D desenha as juntas e o dedo gira o osso). */
+    var rigPoseMode by mutableStateOf(false)
+        private set
+    /** Nó do osso escolhido (−1 = nenhum: o dedo orbita a cena). */
+    var poseBone by mutableIntStateOf(-1)
+        private set
+    private var poseGestureSent = false
+
+    private fun refreshRigPose(id: Long?) {
+        val model = id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind
+        poseBones = if (model && id != null) {
+            val need = engine.queryModelBones(id, null)
+            if (need <= 0) null else {
+                val out = FloatArray(need)
+                val n = engine.queryModelBones(id, out)
+                val novo = if (n == need) out else null
+                if (novo != null && poseBones?.contentEquals(novo) == true) poseBones else novo
+            }
+        } else null
+        if (poseBones == null) { rigPoseMode = false; poseBone = -1 }
+    }
+
+    fun setRigPose(on: Boolean) {
+        rigPoseMode = on && poseBones != null
+        if (!rigPoseMode) poseBone = -1
+    }
+
+    fun choosePoseBone(node: Int) { poseBone = node }
+
+    /** Dedo na cena: gira o osso escolhido (px da composição; twist em graus). */
+    fun dragPoseBone(dx: Float, dy: Float, twist: Float) {
+        val id = primary ?: return
+        if (poseBone < 0) return
+        val continuing = gestureDepth > 0 && poseGestureSent
+        if (engine.dragBone(id, poseBone, dx, dy, twist, continuing) && gestureDepth > 0) poseGestureSent = true
+        refreshDetail()
+    }
+
+    fun endPoseGesture() { poseGestureSent = false }
+
+    /** Keyframe da pose no cabeçote: o osso escolhido, ou todos ([all]). */
+    fun togglePoseKey(all: Boolean) {
+        val id = primary ?: return
+        val node = if (all) -1 else poseBone
+        if (!all && node < 0) return
+        if (engine.toggleBoneKey(id, node) < 0) showToast(appText(R.string.shape3d_key_outside))
+        refreshNow()
+    }
+
+    fun resetPose(all: Boolean) {
+        val id = primary ?: return
+        engine.resetBonePose(id, if (all) -1 else poseBone)
+        thumbnails.unalias(id)
+        refreshNow()
+    }
+
     /** A parte escolhida vale só para ESTA camada (outra camada = a forma inteira). */
     fun shapePartOf(id: Long?): Int {
         // Lê os três estados SEMPRE (sem curto-circuito): quem desenha fica inscrito em todos.
@@ -2285,6 +2412,41 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshNow()
         }
     }
+
+    // --- Efeitos de parte 3D (beta 12/10/2026; Object3DEffects.cpp) -------------
+    /** Nome de cada parte da camada 3D escolhida (vazio = o arquivo não deu nome). */
+    fun modelPartNames(): List<String> = primary?.let { engine.modelPartNames(it).toList() } ?: emptyList()
+
+    /**
+     * Põe "Animar parte 3D", "Esconder partes 3D" ou "Trocar textura 3D" já
+     * apontando para a parte `part` (0 = a 1ª). O motor faz tudo num passo de
+     * desfazer; os ajustes e keyframes ficam no painel de Efeitos.
+     */
+    fun addPartEffect(key: String, part: Int): Boolean {
+        val id = primary ?: return false
+        val fx = engine.addPartEffect(id, com.aurea.aurea.editor.panels.effectTypeId(key), part.coerceAtLeast(0))
+        refreshNow()
+        if (fx < 0) { showToast(appText(R.string.fx3d_add_failed)); return false }
+        return true
+    }
+
+    /** A imagem do "Trocar textura 3D" (cópia reduzida em projetos/formas3d, como a imagem das partes). */
+    fun setEffectImage(uri: Uri, effect: Int) {
+        if (!acceptsImport()) return
+        val id = primary ?: return
+        busyMessage = appText(R.string.app_importing_image)
+        launchImport launch@{
+            val ok = withContext(Dispatchers.IO) {
+                val file = saveShapeImage(uri) ?: return@withContext false
+                engine.setEffectImage(id, effect, file.absolutePath)
+            }
+            busyMessage = null
+            if (!ok) errorMessage = appText(R.string.msg_nao_foi_possivel_importar_a_imagem)
+            refreshNow()
+        }
+    }
+
+    fun effectImageName(effect: Int): String = primary?.let { engine.effectImageName(it, effect) } ?: ""
 
     fun clearShapePartImage(part: Int) {
         val id = primary ?: return
@@ -2545,7 +2707,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     /** Força a releitura na mesma volta (depois de um comando local). */
     private fun refreshNow() {
-        if (destroyed || !ready) return
+        if (destroyed || !ready || exporter.state.preparing || preRenderPreparing) return
         lastRevision = -1
         wakeStatusLoop()
         // Fase 8D: DENTRO de um gesto (arrasto, slider) a releitura fica para o
@@ -2987,7 +3149,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (values.size != 3 || values.any { !it.isFinite() }) return
         val d = (if (id == primary) detail else detailOf(id)) ?: return
         group("scale XYZ") {
-            when (transformWrite(sceneEditor, autoKeyTransforms, (3..5).any { d.isAnimated(it) })) {
+            when (transformWrite(sceneEditor, autoKeyTransforms, (3..5).any { d.isAnimated(it) },
+                keyHere = (3..5).any { d.hasKeyAtPlayhead(it) })) {
                 TransformWrite.Keyframe -> (0..2).forEach { gestureKeyframe(id, 3 + it, values[it], gestureKeyFlags(wholeGroup = true)) }
                 TransformWrite.Layout -> (0..2).forEach { layoutTransform(id, 3 + it, values[it]) }
                 TransformWrite.Static -> setScale(id, values[0], values[1], values[2])
@@ -3007,8 +3170,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         for ((base, values) in listOf(TrackProperty.ANCHOR_X to anchor, TrackProperty.POSITION_X to position)) {
             if (keyTransformGroup(id, d, (0..2).associate { base + it to values[it] })) continue
             val animated = (0..2).any { d.isAnimated(base + it) }
+            val keyHere = (0..2).any { d.hasKeyAtPlayhead(base + it) }
             send {
-                when (transformWrite(sceneEditor, autoKeyTransforms, animated)) {
+                when (transformWrite(sceneEditor, autoKeyTransforms, animated, keyHere)) {
                     // Como `setScale3`: o vetor inteiro no cabeçote (Z incluso).
                     TransformWrite.Keyframe -> (0..2).forEach { gestureKeyframe(id, base + it, values[it], gestureKeyFlags(wholeGroup = true)) }
                     TransformWrite.Layout -> (0..2).forEach { layoutTransform(id, base + it, values[it]) }
@@ -3027,7 +3191,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = if (id == primary) detail else detailOf(id)
         if (d != null && keyTransformGroup(id, d, mapOf(property to value))) return
         // Trilha animada com Auto-Key marca keyframe TAMBÉM na cena 3D (ver `transformWrite`).
-        if (property in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, d?.isAnimated(property) == true) == TransformWrite.Layout) {
+        if (property in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, d?.isAnimated(property) == true,
+                d?.hasKeyAtPlayhead(property) == true) == TransformWrite.Layout) {
             send { layoutTransform(id, property, value) }; refreshNow(); return
         }
         d ?: return
@@ -3067,7 +3232,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val d = if (id == primary) detail else detailOf(id)
         if (d != null && keyTransformGroup(id, d, mapOf(pa to va, pb to vb))) return
         val animated = d?.isAnimated(pa) == true || d?.isAnimated(pb) == true
-        if (pa in 0..14 && pb in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, animated) == TransformWrite.Layout) {
+        val keyHere = d?.hasKeyAtPlayhead(pa) == true || d?.hasKeyAtPlayhead(pb) == true
+        if (pa in 0..14 && pb in 0..14 && transformWrite(sceneEditor, autoKeyTransforms, animated, keyHere) == TransformWrite.Layout) {
             send { layoutTransform(id, pa, va); layoutTransform(id, pb, vb) }
             refreshNow(); return
         }
@@ -3296,6 +3462,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    /**
+     * Ponto (X e Y) de efeito num comando só — o arrasto no palco (pontos do
+     * Saber). Dois `setEffectParam` seguidos releriam o vetor velho entre um e
+     * outro. Animado → um keyframe por eixo no playhead.
+     */
+    fun setEffectPoint(effectId: Int, param: EffectParam, x: Float, y: Float) {
+        if (!x.isFinite() || !y.isFinite()) return
+        val id = primary ?: return
+        val d = detail ?: return
+        val local = d.localFrame(playhead)
+        send {
+            if (param.animated) {
+                insertKeyframe(id, TrackProperty.EFFECT_PARAM, effectId, param.index * 4, local, x)
+                insertKeyframe(id, TrackProperty.EFFECT_PARAM, effectId, param.index * 4 + 1, local, y)
+            } else {
+                val v = param.value
+                setEffectVector(id, effectId, param.index, x, y, v.getOrElse(2) { 0f }, v.getOrElse(3) { 0f })
+            }
+        }
+        refreshNow()
+    }
+
     fun effectCurve(effect: Int, param: Int, channel: Int, samples: Boolean = false): FloatArray =
         primary?.let { engine.effectCurve(it, effect, param, channel, samples) } ?: FloatArray(0)
 
@@ -3347,6 +3535,62 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun pause() = send { pause() }
     fun togglePlayback() { pendingPlayhead = null; send { togglePlayback() } }
 
+    /** Pause immediately; the native snapshot/startup stays off the UI thread. */
+    fun startPreRender(direction: Int) {
+        if (destroyed || !ready || screen != Screen.Editor || projectWork || exporter.busy || preRenderPreparing || preRenderProgress.running) return
+        pause()
+        playing = false
+        val request = AtomicBoolean(false)
+        val session = projectGeneration
+        val compositionId = composition?.id
+        val normalized = if (direction < 0) -1 else 1
+        preRenderRequest = request
+        preRenderCancelled = false
+        preRenderPreparing = true
+        preRenderProgress = PreRenderProgress(direction = normalized)
+        enqueueLifecycle {
+            var code = 5
+            try {
+                // Fora do lifecycleLock: preparar o PreRender espera o render e
+                // a main não pode ficar presa atrás disso (ANR vivo 1938).
+                if (ready && !request.get()) {
+                    code = engine.startPreRender(normalized)
+                    if (request.get()) engine.cancelPreRender()
+                }
+            } catch (failure: Exception) {
+                Log.w(TAG, "PreRender startup failed", failure)
+                code = 10
+            } catch (failure: OutOfMemoryError) { code = 8 }
+            finally {
+                val result = code
+                main.post {
+                    if (destroyed || preRenderRequest !== request) return@post
+                    preRenderRequest = null
+                    preRenderPreparing = false
+                    if (!ready || projectGeneration != session || composition?.id != compositionId) return@post
+                    if (!request.get()) {
+                        updatePreRenderProgress()
+                        if (result != 0 && preRenderProgress.error != result) showToast(appText(R.string.prerender_failed, humanError(result)))
+                    }
+                    wakeStatusLoop()
+                }
+            }
+        }
+    }
+
+    fun cancelPreRender() {
+        preRenderCancelled = true
+        preRenderRequest?.set(true)
+        viewModelScope.launch(Dispatchers.Default) { engine.cancelPreRender() }
+    }
+
+    private fun updatePreRenderProgress() {
+        val progress = engine.preRenderProgress()
+        if (progress.error != 0 && progress.error != preRenderProgress.error && !preRenderCancelled && progress.error != 25)
+            showToast(appText(R.string.prerender_failed, humanError(progress.error)))
+        if (progress != preRenderProgress) preRenderProgress = progress
+    }
+
     fun seek(frame: Int) {
         val f = clampFrame(frame)
         send { seek(frameToNs(f)) }
@@ -3356,6 +3600,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Scrub: o playhead da UI segue o dedo; o decoder coalesce os pedidos. */
     fun scrubStart(frame: Int) {
         scrubbing = true
+        lastScrubStepNs = System.nanoTime()
         val f = clampFrame(frame)
         send { scrubBegin(); scrub(frameToNs(f)) }
         playhead = f
@@ -3363,6 +3608,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun scrubTo(frame: Int) {
         val f = clampFrame(frame)
+        lastScrubStepNs = System.nanoTime()
         if (f == playhead) return
         send { scrub(frameToNs(f)) }
         playhead = f
@@ -3378,12 +3624,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun step(frames: Int) { pendingPlayhead = null; send { step(frames) } }
 
-    /** Composition markers take precedence even when there is no next marker. */
+    /** The shared engine merges markers with visible keys of the active layer. */
     fun stepTransport(direction: Int) {
-        val target = markerNavigationTarget(markers.frames, playhead, direction)
-        if (target != null) {
-            if (target != playhead) seek(target)
-        } else if (!stepToKeyframe(direction)) step(direction)
+        if (!ready) return
+        val target = engine.queryTimelineNavigation(primary, playhead, direction) ?: return
+        if (engine.seekTimelineEvent(target)) holdPlayhead(target)
     }
 
 
@@ -3514,6 +3759,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     private fun acceptsProjectChange(): Boolean {
+        if (preRenderPreparing) { showToast(appText(R.string.prerender_preparing)); return false }
         if (destroyed || !ready || projectWork) return false
         if (exporter.busy) { showToast(appText(R.string.msg_aguarde_a_exportacao_terminar)); return false }
         if (activeImports > 0 || busyMessage != null || captions.busy != null || tracking || maskTracking || detectingBeats) return false
@@ -3533,8 +3779,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** One bounded import job, retaining selection order without parallel decoders. */
-    fun importMediaBatch(uris: List<Uri>) {
+    fun importMediaBatch(uris: List<Uri>, asOverlay: Boolean = false) {
         if (uris.isEmpty() || !acceptsImport()) return
+        val overlayFrame = playhead.toLong()
         val app = getApplication<Application>()
         val requested = uris.distinct()
         val imported = mutableListOf<Long>()
@@ -3570,6 +3817,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
                     }
                 }
+                // "Camada" da Edição: cada mídia numa linha própria, no cabeçote.
+                if (asOverlay) imported.forEach { engine.moveClipToOverlay(it, overlayFrame) }
                 refreshNow()
                 if (imported.isNotEmpty()) {
                     selection = imported.toCollection(LinkedHashSet())
@@ -3638,6 +3887,55 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
             refreshNow()
             select(id)
+        }
+    }
+
+    // --- Gravar voz ---------------------------------------------------------------
+    /**
+     * Arquivo novo para uma narração. Fica com os projetos
+     * (`filesDir/projetos/voz`), fora da limpeza de cache: é mídia do usuário,
+     * como o vídeo gerado pela IA, e o motor lê pelo caminho absoluto.
+     */
+    fun newVoiceRecordingFile(): File {
+        val dir = File(File(getApplication<Application>().filesDir, "projetos"), "voz").apply { mkdirs() }
+        return File(dir, "voz-${System.currentTimeMillis()}.m4a")
+    }
+
+    /**
+     * "Gravar voz": a narração vira camada de áudio pelo MESMO `importAudio`
+     * (desfazer, waveform e export de sempre), com o nome "Voz N". O motor põe
+     * a camada no cabeçote; como a timeline pode ter tocado junto durante a
+     * gravação, o cabeçote volta antes ao quadro onde ela começou — e a camada
+     * entra ali, num passo de desfazer só. Falhou: o arquivo sai (sem mídia órfã).
+     * `interrupted`: a gravação parou sozinha (ligação, app fora da tela) — o
+     * aviso final diz isso em vez do "adicionada".
+     */
+    fun importVoiceRecording(file: File, startFrame: Int, interrupted: Boolean = false) {
+        if (!file.isFile || file.length() == 0L) {
+            file.delete()
+            errorMessage = appText(R.string.voice_save_failed)
+            return
+        }
+        if (!acceptsImport()) {
+            file.delete()
+            return
+        }
+        if (playing) pause()
+        seek(startFrame)
+        val name = com.aurea.aurea.editor.VoiceTake.nextName(appText(R.string.voice_layer_prefix), layers.map { it.name })
+        busyMessage = appText(R.string.voice_saving)
+        launchImport launch@{
+            // A fila de comandos (pausa + seek) é drenada pelo `import_audio` antes de ler o cabeçote.
+            val id = withContext(Dispatchers.IO) { engine.importAudio(file.absolutePath, name) }
+            busyMessage = null
+            if (id < 0) {
+                file.delete()
+                errorMessage = appText(R.string.app_audio_import_failed, humanError((-id).toInt()))
+                return@launch
+            }
+            refreshNow()
+            select(id)
+            showToast(appText(if (interrupted) R.string.voice_interrupted else R.string.voice_saved))
         }
     }
 
@@ -3934,7 +4232,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 if (kotlin.math.abs(out[axis] - current[axis]) < .00001f) continue
                 val property = base + axis
                 // Na cena 3D também: o dedo no nulo/objeto animado grava o keyframe do cabeçote.
-                if (transformWrite(sceneEditor, autoKeyTransforms, d.isAnimated(property)) == TransformWrite.Keyframe) {
+                if (transformWrite(sceneEditor, autoKeyTransforms, d.isAnimated(property),
+                        d.hasKeyAtPlayhead(property)) == TransformWrite.Keyframe) {
                     gestureKeyframe(id, property, out[axis], gestureKeyFlags(wholeGroup = false))
                 } else layoutTransform(id, property, out[axis])
             }
@@ -4061,6 +4360,31 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
         select(id)
         showToast(appText(R.string.msg_agrupado_toque_em_editar_o_grupo))
+    }
+
+    /** The engine chooses the top selected visual layer and commits one undo step. */
+    fun groupAndMask(exclude: Boolean, ids: Collection<Long> = selection) {
+        if (playing) pause()
+        val id = engine.groupAndMask(ids.toLongArray(), exclude, appText(R.string.editor_grupo))
+        if (id < 0) {
+            showToast(appText(R.string.editor_group_mask_failed, -id))
+            return
+        }
+        clearSelectedKeyframe()
+        changeLayerSelectMode(false)
+        timelineFocus = null
+        maskEdit = null
+        maskPoint = -1
+        maskDrawing = false
+        refreshNow()
+        select(id)
+        showToast(appText(R.string.msg_agrupado_toque_em_editar_o_grupo))
+    }
+
+    fun keyframeNavigation(layer: Long, target: com.aurea.aurea.engine.TrackKey,
+                           compositionFrame: Int = playhead): com.aurea.aurea.engine.KeyframeNavigation? {
+        keyframes[layer] ?: return null // Observe the engine's published anchor snapshot.
+        return engine.queryKeyframeNavigation(layer, target.property, target.effectIndex, target.paramIndex, compositionFrame)
     }
 
     /** "Desagrupar": as camadas voltam para cá, no mesmo lugar e tempo da tela. */
@@ -4431,7 +4755,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         maskTracking = true
         showToast(appText(R.string.msg_rastreando_a_mascara))
         enqueueLifecycle {
-            val r = synchronized(lifecycleLock) { if (ready) engine.trackMask(id, mask, mode) else -1 }
+            // Rastreio longo: fora do lifecycleLock (a main o usa nos callbacks de superfície).
+            val r = if (ready) engine.trackMask(id, mask, mode) else -1
             trackHandler.post {
                 if (destroyed) return@post
                 maskTracking = false
@@ -4590,6 +4915,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Remapeamento de tempo -----------------------------------------------------------
+    fun timeRemapCurrentSource(layer: Long): Double = engine.timeRemapCurrentSource(layer)
+
     fun enableManualTimeRemap() {
         val id = primary ?: return
         if (detail?.timeRemap != true) engine.setTimeRemap(id, true)
@@ -4851,6 +5178,67 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (!ok) showToast(appText(R.string.msg_a_curva_precisa_de_pelo_menos))
         refreshNow()
         return ok
+    }
+
+    // --- Gráfico de velocidade (0.1.8) -----------------------------------------------
+    /**
+     * `query_speed_curve` da camada principal (vídeo/áudio): [0] amostras, [1] chaves,
+     * [2..3] início/fim locais, [4] cabeçote local, [5] modo (0 constante, 1 curva,
+     * 2 remapear), [6] velocidade no cabeçote, [7] quadro da fonte no cabeçote; depois
+     * as amostras e as chaves (tempo local, ×, interpolação).
+     */
+    var speedCurve by mutableStateOf<FloatArray?>(null)
+        private set
+
+    /** Abas do painel de velocidade: 0 constante, 1 curva de velocidade, 2 remapear tempo. */
+    fun setSpeedMode(mode: Int) {
+        val id = primary ?: return
+        val now = speedCurve?.getOrNull(5)?.toInt() ?: 0
+        if (mode == now) return
+        beginGesture("modo do tempo")
+        when (mode) {
+            0 -> {
+                if (detail?.timeRemap == true) engine.setTimeRemap(id, false)
+                engine.applySpeedCurve(id, 8)
+            }
+            1 -> {
+                if (detail?.timeRemap == true) engine.setTimeRemap(id, false)
+                if (detail?.speedAnimated != true) engine.applySpeedCurve(id, 0)
+            }
+            else -> engine.setTimeRemap(id, true)
+        }
+        endGesture()
+        thumbnails.unalias(id)   // o tempo do pedaço mudou: a tira dele é outra
+        refreshNow()
+    }
+
+    /** Curva pronta: 0 plana, 1 montagem, 2 herói, 3 bala, 4 entrada rápida, 5 saída rápida, 6 pulo, 7 suavizar. */
+    fun applySpeedCurve(preset: Int) {
+        val id = primary ?: return
+        if (engine.applySpeedCurve(id, preset)) thumbnails.unalias(id)
+        refreshNow()
+    }
+
+    /** Ponto novo na curva de velocidade (no valor que ela já tem). Devolve o índice. */
+    fun speedKeyInsert(localFrame: Int): Int {
+        val id = primary ?: return -1
+        val i = engine.editSpeedKey(id, -1, localFrame.toLong(), 0f, -1)
+        refreshNow()
+        return i
+    }
+
+    /** Arrasto no gráfico (dentro de `beginGesture`/`endGesture`). */
+    fun speedKeyMove(index: Int, localFrame: Int, speed: Float): Int {
+        val id = primary ?: return -1
+        val moved = engine.editSpeedKey(id, index, localFrame.toLong(), speed, -1)
+        refreshDetail()
+        return moved
+    }
+
+    fun speedKeyRemove(index: Int) {
+        val id = primary ?: return
+        if (engine.removeSpeedKey(id, index)) thumbnails.unalias(id)
+        refreshNow()
     }
 
     // --- Fontes ---------------------------------------------------------------------------
@@ -5441,7 +5829,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         launchImport launch@{
             for (uri in uris.distinct()) {
                 val ext = (displayName(uri) ?: "fonte.ttf").substringAfterLast('.', "ttf").lowercase()
-                if (ext != "ttf" && ext != "otf") {
+                // 0.1.8: coleções (TTC/OTC) e WOFF também — o motor converte em TTF/OTF.
+                if (ext !in FONT_EXTENSIONS) {
                     errorMessage = appText(R.string.msg_use_uma_fonte_ttf_ou_otf); continue
                 }
                 val line = withContext(Dispatchers.IO) {
@@ -5451,6 +5840,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 val item = line?.let { parseFont(it) }
                 if (item == null) { errorMessage = appText(R.string.msg_nao_deu_para_ler_essa_fonte); continue }
                 fonts = (fonts.filterNot { it.path == item.path } + item).sortedWith(compareBy({ it.family }, { it.italic }, { it.weight }))
+                // Coleção: as outras faces também entraram no motor.
+                if (ext == "ttc" || ext == "otc") loadFonts()
                 // Importing a library must not repeatedly change the selected text.
                 if (uris.size == 1 && primary == targetLayer) {
                     if (forText3d) text3d?.let { setText3D(it.copy(fontPath = item.path)) }
@@ -5463,10 +5854,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun colorLutName(layer: Long, effect: Int): String = engine.colorLutName(layer, effect)
 
+    private val PALETTE_EXTENSIONS = listOf(".png", ".jpg", ".jpeg", ".gpl", ".hex")
+
     fun importColorLut(uri: Uri, layer: Long, effect: Int) {
         if (!acceptsImport()) return
         val name = displayName(uri)?.substringAfterLast('/')?.substringAfterLast('\\') ?: "look.cube"
-        if (!name.endsWith(".cube", ignoreCase = true)) {
+        // Palettize: PNG/JPG, .gpl (GIMP) ou .hex (Lospec); o motor confere o efeito.
+        val palette = PALETTE_EXTENSIONS.any { name.endsWith(it, ignoreCase = true) }
+        if (!palette && !name.endsWith(".cube", ignoreCase = true)) {
             errorMessage = appText(R.string.lut_invalid)
             return
         }
@@ -5496,8 +5891,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 }
             }
             refreshNow()
-            if (ok) showToast(appText(R.string.lut_imported))
-            else errorMessage = appText(R.string.lut_invalid)
+            if (ok) showToast(appText(if (palette) R.string.palette_imported else R.string.lut_imported))
+            else errorMessage = appText(if (palette) R.string.palette_invalid else R.string.lut_invalid)
         }
     }
 
@@ -5713,6 +6108,51 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var editMode by mutableStateOf(false)
         private set
 
+    /**
+     * INTERFACE do projeto (0.2.5): [UI_MODE_COMPOSITION] (a principal, padrão)
+     * ou [UI_MODE_EDIT] (trilha principal, cortes em sequência). Vem do motor:
+     * fica gravada no projeto e pode ser trocada a qualquer momento.
+     */
+    var uiMode by mutableStateOf(UI_MODE_COMPOSITION)
+        private set
+
+    /** O trecho de mídia mais fundo: a linha dele é a trilha principal da Edição (0 = nenhum). */
+    var mainTrackAnchor by mutableStateOf(0L)
+        private set
+
+    /** "Para camada" (Edição): o corte vai para uma linha própria acima da trilha principal. */
+    fun moveClipToOverlay(layer: Long) {
+        if (playing) pause()
+        if (engine.moveClipToOverlay(layer)) refreshNow()
+    }
+
+    /** "Para trilha principal" (Edição): o corte entra no fim da trilha principal. */
+    fun moveClipToMainTrack(layer: Long) {
+        if (playing) pause()
+        if (engine.moveClipToMainTrack(layer)) refreshNow()
+    }
+
+    /** O tipo da transição no corte que entra em [incoming] (0 = nenhuma). */
+    fun cutTransition(incoming: Long): Int = engine.cutTransition(incoming)
+
+    /** Transição num corte da trilha (meio segundo de cada lado; regra do motor, um passo de desfazer). */
+    fun setCutTransition(outgoing: Long, incoming: Long, type: Int): Boolean {
+        if (playing) pause()
+        val frames = ((project.fps.takeIf { it > 0f } ?: 30f) * 0.5f).roundToInt().coerceAtLeast(1)
+        val ok = engine.setCutTransition(outgoing, incoming, type, frames)
+        if (ok) refreshNow()
+        return ok
+    }
+
+    /** Troca a interface do projeto; a Edição liga o ímã (regra do motor). */
+    fun setUiMode(mode: Int, announce: Boolean = true) {
+        if (mode == uiMode || !engine.setProjectUiMode(mode)) return
+        if (playing) pause()
+        clearSelection()
+        refreshNow()
+        if (announce) showToast(appText(if (mode == UI_MODE_EDIT) R.string.ui_mode_switched_edit else R.string.ui_mode_switched_composition))
+    }
+
     fun toggleEditMode() {
         engine.setEditMode(!editMode)
         refreshNow()
@@ -5880,7 +6320,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val bpm = DoubleArray(1)
             var result = -ERRC_IO.toLong()
             try {
-                result = synchronized(lifecycleLock) { if (ready) engine.detectBeats(id, bpm) else -1L }
+                // Análise longa: fora do lifecycleLock (a main o usa nos callbacks de superfície).
+                result = if (ready) engine.detectBeats(id, bpm) else -1L
             } catch (failure: Exception) {
                 Log.w(TAG, "beat analysis failed", failure)
             } catch (failure: OutOfMemoryError) {
@@ -6080,6 +6521,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         com.aurea.aurea.editor.RealCamera.recording = native[1] != 0L
         com.aurea.aurea.editor.RealCamera.lastFrame = native[2].toInt()
         com.aurea.aurea.editor.RealCamera.positional = native[3] != 0L
+    }
+
+    /** Andar da Real Camera: [direction] +1 frente, −1 trás, 0 parado (velocidade e profundidade do painel). */
+    fun realCameraWalk(direction: Int) {
+        if (destroyed) return
+        val cam = com.aurea.aurea.editor.RealCamera
+        engine.realCameraWalk(direction.coerceIn(-1, 1) * cam.walkSpeed, cam.depthScale)
     }
 
     fun realCameraRecenter() {
@@ -6479,7 +6927,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     val report = engine.lastModelImport()
                     val before = report.getOrElse(0) { 0L }
                     val after = report.getOrElse(1) { 0L }
+                    // Câmeras do arquivo já entraram na timeline (0.1.8): o olho da camada liga/desliga.
+                    val cameras = engine.modelCameraCount(id)
                     if (missing.isNotEmpty() && engine.modelFolder(id).isNotEmpty()) promptModelTextures(MissingModelTextures(id, missing))
+                    else if (cameras > 0) showToast(appText(R.string.model3d_cameras_added, cameras))
                     else if (quality != com.aurea.aurea.engine.MODEL_QUALITY_ORIGINAL && before > after) {
                         showToast(appText(R.string.model3d_optimized_toast, modelCount(before), modelCount(after)))
                     } else if (warnings.isNotEmpty()) showToast(
@@ -6832,11 +7283,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         newProject(width, height, fps.toDouble(), title, null)
 
     /** fps livre (1–240) e, opcional, o fundo inicial em RGBA sRGB (nulo = preto). */
-    fun newProject(width: Int, height: Int, fps: Double, title: String, background: FloatArray?) {
+    fun newProject(width: Int, height: Int, fps: Double, title: String, background: FloatArray?, uiMode: Int = UI_MODE_COMPOSITION) {
         if (!acceptsProjectChange()) return
         projectGeneration++
         launchProjectWork launch@{
-            val ok = withContext(Dispatchers.Default) { engine.newProject(width, height, fps, title, background) }
+            val ok = withContext(Dispatchers.Default) {
+                // A interface escolhida na folha entra ANTES do primeiro salvar: o arquivo já nasce nela.
+                engine.newProject(width, height, fps, title, background) &&
+                    (uiMode == UI_MODE_COMPOSITION || engine.setProjectUiMode(uiMode))
+            }
             if (!ok) {
                 errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_projeto)
                 return@launch
@@ -7363,8 +7818,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val CAMERA_LENS_FOCUS = 2
         const val CAMERA_LENS_APERTURE = 3
         const val CAMERA_LENS_BLUR = 4
+        /** A câmera afeta as camadas 2D abaixo dela (0/1). */
+        const val CAMERA_AFFECTS_BELOW = 7
         /** `ParticleParam::Count` do motor (contrato v21: 70 parâmetros). */
         const val PARTICLE_PARAM_COUNT = 70
+        /** Fontes aceitas na importação (o motor converte WOFF e coleções). */
+        val FONT_EXTENSIONS = setOf("ttf", "otf", "ttc", "otc", "woff")
+        /** Amostras do gráfico de velocidade (painel de velocidade). */
+        const val SPEED_GRAPH_SAMPLES = 96
         /** Id do "tipo" memória na tela Armazenamento. */
         const val MEMORY = "memoria"
         // ComponentCallbacks2.TRIM_MEMORY_* (valores do SDK).
@@ -7559,3 +8020,8 @@ enum class Text3DPreset(val labelRes: Int) {
     CinematicMetal(R.string.pn_t3d_preset_cinematic);
 
 }
+
+/** Interface de Composição (camadas): a principal e o padrão de todo projeto novo. */
+const val UI_MODE_COMPOSITION = 0
+/** Interface de Edição (trilha principal magnética, cortes em sequência). */
+const val UI_MODE_EDIT = 1

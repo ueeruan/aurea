@@ -5,9 +5,11 @@
 
   O QUE ESTE ARQUIVO NÃO TEM, E POR QUÊ:
 
-   · NSMicrophoneUsageDescription: não há captura de áudio no editor.
-     A galeria integrada usa NSPhotoLibraryUsageDescription para mostrar as
+   · A galeria integrada usa NSPhotoLibraryUsageDescription para mostrar as
      fotos e os vídeos aos quais a pessoa concedeu acesso.
+   · NSMicrophoneUsageDescription existe só para o "Gravar voz" (Adicionar →
+     Áudio): o pedido aparece quando a pessoa toca em Permitir no painel, e o
+     áudio gravado fica em Documents/Media, dentro do projeto.
    · Dados de assinatura (Team ID, provisioning): quem assina é o dono, com a
      conta dele. Ver README.
 
@@ -32,12 +34,14 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>AureaReleaseLabel</key>
-    <string>BETA 2</string>
+    <string>BETA 3</string>
     <key>CFBundleShortVersionString</key>
     <string>$(MARKETING_VERSION)</string>
     <!-- Build iOS do porte do editor Android atual. -->
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>O microfone grava a sua narração (Gravar voz) para entrar no projeto como camada de áudio. O áudio fica no seu aparelho.</string>
     <key>NSCameraUsageDescription</key>
     <string>A câmera rastreia o movimento 3D do aparelho para animar a câmera do projeto. As imagens não são gravadas.</string>
     <key>NSPhotoLibraryUsageDescription</key>

@@ -126,6 +126,9 @@ private:
     i32 direction_ = 0;
     f32 scrubVelocity_ = 0.0f;
     u64 lastScrubNs_ = 0;
+    /// Sem nenhum passo do dedo por este tempo, o scrub se fecha sozinho
+    /// (`update`). A UI que o abriu pode desaparecer no meio do gesto.
+    static constexpr u64 kScrubAbandonNs = 1'500'000'000ull;
     FrameIndex lastScrubFrame_{0};
     bool wasPlayingBeforeScrub_ = false;
     u64 generation_ = 1;

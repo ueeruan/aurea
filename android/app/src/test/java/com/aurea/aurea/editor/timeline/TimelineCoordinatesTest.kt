@@ -20,7 +20,7 @@ class TimelineCoordinatesTest {
                         assertEquals(timestamp, TimeAxis.frameAt(x, view, ppf, 540f).toFrame())
                         assertEquals(30, Keyframes.toLocal(timestamp, start, offset))
                         val x0 = TimeAxis.xOf(start.toDouble(), view, ppf, 540f)
-                        val x1 = maxOf(x0 + m.barMinWidth, TimeAxis.xOf(end.toDouble(), view, ppf, 540f))
+                        val x1 = TimeAxis.xOf(end.toDouble(), view, ppf, 540f)
                         val index = intArrayOf(-1)
                         assertEquals(HitKind.KEYFRAME, RowHit.hit(m, x, m.diamondCyNormal, 1080f,
                             x0, x1, false, false, true, intArrayOf(timestamp), view, ppf, 540f, index))

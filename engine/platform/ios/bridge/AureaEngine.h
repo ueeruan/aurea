@@ -315,6 +315,8 @@ NS_SWIFT_NAME(AureaEngine)
     NS_SWIFT_NAME(realCameraSample(_:timestampNs:positional:sensitivity:inverted:));
 - (BOOL)realCameraHold NS_SWIFT_NAME(realCameraHold());
 - (BOOL)realCameraRecenter NS_SWIFT_NAME(realCameraRecenter());
+/// Andar (m/s, + frente, 0 parado) e profundidade (× do frente/trás medido).
+- (BOOL)realCameraWalk:(float)speed depth:(float)depth NS_SWIFT_NAME(realCameraWalk(_:depth:));
 - (void)realCameraStop NS_SWIFT_NAME(realCameraStop());
 /// active, recording, last native frame keyed, actual position tracking mode.
 - (NSArray<NSNumber*>*)realCameraStatus NS_SWIFT_NAME(realCameraStatus());
@@ -331,8 +333,28 @@ NS_SWIFT_NAME(AureaEngine)
 #endif
 /// O que o motor decidiu para ESTE aparelho (chaves do DeviceReport do Android).
 - (NSDictionary<NSString*, NSNumber*>*)deviceReport;
+
+// --- Proxy de edição ("Otimizar vídeos pesados", 0.2.5) ---------------------
+// A política, a fila e o cache são do motor (PreviewProxyService); a UI escolhe
+// o modo, lê o progresso e limpa. Mesmo contrato do nativeProxy* do Android.
+/// 0 Automático · 1 Sempre · 2 Desligado.
+- (void)setProxyMode:(uint32_t)mode NS_SWIFT_NAME(setProxyMode(_:));
+- (uint32_t)proxyMode NS_SWIFT_NAME(proxyMode());
+/// Pedidos desta sessão de projeto: "queued", "generating", "ready", "failed"
+/// e "progress" (0..1, do vídeo sendo otimizado).
+- (NSDictionary<NSString*, NSNumber*>*)proxySummary NS_SWIFT_NAME(proxySummary());
+/// Proxy do vídeo da camada: "state" (0 nenhum · 1 na fila · 2 gerando ·
+/// 3 pronto · 4 falhou) e "progress" (0..1).
+- (NSDictionary<NSString*, NSNumber*>*)proxyStatus:(long long)layer NS_SWIFT_NAME(proxyStatus(_:));
+- (BOOL)regenerateProxy:(long long)layer NS_SWIFT_NAME(regenerateProxy(_:));
+- (BOOL)cancelProxy:(long long)layer NS_SWIFT_NAME(cancelProxy(_:));
+/// Bytes da mídia otimizada em disco (percorre a pasta: fora da main thread).
+- (uint64_t)proxyCacheBytes NS_SWIFT_NAME(proxyCacheBytes());
+/// Apaga a mídia otimizada; devolve os bytes liberados. O export segue no original.
+- (uint64_t)clearProxyCache NS_SWIFT_NAME(clearProxyCache());
 /// Export em andamento (chaves AureaExport*).
 - (NSDictionary<NSString*, id>*)exportProgress;
+- (NSString*)exportDiagnostics;
 
 // --- Projeto ----------------------------------------------------------------
 - (BOOL)newProjectWidth:(uint32_t)width height:(uint32_t)height fps:(double)fps title:(nullable NSString*)title;
@@ -341,6 +363,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)newProjectWidth:(uint32_t)width height:(uint32_t)height fps:(double)fps title:(nullable NSString*)title
             backgroundR:(float)r g:(float)g b:(float)b a:(float)a;
 - (BOOL)loadProject:(NSString*)path;
+/// Failure belongs to this load request. Older BOOL callers remain supported.
+- (BOOL)loadProject:(NSString*)path error:(NSString* _Nullable* _Nullable)error
+         errorCode:(int32_t* _Nullable)errorCode NS_SWIFT_NAME(loadProject(_:error:code:));
 - (BOOL)saveProject:(NSString*)path;
 /// Flush UI commands before dispatching. Safe to execute on an IO queue.
 - (BOOL)autosaveProject;
@@ -376,6 +401,11 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)play;
 - (void)pause;
 - (void)togglePlayback;
+/// Startup runs on the lifecycle queue; progress is a no-I/O snapshot.
+- (int32_t)startPreRender:(int32_t)direction NS_SWIFT_NAME(startPreRender(direction:));
+- (void)cancelPreRender NS_SWIFT_NAME(cancelPreRender());
+/// running, complete, framesDone, framesTotal, width, height, direction, error, diskBytes, residentBytes.
+- (NSArray<NSNumber*>*)preRenderProgress NS_SWIFT_NAME(preRenderProgress());
 - (void)seekToFrame:(int64_t)frame;
 - (void)stepFrames:(int32_t)frames;
 - (void)scrubToFrame:(int64_t)frame;
@@ -406,6 +436,19 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)rippleDeleteLayers:(NSArray<NSNumber*>*)layerIds;
 - (void)setEditMode:(BOOL)on;
 @property(nonatomic, readonly) BOOL timelineEditMode;
+/// Interface do projeto (0.2.5): 0 = Composição (padrão), 1 = Edição. Ligar a Edição liga o ímã.
+- (BOOL)setProjectUiMode:(uint32_t)mode NS_SWIFT_NAME(setProjectUiMode(_:));
+@property(nonatomic, readonly) uint32_t projectUiMode;
+/// O trecho de mídia mais fundo: a linha dele é a trilha principal da Edição (0 = nenhum).
+@property(nonatomic, readonly) long long mainTrackAnchor;
+/// "Para camada": linha própria acima da trilha principal; atFrame >= 0 leva ao quadro. Um passo de desfazer.
+- (BOOL)moveClipToOverlay:(long long)layerId atFrame:(int64_t)frame NS_SWIFT_NAME(moveClipToOverlay(_:atFrame:));
+/// "Para trilha principal": entra no fim dela, magnético. Um passo de desfazer.
+- (BOOL)moveClipToMainTrack:(long long)layerId NS_SWIFT_NAME(moveClipToMainTrack(_:));
+/// Transição num corte: saída de `outgoing` e entrada de `incoming` (0 nenhuma … 5 girar). Um passo de desfazer.
+- (BOOL)setCutTransitionFrom:(long long)outgoing to:(long long)incoming type:(uint32_t)type frames:(uint32_t)frames
+    NS_SWIFT_NAME(setCutTransition(from:to:type:frames:));
+- (uint32_t)cutTransitionInto:(long long)incoming NS_SWIFT_NAME(cutTransition(into:));
 /// LINHA MAGNÉTICA da camada: cortes dela andam como faixa de montagem.
 - (BOOL)setLayer:(long long)layerId magneticTrack:(BOOL)on;
 - (BOOL)layerMagneticTrack:(long long)layerId;
@@ -548,7 +591,16 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setShape:(long long)layerId param:(uint32_t)param value:(float)value;
 - (void)setShape:(long long)layerId fillR:(float)r g:(float)g b:(float)b a:(float)a;
 - (void)setShape:(long long)layerId strokeR:(float)r g:(float)g b:(float)b a:(float)a;
-- (void)setCameraTrack:(uint32_t)mode forLayer:(long long)layerId;
+/// Começa a análise da câmera 3D. NO = não começou (outra análise rodando,
+/// camada que não é vídeo ou com menos de 10 quadros) — par do Android.
+- (BOOL)setCameraTrack:(uint32_t)mode forLayer:(long long)layerId;
+/// Efeito de parte 3D já apontando para a parte `part` (0 = a 1ª). −1 = não entrou.
+- (int)addPartEffect:(uint32_t)type part:(uint32_t)part forLayer:(long long)layerId;
+/// Imagem do "Trocar textura 3D" (arquivo já copiado para o app).
+- (BOOL)setEffectImage:(NSString *)path effect:(uint32_t)effect forLayer:(long long)layerId;
+- (NSString *)effectImageName:(uint32_t)effect forLayer:(long long)layerId;
+/// Nome de cada parte da camada 3D (vazio = sem nome no arquivo).
+- (NSArray<NSString *> *)modelPartNames:(long long)layerId;
 - (void)setModelTransformInScene:(uint64_t)scene modelIndex:(uint32_t)modelIndex
                           x:(float)x y:(float)y z:(float)z
                          sx:(float)sx sy:(float)sy sz:(float)sz
@@ -676,6 +728,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (long long)freezeFrameForLayer:(long long)layerId frame:(int32_t)frame hold:(int32_t)holdFrames;
 /// Motivo legível da última importação que falhou ("" quando deu certo).
 @property (nonatomic, readonly, copy) NSString* lastImportError;
+/// Motivo da última recusa de `startExportTo:` (0.1.8): o código Errc e a frase
+/// do motor. Antes a recusa chegava vazia e o iPhone só dizia "Não foi possível
+/// iniciar a exportação".
 
 // --- Consultas --------------------------------------------------------------
 /// Uma linha por camada, da frente para o fundo (chaves AureaLayer*).
@@ -833,9 +888,25 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)enableExpressions:(long long)layerId tracks:(NSArray<NSNumber*>*)tracks enabled:(BOOL)enabled NS_SWIFT_NAME(enableExpressions(_:tracks:enabled:));
 - (NSDictionary<NSString*, id>*)checkExpressionSyntax:(NSString*)source NS_SWIFT_NAME(checkExpressionSyntax(_:));
 - (NSArray<NSNumber*>*)timeRemap:(long long)layerId;
+- (double)timeRemapCurrentSource:(int64_t)layerId NS_SWIFT_NAME(timeRemapCurrentSource(_:));
 - (int32_t)editTimeRemap:(long long)layerId index:(int32_t)index time:(int64_t)time value:(float)value interpolation:(int32_t)interpolation;
 - (BOOL)setTimeRemapValue:(long long)layerId time:(int64_t)time value:(float)value;
 - (void)removeTimeRemap:(long long)layerId index:(uint32_t)index;
+/// Gráfico de velocidade (`query_speed_curve`): cabeçalho de 8, amostras e chaves (tempo, ×, interpolação).
+- (NSArray<NSNumber*>*)speedCurve:(long long)layerId samples:(uint32_t)samples;
+/// Curva pronta: 0 plana, 1 montagem, 2 herói, 3 bala, 4 entrada rápida, 5 saída rápida, 6 pulo, 7 suavizar, 8 tirar.
+- (BOOL)applySpeedCurve:(uint32_t)preset forLayer:(long long)layerId;
+- (int32_t)editSpeedKey:(long long)layerId index:(int32_t)index time:(int64_t)time speed:(float)speed interpolation:(int32_t)interpolation;
+- (BOOL)removeSpeedKey:(long long)layerId index:(uint32_t)index;
+/// Câmeras do arquivo do modelo 3D (glTF/FBX); a importação já as põe na timeline.
+- (uint32_t)modelCameraCount:(long long)layerId;
+/// Pose do rig 3D (0.1.8): ossos (10 floats por osso, ver Engine::query_model_bones),
+/// giro pelo dedo (trackball), keyframe (node −1 = todos) e reset.
+- (NSArray<NSNumber*>*)modelBones:(long long)layerId;
+- (BOOL)dragBone:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy twist:(float)twist continuing:(BOOL)continuing;
+- (int32_t)toggleBoneKey:(long long)layerId node:(int32_t)node;
+- (BOOL)resetBonePose:(long long)layerId node:(int32_t)node;
+- (uint32_t)addModelCameras:(long long)layerId;
 - (long long)addVector:(uint32_t)preset;
 - (NSArray<NSDictionary<NSString*, id>*>*)vectorGroups:(long long)layerId;
 - (BOOL)editVectorGroup:(long long)layerId group:(uint32_t)group field:(uint32_t)field values:(NSArray<NSNumber*>*)values;
@@ -979,12 +1050,32 @@ NS_SWIFT_NAME(AureaEngine)
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
             aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
               quality:(uint32_t)quality safeMode:(uint32_t)safeMode;
+/// Exact startup status (0 = started). Preparation may fail before the native
+/// export progress is published; callers must not reuse an earlier session.
+- (int32_t)startExportCheckedTo:(NSString*)path codec:(AureaExportCodec)codec
+                        height:(uint32_t)height fps:(double)fps
+                   bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+                     aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+                       quality:(uint32_t)quality safeMode:(uint32_t)safeMode
+    NS_SWIFT_NAME(startExportChecked(to:codec:height:fps:bitrateMbps:audioBitrateKbps:aiUpscale:trimToContent:quality:safeMode:));
 /// A taxa de vídeo (bps) que o export usaria — a mesma regra do encoder, para a
 /// tela mostrar o tamanho estimado sem conta própria.
 - (uint32_t)exportBitrateBps:(uint32_t)width height:(uint32_t)height fps:(double)fps
                        codec:(AureaExportCodec)codec quality:(uint32_t)quality
                   customMbps:(uint32_t)customMbps;
 - (long long)exportDuration:(BOOL)trimToContent;
+/// One shared undoable operation. A positive ID is the new group; a negative
+/// error code leaves the selection unchanged. The highest selected layer masks
+/// the other selected layers, with exclude selecting its inverse.
+- (long long)groupAndMask:(NSArray<NSNumber*>*)layerIds exclude:(BOOL)exclude name:(nullable NSString*)name NS_SWIFT_NAME(groupAndMask(_:exclude:name:));
+/// The core decides visible keys, neighbors and the editable curve segment.
+/// flags: 1=keyHere, 2=previous, 4=next, 8=segment. Neighbor frames are in the
+/// composition; segment endpoints and localFrame are in layer time.
+- (nullable NSDictionary<NSString*, NSNumber*>*)keyframeNavigation:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param compositionFrame:(long long)compositionFrame NS_SWIFT_NAME(keyframeNavigation(_:property:effect:param:compositionFrame:));
+/// Nearest marker or visible key of this layer; layerId=0 searches only markers.
+/// Nil means no strict neighbor, so transport leaves the playhead unchanged.
+- (nullable NSNumber*)timelineNavigation:(long long)layerId compositionFrame:(long long)compositionFrame direction:(int32_t)direction NS_SWIFT_NAME(timelineNavigation(_:compositionFrame:direction:));
+- (BOOL)seekTimelineEvent:(long long)compositionFrame NS_SWIFT_NAME(seekTimelineEvent(_:));
 - (void)cancelExport;
 /// Explicitly restores the checked export snapshot, then restarts from zero.
 - (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath;

@@ -15,6 +15,49 @@
 // =============================================================================
 import SwiftUI
 
+/// Geometry is the visible, keyboard-adjusted viewport. Short content keeps its
+/// natural height; long content scrolls above the fixed actions.
+enum AureaSheetLayout {
+    static func bodyHeight(content: CGFloat, viewport: CGFloat, top: CGFloat,
+                           bottom: CGFloat, handle: CGFloat = 0, footer: CGFloat = 0) -> CGFloat {
+        min(max(0, content), max(0, viewport - max(0, top) - max(0, bottom) - handle - footer))
+    }
+    static func textInputHeight(content: CGFloat) -> CGFloat { min(180, max(96, content)) }
+    static func scrollHeight(content: CGFloat?, maximum: CGFloat) -> CGFloat {
+        let limit = max(0, maximum)
+        return min(content ?? limit, limit)
+    }
+}
+
+private struct AureaSheetContentHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+private struct AureaSheetFooterHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+private struct AureaSheetScroll<Content: View>: View {
+    let maximumHeight: CGFloat
+    @ViewBuilder let content: () -> Content
+    @State private var contentHeight: CGFloat? = nil
+    var body: some View {
+        ScrollView(.vertical) {
+            content().fixedSize(horizontal: false, vertical: true)
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: AureaSheetContentHeight.self, value: geometry.size.height)
+                })
+        }
+        .frame(height: AureaSheetLayout.scrollHeight(content: contentHeight, maximum: maximumHeight))
+        .onPreferenceChange(AureaSheetContentHeight.self) {
+            // A default preference during mounting must not hide a real body.
+            guard $0.isFinite, $0 > 0 else { return }
+            contentHeight = $0
+        }
+    }
+}
+
 // =============================================================================
 // Folha modal (o corpo que o `.sheet` apresenta)
 // =============================================================================
@@ -83,11 +126,18 @@ struct AureaActionSheet: View {
     }
 
     var body: some View {
+        GeometryReader { geometry in
+        let top = max(0, geometry.safeAreaInsets.top) + AureaDims.actionSheetMargin
+        let bottom = max(0, geometry.safeAreaInsets.bottom) + AureaDims.actionSheetMargin
+        let bodyHeight = min(560 - AureaDims.actionRowMinH - AureaDims.s2,
+            AureaSheetLayout.bodyHeight(content: .greatestFiniteMagnitude, viewport: geometry.size.height,
+                                       top: top, bottom: bottom, footer: AureaDims.actionRowMinH + AureaDims.s2))
         ZStack(alignment: .bottom) {
             AureaColors.menuScrim
                 .ignoresSafeArea()
                 .onTapGesture { onDismiss() }
             VStack(spacing: AureaDims.s2) {
+                AureaSheetScroll(maximumHeight: bodyHeight) {
                 VStack(spacing: 0) {
                     if !title.isEmpty {
                         Text(title)
@@ -117,6 +167,7 @@ struct AureaActionSheet: View {
                             }
                     }
                 }
+                }
                 .background(AureaColors.actionSheetBg,
                             in: RoundedRectangle(cornerRadius: AureaDims.actionSheetRadius))
                 Text(AureaText.t("common_cancel"))
@@ -129,7 +180,10 @@ struct AureaActionSheet: View {
                     .contentShape(Rectangle())
                     .aureaTappable(shrink: 1, action: onDismiss)
             }
-            .padding(AureaDims.actionSheetMargin)
+            .padding(.horizontal, AureaDims.actionSheetMargin)
+            .padding(.bottom, bottom)
+        }
+        .padding(.top, top)
         }
     }
 
@@ -181,11 +235,18 @@ struct AureaAlert: View {
     }
 
     var body: some View {
+        GeometryReader { geometry in
+        let top = max(0, geometry.safeAreaInsets.top) + 12
+        let bottom = max(0, geometry.safeAreaInsets.bottom) + 12
+        let available = AureaSheetLayout.bodyHeight(content: .greatestFiniteMagnitude, viewport: geometry.size.height,
+                                                   top: top, bottom: bottom,
+                                                   footer: AureaDims.dialogRowH + AureaDims.dialogDivider)
         ZStack {
             AureaColors.scrim
                 .ignoresSafeArea()
                 .onTapGesture { onDismiss() }
             VStack(spacing: 0) {
+                AureaSheetScroll(maximumHeight: available) {
                 VStack(spacing: AureaDims.s1) {
                     Text(title)
                         .font(.aurea(size: 17, weight: .semibold))
@@ -203,6 +264,7 @@ struct AureaAlert: View {
                 .padding(.top, AureaDims.dialogPadTop)
                 .padding(.bottom, AureaDims.dialogPadBottom)
                 .frame(maxWidth: .infinity)
+                }
                 divider
                 HStack(spacing: 0) {
                     if showCancel {
@@ -220,9 +282,11 @@ struct AureaAlert: View {
                 }
                 .frame(minHeight: AureaDims.dialogRowH)
             }
-            .frame(width: AureaDims.dialogW)
+            .frame(width: min(AureaDims.dialogW, max(0, geometry.size.width - 32)))
             .background(AureaColors.dialogBg,
                         in: RoundedRectangle(cornerRadius: AureaDims.dialogRadius))
+        }
+        .padding(.top, top).padding(.bottom, bottom)
         }
     }
 
@@ -383,49 +447,70 @@ struct NumericKeypadSheet: View {
         return !selectedAll && (text.dropFirst().contains(where: KeypadExpression.isOperator) || text.contains("%") || text.contains(":")) ? "= " + formatted : ""
     }
     var body: some View {
-        ZStack(alignment: .bottom) {
-            AureaColors.sheetScrim.ignoresSafeArea().onTapGesture(perform: onDismiss)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(request.title).font(.aurea(size: 15, weight: .bold)).padding(.bottom, 10)
-                HStack(spacing: 6) {
-                    Spacer(minLength: 0)
-                    Text(text).font(.aurea(size: 26, weight: .bold).monospacedDigit()).lineLimit(1).minimumScaleFactor(0.4)
-                        .background(selectedAll ? AureaColors.accentDim : .clear, in: RoundedRectangle(cornerRadius: 4))
-                    if !request.unit.isEmpty { Text(request.unit).font(.aurea(size: 16)).foregroundStyle(AureaColors.muted) }
-                }.padding(.horizontal, 14).padding(.vertical, 12).background(AureaColors.stage, in: RoundedRectangle(cornerRadius: 12))
-                // Visor e teclas em LTR mesmo em árabe: a conta se lê da esquerda
-                // para a direita e o teclado é o 7-8-9 de sempre (como o do sistema).
-                .keepLtr()
-                Text(hint).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .trailing).frame(height: 22)
-                ForEach(rows.indices, id: \.self) { row in
-                    HStack(spacing: 6) {
-                        ForEach(rows[row], id: \.self) { key in
-                            Button { press(key) } label: {
-                                Group {
-                                    if key == "⌫" { CupertinoGlyph.text(CupertinoGlyph.DeleteLeft, size: 22) }
-                                    else { Text(key).font(.aurea(size: 21, weight: .semibold)) }
-                                }.foregroundStyle("÷×−+=".contains(key) ? AureaColors.accent : AureaColors.text)
-                                    .frame(maxWidth: .infinity).frame(height: 48)
-                                    .background("÷×−+=".contains(key) ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
-                            }.buttonStyle(.plain).simultaneousGesture(LongPressGesture().onEnded { _ in
-                                if key == "⌫" { text = ""; selectedAll = false }
-                            })
-                        }
-                    }.padding(.horizontal, 3).padding(.bottom, 6).keepLtr()
+        GeometryReader { geometry in
+            let topInset = max(0, geometry.safeAreaInsets.top)
+            let bottomInset = max(0, geometry.safeAreaInsets.bottom)
+            let availableHeight = max(0, geometry.size.height - topInset - bottomInset)
+            ZStack(alignment: .bottom) {
+                AureaColors.sheetScrim.ignoresSafeArea().onTapGesture(perform: onDismiss)
+                VStack(alignment: .leading, spacing: 0) {
+                    ScrollView(.vertical) {
+                        keypadContents.padding(.horizontal, 16).padding(.top, 14)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityIdentifier("numeric.keypad.scroll")
+                    keypadFooter.padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 12)
+                        .fixedSize(horizontal: false, vertical: true).layoutPriority(1)
                 }
-                HStack(spacing: 10) {
-                    Button(AureaText.t("ds_cancelar"), action: onDismiss)
-                        .frame(maxWidth: .infinity).padding(.vertical, 12).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-                    Button { if let value { request.onValue(value); onDismiss() } } label: {
-                        Text("OK").fontWeight(.bold).frame(maxWidth: .infinity).padding(.vertical, 12)
-                            .foregroundStyle(value == nil ? AureaColors.disabled : AureaColors.onAction)
-                            .background(value == nil ? AureaColors.chipHigh : AureaColors.accent, in: RoundedRectangle(cornerRadius: 8))
-                    }.disabled(value == nil)
-                }.font(.aurea(size: 15)).buttonStyle(.plain).padding(.top, 4)
-            }.padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 12)
+                .frame(maxWidth: .infinity).frame(height: min(456, availableHeight))
                 .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 13.5))
                 .foregroundStyle(AureaColors.text)
+                .padding(.bottom, bottomInset)
+            }.padding(.top, topInset)
         }.onAppear { text = display(request.value) }
+    }
+    private var keypadContents: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(request.title).font(.aurea(size: 15, weight: .bold)).padding(.bottom, 10)
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                Text(text).font(.aurea(size: 26, weight: .bold).monospacedDigit()).lineLimit(1).minimumScaleFactor(0.4)
+                    .background(selectedAll ? AureaColors.accentDim : .clear, in: RoundedRectangle(cornerRadius: 4))
+                if !request.unit.isEmpty { Text(request.unit).font(.aurea(size: 16)).foregroundStyle(AureaColors.muted) }
+            }.padding(.horizontal, 14).padding(.vertical, 12).background(AureaColors.stage, in: RoundedRectangle(cornerRadius: 12))
+            // Visor e teclas em LTR mesmo em árabe: a conta se lê da esquerda
+            // para a direita e o teclado é o 7-8-9 de sempre (como o do sistema).
+            .keepLtr()
+            Text(hint).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .trailing).frame(height: 22)
+            ForEach(rows.indices, id: \.self) { row in
+                HStack(spacing: 6) {
+                    ForEach(rows[row], id: \.self) { key in
+                        Button { press(key) } label: {
+                            Group {
+                                if key == "⌫" { CupertinoGlyph.text(CupertinoGlyph.DeleteLeft, size: 22) }
+                                else { Text(key).font(.aurea(size: 21, weight: .semibold)) }
+                            }.foregroundStyle("÷×−+=".contains(key) ? AureaColors.accent : AureaColors.text)
+                                .frame(maxWidth: .infinity).frame(height: 48)
+                                .background("÷×−+=".contains(key) ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                        }.buttonStyle(.plain).simultaneousGesture(LongPressGesture().onEnded { _ in
+                            if key == "⌫" { text = ""; selectedAll = false }
+                        })
+                    }
+                }.padding(.horizontal, 3).padding(.bottom, 6).keepLtr()
+            }
+        }
+    }
+    private var keypadFooter: some View {
+        HStack(spacing: 10) {
+            Button(AureaText.t("ds_cancelar"), action: onDismiss)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                .accessibilityIdentifier("numeric.keypad.cancel")
+            Button { if let value { request.onValue(value); onDismiss() } } label: {
+                Text("OK").fontWeight(.bold).frame(maxWidth: .infinity, minHeight: 48)
+                    .foregroundStyle(value == nil ? AureaColors.disabled : AureaColors.onAction)
+                    .background(value == nil ? AureaColors.chipHigh : AureaColors.accent, in: RoundedRectangle(cornerRadius: 8))
+            }.disabled(value == nil).accessibilityIdentifier("numeric.keypad.confirm")
+        }.font(.aurea(size: 15)).buttonStyle(.plain)
     }
     private func press(_ key: String) {
         switch key {
@@ -561,13 +646,32 @@ struct AureaColorSwatch: View {
 /// The adjustment sheet is fixed while controls drag. Only the veil or Done
 /// dismisses it, matching AureaAdjustSheet (not the native iOS sheet gesture).
 struct AureaBottomOverlay<Content: View>: View {
-    var modal = false
+    let modal: Bool
     let onDismiss: () -> Void
-    @ViewBuilder var content: () -> Content
+    private let fixedFooter: AnyView?
+    private let accessibilityID: String
+    private let content: () -> Content
     @State private var shown = false
     @State private var closing = false
+    @State private var footerHeight: CGFloat = 0
+    init(modal: Bool = false, onDismiss: @escaping () -> Void, fixedFooter: AnyView? = nil,
+         accessibilityID: String = "",
+         @ViewBuilder content: @escaping () -> Content) {
+        self.modal = modal; self.onDismiss = onDismiss; self.fixedFooter = fixedFooter; self.content = content
+        self.accessibilityID = accessibilityID
+        // Reserve all current action rows before their first measured layout.
+        _footerHeight = State(initialValue: fixedFooter == nil ? 0 : 80)
+    }
     var body: some View {
         GeometryReader { geometry in
+            // The proposed viewport already excludes the keyboard and unsafe
+            // container edges. Subtracting its reported keyboard inset again
+            // collapsed the scrolling body and lifted the footer twice.
+            let top: CGFloat = 8
+            let bottom: CGFloat = 0
+            let handle: CGFloat = modal ? 21 : 0
+            let bodyHeight = AureaSheetLayout.bodyHeight(content: .greatestFiniteMagnitude,
+                viewport: geometry.size.height, top: top, bottom: bottom, handle: handle, footer: footerHeight)
             ZStack(alignment: .bottom) {
                 (modal ? Color.black.opacity(0.54) : AureaColors.sheetScrim)
                     .opacity(shown ? 1 : 0).ignoresSafeArea().onTapGesture { dismiss() }
@@ -576,14 +680,24 @@ struct AureaBottomOverlay<Content: View>: View {
                         Capsule().fill(Color.white.opacity(0.18)).frame(width: 36, height: 5).padding(.top, 10).padding(.bottom, 6)
                             .contentShape(Rectangle()).gesture(DragGesture().onEnded { if $0.translation.height > 60 { dismiss() } })
                     }
-                    content()
+                    AureaSheetScroll(maximumHeight: bodyHeight, content: content)
+                    if let fixedFooter {
+                        fixedFooter.fixedSize(horizontal: false, vertical: true)
+                            .background(GeometryReader { footer in
+                                Color.clear.preference(key: AureaSheetFooterHeight.self, value: footer.size.height)
+                            })
+                            .layoutPriority(1)
+                    }
                 }
-                .padding(.bottom, geometry.safeAreaInsets.bottom)
                 .frame(maxWidth: .infinity)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(accessibilityID)
                 .background(AureaColors.surface, in: AureaSheetTopShape(radius: modal ? 18 : 13.5))
                 .contentShape(Rectangle()).onTapGesture {}
                 .offset(y: shown ? 0 : geometry.size.height)
-            }.ignoresSafeArea(.container, edges: .bottom)
+                .padding(.bottom, bottom)
+            }.padding(.top, top)
+                .onPreferenceChange(AureaSheetFooterHeight.self) { footerHeight = max(0, $0) }
                 .onAppear { withAnimation(.easeOut(duration: 0.22)) { shown = true } }
         }
     }
@@ -621,7 +735,13 @@ struct ColorPickerSheet: View {
     private var rgba: [Float] { AureaColorSpace.rgba(h: hue, s: saturation, v: brightness, a: alpha) }
     private var current: Color { AureaColorSpace.color(rgba) }
     var body: some View {
-        AureaBottomOverlay(onDismiss: onDismiss) {
+        AureaBottomOverlay(onDismiss: onDismiss, fixedFooter: AnyView(
+            Button(AureaText.t("ds_pronto"), action: onDismiss)
+                .font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.accent)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.horizontal, 18).padding(.top, 4).padding(.bottom, 12)
+                .buttonStyle(AureaPressStyle()).accessibilityIdentifier("color.picker.done")
+        )) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {
                     Text(AureaText.t("ds_cor")).font(.aurea(size: 17, weight: .bold))
@@ -630,8 +750,6 @@ struct ColorPickerSheet: View {
                         AureaColorSwatch(color: current)
                     }.frame(width: 76, height: 28).clipShape(RoundedRectangle(cornerRadius: 8))
                     Spacer(minLength: 0)
-                    Button(AureaText.t("ds_pronto"), action: onDismiss).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.accent)
-                        .padding(.vertical, 6).padding(.horizontal, 4).buttonStyle(AureaPressStyle())
                 }.padding(.bottom, 10)
                 Group {
                     if picking, let shot { PreviewEyedropper(shot: shot) { rgb in setColor(rgb + [alpha]) } }

@@ -479,6 +479,8 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
             val color = when (lines[i + 4].toInt()) { 1 -> Color(0xFFFFCC55); 2 -> Color.Cyan; else -> Color.Gray.copy(alpha = .22f) }
             drawLine(color, Offset(m.sx(lines[i]), m.sy(lines[i + 1])), Offset(m.sx(lines[i + 2]), m.sy(lines[i + 3])), 1.dp.toPx())
         }
+        // Pose do rig (RigPoseStage.kt): juntas e ossos no lugar do gizmo da camada.
+        if (rigPoseActive(store)) { drawRigPoseOverlay(store, m); return }
         store.gizmo?.let { if (!drawTrackball(store, m)) drawGizmo(m, it, store.gizmoTool) }
         return
     }
@@ -497,6 +499,8 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         drawPuppetOverlay(store, m)
         return
     }
+    // Saber com o cartão aberto (núcleo único): início e fim do núcleo (SaberStage.kt).
+    if (saberActive(store)) drawSaberOverlay(store, m)
     // Forma 3D com parte escolhida: um ponto no centro de cada parte (o gizmo segue abaixo).
     if (shapePartActive(store)) drawShapePartOverlay(store, m)
     // Roto Brush: o traço ao vivo no lugar das alças da camada.
@@ -571,6 +575,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     }
 
     val selection = store.selection
+    LayerResizeStage.count = 0
     val d = store.detail ?: return
     if (selection.isEmpty()) return
     val playhead = store.playhead
@@ -619,6 +624,8 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     m.markerAnchorX = m.sx(anchor[0]); m.markerAnchorY = m.sy(anchor[1])
     m.markerAnchorValid = store.pointPick == null
     if (gizmo == null) {
+        // Alças brancas de esticar (LayerResizeStage.kt), por baixo das setas.
+        drawLayerResizeHandles(m)
         placeAxisHandles(m)
         m.handlesValid = true
         drawAxisHandles(m, ui.grabbedHandle)
@@ -1165,6 +1172,15 @@ private suspend fun PointerInputScope.stageGestures(
             puppetGesture(store, m, down)
             return@awaitEachGesture
         }
+        // Saber (cartão aberto, núcleo único): os pontos de início/fim têm a vez;
+        // fora deles, o palco segue normal.
+        if (m.valid && saberActive(store)) {
+            val handle = pickSaberHandle(store, m, downX, downY, 24.dp.toPx())
+            if (handle >= 0) {
+                saberGesture(store, m, down, handle)
+                return@awaitEachGesture
+            }
+        }
         // Roto Brush (RotoPaint.kt): o dedo pinta traços de objeto/fundo.
         if (rotoPaintActive(store)) {
             rotoGesture(store, m, down)
@@ -1194,6 +1210,17 @@ private suspend fun PointerInputScope.stageGestures(
             }
         }
 
+        // Alças brancas de esticar da camada 2D (desenhadas no último quadro):
+        // as setas de eixo e a âncora ganham empate.
+        if (m.valid && LayerResizeStage.count > 0 && store.gizmo == null && pickHandle(m, downX, downY, axisTarget) < 0 &&
+            hypot(downX - m.markerAnchorX, downY - m.markerAnchorY) > 20.dp.toPx()) {
+            val rh = pickLayerResizeHandle(downX, downY, 22.dp.toPx())
+            if (rh >= 0) {
+                layerResizeGesture(store, m, rh, down)
+                return@awaitEachGesture
+            }
+        }
+
         // Gizmo 3D: tocar numa alça trava AQUELE eixo até soltar o dedo.
         val gz = store.gizmo
         // Ferramenta Girar: o trackball (TrackballStage.kt) no lugar das alças.
@@ -1218,6 +1245,13 @@ private suspend fun PointerInputScope.stageGestures(
         }
 
         if (store.sceneEditor) {
+            // Pose do rig: junta perto do dedo ou osso escolhido = gira o osso;
+            // senão o dedo orbita a cena como sempre.
+            if (m.valid && rigPoseActive(store) &&
+                (store.poseBone >= 0 || pickPoseBone(store, m, down.position.x, down.position.y, 36.dp.toPx()) >= 0)) {
+                rigPoseGesture(store, m, down, slop)
+                return@awaitEachGesture
+            }
             if (m.valid) sceneGesture(store, m, edit, down, slop, haptic)
             return@awaitEachGesture
         }

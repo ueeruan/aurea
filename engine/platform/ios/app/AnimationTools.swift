@@ -581,16 +581,30 @@ struct NativeCurvePanel: View {
     private var layer: Int64 { model.primarySelection ?? 0 }
     private var track: [KeyframeItem] {
         (model.keyframes[layer] ?? []).filter {
-            $0.property == model.curveProperty && (model.curveProperty < 31 ||
+            $0.timelineVisible && $0.property == model.curveProperty && (model.curveProperty < 31 ||
                 ($0.effectIndex == model.curveEffect && $0.paramIndex == model.curveParam))
         }.sorted { $0.time < $1.time }
+    }
+    private func compositionFrame(_ local: Int32) -> Int64? {
+        guard let row = model.selectedLayer, row.id == layer else { return nil }
+        return Int64(local) + Int64(row.startFrame) - Int64(row.offsetFrames)
+    }
+    private func navigation(at frame: Int64) -> [String: NSNumber]? {
+        model.engine.keyframeNavigation(layer, property: model.curveProperty, effect: model.curveEffect,
+                                       param: model.curveParam, compositionFrame: frame)
+    }
+    private func navigation(local: Int32) -> [String: NSNumber]? {
+        guard let frame = compositionFrame(local) else { return nil }
+        return navigation(at: frame)
     }
     private var segment: Segment? {
         let keys = track
         guard keys.count >= 2, let selected = model.curveSelectedTime,
-              let selectedIndex = keys.firstIndex(where: { $0.time == selected }) else { return nil }
-        let index = min(selectedIndex, keys.count - 2)
-        return Segment(start: keys[index], end: keys[index + 1], index: index)
+              let query = navigation(local: selected), (query["flags"]?.uint32Value ?? 0) & 8 != 0,
+              let start = query["segmentStart"]?.int64Value, let end = query["segmentEnd"]?.int64Value,
+              let index = keys.firstIndex(where: { Int64($0.time) == start }),
+              let arrival = keys.first(where: { Int64($0.time) == end }) else { return nil }
+        return Segment(start: keys[index], end: arrival, index: index)
     }
     private func progress(_ segment: Segment) -> Float? {
         let frame = model.localPlayhead
@@ -682,22 +696,28 @@ struct NativeCurvePanel: View {
         if current.count >= 2 {
             // A mesma trilha anima aqui: fica nela, no trecho do cabeçote (se a marca escolhida não é desta camada).
             if let time = model.curveSelectedTime, current.contains(where: { $0.time == time }) { return }
-            model.curveSelectedTime = current[max(0, graphSegmentIndexAt(current, model.localPlayhead))].time
+            let query = navigation(at: model.status.playhead)
+            if let query, (query["flags"]?.uint32Value ?? 0) & 8 != 0, let start = query["segmentStart"]?.int64Value {
+                model.curveSelectedTime = Int32(clamping: start)
+            } else { model.curveSelectedTime = current.first?.time }
             return
         }
         let like = KeyframeItem(property: model.curveProperty, paramIndex: model.curveParam, effectIndex: model.curveEffect,
                                 time: 0, value: 0, interpolation: 1)
-        let next = graphTrackFor(model.keyframes[layer] ?? [], like: like)
+        let next = graphTrackFor((model.keyframes[layer] ?? []).filter { $0.timelineVisible }, like: like)
         guard let head = next.first else { model.curveSelectedTime = nil; return }
         model.curveProperty = head.property; model.curveEffect = head.effectIndex; model.curveParam = head.paramIndex
-        model.curveSelectedTime = next[max(0, graphSegmentIndexAt(next, model.localPlayhead))].time
+        let query = navigation(at: model.status.playhead)
+        if let query, (query["flags"]?.uint32Value ?? 0) & 8 != 0, let start = query["segmentStart"]?.int64Value {
+            model.curveSelectedTime = Int32(clamping: start)
+        } else { model.curveSelectedTime = head.time }
     }
     private func followPlayhead() {
         guard !model.timelineKeyDragActive else { return }
-        let keys = track
-        guard let time = model.curveSelectedTime, keys.count >= 2 else { return }
-        let want = graphSegmentIndexAt(keys, model.localPlayhead)
-        if want >= 0 && want != graphSegmentIndexOf(keys, time) { model.curveSelectedTime = keys[want].time }
+        guard let query = navigation(at: model.status.playhead), (query["flags"]?.uint32Value ?? 0) & 8 != 0,
+              let start = query["segmentStart"]?.int64Value else { return }
+        let selected = Int32(clamping: start)
+        if model.curveSelectedTime != selected { model.curveSelectedTime = selected }
     }
     private func back() { if expanded { dismissExpanded() } else { model.openPanel(model.curveReturnPanel == .curve ? .none : model.curveReturnPanel) } }
     private func load() {
@@ -748,8 +768,23 @@ struct NativeCurvePanel: View {
                 else { model.toast = AureaText.t("pn_curve_symmetric") }
             }.disabled(!ease.supportsInversion)
                 .opacity(ease.supportsInversion ? 1 : 0.35)
-            Spacer().frame(height: 4)
-            RailMoreButton(active: false) { showMenu(segment) }
+            // Copiar e colar à mão (pedido da beta): sem abrir o menu.
+            glyphButton(CupertinoGlyph.DocOnDoc, size: 17, target: 40, label: AureaText.t("panel_copiar_curva")) {
+                CurveClipboard.ease = ease; model.toast = AureaText.t("curve_copied")
+            }.accessibilityIdentifier("curve.copy")
+            glyphButton(CupertinoGlyph.DocOnClipboard, size: 17, target: 40, label: AureaText.t("panel_colar_curva")) {
+                if let copied = CurveClipboard.ease { set(copied, to: segment.start, label: "colar curva") }
+            }.disabled(CurveClipboard.ease == nil).opacity(CurveClipboard.ease == nil ? 0.35 : 1)
+                .accessibilityIdentifier("curve.paste")
+            // Menu nativo pequeno ao lado dos três pontos (antes: folha que cobria a tela).
+            Menu {
+                ForEach(Array(menuActions(segment).enumerated()), id: \.offset) { _, action in
+                    Button(action.label, action: action.onClick).disabled(!action.enabled)
+                }
+            } label: {
+                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: AureaDims.iconLg, color: AureaColors.text)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }.accessibilityLabel(AureaText.t("panel_curva")).accessibilityIdentifier("curve.menu")
             Spacer().frame(height: 8)
         }.frame(width: 44).frame(maxHeight: .infinity).background(curveRailFill, ignoresSafeAreaEdges: [])
     }
@@ -763,6 +798,7 @@ struct NativeCurvePanel: View {
     private func segmentNavigation(_ segment: Segment) -> some View {
         HStack(spacing: 4) {
             glyphButton(CupertinoGlyph.ChevronLeft, size: 16, target: 44, label: AureaText.t("panel_keyframe_anterior")) { jump(-1) }
+                .disabled((navigation(local: segment.start.time)?["flags"]?.uint32Value ?? 0) & 2 == 0)
             // A curva do trecho em números; tocar troca a força (×1 → ×2 → ×3).
             Text(graphMode == 0 ? (ease.hasHandles ? cubicBezierLabel(ease) : ease.name)
                  : AureaText.t(graphMode == 1 ? "particular_curve_value" : "panel_velocidade"))
@@ -772,6 +808,7 @@ struct NativeCurvePanel: View {
                 .onTapGesture { if graphMode == 0 && ease.hasHandles { set(curveNextPower(ease), to: segment.start, label: "força da curva") } }
                 .accessibilityIdentifier("curve.power")
             glyphButton(CupertinoGlyph.ChevronRight, size: 16, target: 44, label: AureaText.t("panel_proximo_keyframe")) { jump(1) }
+                .disabled((navigation(local: segment.end.time)?["flags"]?.uint32Value ?? 0) & 4 == 0)
         }.frame(maxWidth: .infinity).frame(height: 44)
         // Keyframe anterior/próximo andam no tempo: anterior à esquerda, como no transporte.
         .keepLtr()
@@ -839,16 +876,19 @@ struct NativeCurvePanel: View {
         }.font(.aurea(size: 12)).tint(curveGreen).padding(.horizontal, 8).frame(height: 48)
     }
     private func jump(_ direction: Int) {
-        guard let segment else { return }
-        let keys = track, target = (segment.index + direction).clamped(to: 0...max(0, track.count - 2))
-        guard target != segment.index, target + 1 < keys.count else { return }
-        model.curveSelectedTime = keys[target].time
+        guard let segment, let edge = compositionFrame(direction < 0 ? segment.start.time : segment.end.time),
+              let neighbors = navigation(at: edge) else { return }
+        let flag: UInt32 = direction < 0 ? 2 : 4
+        guard (neighbors["flags"]?.uint32Value ?? 0) & flag != 0 else { return }
+        let frame = direction < 0 ? neighbors["previousFrame"]?.int64Value : edge
+        guard let frame, let next = navigation(at: frame), (next["flags"]?.uint32Value ?? 0) & 8 != 0,
+              let start = next["segmentStart"]?.int64Value else { return }
+        model.curveSelectedTime = Int32(clamping: start)
         if model.status.playing != 0 { model.playPause() }
-        let local = Int64(keys[target].time) + (Int64(keys[target + 1].time) - Int64(keys[target].time)) / 2
-        model.seek(toFrame: local + Int64(model.selectedLayer?.startFrame ?? 0) - Int64(model.selectedLayer?.offsetFrames ?? 0))
+        model.seek(toFrame: frame)
         load()
     }
-    private func showMenu(_ segment: Segment) {
+    private func menuActions(_ segment: Segment) -> [SheetAction] {
         let value = ease
         let copied = CurveClipboard.ease
         let actions: [SheetAction] = [
@@ -872,7 +912,7 @@ struct NativeCurvePanel: View {
                 model.endGesture()
             }
         ]
-        model.actionSheet = ActionSheetRequest(title: AureaText.t("panel_curva"), actions: actions)
+        return actions
     }
     /// Presets prontos (menu), salvar a curva e as curvas salvas numa fileira
     /// fina que rola: o painel não cresce.
@@ -979,8 +1019,12 @@ struct ExpressionEditor: View {
 /// O dado é a MESMA curva da camada (prévia, exportação e som).
 struct TimeRemapEffectEditor: View {
     @EnvironmentObject private var model: AureaModel
-    let effectId: UInt32
+    /// O efeito antigo (projetos salvos com ele); na aba Remapear do painel de velocidade não há efeito.
+    var effectId: UInt32 = 0
+    var showInterpolation = true
     @State private var values: [Float] = []
+    /// Quadro da fonte no cabeçote (`query_speed_curve` [7]), em quadros da composição.
+    @State private var sourceFrame: Float = 0
     @State private var drag: Float?
     @State private var dragStart: Float?
     @State private var dragLocal: Int32?
@@ -1001,9 +1045,12 @@ struct TimeRemapEffectEditor: View {
         return max(1, values[3] > 0 ? values[3] : values[2])
     }
     private var inside: Bool { values.count >= 5 && model.localPlayhead >= lo && model.localPlayhead <= hi }
-    private var seconds: Float { model.effectParams.first { $0.index == 0 }?.scalar ?? 0 }
+    private var sourceFrames: Float {
+        let source = model.engine.timeRemapCurrentSource(id)
+        return source.isFinite ? Float(source) : 0
+    }
     private var keyHere: Int? { keyTimes.firstIndex(of: model.localPlayhead) }
-    private var shownFrames: Float { drag ?? seconds * fps }
+    private var shownFrames: Float { drag ?? sourceFrames }
     private func load() { values = model.engine.timeRemap(id).map(\.floatValue) }
     private func refresh() { model.refreshModel(force: true); load() }
     private func seekLocal(_ local: Int32) {
@@ -1026,7 +1073,7 @@ struct TimeRemapEffectEditor: View {
                         ValueBox(Self.timecode(Int(shownFrames.rounded()), fps: fps), enabled: inside, width: 112) { openKeypad() }
                             .highPriorityGesture(DragGesture(minimumDistance: 6).onChanged { value in
                                 guard inside else { return }
-                                if dragStart == nil { dragStart = seconds * fps; dragLocal = model.localPlayhead; model.beginGesture("tempo do vídeo") }
+                                if dragStart == nil { dragStart = sourceFrames; dragLocal = model.localPlayhead; model.beginGesture("tempo do vídeo") }
                                 let frames = min(lastFrame, max(0, (dragStart ?? 0) + Float(value.translation.width) * 0.25))
                                 drag = frames.rounded()
                                 _ = model.engine.setTimeRemapValue(id, time: Int64(dragLocal ?? model.localPlayhead), value: frames.rounded())
@@ -1044,7 +1091,7 @@ struct TimeRemapEffectEditor: View {
                     Text(AureaText.t("remap_fora_clipe")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if isVideo {
+                if isVideo && showInterpolation {
                     Text(AureaText.t("remap_interpolacao")).font(.aurea(size: 13)).padding(.top, 6)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
@@ -1167,9 +1214,9 @@ struct TimeRemapEffectEditor: View {
     private func chip(_ label: String, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(AureaText.t(label)).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
-                .padding(.horizontal, 12).frame(height: 36)
+                .padding(.horizontal, 12).frame(height: 44)
                 .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(AureaPressStyle())
+        }.buttonStyle(AureaPressStyle()).accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 
@@ -1505,7 +1552,13 @@ struct ExpressionSheet: View {
         return (AureaText.t("panel_escreva_expressao_ou_toque_num_atalho"), AureaColors.muted)
     }
     var body: some View {
-        AureaBottomOverlay(modal: true, onDismiss: onDismiss) {
+        AureaBottomOverlay(modal: true, onDismiss: onDismiss, fixedFooter: AnyView(
+            HStack(spacing: 8) {
+                if applied { sheetButton(AureaText.t("panel_remover"), color: AureaColors.danger) { apply(""); source = ""; selection = NSRange(location: 0, length: 0) } }
+                sheetButton(AureaText.t("panel_fechar"), color: AureaColors.text, action: onDismiss)
+                sheetButton(AureaText.t("panel_aplicar"), color: AureaColors.accent, enabled: dirty) { apply(source) }
+            }.padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 12)
+        )) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 0) {
@@ -1532,11 +1585,7 @@ struct ExpressionSheet: View {
                         }
                     }
                 }.padding(.top, 10)
-                HStack(spacing: 8) {
-                    if applied { sheetButton(AureaText.t("panel_remover"), color: AureaColors.danger) { apply(""); source = ""; selection = NSRange(location: 0, length: 0) } }
-                    sheetButton(AureaText.t("panel_fechar"), color: AureaColors.text, action: onDismiss)
-                    sheetButton(AureaText.t("panel_aplicar"), color: AureaColors.accent, enabled: dirty) { apply(source) }
-                }.padding(.top, 14).padding(.bottom, 12)
+                Spacer().frame(height: 10)
             }.padding(.horizontal, 16).foregroundStyle(AureaColors.text)
         }
         .onAppear {

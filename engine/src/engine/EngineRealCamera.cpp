@@ -90,7 +90,8 @@ Status Engine::real_camera_commit_locked() noexcept {
         realCameraState_.active = false;
         return Errc::InvalidState;
     }
-    const bool positional = realCameraPose_.positional();
+    // Andar dá posição mesmo sem AR: grava/mostra os 6 canais.
+    const bool positional = realCameraPose_.positional() || realCameraPose_.walked();
     if (realCameraState_.recording) {
         if (playback_.playing()) realCameraPlaybackStarted_ = true;
         else if (realCameraPlaybackStarted_ && !previewBuffering_) real_camera_end_locked(false);
@@ -130,9 +131,16 @@ Status Engine::real_camera_commit_locked() noexcept {
             }
         }
     }
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     project_->mark_dirty();
     request_render();
+    return OkStatus;
+}
+Status Engine::real_camera_walk(f32 metersPerSecond, f32 depthScale) noexcept {
+    std::lock_guard lock(modelMutex_);
+    if (!realCameraState_.active) return Errc::InvalidState;
+    realCameraPose_.set_walk(metersPerSecond);
+    realCameraPose_.set_depth_scale(depthScale);
     return OkStatus;
 }
 Status Engine::real_camera_recenter() noexcept {

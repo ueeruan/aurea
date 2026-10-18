@@ -19,11 +19,14 @@ add_executable(aurea_tests
     test_regression_2134.cpp
     test_math.cpp
     test_real_camera.cpp
+    test_palette.cpp
     test_mesh_warp_keys.cpp
+    test_puppet_solver.cpp
     test_animation.cpp
     test_core.cpp
     test_timeline.cpp
     test_render.cpp
+    test_prerender_cache.cpp
     test_motion_blur.cpp
     test_serialization.cpp
     test_engine.cpp
@@ -58,9 +61,12 @@ add_executable(aurea_tests
     test_audio_fx.cpp
     test_audio_transport.cpp
     test_captions.cpp
+    test_captions_quality.cpp
     test_cliptime.cpp
     test_beats.cpp
     test_edit.cpp
+    test_ui_mode.cpp
+    test_editor_reference.cpp
     test_trackball.cpp
     test_tracking.cpp
     test_motion_geometry.cpp
@@ -77,9 +83,11 @@ add_executable(aurea_tests
     test_keyframe_shape.cpp
     test_vector.cpp
     test_vector_gpu.cpp
+    test_drawing_progress.cpp
     test_editing_tools.cpp
     test_export.cpp
     test_export_recovery.cpp
+    test_export_packet_log.cpp
     test_export_scheduler.cpp
     test_offline_frame_queue.cpp
     test_offline_audio.cpp

@@ -81,6 +81,28 @@ def save_json(path, value):
     temporary.replace(path)
 
 
+def export_model_fixtures():
+    """Use the same official pinned models as the native composition harness."""
+    tools = Path(__file__).resolve().parents[4] / 'tools'
+    sys.path.insert(0, str(tools))
+    from run_ios_offline_composition_probe import MODELS
+    models = Path(os.environ.get('AUREA_PARITY_MODEL_FIXTURES',
+                                 'build/reference/astra-ios-parity/models')).resolve()
+    fixtures = []
+    for name, expected in MODELS:
+        path = models / (name + '.glb')
+        if not path.is_file():
+            raise FileNotFoundError('Official export fixture not prepared: ' + str(path))
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != expected:
+            raise RuntimeError('Official export fixture hash mismatch: ' + str(path) + ': ' + actual)
+        license_path = models / ('LICENSE_' + name + '.md')
+        if not license_path.is_file():
+            raise FileNotFoundError('Official export fixture license not prepared: ' + str(license_path))
+        fixtures.append(path)
+    return fixtures
+
+
 def run(report, *args, timeout=120, check=True):
     command = {'argv': list(args), 'startedAt': time.time()}
     report.setdefault('commands', []).append(command)
@@ -157,7 +179,7 @@ def collect_export_artifacts(documents, output, record):
     for pattern in ('paper-*.png', 'paper-*.aurea', 'paper-effects-ready.json',
                     'particle-camera-*.rgba', 'particle-camera-*.png',
                     'particle-camera-*.aurea', 'particle-camera-ready.json',
-                    'astra-*.mp4', 'astra-*.png', 'astra-*.aurea', 'astra-offline-ready.json'):
+                    'astra-*.mp4', 'astra-*.png', 'astra-*.aurea', 'astra-smoke-*.rgba', 'astra-real-camera-hold.json', 'astra-offline-ready.json'):
         for source in sorted(documents.glob(pattern)):
             if source.is_file() and source.name not in record['exportArtifacts']:
                 shutil.copy2(source, output / source.name)
@@ -422,8 +444,8 @@ def capture_scene(scene, app, output, udid, console_option, report, frame_checke
         if scene == 'export-render':
             shutil.copy2('engine/tests/data/preview-bframes.mp4', documents / 'preview-bframes.mp4')
             shutil.copy2('engine/tests/data/preview-vfr.mp4', documents / 'preview-vfr.mp4')
-            shutil.copy2('engine/tests/data/gltf/DamagedHelmet.glb', documents / 'DamagedHelmet.glb')
-            shutil.copy2('engine/tests/data/gltf/Fox.glb', documents / 'Fox.glb')
+            for model_fixture in export_model_fixtures():
+                shutil.copy2(model_fixture, documents / model_fixture.name)
             shutil.copy2('android/app/src/androidTest/assets/animated-character.fbx', documents / 'animated-character.fbx')
             shutil.copy2('docs/parity/fixtures/android-2103-square-glow.aurea', documents / 'astra-legacy-square-glow.aurea')
         ready = documents / 'parity-ready.json'

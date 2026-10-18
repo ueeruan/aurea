@@ -9,6 +9,8 @@
 //
 //  Saída: RG = fluxo em pixels DESTE nível (atual → seguinte), B = confiança
 //  (menor autovalor da matriz de estrutura; 0 = região lisa, sem informação).
+//  flags.z = 1: o mesmo nível nos dois papéis trocados (fluxo do seguinte
+//  para o atual), sem reduzir a pirâmide de novo.
 // =============================================================================
 #include "../common/bindings.glsl"
 
@@ -20,8 +22,12 @@ layout(set = 0, binding = AUREA_TEX1) uniform sampler2D u_coarse;   // RG = flux
 
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 texel;    // xy = 1/tamanho do nível, zw = tamanho
-    vec4 flags;    // x = tem nível de cima (0/1), y = iterações
+    vec4 flags;    // x = tem nível de cima (0/1), y = iterações, z = sentido trocado (0/1)
 } p;
+
+// Quadro de origem (o "atual") e o de destino, conforme o sentido.
+float src_luma(vec2 uv) { const vec2 c = texture(u_level, uv).rg; return p.flags.z > 0.5 ? c.g : c.r; }
+float dst_luma(vec2 uv) { const vec2 c = textureLod(u_level, uv, 0.0).rg; return p.flags.z > 0.5 ? c.r : c.g; }
 
 void main() {
     vec2 flow = p.flags.x > 0.5 ? texture(u_coarse, v_uv).xy * 2.0 : vec2(0.0);
@@ -29,11 +35,11 @@ void main() {
     float gxx = 0.0, gxy = 0.0, gyy = 0.0;
     for (int k = 0; k < 25; ++k) {
         vec2 uv = v_uv + vec2(float(k % 5 - 2), float(k / 5 - 2)) * p.texel.xy;
-        float gx = 0.5 * (texture(u_level, uv + vec2(p.texel.x, 0.0)).r - texture(u_level, uv - vec2(p.texel.x, 0.0)).r);
-        float gy = 0.5 * (texture(u_level, uv + vec2(0.0, p.texel.y)).r - texture(u_level, uv - vec2(0.0, p.texel.y)).r);
+        float gx = 0.5 * (src_luma(uv + vec2(p.texel.x, 0.0)) - src_luma(uv - vec2(p.texel.x, 0.0)));
+        float gy = 0.5 * (src_luma(uv + vec2(0.0, p.texel.y)) - src_luma(uv - vec2(0.0, p.texel.y)));
         ix[k] = gx;
         iy[k] = gy;
-        av[k] = texture(u_level, uv).r;
+        av[k] = src_luma(uv);
         gxx += gx * gx;
         gxy += gx * gy;
         gyy += gy * gy;
@@ -53,7 +59,7 @@ void main() {
                 // branch/iteration count varies per pixel: implicit texture
                 // derivatives are undefined here, so keep the same bilinear
                 // sampling with an explicit base level on Vulkan and Metal.
-                float dt = textureLod(u_level, uv, 0.0).g - av[k];
+                float dt = dst_luma(uv) - av[k];
                 bx += ix[k] * dt;
                 by += iy[k] * dt;
             }

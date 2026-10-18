@@ -41,8 +41,13 @@
          Console tem de declarar "usa ID de publicidade: sim (publicidade)". -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
 
-    <!-- No microphone recording or APK installation feature is exposed.
+    <!-- Microfone: só o "Gravar voz" (Adicionar → Áudio) grava, e só depois que
+         a pessoa toca em Gravar; a permissão é pedida em tempo de execução com a
+         explicação no painel. O áudio fica no aparelho (pasta do projeto).
+         No APK installation feature is exposed.
          CAMERA is requested only by optional positional Real Camera tracking. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
 
     <!-- Real Camera uses optional ARCore for positional tracking. Rotation
          recording remains available without ARCore or camera permission. -->

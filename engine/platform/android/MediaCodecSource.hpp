@@ -55,6 +55,8 @@ public:
     [[nodiscard]] std::unique_ptr<VideoDecoderBackend> open_video(const Asset& asset,
                                                                   MediaPriority priority) override;
     [[nodiscard]] std::unique_ptr<audio::AudioDecoderBackend> open_audio(const char* sourcePath) override;
+    /// Export compatível: o decoder de áudio de SOFTWARE do AOSP (o do aparelho travou).
+    [[nodiscard]] std::unique_ptr<audio::AudioDecoderBackend> open_audio_software(const char* sourcePath) override;
 
 private:
     std::atomic<bool> zeroCopy_{true};

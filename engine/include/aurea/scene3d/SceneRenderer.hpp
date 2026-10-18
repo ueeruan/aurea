@@ -19,6 +19,8 @@
 #include "aurea/render/FrameGraph.hpp"
 #include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/scene3d/Environment.hpp"
+#include "aurea/effects/MotionTile.hpp"
+#include "aurea/effects/RasterExtrude.hpp"
 
 #include <utility>
 #include <vector>
@@ -140,6 +142,14 @@ struct SceneEnvironment {
     Vec3 ground{0.30f, 0.28f, 0.26f};
 };
 
+/// "Trocar textura 3D" num nó: a imagem (já na GPU, sRGB com mips, dona do
+/// Renderer) no lugar da textura de cor do material, repetida `repeat` vezes.
+struct SceneNodeTexture {
+    u32 node = 0;
+    TextureHandle texture{};
+    f32 repeat = 1.0f;
+};
+
 struct SceneInstance {
     /// Rigid exposure samples share immutable pose/material state. Only the
     /// transform and camera vary; a dense static glTF is never copied K times.
@@ -163,6 +173,9 @@ struct SceneInstance {
     /// de 1 o nó mistura como transparente; perto de 0 nem desenha.
     std::vector<f32> nodeOpacity;
     std::vector<Vec4> nodeFill; ///< Linear RGB override and selector mix weight.
+    /// Texturas trocadas por nó (efeito "Trocar textura 3D"). Fica na
+    /// instância (não na pose): vale também com a pose compartilhada.
+    std::vector<SceneNodeTexture> nodeTextures;
     bool castShadows = true;
     /// MOSTRAR INTERIOR (Model3DData::interior): todo material deste objeto
     /// vira dupla face — sem recorte da face de trás, normal invertida no
@@ -248,6 +261,8 @@ struct ScenePlane {
     u32  sourceLayer = ~0u;        ///< índice da camada no snapshot (desfoque por sub-quadro)
     /// Luzes da composição e o mundo da camada (a câmera entra no build).
     PlaneLightBlock light{};
+    motion_tile::PeriodicPlane periodic{}; ///< enabled only for a terminal Motion Tile
+    raster_extrude::Volume extrusion{};
 };
 
 /// Pós do grupo 3D vindo da composição (PostProcessSettings): o que a pessoa
@@ -425,7 +440,7 @@ public:
     /// Profundidade de campo: amostras do disco por pixel (o preview usa
     /// poucas, o export muitas). 0 = desligada mesmo com a lente pedindo.
     void set_dof_quality(u32 taps) noexcept { dofTaps_ = std::min(taps, 256u); }
-    [[nodiscard]] PipelineKey plane_key(bool translucent = false) const noexcept;
+    [[nodiscard]] PipelineKey plane_key(bool translucent = false, bool periodic = false, bool extruded = false) const noexcept;
 
     /// Pipelines 3D para aquecer junto com os 2D.
     void collect_pipelines(std::vector<PipelineKey>& out) const;
@@ -487,6 +502,8 @@ public:
     /// Accumulates omitted resources across all groups/subframes of one render.
     /// A fallback may be displayed, but must never become a completed cache entry.
     [[nodiscard]] bool incomplete() const noexcept { return incomplete_; }
+    [[nodiscard]] const char* incomplete_file() const noexcept { return incompleteFile_; }
+    [[nodiscard]] u32 incomplete_line() const noexcept { return incompleteLine_; }
     void reset_incomplete() noexcept { incomplete_ = false; }
     /// Qualidade (HeavyQuality): mapa de sombra (256..4096), nível da sombra
     /// (0 BAIXO = PCF 8, 1 MÉDIO = PCF 16, 2 ALTO = PCSS 12+24, 3 ULTRA =
@@ -617,6 +634,8 @@ private:
     bool restore_environment(u64 key) noexcept;
     void trim_scene_environments(u64 frameNumber) noexcept;
     SamplerHandle cubeSampler_{};
+    /// Sampler da textura trocada (repete, mips lineares, anisotropia).
+    SamplerHandle swapSampler_{};
     void release_environment() noexcept;
     /// Conjuntos por HDRI: um upload por asset, compartilhado pelos objetos.
     /// Teto pequeno — cada conjunto é um cubemap com mips.
@@ -625,6 +644,9 @@ private:
     usize envSetFrame_ = 0;
     SceneStats stats_{};
     bool incomplete_ = false;
+    const char* incompleteFile_ = nullptr;
+    u32 incompleteLine_ = 0;
+    void mark_incomplete(const char* file, u32 line) noexcept { incomplete_ = true; incompleteFile_ = file; incompleteLine_ = line; }
 };
 
 } // namespace aurea::scene3d

@@ -691,3 +691,66 @@ AUREA_TEST(ImageExport, SequenceZipAndGifCarryEveryRenderedFrame) {
 }
 
 #endif // AUREA_TEST_VULKAN
+
+// =============================================================================
+// MÍDIA DO SELETOR (content://) NO EXPORT DE IMAGEM
+//
+// O vídeo resolvia a fonte pela plataforma antes de congelar o projeto; o GIF,
+// o PNG e a sequência não, e `add_path` recusa qualquer coisa que não seja um
+// arquivo — o export recusava QUALQUER projeto com mídia do seletor antes de
+// desenhar um quadro. A cópia com a mídia embutida funcionava porque o arquivo
+// já estava no app.
+// =============================================================================
+namespace {
+/// A cópia que a plataforma faz (Android: `preserve_export_asset` → Documents).
+std::string g_pickerCopy;
+Result<std::string> resolve_picker_source(const std::string& source, const std::string&,
+                                          const std::atomic<bool>*) noexcept {
+    if (source.rfind("content://", 0) != 0) return source;
+    return g_pickerCopy;   // vazio: nenhum arquivo, e o add_path recusa
+}
+} // namespace
+
+AUREA_TEST(ImageExport, PickerContentUriIsResolvedBeforeTheFreeze) {
+    if (!image_gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    const std::string copy = tmp_path("seletor-fonte.png");
+    {
+        const std::vector<u8> px = test_image(16, 9, false);
+        std::vector<u8> png;
+        AUREA_CHECK(encode_png(px.data(), 16, 9, false, png).ok());
+        std::FILE* f = std::fopen(copy.c_str(), "wb");
+        AUREA_CHECK(f != nullptr);
+        if (!f) return;
+        const bool wrote = std::fwrite(png.data(), 1, png.size(), f) == png.size();
+        std::fclose(f);
+        AUREA_CHECK(wrote);
+        if (!wrote) return;
+    }
+    g_pickerCopy = copy;
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.enableValidation = false;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    ec.exportAssetPathResolver = &resolve_picker_source;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(64, 36, 30.0, nullptr).ok());
+    std::vector<u8> px(16 * 9 * 4, 200);
+    for (usize i = 3; i < px.size(); i += 4) px[i] = 255;
+    AUREA_CHECK(e.import_image(px.data(), 16, 9, "seletor", "content://media/external/images/1").ok());
+
+    ImageExportSettings s;
+    s.format = ImageExportFormat::Png;
+    const std::string out = tmp_path("seletor.png");
+    const Status started = e.start_image_export(s, out.c_str());
+    AUREA_CHECK(started.ok());
+    if (started.ok()) {
+        AUREA_CHECK(wait_export(e));
+        AUREA_CHECK(e.export_progress().result == Errc::Ok);
+    }
+    std::error_code ec2;
+    std::filesystem::remove(out, ec2);
+    std::filesystem::remove(copy, ec2);
+    g_pickerCopy.clear();
+}

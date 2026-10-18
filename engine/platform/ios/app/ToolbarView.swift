@@ -148,6 +148,8 @@ struct TopBarView: View {
             searchButton()
             linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44)
             }
+            ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada"), size: 19, width: 44) { duplicateSelection() }
+                .accessibilityIdentifier("layer.duplicate")
             ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 48) { removeSelection() }
                 .disabled(row.locked).accessibilityIdentifier("layer.delete")
             Button { open(.layerMenu) } label: { MaterialGlyph("filled.MoreHoriz", size: 22, color: AureaColors.text).frame(width: 44, height: 44) }
@@ -166,16 +168,33 @@ struct TopBarView: View {
             pickLayerButton(tint: AureaColors.text, width: 40)
             searchButton()
             linkMenuButton(tint: AureaColors.text)
-            ShellBarButton(glyph: ShellGlyph.FolderBadgePlus, description: AureaText.t("editor_agrupar"), size: 19, tint: AureaColors.text) { model.groupSelection() }
+            Menu {
+                Button(AureaText.t("editor_agrupar")) { model.groupSelection() }
+                Button(AureaText.t("editor_group_mask")) { model.groupAndMaskSelection() }
+                    .accessibilityHint(AureaText.t("editor_group_mask_hint"))
+                Button(AureaText.t("editor_group_exclude")) { model.groupAndMaskSelection(exclude: true) }
+                    .accessibilityHint(AureaText.t("editor_group_exclude_hint"))
+            } label: {
+                CupertinoGlyph.text(ShellGlyph.FolderBadgePlus, size: 19, color: AureaColors.text)
+                    .frame(width: StageDim.barButtonHeight, height: StageDim.barButtonHeight).contentShape(Rectangle())
+            }.accessibilityLabel(AureaText.t("editor_agrupar"))
+                .accessibilityIdentifier("selection.group.menu")
             if model.layers.contains(where: { model.selection.contains($0.id) && $0.kind == 12 }) {
                 ShellBarButton(glyph: ShellGlyph.SquareSplit2x2, description: AureaText.t("editor_desagrupar"), size: 19, tint: AureaColors.text) {
                     for row in model.layers where model.selection.contains(row.id) && row.kind == 12 { model.ungroup(row.id) }
                 }
             }
+            ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada"), size: 19, tint: AureaColors.text) { duplicateSelection() }
             ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_selecao"), size: 19, tint: AureaColors.text) { removeSelection() }
             ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
                            description: AureaText.t(model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir"), size: 20, tint: AureaColors.text) { model.playPause() }
         }.padding(.trailing, 2)
+    }
+    /// Duplicar à vista (pedido da beta): a(s) camada(s) escolhida(s), um desfazer.
+    private func duplicateSelection() {
+        let ids = model.layers.filter { model.selection.contains($0.id) }.map { NSNumber(value: $0.id) }
+        guard !ids.isEmpty else { return }
+        model.engine.duplicateLayers(ids); model.refreshModel(force: true)
     }
     private func pickLayerButton(tint: Color, width: CGFloat) -> some View {
         ShellBarButton(glyph: CupertinoGlyph.RectangleStack, description: AureaText.t("editor_selecionar_uma_camada"), size: 19, width: width, tint: tint) { open(.searchLayers) }
@@ -285,6 +304,8 @@ struct TransportView: View {
             .lineLimit(1).minimumScaleFactor(0.7)
             .frame(width: max(1, side - 6), height: 26)
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(AureaColors.border, lineWidth: 1))
+            // "Otimizar vídeos pesados": o fio de progresso da versão leve em geração.
+            .modifier(ProxyChipBar())
             .frame(width: side, height: 48)
             .overlay { GeometryReader { bounds in
                 Color.clear.contentShape(Rectangle())
@@ -292,6 +313,7 @@ struct TransportView: View {
                     .onLongPressGesture(minimumDuration: 0.5) { model.toggleHud() }
             }}
             .accessibilityLabel(AureaText.t("editor_resolucao_previa_segure_diagnostico"))
+            .modifier(ProxyChipAccessibility())
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("transport.resolution")
     }
@@ -323,14 +345,7 @@ struct TransportView: View {
             .accessibilityIdentifier("transport.next")
     }
     private func playButton(_ side: CGFloat) -> some View {
-        ZStack(alignment: .bottomTrailing) {
-            ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
-                           description: AureaText.t(model.looping ? "editor_repeticao_ligada_segure_desligar" : (model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir_segure_repetir")),
-                           size: 22, width: side, height: 48, tint: model.looping ? AureaColors.accent : AureaColors.text,
-                           onLongPress: { model.setLooping(!model.looping) }, action: { model.playPause() })
-                .accessibilityIdentifier("transport.play")
-            if model.looping { CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent).padding(.trailing, 6).padding(.bottom, 7).allowsHitTesting(false) }
-        }
+        PreRenderPlayControl(side: side)
     }
     /// Marcar o instante atual continua acessível durante a reprodução.
     private func markerButton(_ side: CGFloat) -> some View {
@@ -340,6 +355,92 @@ struct TransportView: View {
                               tint: marked ? AureaColors.accent : AureaColors.text,
                               onLongPress: { model.editMarkerAtPlayhead() }, action: { model.toggleMarkerAt(model.status.playhead) })
             .accessibilityIdentifier("transport.marker")
+    }
+}
+
+private struct PreRenderPlayControl: View {
+    @EnvironmentObject private var model: AureaModel
+    let side: CGFloat
+    @State private var pressed = false
+    @State private var began: Double?
+    @State private var pressID: UUID?
+    @State private var hold: DispatchWorkItem?
+    @State private var armed = false
+    @State private var cancelled = false
+    @State private var fired = false
+
+    private var progressText: String {
+        if model.preRenderPreparing { return AureaText.t("prerender_preparing") }
+        if model.preRenderProgress.running { return AureaText.t("prerender_progress", Int((model.preRenderProgress.fraction * 100).rounded())) }
+        if model.preRenderProgress.complete { return AureaText.t("prerender_ready") }
+        return ""
+    }
+
+    var body: some View {
+        Button { model.playPause() } label: {
+            ZStack(alignment: .bottomTrailing) {
+                ZStack {
+                    CupertinoGlyph.text(model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
+                        size: 22, color: model.looping ? AureaColors.accent : AureaColors.text)
+                    if model.preRenderPreparing || model.preRenderProgress.running || model.preRenderProgress.complete {
+                        Circle().trim(from: 0, to: CGFloat(model.preRenderPreparing ? 0.08 : model.preRenderProgress.fraction))
+                            .stroke(AureaColors.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .frame(width: 30, height: 30).rotationEffect(.degrees(-90)).allowsHitTesting(false)
+                    }
+                }.frame(width: side, height: 48).contentShape(Rectangle())
+                if model.looping {
+                    CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent)
+                        .padding(.trailing, 6).padding(.bottom, 7).allowsHitTesting(false)
+                }
+            }.opacity(pressed ? 0.65 : 1)
+        }.buttonStyle(.plain)
+            .highPriorityGesture(DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if began == nil {
+                        let id = UUID()
+                        began = ProcessInfo.processInfo.systemUptime; pressID = id
+                        pressed = true; armed = false; cancelled = false; fired = false
+                        let work = DispatchWorkItem {
+                            guard pressID == id, !cancelled else { return }
+                            armed = true
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }
+                        hold = work
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+                    }
+                    if !armed, !cancelled, let began, ProcessInfo.processInfo.systemUptime - began >= 0.5 {
+                        armed = true; hold?.cancel()
+                    }
+                    let delta = value.translation
+                    if !armed && hypot(delta.width, delta.height) > 10 { cancelled = true; hold?.cancel() }
+                    if armed && abs(delta.height) >= 24 && abs(delta.height) > abs(delta.width) { cancelled = true }
+                    if armed && !cancelled && !fired && abs(delta.width) >= 24 && abs(delta.width) > abs(delta.height) {
+                        fired = true
+                        model.startPreRender(delta.width > 0 ? 1 : -1)
+                    }
+                }
+                .onEnded { _ in
+                    if !cancelled && !fired {
+                        if armed || began.map({ ProcessInfo.processInfo.systemUptime - $0 >= 0.5 }) == true { model.setLooping(!model.looping) }
+                        else { model.playPause() }
+                    }
+                    resetPress()
+                })
+            .accessibilityIdentifier("transport.play")
+            .accessibilityLabel(AureaText.t(model.looping ? "editor_repeticao_ligada_segure_desligar" :
+                (model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir_segure_repetir")))
+            .accessibilityHint(AureaText.t("prerender_gesture_hint"))
+            .accessibilityValue(progressText)
+            .accessibilityAction(named: Text(AureaText.t("prerender_forward"))) { model.startPreRender(1) }
+            .accessibilityAction(named: Text(AureaText.t("prerender_backward"))) { model.startPreRender(-1) }
+            .accessibilityAction(named: Text(AureaText.t("prerender_cancel"))) { model.cancelPreRender() }
+            .accessibilityAction(named: Text(AureaText.t("editor_reproducao_loop"))) { model.setLooping(!model.looping) }
+            .onDisappear { resetPress() }
+    }
+
+    private func resetPress() {
+        hold?.cancel(); hold = nil; pressID = nil; began = nil
+        pressed = false; armed = false; cancelled = false; fired = false
     }
 }
 
@@ -585,6 +686,8 @@ private struct ShellMenuRow: View {
     }
     private var resolutionPopup: some View {
         VStack(spacing: 0) {
+            // Informativo ("Otimizando 42%"), só enquanto a versão leve é gerada.
+            ProxyMenuStatus()
             // Teste de reprodução crua (texto fixo, sem tradução): só no build
             // Debug — é o que a CI de gestos usa. Na App Store/Play não aparece.
             #if DEBUG
@@ -780,6 +883,8 @@ private struct ShellMenuRow: View {
         ShellMenuRow(CupertinoGlyph.SuitDiamond, "editor_keyframes_todas_camadas", checked: model.showAllKeyframes, detail: "editor_keyframes_todas_camadas_detalhe") { act { model.showAllKeyframes.toggle() } }
         ShellMenuRow(CupertinoGlyph.Link, "editor_timeline_magnetica_modo_edicao", checked: model.editMode, detail: "editor_aparar_empurra_camadas_seguintes_excluir_fecha") { act { model.toggleEditMode() } }
         ShellMenuRow(ShellGlyph.ScissorsAlt, "editor_remover_espacos_vazios") { act { model.removeGaps() } }
+        // Interface do projeto (0.2.5): a Composição é esta; a Edição é a de montagem.
+        ShellMenuRow(CupertinoGlyph.RectangleStack, "ui_mode_switch_to_edit", detail: "ui_mode_edit_hint") { act { model.setUiMode(AureaUiMode.edit) } }
         ShellMenuSection("editor_marcas_ritmo")
         // Editar a marca do cabeçote (o segurar do antigo botão da marca); tocar a
         // régua em cima de uma marca também abre o editor dela.
@@ -787,6 +892,8 @@ private struct ShellMenuRow: View {
         ShellMenuRow(ShellGlyph.BookmarkSolid, "editor_ir_proxima_marca", enabled: !model.markerFrames.isEmpty) { act { model.seekToNextMarker() } }
         ShellMenuSection("editor_mais")
         ShellMenuRow(CupertinoGlyph.RectangleStack, "editor_agrupar_camadas_escolhidas", enabled: !model.selection.isEmpty) { act { model.groupSelection() } }
+        ShellMenuRow(CupertinoGlyph.Crop, "editor_group_mask", enabled: model.selection.count >= 2, detail: "editor_group_mask_hint") { act { model.groupAndMaskSelection() } }
+        ShellMenuRow(CupertinoGlyph.CircleLefthalfFill, "editor_group_exclude", enabled: model.selection.count >= 2, detail: "editor_group_exclude_hint") { act { model.groupAndMaskSelection(exclude: true) } }
         ShellMenuRow(CupertinoGlyph.Speedometer, "ios_perf_test_a11y") { act { shell.performanceTest = true } }
     }
     /// A seção "Projeto" do menu da engrenagem (o que saiu da barra do topo e do transporte).

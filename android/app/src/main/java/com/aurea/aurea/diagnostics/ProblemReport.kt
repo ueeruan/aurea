@@ -72,9 +72,20 @@ object ProblemReport {
         return (prefix + "[export] " + lastExport).take(STEPS_MAX)
     }
 
+    fun stepsWithExportDiagnostics(steps: String, lastExport: String?, diagnostic: String?): String {
+        if (diagnostic.isNullOrBlank()) return stepsWithExport(steps, lastExport)
+        val evidence = "[export-diagnostic] " + diagnostic.take(3000)
+        val failure = if (lastExport.isNullOrBlank()) "" else "[export] " + lastExport.take(600) + "\n"
+        val room = (STEPS_MAX - evidence.length - failure.length - 2).coerceAtLeast(0)
+        val own = steps.trim().take(room)
+        return ((if (own.isEmpty()) "" else own + "\n\n") + failure + evidence).take(STEPS_MAX)
+    }
+
     /** Envia (IO). A sessão, quando há, dá ao relato o e-mail da conta. */
     fun send(context: Context, sessao: SessaoGuardada?, whatDid: String, whatHappened: String, steps: String): Result {
-        val corpo = body(CrashReporter.installationId(context), whatDid, whatHappened, stepsWithExport(steps, lastExport(context)))
+        val diagnostic = ExportDiagnosticReport.last(context)
+        val corpo = body(CrashReporter.installationId(context), whatDid, whatHappened,
+            stepsWithExportDiagnostics(steps, lastExport(context), diagnostic))
         if (sessao != null) corpo.put("email", sessao.email)
         val r = ContaApi.relatar(corpo, sessao?.token)
         return when {

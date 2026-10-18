@@ -49,6 +49,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.LocalContext
@@ -76,6 +79,8 @@ internal data class NewProjectSpec(
     val background: FloatArray = floatArrayOf(0f, 0f, 0f),
     /** "Transparente": sem fundo (o motor recebe alfa 0; PNG e GIF saem com alfa). */
     val transparent: Boolean = false,
+    /** Interface do projeto (0.2.5): 0 = Composição (padrão), 1 = Edição. */
+    val uiMode: Int = com.aurea.aurea.state.UI_MODE_COMPOSITION,
 )
 
 /** Segmento "Personalizado…" da fileira de fps (nunca é uma taxa de verdade). */
@@ -119,6 +124,9 @@ internal fun NewProjectSheet(
     var name by rememberSaveable { mutableStateOf("") }
     var freeWidth by rememberSaveable { mutableStateOf("1080") }
     var freeHeight by rememberSaveable { mutableStateOf("1350") }
+    // A interface NÃO lembra a última escolha: toda folha nova abre na
+    // Composição, a principal (pedido de 2026-10-18).
+    var uiMode by remember { mutableIntStateOf(com.aurea.aurea.state.UI_MODE_COMPOSITION) }
 
     val aspect = ProjectPresets.aspectByKey(aspectKey)
     // Medida livre: lida com clamp [64, 7680]; inválido → o padrão 1080 × 1350.
@@ -133,7 +141,7 @@ internal fun NewProjectSheet(
     fun create() {
         val title = name.trim().ifEmpty { suggestedName.ifEmpty { untitled } }
         onDismiss()
-        onCreate(NewProjectSpec(frame.width, frame.height, fps, title, background.copyOf(), transparent))
+        onCreate(NewProjectSpec(frame.width, frame.height, fps, title, background.copyOf(), transparent, uiMode))
     }
 
     AureaModalSheet(onDismiss = onDismiss, topRadius = AureaDims.RadiusXl) {
@@ -149,6 +157,10 @@ internal fun NewProjectSheet(
                 Text("${frame.width} × ${frame.height} · ${formatFps(fps.toFloat())} fps", style = AureaType.SheetSpec)
             }
             Spacer(Modifier.height(16.dp))
+            CapsLabel(stringResource(R.string.ui_mode_label))
+            Spacer(Modifier.height(8.dp))
+            UiModeChoice(uiMode) { uiMode = it }
+            Spacer(Modifier.height(18.dp))
             AspectPreviewFrame(
                 ratio = ratioOnScreen,
                 label = if (free) ltrPlain("$fw × $fh") else aspect.label,
@@ -449,4 +461,50 @@ internal fun SheetTextField(
             }
         },
     )
+}
+
+/**
+ * A INTERFACE do projeto (0.2.5), dois cartões lado a lado: Composição (a
+ * principal, marcada por padrão, com o selo "Padrão") e Edição (trilha
+ * principal com os cortes em sequência). Dá para trocar depois, no projeto.
+ */
+@Composable
+internal fun UiModeChoice(selected: Int, onSelect: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        listOf(
+            Triple(com.aurea.aurea.state.UI_MODE_COMPOSITION, R.string.ui_mode_composition, R.string.ui_mode_composition_hint),
+            Triple(com.aurea.aurea.state.UI_MODE_EDIT, R.string.ui_mode_edit, R.string.ui_mode_edit_hint),
+        ).forEach { (mode, title, hint) ->
+            val active = mode == selected
+            val name = stringResource(title)
+            val detail = stringResource(hint)
+            Column(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (active) AureaColors.AccentDim else AureaColors.SurfaceHigh)
+                    .border(if (active) 2.dp else 1.dp, if (active) AureaColors.Accent else AureaColors.Hairline, RoundedCornerShape(14.dp))
+                    .semantics(mergeDescendants = true) {
+                        role = androidx.compose.ui.semantics.Role.RadioButton
+                        this.selected = active
+                        contentDescription = "$name. $detail"
+                    }
+                    .testTag(if (mode == com.aurea.aurea.state.UI_MODE_EDIT) "newProject.uiMode.edit" else "newProject.uiMode.composition")
+                    .pressHighlight { onSelect(mode) }
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(name, style = AureaType.of(15f, FontWeight.W700, color = if (active) AureaColors.Accent else AureaColors.Text),
+                        modifier = Modifier.weight(1f, fill = false))
+                    if (mode == com.aurea.aurea.state.UI_MODE_COMPOSITION) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.ui_mode_default_badge), style = AureaType.of(10.5f, FontWeight.W700, color = AureaColors.Background),
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(AureaColors.Accent).padding(horizontal = 5.dp, vertical = 1.dp))
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(detail, style = AureaType.of(12f, color = AureaColors.Muted, lineHeight = 1.3f))
+            }
+        }
+    }
 }

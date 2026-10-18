@@ -130,8 +130,8 @@ internal class TimelinePainter(
         platformStyle = PlatformTextStyle(includeFontPadding = false),
     )
     private val digitStyle = TextStyle(
-        color = if (m.referenceTrial) AureaColors.OnAccent else Color.White,
-        fontSize = (if (m.referenceTrial) 10 else 16).sp,
+        color = Color.White,
+        fontSize = (if (m.referenceTrial) 14 else 16).sp,
         fontWeight = FontWeight.W700,
         letterSpacing = 0.3.sp,
         fontFeatureSettings = "tnum",
@@ -202,7 +202,7 @@ internal class TimelinePainter(
         drawTimecode(cx, store.playhead, fps)
         if (thumbs.starved) c.requestRedraw()
         // Uma origem temporal para clipes, losangos e fio, inclusive na seleção.
-        val color = if (m.referenceTrial) AureaColors.Accent else AureaColors.Playhead
+        val color = AureaColors.Playhead
         // Fio de 1 dp interrompido apenas na faixa do relógio.
         drawRect(color, Offset(playheadX - m.playhead / 2f, m.playheadTop), Size(m.playhead, h - m.playheadTop))
         drawRect(color, Offset(playheadX - m.playhead / 2f, 0f), Size(m.playhead, m.rulerTicks))
@@ -270,7 +270,7 @@ internal class TimelinePainter(
             var offRight = false
             for (s in segs) {
                 val x0 = TimeAxis.xOf(s.start.toDouble(), view, ppf, cx)
-                val x1 = max(TimeAxis.xOf(s.end.toDouble(), view, ppf, cx), x0 + m.barMinWidth)
+                val x1 = TimeAxis.xOf(s.end.toDouble(), view, ppf, cx)
                 when {
                     x1 >= -m.barRadius && x0 <= w + m.barRadius -> onScreen = true
                     x0 > w -> offRight = true
@@ -306,7 +306,7 @@ internal class TimelinePainter(
             // aberta se as trilhas abertas são de um trecho dela.
             var inBatch = false
             if (multi) for (s in r.segments) if (c.isSelected(s.id)) inBatch = true
-            drawGutter(c, r, rowTop, inBatch, c.isExpanded(r), fps)
+            drawGutter(c, r, rowTop + m.barTop, inBatch, c.isExpanded(r), fps)
         }
 
         // Trecho no ar (arrasto vertical de UM trecho): o traço de inserção entre
@@ -321,7 +321,7 @@ internal class TimelinePainter(
             for (r in rows) { lifted = r.segment(st.liftId); if (lifted != null) break }
             if (lifted != null) {
                 val x0 = TimeAxis.xOf(lifted.start.toDouble(), view, ppf, cx)
-                val x1 = max(TimeAxis.xOf(lifted.end.toDouble(), view, ppf, cx), x0 + m.barMinWidth)
+                val x1 = TimeAxis.xOf(lifted.end.toDouble(), view, ppf, cx)
                 val hh = c.rowHeight(lifted)
                 drawRect(AureaColors.Accent.copy(alpha = 0.22f), Offset(x0, st.liftTop), Size(x1 - x0, hh))
                 drawSegment(c, lifted, st.liftTop, w, view, ppf, cx, fps, compact, selCount, multi, cache, generation, arrows = false)
@@ -366,7 +366,8 @@ internal class TimelinePainter(
         // Seleção de keyframes da timeline: quais instantes desta linha têm keyframe escolhido.
         val picked = if (keySel != null && keySel.on(r.id).isNotEmpty()) pickedInstants(r, keySel) else null
         val keysShown = KeyframeVisibility.visible(c.store.showAllKeyframes, r.track != null, selected)
-        drawRow(r, top, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation, picked, keysShown, arrows)
+        val keysLocked = !KeyframeVisibility.editable(selected, c.store.keySelectMode, r.track != null)
+        drawRow(r, top + if (r.track == null) m.barTop else 0f, w, view, ppf, cx, fps, compact, selected, multi, handles, selFrame, dragFrame, cache, generation, picked, keysShown, arrows, keysLocked)
     }
 
     /** Seta na borda: o clipe está para aquele lado (linha vazia parecia camada quebrada). */
@@ -390,6 +391,7 @@ internal class TimelinePainter(
         picked: BooleanArray?,
         keysShown: Boolean = true,
         arrows: Boolean = true,
+        keysLocked: Boolean = false,
     ) {
         if (r.track != null) {
             // Trilha BAIXA (16 dp): nome e losangos na mesma faixa, centrados;
@@ -403,7 +405,7 @@ internal class TimelinePainter(
                 val left = m.laneLabelLeft
                 drawText(label, alpha = if (r.track.group) 0.9f else 0.6f, topLeft = Offset(left, cy - label.size.height / 2f))
             }
-            drawDiamonds(r, cy - m.diamondCyNormal, w, view, ppf, cx, false, selFrame, dragFrame, fps, picked)
+            lockedKeys(keysLocked, top, laneH, w) { drawDiamonds(r, cy - m.diamondCyNormal, w, view, ppf, cx, false, selFrame, dragFrame, fps, picked) }
             return
         }
         val captionTrack = waveStore?.captionTracks?.firstOrNull { it.layer == r.id }
@@ -424,7 +426,7 @@ internal class TimelinePainter(
             return
         }
         val x0 = TimeAxis.xOf(r.start.toDouble(), view, ppf, cx)
-        val x1 = max(TimeAxis.xOf(r.end.toDouble(), view, ppf, cx), x0 + m.barMinWidth)
+        val x1 = TimeAxis.xOf(r.end.toDouble(), view, ppf, cx)
         val barW = x1 - x0
         val tone = AureaTimeline.tone(r.type)
         // Camada oculta: os clipes da fileira a 40 %.
@@ -442,8 +444,8 @@ internal class TimelinePainter(
             barClip.reset()
             // Fileira compacta, clipe escolhido: ponta esquerda bem redonda (raio 14).
             if (capped) {
-                val l = m.capRadius
-                val rr = m.barRadius
+                val l = ClipGeometry.cornerRadius(right - left, m.bar, m.capRadius)
+                val rr = ClipGeometry.cornerRadius(right - left, m.bar, m.barRadius)
                 capRadii[0] = l; capRadii[1] = l; capRadii[2] = rr; capRadii[3] = rr
                 capRadii[4] = rr; capRadii[5] = rr; capRadii[6] = l; capRadii[7] = l
                 barClip.addRoundRect(rectF, capRadii, android.graphics.Path.Direction.CW)
@@ -488,35 +490,52 @@ internal class TimelinePainter(
             // Setas ‹ › do compacto só no trecho escolhido (os outros da linha também aparecem).
             clipRect(bodyLeft, top, right, bottom) { drawBarContent(r, top, x0, x1, w, capped, tone, alpha) }
 
-            if (capped) {
-                // Fileira compacta: contorno branco de 1,5 com a mesma ponta redonda.
-                val s = m.capStroke / 2f
-                capOutline.reset()
-                capOutline.addRoundRect(
-                    androidx.compose.ui.geometry.RoundRect(
-                        left + s, top + s, right - s, bottom - s,
-                        topLeftCornerRadius = CornerRadius(m.capRadius - s),
-                        topRightCornerRadius = CornerRadius(m.barRadius - s),
-                        bottomRightCornerRadius = CornerRadius(m.barRadius - s),
-                        bottomLeftCornerRadius = CornerRadius(m.capRadius - s),
-                    ),
-                )
-                drawPath(capOutline, AureaTimeline.ClipSelected, style = capStroke)
-            } else if (selected) {
-                // Escolhido: contorno branco de 2 dp (no lote também).
-                val s = m.selStroke
-                drawRoundRect(
-                    AureaTimeline.ClipSelected,
-                    Offset(left + s / 2f, top + s / 2f),
-                    Size(right - left - s, m.bar - s),
-                    CornerRadius(m.barRadius - s / 2f),
-                    style = if (multi) multiStroke else selStroke,
-                )
+            // Subpixel bars must not gain duration from centered strokes or
+            // corner paths. Only the separate trim controls may be external.
+            clipRect(left, top, right, bottom) {
+                if (capped) {
+                    val stroke = ClipGeometry.strokeWidth(right - left, m.bar, m.capStroke)
+                    if (right - left <= stroke) {
+                        drawRect(AureaTimeline.ClipSelected, Offset(left, top), Size(right - left, m.bar))
+                    } else {
+                        val s = stroke / 2f
+                        val innerWidth = right - left - stroke
+                        val innerHeight = m.bar - stroke
+                        capOutline.reset()
+                        capOutline.addRoundRect(
+                            androidx.compose.ui.geometry.RoundRect(
+                                left + s, top + s, right - s, bottom - s,
+                                topLeftCornerRadius = CornerRadius(ClipGeometry.cornerRadius(innerWidth, innerHeight, m.capRadius - s)),
+                                topRightCornerRadius = CornerRadius(ClipGeometry.cornerRadius(innerWidth, innerHeight, m.barRadius - s)),
+                                bottomRightCornerRadius = CornerRadius(ClipGeometry.cornerRadius(innerWidth, innerHeight, m.barRadius - s)),
+                                bottomLeftCornerRadius = CornerRadius(ClipGeometry.cornerRadius(innerWidth, innerHeight, m.capRadius - s)),
+                            ),
+                        )
+                        drawPath(capOutline, AureaTimeline.ClipSelected, style = if (stroke == m.capStroke) capStroke else Stroke(stroke))
+                    }
+                } else if (selected) {
+                    val requested = if (multi) m.multiStroke else m.selStroke
+                    val stroke = ClipGeometry.strokeWidth(right - left, m.bar, requested)
+                    if (right - left <= stroke) {
+                        drawRect(AureaTimeline.ClipSelected, Offset(left, top), Size(right - left, m.bar))
+                    } else {
+                        drawRoundRect(
+                            AureaTimeline.ClipSelected,
+                            Offset(left + stroke / 2f, top + stroke / 2f),
+                            Size(right - left - stroke, m.bar - stroke),
+                            CornerRadius(ClipGeometry.cornerRadius(right - left - stroke, m.bar - stroke, m.barRadius - stroke / 2f)),
+                            style = if (multi) multiStroke else selStroke,
+                        )
+                    }
+                }
             }
             if (handles && r.track == null) {
                 // A tampa "‹" já é a alça branca da ponta esquerda (o dedo ali também apara).
-                if (!capped && RowHit.startHandleVisible(m, x0)) drawTrimHandle(x0 - m.trimInsetStart, top, start = true)
-                if (RowHit.endHandleVisible(x1, w)) drawTrimHandle(x1 - m.trimInsetEnd, top, start = false)
+                clipRect(left = m.headerColumn, right = w) {
+                    val handleWidth = ClipGeometry.trimPaintWidth(barW, m.trimWidth)
+                    if (!capped && RowHit.startHandleVisible(m, x0)) drawTrimHandle(x0 - handleWidth, top, start = true, width = handleWidth)
+                    if (RowHit.endHandleVisible(x1, w)) drawTrimHandle(x1 - ClipGeometry.trimPaintEndInset(barW, m.trimWidth), top, start = false, width = handleWidth)
+                }
             }
         } else if (r.track == null && arrows) {
             // Clipe fora da janela: uma seta na borda diz para que lado ele
@@ -526,8 +545,17 @@ internal class TimelinePainter(
         }
         // "Keyframes: só as escolhidas" (menu da timeline): as outras linhas ficam limpas.
         if (keysShown) {
-            drawDiamonds(r, top, w, view, ppf, cx, compact, selFrame, dragFrame, fps, picked)
+            lockedKeys(keysLocked, top, m.row, w) { drawDiamonds(r, top, w, view, ppf, cx, compact, selFrame, dragFrame, fps, picked) }
         }
+    }
+
+    /** Losangos só de referência (camada não selecionada): a mesma figura, esmaecida numa camada de desenho. */
+    private inline fun DrawScope.lockedKeys(locked: Boolean, top: Float, height: Float, w: Float, block: DrawScope.() -> Unit) {
+        if (!locked) { block(); return }
+        val paint = androidx.compose.ui.graphics.Paint().apply { alpha = KeyframeVisibility.LOCKED_ALPHA }
+        val pad = m.diamond * 2f
+        drawContext.canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, top - pad, w, top + height + pad), paint)
+        try { block() } finally { drawContext.canvas.restore() }
     }
 
     /**
@@ -600,23 +628,24 @@ internal class TimelinePainter(
         drawText(layout, alpha = alpha, topLeft = Offset(x, cy - layout.size.height / 2f))
     }
 
-    /** Alça de trim da A.01: 16 × 32 branca DENTRO da ponta, risco central escuro. */
-    private fun DrawScope.drawTrimHandle(left: Float, top: Float, start: Boolean) {
+    /** Trim control paint can shrink; the temporal edge and padded hit target stay fixed. */
+    private fun DrawScope.drawTrimHandle(left: Float, top: Float, start: Boolean, width: Float = m.trimWidth) {
+        if (width <= 0f) return
         if (m.referenceTrial) {
-            drawRoundRect(AureaTimeline.ClipSelected, Offset(left, top), Size(m.trimWidth, m.bar), CornerRadius(m.trimRadius))
-            drawGlyph(if (start) CupertinoGlyph.ChevronLeft else CupertinoGlyph.ChevronRight, 10f, Color.Black,
-                left + m.trimWidth / 2f, top + m.bar / 2f)
+            drawRoundRect(AureaTimeline.ClipSelected, Offset(left, top), Size(width, m.bar), CornerRadius(ClipGeometry.cornerRadius(width, m.bar, m.trimRadius)))
+            if (width >= 10f * m.density) drawGlyph(if (start) CupertinoGlyph.ChevronLeft else CupertinoGlyph.ChevronRight, 10f, Color.Black,
+                left + width / 2f, top + m.bar / 2f)
             return
         }
         drawRoundRect(
             AureaTimeline.ClipSelected,
             Offset(left, top + m.trimTop),
-            Size(m.trimWidth, m.bar - m.trimTop * 2f),
-            CornerRadius(m.trimRadius),
+            Size(width, m.bar - m.trimTop * 2f),
+            CornerRadius(ClipGeometry.cornerRadius(width, m.bar - m.trimTop * 2f, m.trimRadius)),
         )
-        drawRect(
+        if (width >= m.gripWidth * 2f) drawRect(
             GRIP,
-            Offset(left + (m.trimWidth - m.gripWidth) / 2f, top + (m.bar - m.gripHeight) / 2f),
+            Offset(left + (width - m.gripWidth) / 2f, top + (m.bar - m.gripHeight) / 2f),
             Size(m.gripWidth, m.gripHeight),
         )
     }
@@ -753,10 +782,12 @@ internal class TimelinePainter(
                 drawKeyPill(kx, TimeAxis.xOf(inst[j].toDouble(), view, ppf, cx), cy, if (inSelection) KEY_PICKED else KEY_OFF, inSelection)
                 // A faixa resume chaves densas, mas nunca substitui a posição
                 // temporal da chave no cabeçote, escolhida ou sendo arrastada.
-                val focus = intArrayOf(waveStore?.playhead ?: Snap.NONE, selFrame, dragFrame)
+                // Paint temporal boundaries first and the selected/dragged key
+                // last, so adjacent dense anchors cannot cover its diamond.
+                val focus = intArrayOf(r.start, r.end, waveStore?.playhead ?: Snap.NONE, selFrame, dragFrame)
                 for (f in focus.indices) {
                     val frame = focus[f]
-                    if ((0 until f).any { focus[it] == frame } || !Keyframes.groupHas(inst, i, j, frame)) continue
+                    if ((f + 1 until focus.size).any { focus[it] == frame } || !Keyframes.groupHas(inst, i, j, frame)) continue
                     val index = java.util.Arrays.binarySearch(inst, frame)
                     val keyX = TimeAxis.xOf(frame.toDouble(), view, ppf, cx)
                     val chosen = frame == selFrame
@@ -874,17 +905,6 @@ internal class TimelinePainter(
      */
     private fun DrawScope.drawGutter(c: TimelineController, r: RowModel, top: Float, inBatch: Boolean, expanded: Boolean, fps: Float) {
         val pillTop = top - m.pillInset
-        if (m.referenceTrial) {
-            val cy = top + m.bar / 2f
-            drawRect(AureaColors.EditorCanvas, Offset.Zero.copy(y = top), Size(m.headerColumn, m.bar))
-            drawGlyph(if (r.visible) CupertinoGlyph.Eye else CupertinoGlyph.EyeSlash, 14f,
-                if (inBatch || expanded) AureaColors.Accent else AureaColors.Text, m.gutterEyeCx, cy)
-            val right = size.width - 28f * m.density
-            drawRect(AureaColors.EditorCanvas, Offset(right, top), Size(28f * m.density, m.bar))
-            drawGlyph(CupertinoGlyph.LineHorizontal3, 14f, if (expanded) AureaColors.Accent else AureaColors.Muted,
-                size.width - 14f * m.density, cy)
-            return
-        }
         translate(0f, pillTop) {
             drawPath(pillPath, AureaColors.EditorRowPill)
             if (inBatch) drawPath(pillPath, AureaColors.Accent, style = glyphRing)
@@ -1066,11 +1086,8 @@ internal class TimelinePainter(
         }
         val colons = if (hourDigits > 0) 3 else 2
         val total = (hourDigits + 4 + ffDigits) * digitWidth + colons * colonWidth
-        val pillHeight = max(15f * m.density, digits[0]!!.size.height + 2f * m.density)
-        val top = if (m.referenceTrial) (pillHeight - digits[0]!!.size.height) / 2f else m.timecodeBaseline - digitBaseline
+        val top = m.timecodeBaseline - digitBaseline
         var x = cx - total / 2f
-        if (m.referenceTrial) drawRoundRect(AureaColors.Accent, Offset(x - 5f * m.density, 0f),
-            Size(total + 10f * m.density, pillHeight), CornerRadius(7f * m.density))
         if (hourDigits > 0) {
             x = drawNumber(tc[0], hourDigits, x, top)
             x = drawColon(x, top)
@@ -1080,7 +1097,7 @@ internal class TimelinePainter(
         x = drawNumber(tc[2], 2, x, top)
         x = drawColon(x, top)
         drawNumber(tc[3], ffDigits, x, top)
-        if (!m.referenceTrial) drawRect(Color.White, Offset(cx - total / 2f, m.underlineTop), Size(total, m.underlineHeight))
+        drawRect(Color.White, Offset(cx - total / 2f, m.underlineTop), Size(total, m.underlineHeight))
     }
 
     private fun DrawScope.drawNumber(value: Int, count: Int, x0: Float, top: Float): Float {

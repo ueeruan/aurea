@@ -240,13 +240,13 @@ enum ParamRowColors {
     }
 }
 
-/// Medidas da linha de parâmetro: `[rótulo 70×36] 6 [régua] 6 [valor 62×36]` em 40.
+/// Property controls keep readable numbers and 52pt touch targets.
 enum ParamRowDims {
-    static let row: CGFloat = 40
+    static let row: CGFloat = 56
     static let gap: CGFloat = 6
-    static let labelW: CGFloat = 70
-    static let labelH: CGFloat = 36
-    static let valueW: CGFloat = 62
+    static let labelW: CGFloat = 76
+    static let labelH: CGFloat = 52
+    static let valueW: CGFloat = 76
     static let radius: CGFloat = 6
 }
 
@@ -533,18 +533,18 @@ struct ParamRowLabel: View {
     let selected: Bool
     var keyframe: KeyframeLook = .none
     var expression: ExpressionLook = .none
+    var width: CGFloat = ParamRowDims.labelW
 
     var body: some View {
         Text(label)
-            .font(.aurea(size: FxParamRowMath.labelFontSize(label), weight: selected ? .bold : .regular))
+            .font(.aurea(size: 14, weight: selected ? .bold : .regular))
             .multilineTextAlignment(.center)
             .lineLimit(FxParamRowMath.labelMaxLines(label))
-            .minimumScaleFactor(0.7)   // palavra longa ("Profundidade") encolhe em vez de virar "Profundida…"
+            .minimumScaleFactor(0.86)
             .truncationMode(.tail)
             .foregroundStyle(selected ? AureaColors.accent : ParamRowColors.labelOffText)
-            .underline(true)
             .padding(.horizontal, 4)
-            .frame(width: ParamRowDims.labelW, height: ParamRowDims.labelH)
+            .frame(width: width, height: ParamRowDims.labelH)
             .background(selected ? ParamRowColors.labelOn : ParamRowColors.labelOff,
                         in: RoundedRectangle(cornerRadius: ParamRowDims.radius))
             .overlay(alignment: .topTrailing) {
@@ -596,9 +596,7 @@ struct PropertyLabelChip: View {
     }
 }
 
-/// A CAIXA DE VALOR da linha (redesenho 2026-09-29): 62 × 36, raio 6, #1B2333,
-/// número 13 pt alinhado à DIREITA com algarismos tabulares (não dança durante o
-/// arrasto); encolhe antes de vazar. Tocar abre o teclado.
+/// Precise numeric value: centered tabular digits, with typing on tap.
 struct ParamValueBox: View {
     private let text: String
     private let width: CGFloat
@@ -614,16 +612,15 @@ struct ParamValueBox: View {
 
     var body: some View {
         Text(text)
-            .font(.aurea(size: 13).monospacedDigit())
+            .font(.aurea(size: 16).monospacedDigit())
             .foregroundStyle(enabled ? AureaColors.text : AureaColors.muted)
             .lineLimit(1)
-            .minimumScaleFactor(0.62)
-            .multilineTextAlignment(.trailing)
-            .padding(.leading, 4)
-            .padding(.trailing, 8)
-            .frame(width: width, height: ParamRowDims.labelH, alignment: .trailing)
-            // Número em LTR e à direita da caixa em qualquer idioma (o sinal de
-            // menos não vai para o fim com o bidi do árabe).
+            .minimumScaleFactor(0.75)
+            .truncationMode(.tail)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 4)
+            .frame(width: width, height: ParamRowDims.labelH, alignment: .center)
+            // Signs and digits retain their order in right-to-left languages.
             .keepLtr()
             .background(ParamRowColors.valueBox, in: RoundedRectangle(cornerRadius: ParamRowDims.radius))
             .contentShape(Rectangle())
@@ -631,7 +628,154 @@ struct ParamValueBox: View {
     }
 }
 
-/// A LINHA DE PROPRIEDADE (texto): 40 = `[rótulo 70] 6 ... [valor 62]`.
+/// One vector uses one ruler. Axis selection changes the presentation; callers
+/// retain native property IDs, grouped keys and their own undo boundaries.
+struct VectorPropertyRow: View {
+    let label: String
+    let values: [Float]
+    let axes: [String]
+    let selectedAxis: Int
+    let unitsPerPoint: Float
+    let range: ClosedRange<Float>
+    let formattedValue: (Int, Float) -> String
+    var compactValue: ((Int, Float) -> String)? = nil
+    // Focused transform faces use the free panel area below the axis fields.
+    // Effects retain their compact rows by default.
+    var focusedPanel = false
+    var enabled = true
+    var selected = false
+    var look: KeyframeLook = .none
+    var expression: ExpressionLook = .none
+    var identifier = ""
+    var onMenu: (() -> Void)? = nil
+    let onSelect: (Int) -> Void
+    let onKeypad: (Int) -> Void
+    let onBegin: () -> Void
+    let onValue: (Int, Float) -> Void
+    let onEnd: () -> Void
+    @State private var dragging = false
+    @State private var live: Float = 0
+    @State private var dragAxis = 0
+    @State private var availableWidth: CGFloat = 320
+    private var count: Int { min(4, min(values.count, axes.count)) }
+    private var axis: Int { max(0, min(count - 1, dragging ? dragAxis : selectedAxis)) }
+    private var amount: Float { values.indices.contains(axis) ? values[axis] : 0 }
+    private func text(_ index: Int) -> String {
+        let amount = dragging && index == dragAxis ? live : values[index]
+        return compactValue?(index, amount) ?? formattedValue(index, amount)
+    }
+    private func widths(_ width: CGFloat) -> [CGFloat] {
+        let maximum = max(44, (width - CGFloat(max(0, count - 1)) * 4) / CGFloat(max(1, count)))
+        return (0..<count).map { min(text($0).count > 6 ? 64 : 44, maximum) }
+    }
+    private func inline(_ width: CGFloat) -> Bool { width >= 44 + widths(width).reduce(0, +) + CGFloat(max(0, count - 1)) * 4 + 84 }
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let boxWidths = widths(width)
+            let boxesWidth = boxWidths.reduce(0, +) + CGFloat(max(0, count - 1)) * 4
+            let focusedInline = width >= 44 + boxesWidth + ParamRowDims.gap
+            let focusedHeaderHeight = focusedInline ? ParamRowDims.labelH : ParamRowDims.labelH * 2 + 4
+            Group {
+            if focusedPanel {
+                VStack(spacing: 8) {
+                    if focusedInline {
+                        HStack(spacing: ParamRowDims.gap) {
+                            name(width: min(76, max(44, width - boxesWidth - ParamRowDims.gap)))
+                            Spacer(minLength: 0)
+                            boxes(boxWidths)
+                        }.frame(height: ParamRowDims.labelH)
+                    } else {
+                        VStack(spacing: 4) {
+                            name(width: 76).frame(maxWidth: .infinity, alignment: .leading)
+                            boxes(boxWidths).frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    }
+                    ruler(height: min(120, max(44, geometry.size.height - focusedHeaderHeight - 8)), expanded: true)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VStack(spacing: 4) {
+                    HStack(spacing: ParamRowDims.gap) {
+                        name(width: inline(width) ? min(76, max(44, width - boxesWidth - 84)) : 76)
+                        ruler(height: ParamRowDims.labelH)
+                        if inline(width) { boxes(boxWidths) }
+                    }
+                    if !inline(width) { boxes(boxWidths).frame(maxWidth: .infinity, alignment: .trailing) }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            }
+            .onAppear { availableWidth = width }
+            .onChange(of: width) { availableWidth = $0 }
+        }
+        .frame(minHeight: focusedPanel ? 180 : nil, maxHeight: focusedPanel ? .infinity : nil)
+        .frame(height: focusedPanel ? nil : inline(availableWidth) ? ParamRowDims.row : ParamRowDims.labelH * 2 + 4)
+        .accessibilityElement(children: .contain).accessibilityIdentifier(identifier)
+        .onDisappear(perform: finish)
+    }
+    private func ruler(height: CGFloat, expanded: Bool = false) -> some View {
+        TickRuler(value: { dragging ? live : amount }, unitsPerDp: unitsPerPoint,
+                  active: enabled && (selected || dragging), height: height, verticalPadding: 4)
+            .frame(maxWidth: .infinity, maxHeight: expanded ? .infinity : nil)
+            .frame(minWidth: 72, minHeight: expanded ? 44 : ParamRowDims.labelH)
+            .contentShape(Rectangle())
+            .valueDrag(enabled: enabled && count > 0, start: { amount }, unitsPerDp: { unitsPerPoint },
+                       min: range.lowerBound, max: range.upperBound,
+                       onStart: { dragAxis = axis; live = amount; dragging = true; onSelect(dragAxis); onBegin() },
+                       onValue: { live = $0; onValue(dragAxis, $0) }, onEnd: finish)
+            .accessibilityElement().accessibilityLabel(label + " · " + (axes.indices.contains(axis) ? axes[axis] : ""))
+            .accessibilityValue(formattedValue(axis, dragging ? live : amount))
+            .accessibilityAdjustableAction { direction in
+                let delta = unitsPerPoint * 10 * (direction == .increment ? 1 : direction == .decrement ? -1 : 0)
+                guard enabled, count > 0, delta != 0 else { return }
+                onSelect(axis); onBegin(); onValue(axis, (amount + delta).clamped(to: range)); onEnd()
+            }.accessibilityIdentifier(identifier + ".ruler")
+    }
+    private func boxes(_ widths: [CGFloat]) -> some View {
+        HStack(spacing: 4) {
+            ForEach(0..<count, id: \.self) { index in
+                Button {
+                    guard enabled, !dragging else { return }
+                    if selected && index == axis { onKeypad(index) } else { finish(); onSelect(index) }
+                } label: {
+                    VStack(spacing: 2) {
+                        Text(text(index)).font(.aurea(size: 16).monospacedDigit()).lineLimit(1)
+                            .minimumScaleFactor(0.75).truncationMode(.tail)
+                        Text(axes[index]).font(.aurea(size: 12, weight: .semibold))
+                    }.foregroundStyle(index == 0 ? AureaColors.keyframe : index == 2 ? AureaColors.accent : AureaColors.text)
+                        .frame(width: widths[index], height: ParamRowDims.labelH)
+                        .background(selected && index == axis ? ParamRowColors.labelOn : ParamRowColors.valueBox,
+                                    in: RoundedRectangle(cornerRadius: ParamRowDims.radius)).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .onLongPressGesture(minimumDuration: 0.5) { guard enabled, !dragging else { return }; onSelect(index); onKeypad(index) }
+                    .disabled(!enabled || dragging)
+                    .accessibilityLabel(label + " · " + axes[index]).accessibilityValue(formattedValue(index, values[index]))
+                    .accessibilityAddTraits(selected && index == axis ? .isSelected : [])
+                    .accessibilityIdentifier(identifier + ".axis.\(index)")
+            }
+        }.keepLtr()
+    }
+    private func name(width: CGFloat) -> some View {
+        ParamRowLabel(label: label, selected: selected, keyframe: look, expression: expression, width: width)
+            .contentShape(Rectangle()).onTapGesture { if enabled && !dragging { onSelect(axis) } }
+            .onLongPressGesture(minimumDuration: 0.5) { if enabled && !dragging { onMenu?() } }
+            .accessibilityLabel(label).accessibilityAddTraits(.isButton)
+    }
+    private func finish() { if dragging { dragging = false; onEnd() } }
+}
+
+/// Display only: keep complete values/units in precise input and accessibility.
+func compactPropertyNumber(_ value: Float, decimals: Int) -> String {
+    var text = numeroPtBr(value, casas: decimals)
+    if decimals > 0 && (text.contains(",") || text.contains(".")) {
+        while text.last == "0" { text.removeLast() }
+        if text.last == "," || text.last == "." { text.removeLast() }
+    }
+    return text
+}
+
+/// A LINHA DE PROPRIEDADE (texto): nome à esquerda e valor preciso à direita.
 ///
 /// O valor é TEXTO já formatado por quem chama (o motor manda o número); quem
 /// arrasta é a régua ao lado, com o `valueDrag`.
@@ -667,6 +811,7 @@ struct PropertyRow: View {
             ParamValueBox(value, enabled: enabled, onTap: onTap)
             if look != .none {
                 KeyframeDiamondIcon(look: look, enabled: enabled)
+                    .frame(width: 44, height: ParamRowDims.labelH)
                     .contentShape(Rectangle())
                     .aureaTappable(shrink: 1, enabled: enabled && onKeyframe != nil) { onKeyframe?() }
             }

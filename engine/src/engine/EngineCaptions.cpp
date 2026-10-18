@@ -113,7 +113,8 @@ bool Engine::edit_caption_track(u64 layerId, const std::string& command) noexcep
         // blocos, e o texto sairia repetido na tela).
         std::erase_if(it->words, [&](auto& word) { if (word.start >= frame) return true; word.end = std::min(word.end,frame); return false; });
         std::erase_if(right.words, [&](auto& word) { if (word.start < frame) return true; return false; });
-        auto join = [](auto& segment) { segment.text.clear(); for (const auto& word : segment.words) segment.text += (segment.text.empty() ? "" : " ") + word.text; };
+        // Sem espaço entre ideogramas nem antes de pontuação (o mesmo do agrupamento).
+        auto join = [](auto& segment) { segment.text.clear(); for (const auto& word : segment.words) segment.text = text::caption_join(segment.text, word.text); };
         join(*it); join(right); next.push_back(std::move(right));
     } else if (op == "merge") {
         if (selected.size() < 2) return false;
@@ -122,7 +123,7 @@ bool Engine::edit_caption_track(u64 layerId, const std::string& command) noexcep
         for (auto it = first+1; it != next.end(); ++it) {
             if (!selected.contains(it->id)) { gap = true; continue; }
             if (gap) return false;
-            first->end = it->end; first->text += " " + it->text;
+            first->end = it->end; first->text = text::caption_join(first->text, it->text);
             first->words.insert(first->words.end(), it->words.begin(), it->words.end());
         }
         std::erase_if(next, [&](const auto& s) { return s.id != keep && selected.contains(s.id); });
@@ -154,6 +155,7 @@ bool Engine::edit_caption_track(u64 layerId, const std::string& command) noexcep
             for (const auto& w : s.words) words.push_back({w.text, static_cast<f64>(w.start) / fps, static_cast<f64>(w.end) / fps});
         }
         if (words.empty() || gap) return false;
+        words = text::normalize_caption_words(words);
         const auto groups = text::group_captions(words, current->captionOptions);
         if (groups.empty()) return false;
         u64 newId = 1; for (const auto& s : next) newId = std::max(newId, s.id + 1);
@@ -188,7 +190,7 @@ bool Engine::edit_caption_track(u64 layerId, const std::string& command) noexcep
         layer->text.content = layer->captions.front().text;
         recenter_text(*layer);
     }
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel); project_->mark_dirty(); request_render();
+    bump_model_revision_locked(); project_->mark_dirty(); request_render();
     return true;
 }
 }

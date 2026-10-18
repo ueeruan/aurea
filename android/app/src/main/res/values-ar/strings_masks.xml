@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Aba Máscaras numa tela só (12/10/2026): títulos das seções. -->
+    <string name="panel_mask_mode">الوضع</string>
+    <string name="panel_mask_edge">الحافة</string>
+    <string name="panel_mask_follow">تتبّع جسم</string>
+</resources>

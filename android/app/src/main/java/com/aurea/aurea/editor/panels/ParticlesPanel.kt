@@ -83,12 +83,12 @@ internal fun ParticlesPanel(env: PanelEnv) {
             keyframeLook = railLook,
             onKeyframe = selected?.let { param -> { store.toggleParticleKeyframe(param) } },
             curveAnimated = railTrack.size >= 2,
-            onCurve = if (railTrack.size >= 2) {
+            onCurve = if (store.curveStart(railTrack) != null) {
                 {
                     val layer = store.primary
                     val t = store.detail?.localPlayhead
                     if (layer != null && t != null) {
-                        railTrack.segmentStart(t)?.let { key ->
+                        store.curveStart(railTrack)?.let { key ->
                             store.selectKeyframe(layer, key)
                             env.onOpenPanel(EditorPanel.Curve)
                         }
@@ -229,7 +229,7 @@ private fun PresetRow(store: EditorStore) {
     // Os presets do Particular (ordem = `particular::apply_preset`).
     val names = listOf(R.string.particular_preset_default, R.string.particular_preset_rain, R.string.particular_preset_snow,
         R.string.particular_preset_fire, R.string.particular_preset_sparks, R.string.particular_preset_fireworks,
-        R.string.particular_preset_dust, R.string.particular_preset_bokeh)
+        R.string.particular_preset_dust, R.string.particular_preset_bokeh, R.string.particular_preset_plexus)
     Column {
         Text(stringResource(R.string.particular_presets), style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)))
         Spacer(Modifier.height(5.dp))

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Efeitos 3D do pedido de beta de 12/10/2026 (Object3DEffects.cpp) e o painel 3D enxuto. -->
+    <string name="fx3d_name_part_transform">Animasikan bagian 3D</string>
+    <string name="fx3d_name_part_hide">Sembunyikan bagian 3D</string>
+    <string name="fx3d_name_part_texture">Ganti tekstur 3D</string>
+    <string name="fx3d_name_shatter">3D Shatter</string>
+    <string name="fx3d_name_stroke">3D Stroke</string>
+    <string name="fx3d_desc_part_transform">Memindah, memutar, dan mengubah ukuran satu bagian objek 3D, dengan keyframe.</string>
+    <string name="fx3d_desc_part_hide">Menyembunyikan atau memudarkan bagian objek 3D (dari satu bagian ke bagian lain).</string>
+    <string name="fx3d_desc_part_texture">Menutup satu bagian objek 3D (atau semuanya) dengan gambar dari galeri.</string>
+    <string name="fx3d_desc_shatter">Memecah layer menjadi kepingan tebal yang meledak dalam 3D.</string>
+    <string name="fx3d_desc_stroke">Garis animasi 3D mengikuti mask layer atau bentuk siap pakai.</string>
+    <string name="fx3d_env_background">Latar</string>
+    <string name="fx3d_env_floor">Lantai</string>
+    <string name="fx3d_parts_hint">Pilih bagian lalu ketuk efek: efek langsung mengarah ke bagian itu. Pengaturan dan keyframe ada di Efek.</string>
+    <string name="fx3d_part_n">Bagian %1$d</string>
+    <string name="fx3d_image_pick">Pilih gambar</string>
+    <string name="fx3d_image_none">Tidak ada gambar</string>
+    <string name="fx3d_effect_added">Efek ditambahkan — atur di Efek</string>
+    <string name="fx3d_add_failed">Efek ini hanya berfungsi pada objek 3D yang tidak terkunci.</string>
+</resources>

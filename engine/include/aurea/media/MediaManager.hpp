@@ -37,6 +37,9 @@ struct MediaProbe {
     u32 audioSampleRate = 0;
     u32 audioChannels = 0;
     i64 audioDurationUs = 0;
+    /// Tamanho do arquivo (0 = a plataforma não soube): com a duração dá o
+    /// bitrate que a política do proxy de edição lê (PreviewProxy.hpp).
+    u64 fileBytes = 0;
 };
 
 class VideoSourceFactory {
@@ -57,6 +60,11 @@ public:
         (void)sourcePath;
         return nullptr;
     }
+    /// O mesmo, com o decoder de SOFTWARE da plataforma (export refeito depois
+    /// de o decoder do aparelho travar). Sem um, o decoder de sempre.
+    [[nodiscard]] virtual std::unique_ptr<audio::AudioDecoderBackend> open_audio_software(const char* sourcePath) {
+        return open_audio(sourcePath);
+    }
 };
 
 class MediaManager {
@@ -70,6 +78,7 @@ public:
     void set_memory(MemoryManager* memory) noexcept;
     [[nodiscard]] VideoSourceFactory* factory() const noexcept { return factory_; }
     PreviewProxyService& proxies() noexcept { return proxies_; }
+    const PreviewProxyService& proxies() const noexcept { return proxies_; }
 
     /// Keeps preview requests on originals while exact captures wait outside
     /// the render lock. Counted because several captures may overlap/cancel.
@@ -121,12 +130,23 @@ public:
     /// Fecha e espera todas as fontes, inclusive as já retiradas, antes de
     /// substituir/destruir o projeto, a fábrica ou o contexto dos callbacks.
     void close_all();
+    /// Release recreatable preview decoders before export opens its own sessions.
+    /// Vendor shutdown runs on the retirement worker, with bounded caller wait.
+    [[nodiscard]] Status release_preview_for_export(const std::atomic<bool>* cancel, u64 timeoutNs) noexcept;
+    /// Fecha tudo esperando no máximo `timeoutNs` pelos decoders (0 = só
+    /// confere). false = algum decoder ficou preso dentro da plataforma (driver
+    /// que não devolve a chamada): este MediaManager precisa continuar vivo até
+    /// ele voltar — chame de novo depois. Nunca espera para sempre.
+    [[nodiscard]] bool close_all_for(u64 timeoutNs);
 
     void suspend_all();
     void resume_all();
 
     /// Callback de frame pronto, repassado a toda fonte.
     void set_ready_callback(void (*fn)(void*), void* ctx) noexcept;
+    /// Prioridade com que os decoders NOVOS são abertos (o export compatível
+    /// abre com MediaPriority::ExportSoftwareDecode). Padrão: Preview.
+    void set_open_priority(MediaPriority priority) noexcept { openPriority_.store(priority, std::memory_order_relaxed); }
     /// O mesmo callback, para outro trabalho de fundo que o quadro espera (o
     /// mapa de profundidade de um vídeo) acordar o render do mesmo jeito.
     void ready_callback(void (*&fn)(void*), void*& ctx) const noexcept;
@@ -153,6 +173,9 @@ public:
         char decoderName[64] = {};
     };
     [[nodiscard]] Stats stats() const;
+    /// Algum abridor da plataforma ainda dentro da chamada de abrir (o que
+    /// fechar/destruir teria de esperar)? Não bloqueia.
+    [[nodiscard]] bool opening_in_flight() noexcept;
 
 private:
     struct Opening {
@@ -179,6 +202,7 @@ private:
     std::vector<Entry> entries_;
     void (*readyFn_)(void*) = nullptr;
     void* readyCtx_ = nullptr;
+    std::atomic<MediaPriority> openPriority_{MediaPriority::Preview};
     std::atomic<u64> decodeWork_{0};   ///< decode_work(); as fontes incrementam
     bool suspended_ = false;
     u32 pointerBits_ = kPointerBits;   ///< guarded by mutex_; AddressSpace.hpp

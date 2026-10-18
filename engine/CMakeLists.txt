@@ -91,17 +91,20 @@ set(AUREA_CORE_SOURCES
     src/project/ProjectPackage.cpp
     src/export/ImageEncode.cpp
     src/export/ExportRecovery.cpp
+    src/export/ExportPacketLog.cpp
     src/export/ExportSinkStartup.cpp
     src/export/OfflineFrameQueue.cpp
     src/export/OfflineFrameRenderer.cpp
     src/export/OfflineAudioSnapshot.cpp
     src/export/OfflineAudioBlockSource.cpp
     src/export/FFmpegExportSink.cpp
+    src/export/AndroidVideoEncoder.cpp
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
     src/render/ShaderLibrary.cpp
     src/render/RenderScheduler.cpp
     src/render/Renderer.cpp
+    src/render/PreRenderCache.cpp
     src/render/MaskRaster.cpp
     src/render/ParticleExtras.cpp
     src/render/ParticleScene.cpp
@@ -110,6 +113,7 @@ set(AUREA_CORE_SOURCES
     src/render/RendererAudio.cpp
     src/effects/Parameter.cpp
     src/effects/CubeLut.cpp
+    src/effects/Palette.cpp
     src/effects/EffectGraph.cpp
     src/effects/builtin/ColorEffects.cpp
     src/effects/builtin/BlurEffects.cpp
@@ -137,6 +141,8 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/PixelEncoderEffect.cpp
     src/effects/builtin/StarglowEffect.cpp
     src/effects/builtin/PixDitherEffect.cpp
+    src/effects/builtin/ColorQuantizeEffects.cpp
+    src/effects/builtin/GlowScanEffect.cpp
     src/effects/builtin/VideoGlitchEffect.cpp
     src/effects/builtin/DisplaceTransformEffect.cpp
     src/effects/builtin/OpticalEffects.cpp
@@ -156,12 +162,21 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/FinishingEffects.cpp
     src/effects/builtin/GenerateEffects.cpp
     src/effects/builtin/MatteEffects.cpp
+    src/effects/builtin/RasterExtrudeEffect.cpp
     src/effects/builtin/VhsLookEffect.cpp
     src/effects/builtin/DepthEffects.cpp
     src/effects/builtin/RotobrushEffect.cpp
     src/effects/builtin/AudioPackEffects.cpp
     src/effects/builtin/ParticularEffect.cpp
     src/effects/builtin/DisintegrateEffect.cpp
+    src/effects/builtin/Object3DEffects.cpp
+    src/effects/builtin/FlowTimeEffects.cpp
+    src/effects/builtin/CCEffects.cpp
+    src/effects/builtin/CCStylizeEffects.cpp
+    src/effects/builtin/CCTransitions.cpp
+    src/effects/builtin/SaberEffect.cpp
+    src/effects/builtin/LumaDissolveEffect.cpp
+    src/effects/builtin/DrawingProgressEffect.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp
@@ -186,10 +201,12 @@ set(AUREA_CORE_SOURCES
     src/tracking/MotionGeometry.cpp
     src/text/Text.cpp
     src/text/FontManager.cpp
+    src/text/FontUnpack.cpp
     src/text/TextAnimator.cpp
     src/text/TextTransform.cpp
     src/text/Captions.cpp
     src/engine/EngineCaptions.cpp
+    src/engine/EngineUiMode.cpp
     src/engine/EngineCaptionPresets.cpp
     src/vector/Vector.cpp
     src/vector/Clipper.cpp
@@ -200,7 +217,9 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineMeshWarp.cpp
     src/engine/EnginePuppet.cpp
     src/engine/EngineShape3D.cpp
+    src/engine/EngineRigPose.cpp
     src/engine/EngineMedia.cpp
+    src/engine/EngineProxy.cpp
     src/engine/EngineLayerAnim.cpp
     src/engine/EngineRoto.cpp
     src/playback/Playback.cpp
@@ -215,6 +234,8 @@ set(AUREA_CORE_SOURCES
     src/scene3d/Animation.cpp
     src/scene3d/Text3D.cpp
     src/scene3d/Shape3D.cpp
+    src/scene3d/PartEffects.cpp
+    src/scene3d/RigPose.cpp
     src/scene3d/MaterialPreview.cpp
     src/engine/Engine.cpp
     src/engine/EngineRealCamera.cpp
@@ -289,6 +310,9 @@ if(AUREA_PLATFORM_ANDROID)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VideoColorGlsl.hpp.in"
         "${AUREA_GENERATED_INCLUDE}/aurea/shaders/VideoColorGlsl.hpp" @ONLY)
     target_compile_definitions(aurea_core PUBLIC AUREA_PLATFORM_ANDROID=1)
+    # Encoder do aparelho com entrada por Surface (export/AndroidVideoEncoder):
+    # contexto EGL próprio que desenha o quadro na Surface do MediaCodec.
+    target_link_libraries(aurea_core PUBLIC EGL GLESv3)
 elseif(AUREA_PLATFORM_IOS)
     target_compile_definitions(aurea_core PUBLIC AUREA_PLATFORM_IOS=1)
 else()
@@ -322,7 +346,7 @@ set(AUREA_IMPORT_BOUNDARIES
     src/scene3d/EnvironmentJob.cpp
 )
 list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportSinkStartup.cpp
-    src/export/FFmpegExportSink.cpp
+    src/export/FFmpegExportSink.cpp src/export/AndroidVideoEncoder.cpp
     src/export/OfflineAudioSnapshot.cpp src/export/OfflineAudioBlockSource.cpp)
 if(MSVC)
     set_source_files_properties(${AUREA_IMPORT_BOUNDARIES} PROPERTIES COMPILE_OPTIONS /EHsc)

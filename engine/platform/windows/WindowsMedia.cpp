@@ -21,8 +21,10 @@ struct Apartment { HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED); ~
 void apartment(){ thread_local Apartment value; (void)value; }
 Status failure(Errc code, const char* detail) { return Status{code, detail}; }
 ComPtr<IMFSourceReader> reader(const char* path, bool video) {
- apartment(); ComPtr<IMFAttributes> a; MFCreateAttributes(&a, 3);
- a->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);
+ if(!path||!*path)return {};
+ apartment(); ComPtr<IMFAttributes> a;
+ if(FAILED(MFCreateAttributes(&a, 3)))return {};
+ if(FAILED(a->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE)))return {};
  ComPtr<IMFSourceReader> r;
  if(FAILED(MFCreateSourceReaderFromURL(wide(path).c_str(), a.Get(), &r))) return {};
  r->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS,FALSE);
@@ -133,7 +135,9 @@ class Sound final : public audio::AudioOutput {
 public:
  ~Sound() override {close();}
  Status open(audio::AudioRenderFn fn,void* ctx) noexcept override {
-  close();fn_=fn;ctx_=ctx;event_=CreateEventW(nullptr,FALSE,FALSE,nullptr);
+  close();if(!fn)return failure(Errc::InvalidArgument,"Windows: callback de audio ausente");
+  fn_=fn;ctx_=ctx;base_=0;event_=CreateEventW(nullptr,FALSE,FALSE,nullptr);
+  if(!event_)return failure(Errc::NotSupported,"Windows: evento de audio indisponivel");
   WAVEFORMATEX fmt{WAVE_FORMAT_IEEE_FLOAT,2,48000,48000*8,8,32,0};
   if(waveOutOpen(&device_,WAVE_MAPPER,&fmt,reinterpret_cast<DWORD_PTR>(event_),0,CALLBACK_EVENT)!=MMSYSERR_NOERROR){close();return failure(Errc::NotSupported,"Windows: saida de audio indisponivel");}return OkStatus;
  }
@@ -166,10 +170,18 @@ bool load_image(const char* path,ImagePixels& out,void*) {
  out.width=w;out.height=h;out.rgba.resize(size_t(w)*h*4);return SUCCEEDED(converter->CopyPixels(nullptr,w*4,UINT(out.rgba.size()),out.rgba.data()));
 }
 bool save_png(const std::wstring& path,const u8* rgba,u32 w,u32 h) {
+ if(!rgba||!w||!h||u64(w)*h>67108864)return false;
  apartment();ComPtr<IWICImagingFactory> factory;ComPtr<IWICStream> stream;ComPtr<IWICBitmapEncoder> enc;ComPtr<IWICBitmapFrameEncode> frame;
  if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&factory)))||FAILED(factory->CreateStream(&stream))||FAILED(stream->InitializeFromFilename(path.c_str(),GENERIC_WRITE))||FAILED(factory->CreateEncoder(GUID_ContainerFormatPng,nullptr,&enc))||FAILED(enc->Initialize(stream.Get(),WICBitmapEncoderNoCache))||FAILED(enc->CreateNewFrame(&frame,nullptr))||FAILED(frame->Initialize(nullptr)))return false;
- frame->SetSize(w,h);WICPixelFormatGUID format=GUID_WICPixelFormat32bppRGBA;frame->SetPixelFormat(&format);
- return SUCCEEDED(frame->WritePixels(h,w*4,w*h*4,const_cast<BYTE*>(rgba)))&&SUCCEEDED(frame->Commit())&&SUCCEEDED(enc->Commit());
+ if(FAILED(frame->SetSize(w,h)))return false;
+ // The native PNG encoder accepts BGRA, whereas requesting RGBA may silently
+ // negotiate another format. Supply the negotiated bytes explicitly so red,
+ // blue and alpha survive both exported frames and imported image round trips.
+ WICPixelFormatGUID format=GUID_WICPixelFormat32bppBGRA;
+ if(FAILED(frame->SetPixelFormat(&format))||format!=GUID_WICPixelFormat32bppBGRA)return false;
+ std::vector<u8> bgra(size_t(w)*h*4);
+ for(size_t i=0;i<bgra.size();i+=4){bgra[i]=rgba[i+2];bgra[i+1]=rgba[i+1];bgra[i+2]=rgba[i];bgra[i+3]=rgba[i+3];}
+ return SUCCEEDED(frame->WritePixels(h,w*4,w*h*4,bgra.data()))&&SUCCEEDED(frame->Commit())&&SUCCEEDED(enc->Commit());
 }
 bool MediaFactory::probe(const char* path,MediaProbe& out){out={};Video v;Audio a;if(v.open(path)){out.hasVideo=true;out.video=v.info();}if(a.open(path)){out.hasAudio=true;out.audioSampleRate=a.info().sampleRate;out.audioChannels=a.info().channels;out.audioDurationUs=a.info().durationUs;}return out.hasVideo||out.hasAudio;}
 std::unique_ptr<VideoDecoderBackend> MediaFactory::open_video(const Asset& asset,MediaPriority){auto v=std::make_unique<Video>();return v->open(asset.sourcePath.c_str())?std::move(v):nullptr;}

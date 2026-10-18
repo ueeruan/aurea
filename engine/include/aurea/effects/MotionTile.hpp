@@ -26,6 +26,7 @@
 #pragma once
 
 #include "aurea/effects/Effect.hpp"
+#include <array>
 
 namespace aurea {
 struct Layer;
@@ -96,6 +97,32 @@ inline constexpr f32 kMaxOutput = 5.0f;
 
 /// A janela de saída contém o ponto `compUv` (0..1 no quadro)?
 [[nodiscard]] bool inside_output(const Params& p, Vec2 compUv) noexcept;
+
+/// A terminal tile in a 3D plane samples a bounded pyramid of ONE source tile.
+/// Rays cover the visible plane without an arbitrarily large raster wall.
+inline constexpr u32 kSceneTileSlots = 12;
+static_assert(kSceneTileSlots <= binding::kTextureSlots);
+struct PeriodicPlane {
+    std::array<FGTexture, kSceneTileSlots> textures{};
+    Vec4 inverseX{}, inverseY{}, inverseW{};
+    Vec4 box{}, tile{}, flags{}, mips{}, window{};
+    u32 count = 0;
+};
+/// Inversa de UM instante (camada → composição) para o plano periódico: leva
+/// a direção do raio à coordenada da camada, e é daqui que o shader tira onde
+/// a parede está naquele instante. `build_scene_plane` grava a do quadro;
+/// o desfoque de movimento regrava a de cada amostra do obturador com a matriz
+/// daquele instante — sem isso as K amostras desenham a parede na MESMA pose e
+/// a média sai igual ao quadro sem desfoque (o motion blur "não faz nada" com
+/// Motion Tile). Escreve só `inverseX/Y/W`; `box`, `tile`, `flags`, `mips`,
+/// `window` e `textures` ficam como estão. Devolve false, sem tocar em `out`,
+/// quando a homografia é degenerada (plano de perfil, determinante ~0): aí o
+/// chamador mantém a inversa anterior.
+[[nodiscard]] bool periodic_inverse(const Mat4& compFromLayer, u32 compWidth, u32 compHeight,
+                                    PeriodicPlane& out) noexcept;
+
+[[nodiscard]] bool build_scene_plane(EffectBuildContext& ctx, const EffectEval& eval,
+                                    const LayerImage& input, PeriodicPlane& out) noexcept;
 
 /// Converte, NO LUGAR, um Motion Tile gravado na disposição anterior (menos de
 /// `kLayout + 1` slots) para a atual, junto com os keyframes dele na layer:

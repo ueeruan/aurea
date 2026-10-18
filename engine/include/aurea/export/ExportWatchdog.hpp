@@ -182,10 +182,13 @@ inline constexpr u32 kExportSafeModeMax = 2;
 inline constexpr u32 kExportRetryShift = 16;
 inline constexpr u32 kExportRetryMask = 0x3u << kExportRetryShift;
 
-/// Encoder travou ou recusou no meio: refazer no próximo nível (até o 2).
-/// Qualquer outro motivo (mídia, GPU, disco, cancelamento) não muda refazendo.
+/// A native stall retains its codec/session. Go straight to the available
+/// software path instead of filling both bounded native slots with another
+/// hardware retry and then refusing software before it can open. A returned
+/// codec failure can still try the baseline profile before software.
 [[nodiscard]] inline u32 export_retry_safe_mode(ExportFailure failure, u32 currentLevel) noexcept {
     if (failure != ExportFailure::EncoderStalled && failure != ExportFailure::Encoder) return 0;
+    if (failure == ExportFailure::EncoderStalled) return currentLevel < kExportSafeModeMax ? kExportSafeModeMax : 0;
     return currentLevel < kExportSafeModeMax ? currentLevel + 1 : 0;
 }
 

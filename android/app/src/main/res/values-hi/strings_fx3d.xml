@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Efeitos 3D do pedido de beta de 12/10/2026 (Object3DEffects.cpp) e o painel 3D enxuto. -->
+    <string name="fx3d_name_part_transform">3D भाग एनिमेट करें</string>
+    <string name="fx3d_name_part_hide">3D भाग छिपाएँ</string>
+    <string name="fx3d_name_part_texture">3D टेक्सचर बदलें</string>
+    <string name="fx3d_name_shatter">3D Shatter</string>
+    <string name="fx3d_name_stroke">3D Stroke</string>
+    <string name="fx3d_desc_part_transform">3D ऑब्जेक्ट के एक भाग को कीफ़्रेम के साथ हिलाता, घुमाता और आकार बदलता है।</string>
+    <string name="fx3d_desc_part_hide">3D ऑब्जेक्ट के भागों को छिपाता या धुंधला करता है (एक भाग से दूसरे तक)।</string>
+    <string name="fx3d_desc_part_texture">3D ऑब्जेक्ट के एक भाग (या सभी) को गैलरी की छवि से ढकता है।</string>
+    <string name="fx3d_desc_shatter">लेयर को मोटे टुकड़ों में तोड़कर 3D में बिखेरता है।</string>
+    <string name="fx3d_desc_stroke">लेयर के मास्क या तैयार आकृति के साथ 3D में एनिमेटेड रेखा।</string>
+    <string name="fx3d_env_background">पृष्ठभूमि</string>
+    <string name="fx3d_env_floor">फ़र्श</string>
+    <string name="fx3d_parts_hint">भाग चुनें और कोई इफ़ेक्ट टैप करें: वह उसी भाग के लिए जुड़ जाएगा। सेटिंग और कीफ़्रेम इफ़ेक्ट्स में हैं।</string>
+    <string name="fx3d_part_n">भाग %1$d</string>
+    <string name="fx3d_image_pick">छवि चुनें</string>
+    <string name="fx3d_image_none">कोई छवि नहीं</string>
+    <string name="fx3d_effect_added">इफ़ेक्ट जोड़ा गया — इफ़ेक्ट्स में बदलें</string>
+    <string name="fx3d_add_failed">यह इफ़ेक्ट सिर्फ़ अनलॉक 3D ऑब्जेक्ट पर काम करता है।</string>
+</resources>

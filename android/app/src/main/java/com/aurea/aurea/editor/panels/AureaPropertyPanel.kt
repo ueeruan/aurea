@@ -1,17 +1,12 @@
 package com.aurea.aurea.editor.panels
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
@@ -25,9 +20,6 @@ import com.aurea.aurea.ui.ds.*
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import java.util.Locale
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
 
 /** Metadata chooses controls; all reads, animation and history use the existing engine. */
 @Composable
@@ -148,9 +140,6 @@ internal fun AureaPropertyPanel(
                         val scale = if (spec.unit == "%") 100f else 1f
                         val value = spec.value(values) * scale
                         val lo = spec.typedMin * scale; val hi = spec.typedMax * scale
-                        if (spec.type == ParamType.ANGLE) NativePropertyDial(value, label, lo, hi, enabled,
-                            { begin(label) }, { write(spec, 0, it / scale) }, ::end,
-                            Modifier.fillMaxWidth().height(88.dp).testTag("property.$domain.${spec.id}.dial"))
                         Row(Modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                             PropertyRow(label, value, (spec.sliderMax - spec.sliderMin) * scale / 180f,
                                 lo, hi, { formatProperty(it, spec.precision, spec.unit) }, selected == spec.id, ::choose,
@@ -171,13 +160,12 @@ internal fun AureaPropertyPanel(
         }
         val curveKeys = store.primaryKeys().filter { key -> tracks.any { it.matches(key.property, key.effectIndex, key.paramIndex) } }
         val curveTracks = tracks.map { binding -> curveKeys.filter { binding.matches(it.property, it.effectIndex, it.paramIndex) } }
+        val curveTrack = curveTrack(curveTracks)
         if (onOpenCurve != null && curveTracks.any { it.size >= 2 }) TextButton(onClick = {
-            val local = store.detail?.localFrame(store.playhead) ?: return@TextButton
-            val track = curveTrack(curveTracks)
-            track.segmentStart(local)?.let { key ->
+            store.curveStart(curveTrack)?.let { key ->
                 if (layer != null && currentOwner()) { store.selectKeyframe(layer, key); onOpenCurve() }
             }
-        }, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp).testTag("property.$domain.curve")) {
+        }, enabled = enabled && store.curveStart(curveTrack) != null, modifier = Modifier.heightIn(min = 48.dp).testTag("property.$domain.curve")) {
             Text(stringResource(R.string.panel_editar_curva_propriedade))
         }
     }
@@ -223,41 +211,4 @@ private fun optionLabel(id: String, fallback: String): String = when (id) {
     "point" -> stringResource(R.string.scene_light_point)
     "spot" -> stringResource(R.string.scene_light_spot)
     else -> fallback
-}
-
-/** Angular geometry follows the existing transform dial; bounds remain native metadata. */
-@Composable
-private fun NativePropertyDial(value: Float, label: String, min: Float, max: Float, enabled: Boolean,
-    begin: () -> Unit, write: (Float) -> Unit, end: () -> Unit, modifier: Modifier) {
-    val send by rememberUpdatedState(write)
-    val start by rememberUpdatedState(begin)
-    val finish by rememberUpdatedState(end)
-    Box(modifier.semantics {
-        contentDescription = label
-        progressBarRangeInfo = ProgressBarRangeInfo(value.coerceIn(min, max), min..max)
-        if (!enabled) disabled() else setProgress { send(it.coerceIn(min, max)); true }
-    }, contentAlignment = Alignment.Center) {
-        Canvas(Modifier.size(80.dp).pointerInput(enabled, min, max) {
-            if (!enabled) return@pointerInput
-            var active = false
-            fun angle(p: Offset): Float {
-                val raw = Math.toDegrees(atan2((p.y - size.height / 2f).toDouble(), (p.x - size.width / 2f).toDouble())).toFloat()
-                return (if (raw < 0) raw + 360f else raw).coerceIn(min, max)
-            }
-            try {
-                detectDragGestures(onDragStart = { active = true; start(); send(angle(it)) },
-                    onDragEnd = { if (active) { active = false; finish() } },
-                    onDragCancel = { if (active) { active = false; finish() } }) { change, _ ->
-                    change.consume(); send(angle(change.position))
-                }
-            } finally { if (active) finish() }
-        }) {
-            val radius = size.minDimension / 2 - 8.dp.toPx()
-            drawCircle(AureaColors.DialTrack, radius, center, style = Stroke(2.dp.toPx()))
-            val radians = Math.toRadians(value.toDouble())
-            val tip = center + Offset((cos(radians) * radius).toFloat(), (sin(radians) * radius).toFloat())
-            drawLine(AureaColors.Accent, center, tip, 2.dp.toPx())
-            drawCircle(AureaColors.Accent, 5.dp.toPx(), tip)
-        }
-    }
 }

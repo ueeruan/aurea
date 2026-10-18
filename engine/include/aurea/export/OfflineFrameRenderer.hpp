@@ -15,11 +15,21 @@ public:
     Status render(const Project& project, CompositionId composition,
                   FrameIndex time, const OffscreenTarget& target,
                   const ImagePixels* (*images)(void*, AssetId), void* imageContext,
-                  const RenderSettings& settings, u64& submittedFrame) noexcept;
+                  const RenderSettings& settings, u64& submittedFrame,
+                  std::mutex* pollingMutex = nullptr,
+                  const std::atomic<bool>* additionalCancel = nullptr) noexcept;
     void shutdown() noexcept;
+    // Engine proved all normal/auxiliary GPU work; no renderer command may be
+    // submitted after this. Source callbacks remain CPU-only until retired.
+    void retire_gpu_after_done() noexcept;
+    // Transfer opens/decoders to their owner retirement worker and poll only.
+    // The caller must retain this renderer/factory until this returns true.
+    [[nodiscard]] bool retire_sources() noexcept;
+    void detach_device() noexcept; // Invalidates handles without joining a platform opener.
     void forget_device() noexcept;
 private:
-    Status wait_gpu(u64 frame, const std::atomic<bool>* cancel) noexcept;
+    Status wait_gpu(u64 frame, const std::atomic<bool>* cancel, std::mutex* pollingMutex = nullptr,
+                    const std::atomic<bool>* additionalCancel = nullptr) noexcept;
     static void source_ready(void* context) noexcept;
     GPUBackend* gpu_ = nullptr;
     Renderer renderer_;

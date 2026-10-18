@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.1.8 BETA 2: Saber e Luma Dissolve (nomes de efeito em inglês em todo idioma; descrição traduzida). -->
+    <string name="saber_desc">An energy stroke with a white-hot core and a wide glow — between two points, along the masks or around the text outline. Lightsaber, neon, electric and fire presets.</string>
+    <string name="luma_dissolve_desc">The layer vanishes or appears by brightness: darks first, or by noise, a gradient or another layer, with an optional colored edge.</string>
+    <string name="fxp_saber_default">Default</string>
+    <string name="fxp_saber_lightsaber">Lightsaber</string>
+    <string name="fxp_saber_neon">Neon</string>
+    <string name="fxp_saber_electric">Electric</string>
+    <string name="fxp_saber_fire">Fire</string>
+    <string name="fxp_saber_plasma">Plasma</string>
+    <string name="fxp_saber_energy">Energy</string>
+    <string name="fxp_saber_soft">Soft glow</string>
+    <string name="fxp_saber_magic">Magic</string>
+    <string name="app_preset_fx_luma_in">Luma Dissolve (in)</string>
+    <string name="app_preset_fx_luma_out">Luma Dissolve (out)</string>
+    <string name="saber_point_start">Saber start</string>
+    <string name="saber_point_end">Saber end</string>
+    <string name="saber_points_hint">Drag to move the saber point</string>
+</resources>

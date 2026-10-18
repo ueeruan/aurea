@@ -393,7 +393,7 @@ private:
 ///   22/23 teto do codificador HEVC (lado maior × menor; 0 = sem HEVC)
 ///   24 heavyScale × 100 AGORA · 25 denominador inicial do preview
 ///   26 lado das prévias de efeito · 27 % do orçamento para decode
-///   28 faixa térmica AGORA · 29 sombra (px) · 30 proxy acima de (lado menor)
+///   28 faixa térmica AGORA · 29 sombra (px) · 30 lado menor do proxy de edição
 ///   31 frequência máxima da CPU (MHz; 0 = não medida)
 inline constexpr u32 kDeviceReportSlots = 32;
 inline constexpr i64 kReportCodecsKnown  = 1 << 0;

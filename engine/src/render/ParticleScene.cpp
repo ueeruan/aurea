@@ -244,7 +244,7 @@ void Renderer::prepare_particle_space(const Composition& comp, const Layer& l, F
     const f64 travel = std::fabs(pd.speed) * open / fps + shutter_projected_path(shutter,
         static_cast<f32>(comp.width()), static_cast<f32>(comp.height()), [&](f64 offset) { return outFrom(tl + offset); });
     const u32 k = (blur && !ps.inScene)
-        ? shutter_sample_count(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel, true)
+        ? capped_shutter_samples(mb, settings.finalQuality, effective_quality(settings).motionBlurSamples, travel, true)
         : 1u;
     shutter.count = k;
     ps.subs.resize(k);
@@ -370,7 +370,7 @@ u32 Renderer::scene_particle_draws(const scene3d::SceneFrame& group, const scene
         key.cull = CullMode::None;
         auto pipe = shaders_.pipeline(key);
         if (!pipe.ok()) {
-            incomplete_ = true;
+            mark_incomplete(__FILE__, __LINE__);
             continue;
         }
         auto* uni = arena_.alloc_array<Vec4>(LayerSource::kParticleBlocks);

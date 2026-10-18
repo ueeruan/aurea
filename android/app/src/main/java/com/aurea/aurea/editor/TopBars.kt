@@ -168,6 +168,9 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
         )
         ChromeButton(CupertinoGlyph.Search, stringResource(R.string.edt_cmd_search_desc), onClick = { openSheet(store, ui, ShellSheet.CommandSearch) }, width = 44.dp)
         }
+        ChromeButton(CupertinoGlyph.PlusSquareOnSquare, stringResource(R.string.editor_duplicar_camada),
+            onClick = { store.duplicateLayers(listOf(h.id)) },
+            modifier = Modifier.testTag("layer.duplicate"), size = 19.dp, width = 44.dp, height = 48.dp)
         ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada),
             onClick = if (!h.locked) ({ LayerOps.delete(store, listOf(h.id)) }) else null,
             modifier = Modifier.testTag("layer.delete"), size = 19.dp, width = 48.dp, height = 48.dp)
@@ -535,6 +538,7 @@ internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
                 ids.forEach { store.ungroupPrecomp(it) }
             }, size = 19.dp, tint = ink)
         }
+        ChromeButton(CupertinoGlyph.PlusSquareOnSquare, stringResource(R.string.editor_duplicar_camada), onClick = { store.duplicateLayers() }, size = 19.dp, tint = ink)
         ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_selecao), onClick = { LayerOps.delete(store, store.selection) }, size = 19.dp, tint = ink)
         ChromeButton(
             if (store.playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill,

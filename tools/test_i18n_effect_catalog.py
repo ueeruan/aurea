@@ -93,6 +93,20 @@ class EffectCatalogTests(unittest.TestCase):
         self.run_generator()
         self.assertTrue(all(path.read_bytes() == data for path, data in before.items()))
 
+    def test_quality_enum_reuses_existing_scene_resources(self):
+        originals = {}
+        for lang in catalog.i18n_add.FOLDERS:
+            path = self.strings(lang, "strings.xml", {
+                "fxl_quality": "Qualidade", "scene_low": "Baixa", "scene_medium": "Média", "scene_high": "Alta", "fxo_high": "Alta",
+            })
+            originals[path] = path.read_bytes()
+        self.source("Qualidade", ["Baixa", "Média", "Alta"])
+        self.run_generator()
+        table = self.outputs[0].read_text(encoding="utf-8")
+        for index, key in enumerate(("scene_low", "scene_medium", "fxo_high")):
+            self.assertIn(f"aurea.test\t0\tamount\t{index}\t{key}", table)
+        self.assertTrue(all(path.read_bytes() == data for path, data in originals.items()))
+
 
 if __name__ == "__main__":
     unittest.main()

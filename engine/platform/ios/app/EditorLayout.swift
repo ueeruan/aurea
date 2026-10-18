@@ -260,6 +260,8 @@ final class ShellPresentation: ObservableObject {
     /// Grade de terços sobre o quadro (só na prévia, nunca no export).
     @Published var showGrid = false
     @Published var grabbedShapeHandle = -1
+    /// Alça branca de esticar em uso (LayerResizeGeometry), ou −1.
+    @Published var grabbedResizeHandle = -1
     @Published var snapX: Float?
     @Published var snapY: Float?
     /// Seletor pedido pelo diálogo de adicionar. Quem APRESENTA é a raiz do
@@ -268,6 +270,8 @@ final class ShellPresentation: ObservableObject {
     /// apresentação presa e invisível (foto/vídeo e depois modelo 3D: nada
     /// entrava e nenhum toque respondia).
     @Published var addPicker: ShellAddPicker?
+    /// Painel "Gravar voz" aberto (VoiceRecorder.swift), pedido pela aba Áudio.
+    @Published var voiceRecorder = false
     func dismiss() { sheet = nil; linkAnchor = nil; resolutionAnchor = nil }
 }
 

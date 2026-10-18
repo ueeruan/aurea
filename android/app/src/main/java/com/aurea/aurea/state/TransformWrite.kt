@@ -8,20 +8,27 @@ package com.aurea.aurea.state
  * do quadro 0.
  */
 internal enum class TransformWrite {
-    /** Trilha animada com Auto-Key ligado: keyframe no cabeçote; os outros quadros ficam. */
+    /** Trilha animada: keyframe no cabeçote; os outros quadros ficam. */
     Keyframe,
-    /** Desloca a animação inteira (Auto-Key desligado) ou o valor parado na cena 3D. */
+    /** Desloca a animação inteira, ou o valor parado na cena 3D. */
     Layout,
     /** Trilha parada fora da cena: muda o valor fixo. */
     Static,
 }
 
-/** [animated] = a trilha da propriedade já tem keyframe (o losango foi cravado). */
-internal fun transformWrite(sceneEditor: Boolean, autoKey: Boolean, animated: Boolean): TransformWrite = when {
-    !autoKey -> TransformWrite.Layout
-    animated -> TransformWrite.Keyframe
-    sceneEditor -> TransformWrite.Layout
-    else -> TransformWrite.Static
+/**
+ * [animated] = a trilha da propriedade já tem keyframe (o losango foi cravado).
+ * [keyHere] = há keyframe DESSA propriedade no quadro do cabeçote.
+ */
+internal fun transformWrite(sceneEditor: Boolean, autoKey: Boolean, animated: Boolean,
+                            keyHere: Boolean = false): TransformWrite = when {
+    // Ajustar em cima de um keyframe edita AQUELE keyframe, com o Auto-Key
+    // ligado ou desligado: era o buraco do relato "adicionei dois keyframes,
+    // mexi em um e nada mudou" — com o Auto-Key desligado a edição deslocava a
+    // animação inteira (as duas chaves juntas) e o desenho continuava parado.
+    animated && (autoKey || keyHere) -> TransformWrite.Keyframe
+    !animated && autoKey && !sceneEditor -> TransformWrite.Static
+    else -> TransformWrite.Layout
 }
 
 /** Bits de `KeyframePayload::onlyIfChanged` (Command.hpp, `kAutoKey*`). */

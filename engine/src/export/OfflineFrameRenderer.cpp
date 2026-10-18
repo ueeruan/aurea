@@ -26,21 +26,33 @@ Status OfflineFrameRenderer::initialize(GPUBackend& gpu, const EffectRegistry& e
     if (!status.ok()) return status;
     return OkStatus;
 }
-Status OfflineFrameRenderer::wait_gpu(u64 frame, const std::atomic<bool>* cancel) noexcept {
+Status OfflineFrameRenderer::wait_gpu(u64 frame, const std::atomic<bool>* cancel, std::mutex* pollingMutex,
+                                      const std::atomic<bool>* additionalCancel) noexcept {
     if (!frame) return OkStatus;
     const u64 begin = monotonic_ns();
     for (;;) {
-        if (cancel && cancel->load(std::memory_order_acquire)) return Errc::Cancelled;
-        const Status ready = gpu_->wait_frame(frame, 100'000'000ull);
+        if ((cancel && cancel->load(std::memory_order_acquire))
+            || (additionalCancel && additionalCancel->load(std::memory_order_acquire))) return Errc::Cancelled;
+        Status ready;
+        {
+            std::unique_lock<std::mutex> gpuLock;
+            if (pollingMutex) gpuLock = std::unique_lock<std::mutex>(*pollingMutex);
+            ready = gpu_->wait_frame(frame, pollingMutex ? 0 : 100'000'000ull);
+        }
         if (ready.ok() || ready.code() != Errc::Timeout) return ready;
         if (monotonic_ns() - begin >= fenceTimeoutNs_)
             return Status{Errc::Timeout, "GPU sem resposta no renderizador offline"};
+        if (pollingMutex) {
+            std::unique_lock lock(wakeMutex_);
+            wake_.wait_for(lock, std::chrono::milliseconds(2));
+        }
     }
 }
 Status OfflineFrameRenderer::render(const Project& project, CompositionId composition,
     FrameIndex time, const OffscreenTarget& target,
     const ImagePixels* (*images)(void*, AssetId), void* imageContext,
-    const RenderSettings& requested, u64& submittedFrame) noexcept {
+    const RenderSettings& requested, u64& submittedFrame, std::mutex* pollingMutex,
+    const std::atomic<bool>* additionalCancel) noexcept {
     submittedFrame = 0;
     if (!gpu_ || !renderer_.ready()) return Errc::InvalidState;
     const auto* comp = project.timeline().composition(composition);
@@ -48,11 +60,19 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
     RenderSettings settings = requested;
     settings.finalQuality = true;
     settings.dither = false;
-    const auto cancelled = [&] { return settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire); };
+    const auto cancelled = [&] {
+        return (settings.cancelFlag && settings.cancelFlag->load(std::memory_order_acquire))
+            || (additionalCancel && additionalCancel->load(std::memory_order_acquire));
+    };
     const u64 start = monotonic_ns();
     u64 lastProgress = start, lastWork = media_.decode_work(), lastGeneration = generation_.load();
     bool reclaimed = false;
     for (;;) {
+        if (cancelled()) return Errc::Cancelled;
+        // Opt-in PreRender ownership: GPU recording stays serialized, but
+        // decoder/fence polling never holds the editing/surface mutex.
+        std::unique_lock<std::mutex> gpuLock;
+        if (pollingMutex) gpuLock = std::unique_lock<std::mutex>(*pollingMutex);
         if (cancelled()) return Errc::Cancelled;
         const u64 observed = generation_.load(std::memory_order_acquire);
         (void)renderer_.take_incomplete();
@@ -70,7 +90,9 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
             submittedFrame = gpu_->last_submitted_frame();
             if (rendered.code() == Errc::OutOfDeviceMemory && !reclaimed) {
                 snapshot_.release_video_frames();
-                if (const Status ready = wait_gpu(submittedFrame, settings.cancelFlag); !ready.ok()) return ready;
+                if (gpuLock.owns_lock()) gpuLock.unlock();
+                if (const Status ready = wait_gpu(submittedFrame, settings.cancelFlag, pollingMutex, additionalCancel); !ready.ok()) return ready;
+                if (pollingMutex) gpuLock.lock();
                 if (const Status ready = renderer_.reclaim_failed_transients(100'000'000ull); !ready.ok()) return ready;
                 reclaimed = true;
                 continue;
@@ -79,7 +101,9 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
             if (!renderer_.take_incomplete()) return OkStatus;
         }
         snapshot_.release_video_frames();
-        if (const Status ready = wait_gpu(gpu_->last_submitted_frame(), settings.cancelFlag); !ready.ok()) return ready;
+        const u64 pending = gpu_->last_submitted_frame();
+        if (gpuLock.owns_lock()) gpuLock.unlock();
+        if (const Status ready = wait_gpu(pending, settings.cancelFlag, pollingMutex, additionalCancel); !ready.ok()) return ready;
         const u64 now = monotonic_ns(), work = media_.decode_work();
         const u64 resources = generation_.load(std::memory_order_acquire)
             + (static_cast<u64>(renderer_.shaders().compiles_since_mark()) << 32)
@@ -104,9 +128,21 @@ void OfflineFrameRenderer::shutdown() noexcept {
     renderer_.shutdown();
     gpu_ = nullptr;
 }
-void OfflineFrameRenderer::forget_device() noexcept {
+bool OfflineFrameRenderer::retire_sources() noexcept {
     snapshot_ = FrameSnapshot{};
+    return media_.release_preview_for_export(nullptr, 1).ok();
+}
+void OfflineFrameRenderer::retire_gpu_after_done() noexcept {
+    snapshot_ = FrameSnapshot{};
+    renderer_.shutdown_after_gpu_done();
+    gpu_ = nullptr;
+}
+void OfflineFrameRenderer::forget_device() noexcept {
+    detach_device();
     media_.close_all();
+}
+void OfflineFrameRenderer::detach_device() noexcept {
+    snapshot_ = FrameSnapshot{};
     renderer_.forget_device();
     gpu_ = nullptr;
 }

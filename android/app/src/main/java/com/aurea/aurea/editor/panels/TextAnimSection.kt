@@ -264,18 +264,15 @@ private fun AnimRuler(store: EditorStore, index: Int, p: AnimParam, v: FloatArra
 internal fun AnimationTrackActions(env: PanelEnv, target: TrackKey, curveTag: String) {
         val store = env.store
         val layer = store.primary
-        val detail = store.detail
-        val track = store.primaryKeys().filter { it.property == target.property && it.effectIndex == target.effectIndex && it.paramIndex == target.paramIndex }.sortedBy { it.time }
-        val local = detail?.localPlayhead ?: 0
-        val previous = track.lastOrNull { it.time < local }
-        val next = track.firstOrNull { it.time > local }
+        val navigation = layer?.let { store.keyframeNavigation(it, target) }
+        val track = store.primaryKeys().filter { it.property == target.property && it.effectIndex == target.effectIndex && it.paramIndex == target.paramIndex }
+        val start = navigation?.takeIf { it.hasSegment }?.let { nav -> track.firstOrNull { it.time == nav.segmentStart } }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).heightIn(min = 44.dp)) {
-            TextButton(enabled = previous != null, onClick = { previous?.let { key -> detail?.let { store.seek(it.timelineFrame(key.time)) } } }) { Text(stringResource(R.string.panel_keyframe_anterior)) }
-            TextButton(enabled = next != null, onClick = { next?.let { key -> detail?.let { store.seek(it.timelineFrame(key.time)) } } }) { Text(stringResource(R.string.panel_proximo_keyframe)) }
-            TextButton(enabled = track.size >= 2, modifier = Modifier.testTag(curveTag), onClick = {
-                if (layer != null && track.size >= 2) {
-                    val key = track.lastOrNull { it.time <= local && it != track.last() } ?: track.first()
-                    store.selectKeyframe(layer, key)
+            TextButton(enabled = navigation?.hasPrevious == true, onClick = { navigation?.takeIf { it.hasPrevious }?.let { store.pause(); store.seek(it.previousFrame) } }) { Text(stringResource(R.string.panel_keyframe_anterior)) }
+            TextButton(enabled = navigation?.hasNext == true, onClick = { navigation?.takeIf { it.hasNext }?.let { store.pause(); store.seek(it.nextFrame) } }) { Text(stringResource(R.string.panel_proximo_keyframe)) }
+            TextButton(enabled = start != null, modifier = Modifier.testTag(curveTag), onClick = {
+                if (layer != null && start != null) {
+                    store.selectKeyframe(layer, start)
                     env.onOpenPanel(EditorPanel.Curve)
                 }
             }) { Text(stringResource(R.string.panel_curva)) }

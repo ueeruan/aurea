@@ -73,10 +73,14 @@ public:
     bool mapBuffers = false;
     std::unordered_map<u64, std::vector<u8>> mappedBuffers;
     std::function<void()> beforeBeginFrame;
+    std::function<Status()> beforeBeginFrameStatus;
     std::function<void()> beforeBeginOffscreenFrame;
     std::function<void()> beforeBeginLeasedFrame;
     std::function<void()> beforeWaitIdle;
+    std::function<Status()> beforeExportWorkPoll;
+    Status completedExportWorkFailure = OkStatus;
     std::function<Status()> beforeEndFrame;
+    std::function<Status(const TextureDesc&)> beforeCreateTexture;
     std::function<Status(const BufferDesc&)> beforeCreateBuffer;
     std::function<Status(u64, u64)> beforeWaitFrame;
     std::function<Status(TextureHandle, const void*, u32)> beforeTextureUpload;
@@ -122,6 +126,10 @@ public:
 
     Status begin_frame(FrameBegin& out) noexcept override {
         if (beforeBeginFrame) beforeBeginFrame();
+        if (beforeBeginFrameStatus) {
+            const Status ready = beforeBeginFrameStatus();
+            if (!ready.ok()) return ready;
+        }
         if (presentableLeaseActive) return Errc::Busy;
         out = FrameBegin{};
         out.commands = this;
@@ -190,6 +198,10 @@ public:
     }
 
     Result<TextureHandle> create_texture(const TextureDesc& d) noexcept override {
+        if (beforeCreateTexture) {
+            const Status status = beforeCreateTexture(d);
+            if (!status.ok()) return status;
+        }
         textures.push_back(d);
         textureAlive.push_back(true);
         ++texturesCreated;
@@ -264,6 +276,15 @@ public:
     void wait_idle() noexcept override {
         if (beforeWaitIdle) beforeWaitIdle();
         ++idleWaits;
+    }
+    Status poll_export_work(Status* completedFailure = nullptr) noexcept override {
+        if (completedFailure) *completedFailure = completedExportWorkFailure;
+        if (frameOpen) return Status{Errc::Timeout};
+        if (beforeExportWorkPoll) {
+            const Status status = beforeExportWorkPoll();
+            if (!status.ok()) return status;
+        }
+        return wait_frame(last_submitted_frame(), 0);
     }
     u64 last_submitted_frame() const noexcept override { return framesSubmitted ? frame_ : 0; }
     Status wait_frame(u64 frame, u64 timeout) noexcept override {

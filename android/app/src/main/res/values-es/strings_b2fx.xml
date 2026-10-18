@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.1.8 BETA 2: Saber e Luma Dissolve (nomes de efeito em inglês em todo idioma; descrição traduzida). -->
+    <string name="saber_desc">Un trazo de energía con núcleo blanco incandescente y brillo amplio: entre dos puntos, por las máscaras o por el contorno del texto. Presets de sable de luz, neón, eléctrico y fuego.</string>
+    <string name="luma_dissolve_desc">La capa desaparece o aparece según el brillo: primero los oscuros, o por ruido, degradado u otra capa, con borde de color opcional.</string>
+    <string name="fxp_saber_default">Predeterminado</string>
+    <string name="fxp_saber_lightsaber">Sable de luz</string>
+    <string name="fxp_saber_neon">Neón</string>
+    <string name="fxp_saber_electric">Eléctrico</string>
+    <string name="fxp_saber_fire">Fuego</string>
+    <string name="fxp_saber_plasma">Plasma</string>
+    <string name="fxp_saber_energy">Energía</string>
+    <string name="fxp_saber_soft">Brillo suave</string>
+    <string name="fxp_saber_magic">Magia</string>
+    <string name="app_preset_fx_luma_in">Luma Dissolve (entrada)</string>
+    <string name="app_preset_fx_luma_out">Luma Dissolve (salida)</string>
+    <string name="saber_point_start">Inicio del sable</string>
+    <string name="saber_point_end">Fin del sable</string>
+    <string name="saber_points_hint">Arrastra para mover el punto del sable</string>
+</resources>

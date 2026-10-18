@@ -1,7 +1,9 @@
 package com.aurea.aurea.editor.panels
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.presets.readPreset
 import androidx.compose.runtime.rememberCoroutineScope
@@ -289,7 +291,8 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         }
     }
     val hasCameraTrack by remember(store) {
-        derivedStateOf { store.detail?.kind == LayerType.Video.kind && (store.cameraTrack?.state == 2 || store.cameraTrack?.state == 3) }
+        // Só uma análise que deu certo (2) é "câmera analisada"; falha (3) não.
+        derivedStateOf { store.detail?.kind == LayerType.Video.kind && store.cameraTrack?.state == 2 }
     }
     val tools = buildList {
         if (!tabbed) return@buildList
@@ -326,6 +329,11 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     else if (puppetOpen && (puppet.editing || selected == null))
         puppetPanelTimelineFocus(puppet.effect, puppet.selected, activePins)
     else selected?.let { listOf(TrackKey(31, it.effectId, it.param * 4 + it.component)) } ?: emptyList()
+    // Fantoche: os pinos são parâmetros ocultos (sem linha no cartão), então o
+    // losango e a curva do trilho miram o pino em foco (eixo X da posição dele).
+    val puppetKey = if (!meshSelected && puppetOpen && (puppet.editing || selected == null))
+        focus.firstOrNull()?.let { ParamKey(it.effectIndex, it.paramIndex / 4, it.paramIndex % 4) } else null
+    val railKey = puppetKey ?: selected
     androidx.compose.runtime.DisposableEffect(store, layerId, focus) {
         store.timelineFocus = focus
         onDispose { store.timelineFocus = null }
@@ -406,22 +414,22 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     }
 
     // O trilho só precisa do ESTADO do losango — derivado, não do valor que anda.
-    val railLook by remember(store, meshSelected, openId) {
+    val railLook by remember(store, meshSelected, openId, puppetKey) {
         derivedStateOf {
             if (meshSelected) {
                 val keys = store.primaryKeys().filter { it.property == TrackProperty.MESH_WARP && it.effectIndex == openId }
                 val local = store.detail?.localFrame(store.playhead)
                 if (keys.any { it.time == local }) KeyframeLook.KeyHere else if (keys.isEmpty()) KeyframeLook.None else KeyframeLook.Animated
-            } else selected?.let { effectLook(store, it.effectId, it.param) } ?: KeyframeLook.None
+            } else (puppetKey ?: selected)?.let { effectLook(store, it.effectId, it.param) } ?: KeyframeLook.None
         }
     }
-    val railAnimatable by remember(store, meshSelected) {
+    val railAnimatable by remember(store, meshSelected, puppetKey) {
         derivedStateOf {
-            meshSelected || (selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { ParamSlot.of(it).animatable } } ?: false)
+            meshSelected || ((puppetKey ?: selected)?.let { k -> store.paramOf(k.effectId, k.param)?.let { ParamSlot.of(it).animatable } } ?: false)
         }
     }
-    val curveTrackReady by remember(store) {
-        derivedStateOf { selected?.let { k -> store.primaryKeys().effectTrack(k.effectId, k.param, k.component).size >= 2 } ?: false }
+    val curveTrackReady by remember(store, puppetKey) {
+        derivedStateOf { (puppetKey ?: selected)?.let { k -> store.primaryKeys().effectTrack(k.effectId, k.param, k.component).size >= 2 } ?: false }
     }
 
     val byId = effects.associateBy { it.effectId }
@@ -455,19 +463,19 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                     {
                         // Lido NO TOQUE: o parâmetro e o cabeçote de agora.
                         if (meshSelected) store.primary?.let { layer -> openId?.let { store.meshWarpToggleKey(layer, it) } }
-                        else selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.toggleEffectKeyframe(k.effectId, it) } }
+                        else railKey?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.toggleEffectKeyframe(k.effectId, it) } }
                     }
                 } else {
                     null
                 },
                 curveAnimated = railLook != KeyframeLook.None,
-                onCurve = if (curveTrackReady) {
+                onCurve = if (curveTrackReady && railKey?.let { store.curveStart(store.primaryKeys().effectTrack(it.effectId, it.param, it.component)) } != null) {
                     {
-                        val k = selected
+                        val k = railKey
                         val layer = store.primary
                         val t = store.detail?.localFrame(store.playhead)
                         if (k != null && layer != null && t != null) {
-                            store.primaryKeys().effectTrack(k.effectId, k.param, k.component).segmentStart(t)?.let { key ->
+                            store.curveStart(store.primaryKeys().effectTrack(k.effectId, k.param, k.component))?.let { key ->
                                 store.selectKeyframe(layer, key)
                                 env.onOpenPanel(EditorPanel.Curve)
                             }
@@ -1025,6 +1033,7 @@ private fun EffectCardItem(
         }
         if (effect.typeId == effectTypeId("aurea.distort.mesh_warp")) com.aurea.aurea.editor.MeshWarpCardTools(store, id, meshSelected, onSelectMesh)
         if (effect.typeId == effectTypeId("aurea.distort.puppet")) com.aurea.aurea.editor.PuppetCardTools(store, id)
+        if (effect.typeId == effectTypeId("aurea.light.saber")) com.aurea.aurea.editor.SaberCardTools(store, id)
         val visible = slots.filter { !it.hidden }
         if (visible.isEmpty()) {
             PanelNotice(stringResource(R.string.panel_este_efeito_nao_tem_ajustes))
@@ -1051,6 +1060,15 @@ private fun effectPresetLabel(id: String): Int? = when (id) {
     "impact" -> R.string.fxp_impact
     "handheld" -> R.string.fxp_handheld
     "glitch" -> R.string.fxp_glitch
+    "saber_default" -> R.string.fxp_saber_default
+    "saber_lightsaber" -> R.string.fxp_saber_lightsaber
+    "saber_neon" -> R.string.fxp_saber_neon
+    "saber_electric" -> R.string.fxp_saber_electric
+    "saber_fire" -> R.string.fxp_saber_fire
+    "saber_plasma" -> R.string.fxp_saber_plasma
+    "saber_energy" -> R.string.fxp_saber_energy
+    "saber_soft" -> R.string.fxp_saber_soft
+    "saber_magic" -> R.string.fxp_saber_magic
     else -> null
 }
 
@@ -1087,17 +1105,20 @@ private fun ParamRows(
     val label = d.label()
     val menu = { onParamMenu(ParamMenuTarget(id, s.index, label)) }
     when (s.type) {
-        ParamType.FLOAT, ParamType.INT, ParamType.ANGLE ->
+        ParamType.FLOAT, ParamType.INT, ParamType.ANGLE -> androidx.compose.runtime.key(env.store.projectGeneration, env.store.composition?.id, env.store.primary, id, s.index) {
             EffectNumberRow(env, id, s, d, 0, label, selected == ParamKey(id, s.index, 0), onSelect, menu)
-        ParamType.POINT2D, ParamType.POINT3D -> repeat(s.components) { c ->
-            EffectNumberRow(env, id, s, d, c, rowLabel(label, s, c), selected == ParamKey(id, s.index, c), onSelect, menu)
+        }
+        ParamType.POINT2D, ParamType.POINT3D -> androidx.compose.runtime.key(env.store.projectGeneration, env.store.composition?.id, env.store.primary, id, s.index) {
+            EffectVectorRow(env, id, s, d, label, selected, onSelect, menu)
         }
         ParamType.BOOL -> EffectToggleRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
         ParamType.ENUM -> EffectChoiceRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
         ParamType.COLOR -> EffectColorRow(env, id, s, label, selected?.param == s.index, onSelect, menu)
         // Outra camada ("Camada de áudio"): escolhe na lista das camadas.
         ParamType.LAYER_REFERENCE -> EffectLayerRow(env, id, s, label, menu)
-        ParamType.TEXTURE_REFERENCE -> CubeLutImportRow(env, id)
+        ParamType.TEXTURE_REFERENCE ->
+            if (typeId == effectTypeId("aurea.3d.part_texture")) PartTextureImageRow(env, id, label)
+            else CubeLutImportRow(env, id)
         ParamType.CURVE -> ColorCurveEditor(env, id, s.index)
         // Curva/degradê/textura: o motor tem, o app ainda não edita — sem botão falso.
         else -> PropertyCustomRow(label = label, selected = false, onSelect = {}) {
@@ -1105,6 +1126,27 @@ private fun ParamRows(
                 stringResource(R.string.panel_ainda_nao_editavel_app),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
             )
+        }
+    }
+}
+
+/** "Trocar textura 3D": a imagem da galeria que cobre a parte (nome + botão grande). */
+@Composable
+private fun PartTextureImageRow(env: PanelEnv, effect: Int, label: String) {
+    val store = env.store
+    store.primary ?: return
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        if (uri != null) store.setEffectImage(uri, effect)
+    }
+    val name = remember(store.detail, store.curveRevision, store.effects) { store.effectImageName(effect) }
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text("$label · " + name.ifBlank { stringResource(R.string.fx3d_image_none) }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+        Box(Modifier.fillMaxWidth().height(48.dp).testTag("effect.part_texture.pick")
+            .clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip)
+            .tocavel(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }),
+            contentAlignment = Alignment.Center) {
+            Text(stringResource(if (name.isBlank()) R.string.fx3d_image_pick else R.string.shape3d_image_change), color = AureaColors.Text)
         }
     }
 }
@@ -1119,6 +1161,8 @@ private fun CubeLutImportRow(env: PanelEnv, effect: Int) {
         target = null
     }
     val name = store.colorLutName(layer, effect)
+    // O mesmo importador serve o LUT (.cube) e a paleta do Palettize.
+    val palette = store.typeOf(effect) == effectTypeId("aurea.color.palettize")
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         if (name.isNotBlank()) Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
@@ -1126,7 +1170,7 @@ private fun CubeLutImportRow(env: PanelEnv, effect: Int) {
             .clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip)
             .tocavel(onClick = { target = layer to effect; picker.launch(arrayOf("*/*")) }),
             contentAlignment = Alignment.Center) {
-            Text(stringResource(R.string.lut_import), color = AureaColors.Text)
+            Text(stringResource(if (palette) R.string.palette_import else R.string.lut_import), color = AureaColors.Text)
         }
     }
 }
@@ -1183,6 +1227,9 @@ private fun EffectNumberRow(
     onMenu: () -> Unit,
 ) {
     val store = env.store
+    val owner = store.primary
+    val generation = store.projectGeneration
+    val composition = store.composition?.id
     val value = rememberParamValue(env, effectId, s.index, component)
     val look = rememberLook(env, effectId, s.index, component)
     // Duas faixas: a RÉGUA anda só na do slider ([s.min]..[s.max]); o TECLADO
@@ -1197,6 +1244,8 @@ private fun EffectNumberRow(
     val typedShownLo = if (typedLo.isFinite()) d.toDisplay(typedLo) else typedLo
     val typedShownHi = if (typedHi.isFinite()) d.toDisplay(typedHi) else typedHi
     fun write(display: Float) {
+        if (owner == null || store.primary != owner || store.projectGeneration != generation ||
+            store.composition?.id != composition || store.detail?.locked == true || !display.isFinite()) return
         val p = store.paramOf(effectId, s.index) ?: return
         val clamped = d.toEngine(display).coerceIn(typedLo, typedHi)
         store.setEffectParam(effectId, p, if (s.type == ParamType.INT) clamped.roundToInt().toFloat() else clamped, component)
@@ -1230,6 +1279,42 @@ private fun EffectNumberRow(
             )
         },
     )
+}
+
+/** A point uses one ruler and explicit axis selection, preserving its native bindings. */
+@Composable
+private fun EffectVectorRow(env: PanelEnv, effectId: Int, s: ParamSlot, d: ParamDisplay,
+    label: String, selected: ParamKey?, onSelect: (ParamKey) -> Unit, onMenu: () -> Unit) {
+    val store = env.store
+    val owner = store.primary
+    val generation = store.projectGeneration
+    val composition = store.composition?.id
+    val own = selected?.takeIf { it.effectId == effectId && it.param == s.index }
+    val axis = own?.component?.coerceIn(0, s.components - 1) ?: 0
+    val values = (0 until s.components).map { d.toDisplay(rememberParamValue(env, effectId, s.index, it)) }
+    val looks = (0 until s.components).map { rememberLook(env, effectId, s.index, it) }
+    val lo = d.toDisplay(s.min); val hi = d.toDisplay(s.max)
+    val typedLo = d.toDisplay(s.typedLo); val typedHi = d.toDisplay(s.typedHi)
+    fun currentOwner() = owner != null && store.primary == owner && store.projectGeneration == generation && store.composition?.id == composition && store.detail?.locked != true
+    fun choose(c: Int) { if (currentOwner()) onSelect(ParamKey(effectId, s.index, c)) }
+    fun write(c: Int, value: Float) {
+        if (!currentOwner() || !value.isFinite()) return
+        val p = store.paramOf(effectId, s.index) ?: return
+        store.setEffectParam(effectId, p, d.toEngine(value).coerceIn(s.typedLo, s.typedHi), c)
+    }
+    com.aurea.aurea.ui.ds.VectorPropertyRow(label, values, (0 until s.components).map { "XYZ"[it].toString() },
+        selectedAxis = axis, unitsPerDp = s.unitsPerDp * d.scale, min = min(lo, hi), max = max(lo, hi),
+        format = { comUnidade(numeroPtBr(it, d.decimals), d.suffix) }, selected = own != null,
+        onSelectAxis = ::choose, onGestureStart = { store.beginGesture("ajustar $label") },
+        onValue = ::write, onGestureEnd = store::endGesture,
+        onTapValue = { c ->
+            choose(c)
+            env.openKeypad(KeypadRequest("$label · ${"XYZ"[c]}", values[c], d.suffix,
+                min(typedLo, typedHi), max(typedLo, typedHi), d.decimals,
+                percentBase = max(lo, hi)) { write(c, it) })
+        }, keyframes = looks, enabled = currentOwner() && store.detail?.locked != true,
+        expression = rememberExpr(env, effectId, s), onExpression = onMenu,
+        tag = "effects.vector.$effectId.${s.index}", displayFormat = { com.aurea.aurea.ui.ds.compactPropertyNumber(it, d.decimals) })
 }
 
 /** Liga/desliga: valor ≥ 0,5 = ligado; escreve 1/0 num passo. O interruptor mora no lugar da caixa de valor. */

@@ -23,7 +23,7 @@ class TimelineHitTest {
         keys: Boolean = true,
     ): HitKind {
         val x0 = TimeAxis.xOf(start.toDouble(), VIEW, PPF, CX)
-        val x1 = maxOf(TimeAxis.xOf(end.toDouble(), VIEW, PPF, CX), x0 + m.barMinWidth)
+        val x1 = TimeAxis.xOf(end.toDouble(), VIEW, PPF, CX)
         return RowHit.hit(m, x, y, WIDTH, x0, x1, handles, compact, keys, instants, VIEW, PPF, CX, out)
     }
 
@@ -70,12 +70,12 @@ class TimelineHitTest {
     }
 
     @Test
-    fun `alcas dentro das pontas com folga para fora`() {
+    fun `alcas externas deixam o corpo editavel`() {
         assertEquals(HitKind.TRIM_START, hit(190f, 10f))
-        assertEquals(HitKind.TRIM_START, hit(205f, 10f))
-        assertEquals(HitKind.TRIM_END, hit(295f, 10f))
+        assertEquals(HitKind.BODY, hit(205f, 10f))
+        assertEquals(HitKind.BODY, hit(295f, 10f))
         assertEquals(HitKind.TRIM_END, hit(310f, 10f))
-        assertEquals(HitKind.NONE, hit(320f, 10f))
+        assertEquals(HitKind.NONE, hit(330f, 10f))
         assertEquals(HitKind.NONE, hit(190f, 10f, handles = false))
         assertEquals(HitKind.BODY, hit(205f, 10f, handles = false))
     }
@@ -128,12 +128,12 @@ class TimelineHitTest {
     @Test
     fun `tampa externa preserva trim e as duas metades do keyframe na borda`() {
         val keys = intArrayOf(100)
-        assertEquals(HitKind.CAP_BACK, hit(180f, 10f, compact = true, instants = keys))
+        assertEquals(HitKind.TRIM_START, hit(180f, 10f, compact = true, instants = keys))
         assertEquals(HitKind.KEYFRAME, hit(190f, 10f, compact = true, instants = keys))
         assertEquals(HitKind.KEYFRAME, hit(197f, 12f, compact = true, instants = keys))
         assertEquals(HitKind.KEYFRAME, hit(203f, 12f, compact = true, instants = keys))
         // Mesmo quando somente a tampa entra pela borda direita da janela.
-        assertEquals(HitKind.CAP_BACK, hit(390f, 10f, start = 205, end = 250, compact = true))
+        assertEquals(HitKind.TRIM_START, hit(390f, 10f, start = 205, end = 250, compact = true))
     }
 
     @Test
@@ -144,10 +144,10 @@ class TimelineHitTest {
     }
 
     @Test
-    fun `clipe curto divide as zonas no meio`() {
-        // 100..105 → 200..210, alargado ao mínimo de 40 → 200..240, meio 220.
-        assertEquals(HitKind.TRIM_START, hit(205f, 10f, end = 105))
-        assertEquals(HitKind.BODY, hit(215f, 10f, end = 105))
+    fun `clipe curto nao amplia o tempo editavel`() {
+        // 100..105 → 200..210; as alças ficam fora das duas bordas reais.
+        assertEquals(HitKind.BODY, hit(205f, 10f, end = 105))
+        assertEquals(HitKind.TRIM_END, hit(215f, 10f, end = 105))
         assertEquals(HitKind.TRIM_END, hit(230f, 10f, end = 105))
     }
 

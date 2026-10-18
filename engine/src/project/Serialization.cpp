@@ -930,6 +930,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.boolv(l.acceptsLights);
     // v46: efeitos de imagem valem sobre o resultado 3D do modelo.
     w.boolv(l.modelEffects);
+    // v47: preserve the camera's projection of 2D layers below it.
+    w.boolv(l.camera.affectsLayersBelow);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -959,8 +961,14 @@ void write_layer(ByteWriter& w, const Layer& l) {
 //      grupo fechado para a câmera (o render de sempre).
 // v43: mostrar interior do objeto 3D (Model3DData::interior, um byte no fim
 //      da camada). Antes dela: automático.
+// v47: CameraData::affectsLayersBelow, one bool at the end of each layer.
+//      Earlier timelines retain the original 3D-only camera behavior.
 // v46: efeitos de imagem no modelo 3D valem (Layer::modelEffects, um bool no
 //      fim da camada). Antes dela: desligado — os efeitos eram ignorados.
+// v47: câmera "afeta camadas abaixo" (CameraData::affectsLayersBelow, um bool
+//      no fim da camada). Antes dela: desligado — só as camadas 3D passam pela câmera.
+// v47: câmera "afeta camadas abaixo" (CameraData::affectsLayersBelow, um bool
+//      no fim da camada). Antes dela: desligado — só as camadas 3D passam pela câmera.
 // v45: "aceita luzes" da camada (Layer::acceptsLights, um bool no fim da
 //      camada). Antes dela: desligado — as luzes não tocam as camadas 2D.
 // v44: parâmetros das formas paramétricas (profundidade, ponta, espessura,
@@ -1532,6 +1540,7 @@ void read_layer(ByteReader& r, Layer& l) {
     // Projeto anterior à v46: efeitos num modelo 3D eram ignorados — continuam
     // assim até a pessoa mexer nos efeitos da camada.
     l.modelEffects = g_readingTimelineVersion >= 46 ? r.boolv() : false;
+    l.camera.affectsLayersBelow = g_readingTimelineVersion >= 47 ? r.boolv() : false;
 }
 
 // Values in the old effect's time parameter are seconds; direct TimeRemap
@@ -1762,6 +1771,9 @@ std::vector<u8> build_project_section(const Project& p) {
     w.boolv(ed.showGrid);
     w.u32v(static_cast<u32>(ed.selectedLayers.size()));
     for (u64 id : ed.selectedLayers) w.u64v(id);
+    // 0.2.5: a interface do projeto vai no FIM — quem lê um arquivo antigo
+    // não acha o byte e fica na Composição; versão antiga ignora o que sobra.
+    w.u8v(ed.uiMode);
 
     return std::vector<u8>(w.bytes().begin(), w.bytes().end());
 }
@@ -1931,6 +1943,12 @@ void apply_project_section(const u8* data, usize size, Project& p) {
         if (n <= 4096u) {
             for (u32 i = 0; i < n && r.good(); ++i) ed.selectedLayers.push_back(r.u64v());
         }
+    }
+    // Interface do projeto (0.2.5): ausente = Composição; valor desconhecido também.
+    ed.uiMode = 0;
+    if (r.good() && r.remaining() >= 1) {
+        const u8 mode = r.u8v();
+        ed.uiMode = mode <= 1 ? mode : 0;
     }
 }
 

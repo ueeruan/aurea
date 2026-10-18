@@ -2,11 +2,20 @@ package com.aurea.aurea.editor
 
 import com.aurea.aurea.ui.i18n.KeepLtr
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.layout.size
 import com.aurea.aurea.ui.theme.tocavel
 import androidx.compose.foundation.background
@@ -41,6 +50,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
@@ -63,7 +77,8 @@ import kotlin.math.roundToInt
 
 /**
  * Grade · resolução · marca | ⇤ ▶ ⇥ | camadas · ↶ ↷.
- * Tocar ⇤/⇥ anda de marca/keyframe/quadro; segurar vai ao início/fim.
+ * Tocar ⇤/⇥ busca a marca ou o keyframe da camada ativa mais próximo;
+ * sem camada ativa busca só marcas. Segurar vai ao início/fim.
  * Os três grupos seguem a referência do usuário com os glifos do AUREA.
  * Enquanto um dedo manipula algo no palco, a barra vira a de informações.
  */
@@ -172,28 +187,47 @@ private fun PreviewResolutionButton(store: EditorStore, side: androidx.compose.u
     // (toque longo) é recurso de usuário — também está no menu "Diagnóstico na tela".
     val testeRaw = com.aurea.aurea.BuildConfig.DEBUG
     val chipDescription = stringResource(R.string.editor_resolucao_previa_segure_diagnostico)
+    // "Otimizar vídeos pesados" (0.2.5): enquanto o motor gera a versão leve,
+    // um fio de progresso no chip da prévia — e o estado falado pelo leitor.
+    val proxy = store.proxies.summary
+    val optimizing = proxy.generating > 0
+    val proxyState = when {
+        optimizing -> stringResource(R.string.proxy_optimizing_description, proxy.percent)
+        proxy.busy -> stringResource(R.string.proxy_queued)
+        else -> ""
+    }
     Box(Modifier.width(side).height(ShellDims.Transport)) {
         Box(
             Modifier
                 .fillMaxWidth().height(ShellDims.Transport)
                 .testTag("transport.resolution")
-                .semantics { contentDescription = chipDescription }
+                .semantics {
+                    contentDescription = chipDescription
+                    if (proxyState.isNotEmpty()) stateDescription = proxyState
+                }
                 .tocavel(haptic = true, onLongClick = { store.toggleHud() }) { open = true },
             contentAlignment = Alignment.Center,
         ) {
             Box(
                 Modifier.padding(horizontal = 3.dp).fillMaxWidth().height(26.dp)
+                    .clip(RoundedCornerShape(4.dp))
                     .border(1.dp, AureaColors.Border, RoundedCornerShape(4.dp)),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Text)))
+                if (optimizing) Box(
+                    Modifier.align(Alignment.BottomStart).fillMaxWidth(proxy.progress.coerceIn(0.05f, 1f))
+                        .height(2.dp).background(AureaColors.Accent),
+                )
             }
         }
         if (open) com.aurea.aurea.ui.i18n.LocaleDirection {
             val current = store.preview.scaleLabel
             ShellPopupMenu(
                 items = listOfNotNull(
+                    // Informativo: tocar só fecha o menu.
+                    if (optimizing) PopupItem(stringResource(R.string.proxy_optimizing, proxy.percent), false) {} else null,
                     // Teste de reprodução crua: só depuração. `store.rawPlayback`
                     // ligado (impossível no release) ainda mostra a volta.
                     if (testeRaw || store.rawPlayback) PopupItem(if (store.rawPlayback) stringResource(R.string.edt_back_to_compositor) else "AUREA RAW PLAYBACK TEST", store.rawPlayback) { store.toggleRawPlayback() } else null,
@@ -219,22 +253,101 @@ private fun PreviewResolutionButton(store: EditorStore, side: androidx.compose.u
 private fun PlayButton(store: EditorStore, side: androidx.compose.ui.unit.Dp = 48.dp) {
     val playing = store.playing || store.preview.buffering
     val loop = store.looping
-    Box(contentAlignment = Alignment.Center) {
-        ChromeButton(
-            if (playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill,
-            when {
-                playing -> stringResource(R.string.editor_pausar)
-                loop -> stringResource(R.string.editor_repeticao_ligada_segure_desligar)
-                else -> stringResource(R.string.editor_reproduzir_segure_repetir)
+    val haptic = LocalHapticFeedback.current
+    var pressed by remember { mutableStateOf(false) }
+    val playDescription = stringResource(when {
+        playing -> R.string.editor_pausar
+        loop -> R.string.editor_repeticao_ligada_segure_desligar
+        else -> R.string.editor_reproduzir_segure_repetir
+    })
+    val forward = stringResource(R.string.prerender_forward)
+    val backward = stringResource(R.string.prerender_backward)
+    val cancel = stringResource(R.string.prerender_cancel)
+    val hint = stringResource(R.string.prerender_gesture_hint)
+    val progress = store.preRenderProgress
+    val progressDescription = when {
+        store.preRenderPreparing -> stringResource(R.string.prerender_preparing)
+        progress.running -> stringResource(R.string.prerender_progress, (progress.fraction * 100).roundToInt())
+        progress.complete -> stringResource(R.string.prerender_ready)
+        else -> ""
+    }
+    Box(
+        Modifier.size(side, ShellDims.Transport).testTag("transport.play")
+            .alpha(if (pressed) 0.65f else 1f)
+            .semantics {
+                role = Role.Button
+                contentDescription = "$playDescription. $hint"
+                stateDescription = progressDescription
+                onClick { if (store.preview.buffering) store.pause() else store.togglePlayback(); true }
+                onLongClick { store.setLoop(!store.looping); true }
+                customActions = listOf(
+                    CustomAccessibilityAction(forward) { store.startPreRender(1); true },
+                    CustomAccessibilityAction(backward) { store.startPreRender(-1); true },
+                    CustomAccessibilityAction(cancel) { store.cancelPreRender(); true },
+                )
+            }
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyUp && event.key in listOf(Key.Enter, Key.NumPadEnter, Key.Spacebar)) {
+                    if (store.preview.buffering) store.pause() else store.togglePlayback()
+                    true
+                } else false
+            }
+            .focusable()
+            .pointerInput(store) {
+                val threshold = 24.dp.toPx()
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    down.consume()
+                    pressed = true
+                    var change = down
+                    var cancelled = false
+                    try {
+                        val releasedEarly = withTimeoutOrNull(500L) {
+                            while (change.pressed) {
+                                val next = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                                if (next == null || next.isConsumed || (next.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                                    cancelled = true
+                                    return@withTimeoutOrNull false
+                                }
+                                change = next
+                                change.consume()
+                            }
+                            true
+                        }
+                        if (!cancelled && releasedEarly == true) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            if (store.preview.buffering) store.pause() else store.togglePlayback()
+                        } else if (!cancelled) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            var fired = false
+                            while (change.pressed) {
+                                val next = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                                if (next == null || next.isConsumed) { cancelled = true; break }
+                                change = next
+                                val delta = change.position - down.position
+                                if (abs(delta.y) >= threshold && abs(delta.y) > abs(delta.x)) cancelled = true
+                                if (!fired && !cancelled && abs(delta.x) >= threshold && abs(delta.x) > abs(delta.y)) {
+                                    fired = true
+                                    store.startPreRender(if (delta.x > 0) 1 else -1)
+                                }
+                                change.consume()
+                            }
+                            if (!fired && !cancelled) store.setLoop(!store.looping)
+                        }
+                    } finally { pressed = false }
+                }
             },
-            onClick = { if (store.preview.buffering) store.pause() else store.togglePlayback() },
-            size = 22.dp,
-            width = side,
-            height = ShellDims.Transport,
-            tint = if (loop) AureaColors.Accent else AureaColors.Text,
-            onLongClick = { store.setLoop(!store.looping) },
-            modifier = Modifier.testTag("transport.play"),
-        )
+        contentAlignment = Alignment.Center,
+    ) {
+        CupertinoIcon(if (playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill,
+            22.dp, if (loop) AureaColors.Accent else AureaColors.Text)
+        if (store.preRenderPreparing || progress.running || progress.complete) {
+            val color = AureaColors.Accent
+            Canvas(Modifier.size(30.dp)) {
+                drawArc(color, -90f, 360f * if (store.preRenderPreparing) 0.08f else progress.fraction,
+                    false, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+            }
+        }
         if (loop) {
             CupertinoIcon(
                 CupertinoGlyph.Repeat,

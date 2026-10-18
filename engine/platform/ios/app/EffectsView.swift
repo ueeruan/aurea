@@ -52,17 +52,39 @@ struct EffectsView: View {
     private var meshSelected: Bool {
         selected == nil && openId != nil && model.effects.contains { $0.effectId == openId && $0.typeId == fxEffectTypeId("aurea.distort.mesh_warp") }
     }
-    private var canAnimate: Bool { meshSelected || (selectedParam.map { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 } ?? false) }
+    /// Fantoche: os pinos são parâmetros ocultos (sem linha no cartão), então o
+    /// losango e a curva do trilho miram o pino em foco (eixo X da posição dele).
+    /// Mesmo contrato do Android (EffectsPanel.kt, puppetKey).
+    private var puppetSelection: EffectParamSelection? {
+        guard !meshSelected, let layer = model.primarySelection, let effect = openId, puppet.layer == layer,
+              puppet.effect >= 0, UInt32(puppet.effect) == effect,
+              model.effects.contains(where: { $0.effectId == effect && $0.typeId == PuppetStageState.type }),
+              puppet.editing || selected == nil else { return nil }
+        let pins = model.puppetPins(layer, effect: puppet.effect)
+        let active = stride(from: 0, to: pins.count, by: 4).compactMap { index -> Int? in
+            guard index + 3 < pins.count, pins[index].isFinite, pins[index] >= 0, pins[index] <= 15 else { return nil }
+            let pin = Int(pins[index]); return Float(pin) == pins[index] ? pin : nil
+        }
+        guard let pin = active.contains(puppet.selected) ? puppet.selected : active.first else { return nil }
+        return EffectParamSelection(effect: effect, param: UInt32(5 + pin * 3), component: 0)
+    }
+    /// O alvo do trilho (◇+ e curva): o pino em foco do Fantoche ou o parâmetro escolhido.
+    private var railSelection: EffectParamSelection? { puppetSelection ?? selected }
+    private var railParam: EffectParamItem? {
+        guard let s = railSelection, s.effect == openId else { return nil }
+        return model.effectParams.first { $0.index == s.param }
+    }
+    private var canAnimate: Bool { meshSelected || (railParam.map { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 } ?? false) }
     private var railLook: KeyframeLook {
         if meshSelected, let effect = openId, let layer = model.primarySelection {
             let keys = (model.keyframes[layer] ?? []).filter { $0.property == 44 && $0.effectIndex == effect }
             return keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
         }
-        guard let selected else { return .none }
+        guard let selected = railSelection else { return .none }
         return look(effect: selected.effect, param: selected.param)
     }
     private var selectedTrack: [KeyframeItem] {
-        guard let selected, let layer = model.primarySelection else { return [] }
+        guard let selected = railSelection, let layer = model.primarySelection else { return [] }
         return (model.keyframes[layer] ?? []).filter { $0.property == 31 && $0.effectIndex == selected.effect && $0.paramIndex == selected.param * 4 + UInt32(selected.component) }.sorted { $0.time < $1.time }
     }
     var body: some View {
@@ -138,7 +160,10 @@ struct EffectsView: View {
             model.refreshModel(force: true)
             pendingPick = nil
         }
-        .sheet(item: $about) { entry in EffectAboutSheet(prefs: prefs, entry: entry).environmentObject(model) }
+        .sheet(item: $about) { entry in
+            EffectAboutSheet(prefs: prefs, entry: entry).environmentObject(model)
+                .presentationDetents([.medium, .large])
+        }
         .onChange(of: model.status.modelRevision) { _ in refreshExpressions(); refreshTools(); updateTimelineFocus() }
         .onChange(of: model.status.playhead) { _ in refreshExpressions() }
         // Alight Motion: .xml/.amproj/.zip não têm tipo padrão; o motor reconhece pelo conteúdo.
@@ -310,6 +335,7 @@ struct EffectsView: View {
                     else {
                         if effect.typeId == fxEffectTypeId("aurea.distort.mesh_warp") { MeshWarpCardTools(effectId: effect.effectId, selected: meshSelected, onSelect: { selected = nil }) }
                         if effect.typeId == fxEffectTypeId("aurea.distort.puppet") { PuppetCardTools(effectId: effect.effectId) }
+                        if effect.typeId == fxEffectTypeId("aurea.light.saber") { SaberCardTools(effectId: effect.effectId) }
                         if effect.typeId == fxEffectTypeId("aurea.key.rotobrush") {
                             PanelNotice(AureaText.t("roto_note"))
                             RotoPaintCardTools(effectId: effect.effectId,
@@ -450,7 +476,7 @@ struct EffectsView: View {
         switch Int(param.type) {
         case fxParamFloat, fxParamInt, fxParamAngle: numberRow(param, effect: effect, component: 0)
         case fxParamPoint2D, fxParamPoint3D:
-            ForEach(0..<fxComponentCount(Int(param.type)), id: \.self) { component in numberRow(param, effect: effect, component: component) }
+            vectorRow(param, effect: effect)
         case fxParamBool:
             // O interruptor mora no lugar da caixa de valor, à direita.
             customRow(param, effect: effect) {
@@ -470,7 +496,13 @@ struct EffectsView: View {
         case fxParamCurve:
             if let layer = model.primarySelection { ColorCurveEditor(layer: layer, effect: effect, param: param.index) }
         case fxParamTextureRef:
-            if let layer = model.primarySelection { CubeLutImportRow(layer: layer, effect: effect) }
+            if let layer = model.primarySelection {
+                if model.effects.first(where: { $0.effectId == effect })?.typeId == fxEffectTypeId("aurea.3d.part_texture") {
+                    PartTextureImageRow(layer: layer, effect: effect)
+                } else {
+                    CubeLutImportRow(layer: layer, effect: effect)
+                }
+            }
         case fxParamLayerRef:
             // Outra camada ("Camada de áudio"): o menu lista as camadas da
             // composição; o motor recebe o ÍNDICE da camada (−1 = nenhuma).
@@ -583,6 +615,7 @@ struct EffectsView: View {
     }
     private func numberRow(_ param: EffectParamItem, effect: UInt32, component: Int) -> some View {
         let d = display(param, effectId: effect), key = EffectParamSelection(effect: effect, param: param.index, component: component)
+        let project = model.projectGeneration, composition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value, layer = model.primarySelection
         let label = Int(param.type) == fxParamPoint2D || Int(param.type) == fxParamPoint3D ? axisLabel(d.label, component: component) : d.label
         // Duas faixas (EffectsPanel.kt): a RÉGUA anda na do slider (minValue...maxValue);
         // o TECLADO aceita a digitada (hardMin...hardMax), que o motor impõe. A
@@ -595,11 +628,14 @@ struct EffectsView: View {
         let step: Float = Int(param.type) == fxParamAngle ? 0.5 : range.isFinite && range > 0 ? min(range / 500, 2) : 0.5
         let shown = d.toDisplay(component < param.value.count ? param.value[component] : 0)
         let send: (Float) -> Void = { value in
+            guard model.projectGeneration == project, model.primarySelection == layer,
+                  (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition, openId == effect else { return }
             let coreValue = min(typedMax, max(typedMin, d.toEngine(value)))
             writeComponent(param.index, effect: effect, component: component, value: Int(param.type) == fxParamInt ? coreValue.rounded() : coreValue)
         }
         return EffectNumberRow(label: label, value: shown, unitsPerPoint: step * d.scale, minimum: min(lo, hi), maximum: max(lo, hi), suffix: d.suffix, decimals: d.decimals,
                                identifier: "effects.param.\(effect).\(param.index).\(component)",
+                               enabled: param.flags & 16 == 0 && model.selectedLayer?.locked != true,
                                selected: selected == key, look: look(effect: effect, param: param.index, component: component), expression: expressionLooks[param.index] ?? .none,
                                onSelect: { selected = key }, onMenu: { paramMenu(param, effect: effect) },
                                onBegin: { model.beginGesture("ajustar " + label) }, onValue: send, onEnd: { model.endGesture() }, onKeypad: {
@@ -607,7 +643,39 @@ struct EffectsView: View {
                                    // "50%" continua sendo 50 % do fim da RÉGUA (não do teto digitado).
                                    model.numericKeypad = KeypadRequest(title: label, value: shown, unit: d.suffix, min: min(typedLo, typedHi), max: max(typedLo, typedHi),
                                                                        decimals: d.decimals, percentBase: max(lo, hi), onValue: send)
-                               })
+                               }).id("effect.scalar:\(model.projectGeneration):\(model.composition[AureaCompositionId] ?? ""):\(model.primarySelection ?? 0):\(effect):\(param.index):\(component)")
+    }
+    private func vectorRow(_ param: EffectParamItem, effect: UInt32) -> some View {
+        let d = display(param, effectId: effect), count = fxComponentCount(Int(param.type))
+        let project = model.projectGeneration, composition = (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value, layer = model.primarySelection
+        let chosen = selected?.effect == effect && selected?.param == param.index
+        let axis = chosen ? min(count - 1, max(0, selected?.component ?? 0)) : 0
+        let lo = d.toDisplay(param.minValue), hi = d.toDisplay(param.maxValue)
+        let typedMin = min(param.hardMin, param.minValue), typedMax = max(param.hardMax, param.maxValue)
+        let typedLo = d.toDisplay(typedMin), typedHi = d.toDisplay(typedMax)
+        let span = param.maxValue - param.minValue
+        let step: Float = span.isFinite && span > 0 ? min(span / 500, 2) : 0.5
+        let values = (0..<count).map { d.toDisplay($0 < param.value.count ? param.value[$0] : 0) }
+        let select: (Int) -> Void = { selected = EffectParamSelection(effect: effect, param: param.index, component: $0) }
+        let send: (Int, Float) -> Void = { component, amount in
+            guard model.projectGeneration == project, model.primarySelection == layer,
+                  (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value == composition, openId == effect else { return }
+            writeComponent(param.index, effect: effect, component: component, value: d.toEngine(amount).clamped(to: typedMin...typedMax))
+        }
+        return VectorPropertyRow(label: d.label, values: values, axes: Array(["X", "Y", "Z"].prefix(count)),
+            selectedAxis: axis, unitsPerPoint: step * d.scale, range: min(lo, hi)...max(lo, hi),
+            formattedValue: { _, amount in comUnidade(numeroPtBr(amount, casas: d.decimals), d.suffix) },
+            compactValue: { _, amount in compactPropertyNumber(amount, decimals: d.decimals) },
+            enabled: param.flags & 16 == 0 && model.selectedLayer?.locked != true,
+            selected: chosen, look: look(effect: effect, param: param.index), expression: expressionLooks[param.index] ?? .none,
+            identifier: "effects.param.\(effect).\(param.index).vector", onMenu: { paramMenu(param, effect: effect) },
+            onSelect: select, onKeypad: { component in
+                select(component)
+                model.numericKeypad = KeypadRequest(title: d.label + " · " + ["X", "Y", "Z"][component],
+                    value: values[component], unit: d.suffix, min: min(typedLo, typedHi), max: max(typedLo, typedHi),
+                    decimals: d.decimals, percentBase: max(lo, hi)) { send(component, $0) }
+            }, onBegin: { model.beginGesture("ajustar " + d.label) }, onValue: send, onEnd: { model.endGesture() })
+            .id("effect.vector:\(model.projectGeneration):\(model.composition[AureaCompositionId] ?? ""):\(model.primarySelection ?? 0):\(effect):\(param.index)")
     }
     private func customRow<Content: View>(_ param: EffectParamItem, effect: UInt32, @ViewBuilder content: () -> Content) -> some View {
         let key = EffectParamSelection(effect: effect, param: param.index, component: 0)
@@ -650,7 +718,7 @@ struct EffectsView: View {
             }
             return
         }
-        guard let selection = selected, let param = currentParam(selection.param), let layer = model.primarySelection,
+        guard let selection = railSelection, let param = currentParam(selection.param), let layer = model.primarySelection,
               model.selectedLayer?.locked != true, param.flags & 1 != 0 else { return }
         let here = (model.keyframes[layer] ?? []).filter { $0.property == 31 && $0.effectIndex == selection.effect && $0.paramIndex / 4 == param.index && $0.time == model.localPlayhead }
         model.beginGesture("keyframe de efeito")
@@ -686,7 +754,7 @@ struct EffectsView: View {
     }
 
     private func openCurve() {
-        guard let selected else { return }
+        guard let selected = railSelection else { return }
         let track = selectedTrack
         guard track.count >= 2 else { return }
         let index = min(track.count - 2, track.lastIndex(where: { $0.time <= model.localPlayhead }) ?? 0)
@@ -953,6 +1021,35 @@ struct EffectsView: View {
     }
 }
 
+/// "Trocar textura 3D": a imagem da galeria que cobre a parte (par do Android,
+/// EffectsPanel.kt `PartTextureImageRow`).
+@MainActor
+private struct PartTextureImageRow: View {
+    let layer: Int64
+    let effect: UInt32
+    @EnvironmentObject private var model: AureaModel
+    @State private var picking = false
+    @State private var filename = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(AureaText.t("fxl_image") + " · " + (filename.isEmpty ? AureaText.t("fx3d_image_none") : filename))
+                .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
+            Button(AureaText.t(filename.isEmpty ? "fx3d_image_pick" : "shape3d_image_change")) { picking = true }
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .accessibilityIdentifier("effect.part_texture.pick")
+        }
+        .onAppear { filename = model.engine.effectImageName(effect, forLayer: layer) }
+        .onChange(of: model.effects) { _ in filename = model.engine.effectImageName(effect, forLayer: layer) }
+        .onChange(of: model.status.modelRevision) { _ in filename = model.engine.effectImageName(effect, forLayer: layer) }
+        .sheet(isPresented: $picking) {
+            ShellMediaPicker(selectionLimit: 1, filter: .images) { items in
+                picking = false
+                if let (url, _) = items.first { model.setEffectImage(layer, effect: effect, url: url) }
+            }
+        }
+    }
+}
+
 @MainActor
 private struct CubeLutImportRow: View {
     let layer: Int64
@@ -962,13 +1059,18 @@ private struct CubeLutImportRow: View {
     @State private var lutPick: URL?
     @State private var busy = false
     @State private var filename = ""
+    private var palette: Bool { model.effects.first { $0.effectId == effect }?.typeId == fxEffectTypeId("aurea.color.palettize") }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if !filename.isEmpty {
                 Text(filename).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).lineLimit(1)
             }
-            Button(AureaText.t(busy ? "lut_importing" : "lut_import")) {
-                DocumentImportPicker.present(types: [UTType(filenameExtension: "cube") ?? .data, .data]) { urls in lutPick = urls?.first }
+            Button(AureaText.t(palette ? "palette_import" : busy ? "lut_importing" : "lut_import")) {
+                // O mesmo importador serve o LUT (.cube) e a paleta do Palettize.
+                let types: [UTType] = palette
+                    ? [.png, .jpeg, UTType(filenameExtension: "gpl") ?? .data, UTType(filenameExtension: "hex") ?? .data, .data]
+                    : [UTType(filenameExtension: "cube") ?? .data, .data]
+                DocumentImportPicker.present(types: types) { urls in lutPick = urls?.first }
             }
                 .frame(maxWidth: .infinity, minHeight: 44).disabled(busy)
                 .accessibilityIdentifier("effect.lut.import")
@@ -978,7 +1080,8 @@ private struct CubeLutImportRow: View {
         .onChange(of: lutPick) { picked in
             guard let url = picked else { return }
             lutPick = nil
-            guard url.pathExtension.lowercased() == "cube" else { model.toast = AureaText.t("lut_invalid"); return }
+            let isPalette = ["png", "jpg", "jpeg", "gpl", "hex"].contains(url.pathExtension.lowercased())
+            guard isPalette || url.pathExtension.lowercased() == "cube" else { model.toast = AureaText.t(palette ? "palette_invalid" : "lut_invalid"); return }
             busy = true
             let engine = model.engine
             let targetLayer = layer, targetEffect = effect
@@ -1012,7 +1115,7 @@ private struct CubeLutImportRow: View {
                     busy = false
                     filename = engine.colorLutName(targetLayer, effect: targetEffect)
                     model.refreshModel(force: true)
-                    model.toast = AureaText.t(imported ? "lut_imported" : "lut_invalid")
+                    model.toast = AureaText.t(isPalette ? (imported ? "palette_imported" : "palette_invalid") : (imported ? "lut_imported" : "lut_invalid"))
                 }
             }
         }
@@ -1041,6 +1144,7 @@ private struct EffectNumberRow: View {
     let decimals: Int
     /// `effects.param.<efeito>.<parâmetro>.<componente>` (o testTag do Android).
     var identifier: String = ""
+    var enabled = true
     let selected: Bool
     let look: KeyframeLook
     let expression: ExpressionLook
@@ -1057,13 +1161,13 @@ private struct EffectNumberRow: View {
             EffectPropertyLabel(label: label, selected: selected, look: look, expression: expression, onSelect: onSelect, onMenu: onMenu)
             // Valor já fora da régua (digitado além do slider): o `valueDrag`
             // estende a faixa do gesto até ele — o toque não o puxa de volta.
-            TickRuler(value: { dragging ? live : value }, unitsPerDp: unitsPerPoint, active: true,
+            TickRuler(value: { dragging ? live : value }, unitsPerDp: unitsPerPoint, active: selected || dragging,
                       height: ParamRowDims.labelH, verticalPadding: 2)
                 .frame(maxWidth: .infinity).contentShape(Rectangle())
-                .valueDrag(enabled: true, start: { value }, unitsPerDp: { unitsPerPoint }, min: minimum, max: maximum,
+                .valueDrag(enabled: enabled, start: { value }, unitsPerDp: { unitsPerPoint }, min: minimum, max: maximum,
                            onStart: { live = value; dragging = true; onSelect(); onBegin() },
                            onValue: { next in live = next; onValue(next) },
-                           onEnd: { dragging = false; onEnd() })
+                           onEnd: finish)
                 // A régua é o controle: rótulo, valor e ajuste por gesto do
                 // VoiceOver (um passo = 10 pontos de arrasto).
                 .accessibilityElement()
@@ -1071,13 +1175,14 @@ private struct EffectNumberRow: View {
                 .accessibilityValue(comUnidade(numeroPtBr(dragging ? live : value, casas: decimals), suffix))
                 .accessibilityAdjustableAction { direction in
                     let delta = unitsPerPoint * 10 * (direction == .increment ? 1 : direction == .decrement ? -1 : 0)
-                    guard delta != 0 else { return }
+                    guard enabled, delta != 0 else { return }
                     onSelect(); onBegin(); onValue(Swift.min(Swift.max(value + delta, minimum), maximum)); onEnd()
                 }
                 .accessibilityIdentifier(identifier)
-            ParamValueBox(comUnidade(numeroPtBr(dragging ? live : value, casas: decimals), suffix), onTap: onKeypad)
-        }.frame(height: ParamRowDims.row)
+            ParamValueBox(comUnidade(numeroPtBr(dragging ? live : value, casas: decimals), suffix), enabled: enabled, onTap: { if !dragging { onKeypad() } })
+        }.frame(height: ParamRowDims.row).onDisappear(perform: finish)
     }
+    private func finish() { if dragging { dragging = false; onEnd() } }
 }
 /// O rótulo das linhas de Efeitos: o MESMO desenho do `PropertyLabelChip`
 /// (`ParamRowLabel`); tocar escolhe a linha, segurar abre o menu do parâmetro.
@@ -1149,6 +1254,9 @@ struct FxPresetRow: View {
         case "impact": return AureaText.t("fxp_impact")
         case "handheld": return AureaText.t("fxp_handheld")
         case "glitch": return AureaText.t("fxp_glitch")
+        case "saber_default", "saber_lightsaber", "saber_neon", "saber_electric", "saber_fire",
+             "saber_plasma", "saber_energy", "saber_soft", "saber_magic":
+            return AureaText.t("fxp_" + pid)
         default: return fallback
         }
     }

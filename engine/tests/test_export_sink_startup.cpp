@@ -17,28 +17,39 @@ namespace {
 struct Control {
     std::mutex mutex;
     std::condition_variable changed;
-    bool release = false, blockOpen = false, progressOpen = false, cancelWrite = false;
-    bool failOpen = false, failFinish = false, failValidation = false;
-    std::atomic<bool> entered{false}, inOpen{false};
+    bool release = false, blockOpen = false, blockAbort = false, progressOpen = false, cancelWrite = false;
+    bool failOpen = false, failFinish = false, failValidation = false, blockDestroy = false;
+    bool requestedSoftware = false;
+    std::atomic<bool> entered{false}, inOpen{false}, inAbort{false}, inDestroy{false};
     std::atomic<u32> destroyed{0}, aborts{0}, concurrentAborts{0};
     u32 delayMs = 0;
     std::string staged, payload = "complete";
     const std::atomic<bool>* cancelAddress = nullptr;
+    std::atomic<bool>* cancelOnOpen = nullptr;
     std::atomic<bool>* cancelOnFinish = nullptr;
     std::atomic<bool>* cancelOnValidation = nullptr;
 };
 class ControlledSink final : public ExportSink {
 public:
     explicit ControlledSink(std::shared_ptr<Control> c) : control_(std::move(c)) {}
-    ~ControlledSink() override { abort(); ++control_->destroyed; control_->changed.notify_all(); }
+    ~ControlledSink() override {
+        abort();
+        if (control_->blockDestroy) {
+            control_->inDestroy = true; control_->changed.notify_all();
+            std::unique_lock lock(control_->mutex);
+            control_->changed.wait(lock, [&] { return control_->release; });
+        }
+        ++control_->destroyed; control_->changed.notify_all();
+    }
     void set_cancel_flag(const std::atomic<bool>* c) noexcept override { cancel_ = c; }
     void set_heartbeat(std::atomic<u64>* b) noexcept override { beat_ = b; }
-    Status open(const char* path, const VideoStreamConfig&, const AudioStreamConfig*) noexcept override {
+    Status open(const char* path, const VideoStreamConfig& video, const AudioStreamConfig*) noexcept override {
         control_->inOpen = true;
         {
             std::lock_guard lock(control_->mutex);
             control_->staged = path;
             control_->cancelAddress = cancel_;
+            control_->requestedSoftware = video.preferSoftware;
         }
         { std::ofstream partial(path); partial << "partial"; }
         control_->entered = true; control_->changed.notify_all();
@@ -53,6 +64,7 @@ public:
         // This load is after the original caller may have destroyed its flags.
         if (cancel_) (void)cancel_->load();
         control_->inOpen = false;
+        if (control_->cancelOnOpen) control_->cancelOnOpen->store(true, std::memory_order_release);
         if (control_->failOpen) {
             std::snprintf(detail_, sizeof(detail_), "precise open failure");
             return Status{Errc::UnsupportedCodec, detail_};
@@ -83,6 +95,11 @@ public:
     void abort() noexcept override {
         ++control_->aborts;
         if (control_->inOpen) ++control_->concurrentAborts;
+        control_->inAbort = true; control_->changed.notify_all();
+        if (control_->blockAbort) {
+            std::unique_lock lock(control_->mutex);
+            control_->changed.wait(lock, [&] { return control_->release; });
+        }
         if (!control_->staged.empty()) {
             std::error_code error;
             std::filesystem::remove(control_->staged, error);
@@ -170,6 +187,107 @@ AUREA_TEST(ExportSinkStartup, FailureDiagnosticsSurviveSinkDestructionAndResultM
     AUREA_CHECK(!moved.sink);
     AUREA_CHECK_EQ(c->destroyed.load(), 1u);
     AUREA_CHECK(!std::filesystem::exists(c->staged));
+}
+
+AUREA_TEST(ExportSinkStartup, FailedOpenCleanupCannotHoldCallerBeyondStartupDeadline) {
+    Files files; auto control = std::make_shared<Control>();
+    control->failOpen = true; control->blockAbort = true;
+    std::thread delayedRelease([control] {
+        std::unique_lock lock(control->mutex);
+        control->changed.wait(lock, [&] { return control->inAbort.load(); });
+        lock.unlock();
+        std::this_thread::sleep_for(std::chrono::milliseconds(700));
+        release(control);
+    });
+    const u64 started = monotonic_ns();
+    auto failed = run(control, files.target(), nullptr, nullptr, limits(100));
+    const u64 elapsed = monotonic_ns() - started;
+    std::printf(" failed-open cleanup caller: %.1fms (startup hard limit=100ms, native abort delayed=700ms)\n",
+        static_cast<double>(elapsed) / 1'000'000.0);
+    auto retry = std::make_shared<Control>(); retry->payload = "successful retry during old cleanup";
+    auto opened = run(retry, files.target());
+    AUREA_CHECK(opened.status().ok());
+    if (opened.sink) AUREA_CHECK(opened.sink->finish().ok());
+    delayedRelease.join();
+    AUREA_CHECK(failed.code == Errc::UnsupportedCodec);
+    AUREA_CHECK_EQ(failed.status().detail(), std::string_view("precise open failure"));
+    AUREA_CHECK(elapsed < 400'000'000ull);
+    AUREA_CHECK(wait_destroyed(control));
+    AUREA_CHECK_EQ(control->concurrentAborts.load(), 0u);
+    AUREA_CHECK(!std::filesystem::exists(control->staged));
+    AUREA_CHECK_EQ(contents(files.target()), retry->payload);
+}
+
+AUREA_TEST(ExportSinkStartup, CancelAtOpenReturnDoesNotWaitForNativeCleanup) {
+    Files files; auto control = std::make_shared<Control>();
+    std::atomic<bool> cancellation{false};
+    control->cancelOnOpen = &cancellation; control->blockAbort = true;
+    std::thread delayedRelease([control] {
+        std::unique_lock lock(control->mutex);
+        control->changed.wait(lock, [&] { return control->inAbort.load(); });
+        lock.unlock(); std::this_thread::sleep_for(std::chrono::milliseconds(700)); release(control);
+    });
+    const u64 started = monotonic_ns();
+    auto cancelled = run(control, files.target(), &cancellation, nullptr, limits(100));
+    const u64 elapsed = monotonic_ns() - started;
+    std::printf(" cancelled-open cleanup caller: %.1fms (native abort delayed=700ms)\n",
+        static_cast<double>(elapsed) / 1'000'000.0);
+    delayedRelease.join();
+    AUREA_CHECK(cancelled.code == Errc::Cancelled); AUREA_CHECK(!cancelled.sink);
+    AUREA_CHECK(elapsed < 400'000'000ull); AUREA_CHECK(wait_destroyed(control));
+    AUREA_CHECK_EQ(control->concurrentAborts.load(), 0u);
+    AUREA_CHECK(!std::filesystem::exists(files.target()));
+}
+
+AUREA_TEST(ExportSinkStartup, NativeDestructorAfterFailedOpenKeepsTheSameDeadline) {
+    Files files; auto control = std::make_shared<Control>();
+    control->failOpen = true; control->blockDestroy = true;
+    std::thread delayedRelease([control] {
+        std::unique_lock lock(control->mutex);
+        control->changed.wait(lock, [&] { return control->inDestroy.load(); });
+        lock.unlock(); std::this_thread::sleep_for(std::chrono::milliseconds(700)); release(control);
+    });
+    const u64 started = monotonic_ns();
+    auto failed = run(control, files.target(), nullptr, nullptr, limits(100));
+    const u64 elapsed = monotonic_ns() - started;
+    std::printf(" failed-open destructor caller: %.1fms (startup hard limit=100ms, native destructor delayed=700ms)\n",
+        static_cast<double>(elapsed) / 1'000'000.0);
+    delayedRelease.join();
+    AUREA_CHECK(failed.code == Errc::UnsupportedCodec);
+    AUREA_CHECK_EQ(failed.status().detail(), std::string_view("precise open failure"));
+    AUREA_CHECK(elapsed < 400'000'000ull); AUREA_CHECK(wait_destroyed(control));
+    AUREA_CHECK(!std::filesystem::exists(files.target()));
+}
+
+AUREA_TEST(ExportSinkStartup, TwoFailedNativeCleanupsHoldAdmissionUntilDestructorsFinish) {
+    Files files; auto first = std::make_shared<Control>(); auto second = std::make_shared<Control>();
+    first->failOpen = second->failOpen = true;
+    first->blockAbort = second->blockAbort = true;
+    // This case tests retention during failed cleanup, not scheduling of the
+    // new opener. Allow enough time for both workers to return their injected
+    // failure while another native build may occupy the host's CPU.
+    const auto one = run(first, files.target(), nullptr, nullptr, limits(300));
+    const auto two = run(second, files.target(), nullptr, nullptr, limits(300));
+    AUREA_CHECK(one.code == Errc::UnsupportedCodec); AUREA_CHECK(two.code == Errc::UnsupportedCodec);
+    AUREA_CHECK_EQ(first->destroyed.load(), 0u); AUREA_CHECK_EQ(second->destroyed.load(), 0u);
+    auto third = std::make_shared<Control>();
+    const auto refused = run(third, files.target(), nullptr, nullptr, limits(40));
+    AUREA_CHECK(refused.code == Errc::BudgetExceeded); AUREA_CHECK(!third->entered.load());
+    release(first); AUREA_CHECK(wait_destroyed(first));
+    auto retry = std::make_shared<Control>(); retry->payload = "success after failed cleanup retires";
+    ExportSinkStartupResult opened;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    do {
+        opened = run(retry, files.target());
+        if (opened.code != Errc::BudgetExceeded) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
+    AUREA_CHECK(opened.status().ok());
+    if (opened.sink) AUREA_CHECK(opened.sink->finish().ok());
+    release(second); AUREA_CHECK(wait_destroyed(second));
+    AUREA_CHECK_EQ(first->concurrentAborts.load(), 0u); AUREA_CHECK_EQ(second->concurrentAborts.load(), 0u);
+    AUREA_CHECK(!std::filesystem::exists(first->staged)); AUREA_CHECK(!std::filesystem::exists(second->staged));
+    AUREA_CHECK_EQ(contents(files.target()), retry->payload);
 }
 
 AUREA_TEST(ExportSinkStartup, HungOpenOwnsFlagsAndLateAbortCannotEraseRetryOutput) {
@@ -373,4 +491,100 @@ AUREA_TEST(ExportSinkStartup, ConcurrentRequestsNeverCreateMoreThanTwoNativeOpen
         AUREA_CHECK(!std::filesystem::exists(control->staged));
     }
     AUREA_CHECK(!std::filesystem::exists(files.target()));
+}
+
+AUREA_TEST(ExportSinkStartup, ProxyAbortReturnsWhileNativeStopRemainsBlocked) {
+    Files files; auto control = std::make_shared<Control>();
+    auto opened = run(control, files.target());
+    AUREA_CHECK(opened.status().ok()); if (!opened.sink) return;
+    control->blockAbort = true;
+    std::thread delayedRelease([control] {
+        std::unique_lock lock(control->mutex);
+        control->changed.wait(lock, [&] { return control->inAbort.load(); });
+        lock.unlock(); std::this_thread::sleep_for(std::chrono::milliseconds(700)); release(control);
+    });
+    const u64 started = monotonic_ns(); opened.sink->abort();
+    const u64 elapsed = monotonic_ns() - started;
+    std::printf(" proxy abort caller: %.1fms (native stop delayed=700ms)\n",
+        static_cast<double>(elapsed) / 1'000'000.0);
+    AUREA_CHECK(opened.sink->write_video(nullptr, 0, nullptr, 0, 0).code() == Errc::InvalidState);
+    AUREA_CHECK(opened.sink->finish().code() == Errc::InvalidState);
+    opened.sink.reset(); delayedRelease.join();
+    AUREA_CHECK(elapsed < 400'000'000ull); AUREA_CHECK(wait_destroyed(control));
+    AUREA_CHECK_EQ(control->concurrentAborts.load(), 0u);
+    AUREA_CHECK(!std::filesystem::exists(files.target()));
+    AUREA_CHECK(!std::filesystem::exists(control->staged));
+}
+
+AUREA_TEST(ExportSinkStartup, ProxyDestructorRetiresUnpublishedNativeStopWithinBudget) {
+    Files files; auto control = std::make_shared<Control>();
+    auto opened = run(control, files.target());
+    AUREA_CHECK(opened.status().ok()); if (!opened.sink) return;
+    control->blockAbort = true;
+    std::thread delayedRelease([control] {
+        std::unique_lock lock(control->mutex);
+        control->changed.wait(lock, [&] { return control->inAbort.load(); });
+        lock.unlock(); std::this_thread::sleep_for(std::chrono::milliseconds(700)); release(control);
+    });
+    const u64 started = monotonic_ns(); opened.sink.reset();
+    const u64 elapsed = monotonic_ns() - started;
+    std::printf(" unpublished proxy destructor caller: %.1fms (native stop delayed=700ms)\n",
+        static_cast<double>(elapsed) / 1'000'000.0);
+    auto retry = std::make_shared<Control>(); retry->payload = "complete after unpublished slow stop";
+    auto next = run(retry, files.target());
+    AUREA_CHECK(next.status().ok()); if (next.sink) AUREA_CHECK(next.sink->finish().ok());
+    delayedRelease.join(); AUREA_CHECK(wait_destroyed(control));
+    AUREA_CHECK(elapsed < 400'000'000ull);
+    AUREA_CHECK_EQ(contents(files.target()), retry->payload);
+    AUREA_CHECK(!std::filesystem::exists(control->staged));
+}
+
+AUREA_TEST(ExportSinkStartup, PublishedProxyNativeDestructorCannotBlockCallerOrDeleteOutput) {
+    Files files; auto control = std::make_shared<Control>();
+    auto opened = run(control, files.target());
+    AUREA_CHECK(opened.status().ok()); if (!opened.sink) return;
+    AUREA_CHECK(opened.sink->finish().ok());
+    control->blockDestroy = true;
+    std::thread delayedRelease([control] {
+        std::unique_lock lock(control->mutex);
+        control->changed.wait(lock, [&] { return control->inDestroy.load(); });
+        lock.unlock(); std::this_thread::sleep_for(std::chrono::milliseconds(700)); release(control);
+    });
+    const u64 started = monotonic_ns(); opened.sink.reset();
+    const u64 elapsed = monotonic_ns() - started;
+    std::printf(" published proxy destructor caller: %.1fms (native delete delayed=700ms)\n",
+        static_cast<double>(elapsed) / 1'000'000.0);
+    delayedRelease.join(); AUREA_CHECK(wait_destroyed(control));
+    AUREA_CHECK(elapsed < 400'000'000ull);
+    AUREA_CHECK_EQ(contents(files.target()), control->payload);
+    AUREA_CHECK(!std::filesystem::exists(control->staged));
+}
+
+AUREA_TEST(ExportSinkStartup, OpenTimeoutRecoveryReachesSoftwareBeforeRetainedNativeQuotaFills) {
+    Files files; auto first = std::make_shared<Control>(); auto second = std::make_shared<Control>();
+    first->blockOpen = second->blockOpen = true;
+    auto one = run(first, files.target(), nullptr, nullptr, limits(40));
+    AUREA_CHECK(one.code == Errc::Timeout);
+    const auto failure = export_failure_reason(ExportStage::Open, one.code);
+    const u32 next = export_retry_safe_mode(failure, 0);
+    std::printf(" native open timeout failure=%u nextSafeMode=%u ", static_cast<u32>(failure), next);
+    AUREA_CHECK(failure == ExportFailure::EncoderStalled); AUREA_CHECK_EQ(next, 2u);
+    if (next == 1) {
+        auto two = run(second, files.target(), nullptr, nullptr, limits(40));
+        AUREA_CHECK(two.code == Errc::Timeout);
+        AUREA_CHECK_EQ(export_retry_safe_mode(export_failure_reason(ExportStage::Open, two.code), 1), 2u);
+    }
+    auto software = std::make_shared<Control>(); VideoStreamConfig video; video.preferSoftware = true;
+    auto fallback = open_export_sink_startup(std::make_unique<ControlledSink>(software), files.target().c_str(),
+        video, nullptr, nullptr, nullptr, limits(100));
+    std::printf(" available software open result=%d ", static_cast<int>(fallback.code));
+    if (next == 1) {
+        AUREA_CHECK(fallback.code == Errc::BudgetExceeded); AUREA_CHECK(!software->entered.load());
+    } else {
+        AUREA_CHECK(fallback.status().ok()); AUREA_CHECK(software->requestedSoftware);
+        if (fallback.sink) AUREA_CHECK(fallback.sink->finish().ok());
+    }
+    release(first); AUREA_CHECK(wait_destroyed(first));
+    if (second->entered.load()) { release(second); AUREA_CHECK(wait_destroyed(second)); }
+    if (next == 2) AUREA_CHECK_EQ(contents(files.target()), software->payload);
 }

@@ -13,6 +13,8 @@ import simd
 enum ParityExportProbe {
     private struct Failure: LocalizedError {
         let message: String
+        let details: [String: Any]
+        init(message: String, details: [String: Any] = [:]) { self.message = message; self.details = details }
         var errorDescription: String? { message }
     }
 
@@ -59,6 +61,9 @@ enum ParityExportProbe {
                 report["realCamera"] = try await checkRealCameraController(model: model, documents: documents)
             }
 #endif
+            report["phase"] = "native-feature-smoke"
+            try writeReport()
+            report["nativeFeatures"] = try await checkNativeFeatures(engine: engine, documents: documents)
             report["phase"] = "particle-camera"
             try writeReport()
             report["particleCamera"] = try await checkParticleCamera(engine: engine, documents: documents)
@@ -215,6 +220,7 @@ enum ParityExportProbe {
         } catch {
             if exportStarted { engine.cancelExport() }
             report["error"] = error.localizedDescription
+            if let failure = error as? Failure, !failure.details.isEmpty { report["failureDetails"] = failure.details }
             report["failedPhase"] = report["phase"]
             report["phase"] = "failed"
         }
@@ -225,6 +231,132 @@ enum ParityExportProbe {
         do { try writeReport() }
         catch { report["reportWriteError"] = error.localizedDescription }
         return report
+    }
+
+    /// Small native checks for build 2180. These exercise the public bridge and
+    /// real Metal pixels; gesture/UI coverage remains a separate XCTest result.
+    @MainActor
+    private static func checkNativeFeatures(engine: AureaEngine, documents: URL) async throws -> [String: Any] {
+        func project(_ title: String, width: UInt32 = 320, height: UInt32 = 180) throws -> UInt64 {
+            engine.pause(); _ = engine.flush()
+            guard engine.newProjectWidth(width, height: height, fps: 30, title: title),
+                  let id = (engine.composition()?[AureaCompositionId] as? NSNumber)?.uint64Value else {
+                throw Failure(message: "Native feature fixture unavailable: \(title)")
+            }
+            engine.setComposition(id, duration: 30)
+            engine.setComposition(id, backgroundR: 0, g: 0, b: 0, a: 1)
+            return id
+        }
+        func save(_ name: String) throws {
+            guard engine.saveProject(documents.appendingPathComponent(name + ".aurea").path) else {
+                throw Failure(message: "Native smoke commands did not drain: \(name)")
+            }
+        }
+        func shape(x: Float, y: Float) throws -> Int64 {
+            let layer = engine.addShape(0)
+            guard layer >= 0 else { throw Failure(message: "Native smoke shape unavailable") }
+            engine.setLayer(layer, startFrame: 0, endFrame: 30, offsetFrames: 0, setOffset: true)
+            engine.setShape(layer, fillR: 1, g: 1, b: 1, a: 1)
+            engine.setPosition(forLayer: layer, x: x, y: y, z: 0)
+            return layer
+        }
+        func capture() async throws -> Data {
+            let result: Data? = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    var width: UInt32 = 0, height: UInt32 = 0
+                    let pixels = engine.captureFrame(320, outWidth: &width, outHeight: &height)
+                    continuation.resume(returning: width == 320 && height == 180 ? pixels : nil)
+                }
+            }
+            guard let result, result.count == 320 * 180 * 4 else { throw Failure(message: "Native smoke Metal capture unavailable") }
+            return result
+        }
+        var result: [String: Any] = [:]
+        _ = try project("PreRender native 2180", width: 960, height: 540)
+        _ = try shape(x: 480, y: 270)
+        try save("astra-smoke-prerender")
+        defer { engine.cancelPreRender() }
+        // Hold a strong native owner until startup returns; never run snapshot
+        // preparation on UIKit's thread or replace the production renderer.
+        let start: Int32 = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: engine.startPreRender(direction: 1))
+            }
+        }
+        guard start == 0 else { throw Failure(message: "Native PreRender startup failed code=\(start)") }
+        let deadline = ProcessInfo.processInfo.systemUptime + 120
+        var progress = PreRenderState()
+        while true {
+            progress = PreRenderState(engine.preRenderProgress())
+            guard progress.error == 0 else { throw Failure(message: "Native PreRender failed code=\(progress.error) done=\(progress.framesDone)") }
+            if progress.complete && !progress.running { break }
+            guard ProcessInfo.processInfo.systemUptime < deadline else { throw Failure(message: "Native PreRender exceeded 120s") }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        guard progress.framesDone == 30, progress.framesTotal == 30, progress.height == 540,
+              progress.width == 960, progress.diskBytes > 0,
+              (engine.exportProgress()[AureaExportRunning] as? NSNumber)?.boolValue != true else {
+            throw Failure(message: "Native PreRender dimensions/counts/export isolation differ: \(engine.preRenderProgress())")
+        }
+        _ = try shape(x: 300, y: 270)
+        let invalidated = PreRenderState(engine.preRenderProgress())
+        guard !invalidated.complete, !invalidated.running else { throw Failure(message: "Adding a layer did not invalidate native PreRender") }
+        result["preRender"] = ["passed": true, "frames": progress.framesDone, "width": progress.width,
+            "height": progress.height, "diskBytes": progress.diskBytes, "startupOffMain": true,
+            "addLayerInvalidates": true, "uiGesturesValidated": false]
+
+        _ = try project("Manual source getter 2180")
+        let source = documents.appendingPathComponent("preview-bframes.mp4")
+        guard FileManager.default.fileExists(atPath: source.path) else { throw Failure(message: "Pinned smoke video fixture missing") }
+        let video = engine.importVideo(source.path, name: "Manual remap")
+        guard video >= 0 else { throw Failure(message: "Manual remap video import failed") }
+        engine.setLayer(video, startFrame: 0, endFrame: 30, offsetFrames: 0, setOffset: true)
+        try save("astra-smoke-remap")
+        engine.setTimeRemap(true, forLayer: video)
+        guard engine.setTimeRemapValue(video, time: 0, value: 0),
+              engine.setTimeRemapValue(video, time: 30, value: 60) else { throw Failure(message: "Manual remap keys rejected") }
+        engine.seek(toFrame: 15); try save("astra-smoke-remap")
+        let current = engine.timeRemapCurrentSource(video)
+        guard current.isFinite, abs(current - 30) < 0.001, engine.effects(forLayer: video).isEmpty,
+              engine.timeRemapCurrentSource(Int64.max).isNaN else {
+            throw Failure(message: "Manual remap native source differs: actual=\(current) expected=30 without effect")
+        }
+        result["timeRemap"] = ["passed": true, "playhead": 15, "sourceFrames": current, "manualWithoutEffect": true]
+
+        _ = try project("Raster volume 2180")
+        let plane = try shape(x: 160, y: 90)
+        engine.setScale(forLayer: plane, x: 0.3, y: 0.3, z: 1)
+        let type = fxEffectTypeId("aurea.generate.raster_extrude")
+        engine.addEffect(type, toLayer: plane, at: 0); try save("astra-smoke-raster")
+        guard let effect = engine.effects(forLayer: plane).first,
+              let id = (effect[AureaEffectId] as? NSNumber)?.uint32Value else { throw Failure(message: "Raster extrusion native effect missing") }
+        engine.setEffect(id, forLayer: plane, paramIndex: 0, value: 48)
+        engine.setEffectColor(id, forLayer: plane, paramIndex: 1, r: 1, g: 0, b: 0, a: 1)
+        engine.setEffect(id, forLayer: plane, paramIndex: 2, value: 0)
+        try save("astra-smoke-raster")
+        let front = try await capture()
+        engine.setRotation(forLayer: plane, x: 0, y: 55, z: 0); try save("astra-smoke-raster-side")
+        let side = try await capture()
+        func counts(_ data: Data) -> (light: Int, red: Int) {
+            var light = 0, red = 0
+            data.withUnsafeBytes { raw in
+                let pixels = raw.bindMemory(to: UInt8.self)
+                for i in stride(from: 0, to: pixels.count, by: 4) {
+                    if pixels[i] > 180 && pixels[i+1] > 180 && pixels[i+2] > 180 { light += 1 }
+                    if pixels[i] > 90 && Int(pixels[i]) > Int(pixels[i+1]) + 40 && Int(pixels[i]) > Int(pixels[i+2]) + 40 { red += 1 }
+                }
+            }
+            return (light, red)
+        }
+        let frontCounts = counts(front), sideCounts = counts(side)
+        try front.write(to: documents.appendingPathComponent("astra-smoke-raster-front.rgba"), options: .atomic)
+        try side.write(to: documents.appendingPathComponent("astra-smoke-raster-side.rgba"), options: .atomic)
+        guard frontCounts.light > 100, sideCounts.red > frontCounts.red + 20, front != side else {
+            throw Failure(message: "Raster volume front/side failed frontLight=\(frontCounts.light) frontRed=\(frontCounts.red) sideRed=\(sideCounts.red)")
+        }
+        result["rasterExtrude"] = ["passed": true, "frontLight": frontCounts.light,
+            "frontRed": frontCounts.red, "sideRed": sideCounts.red, "rotationY": 55, "realMetalCapture": true]
+        return result
     }
 
     @MainActor
@@ -508,7 +640,12 @@ enum ParityExportProbe {
                 let obj = documents.appendingPathComponent("astra-owned-triangle.obj")
                 try "o OwnedTriangle\nv -1 -1 0\nv 1 -1 0\nv 0 1 0\nf 1 2 3\n".write(to: obj, atomically: true, encoding: .utf8)
                 for (index, file) in ["DamagedHelmet.glb", "Fox.glb", "animated-character.fbx", obj.lastPathComponent].enumerated() {
-                    let layer = engine.importModel(documents.appendingPathComponent(file).path, name: "Offline imported \(file)")
+                    // This fixture stresses geometry, blur and frame delivery.
+                    // Original texture restoration exceeded the measured source
+                    // budget on the CI simulator; authored balanced quality is
+                    // explicit rather than silently weakening Original exports.
+                    let layer = engine.importModel(documents.appendingPathComponent(file).path,
+                                                   name: "Offline imported \(file)", quality: 1)
                     guard layer >= 0 else { throw Failure(message: "Offline \(file) import failed") }
                     engine.setLayer(layer, startFrame: 0, endFrame: Int32(frames), offsetFrames: 0, setOffset: true)
                     engine.setScale(forLayer: layer, x: 0.5, y: 0.5, z: 0.5)
@@ -539,9 +676,14 @@ enum ParityExportProbe {
             guard engine.saveProject(project.path) else { throw Failure(message: "Offline fixture commands did not drain") }
             var running = false
             do {
-                guard engine.startExport(to: movie.path, codec: .h264, height: UInt32(height), fps: 30,
-                                         bitrateMbps: 4, audioBitrateKbps: 128) else {
-                    throw Failure(message: "Offline \(name) export could not start")
+                let startup = engine.startExportChecked(to: movie.path, codec: .h264, height: UInt32(height), fps: 30,
+                    bitrateMbps: 4, audioBitrateKbps: 128, aiUpscale: 0, trimToContent: false, quality: 1, safeMode: 0)
+                guard startup == 0 else {
+                    throw Failure(message: "Offline \(name) export could not start (code \(startup))",
+                                  details: ["fixture": name, "startupCode": startup,
+                                            "modelImportQuality": heavy ? 1 : -1,
+                                            "exportDiagnosticsJSON": engine.exportDiagnostics(),
+                                            "perf": engine.perf()])
                 }
                 running = true
                 let deadline = ProcessInfo.processInfo.systemUptime + 1800
@@ -571,6 +713,7 @@ enum ParityExportProbe {
                 }
                 var result: [String: Any] = ["name": name, "passed": true, "exportProgress": progress,
                                            "decoded": decoded.dictionary, "movieFile": movie.lastPathComponent]
+                if heavy { result["modelImportQuality"] = ["value": 1, "name": "Balanced"] }
                 if !heavy {
                     result["decodedAudio"] = try await Task.detached(priority: .utility) {
                         try await decodeAudio(movie: movie, seconds: 120)
@@ -626,22 +769,34 @@ enum ParityExportProbe {
         guard camera.recording else { throw Failure(message: "Swift Record did not arm the native session") }
         var frames = Set<Int64>()
         var heldFrames = Set<Int64>()
+        var callbacks: [[String: Any]] = []
         for index in 0..<12 {
             let angle = Float(index) * 0.04
             pose = simd_float4x4(simd_quatf(angle: angle, axis: SIMD3<Float>(0, 1, 0)))
             pose.columns.3 = SIMD4<Float>(0.25 + Float(index) * 0.01, -0.10, 0.20, 1)
+            let previousFrame = camera.lastFrame
             let accepted = index >= 8 ? camera.parityHoldTracking()
                 : camera.paritySubmitPose(pose, timestamp: 3 + Double(index) * 0.05, positional: true)
             guard accepted, camera.recording, camera.lastFrame >= 0 else {
                 throw Failure(message: "Swift pose/hold callback stopped before native camera keys were recorded")
             }
             frames.insert(camera.lastFrame)
-            if index >= 8 { heldFrames.insert(camera.lastFrame) }
+            let newFrame = camera.lastFrame != previousFrame
+            callbacks.append(["index": index, "hold": index >= 8, "beforeFrame": previousFrame,
+                "afterFrame": camera.lastFrame, "newRecordedFrame": newFrame])
+            // The native recorder accepts repeated callbacks in one frame but
+            // deliberately keeps that frame's first key. A successful no-op
+            // hold cannot relabel an earlier motion sample as a new held key.
+            if index >= 8 && newFrame { heldFrames.insert(camera.lastFrame) }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         camera.toggleRecording(model)
         guard !camera.recording else { throw Failure(message: "Swift Stop did not end native recording") }
         let keys = engine.keyframes(forLayer: layer)
+        let holdDiagnostics: [String: Any] = ["callbacks": callbacks, "heldFrames": heldFrames.sorted(), "keys": keys]
+        if let data = AureaJSONData(holdDiagnostics, true) {
+            try data.write(to: documents.appendingPathComponent("astra-real-camera-hold.json"), options: .atomic)
+        }
         let expectedProperties = Set([0, 1, 2, 6, 7, 8])
         let properties = Set(keys.compactMap { ($0[AureaKeyframeProperty] as? NSNumber)?.intValue })
         let uniquePairs = Set(keys.compactMap { row -> String? in
@@ -658,14 +813,18 @@ enum ParityExportProbe {
             throw Failure(message: "Tracking loss did not retain recording over distinct native frames")
         }
         for property in expectedProperties {
-            let held = keys.filter { row in
+            let rows = keys.filter { row in
                 guard let p = row[AureaKeyframeProperty] as? NSNumber,
                       let t = row[AureaKeyframeTime] as? NSNumber else { return false }
                 return p.intValue == property && heldFrames.contains(t.int64Value)
-            }.compactMap { ($0[AureaKeyframeValue] as? NSNumber)?.floatValue }
+            }
+            let held = rows.compactMap { ($0[AureaKeyframeValue] as? NSNumber)?.floatValue }
             guard held.count == heldFrames.count, let first = held.first,
                   held.allSatisfy({ abs($0 - first) < 0.00001 }) else {
-                throw Failure(message: "Tracking loss invented movement instead of writing constant native keys")
+                let actuals = rows.map { ["time": $0[AureaKeyframeTime] ?? NSNull(), "value": $0[AureaKeyframeValue] ?? NSNull()] }
+                throw Failure(message: "Tracking loss values differ property=\(property) times=\(heldFrames.sorted()) actuals=\(actuals)",
+                    details: ["property": property, "heldFrames": heldFrames.sorted(), "actuals": actuals,
+                        "callbacks": callbacks, "expectedConstantTolerance": 0.00001])
             }
         }
         let fixture = documents.appendingPathComponent("astra-real-camera-capture.aurea")
@@ -687,6 +846,7 @@ enum ParityExportProbe {
                 "nativeFrames": frames.sorted(), "keys": keys.count, "linearTracks": properties.sorted(),
                 "oneUndoRedo": true, "rotationFallbackPositional": camera.positional,
                 "trackingLossHeldFrames": heldFrames.sorted(), "trackingLossKeptPoseConstant": true,
+                "callbacks": callbacks, "ignoredSameFrameHold": callbacks.filter { ($0["hold"] as? Bool) == true && ($0["newRecordedFrame"] as? Bool) == false }.count,
                 "projectFile": fixture.lastPathComponent]
     }
 #endif

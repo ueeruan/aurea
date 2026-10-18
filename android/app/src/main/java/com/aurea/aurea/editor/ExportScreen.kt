@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -109,10 +110,13 @@ internal fun ExportScreen(store: EditorStore, onDismiss: () -> Unit) {
     val compFps = comp?.fps ?: store.project.fps.toDouble()
 
     var options by remember { mutableStateOf(ExportOptions(shortSide = min(1080, max(720, min(compW, compH))))) }
-    val seconds = if (compFps > 0) store.exportDuration(options.trimToContent) / compFps else 0.0
+    // The estimate is only shown before startup; querying the model during its
+    // serialization would make preparation contend with the dialog on main.
+    val seconds = if (!exporter.busy && compFps > 0) store.exportDuration(options.trimToContent) / compFps else 0.0
     var preview by remember { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(store, store.projectGeneration) {
         exporter.reset()
+        if (exporter.busy) return@LaunchedEffect
         preview = null
         val project = store.projectGeneration
         var captured: Bitmap? = null
@@ -156,7 +160,7 @@ internal fun ExportScreen(store: EditorStore, onDismiss: () -> Unit) {
                 when (st.phase) {
                     ExportPhase.Running, ExportPhase.Publishing -> Rendering(
                         st.fraction, st.framesDone, st.framesTotal, st.fps, st.etaSeconds,
-                        publishing = st.phase == ExportPhase.Publishing, notice = st.notice,
+                        publishing = st.phase == ExportPhase.Publishing, preparing = st.preparing, notice = st.notice,
                         title = stringResource(when (st.format) {
                             ExportFormat.Video -> R.string.exp2_rendering
                             ExportFormat.Frame -> R.string.exp2_rendering_frame
@@ -588,7 +592,7 @@ private fun Notice(text: String, danger: Boolean) {
 
 /** Render em andamento: animador, porcentagem, barra, ETA e a frase da vez. */
 @Composable
-private fun Rendering(fraction: Float, done: Int, total: Int, fps: Float, eta: Int, publishing: Boolean, notice: String, title: String) {
+private fun Rendering(fraction: Float, done: Int, total: Int, fps: Float, eta: Int, publishing: Boolean, preparing: Boolean, notice: String, title: String) {
     val context = LocalContext.current
     // "Remover animações" do sistema: o animador fica parado no 1º quadro.
     val reduceMotion = remember {
@@ -608,40 +612,53 @@ private fun Rendering(fraction: Float, done: Int, total: Int, fps: Float, eta: I
         PixelAnimatorView(frame, Modifier.width(200.dp).aspectRatio(PixelAnimator.WIDTH.toFloat() / PixelAnimator.HEIGHT))
         Spacer(Modifier.height(18.dp))
         Text(
-            if (publishing) stringResource(R.string.editor_salvando_galeria) else title,
+            when {
+                preparing -> stringResource(R.string.msg_preparando)
+                publishing -> stringResource(R.string.editor_salvando_galeria)
+                else -> title
+            },
             style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600)),
         )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            if (publishing) "100%" else "${(fraction * 100).roundToInt()}%",
-            style = AureaType.HeadlineLarge.merge(TextStyle(fontFeatureSettings = "tnum")),
-        )
-        Spacer(Modifier.height(12.dp))
-        Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(AureaColors.Chip)) {
-            Box(
-                Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(if (publishing) 1f else fraction.coerceIn(0f, 1f))
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(AureaColors.Accent),
+        if (preparing) {
+            Spacer(Modifier.height(12.dp))
+            val preparingLabel = stringResource(R.string.msg_preparando)
+            CircularProgressIndicator(color = AureaColors.Accent,
+                modifier = Modifier.size(32.dp).semantics { contentDescription = preparingLabel })
+        } else {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (publishing) "100%" else "${(fraction * 100).roundToInt()}%",
+                style = AureaType.HeadlineLarge.merge(TextStyle(fontFeatureSettings = "tnum")),
             )
+            Spacer(Modifier.height(12.dp))
+            Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(AureaColors.Chip)) {
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(if (publishing) 1f else fraction.coerceIn(0f, 1f))
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(AureaColors.Accent),
+                )
+            }
         }
         if (!publishing) {
-            Spacer(Modifier.height(10.dp))
-            if (eta > 0) {
+            if (!preparing) {
+                Spacer(Modifier.height(10.dp))
+                if (eta > 0) {
+                    Text(
+                        stringResource(R.string.exp2_eta, fmtTime(eta.toDouble())),
+                        style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text, fontFeatureSettings = "tnum")),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
                 Text(
-                    stringResource(R.string.exp2_eta, fmtTime(eta.toDouble())),
-                    style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text, fontFeatureSettings = "tnum")),
+                    // Com o "faltam" grande em cima, a linha de detalhe não repete o tempo.
+                    if (eta > 0) stringResource(R.string.exp2_frames, done, total, fmt(fps.toDouble()))
+                    else stringResource(R.string.sh_export_progress, done, total, fmt(fps.toDouble()), fmtTime(eta.toDouble())),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted, fontFeatureSettings = "tnum")),
+                    textAlign = TextAlign.Center,
                 )
-                Spacer(Modifier.height(4.dp))
             }
-            Text(
-                // Com o "faltam" grande em cima, a linha de detalhe não repete o tempo.
-                if (eta > 0) stringResource(R.string.exp2_frames, done, total, fmt(fps.toDouble()))
-                else stringResource(R.string.sh_export_progress, done, total, fmt(fps.toDouble()), fmtTime(eta.toDouble())),
-                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted, fontFeatureSettings = "tnum")),
-                textAlign = TextAlign.Center,
-            )
             Spacer(Modifier.height(16.dp))
             Text(
                 stringResource(FunPhrases[phrase]),
@@ -656,7 +673,7 @@ private fun Rendering(fraction: Float, done: Int, total: Int, fps: Float, eta: I
                 textAlign = TextAlign.Center,
             )
             // Encoder de software ou aparelho quente: dito, não escondido.
-            if (notice.isNotEmpty()) {
+            if (!preparing && notice.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
                 Notice(notice, danger = false)
             }

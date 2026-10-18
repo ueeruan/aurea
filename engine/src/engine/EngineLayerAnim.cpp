@@ -135,7 +135,7 @@ i32 Engine::add_layer_animator(u64 layerId) noexcept {
     if (!l || l->locked || l->layerAnimators.size() >= kMaxLayerAnimators || l->kind == LayerKind::Camera || l->kind == LayerKind::Light)
         return -1;
     history_.before_mutation(*comp, project_->timeline().current(), "novo animador");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const u32 index = static_cast<u32>(l->layerAnimators.size());
     // Trilhas órfãs com este índice (não deveriam existir) saem antes.
     l->tracks.remove_if([&](const Track& t) { return t.property == TrackProperty::LayerAnimParam && t.effectIndex >= index; });
@@ -160,7 +160,7 @@ bool Engine::remove_layer_animator(u64 layerId, u32 index) noexcept {
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->locked || index >= l->layerAnimators.size()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "remover animador");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->layerAnimators.erase(l->layerAnimators.begin() + index);
     l->tracks.remove_if([&](const Track& t) { return t.property == TrackProperty::LayerAnimParam && t.effectIndex == index; });
     for (u32 i = 0; i < l->tracks.size(); ++i) {
@@ -180,7 +180,7 @@ bool Engine::set_layer_animator(u64 layerId, u32 index, const f32* v) noexcept {
     if (!l || l->locked || !v || index >= l->layerAnimators.size()) return false;
     for (u32 i = 0; i < 6; ++i) if (!std::isfinite(v[i])) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "animador");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     LayerAnimator& a = l->layerAnimators[index];
     const f32 duration = progress_duration_ms(*l, index, comp->fps());
     const FrameIndex local = l->local_time(playback_.current());
@@ -215,7 +215,7 @@ bool Engine::set_layer_anim_param(u64 layerId, u32 index, u32 param, f32 value) 
     f32* r = layeranim::param_ref(l->layerAnimators[index], param);
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "valor do animador");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     value = layeranim::clamp_param(param, value);
     Track* tr = l->tracks.find(TrackProperty::LayerAnimParam, index, param);
     if (tr && !tr->keys.empty()) {
@@ -241,7 +241,7 @@ bool Engine::toggle_layer_anim_key(u64 layerId, u32 index, u32 param) noexcept {
     f32* r = layeranim::param_ref(l->layerAnimators[index], param);
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe do animador");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const FrameIndex local = l->local_time(playback_.current());
     Track& tr = l->tracks.get_or_create(TrackProperty::LayerAnimParam, index, param);
     const u32 k = tr.find_exact(local);
@@ -296,7 +296,7 @@ u32 Engine::paste_layer_animators(const u64* ids, u32 count) noexcept {
         if (base + clipboard_.layerAnimators.size() > kMaxLayerAnimators) continue;
         if (!captured) {
             history_.before_mutation(*comp, project_->timeline().current(), "colar animadores");
-            modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+            bump_model_revision_locked();
             captured = true;
         }
         const i64 local0 = l->local_time(l->start).value;
@@ -372,7 +372,7 @@ bool Engine::apply_text3d_anim(u64 layerId, i32 preset, u32 mode, u32 unit, f32 
     // Forma 3D: a unidade é sempre a parte (palavra e linha não existem nela).
     if (shape) unit = 1;
     history_.before_mutation(*comp, project_->timeline().current(), shape ? "animação das partes" : "animação de texto 3D");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     // As letras viram nós próprios (uma vez); o layout por letra continua
     // valendo. As partes da forma já são nós: nada a preparar.
     if (preset >= 0 && !shape && !ensure_text3d_layout(*l).ok()) return false;
@@ -396,7 +396,7 @@ bool Engine::set_layer_motion_blur_length(u64 layerId, f32 factor) noexcept {
     factor = std::clamp(factor, 0.0f, 4.0f);
     if (l->transform.motionBlurAmount == factor) return true;
     history_.before_mutation(*comp, project_->timeline().current(), "comprimento do desfoque");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->transform.motionBlurAmount = factor;
     project_->mark_dirty();
     request_render();
@@ -421,7 +421,7 @@ bool Engine::set_adjustment_scope(u64 layerId, u32 scope) noexcept {
     if (!l || scope > 2) return false;
     if (l->adjustmentScope == scope) return true;
     history_.before_mutation(*comp, project_->timeline().current(), "camadas afetadas");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->adjustmentScope = static_cast<u8>(scope);
     project_->mark_dirty();
     request_render();
@@ -446,7 +446,7 @@ bool Engine::set_adjustment_target(u64 layerId, u64 targetId, bool on) noexcept 
     if ((it != list.end()) == on && l->adjustmentScope == 2) return true;
     if (on && it == list.end() && list.size() >= 256) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "camadas afetadas");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     if (on && it == list.end()) list.push_back(target);
     if (!on && it != list.end()) list.erase(it);
     l->adjustmentScope = 2;
@@ -492,7 +492,7 @@ bool Engine::apply_effect_preset(u64 layerId, u32 effectId, u32 preset) noexcept
     const std::span<const EffectPreset> all = fx->presets();
     if (preset >= all.size()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "preset do efeito");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     for (const EffectPresetValue& v : all[preset].values) {
         if (v.param >= e->params.size() || v.param >= specs->count() || !std::isfinite(v.value)) continue;
         const ParamSpec& spec = specs->at(v.param);
@@ -500,7 +500,7 @@ bool Engine::apply_effect_preset(u64 layerId, u32 effectId, u32 preset) noexcept
         switch (spec.type) {
             case ParamType::Bool: dst = ParamValue::boolean(v.value >= 0.5f); break;
             case ParamType::Int: case ParamType::Enum: dst.v[0] = std::round(v.value); break;
-            default: dst.v[0] = v.value; break;
+            default: dst.v[std::min<u32>(v.component, component_count(spec.type) > 0 ? component_count(spec.type) - 1 : 0)] = v.value; break;
         }
     }
     project_->mark_dirty();
@@ -515,7 +515,7 @@ bool Engine::set_group_camera_pass_through(u64 layerId, bool on) noexcept {
     if (!l || l->kind != LayerKind::Composition) return false;
     if (l->nested.cameraPassThrough == on) return true;
     history_.before_mutation(*comp, project_->timeline().current(), "câmera no grupo");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->nested.cameraPassThrough = on;
     project_->mark_dirty();
     request_render();
@@ -550,7 +550,7 @@ bool Engine::set_layer_accepts_lights(u64 layerId, bool on) noexcept {
     if (!l || !accepts_lights_applies(*l)) return false;
     if (l->acceptsLights == on) return true;
     history_.before_mutation(*comp, project_->timeline().current(), "aceita luzes");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->acceptsLights = on;
     project_->mark_dirty();
     request_render();
@@ -573,7 +573,7 @@ bool Engine::set_layer_3d(u64 layerId, bool on) noexcept {
     if (l->threeD == on) return true;
     history_.before_mutation(*comp, project_->timeline().current(), on ? "ativar camada 3D" : "desativar camada 3D");
     l->threeD = on;
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     project_->mark_dirty();
     request_render();
     return true;
@@ -633,7 +633,7 @@ Result<u32> Engine::add_layers_to_group(const u64* ids, u32 count, u64 groupLaye
     }
 
     history_.before_mutation(*comp, parentId, "adicionar ao grupo");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     // Quadro c de dentro aparece no quadro c + shift de fora.
     const i64 shift = G->start.value - G->offset.value;
     // O grupo passa a mostrar uma CÓPIA da composição com as camadas novas: o
@@ -741,7 +741,7 @@ Result<u64> Engine::remove_layer_from_group(u64 layerId, std::string* why) noexc
     }
 
     history_.before_mutation(*P, parentId, "tirar do grupo");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const i64 shift = G->start.value - G->offset.value;
     // O grupo transformado leva a camada junto como pai (a tela não muda).
     bool identity = !G->tracks.has_animation() && !G->parent.valid();

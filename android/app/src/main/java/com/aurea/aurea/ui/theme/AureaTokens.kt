@@ -741,7 +741,6 @@ object AureaTimeline {
     val Row = 32.dp                        // pílula 28 + 4 de vão (antes 36: camadas grandes demais)
     val Bar = 26.dp                        // barra do clipe
     val BarRadius = 0.dp
-    val BarMinWidth = 40.dp
     val KeyframeTrack = 11.dp              // faixa de baixo da barra, dos losangos
     val HeaderColumn = 70.dp               // a pílula colada à esquerda (as barras passam por baixo)
     val RowPillHeight = 28.dp

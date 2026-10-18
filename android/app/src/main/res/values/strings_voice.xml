@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gravar voz (narração pelo microfone, Adicionar → Áudio). Par do iOS: VoiceRecorder.swift. -->
+<resources>
+    <string name="voice_title">Gravar voz</string>
+    <string name="voice_layer_prefix">Voz</string>
+    <string name="voice_record">Gravar</string>
+    <string name="voice_stop">Parar e salvar</string>
+    <string name="voice_cancel_take">Cancelar e descartar a gravação</string>
+    <string name="voice_level">Nível do microfone</string>
+    <string name="voice_elapsed">Tempo gravado</string>
+    <string name="voice_hint">Toque no botão vermelho e fale. A narração entra na timeline a partir do cabeçote.</string>
+    <string name="voice_recording">Gravando…</string>
+    <string name="voice_countdown">Contagem 3-2-1</string>
+    <string name="voice_play_along">Tocar o vídeo enquanto grava</string>
+    <string name="voice_headphones">Use fones de ouvido para o som do vídeo não entrar na gravação.</string>
+    <string name="voice_permission_title">Permitir o microfone</string>
+    <string name="voice_permission_body">Para gravar a sua narração, o Aurea precisa do microfone. O áudio fica no seu aparelho, dentro do projeto.</string>
+    <string name="voice_permission_allow">Permitir</string>
+    <string name="voice_permission_blocked">O acesso ao microfone está bloqueado. Abra as configurações do app e permita o microfone.</string>
+    <string name="voice_open_settings">Abrir configurações</string>
+    <string name="voice_saving">Salvando a narração…</string>
+    <string name="voice_saved">Narração adicionada na timeline</string>
+    <string name="voice_save_failed">Não foi possível salvar a gravação</string>
+    <string name="voice_start_failed">Não foi possível usar o microfone. Feche outros apps que estejam gravando e tente de novo.</string>
+    <string name="voice_too_short">Gravação curta demais: nada foi adicionado</string>
+    <string name="voice_interrupted">A gravação parou (o app saiu da tela ou houve uma ligação). O que já foi gravado foi salvo.</string>
+    <string name="voice_discarded">Gravação descartada</string>
+    <string name="voice_countdown_value">Começa em %1$d</string>
+</resources>

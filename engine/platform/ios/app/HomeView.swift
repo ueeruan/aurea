@@ -503,7 +503,8 @@ struct HomeView: View {
         pendingProject = nil
         let created = model.newProject(width: draft.width, height: draft.height,
                                        fps: draft.fps, title: draft.title,
-                                       background: Array(draft.background.prefix(3)) + [draft.transparent ? 0 : 1])
+                                       background: Array(draft.background.prefix(3)) + [draft.transparent ? 0 : 1],
+                                       uiMode: draft.uiMode)
         guard created, let url = model.projectURL else {
             // Antes daqui saia calado: o usuario tocava, nada acontecia, e nao
             // havia nem projeto nem explicacao.
@@ -736,6 +737,8 @@ struct NewProjectDraft {
     var background: [Float] = [0, 0, 0]
     /// "Transparente": sem fundo (o motor recebe alfa 0; PNG e GIF saem com alfa).
     var transparent = false
+    /// Interface do projeto (0.2.5): Composição (padrão) ou Edição.
+    var uiMode: UInt32 = AureaUiMode.composition
 }
 
 /// `home/NewProjectSheet.kt`: same format drawings, field order and segments.
@@ -757,6 +760,8 @@ struct NewProjectSheet: View {
     @State private var free = false
     @State private var freeWidth = "1080"
     @State private var freeHeight = "1350"
+    // A interface NÃO lembra a última escolha: toda folha nova abre na Composição, a principal.
+    @State private var uiMode = AureaUiMode.composition
     @State private var submitting = false
     @State private var contentHeight: CGFloat = 650
 
@@ -829,6 +834,8 @@ struct NewProjectSheet: View {
                     .aureaFont(.sheetSpec).foregroundStyle(AureaColors.muted)
             }
             .padding(.bottom, 16)
+            HomeCapsLabel(text: AureaText.t("ui_mode_label"))
+            UiModeChoice(selected: uiMode) { uiMode = $0 }.padding(.top, 8).padding(.bottom, 18)
             aspectPreview
             HStack(spacing: 0) {
                 ForEach(ProjectPresets.aspects, id: \.key) { option in
@@ -948,7 +955,7 @@ struct NewProjectSheet: View {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = trimmed.isEmpty ? (suggestedName.isEmpty ? AureaText.t("new_project_untitled") : suggestedName) : trimmed
         onCreate(NewProjectDraft(width: UInt32(frame.width), height: UInt32(frame.height), fps: fps, title: title,
-                                 background: background, transparent: transparent))
+                                 background: background, transparent: transparent, uiMode: uiMode))
     }
 
     /// `NewProjectSheet.kt` BackgroundChoices: preto, branco, transparente
@@ -1014,7 +1021,7 @@ private struct UnevenHomeSheet: Shape {
 
 /// `home/HomeComponents.kt::AureaSegmented`. Text, tracks, separators and
 /// moving thumb retain Android's dimensions instead of the OS Picker style.
-private struct HomeSegmented<Value: Hashable>: View {
+struct HomeSegmented<Value: Hashable>: View {
     let values: [Value]
     @Binding var selected: Value
     let label: (Value) -> String
@@ -1074,6 +1081,8 @@ struct HomeSettingsTab: View {
     @State private var licenses = false
     @State private var performanceTest = false
     @AppStorage("home.developerTools") private var developerTools = false
+    /// "Otimizar vídeos pesados" (0.2.5): modo e mídia otimizada (ProxyOptimizer.swift).
+    @ObservedObject private var proxies = ProxyOptimizer.shared
 
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?" }
     private var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?" }
@@ -1113,6 +1122,20 @@ struct HomeSettingsTab: View {
                     Button(AureaText.t("ios_perf_test_button")) { performanceTest = true }.padding(16)
                 }
                 groupNote("settings_device_auto_note")
+                // Par do ProxyGroup (SettingsTab.kt): o QUE otimizar é do motor; aqui o
+                // modo gravado e a limpeza com o tamanho real. O export usa o original.
+                group {
+                    segmentedRow("proxy_settings_title", values: ProxyOptimizer.Mode.allCases,
+                                 selected: Binding(get: { proxies.mode }, set: { proxies.select($0) }),
+                                 label: { AureaText.t($0.labelKey) })
+                    groupDivider
+                    tapRow("proxy_clear_title_unknown", subtitle: AureaText.t("proxy_clear_note"),
+                           literalTitle: proxies.cacheBytes >= 0 ? AureaText.t("proxy_clear_title", ProxyOptimizer.megabytes(proxies.cacheBytes)) : nil) {
+                        proxies.clearCache { mb in model.toast = AureaText.t("proxy_cleared", mb) }
+                    }
+                }
+                .onAppear { proxies.refreshCacheSize() }
+                groupNote("proxy_settings_note")
                 groupHeader("settings_group_general", top: true)
                 group {
                     tapRow("settings_clear_cache", subtitle: AureaText.t("settings_clear_cache_note")) { model.clearHomeCaches() }
@@ -1142,7 +1165,7 @@ struct HomeSettingsTab: View {
                     tileRow(CupertinoGlyph.PersonCropCircle, title: "settings_creator",
                             subtitle: AureaText.t("home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo"))
                     groupDivider
-                    tapRow("licenses_title", subtitle: "Real-ESRGAN · MiDaS · Tencent/ncnn") { licenses = true }
+                    tapRow("licenses_title", subtitle: "MiDaS · U2-Net · Tencent/ncnn") { licenses = true }
                 }
                 betaBanner.padding(.top, HomeDims.s4)
                 if developerTools {
@@ -1226,11 +1249,12 @@ struct HomeSettingsTab: View {
             HomeSegmented(values: values, selected: selected, label: label)
         }.padding(.horizontal, 16).padding(.vertical, 14)
     }
-    private func tapRow(_ title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+    /// `literalTitle`: texto já montado (com número) no lugar da chave.
+    private func tapRow(_ title: String, subtitle: String, literalTitle: String? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(AureaText.t(title)).aureaFont(.bodyLarge)
+                    Text(literalTitle ?? AureaText.t(title)).aureaFont(.bodyLarge)
                     Text(subtitle).aureaFont(.bodySmall).foregroundStyle(AureaColors.muted)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 16, color: AureaColors.muted).mirrorsInRtl()
@@ -1516,5 +1540,47 @@ private struct HomeMediaPicker: UIViewControllerRepresentable {
                 }
             }
         }
+    }
+}
+
+/// A INTERFACE do projeto (espelho de NewProjectSheet.kt `UiModeChoice`): dois
+/// cartões lado a lado — Composição (a principal, marcada por padrão, com o selo
+/// "Padrão") e Edição (trilha principal com os cortes em sequência).
+struct UiModeChoice: View {
+    let selected: UInt32
+    let onSelect: (UInt32) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            card(AureaUiMode.composition, title: "ui_mode_composition", hint: "ui_mode_composition_hint", id: "newProject.uiMode.composition")
+            card(AureaUiMode.edit, title: "ui_mode_edit", hint: "ui_mode_edit_hint", id: "newProject.uiMode.edit")
+        }
+    }
+
+    private func card(_ mode: UInt32, title: String, hint: String, id: String) -> some View {
+        let active = mode == selected
+        return Button { onSelect(mode) } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(AureaText.t(title)).font(.aurea(size: 15, weight: .bold))
+                        .foregroundStyle(active ? AureaColors.accent : AureaColors.text).lineLimit(1)
+                    if mode == AureaUiMode.composition {
+                        Text(AureaText.t("ui_mode_default_badge")).font(.aurea(size: 10.5, weight: .bold))
+                            .foregroundStyle(AureaColors.background).padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+                Text(AureaText.t(hint)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                    .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(active ? AureaColors.accentDim : AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(active ? AureaColors.accent : AureaColors.hairline, lineWidth: active ? 2 : 1))
+        }
+        .buttonStyle(AureaPressStyle(shrink: 0.98))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AureaText.t(title) + ". " + AureaText.t(hint))
+        .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier(id)
     }
 }

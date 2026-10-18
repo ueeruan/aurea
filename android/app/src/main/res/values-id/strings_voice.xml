@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gravar voz (narração pelo microfone, Adicionar → Áudio). Par do iOS: VoiceRecorder.swift. -->
+<resources>
+    <string name="voice_title">Rekam suara</string>
+    <string name="voice_layer_prefix">Suara</string>
+    <string name="voice_record">Rekam</string>
+    <string name="voice_stop">Berhenti dan simpan</string>
+    <string name="voice_cancel_take">Batalkan dan buang rekaman</string>
+    <string name="voice_level">Level mikrofon</string>
+    <string name="voice_elapsed">Waktu rekaman</string>
+    <string name="voice_hint">Ketuk tombol merah lalu bicara. Narasi masuk ke timeline mulai dari playhead.</string>
+    <string name="voice_recording">Merekam…</string>
+    <string name="voice_countdown">Hitung mundur 3-2-1</string>
+    <string name="voice_play_along">Putar video saat merekam</string>
+    <string name="voice_headphones">Gunakan headphone agar suara video tidak masuk ke rekaman.</string>
+    <string name="voice_permission_title">Izinkan mikrofon</string>
+    <string name="voice_permission_body">Untuk merekam narasi Anda, Aurea memerlukan mikrofon. Audio tetap di perangkat Anda, di dalam proyek.</string>
+    <string name="voice_permission_allow">Izinkan</string>
+    <string name="voice_permission_blocked">Akses mikrofon diblokir. Buka pengaturan aplikasi dan izinkan mikrofon.</string>
+    <string name="voice_open_settings">Buka pengaturan</string>
+    <string name="voice_saving">Menyimpan narasi…</string>
+    <string name="voice_saved">Narasi ditambahkan ke timeline</string>
+    <string name="voice_save_failed">Tidak dapat menyimpan rekaman</string>
+    <string name="voice_start_failed">Tidak dapat menggunakan mikrofon. Tutup aplikasi lain yang sedang merekam, lalu coba lagi.</string>
+    <string name="voice_too_short">Rekaman terlalu pendek: tidak ada yang ditambahkan</string>
+    <string name="voice_interrupted">Rekaman berhenti (aplikasi keluar dari layar atau ada panggilan). Yang sudah direkam telah disimpan.</string>
+    <string name="voice_discarded">Rekaman dibuang</string>
+    <string name="voice_countdown_value">Mulai dalam %1$d</string>
+</resources>

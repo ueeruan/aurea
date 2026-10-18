@@ -277,10 +277,11 @@ internal class TimelineController(
     private fun hitSegment(s: RowModel, x: Float, y: Float): HitKind {
         val m = metrics
         val x0 = xOf(s.start)
-        val x1 = max(xOf(s.end), x0 + m.barMinWidth)
+        val x1 = xOf(s.end)
         return RowHit.hit(
             m, x, y, state.width.toFloat(), x0, x1, handlesOn(s), state.compact && isSelected(s.id),
-            keysEnabled = !multi() && KeyframeVisibility.visible(store.showAllKeyframes, s.track != null, isSelected(s.id)),
+            keysEnabled = !multi() && KeyframeVisibility.visible(store.showAllKeyframes, s.track != null, isSelected(s.id)) &&
+                KeyframeVisibility.editable(isSelected(s.id), store.keySelectMode, s.track != null),
             instants = s.instants,
             view = view(), pxPerFrame = pxPerFrame(), centerX = centerX(), out = hitOut,
         )
@@ -303,7 +304,7 @@ internal class TimelineController(
         if (i !in 0 until n) return hit
         val r = rowAt(list, i) ?: return hit
         val top = m.rowsTop + rowTop(i) - scroll
-        val y = if (r.track == null) p.y - top else m.diamondCyNormal
+        val y = if (r.track == null) (p.y - top - m.barTop).coerceAtLeast(0f) else m.diamondCyNormal
         hit.lane = r
         hit.rowIndex = i
         if (r.track != null && !state.compact) return laneHit(hit, list, i, p.x, p.y - m.rowsTop + scroll)
@@ -334,7 +335,7 @@ internal class TimelineController(
             val kind = hitSegment(s, p.x, y)
             if (kind == HitKind.NONE) continue
             val x0 = xOf(s.start)
-            val x1 = max(xOf(s.end), x0 + m.barMinWidth)
+            val x1 = xOf(s.end)
             val score = when {
                 handlesOn(s) && (kind == HitKind.TRIM_START || kind == HitKind.TRIM_END || kind == HitKind.KEYFRAME) -> 4
                 kind == HitKind.CAP_BACK && isSelected(s.id) -> 4

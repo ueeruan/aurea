@@ -3,6 +3,7 @@ import AVFoundation
 import UniformTypeIdentifiers
 import Security
 import CryptoKit
+import os
 
 struct NativeCaptionBlock: Codable, Equatable, Identifiable {
     var id: Int64; var start: Int32; var end: Int32; var text: String
@@ -40,8 +41,8 @@ struct CaptionBlockEditor: View {
             }
             if !selected.isEmpty {
                 HStack {
-                    Button("← 1") { edit("move", ["delta": -1]) }
-                    Button("1 →") { edit("move", ["delta": 1]) }
+                    Button(AureaText.t("edt_cap_back_frame")) { edit("move", ["delta": -1]) }
+                    Button(AureaText.t("edt_cap_fwd_frame")) { edit("move", ["delta": 1]) }
                     Button(AureaText.t("dock_short_split")) { edit("split", ["frame": model.status.playhead]) }.disabled(selected.count != 1)
                     Button(AureaText.t("panel_unir")) { edit("merge"); selected.removeAll() }.disabled(selected.count < 2)
                     Button(AureaText.t("common_delete")) { edit("delete"); selected.removeAll() }
@@ -159,9 +160,17 @@ struct TrackingPanel: View {
                 Picker(AureaText.t("cam_camera"), selection: $cameraMotion) { Text(AureaText.t("trk_auto")).tag(UInt32(0)); Text(AureaText.t("cam_free")).tag(UInt32(1)); Text(AureaText.t("cam_tripod")).tag(UInt32(2)) }
                 Button(knownFov == 0 ? AureaText.t("cam_fov_auto") : AureaText.t("cam_fov_value", Int(knownFov))) { knownFov = knownFov == 0 ? Float(number("fovDeg")).clamped(to: 10...120) : 0 }
                 if knownFov > 0 { Slider(value: $knownFov, in: 10...120).tint(AureaColors.accent) }
-                action("cam_resolve", "cam_resolve_desc") { _ = model.engine.refineCameraTrack(false, motion: cameraMotion, fov: knownFov); reload() }
+                action("cam_resolve", "cam_resolve_desc") {
+                    if !model.engine.refineCameraTrack(false, motion: cameraMotion, fov: knownFov) { model.toast = AureaText.t("app_cam_refine_failed") }
+                    reload()
+                }
                 if model.cameraSelectedCount > 0 {
-                    action("cam_delete_resolve", "cam_delete_resolve_desc") { _ = model.engine.refineCameraTrack(true, motion: cameraMotion, fov: knownFov); model.cameraSelectedCount = 0; reload() }
+                    action("cam_delete_resolve", "cam_delete_resolve_desc") {
+                        // Par do Android: falhou = avisa e mantém a seleção.
+                        if model.engine.refineCameraTrack(true, motion: cameraMotion, fov: knownFov) { model.cameraSelectedCount = 0 }
+                        else { model.toast = AureaText.t("app_cam_refine_failed") }
+                        reload()
+                    }
                 }
                 Spacer().frame(height: 8)
                 action("panel_analisar_novo", "panel_modo_escolhido_acima", run: analyze)
@@ -190,8 +199,15 @@ struct TrackingPanel: View {
     }
     private func analyze() {
         guard let id = model.primarySelection else { return }
+        // Não começou (outra análise rodando, clipe curto): avisa e NÃO adota a
+        // camada — antes o painel desta camada mostrava a análise de outra.
+        guard model.engine.setCameraTrack(mode, forLayer: id) else {
+            model.toast = AureaText.t("msg_nao_foi_possivel_analisar_esta_camada")
+            reload()
+            return
+        }
         sourceLayer = id
-        model.engine.setCameraTrack(mode, forLayer: id); reload()
+        reload()
     }
     private var qualityPicker: some View {
         HStack(spacing: 8) {
@@ -329,6 +345,87 @@ enum CaptionKeychain {
     }
 }
 
+/// Qualidade da transcrição = tamanho do modelo Whisper (pesos oficiais q5_1
+/// do ggerganov/whisper.cpp; tamanho e SHA-256 do ponteiro LFS publicado).
+/// O mesmo trio existe no Android (`WhisperQuality` em WhisperModels.kt).
+enum WhisperQuality: Int, CaseIterable, Identifiable {
+    case fast = 0, balanced = 1, accurate = 2
+    var id: Int { rawValue }
+    var model: String { ["tiny", "base", "small"][rawValue] }
+    var bytes: Int { [32152673, 59707625, 190085487][rawValue] }
+    var megabytes: Int { [32, 60, 190][rawValue] }
+    var sha256: String {
+        ["818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7",
+         "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898",
+         "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"][rawValue]
+    }
+    var fileName: String { "ggml-\(model)-q5_1.bin" }
+    var label: String { AureaText.t(["cap025_quality_fast", "cap025_quality_balanced", "cap025_quality_accurate"][rawValue]) }
+    var hint: String { AureaText.t(["cap025_quality_fast_hint", "cap025_quality_balanced_hint", "cap025_quality_accurate_hint"][rawValue]) }
+    /// Cabe agora? O jetsam corta o app pelo limite do processo, não pela RAM
+    /// total: `os_proc_available_memory` é o que ainda dá para usar (base usa
+    /// ~350 MB e small ~650 MB durante a transcrição, com o editor aberto).
+    var fits: Bool {
+        if self == .fast { return true }
+        let physical = ProcessInfo.processInfo.physicalMemory
+        let reported = UInt64(os_proc_available_memory())
+        let available = reported > 0 ? reported : physical / 2   // simulador: sem limite informado
+        let gib: UInt64 = 1 << 30
+        switch self {
+        case .balanced: return physical >= 3 * gib && available >= 600 << 20
+        case .accurate: return physical >= gib * 11 / 2 && available >= 1200 << 20
+        case .fast: return true
+        }
+    }
+    var downloaded: Bool {
+        let url = AureaPaths.documents.appendingPathComponent("Whisper", isDirectory: true).appendingPathComponent(fileName)
+        return ((try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? NSNumber)?.intValue == bytes
+    }
+    static var best: WhisperQuality { allCases.last { $0.fits } ?? .fast }
+    /// A pedida, ou a melhor abaixo dela que ainda cabe (a memória livre muda).
+    func usable() -> WhisperQuality { WhisperQuality.allCases.filter { $0.rawValue <= rawValue }.last { $0.fits } ?? .fast }
+    private static let key = "aurea.captions.whisperQuality"
+    /// Guardada ou a melhor que cabe (em Modo de Pouca Energia, no máximo a equilibrada).
+    static func initial() -> WhisperQuality {
+        if let saved = UserDefaults.standard.object(forKey: key) as? Int, let quality = WhisperQuality(rawValue: saved) { return quality }
+        let best = WhisperQuality.best
+        return ProcessInfo.processInfo.isLowPowerModeEnabled && best == .accurate ? .balanced : best
+    }
+    static func save(_ quality: WhisperQuality) { UserDefaults.standard.set(quality.rawValue, forKey: key) }
+}
+
+/// Idiomas da fala (0.2.5): os sete do app mais os comuns que o Whisper
+/// reconhece bem. Código do Whisper; nome no próprio idioma. Mesma lista no Android.
+enum CaptionLanguages {
+    static let codes = ["pt", "en", "es", "ru", "hi", "ar", "id", "fr", "de", "it", "ja", "ko", "zh", "tr"]
+    private static let names = ["pt": "Português", "en": "English", "es": "Español", "ru": "Русский", "hi": "हिन्दी",
+                                "ar": "العربية", "id": "Bahasa Indonesia", "fr": "Français", "de": "Deutsch", "it": "Italiano",
+                                "ja": "日本語", "ko": "한국어", "zh": "中文", "tr": "Türkçe"]
+    static func endonym(_ code: String) -> String { names[code] ?? code }
+    /// Para o VoiceOver: o nome no idioma do app junto do nativo ("Japonês (日本語)").
+    static func spoken(_ code: String) -> String {
+        let app = AureaText.language.resolved.rawValue
+        guard let local = Locale(identifier: app).localizedString(forLanguageCode: code), local != endonym(code) else { return endonym(code) }
+        return "\(local.prefix(1).uppercased())\(local.dropFirst()) (\(endonym(code)))"
+    }
+    private static let key = "aurea.captions.speechLanguage"
+    /// Idioma escolhido no app ou, seguindo o sistema, o do aparelho — quando o Whisper o tem; "" = automático.
+    static func preferred() -> String {
+        let chosen = AureaText.language == .system ? nil : String(AureaText.language.rawValue.prefix(2))
+        let device = Locale.preferredLanguages.first.map { tag in String(tag.prefix { $0 != "-" && $0 != "_" }) }
+        for raw in [chosen, device].compactMap({ $0 }) {
+            let code = raw == "in" ? "id" : raw
+            if codes.contains(code) { return code }
+        }
+        return ""
+    }
+    static func initial() -> String {
+        if let saved = UserDefaults.standard.string(forKey: key), saved.isEmpty || codes.contains(saved) { return saved }
+        return preferred()
+    }
+    static func save(_ code: String) { UserDefaults.standard.set(code, forKey: key) }
+}
+
 enum CaptionTranscriber {
     struct Failure: LocalizedError { var message: String; var errorDescription: String? { message } }
     static func cacheURL(_ path: String) -> URL {
@@ -346,37 +443,76 @@ enum CaptionTranscriber {
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         if let data = try? JSONEncoder().encode(words) { try? data.write(to: url, options: .atomic) }
     }
-    static func prepareModel() async throws -> URL {
+    /// Baixa (uma vez) e confere o modelo da qualidade pedida. `progress` recebe 0…100.
+    static func prepareModel(_ quality: WhisperQuality, progress: @escaping @Sendable (Int) -> Void) async throws -> URL {
         try Task.checkCancellation()
-        let base = ProcessInfo.processInfo.physicalMemory >= 6 * 1024 * 1024 * 1024 && !ProcessInfo.processInfo.isLowPowerModeEnabled
-        let name = base ? "base" : "tiny"
-        let expected = base ? 59707625 : 32152673
-        let hash = base ? "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898" : "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7"
         let folder = AureaPaths.documents.appendingPathComponent("Whisper", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let target = folder.appendingPathComponent("ggml-\(name)-q5_1.bin")
+        let target = folder.appendingPathComponent(quality.fileName)
         func valid(_ url: URL) throws -> Bool {
-            guard (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue == expected else { return false }
+            guard (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue == quality.bytes else { return false }
             let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
             var digest = SHA256()
             while let data = try file.read(upToCount: 65536), !data.isEmpty {
                 try Task.checkCancellation()
                 digest.update(data: data)
             }
-            return digest.finalize().map { String(format: "%02x", $0) }.joined() == hash
+            return digest.finalize().map { String(format: "%02x", $0) }.joined() == quality.sha256
         }
         if (try? valid(target)) == true { return target }
         try Task.checkCancellation()
-        let remote = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(target.lastPathComponent)")!
-        let (temporary, response) = try await URLSession.shared.download(from: remote)
-        defer { try? FileManager.default.removeItem(at: temporary) }
-        guard (response as? HTTPURLResponse)?.statusCode == 200, try valid(temporary) else { throw Failure(message: AureaText.t("ios_whisper_verify_failed")) }
+        let free = (try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage ?? Int64.max
+        if free < Int64(quality.bytes) * 2 { throw Failure(message: AureaText.t("app_whisper_no_space", quality.model)) }
+        let remote = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(quality.fileName)")!
+        let partial = folder.appendingPathComponent(quality.fileName + ".part")
+        defer { try? FileManager.default.removeItem(at: partial) }
+        do { try await download(remote, to: partial, progress: progress) }
+        catch let failure as Failure { throw failure }
+        catch {
+            // Sem rede, DNS, tempo esgotado: "não deu para baixar", não "falha na transcrição".
+            if Task.isCancelled { throw CancellationError() }
+            throw Failure(message: AureaText.t("app_whisper_download_failed"))
+        }
         try Task.checkCancellation()
+        guard try valid(partial) else { throw Failure(message: AureaText.t("ios_whisper_verify_failed")) }
         if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
-        try FileManager.default.moveItem(at: temporary, to: target)
+        try FileManager.default.moveItem(at: partial, to: target)
         var values = URLResourceValues(); values.isExcludedFromBackup = true
         var local = target; try local.setResourceValues(values)
         return target
+    }
+    /// O handler move o arquivo antes de o URLSession apagá-lo; o progresso
+    /// vem do `Progress` da tarefa (o modelo preciso tem 190 MB).
+    private final class ModelDownload: @unchecked Sendable {
+        var task: URLSessionDownloadTask?
+        var observation: NSKeyValueObservation?
+        var shown = -1
+    }
+    private static func download(_ remote: URL, to destination: URL, progress: @escaping @Sendable (Int) -> Void) async throws {
+        let box = ModelDownload()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let task = URLSession.shared.downloadTask(with: remote) { url, response, error in
+                    box.observation?.invalidate()
+                    if let error { continuation.resume(throwing: error); return }
+                    guard let url, (response as? HTTPURLResponse)?.statusCode == 200 else {
+                        continuation.resume(throwing: Failure(message: AureaText.t("app_whisper_download_failed"))); return
+                    }
+                    do {
+                        if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+                        try FileManager.default.moveItem(at: url, to: destination)
+                        continuation.resume()
+                    } catch { continuation.resume(throwing: error) }
+                }
+                box.task = task
+                box.observation = task.progress.observe(\.fractionCompleted) { value, _ in
+                    let percent = Int(value.fractionCompleted * 100)
+                    if percent != box.shown { box.shown = percent; progress(percent) }
+                }
+                task.resume()
+                if Task.isCancelled { task.cancel() }
+            }
+        } onCancel: { box.task?.cancel() }
     }
     // Mesma combinação de palavras e pontuação de Captions.kt no Android.
     static func parse(_ object: [String: Any]) -> [CaptionWord] {
@@ -416,10 +552,10 @@ struct CaptionsPanel: View {
     @State private var transcriptSource: String?
     @State private var translateEnglish = false
     @State private var hasKey = false
-    @State private var language: String = {
-        let code = Locale.current.languageCode ?? ""
-        return ["pt", "en", "es"].contains(code) ? code : ""
-    }()
+    @State private var language: String = CaptionLanguages.initial()
+    @State private var quality: WhisperQuality = WhisperQuality.initial()
+    /// Aviso sem erro (a qualidade pedida não coube na memória livre e outra foi usada).
+    @State private var notice: String?
     /// O .srt escolhido (DocumentImportPicker: o `.fileImporter` aninhado não abria).
     @State private var srtPick: URL?
     @State private var busy: String?
@@ -445,8 +581,6 @@ struct CaptionsPanel: View {
     private var captionTrack: NativeCaptionTrack? { model.captionTracks.first { $0.layer == model.primarySelection || $0.source == model.primarySelection } }
     private var id: Int64 { captionTrack?.source ?? model.primarySelection ?? 0 }
     private var path: String { model.engine.layerMediaPath(id) }
-    private var languages: [String] { [AureaText.t("pn_caption_lang_auto"), "Português", "English", "Español"] }
-    private let languageCodes = ["", "pt", "en", "es"]
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(title: AureaText.t("panel_legendas"), onBack: { model.panel = .none })
@@ -471,6 +605,8 @@ struct CaptionsPanel: View {
         .onAppear { open(); loadOptions() }
         .onChange(of: id) { _ in open() }
         .onChange(of: model.status.modelRevision) { _ in captionCount = Int(model.engine.captionCount(id)) }
+        .onChange(of: language) { CaptionLanguages.save($0) }
+        .onChange(of: quality) { notice = nil; WhisperQuality.save($0) }
         .onDisappear { _ = model.engine.captionProgress(true); job?.cancel(); loading?.cancel(); persist(); model.captionOptions = options }
         .onChange(of: srtPick) { picked in
             guard let url = picked else { return }
@@ -483,10 +619,10 @@ struct CaptionsPanel: View {
             if let captionTrack { CaptionBlockEditor(track: captionTrack) }
             if let busy { note(busy, color: AureaColors.accent) }
             if let error { note(error, color: AureaColors.danger) }
+            if let notice { note(notice, color: AureaColors.muted) }
             note(AureaText.t("ios_whisper_note"), color: AureaColors.muted)
             if busy != nil { CaptionAction(label: AureaText.t("common_cancel")) { _ = model.engine.captionProgress(true); job?.cancel() } }
-            label("panel_idioma_fala")
-            CaptionChips(options: languages, selected: languageCodes.firstIndex(of: language) ?? 0) { language = languageCodes[$0] }
+            speechControls
             Toggle(AureaText.t("beta_translate_english"), isOn: $translateEnglish)
                 .frame(minHeight: 44).disabled(busy != nil)
             HStack(spacing: 8) {
@@ -524,6 +660,34 @@ struct CaptionsPanel: View {
                     ?? AureaText.plural("pn_caption_transcript", words.count, words.count))
                     .font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 8)
             }
+        }
+    }
+    /// Idioma da fala e qualidade do Whisper. Qualidade que não cabe na
+    /// memória livre aparece desligada, com o motivo para o VoiceOver.
+    private var speechControls: some View {
+        let codes = [""] + CaptionLanguages.codes
+        let auto = AureaText.t("cap025_lang_auto")
+        let qualities = WhisperQuality.allCases
+        let fits = qualities.map(\.fits)
+        let unavailable = AureaText.t("cap025_quality_unavailable")
+        let names: [String] = codes.map { $0.isEmpty ? auto : CaptionLanguages.endonym($0) }
+        let spoken: [String] = codes.map { $0.isEmpty ? auto : CaptionLanguages.spoken($0) }
+        let explained: [String] = qualities.map { q in
+            let reason = fits[q.rawValue] ? "" : " " + unavailable
+            return q.label + ". " + q.hint + reason
+        }
+        let idle = busy == nil
+        return VStack(alignment: .leading, spacing: 0) {
+            label("panel_idioma_fala")
+            CaptionChips(options: names, selected: codes.firstIndex(of: language) ?? 0, descriptions: spoken,
+                         enabled: { _ in idle }, wrap: true) { language = codes[$0] }
+            label("cap025_quality")
+            CaptionChips(options: qualities.map(\.label), selected: quality.rawValue, descriptions: explained,
+                         enabled: { idle && fits[$0] }) { quality = qualities[$0] }
+            note(quality.hint, color: AureaColors.muted)
+            if !fits[quality.rawValue] { note(unavailable, color: AureaColors.danger) }
+            else if quality.downloaded { note(AureaText.t("cap025_quality_ready"), color: AureaColors.muted) }
+            else { note(AureaText.t("cap025_quality_needs_download", quality.megabytes), color: AureaColors.muted) }
         }
     }
     private var groupingControls: some View {
@@ -642,11 +806,20 @@ struct CaptionsPanel: View {
         guard busy == nil else { return }
         let sourceId = id, engine = model.engine, selectedLanguage = language, translate = translateEnglish, project = model.projectGeneration
         guard !path.isEmpty else { error = AureaText.t("ios_no_audio_media"); return }
+        // A memória livre muda: a qualidade pedida cai para a melhor que cabe agora.
+        let chosen = quality.usable()
+        notice = chosen != quality ? AureaText.t("cap025_quality_fallback", chosen.label) : nil
         busy = AureaText.t("ios_whisper_preparing"); error = nil
         let revision = UUID(); jobRevision = revision
         job = Task {
             do {
-                let preparation = Task.detached(priority: .utility) { try await CaptionTranscriber.prepareModel() }
+                let preparation = Task.detached(priority: .utility) {
+                    try await CaptionTranscriber.prepareModel(chosen) { percent in
+                        Task { @MainActor in
+                            if jobRevision == revision && !Task.isCancelled { busy = AureaText.t("app_whisper_downloading", chosen.model, percent) }
+                        }
+                    }
+                }
                 let modelFile = try await withTaskCancellationHandler {
                     try await preparation.value
                 } onCancel: { preparation.cancel() }
@@ -658,7 +831,7 @@ struct CaptionsPanel: View {
                 let ticker = Task { @MainActor in
                     while !Task.isCancelled && jobRevision == revision {
                         try? await Task.sleep(nanoseconds: 400_000_000)
-                        if !Task.isCancelled && jobRevision == revision { busy = "Whisper local: \(engine.captionProgress(false))%" }
+                        if !Task.isCancelled && jobRevision == revision { busy = AureaText.t("app_caption_whisper_progress", Int(engine.captionProgress(false))) }
                     }
                 }
                 defer { ticker.cancel() }
@@ -723,19 +896,32 @@ struct CaptionsPanel: View {
 private struct CaptionChips: View {
     let options: [String]
     let selected: Int
+    /// Rótulo para o VoiceOver (nome do idioma no idioma do app, motivo de estar desligada).
+    var descriptions: [String]? = nil
+    var enabled: (Int) -> Bool = { _ in true }
+    /// Quebra em linhas (a lista de idiomas inteira à vista) em vez de rolar.
+    var wrap = false
     let onPick: (Int) -> Void
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(Array(options.enumerated()), id: \.offset) { index, title in
-                    Button { onPick(index) } label: {
-                        Text(title).font(.aurea(size: 12)).foregroundStyle(index == selected ? AureaColors.accent : AureaColors.text)
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(index == selected ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-                    }.buttonStyle(AureaPressStyle())
-                }
+        if wrap {
+            AureaFlowLayout(hGap: 6, vGap: 6) { chips }.padding(.vertical, 6)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) { chips }.frame(height: 44)
             }.frame(height: 44)
-        }.frame(height: 44)
+        }
+    }
+    private var chips: some View {
+        ForEach(Array(options.enumerated()), id: \.offset) { index, title in
+            let on = index == selected, active = enabled(index)
+            Button { onPick(index) } label: {
+                Text(title).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : active ? AureaColors.text : AureaColors.muted)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(on ? AureaColors.accentDim : AureaColors.chip.opacity(active ? 1 : 0.4), in: RoundedRectangle(cornerRadius: 8))
+            }.buttonStyle(AureaPressStyle()).disabled(!active)
+            .accessibilityLabel(descriptions.flatMap { index < $0.count ? $0[index] : nil } ?? title)
+            .accessibilityAddTraits(on ? .isSelected : [])
+        }
     }
 }
 

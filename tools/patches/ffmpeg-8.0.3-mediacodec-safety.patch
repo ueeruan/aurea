@@ -1,0 +1,176 @@
+--- a/libavcodec/mediacodecenc.c
++++ b/libavcodec/mediacodecenc.c
+@@ -75,6 +75,7 @@
+     uint8_t *extradata;
+     int extradata_size;
+     int eof_sent;
++    int eof_received;
+ 
+     AVFrame *frame;
+     AVBSFContext *bsf;
+@@ -218,12 +219,28 @@
+     return ret;
+ }
+ 
+-static void copy_frame_to_buffer(AVCodecContext *avctx, const AVFrame *frame,
++static int copy_frame_to_buffer(AVCodecContext *avctx, const AVFrame *frame,
+                                  uint8_t *dst, size_t size)
+ {
+     MediaCodecEncContext *s = avctx->priv_data;
+     uint8_t *dst_data[4] = {};
+     int dst_linesize[4] = {};
++    size_t required;
++
++    if (s->width <= 0 || s->height <= 0 || (s->width & 1) || (s->height & 1) ||
++        av_image_check_size(s->width, s->height, 0, avctx) < 0)
++        return AVERROR(EINVAL);
++    required = (size_t)s->width * s->height * 3 / 2;
++    if (!dst || size < required || required > INT_MAX) {
++        av_log(avctx, AV_LOG_ERROR, "MediaCodec input buffer too small: %zu < %zu\n", size, required);
++        return AVERROR(EINVAL);
++    }
++    /* The coded storage is aligned while the visible picture need not be.
++     * Initialize padding and queue exactly the filled storage, not capacity. */
++    memset(dst, avctx->color_range == AVCOL_RANGE_JPEG ? 0 : 16,
++           (size_t)s->width * s->height);
++    memset(dst + (size_t)s->width * s->height, 128,
++           (size_t)s->width * s->height / 2);
+ 
+     if (avctx->pix_fmt == AV_PIX_FMT_YUV420P) {
+         dst_data[0] = dst;
+@@ -244,6 +261,7 @@
+ 
+     av_image_copy2(dst_data, dst_linesize, frame->data, frame->linesize,
+                    avctx->pix_fmt, avctx->width, avctx->height);
++    return (int)required;
+ }
+ 
+ 
+@@ -356,7 +374,7 @@
+     s->async_mode = 0;
+ }
+ 
+-static int mediacodec_generate_extradata(AVCodecContext *avctx);
++static int mediacodec_generate_extradata(AVCodecContext *avctx, FFAMediaFormat *format);
+ 
+ static void mediacodec_set_qp_range(AVCodecContext *avctx,
+                                     FFAMediaFormat *format)
+@@ -616,7 +634,7 @@
+         goto bailout;
+     }
+ 
+-    ret = mediacodec_generate_extradata(avctx);
++    ret = mediacodec_generate_extradata(avctx, format);
+ 
+ bailout:
+     if (format)
+@@ -675,6 +693,9 @@
+     int ret;
+     int extradata_size = 0;
+ 
++    if (s->eof_received)
++        return AVERROR_EOF;
++
+     ret = mediacodec_get_output_index(avctx, &index, &out_info);
+     if (ret < 0)
+         return ret;
+@@ -695,11 +716,20 @@
+     if (index < 0)
+         return AVERROR_EXTERNAL;
+ 
+-    if (out_info.flags & ff_AMediaCodec_getBufferFlagEndOfStream(codec))
+-        return AVERROR_EOF;
++    if (out_info.flags & ff_AMediaCodec_getBufferFlagEndOfStream(codec)) {
++        s->eof_received = 1;
++        /* EOS may accompany the final valid packet. Empty EOS still owns a
++         * buffer that must be returned to the codec. */
++        if (out_info.size == 0) {
++            ff_AMediaCodec_releaseOutputBuffer(codec, index, false);
++            return AVERROR_EOF;
++        }
++    }
+ 
+     out_buf = ff_AMediaCodec_getOutputBuffer(codec, index, &out_size);
+-    if (!out_buf) {
++    if (!out_buf || out_info.offset < 0 || out_info.size < 0 ||
++        (size_t)out_info.offset > out_size ||
++        (size_t)out_info.size > out_size - (size_t)out_info.offset) {
+         ret = AVERROR_EXTERNAL;
+         goto bailout;
+     }
+@@ -824,15 +854,21 @@
+ 
+     if (frame) {
+         input_buf = ff_AMediaCodec_getInputBuffer(codec, index, &input_size);
+-        copy_frame_to_buffer(avctx, frame, input_buf, input_size);
++        ret = copy_frame_to_buffer(avctx, frame, input_buf, input_size);
++        if (ret < 0)
++            return ret;
++        input_size = ret;
+ 
+         pts = av_rescale_q(frame->pts, avctx->time_base, AV_TIME_BASE_Q);
+     } else {
+         flags |= ff_AMediaCodec_getBufferFlagEndOfStream(codec);
++    }
++
++    ret = ff_AMediaCodec_queueInputBuffer(codec, index, 0, input_size, pts, flags);
++    if (ret < 0)
++        return ret;
++    if (!frame)
+         s->eof_sent = 1;
+-    }
+-
+-    ff_AMediaCodec_queueInputBuffer(codec, index, 0, input_size, pts, flags);
+     return 0;
+ }
+ 
+@@ -935,7 +971,7 @@
+     return ret;
+ }
+ 
+-static int mediacodec_generate_extradata(AVCodecContext *avctx)
++static int mediacodec_generate_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
+ {
+     MediaCodecEncContext *s = avctx->priv_data;
+     AVPacket *pkt = NULL;
+@@ -978,9 +1014,29 @@
+     }
+ 
+ bailout:
+-    if (s->eof_sent) {
++    if (s->eof_sent && ret >= 0) {
++        /* Encoder flush after EOS is undefined on Android. Retire the header
++         * probe's complete instance, then start a fresh user session with
++         * precisely the same codec and retained MediaFormat. */
++        ret = ff_AMediaCodec_stop(s->codec);
++        {
++            int deleted = ff_AMediaCodec_delete(s->codec);
++            s->codec = NULL;
++            if (ret >= 0 && deleted < 0)
++                ret = deleted;
++        }
++        if (ret >= 0) {
++            s->codec = s->name ? ff_AMediaCodec_createCodecByName(s->name, s->use_ndk_codec) : NULL;
++            if (!s->codec)
++                ret = AVERROR_EXTERNAL;
++        }
++        if (ret >= 0)
++            ret = ff_AMediaCodec_configure(s->codec, format, s->window, NULL,
++                                          ff_AMediaCodec_getConfigureFlagEncode(s->codec));
++        if (ret >= 0)
++            ret = ff_AMediaCodec_start(s->codec);
+         s->eof_sent = 0;
+-        ff_AMediaCodec_flush(s->codec);
++        s->eof_received = 0;
+     }
+     av_bsf_flush(s->bsf);
+     av_packet_free(&pkt);
+@@ -1015,6 +1071,8 @@
+     if (s->bsf)
+         av_bsf_flush(s->bsf);
+     av_frame_unref(s->frame);
++    s->eof_sent = 0;
++    s->eof_received = 0;
+     ff_AMediaCodec_flush(s->codec);
+ }
+ 

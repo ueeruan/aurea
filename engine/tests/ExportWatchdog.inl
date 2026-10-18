@@ -59,7 +59,7 @@ AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     AUREA_CHECK(o.finished);
     AUREA_CHECK_EQ(o.p.result, Errc::Timeout);
     AUREA_CHECK_EQ(o.p.failure, static_cast<u32>(ExportFailure::EncoderStalled));
-    AUREA_CHECK_EQ(export_retry_from_flags(o.p.flags), 1u);
+    AUREA_CHECK_EQ(export_retry_from_flags(o.p.flags), 2u);
     std::printf("travado detectado em %.1f s ", o.seconds);
     AUREA_CHECK(o.seconds < 5.0);
     // Ninguém chamou o sink preso de novo: abort/finish prenderiam também.
@@ -67,7 +67,7 @@ AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     // O que vai para as duas telas (ABI da bridge) leva a sugestão e o motivo.
     bridge::ExportProgressPOD pod;
     r.e.fill_export_progress(pod);
-    AUREA_CHECK_EQ(export_retry_from_flags(pod.flags), 1u);
+    AUREA_CHECK_EQ(export_retry_from_flags(pod.flags), 2u);
     AUREA_CHECK_EQ(pod.flags >> kExportFailureShift, static_cast<u32>(ExportFailure::EncoderStalled));
 
     // A tela refaz no modo sugerido: o contexto preso fica de lado (vivo) e o
@@ -87,7 +87,7 @@ AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     AUREA_CHECK_EQ(export_retry_from_flags(retry.p.flags), 0u);
     AUREA_CHECK(r.cap.video.codec == ExportCodec::HEVC);
     AUREA_CHECK_EQ(r.cap.video.profile, kExportProfileBaseline);
-    AUREA_CHECK(!r.cap.video.preferSoftware);
+    AUREA_CHECK(r.cap.video.preferSoftware);
     AUREA_CHECK_EQ(r.cap.video.width, 64u);
     AUREA_CHECK_EQ(r.cap.video.height, 36u);
     AUREA_CHECK_EQ(r.cap.video.bitrateBps,
@@ -107,7 +107,7 @@ AUREA_TEST(ExportWatchdog, HungFinishIsAbandonedAsEncoderStall) {
     AUREA_CHECK(o.finished);
     AUREA_CHECK_EQ(o.p.result, Errc::Timeout);
     AUREA_CHECK_EQ(o.p.failure, static_cast<u32>(ExportFailure::EncoderStalled));
-    AUREA_CHECK_EQ(export_retry_from_flags(o.p.flags), 1u);
+    AUREA_CHECK_EQ(export_retry_from_flags(o.p.flags), 2u);
     AUREA_CHECK_EQ(r.cap.hashes.size(), usize{3});
     AUREA_CHECK(!r.cap.aborted);
     AUREA_CHECK(o.seconds < 5.0);
@@ -296,6 +296,50 @@ AUREA_TEST(ExportWatchdog, NativeFailureDetailSurvivesAbandonedCloseAndLateDestr
     AUREA_CHECK(std::strcmp(r.cap.platformDiagnostic, "diagnostico expirado") == 0);
     AUREA_CHECK_EQ(r.e.export_progress().result, Errc::IoError);
     AUREA_CHECK(std::strcmp(r.e.export_progress().message, expected) == 0);
+}
+
+AUREA_TEST(ExportWatchdog, AutomaticStallRecoveryReachesSoftwareBeforeRetainedNativeQuotaFills) {
+    SyntheticConfig cfg; cfg.width = 64; cfg.height = 36;
+    auto* backend = new MockBackend(); backend->mapBuffers = true;
+    Rig r(cfg, 30, 3, 1, nullptr, backend, 200); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    HungGate first, second;
+    first.arm(r.cap); r.cap.hangWriteAt = 0;
+    ExportSettings settings; settings.height = 36; settings.fps = 30; settings.dither = false;
+    const Outcome stalled = run_export_with(r, settings, 5);
+    AUREA_CHECK(first.entered.load()); AUREA_CHECK(stalled.finished);
+    AUREA_CHECK_EQ(stalled.p.result, Errc::Timeout);
+    const u32 suggestion = export_retry_from_flags(stalled.p.flags);
+    std::printf(" stalled native attempt suggests safe mode=%u ", suggestion);
+    AUREA_CHECK_EQ(suggestion, 2u);
+    if (suggestion == 1) {
+        // Record the old actual retry path, not just the rule's return value:
+        // another held native codec fills both permits and the available
+        // software retry is then refused before its factory can open.
+        second.arm(r.cap); r.cap.writes = 0; settings.safeMode = suggestion;
+        const Outcome retriedNative = run_export_with(r, settings, 5);
+        AUREA_CHECK(second.entered.load()); AUREA_CHECK(retriedNative.finished);
+        AUREA_CHECK_EQ(retriedNative.p.result, Errc::Timeout);
+        AUREA_CHECK_EQ(export_retry_from_flags(retriedNative.p.flags), 2u);
+        r.cap.hangWriteAt = -1; settings.safeMode = 2;
+        const Status refusedSoftware = r.e.start_export(settings, "nao-usado.mp4");
+        std::printf(" software attempt after two retained native workers: result=%d ", refusedSoftware.raw());
+        AUREA_CHECK_EQ(refusedSoftware.code(), Errc::BudgetExceeded);
+    } else {
+        r.cap.hangWriteAt = -1; r.cap.writes = 0; r.cap.hashes.clear(); r.cap.pts.clear();
+        settings.safeMode = suggestion;
+        const Outcome software = run_export_with(r, settings, 5);
+        AUREA_CHECK(software.finished); AUREA_CHECK_EQ(software.p.result, Errc::Ok);
+        AUREA_CHECK(r.cap.video.preferSoftware);
+        AUREA_CHECK_EQ(r.cap.video.width, 64u); AUREA_CHECK_EQ(r.cap.video.height, 36u);
+        AUREA_CHECK_EQ(r.cap.hashes.size(), usize{3}); AUREA_CHECK(r.cap.ptsMonotonic);
+        AUREA_CHECK_EQ(export_retry_from_flags(software.p.flags), 0u);
+        std::printf(" software completed with the first native call still held ");
+    }
+    if (first.entered.load()) release_hung(first.release, first.returned);
+    if (second.entered.load()) release_hung(second.release, second.returned);
+    AUREA_CHECK(first.returned.load());
+    if (second.entered.load()) AUREA_CHECK(second.returned.load());
 }
 
 // Exercise the complete serial export session, not just the codec recipe:

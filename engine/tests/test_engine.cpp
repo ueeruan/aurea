@@ -2065,6 +2065,8 @@ AUREA_TEST(History, SplitAndEffectAreUndoable) {
     e.shutdown();
 }
 
+#include "RasterExtrudeCommands.inl"
+
 AUREA_TEST(History, DeleteAndFpsChangeAreUndoable) {
     Engine e;
     AUREA_CHECK(e.initialize(headless_config()).ok());

@@ -910,6 +910,7 @@ AUREA_TEST(Scene3D, StudioEnvironmentsHaveFiniteEnergy) {
     AUREA_CHECK(studio_preset_from_name("estudio_escuro") == 1u);
     AUREA_CHECK(studio_preset_from_name("estudio_produto") == 2u);
     AUREA_CHECK(studio_preset_from_name("ceu_sol") == 3u);
+    AUREA_CHECK(studio_preset_from_name("estudio_cromado") == 4u);
     AUREA_CHECK(studio_preset_from_name("nada") == 0u);
     AUREA_CHECK(studio_preset_of_key(studio_environment_key(2)) == 2u);
     AUREA_CHECK(studio_preset_of_key(0x0000000100000001ull) == 0u);
@@ -950,6 +951,18 @@ AUREA_TEST(Scene3D, StudioEnvironmentsHaveFiniteEnergy) {
             // Produto: ciclorama cinza médio visível, luz macia (sem pico duro).
             AUREA_CHECK(median > 0.3f && median < 0.9f);
             AUREA_CHECK(peak < 20.0f);
+        } else if (preset == 4) {
+            // Cromado: céu claro em cima, chão escuro embaixo (o corte da letra
+            // cromada) e faixas/ponto quente bem acima do céu.
+            f64 lower = 0.0, lowerW = 0.0;
+            for (u32 y = px->height / 2 + 4; y < px->height; ++y)
+                for (u32 x = 0; x < px->width; ++x) {
+                    const f32* c = &px->rgb[(static_cast<usize>(y) * px->width + x) * 3];
+                    lower += 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; lowerW += 1.0;
+                }
+            AUREA_CHECK(upper / upperW > 0.4);
+            AUREA_CHECK(lower / lowerW < 0.06);
+            AUREA_CHECK(peak > 10.0f && peak < 65000.0f);
         } else {
             // Céu: hemisfério de cima azul-claro; o sol, HDR de verdade.
             AUREA_CHECK(upper / upperW > 0.3);

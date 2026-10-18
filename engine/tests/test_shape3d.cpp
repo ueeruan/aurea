@@ -11,6 +11,7 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
+#include "aurea/scene3d/PartEffects.hpp"
 #include "aurea/scene3d/MaterialPreview.hpp"
 #include "aurea/scene3d/Text3D.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
@@ -849,5 +850,272 @@ AUREA_TEST(Gpu, Shape3DTexturedCubeRendersAndMovingOneFaceChangesTheFrame) {
     std::printf("\n    frente movida: %.3f do quadro mudou", dMove);
     AUREA_CHECK(dMove > 0.02f);
     e.shutdown();
+}
+#endif
+
+// =============================================================================
+// Efeitos de PARTE 3D (pedido de beta 12/10/2026): Animar parte 3D, Esconder
+// partes 3D e Trocar textura 3D — scene3d/PartEffects.cpp.
+// =============================================================================
+namespace {
+EffectInstance part_effect(const char* key, u32 id) {
+    EffectRegistry registry;
+    register_builtin_effects(registry);
+    EffectInstance fx;
+    fx.id = id;
+    fx.type = effect_type_id(key);
+    initialize_instance(fx, *registry.params(fx.type));
+    return fx;
+}
+}
+
+AUREA_TEST(Part3DEffects, MoveOnePartHideARangeAndPickTextures) {
+    StarLayout s = star_with_layout();
+    AUREA_CHECK(s.asset != nullptr);
+    if (!s.asset) return;
+    const SceneAsset& a = *s.asset;
+    s.layer.effects.clear();
+    std::vector<u32> parts;
+    part_nodes(a, parts);
+    AUREA_CHECK_EQ(parts.size(), usize{6});
+    std::vector<std::string> names;
+    part_names(a, names);
+    AUREA_CHECK_EQ(names.size(), usize{6});
+    AUREA_CHECK(is_part3d_effect(effect_type_id(effect_keys::kPart3DHide)));
+    AUREA_CHECK(!is_part3d_effect(effect_type_id(effect_keys::kShape3DLayout)));
+
+    // Padrão: nada muda (e a pose continua compartilhável).
+    s.layer.effects.push_back(part_effect(effect_keys::kPart3DTransform, 1));
+    auto world = a.rest_world_matrices();
+    std::vector<f32> opacity;
+    apply_part_effects(a, s.layer, 10.0, world, opacity);
+    for (const Mat4& m : world) AUREA_CHECK(xyz_of(m.col[3]).length() < 1e-6f);
+    AUREA_CHECK(opacity.empty());
+
+    // Parte 2, posição X 100% = o maior lado do objeto; só ela anda.
+    s.layer.effects[0].params[0].constant = ParamValue::scalar(2.0f);
+    s.layer.effects[0].params[1].constant = ParamValue::scalar(100.0f);
+    const Vec3 ext = a.bounds.extent();
+    const f32 size = std::max({ext.x, ext.y, ext.z});
+    world = a.rest_world_matrices();
+    apply_part_effects(a, s.layer, 10.0, world, opacity);
+    for (u32 i = 0; i < 6; ++i) {
+        const f32 moved = world[i].col[3].x;
+        if (i == 1) AUREA_CHECK_NEAR(moved, size, 1e-4f);
+        else AUREA_CHECK_NEAR(moved, 0.0f, 1e-6f);
+    }
+    // Giro Y 90° na parte 3: em volta do PRÓPRIO centro.
+    s.layer.effects[0].params[0].constant = ParamValue::scalar(3.0f);
+    s.layer.effects[0].params[1].constant = ParamValue::scalar(0.0f);
+    s.layer.effects[0].params[5].constant = ParamValue::scalar(90.0f);
+    world = a.rest_world_matrices();
+    apply_part_effects(a, s.layer, 10.0, world, opacity);
+    const Vec3 c = a.meshes[static_cast<usize>(a.nodes[2].mesh)].bounds.center();
+    AUREA_CHECK((world[2].transform_point(c) - c).length() < 1e-4f);
+    AUREA_CHECK(std::fabs(world[2].col[0].x) < 1e-4f);
+    // Com keyframe a parte anima: X 0% no quadro 0 e 100% no quadro 20.
+    s.layer.effects[0].params[5].constant = ParamValue::scalar(0.0f);
+    Track& track = s.layer.tracks.get_or_create(TrackProperty::EffectParam, 1, param_track_key(1, 0));
+    track.set(FrameIndex{0}, 0.0f);
+    track.set(FrameIndex{20}, 100.0f);
+    world = a.rest_world_matrices();
+    apply_part_effects(a, s.layer, 10.0, world, opacity);
+    AUREA_CHECK_NEAR(world[2].col[3].x, size * 0.5f, size * 0.02f);
+    AUREA_CHECK(has_part_effects(s.layer));
+
+    // Esconder partes 2..3; 50% esmaece; "esconder as outras" inverte.
+    s.layer.effects.clear();
+    s.layer.tracks = TrackSet{};
+    s.layer.effects.push_back(part_effect(effect_keys::kPart3DHide, 2));
+    s.layer.effects[0].params[0].constant = ParamValue::scalar(2.0f);
+    s.layer.effects[0].params[1].constant = ParamValue::scalar(3.0f);
+    world = a.rest_world_matrices();
+    opacity.clear();
+    apply_part_effects(a, s.layer, 0.0, world, opacity);
+    AUREA_CHECK_EQ(opacity.size(), a.nodes.size());
+    for (u32 i = 0; i < 6; ++i) AUREA_CHECK_NEAR(opacity[i], (i == 1 || i == 2) ? 0.0f : 1.0f, 1e-6f);
+    s.layer.effects[0].params[2].constant = ParamValue::scalar(50.0f);
+    opacity.clear();
+    apply_part_effects(a, s.layer, 0.0, world, opacity);
+    AUREA_CHECK_NEAR(opacity[1], 0.5f, 1e-6f);
+    s.layer.effects[0].params[2].constant = ParamValue::scalar(100.0f);
+    s.layer.effects[0].params[3].constant = ParamValue::boolean(true);
+    opacity.clear();
+    apply_part_effects(a, s.layer, 0.0, world, opacity);
+    for (u32 i = 0; i < 6; ++i) AUREA_CHECK_NEAR(opacity[i], (i == 1 || i == 2) ? 1.0f : 0.0f, 1e-6f);
+    // Desligado: nada.
+    s.layer.effects[0].enabled = false;
+    AUREA_CHECK(!has_part_effects(s.layer));
+
+    // Trocar textura: sem imagem nada; com imagem a parte escolhida; "todas".
+    s.layer.effects.clear();
+    s.layer.effects.push_back(part_effect(effect_keys::kPart3DTexture, 3));
+    std::vector<PartTexture> swaps;
+    collect_part_textures(a, s.layer, 0.0, swaps);
+    AUREA_CHECK(swaps.empty());
+    s.layer.effects[0].params[1].constant.ref = 77;
+    s.layer.effects[0].params[0].constant = ParamValue::scalar(4.0f);
+    s.layer.effects[0].params[3].constant = ParamValue::scalar(300.0f);
+    collect_part_textures(a, s.layer, 0.0, swaps);
+    AUREA_CHECK_EQ(swaps.size(), usize{1});
+    if (!swaps.empty()) {
+        AUREA_CHECK_EQ(swaps[0].node, parts[3]);
+        AUREA_CHECK_EQ(swaps[0].image, u64{77});
+        AUREA_CHECK_NEAR(swaps[0].repeat, 3.0f, 1e-6f);
+    }
+    s.layer.effects[0].params[2].constant = ParamValue::boolean(true);
+    collect_part_textures(a, s.layer, 0.0, swaps);
+    AUREA_CHECK_EQ(swaps.size(), usize{6});
+}
+
+AUREA_TEST(Part3DEffects, EngineAcceptsThemOnlyOn3DLayersAndKeepsTheImageAcrossSave) {
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const Result<u64> star = e.add_shape3d(static_cast<u32>(Shape3DKind::Star), "Estrela");
+    AUREA_CHECK(star.ok());
+    if (!star.ok()) return;
+    AUREA_CHECK_EQ(e.model_part_names(*star).size(), usize{6});
+    Command add;
+    add.type = CommandType::EffectAdd;
+    add.effect_add.layer = LayerId::unpack(*star);
+    add.effect_add.effectType = effect_type_id(effect_keys::kPart3DTexture);
+    add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(e.apply_command(add).ok());
+    // Numa camada de imagem: recusado.
+    const std::vector<u8> rgba(16u * 16u * 4u, 200);
+    const Result<u64> image = e.import_image(rgba.data(), 16, 16, "img");
+    AUREA_CHECK(image.ok());
+    if (image.ok()) {
+        Command onImage = add;
+        onImage.effect_add.layer = LayerId::unpack(*image);
+        onImage.effect_add.effectType = effect_type_id(effect_keys::kPart3DHide);
+        AUREA_CHECK(!e.apply_command(onImage).ok());
+    }
+    // Texto 3D: cada letra vira uma parte.
+    Text3DSpec spec;
+    spec.content = "ABC";
+    const auto text = e.add_text3d(spec);
+    AUREA_CHECK(text.ok());
+    if (text.ok()) {
+        Command onText = add;
+        onText.effect_add.layer = LayerId::unpack(*text);
+        onText.effect_add.effectType = effect_type_id(effect_keys::kPart3DTransform);
+        AUREA_CHECK(e.apply_command(onText).ok());
+        AUREA_CHECK_EQ(e.model_part_names(*text).size(), usize{3});
+    }
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    const Layer* layer = comp->layer(LayerId::unpack(*star));
+    AUREA_CHECK(layer && layer->effects.size() == 1);
+    if (!layer || layer->effects.empty()) { e.shutdown(); return; }
+    const u32 fx = layer->effects[0].id;
+    const std::string png = checker_png("aurea_teste_textura_trocada.png");
+    AUREA_CHECK(e.set_effect_image(*star, fx, png.c_str()).ok());
+    AUREA_CHECK_EQ(e.effect_image_name(*star, fx), std::string("aurea_teste_textura_trocada.png"));
+    AUREA_CHECK(!e.set_effect_image(*star, fx + 99, png.c_str()).ok());
+    AUREA_CHECK(!e.set_effect_image(*star, fx, "nao_existe.png").ok());
+    // Desfazer tira a imagem; refazer devolve.
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(e.effect_image_name(*star, fx).empty());
+    Command redo;
+    redo.type = CommandType::Redo;
+    AUREA_CHECK(e.apply_command(redo).ok());
+    AUREA_CHECK(!e.effect_image_name(*star, fx).empty());
+    // Salvar e reabrir: a imagem segue referenciada (não vira asset órfão).
+    const std::string path = temp_file("aurea_teste_textura_trocada.aurea");
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    AUREA_CHECK_EQ(e.effect_image_name(*star, fx), std::string("aurea_teste_textura_trocada.png"));
+    e.shutdown();
+    std::remove(path.c_str());
+    std::remove(png.c_str());
+}
+
+#if defined(AUREA_TEST_VULKAN)
+AUREA_TEST(Gpu, Part3DEffectsTextureHideAndMoveChangeTheRenderedCube) {
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.enableValidation = false;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    if (!e.initialize(ec).ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    AUREA_CHECK(e.new_project(256, 144, 30.0, nullptr).ok());
+    const Result<u64> id = e.add_shape3d(static_cast<u32>(Shape3DKind::Cube), "Cubo");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) { e.shutdown(); return; }
+    auto capture = [&] {
+        test::Image8 img;
+        AUREA_CHECK(e.capture_frame_rgba(256, img.rgba, img.width, img.height).ok());
+        return img;
+    };
+    auto lit_of = [](const test::Image8& img) {
+        u32 lit = 0;
+        for (u32 y = 0; y < img.height; ++y)
+            for (u32 x = 0; x < img.width; ++x) { const u8* q = img.at(x, y); if (q[0] > 8 || q[1] > 8 || q[2] > 8) ++lit; }
+        return lit;
+    };
+    auto add = [&](const char* key) -> u32 {
+        Command c;
+        c.type = CommandType::EffectAdd;
+        c.effect_add.layer = LayerId::unpack(*id);
+        c.effect_add.effectType = effect_type_id(key);
+        c.effect_add.index = kInvalidIndex;
+        AUREA_CHECK(e.apply_command(c).ok());
+        Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+        const Layer* l = comp->layer(LayerId::unpack(*id));
+        return l && !l->effects.empty() ? l->effects.back().id : 0u;
+    };
+    auto set_param = [&](u32 effect, u32 param, f32 value) {
+        Command c;
+        c.type = CommandType::EffectSetParam;
+        c.effect_param.layer = LayerId::unpack(*id);
+        c.effect_param.effect = EffectId{effect, 0};
+        c.effect_param.paramIndex = param;
+        c.effect_param.value = value;
+        AUREA_CHECK(e.apply_command(c).ok());
+    };
+    const test::Image8 plain = capture();
+    const u32 plainLit = lit_of(plain);
+    AUREA_CHECK(plainLit > 1000u);
+    // Trocar textura em TODAS as partes: o quadriculado vermelho/azul aparece.
+    const u32 swap = add(effect_keys::kPart3DTexture);
+    const std::string png = checker_png("aurea_teste_textura_trocada_gpu.png");
+    AUREA_CHECK(e.set_effect_image(*id, swap, png.c_str()).ok());
+    set_param(swap, 2, 1.0f);
+    const test::Image8 textured = capture();
+    u32 reds = 0, blues = 0;
+    for (u32 y = textured.height / 3; y < textured.height * 2 / 3; ++y)
+        for (u32 x = textured.width / 3; x < textured.width * 2 / 3; ++x) {
+            const u8* q = textured.at(x, y);
+            if (q[0] > q[2] + 40) ++reds;
+            if (q[2] > q[0] + 40) ++blues;
+        }
+    std::printf("\n    textura trocada: vermelho %u, azul %u", reds, blues);
+    AUREA_CHECK(reds > 20 && blues > 20);
+    // Esconder todas as partes: o cubo some.
+    const u32 hide = add(effect_keys::kPart3DHide);
+    set_param(hide, 1, 6.0f);
+    const u32 hiddenLit = lit_of(capture());
+    std::printf("\n    escondido: %u de %u pixels acesos", hiddenLit, plainLit);
+    AUREA_CHECK(hiddenLit * 20u < plainLit);
+    // Mostrar de novo e mover só a parte 1: o quadro muda.
+    set_param(hide, 2, 0.0f);
+    const test::Image8 shown = capture();
+    const u32 move = add(effect_keys::kPart3DTransform);
+    set_param(move, 1, 60.0f);
+    const test::Image8 moved = capture();
+    u32 changed = 0;
+    for (usize i = 0; i < moved.rgba.size() && i < shown.rgba.size(); i += 4)
+        if (std::abs(int(moved.rgba[i]) - int(shown.rgba[i])) + std::abs(int(moved.rgba[i + 2]) - int(shown.rgba[i + 2])) > 24) ++changed;
+    std::printf("\n    parte 1 movida: %u pixels mudaram", changed);
+    AUREA_CHECK(changed > 200u);
+    e.shutdown();
+    std::remove(png.c_str());
 }
 #endif

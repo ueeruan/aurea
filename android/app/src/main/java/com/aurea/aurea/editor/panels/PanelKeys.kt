@@ -14,6 +14,18 @@ import kotlin.math.max
 /** Keyframes da camada principal (tempo LOCAL). */
 internal fun EditorStore.primaryKeys(): List<KeyframeRow> = primary?.let { keyframes[it] } ?: emptyList()
 
+internal fun EditorStore.trackNavigation(track: List<KeyframeRow>): com.aurea.aurea.engine.KeyframeNavigation? {
+    val layer = primary ?: return null
+    val key = track.firstOrNull() ?: return null
+    return keyframeNavigation(layer, com.aurea.aurea.engine.TrackKey(key.property, key.effectIndex, key.paramIndex))
+}
+
+/** Curves open only on a visible segment resolved by the shared engine. */
+internal fun EditorStore.curveStart(track: List<KeyframeRow>): KeyframeRow? {
+    val navigation = trackNavigation(track)?.takeIf { it.hasSegment } ?: return null
+    return track.firstOrNull { it.time == navigation.segmentStart }
+}
+
 /** A mesma trilha? Transform = mesma propriedade; efeito = mesmo efeito e mesmo `param*4+componente`. */
 internal fun KeyframeRow.sameTrack(o: KeyframeRow): Boolean =
     property == o.property && (property < TrackProperty.EFFECT_PARAM || (effectIndex == o.effectIndex && paramIndex == o.paramIndex))

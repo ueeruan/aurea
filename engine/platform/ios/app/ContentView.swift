@@ -82,10 +82,19 @@ struct ContentView: View {
             if let request = model.liveNoticePopup { LiveNoticePopup(request: request) }
             if model.showProjectSettings { ProjectSettingsPanel(onDismiss: { model.showProjectSettings = false }) }
             if let request = model.actionSheet { AureaActionSheet(title: request.title, message: request.message, actions: request.actions) { model.actionSheet = nil } }
-            if let request = model.colorSheet { ColorPickerSheet(request: request) { model.colorSheet = nil; request.onDone() }.id(request.id) }
-            if let request = model.expressionSheet { ExpressionSheet(request: request) { model.expressionSheet = nil }.id(request.id) }
+            if let request = model.colorSheet { ColorPickerSheet(request: request) {
+                guard model.colorSheet?.id == request.id else { return }
+                model.colorSheet = nil; request.onDone()
+            }.id(request.id) }
+            if let request = model.expressionSheet { ExpressionSheet(request: request) {
+                guard model.expressionSheet?.id == request.id else { return }
+                model.expressionSheet = nil
+            }.id(request.id) }
             if let request = model.text3DFontSheet { T3DFontSheet(request: request) { model.text3DFontSheet = nil }.id(request.id) }
-            if let request = model.numericKeypad { NumericKeypadSheet(request: request) { model.numericKeypad = nil }.id(request.id) }
+            if let request = model.numericKeypad { NumericKeypadSheet(request: request) {
+                guard model.numericKeypad?.id == request.id else { return }
+                model.numericKeypad = nil
+            }.id(request.id) }
             if let request = model.namePrompt { AureaNamePrompt(title: request.title, initial: request.initial, onConfirm: request.onConfirm, onDismiss: { model.namePrompt = nil }).id(request.id) }
             if let request = model.presetDialog { PresetDialog(request: request) { model.presetDialog = nil }.id(request.id) }
         }

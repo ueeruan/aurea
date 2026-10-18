@@ -36,6 +36,8 @@
 #include <initializer_list>
 #include <vector>
 
+namespace aurea::vector { struct DrawProgress; }
+
 namespace aurea {
 
 enum class EffectClass : u8 {
@@ -135,10 +137,12 @@ struct LayerPlacement {
 [[nodiscard]] Rect visible_layer_rect(const LayerPlacement& placement) noexcept;
 
 /// Um valor de preset: parâmetro (índice da declaração) e valor parado
-/// (componente 0; bool = 0/1, enum = índice).
+/// (bool = 0/1, enum = índice). `component` escolhe o componente de ponto e
+/// cor (0 = x/r ... 3 = w/a); os escalares usam só o 0.
 struct EffectPresetValue {
     u32 param;
     f32 value;
+    u32 component = 0;
 };
 /// Preset de um efeito (Effect::presets). `id` é estável — a interface traduz
 /// o nome por ele; `name` é o texto do motor (pt-BR).
@@ -164,6 +168,11 @@ struct LayerImage {
     /// A cropped source's original transparent canvas. Motion Tile keeps this
     /// domain for its period instead of treating the occupied crop as a tile.
     Rect virtualSourceRegion{};
+    /// A PAREDE do Motion Tile: a imagem continua além da caixa da camada (o
+    /// EffectGraph leva a marca adiante enquanto a região passar da caixa).
+    /// Efeitos que mapeiam a caixa (Corner Pin) estendem o mapa à parede em
+    /// vez de recortá-la.
+    bool tiled = false;
 
     [[nodiscard]] bool valid() const noexcept { return texture.valid() && width && height; }
     /// Texels por pixel de layer.
@@ -207,6 +216,9 @@ struct DepthMapRequest {
     /// os seus; perto de 1 = os limites andam devagar e o mapa não "respira".
     f32 smoothing = 0.7f;
     bool foreground = false;
+    /// Separa o estado da suavização de quem pede o mapa de OUTRA camada
+    /// (a camada de ajuste lê o da foto/vídeo abaixo dela).
+    u64 stateSalt = 0;
 };
 
 /// A disparidade 256×256 da FONTE da camada (R: normalizada pelos percentis
@@ -218,6 +230,11 @@ struct DepthMapResult {
     f32 hi = 1.0f;
     bool failed = false;
     i64 sourceTimeUs = -1; ///< foreground preview must pair this source frame with its mask
+    /// O mapa é de OUTRA camada (camada de ajuste): px de quem pede → px da
+    /// fonte do mapa, por linha (x, y, deslocamento) e o tamanho natural dela
+    /// em `w`. Zero = o mapa cobre a caixa natural de quem pede.
+    Vec4 mapX{};
+    Vec4 mapY{};
 };
 
 /// O que a Forma de onda e o Espectro de áudio pedem ao renderer: o som de
@@ -317,6 +334,9 @@ struct EffectEval {
     f64                   auxTimeFrames = std::numeric_limits<f64>::quiet_NaN();
     i64                   foregroundSourceTimeUs = -1;
     std::shared_ptr<const std::vector<Vec4>> pathSamples;
+    /// Mapa de profundidade de outra camada (ver DepthMapResult::mapX).
+    Vec4 auxMapX{};
+    Vec4 auxMapY{};
     f64 fractionalTime = std::numeric_limits<f64>::quiet_NaN();
 
     [[nodiscard]] f64 time_frames() const noexcept {
@@ -524,6 +544,20 @@ public:
     [[nodiscard]] virtual bool fold_into_composite(const EffectEval& eval, Mat4& layerMatrix,
                                                    f32& opacity) const noexcept {
         (void)eval; (void)layerMatrix; (void)opacity;
+        return false;
+    }
+
+    /// Efeito que age na GEOMETRIA da camada vetorial, antes de ela virar
+    /// pixel (Progresso do desenho). O renderer só avalia os valores de quem
+    /// diz sim aqui — a pergunta é barata, a avaliação não.
+    [[nodiscard]] virtual bool edits_vector_geometry() const noexcept { return false; }
+    /// O corte dos contornos da camada vetorial no instante: o renderer chama
+    /// ao montar a malha (sob o lock do modelo; `eval.layer` é a camada) e
+    /// desenha só o que `out` disser. Devolve true se escreveu. A cadeia de
+    /// pixels segue o contrato de sempre: o efeito diz em `is_identity` se,
+    /// numa camada vetorial, ainda tem passe a montar.
+    [[nodiscard]] virtual bool vector_progress(const EffectEval& eval, vector::DrawProgress& out) const noexcept {
+        (void)eval; (void)out;
         return false;
     }
 };

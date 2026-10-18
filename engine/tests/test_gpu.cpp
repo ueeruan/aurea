@@ -37,6 +37,7 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/Particular.hpp"
 #include "aurea/project/Project.hpp"
+#include "aurea/project/Serialization.hpp"
 #include "aurea/render/MaskRaster.hpp"
 #include "aurea/render/Renderer.hpp"
 #include "aurea/audio/AudioEffects.hpp"
@@ -5268,6 +5269,182 @@ AUREA_TEST(Gpu, OpticalFlowPlacesTheMovingSquareBetweenFrames) {
     e.shutdown();
 }
 
+// Qualidade do "Movimento suave" (0.1.8, retorno de beta: "parece glitchy"):
+// uma textura que desliza 5,25 px/quadro em x e 1,75 em y, em câmera lenta
+// 0,5×. No meio de dois quadros da fonte, o quadro inventado é comparado com
+// a textura EXATA no meio-quadro. A mistura erra muito (dois fantasmas); o
+// movimento de pixels tem de chegar perto da verdade.
+AUREA_TEST(Gpu, SmoothMotionMidFrameMatchesTheTrueSlidingTexture) {
+    AUREA_REQUIRE_GPU();
+    constexpr u32 W = 192, H = 108;
+    SyntheticConfig cfg;
+    cfg.width = W;
+    cfg.height = H;
+    cfg.frameCount = 300;
+    cfg.pattern = SyntheticPattern::PanTexture;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.framesInFlight = 2;
+    ec.mediaFactory = &factory;
+    ec.workerCount = 2;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(W, H, 30.0, "flow quality").ok());
+    VideoImport imp;
+    imp.sourcePath = "sintetico";
+    imp.displayName = "clipe";
+    auto layer = e.import_video(imp);
+    AUREA_CHECK(layer.ok());
+    if (!layer.ok()) { e.shutdown(); return; }
+    {
+        Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+        Layer* l = c->layer(LayerId::unpack(*layer));
+        l->speed = 0.5f;
+        l->end = FrameIndex{l->start.value + 400};
+        c->set_duration(FrameIndex{400});
+    }
+    TextureDesc d;
+    d.width = W;
+    d.height = H;
+    d.format = SurfaceFormat::RGBA16F;
+    d.renderTarget = true;
+    d.transferSrc = true;
+    const TextureHandle target = *e.gpu()->create_texture(d);
+    std::vector<u16> half(static_cast<usize>(W) * H * 4);
+    // Erro médio (níveis de 8 bits) no miolo, contra a textura no quadro `truth`.
+    auto error_at = [&](i64 frame, f64 truth) {
+        Command seek;
+        seek.type = CommandType::PlaybackSeek;
+        seek.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(e.submit_commands(&seek, 1) == 1);
+        AUREA_CHECK(e.render_offscreen(target, W, H).ok());
+        AUREA_CHECK(e.gpu()->read_texture(target, half.data(), W * 8).ok());
+        f64 sum = 0;
+        u32 n = 0;
+        for (u32 y = 16; y < H - 16; ++y)
+            for (u32 x = 16; x < W - 16; ++x) {
+                const f64 v = srgb_encode(half_to_float(half[(static_cast<usize>(y) * W + x) * 4])) * 219.0 + 16.0;
+                sum += std::fabs(v - pan_texture_value(x, y, truth));
+                ++n;
+            }
+        return sum / std::max(1u, n);
+    };
+    const f64 exact = error_at(100, 50.0);            // quadro da fonte de verdade
+    AUREA_CHECK(e.set_frame_blend(*layer, 1));
+    const f64 blend = error_at(101, 50.5);            // fonte 50,5
+    AUREA_CHECK(e.set_frame_blend(*layer, 2));
+    const f64 flow = error_at(101, 50.5);
+    const f64 flow2 = error_at(121, 60.5);
+    std::printf("    movimento suave: erro medio exato %.2f, mistura %.2f, movimento %.2f / %.2f (niveis de 8 bits)\n",
+                exact, blend, flow, flow2);
+    AUREA_CHECK(exact < 2.5);
+    AUREA_CHECK(flow < blend * 0.5);
+    AUREA_CHECK(flow2 < blend * 0.5);
+    AUREA_CHECK(flow < 6.0 && flow2 < 6.0);
+    e.gpu()->destroy_texture(target);
+    e.shutdown();
+}
+
+// O caso difícil: disco texturizado passando rápido por cima de um fundo que
+// anda para o outro lado. Mede o erro no anel em volta do disco (onde pixels
+// aparecem e somem) e no resto. O padrão repete a cada 16 quadros.
+AUREA_TEST(Gpu, SmoothMotionHandlesAnOccludingDisc) {
+    AUREA_REQUIRE_GPU();
+    constexpr u32 W = 256, H = 144;
+    SyntheticConfig cfg;
+    cfg.width = W;
+    cfg.height = H;
+    cfg.frameCount = 300;
+    cfg.pattern = SyntheticPattern::PanOcclusion;
+    SyntheticFactory factory(cfg);
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.framesInFlight = 2;
+    ec.mediaFactory = &factory;
+    ec.workerCount = 2;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(W, H, 30.0, "flow occlusion").ok());
+    VideoImport imp;
+    imp.sourcePath = "sintetico";
+    imp.displayName = "clipe";
+    auto layer = e.import_video(imp);
+    AUREA_CHECK(layer.ok());
+    if (!layer.ok()) { e.shutdown(); return; }
+    {
+        Composition* c = e.project()->timeline().composition(e.project()->timeline().current());
+        Layer* l = c->layer(LayerId::unpack(*layer));
+        l->speed = 0.5f;
+        l->end = FrameIndex{l->start.value + 400};
+        c->set_duration(FrameIndex{400});
+    }
+    TextureDesc d;
+    d.width = W;
+    d.height = H;
+    d.format = SurfaceFormat::RGBA16F;
+    d.renderTarget = true;
+    d.transferSrc = true;
+    const TextureHandle target = *e.gpu()->create_texture(d);
+    std::vector<u16> half(static_cast<usize>(W) * H * 4);
+    struct Err { f64 ring, rest; };
+    auto error_at = [&](i64 frame, f64 truth) {
+        Command seek;
+        seek.type = CommandType::PlaybackSeek;
+        seek.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(e.submit_commands(&seek, 1) == 1);
+        AUREA_CHECK(e.render_offscreen(target, W, H).ok());
+        AUREA_CHECK(e.gpu()->read_texture(target, half.data(), W * 8).ok());
+        f64 cx, cy;
+        pan_occlusion_disc(truth, cx, cy);
+        if (std::getenv("AUREA_FLOW_DUMP")) {
+            // Depuração: render | verdade | erro×4 lado a lado.
+            test::Image8 img;
+            img.width = W * 3; img.height = H; img.rgba.assign(static_cast<usize>(W) * 3 * H * 4, 255);
+            for (u32 y = 0; y < H; ++y) for (u32 x = 0; x < W; ++x) {
+                const f64 v = srgb_encode(half_to_float(half[(static_cast<usize>(y) * W + x) * 4])) * 219.0 + 16.0;
+                const f64 tv = pan_occlusion_value(x, y, truth);
+                const u8 vals[3] = {static_cast<u8>(std::clamp(v, 0.0, 255.0)), static_cast<u8>(std::clamp(tv, 0.0, 255.0)),
+                                    static_cast<u8>(std::clamp(std::fabs(v - tv) * 4.0, 0.0, 255.0))};
+                for (u32 k = 0; k < 3; ++k) {
+                    u8* q = &img.rgba[(static_cast<usize>(y) * W * 3 + k * W + x) * 4];
+                    q[0] = q[1] = q[2] = vals[k];
+                }
+            }
+            (void)test::write_png(std::string(std::getenv("AUREA_FLOW_DUMP")) + "_" + std::to_string(frame) + ".png", img);
+        }
+        f64 ring = 0, rest = 0;
+        u32 nr = 0, nn = 0;
+        for (u32 y = 8; y < H - 8; ++y)
+            for (u32 x = 8; x < W - 8; ++x) {
+                const f64 v = srgb_encode(half_to_float(half[(static_cast<usize>(y) * W + x) * 4])) * 219.0 + 16.0;
+                const f64 err = std::fabs(v - pan_occlusion_value(x, y, truth));
+                const f64 r = std::hypot(x - cx, y - cy);
+                if (std::fabs(r - kPanOcclusionRadius) < 8.0) { ring += err; ++nr; }
+                else { rest += err; ++nn; }
+            }
+        return Err{ring / std::max(1u, nr), rest / std::max(1u, nn)};
+    };
+    // Fonte 3,5, 6,5 e 9,5 (meio de dois quadros; o disco fica no quadro).
+    AUREA_CHECK(e.set_frame_blend(*layer, 1));
+    const Err blend = error_at(7, 3.5);
+    AUREA_CHECK(e.set_frame_blend(*layer, 2));
+    Err flow{0, 0};
+    for (const i64 f : {7LL, 13LL, 19LL}) {
+        const Err one = error_at(f, static_cast<f64>(f) * 0.5);
+        flow.ring += one.ring / 3.0;
+        flow.rest += one.rest / 3.0;
+    }
+    std::printf("    oclusao: mistura anel %.2f resto %.2f; movimento anel %.2f resto %.2f (niveis de 8 bits)\n",
+                blend.ring, blend.rest, flow.ring, flow.rest);
+    AUREA_CHECK(flow.rest < blend.rest * 0.5);
+    AUREA_CHECK(flow.ring < blend.ring);
+    e.gpu()->destroy_texture(target);
+    e.shutdown();
+}
+
 AUREA_TEST(Gpu, TimeRemapGraphEditsPointsAndTheVideoFollows) {
     AUREA_REQUIRE_GPU();
     SyntheticConfig cfg;
@@ -8404,6 +8581,9 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         if (fx.type_id() == effect_type_id(effect_keys::kText3DLayout)) continue;
         // Shape 3D Layout idem (só em forma 3D): coberto por Shape3DLayout.* em test_shape3d.cpp.
         if (fx.type_id() == effect_type_id(effect_keys::kShape3DLayout)) continue;
+        // Os efeitos de PARTE 3D só existem em camada 3D: cobertos em test_shape3d.cpp.
+        if (fx.type_id() == effect_type_id(effect_keys::kPart3DTransform) || fx.type_id() == effect_type_id(effect_keys::kPart3DHide)
+            || fx.type_id() == effect_type_id(effect_keys::kPart3DTexture)) continue;
         // Text Transform / Text Animator só existem em camada de texto (o motor recusa
         // pô-los numa foto); o efeito deles no quadro é coberto por TextTransform.* e
         // TextAnimatorEditing.* / Regression2135Gpu.
@@ -8424,7 +8604,8 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         const bool shadow = fx.type_id() == effect_type_id(effect_keys::kShadowStudio3);
         const bool cubeLut = fx.type_id() == effect_type_id(effect_keys::kCubeLut);
         const bool repeat = std::strncmp(key, "aurea.repeat.", 13) == 0;
-        const bool repeatPath = std::strcmp(key, "aurea.repeat.path") == 0;
+        // Repeat/Move Along Path: o caminho é a camada logo abaixo.
+        const bool repeatPath = std::strcmp(key, "aurea.repeat.path") == 0 || std::strcmp(key, "aurea.move.path") == 0;
         const bool solidMatte = std::strcmp(key, "aurea.key.solid_matte") == 0;
         const bool timedMotion = std::strcmp(key, "aurea.motion.blink") == 0 || std::strcmp(key, "aurea.motion.swing_range") == 0;
         const FrameIndex sampleFrame{timedMotion ? 11 : 0};
@@ -13320,6 +13501,13 @@ AUREA_TEST(MotionBlurGpu, FloorReflectionKeepsPerInstanceCamera) {
 #include "MaskBlendGpu.inl"
 #include "PuppetGpu.inl"
 #include "DisintegrateBallsGpu.inl"
+#include "Object3DEffectsGpu.inl"
+#include "FlowTimeGpu.inl"
+#include "ModelCameraGpu.inl"
+#include "RigPoseGpu.inl"
+#include "CCEffectsGpu.inl"
+#include "SaberLumaDissolveGpu.inl"
+#include "DrawingProgressGpu.inl"
 #include "GlesFallbackGpu.inl"
 
 // -----------------------------------------------------------------------------
@@ -13458,3 +13646,8 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "RaysFootprintGpu.inl"
 #include "SceneWarmupGpu.inl"
 #include "VulkanMrtGpu.inl"
+#include "Reference3DRegression.inl"
+#include "RasterExtrudeGpu.inl"
+#include "PreRenderIntegration.inl"
+#include "AdjustmentEffectsGpu.inl"
+#include "MotionTileWallGpu.inl"

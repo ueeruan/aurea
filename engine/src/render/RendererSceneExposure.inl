@@ -2,6 +2,14 @@
 void Renderer::configure_scene_quality(const scene3d::SceneFrame& group) noexcept {
     HeavyQuality q = heavyQ_;
     apply_scene3d_quality(q, static_cast<Scene3DQuality>(group.post.quality));
+    if (heavyQ_.exportFrame && exportGpuStep_ > 0) {
+        // Degraus medidos (Engine::render_export_frame): o passe 3D passava de
+        // ~2 s numa Adreno 610 com PCSS 16+32 + MSAA 4x e o driver resetava a GPU.
+        if (exportGpuStep_ >= 1) q.shadowFilter = std::min(q.shadowFilter, 2u);
+        if (exportGpuStep_ >= 2) { q.msaaSamples = std::min(q.msaaSamples, 2u); q.shadowMapSize = std::min(q.shadowMapSize, 2048u); q.shadowFilter = std::min(q.shadowFilter, 1u); }
+        if (exportGpuStep_ >= 3) { q.msaaSamples = 1; q.fxaa = true; q.shadowFilter = 0; }
+        if (exportGpuStep_ >= 4) q.shadowMapSize = std::min(q.shadowMapSize, 1024u);
+    }
     scene3d_.set_shadow_map_cap(heavyQ_.exportFrame || !lowMemoryDevice_ ? 4096u : 2048u);
     scene3d_.set_quality(q.shadowMapSize, q.shadowFilter, heavyQ_.lodBias, !heavyQ_.exportFrame);
     scene3d_.set_post_quality(q.msaaSamples, q.fxaa, q.bloomStartDiv, q.bloomLevels);

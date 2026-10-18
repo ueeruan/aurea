@@ -114,8 +114,55 @@ struct StrokeTaper {
 };
 /// Fator da largura (0..1) na fração `u` (0..1) do comprimento.
 [[nodiscard]] f32 taper_factor(const StrokeTaper& t, f32 u) noexcept;
+/// `ranges` (opcional, um por contorno): a faixa [x, y] (frações) do caminho
+/// de ORIGEM que cada contorno cobre — o afinar de um pedaço é o do caminho
+/// inteiro (Progresso do desenho), não um afinar novo esticado no pedaço.
 void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8 join, f32 miterLimit,
-                     f32 tolerance, std::vector<Contour>& out, const StrokeTaper& taper = {});
+                     f32 tolerance, std::vector<Contour>& out, const StrokeTaper& taper = {},
+                     const std::vector<Vec2>* ranges = nullptr);
+
+// --- Progresso do desenho --------------------------------------------------------
+
+/// O efeito Progresso do desenho (aurea.draw.drawing_progress) na camada
+/// vetorial: só a fração `amount` do comprimento dos contornos aparece — a
+/// geometria exata, com a tampa do próprio contorno na ponta (não é uma
+/// varredura de pixels). Vale DEPOIS do Aparar de cada grupo: desenha a fração
+/// do que o Aparar deixou, então os dois compõem.
+///  - sequencial: um comprimento só, na ordem do desenho (os grupos na ordem
+///    da lista, os caminhos na ordem do grupo), medido em px da camada;
+///  - simultâneo: cada caminho de cada grupo na mesma fração.
+/// `reverse` desenha do fim para o começo (o último traço primeiro, e cada
+/// caminho do fim dele para o começo).
+/// Preenchimento: num grupo com contorno ele acende nos últimos 10 % do
+/// contorno daquele grupo (o desenho fecha, a tinta entra); num grupo só de
+/// preenchimento ele acende ao longo do trecho do grupo. O repetidor desenha
+/// as cópias juntas (o comprimento do grupo é o de uma cópia).
+struct DrawProgress {
+    f32  amount = 1.0f;      ///< 0..1 do comprimento
+    bool sequential = true;
+    bool reverse = false;
+    [[nodiscard]] bool active() const noexcept { return !(amount >= 1.0f); }
+};
+/// Fração final do contorno de um grupo em que o preenchimento acende.
+inline constexpr f32 kDrawFillFade = 0.10f;
+
+/// Um pedaço desenhado de um contorno: o trecho visível e de onde ele vem no
+/// contorno de origem ([from, to] em comprimento, de `total`).
+struct DrawnLine {
+    Contour line;
+    f64 from = 0.0, to = 0.0, total = 0.0;
+};
+/// Corta os contornos de UM grupo na fração `amount` (0..1): `sequential` =
+/// todos como um comprimento só, na ordem; senão cada um na mesma fração.
+/// `reverse` mostra o fim em vez do começo. Contorno inteiro sai como está
+/// (fechado continua fechado); contorno de comprimento zero (um ponto, que
+/// vira só a tampa) aparece quando o desenho passa por ele.
+void cut_drawn(const std::vector<Contour>& lines, f32 amount, bool sequential, bool reverse, std::vector<DrawnLine>& out);
+/// Fração desenhada de cada grupo: `lengths` = o comprimento de cada grupo na
+/// ordem do desenho (px da camada; 0 = nada a desenhar).
+void group_amounts(const std::vector<f64>& lengths, const DrawProgress& p, std::vector<f32>& out);
+/// Comprimento dos contornos depois do afim `m` (exato para afim).
+[[nodiscard]] f64 length_under(const std::vector<Contour>& lines, const Affine2& m) noexcept;
 
 // --- Avaliação e malha ---------------------------------------------------------
 
@@ -151,22 +198,32 @@ struct GroupGeometry {
     std::vector<Contour> fill;     ///< anéis limpos
     std::vector<Contour> stroke;   ///< anéis limpos
     std::vector<Contour> lines;    ///< caminhos depois de mesclar/aparar (espaço do grupo)
+    /// Só com o Progresso do desenho: os trechos do contorno já desenhados
+    /// (antes do tracejado) e o quanto do preenchimento aparece (0..1).
+    std::vector<Contour> drawn;
+    f32 fillAlpha = 1.0f;
 };
 /// Geometria do grupo JÁ avaliado, sem repetidor nem transform do grupo
-/// (espaço do grupo). `tolerance` em px do grupo.
-void group_geometry(const VectorGroup& g, f64 frame, f32 tolerance, GroupGeometry& out);
+/// (espaço do grupo). `tolerance` em px do grupo. `draw` = o Progresso do
+/// desenho DESTE grupo (a fração dele já resolvida, ver `group_amounts`).
+void group_geometry(const VectorGroup& g, f64 frame, f32 tolerance, GroupGeometry& out,
+                    const DrawProgress* draw = nullptr);
 
 /// Malha de todos os grupos avaliados. `density` = texels por px da camada
-/// (a tolerância e a largura do antisserrilhado saem dela).
-void build_mesh(const std::vector<VectorGroup>& evaluated, f64 frame, f32 density, VectorMesh& out);
+/// (a tolerância e a largura do antisserrilhado saem dela). `progress` = o
+/// Progresso do desenho da camada (inativo = o desenho inteiro).
+void build_mesh(const std::vector<VectorGroup>& evaluated, f64 frame, f32 density, VectorMesh& out,
+                const DrawProgress& progress = {});
 
 /// Caixa (px da camada) aproximada dos grupos avaliados (controle + contorno
 /// + repetidor), para o palco e o hit-test. Falso se vazio.
 bool bounds_of(const std::vector<VectorGroup>& evaluated, f64 frame, Vec2& mn, Vec2& mx);
 
 /// Chave de conteúdo dos grupos avaliados (cache da malha): muda quando
-/// qualquer coisa que altera a geometria ou a tinta muda.
-[[nodiscard]] u64 content_hash(const std::vector<VectorGroup>& evaluated, f64 frame) noexcept;
+/// qualquer coisa que altera a geometria ou a tinta muda — o Progresso do
+/// desenho ativo entra junto (inativo, a chave é a de sempre).
+[[nodiscard]] u64 content_hash(const std::vector<VectorGroup>& evaluated, f64 frame,
+                               const DrawProgress& progress = {}) noexcept;
 
 /// Texto no caminho: posição (no espaço do caminho) e ângulo (graus) de uma
 /// letra cujo centro fica em `x` px da margem inicial `offset`, deslocada `dy`

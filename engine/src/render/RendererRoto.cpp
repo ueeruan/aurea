@@ -143,7 +143,7 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
         src.frameCount = 1;
         if (!src.image) {
             if (planFinal_) { if (planDeferLocalAi_) localAiPending_ |= 2u; return none; }
-            incomplete_ = true;
+            mark_incomplete(__FILE__, __LINE__);
             return none;
         }
     } else {
@@ -178,7 +178,7 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
         } else {
             roto_->request(track, strokes, src, frame);
             if (planFinal_) { localAiPending_ |= 2u; return none; }
-            incomplete_ = true;
+            mark_incomplete(__FILE__, __LINE__);
             // Preview: segura a textura de um quadro vizinho já pronto (melhor
             // atrasado que piscando o original). TOCANDO, o vídeo acompanha o
             // instante dele (recorte e imagem casam); PARADO/scrub, o vídeo
@@ -227,7 +227,7 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
         d.width = kSize; d.height = kSize; d.format = SurfaceFormat::R16F;
         d.sampled = true; d.transferDst = true; d.debugName = "roto-recorte";
         auto created = backend_->create_texture(d);
-        if (!created.ok()) { incomplete_ = true; return none; }
+        if (!created.ok()) { mark_incomplete(__FILE__, __LINE__); return none; }
         PendingUpload up;
         up.texture = *created;
         up.bytesPerRow = kSize * 2;
@@ -241,7 +241,7 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
     }
     return DepthMapResult{tex, 0.0f, 1.0f, false, sourceTimeUs};
 } catch (...) {
-    incomplete_ = true;
+    mark_incomplete(__FILE__, __LINE__);
     return DepthMapResult{};
 }
 

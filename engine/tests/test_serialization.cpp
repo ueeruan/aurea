@@ -34,6 +34,61 @@ Project make_project() {
 
 } // namespace
 
+AUREA_TEST(Serialization, Timeline47CameraLayeringPreservesMultipleLayersAndNestedCompositions) {
+    auto original = make_project();
+    auto* root = original.timeline().composition(original.timeline().root());
+    const auto cameraId = root->add_layer(LayerKind::Camera, "v47 camera");
+    root->layer(cameraId)->camera.affectsLayersBelow = true;
+    root->layer(cameraId)->camera.focalLength = 85.f;
+    const auto shapeId = root->add_layer(LayerKind::Shape, "after camera");
+    root->layer(shapeId)->shape.bounds = Rect{0.f, 0.f, 37.f, 29.f};
+    const auto childId = original.timeline().create_composition("nested v47", 320, 180, 30.);
+    auto* child = original.timeline().composition(childId);
+    const auto childCamera = child->add_layer(LayerKind::Camera, "old behavior camera");
+    child->layer(childCamera)->camera.affectsLayersBelow = false;
+    const auto textId = child->add_layer(LayerKind::Text, "last nested layer");
+    child->layer(textId)->text.content = "Preserve every layer";
+    std::vector<u8> bytes;
+    AUREA_CHECK(ProjectSerializer::encode(original, SaveOptions{}, bytes).ok());
+    Project restored; LoadReport report;
+    AUREA_CHECK(ProjectSerializer::load_bytes(restored, bytes.data(), bytes.size(), LoadOptions{}, &report).ok());
+    AUREA_CHECK_EQ(report.timelineVersion, 47u);
+    AUREA_CHECK(!report.partial);
+    const auto* restoredRoot = restored.timeline().composition(restored.timeline().root());
+    AUREA_CHECK_EQ(restoredRoot->order().size(), 2u);
+    AUREA_CHECK(restoredRoot->layer(cameraId)->camera.affectsLayersBelow);
+    AUREA_CHECK_EQ(restoredRoot->layer(cameraId)->camera.focalLength, 85.f);
+    AUREA_CHECK_EQ(restoredRoot->layer(shapeId)->shape.bounds.w, 37.f);
+    const auto* restoredChild = restored.timeline().composition(childId);
+    AUREA_CHECK(restoredChild != nullptr);
+    if (!restoredChild) return;
+    AUREA_CHECK_EQ(restoredChild->order().size(), 2u);
+    AUREA_CHECK(!restoredChild->layer(childCamera)->camera.affectsLayersBelow);
+    AUREA_CHECK_EQ(restoredChild->layer(textId)->text.content, std::string("Preserve every layer"));
+    // A second save must retain the v47 option, rather than silently downgrade it.
+    bytes.clear();
+    AUREA_CHECK(ProjectSerializer::encode(restored, SaveOptions{}, bytes).ok());
+    Project reopened;
+    AUREA_CHECK(ProjectSerializer::load_bytes(reopened, bytes.data(), bytes.size(), LoadOptions{}, nullptr).ok());
+    AUREA_CHECK(reopened.timeline().composition(reopened.timeline().root())->layer(cameraId)->camera.affectsLayersBelow);
+}
+
+AUREA_TEST(Serialization, Timeline47ReaderKeepsLegacyCameraLayeringDisabled) {
+    Project restored; LoadReport report;
+    const auto path = std::string(AUREA_TEST_DATA_DIR) + "/manual-editing/manual-editing.aurea";
+    AUREA_CHECK(ProjectSerializer::load(restored, path, LoadOptions{}, &report).ok());
+    AUREA_CHECK(report.timelineVersion > 0 && report.timelineVersion <= 46);
+    AUREA_CHECK(report.olderFormat && !report.partial);
+    u32 layers = 0;
+    restored.timeline().for_each_composition([&](CompositionId, const Composition& comp) {
+        comp.layers().for_each([&](LayerId, const Layer& layer) {
+            ++layers;
+            AUREA_CHECK(!layer.camera.affectsLayersBelow);
+        });
+    });
+    AUREA_CHECK_EQ(layers, 14u);
+}
+
 AUREA_TEST(Serialization, MotionBlurShutterSettingsRoundTripAcrossCompositions) {
     auto original = make_project();
     const auto childId = original.timeline().create_composition("child", 64, 64, 30.);

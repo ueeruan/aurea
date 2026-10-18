@@ -389,12 +389,22 @@ void trim(std::vector<Contour>& contours, f32 start, f32 end, f32 offset, bool s
     contours.swap(out);
 }
 
+namespace {
+/// Padrão do tracejado pronto: negativos viram 0 e o ímpar se repete (traço,
+/// vão, traço, vão). Falso = sem padrão (contorno contínuo).
+bool dash_pattern(const std::vector<f32>& pattern, std::vector<f64>& pat, f64& period) {
+    pat.clear();
+    period = 0.0;
+    for (f32 v : pattern) { pat.push_back(std::max(0.0, static_cast<f64>(v))); period += pat.back(); }
+    if (pat.size() % 2 == 1) { const usize k = pat.size(); for (usize i = 0; i < k; ++i) { pat.push_back(pat[i]); period += pat[i]; } }
+    return !pat.empty() && period > 1e-6;
+}
+} // namespace
+
 void dash(std::vector<Contour>& contours, const std::vector<f32>& pattern, f32 offset) {
     f64 period = 0.0;
     std::vector<f64> pat;
-    for (f32 v : pattern) { pat.push_back(std::max(0.0, static_cast<f64>(v))); period += pat.back(); }
-    if (pat.size() % 2 == 1) { const usize k = pat.size(); for (usize i = 0; i < k; ++i) { pat.push_back(pat[i]); period += pat[i]; } }
-    if (pat.empty() || period <= 1e-6) return;
+    if (!dash_pattern(pattern, pat, period)) return;
     std::vector<Contour> out;
     for (const Contour& c : contours) {
         const f64 L = length_of(c);
@@ -455,7 +465,7 @@ f32 taper_factor(const StrokeTaper& t, f32 u) noexcept {
 }
 
 void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8 join, f32 miterLimit, f32 tolerance,
-                     std::vector<Contour>& out, const StrokeTaper& taper) {
+                     std::vector<Contour>& out, const StrokeTaper& taper, const std::vector<Vec2>* ranges) {
     out.clear();
     const f32 hw0 = width * 0.5f;
     if (hw0 <= 0.0f) return;
@@ -463,7 +473,10 @@ void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8
     const bool tapered = taper.active();
     std::vector<Contour> pieces;
     std::vector<f32> H;   // meia largura em cada vértice (constante sem afinar)
-    for (const Contour& src : contours) {
+    for (usize ci = 0; ci < contours.size(); ++ci) {
+        const Contour& src = contours[ci];
+        // Trecho do caminho de origem que este contorno cobre (inteiro sem `ranges`).
+        const Vec2 span = ranges && ci < ranges->size() ? (*ranges)[ci] : Vec2{0.0f, 1.0f};
         std::vector<Vec2> P;
         P.reserve(src.pts.size());
         for (Vec2 q : src.pts) if (P.empty() || (q - P.back()).length_sq() > 1e-8f) P.push_back(q);
@@ -488,7 +501,8 @@ void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8
             f64 s = 0.0;
             for (usize i = 0; i < P.size(); ++i) {
                 if (i) s += (P[i] - P[i - 1]).length();
-                H[i] = hw0 * taper_factor(taper, L > 0.0 ? static_cast<f32>(s / L) : 0.0f);
+                const f32 u = L > 0.0 ? static_cast<f32>(s / L) : 0.0f;
+                H[i] = hw0 * taper_factor(taper, span.x + (span.y - span.x) * u);
             }
         } else {
             H.assign(P.size(), hw0);
@@ -561,6 +575,135 @@ void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8
 }
 
 // =============================================================================
+// Progresso do desenho
+// =============================================================================
+f64 length_under(const std::vector<Contour>& lines, const Affine2& m) noexcept {
+    f64 s = 0.0;
+    for (const Contour& c : lines) {
+        const usize n = c.pts.size();
+        if (n < 2) continue;
+        for (usize i = 1; i < n; ++i) s += static_cast<f64>(m.apply_vec(c.pts[i] - c.pts[i - 1]).length());
+        if (c.closed) s += static_cast<f64>(m.apply_vec(c.pts.front() - c.pts.back()).length());
+    }
+    return s;
+}
+
+namespace {
+/// Fração 0..1 sem NaN (NaN = o desenho inteiro, o padrão do efeito).
+f64 draw_fraction(f32 amount) noexcept {
+    return std::isfinite(amount) ? std::clamp(static_cast<f64>(amount), 0.0, 1.0) : 1.0;
+}
+} // namespace
+
+void cut_drawn(const std::vector<Contour>& lines, f32 amount, bool sequential, bool reverse, std::vector<DrawnLine>& out) {
+    out.clear();
+    const f64 a = draw_fraction(amount);
+    std::vector<f64> L(lines.size());
+    f64 total = 0.0;
+    for (usize i = 0; i < lines.size(); ++i) { L[i] = length_of(lines[i]); total += L[i]; }
+    // `len` = quanto do contorno i aparece; `reached` = o desenho já chegou nele.
+    auto emit = [&](usize i, f64 len, bool reached) {
+        const Contour& c = lines[i];
+        if (c.pts.empty() || !reached) return;
+        if (L[i] <= 0.0) {
+            // Um ponto só (o toque do lápis): a tampa aparece quando o desenho chega.
+            out.push_back(DrawnLine{c, 0.0, 0.0, 0.0});
+            return;
+        }
+        if (len >= L[i] - 1e-9) {
+            out.push_back(DrawnLine{c, 0.0, L[i], L[i]});
+            return;
+        }
+        if (len <= 1e-9) return;
+        const f64 from = reverse ? L[i] - len : 0.0, to = reverse ? L[i] : len;
+        std::vector<Contour> part;
+        sub_polyline(c, from, to, part);
+        for (Contour& p : part) out.push_back(DrawnLine{std::move(p), from, to, L[i]});
+    };
+    if (!sequential) {
+        for (usize i = 0; i < lines.size(); ++i) emit(i, a * L[i], a > 0.0);
+        return;
+    }
+    // Um comprimento só, na ordem (do último para o primeiro, invertido): o
+    // que vem antes da posição já está inteiro, o que vem depois não começou.
+    const f64 pos = a * total;
+    f64 before = 0.0;
+    for (usize k = 0; k < lines.size(); ++k) {
+        const usize i = reverse ? lines.size() - 1 - k : k;
+        emit(i, std::clamp(pos - before, 0.0, L[i]), pos > before || a >= 1.0);
+        before += L[i];
+    }
+}
+
+void group_amounts(const std::vector<f64>& lengths, const DrawProgress& p, std::vector<f32>& out) {
+    const f64 a = draw_fraction(p.amount);
+    out.assign(lengths.size(), static_cast<f32>(a));
+    if (!p.sequential || a >= 1.0) return;
+    f64 total = 0.0;
+    for (f64 l : lengths) total += std::max(0.0, l);
+    if (total <= 0.0) return;
+    const f64 pos = a * total;
+    f64 before = 0.0;
+    for (usize k = 0; k < lengths.size(); ++k) {
+        const usize i = p.reverse ? lengths.size() - 1 - k : k;
+        const f64 l = std::max(0.0, lengths[i]);
+        out[i] = l > 0.0 ? static_cast<f32>(std::clamp((pos - before) / l, 0.0, 1.0)) : (pos > before ? 1.0f : 0.0f);
+        before += l;
+    }
+}
+
+namespace {
+/// Quanto do preenchimento aparece com o grupo na fração `u` do desenho.
+f32 draw_fill_alpha(f32 u, bool stroked) noexcept {
+    if (!stroked) return u;   // só preenchimento: acende ao longo do trecho do grupo
+    const f32 t = std::clamp((u - (1.0f - kDrawFillFade)) / kDrawFillFade, 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+/// Contorno dos pedaços desenhados. O tracejado e o afinar continuam presos
+/// ao contorno de ORIGEM: o pedaço é exatamente o começo (ou o fim) do
+/// contorno de 100 % — o padrão não escorrega e a ponta afinada não estica.
+void stroke_drawn(const VectorStroke& st, f32 tol, const std::vector<DrawnLine>& pieces, std::vector<Contour>& out) {
+    std::vector<Contour> lines;
+    std::vector<Vec2> ranges;
+    std::vector<f64> pat;
+    f64 period = 0.0;
+    const bool dashed = dash_pattern(st.dashes, pat, period);
+    for (const DrawnLine& d : pieces) {
+        if (!dashed) {
+            lines.push_back(d.line);
+            ranges.push_back(d.total > 0.0 ? Vec2{static_cast<f32>(d.from / d.total), static_cast<f32>(d.to / d.total)}
+                                           : Vec2{0.0f, 1.0f});
+            continue;
+        }
+        if (d.total <= 0.0) continue;   // o ponto solto some no tracejado (como no `dash`)
+        // Os traços do padrão no contorno inteiro (a fase do `dash`: começa em
+        // −deslocamento), recortados ao pedaço; cada um leva a faixa dele.
+        f64 pos = -std::fmod(static_cast<f64>(st.dashOffset), period);
+        if (pos > 0.0) pos -= period;
+        usize k = 0;
+        while (pos < d.to && lines.size() < 200000) {
+            const f64 len = pat[k];
+            if (k % 2 == 0) {
+                const f64 a = std::max(0.0, pos), b = std::min(d.total, pos + len);
+                const f64 va = std::max(a, d.from), vb = std::min(b, d.to);
+                if (b > a && vb > va) {
+                    const usize first = lines.size();
+                    sub_polyline(d.line, va - d.from, vb - d.from, lines);
+                    for (usize j = first; j < lines.size(); ++j)
+                        ranges.push_back(Vec2{static_cast<f32>((va - a) / (b - a)), static_cast<f32>((vb - a) / (b - a))});
+                }
+            }
+            pos += len;
+            k = (k + 1) % pat.size();
+        }
+    }
+    const StrokeTaper taper{st.taperStart * 0.01f, st.taperEnd * 0.01f, st.taperEase * 0.01f};
+    stroke_to_rings(lines, st.width, st.cap, st.join, st.miterLimit, tol, out, taper, &ranges);
+}
+} // namespace
+
+// =============================================================================
 // Valores animados
 // =============================================================================
 f32* param_ref(VectorGroup& g, u32 p) noexcept {
@@ -631,11 +774,15 @@ Affine2 repeater_matrix(const VectorRepeater& r, f32 k) noexcept {
 // =============================================================================
 // Geometria do grupo
 // =============================================================================
-void group_geometry(const VectorGroup& g, f64 frame, f32 tol, GroupGeometry& out) {
-    out.fill.clear();
-    out.stroke.clear();
-    out.lines.clear();
-    std::vector<Contour> lines;
+namespace {
+bool group_fills(const VectorGroup& g) noexcept { return g.fill.enabled && g.fill.paint.opacity > 0.0f; }
+bool group_strokes(const VectorGroup& g) noexcept {
+    return g.stroke.enabled && g.stroke.width > 0.0f && g.stroke.paint.opacity > 0.0f;
+}
+
+/// Os caminhos do grupo no quadro: achatados, mesclados e aparados (espaço do grupo).
+void group_lines(const VectorGroup& g, f64 frame, f32 tol, std::vector<Contour>& lines) {
+    lines.clear();
     std::vector<std::vector<Contour>> sets;
     for (const VectorPath& vp : g.paths) {
         const BezierPath b = path_at(vp, frame);
@@ -655,21 +802,52 @@ void group_geometry(const VectorGroup& g, f64 frame, f32 tol, GroupGeometry& out
         if (!sets.empty()) boolean_op(sets, rule, op, lines);
     }
     if (g.trim.enabled) trim(lines, g.trim.start * 0.01f, g.trim.end * 0.01f, g.trim.offset * 0.01f, g.trim.mode == 1);
-    const bool fill = g.fill.enabled && g.fill.paint.opacity > 0.0f;
-    const bool stroke = g.stroke.enabled && g.stroke.width > 0.0f && g.stroke.paint.opacity > 0.0f;
-    if (fill) {
+}
+
+/// Preenchimento e contorno a partir das linhas do grupo. `draw` = a fração
+/// do Progresso do desenho deste grupo: o contorno sai dos pedaços já
+/// desenhados e o preenchimento (das linhas inteiras) ganha `fillAlpha`.
+void group_paint(const VectorGroup& g, f32 tol, std::vector<Contour> lines, const DrawProgress* draw, GroupGeometry& out) {
+    out.fill.clear();
+    out.stroke.clear();
+    out.drawn.clear();
+    out.fillAlpha = 1.0f;
+    const FillRule rule = g.fill.rule == 1 ? FillRule::EvenOdd : FillRule::NonZero;
+    const bool fill = group_fills(g);
+    const bool stroke = group_strokes(g);
+    // Fração 1 é o desenho de sempre (o mesmo caminho de código, bit a bit).
+    const f32 u = draw ? static_cast<f32>(draw_fraction(draw->amount)) : 1.0f;
+    const bool cut = draw && u < 1.0f;
+    std::vector<DrawnLine> pieces;
+    if (cut) {
+        out.fillAlpha = draw_fill_alpha(u, stroke);
+        if (stroke) cut_drawn(lines, u, draw->sequential, draw->reverse, pieces);
+        for (const DrawnLine& d : pieces) out.drawn.push_back(d.line);
+    } else if (draw) {
+        out.drawn = lines;
+    }
+    if (fill && out.fillAlpha > 0.0f) {
         std::vector<Contour> closed;
         for (const Contour& c : lines) if (c.pts.size() >= 3) closed.push_back(c);
         // Depois da mesclagem os anéis já saem limpos; a regra continua valendo.
         resolve_fill(closed, g.merge != 0 ? FillRule::NonZero : rule, out.fill);
     }
-    if (stroke) {
+    if (stroke && cut) {
+        stroke_drawn(g.stroke, tol, pieces, out.stroke);
+    } else if (stroke) {
         std::vector<Contour> s = lines;
         if (!g.stroke.dashes.empty()) dash(s, g.stroke.dashes, g.stroke.dashOffset);
         const StrokeTaper taper{g.stroke.taperStart * 0.01f, g.stroke.taperEnd * 0.01f, g.stroke.taperEase * 0.01f};
         stroke_to_rings(s, g.stroke.width, g.stroke.cap, g.stroke.join, g.stroke.miterLimit, tol, out.stroke, taper);
     }
     out.lines = std::move(lines);
+}
+} // namespace
+
+void group_geometry(const VectorGroup& g, f64 frame, f32 tol, GroupGeometry& out, const DrawProgress* draw) {
+    std::vector<Contour> lines;
+    group_lines(g, frame, tol, lines);
+    group_paint(g, tol, std::move(lines), draw, out);
 }
 
 // =============================================================================
@@ -871,30 +1049,63 @@ u32 copy_count(const VectorRepeater& r, f32& lastAlpha) {
 }
 } // namespace
 
-void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, VectorMesh& out) {
+void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, VectorMesh& out, const DrawProgress& progress) {
     out.verts.clear();
     out.paints.clear();
     out.min = out.max = Vec2{0, 0};
     Emitter em{out};
     const f32 dens = std::max(density, 1e-3f);
     const f32 aa = 1.0f / dens;   // 1 texel de cada lado da borda
+    // Os grupos que desenham, com transform, cópias, tolerância e linhas: o
+    // Progresso do desenho precisa do comprimento de TODOS antes de cortar um.
+    struct Prepared {
+        const VectorGroup* g = nullptr;
+        Affine2 G{};
+        f32 tol = 1.0f;
+        u32 copies = 1;
+        f32 lastAlpha = 1.0f;
+        std::vector<Contour> lines;
+    };
+    std::vector<Prepared> list;
+    list.reserve(groups.size());
     for (const VectorGroup& g : groups) {
         if (!g.visible || g.opacity <= 0.0f) continue;
-        const Affine2 G = group_matrix(g);
+        Prepared p;
+        p.g = &g;
+        p.G = group_matrix(g);
         f32 repScale = 1.0f;
-        f32 lastAlpha = 1.0f;
-        u32 copies = 1;
         if (g.repeater.enabled) {
-            copies = copy_count(g.repeater, lastAlpha);
-            if (copies == 0) continue;
+            p.copies = copy_count(g.repeater, p.lastAlpha);
+            if (p.copies == 0) continue;
             const f32 s = std::fabs(g.repeater.scale) * 0.01f;
-            repScale = std::max(1.0f, std::pow(std::max(s, 1e-3f), std::max(0.0f, static_cast<f32>(copies) - 1.0f + std::fabs(g.repeater.offset))));
+            repScale = std::max(1.0f, std::pow(std::max(s, 1e-3f), std::max(0.0f, static_cast<f32>(p.copies) - 1.0f + std::fabs(g.repeater.offset))));
             repScale = std::min(repScale, 64.0f);
         }
         // Tolerância: 0,2 texel na maior escala que o grupo chega a ter.
-        const f32 tol = 0.2f / (dens * std::max(1e-3f, G.max_scale() * repScale));
+        p.tol = 0.2f / (dens * std::max(1e-3f, p.G.max_scale() * repScale));
+        group_lines(g, frame, p.tol, p.lines);
+        list.push_back(std::move(p));
+    }
+    // Progresso do desenho: a fração de cada grupo pelo comprimento dele na
+    // camada (grupo sem tinta não gasta tempo do desenho).
+    const bool drawing = progress.active();
+    std::vector<f32> amounts;
+    if (drawing) {
+        std::vector<f64> lengths(list.size(), 0.0);
+        for (usize i = 0; i < list.size(); ++i)
+            if (group_strokes(*list[i].g) || group_fills(*list[i].g)) lengths[i] = length_under(list[i].lines, list[i].G);
+        group_amounts(lengths, progress, amounts);
+    }
+    for (usize gi = 0; gi < list.size(); ++gi) {
+        Prepared& prep = list[gi];
+        const VectorGroup& g = *prep.g;
+        const Affine2 G = prep.G;
+        const u32 copies = prep.copies;
+        const f32 lastAlpha = prep.lastAlpha;
+        DrawProgress mine = progress;
+        if (drawing) mine.amount = amounts[gi];
         GroupGeometry geo;
-        group_geometry(g, frame, tol, geo);
+        group_paint(g, prep.tol, std::move(prep.lines), drawing ? &mine : nullptr, geo);
         if (geo.fill.empty() && geo.stroke.empty()) continue;
         const f32 fillPaint = static_cast<f32>(out.paints.size() / kPaintVec4);
         encode_paint(g.fill.paint, out.paints);
@@ -902,7 +1113,7 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         encode_paint(g.stroke.paint, out.paints);
         const f32 gop = std::clamp(g.opacity * 0.01f, 0.0f, 1.0f);
         auto draw_copy = [&](const Affine2& M, f32 alpha) {
-            emit_rings(em, geo.fill, M, fillPaint, alpha, aa);
+            emit_rings(em, geo.fill, M, fillPaint, alpha * geo.fillAlpha, aa);
             emit_rings(em, geo.stroke, M, strokePaint, alpha, aa);
         };
         if (!g.repeater.enabled) {
@@ -977,8 +1188,15 @@ struct Hasher {
 };
 } // namespace
 
-u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame) noexcept {
+u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame, const DrawProgress& progress) noexcept {
     Hasher H;
+    if (progress.active()) {
+        // Só o progresso ativo entra: sem ele a chave é a de sempre (cache quente).
+        H.u(0x44524157ull);   // "DRAW"
+        H.f(static_cast<f32>(draw_fraction(progress.amount)));
+        H.u(progress.sequential);
+        H.u(progress.reverse);
+    }
     bool morph = false;
     f64 kmin = 1e300, kmax = -1e300;
     H.u(groups.size());

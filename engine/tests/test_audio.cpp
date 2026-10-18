@@ -707,13 +707,14 @@ AUREA_TEST(Audio, CaptionsGroupBreakAndParse) {
     text::CaptionOptions o;
     o.maxWords = 3;
     auto g = text::group_captions(clean, o);
-    // "Olá pessoal, hoje" | "vamos editar." (fim de frase) | pausa de 1,5 s | "Depois da pausa"
+    // 0.2.5: "Olá pessoal," | "hoje vamos editar." (a vírgula e a pausa de
+    // 0,3 s cortam melhor que o bloco cheio) | pausa de 1,5 s | "Depois da pausa"
     AUREA_CHECK_EQ(g.size(), 3u);
-    AUREA_CHECK_EQ(g[0].text, std::string("Olá pessoal, hoje"));   // cabe em 18 caracteres
+    AUREA_CHECK_EQ(g[0].text, std::string("Olá pessoal,"));
     o.maxChars = 12;
-    AUREA_CHECK_EQ(text::group_captions(clean, o)[0].text, std::string("Olá pessoal,\nhoje"));
+    AUREA_CHECK_EQ(text::group_captions(clean, o)[1].text, std::string("hoje vamos\neditar."));
     o.maxChars = 18;
-    AUREA_CHECK_EQ(g[1].text, std::string("vamos editar."));
+    AUREA_CHECK_EQ(g[1].text, std::string("hoje vamos editar."));   // cabe em 18 caracteres
     AUREA_CHECK(std::fabs(g[2].start - 3.5) < 1e-9 && g[2].count == 3);
     o.uppercase = true;
     o.mode = 1;

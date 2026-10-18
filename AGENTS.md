@@ -1,5 +1,16 @@
 # Android e iOS
 
+## Engenharia reversa
+
+Use sempre o REA para toda engenharia reversa, incluindo análise de aplicativos,
+APKs, binários, pacotes e comportamento em execução. Regra solicitada pelo usuário
+em 13/10/2026. Leia a skill `reverse-engineer-anything` e use as ferramentas MCP
+ou o CLI do REA. Outras ferramentas podem complementar a análise. Quando uma
+capacidade necessária estiver indisponível, diagnostique a limitação e registre
+o que foi observado, inferido ou não comprovado.
+
+## Paridade de plataformas
+
 Toda mudança funcional ou de interface no AUREA deve ser implementada nas duas
 plataformas. Regra solicitada pelo usuário em 29/09/2026.
 

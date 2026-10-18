@@ -63,6 +63,7 @@ struct Backend::Impl final : CommandList {
     std::array<Frame, 3> frames;
     Frame* current = nullptr;
     Frame* last = nullptr;
+    GLsync exportRetirementFence = nullptr;
     u64 sequence = 0, nextId = 1, bytesTextures = 0, bytesBuffers = 0, uploadBytes = 0;
     u32 frameCount = 3, surfaceWidth = 0, surfaceHeight = 0;
     bool frameOpen = false, presenting = false, deviceLost = false, borderClamp = false;

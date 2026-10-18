@@ -126,7 +126,7 @@ internal fun CommandSearchSheet(store: EditorStore, ui: EditorUi, onDismiss: () 
         val detail = res?.let { r -> stringResource(r.second) } ?: it.detail
         CommandHit(it.id, title, detail, normalizeSearch("$title ${it.title} ${it.keywords} $detail ${it.detail}"), "Ações", it.requires)
     } +
-        store.catalog.filter { it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.motion.oscillate") }.map { CommandHit("effect:${it.typeId}", effectDisplayName(it.typeId, it.name), addEffectDetail.format(com.aurea.aurea.effects.effectCategoryLabel(it.category)),
+        store.catalog.filter { it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.motion.oscillate") && it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.time.remap") }.map { CommandHit("effect:${it.typeId}", effectDisplayName(it.typeId, it.name), addEffectDetail.format(com.aurea.aurea.effects.effectCategoryLabel(it.category)),
             effectSearchText(it.typeId, it.name, it.category), "Efeitos", when (it.typeId) {
                 effectTypeId("aurea.text3d.layout") -> "text3d"
                 effectTypeId("aurea.shape3d.layout") -> "shape3d"

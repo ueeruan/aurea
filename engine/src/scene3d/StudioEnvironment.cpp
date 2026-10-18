@@ -155,11 +155,49 @@ Vec3 sky_sun(Vec3 d) noexcept {
     return hz * (1.0f - t) + groundC * t;
 }
 
+// --- 4: estúdio cromado -----------------------------------------------------------
+// A frente de uma letra voltada para a câmera reflete o que está ATRÁS da câmera
+// (+Z), em volta do horizonte: é ali que mora o corte claro/escuro. Chanfros e
+// cantos pegam as faixas, o ponto quente e os recortes coloridos.
+const Vec3 kChromeHot = Vec3{-0.55f, 0.48f, 0.68f}.normalized();
+
+Vec3 chrome_studio(Vec3 d) noexcept {
+    static const RectLight lights[] = {
+        // Faixa larga no alto, de um lado ao outro: o brilho longo no topo das letras.
+        {{0.0f, 3.0f, 0.6f}, {1, 0, 0}, {0, 0.196f, -0.981f}, 3.2f, 0.22f, 0.03f, {14.0f, 14.0f, 14.4f}, 0.2f},
+        // Duas faixas verticais atrás da câmera, abertas: os riscos verticais na frente.
+        {{-1.6f, 1.3f, 2.8f}, {0, 1, 0}, {0.868f, 0, 0.496f}, 1.0f, 0.10f, 0.02f, {11.0f, 11.0f, 11.5f}, 0.15f},
+        {{1.7f, 1.3f, 2.7f}, {0, 1, 0}, {0.846f, 0, -0.533f}, 1.0f, 0.08f, 0.02f, {9.0f, 9.0f, 9.5f}, 0.15f},
+        // Recortes laterais atrás do objeto: quente à esquerda, frio à direita.
+        {{-3.0f, 1.2f, -1.2f}, {0, 1, 0}, {0.371f, 0, -0.928f}, 1.0f, 0.16f, 0.03f, {9.0f, 4.6f, 1.6f}, 0.2f},
+        {{3.0f, 1.2f, -1.2f}, {0, 1, 0}, {0.371f, 0, 0.928f}, 1.0f, 0.16f, 0.03f, {1.8f, 4.4f, 10.0f}, 0.2f},
+    };
+    const f32 y = d.y;
+    Vec3 c;
+    if (y >= 0.0f) {
+        // Céu: claro no horizonte, cinza-azulado no zênite, e a faixa do horizonte.
+        const f32 t = std::pow(y, 0.45f);
+        c = Vec3{1.25f, 1.28f, 1.35f} * (1.0f - t) + Vec3{0.20f, 0.24f, 0.32f} * t;
+        c = c + Vec3{2.6f, 2.6f, 2.7f} * std::exp(-y / 0.035f);
+    } else {
+        // Chão escuro com um reflexo fraco do horizonte logo abaixo do corte.
+        const f32 t = std::min(1.0f, -y * 4.0f);
+        c = Vec3{0.06f, 0.05f, 0.045f} * (1.0f - t) + Vec3{0.012f, 0.011f, 0.010f} * t;
+        c = c + Vec3{0.35f, 0.33f, 0.31f} * std::exp(y / 0.012f);
+    }
+    // Ponto quente (brilho de "estrela" nos chanfros), disco macio de ~2°.
+    const f32 ang = std::acos(std::clamp(d.dot(kChromeHot), -1.0f, 1.0f));
+    c = c + Vec3{60.0f, 58.0f, 54.0f} * std::exp(-(ang * ang) / (2.0f * 0.02f * 0.02f));
+    for (const RectLight& l : lights) c = c + rect_radiance(l, d);
+    return c;
+}
+
 Vec3 radiance(u32 preset, Vec3 d) noexcept {
     switch (preset) {
         case 1: return dark_studio(d);
         case 2: return product_studio(d);
         case 3: return sky_sun(d);
+        case 4: return chrome_studio(d);
         default: return Vec3{0, 0, 0};
     }
 }
@@ -171,6 +209,7 @@ const char* studio_preset_name(u32 preset) noexcept {
         case 1: return "estudio_escuro";
         case 2: return "estudio_produto";
         case 3: return "ceu_sol";
+        case 4: return "estudio_cromado";
         default: return nullptr;
     }
 }

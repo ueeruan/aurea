@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="editor_group_mask">Group and mask</string>
+    <string name="editor_group_exclude">Group and exclude</string>
+    <string name="editor_group_mask_hint">The uppermost selected visual layer masks the other layers inside the group.</string>
+    <string name="editor_group_exclude_hint">The uppermost selected visual layer excludes its area from the other layers inside the group.</string>
+    <string name="editor_group_mask_failed">Could not create the mask group (error %1$d).</string>
+    <string name="eng_group_mask_external">Ungrouping would apply the group\'s mask to other layers</string>
+</resources>

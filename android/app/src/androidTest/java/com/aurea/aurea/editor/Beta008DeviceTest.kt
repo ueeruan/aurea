@@ -164,26 +164,26 @@ class Beta008DeviceTest {
         compose.waitUntil(10000) { store.detail?.rotation?.get(2) == 45f }
         compose.onNodeWithTag("dock.tool.Move").performScrollTo().performClick()
         compose.onNodeWithContentDescription(context.getString(R.string.panel_rotacao)).performClick()
-        for (tag in listOf("transform.rotation.degrees", "transform.rotation.turns")) {
+        for (tag in listOf("transform.rotation.axis.0")) {
             compose.onNodeWithTag(tag).performClick()
             compose.waitForIdle()
-            assertEquals("Numeric tap must not be handled by the dial", 45f, store.detail!!.rotation[2], .0001f)
+            assertEquals("Numeric tap must not change rotation", 45f, store.detail!!.rotation[2], .0001f)
             compose.onNodeWithText(context.getString(R.string.ds_cancelar)).performClick()
             compose.waitForIdle()
             compose.onNodeWithTag(tag).performTouchInput { longClick(durationMillis = 900) }
             compose.waitForIdle()
             assertEquals("Holding a numeric field must not rotate", 45f, store.detail!!.rotation[2], .0001f)
-            // Long tap may open the keypad; dismiss it only if the dial is covered.
+            // Long tap may open the keypad; dismiss it before scrubbing the ruler.
             if (compose.onAllNodesWithText(context.getString(R.string.ds_cancelar)).fetchSemanticsNodes().isNotEmpty())
                 compose.onNodeWithText(context.getString(R.string.ds_cancelar)).performClick()
         }
-        compose.onNodeWithTag("transform.rotation.dial").performTouchInput {
-            down(center + Offset(width * .35f, 0f))
-            moveTo(center + Offset(width * .25f, -height * .25f), 150)
-            moveTo(center + Offset(0f, -height * .35f), 150)
+        compose.onNodeWithTag("transform.rotation.ruler").performTouchInput {
+            down(center)
+            moveBy(Offset(-48f, 0f), 16)
+            moveBy(Offset(-12f, 0f), 16)
             up()
         }
-        compose.waitUntil(5000) { abs(store.detail!!.rotation[2] + 45f) < 1f }
+        compose.waitUntil(5000) { store.detail!!.rotation[2] > 55f }
         compose.runOnIdle { store.undo() }
         compose.waitUntil(5000) { abs(store.detail!!.rotation[2] - 45f) < .001f }
         note("PASS native rotation number tap and hold preserve 45 degrees")

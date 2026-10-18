@@ -58,6 +58,8 @@
 #include "aurea/render/Renderer.hpp"
 #include "aurea/render/PreviewRefill.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
+#include "aurea/render/PreRender.hpp"
+#include "aurea/render/PreRenderCache.hpp"
 
 #include <array>
 #include <atomic>
@@ -68,7 +70,9 @@
 #include <unordered_map>
 #include <vector>
 
+namespace aurea { class OfflineFrameRenderer; }
 namespace aurea {
+class PreRenderCache;
 
 /// Stable bridge values. Timing arrangements move whole layers without trimming.
 enum class LayerTimeArrangement : u32 {
@@ -207,11 +211,29 @@ struct EngineConfig {
     /// Watchdog do worker do encoder (export/ExportWatchdog.hpp): sem batida
     /// da plataforma por isto, o motor desiste do worker travado e conclui o
     /// export com falha (EncoderStalled) em vez de esperar o join para sempre.
-    /// 0 = 45 s. Os testes usam menos.
+    /// 0 = adaptativo por fase (export_worker_hang_limit_ns: preparação 20 s,
+    /// regime max(12 s, 8 × média por quadro), teto 45 s). Os testes usam menos.
     u32 exportWorkerHangMs = 0;
+    /// Verificação pós-export ESTRITA (ExportOutputValidation::strict): toda
+    /// divergência de PTS/duração/contagem/dimensão/áudio reprova o arquivo.
+    /// Os apps ficam no tolerante (padrão): divergência vira aviso no
+    /// diagnóstico e o arquivo é publicado; só reprova o que não abre, vazio,
+    /// sem vídeo ou sem nenhum quadro decodificável. Os testes de host que
+    /// guardam o export (retomável, registro de pacotes, PTS) ligam o estrito.
+    bool strictExportVerification = false;
     /// Opt-in integrity recovery. A checked, frozen export snapshot is
     /// persisted before codec open; version 1 restarts from frame zero.
     bool enableExportRecovery = false;
+    /// Export retomável (export/ExportPacketLog.hpp): os pacotes de vídeo vão
+    /// para `<saída>.aurea-pkt` e o MP4 é montado no fim. Um start_export com
+    /// a MESMA saída, o mesmo projeto e as mesmas configurações continua do
+    /// último GOP íntegro (o app fechou, a GPU caiu, o iOS suspendeu). Qualquer
+    /// diferença recomeça do zero. Desligado = MP4 direto (caminho antigo).
+    bool enableResumableExport = false;
+    /// NV12 do export com 4 bytes por fragmento (yuv_encode_packed.frag), 1/4
+    /// dos fragmentos. Sem dither, os mesmos bytes; com dither, raros pixels
+    /// diferem em 1 nível. DESLIGADO até ser medido no aparelho.
+    bool enablePackedYuvExport = false;
     /// Deadline for a submitted export/startup GPU fence. Zero = 120 seconds.
     u32 exportGpuTimeoutMs = 0;
 
@@ -234,9 +256,17 @@ struct EngineConfig {
     /// Fonte padrão do texto (arquivo TTF/OTF); vazio = procurar a do sistema.
     std::string defaultFontPath;
     std::string cacheDirectory;
+    // App-owned intermediate exports only. Empty when output files are final
+    // user documents (iOS); never infer a cleanup directory from outputPath.
+    std::string exportTemporaryDirectory;
     std::string documentsDirectory;
     u32   workerCount = 0;
     u64   memoryBudgetBytes = 0;
+    /// Teto do orçamento medido (0 = sem teto). Android: HyperOS/MIUI mata o
+    /// processo que passa de ~600 MB de memória de GPU ("GpuMemory OOM",
+    /// relatório de 12/10/2026 no meio de um export); o orçamento de ¼ da RAM
+    /// livre chegava a 1 GB num aparelho de 8 GB.
+    u64   memoryBudgetCapBytes = 0;
     bool  enableTelemetry = true;
     bool  disableAutosave = false;
     u32   autosaveJournalIntervalMs  = 3000;
@@ -520,6 +550,44 @@ public:
     [[nodiscard]] Result<text::FontEntry> import_font(const char* path) noexcept;
     [[nodiscard]] Status import_color_lut(u64 layer, u32 effect, const char* path) noexcept;
     [[nodiscard]] std::string color_lut_name(u64 layer, u32 effect) const noexcept;
+    /// "Trocar textura 3D": a imagem `path` (já copiada para a pasta do app;
+    /// decodificada pelo `imageLoader` da plataforma) vira o parâmetro Imagem
+    /// do efeito `effect` da camada. Um passo de desfazer; o projeto guarda o
+    /// caminho e a imagem volta ao reabrir, como as camadas de imagem.
+    [[nodiscard]] Status set_effect_image(u64 layer, u32 effect, const char* path) noexcept;
+    /// Nome do arquivo da imagem do efeito (vazio = nenhuma).
+    [[nodiscard]] std::string effect_image_name(u64 layer, u32 effect) const noexcept;
+    /// As PARTES da camada 3D na ordem dos efeitos de parte (Parte 1, 2...):
+    /// o nome de cada uma (vazio = o arquivo não deu nome). Vazio = não é 3D.
+    [[nodiscard]] std::vector<std::string> model_part_names(u64 layer) noexcept;
+    /// Câmeras do arquivo do modelo (glTF/FBX) — 0.1.8. A importação já as põe
+    /// na timeline (camadas de câmera filhas do modelo, com a animação do
+    /// arquivo em keyframes); `add_model_cameras` põe de novo (um passo de
+    /// desfazer) e devolve quantas entraram.
+    [[nodiscard]] u32 model_camera_count(u64 layer) noexcept;
+    // --- Pose do rig 3D (0.1.8) — scene3d/RigPose.hpp ----------------------
+    /// Ossos posáveis do modelo no cabeçote, kBoneFloats por osso: [0] nó,
+    /// [1] posição (na lista) do osso pai ou −1, [2..4] rotação da pose X/Y/Z °,
+    /// [5] canais com keyframe (bits), [6] key no cabeçote (0/1), [7..8] posição
+    /// na tela (px da composição, a vista da cena 3D quando ligada), [9] na
+    /// frente da câmera. Devolve os floats necessários (capacity 0 = medir).
+    static constexpr u32 kBoneFloats = 10;
+    u32 query_model_bones(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// Dedo na cena: gira o osso como uma trackball (dx, dy em px da
+    /// composição; twist em graus em volta do olhar). Osso com keyframe grava
+    /// keyframe no cabeçote; sem, muda a pose parada. `continuing` = mesmo gesto.
+    bool drag_bone(u64 layerId, u32 node, f32 dxPx, f32 dyPx, f32 twistDeg, bool continuing) noexcept;
+    /// Marca/tira keyframe do osso no cabeçote (node < 0 = todos os ossos, como
+    /// o "inserir keyframe" do Blender). 1 marcou, 0 tirou, −1 fora da camada.
+    i32 toggle_bone_key(u64 layerId, i32 node) noexcept;
+    /// Volta o osso (node < 0 = todos) à pose do arquivo: apaga as trilhas.
+    bool reset_bone_pose(u64 layerId, i32 node) noexcept;
+    u32 add_model_cameras(u64 layer) noexcept;
+    /// Põe um efeito de PARTE (Animar parte 3D, Esconder partes 3D, Trocar
+    /// textura 3D) na camada 3D já apontando para a parte `part` (0 = a 1ª;
+    /// no Esconder, primeira = última = ela). Um passo de desfazer. Devolve
+    /// o id do efeito.
+    [[nodiscard]] Result<u32> add_part_effect(u64 layer, u32 effectType, u32 part) noexcept;
     /// Fonte da camada de texto: família/peso/itálico e, se importada, o arquivo.
     bool set_text_font(u64 layerId, const std::string& family, u32 weight, bool italic, const std::string& path) noexcept;
     /// Estilo de parágrafo (18 floats): modo da caixa, largura, altura, fundo
@@ -760,6 +828,8 @@ public:
     [[nodiscard]] Status real_camera_sample(const f32* pose16, u64 timestampNs,
                                           bool positional, f32 sensitivity, bool inverted) noexcept;
     [[nodiscard]] Status real_camera_recenter() noexcept;
+    /// Andar (m/s, + frente) e profundidade (× do deslocamento frente/trás do AR).
+    [[nodiscard]] Status real_camera_walk(f32 metersPerSecond, f32 depthScale) noexcept;
     /// Tracking is lost: record the last valid virtual pose as a constant.
     [[nodiscard]] Status real_camera_hold() noexcept;
     void real_camera_stop() noexcept;
@@ -774,8 +844,10 @@ public:
     /// frame 36×24, altura 24 mm), [2] DOF ligado, [3] distância de foco (px do
     /// mundo), [4] abertura (f/), [5] força do desfoque (×), [6] px por metro
     /// da cena, [7] máscara de trilhas com keyframe (bit 0 mm, 1 foco,
-    /// 2 abertura, 3 desfoque), [8] câmera ativa. Falso = não é câmera.
-    [[nodiscard]] bool query_camera_lens(u64 layer, f32* values) noexcept;
+    /// 2 abertura, 3 desfoque), [8] câmera ativa. Capacity >= 10 also returns
+    /// [9] whether the camera projects visual layers below it (Timeline v47).
+    /// The default capacity preserves existing nine-value callers.
+    [[nodiscard]] bool query_camera_lens(u64 layer, f32* values, u32 capacity = 9) noexcept;
     /// Pick Focus: distância AO LONGO DO EIXO ÓTICO da câmera `layer` até a
     /// superfície 3D sob o ponto (px da composição), com o raio da câmera
     /// ativa (a que o palco mostra). Só mede; a UI grava com
@@ -807,6 +879,9 @@ public:
     /// velocidade no cabeçote} e depois 7 floats por ponto: tempo local, quadro
     /// da fonte, interpolação, bx1, by1, bx2, by2. Devolve os floats escritos.
     u32 query_time_remap(u64 layerId, f32* out, u32 maxFloats) noexcept;
+    /// Momento atual da fonte, em quadros da composição, avaliado pelo motor
+    /// (inclui remap/easing/expressão). NaN quando projeto/camada não existem.
+    [[nodiscard]] f64 query_time_remap_current_source(u64 layerId) noexcept;
     /// Ponto da curva: `index` < 0 insere em `localFrame` com o valor que a
     /// curva JÁ tem ali (nada muda até mover); senão move o ponto (tempo
     /// preso entre os vizinhos, valor dentro da fonte). `interp` < 0 mantém.
@@ -819,6 +894,27 @@ public:
     /// easing de cada trecho espelhado — duas vezes volta exatamente ao que era.
     /// Com o remapeamento desligado, liga antes (curva = o tempo de agora).
     bool reverse_time_remap(u64 layerId) noexcept;
+    /// Gráfico de velocidade (painel de velocidade, 0.1.8). `out` = {nº de
+    /// amostras S, nº de chaves K, início e fim locais da camada, cabeçote
+    /// local, modo (0 constante, 1 curva de velocidade, 2 remapeamento),
+    /// velocidade no cabeçote (×), quadro da fonte no cabeçote (quadros da
+    /// composição)}; depois S velocidades (×) igualmente espaçadas do início
+    /// ao fim (no remapeamento, a inclinação da curva de tempo) e K×3 (tempo
+    /// local, velocidade, interpolação) das chaves de VELOCIDADE.
+    u32 query_speed_curve(u64 layerId, u32 samples, f32* out, u32 maxFloats) noexcept;
+    /// Curva de velocidade pronta (desliga o remapeamento): chaves de
+    /// VELOCIDADE suaves com a MESMA quantidade de fonte que o clipe mostra
+    /// agora (a barra não muda). 0 plana, 1 montagem, 2 herói, 3 bala,
+    /// 4 entrada rápida, 5 saída rápida, 6 pulo, 7 suavizar as chaves que
+    /// existem, 8 tirar a curva (volta à velocidade constante média).
+    bool apply_speed_curve(u64 layerId, u32 preset) noexcept;
+    /// Chave de velocidade pelo gráfico: `index` < 0 insere em `localFrame`
+    /// com a velocidade que a curva já tem ali (nada muda até mover); senão
+    /// move (tempo preso entre as vizinhas) e muda a velocidade (×, 0,05…16).
+    /// `interp` < 0 mantém. Devolve o índice da chave, ou −1.
+    i32 edit_speed_key(u64 layerId, i32 index, i64 localFrame, f32 speed, i32 interp) noexcept;
+    /// Apaga uma chave de velocidade (a última que sobra vira velocidade constante).
+    bool remove_speed_key(u64 layerId, u32 index) noexcept;
     /// Manter o tom do áudio quando a fonte não anda a 1× (Layer::keepPitch).
     bool set_keep_pitch(u64 layerId, bool on) noexcept;
 
@@ -1176,12 +1272,26 @@ public:
     /// A bola de um material pronto do texto 3D (0..6, a mesma ordem de
     /// apply_text3d_material_preset). Não depende do projeto.
     bool text3d_preset_preview(u32 preset, u32 size, std::vector<u8>& outRgba) noexcept;
+    /// Aplica o material pronto do Texto 3D. Metal (Cromo, Ouro, Escovado, Metal
+    /// cinemático) numa cena sem estúdio nem HDRI liga o "Estúdio cromado": sem
+    /// ele o metal só refletia o degradê analítico e ficava chapado.
+    bool apply_text3d_preset(u64 layerId, u32 preset) noexcept;
 
     // --- Pré-composição ----------------------------------------------------------
     /// Move as camadas para uma composição nova (mesmo tamanho, taxa e
     /// duração; fundo transparente) e põe no lugar UMA camada que a mostra, na
     /// posição da mais alta. Os tempos não mudam. Devolve a camada nova.
     [[nodiscard]] Result<u64> precompose(const u64* ids, u32 count, const char* name = nullptr) noexcept;
+    /// Group and mask the composed content with the highest selected visual
+    /// layer. Exclude cuts a hole; otherwise only the source alpha is retained.
+    /// Preserves stack order/local timing and records one undo action. Missing,
+    /// locked or nonvisual layers reject the whole selection before mutation.
+    [[nodiscard]] Result<u64> group_and_mask(const u64* ids, u32 count, bool exclude,
+                                           const char* name = nullptr) noexcept;
+private:
+    [[nodiscard]] Result<u64> precompose_locked(const u64* ids, u32 count, const char* name,
+                                               bool mask, bool exclude) noexcept;
+public:
     /// Desagrupa: as camadas da pré-composição voltam para a composição atual,
     /// no lugar da camada, com os mesmos tempos na tela (aparadas ao trecho que
     /// a camada mostrava). Transform da camada ≠ identidade vira um Nulo pai
@@ -1267,6 +1377,34 @@ public:
     /// já existe não muda — a opção de cada uma manda.
     void set_edit_mode(bool on) noexcept;
     [[nodiscard]] bool edit_mode() noexcept;
+    /// INTERFACE DO PROJETO (0.2.5): 0 = Composição (padrão), 1 = Edição. Fica
+    /// no projeto — cada projeto reabre na interface em que foi deixado — e não
+    /// entra no desfazer (é um modo de tela, não uma edição). Passar para a
+    /// Edição liga o ímã da composição atual e, se nenhuma linha for magnética,
+    /// faz da linha de vídeo/imagem mais funda a TRILHA PRINCIPAL magnética —
+    /// isso sim num passo de desfazer. Voltar à Composição não desliga o ímã:
+    /// a pessoa decide no menu. false = sem projeto ou modo inválido.
+    bool set_project_ui_mode(u32 mode) noexcept;
+    [[nodiscard]] u32 project_ui_mode() noexcept;
+    /// A TRILHA PRINCIPAL da interface de Edição: o trecho de vídeo/imagem/
+    /// composição mais fundo na pilha (id empacotado). A linha dele (`trackId`)
+    /// é a trilha principal; 0 = nenhuma mídia ainda.
+    [[nodiscard]] u64 main_track_anchor() noexcept;
+    /// "Para camada" da Edição: o corte sai da trilha principal para uma linha
+    /// só dele logo ACIMA dela, solto no tempo; o buraco que ficou na trilha
+    /// principal fecha. `atFrame` >= 0 também leva o corte para esse quadro (a
+    /// mídia importada como camada entra no cabeçote). Um passo de desfazer.
+    bool move_clip_to_overlay(u64 layerId, i64 atFrame = -1) noexcept;
+    /// "Para trilha principal": o corte entra no FIM da trilha principal,
+    /// magnético, logo abaixo do trecho mais alto dela. Um passo de desfazer.
+    bool move_clip_to_main_track(u64 layerId) noexcept;
+    /// TRANSIÇÃO NUM CORTE da trilha (o quadradinho entre dois trechos): a saída
+    /// de `outgoing` e a entrada de `incoming` com o mesmo tipo (0 nenhuma, 1
+    /// dissolver, 2 deslizar p/ cima, 3 deslizar da esquerda, 4 zoom, 5 girar) e
+    /// a mesma duração em quadros (cada lado limitado à metade do trecho). Um
+    /// passo de desfazer. O tipo do corte é o da entrada de `incoming`.
+    bool set_cut_transition(u64 outgoing, u64 incoming, u32 type, u32 frames) noexcept;
+    [[nodiscard]] u32 cut_transition(u64 incoming) noexcept;
 
     /// LINHA MAGNÉTICA da camada (um passo de desfazer). Ligada, os cortes
     /// dela se comportam como uma faixa de montagem: aparar e apagar mexem só
@@ -1490,6 +1628,23 @@ public:
     /// Degrau de reduções que o estado térmico impõe (0 normal, 1 quente, 2 crítico).
     [[nodiscard]] u32 thermal_heavy_level() const noexcept;
 
+    // --- Proxy de edição ("Otimizar vídeos pesados", 0.2.5; EngineProxy.cpp) --
+    /// ProxyMode: 0 Automático, 1 Sempre, 2 Desligado. O app grava a escolha e
+    /// manda na abertura; trocar põe na fila do projeto o que passou a valer.
+    void set_proxy_mode(u32 mode) noexcept;
+    [[nodiscard]] u32 proxy_mode() const noexcept;
+    /// Proxy do vídeo da camada (estado e progresso). Sem vídeo: None.
+    [[nodiscard]] ProxyStatus proxy_status(u64 layerId) noexcept;
+    /// Pedidos desta sessão de projeto: o selo "Otimizando 42%".
+    [[nodiscard]] ProxySummary proxy_summary() noexcept;
+    /// Gera de novo (descarta o arquivo) / para de otimizar o vídeo da camada.
+    bool regenerate_proxy(u64 layerId) noexcept;
+    bool cancel_proxy(u64 layerId) noexcept;
+    /// Mídia otimizada em disco (bytes) / apaga tudo e devolve os liberados.
+    /// O export continua no original de qualquer jeito.
+    [[nodiscard]] u64 proxy_cache_bytes() noexcept;
+    u64 clear_proxy_cache() noexcept;
+
     /// O frame do playhead em RGBA8 sRGB (alfa reto), com o lado maior em
     /// `maxDim`. Captura exata, com qualidade final. Síncrono (espera a GPU).
     [[nodiscard]] Status capture_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, u32& height) noexcept;
@@ -1525,6 +1680,29 @@ public:
     u32 query_layers(bridge::LayerRow* out, u32 capacity,
                      char* outNameBlob, u32 nameBlobCapacity) noexcept;
     u32 query_keyframes(u64 layerId, bridge::KeyframeRow* out, u32 capacity) noexcept;
+    struct KeyframeNavigation {
+        u32 visibleCount = 0;
+        u32 flags = 0;           // 1 key here, 2 previous, 4 next, 8 easing segment
+        i64 localFrame = 0;
+        i64 previousFrame = 0;   // composition frame; valid only with flag 2
+        i64 nextFrame = 0;       // composition frame; valid only with flag 4
+        i64 segmentStart = 0;    // local frame; valid only with flag 8
+        i64 segmentEnd = 0;      // local frame; valid only with flag 8
+    };
+    /// Visible keys on one track, with the same inclusive clip-end anchor rule
+    /// as query_keyframes. Previous/next are strict. A segment exists only
+    /// inside the visible key span; its last endpoint selects the prior segment.
+    bool query_keyframe_navigation(u64 layerId, u32 property, u32 effectIndex, u32 paramIndex,
+                                   i64 compositionFrame, KeyframeNavigation& out) noexcept;
+    /// Transport arrows choose the strict nearest event in composition time.
+    /// With layerId=0 (or a stale id), only composition markers participate.
+    /// A valid layer adds all its visible keys, including the clip-end anchor.
+    /// False means there is no event in that direction; the UI stays put.
+    bool query_timeline_navigation(u64 layerId, i64 compositionFrame, i32 direction,
+                                   i64& targetFrame) noexcept;
+    /// Seek a transport event within the composition, even after the last clip.
+    /// Regular scrubbing/seek and content-bounded playback retain their limits.
+    bool seek_timeline_event(i64 compositionFrame) noexcept;
     /// Keyframes de TODAS as camadas da composição atual numa consulta só (a
     /// timeline relê a cada `modelRevision`: um travamento do modelo e uma
     /// travessia de JNI em vez de uma por camada). Ordem de query_layers
@@ -1660,6 +1838,8 @@ public:
         // falhou pelo encoder (kExportRetryShift, export/ExportWatchdog.hpp).
     };
     [[nodiscard]] ExportProgress export_progress() const noexcept;
+    /// Path-free session evidence, also readable while a codec/provider call stalls.
+    [[nodiscard]] std::string export_diagnostics() const noexcept;
 
     /// Export como IMAGEM (export/ImageEncode.hpp): o quadro do playhead em PNG,
     /// a sequência de PNGs do trecho num .zip ou o GIF animado. O MESMO
@@ -1670,6 +1850,12 @@ public:
     /// O plano do export como imagem (dimensões, fps, quadros, alfa) com a
     /// regra do motor — o que a tela Exportar mostra é o que sai.
     [[nodiscard]] ImageExportPlan query_image_export_plan(const ImageExportSettings& settings) noexcept;
+
+    /// Whole current composition at540p in either timeline direction. The
+    /// private cache preserves alpha and expires on any content revision.
+    [[nodiscard]] Status start_prerender(i32 direction) noexcept;
+    void cancel_prerender() noexcept;
+    [[nodiscard]] PreRenderProgress query_prerender_progress() noexcept;
 
     // =========================================================================
     // Acesso de baixo nível (testes e painel de debug)
@@ -1712,6 +1898,9 @@ private:
     /// Divide o orçamento de memória pelas categorias. Chamado na subida e de
     /// novo quando a GPU real chega e muda o orçamento.
     void apply_memory_budgets() noexcept;
+    /// Orçamento do processo: o configurado, senão o medido, preso pelo teto
+    /// do aparelho (`memoryBudgetCapBytes`) e pelo espaço de endereços.
+    [[nodiscard]] u64 process_budget_bytes() const noexcept;
     /// Maior lado de textura aceito ao importar modelo 3D — e o MESMO ao
     /// reabrir, senão o quadro muda entre importar e reabrir o projeto.
     [[nodiscard]] u32 model_texture_cap() const noexcept;
@@ -1741,6 +1930,9 @@ private:
     void drain_capture_target_locked() noexcept;
     void retain_failed_export_gpu_locked() noexcept;
     void render_thread_main() noexcept;
+    /// Põe na fila do proxy os vídeos usados pelo projeto (import, abertura,
+    /// troca de modo/escala). Só consulta o disco ou gera em segundo plano.
+    void queue_project_proxies_locked() noexcept;
     void update_perf(const FrameStats& stats, const RenderTimings& timings,
                      const FrameSnapshot& snap, u64 frameStartNs) noexcept;
     [[nodiscard]] RenderSettings current_render_settings() noexcept;
@@ -1845,7 +2037,7 @@ private:
         u64 session = 0;
         std::unordered_map<u64, Asset> assets;
         std::unordered_map<u64, std::shared_ptr<const Composition>> compositions;
-        std::unordered_map<u64, ImagePixels> images;
+        std::unordered_map<u64, std::shared_ptr<const ImagePixels>> images;
         std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> models;
         std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris;
         std::unordered_map<u64, std::shared_ptr<const CubeLut>> luts;
@@ -1876,7 +2068,12 @@ private:
         std::vector<LayerAnimator> layerAnimators;   ///< animadores de camada copiados
         std::vector<Track> layerAnimTracks;          ///< trilhas deles (effectIndex = posição na cópia)
     } clipboard_;
-    std::unordered_map<u64, ImagePixels> images_;   ///< por AssetId empacotado
+    /// Por AssetId empacotado. Pixels IMUTÁVEIS e compartilhados: trocar uma
+    /// imagem cria outro objeto. O export (snapshot offline), o colar e a
+    /// recuperação seguram ponteiros, não cópias — copiar todas as fotos do
+    /// projeto na largada do export estourava o orçamento ("erro 9") em
+    /// projetos com muitas imagens.
+    std::unordered_map<u64, std::shared_ptr<const ImagePixels>> images_;
     /// Modelos 3D carregados, por AssetId. Um por asset, qualquer número de
     /// layers (ModelInstance) apontando para ele.
     std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>> models_;
@@ -1943,6 +2140,10 @@ private:
     i64 previewBufferStart_ = 0;
     u64 previewBufferSince_ = 0;
     u32 previewBufferReady_ = 0, previewBufferTarget_ = 0;
+    /// Quadros perdidos até o último Play e se a reprodução anterior engasgou
+    /// (a pré-render do próximo Play prepara mais quadros).
+    u32 previewDroppedAtPlay_ = 0;
+    bool previewStuttered_ = false;
     std::atomic<u32> previewBufferStatus_{0};
     u32  lastRenderedRevision_ = 0;           ///< modelRevision_ do último frame desenhado
     u32  incompleteRetries_ = 0;              ///< quadros seguidos com camada pendente
@@ -1955,7 +2156,16 @@ private:
     bool refineNow_ = false;                  ///< este quadro é o refino
     u64 refineDueNs_ = 0;                     ///< prazo absoluto; vsync sem mudança não o adia
     bool contentBoundedPlayback_ = false;
+    // A paused transport jump may target a project marker after the last clip.
+    // Keep that cursor across preview reconfiguration while the marker exists.
+    i64 pausedTimelineEventFrame_ = -1;
+    u64 pausedTimelineEventSession_ = 0;
+    CompositionId pausedTimelineEventComposition_{};
     void configure_playback_locked(const Composition* comp, i64 rawDuration = -1) noexcept;
+    /// Mídia importada que o modo Edição pôs numa LINHA MAGNÉTICA entra encostada
+    /// no fim dela (nunca no cabeçote, que sobreporia os cortes); `length` em
+    /// quadros. Devolve se reposicionou. Chamar com `modelMutex_` travado.
+    bool place_on_magnetic_line_locked(Composition& comp, LayerId id, i64 length) noexcept;
     [[nodiscard]] i64 navigation_end_locked(const Composition* comp) const noexcept;
     u64  nextFrameDueNs_ = 0;                 ///< quando o playhead muda de frame (tocando)
     std::atomic<bool> renderRunning_{false};
@@ -2005,6 +2215,8 @@ private:
     // Short-lived pointer lock: progress/cancel never wait for encoder startup
     // or for the lifecycle join, only for publication of a new context.
     mutable std::mutex exportContextMutex_;
+    mutable std::mutex exportDiagnosticsMutex_;
+    std::shared_ptr<ExportDiagnostics> exportDiagnostics_;
     std::unique_ptr<ExportContext> exportCtx_;
     // Native calls may return after watchdog abandonment. Keep at most two
     // sessions until their own workers close the sink and publish their exit.
@@ -2014,6 +2226,7 @@ private:
     // Bound from startup context creation through publication when gated. The pointer lock prevents a
     // public cancellation from racing its scoped removal/context destruction.
     std::atomic<bool>* exportStartupCancel_ = nullptr;
+    std::atomic<bool>* preRenderStartupCancel_ = nullptr; // same short context lock
     /// Export em andamento: o render do preview não toca na GPU nem nos
     /// decoders (que o export usa em sequência).
     std::atomic<bool> exportActive_{false};
@@ -2029,7 +2242,27 @@ private:
     /// another export starts. Called after producer join with renderMutex_.
     [[nodiscard]] Status retire_abandoned_export_locked(bool admitNewSession = true) noexcept;
     void image_export_thread_main() noexcept;
+    [[nodiscard]] Status start_image_export_internal(const ImageExportSettings& settings, const char* outputPath,
+                                                     i32 preRenderDirection) noexcept;
+    void invalidate_prerender() noexcept;
+    u32 bump_model_revision_locked() noexcept;
+    [[nodiscard]] bool prerender_valid_locked() noexcept; // modelMutex_
+    void clear_prerender_gpu_locked() noexcept; // renderMutex_, backend owns deferred destruction
+    std::unique_ptr<PreRenderCache> preRenderCache_;
+    mutable std::mutex preRenderStateMutex_;
+    PreRenderProgress preRenderProgress_{};
+    PreRenderCache::Key preRenderKey_{};
+    std::atomic<u64> preRenderToken_{0};
+    std::atomic<bool> preRenderCancel_{false}, preRenderActive_{false};
+    struct PreRenderGpuSlot {
+        TextureHandle texture{};
+        u64 generation = 0, gpuFrame = 0, token = 0;
+        i64 time = -1;
+    };
+    std::array<PreRenderGpuSlot, 2> preRenderTextures_{};
+    std::vector<u16> preRenderUpload_;
     [[nodiscard]] Status initialize_offline_export(ExportContext& ctx) noexcept;
+    [[nodiscard]] Status prepare_export_resources(ExportContext& ctx) noexcept;
     void release_offline_export(ExportContext& ctx, bool retainReadbacks = false) noexcept;
     [[nodiscard]] Status render_export_frame(FrameIndex t, const OffscreenTarget& target, u64& gpuFrame) noexcept;
     [[nodiscard]] Status wait_export_gpu(u64 gpuFrame) noexcept; // renderMutex_ held by caller

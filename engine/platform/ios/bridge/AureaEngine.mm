@@ -25,6 +25,7 @@
 #import "AureaEngine.h"
 
 #import "AureaBridge.h"
+#import <VideoToolbox/VideoToolbox.h>
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/GestureMath.hpp"
@@ -32,6 +33,7 @@
 #include "aurea/timeline/CanvasFit.hpp"
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
+#include "aurea/export/FFmpegExportSink.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/ui/BuiltinPropertySchema.hpp"
 
@@ -344,6 +346,24 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     return _host ? _host->engine() : nullptr;
 }
 
+- (int32_t)startPreRender:(int32_t)direction {
+    auto* e = self.engine;
+    return e ? e->start_prerender(direction < 0 ? -1 : 1).raw()
+             : static_cast<int32_t>(aurea::Errc::InvalidState);
+}
+
+- (void)cancelPreRender {
+    if (auto* e = self.engine) e->cancel_prerender();
+}
+
+- (NSArray<NSNumber*>*)preRenderProgress {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const auto p = e->query_prerender_progress();
+    return @[@(p.running), @(p.complete), @(p.framesDone), @(p.framesTotal),
+             @(p.width), @(p.height), @(p.direction), @(p.error), @(p.diskBytes), @(p.residentBytes)];
+}
+
 // =============================================================================
 // Ciclo de vida
 // =============================================================================
@@ -490,6 +510,11 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
     const bool accepted = e && e->real_camera_hold().ok();
     if (accepted) [self wakeRender];
     return accepted;
+}
+
+- (BOOL)realCameraWalk:(float)speed depth:(float)depth {
+    auto* e = self.engine;
+    return e && e->real_camera_walk(speed, depth).ok();
 }
 
 - (BOOL)realCameraRecenter {
@@ -723,9 +748,56 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
         @"decodeCachePercent": @(report[27]),
         @"thermalTier":        @(report[28]),
         @"shadowSize":         @(report[29]),
-        @"proxyAboveShort":    @(report[30]),
+        @"proxyShortSide":     @(report[30]),
         @"maxFrequencyMhz":    @(report[31]),
     };
+}
+
+// =============================================================================
+// Proxy de edição ("Otimizar vídeos pesados", 0.2.5)
+// =============================================================================
+- (void)setProxyMode:(uint32_t)mode {
+    if (auto* e = self.engine) e->set_proxy_mode(mode);
+}
+
+- (uint32_t)proxyMode {
+    auto* e = self.engine;
+    return e ? e->proxy_mode() : 0;
+}
+
+- (NSDictionary<NSString*, NSNumber*>*)proxySummary {
+    auto* e = self.engine;
+    if (!e) return @{};
+    const aurea::ProxySummary s = e->proxy_summary();
+    return @{@"queued": @(s.queued), @"generating": @(s.generating), @"ready": @(s.ready),
+             @"failed": @(s.failed), @"progress": @(s.progress)};
+}
+
+- (NSDictionary<NSString*, NSNumber*>*)proxyStatus:(long long)layer {
+    auto* e = self.engine;
+    if (!e) return @{@"state": @0, @"progress": @0};
+    const aurea::ProxyStatus s = e->proxy_status(static_cast<u64>(layer));
+    return @{@"state": @(static_cast<uint32_t>(s.state)), @"progress": @(s.progress)};
+}
+
+- (BOOL)regenerateProxy:(long long)layer {
+    auto* e = self.engine;
+    return e && e->regenerate_proxy(static_cast<u64>(layer)) ? YES : NO;
+}
+
+- (BOOL)cancelProxy:(long long)layer {
+    auto* e = self.engine;
+    return e && e->cancel_proxy(static_cast<u64>(layer)) ? YES : NO;
+}
+
+- (uint64_t)proxyCacheBytes {
+    auto* e = self.engine;
+    return e ? e->proxy_cache_bytes() : 0;
+}
+
+- (uint64_t)clearProxyCache {
+    auto* e = self.engine;
+    return e ? e->clear_proxy_cache() : 0;
 }
 
 - (NSDictionary<NSString*, id>*)exportProgress {
@@ -766,8 +838,20 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 }
 
 - (BOOL)loadProject:(NSString*)path {
+    return [self loadProject:path error:nullptr errorCode:nullptr];
+}
+
+- (BOOL)loadProject:(NSString*)path error:(NSString**)error errorCode:(int32_t*)errorCode {
+    if (error) *error = nil;
+    if (errorCode) *errorCode = 0;
     auto* e = self.engine;
-    return e && e->load_project(to_std(path).c_str()).ok() ? YES : NO;
+    const aurea::Status status = e ? e->load_project(to_std(path).c_str())
+                                  : aurea::Status{aurea::Errc::InvalidState, "motor indisponivel"};
+    if (!status.ok()) {
+        if (errorCode) *errorCode = status.raw();
+        if (error) *error = to_ns(std::string(status.detail()));
+    }
+    return status.ok() ? YES : NO;
 }
 
 - (BOOL)saveProject:(NSString*)path {
@@ -834,7 +918,12 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 // Comandos (bloco)
 // =============================================================================
 - (void)beginBatch {
-    _batch.clear();
+    // Pendente NÃO se perde: entra no motor antes de abrir o bloco. `clear()`
+    // descartava em silêncio tudo o que a UI mandou sem `flush` — os controles
+    // de texto (tamanho, cor, alinhamento, cor e largura do contorno) iam para
+    // o lixo no próximo `beginBatch` de um `mutate`/gesto e a tela ficava
+    // "sem resposta" (relato do beta). `submit` já esvazia o bloco.
+    [self flush];
 }
 
 - (NSInteger)flush {
@@ -1083,6 +1172,41 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 - (BOOL)timelineEditMode {
     auto* e = self.engine;
     return e && e->edit_mode();
+}
+
+- (BOOL)setProjectUiMode:(uint32_t)mode {
+    auto* e = self.engine;
+    return e && e->set_project_ui_mode(mode);
+}
+
+- (uint32_t)projectUiMode {
+    auto* e = self.engine;
+    return e ? e->project_ui_mode() : 0;
+}
+
+- (long long)mainTrackAnchor {
+    auto* e = self.engine;
+    return e ? static_cast<long long>(e->main_track_anchor()) : 0;
+}
+
+- (BOOL)moveClipToOverlay:(long long)layerId atFrame:(int64_t)frame {
+    auto* e = self.engine;
+    return e && e->move_clip_to_overlay(static_cast<aurea::u64>(layerId), static_cast<aurea::i64>(frame));
+}
+
+- (BOOL)setCutTransitionFrom:(long long)outgoing to:(long long)incoming type:(uint32_t)type frames:(uint32_t)frames {
+    auto* e = self.engine;
+    return e && e->set_cut_transition(static_cast<aurea::u64>(outgoing), static_cast<aurea::u64>(incoming), type, frames);
+}
+
+- (uint32_t)cutTransitionInto:(long long)incoming {
+    auto* e = self.engine;
+    return e ? e->cut_transition(static_cast<aurea::u64>(incoming)) : 0;
+}
+
+- (BOOL)moveClipToMainTrack:(long long)layerId {
+    auto* e = self.engine;
+    return e && e->move_clip_to_main_track(static_cast<aurea::u64>(layerId));
 }
 
 - (BOOL)setLayer:(long long)layerId magneticTrack:(BOOL)on {
@@ -1540,10 +1664,8 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return e->set_text3d(layerId, spec).ok();
 }
 - (BOOL)applyText3DPreset:(long long)layerId preset:(uint32_t)preset {
-    auto* e = self.engine; aurea::scene3d::Text3DSpec spec;
-    if (!e || !e->query_text3d(layerId, spec) ||
-        !aurea::scene3d::apply_text3d_material_preset(spec, preset)) return NO;
-    return e->set_text3d(layerId, spec).ok();
+    auto* e = self.engine;
+    return e && e->apply_text3d_preset(static_cast<aurea::u64>(layerId), preset);
 }
 - (NSArray<NSNumber*>*)text3DAnim:(long long)layerId {
     auto* e = self.engine;
@@ -1657,6 +1779,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
         c->text_size.layer = layer_of(layerId);
         c->text_size.size = size;
     }
+    [self flush];
 }
 
 - (void)setText:(long long)layerId colorR:(float)r g:(float)g b:(float)b a:(float)a {
@@ -1664,6 +1787,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
         c->text_color.layer = layer_of(layerId);
         c->text_color.r = r; c->text_color.g = g; c->text_color.b = b; c->text_color.a = a;
     }
+    [self flush];
 }
 
 - (void)setText:(long long)layerId alignment:(uint32_t)alignment {
@@ -1671,6 +1795,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
         c->text_align.layer = layer_of(layerId);
         c->text_align.alignment = alignment;
     }
+    [self flush];
 }
 
 - (void)setText:(long long)layerId strokeWidth:(float)width {
@@ -1678,6 +1803,7 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
         c->text_stroke_width.layer = layer_of(layerId);
         c->text_stroke_width.width = width;
     }
+    [self flush];
 }
 
 - (NSInteger)addTextAnimator:(long long)layerId props:(uint32_t)props {
@@ -1738,8 +1864,36 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     }
 }
 
-- (void)setCameraTrack:(uint32_t)mode forLayer:(long long)layerId {
-    if (auto* e = self.engine) (void)e->start_camera_track(static_cast<aurea::u64>(layerId), mode);
+- (int)addPartEffect:(uint32_t)type part:(uint32_t)part forLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return -1;
+    const auto id = e->add_part_effect(static_cast<aurea::u64>(layerId), type, part);
+    return id.ok() ? static_cast<int>(*id) : -1;
+}
+
+- (BOOL)setEffectImage:(NSString *)path effect:(uint32_t)effect forLayer:(long long)layerId {
+    auto* e = self.engine;
+    return e && path && e->set_effect_image(static_cast<aurea::u64>(layerId), effect, path.UTF8String).ok();
+}
+
+- (NSString *)effectImageName:(uint32_t)effect forLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @"";
+    return [NSString stringWithUTF8String:e->effect_image_name(static_cast<aurea::u64>(layerId), effect).c_str()] ?: @"";
+}
+
+- (NSArray<NSString *> *)modelPartNames:(long long)layerId {
+    auto* e = self.engine;
+    NSMutableArray<NSString *>* out = [NSMutableArray array];
+    if (!e) return out;
+    for (const auto& name : e->model_part_names(static_cast<aurea::u64>(layerId)))
+        [out addObject:[NSString stringWithUTF8String:name.c_str()] ?: @""];
+    return out;
+}
+
+- (BOOL)setCameraTrack:(uint32_t)mode forLayer:(long long)layerId {
+    auto* e = self.engine;
+    return e && e->start_camera_track(static_cast<aurea::u64>(layerId), mode);
 }
 
 - (void)setModelTransformInScene:(uint64_t)scene modelIndex:(uint32_t)modelIndex
@@ -2107,6 +2261,10 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (NSString*)playbackReport {
     auto* e = self.engine; return e ? [NSString stringWithUTF8String:e->playback_report().c_str()] : @"";
 }
+- (NSString*)exportDiagnostics {
+    auto* e = self.engine;
+    return e ? to_ns(e->export_diagnostics()) : @"{}";
+}
 - (int64_t)audioPositionNs {
     auto* e = self.engine; return e ? e->audio().position_ns() : 0;
 }
@@ -2145,9 +2303,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 // --- Lente da câmera 3D (ver Engine::query_camera_lens) ----------------------
 - (NSArray<NSNumber*>*)cameraLens:(long long)layer {
-    float values[9]{};
-    if (!self.engine || !self.engine->query_camera_lens(static_cast<aurea::u64>(layer), values)) return @[];
-    return floats_to_array(values, 9);
+    float values[10]{};
+    if (!self.engine || !self.engine->query_camera_lens(static_cast<aurea::u64>(layer), values, 10)) return @[];
+    return floats_to_array(values, 10);
 }
 - (float)pickFocusDistance:(long long)layer x:(float)x y:(float)y {
     if (!self.engine) return -1.f;
@@ -2573,6 +2731,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
         c->text_color.layer = layer_of(layerId);
         c->text_color.r = r; c->text_color.g = g; c->text_color.b = b; c->text_color.a = a;
     }
+    [self flush];
 }
 
 - (void)setLayer:(long long)layerId audioSolo:(BOOL)solo {
@@ -3021,6 +3180,11 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     const auto diagnostic = aurea::expr::check_syntax(to_std(source));
     return @{@"accepted": @YES, @"ok": @(diagnostic.ok), @"message": to_ns(diagnostic.message), @"line": @(diagnostic.line), @"column": @(diagnostic.column)};
 }
+- (double)timeRemapCurrentSource:(int64_t)layerId {
+    auto* e = self.engine;
+    return e ? e->query_time_remap_current_source(static_cast<u64>(layerId)) : std::nan("");
+}
+
 - (NSArray<NSNumber*>*)timeRemap:(long long)layerId {
     auto* e = self.engine; if (!e) return @[];
     float header[5]{}; if (e->query_time_remap(layerId, header, 5) < 5) return @[];
@@ -3036,6 +3200,46 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     auto* e = self.engine; return e ? e->edit_time_remap_key(layerId, index, time, value, interpolation) : -1;
 }
 - (void)removeTimeRemap:(long long)layerId index:(uint32_t)index { if (auto* e = self.engine) (void)e->remove_time_remap_key(layerId, index); }
+- (NSArray<NSNumber*>*)speedCurve:(long long)layerId samples:(uint32_t)samples {
+    auto* e = self.engine; if (!e) return @[];
+    const u32 n = std::min<u32>(samples, 1024);
+    std::vector<float> v(8 + n + 3 * 512);
+    const auto w = e->query_speed_curve(layerId, n, v.data(), static_cast<u32>(v.size()));
+    return floats_to_array(v.data(), w);
+}
+- (BOOL)applySpeedCurve:(uint32_t)preset forLayer:(long long)layerId {
+    auto* e = self.engine; return e && e->apply_speed_curve(static_cast<aurea::u64>(layerId), preset);
+}
+- (int32_t)editSpeedKey:(long long)layerId index:(int32_t)index time:(int64_t)time speed:(float)speed interpolation:(int32_t)interpolation {
+    auto* e = self.engine; return e ? e->edit_speed_key(layerId, index, time, speed, interpolation) : -1;
+}
+- (NSArray<NSNumber*>*)modelBones:(long long)layerId {
+    auto* e = self.engine; if (!e) return @[];
+    const auto need = e->query_model_bones(static_cast<aurea::u64>(layerId), nullptr, 0);
+    if (!need) return @[];
+    std::vector<float> v(need);
+    const auto w = e->query_model_bones(static_cast<aurea::u64>(layerId), v.data(), need);
+    return floats_to_array(v.data(), w);
+}
+- (BOOL)dragBone:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy twist:(float)twist continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    return e && node >= 0 && e->drag_bone(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(node), dx, dy, twist, continuing);
+}
+- (int32_t)toggleBoneKey:(long long)layerId node:(int32_t)node {
+    auto* e = self.engine; return e ? e->toggle_bone_key(static_cast<aurea::u64>(layerId), node) : -1;
+}
+- (BOOL)resetBonePose:(long long)layerId node:(int32_t)node {
+    auto* e = self.engine; return e && e->reset_bone_pose(static_cast<aurea::u64>(layerId), node);
+}
+- (uint32_t)modelCameraCount:(long long)layerId {
+    auto* e = self.engine; return e ? e->model_camera_count(static_cast<aurea::u64>(layerId)) : 0;
+}
+- (uint32_t)addModelCameras:(long long)layerId {
+    auto* e = self.engine; return e ? e->add_model_cameras(static_cast<aurea::u64>(layerId)) : 0;
+}
+- (BOOL)removeSpeedKey:(long long)layerId index:(uint32_t)index {
+    auto* e = self.engine; return e && e->remove_speed_key(layerId, index);
+}
 - (long long)addVector:(uint32_t)preset {
     auto* e = self.engine; if (!e) return -1; const auto r = e->add_vector_layer(preset); return r.ok() ? static_cast<long long>(*r) : -1;
 }
@@ -3617,6 +3821,44 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return static_cast<long long>(*r);
 }
 
+- (long long)groupAndMask:(NSArray<NSNumber*>*)layerIds exclude:(BOOL)exclude name:(NSString*)name {
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    std::vector<aurea::u64> ids;
+    ids.reserve(layerIds.count);
+    for (NSNumber* n in layerIds) ids.push_back(static_cast<aurea::u64>(n.longLongValue));
+    const std::string label = to_std(name);
+    const auto result = e->group_and_mask(ids.data(), static_cast<aurea::u32>(ids.size()), exclude != NO,
+                                         label.empty() ? nullptr : label.c_str());
+    return result.ok() ? static_cast<long long>(*result) : -static_cast<long long>(result.status().code());
+}
+
+- (nullable NSDictionary<NSString*, NSNumber*>*)keyframeNavigation:(long long)layerId property:(uint32_t)property
+        effect:(uint32_t)effect param:(uint32_t)param compositionFrame:(long long)compositionFrame {
+    auto* e = self.engine;
+    aurea::Engine::KeyframeNavigation result{};
+    if (!e || !e->query_keyframe_navigation(static_cast<aurea::u64>(layerId), property, effect, param,
+                                           static_cast<aurea::i64>(compositionFrame), result)) return nil;
+    return @{ @"visibleCount": @(result.visibleCount), @"flags": @(result.flags),
+              @"localFrame": @(result.localFrame), @"previousFrame": @(result.previousFrame),
+              @"nextFrame": @(result.nextFrame), @"segmentStart": @(result.segmentStart),
+              @"segmentEnd": @(result.segmentEnd) };
+}
+
+- (nullable NSNumber*)timelineNavigation:(long long)layerId compositionFrame:(long long)compositionFrame
+        direction:(int32_t)direction {
+    auto* e = self.engine;
+    aurea::i64 target = 0;
+    if (!e || !e->query_timeline_navigation(static_cast<aurea::u64>(layerId),
+            static_cast<aurea::i64>(compositionFrame), direction, target)) return nil;
+    return @(target);
+}
+
+- (BOOL)seekTimelineEvent:(long long)compositionFrame {
+    auto* e = self.engine;
+    return e && e->seek_timeline_event(static_cast<aurea::i64>(compositionFrame));
+}
+
 - (NSString*)ungroupPrecomp:(long long)layerId {
     auto* e = self.engine;
     if (!e) return @"motor indisponivel";
@@ -3795,6 +4037,8 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 // =============================================================================
 // Export
 // =============================================================================
+
+
 - (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
                height:(uint32_t)height fps:(double)fps
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps {
@@ -3845,8 +4089,18 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
             aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
               quality:(uint32_t)quality safeMode:(uint32_t)safeMode {
+    return [self startExportCheckedTo:path codec:codec height:height fps:fps bitrateMbps:bitrateMbps
+                   audioBitrateKbps:audioBitrateKbps aiUpscale:aiUpscale trimToContent:trimToContent
+                           quality:quality safeMode:safeMode] == 0;
+}
+
+- (int32_t)startExportCheckedTo:(NSString*)path codec:(AureaExportCodec)codec
+                        height:(uint32_t)height fps:(double)fps
+                   bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+                     aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+                       quality:(uint32_t)quality safeMode:(uint32_t)safeMode {
     auto* e = self.engine;
-    if (!e) return NO;
+    if (!e) return static_cast<int32_t>(aurea::Errc::InvalidState);
     aurea::ExportSettings settings;
     // `height` é o LADO MENOR pedido; a largura vem da proporção (o motor
     // calcula, e nunca estica).
@@ -3861,7 +4115,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     settings.safeMode = std::min<uint32_t>(safeMode, aurea::kExportSafeModeMax);
     settings.container = 0;   // MP4, o mesmo do Android
     const std::string out = to_std(path);
-    return e->start_export(settings, out.c_str()).ok() ? YES : NO;
+    return e->start_export(settings, out.c_str()).raw();
 }
 
 - (void)cancelExport {

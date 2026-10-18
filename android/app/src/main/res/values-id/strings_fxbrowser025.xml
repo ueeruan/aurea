@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Navegador de efeitos 0.2.5: destaques, recentes/favoritos e ladrilhos de categoria. -->
+<resources>
+    <string name="fxui_group_repeat">Ulangi</string>
+    <string name="fxui_group_visibility">Opasitas dan visibilitas</string>
+    <string name="fx_browser_title">Penjelajah efek</string>
+    <string name="fx_browser_featured">Unggulan</string>
+    <string name="fx_browser_quick">Terbaru dan favorit</string>
+    <string name="fx_browser_recent_empty">Efek yang Anda gunakan muncul di sini.</string>
+    <string name="fx_browser_favorites_empty">Tahan efek untuk menyimpannya ke favorit.</string>
+    <string name="fx_browser_page_recent">Tampilkan terbaru</string>
+    <string name="fx_browser_page_favorites">Tampilkan favorit</string>
+    <string name="fx_browser_categories">Kategori</string>
+    <string name="fx_browser_prev_group">Kategori sebelumnya: %1$s</string>
+    <string name="fx_browser_next_group">Kategori berikutnya: %1$s</string>
+    <string name="fx_browser_heavy">Efek berat</string>
+    <string name="fx_browser_open_group">Buka kategori %1$s</string>
+</resources>

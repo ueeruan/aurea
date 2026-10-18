@@ -1109,7 +1109,7 @@ constexpr i32 kPcm16 = 2, kPcmFloat = 4, kPcm8 = 3;
 
 class MediaCodecAudioDecoder final : public audio::AudioDecoderBackend {
 public:
-    explicit MediaCodecAudioDecoder(SourceFd fd) : fd_(std::move(fd)) {}
+    explicit MediaCodecAudioDecoder(SourceFd fd, bool software = false) : fd_(std::move(fd)), software_(software) {}
     ~MediaCodecAudioDecoder() override {
         if (codec_) {
             AMediaCodec_stop(codec_);
@@ -1145,7 +1145,16 @@ public:
         int64_t dur = 0;
         if (AMediaFormat_getInt64(fmt, AMEDIAFORMAT_KEY_DURATION, &dur)) info_.durationUs = dur;
         AMediaExtractor_selectTrack(ex_, static_cast<size_t>(track_));
-        codec_ = AMediaCodec_createDecoderByType(mime_.c_str());
+        // Export compatível: o decoder de software do AOSP (Codec2, depois OMX);
+        // sem um para o tipo, o padrão.
+        if (software_) {
+            for (const bool legacy : {false, true}) {
+                if (codec_) break;
+                if (const char* name = android::software_audio_decoder(mime_, legacy)) codec_ = AMediaCodec_createCodecByName(name);
+            }
+            if (codec_) AUREA_LOG_INFO("audio: decoder de software (export compativel)");
+        }
+        if (!codec_) codec_ = AMediaCodec_createDecoderByType(mime_.c_str());
         if (!codec_) {
             AMediaFormat_delete(fmt);
             return Status{Errc::UnsupportedFormat, "sem decoder para este audio"};
@@ -1278,6 +1287,7 @@ public:
 
 private:
     SourceFd fd_;
+    bool software_ = false;   ///< export compatível: decoder de software do AOSP
     AMediaExtractor* ex_ = nullptr;
     AMediaCodec* codec_ = nullptr;
     i32 track_ = -1;
@@ -1312,6 +1322,8 @@ bool MediaCodecFactory::probe(const char* sourcePath, MediaProbe& out) {
     AMediaExtractor* ex = AMediaExtractor_new();
     if (!ex) return false;
     bool ok = false;
+    // Bitrate médio do arquivo para a política do proxy de edição.
+    out.fileBytes = fd.length > 0 ? static_cast<u64>(fd.length) : 0;
     if (AMediaExtractor_setDataSourceFd(ex, fd.fd, fd.offset, fd.length) == AMEDIA_OK) {
         const size_t n = AMediaExtractor_getTrackCount(ex);
         for (size_t i = 0; i < n; ++i) {
@@ -1350,7 +1362,8 @@ std::unique_ptr<VideoDecoderBackend> MediaCodecFactory::open_video(const Asset& 
     // cujo backend importa AHardwareBuffer RGBA; modo seguro = software.
     VideoPathInputs in;
     in.rgbaImport = driverGl_.load();
-    in.safeMode = softwareOnly_.load();
+    // Export compatível (o decoder do aparelho travou antes): software.
+    in.safeMode = softwareOnly_.load() || priority == MediaPriority::ExportSoftwareDecode;
     in.thumbnail = priority == MediaPriority::Thumbnail;
     const VideoPath path = initial_video_path(in);
     const bool zeroCopy = priority != MediaPriority::Thumbnail && zeroCopy_.load();
@@ -1376,6 +1389,20 @@ std::unique_ptr<audio::AudioDecoderBackend> MediaCodecFactory::open_audio(const 
         return nullptr;
     }
     AUREA_LOG_INFO("audio: %u Hz, %u canais", d->info().sampleRate, d->info().channels);
+    return d;
+}
+
+std::unique_ptr<audio::AudioDecoderBackend> MediaCodecFactory::open_audio_software(const char* sourcePath) {
+    SourceFd fd;
+    if (!open_source(sourcePath, opener_, openerCtx_, fd)) {
+        AUREA_LOG_ERROR("audio inacessivel");
+        return nullptr;
+    }
+    auto d = std::make_unique<MediaCodecAudioDecoder>(std::move(fd), true);
+    if (const Status s = d->open(); !s.ok()) {
+        AUREA_LOG_WARN("decoder de audio (software) nao abriu: %s", s.message().data());
+        return nullptr;
+    }
     return d;
 }
 

@@ -86,7 +86,9 @@ enum class DecodeMode : u8 {
 
 /// Prioridade de uso. Preview disputa com nada; miniatura cede para tudo;
 /// export tem decoder próprio e não compartilha com o preview.
-enum class MediaPriority : u8 { Preview = 0, Export, Thumbnail };
+/// `ExportSoftwareDecode`: o decoder do export na tentativa compatível (o do
+/// aparelho travou antes) — software no Android, planos na CPU no iOS.
+enum class MediaPriority : u8 { Preview = 0, Export, Thumbnail, ExportSoftwareDecode };
 
 struct DecodeRequest {
     i64 targetUs = 0;

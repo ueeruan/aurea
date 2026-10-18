@@ -28,10 +28,10 @@ on:
         default: ''
         type: string
   push:
-    branches: ['codex/native-beta2-ipa']
+    branches: ['codex/native-beta2-ipa', 'codex/aurea-025-ipa']
     paths: ['engine/**', '.github/workflows/build-ipa.yml']
 concurrency:
-  group: native-ipa-${{ github.ref }}${{ inputs.capture_only && '-capture' || '' }}
+  group: native-ipa-${{ github.ref }}-${{ github.sha }}${{ inputs.capture_only && '-capture' || '' }}
   cancel-in-progress: true
 permissions:
   contents: read
@@ -72,12 +72,14 @@ jobs:
           python3 engine/platform/ios/verify/check_effect_contract.py
           python3 engine/platform/ios/verify/check_metal_frag_outputs.py
           python3 engine/platform/ios/verify/check_editor_layout.py
+          python3 engine/platform/ios/verify/check_sheet_layout.py
           python3 engine/platform/ios/verify/check_preview_buffer.py
           python3 engine/platform/ios/verify/check_ai_sessions.py
           python3 engine/platform/ios/verify/check_project_lifecycle.py
           python3 engine/platform/ios/verify/check_scene_drag.py
           python3 engine/platform/ios/verify/check_memory_pressure.py
           python3 engine/platform/ios/verify/check_motion_blur.py
+          python3 engine/platform/ios/verify/check_export_startup_async.py
       - name: Install shader tools
         run: brew install cmake ninja shaderc ccache
       - name: Identify iOS export dependency SDK
@@ -90,7 +92,7 @@ jobs:
           path: |
             build/ffmpeg/ios/arm64
             build/astra-ffmpeg/downloads
-          key: aurea-ffmpeg-ios-arm64-sdk${{ steps.export_sdk.outputs.version }}-${{ hashFiles('tools/build_ffmpeg.py', 'engine/cmake/AureaFFmpeg.cmake') }}
+          key: aurea-ffmpeg-ios-arm64-sdk${{ steps.export_sdk.outputs.version }}-${{ hashFiles('tools/build_ffmpeg.py', 'tools/patches/**', 'engine/cmake/AureaFFmpeg.cmake') }}
       - name: Compile FFmpeg and software fallback for physical iOS
         if: steps.export_libraries.outputs.cache-hit != 'true'
         run: |
@@ -134,6 +136,35 @@ jobs:
             build 2>&1 | tee build-ios.log
       - name: Validate compiled app with Foundation
         run: swift engine/platform/ios/verify/check_bundle.swift build/ios/Build/Products/Release-iphoneos/Aurea.app
+      - name: Preserve symbols matching the packaged executable
+        run: |
+          app="build/ios/Build/Products/Release-iphoneos/Aurea.app"
+          dsym="build/ios/Build/Products/Release-iphoneos/Aurea.app.dSYM"
+          test -s "$dsym/Contents/Resources/DWARF/Aurea"
+          xcrun dwarfdump --uuid "$app/Aurea" > build/ios-executable-uuid.txt
+          xcrun dwarfdump --uuid "$dsym" > build/ios-symbols-uuid.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os, re
+          expression = r'UUID: ([0-9A-Fa-f-]+) \(([^)]+)\)'
+          binary = re.findall(expression, Path('build/ios-executable-uuid.txt').read_text())
+          symbols = re.findall(expression, Path('build/ios-symbols-uuid.txt').read_text())
+          assert binary and sorted(binary) == sorted(symbols), (binary, symbols)
+          Path('build/ios-symbols-identity.json').write_text(json.dumps({
+              'source_commit': os.environ['GITHUB_SHA'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'matching_uuids': binary,
+          }, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurea-ios-dsym
+          path: |
+            build/ios/Build/Products/Release-iphoneos/Aurea.app.dSYM/
+            build/ios-symbols-identity.json
+            build/ios-executable-uuid.txt
+            build/ios-symbols-uuid.txt
+          if-no-files-found: error
       - name: Validate shaders with Apple Metal compiler
         run: |
           set -o pipefail
@@ -218,7 +249,7 @@ jobs:
           path: |
             build/ffmpeg/ios-simulator/${{ steps.export_sdk.outputs.arch }}
             build/astra-ffmpeg/downloads
-          key: aurea-ffmpeg-ios-simulator-${{ steps.export_sdk.outputs.arch }}-sdk${{ steps.export_sdk.outputs.version }}-${{ hashFiles('tools/build_ffmpeg.py', 'engine/cmake/AureaFFmpeg.cmake') }}
+          key: aurea-ffmpeg-ios-simulator-${{ steps.export_sdk.outputs.arch }}-sdk${{ steps.export_sdk.outputs.version }}-${{ hashFiles('tools/build_ffmpeg.py', 'tools/patches/**', 'engine/cmake/AureaFFmpeg.cmake') }}
       - name: Compile FFmpeg and software fallback for iOS Simulator
         if: steps.export_libraries.outputs.cache-hit != 'true'
         run: |
@@ -269,6 +300,22 @@ jobs:
             -destination 'generic/platform=iOS Simulator' -derivedDataPath build/simulator \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             build 2>&1 | tee build-simulator.log
+      - name: Prepare official 3D export fixtures
+        env:
+          AUREA_PARITY_SCENES: ${{ inputs.capture_scenes || '' }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import sys
+          requested = os.environ.get('AUREA_PARITY_SCENES', '').strip()
+          if not requested or 'export-render' in {part.strip() for part in requested.split(',')}:
+              sys.path.insert(0, str(Path('tools').resolve()))
+              from run_ios_offline_composition_probe import prepare_models
+              output = Path('build/reference/astra-ios-parity')
+              output.mkdir(parents=True, exist_ok=True)
+              prepare_models(output)
+          PY
       - name: Capture actual iOS UI and core fixture projects
         env:
           AUREA_PARITY_SCENES: ${{ inputs.capture_scenes || '' }}
@@ -282,6 +329,8 @@ jobs:
             build-simulator.log
             build-ffmpeg-simulator.log
             build/ffmpeg/ios-simulator/*/aurea-ffmpeg-build.json
+            build/reference/astra-ios-parity/model-sources.json
+            build/reference/astra-ios-parity/models/LICENSE_*.md
           if-no-files-found: ignore
       - name: Run native preview gestures and undo tests
         if: always() && steps.compile_simulator.outcome == 'success' && !inputs.capture_only

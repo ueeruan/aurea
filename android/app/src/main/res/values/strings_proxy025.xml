@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Otimizar vídeos pesados (proxy de edição), 0.2.5. -->
+<resources>
+    <string name="proxy_settings_title">Otimizar vídeos pesados</string>
+    <string name="proxy_mode_auto">Automático</string>
+    <string name="proxy_mode_always">Sempre</string>
+    <string name="proxy_mode_off">Desligado</string>
+    <string name="proxy_settings_note">Vídeos 4K, acima de 60 fps, HEVC/10 bits ou com bitrate muito alto ganham uma cópia leve (720p) só para editar, feita em segundo plano. A exportação usa sempre o arquivo original. Sempre: também tudo acima de 720p.</string>
+    <string name="proxy_clear_title">Limpar mídia otimizada (%1$s MB)</string>
+    <string name="proxy_clear_title_unknown">Limpar mídia otimizada</string>
+    <string name="proxy_clear_note">Apaga as cópias leves de edição; elas são refeitas quando preciso</string>
+    <string name="proxy_cleared">Mídia otimizada removida: %1$s MB</string>
+    <string name="proxy_optimizing">Otimizando %1$d%%</string>
+    <string name="proxy_optimizing_description">Otimizando vídeo pesado para a edição: %1$d%%</string>
+    <string name="proxy_queued">Vídeo pesado aguardando otimização</string>
+    <string name="proxy_ready">Vídeo otimizado: a edição fica mais leve</string>
+    <string name="proxy_failed">Não foi possível otimizar um vídeo; a prévia usa o original</string>
+</resources>

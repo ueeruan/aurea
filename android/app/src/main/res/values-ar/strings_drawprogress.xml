@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.2.5: تقدّم الرسم (اسم التأثير بالإنجليزية في كل اللغات؛ الاسم المترجم يدخل في البحث). -->
+    <string name="fx_name_drawing_progress">تقدّم الرسم</string>
+    <string name="drawing_progress_desc">يرسم الرسمة خطًّا بعد خط: في الرسوم المتجهة يمتد كل محيط على مساره، واحدًا بعد الآخر أو جميعها معًا، وتظهر التعبئة عندما يكتمل المحيط. أما الصور فيكشفها بمسحٍ متدرّج: الحبر الداكن قبل الورق الفاتح.</string>
+    <string name="fxl_draw_order">الترتيب</string>
+    <string name="fxo_simultaneous">متزامن</string>
+    <string name="fxl_tip_softness">نعومة الطرف</string>
+    <string name="drawprog_reverse">عكس الاتجاه</string>
+</resources>

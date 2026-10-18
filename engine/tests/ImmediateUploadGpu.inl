@@ -69,6 +69,40 @@ struct DelayedFenceObservation {
 };
 }
 
+AUREA_TEST(ExportGpuRetirementGpu, AuxiliaryWorkNeedsItsOwnCompletionWithAndWithoutANormalFrame) {
+    AUREA_REQUIRE_GPU();
+    for (const bool normalFrame : {false, true}) {
+        Gpu isolated;
+        AUREA_CHECK(isolated.ok); if (!isolated.ok) return;
+        auto& backend = isolated.backend;
+        const u32 errors = vk::Backend::validation_errors();
+        u64 frameNumber = 0;
+        if (normalFrame) {
+            FrameBegin frame;
+            AUREA_CHECK(backend.begin_offscreen_frame(frame).ok());
+            AUREA_CHECK(backend.end_frame().ok());
+            frameNumber = backend.last_submitted_frame();
+            AUREA_CHECK(frameNumber != 0);
+            AUREA_CHECK(backend.wait_frame(frameNumber, 1'000'000'000ull).ok());
+        } else AUREA_CHECK_EQ(backend.last_submitted_frame(), 0u);
+        DelayedFenceObservation completion(backend);
+        AUREA_CHECK_EQ(vk::ImmediateSubmissionTestAccess::submit(backend).code(), Errc::Timeout);
+        bool retired = false;
+        backend.defer_until_gpu_done([](void* flag) { *static_cast<bool*>(flag) = true; }, &retired);
+        // The old frame fence says ready although the newer upload is pending.
+        AUREA_CHECK(backend.wait_frame(frameNumber, 0).ok());
+        AUREA_CHECK_EQ(backend.poll_export_work().code(), Errc::Timeout);
+        AUREA_CHECK(!retired);
+        AUREA_CHECK_EQ(vk::ImmediateSubmissionTestAccess::pending(backend), 1u);
+        completion.release();
+        AUREA_CHECK_EQ(completion.await_real_completion(), VK_SUCCESS);
+        AUREA_CHECK(backend.poll_export_work().ok());
+        AUREA_CHECK(retired);
+        AUREA_CHECK_EQ(vk::ImmediateSubmissionTestAccess::pending(backend), 0u);
+        AUREA_CHECK_EQ(vk::Backend::validation_errors() - errors, 0u);
+    }
+}
+
 AUREA_TEST(UploadLifetimeGpu, TimedOutSubmissionKeepsItsFenceAndDeferredResourcesUntilCompletion) {
     AUREA_REQUIRE_GPU();
     Gpu isolated;

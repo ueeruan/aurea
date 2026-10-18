@@ -290,3 +290,37 @@ AUREA_TEST(ExportSourceStartupGpu, CancelReturnsPromptlyWhileTheUninterruptibleO
     AUREA_CHECK_EQ(factory.state->returned.load(), factory.state->entered.load());
     AUREA_CHECK(factory.state->factoryAlive.load());
 }
+
+AUREA_TEST(ExportSourceStartupGpu, TwoRetiringSourcesBoundAdmissionAndReleaseAllowsRetry) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    using namespace export_source_startup_test;
+    OwnedFiles files; AUREA_CHECK(files.create());
+    OpeningFactory factory(config(), Mode::Held);
+    Rig rig(config(), 30, 4, 1, &factory, nullptr, 0, false, OwnedFiles::delayed,
+        ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 100);
+    ReleaseBeforeRigDestruction guard{factory.state};
+    AUREA_CHECK(rig.ok); if (!rig.ok) return;
+    rig.e.media().close_all(); factory.arm(0);
+    for (u32 attempt = 0; attempt < 2; ++attempt) {
+        const Outcome out = run_export(rig, 36, 30, false, 2);
+        check_media_failure(rig, out);
+        AUREA_CHECK(out.seconds < 1);
+        AUREA_CHECK_EQ(factory.state->active.load(), attempt + 1);
+    }
+    ExportSettings settings; settings.height = 36;
+    AUREA_CHECK_EQ(rig.e.start_export(settings, "nao-usado.mp4").code(), Errc::BudgetExceeded);
+    AUREA_CHECK_EQ(rig.e.start_image_export(ImageExportSettings{}, "nao-usado.png").code(), Errc::BudgetExceeded);
+    AUREA_CHECK_EQ(factory.state->entered.load(), 2u);
+    factory.state->release.store(true);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (factory.state->active.load() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const Outcome retry = run_export(rig, 36, 30, false, 3);
+    AUREA_CHECK(retry.finished); AUREA_CHECK_EQ(retry.p.result, Errc::Ok);
+    AUREA_CHECK_EQ(retry.p.framesDone, 4u);
+    AUREA_CHECK(rig.cap.finished);
+    rig.e.shutdown();
+    AUREA_CHECK_EQ(factory.state->active.load(), 0u);
+    AUREA_CHECK_EQ(factory.state->returned.load(), factory.state->entered.load());
+    AUREA_CHECK(factory.state->factoryAlive.load());
+}

@@ -305,7 +305,7 @@ Result<u64> Engine::apply_motion_track(u64 target,u32 apply,bool lock,f32 smooth
         const bool reusable=std::any_of(dst->effects.begin(),dst->effects.end(),[&](const auto& e){return e.id==dst->motionTrackEffect&&e.type==effect_type_id(effect_keys::kCornerPin);});
         if(!effectRegistry_.params(effect_type_id(effect_keys::kCornerPin))||(!reusable&&dst->effects.size()>=kMaxEffectCount))return Status{Errc::InvalidState};
     }
-    history_.before_mutation(*comp,project_->timeline().current(),apply==3?"Stabilize video":"Apply motion tracking");modelRevision_.fetch_add(1,std::memory_order_acq_rel);
+    history_.before_mutation(*comp,project_->timeline().current(),apply==3?"Stabilize video":"Apply motion tracking");bump_model_revision_locked();
     LayerId destId=dst?LayerId::unpack(apply==3?j->layer:target):comp->add_layer(apply==4?LayerKind::Shape:apply==5?LayerKind::Text:LayerKind::Null,"Motion track");
     dst=comp->layer(destId);src=comp->layer(LayerId::unpack(j->layer));if(!dst||!src)return Status{Errc::OutOfMemory};
     if(apply==0||apply==4||apply==5){dst->start=src->start;dst->end=src->end;dst->transform.anchor={50,50,0};if(apply==4){dst->shape.bounds={0,0,100,100};dst->shape.filled=true;}if(apply==5)dst->text.content="Text";}

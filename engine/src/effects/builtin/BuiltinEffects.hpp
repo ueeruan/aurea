@@ -60,8 +60,17 @@ void register_lens_gradient(EffectRegistry& r);
 void register_pixel_encoder(EffectRegistry& r);
 void register_starglow(EffectRegistry& r);
 void register_pix_dither(EffectRegistry& r);
+void register_color_quantize_effects(EffectRegistry& r);
+void register_glow_scan_effect(EffectRegistry& r);
 void register_video_glitch(EffectRegistry& r);
 void register_displace_transform(EffectRegistry& r);
+void register_raster_extrude(EffectRegistry& r);
+/// Animar parte 3D, Esconder partes 3D, Trocar textura 3D, 3D Shatter e
+/// 3D Stroke (Object3DEffects.cpp). No fim.
+void register_object3d_effects(EffectRegistry& r);
+/// Flow Retime (câmera lenta por optical flow) e Flow Motion Blur
+/// (FlowTimeEffects.cpp). No fim.
+void register_flow_time_effects(EffectRegistry& r);
 /// Shape 3D Layout (PatternEffects.cpp): o Text 3D Layout das formas 3D.
 void register_shape3d_layout_effect(EffectRegistry& r);
 /// Detectar movimento (MotionDetectEffect.cpp). Sempre no fim.
@@ -79,6 +88,16 @@ void register_disintegrate_effect(EffectRegistry& r);
 void register_mesh_warp_effect(EffectRegistry& r);
 /// Fantoche — pinos com ARAP (PuppetEffect.cpp). No fim.
 void register_puppet_effect(EffectRegistry& r);
+/// Pacote CC: distorções/ladrilhos (CCEffects.cpp), estilo/luz/cor
+/// (CCStylizeEffects.cpp) e transições (CCTransitions.cpp). No fim.
+void register_cc_distort_effects(EffectRegistry& r);
+void register_cc_stylize_effects(EffectRegistry& r);
+void register_cc_transitions(EffectRegistry& r);
+/// Saber (SaberEffect.cpp) e Luma Dissolve (LumaDissolveEffect.cpp). No fim.
+void register_saber_effect(EffectRegistry& r);
+void register_luma_dissolve_effect(EffectRegistry& r);
+/// Progresso do desenho (DrawingProgressEffect.cpp) — 0.2.5. No fim.
+void register_drawing_progress_effect(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

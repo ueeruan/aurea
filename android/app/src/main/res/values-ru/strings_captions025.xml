@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legendas automáticas 0.2.5: idioma da fala e qualidade do Whisper no aparelho. -->
+<resources>
+    <string name="cap025_lang_auto">Определять автоматически</string>
+    <string name="cap025_quality">Качество распознавания</string>
+    <string name="cap025_quality_fast">Быстрое</string>
+    <string name="cap025_quality_balanced">Сбалансированное</string>
+    <string name="cap025_quality_accurate">Точное</string>
+    <string name="cap025_quality_fast_hint">Лёгкая модель: работает быстрее, но чаще ошибается в словах.</string>
+    <string name="cap025_quality_balanced_hint">Баланс скорости и точности.</string>
+    <string name="cap025_quality_accurate_hint">Большая модель: точнее распознаёт слова и имена, но работает дольше.</string>
+    <string name="cap025_quality_unavailable">Сейчас на устройстве недостаточно свободной памяти для этого качества.</string>
+    <string name="cap025_quality_ready">Модель уже загружена: работает без интернета.</string>
+    <string name="cap025_quality_needs_download">При первом использовании загружается %1$d МБ, потом работает без интернета.</string>
+    <string name="cap025_quality_fallback">Сейчас мало свободной памяти: используется качество «%1$s».</string>
+</resources>

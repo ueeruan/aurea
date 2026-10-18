@@ -49,13 +49,13 @@ class TimelineCoordinatesTest {
     private fun surface() = compose.onNodeWithTag("coordinates.timeline")
     private var id = 0L
 
-    private fun launch(keys: List<Int> = listOf(0, 30, 60)) {
+    private fun launch(keys: List<Int> = listOf(0, 30, 60), referenceTrial: Boolean = false) {
         assertTrue(context.packageName.endsWith(".uitest"))
         compose.setContent {
             store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
             val density = LocalDensity.current
             state = remember { TimelineState() }
-            metrics = remember { TimelineMetrics(density.density, density.fontScale) }
+            metrics = remember { TimelineMetrics(density.density, density.fontScale, referenceTrial = referenceTrial) }
             val scope = rememberCoroutineScope()
             controller = remember { TimelineController(store, state, scope) }
             val measurer = rememberTextMeasurer()
@@ -99,12 +99,18 @@ class TimelineCoordinatesTest {
     }
 
     private fun assertPixels(frame: Int, message: String) {
-        val pixels = surface().captureToImage().toPixelMap()
+        val image = surface().captureToImage()
+        val pixels = image.toPixelMap()
         val cy = metrics.rowsTop + if (state.compact) metrics.diamondCyCompact else metrics.diamondCyNormal
         val row = (cy - 2 * metrics.density).roundToInt()
         fun near(a: Color, b: Color) = abs(a.red - b.red) < .04f && abs(a.green - b.green) < .04f && abs(a.blue - b.blue) < .04f
         val diamond = (0 until pixels.width).filter { near(pixels[it, row], AureaTimeline.KeyframeOn) }
         val line = (0 until pixels.width).filter { near(pixels[it, (cy + 35 * metrics.density).roundToInt()], AureaColors.Playhead) }
+        if (diamond.size < 2 || message.startsWith("selected dense key")) {
+            File(context.filesDir, "coordinates-frame-$frame.png").outputStream().use {
+                assertTrue(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+            }
+        }
         assertTrue("$message: diamond must be drawn", diamond.size >= 2)
         assertTrue("$message: playhead must be drawn", line.isNotEmpty())
         val center = (diamond.first() + diamond.last() + 1) / 2.0
@@ -188,6 +194,45 @@ class TimelineCoordinatesTest {
         }
         File(context.filesDir, "beta007-marker-empty.png").outputStream().use {
             assertTrue(empty.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+        }
+    }
+
+    @Test fun shortClipBodyDoesNotPaintPastItsBeatWhenZoomingOut() {
+        launch(emptyList(), referenceTrial = EditorTimelineRefresh.enabled)
+        compose.runOnIdle {
+            store.trimStart(id, 90)
+            store.trimEnd(id, 120)
+            assertTrue(store.editMarker(-1, 120, 0xFFFF00FF.toInt(), "Short clip end"))
+            store.clearSelection()
+            state.compact = false
+            state.scrollY = 0f
+        }
+        compose.waitUntil(5000) { store.layers.single().startFrame == 90 && store.layers.single().endFrame == 120 }
+        for (zoom in listOf(800f, 100f, 20f, 2f, 20f, 100f, 800f)) for (selected in if (zoom <= 20f) listOf(false, true) else listOf(false)) {
+            compose.runOnIdle {
+                if (selected) store.select(id, openOptions = false) else store.clearSelection()
+                state.heldView = 120.375; state.pps = zoom
+            }
+            compose.waitForIdle()
+            val image = surface().captureToImage()
+            val pixels = image.toPixelMap()
+            val expectedEnd = pixels.width / 2.0 + (120 - state.heldView) * zoom * metrics.density / 30.0
+            val row = (metrics.rowsTop + metrics.bar / 2).roundToInt()
+            // Skip the one pixel antialiasing footprint at the real edge.
+            // A 40dp minimum body would paint far beyond it at 2dp/second.
+            for (x in kotlin.math.ceil(expectedEnd + 2).toInt() until minOf(pixels.width, kotlin.math.ceil(expectedEnd + 45 * metrics.density).toInt())) {
+                val pixel = pixels[x, row]
+                val background = AureaColors.EditorCanvas
+                assertTrue("Clip body or narrow end grip extends past beat: selected=$selected zoom=$zoom x=$x end=$expectedEnd",
+                    abs(pixel.red - background.red) < .04f && abs(pixel.green - background.green) < .04f && abs(pixel.blue - background.blue) < .04f)
+            }
+            assertEquals("Zoom must not mutate duration", 120, store.layers.single().endFrame)
+            if (zoom <= 20f || zoom == 800f) {
+                val directory = File(context.getExternalFilesDir(null), "beta3-timeline-zoom").apply { mkdirs() }
+                File(directory, "zoom-${zoom.toInt()}-selected-$selected.png").outputStream().use {
+                    assertTrue(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                }
+            }
         }
     }
 

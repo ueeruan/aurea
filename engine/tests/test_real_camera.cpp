@@ -69,6 +69,53 @@ AUREA_TEST(RealCamera, EulerWrapAndSensorToARTransitionDoNotJump) {
     AUREA_CHECK(capture.sample(camera_pose().data(), ++clock, true, 1, false));
     AUREA_CHECK_NEAR(capture.rotation().z, 179.f, .001f);
 }
+AUREA_TEST(RealCamera, PanWithTiltedPhoneTurnsAboutSceneVerticalWithoutRollingHorizon) {
+    // Beta 12/10 ("igual a gravar"): the take starts with the phone tilted 30°
+    // down; a 40° pan about gravity must pan the level virtual camera about the
+    // scene's vertical, not about the tilted phone axis (that rolled the horizon).
+    auto pose_of = [](Quat q) {
+        const Mat4 m = Mat4::from_quat(q.normalized());
+        std::array<f32, 16> out{};
+        for (u32 c = 0; c < 4; ++c) for (u32 r = 0; r < 4; ++r) out[c * 4 + r] = (&m.col[c].x)[r];
+        return out;
+    };
+    tracking::RealCameraCapture capture;
+    capture.reset({0, 0, -1000}, {}, 500);
+    u64 clock = 1;
+    const Quat tilt = Quat::from_axis_angle({1, 0, 0}, -30 * kDeg2Rad);
+    AUREA_CHECK(capture.sample(pose_of(tilt).data(), clock, false, 1, false));
+    const Quat pan = Quat::from_axis_angle({0, 1, 0}, 40 * kDeg2Rad);
+    AUREA_CHECK(capture.sample(pose_of(pan * tilt).data(), clock += 16'666'667, false, 1, false));
+    AUREA_CHECK_NEAR(capture.rotation().x, 0.f, .05f);
+    AUREA_CHECK_NEAR(capture.rotation().z, 0.f, .05f);
+    AUREA_CHECK_NEAR(std::fabs(capture.rotation().y), 40.f, .05f);
+    // No smoothing at 100 %: a single sample already lands the whole motion.
+}
+AUREA_TEST(RealCamera, WalkingMovesAlongTheCameraHeadingWithoutARAndDepthScalesForwardOnly) {
+    // Beta 2 da 0.1.6: "mais opções de movimento em Z, andar para frente".
+    tracking::RealCameraCapture capture;
+    capture.reset({0, 0, -1000}, {}, 500);
+    u64 clock = 1;
+    AUREA_CHECK(capture.sample(camera_pose().data(), clock, false, 1, false));
+    AUREA_CHECK(!capture.walked());
+    capture.set_walk(1.0f);   // 1 m/s para frente, só sensor de giro (sem AR)
+    for (u32 i = 0; i < 10; ++i) AUREA_CHECK(capture.sample(camera_pose().data(), clock += 100'000'000, false, 1, false));
+    AUREA_CHECK(capture.walked());
+    AUREA_CHECK_NEAR(capture.position().z, -500.f, .5f);   // 1 s × 1 m/s × 500 px/m
+    AUREA_CHECK_NEAR(capture.position().x, 0.f, .01f);
+    capture.set_walk(0);
+    AUREA_CHECK(capture.sample(camera_pose().data(), clock += 100'000'000, false, 1, false));
+    AUREA_CHECK_NEAR(capture.position().z, -500.f, .5f);
+    // Profundidade 2×: o passo para frente medido pelo AR dobra; o lateral, não.
+    tracking::RealCameraCapture ar;
+    ar.reset({0, 0, -1000}, {}, 500);
+    ar.set_depth_scale(2.0f);
+    clock = 1;
+    AUREA_CHECK(ar.sample(camera_pose().data(), clock, true, 1, false));
+    AUREA_CHECK(ar.sample(camera_pose({.2f, 0, -.5f}).data(), clock += 16'666'667, true, 1, false));
+    AUREA_CHECK_NEAR(ar.position().z, -500.f, .5f);
+    AUREA_CHECK_NEAR(ar.position().x, 100.f, .5f);
+}
 AUREA_TEST(RealCamera, InvalidStaleAndNonRigidSamplesCannotChangePose) {
     tracking::RealCameraCapture capture;
     capture.reset({1, 2, 3}, {}, 200);
@@ -164,6 +211,37 @@ AUREA_TEST(RealCamera, LostTrackingRecordsConstantPoseUntilTrackingReturns) {
         AUREA_CHECK_EQ(z->keys[1].value, z->keys[2].value);
         AUREA_CHECK_EQ(z->keys[2].value, z->keys[3].value);
     }
+    AUREA_CHECK(e.real_camera_record(false).ok());
+}
+AUREA_TEST(RealCamera, SameFrameSampleThenHoldDoesNotRelabelAnEarlierPoseAsNewHeldKey) {
+    Engine e;AUREA_CHECK(e.initialize(camera_config()).ok());
+    AUREA_CHECK(e.new_project(800,600,30,"own same-frame hold proof").ok());
+    const auto camera=e.add_camera();AUREA_CHECK(camera.ok());if(!camera.ok())return;
+    const u64 id=*camera;AUREA_CHECK(e.real_camera_start(id).ok());AUREA_CHECK(e.real_camera_record(true).ok());
+    AUREA_CHECK(e.real_camera_sample(camera_pose().data(),1,true,1,false).ok());
+    auto* z=camera_layer(e,id)->tracks.find(TrackProperty::PositionZ);AUREA_CHECK(z && z->keys.size()==1);
+    if(!z || z->keys.size()!=1)return;
+    const f32 keyF=z->keys[0].value;const i64 sampledFrame=e.real_camera_status().lastFrame;
+    AUREA_CHECK_EQ(sampledFrame,i64{0});
+    // The sensor updates its current pose while the same timeline frame still
+    // contains its first recorded key. This successful sample is a key no-op.
+    AUREA_CHECK(e.real_camera_sample(camera_pose({0,0,-.5f}).data(),100'000'001,true,1,false).ok());
+    AUREA_CHECK_EQ(e.real_camera_status().lastFrame,sampledFrame);
+    AUREA_CHECK_EQ(z->keys.size(),usize{1});AUREA_CHECK_EQ(z->keys[0].value,keyF);
+    const i64 beforeHold=e.real_camera_status().lastFrame;AUREA_CHECK(e.real_camera_hold().ok());
+    const i64 sameFrameHold=e.real_camera_status().lastFrame;
+    AUREA_CHECK_EQ(sameFrameHold,beforeHold);AUREA_CHECK_EQ(z->keys.size(),usize{1});
+    AUREA_CHECK_EQ(z->keys[0].value,keyF);
+    e.playback().seek(FrameIndex{1},monotonic_ns());AUREA_CHECK(e.real_camera_hold().ok());
+    const i64 firstNewHold=e.real_camera_status().lastFrame;AUREA_CHECK_EQ(firstNewHold,i64{1});
+    z=camera_layer(e,id)->tracks.find(TrackProperty::PositionZ);AUREA_CHECK(z && z->keys.size()==2);if(!z || z->keys.size()!=2)return;
+    const f32 keyNext=z->keys[1].value;AUREA_CHECK(std::abs(keyNext-keyF)>1.f);
+    e.playback().seek(FrameIndex{2},monotonic_ns());AUREA_CHECK(e.real_camera_hold().ok());
+    const i64 secondNewHold=e.real_camera_status().lastFrame;AUREA_CHECK_EQ(secondNewHold,i64{2});
+    z=camera_layer(e,id)->tracks.find(TrackProperty::PositionZ);AUREA_CHECK(z && z->keys.size()==3);if(!z || z->keys.size()!=3)return;
+    AUREA_CHECK_EQ(z->keys[1].value,z->keys[2].value);
+    std::printf("    own same-frame hold: before=%lld after=%lld keyF=%.6f; newHoldFrames=%lld,%lld keyNext=%.6f keyAfter=%.6f; relabelingNoopAsHoldChangesPose=1\n",
+        static_cast<long long>(beforeHold),static_cast<long long>(sameFrameHold),keyF,static_cast<long long>(firstNewHold),static_cast<long long>(secondNewHold),keyNext,z->keys[2].value);
     AUREA_CHECK(e.real_camera_record(false).ok());
 }
 AUREA_TEST(RealCamera, LivePreviewAfterRecordingDoesNotEditAnyRecordedKey) {

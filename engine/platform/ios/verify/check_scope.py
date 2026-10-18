@@ -25,6 +25,7 @@ REPO = os.path.normpath(os.path.join(ROOT, ".."))
 APPLE_IMPORTS = {
     "SwiftUI", "PhotosUI", "Photos", "AVKit", "QuickLook", "Foundation", "UIKit", "Metal", "MetalKit", "QuartzCore", "CoreGraphics", "CoreText",
     "CoreVideo", "CoreMedia", "CoreImage", "VideoToolbox", "AVFoundation", "AudioToolbox", "CoreAudio",
+    "ARKit", "CoreMotion",
     "ImageIO", "UniformTypeIdentifiers", "simd", "Combine", "Dispatch", "os", "Swift",
     "Accelerate", "CoreFoundation", "CoreTransferable", "IOSurface", "AVFAudio", "os.log", "CryptoKit", "Security", "Darwin", "MetricKit",
 }
@@ -95,8 +96,10 @@ def main():
         fail("bundle id divergente do Android (%s x %s)" % (pbx_id, android_id))
 
     # --- 4. o iOS nao alterou o motor ---------------------------------------
+    # Test fixtures compare bundled mobile resources; those filesystem paths
+    # do not make the production engine depend on Objective-C or Swift.
     forbidden = [os.path.join(IOS, "..", "..", "src"), os.path.join(IOS, "..", "..", "gpu"),
-                 os.path.join(IOS, "..", "..", "include"), os.path.join(IOS, "..", "..", "tests")]
+                 os.path.join(IOS, "..", "..", "include")]
     for path in forbidden:
         if not os.path.isdir(path):
             continue

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Navegador de efeitos 0.2.5: destaques, recentes/favoritos e ladrilhos de categoria. -->
+<resources>
+    <string name="fxui_group_repeat">Repeat</string>
+    <string name="fxui_group_visibility">Opacity and visibility</string>
+    <string name="fx_browser_title">Effect browser</string>
+    <string name="fx_browser_featured">Featured</string>
+    <string name="fx_browser_quick">Recent and favorites</string>
+    <string name="fx_browser_recent_empty">Effects you use show up here.</string>
+    <string name="fx_browser_favorites_empty">Hold an effect to save it to favorites.</string>
+    <string name="fx_browser_page_recent">Show recent</string>
+    <string name="fx_browser_page_favorites">Show favorites</string>
+    <string name="fx_browser_categories">Categories</string>
+    <string name="fx_browser_prev_group">Previous category: %1$s</string>
+    <string name="fx_browser_next_group">Next category: %1$s</string>
+    <string name="fx_browser_heavy">Heavy effect</string>
+    <string name="fx_browser_open_group">Open category %1$s</string>
+</resources>

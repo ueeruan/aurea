@@ -656,5 +656,109 @@
         ]
       }
     ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "Luma Dissolve (entrada)",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.transition.luma_dissolve",
+        "params": [
+          {
+            "id": "progress",
+            "v": [
+              100,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "softness",
+            "v": [
+              25,
+              0,
+              0,
+              0
+            ]
+          }
+        ],
+        "tracks": [
+          {
+            "param": "progress",
+            "comp": 0,
+            "keys": [
+              [
+                0,
+                100,
+                2,
+                0.16,
+                1,
+                0.3,
+                1
+              ],
+              [
+                20,
+                0
+              ]
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "aurea_preset": 1,
+    "kind": "effects",
+    "name": "Luma Dissolve (saída)",
+    "fps": 30,
+    "effects": [
+      {
+        "key": "aurea.transition.luma_dissolve",
+        "params": [
+          {
+            "id": "progress",
+            "v": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "softness",
+            "v": [
+              25,
+              0,
+              0,
+              0
+            ]
+          }
+        ],
+        "tracks": [
+          {
+            "param": "progress",
+            "comp": 0,
+            "keys": [
+              [
+                0,
+                0,
+                2,
+                0.7,
+                0,
+                0.84,
+                0
+              ],
+              [
+                20,
+                100
+              ]
+            ]
+          }
+        ]
+      }
+    ]
   }
 ]

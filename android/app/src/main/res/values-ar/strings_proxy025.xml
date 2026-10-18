@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- تحسين الفيديوهات الثقيلة (نسخة التحرير)، 0.2.5. -->
+<resources>
+    <string name="proxy_settings_title">تحسين الفيديوهات الثقيلة</string>
+    <string name="proxy_mode_auto">تلقائي</string>
+    <string name="proxy_mode_always">دائمًا</string>
+    <string name="proxy_mode_off">متوقف</string>
+    <string name="proxy_settings_note">تحصل فيديوهات 4K وما فوق 60 إطارًا/ث وHEVC/10 بت أو ذات معدل البت المرتفع جدًا على نسخة خفيفة (720p) للتحرير فقط، تُنشأ في الخلفية. يستخدم التصدير الملف الأصلي دائمًا. دائمًا: كل ما فوق 720p أيضًا.</string>
+    <string name="proxy_clear_title">مسح الوسائط المحسّنة (%1$s ميغابايت)</string>
+    <string name="proxy_clear_title_unknown">مسح الوسائط المحسّنة</string>
+    <string name="proxy_clear_note">يحذف نسخ التحرير الخفيفة، وتُنشأ من جديد عند الحاجة</string>
+    <string name="proxy_cleared">أُزيلت الوسائط المحسّنة: %1$s ميغابايت</string>
+    <string name="proxy_optimizing">جارٍ التحسين %1$d%%</string>
+    <string name="proxy_optimizing_description">جارٍ تحسين فيديو ثقيل للتحرير: %1$d%%</string>
+    <string name="proxy_queued">فيديو ثقيل في انتظار التحسين</string>
+    <string name="proxy_ready">تم تحسين الفيديو: أصبح التحرير أخف</string>
+    <string name="proxy_failed">تعذّر تحسين فيديو؛ تستخدم المعاينة الملف الأصلي</string>
+</resources>

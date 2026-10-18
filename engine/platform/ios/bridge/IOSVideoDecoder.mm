@@ -782,6 +782,10 @@ public:
             NSArray<AVAssetTrack*>* video = [asset tracksWithMediaType:AVMediaTypeVideo];
             NSArray<AVAssetTrack*>* audio = [asset tracksWithMediaType:AVMediaTypeAudio];
             if (video.count == 0 && audio.count == 0) return false;
+            // Bitrate médio do arquivo para a política do proxy de edição.
+            id bytes = nil;
+            if ([url getResourceValue:&bytes forKey:NSURLFileSizeKey error:nil] && [bytes isKindOfClass:[NSNumber class]])
+                out.fileBytes = [(NSNumber*)bytes unsignedLongLongValue];
 
             if (video.count > 0) {
                 AVAssetTrack* track = video.firstObject;
@@ -837,7 +841,10 @@ public:
             NSArray<AVAssetTrack*>* tracks = [av tracksWithMediaType:AVMediaTypeVideo];
             if (tracks.count == 0) return nullptr;
             return std::unique_ptr<VideoDecoderBackend>(
-                new (std::nothrow) AVFoundationVideoDecoder(av, tracks.firstObject, priority != MediaPriority::Thumbnail && zeroCopy_.load(), priority == MediaPriority::Thumbnail));
+                new (std::nothrow) AVFoundationVideoDecoder(av, tracks.firstObject,
+                    // Export compatível (o decoder travou antes): planos na CPU, sem IOSurface.
+                    priority != MediaPriority::Thumbnail && priority != MediaPriority::ExportSoftwareDecode && zeroCopy_.load(),
+                    priority == MediaPriority::Thumbnail));
         }
     }
 

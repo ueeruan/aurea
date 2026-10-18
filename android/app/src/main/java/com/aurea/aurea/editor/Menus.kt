@@ -74,6 +74,10 @@ import kotlin.math.roundToInt
  */
 @Composable
 internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> Unit) {
+    if (store.selection.size > 1) {
+        GroupSelectionSheet(store, onDismiss)
+        return
+    }
     val id = store.primary
     val index = store.layers.indexOfFirst { it.id == id }
     val row = store.layers.getOrNull(index)
@@ -531,6 +535,13 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         MenuItemRow(ShellGlyph.ScissorsAlt, stringResource(R.string.editor_remover_espacos_vazios), act { store.removeGaps() })
 
         MenuSection(stringResource(R.string.editor_projeto_cbe9))
+        // Interface do projeto (0.2.5): a Composição é esta; a Edição é a de montagem.
+        MenuItemRow(
+            CupertinoGlyph.RectangleStack,
+            stringResource(R.string.ui_mode_switch_to_edit),
+            act { store.setUiMode(com.aurea.aurea.state.UI_MODE_EDIT) },
+            detail = stringResource(R.string.ui_mode_edit_hint),
+        )
         MenuItemRow(
             ShellGlyph.ScissorsAlt,
             stringResource(R.string.editor_aparar_projeto_cabecote),
@@ -549,6 +560,29 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
             CupertinoGlyph.RectangleStack, stringResource(R.string.editor_agrupar_camadas_escolhidas),
             if (store.selection.isNotEmpty()) act { store.precompose() } else null,
         )
+        MenuItemRow(CupertinoGlyph.Crop, stringResource(R.string.editor_group_mask),
+            if (store.selection.size >= 2) act { store.groupAndMask(false) } else null,
+            detail = stringResource(R.string.editor_group_mask_hint))
+        MenuItemRow(CupertinoGlyph.Crop, stringResource(R.string.editor_group_exclude),
+            if (store.selection.size >= 2) act { store.groupAndMask(true) } else null,
+            detail = stringResource(R.string.editor_group_exclude_hint))
+    }
+}
+
+/** Group commands use the shared engine's stacking order, regardless of tap order. */
+@Composable
+internal fun GroupSelectionSheet(store: EditorStore, onDismiss: () -> Unit) {
+    fun action(block: () -> Unit): () -> Unit = { onDismiss(); block() }
+    ShellMenuSheet(onDismiss) {
+        MenuSection(stringResource(R.string.editor_grupo))
+        MenuItemRow(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_agrupar_camadas_escolhidas),
+            if (store.selection.isNotEmpty()) action { store.precompose() } else null)
+        MenuItemRow(CupertinoGlyph.Crop, stringResource(R.string.editor_group_mask),
+            if (store.selection.size >= 2) action { store.groupAndMask(false) } else null,
+            detail = stringResource(R.string.editor_group_mask_hint))
+        MenuItemRow(CupertinoGlyph.Crop, stringResource(R.string.editor_group_exclude),
+            if (store.selection.size >= 2) action { store.groupAndMask(true) } else null,
+            detail = stringResource(R.string.editor_group_exclude_hint))
     }
 }
 

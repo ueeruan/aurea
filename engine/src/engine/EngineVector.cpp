@@ -74,7 +74,7 @@ Result<u64> Engine::add_vector_layer(u32 preset) noexcept {
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
     history_.before_mutation(*comp, project_->timeline().current(), "camada vetorial");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const LayerId lid = comp->add_layer(LayerKind::Shape, preset == 0 ? "Desenho vetorial" : "Vetor");
     Layer* l = comp->layer(lid);
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
@@ -110,7 +110,7 @@ bool Engine::set_vector_document(u64 layerId, const f32* data, usize count, cons
     if (!vector::decode_document(data, count, names, d) || d.groups.size() != l->shape.vector.groups.size()) return false;
     if (d == l->shape.vector) return true;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "camada vetorial");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->shape.vector = std::move(d);
     project_->mark_dirty();
     request_render();
@@ -145,7 +145,7 @@ bool Engine::set_vector_path(u64 layerId, u32 group, u32 path, const f32* bez, u
     usize pos = 0;
     if (!vector::decode_path(bez, count, pos, b)) return false;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "editar caminho");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     VectorPath& p = l->shape.vector.groups[group].paths[path];
     if (p.kind != VectorPathKind::Free) vector::make_editable(p);
     if (p.keys.empty()) {
@@ -174,7 +174,7 @@ bool Engine::ensure_vector_path_key(u64 layerId, u32 group, u32 path) noexcept {
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe de forma");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     VectorPath& p = l->shape.vector.groups[group].paths[path];
     if (p.kind != VectorPathKind::Free) vector::make_editable(p);
     const i64 local = l->local_time(playback_.current()).value;
@@ -200,7 +200,7 @@ bool Engine::toggle_vector_path_key(u64 layerId, u32 group, u32 path) noexcept {
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe de forma");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     VectorPath& p = l->shape.vector.groups[group].paths[path];
     if (p.kind != VectorPathKind::Free) vector::make_editable(p);
     const i64 local = l->local_time(playback_.current()).value;
@@ -226,7 +226,7 @@ i32 Engine::add_vector_group(u64 layerId, u32 pathKind) noexcept {
     Layer* l = vector_layer(comp, layerId);
     if (!l || l->shape.vector.groups.size() >= 4096) return -1;
     history_.before_mutation(*comp, project_->timeline().current(), "novo grupo vetorial");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const Rect b = l->shape.bounds;
     const u32 idx = static_cast<u32>(l->shape.vector.groups.size());
     l->shape.vector.groups.push_back(default_group(pathKind, Vec2{b.x + b.w * 0.5f, b.y + b.h * 0.5f}, 0.3f * std::max(1.0f, std::min(b.w, b.h)), idx));
@@ -241,7 +241,7 @@ bool Engine::remove_vector_group(u64 layerId, u32 group) noexcept {
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "remover grupo vetorial");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->shape.vector.groups.erase(l->shape.vector.groups.begin() + group);
     drop_group_tracks(*l, group);
     project_->mark_dirty();
@@ -263,7 +263,7 @@ i32 Engine::add_vector_path(u64 layerId, u32 group, u32 pathKind, const f32* bez
         p.kind = VectorPathKind::Free;
     }
     history_.before_mutation(*comp, project_->timeline().current(), "novo caminho");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     g.paths.push_back(std::move(p));
     project_->mark_dirty();
     request_render();
@@ -276,7 +276,7 @@ bool Engine::remove_vector_path(u64 layerId, u32 group, u32 path) noexcept {
     Layer* l = vector_layer(comp, layerId);
     if (!l || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "remover caminho");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     auto& ps = l->shape.vector.groups[group].paths;
     ps.erase(ps.begin() + path);
     project_->mark_dirty();
@@ -292,7 +292,7 @@ bool Engine::make_vector_path_editable(u64 layerId, u32 group, u32 path) noexcep
     VectorPath& p = l->shape.vector.groups[group].paths[path];
     if (p.kind == VectorPathKind::Free) return true;
     history_.before_mutation(*comp, project_->timeline().current(), "converter em caminho");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     vector::make_editable(p);
     project_->mark_dirty();
     request_render();
@@ -329,7 +329,7 @@ bool Engine::set_vector_param(u64 layerId, u32 group, u32 param, f32 value, bool
     f32* r = vector::param_ref(g, param);
     if (!r) return false;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "valor vetorial");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     value = vector::clamp_param(param, value);
     Track* tr = l->tracks.find(TrackProperty::VectorParam, group, param);
     if (tr && !tr->keys.empty()) {
@@ -355,7 +355,7 @@ bool Engine::ensure_vector_param_key(u64 layerId, u32 group, u32 param) noexcept
     f32* r = vector::param_ref(l->shape.vector.groups[group], param);
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe vetorial");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const FrameIndex local = l->local_time(playback_.current());
     Track& tr = l->tracks.get_or_create(TrackProperty::VectorParam, group, param);
     const f32 atual = tr.keys.empty() ? *r : tr.sample(local);
@@ -373,7 +373,7 @@ bool Engine::toggle_vector_param_key(u64 layerId, u32 group, u32 param) noexcept
     f32* r = vector::param_ref(l->shape.vector.groups[group], param);
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe vetorial");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const FrameIndex local = l->local_time(playback_.current());
     Track& tr = l->tracks.get_or_create(TrackProperty::VectorParam, group, param);
     const u32 k = tr.find_exact(local);
@@ -440,7 +440,7 @@ bool Engine::set_shape_param(u64 layerId, u32 param, f32 value, bool continuing)
     f32* r = shape_param_ref(l->shape, param);
     if (!r) return false;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "valor da forma");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     value = clamp_shape_param(param, value);
     Track* tr = l->tracks.find(TrackProperty::ShapeParam, 0, param);
     if (tr && !tr->keys.empty()) {
@@ -474,7 +474,7 @@ bool Engine::ensure_shape_param_key(u64 layerId, u32 param) noexcept {
     f32* r = shape_param_ref(l->shape, param);
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe da forma");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const FrameIndex local = l->local_time(playback_.current());
     Track& tr = l->tracks.get_or_create(TrackProperty::ShapeParam, 0, param);
     // COM keyframe aqui: regrava o valor AVALIADO (não apaga). É o que o
@@ -496,7 +496,7 @@ bool Engine::toggle_shape_param_key(u64 layerId, u32 param) noexcept {
     f32* r = shape_param_ref(l->shape, param);
     if (!r) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "keyframe da forma");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const FrameIndex local = l->local_time(playback_.current());
     Track& tr = l->tracks.get_or_create(TrackProperty::ShapeParam, 0, param);
     const u32 k = tr.find_exact(local);
@@ -521,7 +521,7 @@ Result<u64> Engine::add_freehand_path(u64 layerId, const f32* xy, usize count, f
     Layer* l = layerId ? vector_layer(comp, layerId) : nullptr;
     if (layerId && !l) return Status{Errc::NotFound, "camada vetorial nao encontrada"};
     history_.before_mutation(*comp, project_->timeline().current(), "desenho à mão livre");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
     u64 result = layerId;
     if (!l) {
@@ -561,7 +561,7 @@ Result<u64> Engine::import_svg(const std::string& text, const char* name) noexce
     Composition* comp = current_composition();
     if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
     history_.before_mutation(*comp, project_->timeline().current(), "importar SVG");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     const LayerId lid = comp->add_layer(LayerKind::Shape, name && *name ? name : "SVG");
     Layer* l = comp->layer(lid);
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
@@ -590,7 +590,7 @@ bool Engine::set_text_path(u64 layerId, u64 pathLayer, f32 offset, bool perpendi
     if (!l || l->kind != LayerKind::Text) return false;
     if (pathLayer != 0 && (pathLayer == layerId || !vector_layer(comp, pathLayer))) return false;
     history_.before_mutation(*comp, project_->timeline().current(), "texto no caminho");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     l->text.pathLayer = pathLayer;
     l->text.pathOffset = std::clamp(offset, -100000.0f, 100000.0f);
     l->text.pathPerpendicular = perpendicular;

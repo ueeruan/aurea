@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legendas automáticas 0.2.5: idioma da fala e qualidade do Whisper no aparelho. -->
+<resources>
+    <string name="cap025_lang_auto">اكتشاف تلقائي</string>
+    <string name="cap025_quality">جودة التفريغ النصي</string>
+    <string name="cap025_quality_fast">سريعة</string>
+    <string name="cap025_quality_balanced">متوازنة</string>
+    <string name="cap025_quality_accurate">دقيقة</string>
+    <string name="cap025_quality_fast_hint">نموذج خفيف: يفرّغ أسرع لكنه يخطئ في كلمات أكثر.</string>
+    <string name="cap025_quality_balanced_hint">توازن بين السرعة والدقة.</string>
+    <string name="cap025_quality_accurate_hint">نموذج أكبر: يتعرّف على كلمات وأسماء أكثر بدقة، لكنه يستغرق وقتًا أطول.</string>
+    <string name="cap025_quality_unavailable">لا تتوفر ذاكرة حرة كافية على هذا الجهاز لهذه الجودة الآن.</string>
+    <string name="cap025_quality_ready">النموذج منزّل مسبقًا: يعمل دون إنترنت.</string>
+    <string name="cap025_quality_needs_download">يُنزِّل ⁨%1$d MB⁩ عند أول استخدام، ثم يعمل دون إنترنت.</string>
+    <string name="cap025_quality_fallback">الذاكرة الحرة منخفضة الآن: يتم استخدام الجودة ⁨%1$s⁩.</string>
+</resources>

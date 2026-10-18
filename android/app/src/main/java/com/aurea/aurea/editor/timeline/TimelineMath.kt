@@ -6,6 +6,7 @@ import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.ln
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
@@ -45,18 +46,38 @@ internal object TimeAxis {
         if (view.isFinite()) view.coerceIn(0.0, (Int.MAX_VALUE - 1).toDouble()) else 0.0
 }
 
+/**
+ * Decoration must fit inside the temporal rectangle, including subpixel clips.
+ * Touch padding is independent and must never become painted duration.
+ */
+internal object ClipGeometry {
+    fun strokeWidth(width: Float, height: Float, requested: Float): Float =
+        max(0f, min(requested, min(width, height)))
+
+    fun cornerRadius(width: Float, height: Float, requested: Float): Float =
+        max(0f, min(requested, min(width, height) / 2f))
+
+    /** A fixed external grip must not dwarf a short clip at low zoom. */
+    fun trimPaintWidth(clipWidth: Float, requested: Float): Float =
+        max(0f, min(requested, clipWidth / 2f))
+
+    /** Narrow end grips finish at the beat; their padded hit target stays external. */
+    fun trimPaintEndInset(clipWidth: Float, requested: Float): Float =
+        if (clipWidth < requested * 2f) trimPaintWidth(clipWidth, requested) else 0f
+}
+
 /** Zoom em dp por segundo. */
 internal object Zoom {
     const val MIN_PPS = 2f
     const val MAX_PPS = 800f
-    /** A.01: 80 dp/s (10 riscos por segundo a 8 dp). */
-    const val DEFAULT_PPS = 80f
+    /** Reference editor initial scale: 100 dp per second. */
+    const val DEFAULT_PPS = 100f
     /** A.01 enquadra projetos longos (≥ 20 s) na largura ao abrir. */
     const val AUTO_FIT_MIN_SECONDS = 20f
 
     fun clamp(pps: Float): Float = if (pps.isFinite()) pps.coerceIn(MIN_PPS, MAX_PPS) else DEFAULT_PPS
 
-    /** `clamp((largura − 32) / segundos, 4, 80)` da A.01. */
+    /** Long projects fit the viewport while preserving the initial zoom ceiling. */
     fun autoFit(availableDp: Float, seconds: Float): Float =
         if (!seconds.isFinite() || !availableDp.isFinite() || seconds <= 0f) DEFAULT_PPS else (availableDp / seconds).coerceIn(4f, DEFAULT_PPS)
 

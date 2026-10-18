@@ -56,6 +56,9 @@ AUREA_TEST(CaptureProxyGpu, ReadyProxyCannotReplaceOriginalWhileFinalCaptureWait
         ("capture-proxy-" + std::to_string(monotonic_ns()));
     e.media().proxies().configure(&factory, capture_proxy_sink, nullptr, directory.generic_string());
     e.media().proxies().set_policy(26);
+    // A fonte sintética (96×54) só entra na política com o limiar zerado.
+    ProxyThresholds tiny; tiny.heavyPixels = 0;
+    e.media().proxies().set_thresholds(tiny);
     std::shared_ptr<const PreviewProxy> proxy;
     AUREA_CHECK(capture_epoch_wait([&] { proxy = e.media().proxies().request(asset); return !!proxy; }, 3000));
     if (!proxy) return;

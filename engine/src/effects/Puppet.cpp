@@ -24,8 +24,79 @@ namespace {
 struct Entry { u32 col; f64 val; };
 struct Row { Entry e[6]; u32 n = 0; f64 rhs = 0.0; };
 
-/// min ‖A x − b‖² (x tem `cols` incógnitas, começa em `x`).
+/// min ‖A x − b‖² DIRETO: AᵀA em banda + Cholesky. A malha é uma grade, então
+/// a banda é estreita (~2 linhas de vértices) e o custo é n·banda². O peso dos
+/// pinos (kPin² ≈ 10⁶ contra ~1) deixava o gradiente conjugado parar com o giro
+/// global da semente ainda lá — a camada inteira inclinava. Aqui a solução é a
+/// exata, independente da semente. false = banda grande demais ou sistema
+/// singular (o chamador cai no gradiente conjugado).
+bool solve_lsq_direct(const std::vector<Row>& rows, u32 cols, std::vector<f64>& x) {
+    if (!cols) return false;
+    u32 bw = 0;
+    for (const Row& r : rows) {
+        if (!r.n) continue;
+        u32 lo = r.e[0].col, hi = r.e[0].col;
+        for (u32 k = 1; k < r.n; ++k) { lo = std::min(lo, r.e[k].col); hi = std::max(hi, r.e[k].col); }
+        bw = std::max(bw, hi - lo);
+    }
+    const f64 cost = static_cast<f64>(cols) * (bw + 1.0) * (bw + 1.0);
+    if (cost > 3.0e8) return false;
+    const usize w = bw + 1;
+    std::vector<f64> band(static_cast<usize>(cols) * w, 0.0);   // band[i*w + d] = N(i, i−d)
+    std::vector<f64> rhs(cols, 0.0);
+    for (const Row& r : rows)
+        for (u32 a = 0; a < r.n; ++a) {
+            const u32 i = r.e[a].col;
+            rhs[i] += r.e[a].val * r.rhs;
+            for (u32 b = 0; b < r.n; ++b) {
+                const u32 j = r.e[b].col;
+                if (j <= i) band[static_cast<usize>(i) * w + (i - j)] += r.e[a].val * r.e[b].val;
+            }
+        }
+    // Tikhonov ínfimo rumo à semente: mantém o sistema definido positivo se dois
+    // pinos coincidirem, sem puxar a solução de forma mensurável.
+    f64 maxDiag = 0.0;
+    for (u32 i = 0; i < cols; ++i) maxDiag = std::max(maxDiag, band[static_cast<usize>(i) * w]);
+    const f64 eps = std::max(1e-12, maxDiag * 1e-12);
+    for (u32 i = 0; i < cols; ++i) { band[static_cast<usize>(i) * w] += eps; rhs[i] += eps * x[i]; }
+    auto L = [&](u32 i, u32 j) -> f64& { return band[static_cast<usize>(i) * w + (i - j)]; };
+    for (u32 i = 0; i < cols; ++i) {
+        const u32 j0 = i > bw ? i - bw : 0u;
+        for (u32 j = j0; j <= i; ++j) {
+            f64 s = L(i, j);
+            const u32 k0 = std::max(j0, j > bw ? j - bw : 0u);
+            for (u32 k = k0; k < j; ++k) s -= L(i, k) * L(j, k);
+            if (j == i) {
+                if (!(s > 0.0) || !std::isfinite(s)) return false;
+                L(i, i) = std::sqrt(s);
+            } else {
+                L(i, j) = s / L(j, j);
+            }
+        }
+    }
+    std::vector<f64> y(cols);
+    for (u32 i = 0; i < cols; ++i) {
+        f64 s = rhs[i];
+        for (u32 k = i > bw ? i - bw : 0u; k < i; ++k) s -= L(i, k) * y[k];
+        y[i] = s / L(i, i);
+    }
+    for (u32 ii = cols; ii-- > 0;) {
+        f64 s = y[ii];
+        const u32 kEnd = std::min<u32>(cols - 1, ii + bw);
+        for (u32 k = ii + 1; k <= kEnd; ++k) s -= L(k, ii) * x[k];
+        x[ii] = s / L(ii, ii);
+        if (!std::isfinite(x[ii])) return false;
+    }
+    return true;
+}
+
+/// min ‖A x − b‖² (x tem `cols` incógnitas, começa em `x`): direto quando dá,
+/// senão gradiente conjugado (Jacobi) nas equações normais.
 void solve_lsq(const std::vector<Row>& rows, u32 cols, std::vector<f64>& x) {
+    {
+        std::vector<f64> direct = x;
+        if (solve_lsq_direct(rows, cols, direct)) { x.swap(direct); return; }
+    }
     std::vector<f64> diag(cols, 0.0);
     for (const Row& r : rows) for (u32 k = 0; k < r.n; ++k) diag[r.e[k].col] += r.e[k].val * r.e[k].val;
     for (f64& d : diag) d = d > 1e-12 ? 1.0 / d : 1.0;

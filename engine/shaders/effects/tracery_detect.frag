@@ -17,7 +17,9 @@ void main(){
         vec2 d=vec2(p.p0.y)/p.texel.xy;vec4 c=texture(u_tex0,v_uv);
         if(p.p0.y>0.)c=(c*4.+texture(u_tex0,v_uv+vec2(d.x,0))+texture(u_tex0,v_uv-vec2(d.x,0))+texture(u_tex0,v_uv+vec2(0,d.y))+texture(u_tex0,v_uv-vec2(0,d.y)))/8.;
         vec3 rgb=aurea_linear_to_srgb(unpremultiply(c).rgb);vec3 key=aurea_linear_to_srgb(p.color.rgb);
-        bool selected=c.a>.01&&length(rgb-key)/1.7320508<=p.p0.x;
+        // Por cor (distância à cor-chave) ou por brilho (luma acima do limite).
+        float luma=dot(rgb,vec3(.2126,.7152,.0722));
+        bool selected=c.a>.01&&(p.p1.y>.5?luma>=1.-p.p0.x:length(rgb-key)/1.7320508<=p.p0.x);
         o_color=selected?vec4(vec2(xy)+1.,0,1):vec4(0);return;
     }
     if(stage==1){

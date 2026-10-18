@@ -14,8 +14,8 @@ class TimelineMathTest {
             assertEquals(30f, TimeAxis.safeFps(fps), 0f)
             assertEquals("00:01:00", Timecode.format(30, fps))
         }
-        assertEquals(80f, Zoom.clamp(Float.NaN), 0f)
-        assertEquals(80f, Zoom.autoFit(320f, Float.NaN), 0f)
+        assertEquals(100f, Zoom.clamp(Float.NaN), 0f)
+        assertEquals(100f, Zoom.autoFit(320f, Float.NaN), 0f)
         assertEquals(30.0, TimeAxis.frameAt(120f, 30.0, Float.NaN, 160f), 0.0)
     }
 
@@ -53,7 +53,7 @@ class TimelineMathTest {
     @Test
     fun `auto zoom da A01`() {
         assertEquals(379f / 60f, Zoom.autoFit(379f, 60f), 1e-4f)
-        assertEquals(80f, Zoom.autoFit(379f, 1f), 0f)
+        assertEquals(100f, Zoom.autoFit(379f, 1f), 0f)
         assertEquals(4f, Zoom.autoFit(379f, 1000f), 0f)
         assertEquals(800f, Zoom.clamp(5000f), 0f)
         assertEquals(2f, Zoom.clamp(0.1f), 0f)

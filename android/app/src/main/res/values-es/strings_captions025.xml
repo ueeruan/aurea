@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legendas automáticas 0.2.5: idioma da fala e qualidade do Whisper no aparelho. -->
+<resources>
+    <string name="cap025_lang_auto">Detectar automáticamente</string>
+    <string name="cap025_quality">Calidad de la transcripción</string>
+    <string name="cap025_quality_fast">Rápida</string>
+    <string name="cap025_quality_balanced">Equilibrada</string>
+    <string name="cap025_quality_accurate">Precisa</string>
+    <string name="cap025_quality_fast_hint">Modelo ligero: transcribe más rápido, pero falla más palabras.</string>
+    <string name="cap025_quality_balanced_hint">Equilibrio entre velocidad y precisión.</string>
+    <string name="cap025_quality_accurate_hint">Modelo más grande: acierta más palabras y nombres, pero tarda más.</string>
+    <string name="cap025_quality_unavailable">No hay suficiente memoria libre en este dispositivo para esta calidad ahora.</string>
+    <string name="cap025_quality_ready">Modelo ya descargado: funciona sin internet.</string>
+    <string name="cap025_quality_needs_download">Descarga %1$d MB la primera vez; después funciona sin internet.</string>
+    <string name="cap025_quality_fallback">Poca memoria libre ahora: usando la calidad %1$s.</string>
+</resources>

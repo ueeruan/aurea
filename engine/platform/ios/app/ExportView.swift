@@ -86,12 +86,11 @@ struct ExportView: View {
             }
         }
         .task {
-            if !model.exporting {
-                model.exportOptions = ExportOptions()
-                model.exportOptions.shortSide = min(1080, max(720, min(model.compositionWidth, model.compositionHeight)))
-                model.exportOptions.bitrateMbps = 0
-                model.exportOptions.quality = 1
-            }
+            guard !model.exporting else { return }
+            model.exportOptions = ExportOptions()
+            model.exportOptions.shortSide = min(1080, max(720, min(model.compositionWidth, model.compositionHeight)))
+            model.exportOptions.bitrateMbps = 0
+            model.exportOptions.quality = 1
             let project = model.projectGeneration
             if let frame = await model.capturePreviewFrame(640),
                !Task.isCancelled, model.projectGeneration == project {
@@ -501,6 +500,7 @@ struct ExportView: View {
         return model.exportMessage
     }
     private var progressNotice: String {
+        if model.exportPreparing { return "" }
         let flags = (model.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
         var notices: [String] = []
         switch (flags >> 8) & 15 {
@@ -561,27 +561,34 @@ private struct ExportRenderingView: View {
             PixelAnimatorView(frame: frame)
                 .frame(width: PixelAnimator.viewWidth, height: PixelAnimator.viewWidth * CGFloat(PixelAnimator.height) / CGFloat(PixelAnimator.width))
                 .padding(.top, 20)
-            Text(AureaText.t(publishing ? "editor_salvando_galeria" : ExportView.renderingKey(model.exportedKind)))
+            Text(AureaText.t(model.exportPreparing ? "msg_preparando" : publishing ? "editor_salvando_galeria" : ExportView.renderingKey(model.exportedKind)))
                 .font(.aurea(size: 17, weight: .semibold)).padding(.top, 18)
-            Text(publishing ? "100%" : "\(Int((fraction * 100).rounded()))%")
-                .font(.aurea(size: 34, weight: .bold).monospacedDigit()).padding(.top, 6)
-            GeometryReader { bounds in
-                ZStack(alignment: .leading) {
-                    AureaColors.chip
-                    AureaColors.accent.frame(width: bounds.size.width * (publishing ? 1 : fraction))
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                }.clipShape(RoundedRectangle(cornerRadius: 4))
-            }.frame(height: 8).padding(.top, 12)
-                .accessibilityElement().accessibilityValue("\(Int((fraction * 100).rounded()))%")
-            if !publishing {
-                if eta > 0 {
-                    Text(AureaText.t("exp2_eta", ExportFormat.time(eta))).font(.aurea(size: 14).monospacedDigit()).padding(.top, 10)
+            if model.exportPreparing {
+                ProgressView().tint(AureaColors.accent).padding(.top, 12)
+                    .accessibilityLabel(AureaText.t("msg_preparando"))
+            } else {
+                Text(publishing ? "100%" : "\(Int((fraction * 100).rounded()))%")
+                    .font(.aurea(size: 34, weight: .bold).monospacedDigit()).padding(.top, 6)
+                GeometryReader { bounds in
+                    ZStack(alignment: .leading) {
+                        AureaColors.chip
+                        AureaColors.accent.frame(width: bounds.size.width * (publishing ? 1 : fraction))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }.clipShape(RoundedRectangle(cornerRadius: 4))
+                }.frame(height: 8).padding(.top, 12)
+                    .accessibilityElement().accessibilityValue("\(Int((fraction * 100).rounded()))%")
+                if !publishing {
+                    if eta > 0 {
+                        Text(AureaText.t("exp2_eta", ExportFormat.time(eta))).font(.aurea(size: 14).monospacedDigit()).padding(.top, 10)
+                    }
+                    // Com o "faltam" grande em cima, a linha de detalhe não repete o tempo.
+                    Text(eta > 0 ? AureaText.t("exp2_frames", String(done), String(total), ExportFormat.number(speed))
+                         : AureaText.t("sh_export_progress", String(done), String(total), ExportFormat.number(speed), ExportFormat.time(eta)))
+                        .font(.aurea(size: 12).monospacedDigit()).foregroundStyle(AureaColors.muted)
+                        .multilineTextAlignment(.center).padding(.top, eta > 0 ? 4 : 10)
                 }
-                // Com o "faltam" grande em cima, a linha de detalhe não repete o tempo.
-                Text(eta > 0 ? AureaText.t("exp2_frames", String(done), String(total), ExportFormat.number(speed))
-                     : AureaText.t("sh_export_progress", String(done), String(total), ExportFormat.number(speed), ExportFormat.time(eta)))
-                    .font(.aurea(size: 12).monospacedDigit()).foregroundStyle(AureaColors.muted)
-                    .multilineTextAlignment(.center).padding(.top, eta > 0 ? 4 : 10)
+            }
+            if !publishing {
                 Text(AureaText.t(Self.phrases[phrase % Self.phrases.count]))
                     .font(.aurea(size: 15, weight: .medium)).foregroundStyle(AureaColors.accent)
                     .multilineTextAlignment(.center).frame(maxWidth: .infinity, minHeight: 22).padding(.top, 16)

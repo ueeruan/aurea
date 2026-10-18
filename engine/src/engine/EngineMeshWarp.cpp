@@ -165,7 +165,7 @@ bool Engine::mesh_warp_drag(u64 layerId, u32 effectId, u32 vertex, u32 handle, f
     (void)mesh_warp::evaluate(old, rows, cols, static_cast<f64>(local.value), values);
     if (!mesh_warp::move_handle(values, rows, cols, vertex, handle, Vec2{u, v})) return false;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "malha de deformacao");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     if (e->meshes.empty()) e->meshes.emplace_back();
     MeshWarpData& d = e->meshes.front();
     if (!mesh_warp::matches(d, rows, cols)) {
@@ -206,7 +206,7 @@ bool Engine::mesh_warp_reset(u64 layerId, u32 effectId) noexcept {
     if (!e || l->locked) return false;
     if (e->meshes.empty()) return true;
     history_.before_mutation(*comp, project_->timeline().current(), "redefinir malha");
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     e->meshes.clear();
     project_->mark_dirty();
     request_render();
@@ -230,7 +230,7 @@ bool Engine::mesh_warp_toggle_key(u64 layerId, u32 effectId) noexcept {
     command.keyframe.track = TrackRef{LayerId::unpack(layerId), TrackProperty::MeshWarp, effectId, 0};
     command.keyframe.time = local;
     if (!mesh_warp::key_command(*layer, command, playback_.current()).ok()) return false;
-    modelRevision_.fetch_add(1, std::memory_order_acq_rel);
+    bump_model_revision_locked();
     project_->mark_dirty();
     request_render();
     return true;

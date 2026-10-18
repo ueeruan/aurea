@@ -169,6 +169,7 @@ enum AureaEngineText {
         ("a camada usa uma matte do grupo", "eng_group_links"),
         ("o grupo tem outra taxa de quadros", "eng_group_timing"),
         ("o tempo do grupo foi alterado", "eng_group_timing"),
+        ("a mascara do grupo afetaria camadas externas", "eng_group_mask_external"),
         ("um grupo nao entra nele mesmo", "eng_group_self"),
         ("nao deu para agrupar", "eng_group_failed"),
         ("nao deu para tirar do grupo", "eng_group_failed"),
@@ -296,6 +297,8 @@ enum AureaEngineText {
         case 29: return "msg_o_arquivo_de_midia_esta_danificado"
         case 30: return "msg_o_projeto_esta_danificado_e_nao"
         case 31: return "msg_este_aparelho_nao_tem_codificador_para"
+        // CodecHung: o codec do aparelho travou (antes saía como 9 = "memória").
+        case 33: return "msg_codec_do_aparelho_travou"
         default: return nil
         }
     }

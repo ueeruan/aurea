@@ -349,13 +349,13 @@ private func editRows(_ layers: [LayerItem], anchor: Int64) -> [EditRow] {
     var main: EditRow?
     var others: [(EditRow, Int)] = []
     for (k, entries) in grouped {
-        let clips = entries.map(\.element).sorted { $0.startFrame < $1.startFrame }
+        let clips = entries.map { $0.element }.sorted { $0.startFrame < $1.startFrame }
         // A lista do motor vem do topo da pilha para o fundo: índice menor = mais à frente.
-        let front = entries.map(\.offset).min() ?? 0
+        let front = entries.map { $0.offset }.min() ?? 0
         if k == mainKey { main = EditRow(id: k, clips: clips, main: true, audio: false) }
         else { others.append((EditRow(id: k, clips: clips, main: false, audio: clips.allSatisfy { $0.kind == 3 }), front)) }
     }
-    let ordered = others.sorted { a, b in a.0.audio != b.0.audio ? !a.0.audio : a.1 < b.1 }.map(\.0)
+    let ordered = others.sorted { a, b in a.0.audio != b.0.audio ? !a.0.audio : a.1 < b.1 }.map { $0.0 }
     return (main.map { [$0] } ?? []) + ordered
 }
 
@@ -475,7 +475,8 @@ private struct EditTimelineBody: View {
                     addButton
                 }.padding(.horizontal, 16).frame(width: width, height: mainH).offset(y: top)
             }
-            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+            ForEach(rows.indices, id: \.self) { index in
+                let row = rows[index]
                 let y = layout.rows[index]
                 let h = row.main ? mainH : rowH
                 ForEach(row.clips) { clip in

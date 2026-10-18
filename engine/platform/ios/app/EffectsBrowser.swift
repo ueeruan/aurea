@@ -283,7 +283,8 @@ func fxOpenEffectTool(_ tool: FxEffectTool, in model: AureaModel) {
 enum FxEffectGroup: String, CaseIterable {
     // A ordem dos casos é a ordem dos ladrilhos (igual à do EffectGroup do Android).
     case colorLight = "color_light", drawEdge = "draw_edge", blur, distort, procedural, threeD = "3d"
-    case motion, repeat, matte, visibility, stylize, glitch, time, text
+    // `repeat` é palavra reservada do Swift: o caso se chama repeatTiles, o id continua "repeat".
+    case motion, repeatTiles = "repeat", matte, visibility, stylize, glitch, time, text
     case audio, utility, other
     var id: String { rawValue }
     var label: String {
@@ -292,7 +293,7 @@ enum FxEffectGroup: String, CaseIterable {
         case .blur: return AureaText.t("fxui_group_blur")
         case .distort: return AureaText.t("fxui_group_distort")
         case .motion: return AureaText.t("fxui_group_motion")
-        case .repeat: return AureaText.t("fxui_group_repeat")
+        case .repeatTiles: return AureaText.t("fxui_group_repeat")
         case .visibility: return AureaText.t("fxui_group_visibility")
         case .stylize: return AureaText.t("fxui_group_stylize")
         case .glitch: return AureaText.t("fxui_group_glitch")
@@ -312,7 +313,7 @@ enum FxEffectGroup: String, CaseIterable {
         case .colorLight: return CupertinoGlyph.Sparkles
         case .blur: return CupertinoGlyph.DropFill
         case .distort, .motion: return CupertinoGlyph.Move
-        case .repeat, .stylize: return CupertinoGlyph.SquareGrid2x2
+        case .repeatTiles, .stylize: return CupertinoGlyph.SquareGrid2x2
         case .visibility: return CupertinoGlyph.Sparkles
         case .glitch: return CupertinoGlyph.Bolt
         case .drawEdge: return CupertinoGlyph.PencilOutline
@@ -334,7 +335,7 @@ private let fxGroupByCategory: [String: FxEffectGroup] = {
     for c in ["desfoque", "blur", "nitidez", "sharpen"] { map[c] = .blur }
     for c in ["distorcer", "distort", "distorcao"] { map[c] = .distort }
     for c in ["transform", "transformar", "movimento", "motion", "rastreio", "tracking"] { map[c] = .motion }
-    for c in ["repetir", "repeat"] { map[c] = .repeat }
+    for c in ["repetir", "repeat"] { map[c] = .repeatTiles }
     for c in ["estilizar", "stylize", "stylise"] { map[c] = .stylize }
     map["glitch"] = .glitch
     for c in ["gerar", "generate", "pattern", "ruido", "noise"] { map[c] = .procedural }
@@ -359,7 +360,7 @@ private let fxGroupByKey: [UInt32: FxEffectGroup] = {
     }
     for key in ["aurea.stylize.repeat_tile", "aurea.stylize.motion_tile", "aurea.stylize.tiler", "aurea.stylize.hex_tile",
                 "aurea.distort.kaleidoscope", "aurea.distort.mirror", "aurea.distort.griddler", "aurea.stylize.ball_grid"] {
-        map[fxEffectTypeId(key)] = .repeat
+        map[fxEffectTypeId(key)] = .repeatTiles
     }
     return map
 }()
@@ -379,7 +380,7 @@ func fxGroupEntries(_ sorted: [EffectCatalogItem]) -> [(group: FxEffectGroup, en
 
 private let fxGroupBannerKeys: [FxEffectGroup: String] = [
     .colorLight: "aurea.color.colorama", .blur: "aurea.blur.radial", .distort: "aurea.distort.wave_warp",
-    .motion: "aurea.distort.corner_pin", .repeat: "aurea.stylize.motion_tile", .stylize: "aurea.stylize.halftone",
+    .motion: "aurea.distort.corner_pin", .repeatTiles: "aurea.stylize.motion_tile", .stylize: "aurea.stylize.halftone",
     .glitch: "aurea.glitch.glitchify", .drawEdge: "aurea.stylize.find_edges", .procedural: "aurea.generate.fractal_noise",
     .matte: "aurea.key.chroma", .visibility: "aurea.transition.radial_wipe", .time: "aurea.time.warp_rgb",
 ]
@@ -507,7 +508,7 @@ struct EffectAddSheet: View {
         return VStack(spacing: 0) {
             topBar(title: group?.group.label ?? AureaText.t("fx_browser_title"), inGroup: group != nil)
             if let group {
-                let near = fxAdjacentGroups(groups.map(\.group), group.group)
+                let near = fxAdjacentGroups(groups.map { $0.group }, group.group)
                 FxGroupGrid(group: group.group, entries: group.entries, prefs: prefs, store: model.effectPreviews,
                             previous: near.previous, next: near.next, onPick: pick, onFavorite: toggleFavorite,
                             onGroup: { groupId = $0.id })

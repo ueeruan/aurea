@@ -1414,9 +1414,10 @@ private struct EffectStackThumb: View {
     let category: String
     let store: EffectPreviewStore
     @State private var image: UIImage?
+    @AppStorage(FxEffectPrefs.previewsEnabledKey) private var previewsEnabled = true
     var body: some View {
         Group {
-            if let image {
+            if previewsEnabled, let image {
                 Image(uiImage: image).resizable().interpolation(.low).scaledToFill()
             } else {
                 FxToolPlate(glyph: fxCategoryGlyph(category), glyphSize: 16, opacity: 0.8)
@@ -1424,7 +1425,9 @@ private struct EffectStackThumb: View {
         }
         .frame(width: 40, height: 40).clipShape(RoundedRectangle(cornerRadius: 8))
         .accessibilityHidden(true)
-        .task(id: typeId) {
+        .task(id: "\(typeId)-\(previewsEnabled)") {
+            // "Prévias de efeitos" desligado em Ajustes: só a cartela, sem pedir render.
+            guard previewsEnabled else { image = nil; return }
             let loaded = await store.image(for: typeId)
             if !Task.isCancelled { image = loaded }
         }

@@ -3978,6 +3978,24 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return [NSData dataWithBytes:rgba.data() length:rgba.size()];
 }
 
+- (NSData*)effectPreviewSequence:(uint32_t)typeId width:(uint32_t)width height:(uint32_t)height
+                          frames:(uint32_t)frames scene:(uint32_t)scene
+                        outWidth:(uint32_t*)outWidth outHeight:(uint32_t*)outHeight
+                       outFrames:(uint32_t*)outFrames status:(int32_t*)status {
+    auto* e = self.engine;
+    if (status) *status = static_cast<int32_t>(aurea::Errc::InvalidState);
+    if (!e || width == 0 || height == 0 || frames == 0) return nil;
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0, n = 0;
+    const aurea::Status result = e->render_effect_preview_sequence(typeId, width, height, frames, scene, rgba, w, h, n);
+    if (status) *status = static_cast<int32_t>(result.code());
+    if (!result.ok() || rgba.empty()) return nil;
+    if (outWidth) *outWidth = w;
+    if (outHeight) *outHeight = h;
+    if (outFrames) *outFrames = n;
+    return [NSData dataWithBytes:rgba.data() length:rgba.size()];
+}
+
 - (BOOL)setEffectPreviewSource:(NSData*)rgba width:(uint32_t)width height:(uint32_t)height {
     auto* e = self.engine;
     if (!e || rgba.length < static_cast<NSUInteger>(width) * height * 4) return NO;

@@ -375,6 +375,16 @@ private fun Options(
         Spacer(Modifier.height(12.dp))
         SummaryRow(stringResource(R.string.editor_video), listOf("$w × $h", "${fmt(fps)} fps", codecName).joinToString(" · ") { ltrPlain(it) })
         SummaryRow(stringResource(R.string.editor_duracao), fmtTime(seconds))
+        // 0.2.4 (C2): duração inflada (camada esticada pela timeline) aparece
+        // antes de exportar; acima de 3 h o motor recusa.
+        if (seconds > EXPORT_LONG_SECONDS) {
+            Text(
+                if (seconds > EXPORT_MAX_SECONDS) stringResource(R.string.exp_too_long_3h)
+                else stringResource(R.string.exp_long_duration, fmtTime(seconds)),
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Danger)),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            )
+        }
         SummaryRow(stringResource(R.string.editor_tamanho_estimado), fmtSize(bytes))
         SummaryRow(stringResource(R.string.editor_cor), stringResource(R.string.editor_sdr_bt_709))
     }
@@ -652,8 +662,10 @@ private fun Rendering(fraction: Float, done: Int, total: Int, fps: Float, eta: I
                     Spacer(Modifier.height(4.dp))
                 }
                 Text(
+                    // 0.2.4 (C5): no quadro 0 o "0 fps · 0:00" parecia travado.
+                    if (done == 0) stringResource(R.string.exp_first_frame)
                     // Com o "faltam" grande em cima, a linha de detalhe não repete o tempo.
-                    if (eta > 0) stringResource(R.string.exp2_frames, done, total, fmt(fps.toDouble()))
+                    else if (eta > 0) stringResource(R.string.exp2_frames, done, total, fmt(fps.toDouble()))
                     else stringResource(R.string.sh_export_progress, done, total, fmt(fps.toDouble()), fmtTime(eta.toDouble())),
                     style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted, fontFeatureSettings = "tnum")),
                     textAlign = TextAlign.Center,
@@ -762,7 +774,10 @@ private fun BottomAction(store: EditorStore, options: ExportOptions, compW: Int,
     val st = exporter.state
     val context = LocalContext.current
     val noViewer = stringResource(R.string.editor_nenhum_app_abre_video)
-    val startExport = { exporter.start(store.project.title, compW, compH, compFps, options) }
+    val startExport = {
+        exporter.plannedSeconds = if (compFps > 0) store.exportDuration(options.trimToContent) / compFps else 0.0
+        exporter.start(store.project.title, compW, compH, compFps, options)
+    }
     // Android 8–9: a galeria só vê o que está na pasta PÚBLICA (Filmes/Aurea),
     // e lá só se escreve com WRITE_EXTERNAL_STORAGE. Negada, o export segue e
     // fica na pasta do app (a mensagem final diz onde).
@@ -833,3 +848,7 @@ private fun fmtTime(seconds: Double): String {
     return if (s >= 3600) String.format(Locale.ROOT, "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
     else String.format(Locale.ROOT, "%d:%02d", s / 60, s % 60)
 }
+
+/** Acima disso a tela avisa da duração; acima do teto o motor recusa (EngineConfig::maxExportSeconds). */
+private const val EXPORT_LONG_SECONDS = 30.0 * 60.0
+internal const val EXPORT_MAX_SECONDS = 3.0 * 3600.0

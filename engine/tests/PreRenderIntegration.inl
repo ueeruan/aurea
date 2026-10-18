@@ -458,4 +458,54 @@ AUREA_TEST(PreRenderIntegration, CachedCompositionBypassesHeavySceneAndKeepsZoom
     }
     device.destroy_texture(*output);device.destroy_texture(*cache);device.destroy_texture(*work);
 }
+// 0.2.4 (C4): o PreRender e o export dividem o contexto. Exportar com o
+// PreRender rodando dava "ja existe um export em andamento" (erro 5).
+AUREA_TEST(PreRenderIntegration, ExportCancelsRunningPreRenderAndStarts) {
+    using namespace prerender_integration;
+    Rig rig(true, 32, 32, 12); rig.shape(.5f);
+    std::atomic<bool> slow{true};
+    const auto fill = rig.mock->beforeReadTexture;
+    rig.mock->beforeReadTexture = [&slow, fill](TextureHandle texture, void* data, u32 stride) {
+        if (slow.load()) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        return fill(texture, data, stride);
+    };
+    AUREA_CHECK(rig.engine.start_prerender(1).ok());
+    for (u32 i = 0; i < 5000 && rig.engine.query_prerender_progress().framesDone < 1; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(rig.engine.query_prerender_progress().running);
+    ImageExportSettings settings; settings.format = ImageExportFormat::Png;
+    const auto out = (rig.root / "export-c4.png").string();
+    const Status started = rig.engine.start_image_export(settings, out.c_str());
+    std::printf("    export com PreRender rodando status=%d\n", started.raw());
+    AUREA_CHECK(started.ok());
+    slow = false;
+    AUREA_CHECK(!rig.engine.query_prerender_progress().running);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (rig.engine.export_progress().running && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    const auto done = rig.engine.export_progress();
+    AUREA_CHECK(done.finished); AUREA_CHECK_EQ(done.result, Errc::Ok);
+}
+
+// 0.2.4 (C2): duração inflada não é herdada por camada nova e o export
+// recusa acima de 3 h com mensagem clara ("Frame 0 de 522520").
+AUREA_TEST(PreRenderIntegration, InflatedDurationIsNotInheritedAndExportAboveThreeHoursIsRefused) {
+    using namespace prerender_integration;
+    Rig rig(true, 32, 32, 30); rig.shape();
+    rig.comp()->set_duration(FrameIndex{522520});
+    const auto text = rig.engine.add_text("depois da inflacao");
+    AUREA_CHECK(text.ok()); if (!text.ok()) return;
+    const Layer* layer = rig.comp()->layer(LayerId::unpack(*text));
+    AUREA_CHECK(layer != nullptr); if (!layer) return;
+    AUREA_CHECK_EQ(layer->end.value, i64{30});
+    AUREA_CHECK_EQ(rig.comp()->export_duration(true).value, i64{30});
+    ImageExportSettings whole; whole.format = ImageExportFormat::PngSequence; whole.trimToContent = false;
+    const auto dir = (rig.root / "seq-c2").string();
+    std::error_code ec; fs::create_directories(dir, ec);
+    const Status refused = rig.engine.start_image_export(whole, dir.c_str());
+    std::printf("    export de 4,8 h status=%d msg=%.*s\n", refused.raw(),
+                static_cast<int>(refused.message().size()), refused.message().data());
+    AUREA_CHECK_EQ(refused.code(), Errc::NotSupported);
+    AUREA_CHECK(refused.message().find("3 h") != std::string_view::npos || refused.detail().find("3 h") != std::string_view::npos);
+}
 #endif

@@ -214,6 +214,10 @@ struct EngineConfig {
     /// 0 = adaptativo por fase (export_worker_hang_limit_ns: preparação 20 s,
     /// regime max(12 s, 8 × média por quadro), teto 45 s). Os testes usam menos.
     u32 exportWorkerHangMs = 0;
+    /// 0.2.4 (C2): teto de sanidade da duração do export, em segundos.
+    /// Acima disso o motor recusa (NotSupported, "duracao acima de 3 h").
+    /// 0 = sem teto (testes de linha do tempo longa).
+    f64 maxExportSeconds = 3.0 * 3600.0;
     /// Verificação pós-export ESTRITA (ExportOutputValidation::strict): toda
     /// divergência de PTS/duração/contagem/dimensão/áudio reprova o arquivo.
     /// Os apps ficam no tolerante (padrão): divergência vira aviso no
@@ -1640,6 +1644,15 @@ public:
     bool set_effect_preview_source(const u8* rgba, u32 width, u32 height) noexcept;
     [[nodiscard]] Status render_effect_preview(u32 typeId, u32 width, u32 height, std::vector<u8>& out,
                                                u32& outWidth, u32& outHeight) noexcept;
+    /// PRÉVIA ANIMADA de um efeito: `frames` (12..16) quadros antes/depois,
+    /// concatenados em `out` (RGBA8 sRGB de alfa reto, `outWidth`×`outHeight`
+    /// cada), sobre a cena `scene` (EffectPreviewScene: 0 foto, 1 cartela,
+    /// 2 formas, 3 baixa luz). Mesmo teto de lado da prévia estática. `Busy` =
+    /// o preview do editor está com a GPU (a UI tenta de novo com recuo); o
+    /// mutex de render é solto entre os quadros.
+    [[nodiscard]] Status render_effect_preview_sequence(u32 typeId, u32 width, u32 height, u32 frames, u32 scene,
+                                                        std::vector<u8>& out, u32& outWidth, u32& outHeight,
+                                                        u32& outFrames) noexcept;
 
     [[nodiscard]] EngineStatus read_status() noexcept;
     [[nodiscard]] EngineTelemetry read_telemetry() noexcept;
@@ -2144,6 +2157,7 @@ private:
     u64 pausedTimelineEventSession_ = 0;
     CompositionId pausedTimelineEventComposition_{};
     void configure_playback_locked(const Composition* comp, i64 rawDuration = -1) noexcept;
+    i64 new_layer_end_locked(const Composition* comp, const Layer* self, i64 start) const noexcept;
     [[nodiscard]] i64 navigation_end_locked(const Composition* comp) const noexcept;
     u64  nextFrameDueNs_ = 0;                 ///< quando o playhead muda de frame (tocando)
     std::atomic<bool> renderRunning_{false};
@@ -2235,10 +2249,14 @@ private:
     /// exportLifecycleMutex_: a PreRender cancelled by an edit/Cancel keeps its
     /// worker until the current frame returns. A new PreRender waits for it
     /// (bounded, cancellable) instead of failing with "export em andamento".
-    [[nodiscard]] Status await_cancelled_prerender_worker(u64 deadlineNs) noexcept;
+    [[nodiscard]] Status await_cancelled_prerender_worker(u64 deadlineNs, bool forExport = false) noexcept;
     /// Startup waits that depend on the phone (slow GPU finishing a cancelled
     /// frame, slow flash removing the previous cache). Cancel ends them at once.
     static constexpr u64 kPreRenderStartupWaitNs = 30'000'000'000ull;
+    /// Cancela um PreRender em andamento para o export usar o contexto.
+    /// true = havia worker de PreRender (o chamador espera ele sair).
+    bool cancel_prerender_for_export() noexcept;
+    static Status export_too_long_status() noexcept;
     u32 bump_model_revision_locked() noexcept;
     [[nodiscard]] bool prerender_valid_locked() noexcept; // modelMutex_
     void clear_prerender_gpu_locked() noexcept; // renderMutex_, backend owns deferred destruction

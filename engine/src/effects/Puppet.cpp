@@ -145,8 +145,26 @@ void deform(const Mesh& mesh, const std::vector<Pin>& pins, f32 rigidity, std::v
     const u32 n = static_cast<u32>(mesh.rest.size());
     if (!n || mesh.tris.empty() || pins.empty()) return;
 
-    // Pinos: triângulo e baricêntricas no repouso.
-    struct Bound { u32 v[3]; f32 b[3]; Vec2 target; };
+    // Partes da malha: o contorno pode deixar pedaços soltos (braço, letra,
+    // objeto separado). Cada parte só obedece aos pinos dela; sem isso, uma
+    // parte sem pino (ou com um só) ficava no chute inicial — o giro rígido
+    // de TODOS os pinos — e inclinava junto quando um pino de outra parte
+    // andava (o sistema não tem equação que a tire de lá).
+    std::vector<u32> part(n);
+    for (u32 i = 0; i < n; ++i) part[i] = i;
+    auto root = [&](u32 i) {
+        while (part[i] != i) { part[i] = part[part[i]]; i = part[i]; }
+        return i;
+    };
+    for (usize t = 0; t + 2 < mesh.tris.size(); t += 3)
+        for (int k = 1; k < 3; ++k) {
+            const u32 a = root(mesh.tris[t]), b = root(mesh.tris[t + k]);
+            if (a != b) part[b] = a;
+        }
+    for (u32 i = 0; i < n; ++i) part[i] = root(i);
+
+    // Pinos: triângulo e baricêntricas no repouso, e a parte de cada um.
+    struct Bound { u32 v[3]; f32 b[3]; Vec2 rest; Vec2 target; u32 part; };
     std::vector<Bound> bound;
     for (const Pin& p : pins) {
         f32 bc[3];
@@ -154,31 +172,48 @@ void deform(const Mesh& mesh, const std::vector<Pin>& pins, f32 rigidity, std::v
         if (t < 0) continue;
         Bound b;
         for (int k = 0; k < 3; ++k) { b.v[k] = mesh.tris[static_cast<u32>(t) * 3 + k]; b.b[k] = bc[k]; }
+        b.rest = p.rest;
         b.target = p.pos;
+        b.part = part[b.v[0]];
         bound.push_back(b);
     }
     if (bound.empty()) return;
 
-    // Melhor movimento rígido dos pinos (rotação + translação) — vale sozinho
-    // com 1 pino (só translação) e é o alvo da rigidez.
-    Vec2 cr{}, cp{};
-    for (const Pin& p : pins) { cr.x += p.rest.x; cr.y += p.rest.y; cp.x += p.pos.x; cp.y += p.pos.y; }
-    cr.x /= pins.size(); cr.y /= pins.size(); cp.x /= pins.size(); cp.y /= pins.size();
-    f64 sa = 0.0, sb = 0.0;
-    for (const Pin& p : pins) {
-        const f64 rx = p.rest.x - cr.x, ry = p.rest.y - cr.y, qx = p.pos.x - cp.x, qy = p.pos.y - cp.y;
-        sa += rx * qx + ry * qy;
-        sb += rx * qy - ry * qx;
+    // Melhor movimento rígido dos pinos de cada parte (rotação + translação):
+    // com 1 pino é só translação, sem pino a parte fica em repouso. É o chute
+    // do solver e o alvo da rigidez.
+    struct Fit { Vec2 cr{}, cp{}; f64 cs = 1.0, sn = 0.0; u32 count = 0; };
+    std::vector<Fit> fit(n);   // indexado pela raiz da parte
+    for (const Bound& b : bound) {
+        Fit& f = fit[b.part];
+        f.cr.x += b.rest.x; f.cr.y += b.rest.y; f.cp.x += b.target.x; f.cp.y += b.target.y;
+        ++f.count;
     }
-    const f64 ang = (std::fabs(sa) + std::fabs(sb)) > 1e-9 ? std::atan2(sb, sa) : 0.0;
-    const f64 cs = std::cos(ang), sn = std::sin(ang);
-    auto rigid = [&](Vec2 v) {
-        const f64 x = v.x - cr.x, y = v.y - cr.y;
-        return Vec2{static_cast<f32>(cs * x - sn * y + cp.x), static_cast<f32>(sn * x + cs * y + cp.y)};
-    };
+    bool solve = false;
+    for (u32 r = 0; r < n; ++r) {
+        Fit& f = fit[r];
+        if (!f.count) continue;
+        f.cr.x /= f.count; f.cr.y /= f.count; f.cp.x /= f.count; f.cp.y /= f.count;
+        f64 sa = 0.0, sb = 0.0;
+        for (const Bound& b : bound) {
+            if (b.part != r) continue;
+            const f64 rx = b.rest.x - f.cr.x, ry = b.rest.y - f.cr.y, qx = b.target.x - f.cp.x, qy = b.target.y - f.cp.y;
+            sa += rx * qx + ry * qy;
+            sb += rx * qy - ry * qx;
+        }
+        const f64 ang = (std::fabs(sa) + std::fabs(sb)) > 1e-9 ? std::atan2(sb, sa) : 0.0;
+        f.cs = std::cos(ang);
+        f.sn = std::sin(ang);
+        solve |= f.count >= 2;
+    }
     std::vector<Vec2> rigidOut(n);
-    for (u32 i = 0; i < n; ++i) rigidOut[i] = rigid(mesh.rest[i]);
-    if (bound.size() == 1 || rigidity >= 0.999f) { out = rigidOut; return; }
+    for (u32 i = 0; i < n; ++i) {
+        const Fit& f = fit[part[i]];
+        if (!f.count) { rigidOut[i] = mesh.rest[i]; continue; }
+        const f64 x = mesh.rest[i].x - f.cr.x, y = mesh.rest[i].y - f.cr.y;
+        rigidOut[i] = Vec2{static_cast<f32>(f.cs * x - f.sn * y + f.cp.x), static_cast<f32>(f.sn * x + f.cs * y + f.cp.y)};
+    }
+    if (!solve || rigidity >= 0.999f) { out = rigidOut; return; }
 
     const f64 kPin = 1000.0;
     const u32 ntri = static_cast<u32>(mesh.tris.size() / 3);
@@ -270,6 +305,9 @@ void deform(const Mesh& mesh, const std::vector<Pin>& pins, f32 rigidity, std::v
         rows.push_back(ry);
     }
     solve_lsq(rows, 2 * n, x);
+    // Partes com menos de dois pinos não têm deformação: o movimento rígido.
+    for (u32 i = 0; i < n; ++i)
+        if (fit[part[i]].count < 2) { x[2 * i] = rigidOut[i].x; x[2 * i + 1] = rigidOut[i].y; }
 
     const f32 r = std::clamp(std::isfinite(rigidity) ? rigidity : 0.0f, 0.0f, 1.0f);
     for (u32 i = 0; i < n; ++i) {

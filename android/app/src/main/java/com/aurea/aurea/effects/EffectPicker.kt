@@ -54,6 +54,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -101,6 +105,8 @@ import java.util.Locale
 
 private const val PREVIEW_W = 320
 private const val PREVIEW_H = 200
+/** Quanto a animação do cartão segue depois de soltar: um laço de 16 quadros. */
+private const val HELD_LINGER_MS = 1100L
 private val CardMin = 152.dp
 private const val ALL_GROUP = ALL_CATEGORIES_ID
 
@@ -233,7 +239,8 @@ private fun EffectAddSheetBody(
                 EmptyLine(stringResource(if (section == 2) R.string.effects_favorites_hint else R.string.effect_empty_category))
             }
             items(shown, key = { it.typeId }, contentType = { "effect" }) { e ->
-                EffectPickCard(e, store.effectPreviews, e.typeId in prefs.favorites, "effects.card.", pick, onFavorite, nameSize = 14f)
+                EffectPickCard(e, store.effectPreviews, e.typeId in prefs.favorites, "effects.card.", pick, onFavorite, nameSize = 14f,
+                    previewsOn = prefs.previewsEnabled)
             }
         }
     }
@@ -344,10 +351,25 @@ private fun EffectPickCard(
     modifier: Modifier = Modifier,
     aspect: Float = 1.6f,
     nameSize: Float = 14f,
+    /** "Prévias de efeitos" desligado em Ajustes: só a cartela, sem pedir render. */
+    previewsOn: Boolean = true,
 ) {
     val name = pickerEntryName(entry)
     val tool = effectToolOf(entry.typeId)
     val addLabel = stringResource(R.string.effects_card_add, name)
+    // SEGURADO: toca a animação que a ficha já gerou (cena Foto, a mesma da
+    // grade). A grade nunca pede sequência ao motor; sem tira guardada, nada
+    // muda. Desligado por "Prévias de efeitos" e por "Remover animações".
+    var held by remember { mutableStateOf(false) }
+    // Ao soltar, completa um laço (~1 s) antes de voltar ao quadro parado — o
+    // toque longo que favorita termina em 0,45 s, igual no iOS.
+    var lingering by remember { mutableStateOf(false) }
+    LaunchedEffect(held) {
+        if (held) lingering = true else { kotlinx.coroutines.delay(HELD_LINGER_MS); lingering = false }
+    }
+    val reduceMotion = rememberReduceMotion()
+    val heldStore = previews?.animated?.takeIf { (held || lingering) && previewsOn && !reduceMotion && tool == null }
+    val heldAnimation = rememberAnimatedEffectPreview(heldStore, entry.typeId, EffectPreviewScene.PHOTO.id, generate = false)
     val favoriteLabel = stringResource(if (favorite) R.string.effect_tirar_favoritos else R.string.effect_nos_favoritos)
     Column(
         modifier
@@ -357,11 +379,36 @@ private fun EffectPickCard(
                 contentDescription = addLabel
                 customActions = listOf(CustomAccessibilityAction(favoriteLabel) { onFavorite(entry, name); true })
             }
+            .pointerInput(Unit) {
+                // Só observa (passo Initial, sem consumir): o toque, o toque
+                // longo e a rolagem da grade continuam com quem já os trata.
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    held = true
+                    try {
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                        } while (event.changes.any { it.pressed })
+                    } finally {
+                        held = false
+                    }
+                }
+            }
             .tocavel(shrink = 0.96f, haptic = true, onLongClick = { onFavorite(entry, name) }, onClick = { onPick(entry) }),
     ) {
         Box(Modifier.fillMaxWidth().aspectRatio(aspect).clip(AureaShape.Card)) {
             if (tool != null) {
                 ToolPlate(toolGlyph(tool))
+            } else if (!previewsOn) {
+                GenericPlate(categoryGlyph(entry.category))
+            } else if (heldAnimation.frames.isNotEmpty()) {
+                AnimatedPreviewFrames(heldAnimation.frames, playing = true, contentScale = ContentScale.Fit)
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        PreviewLabel(stringResource(R.string.fx_browser_before))
+                        PreviewLabel(stringResource(R.string.fx_browser_after))
+                    }
+                }
             } else {
                 val state = rememberEffectPreviewState(previews, entry.typeId, PREVIEW_W, PREVIEW_H)
                 val preview = state.image
@@ -518,7 +565,8 @@ private fun SearchSheetBody(
                 item(key = "vazio", span = { GridItemSpan(maxLineSpan) }) { EmptyLine(stringResource(R.string.effect_empty_search)) }
             }
             items(results, key = { it.typeId }, contentType = { "efeito" }) { e ->
-                EffectPickCard(e, store.effectPreviews, e.typeId in favorites, "effects.result.", onPick, onFavorite)
+                EffectPickCard(e, store.effectPreviews, e.typeId in favorites, "effects.result.", onPick, onFavorite,
+                    previewsOn = store.effectPrefs.previewsEnabled)
             }
         }
     }

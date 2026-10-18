@@ -671,7 +671,10 @@ AVFoundationAudioDecoder::AVFoundationAudioDecoder(AVAsset* asset, AVAssetTrack*
         }
         if (info_.sampleRate == 0) info_.sampleRate = 48000;
         if (info_.channels == 0) info_.channels = 2;
-        info_.durationUs = us_of(asset_.duration);
+        // 0.2.4 (C6): a duração da TRILHA de áudio; a do asset é a da trilha
+        // mais longa (o vídeo) e superestimava o clipe de áudio.
+        const i64 trackUs = CMTIME_IS_NUMERIC(track_.timeRange.duration) ? us_of(track_.timeRange.duration) : 0;
+        info_.durationUs = trackUs > 0 ? trackUs : us_of(asset_.duration);
     }
 }
 
@@ -820,7 +823,8 @@ public:
                         out.audioChannels = asbd->mChannelsPerFrame;
                     }
                 }
-                out.audioDurationUs = us_of(asset.duration);
+                const i64 trackUs = CMTIME_IS_NUMERIC(track.timeRange.duration) ? us_of(track.timeRange.duration) : 0;
+                out.audioDurationUs = trackUs > 0 ? trackUs : us_of(asset.duration);   // 0.2.4 (C6)
                 out.hasAudio = out.audioSampleRate > 0;
             }
             return out.hasVideo || out.hasAudio;

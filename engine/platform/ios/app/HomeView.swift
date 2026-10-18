@@ -1074,6 +1074,7 @@ struct HomeSettingsTab: View {
     @State private var licenses = false
     @State private var performanceTest = false
     @AppStorage("home.developerTools") private var developerTools = false
+    @AppStorage(FxEffectPrefs.previewsEnabledKey) private var effectPreviewsEnabled = true
 
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?" }
     private var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?" }
@@ -1116,6 +1117,10 @@ struct HomeSettingsTab: View {
                 groupHeader("settings_group_general", top: true)
                 group {
                     tapRow("settings_clear_cache", subtitle: AureaText.t("settings_clear_cache_note")) { model.clearHomeCaches() }
+                    groupDivider
+                    // Prévias de efeitos: desligado, os cartões de efeito mostram só a
+                    // cartela com o ícone da categoria e o motor não renderiza prévia.
+                    switchRow("settings_effect_previews", subtitle: AureaText.t("settings_effect_previews_note"), isOn: $effectPreviewsEnabled)
                     groupDivider
                     tapRow("settings_clear_recents", subtitle: AureaText.t("settings_clear_recents_note")) {
                         FxEffectPrefs().clearRecents()
@@ -1236,6 +1241,18 @@ struct HomeSettingsTab: View {
                 CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 16, color: AureaColors.muted).mirrorsInRtl()
             }.padding(.horizontal, 16).padding(.vertical, 12).contentShape(Rectangle())
         }.buttonStyle(.plain)
+    }
+    private func switchRow(_ title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(AureaText.t(title)).aureaFont(.bodyLarge)
+                Text(subtitle).aureaFont(.bodySmall).foregroundStyle(AureaColors.muted)
+            }
+        }
+        .tint(AureaColors.accent)
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .accessibilityLabel(AureaText.t(title))
+        .accessibilityHint(subtitle)
     }
     private func tileRow(_ glyph: Character, title: String, subtitle: String) -> some View {
         HStack(spacing: 16) {

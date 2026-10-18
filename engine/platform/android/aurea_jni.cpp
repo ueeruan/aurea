@@ -106,8 +106,12 @@ int open_content_fd(const char* uri, void*) {
 }
 
 /// Pede à plataforma os pixels de uma imagem do projeto (reabrir projeto).
+/// Cópia durável só quando a recuperação de export está ligada (hoje nunca).
+std::atomic<bool> g_copyExportSources{false};
 Result<std::string> preserve_export_asset(const std::string& source, const std::string& documents,
                                         const std::atomic<bool>* cancel) noexcept {
+    if (!g_copyExportSources.load(std::memory_order_acquire))
+        return android_export::validate_asset(source, cancel, &open_content_fd);
     return android_export::preserve_asset(source, documents, cancel, &open_content_fd);
 }
 
@@ -473,6 +477,10 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.imageLoader = &load_image;
     config.enableTelemetry = true;
 
+    g_copyExportSources.store(config.enableExportRecovery, std::memory_order_release);
+    // Sem recuperação, as cópias antigas não servem; com ela, teto de 2 GB.
+    (void)android_export::prune_export_sources(config.documentsDirectory,
+        config.enableExportRecovery ? (2ull << 30) : 0);
     if (const Status s = c->engine.initialize(config); !s.ok()) {
         c->startupError = std::string(s.message()) + ": " + std::string(s.detail());
         AUREA_LOG_ERROR("falha ao inicializar: %s", s.message().data());
@@ -1007,6 +1015,32 @@ AUREA_JNI jboolean AUREA_FN(nativeRenderEffectPreview)(JNIEnv* env, jclass, jlon
         env->SetIntArrayRegion(outSize, 0, 2, wh);
     }
     return JNI_TRUE;
+}
+
+/// A prévia ANIMADA de um efeito: `frames` quadros RGBA8 sRGB concatenados em
+/// `out`; `outSize` recebe largura, altura e número de quadros. Devolve 0 (ok)
+/// ou o código Errc cru (32 = Busy: o preview do editor está com a GPU).
+AUREA_JNI jint AUREA_FN(nativeRenderEffectPreviewSequence)(JNIEnv* env, jclass, jlong handle, jint typeId,
+                                                           jint width, jint height, jint frames, jint scene,
+                                                           jobject out, jintArray outSize) {
+    NativeContext* c = ctx_of(handle);
+    auto* dst = static_cast<u8*>(buffer_ptr(env, out));
+    if (!c || !dst || width <= 0 || height <= 0 || frames <= 0 || scene < 0)
+        return static_cast<jint>(Errc::InvalidArgument);
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0, n = 0;
+    const Status s = c->engine.render_effect_preview_sequence(static_cast<u32>(typeId), static_cast<u32>(width),
+                                                              static_cast<u32>(height), static_cast<u32>(frames),
+                                                              static_cast<u32>(scene), rgba, w, h, n);
+    if (!s.ok()) return static_cast<jint>(s.code());
+    if (rgba.empty() || static_cast<jlong>(rgba.size()) > buffer_capacity(env, out))
+        return static_cast<jint>(Errc::OutOfRange);
+    std::memcpy(dst, rgba.data(), rgba.size());
+    if (outSize && env->GetArrayLength(outSize) >= 3) {
+        const jint whn[3] = {static_cast<jint>(w), static_cast<jint>(h), static_cast<jint>(n)};
+        env->SetIntArrayRegion(outSize, 0, 3, whn);
+    }
+    return 0;
 }
 
 AUREA_JNI void AUREA_FN(nativeSetSelection)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {

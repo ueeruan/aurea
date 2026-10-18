@@ -530,6 +530,35 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         bmp.copyPixelsFromBuffer(pixels)
         return bmp.asImageBitmap()
     }
+
+    /**
+     * A prévia ANIMADA de um efeito (a ficha): o motor devolve os quadros
+     * antes/depois concatenados; aqui viram bitmaps. O código de erro passa
+     * adiante cru — Busy (o preview do editor está com a GPU) faz a ficha
+     * tentar de novo com recuo, qualquer outro cai na prévia parada.
+     */
+    private fun renderEffectPreviewSequence(typeId: Int, width: Int, height: Int, frames: Int, scene: Int):
+        com.aurea.aurea.effects.EffectSequenceResult {
+        ensureEffectPreviewPhoto()
+        val pixels = directBuffer(width * height * 4 * frames)
+        val dims = IntArray(3)
+        val code = engine.renderEffectPreviewSequence(typeId, width, height, frames, scene, pixels, dims)
+        if (code != 0) return com.aurea.aurea.effects.EffectSequenceResult(code)
+        val w = dims[0]
+        val h = dims[1]
+        val n = dims[2]
+        if (w <= 0 || h <= 0 || n <= 0) return com.aurea.aurea.effects.EffectSequenceResult(-1)
+        val list = ArrayList<ImageBitmap>(n)
+        val frameBytes = w * h * 4
+        for (i in 0 until n) {
+            pixels.limit((i + 1) * frameBytes)
+            pixels.position(i * frameBytes)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            bmp.copyPixelsFromBuffer(pixels.slice())
+            list.add(bmp.asImageBitmap())
+        }
+        return com.aurea.aurea.effects.EffectSequenceResult(0, list)
+    }
     /** Efeitos da camada principal, na ordem da pilha. */
     var effects by mutableStateOf<List<LayerEffect>>(emptyList())
         private set
@@ -974,7 +1003,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         // Abertura (Fase 8I §59–63): a foto das prévias NÃO é
                         // decodificada aqui (era JPEG + cópia de 1,6 MB no main
                         // thread em toda abertura); sobe na primeira prévia.
-                        effectPreviews = EffectPreviewStore(dirs.cache, installStamp() + "-compare-v2", ::renderEffectPreview)
+                        // -compare-v3: imagem de amostra nova (0.2.4) e recorte centralizado.
+                        effectPreviews = EffectPreviewStore(dirs.cache, installStamp() + "-compare-v3", ::renderEffectPreview,
+                            ::renderEffectPreviewSequence)
                         startStatusLoop()
                     } else {
                         errorMessage = appText(R.string.msg_nao_foi_possivel_iniciar_o_motor) +

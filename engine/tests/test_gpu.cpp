@@ -8185,6 +8185,172 @@ AUREA_TEST(Gpu, EveryCatalogEffectEitherRendersAPreviewOrSaysWhyNot) {
 }
 
 // =============================================================================
+// A PRÉVIA ANIMADA (docs/diagnostico/efeitos-imagem-feed.md §3.2)
+//
+// Percorre o registro INTEIRO, nas três cenas que não dependem da foto do app,
+// e exige de cada efeito uma sequência com todos os quadros do tamanho pedido,
+// opacos e com conteúdo. Na cartela (fonte parada para quem não é de tempo),
+// todo efeito que a sequência ANIMA — de tempo, com histórico ou com um
+// parâmetro varrido — tem de ter quadros diferentes entre si: uma prévia
+// "animada" que repete o mesmo quadro mente tanto quanto uma cartela vazia.
+// =============================================================================
+namespace {
+u32 distinct_frames(const std::vector<u8>& all, usize frameBytes, u32 frames) {
+    u32 distinct = frames ? 1u : 0u;
+    for (u32 i = 1; i < frames; ++i) {
+        bool fresh = true;
+        for (u32 j = 0; j < i && fresh; ++j)
+            fresh = std::memcmp(all.data() + i * frameBytes, all.data() + j * frameBytes, frameBytes) != 0;
+        if (fresh) ++distinct;
+    }
+    return distinct;
+}
+bool frame_has_content(const u8* px, usize pixels) {
+    usize lit = 0;
+    for (usize i = 0; i < pixels; ++i) {
+        if (px[i * 4 + 3] != 255) return false;   // a comparação sai opaca
+        if (std::max({px[i * 4], px[i * 4 + 1], px[i * 4 + 2]}) > 12) ++lit;
+    }
+    return lit > pixels / 50;
+}
+} // namespace
+
+AUREA_TEST(Gpu, EffectPreviewSceneIsProceduralPeriodicAndMoving) {
+    for (const EffectPreviewScene scene : {EffectPreviewScene::Shapes, EffectPreviewScene::LowLight}) {
+        std::vector<u8> a, b, c;
+        effect_preview_procedural_scene(scene, 96, 60, 18.0, 32.0, a);
+        effect_preview_procedural_scene(scene, 96, 60, 18.0 + 32.0, 32.0, b);
+        effect_preview_procedural_scene(scene, 96, 60, 26.0, 32.0, c);
+        AUREA_CHECK_EQ(a.size(), static_cast<usize>(96) * 60 * 4);
+        AUREA_CHECK(a == b);   // periódica: o laço fecha sem salto
+        AUREA_CHECK(a != c);   // e anda
+        AUREA_CHECK(frame_has_content(a.data(), 96 * 60));
+    }
+}
+
+AUREA_TEST(Gpu, EveryCatalogEffectRendersAnAnimatedPreviewSequence) {
+    AUREA_REQUIRE_GPU();
+    Gpu& g = gpu();
+    g.renderer.set_effect_preview_source({}, 0, 0);
+    constexpr u32 N = 12;
+    // A cartela no tamanho do cartão de aparelho de entrada (160×100): é nela
+    // que se cobra o movimento. As outras cenas, menores (só "sai e tem conteúdo").
+    struct Pass { EffectPreviewScene scene; u32 w, h; };
+    constexpr Pass passes[] = {{EffectPreviewScene::Plate, 160, 100}, {EffectPreviewScene::Shapes, 64, 40},
+                               {EffectPreviewScene::LowLight, 64, 40}};
+    // Referência do "nada acontece": o quadro estático de um controle de
+    // expressão (não desenha) sobre a cartela parada, repetido N vezes.
+    std::vector<u8> inertFrame, inertRef;
+    AUREA_CHECK(g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kCheckboxControl), 160, 100,
+                                                 inertFrame, true).ok());
+    for (u32 f = 0; f < N; ++f) inertRef.insert(inertRef.end(), inertFrame.begin(), inertFrame.end());
+    u32 sequences = 0, animated = 0, failed = 0;
+    std::vector<std::string> still, inert, generators;
+    std::vector<u8> all;
+    for (u32 i = 0; i < g.effects.count(); ++i) {
+        const Effect& e = g.effects.at(i);
+        for (const Pass& pass : passes) {
+            const usize frameBytes = static_cast<usize>(pass.w) * pass.h * 4;
+            all.clear();
+            EffectPreviewSequenceInfo info;
+            const Status s = g.renderer.render_effect_preview_sequence(g.effects, e.type_id(), pass.w, pass.h, N,
+                                                                       pass.scene, all, &info);
+            if (!s.ok()) {
+                std::printf("\n    '%s' (cena %u) sem sequencia: %s", e.info().key, static_cast<u32>(pass.scene),
+                            s.message().data());
+                ++failed;
+                continue;
+            }
+            ++sequences;
+            AUREA_CHECK_EQ(info.frames, N);
+            AUREA_CHECK_EQ(all.size(), frameBytes * N);
+            if (all.size() != frameBytes * N) { ++failed; continue; }
+            for (u32 f = 0; f < N; ++f) {
+                if (!frame_has_content(all.data() + f * frameBytes, static_cast<usize>(pass.w) * pass.h)) {
+                    std::printf("\n    '%s' (cena %u) quadro %u vazio", e.info().key, static_cast<u32>(pass.scene), f);
+                    ++failed;
+                    break;
+                }
+            }
+            const bool expectMotion = info.temporal || info.moving || info.sweepParam >= 0;
+            if (pass.scene == EffectPreviewScene::Plate && expectMotion) {
+                ++animated;
+                if (distinct_frames(all, frameBytes, N) < 2) {
+                    // Igual à cartela sem efeito em todo quadro: o efeito não
+                    // aparece nem na prévia estática (desenha fora da camada,
+                    // depende de 3D/composição). Não é a ANIMAÇÃO que falhou.
+                    // Sem tempo nem varredura, o único movimento é a fonte: um
+                    // gerador que a ignora sai parado de verdade.
+                    if (all == inertRef) inert.emplace_back(e.info().key);
+                    else if (!info.temporal && info.sweepParam < 0 && !e.wants_history()) generators.emplace_back(e.info().key);
+                    else still.emplace_back(e.info().key);
+                }
+            }
+        }
+    }
+    for (const std::string& k : inert) std::printf("\n    sem efeito visivel na cartela (estatica tambem): %s", k.c_str());
+    for (const std::string& k : generators) std::printf("\n    independe da fonte (parado de verdade): %s", k.c_str());
+    for (const std::string& k : still) std::printf("\n    previa animada parada: %s", k.c_str());
+    std::printf("\n    (sequencias: %u, animadas na cartela: %u, falhas: %u, paradas: %zu, inertes: %zu) ", sequences,
+                animated, failed, still.size(), inert.size());
+    AUREA_CHECK_EQ(failed, 0u);
+    AUREA_CHECK_MSG(still.empty(), "efeito animado com todos os quadros iguais");
+}
+
+AUREA_TEST(Gpu, AnimatedPreviewMovesTheSourceForTimeEffectsAndClampsFrames) {
+    AUREA_REQUIRE_GPU();
+    Gpu& g = gpu();
+    // "Foto" 64×64 com um degradê: a janela que passeia tem de mostrar a mudança.
+    std::vector<u8> photo(64 * 64 * 4);
+    for (u32 y = 0; y < 64; ++y) for (u32 x = 0; x < 64; ++x) {
+        u8* p = &photo[(y * 64 + x) * 4];
+        p[0] = static_cast<u8>(x * 4); p[1] = static_cast<u8>(y * 4); p[2] = 90; p[3] = 255;
+    }
+    g.renderer.set_effect_preview_source(photo, 64, 64);
+    constexpr u32 W = 80, H = 50;
+    constexpr usize frameBytes = static_cast<usize>(W) * H * 4;
+    for (const char* key : {effect_keys::kEchoTrail, effect_keys::kTimeWarpRgb, effect_keys::kMotionDetect,
+                            effect_keys::kPosterizeTime, effect_keys::kTimeSlice}) {
+        std::vector<u8> a, b;
+        EffectPreviewSequenceInfo info;
+        const Status s = g.renderer.render_effect_preview_sequence(g.effects, effect_type_id(key), W, H, 16,
+                                                                   EffectPreviewScene::Photo, a, &info);
+        AUREA_CHECK_MSG(s.ok(), key);
+        if (!s.ok()) continue;
+        AUREA_CHECK(info.temporal && info.moving);
+        AUREA_CHECK_EQ(a.size(), frameBytes * 16);
+        // A metade "antes" (a fonte) anda entre o primeiro e o meio da sequência.
+        u32 changed = 0;
+        for (u32 y = 0; y < H; ++y) for (u32 x = 2; x < W / 2 - 2; ++x) {
+            const usize at = (static_cast<usize>(y) * W + x) * 4;
+            if (a[at] != a[8 * frameBytes + at]) ++changed;
+        }
+        AUREA_CHECK_MSG(changed > 100, key);
+        // Determinística: a mesma sequência de novo é igual byte a byte.
+        AUREA_CHECK(g.renderer.render_effect_preview_sequence(g.effects, effect_type_id(key), W, H, 16,
+                                                              EffectPreviewScene::Photo, b).ok());
+        AUREA_CHECK(a == b);
+    }
+    // Pedidos fora de 12..16 quadros são presos na faixa.
+    std::vector<u8> few, many;
+    EffectPreviewSequenceInfo fewInfo, manyInfo;
+    AUREA_CHECK(g.renderer.render_effect_preview_sequence(g.effects, effect_type_id(effect_keys::kSaturation), W, H, 3,
+                                                          EffectPreviewScene::Photo, few, &fewInfo).ok());
+    AUREA_CHECK(g.renderer.render_effect_preview_sequence(g.effects, effect_type_id(effect_keys::kSaturation), W, H, 40,
+                                                          EffectPreviewScene::Photo, many, &manyInfo).ok());
+    AUREA_CHECK_EQ(fewInfo.frames, kEffectPreviewSequenceMinFrames);
+    AUREA_CHECK_EQ(manyInfo.frames, kEffectPreviewSequenceMaxFrames);
+    AUREA_CHECK_EQ(few.size(), frameBytes * kEffectPreviewSequenceMinFrames);
+    // A prévia estática não mudou: o mesmo quadro de sempre, e temporal recusado.
+    std::vector<u8> one;
+    AUREA_CHECK(!g.renderer.render_effect_preview(g.effects, effect_type_id(effect_keys::kEchoTrail), W, H, one, true).ok());
+    std::vector<u8> bad;
+    AUREA_CHECK(!g.renderer.render_effect_preview_sequence(g.effects, effect_type_id(effect_keys::kSaturation), W, H, 12,
+                                                           static_cast<EffectPreviewScene>(9), bad).ok());
+    g.renderer.set_effect_preview_source({}, 0, 0);
+}
+
+// =============================================================================
 // Efeitos temporais (Fase 7.3 §25, §26, §61)
 //
 // Os dois são DECLARATIVOS: quem age é o renderer, lendo os parâmetros no
@@ -11887,7 +12053,8 @@ AUREA_TEST(Gpu, DetachSurfaceIsNotBlockedByAThumbnailCaptureWaitingForVideo) {
 // Mapa de profundidade (IA): o efeito de verdade, num quadro renderizado.
 // =============================================================================
 namespace {
-/// A foto das prévias do app (pessoa perto, fundo escuro longe), RGBA8 reta.
+/// A imagem das prévias do app (procedural desde 0.2.4: vaso no centro perto,
+/// parede escura longe nos cantos), RGBA8 reta.
 bool depth_photo(ImagePixels& out) {
     const std::string path = std::string(AUREA_APP_PRESETS_DIR) + "/../previa_efeitos.jpg";
     std::ifstream f(path, std::ios::binary);
@@ -11915,7 +12082,7 @@ f32 depth_max_diff(const FloatImage& a, const FloatImage& b) {
 }
 }
 
-// Qual lado é perto, NO QUADRO: a pessoa (primeiro plano) sai clara e o fundo
+// Qual lado é perto, NO QUADRO: o vaso central (primeiro plano) sai claro e o fundo
 // escuro; Inverter troca; Mistura 0 devolve a foto. AUREA_DEPTH_PNG=<pasta>
 // grava o antes e o depois.
 AUREA_TEST(Gpu, DepthMapEffectPaintsTheNearSideBright) {
@@ -11934,7 +12101,7 @@ AUREA_TEST(Gpu, DepthMapEffectPaintsTheNearSideBright) {
     AUREA_CHECK(svc != nullptr);
     const f32 person = encoded_mean(after, 60, 60, 100, 120);
     const f32 background = 0.5f * (encoded_mean(after, 0, 0, 20, 20) + encoded_mean(after, 140, 0, 160, 20));
-    std::printf("    pessoa %.2f fundo %.2f (0 preto, 1 branco)", person, background);
+    std::printf("    objeto %.2f fundo %.2f (0 preto, 1 branco)", person, background);
     AUREA_CHECK(person > background + 0.3f);
     // Um mapa é cinza.
     f32 chroma = 0;
@@ -11969,7 +12136,7 @@ AUREA_TEST(Gpu, DepthMapEffectPaintsTheNearSideBright) {
 }
 
 // A prévia do catálogo usa a foto das prévias: o cartão mostra o mapa (cinza,
-// pessoa clara), não a foto intacta. Sem foto, a cartela passa como está.
+// vaso claro; recorte centralizado desde 0.2.4), não a foto intacta. Sem foto, a cartela passa como está.
 AUREA_TEST(Gpu, DepthMapCatalogPreviewShowsTheMapOfThePhoto) {
     AUREA_REQUIRE_GPU();
     Gpu& g = gpu();
@@ -11990,7 +12157,7 @@ AUREA_TEST(Gpu, DepthMapCatalogPreviewShowsTheMapOfThePhoto) {
     for (usize i = 0; i < card.size(); i += 4)
         colored += std::abs(static_cast<int>(card[i]) - card[i + 1]) > 3 || std::abs(static_cast<int>(card[i + 1]) - card[i + 2]) > 3;
     const f32 person = mean(64, 30, 96, 90), corner = mean(0, 0, 12, 12);
-    std::printf("    cartao: pessoa %.2f canto %.2f, pixels coloridos %u", person, corner, colored);
+    std::printf("    cartao: objeto %.2f canto %.2f, pixels coloridos %u", person, corner, colored);
     AUREA_CHECK_EQ(colored, 0u);
     AUREA_CHECK(person > corner + 0.3f);
     g.renderer.release_project_resources();
@@ -13899,3 +14066,4 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "MotionTileWallGpu.inl"
 #include "ClipMaskGpu.inl"
 #include "Scene3DImageBlurGpu.inl"
+

@@ -2047,6 +2047,10 @@ func fxFilterCatalog(_ catalog: [EffectCatalogItem],
 
 final class FxEffectPrefs: ObservableObject {
     static let recentMax = 12
+    /// "Prévias de efeitos" (Ajustes; padrão ligado). Desligado, os cartões
+    /// mostram só a cartela com o ícone da categoria e nada é renderizado.
+    /// Lido pelas views com @AppStorage (mesma semântica do EffectPrefs.kt).
+    static let previewsEnabledKey = "aurea.efeitos.previas"
     private let favoritesKey = "aurea.efeitos.favoritos"
     private let recentsKey = "aurea.efeitos.recentes"
 

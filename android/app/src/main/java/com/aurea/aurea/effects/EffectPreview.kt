@@ -43,6 +43,7 @@ class EffectPreviewStore(
     cacheDir: File,
     private val version: String,
     private val render: (typeId: Int, width: Int, height: Int) -> ImageBitmap?,
+    renderSequence: ((typeId: Int, width: Int, height: Int, frames: Int, scene: Int) -> EffectSequenceResult)? = null,
 ) : com.aurea.aurea.engine.TrimmableImageCache {
     init { com.aurea.aurea.engine.UiImageCaches.register(this) }
     override fun releaseImages() = trimMemory()
@@ -51,6 +52,11 @@ class EffectPreviewStore(
     private val dir = File(root, version)
     @Volatile private var dirReady = false
     @Volatile private var trimEpoch = 0L
+
+    /** As prévias ANIMADAS (ficha do efeito), na mesma pasta versionada. */
+    val animated: EffectAnimatedPreviewStore? = renderSequence?.let { r ->
+        EffectAnimatedPreviewStore({ ensureDir(); dir }, r)
+    }
 
     /** Em memória: por BYTES, não por número — 128 prévias de 256² são 32 MB. */
     private val memory = object : LruCache<String, ImageBitmap>(MAX_MEMORY_BYTES) {
@@ -69,14 +75,14 @@ class EffectPreviewStore(
         memory.get(k)?.let { return it }
         val epoch = trimEpoch
         val file = File(dir, "$k.webp")
-        withContext(Disk) { readPng(file) }?.let { if (epoch == trimEpoch) memory.put(k, it); return it }
-        val bmp = withContext(Gpu) {
+        withContext(EffectPreviewDisk) { readPng(file) }?.let { if (epoch == trimEpoch) memory.put(k, it); return it }
+        val bmp = withContext(EffectPreviewGpu) {
             // Outro cartão com o mesmo efeito pode ter gerado enquanto este esperava.
             if (epoch != trimEpoch) null else memory.get(k) ?: try { render(typeId, width, height) }
                 catch (_: OutOfMemoryError) { trimMemory(); null }
         } ?: return null
         if (epoch == trimEpoch) memory.put(k, bmp)
-        withContext(Disk) { writePng(file, bmp) }
+        withContext(EffectPreviewDisk) { writePng(file, bmp) }
         return bmp
     }
 
@@ -84,11 +90,12 @@ class EffectPreviewStore(
     fun residentCount(): Int = memory.size()
 
     /** Pressão de memória (Fase 8B): solta as prévias em memória; refeitas sob demanda. */
-    fun trimMemory() { trimEpoch++; memory.evictAll() }
+    fun trimMemory() { trimEpoch++; memory.evictAll(); animated?.trimMemory() }
 
     /** "Limpar cache" (main thread): renomeia na hora, apaga em segundo plano. */
     fun clear() {
         memory.evictAll()
+        animated?.trimMemory()
         dirReady = false
         val trash = File(root.parentFile, "previas.apagar.${System.nanoTime()}")
         if (root.renameTo(trash)) kotlin.concurrent.thread(name = "aurea-previas-limpar") { trash.deleteRecursively() }
@@ -128,13 +135,17 @@ class EffectPreviewStore(
         @Suppress("DEPRECATION")
         val WEBP_LOSSY: Bitmap.CompressFormat =
             if (android.os.Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
-        /** O motor serializa o render: mais de uma aqui só prende threads. */
-        @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-        val Gpu = Dispatchers.Default.limitedParallelism(1)
-        @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-        val Disk = Dispatchers.IO.limitedParallelism(2)
     }
 }
+
+/**
+ * O motor serializa o render: mais de uma aqui só prende threads. A mesma fila
+ * para a prévia parada e para a animada (EffectAnimatedPreview.kt).
+ */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+internal val EffectPreviewGpu = Dispatchers.Default.limitedParallelism(1)
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+internal val EffectPreviewDisk = Dispatchers.IO.limitedParallelism(2)
 
 /**
  * A prévia de um efeito como estado do Compose.

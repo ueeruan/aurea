@@ -221,6 +221,9 @@ class Exporter internal constructor(
         else -> 0.0
     }
 
+    /** Duração pedida (s), só para explicar a recusa acima de 3 h. 0 = desconhecida. */
+    var plannedSeconds: Double = 0.0
+
     fun start(title: String, compWidth: Int, compHeight: Int, compFps: Double, options: ExportOptions) {
         if (busy) return
         val dir = File(app.cacheDir, "export")
@@ -677,6 +680,7 @@ class Exporter internal constructor(
 
     private fun startError(code: Int, options: ExportOptions): String = when (code) {
         NOT_SUPPORTED -> text(when {
+            plannedSeconds > com.aurea.aurea.editor.EXPORT_MAX_SECONDS -> R.string.exp_too_long_3h
             options.format == ExportFormat.Gif || options.format == ExportFormat.Sequence -> R.string.exp2_too_long
             options.format == ExportFormat.Frame -> R.string.app_export_unsupported_res
             options.hevc -> R.string.app_export_no_hevc

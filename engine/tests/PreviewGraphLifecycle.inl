@@ -50,6 +50,10 @@ AUREA_TEST(PreviewGraphLifecycle, PendingPictureKeepsItsSnapshotAndSeekCancelsBe
     u32 width = 0, height = 0;
     AUREA_CHECK_EQ(engine.render_effect_preview(effect_type_id(effect_keys::kGaussianBlur), 64,64,
         pixels,width,height).code(), Errc::Busy);
+    // A prévia animada também espera o preview do editor (a UI tenta de novo).
+    u32 sequenceFrames = 0;
+    AUREA_CHECK_EQ(engine.render_effect_preview_sequence(effect_type_id(effect_keys::kGaussianBlur), 64, 64, 12, 1,
+        pixels, width, height, sequenceFrames).code(), Errc::Busy);
     AUREA_CHECK_EQ(backend->texturesCreated, created);
     AUREA_CHECK_EQ(backend->framesSubmitted, submitted);
     Command seek; seek.type = CommandType::PlaybackSeek;

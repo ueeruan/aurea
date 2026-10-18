@@ -347,6 +347,13 @@ struct ExportView: View {
         VStack(spacing: 0) {
             summary("editor_video", ["\(outputSize.0) × \(outputSize.1)", "\(format(fps)) fps", codec].map(ltrIsolado).joined(separator: " · "))
             summary("editor_duracao", formatTime(seconds))
+            // 0.2.4 (C2): a duração inflada aparece antes; acima de 3 h o motor recusa.
+            if seconds > 30 * 60 {
+                Text(seconds > AureaModel.exportMaxSeconds ? AureaText.t("exp_too_long_3h")
+                     : AureaText.t("exp_long_duration", formatTime(seconds)))
+                    .font(.aurea(size: 12)).foregroundStyle(AureaColors.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+            }
             summary("editor_tamanho_estimado", estimatedSize)
             summary("editor_cor", AureaText.t("editor_sdr_bt_709"))
         }.padding(.top, 12)
@@ -423,7 +430,8 @@ struct ExportView: View {
             if model.exportPublishing {
                 wideButton("editor_salvando", filled: false) {}.disabled(true)
             } else if model.exporting {
-                wideButton("editor_cancelar", filled: false) { cancelled = true; model.cancelExport() }.disabled(model.exportCancelled)
+                wideButton("editor_cancelar", filled: false) { cancelled = true; model.cancelExport() }
+                    .accessibilityHint(AureaText.t(model.exportPreparing ? "msg_preparando" : "editor_cancelar"))
             } else if model.exportedURL != nil {
                 HStack(spacing: 10) {
                     wideButton("editor_abrir", filled: false) { viewing = true }
@@ -582,7 +590,9 @@ private struct ExportRenderingView: View {
                         Text(AureaText.t("exp2_eta", ExportFormat.time(eta))).font(.aurea(size: 14).monospacedDigit()).padding(.top, 10)
                     }
                     // Com o "faltam" grande em cima, a linha de detalhe não repete o tempo.
-                    Text(eta > 0 ? AureaText.t("exp2_frames", String(done), String(total), ExportFormat.number(speed))
+                    // 0.2.4 (C5): no quadro 0 o "0 fps · 0:00" parecia travado.
+                    Text(done == 0 ? AureaText.t("exp_first_frame")
+                         : eta > 0 ? AureaText.t("exp2_frames", String(done), String(total), ExportFormat.number(speed))
                          : AureaText.t("sh_export_progress", String(done), String(total), ExportFormat.number(speed), ExportFormat.time(eta)))
                         .font(.aurea(size: 12).monospacedDigit()).foregroundStyle(AureaColors.muted)
                         .multilineTextAlignment(.center).padding(.top, eta > 0 ? 4 : 10)

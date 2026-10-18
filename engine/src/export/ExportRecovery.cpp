@@ -46,9 +46,12 @@ bool unsupported_uri(const std::string& p) noexcept {
     return colon != std::string::npos && (slash == std::string::npos || colon < slash) && !(colon == 1 && p.size() > 2 &&
         ((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z')));
 }
-Status add_path(Package& package, std::string& path, const PathResolver& resolve) {
+Status add_path(Package& package, std::string& path, const PathResolver& resolve, bool allowUri = false) {
     if (path.empty()) return OkStatus;
     std::string real = resolve ? resolve(path) : path;
+    // Sem recuperação (0.2.4, C3): a plataforma valida a URI e a devolve como
+    // está; o decoder a abre pelo fd. Não vira dependência verificada.
+    if (allowUri && !real.empty() && real.rfind("file://", 0) != 0 && unsupported_uri(real)) { path = std::move(real); return OkStatus; }
     if (real.rfind("file://", 0) == 0) {
         real.erase(0, 7);
         if (real.rfind("localhost/", 0) == 0) real.erase(0, 9);
@@ -213,20 +216,20 @@ bool valid_settings(const ExportSettings& s) noexcept {
 
 Status capture(const Project& project, CompositionId composition, const ExportSettings& settings,
                const PathResolver& resolve, std::unique_ptr<Project>& frozen, Package& package,
-               bool requirePersistentSources) noexcept {
+               bool requirePersistentSources, const std::vector<u64>* retainedImages) noexcept {
     try {
         SaveOptions save; save.writeThumbnail = false;
         std::vector<u8> initial;
         if (const Status s = ProjectSerializer::encode(project, save, initial); !s.ok()) return s;
         return capture_snapshot(std::move(initial), composition, settings, resolve, frozen, package,
-                                requirePersistentSources);
+                                requirePersistentSources, retainedImages);
     } catch (const std::bad_alloc&) { return Errc::OutOfMemory; }
       catch (...) { return Errc::IoError; }
 }
 
 Status capture_snapshot(std::vector<u8> initial, CompositionId composition, const ExportSettings& settings,
                const PathResolver& resolve, std::unique_ptr<Project>& frozen, Package& package,
-               bool requirePersistentSources) noexcept {
+               bool requirePersistentSources, const std::vector<u64>* retainedImages) noexcept {
     try {
         Package candidate; candidate.settings = settings; candidate.composition = composition;
         SaveOptions save; save.writeThumbnail = false;
@@ -236,9 +239,32 @@ Status capture_snapshot(std::vector<u8> initial, CompositionId composition, cons
         initial.clear(); initial.shrink_to_fit();
         if (!copy->timeline().composition(composition)) return Errc::NotFound;
         copy->timeline().set_current(composition);
+        // 0.2.4: so os assets que a composicao exportada alcanca (camadas,
+        // aninhadas, texturas, HDRI, LUT). Um asset morto de clipe apagado ou
+        // de midia substituida derrubava todo export com erro 18. Os demais
+        // ficam no snapshot com o caminho intacto, sem passar pelo resolvedor.
+        const auto reachable = copy->assets_reachable_from(composition);
+        const auto reaches = [&](AssetId id) { return std::find(reachable.begin(), reachable.end(), id) != reachable.end(); };
+        std::vector<CompositionId> compositions, pendingComps{composition};
+        while (!pendingComps.empty()) {
+            const CompositionId id = pendingComps.back(); pendingComps.pop_back();
+            if (std::find(compositions.begin(), compositions.end(), id) != compositions.end()) continue;
+            const Composition* comp = copy->timeline().composition(id);
+            if (!comp) continue;
+            compositions.push_back(id);
+            comp->layers().for_each([&](LayerId, const Layer& l) {
+                if (l.kind == LayerKind::Composition && l.nested.composition.valid()) pendingComps.push_back(l.nested.composition);
+            });
+        }
         Status status;
-        copy->for_each_asset([&](AssetId, Asset& asset) {
+        copy->for_each_asset([&](AssetId id, Asset& asset) {
             if (!status.ok()) return;
+            asset.proxyPath.clear(); // Final export always resolves the original.
+            if (!reaches(id)) return;
+            // Imagem com os pixels ja retidos pelo export: o render nao abre o
+            // arquivo, entao uma URI que expirou nao precisa ser lida de novo.
+            if (!requirePersistentSources && retainedImages && asset.kind == AssetKind::Image &&
+                std::find(retainedImages->begin(), retainedImages->end(), id.pack()) != retainedImages->end()) return;
             scene3d::Text3DSpec text;
             scene3d::Shape3DSpec shape;
             if (scene3d::decode_text3d(asset.sourcePath, text)) {
@@ -258,16 +284,16 @@ Status capture_snapshot(std::vector<u8> initial, CompositionId composition, cons
                 for (auto& part : shape.parts) { status = add_path(candidate, part.image, resolve); if (!status.ok()) break; }
                 asset.sourcePath = scene3d::encode_shape3d(shape);
             } else if (!asset.sourcePath.empty()) {
-                status = add_path(candidate, asset.sourcePath, resolve);
+                status = add_path(candidate, asset.sourcePath, resolve, !requirePersistentSources);
                 if (status.ok() && requirePersistentSources && asset.kind == AssetKind::Model3D)
                     status = add_gltf_dependencies(candidate, asset.sourcePath);
             } else if (requirePersistentSources && (asset.kind == AssetKind::Image || asset.kind == AssetKind::Video || asset.kind == AssetKind::Audio || asset.kind == AssetKind::Model3D)) {
                 status = Status{Errc::NotSupported, "fonte apenas em memoria nao pode ser recuperada apos fechar o app"};
             }
-            asset.proxyPath.clear(); // Final export always resolves the original.
         });
         if (!status.ok()) return status;
-        copy->timeline().for_each_composition([&](CompositionId, Composition& comp) {
+        copy->timeline().for_each_composition([&](CompositionId compId, Composition& comp) {
+            if (std::find(compositions.begin(), compositions.end(), compId) == compositions.end()) return;
             comp.layers().for_each([&](LayerId, Layer& layer) {
                 if (!status.ok() || layer.kind != LayerKind::Text) return;
                 if (const auto font = text::FontManager::instance().font_for(layer.text)) {

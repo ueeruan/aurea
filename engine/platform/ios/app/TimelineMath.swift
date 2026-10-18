@@ -609,3 +609,53 @@ enum TimelineCompactScroll {
         return (min(max(0, saved ?? current), max(0, maxScroll)), nil)
     }
 }
+
+/**
+ * Teto da auto-rolagem durante um arraste/aparo (docs/diagnostico/export-falhas.md,
+ * A.3 item 1 e C2 item 1). Par do `GestureLimit` do Android (TimelineMath.kt).
+ *
+ * Sem ele, segurar um clipe (ou a borda dele) na margem direita virava uma
+ * catraca: a vista é limitada pelo `navigationEnd` VIVO, que durante o arraste
+ * é o fim do próprio clipe; cada passo da auto-rolagem empurra o clipe, que
+ * empurra o teto, e a composição crescia até horas.
+ *
+ * Regra: no começo do gesto vale `max(navigationEnd, duração) + 10 s` (em
+ * quadros, pelo fps da composição), congelado até soltar. A vista e o
+ * deslocamento aplicado não passam disso. Fora de gesto nada muda (`none`).
+ */
+enum GestureLimit {
+    /// Folga além do conteúdo que um gesto pode abrir de uma vez.
+    static let marginSeconds: Double = 10
+    /// Sem gesto em curso: nenhum teto extra.
+    static let none: Int64 = .max
+    /// Maior quadro do protocolo de frames.
+    private static let maxFrame: Int64 = Int64(Int32.max) - 1
+
+    static func autoScrollLimit(startNavEnd: Int64, startDuration: Int64, fps: Double) -> Int64 {
+        let safe = fps.isFinite && fps >= 1 && fps <= 1000 ? fps : 30
+        let margin = Int64((marginSeconds * safe).rounded(.up))
+        let base = min(maxFrame, max(0, max(startNavEnd, startDuration)))
+        return min(maxFrame, base + margin)
+    }
+
+    /// Próxima vista da auto-rolagem: não avança além de `limit`. Se a vista já
+    /// estava além (o teto não a puxa de volta), só deixa recuar.
+    static func clampView(_ next: Double, current: Double, limit: Int64) -> Double {
+        guard limit != none, next > current else { return next }
+        return min(next, max(current, Double(limit)))
+    }
+
+    /// Quadro-alvo de um arraste/aparo: no máximo `limit`.
+    static func clampFrame(_ frame: Int32, limit: Int64) -> Int32 {
+        guard limit != none, Int64(frame) > limit else { return frame }
+        return Int32(clamping: min(max(0, limit), maxFrame))
+    }
+
+    /// Maior deslocamento à direita de um lote cujo maior fim é `maxEnd`: nem
+    /// além do protocolo de frames, nem com o fim passando de `limit`.
+    static func maxShift(maxEnd: Int32, limit: Int64) -> Int32 {
+        let protocolShift = maxFrame - Int64(maxEnd)
+        let bounded = limit == none ? protocolShift : min(protocolShift, max(0, limit - Int64(maxEnd)))
+        return Int32(clamping: max(0, bounded))
+    }
+}

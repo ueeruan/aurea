@@ -150,9 +150,10 @@ class LocalAiDeviceTest {
                 if (maxOf(r, g, b) - minOf(r, g, b) > 4) ++colored
             }
             assertTrue("Depth map must replace the colored photo with grayscale", colored < 100)
-            val person = mean(depth, 96, 96, 160, 192)
+            // A amostra de 0.2.4: vaso no centro (perto), parede escura nos cantos (longe).
+            val subject = mean(depth, 96, 96, 160, 192)
             val background = (mean(depth, 0, 0, 32, 32) + mean(depth, 224, 0, 256, 32)) / 2
-            assertTrue("Near person must be brighter than distant background: $person / $background", person > background + 45)
+            assertTrue("Near central subject must be brighter than distant background: $subject / $background", subject > background + 45)
             stabilityScreenshot("depth-offline.png")
 
             val circle = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)

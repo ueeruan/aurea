@@ -109,6 +109,7 @@ set(AUREA_CORE_SOURCES
     src/render/ParticleExtras.cpp
     src/render/ParticleScene.cpp
     src/render/RendererDepth.cpp
+    src/render/RendererEffectSequence.cpp
     src/render/RendererRoto.cpp
     src/render/RendererAudio.cpp
     src/effects/Parameter.cpp

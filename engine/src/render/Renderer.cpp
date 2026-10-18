@@ -7855,6 +7855,16 @@ void Renderer::set_effect_preview_source(std::vector<u8> rgba, u32 width, u32 he
 
 Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectTypeId type,
                                        u32 width, u32 height, std::vector<u8>& outRgba, bool comparison) noexcept {
+    // A prévia estática de sempre: um quadro, foto (ou cartela), sem fonte da CPU.
+    PreviewFrameSpec spec;
+    spec.comparison = comparison;
+    if (comparison) { spec.localTime = 18; spec.clipProgress = 0.5f; }
+    return render_effect_preview_impl(effects, type, width, height, spec, outRgba);
+}
+
+Status Renderer::render_effect_preview_impl(const EffectRegistry& effects, EffectTypeId type, u32 width, u32 height,
+                                            const PreviewFrameSpec& spec, std::vector<u8>& outRgba) noexcept {
+    const bool comparison = spec.comparison;
     if (!backend_) return Status{Errc::InvalidState, "renderer sem backend"};
     if (previewGraph_.active) return Status{Errc::Busy, "preview graph continuation active"};
     if (const Status ready = reclaim_failed_transients(); !ready.ok()) return ready;
@@ -7866,10 +7876,28 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     // Um quadro solto não diz nada sobre efeito que precisa de uma SEQUÊNCIA
     // (eco, remapeamento de tempo) nem de um histograma do quadro inteiro.
     // Não é falha: é um efeito que a cartela não representa, e a UI mostra a
-    // cartela genérica em vez de uma imagem que mentiria.
-    if (effect->effect_class() == EffectClass::Temporal || effect->effect_class() == EffectClass::Global) {
+    // cartela genérica em vez de uma imagem que mentiria. A SEQUÊNCIA animada
+    // (render_effect_preview_sequence) representa: ela entra com o resultado
+    // temporal já montado ou com o quadro passado (`spec.allowTemporal`).
+    if (!spec.allowTemporal
+        && (effect->effect_class() == EffectClass::Temporal || effect->effect_class() == EffectClass::Global)) {
         return Status{Errc::NotImplemented, "efeito sem previa de um quadro"};
     }
+
+    // Fontes vindas da CPU (cenas procedurais da sequência, histórico, resultado
+    // temporal): texturas nossas, destruídas em qualquer saída depois do quadro.
+    struct OwnedTextures {
+        GPUBackend* backend;
+        TextureHandle handles[3]{};
+        u32 count = 0;
+        ~OwnedTextures() { for (u32 i = 0; i < count; ++i) if (handles[i].valid()) backend->destroy_texture(handles[i]); }
+    } owned{backend_};
+    // A cena escolhida não é a foto: o mapa de profundidade da foto não vale.
+    struct DepthGate {
+        bool& flag; bool saved;
+        ~DepthGate() { flag = saved; }
+    } depthGate{previewDepthFromPhoto_, previewDepthFromPhoto_};
+    if (spec.source || spec.forcePlate) previewDepthFromPhoto_ = false;
 
     FrameBegin fb;
     // Offscreen: a cartela é renderizada e lida de volta, não vai para a tela.
@@ -7910,10 +7938,40 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
 
     EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
     // A foto de base (quando o app mandou uma): sobe uma vez, vira linear e é
-    // recortada no formato pedido, puxando o corte para o terço de cima (o
-    // rosto fica no card). Sem foto, a cartela de teste do shader.
+    // recortada no formato pedido, CENTRALIZADA (a amostra de 0.2.4 é um
+    // objeto no meio do quadro; o corte puxado para o rosto, 0,35, saiu junto
+    // com a foto antiga). Mesma conta em RendererDepth.cpp (depth_map_preview).
+    // Sem foto, a cartela de teste do shader.
+    // Uma imagem RGBA8 sRGB (alfa reto) da CPU, do tamanho pedido, sobe e vira
+    // linear no formato de trabalho — o mesmo passe da foto.
+    auto upload_cpu = [&](const u8* rgba, const char* name, FGTexture target) noexcept -> bool {
+        if (!rgba || owned.count >= 3) return false;
+        TextureDesc d;
+        d.width = width;
+        d.height = height;
+        d.format = SurfaceFormat::RGBA8;
+        d.sampled = true;
+        d.transferDst = true;
+        d.debugName = name;
+        auto t = backend_->create_texture(d);
+        if (!t.ok()) return false;
+        owned.handles[owned.count++] = *t;
+        if (!backend_->upload_texture(*t, rgba, width * 4).ok()) return false;
+        const Vec4 flags{0.0f, 0.0f, 0.0f, 0.0f};
+        return ctx.fullscreen_pass(name, PassStage::Decode, target, ShaderId::video_rgba_to_linear_frag,
+                                   {PassTexture{{}, *t, CommonSampler::LinearClamp}}, &flags, sizeof(flags)) != kInvalidIndex;
+    };
     bool usedPhoto = false;
-    if (previewSrcW_ > 0 && previewSrcH_ > 0) {
+    if (spec.source) {
+        usedPhoto = upload_cpu(spec.source, "cena-da-previa", plate);
+        if (!usedPhoto) {
+            graph_.release(pool_);
+            pool_.end_frame();
+            (void)backend_->end_frame();
+            return Status{Errc::OutOfDeviceMemory, "cena da previa nao subiu"};
+        }
+    }
+    if (!usedPhoto && !spec.forcePlate && previewSrcW_ > 0 && previewSrcH_ > 0) {
         if (!previewSrcTex_.valid()) {
             TextureDesc d;
             d.width = previewSrcW_;
@@ -7942,7 +8000,7 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
             Vec4 map{1.0f, 1.0f, 0.0f, 0.0f};   // uv = v_uv * xy + zw
             if (dst > src) {                     // mais largo: corta em cima/embaixo
                 map.y = src / dst;
-                map.w = (1.0f - map.y) * 0.35f;
+                map.w = (1.0f - map.y) * 0.5f;
             } else {                             // mais alto: corta dos lados
                 map.x = dst / src;
                 map.z = (1.0f - map.x) * 0.5f;
@@ -7972,6 +8030,9 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     // A prévia mostra o efeito LIGADO: com os padrões de fábrica (quase sempre
     // neutros) a cartela sairia intacta e a prévia não diria nada.
     (void)effect->demo_values(instance, values);
+    // Sequência animada: os parâmetros de demonstração andam desde o padrão
+    // (ver effect_preview_apply_sweep).
+    if (std::isfinite(spec.sweep)) effect_preview_apply_sweep(*params, instance, values, spec.sweep);
 
     // A camada cobre o quadro inteiro, sem transformação: é o caso mais simples
     // e o que faz todo efeito de domínio (Motion Tile) se comportar.
@@ -7990,8 +8051,8 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     eval.valueOffset = 0;
     eval.count = static_cast<u32>(values.size());
     eval.effectIndex = 0;
-    eval.localTime = FrameIndex{0};
-    if (comparison) { eval.localTime = FrameIndex{18}; eval.clipProgress = 0.5f; }
+    eval.localTime = FrameIndex{spec.localTime};
+    eval.clipProgress = spec.clipProgress;
     eval.texelScale = 1.0f;
     eval.placement = &placement;
     // Recurso resolvido fora do grafo (o mapa de profundidade da foto das
@@ -8002,12 +8063,33 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     LayerImage result;
     Status built = OkStatus;
 
+    // Sequência: a captura da cena (sem efeito), o resultado temporal montado
+    // fora (o eco, o RGB no tempo... somados na CPU sobre a cena que anda) e o
+    // quadro PASSADO para quem compara com ele (Detectar movimento, Datamosh).
+    if (spec.sourceOnly) {
+        result = input;
+    } else if (spec.result) {
+        const FGTexture done = graph_.create_texture("resultado-temporal", inDesc);
+        if (!upload_cpu(spec.result, "resultado-temporal", done)) {
+            graph_.release(pool_);
+            pool_.end_frame();
+            (void)backend_->end_frame();
+            return Status{Errc::OutOfDeviceMemory, "resultado temporal nao subiu"};
+        }
+        result = LayerImage{done, input.region, width, height};
+    } else if (spec.history && effect->wants_history()) {
+        const FGTexture past = graph_.create_texture("historico-da-previa", inDesc);
+        if (upload_cpu(spec.history, "historico-da-previa", past)) {
+            ctx.set_history(LayerImage{past, input.region, width, height});
+        }
+    }
+
     // EFEITO NEUTRO: a prévia é a própria cartela. Isto não é um atalho — é a
     // resposta certa para os controles de expressão (que existem no painel e
     // não desenham nada) e para qualquer efeito nos valores de demonstração
     // que não mudam a imagem. Sem esta linha, eles apareceriam como "sem
     // prévia", que para um efeito que não muda nada é simplesmente falso.
-    if (effect->is_identity(eval)) {
+    if (!result.valid() && effect->is_identity(eval)) {
         const FGTexture same = graph_.create_texture("previa", plateDesc());
         const Vec4 copyMap{1.0f, 1.0f, 0.0f, 0.0f};
         if (ctx.fullscreen_pass("previa", PassStage::Output, same, ShaderId::common_copy_frag,

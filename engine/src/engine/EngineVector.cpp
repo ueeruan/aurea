@@ -85,7 +85,7 @@ Result<u64> Engine::add_vector_layer(u32 preset) noexcept {
     sh.vector.groups.push_back(default_group(std::min<u32>(preset, 4), Vec2{w * 0.5f, h * 0.5f}, 0.3f * std::min(w, h), 0));
     const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
     l->start = FrameIndex{t};
-    l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    l->end = FrameIndex{new_layer_end_locked(comp, l, t)};
     l->transform.anchor = Vec3{w * 0.5f, h * 0.5f, 0.0f};
     l->transform.position = Vec3{w * 0.5f, h * 0.5f, 0.0f};
     project_->mark_dirty();
@@ -533,7 +533,7 @@ Result<u64> Engine::add_freehand_path(u64 layerId, const f32* xy, usize count, f
         l->shape.bounds = Rect{0.0f, 0.0f, w, h};
         const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
         l->start = FrameIndex{t};
-        l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+        l->end = FrameIndex{new_layer_end_locked(comp, l, t)};
         l->transform.anchor = Vec3{w * 0.5f, h * 0.5f, 0.0f};
         l->transform.position = Vec3{w * 0.5f, h * 0.5f, 0.0f};
     }
@@ -572,7 +572,7 @@ Result<u64> Engine::import_svg(const std::string& text, const char* name) noexce
     l->shape.vector = std::move(svg.data);
     const i64 t = std::clamp<i64>(playback_.current().value, 0, std::max<i64>(0, comp->duration().value - 1));
     l->start = FrameIndex{t};
-    l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    l->end = FrameIndex{new_layer_end_locked(comp, l, t)};
     // Centrado; maior que 80% da composição encolhe para caber (escala da camada).
     const f32 k = std::min({1.0f, 0.8f * w / sz.x, 0.8f * h / sz.y});
     l->transform.anchor = Vec3{sz.x * 0.5f, sz.y * 0.5f, 0.0f};

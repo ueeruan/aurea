@@ -213,6 +213,24 @@ internal class TimelineController(
         }
     }
 
+    /**
+     * Teto da auto-rolagem do gesto de edição em curso ([GestureLimit]); NONE
+     * fora de gesto. Congelado no começo do arraste/aparo: o `navigationEnd`
+     * vivo cresce com o próprio clipe arrastado e virava catraca.
+     */
+    private var gestureLimit = GestureLimit.NONE
+
+    /** Captura o teto do gesto uma vez (no começo); os passos seguintes reusam. */
+    private fun captureGestureLimit(): Long {
+        if (gestureLimit == GestureLimit.NONE) {
+            val nav = store.navigationEnd
+            // Sem a leitura do motor (navigationEnd = Int.MAX_VALUE), usa o fim das camadas.
+            val navEnd = if (nav == Int.MAX_VALUE) (rows.value.maxOfOrNull { it.end } ?: 0) else nav
+            gestureLimit = GestureLimit.autoScrollLimit(navEnd.toLong(), store.project.durationFrames.toLong(), fps.toDouble())
+        }
+        return gestureLimit
+    }
+
     /** Solta a vista: fecha o scrub e ela volta a ser o playhead do motor. */
     private fun releaseView() {
         if (scrubOpen) {
@@ -470,6 +488,7 @@ internal class TimelineController(
         state.liftKind = RowDrop.NONE
         state.dragKeyLayer = 0L
         state.dragKeyFrame = Snap.NONE
+        gestureLimit = GestureLimit.NONE
         if (flingJob == null) releaseView()
     }
 
@@ -971,7 +990,8 @@ internal class TimelineController(
         val groupIds = group.toLongArray()
         val baseStarts = IntArray(groupIds.size) { rowById(groupIds[it])?.start ?: 0 }
         val baseEnds = IntArray(groupIds.size) { rowById(groupIds[it])?.end ?: 0 }
-        val maxDelta = Int.MAX_VALUE - 1 - (baseEnds.maxOrNull() ?: r.end)
+        // Fim do lote preso ao teto do gesto: a auto-rolagem não estica a composição sem fim.
+        val maxDelta = GestureLimit.maxShift(baseEnds.maxOrNull() ?: r.end, captureGestureLimit())
         val starts = IntArray(groupIds.size)
         val ends = IntArray(groupIds.size)
         var sent = 0
@@ -1009,7 +1029,7 @@ internal class TimelineController(
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = (frameAt(p.x) + grab).toFrame()
             val snapped = if (store.snapping) Snap.nearest(targets, desired.toDouble(), playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble()) else Snap.NONE
-            val target = max(0, if (snapped != Snap.NONE) snapped else desired)
+            val target = GestureLimit.clampFrame(max(0, if (snapped != Snap.NONE) snapped else desired), captureGestureLimit())
             if (target != sent) {
                 openUndo("reordenar")
                 if (store.reorderClip(r.id, target.toLong())) sent = target
@@ -1036,7 +1056,7 @@ internal class TimelineController(
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = frameAt(p.x) + grab
             val snapped = if (store.snapping) Snap.nearest(targets, desired, playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble()) else Snap.NONE
-            val target = max(0, if (snapped != Snap.NONE) snapped else desired.toFrame())
+            val target = GestureLimit.clampFrame(max(0, if (snapped != Snap.NONE) snapped else desired.toFrame()), captureGestureLimit())
             val cur = rowById(id) ?: return@dragLoop
             if (magnetic) {
                 val step = (target - r.start) - applied
@@ -1332,6 +1352,7 @@ internal class TimelineController(
         apply: (Offset) -> Unit,
     ): Boolean {
         autoApply = apply
+        if (horizontal) captureGestureLimit()
         autoHorizontal = horizontal
         autoVertical = vertical
         autoOrigin = origin
@@ -1397,7 +1418,10 @@ internal class TimelineController(
                     val dt = (now - last) / 1e9f
                     last = now
                     // A auto-rolagem horizontal anda no tempo pelo scrub (o cabeçote segue a vista).
-                    if (autoDirX != 0f) holdView(view() + AutoScroll.step(autoDirX, metrics.autoSpeed, dt) / pxPerFrame())
+                    if (autoDirX != 0f) {
+                        val v = view()
+                        holdView(GestureLimit.clampView(v + AutoScroll.step(autoDirX, metrics.autoSpeed, dt) / pxPerFrame(), v, gestureLimit))
+                    }
                     if (autoDirY != 0f) state.scrollY = clampScroll(clampedScroll(rowCount(rows.value)) + AutoScroll.step(autoDirY, metrics.autoSpeed, dt))
                     autoApply?.invoke(lastPointer)
                 }

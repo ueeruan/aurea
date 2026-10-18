@@ -167,6 +167,9 @@ struct TimelineView: View {
         /// `.box`: a seleção de keyframes do começo do arrasto (o retângulo SOMA a ela).
         var boxBase: TimelineKeySelection?
         var undoOpen = false
+        /// Teto da auto-rolagem deste gesto (`GestureLimit`), congelado no começo:
+        /// o `navigationEnd` vivo cresce com o próprio clipe arrastado e virava catraca.
+        var limit: Int64 = GestureLimit.none
     }
     /// Painel aberto: sempre a fileira única. Doca aberta: a fileira única SÓ
     /// sem trilhas de propriedade abertas e fora do modo de escolher keyframes —
@@ -1457,6 +1460,12 @@ struct TimelineView: View {
         if mode == .move, let row, !selected.contains(where: { $0.id == row.id }), let item = model.layers.first(where: { $0.id == row.id }) { selected = [item] }
         var next = Interaction(mode: mode, start: start, view: viewFrame, scroll: scrollY, row: row, hit: touched, selection: selected, snapTargets: [])
         if mode == .step { next.scroll = 0 }
+        if mode == .move || mode == .key || mode == .keys || mode == .trimStart || mode == .trimEnd || mode == .box {
+            let nav = model.navigationEnd
+            // Sem a leitura do motor (navigationEnd = Int64.max), usa o fim das camadas.
+            let navEnd = nav == Int64.max ? Int64(rows.map(\.end).max() ?? 0) : nav
+            next.limit = GestureLimit.autoScrollLimit(startNavEnd: navEnd, startDuration: model.compositionDuration, fps: model.compositionFps)
+        }
         let excluded = Set(mode == .move ? selected.map(\.id) : row.map { [$0.id] } ?? [])
         next.snapTargets = targets(excluding: excluded, own: row, edges: mode == .key, keys: mode == .trimStart || mode == .trimEnd)
         // Reordenar na vertical leva a FILEIRA inteira (numa linha compartilhada,
@@ -1698,7 +1707,7 @@ struct TimelineView: View {
             if row.magnetic, g.selection.count == 1 {
                 let desired = Double(row.start) + delta
                 let snapped = model.snapping ? Snap.nearest(g.snapTargets, desired, extra: timelineFrame(viewFrame), tol: Double(m.snapClip / ppf)) : Snap.none
-                let target = Int64(max(0, snapped == Snap.none ? timelineFrame(desired) : snapped))
+                let target = Int64(GestureLimit.clampFrame(max(0, snapped == Snap.none ? timelineFrame(desired) : snapped), limit: g.limit))
                 if target != g.sentFrame {
                     openUndo(&g)
                     if model.reorderClip(row.id, toFrame: target) { g.sentFrame = target }
@@ -1708,7 +1717,7 @@ struct TimelineView: View {
             }
             let desired = timelineFrame(Double(row.start) + delta)
             let snapped = model.snapping ? Snap.span(g.snapTargets, start: desired, length: row.end - row.start, extra: timelineFrame(viewFrame), tol: Double(m.snapClip / ppf)) : (start: desired, guide: Snap.none)
-            let change = Int32(clamping: max(-Int64(earliest), min(Int64(Int32.max) - Int64(latest), Int64(snapped.start) - Int64(row.start))))
+            let change = Int32(clamping: max(-Int64(earliest), min(Int64(GestureLimit.maxShift(maxEnd: latest, limit: g.limit)), Int64(snapped.start) - Int64(row.start))))
             guide = Int64(row.start) + Int64(change) == Int64(snapped.start) ? snapped.guide : Snap.none
             if change != g.sentDelta {
                 openUndo(&g)
@@ -1722,7 +1731,7 @@ struct TimelineView: View {
             let origin = g.mode == .trimStart ? row.start : row.end
             let desired = Double(origin) + delta
             let snapped = model.snapping ? Snap.nearest(g.snapTargets, desired, extra: timelineFrame(viewFrame), tol: Double(m.snapClip / ppf)) : Snap.none
-            let target = max(0, snapped == Snap.none ? timelineFrame(desired) : snapped)
+            let target = GestureLimit.clampFrame(max(0, snapped == Snap.none ? timelineFrame(desired) : snapped), limit: g.limit)
             let change = Int32(clamping: Int64(target) - Int64(origin))
             if change != g.sentDelta {
                 openUndo(&g)
@@ -1943,7 +1952,9 @@ struct TimelineView: View {
                 if factor != 0 {
                     // Auto-scroll moves the presentation window; the editing gesture
                     // reapplies its absolute target and the core remains authoritative.
-                    let target = min(TimeAxis.clampView(viewFrame + Double(AutoScroll.step(factor: factor, maxSpeed: m.autoSpeed, dt: dt) / ppf), durationFrames: Int32(clamping: model.compositionDuration)), Double(model.navigationEnd))
+                    // Teto do gesto: a vista não passa de max(conteúdo, duração) + 10 s do começo.
+                    let next = GestureLimit.clampView(viewFrame + Double(AutoScroll.step(factor: factor, maxSpeed: m.autoSpeed, dt: dt) / ppf), current: viewFrame, limit: g.limit)
+                    let target = min(TimeAxis.clampView(next, durationFrames: Int32(clamping: model.compositionDuration)), Double(model.navigationEnd))
                     // Scrub, não seek: o seek republicava o status e relia os
                     // painéis 60 vezes por segundo (a borda engasgava).
                     if !autoScrubbing { model.engine.run { $0.scrubBegin() }; autoScrubbing = true }

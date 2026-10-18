@@ -342,6 +342,8 @@ struct Rig {
         ec.memoryBudgetBytes = trackedBudget;
         if (trackedBudget) ec.enableTrackedGpuAdmission = true;
         ec.exportWorkerHangMs = workerHangMs;
+        // Linha do tempo longa de propósito (ex.: 10 h): sem o teto de 3 h.
+        if (compFps > 0 && static_cast<f64>(frames) / compFps > 3.0 * 3600.0) ec.maxExportSeconds = 0;
         ec.enableExportRecovery = recovery;
         ec.imageLoader = imageLoader;
         ec.imageLoaderContext = imageLoaderContext;

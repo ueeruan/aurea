@@ -1343,3 +1343,19 @@ AUREA_TEST(VideoSource, ScrubSeekShowsTheKeyframeBeforeTheExactFrame) {
     AUREA_CHECK(source.wait_for(target, 5000));
     source.stop();
 }
+
+#include "aurea/media/MediaDuration.hpp"
+// 0.2.4 (C6): duração declarada falsa não vira horas de timeline.
+AUREA_TEST(MediaDuration, DeclaredDurationFarBeyondTheLastSampleIsCut) {
+    using aurea::media::reconcile_duration_us;
+    constexpr i64 frame = 33'333;
+    // Arquivo de 10 s que declara 4,8 h: vale a última amostra + 1 quadro.
+    AUREA_CHECK_EQ(reconcile_duration_us(17'417'000'000, 9'966'667, frame), i64{10'000'000});
+    // Arredondamento normal do contêiner (até 1 s ou 2 %) fica como declarado.
+    AUREA_CHECK_EQ(reconcile_duration_us(10'500'000, 9'966'667, frame), i64{10'500'000});
+    AUREA_CHECK_EQ(reconcile_duration_us(3'650'000'000, 3'600'000'000, frame), i64{3'650'000'000});
+    // Sem duração declarada: a medida. Sem amostra lida: a declarada.
+    AUREA_CHECK_EQ(reconcile_duration_us(0, 4'966'667, frame), i64{5'000'000});
+    AUREA_CHECK_EQ(reconcile_duration_us(8'000'000, -1, frame), i64{8'000'000});
+    AUREA_CHECK_EQ(reconcile_duration_us(-5, -1, frame), i64{0});
+}

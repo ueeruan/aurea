@@ -1,0 +1,9 @@
+{
+  "source": "tools/gerar_previa_efeitos.py (procedural, gerada pelo próprio script; sem foto, sem pessoa, nada extraído de outro aplicativo)",
+  "version": "0.2.4",
+  "license": "Própria do AUREA (criada pelo projeto)",
+  "generator": "tools/gerar_previa_efeitos.py, semente 20261018, numpy + Pillow 12.3.0, JPEG qualidade 88",
+  "sha256": "9c8a4e5cce1fa9137df8f6eedcb3bcf3b037051bd43d5c51103d703c79206fa7",
+  "files": ["android/app/src/main/assets/previa_efeitos.jpg", "engine/platform/ios/app/previa_efeitos.jpg"],
+  "use": "Imagem de amostra das prévias de efeito (antes/depois) e da prévia do Mapa de profundidade; vaso estilizado no centro, cantos escuros"
+}

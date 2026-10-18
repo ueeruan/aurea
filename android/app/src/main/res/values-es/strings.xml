@@ -73,6 +73,8 @@
     <string name="settings_group_general">General</string>
     <string name="settings_clear_cache">Limpiar caché</string>
     <string name="settings_clear_cache_note">Borra vistas previas, miniaturas y fotogramas temporales</string>
+    <string name="settings_effect_previews">Vistas previas de efectos</string>
+    <string name="settings_effect_previews_note">Muestra cada efecto aplicado a una imagen de ejemplo. Desactivado, solo se ve el icono de la categoría</string>
     <string name="settings_clear_recents">Limpiar efectos recientes</string>
     <string name="settings_clear_recents_note">La lista de "Recientes" del navegador de efectos</string>
     <string name="settings_recents_cleared">Efectos recientes borrados</string>
@@ -1153,7 +1155,7 @@ para editar la curva.</string>
     <string name="consent_title">Consentimiento y responsabilidad</string>
     <string name="consent_accept">Aceptar y continuar</string>
     <string name="consent_body">Aurea es una herramienta profesional de edición, creación y producción de contenido digital. Al utilizar la aplicación, el usuario reconoce que es plenamente responsable de los contenidos que crea, edita, importa, exporta, publica o comparte a través de la plataforma.\n\nAurea no controla, fomenta, apoya ni autoriza el uso de la herramienta para actividades ilegales, abusivas, fraudulentas, perjudiciales o que vulneren los derechos de terceros.\n\nEl usuario es responsable de garantizar que dispone de las autorizaciones, licencias y derechos necesarios sobre los materiales utilizados, incluidas imágenes, vídeos, música, marcas, modelos, archivos y demás contenidos protegidos.\n\nLa libertad creativa que ofrece Aurea no implica aprobación, participación ni responsabilidad de la aplicación por lo que cada usuario decide producir o hacer con la herramienta.\n\nEl usuario acepta utilizar Aurea conforme a la legislación aplicable y asume la responsabilidad de sus propias acciones y del contenido producido o distribuido mediante la aplicación.\n\nEn la máxima medida permitida por la legislación aplicable, Aurea y sus responsables no serán responsables de los actos realizados exclusivamente por el usuario, del uso indebido de la herramienta ni de las consecuencias derivadas de contenidos creados, publicados o compartidos por el propio usuario.\n\nAurea proporciona la herramienta. El usuario es responsable del modo en que decide utilizarla.\n\nAl continuar, el usuario declara que ha leído, comprendido y acepta estos términos.</string>
-    <string name="release_notes_body">Aurea 0.2.3 (2191) • 18/10/2026\n\n• PreRender: en celulares más lentos, volver a hacer el PreRender justo después de editar o cancelar ya no falla ni se queda parado sin aviso.\n• Android: las fotos y videos de galerías que no dan acceso permanente ahora se copian a la app al importar. La exportación y el PreRender ya no se detienen con \"medio ausente\" (error 18) al reabrir el proyecto. En proyectos antiguos, vuelve a importar el medio que falle.\n• Exportación: cuando un archivo del proyecto falta o no se puede leer, el mensaje dice qué hacer en lugar de \"error 18\".\n• Puppet: los botones de fotograma clave y de gráfico (curva) funcionan en los pines. Selecciona un pin en modo edición para animarlo y ajustar la curva.</string>
+    <string name="release_notes_body">Aurea 0.2.4 (2192) • 18/10/2026\n\n• Exportación: el medio de clips borrados o reemplazados ya no impide exportar. Antes, un archivo antiguo que desapareció de la galería daba \"medio ausente\" (error 18) en cada exportación.\n• Exportación: ya no falla cuando el PreRender está en curso. Se detiene y la exportación empieza.\n• Línea de tiempo: arrastrar o recortar un clip cerca del borde ya no estira el proyecto durante horas. Los textos e imágenes nuevos terminan al final del contenido.\n• Exportación: la pantalla muestra la duración y avisa cuando es demasiado larga. Por encima de 3 h, el motivo se muestra con claridad.\n• Exportación: mientras se prepara el primer fotograma, la pantalla dice \"Preparando el primer fotograma…\". En iPhone, Cancelar siempre funciona.\n• Android: la exportación ya no copia todo el medio de la galería cada vez. Empieza más rápido y no agota el espacio.\n• Importación: los videos que informan una duración incorrecta entran con la longitud correcta.\n• Efectos: nueva imagen de muestra en las vistas previas y opción en Ajustes para desactivarlas.\n• Efectos: la ficha del efecto muestra una vista previa animada en varias escenas.\n• Puppet: las partes separadas de una capa ya no se mueven cuando arrastras un pin de otra parte.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Rellenar</string>
@@ -4362,4 +4364,16 @@ para editar la curva.</string>
     <string name="fxo_shards">Fragmentos</string>
     <string name="fxl_pattern_rotation">Rotación del patrón</string>
     <string name="fxl_pattern_detail">Detalle del patrón</string>
+    <string name="exp_first_frame">Preparando el primer fotograma…</string>
+    <string name="exp_long_duration">Duración larga (%1$s). Revisa si alguna capa pasa del final del contenido.</string>
+    <string name="exp_too_long_3h">Este video dura más de 3 h y no se puede exportar. Elige “Contenido de la línea de tiempo” o acorta el proyecto.</string>
+    <string name="fx_preview_scene_label">Escena de la vista previa</string>
+    <string name="fx_preview_scene_photo">Foto</string>
+    <string name="fx_preview_scene_plate">Carta de ajuste</string>
+    <string name="fx_preview_scene_shapes">Formas</string>
+    <string name="fx_preview_scene_low_light">Poca luz</string>
+    <string name="fx_preview_animated_desc">Vista previa animada de %1$s, escena %2$s: antes a la izquierda, después a la derecha</string>
+    <string name="fx_preview_still_desc">Vista previa de %1$s: antes a la izquierda, después a la derecha</string>
+    <string name="fx_preview_animating">Preparando la animación…</string>
+    <string name="fx_preview_animation_unavailable">Animación no disponible ahora: se muestra la vista previa fija</string>
 </resources>

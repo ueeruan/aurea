@@ -3953,6 +3953,7 @@ final class AureaModel: ObservableObject {
         exportPreparing = true; exporting = true
         exportMessage = AureaText.t("msg_preparando")
         exportProgress = [:]
+        startPreparingWatch(request)
         followPlayback(false)
         releaseInterfaceCaches()
         let native = engine, project = projectGeneration
@@ -4002,6 +4003,7 @@ final class AureaModel: ObservableObject {
                       self.projectGeneration == project, self.pendingExportURL == url else { return }
                 self.exportStartup = nil
                 self.exportPreparing = false
+                self.stopPreparingWatch()
                 self.exportSafeMode = usedSafeMode
                 self.exportMessage = nil
                 if succeeded {
@@ -4019,9 +4021,13 @@ final class AureaModel: ObservableObject {
                     let message = finalProgress["message"] as? String ?? ""
                     let code = (finalProgress["result"] as? NSNumber)?.intValue ?? 0
                     self.exportMessage = code == 0 ? AureaText.t("ios_export_could_not_start")
+                        : code == 6 && self.plannedExportSeconds(options) > Self.exportMaxSeconds
+                        ? AureaText.t("exp_too_long_3h")
                         : AureaEngineText.sentence(message, code: code)
                 } else {
-                    self.exportMessage = finalImageCode == 6 && options.kind != .frame
+                    self.exportMessage = finalImageCode == 6 && self.plannedExportSeconds(options) > Self.exportMaxSeconds
+                        ? AureaText.t("exp_too_long_3h")
+                        : finalImageCode == 6 && options.kind != .frame
                         ? AureaText.t("exp2_too_long") : AureaEngineText.sentence(nil, code: Int(finalImageCode))
                 }
                 self.toast = self.exportMessage
@@ -4067,9 +4073,63 @@ final class AureaModel: ObservableObject {
 
     func cancelExport() {
         guard exporting && !exportPublishing else { return }
+        // 0.2.4 (C5): o Cancelar fica sempre ativo. Tocar de novo enquanto a
+        // preparação não volta (chamada nativa presa) libera a tela, como o
+        // Android faz depois do watchdog.
+        if exportCancelled && exportPreparing { abandonPreparingExport(AureaText.t("app_export_cancelled")); return }
         exportCancelled = true
         exportStartup?.cancel()
         engine.cancelExport()
+    }
+
+    /// Teto do motor (EngineConfig::maxExportSeconds) e a duração pedida, só para
+    /// explicar a recusa; a regra continua no motor.
+    static let exportMaxSeconds: Double = 3 * 3600
+    func plannedExportSeconds(_ options: ExportOptions) -> Double {
+        Double(engine.exportDuration(options.trimToContent)) / max(1, compositionFps)
+    }
+
+    private func startPreparingWatch(_ request: ExportStartupRequest) {
+        preparingTimer?.invalidate()
+        preparingWatch = ExportStallWatch()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.exporting, self.exportPreparing, self.exportStartup === request else {
+                    self?.stopPreparingWatch(); return
+                }
+                let message = self.engine.exportProgress()["message"] as? String ?? ""
+                switch self.preparingWatch.observe(now: ProcessInfo.processInfo.systemUptime, framesDone: 0, message: message) {
+                case .cancel:
+                    self.exportStalled = true
+                    request.cancel()
+                    self.engine.cancelExport()
+                case .giveUp:
+                    self.abandonPreparingExport(AureaText.t("ios_export_failed_detail", AureaText.t("expfail_stuck")))
+                case .running:
+                    break
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        preparingTimer = timer
+    }
+
+    private func stopPreparingWatch() {
+        preparingTimer?.invalidate(); preparingTimer = nil
+    }
+
+    /// A preparação não voltou: a tela se libera. O motor segue com o próprio
+    /// prazo; o próximo export espera ou recebe o motivo dele.
+    private func abandonPreparingExport(_ message: String) {
+        stopPreparingWatch()
+        exportStartup?.cancel()
+        engine.cancelExport()
+        exportStartup = nil
+        exportPreparing = false
+        exporting = false
+        pendingExportURL = nil; pendingExportOptions = nil
+        exportMessage = message
+        toast = message
     }
 
     /// Save-on-background must not contend with the snapshot on UIKit. Queue
@@ -4103,6 +4163,9 @@ final class AureaModel: ObservableObject {
     }
 
     private var exportTimer: Timer?
+    /// 0.2.4 (C5): o watchdog também vigia o "Preparando" (antes só o render).
+    private var preparingTimer: Timer?
+    private var preparingWatch = ExportStallWatch()
     private var exportDiagnosticsTimer: Timer?
     private func recordExportDiagnostics() {
         guard started, exportedKind == .video else { return }

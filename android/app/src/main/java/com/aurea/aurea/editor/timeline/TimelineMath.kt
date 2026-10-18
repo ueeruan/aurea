@@ -549,3 +549,58 @@ internal object Reorder {
 
 /** Arredonda ao quadro mais perto (a grade do motor). */
 internal fun Double.toFrame(): Int = roundToInt()
+
+/**
+ * Teto da auto-rolagem durante um arraste/aparo (docs/diagnostico/export-falhas.md,
+ * A.3 item 1 e C2 item 1).
+ *
+ * Sem ele, segurar um clipe (ou a borda dele) na margem direita virava uma
+ * catraca: a vista é limitada pelo `navigationEnd` VIVO, que durante o arraste
+ * é o fim do próprio clipe; cada passo da auto-rolagem empurra o clipe, que
+ * empurra o teto, e a composição crescia até horas.
+ *
+ * Regra (a mesma no iOS, `GestureLimit` em TimelineMath.swift): no começo do
+ * gesto vale `max(navigationEnd, duração) + 10 s` (em quadros, pelo fps da
+ * composição), congelado até soltar. A vista e o deslocamento aplicado não
+ * passam disso. Fora de gesto nada muda ([NONE]).
+ */
+internal object GestureLimit {
+    /** Folga além do conteúdo que um gesto pode abrir de uma vez. */
+    const val MARGIN_SECONDS = 10.0
+
+    /** Sem gesto em curso: nenhum teto extra. */
+    const val NONE = Long.MAX_VALUE
+
+    /** Maior quadro do protocolo de frames (o mesmo teto de [TimeAxis.clampView]). */
+    private const val MAX_FRAME = Int.MAX_VALUE - 1L
+
+    fun autoScrollLimit(startNavEnd: Long, startDuration: Long, fps: Double): Long {
+        val safe = if (fps.isFinite() && fps >= 1.0 && fps <= 1000.0) fps else 30.0
+        val margin = ceil(MARGIN_SECONDS * safe).toLong()
+        val base = max(0L, max(startNavEnd, startDuration)).coerceAtMost(MAX_FRAME)
+        return (base + margin).coerceAtMost(MAX_FRAME)
+    }
+
+    /**
+     * Próxima vista da auto-rolagem: não avança além de [limit]. Se a vista já
+     * estava além (o teto não a puxa de volta), só deixa recuar.
+     */
+    fun clampView(next: Double, current: Double, limit: Long): Double {
+        if (limit == NONE || !(next > current)) return next
+        return min(next, max(current, limit.toDouble()))
+    }
+
+    /** Quadro-alvo de um arraste/aparo: no máximo [limit]. */
+    fun clampFrame(frame: Int, limit: Long): Int =
+        if (limit == NONE || frame <= limit) frame else limit.coerceIn(0L, MAX_FRAME).toInt()
+
+    /**
+     * Maior deslocamento à direita de um lote cujo maior fim é [maxEnd]: nem
+     * além do protocolo de frames, nem com o fim passando de [limit].
+     */
+    fun maxShift(maxEnd: Int, limit: Long): Int {
+        val protocol = MAX_FRAME - maxEnd
+        val bounded = if (limit == NONE) protocol else min(protocol, max(0L, limit - maxEnd))
+        return bounded.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+    }
+}

@@ -41,6 +41,7 @@ namespace aurea::ai { class RotoService; struct RotoStroke; }
 
 #include <atomic>
 #include <array>
+#include <limits>
 #include <memory>
 #include <map>
 #include <mutex>
@@ -65,6 +66,64 @@ struct ImagePixels {
     /// sempre: a geometria gravada é essa.
     u8 orientation = 1;
 };
+
+// -----------------------------------------------------------------------------
+// PRÉVIA ANIMADA DE EFEITO (docs/diagnostico/efeitos-imagem-feed.md §3.2)
+//
+// N quadros (12..16) do efeito real sobre uma CENA-FONTE nossa, variando o
+// tempo local, o progresso do clipe e o parâmetro principal. Cenas: a foto de
+// amostra do app, a cartela procedural (shader) e duas cenas geradas por código
+// na CPU (formas coloridas em movimento; ambiente escuro de baixa luz) — 0 byte
+// de asset. Para efeito de tempo a fonte ANDA entre os quadros.
+// -----------------------------------------------------------------------------
+enum class EffectPreviewScene : u32 {
+    Photo = 0,     ///< a foto de amostra (sem foto: a cartela)
+    Plate = 1,     ///< a cartela procedural (effects/preview_plate.frag)
+    Shapes = 2,    ///< formas coloridas em movimento (CPU)
+    LowLight = 3,  ///< cena escura, de baixa luz, com uma luz que passeia (CPU)
+};
+inline constexpr u32 kEffectPreviewSceneCount = 4;
+inline constexpr u32 kEffectPreviewSequenceMinFrames = 12;
+inline constexpr u32 kEffectPreviewSequenceMaxFrames = 16;
+/// Quadros da linha do tempo (a 30 qps) entre dois quadros da prévia: 16
+/// quadros cobrem ~1 s de efeito, e a UI toca a ~15 qps.
+inline constexpr i64 kEffectPreviewSequenceStep = 2;
+
+struct EffectPreviewSequenceInfo {
+    u32 frames = 0;
+    bool moving = false;    ///< a fonte anda entre os quadros
+    bool temporal = false;  ///< efeito de tempo (resultado montado sobre a fonte que anda)
+    i32 sweepParam = -1;    ///< parâmetro varrido (-1 = nenhum)
+};
+
+/// O que foi preparado para uma sequência (as fontes da CPU já capturadas).
+struct EffectPreviewSequence {
+    EffectTypeId type = 0;
+    u32 width = 0, height = 0, frames = 0;
+    EffectPreviewScene scene = EffectPreviewScene::Photo;
+    EffectPreviewSequenceInfo info;
+    /// Foto/cartela capturada com folga (RGBA8 sRGB) para a fonte andar por
+    /// recorte; vazia = cena procedural ou fonte parada (caminho da foto).
+    std::vector<u8> base;
+    u32 baseW = 0, baseH = 0;
+    std::vector<ParamValue> values;   ///< valores de demonstração (efeitos de tempo)
+};
+
+class ParameterRegistry;
+struct EffectInstance;
+/// A VARREDURA da sequência: todo parâmetro numérico, animável e visível cujo
+/// valor de demonstração difere do padrão anda junto, do padrão (s = 0) até o
+/// de demonstração (s = 1) — o efeito "entrando". Semente, liga/desliga e
+/// listas ficam no valor de demonstração. `sweep_param` = o primeiro varrido
+/// (-1 = nenhum: o efeito já aparece com os padrões).
+[[nodiscard]] i32 effect_preview_sweep_param(const ParameterRegistry& params, const EffectInstance& instance,
+                                             const std::vector<ParamValue>& demo) noexcept;
+void effect_preview_apply_sweep(const ParameterRegistry& params, const EffectInstance& instance,
+                                std::vector<ParamValue>& values, f32 s) noexcept;
+/// Cena procedural da CPU (Shapes, LowLight) no instante `t` (quadros a 30 qps),
+/// periódica em `period` quadros. RGBA8 sRGB opaco, `w`×`h`.
+void effect_preview_procedural_scene(EffectPreviewScene scene, u32 w, u32 h, f64 t, f64 period,
+                                     std::vector<u8>& out) noexcept;
 
 /// Origem da imagem de uma layer neste frame.
 class Composition;
@@ -645,6 +704,24 @@ public:
     [[nodiscard]] Status render_effect_preview(const EffectRegistry& effects, EffectTypeId type,
                                                u32 width, u32 height, std::vector<u8>& outRgba, bool comparison = false) noexcept;
 
+    /// PRÉVIA ANIMADA (ver EffectPreviewScene). `prepare` captura as fontes
+    /// (a foto/cartela com folga, uma vez); cada `frame` renderiza UM quadro
+    /// antes/depois (RGBA8 sRGB de alfa reto, `width`×`height`). Separados para
+    /// o motor soltar o mutex de render entre quadros (o preview do editor não
+    /// espera a sequência inteira). Efeito de tempo e global entram aqui: o
+    /// resultado temporal é montado sobre a cena que anda.
+    [[nodiscard]] Status prepare_effect_preview_sequence(const EffectRegistry& effects, EffectTypeId type,
+                                                         u32 width, u32 height, u32 frames,
+                                                         EffectPreviewScene scene, EffectPreviewSequence& out) noexcept;
+    [[nodiscard]] Status render_effect_preview_sequence_frame(const EffectRegistry& effects,
+                                                              const EffectPreviewSequence& sequence, u32 index,
+                                                              std::vector<u8>& outRgba) noexcept;
+    /// Tudo de uma vez (testes): `frames` quadros concatenados em `outRgba`.
+    [[nodiscard]] Status render_effect_preview_sequence(const EffectRegistry& effects, EffectTypeId type,
+                                                        u32 width, u32 height, u32 frames, EffectPreviewScene scene,
+                                                        std::vector<u8>& outRgba,
+                                                        EffectPreviewSequenceInfo* info = nullptr) noexcept;
+
     /// De onde vêm os modelos 3D (o motor guarda os SceneAsset).
     using ModelLookup = std::shared_ptr<const scene3d::SceneAsset> (*)(void* ctx, AssetId id);
     /// O último quadro deixou alguma camada de fora por recurso pendente? (lê e zera)
@@ -1159,6 +1236,24 @@ private:
     std::unordered_map<u64, DepthState> depthState_;   ///< por (camada, efeito, export?)
     void release_depth(bool destroyTextures) noexcept;
     [[nodiscard]] DepthMapResult depth_map_preview() noexcept;
+    /// Falso durante um quadro de prévia que não é a foto parada (ver depth_map_preview).
+    bool previewDepthFromPhoto_ = true;
+    /// Um quadro de prévia de efeito. O padrão é a prévia estática de sempre.
+    struct PreviewFrameSpec {
+        bool comparison = false;
+        bool allowTemporal = false;  ///< sequência: temporal/global entram
+        bool sourceOnly = false;     ///< devolve só a cena (captura da cartela/foto)
+        bool forcePlate = false;     ///< ignora a foto: a cartela do shader
+        const u8* source = nullptr;  ///< cena da CPU (RGBA8 sRGB, width×height); nula = foto/cartela
+        const u8* history = nullptr; ///< a cena num instante passado (efeito com histórico)
+        const u8* result = nullptr;  ///< resultado temporal pronto (o efeito não roda)
+        i64 localTime = 0;
+        f32 clipProgress = 0.0f;
+        f32 sweep = std::numeric_limits<f32>::quiet_NaN();   ///< 0..1 da varredura; NaN = sem
+    };
+    [[nodiscard]] Status render_effect_preview_impl(const EffectRegistry& effects, EffectTypeId type, u32 width,
+                                                    u32 height, const PreviewFrameSpec& spec,
+                                                    std::vector<u8>& outRgba) noexcept;
     u32 collect_depth(u64 frameNumber, u64 idleFrames) noexcept;
     /// O `prepare` em curso: de onde vêm os pixels das imagens e se é export.
     const ImagePixels* (*planImageLookup_)(void*, AssetId) = nullptr;

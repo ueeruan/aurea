@@ -1002,6 +1002,13 @@ NS_SWIFT_NAME(AureaEngine)
 /// Prévia de um efeito (ficha do catálogo) em RGBA8 sRGB.
 - (nullable NSData*)effectPreview:(uint32_t)typeId width:(uint32_t)width height:(uint32_t)height
                           outSize:(nullable CGSize*)outSize;
+/// Prévia ANIMADA de um efeito: `frames` (12..16) quadros RGBA8 sRGB
+/// concatenados, sobre a cena `scene` (0 foto, 1 cartela, 2 formas, 3 baixa
+/// luz). `status` recebe 0 ou o código Errc (32 = Busy: tentar de novo).
+- (nullable NSData*)effectPreviewSequence:(uint32_t)typeId width:(uint32_t)width height:(uint32_t)height
+                                   frames:(uint32_t)frames scene:(uint32_t)scene
+                                 outWidth:(nullable uint32_t*)outWidth outHeight:(nullable uint32_t*)outHeight
+                                outFrames:(nullable uint32_t*)outFrames status:(nullable int32_t*)status;
 /// Foto de base das prévias de efeito (RGBA8). O app manda uma vez.
 - (BOOL)setEffectPreviewSource:(NSData*)rgba width:(uint32_t)width height:(uint32_t)height;
 

@@ -21,6 +21,7 @@ add_executable(aurea_tests
     test_real_camera.cpp
     test_palette.cpp
     test_mesh_warp_keys.cpp
+    test_puppet_solver.cpp
     test_animation.cpp
     test_core.cpp
     test_timeline.cpp

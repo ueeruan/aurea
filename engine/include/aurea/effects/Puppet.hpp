@@ -59,6 +59,8 @@ void build_mesh(f32 width, f32 height, u32 triangles, f32 expansion, Mesh& out,
 
 /// Vértices deformados (mesma ordem de `mesh.rest`). Sem pino: cópia do
 /// repouso. `rigidity` 0..1 mistura o ARAP com o melhor movimento rígido.
+/// Cada parte solta da malha (contorno em pedaços) segue só os pinos dela:
+/// sem pino fica em repouso, com um pino só translada.
 void deform(const Mesh& mesh, const std::vector<Pin>& pins, f32 rigidity, std::vector<Vec2>& out);
 
 /// Linhas do contorno (kOutline floats) → células 0/1 (kOutline²). false = vazio.

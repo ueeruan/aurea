@@ -839,7 +839,8 @@ private fun removeEffectTool(store: EditorStore, tool: EffectTool) {
 @Composable
 private fun StackThumb(typeId: Int, category: String, store: EditorStore) {
     Box(Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))) {
-        val preview = rememberEffectPreview(store.effectPreviews, typeId, 320, 200)
+        // "Prévias de efeitos" desligado em Ajustes: só a cartela, sem pedir render.
+        val preview = rememberEffectPreview(store.effectPreviews.takeIf { store.effectPrefs.previewsEnabled }, typeId, 320, 200)
         if (preview != null) {
             Image(preview, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.Low)
         } else {

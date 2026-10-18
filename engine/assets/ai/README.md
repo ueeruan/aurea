@@ -75,6 +75,11 @@ Grafo: 73 Convolution, 24 ConvolutionDepthWise, 29 BinaryOp, 27 Split,
 
 ## Conferência (foto `android/app/src/main/assets/previa_efeitos.jpg`)
 
+> **A remedir com a imagem nova de 0.2.4.** Os números abaixo foram medidos na
+> foto ANTIGA das prévias (trocada em 0.2.4 por uma imagem procedural gerada por
+> `tools/gerar_previa_efeitos.py`). Eles valem como histórico da conversão; a
+> conferência contra o onnxruntime ainda não foi refeita sobre a imagem nova.
+
 Contra o onnxruntime 1.30.0 no ONNX da etapa 1, mesma entrada 256² (erro
 relativo ao intervalo min..max da referência):
 

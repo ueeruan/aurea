@@ -27,6 +27,20 @@ class EffectPrefs(context: Context) {
     var recents by mutableStateOf(readRecents())
         private set
 
+    /**
+     * "Prévias de efeitos" (Ajustes): ligado (padrão) mostra cada efeito
+     * aplicado sobre a imagem de amostra; desligado, os cartões mostram só a
+     * cartela genérica com o ícone da categoria e NENHUMA prévia (parada ou
+     * animada) é pedida ao motor. Mesma chave/semântica do iOS (`FxEffectPrefs.previewsEnabledKey`).
+     */
+    var previewsEnabled by mutableStateOf(prefs.getBoolean(KEY_PREVIEWS, true))
+        private set
+
+    fun updatePreviewsEnabled(on: Boolean) {
+        previewsEnabled = on
+        prefs.edit().putBoolean(KEY_PREVIEWS, on).apply()
+    }
+
     fun isFavorite(typeId: Int): Boolean = typeId in favorites
 
     /** Marca/desmarca e grava. Devolve o estado novo. */
@@ -58,5 +72,6 @@ class EffectPrefs(context: Context) {
         const val RECENTS_MAX = 12
         private const val KEY_FAVORITES = "favoritos"
         private const val KEY_RECENTS = "recentes"
+        private const val KEY_PREVIEWS = "previas"
     }
 }

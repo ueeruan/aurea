@@ -683,6 +683,12 @@ private struct EffectPickerCard: View {
     var nameSize: CGFloat = EffectPickerLayout.nameSize
     let onPick: () -> Void
     let onFavorite: () -> Void
+    @AppStorage(FxEffectPrefs.previewsEnabledKey) private var previewsEnabled = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    // SEGURADO: toca a animação que a ficha já gerou (cena Foto, a da grade).
+    // A grade nunca pede sequência ao motor; ao soltar, completa um laço.
+    @State private var held = false
+    @State private var heldFrames: [UIImage] = []
 
     var body: some View {
         let name = fxPickerEntryName(entry)
@@ -694,6 +700,12 @@ private struct EffectPickerCard: View {
                         .clipShape(RoundedRectangle(cornerRadius: AureaDims.radiusCard))
                 } else {
                     EffectBrowserPreview(entry: entry, store: store, aspect: aspect)
+                        .overlay {
+                            if !heldFrames.isEmpty {
+                                FxAnimatedFrames(frames: heldFrames)
+                                    .clipShape(RoundedRectangle(cornerRadius: AureaDims.radiusCard))
+                            }
+                        }
                 }
             }
                 .overlay(alignment: .topTrailing) {
@@ -723,9 +735,22 @@ private struct EffectPickerCard: View {
             UISelectionFeedbackGenerator().selectionChanged()
             onPick()
         }
-        .onLongPressGesture(minimumDuration: EffectPickerLayout.longPress) {
+        .onLongPressGesture(minimumDuration: EffectPickerLayout.longPress, maximumDistance: 10, perform: {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             onFavorite()
+        }, onPressingChanged: { pressing in
+            if pressing { held = true } else { held = false }
+        })
+        .task(id: held) {
+            if held {
+                guard previewsEnabled, !reduceMotion, !UIAccessibility.isReduceMotionEnabled,
+                      fxEffectToolOf(entry.typeId) == nil else { return }
+                let frames = await store.sequence(for: entry.typeId, scene: .photo, generate: false)
+                if !Task.isCancelled, let frames { heldFrames = frames }
+            } else if !heldFrames.isEmpty {
+                try? await Task.sleep(nanoseconds: 1_100_000_000)
+                if !Task.isCancelled { heldFrames = [] }
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(AureaText.t("effects_card_add", name))
@@ -742,17 +767,18 @@ private struct EffectBrowserPreview: View {
     var aspect: CGFloat = EffectPickerLayout.previewAspect
     @State private var image: UIImage?
     @State private var finished = false
+    @AppStorage(FxEffectPrefs.previewsEnabledKey) private var previewsEnabled = true
 
     var body: some View {
         GeometryReader { geometry in
-            if let image {
+            if previewsEnabled, let image {
                 Image(uiImage: image).resizable().interpolation(.medium).scaledToFit()
                     .frame(width: geometry.size.width, height: geometry.size.height).clipped()
                     .overlay(alignment: .bottom) {
                         HStack {
-                            previewLabel("fx_browser_before")
+                            fxPreviewLabel("fx_browser_before")
                             Spacer()
-                            previewLabel("fx_browser_after")
+                            fxPreviewLabel("fx_browser_after")
                         }.padding(6).environment(\.layoutDirection, .leftToRight)
                     }
             } else {
@@ -770,23 +796,141 @@ private struct EffectBrowserPreview: View {
                     CupertinoGlyph.text(fxCategoryGlyph(entry.category), size: AureaDims.iconSm, color: .white.opacity(0.85)).padding(AureaDims.s2)
                 }
                 .overlay {
-                    Text(AureaText.t(entry.effectClass == 3 || entry.effectClass == 4 ? "fx_browser_timeline_preview" : finished ? "fx_browser_preview_unavailable" : "fx_browser_loading"))
-                        .font(.aurea(size: 12)).foregroundStyle(AureaColors.text).multilineTextAlignment(.center).padding(8)
+                    // "Prévias de efeitos" desligado: só a cartela com o ícone.
+                    if previewsEnabled {
+                        Text(AureaText.t(entry.effectClass == 3 || entry.effectClass == 4 ? "fx_browser_timeline_preview" : finished ? "fx_browser_preview_unavailable" : "fx_browser_loading"))
+                            .font(.aurea(size: 12)).foregroundStyle(AureaColors.text).multilineTextAlignment(.center).padding(8)
+                    }
                 }
             }
         }.aspectRatio(aspect, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: AureaDims.radiusCard))
-            .task(id: entry.typeId) {
+            .task(id: "\(entry.typeId)-\(previewsEnabled)") {
                 image = nil; finished = false
+                guard previewsEnabled else { return }   // desligado: não pede render
                 let loaded = await store.image(for: entry.typeId)
                 if !Task.isCancelled { image = loaded; finished = true }
             }
     }
 
-    private func previewLabel(_ key: String) -> some View {
-        Text(AureaText.t(key)).font(.aurea(size: 10.5, weight: .semibold)).foregroundStyle(.white)
-            .padding(.horizontal, 5).padding(.vertical, 2)
-            .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 6))
+}
+
+// =============================================================================
+//  PRÉVIA ANIMADA (port de effects/EffectAnimatedPreview.kt): a ficha anima,
+//  com seletor de cena; o cartão segurado toca o que a ficha já gerou. Nada
+//  anima com "Reduzir movimento" ou com "Prévias de efeitos" desligado.
+// =============================================================================
+
+/// Os quadros em laço (~15 qps); parado, o primeiro.
+struct FxAnimatedFrames: View {
+    let frames: [UIImage]
+    var playing: Bool = true
+
+    var body: some View {
+        GeometryReader { geometry in
+            TimelineView(.periodic(from: .now, by: EffectPreviewStore.sequenceFrameSeconds)) { context in
+                let index = playing && frames.count > 1
+                    ? Int(context.date.timeIntervalSinceReferenceDate / EffectPreviewStore.sequenceFrameSeconds) % frames.count
+                    : 0
+                Image(uiImage: frames[min(index, frames.count - 1)]).resizable().interpolation(.medium).scaledToFit()
+                    .frame(width: geometry.size.width, height: geometry.size.height).clipped()
+            }
+        }
+        .overlay(alignment: .bottom) {
+            HStack {
+                fxPreviewLabel("fx_browser_before")
+                Spacer()
+                fxPreviewLabel("fx_browser_after")
+            }.padding(6).environment(\.layoutDirection, .leftToRight)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+func fxPreviewLabel(_ key: String) -> some View {
+    Text(AureaText.t(key)).font(.aurea(size: 10.5, weight: .semibold)).foregroundStyle(.white)
+        .padding(.horizontal, 5).padding(.vertical, 2)
+        .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 6))
+}
+
+/// Seletor de cena da ficha: um botão por cena, o escolhido marcado para o VoiceOver.
+struct FxPreviewScenePicker: View {
+    @Binding var selection: FxPreviewScene
+
+    var body: some View {
+        HStack(spacing: AureaDims.s2) {
+            ForEach(FxPreviewScene.allCases) { scene in
+                let on = scene == selection
+                Button { selection = scene } label: {
+                    Text(AureaText.t(scene.labelKey)).font(.aurea(size: 12, weight: .semibold))
+                        .foregroundStyle(on ? AureaColors.editorPanel : AureaColors.text)
+                        .multilineTextAlignment(.center).lineLimit(2)
+                        .frame(maxWidth: .infinity, minHeight: AureaDims.minTap)
+                        .background(on ? AureaColors.accent : AureaColors.chip,
+                                    in: RoundedRectangle(cornerRadius: AureaDims.radiusChip))
+                }
+                .buttonStyle(AureaPressStyle())
+                .accessibilityLabel(AureaText.t(scene.labelKey))
+                .accessibilityAddTraits(on ? [.isSelected] : [])
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(AureaText.t("fx_preview_scene_label"))
+    }
+}
+
+/// A prévia da FICHA: a parada por baixo (recuo) e, por cima, a animada da cena escolhida.
+struct EffectAnimatedDetailPreview: View {
+    let entry: EffectCatalogItem
+    let store: EffectPreviewStore
+    @AppStorage(FxEffectPrefs.previewsEnabledKey) private var previewsEnabled = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var scene: FxPreviewScene = .photo
+    @State private var frames: [UIImage] = []
+    @State private var loading = false
+    @State private var failed = false
+
+    private var animates: Bool { previewsEnabled && !reduceMotion && !UIAccessibility.isReduceMotionEnabled }
+
+    var body: some View {
+        let name = fxEffectDisplayName(entry.typeId, entry.name)
+        VStack(alignment: .leading, spacing: AureaDims.s3) {
+            EffectBrowserPreview(entry: entry, store: store)
+                .overlay {
+                    if animates, !frames.isEmpty {
+                        FxAnimatedFrames(frames: frames)
+                            .clipShape(RoundedRectangle(cornerRadius: AureaDims.radiusCard))
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if animates, loading {
+                        Text(AureaText.t("fx_preview_animating")).font(.aurea(size: 11, weight: .semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 6)).padding(6)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(animates && !frames.isEmpty
+                    ? AureaText.t("fx_preview_animated_desc", name, AureaText.t(scene.labelKey))
+                    : AureaText.t("fx_preview_still_desc", name))
+                .accessibilityAddTraits(.isImage)
+            if animates {
+                FxPreviewScenePicker(selection: $scene)
+                if failed {
+                    Text(AureaText.t("fx_preview_animation_unavailable")).font(.aurea(size: 11))
+                        .foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .task(id: "\(entry.typeId)-\(scene.rawValue)-\(animates)") {
+            frames = []; failed = false
+            guard animates else { loading = false; return }   // nada é pedido ao motor
+            loading = true
+            let loaded = await store.sequence(for: entry.typeId, scene: scene, generate: true)
+            if Task.isCancelled { return }
+            loading = false
+            if let loaded, !loaded.isEmpty { frames = loaded } else { failed = true }
+        }
     }
 }
 
@@ -806,7 +950,7 @@ struct EffectAboutSheet: View {
         let specs = model.engine.effectSpecs(entry.typeId).map { fxLocalizedSpec(entry.typeId, $0) }
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                EffectBrowserPreview(entry: entry, store: model.effectPreviews)
+                EffectAnimatedDetailPreview(entry: entry, store: model.effectPreviews)
                 gap(AureaDims.s4)
                 HStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 2) {

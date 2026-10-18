@@ -424,6 +424,12 @@ struct Engine::ExportContext {
     void set_message(const char* m) {
         std::snprintf(progress.message, sizeof(progress.message), "%s", m);
     }
+    /// 0.2.4 (C5): enquanto o quadro 0 não sai, a mensagem diz em que etapa
+    /// ele está. Alimenta o watchdog das telas e o "Relatar um problema".
+    void first_frame_stage(const char* stage) noexcept {
+        std::lock_guard lock(mutex);
+        if (progress.framesDone == 0) set_message(stage);
+    }
 };
 
 // Backend details may point into a reusable provider buffer. Preserve the
@@ -2430,7 +2436,7 @@ Result<u64> Engine::add_text(const char* content) noexcept {
     // ela nasceria fora do projeto e não apareceria.
     const i64 t = std::max<i64>(0, playback_.current().value);
     l->start = FrameIndex{t};
-    l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    l->end = FrameIndex{new_layer_end_locked(comp, l, t)};
     if (l->end.value > comp->duration().value) {
         comp->set_duration(l->end);
         configure_playback_locked(comp);
@@ -2680,7 +2686,7 @@ Result<u64> Engine::add_light(u32 kind) noexcept {
     if (!layer) return Status{Errc::OutOfMemory};
     layer->threeD = true;
     layer->start = FrameIndex{std::max<i64>(0, playback_.current().value)};
-    layer->end = FrameIndex{std::max(layer->start.value + 1, comp->duration().value)};
+    layer->end = FrameIndex{new_layer_end_locked(comp, layer, layer->start.value)};
     if (layer->end.value > comp->duration().value) {
         comp->set_duration(layer->end); configure_playback_locked(comp);
     }
@@ -2846,7 +2852,7 @@ Result<u64> Engine::add_null(bool threeD) noexcept {
     // ela nasceria fora do projeto e não apareceria.
     const i64 t = std::max<i64>(0, playback_.current().value);
     l->start = FrameIndex{t};
-    l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    l->end = FrameIndex{new_layer_end_locked(comp, l, t)};
     if (l->end.value > comp->duration().value) {
         comp->set_duration(l->end);
         configure_playback_locked(comp);
@@ -4714,7 +4720,7 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
     // ela nasceria fora do projeto e não apareceria.
     const i64 t = std::max<i64>(0, playback_.current().value);
     l->start = FrameIndex{t};
-    l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    l->end = FrameIndex{new_layer_end_locked(comp, l, t)};
     if (l->end.value > comp->duration().value) {
         comp->set_duration(l->end);
         configure_playback_locked(comp);
@@ -8705,7 +8711,7 @@ Result<u64> Engine::add_shape(u32 preset) noexcept {
     // ela nasceria fora do projeto e não apareceria.
     const i64 t = std::max<i64>(0, playback_.current().value);
     l->start = FrameIndex{t};
-    l->end = FrameIndex{std::max<i64>(t + 1, comp->duration().value)};
+    l->end = FrameIndex{new_layer_end_locked(comp, l, t)};
     if (l->end.value > comp->duration().value) {
         comp->set_duration(l->end);
         configure_playback_locked(comp);
@@ -8769,7 +8775,7 @@ Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const ch
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     l->source = assetId;
     l->start = FrameIndex{std::max<i64>(0, playback_.current().value)};
-    l->end = FrameIndex{std::max(l->start.value + 1, comp->duration().value)};
+    l->end = FrameIndex{new_layer_end_locked(comp, l, l->start.value)};
     if (l->end.value > comp->duration().value) comp->set_duration(l->end);
     l->transform.anchor = Vec3{static_cast<f32>(width) * 0.5f, static_cast<f32>(height) * 0.5f, 0.0f};
     l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
@@ -9129,7 +9135,7 @@ Result<u64> Engine::import_model(const ModelImport& request, scene3d::ImportProg
     l->threeD = true;
     l->model.scene = assetId;
     l->start = FrameIndex{std::max<i64>(0, playback_.current().value)};
-    l->end = FrameIndex{std::max(l->start.value + 1, comp->duration().value)};
+    l->end = FrameIndex{new_layer_end_locked(comp, l, l->start.value)};
     if (l->end.value > comp->duration().value) {
         comp->set_duration(l->end); configure_playback_locked(comp);
     }
@@ -10047,7 +10053,7 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& requested) noexcept {
     l->threeD = true;
     l->model.scene = assetId;
     l->start = FrameIndex{std::max<i64>(0, playback_.current().value)};
-    l->end = FrameIndex{std::max(l->start.value + 1, comp->duration().value)};
+    l->end = FrameIndex{new_layer_end_locked(comp, l, l->start.value)};
     if (l->end.value > comp->duration().value) {
         comp->set_duration(l->end); configure_playback_locked(comp);
     }
@@ -11674,6 +11680,57 @@ Status Engine::render_effect_preview(u32 typeId, u32 width, u32 height, std::vec
     return s;
 }
 
+Status Engine::render_effect_preview_sequence(u32 typeId, u32 width, u32 height, u32 frames, u32 scene,
+                                              std::vector<u8>& out, u32& outWidth, u32& outHeight,
+                                              u32& outFrames) noexcept {
+    auto busy = [this]() noexcept {
+        return livePreviewGraphActive_.load(std::memory_order_acquire)
+            || offscreenReaders_.load(std::memory_order_acquire);
+    };
+    if (busy()) return Status{Errc::Busy, "efeito aguarda o quadro do preview"};
+    if (!gpu_ || !renderer_.ready()) return Status{Errc::InvalidState, "sem GPU"};
+    if (width == 0 || height == 0) return Status{Errc::InvalidArgument, "previa sem tamanho"};
+    if (scene >= kEffectPreviewSceneCount) return Status{Errc::InvalidArgument, "cena desconhecida"};
+    // O mesmo teto de lado da prévia estática (classe do aparelho, nunca o calor).
+    const u32 maxTex = std::min<u32>(gpu_->capabilities().maxTexture2D, std::max<u32>(16, caps_.policy().effectPreviewMaxSide));
+    u32 w = width, h = height;
+    if (w > maxTex || h > maxTex) {
+        const f32 k = static_cast<f32>(maxTex) / static_cast<f32>(std::max(w, h));
+        w = std::max<u32>(1, static_cast<u32>(static_cast<f32>(w) * k));
+        h = std::max<u32>(1, static_cast<u32>(static_cast<f32>(h) * k));
+    }
+    EffectPreviewSequence seq;
+    {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        if (renderer_.preview_graph_pending() || busy()) return Status{Errc::Busy, "efeito aguarda o quadro do preview"};
+        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+        if (const Status s = renderer_.prepare_effect_preview_sequence(effectRegistry_, typeId, w, h, frames,
+                                                                      static_cast<EffectPreviewScene>(scene), seq);
+            !s.ok()) return s;
+    }
+    const usize frameBytes = static_cast<usize>(w) * h * 4;
+    std::vector<u8> all;
+    all.reserve(frameBytes * seq.frames);
+    std::vector<u8> one;
+    for (u32 i = 0; i < seq.frames; ++i) {
+        // Um quadro por vez, com o mutex solto entre eles: o preview do editor
+        // que pedir a GPU no meio faz a sequência devolver Busy, não esperar.
+        if (busy()) return Status{Errc::Busy, "efeito aguarda o quadro do preview"};
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        if (renderer_.preview_graph_pending() || busy()) return Status{Errc::Busy, "efeito aguarda o quadro do preview"};
+        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) return ready;
+        one.clear();
+        if (const Status s = renderer_.render_effect_preview_sequence_frame(effectRegistry_, seq, i, one); !s.ok()) return s;
+        if (one.size() != frameBytes) return Status{Errc::InvalidState, "quadro da sequencia sem tamanho"};
+        all.insert(all.end(), one.begin(), one.end());
+    }
+    out = std::move(all);
+    outWidth = w;
+    outHeight = h;
+    outFrames = seq.frames;
+    return OkStatus;
+}
+
 Status Engine::capture_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, u32& height) noexcept {
     return capture_frame_rgba_impl(maxDim, out, width, height, false);
 }
@@ -13164,6 +13221,26 @@ bool Engine::is_selected(u64 layerId) const noexcept {
 // =============================================================================
 // Export
 // =============================================================================
+// 0.2.4 (C2): camada nova termina no fim do conteúdo, não na duração da
+// composição. Uma duração inflada (catraca da timeline) era herdada por todo
+// texto ou imagem criado depois, e o "aparar ao conteúdo" deixava de ajudar.
+// Sem conteúdo depois do início, vale a duração (o comportamento de antes).
+i64 Engine::new_layer_end_locked(const Composition* comp, const Layer* self, i64 start) const noexcept {
+    if (!comp) return start + 1;
+    const i64 duration = comp->duration().value;
+    i64 content = 0;
+    comp->layers().for_each([&](LayerId, const Layer& layer) {
+        if (&layer == self) return;
+        switch (layer.kind) {   // a mesma regra do "aparar ao conteúdo"
+            case LayerKind::Null: case LayerKind::Camera: case LayerKind::Light:
+            case LayerKind::Adjustment: case LayerKind::Unknown: return;
+            default: content = std::max(content, layer.end.value);
+        }
+    });
+    if (content > start + 1) return std::min(content, std::max(duration, start + 1));
+    return std::max(start + 1, duration);
+}
+
 i64 Engine::navigation_end_locked(const Composition* comp) const noexcept {
     i64 end = 0;
     if (comp) comp->layers().for_each([&](LayerId, const Layer& layer) {
@@ -13236,7 +13313,14 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     if (!outputPath || !*outputPath) return Errc::InvalidArgument;
     if (!gpu_ || !renderer_.ready()) return Status{Errc::NotSupported, "export precisa de GPU"};
     if (!config_.exportSinkFactory) return Status{Errc::NotSupported, "sem encoder de video nesta plataforma"};
-    if (exportCtx_ && exportCtx_->thread.joinable()) {
+    // 0.2.4 (C4): o PreRender usa o mesmo contexto. Exportar com ele rodando
+    // dava "ja existe um export em andamento" (erro 5); agora o export o
+    // cancela e espera o worker sair (prazo limitado, como no PreRender).
+    const bool cancelledPreRender = cancel_prerender_for_export();
+    const u64 preRenderWaitDeadline = monotonic_ns() + kPreRenderStartupWaitNs;
+    if (cancelledPreRender) {
+        if (const Status drained = await_cancelled_prerender_worker(preRenderWaitDeadline, true); !drained.ok()) return drained;
+    } else if (exportCtx_ && exportCtx_->thread.joinable()) {
         bool running = false;
         {
             std::lock_guard<std::mutex> pl(exportCtx_->mutex);
@@ -13263,7 +13347,12 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     exportActive_.store(true, std::memory_order_release);
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
-        if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
+        Status ready = poll_export_gpu_locked(1'000'000'000ull);
+        // O ultimo quadro do PreRender cancelado pode ainda estar na GPU.
+        while (cancelledPreRender && ready.code() == Errc::Timeout && pendingExportGpuFrame_
+               && monotonic_ns() < preRenderWaitDeadline)
+            ready = poll_export_gpu_locked(100'000'000ull);
+        if (!ready.ok()) return ready;
         if (const Status admitted = retire_abandoned_export_locked(); !admitted.ok()) return admitted;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         // Complete retained GPU ownership before replacing the previous session.
@@ -13338,6 +13427,8 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     Status sourceStatus;
     ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Sources);
     std::unordered_map<std::string, std::string> preparedPaths;
+    std::vector<u64> retainedImages;
+    for (const auto& [key, pixels] : ctx->frozenImages) if (pixels) retainedImages.push_back(key);
     const Status captured = export_recovery::capture_snapshot(std::move(frozenBytes), frozenComposition, settings,
         [&](const std::string& path) {
             if (ctx->cancelRequested.load(std::memory_order_acquire)) {
@@ -13352,7 +13443,7 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             }
             preparedPaths.emplace(path, resolved);
             return resolved;
-        }, ctx->frozenProject, ctx->recovery, config_.enableExportRecovery);
+        }, ctx->frozenProject, ctx->recovery, config_.enableExportRecovery, &retainedImages);
     if (!sourceStatus.ok()) return sourceStatus;
     if (!captured.ok()) return captured;
     if (ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
@@ -13376,6 +13467,9 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         ctx->width = size.width;
         ctx->height = size.height;
         const f64 seconds = static_cast<f64>(comp->export_duration(settings.trimToContent).value) / comp->fps();
+        // 0.2.4 (C2): teto de sanidade. Uma duracao inflada pela timeline
+        // virava export de horas ("Frame 0 de 522520").
+        if (config_.maxExportSeconds > 0 && seconds > config_.maxExportSeconds + 1e-6) return export_too_long_status();
         const f64 frames = std::ceil(seconds * ctx->fps - 1e-6);
         if (!std::isfinite(frames) || frames > static_cast<f64>(std::numeric_limits<u32>::max()) ||
             std::max(1.0, frames) / ctx->fps > static_cast<f64>(std::numeric_limits<i64>::max()) / 1e9)
@@ -14265,6 +14359,7 @@ void Engine::export_thread_main() noexcept {
         const auto plan = ctx.scheduler.frame(i);
         if (!plan.ok()) { result = plan.status(); break; }
         const u64 renderStarted = monotonic_ns();
+        if (i == 0) ctx.first_frame_stage("primeiro quadro: decodificando fontes e preparando shaders");
         result = render_export_frame(plan->compositionFrame, target, slot.gpuFrame);
         if (ctx.queue && (i == 0 || i + 1 == ctx.frames || (i + 1) % 300 == 0 || !result.ok()))
             AUREA_LOG_INFO("export-ffmpeg frame=%u pts_us=%lld phase=render timestamp_ns=%llu duration_ns=%llu result=%d",
@@ -14540,6 +14635,7 @@ void Engine::export_encoder_main() noexcept {
         // Direto do buffer de leitura para o sink: nenhuma cópia intermediária.
         const u64 w0 = monotonic_ns();
         Status s;
+        if (i == 0) ctx.first_frame_stage("primeiro quadro: aguardando o encoder");
         ctx.enter(upscaler ? ExportWorkerPhase::Upscale : ExportWorkerPhase::Video);
         if (upscaler) {
             ai::nv12_to_rgb709(slot.yPtr, slot.uvPtr, ctx.width, ctx.height, neuralInput.get());
@@ -14590,6 +14686,7 @@ void Engine::export_encoder_main() noexcept {
         // acumulada, nem em 29,97). Mesma thread do vídeo: o sink não é
         // chamado de duas threads.
         if (s.ok() && ctx.audioSnap) {
+            if (i == 0) ctx.first_frame_stage("primeiro quadro: mixando o audio");
             s = write_export_audio(ctx, audio::frame_to_sample(static_cast<i64>(i) + 1, ctx.fps));
             ctx.audioNs.fetch_add(monotonic_ns() - w1, std::memory_order_relaxed);
         }
@@ -14662,6 +14759,8 @@ void Engine::export_encoder_main() noexcept {
         }
         const f64 elapsed = static_cast<f64>(monotonic_ns() - ctx.startNs) / 1e9;
         std::lock_guard<std::mutex> pl(ctx.mutex);
+        if (ctx.progress.framesDone == 0 && done > 0 && std::strncmp(ctx.progress.message, "primeiro quadro", 15) == 0)
+            ctx.set_message("exportando");
         ctx.progress.framesDone = done;
         if (ctx.queue) ctx.progress.flags = (ctx.progress.flags & ~kExportPhaseMask)
             | (static_cast<u32>(ctx.queue->phase()) << kExportPhaseShift);
@@ -14729,6 +14828,31 @@ ImageExportPlan Engine::query_image_export_plan(const ImageExportSettings& setti
                              comp->export_duration(settings.trimToContent).value, comp->transparent_background());
 }
 
+bool Engine::cancel_prerender_for_export() noexcept {
+    // Só um worker de PreRender AINDA rodando. Um PreRender completo fica: o
+    // cache dele continua valendo para a prévia depois do export.
+    bool preRender = false;
+    {
+        std::lock_guard context(exportContextMutex_);
+        if (exportCtx_ && exportCtx_->preRenderMode && exportCtx_->thread.joinable()) {
+            std::lock_guard<std::mutex> pl(exportCtx_->mutex);
+            preRender = exportCtx_->progress.running;
+        }
+    }
+    if (!preRender) return false;
+    invalidate_prerender();
+    {
+        std::lock_guard context(exportContextMutex_);
+        if (exportCtx_ && exportCtx_->preRenderMode) exportCtx_->cancelRequested.store(true, std::memory_order_release);
+    }
+    AUREA_LOG_INFO("export: PreRender cancelado antes de iniciar");
+    return preRender;
+}
+
+Status Engine::export_too_long_status() noexcept {
+    return Status{Errc::NotSupported, "duracao acima de 3 h: apare o projeto ao conteudo antes de exportar"};
+}
+
 void Engine::invalidate_prerender(i32 error) noexcept {
     if (!preRenderActive_.exchange(false, std::memory_order_acq_rel)) return;
     preRenderCancel_.store(true, std::memory_order_release);
@@ -14750,7 +14874,7 @@ void Engine::invalidate_prerender(i32 error) noexcept {
 // isso leva mais que o próximo gesto: o novo PreRender caía em "export em
 // andamento" (toast de falha). Espera limitada e cancelável — só por um
 // worker de PreRender JÁ cancelado; um export de verdade continua recusado.
-Status Engine::await_cancelled_prerender_worker(u64 deadlineNs) noexcept {
+Status Engine::await_cancelled_prerender_worker(u64 deadlineNs, bool forExport) noexcept {
     if (!exportCtx_ || !exportCtx_->thread.joinable()) return OkStatus;
     for (;;) {
         bool running = false;
@@ -14761,7 +14885,7 @@ Status Engine::await_cancelled_prerender_worker(u64 deadlineNs) noexcept {
         if (!running) break;
         if (!exportCtx_->preRenderMode || !exportCtx_->cancelRequested.load(std::memory_order_acquire))
             return Status{Errc::InvalidState, "ja existe um export em andamento"};
-        if (preRenderCancel_.load(std::memory_order_acquire)) return Errc::Cancelled;
+        if (!forExport && preRenderCancel_.load(std::memory_order_acquire)) return Errc::Cancelled;
         if (monotonic_ns() >= deadlineNs) return Status{Errc::Timeout, "PreRender anterior ainda encerrando"};
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
@@ -14851,8 +14975,9 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
     if (!gpu_ || !renderer_.ready()) return Status{Errc::NotSupported, "export precisa de GPU"};
     const bool preRenderStart = preRenderDirection != 0;
     const u64 preRenderWaitDeadline = monotonic_ns() + kPreRenderStartupWaitNs;
-    if (preRenderStart) {
-        if (const Status drained = await_cancelled_prerender_worker(preRenderWaitDeadline); !drained.ok()) return drained;
+    const bool cancelledPreRender = !preRenderStart && cancel_prerender_for_export();
+    if (preRenderStart || cancelledPreRender) {
+        if (const Status drained = await_cancelled_prerender_worker(preRenderWaitDeadline, cancelledPreRender); !drained.ok()) return drained;
     } else if (exportCtx_ && exportCtx_->thread.joinable()) {
         bool running = false;
         {
@@ -14879,8 +15004,8 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
         // na fila. 1 s não basta num quadro 3D pesado em Mali/PowerVR de
         // entrada; espera em fatias de 100 ms (wait_frame bloqueia, sem girar),
         // enquanto ninguém cancelar.
-        while (preRenderStart && ready.code() == Errc::Timeout && pendingExportGpuFrame_
-               && monotonic_ns() < preRenderWaitDeadline && !preRenderCancel_.load(std::memory_order_acquire))
+        while ((preRenderStart || cancelledPreRender) && ready.code() == Errc::Timeout && pendingExportGpuFrame_
+               && monotonic_ns() < preRenderWaitDeadline && (cancelledPreRender || !preRenderCancel_.load(std::memory_order_acquire)))
             ready = poll_export_gpu_locked(100'000'000ull);
         if (!ready.ok()) return ready;
         if (const Status admitted = retire_abandoned_export_locked(); !admitted.ok()) return admitted;
@@ -14927,9 +15052,15 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
         drain_commands_locked();
         Composition* comp = current_composition();
         if (!comp) return Errc::NotFound;
+        // 0.2.4 (C4): o PreRender ia ate a duracao da composicao, que pode ter
+        // inflado a horas; agora para no fim da ultima camada.
+        const i64 span = ctx->preRenderMode
+            ? std::clamp<i64>(navigation_end_locked(comp), 1, comp->duration().value)
+            : comp->export_duration(settings.trimToContent).value;
+        if (!ctx->preRenderMode && config_.maxExportSeconds > 0 && static_cast<f64>(span) / comp->fps() > config_.maxExportSeconds + 1e-6)
+            return export_too_long_status();
         const ImageExportPlan plan = plan_image_export(settings, comp->width(), comp->height(), comp->fps(),
-                                                       comp->export_duration(settings.trimToContent).value,
-                                                       comp->transparent_background());
+                                                       span, comp->transparent_background());
         if (plan.width == 0 || plan.height == 0 || plan.frames == 0) return Errc::InvalidState;
         ctx->compFps = comp->fps();
         ctx->fps = plan.fps;
@@ -14965,6 +15096,8 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
     // embutida funcionava porque o arquivo já estava no app).
     Status sourceStatus;
     std::unordered_map<std::string, std::string> preparedPaths;
+    std::vector<u64> retainedImages;
+    for (const auto& [key, pixels] : ctx->frozenImages) if (pixels) retainedImages.push_back(key);
     const Status frozen = export_recovery::capture_snapshot(std::move(frozenBytes), frozenComposition, freezeSettings,
         [&](const std::string& path) {
             if (ctx->cancelRequested.load(std::memory_order_acquire)) {
@@ -14980,7 +15113,7 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
             }
             preparedPaths.emplace(path, resolved);
             return resolved;
-        }, ctx->frozenProject, ctx->recovery, false);
+        }, ctx->frozenProject, ctx->recovery, false, &retainedImages);
     // A causa da fonte (cancelado, cópia recusada) vem antes do erro genérico
     // que o `add_path` devolve quando o caminho chega vazio.
     if (!sourceStatus.ok()) return sourceStatus;

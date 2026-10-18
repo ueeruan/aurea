@@ -29,6 +29,11 @@ class AureaEngine private constructor() {
         /** [saveProjectIfDirty]: o projeto já estava gravado, nada foi escrito. */
         const val SAVE_CLEAN = -1
 
+        /** Códigos de `Errc` (core/Result.hpp, com `static_assert` lá). */
+        const val ERR_NOT_IMPLEMENTED = 7
+        const val ERR_SHUTTING_DOWN = 27
+        const val ERR_BUSY = 32
+
         /** Tamanho de um `Command` no C++ (`static_assert` do lado nativo). */
         const val COMMAND_SIZE_BYTES = 128
 
@@ -440,6 +445,20 @@ class AureaEngine private constructor() {
      */
     fun renderEffectPreview(typeId: Int, width: Int, height: Int, out: ByteBuffer, outSize: IntArray): Boolean =
         nativeWork.run(false) { nativeRenderEffectPreview(nativeHandle, typeId, width, height, out, outSize) }
+
+    /**
+     * A prévia ANIMADA de um efeito: `frames` (12..16) quadros antes/depois,
+     * RGBA8 de alfa reto, um atrás do outro em [out] (capacidade para
+     * `frames × width × height × 4`). `scene`: 0 foto, 1 cartela, 2 formas,
+     * 3 baixa luz. `outSize` recebe largura, altura e quadros de verdade.
+     * Devolve 0 (ok) ou o código de erro do motor ([ERR_BUSY] = o preview do
+     * editor está com a GPU: tente de novo mais tarde).
+     */
+    fun renderEffectPreviewSequence(
+        typeId: Int, width: Int, height: Int, frames: Int, scene: Int, out: ByteBuffer, outSize: IntArray,
+    ): Int = nativeWork.run(ERR_SHUTTING_DOWN) {
+        nativeRenderEffectPreviewSequence(nativeHandle, typeId, width, height, frames, scene, out, outSize)
+    }
 
     fun setSelection(layers: LongArray) = nativeSetSelection(nativeHandle, layers)
     fun clearSelection() = nativeClearSelection(nativeHandle)
@@ -1218,6 +1237,9 @@ class AureaEngine private constructor() {
     private external fun nativeRenderEffectPreview(
         handle: Long, typeId: Int, width: Int, height: Int, out: ByteBuffer, outSize: IntArray,
     ): Boolean
+    private external fun nativeRenderEffectPreviewSequence(
+        handle: Long, typeId: Int, width: Int, height: Int, frames: Int, scene: Int, out: ByteBuffer, outSize: IntArray,
+    ): Int
     private external fun nativeSetSelection(handle: Long, layers: LongArray)
     private external fun nativeClearSelection(handle: Long)
     private external fun nativeImportVideo(handle: Long, source: String, name: String): Long

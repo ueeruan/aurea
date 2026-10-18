@@ -3,6 +3,7 @@
 // =============================================================================
 #include "MediaCodecSource.hpp"
 #include "GlVideoBridge.hpp"
+#include "aurea/media/MediaDuration.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/export/CodecOutputPacket.hpp"
@@ -216,6 +217,25 @@ f64 frame_rate_of(AMediaExtractor* ex, AMediaFormat* f) {
     return med > 0 ? 1e6 / static_cast<f64>(med) : 30.0;
 }
 
+/// Maior instante de amostra a partir do último quadro-chave antes de
+/// `declaredUs` (ou do fim). Lê no máximo 600 amostras; volta ao início.
+i64 last_sample_us(AMediaExtractor* ex, i64 declaredUs) {
+    if (AMediaExtractor_seekTo(ex, std::max<i64>(declaredUs, 0) > 0 ? declaredUs : INT64_MAX / 2,
+                               AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC) != AMEDIA_OK) {
+        AMediaExtractor_seekTo(ex, 0, AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
+        return -1;
+    }
+    i64 last = -1;
+    for (int i = 0; i < 600; ++i) {
+        const i64 t = AMediaExtractor_getSampleTime(ex);
+        if (t < 0) break;
+        last = std::max(last, t);
+        if (!AMediaExtractor_advance(ex)) break;
+    }
+    AMediaExtractor_seekTo(ex, 0, AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
+    return last;
+}
+
 void fill_stream_info(AMediaExtractor* ex, AMediaFormat* f, const char* mime, VideoStreamInfo& v) {
     const u32 w = static_cast<u32>(std::max(0, get_i32(f, AMEDIAFORMAT_KEY_WIDTH, 0)));
     const u32 h = static_cast<u32>(std::max(0, get_i32(f, AMEDIAFORMAT_KEY_HEIGHT, 0)));
@@ -226,6 +246,15 @@ void fill_stream_info(AMediaExtractor* ex, AMediaFormat* f, const char* mime, Vi
     int64_t dur = 0;
     v.durationUs = AMediaFormat_getInt64(f, AMEDIAFORMAT_KEY_DURATION, &dur) ? dur : 0;
     v.fps = frame_rate_of(ex, f);
+    // 0.2.4 (C6): confere a duração declarada contra a última amostra (a
+    // regra é do motor, media::reconcile_duration_us).
+    const i64 declared = v.durationUs;
+    const i64 last = last_sample_us(ex, declared);
+    v.durationUs = media::reconcile_duration_us(declared, last,
+        v.fps > 0.0 ? static_cast<i64>(std::llround(1e6 / v.fps)) : 33'333);
+    if (v.durationUs != declared)
+        AUREA_LOG_INFO("video importado: duracao declarada %lld us, amostras ate %lld us; usando %lld us",
+            static_cast<long long>(declared), static_cast<long long>(last), static_cast<long long>(v.durationUs));
     const u8 depth = bit_depth_from(mime, get_i32(f, kKeyProfile, 0));
     v.color = color_from(f, w, h, depth, nullptr);
     std::snprintf(v.codec, sizeof(v.codec), "%s", mime ? mime : "");

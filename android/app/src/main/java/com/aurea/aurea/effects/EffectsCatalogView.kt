@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -83,7 +85,18 @@ fun EffectDetailSheet(
     onDismiss: () -> Unit,
 ) {
     val name = effectDisplayName(entry.typeId, entry.name)
-    val preview = rememberEffectPreview(previews, entry.typeId, PREVIEW_W, PREVIEW_H)
+    // "Prévias de efeitos" desligado em Ajustes: a ficha fica na cartela e não pede render.
+    val preview = rememberEffectPreview(previews.takeIf { store.effectPrefs.previewsEnabled }, entry.typeId, PREVIEW_W, PREVIEW_H)
+    // A prévia ANIMADA (só aqui é gerada): desligada por "Prévias de efeitos"
+    // ou por "Remover animações" do sistema — aí fica a prévia parada.
+    val reduceMotion = rememberReduceMotion()
+    val animatedStore = previews?.animated?.takeIf { store.effectPrefs.previewsEnabled && !reduceMotion }
+    var scene by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(EffectPreviewScene.PHOTO.id) }
+    val animated = rememberAnimatedEffectPreview(animatedStore, entry.typeId, scene, generate = true)
+    val sceneName = stringResource(EffectPreviewScene.entries.firstOrNull { it.id == scene }?.label ?: R.string.fx_preview_scene_photo)
+    val previewDesc = if (animated.frames.isNotEmpty())
+        stringResource(R.string.fx_preview_animated_desc, name, sceneName)
+    else stringResource(R.string.fx_preview_still_desc, name)
     val specs = remember(entry.typeId) { store.effectSpecs(entry.typeId) }
     val cost = effectCost(entry.effectClass)
 
@@ -93,11 +106,26 @@ fun EffectDetailSheet(
             contentPadding = PaddingValues(start = AureaDims.S5, end = AureaDims.S5, top = AureaDims.S2, bottom = AureaDims.S6),
         ) {
             item(key = "previa") {
-                Box(Modifier.fillMaxWidth().aspectRatio(1.6f).clip(AureaShape.Card)) {
-                    if (preview != null) {
+                Box(Modifier.fillMaxWidth().aspectRatio(1.6f).clip(AureaShape.Card).semantics { contentDescription = previewDesc }) {
+                    if (animated.frames.isNotEmpty()) {
+                        AnimatedPreviewFrames(animated.frames, playing = true)
+                    } else if (preview != null) {
                         Image(preview, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.Low)
                     } else {
                         GenericPlate(categoryGlyph(entry.category))
+                    }
+                    if (animated.loading) {
+                        Text(stringResource(R.string.fx_preview_animating), style = AureaType.of(11f, FontWeight.W600, color = Color.White),
+                            modifier = Modifier.align(Alignment.TopStart).padding(6.dp).clip(AureaShape.Chip)
+                                .background(Color.Black.copy(alpha = 0.6f)).padding(horizontal = 6.dp, vertical = 3.dp))
+                    }
+                }
+                if (animatedStore != null) {
+                    Spacer(Modifier.height(AureaDims.S3))
+                    EffectPreviewScenePicker(scene, onSelect = { scene = it })
+                    if (animated.failed) {
+                        Spacer(Modifier.height(AureaDims.S2))
+                        Text(stringResource(R.string.fx_preview_animation_unavailable), style = AureaType.CardSpec)
                     }
                 }
                 Spacer(Modifier.height(AureaDims.S4))

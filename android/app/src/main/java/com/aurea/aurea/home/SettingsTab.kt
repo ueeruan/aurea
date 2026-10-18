@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -198,6 +201,15 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
                     store.effectPreviews?.clear()
                 }
                 GroupDivider()
+                // Prévias de efeitos: desligado, os cartões de efeito mostram só a
+                // cartela com o ícone da categoria e o motor não renderiza prévia.
+                SwitchRow(
+                    stringResource(R.string.settings_effect_previews),
+                    stringResource(R.string.settings_effect_previews_note),
+                    store.effectPrefs.previewsEnabled,
+                    store.effectPrefs::updatePreviewsEnabled,
+                )
+                GroupDivider()
                 TapRow(stringResource(R.string.settings_clear_recents), stringResource(R.string.settings_clear_recents_note)) {
                     store.effectPrefs.clearRecents()
                     store.showToast(context.getString(R.string.settings_recents_cleared))
@@ -258,6 +270,30 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
             Spacer(Modifier.height(AureaDims.S5))
             Text(stringResource(R.string.settings_made_by), style = AureaType.Footer, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         }
+    }
+}
+
+/**
+ * Título + subtítulo e o interruptor. A linha inteira é o alvo (papel Switch,
+ * estado lido pelo leitor de tela); o desenho do interruptor não repete o nó.
+ */
+@Composable
+private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
+            .semantics { contentDescription = title }
+            .padding(AureaDims.S4, AureaDims.S3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = AureaType.BodyLarge)
+            Spacer(Modifier.height(1.dp))
+            Text(subtitle, style = AureaType.BodySmall)
+        }
+        Spacer(Modifier.width(AureaDims.S2))
+        Box(Modifier.clearAndSetSemantics { }) { AureaSwitch(checked, onChange) }
     }
 }
 

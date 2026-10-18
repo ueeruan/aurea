@@ -261,11 +261,14 @@ DepthMapResult Renderer::depth_map_preview() noexcept {
     // "foto-recorte"), então o mapa cobre a cartela inteira. Sem foto, a
     // cartela sintética não tem profundidade: o efeito devolve a entrada.
     DepthMapResult none;
+    // Prévia animada sobre outra cena (cartela, formas, baixa luz) ou sobre a
+    // foto em movimento: o mapa da foto parada não descreve o que está ali.
+    if (!previewDepthFromPhoto_) return none;
     if (previewSrc_.empty() || !previewSrcW_ || !previewSrcH_ || !compTargetW_ || !compTargetH_) return none;
     const f32 src = static_cast<f32>(previewSrcW_) / static_cast<f32>(previewSrcH_);
     const f32 dst = static_cast<f32>(compTargetW_) / static_cast<f32>(compTargetH_);
     f32 mx = 1.0f, my = 1.0f, ox = 0.0f, oy = 0.0f;   // uv da foto = uv * m + o
-    if (dst > src) { my = src / dst; oy = (1.0f - my) * 0.35f; }
+    if (dst > src) { my = src / dst; oy = (1.0f - my) * 0.5f; }   // centralizado, igual ao "foto-recorte"
     else           { mx = dst / src; ox = (1.0f - mx) * 0.5f; }
     const u32 x0 = std::min(previewSrcW_ - 1, static_cast<u32>(ox * static_cast<f32>(previewSrcW_)));
     const u32 y0 = std::min(previewSrcH_ - 1, static_cast<u32>(oy * static_cast<f32>(previewSrcH_)));

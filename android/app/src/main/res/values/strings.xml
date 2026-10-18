@@ -108,6 +108,8 @@
     <string name="settings_group_general">Geral</string>
     <string name="settings_clear_cache">Limpar cache</string>
     <string name="settings_clear_cache_note">Remove prévias, miniaturas e quadros temporários</string>
+    <string name="settings_effect_previews">Prévias de efeitos</string>
+    <string name="settings_effect_previews_note">Mostra cada efeito aplicado a uma imagem de exemplo. Desligado, mostra só o ícone da categoria</string>
     <string name="settings_clear_recents">Limpar recentes de efeitos</string>
     <string name="settings_clear_recents_note">A lista de "Recentes" do navegador de efeitos</string>
     <string name="settings_recents_cleared">Recentes de efeitos limpos</string>
@@ -1825,7 +1827,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea 0.2.3 (2191) • 18/10/2026\n\n• PreRender: em celulares mais lentos, refazer o PreRender logo depois de editar ou cancelar não falha mais nem fica parado sem aviso.\n• Android: fotos e vídeos de galerias que não dão acesso permanente agora são copiados para o app ao importar. A exportação e o PreRender não param mais com \"mídia ausente\" (erro 18) depois de reabrir o projeto. Em projetos antigos, importe de novo a mídia que falhar.\n• Exportação: quando um arquivo do projeto some ou não pode ser lido, a mensagem diz o que fazer, em vez de \"erro 18\".\n• Puppet: os botões de keyframe e de gráfico (curva) funcionam nos pinos. Selecione um pino no modo de edição para animar e ajustar a curva.</string>
+    <string name="release_notes_body">Aurea 0.2.4 (2192) • 18/10/2026\n\n• Exportação: mídia de clipes apagados ou substituídos não impede mais exportar. Antes, um arquivo antigo que sumiu da galeria dava \"mídia ausente\" (erro 18) em todo export.\n• Exportação: não falha mais quando o PreRender está rodando. Ele é interrompido e o export começa.\n• Linha do tempo: arrastar ou aparar um clipe perto da borda não estica mais o projeto por horas. Textos e imagens novos terminam no fim do conteúdo.\n• Exportação: a tela mostra a duração e avisa quando ela está longa demais. Acima de 3 h, o motivo aparece claramente.\n• Exportação: enquanto o primeiro quadro é preparado, a tela diz \"Preparando o primeiro quadro…\". No iPhone, o Cancelar funciona sempre.\n• Android: o export não copia mais toda a mídia da galeria a cada vez. Começa mais rápido e não esgota o espaço.\n• Importação: vídeos que informam uma duração errada entram com o tamanho certo.\n• Efeitos: nova imagem de amostra nas prévias e opção em Ajustes para desligar as prévias.\n• Efeitos: a ficha do efeito mostra uma prévia animada, em várias cenas.\n• Puppet: partes separadas de uma camada não se mexem mais quando você arrasta um pino de outra parte.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -4442,4 +4444,16 @@
     <string name="fxo_shards">Estilhaços</string>
     <string name="fxl_pattern_rotation">Rotação do padrão</string>
     <string name="fxl_pattern_detail">Detalhe do padrão</string>
+    <string name="exp_first_frame">Preparando o primeiro quadro…</string>
+    <string name="exp_long_duration">Duração longa (%1$s). Confira se alguma camada passa do fim do conteúdo.</string>
+    <string name="exp_too_long_3h">Este vídeo passa de 3 h e não pode ser exportado. Escolha “Conteúdo da timeline” ou encurte o projeto.</string>
+    <string name="fx_preview_scene_label">Cena da prévia</string>
+    <string name="fx_preview_scene_photo">Foto</string>
+    <string name="fx_preview_scene_plate">Cartela</string>
+    <string name="fx_preview_scene_shapes">Formas</string>
+    <string name="fx_preview_scene_low_light">Pouca luz</string>
+    <string name="fx_preview_animated_desc">Prévia animada de %1$s, cena %2$s: antes à esquerda, depois à direita</string>
+    <string name="fx_preview_still_desc">Prévia de %1$s: antes à esquerda, depois à direita</string>
+    <string name="fx_preview_animating">Preparando a animação…</string>
+    <string name="fx_preview_animation_unavailable">Animação indisponível agora: mostrando a prévia parada</string>
 </resources>

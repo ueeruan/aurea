@@ -82,6 +82,8 @@
     <string name="settings_group_general">General</string>
     <string name="settings_clear_cache">Clear cache</string>
     <string name="settings_clear_cache_note">Removes previews, thumbnails and temporary frames</string>
+    <string name="settings_effect_previews">Effect previews</string>
+    <string name="settings_effect_previews_note">Shows each effect applied to a sample image. When off, only the category icon is shown</string>
     <string name="settings_clear_recents">Clear recent effects</string>
     <string name="settings_clear_recents_note">The "Recent" list in the effect browser</string>
     <string name="settings_recents_cleared">Recent effects cleared</string>
@@ -1792,7 +1794,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea 0.2.3 (2191) • 2026-10-18\n\n• PreRender: on slower phones, running PreRender again right after editing or cancelling no longer fails or silently does nothing.\n• Android: photos and videos from galleries that do not grant permanent access are now copied into the app on import. Export and PreRender no longer stop with \"missing media\" (error 18) after reopening the project. In older projects, import the failing media again.\n• Export: when a project file is missing or unreadable, the message says what to do instead of \"error 18\".\n• Puppet: the keyframe and graph (curve) buttons work on pins. Select a pin in edit mode to animate it and adjust the curve.</string>
+    <string name="release_notes_body">Aurea 0.2.4 (2192) • 2026-10-18\n\n• Export: media from deleted or replaced clips no longer blocks exporting. Before, an old file removed from the gallery caused \"missing media\" (error 18) on every export.\n• Export: no longer fails while PreRender is running. PreRender stops and the export starts.\n• Timeline: dragging or trimming a clip near the edge no longer stretches the project for hours. New text and images end where your content ends.\n• Export: the screen shows the duration and warns when it is too long. Above 3 h, the reason is shown clearly.\n• Export: while the first frame is being prepared, the screen says \"Preparing the first frame…\". On iPhone, Cancel always works.\n• Android: export no longer copies all gallery media every time. It starts faster and does not run out of space.\n• Import: videos that report a wrong duration come in with the right length.\n• Effects: a new sample image in the previews and a Settings option to turn previews off.\n• Effects: the effect sheet shows an animated preview in several scenes.\n• Puppet: separate parts of a layer no longer move when you drag a pin on another part.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -4409,4 +4411,16 @@ to edit the curve.</string>
     <string name="fxo_shards">Shards</string>
     <string name="fxl_pattern_rotation">Pattern rotation</string>
     <string name="fxl_pattern_detail">Pattern detail</string>
+    <string name="exp_first_frame">Preparing the first frame…</string>
+    <string name="exp_long_duration">Long duration (%1$s). Check whether a layer runs past the end of your content.</string>
+    <string name="exp_too_long_3h">This video is longer than 3 h and can’t be exported. Choose “Timeline content” or shorten the project.</string>
+    <string name="fx_preview_scene_label">Preview scene</string>
+    <string name="fx_preview_scene_photo">Photo</string>
+    <string name="fx_preview_scene_plate">Test card</string>
+    <string name="fx_preview_scene_shapes">Shapes</string>
+    <string name="fx_preview_scene_low_light">Low light</string>
+    <string name="fx_preview_animated_desc">Animated preview of %1$s, %2$s scene: before on the left, after on the right</string>
+    <string name="fx_preview_still_desc">Preview of %1$s: before on the left, after on the right</string>
+    <string name="fx_preview_animating">Preparing the animation…</string>
+    <string name="fx_preview_animation_unavailable">Animation unavailable right now: showing the still preview</string>
 </resources>

@@ -3,6 +3,7 @@
 #include "aurea/core/Time.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/project/FileIO.hpp"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -14,6 +15,7 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
+#include <vector>
 namespace aurea::android_export {
 // Gallery locators become durable recovery assets. Constant buffers, cancellable
 // reads, finite deadlines, and exact byte comparison before reusing a prior copy.
@@ -90,5 +92,52 @@ inline Result<std::string> preserve_asset(const std::string& source, const std::
     if (const Status committed = fileio::commit_file(temporary, final); !committed.ok()) return committed;
     AUREA_LOG_INFO("export-v2 phase=preparing persistent_source_bytes=%llu duration_ns=%llu", static_cast<unsigned long long>(bytes), static_cast<unsigned long long>(monotonic_ns() - started));
     return final;
+}
+// 0.2.4 (C3): sem recuperação de export (nenhuma plataforma liga), a cópia
+// inteira de cada content:// a cada export não serve a ninguém: 120 s por
+// arquivo na nuvem (erro 26) e a pasta export-sources crescendo até o erro
+// 28. O decoder já abre content:// pelo fd. Aqui só se confere que a URI
+// ainda abre (permissão viva) e ela segue como está.
+inline Result<std::string> validate_asset(const std::string& source, const std::atomic<bool>* cancel,
+    int (*opener)(const char*, void*)) noexcept {
+    if (source.rfind("content:", 0) != 0) return source;
+    if (cancel && cancel->load(std::memory_order_acquire)) return Status{Errc::Cancelled};
+    if (!opener) return Status{Errc::NotSupported};
+    const int fd = opener(source.c_str(), nullptr);
+    if (fd < 0) return Status{Errc::MediaSourceMissing};
+    ::close(fd);
+    return source;
+}
+
+// Teto da pasta export-sources: apaga as cópias mais antigas até caber em
+// `keepBytes` (0 = esvazia). Só arquivos regulares diretos da pasta; nunca
+// segue links. Devolve quantos saíram.
+inline u32 prune_export_sources(const std::string& documents, u64 keepBytes) noexcept {
+    // Android compila sem exceções: só as sobrecargas com error_code.
+    if (documents.empty()) return 0;
+    namespace fs = std::filesystem;
+    std::error_code error;
+    const auto root = fs::path(documents) / "export-sources";
+    if (!fs::is_directory(fs::symlink_status(root, error)) || error) return 0;
+    struct Entry { fs::path path; u64 bytes; fs::file_time_type time; };
+    std::vector<Entry> files; u64 total = 0;
+    fs::directory_iterator it(root, error), end;
+    for (; !error && it != end; it.increment(error)) {
+        std::error_code e;
+        const auto status = it->symlink_status(e);
+        if (e || !fs::is_regular_file(status)) continue;
+        const u64 bytes = it->file_size(e); if (e) continue;
+        const auto time = it->last_write_time(e); if (e) continue;
+        files.push_back({it->path(), bytes, time}); total += bytes;
+    }
+    std::sort(files.begin(), files.end(), [](const Entry& x, const Entry& y) { return x.time < y.time; });
+    u32 removed = 0;
+    for (const auto& f : files) {
+        if (total <= keepBytes) break;
+        std::error_code e;
+        if (fs::remove(f.path, e) && !e) { total -= f.bytes; ++removed; }
+    }
+    if (removed) AUREA_LOG_INFO("export-sources: %u copia(s) antiga(s) removida(s)", removed);
+    return removed;
 }
 } // namespace aurea::android_export

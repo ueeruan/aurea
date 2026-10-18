@@ -144,6 +144,11 @@ struct AutosaveState {
     u64  editGeneration = 0;
 };
 
+/// Acrescenta a `used` todo AssetId que as camadas de `comp` usam (fonte,
+/// modelo, textura de partícula, HDRI, LUT, textura 3D, paleta). Não desce
+/// nas aninhadas: quem precisa disso usa Project::assets_reachable_from.
+void collect_composition_assets(const Composition& comp, std::vector<AssetId>& used);
+
 class Project {
 public:
     Project() = default;
@@ -189,6 +194,9 @@ public:
     /// Assets que nenhuma layer referencia. A UI oferece removê-los; o motor
     /// não os apaga sozinho porque um asset pode estar só num estado de undo.
     [[nodiscard]] std::vector<AssetId> unreferenced_assets() const;
+    /// Assets que a composição `root` usa, incluindo as aninhadas (recursivo).
+    /// O export resolve só estes: um asset morto fora do alcance não o derruba.
+    [[nodiscard]] std::vector<AssetId> assets_reachable_from(CompositionId root) const;
 
     template <typename Fn>
     void for_each_asset(Fn&& fn) { assets_.for_each(std::forward<Fn>(fn)); }

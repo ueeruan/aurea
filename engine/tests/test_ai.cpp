@@ -78,8 +78,9 @@ extern "C" unsigned char* stbi_load_from_memory(const unsigned char*, int, int*,
 extern "C" void stbi_image_free(void*);
 
 namespace {
-/// A foto das prévias de efeito do app: uma pessoa em primeiro plano sobre um
-/// fundo escuro distante — perto e longe sem ambiguidade.
+/// A imagem das prévias de efeito do app (procedural desde 0.2.4, gerada por
+/// build/gerar_previa_efeitos.py): um vaso no centro, sobre uma mesa, diante de
+/// uma parede escura distante — perto e longe sem ambiguidade.
 bool depth_test_photo(std::vector<u8>& rgba, u32& w, u32& h) {
     const std::string path = std::string(AUREA_APP_PRESETS_DIR) + "/../previa_efeitos.jpg";
     std::FILE* f = std::fopen(path.c_str(), "rb");
@@ -104,9 +105,9 @@ f32 depth_region_mean(const std::vector<f32>& d, u32 x0, u32 y0, u32 x1, u32 y1)
 }
 }
 
-// Qual lado é perto: a disparidade da pessoa (centro) tem de passar a do fundo
-// (cantos de cima). CPU e Vulkan (quando há) dão o mesmo mapa.
-AUREA_TEST(Ai, DepthModelSeesThePersonNearerThanTheBackground) {
+// Qual lado é perto: a disparidade do objeto central (o vaso) tem de passar a
+// do fundo (cantos de cima). CPU e Vulkan (quando há) dão o mesmo mapa.
+AUREA_TEST(Ai, DepthModelSeesTheCentralSubjectNearerThanTheBackground) {
     std::vector<u8> photo;
     u32 w = 0, h = 0;
     AUREA_CHECK(depth_test_photo(photo, w, h));
@@ -122,12 +123,12 @@ AUREA_TEST(Ai, DepthModelSeesThePersonNearerThanTheBackground) {
         AUREA_CHECK(est.run(photo.data(), w, h, w * 4, 4, cancel, cpu.data()).ok());
         best = std::min(best, est.last_inference_ms());
     }
-    const f32 person = depth_region_mean(cpu, 96, 96, 160, 192);
+    const f32 subject = depth_region_mean(cpu, 96, 96, 160, 192);
     const f32 background = 0.5f * (depth_region_mean(cpu, 0, 0, 32, 32) + depth_region_mean(cpu, 224, 0, 256, 32));
     f32 p2 = 0, p98 = 0;
     ai::depth_percentiles(cpu.data(), N, p2, p98);
-    std::printf("    CPU %.1f ms; pessoa %.1f fundo %.1f; p2 %.1f p98 %.1f\n", best, person, background, p2, p98);
-    AUREA_CHECK(person > background * 1.3f);
+    std::printf("    CPU %.1f ms; objeto %.1f fundo %.1f; p2 %.1f p98 %.1f\n", best, subject, background, p2, p98);
+    AUREA_CHECK(subject > background * 1.3f);
     AUREA_CHECK(p98 > p2);
     // Cancelado antes de começar: nada roda.
     std::atomic<bool> stop{true};

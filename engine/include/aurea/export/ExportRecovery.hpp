@@ -32,20 +32,25 @@ using PathResolver = std::function<std::string(const std::string&)>;
 inline constexpr usize kMaxProjectBytes = 64ull << 20;
 inline constexpr usize kMaxPackageBytes = kMaxProjectBytes + (4ull << 20);
 
+// Only assets reachable from `composition` (nested included) pass through the
+// resolver. `retainedImages` lists packed image AssetIds whose decoded pixels
+// the export already owns; without recovery they skip the resolver too.
 // Caller holds the model lock only while serializing. The strict clone preserves IDs,
 // nested compositions and all authored state. Source paths and the effective
 // fonts are frozen in the clone; the open editor document is never modified.
 [[nodiscard]] Status capture(const Project& project, CompositionId composition,
                              const ExportSettings& settings, const PathResolver& resolve,
                              std::unique_ptr<Project>& frozen, Package& package,
-                             bool requirePersistentSources = true) noexcept;
+                             bool requirePersistentSources = true,
+                             const std::vector<u64>* retainedImages = nullptr) noexcept;
 // Serialize the editor under its lock, then hand ownership of those immutable
 // bytes to this operation. URI materialization, fonts and dependency reads may
 // block; they must not hold the live editor's model/status lock.
 [[nodiscard]] Status capture_snapshot(std::vector<u8> initial, CompositionId composition,
                              const ExportSettings& settings, const PathResolver& resolve,
                              std::unique_ptr<Project>& frozen, Package& package,
-                             bool requirePersistentSources = true) noexcept;
+                             bool requirePersistentSources = true,
+                             const std::vector<u64>* retainedImages = nullptr) noexcept;
 // Expensive source hashing runs outside the model lock, with a fixed 64 KiB
 // buffer. Missing, unsupported URI or concurrently changing sources fail.
 [[nodiscard]] Status fingerprint_sources(Package& package) noexcept;

@@ -80,6 +80,7 @@ jobs:
           python3 engine/platform/ios/verify/check_memory_pressure.py
           python3 engine/platform/ios/verify/check_motion_blur.py
           python3 engine/platform/ios/verify/check_export_startup_async.py
+          python3 engine/platform/ios/verify/check_autoscroll_limit.py
       - name: Install shader tools
         run: brew install cmake ninja shaderc ccache
       - name: Identify iOS export dependency SDK

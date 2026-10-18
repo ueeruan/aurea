@@ -3,6 +3,7 @@
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 
+#include <algorithm>
 #include <cstdio>
 
 namespace aurea {
@@ -81,34 +82,43 @@ AssetId Project::find_asset_by_hash(u64 contentHash) const noexcept {
     return found;
 }
 
+namespace {
+// Todos os AssetIds que uma camada usa diretamente. Uma regra só para o
+// "não referenciado" (Ajustes, coleta ao salvar) e o "alcançável" do export.
+void collect_layer_assets(const Layer& l, std::vector<AssetId>& used) {
+    if (l.source.valid()) used.push_back(l.source);
+    if (l.model.scene.valid()) used.push_back(l.model.scene);
+    // These are packed AssetIds, independent of a source layer. A
+    // particle texture still lives after its original image is deleted.
+    if (l.particles.textureAsset != 0) used.push_back(AssetId::unpack(l.particles.textureAsset));
+    if (l.environmentAsset != 0) used.push_back(AssetId::unpack(l.environmentAsset));
+    for (const auto& effect : l.effects) {
+        if (effect.type == effect_type_id("aurea.color.cube_lut") && !effect.params.empty()) {
+            const auto id = AssetId::unpack(effect.params[0].constant.ref);
+            if (id.valid()) used.push_back(id);
+        }
+        // A imagem do "Trocar textura 3D" (parâmetro 1) e o arquivo de paleta
+        // do Palettize (parâmetro 1): os outros dois TextureReference do motor.
+        if ((effect.type == effect_type_id("aurea.3d.part_texture") || effect.type == effect_type_id("aurea.color.palettize")) &&
+            effect.params.size() > 1) {
+            const auto id = AssetId::unpack(effect.params[1].constant.ref);
+            if (id.valid()) used.push_back(id);
+        }
+    }
+    // TextData::font is a FontId in FontManager's separate handle table,
+    // not an AssetId. Equal packed values must not retain unrelated media.
+}
+} // namespace
+void collect_composition_assets(const Composition& comp, std::vector<AssetId>& used) {
+    comp.layers().for_each([&](LayerId, const Layer& l) { collect_layer_assets(l, used); });
+    if (comp.environment().hdri.valid()) used.push_back(comp.environment().hdri);
+}
+
 std::vector<AssetId> Project::unreferenced_assets() const {
     std::vector<AssetId> used;
     used.reserve(64);
-
     timeline_.for_each_composition([&](CompositionId, const Composition& comp) {
-        comp.layers().for_each([&](LayerId, const Layer& l) {
-            if (l.source.valid()) used.push_back(l.source);
-            if (l.nested.composition.valid()) { /* é composição, não asset */ }
-            if (l.model.scene.valid()) used.push_back(l.model.scene);
-            // These are packed AssetIds, independent of a source layer. A
-            // particle texture still lives after its original image is deleted.
-            if (l.particles.textureAsset != 0) used.push_back(AssetId::unpack(l.particles.textureAsset));
-            if (l.environmentAsset != 0) used.push_back(AssetId::unpack(l.environmentAsset));
-            for (const auto& effect : l.effects) {
-                if (effect.type == effect_type_id("aurea.color.cube_lut") && !effect.params.empty()) {
-                    const auto id = AssetId::unpack(effect.params[0].constant.ref);
-                    if (id.valid()) used.push_back(id);
-                }
-                // A imagem do "Trocar textura 3D" (parâmetro 1).
-                if (effect.type == effect_type_id("aurea.3d.part_texture") && effect.params.size() > 1) {
-                    const auto id = AssetId::unpack(effect.params[1].constant.ref);
-                    if (id.valid()) used.push_back(id);
-                }
-            }
-            // TextData::font is a FontId in FontManager's separate handle table,
-            // not an AssetId. Equal packed values must not retain unrelated media.
-        });
-        if (comp.environment().hdri.valid()) used.push_back(comp.environment().hdri);
+        collect_composition_assets(comp, used);
     });
 
     std::vector<AssetId> result;
@@ -118,6 +128,26 @@ std::vector<AssetId> Project::unreferenced_assets() const {
         }
         result.push_back(id);
     });
+    return result;
+}
+
+std::vector<AssetId> Project::assets_reachable_from(CompositionId root) const {
+    std::vector<AssetId> used;
+    std::vector<CompositionId> visited, pending{root};
+    while (!pending.empty()) {
+        const CompositionId id = pending.back(); pending.pop_back();
+        if (std::find(visited.begin(), visited.end(), id) != visited.end()) continue;
+        visited.push_back(id);
+        const Composition* comp = timeline_.composition(id);
+        if (!comp) continue;
+        collect_composition_assets(*comp, used);
+        comp->layers().for_each([&](LayerId, const Layer& l) {
+            if (l.kind == LayerKind::Composition && l.nested.composition.valid()) pending.push_back(l.nested.composition);
+        });
+    }
+    std::vector<AssetId> result;
+    for (AssetId u : used)
+        if (assets_.contains(u) && std::find(result.begin(), result.end(), u) == result.end()) result.push_back(u);
     return result;
 }
 

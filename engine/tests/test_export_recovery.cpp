@@ -23,6 +23,16 @@ struct Files {
 };
 Project project() { auto made = Project::create_new(96, 64, 30, "frozen"); return std::move(*made); }
 bool put(const std::string& p, const std::string& text) { return fileio::write_atomic(p, text.data(), text.size()).ok(); }
+// 0.2.4: o snapshot so resolve assets que a composicao usa. Os testes que
+// conferem dependencias colocam o asset numa camada da raiz.
+AssetId use(Project& p, AssetId id, CompositionId in = {}) {
+    auto* comp = p.timeline().composition(in.valid() ? in : p.timeline().root());
+    const Asset* a = p.asset(id);
+    const bool model = a && a->kind == AssetKind::Model3D;
+    const auto layer = comp->add_layer(model ? LayerKind::Model3D : (a && a->kind == AssetKind::Image ? LayerKind::Image : LayerKind::Video), "uses asset");
+    if (model) comp->layer(layer)->model.scene = id; else comp->layer(layer)->source = id;
+    return id;
+}
 }
 
 AUREA_TEST(ExportRecovery, AtomicPackageRestoresNestedSnapshotAndSessionSettings) {
@@ -85,7 +95,7 @@ AUREA_TEST(ExportRecovery, PlatformAutomaticDimensionsAndRateSurviveRestart) {
 AUREA_TEST(ExportRecovery, WholeSourceHashRejectsSameSizeChangeAndMissingSource) {
     Files files; const auto source = files.add("source.bin"), path = files.add("source.arec");
     AUREA_CHECK(put(source, "original source bytes"));
-    auto p = project(); Asset a; a.kind = AssetKind::Video; a.sourcePath = source; (void)p.add_asset(a);
+    auto p = project(); Asset a; a.kind = AssetKind::Video; a.sourcePath = source; (void)use(p, p.add_asset(a));
     recovery::Package package; std::unique_ptr<Project> frozen;
     AUREA_CHECK(recovery::capture(p, p.timeline().root(), ExportSettings{}, {}, frozen, package).ok());
     AUREA_CHECK_EQ(package.dependencies.size(), usize{1});
@@ -108,7 +118,7 @@ AUREA_TEST(ExportRecovery, LocalFileUriKeepsPersistentVideoSourceAndEncodedSpace
     std::string uri = "file:///";
     if (absolute.front() == '/') uri = "file://";
     for (const char c : absolute) uri += c == ' ' ? "%20" : std::string(1, c);
-    auto p = project(); Asset a; a.kind = AssetKind::Video; a.sourcePath = uri; const auto id = p.add_asset(a);
+    auto p = project(); Asset a; a.kind = AssetKind::Video; a.sourcePath = uri; const auto id = use(p, p.add_asset(a));
     recovery::Package package; std::unique_ptr<Project> frozen;
     AUREA_CHECK(recovery::capture(p, p.timeline().root(), ExportSettings{}, {}, frozen, package).ok());
     AUREA_CHECK_EQ(package.dependencies.size(), usize{1});
@@ -160,7 +170,7 @@ AUREA_TEST(ExportRecovery, GltfExternalBuffersAndImagesAreDependencyChecked) {
     AUREA_CHECK(put(binary, "0123456789ab")); AUREA_CHECK(put(image, "image payload"));
     const std::string json = "{\"asset\":{\"version\":\"2.0\"},\"buffers\":[{\"uri\":\"" + binary + "\",\"byteLength\":12}],\"images\":[{\"uri\":\"" + image + "\"},{\"uri\":\"data:image/png;base64,AA==\"}]}";
     AUREA_CHECK(put(source, json));
-    auto p = project(); Asset a; a.kind = AssetKind::Model3D; a.sourcePath = source; (void)p.add_asset(a);
+    auto p = project(); Asset a; a.kind = AssetKind::Model3D; a.sourcePath = source; (void)use(p, p.add_asset(a));
     recovery::Package package; std::unique_ptr<Project> frozen;
     AUREA_CHECK(recovery::capture(p, p.timeline().root(), ExportSettings{}, {}, frozen, package).ok());
     AUREA_CHECK_EQ(package.dependencies.size(), usize{3});
@@ -175,8 +185,8 @@ AUREA_TEST(ExportRecovery, FbxAndObjModelsFreezeByTheirOwnFile) {
     Files files; const auto fbx = files.add("personagem.fbx"), obj = files.add("cubo.obj");
     AUREA_CHECK(put(fbx, "Kaydara FBX Binary  ")); AUREA_CHECK(put(obj, "v 0 0 0 v 1 0 0 v 0 1 0 f 1 2 3"));
     auto p = project();
-    Asset a; a.kind = AssetKind::Model3D; a.sourcePath = fbx; (void)p.add_asset(a);
-    Asset b; b.kind = AssetKind::Model3D; b.sourcePath = obj; (void)p.add_asset(b);
+    Asset a; a.kind = AssetKind::Model3D; a.sourcePath = fbx; (void)use(p, p.add_asset(a));
+    Asset b; b.kind = AssetKind::Model3D; b.sourcePath = obj; (void)use(p, p.add_asset(b));
     recovery::Package package; std::unique_ptr<Project> frozen;
     const Status captured = recovery::capture(p, p.timeline().root(), ExportSettings{}, {}, frozen, package);
     AUREA_CHECK(captured.ok());
@@ -187,7 +197,7 @@ AUREA_TEST(ExportRecovery, FbxAndObjModelsFreezeByTheirOwnFile) {
 }
 
 AUREA_TEST(ExportRecovery, UnsupportedEphemeralSourcesFailWithoutChangingEditor) {
-    auto p = project(); Asset a; a.kind = AssetKind::Video; a.sourcePath = "fd:123"; const auto id = p.add_asset(a);
+    auto p = project(); Asset a; a.kind = AssetKind::Video; a.sourcePath = "fd:123"; const auto id = use(p, p.add_asset(a));
     recovery::Package package; std::unique_ptr<Project> frozen;
     AUREA_CHECK_EQ(recovery::capture(p, p.timeline().root(), ExportSettings{}, {}, frozen, package).code(), Errc::NotSupported);
     AUREA_CHECK(!frozen); AUREA_CHECK_EQ(p.asset(id)->sourcePath, std::string("fd:123"));
@@ -195,7 +205,7 @@ AUREA_TEST(ExportRecovery, UnsupportedEphemeralSourcesFailWithoutChangingEditor)
 
 AUREA_TEST(ExportRecovery, ColonInLocalFilenameIsNotAnEphemeralUriScheme) {
     Files files; auto p = project(); Asset a; a.kind = AssetKind::Video;
-    a.sourcePath = std::filesystem::absolute(files.add("clip:source.mp4")).string(); const auto id = p.add_asset(a);
+    a.sourcePath = std::filesystem::absolute(files.add("clip:source.mp4")).string(); const auto id = use(p, p.add_asset(a));
     recovery::Package package; std::unique_ptr<Project> frozen;
     AUREA_CHECK(recovery::capture(p, p.timeline().root(), ExportSettings{}, {}, frozen, package).ok());
     AUREA_CHECK(frozen != nullptr); AUREA_CHECK_EQ(package.dependencies.size(), usize{1});
@@ -223,6 +233,92 @@ AUREA_TEST(ExportRecovery, EffectiveSystemAndFallbackFontsBecomeVerifiedDependen
     }
     AUREA_CHECK(recovery::fingerprint_sources(package).ok());
     AUREA_CHECK(recovery::validate_sources(package).ok());
+}
+
+// 0.2.4 (C1): uma URI morta num asset que a composicao nao usa (clipe
+// apagado, midia substituida) derrubava todo export com erro 18.
+AUREA_TEST(ExportRecovery, DeadUnusedAssetIsNeverResolvedAndDoesNotBlockExport) {
+    Files files; const auto live = files.add("live.bin");
+    AUREA_CHECK(put(live, "live media"));
+    auto p = project();
+    Asset used; used.kind = AssetKind::Video; used.sourcePath = live; (void)use(p, p.add_asset(used));
+    Asset dead; dead.kind = AssetKind::Video; dead.sourcePath = "content://media/expired/1";
+    const auto deadId = p.add_asset(dead);
+    std::vector<std::string> asked;
+    const recovery::PathResolver resolver = [&](const std::string& path) {
+        asked.push_back(path);
+        return path.rfind("content://", 0) == 0 ? std::string{} : path;  // URI morta: falha
+    };
+    recovery::Package package; std::unique_ptr<Project> frozen;
+    AUREA_CHECK(recovery::capture(p, p.timeline().root(), ExportSettings{}, resolver, frozen, package, false).ok());
+    AUREA_CHECK_EQ(asked.size(), usize{1});
+    AUREA_CHECK(std::none_of(asked.begin(), asked.end(), [](const std::string& a) { return a.rfind("content://", 0) == 0; }));
+    AUREA_CHECK_EQ(package.dependencies.size(), usize{1});
+    if (frozen) AUREA_CHECK_EQ(frozen->asset(deadId)->sourcePath, std::string("content://media/expired/1"));
+    // Usado de verdade, o mesmo asset morto continua falhando (nada mascarado).
+    (void)use(p, deadId);
+    recovery::Package failing; std::unique_ptr<Project> none;
+    AUREA_CHECK(!recovery::capture(p, p.timeline().root(), ExportSettings{}, resolver, none, failing, false).ok());
+}
+
+AUREA_TEST(ExportRecovery, ReplacedMediaDoesNotAskForTheOldSource) {
+    Files files; const auto fresh = files.add("fresh.bin");
+    AUREA_CHECK(put(fresh, "new media"));
+    auto p = project(); auto* comp = p.timeline().composition(p.timeline().root());
+    Asset old; old.kind = AssetKind::Video; old.sourcePath = "content://media/old/7";
+    const auto oldId = p.add_asset(old);
+    const auto layer = comp->add_layer(LayerKind::Video, "clip");
+    comp->layer(layer)->source = oldId;
+    Asset next; next.kind = AssetKind::Video; next.sourcePath = fresh;
+    comp->layer(layer)->source = p.add_asset(next);  // como "Substituir midia" antiga
+    u32 oldAsked = 0;
+    const recovery::PathResolver resolver = [&](const std::string& path) {
+        if (path.rfind("content://", 0) == 0) { ++oldAsked; return std::string{}; }
+        return path;
+    };
+    recovery::Package package; std::unique_ptr<Project> frozen;
+    AUREA_CHECK(recovery::capture(p, p.timeline().root(), ExportSettings{}, resolver, frozen, package, false).ok());
+    AUREA_CHECK_EQ(oldAsked, 0u);
+}
+
+AUREA_TEST(ExportRecovery, NestedCompositionAssetsAreReachableOthersAreNot) {
+    Files files; const auto inner = files.add("inner.bin"), other = files.add("other.bin");
+    AUREA_CHECK(put(inner, "inner")); AUREA_CHECK(put(other, "other"));
+    auto p = project();
+    const auto child = p.timeline().create_composition("child", 48, 32, 30);
+    const auto unrelated = p.timeline().create_composition("unrelated", 48, 32, 30);
+    Asset a; a.kind = AssetKind::Video; a.sourcePath = inner; (void)use(p, p.add_asset(a), child);
+    Asset b; b.kind = AssetKind::Video; b.sourcePath = other; (void)use(p, p.add_asset(b), unrelated);
+    auto* root = p.timeline().composition(p.timeline().root());
+    const auto group = root->add_layer(LayerKind::Composition, "group");
+    root->layer(group)->nested.composition = child;
+    const auto reach = p.assets_reachable_from(p.timeline().root());
+    AUREA_CHECK_EQ(reach.size(), usize{1});
+    recovery::Package package; std::unique_ptr<Project> frozen;
+    AUREA_CHECK(recovery::capture(p, p.timeline().root(), ExportSettings{}, {}, frozen, package).ok());
+    AUREA_CHECK_EQ(package.dependencies.size(), usize{1});
+    const auto u = std::filesystem::absolute(std::filesystem::u8path(inner)).lexically_normal().u8string();
+    if (package.dependencies.size() == 1)
+        AUREA_CHECK_EQ(package.dependencies[0].path, std::string(reinterpret_cast<const char*>(u.data()), u.size()));
+    // Sem a camada de grupo, a filha nao e alcancavel.
+    root->remove_layer(group);
+    AUREA_CHECK(p.assets_reachable_from(p.timeline().root()).empty());
+}
+
+AUREA_TEST(ExportRecovery, RetainedImagePixelsSkipTheResolverWithoutRecovery) {
+    auto p = project();
+    Asset img; img.kind = AssetKind::Image; img.sourcePath = "content://media/photo/3";
+    const auto id = use(p, p.add_asset(img));
+    u32 asked = 0;
+    const recovery::PathResolver resolver = [&](const std::string&) { ++asked; return std::string{}; };
+    const std::vector<u64> retained{id.pack()};
+    recovery::Package package; std::unique_ptr<Project> frozen;
+    AUREA_CHECK(recovery::capture(p, p.timeline().root(), ExportSettings{}, resolver, frozen, package, false, &retained).ok());
+    AUREA_CHECK_EQ(asked, 0u);
+    // Sem pixels retidos, a imagem passa pelo resolvedor (e a URI morta falha).
+    recovery::Package second; std::unique_ptr<Project> none;
+    AUREA_CHECK(!recovery::capture(p, p.timeline().root(), ExportSettings{}, resolver, none, second, false).ok());
+    AUREA_CHECK_EQ(asked, 1u);
 }
 
 AUREA_TEST(ExportPreparation, OnlyOwnedOrphanOutputsAreRemovedAndRecoveryRemains) {

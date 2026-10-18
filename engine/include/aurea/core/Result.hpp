@@ -73,6 +73,7 @@ enum class Errc : i32 {
 };
 
 // Contrato com a UI (EditorStore.kt): os números abaixo são lidos lá.
+static_assert(static_cast<i32>(Errc::NotImplemented) == 7);   // prévia animada (AureaEngine.kt)
 static_assert(static_cast<i32>(Errc::CorruptData) == 11);
 static_assert(static_cast<i32>(Errc::UnsupportedVersion) == 12);
 static_assert(static_cast<i32>(Errc::UnsupportedFormat) == 17);

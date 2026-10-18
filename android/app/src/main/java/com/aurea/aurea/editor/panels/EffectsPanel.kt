@@ -338,6 +338,11 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     else if (puppetOpen && (puppet.editing || selected == null))
         puppetPanelTimelineFocus(puppet.effect, puppet.selected, activePins)
     else selected?.let { listOf(TrackKey(31, it.effectId, it.param * 4 + it.component)) } ?: emptyList()
+    // Fantoche: os pinos são parâmetros ocultos (sem linha no cartão), então o
+    // losango e a curva do trilho miram o pino em foco (eixo X da posição dele).
+    val puppetKey = if (!meshSelected && puppetOpen && (puppet.editing || selected == null))
+        focus.firstOrNull()?.let { ParamKey(it.effectIndex, it.paramIndex / 4, it.paramIndex % 4) } else null
+    val railKey = puppetKey ?: selected
     androidx.compose.runtime.DisposableEffect(store, layerId, focus) {
         store.timelineFocus = focus
         onDispose { store.timelineFocus = null }
@@ -443,22 +448,22 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
     }
 
     // O trilho só precisa do ESTADO do losango — derivado, não do valor que anda.
-    val railLook by remember(store, meshSelected, openId) {
+    val railLook by remember(store, meshSelected, openId, puppetKey) {
         derivedStateOf {
             if (meshSelected) {
                 val keys = store.primaryKeys().filter { it.property == TrackProperty.MESH_WARP && it.effectIndex == openId }
                 val local = store.detail?.localFrame(store.playhead)
                 if (keys.any { it.time == local }) KeyframeLook.KeyHere else if (keys.isEmpty()) KeyframeLook.None else KeyframeLook.Animated
-            } else selected?.let { effectLook(store, it.effectId, it.param) } ?: KeyframeLook.None
+            } else (puppetKey ?: selected)?.let { effectLook(store, it.effectId, it.param) } ?: KeyframeLook.None
         }
     }
-    val railAnimatable by remember(store, meshSelected) {
+    val railAnimatable by remember(store, meshSelected, puppetKey) {
         derivedStateOf {
-            meshSelected || (selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { ParamSlot.of(it).animatable } } ?: false)
+            meshSelected || ((puppetKey ?: selected)?.let { k -> store.paramOf(k.effectId, k.param)?.let { ParamSlot.of(it).animatable } } ?: false)
         }
     }
-    val curveTrackReady by remember(store) {
-        derivedStateOf { selected?.let { k -> store.primaryKeys().effectTrack(k.effectId, k.param, k.component).size >= 2 } ?: false }
+    val curveTrackReady by remember(store, puppetKey) {
+        derivedStateOf { (puppetKey ?: selected)?.let { k -> store.primaryKeys().effectTrack(k.effectId, k.param, k.component).size >= 2 } ?: false }
     }
 
     val byId = effects.associateBy { it.effectId }
@@ -492,15 +497,15 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                     {
                         // Lido NO TOQUE: o parâmetro e o cabeçote de agora.
                         if (meshSelected) store.primary?.let { layer -> openId?.let { store.meshWarpToggleKey(layer, it) } }
-                        else selected?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.toggleEffectKeyframe(k.effectId, it) } }
+                        else railKey?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.toggleEffectKeyframe(k.effectId, it) } }
                     }
                 } else {
                     null
                 },
                 curveAnimated = railLook != KeyframeLook.None,
-                onCurve = if (curveTrackReady && selected?.let { store.curveStart(store.primaryKeys().effectTrack(it.effectId, it.param, it.component)) } != null) {
+                onCurve = if (curveTrackReady && railKey?.let { store.curveStart(store.primaryKeys().effectTrack(it.effectId, it.param, it.component)) } != null) {
                     {
-                        val k = selected
+                        val k = railKey
                         val layer = store.primary
                         val t = store.detail?.localFrame(store.playhead)
                         if (k != null && layer != null && t != null) {

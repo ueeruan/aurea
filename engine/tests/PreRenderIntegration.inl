@@ -294,6 +294,32 @@ AUREA_TEST(PreRenderIntegration, OtherEngineTranslationUnitMutationCancelsBefore
     if(restarted.ok())AUREA_CHECK(rig.wait().complete);
 }
 
+AUREA_TEST(PreRenderIntegration, ImmediateRestartWaitsForSlowCancelledWorkerAndIsNotCancelledByIt) {
+    using namespace prerender_integration;
+    // Slow phone: one readback outlasts the next gesture. The cancelled worker
+    // is still inside its frame when the new PreRender starts (no retry loop,
+    // exactly as Android/iOS call it once).
+    Rig rig(true, 32, 32, 12); rig.shape(.5f);
+    std::atomic<bool> slow{true};
+    const auto fill = rig.mock->beforeReadTexture;
+    rig.mock->beforeReadTexture = [&slow, fill](TextureHandle texture, void* data, u32 stride) {
+        if (slow.load()) std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        return fill(texture, data, stride);
+    };
+    AUREA_CHECK(rig.engine.start_prerender(1).ok());
+    for (u32 i = 0; i < 5000 && rig.engine.query_prerender_progress().framesDone < 1; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    AUREA_CHECK(rig.engine.query_prerender_progress().running);
+    rig.engine.cancel_prerender();
+    const Status restarted = rig.engine.start_prerender(-1);
+    std::printf("    own slow cancelled worker immediate restart status=%d\n", restarted.raw());
+    AUREA_CHECK(restarted.ok());
+    slow = false;
+    const auto done = rig.wait();
+    AUREA_CHECK(done.complete); AUREA_CHECK_EQ(done.error, 0); AUREA_CHECK_EQ(done.direction, -1);
+    AUREA_CHECK_EQ(done.framesDone, done.framesTotal);
+}
+
 AUREA_TEST(PreRenderIntegration, Whole307Frame540pCompositionKeepsAlphaAndOriginalModelBothDirections) {
     AUREA_REQUIRE_GPU(); using namespace prerender_integration;
     for(const i32 direction:{1,-1}) {

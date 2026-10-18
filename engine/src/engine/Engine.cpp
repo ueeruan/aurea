@@ -14729,7 +14729,7 @@ ImageExportPlan Engine::query_image_export_plan(const ImageExportSettings& setti
                              comp->export_duration(settings.trimToContent).value, comp->transparent_background());
 }
 
-void Engine::invalidate_prerender() noexcept {
+void Engine::invalidate_prerender(i32 error) noexcept {
     if (!preRenderActive_.exchange(false, std::memory_order_acq_rel)) return;
     preRenderCancel_.store(true, std::memory_order_release);
     preRenderToken_.store(0, std::memory_order_release);
@@ -14737,12 +14737,36 @@ void Engine::invalidate_prerender() noexcept {
     {
         std::lock_guard lock(preRenderStateMutex_);
         preRenderProgress_.running = preRenderProgress_.complete = false;
-        preRenderProgress_.error = static_cast<i32>(Errc::Cancelled);
+        preRenderProgress_.error = error;
     }
     // Short context lock only; never join the producer or remove files here.
     std::lock_guard context(exportContextMutex_);
     if (preRenderStartupCancel_) preRenderStartupCancel_->store(true, std::memory_order_release);
     if (exportCtx_ && exportCtx_->preRenderMode) exportCtx_->cancelRequested.store(true, std::memory_order_release);
+}
+
+// Editar, cancelar ou arrastar de novo cancela o PreRender, mas o worker só
+// sai depois do quadro atual (render, leitura, gravação). Num celular lento
+// isso leva mais que o próximo gesto: o novo PreRender caía em "export em
+// andamento" (toast de falha). Espera limitada e cancelável — só por um
+// worker de PreRender JÁ cancelado; um export de verdade continua recusado.
+Status Engine::await_cancelled_prerender_worker(u64 deadlineNs) noexcept {
+    if (!exportCtx_ || !exportCtx_->thread.joinable()) return OkStatus;
+    for (;;) {
+        bool running = false;
+        {
+            std::lock_guard<std::mutex> pl(exportCtx_->mutex);
+            running = exportCtx_->progress.running;
+        }
+        if (!running) break;
+        if (!exportCtx_->preRenderMode || !exportCtx_->cancelRequested.load(std::memory_order_acquire))
+            return Status{Errc::InvalidState, "ja existe um export em andamento"};
+        if (preRenderCancel_.load(std::memory_order_acquire)) return Errc::Cancelled;
+        if (monotonic_ns() >= deadlineNs) return Status{Errc::Timeout, "PreRender anterior ainda encerrando"};
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    exportCtx_->thread.join();
+    return OkStatus;
 }
 
 u32 Engine::bump_model_revision_locked() noexcept {
@@ -14789,11 +14813,7 @@ Status Engine::start_prerender(i32 direction) noexcept {
     ImageExportSettings settings;
     settings.format = ImageExportFormat::PngSequence; settings.shortSide = 540; settings.trimToContent = false;
     const Status result = start_image_export_internal(settings, config_.cacheDirectory.c_str(), direction);
-    if (!result.ok()) {
-        invalidate_prerender();
-        std::lock_guard lock(preRenderStateMutex_);
-        preRenderProgress_.error = result.raw();
-    }
+    if (!result.ok()) invalidate_prerender(result.raw());
     return result;
 }
 
@@ -14829,7 +14849,11 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
     if (!outputPath || !*outputPath) return Errc::InvalidArgument;
     if (static_cast<u32>(settings.format) > static_cast<u32>(ImageExportFormat::Gif)) return Errc::InvalidArgument;
     if (!gpu_ || !renderer_.ready()) return Status{Errc::NotSupported, "export precisa de GPU"};
-    if (exportCtx_ && exportCtx_->thread.joinable()) {
+    const bool preRenderStart = preRenderDirection != 0;
+    const u64 preRenderWaitDeadline = monotonic_ns() + kPreRenderStartupWaitNs;
+    if (preRenderStart) {
+        if (const Status drained = await_cancelled_prerender_worker(preRenderWaitDeadline); !drained.ok()) return drained;
+    } else if (exportCtx_ && exportCtx_->thread.joinable()) {
         bool running = false;
         {
             std::lock_guard<std::mutex> pl(exportCtx_->mutex);
@@ -14850,7 +14874,15 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
     exportActive_.store(true, std::memory_order_release);
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
-        if (const Status ready = poll_export_gpu_locked(1'000'000'000ull); !ready.ok()) return ready;
+        Status ready = poll_export_gpu_locked(1'000'000'000ull);
+        // PreRender recém-cancelado numa GPU lenta: o último quadro ainda está
+        // na fila. 1 s não basta num quadro 3D pesado em Mali/PowerVR de
+        // entrada; espera em fatias de 100 ms (wait_frame bloqueia, sem girar),
+        // enquanto ninguém cancelar.
+        while (preRenderStart && ready.code() == Errc::Timeout && pendingExportGpuFrame_
+               && monotonic_ns() < preRenderWaitDeadline && !preRenderCancel_.load(std::memory_order_acquire))
+            ready = poll_export_gpu_locked(100'000'000ull);
+        if (!ready.ok()) return ready;
         if (const Status admitted = retire_abandoned_export_locked(); !admitted.ok()) return admitted;
         if (const Status healthy = ensure_gpu_healthy_locked(); !healthy.ok()) return healthy;
         std::lock_guard<std::mutex> context(exportContextMutex_);
@@ -15000,13 +15032,19 @@ Status Engine::start_image_export_internal(const ImageExportSettings& settings, 
             limits.memoryBytes = std::min<u64>(cap, frameBytes * wanted + (2ull << 20));
             limits.memoryBytes = std::max<u64>(limits.memoryBytes, 16ull << 20);
         }
-        const u64 deadline = monotonic_ns() + 1'000'000'000ull;
+        // Busy = o cache anterior (invalidado por uma edição) ainda está sendo
+        // apagado, ou um leitor da reprodução ainda termina. Apagar centenas de
+        // quadros de vários MB leva segundos num armazenamento eMMC lento; o
+        // prazo antigo de 1 s devolvia Busy e a UI mostrava falha (os testes
+        // repetiam o pedido; Android e iOS não). Mesmo prazo limitado da
+        // largada, cancelável.
         for (;;) {
             auto token = preRenderCache_->begin(config_.cacheDirectory, key, ctx->frames,
                 ctx->preRenderDirection, limits);
             if (token.ok()) { ctx->preRenderToken = *token; break; }
-            if (token.status().code() != Errc::Busy || monotonic_ns() >= deadline) return token.status();
-            if (preRenderCancel_.load(std::memory_order_acquire)) return Errc::Cancelled;
+            if (token.status().code() != Errc::Busy || monotonic_ns() >= preRenderWaitDeadline) return token.status();
+            if (preRenderCancel_.load(std::memory_order_acquire) || ctx->cancelRequested.load(std::memory_order_acquire))
+                return Errc::Cancelled;
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         preRenderToken_.store(ctx->preRenderToken, std::memory_order_release);
@@ -15177,7 +15215,7 @@ void Engine::image_export_thread_main() noexcept {
         const u32 done = i + 1;
         if (ctx.preRenderMode && !cancelled()) {
             std::lock_guard state(preRenderStateMutex_);
-            preRenderProgress_.framesDone = done;
+            if (preRenderToken_.load(std::memory_order_acquire) == ctx.preRenderToken) preRenderProgress_.framesDone = done;
         }
         const f64 elapsed = static_cast<f64>(monotonic_ns() - ctx.startNs) / 1e9;
         const f64 k = 1e-6 / static_cast<f64>(done);
@@ -15211,12 +15249,21 @@ void Engine::image_export_thread_main() noexcept {
     }
     if (ctx.preRenderMode) {
         if (result.ok() && cancelled()) result = Errc::Cancelled;
-        if (result.ok()) result = preRenderCache_->finish(ctx.preRenderToken);
-        if (!result.ok()) invalidate_prerender();
-        std::lock_guard state(preRenderStateMutex_);
-        preRenderProgress_.running = false;
-        preRenderProgress_.complete = result.ok() && !cancelled();
-        preRenderProgress_.error = result.raw();
+        // Só a sessão ATUAL publica. Um worker cancelado que termina depois de
+        // um novo PreRender ter começado (gesto logo após editar/cancelar, num
+        // aparelho lento) cancelava o novo e escrevia "cancelado" no progresso
+        // dele: o PreRender seguinte não fazia nada e a UI não avisava (25).
+        const bool owner = preRenderToken_.load(std::memory_order_acquire) == ctx.preRenderToken;
+        if (owner && result.ok()) result = preRenderCache_->finish(ctx.preRenderToken);
+        if (owner && !result.ok()) invalidate_prerender(result.raw());
+        if (owner && result.ok()) {
+            std::lock_guard state(preRenderStateMutex_);
+            if (preRenderToken_.load(std::memory_order_acquire) == ctx.preRenderToken) {
+                preRenderProgress_.running = false;
+                preRenderProgress_.complete = !cancelled();
+                preRenderProgress_.error = 0;
+            }
+        }
     }
     {
         std::lock_guard<std::mutex> pl(ctx.mutex);

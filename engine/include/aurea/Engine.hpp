@@ -2229,7 +2229,16 @@ private:
     void image_export_thread_main() noexcept;
     [[nodiscard]] Status start_image_export_internal(const ImageExportSettings& settings, const char* outputPath,
                                                      i32 preRenderDirection) noexcept;
-    void invalidate_prerender() noexcept;
+    /// `error` is published as the progress error (Cancelled for edits/cancel;
+    /// the real cause when the producer itself failed).
+    void invalidate_prerender(i32 error = static_cast<i32>(Errc::Cancelled)) noexcept;
+    /// exportLifecycleMutex_: a PreRender cancelled by an edit/Cancel keeps its
+    /// worker until the current frame returns. A new PreRender waits for it
+    /// (bounded, cancellable) instead of failing with "export em andamento".
+    [[nodiscard]] Status await_cancelled_prerender_worker(u64 deadlineNs) noexcept;
+    /// Startup waits that depend on the phone (slow GPU finishing a cancelled
+    /// frame, slow flash removing the previous cache). Cancel ends them at once.
+    static constexpr u64 kPreRenderStartupWaitNs = 30'000'000'000ull;
     u32 bump_model_revision_locked() noexcept;
     [[nodiscard]] bool prerender_valid_locked() noexcept; // modelMutex_
     void clear_prerender_gpu_locked() noexcept; // renderMutex_, backend owns deferred destruction

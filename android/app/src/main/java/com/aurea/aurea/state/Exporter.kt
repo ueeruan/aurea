@@ -683,10 +683,15 @@ class Exporter internal constructor(
             else -> R.string.app_export_unsupported_res
         })
         OUT_OF_MEMORY -> text(R.string.app_export_no_vram)
-        19, 20, 31 -> EngineText.sentence(app, null, code)
         INVALID_STATE -> text(R.string.app_export_busy)
         STORAGE_FULL -> text(R.string.msg_sem_espaco_no_aparelho_libere_espaco)
-        else -> text(R.string.app_export_start_failed, code)
+        // Qualquer Errc com texto próprio (mídia ausente=18, decode=14, mídia
+        // danificada=29, projeto danificado=30, GPU=19/20, sem encoder=31,
+        // codec travado=33...) diz o que fazer. O mesmo mapa do iOS
+        // (AureaEngineText.errcKey): só sobra "erro N" para código sem frase.
+        else ->
+            if (humanErrorResource(code) != R.string.msg_erro_inesperado_codigo) EngineText.sentence(app, null, code)
+            else text(R.string.app_export_start_failed, code)
     }
 
     /** Texto do catálogo no idioma do app (o `Application` sozinho resolveria no do sistema). */

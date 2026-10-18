@@ -3829,20 +3829,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     busyMessage = "${appText(R.string.ios_importing_media)} ${index + 1}/${requested.size}"
                     try {
                         val id = withContext(Dispatchers.IO) {
-                            takePermission(uri)
+                            val source = durableSource(uri)
                             val display = displayName(uri) ?: uri.lastPathSegment.orEmpty()
                             val mime = app.contentResolver.getType(uri) ?: android.webkit.MimeTypeMap.getSingleton()
                                 .getMimeTypeFromExtension(display.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT))
                             val video = mime?.startsWith("video/") == true
                             val name = display.ifEmpty { appText(if (video) R.string.target_video else R.string.target_image) }
-                            if (video) engine.importVideo(uri.toString(), name)
+                            if (video) engine.importVideo(source, name)
                             else {
                                 val orientation = AureaEngine.exifOrientation(app, uri)
                                 val bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: return@withContext -1L
                                 try {
                                     val buf = directBuffer(bmp.width * bmp.height * 4)
                                     bmp.copyPixelsToBuffer(buf); buf.rewind()
-                                    engine.importImage(buf, bmp.width, bmp.height, name, uri.toString(), orientation)
+                                    engine.importImage(buf, bmp.width, bmp.height, name, source, orientation)
                                 } finally { bmp.recycle() }
                             }
                         }
@@ -3873,10 +3873,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             try {
                 val id = withContext(Dispatchers.IO) {
                     ExitDiagnostics.mark(app, Phase.VIDEO_PERMISSION)
-                    takePermission(uri)
+                    val source = durableSource(uri)
                     val name = displayName(uri) ?: appText(R.string.target_video)
                     ExitDiagnostics.mark(app, Phase.VIDEO_NATIVE)
-                    engine.importVideo(uri.toString(), name).also { imported ->
+                    engine.importVideo(source, name).also { imported ->
                         ExitDiagnostics.mark(app, if (imported < 0) Phase.VIDEO_FAILED else Phase.VIDEO_READY)
                     }
                 }
@@ -3910,7 +3910,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val name = displayName(uri)?.substringBeforeLast('.') ?: appText(R.string.target_audio)
         busyMessage = appText(R.string.app_importing_audio)
         launchImport launch@{
-            val id = withContext(Dispatchers.IO) { engine.importAudio(uri.toString(), name) }
+            val id = withContext(Dispatchers.IO) { engine.importAudio(durableSource(uri), name) }
             busyMessage = null
             if (id < 0) {
                 errorMessage = if (-id == ERRC_UNSUPPORTED_FORMAT) {
@@ -7198,13 +7198,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         busyMessage = appText(R.string.app_importing_image)
         launchImport launch@{
             val id = withContext(Dispatchers.IO) {
+                val source = durableSource(uri)
                 val orientation = AureaEngine.exifOrientation(getApplication(), uri)
                 val bmp = AureaEngine.decodeBitmapRgba(getApplication(), uri) ?: return@withContext -1L
                 try {
                     val buf = directBuffer(bmp.width * bmp.height * 4)
                     bmp.copyPixelsToBuffer(buf)
                     buf.rewind()
-                    engine.importImage(buf, bmp.width, bmp.height, name, uri.toString(), orientation)
+                    engine.importImage(buf, bmp.width, bmp.height, name, source, orientation)
                 } finally { bmp.recycle() }
             }
             busyMessage = null
@@ -7231,8 +7232,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         busyMessage = appText(R.string.layer_replacing_media)
         launchImport launch@{
             val id = withContext(Dispatchers.IO) {
+                val source = durableSource(uri)
                 if (mime.startsWith("video/")) {
-                    engine.replaceLayerVideo(layer, uri.toString(), name)
+                    engine.replaceLayerVideo(layer, source, name)
                 } else {
                     val orientation = AureaEngine.exifOrientation(app, uri)
                     val bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: return@withContext -ERRC_UNSUPPORTED_FORMAT
@@ -7240,7 +7242,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         val buf = directBuffer(bmp.width * bmp.height * 4)
                         bmp.copyPixelsToBuffer(buf)
                         buf.rewind()
-                        engine.replaceLayerImage(layer, buf, bmp.width, bmp.height, name, uri.toString(), orientation)
+                        engine.replaceLayerImage(layer, buf, bmp.width, bmp.height, name, source, orientation)
                     } finally { bmp.recycle() }
                 }
             }
@@ -7259,12 +7261,67 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Arquivo de origem da camada (para "Informações da mídia"); null = sem arquivo. */
     fun layerSourcePath(layer: Long): String? = if (ready) engine.layerSourcePath(layer) else null
 
-    private fun takePermission(uri: Uri) {
+    /** true = a leitura da URI continua valendo depois de fechar o app. */
+    private fun takePermission(uri: Uri): Boolean {
+        val resolver = getApplication<Application>().contentResolver
         try {
-            getApplication<Application>().contentResolver
-                .takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: Exception) {
-            // Nem todo provedor concede permissão persistente; a da sessão basta.
+            // Nem todo provedor concede permissão persistente (durableSource copia).
+        }
+        return try {
+            resolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
+        } catch (_: Exception) { false }
+    }
+
+    /**
+     * O endereço que o projeto guarda para a mídia. Com permissão persistente, a
+     * própria URI. Sem ela (seletor de fotos do Android ≤ 12 pelo Play Services,
+     * Google Fotos, várias galerias) a URI só vale enquanto o app está aberto: ao
+     * reabrir, a foto/vídeo ficava ilegível e o export e o PreRender paravam com
+     * "mídia ausente" (erro 18) em quase todo aparelho. Aí a mídia é copiada para
+     * dentro do app (projetos/import-sources) e o projeto guarda o arquivo — como
+     * o iOS já faz na importação. Bloqueia: chame fora da main.
+     */
+    private fun durableSource(uri: Uri): String {
+        if (uri.scheme != android.content.ContentResolver.SCHEME_CONTENT || takePermission(uri)) return uri.toString()
+        return copyIntoApp(uri)?.absolutePath ?: uri.toString()
+    }
+
+    private fun copyIntoApp(uri: Uri): File? {
+        val app = getApplication<Application>()
+        val dir = File(app.filesDir, "projetos/import-sources").apply { mkdirs() }
+        val ext = displayName(uri)?.substringAfterLast('.', "")?.lowercase(java.util.Locale.ROOT)
+            ?.takeIf { it.length in 1..5 && it.all(Char::isLetterOrDigit) }
+        val tmp = File(dir, "copy-${System.nanoTime()}.tmp")
+        return try {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            var bytes = 0L
+            val input = app.contentResolver.openInputStream(uri) ?: return null
+            input.use { source ->
+                FileOutputStream(tmp).use { out ->
+                    val buffer = ByteArray(1 shl 16)
+                    while (true) {
+                        val n = source.read(buffer)
+                        if (n < 0) break
+                        out.write(buffer, 0, n); digest.update(buffer, 0, n); bytes += n
+                    }
+                    out.fd.sync()
+                }
+            }
+            if (bytes == 0L) { tmp.delete(); return null }
+            // Mesmo conteúdo importado de novo reaproveita a cópia.
+            val hex = digest.digest().take(8).joinToString("") { "%02x".format(it) }
+            val target = File(dir, "$hex-$bytes" + (ext?.let { ".$it" } ?: ""))
+            when {
+                target.length() == bytes -> { tmp.delete(); target }
+                tmp.renameTo(target) -> target
+                else -> { tmp.delete(); null }
+            }
+        } catch (failure: Exception) {
+            Log.w(TAG, "copia da midia sem permissao persistente falhou: ${failure.javaClass.simpleName}")
+            tmp.delete()
+            null
         }
     }
 

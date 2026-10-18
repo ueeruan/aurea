@@ -61,17 +61,39 @@ struct EffectsView: View {
     private var meshSelected: Bool {
         selected == nil && openId != nil && model.effects.contains { $0.effectId == openId && $0.typeId == fxEffectTypeId("aurea.distort.mesh_warp") }
     }
-    private var canAnimate: Bool { meshSelected || (selectedParam.map { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 } ?? false) }
+    /// Fantoche: os pinos são parâmetros ocultos (sem linha no cartão), então o
+    /// losango e a curva do trilho miram o pino em foco (eixo X da posição dele).
+    /// Mesmo contrato do Android (EffectsPanel.kt, puppetKey).
+    private var puppetSelection: EffectParamSelection? {
+        guard !meshSelected, let layer = model.primarySelection, let effect = openId, puppet.layer == layer,
+              puppet.effect >= 0, UInt32(puppet.effect) == effect,
+              model.effects.contains(where: { $0.effectId == effect && $0.typeId == PuppetStageState.type }),
+              puppet.editing || selected == nil else { return nil }
+        let pins = model.puppetPins(layer, effect: puppet.effect)
+        let active = stride(from: 0, to: pins.count, by: 4).compactMap { index -> Int? in
+            guard index + 3 < pins.count, pins[index].isFinite, pins[index] >= 0, pins[index] <= 15 else { return nil }
+            let pin = Int(pins[index]); return Float(pin) == pins[index] ? pin : nil
+        }
+        guard let pin = active.contains(puppet.selected) ? puppet.selected : active.first else { return nil }
+        return EffectParamSelection(effect: effect, param: UInt32(5 + pin * 3), component: 0)
+    }
+    /// O alvo do trilho (◇+ e curva): o pino em foco do Fantoche ou o parâmetro escolhido.
+    private var railSelection: EffectParamSelection? { puppetSelection ?? selected }
+    private var railParam: EffectParamItem? {
+        guard let s = railSelection, s.effect == openId else { return nil }
+        return model.effectParams.first { $0.index == s.param }
+    }
+    private var canAnimate: Bool { meshSelected || (railParam.map { $0.flags & 1 != 0 && fxComponentCount(Int($0.type)) > 0 } ?? false) }
     private var railLook: KeyframeLook {
         if meshSelected, let effect = openId, let layer = model.primarySelection {
             let keys = (model.keyframes[layer] ?? []).filter { $0.property == 44 && $0.effectIndex == effect }
             return keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
         }
-        guard let selected else { return .none }
+        guard let selected = railSelection else { return .none }
         return look(effect: selected.effect, param: selected.param)
     }
     private var selectedTrack: [KeyframeItem] {
-        guard let selected, let layer = model.primarySelection else { return [] }
+        guard let selected = railSelection, let layer = model.primarySelection else { return [] }
         return (model.keyframes[layer] ?? []).filter { $0.property == 31 && $0.effectIndex == selected.effect && $0.paramIndex == selected.param * 4 + UInt32(selected.component) }.sorted { $0.time < $1.time }
     }
     var body: some View {
@@ -805,7 +827,7 @@ struct EffectsView: View {
             }
             return
         }
-        guard let selection = selected, let param = currentParam(selection.param), let layer = model.primarySelection,
+        guard let selection = railSelection, let param = currentParam(selection.param), let layer = model.primarySelection,
               model.selectedLayer?.locked != true, param.flags & 1 != 0 else { return }
         let here = (model.keyframes[layer] ?? []).filter { $0.property == 31 && $0.effectIndex == selection.effect && $0.paramIndex / 4 == param.index && $0.time == model.localPlayhead }
         model.beginGesture("keyframe de efeito")
@@ -841,7 +863,7 @@ struct EffectsView: View {
     }
 
     private func openCurve() {
-        guard let selected else { return }
+        guard let selected = railSelection else { return }
         let track = selectedTrack
         guard track.count >= 2 else { return }
         let index = min(track.count - 2, track.lastIndex(where: { $0.time <= model.localPlayhead }) ?? 0)

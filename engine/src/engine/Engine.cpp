@@ -34,6 +34,8 @@
 #include "aurea/export/UpscaleColor.hpp"
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportRules.hpp"
+#include "aurea/export/ExportAttempts.hpp"
+#include "aurea/platform/AddressSpace.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/ExportRecovery.hpp"
 #include "aurea/export/ExportPacketLog.hpp"
@@ -13330,9 +13332,17 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
     return result;
 }
 
-Status Engine::start_export_checked(const ExportSettings& settings, const char* outputPath,
+Status Engine::start_export_checked(const ExportSettings& requested, const char* outputPath,
                                   const ExportRestartGuard* restartGuard) noexcept {
     std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
+    // 0.2.6: `safeMode` traz o DEGRAU da escada de tentativas
+    // (export/ExportAttempts.hpp). O encoder (0..2), o codec e o upscale saem
+    // daqui; o teto do lado menor e da taxa entram onde o tamanho é resolvido.
+    const ExportAttemptPlan attemptPlan = export_attempt_plan(std::min(requested.safeMode, kExportAttemptMax));
+    ExportSettings settings = requested;
+    settings.safeMode = attemptPlan.safeMode;
+    if (attemptPlan.forceH264) settings.videoCodec = ExportCodec::H264;
+    if (attemptPlan.noUpscale) settings.aiUpscale = 0;
     // Only this caller's admitted session may receive its startup result.
     // Keep finalization under the same lifecycle lock, including recovery.
     std::shared_ptr<ExportDiagnostics> ownedDiagnostics;
@@ -13495,7 +13505,14 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
             return Status{Errc::NotSupported, "taxa de quadros acima do que o encoder aceita (maximo 240 fps)"};
         ctx->fps = settings.fps > 0.0 ? (settings.fps >= kMinCompositionFps ? normalize_fps(settings.fps) : settings.fps)
                                       : comp->fps();
-        const ExportFrameSize size = export_frame_size_v2(comp->width(), comp->height(), settings.height);
+        // Degrau compatível: até 30 qps e lado menor até o teto (nunca amplia).
+        if (attemptPlan.fpsCap > 0.0 && ctx->fps > attemptPlan.fpsCap + 1e-6) ctx->fps = normalize_fps(attemptPlan.fpsCap);
+        u32 wantShort = settings.height;
+        if (attemptPlan.shortSideCap > 0) {
+            const u32 compShort = std::min(comp->width(), comp->height());
+            wantShort = std::min(wantShort ? wantShort : compShort, attemptPlan.shortSideCap);
+        }
+        const ExportFrameSize size = export_frame_size_v2(comp->width(), comp->height(), wantShort);
         if (!size.width || !size.height)
             return Status{Errc::NotSupported, "o codec 4:2:0 requer dimensoes pares; escolha explicitamente outra resolucao"};
         ctx->width = size.width;
@@ -13524,12 +13541,34 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
     // Teto do aparelho (a mesma regra lado maior × lado menor da composição).
     const u32 capLong = std::max(caps_.max_export_width(), caps_.max_export_height());
     const u32 capShort = std::min(caps_.max_export_width(), caps_.max_export_height());
-    if (capLong > 0 && (std::max(ctx->width, ctx->height) > capLong || std::min(ctx->width, ctx->height) > capShort)) {
-        return Status{Errc::NotSupported, "resolucao acima do que este aparelho exporta"};
-    }
     const u32 maxTex = gpu_->capabilities().maxTexture2D;
-    if (maxTex > 0 && std::max(ctx->width, ctx->height) > maxTex) {
-        return Status{Errc::NotSupported, "resolucao acima do limite de textura da GPU"};
+    const auto fitsDevice = [&](u32 w, u32 h) {
+        return !(capLong > 0 && (std::max(w, h) > capLong || std::min(w, h) > capShort)) &&
+               !(maxTex > 0 && std::max(w, h) > maxTex);
+    };
+    if (!fitsDevice(ctx->width, ctx->height)) {
+        // 0.2.6: acima do teto do aparelho (32 bits fica em 1080p) ou da textura
+        // da GPU, o vídeo sai no MAIOR tamanho que cabe, com a mesma proporção,
+        // em vez de recusar ("resolução acima do que este aparelho exporta").
+        const u32 longSide = std::max(ctx->width, ctx->height), shortSide = std::min(ctx->width, ctx->height);
+        f64 scale = 1.0;
+        if (capLong > 0) scale = std::min(scale, static_cast<f64>(capLong) / longSide);
+        if (capShort > 0) scale = std::min(scale, static_cast<f64>(capShort) / shortSide);
+        if (maxTex > 0) scale = std::min(scale, static_cast<f64>(maxTex) / longSide);
+        const Composition* frozenComp = ctx->frozenProject
+            ? ctx->frozenProject->timeline().composition(ctx->recovery.composition) : nullptr;
+        u32 wantShort = static_cast<u32>(std::floor(shortSide * scale)) & ~1u;
+        ExportFrameSize reduced{};
+        while (frozenComp && wantShort >= 16) {
+            reduced = export_frame_size_v2(frozenComp->width(), frozenComp->height(), wantShort);
+            if (reduced.width && reduced.height && fitsDevice(reduced.width, reduced.height)) break;
+            reduced = ExportFrameSize{};
+            wantShort -= 16;
+        }
+        if (!reduced.width || !reduced.height) return Status{Errc::NotSupported, "resolucao acima do que este aparelho exporta"};
+        AUREA_LOG_INFO("export: %ux%u acima do aparelho; saindo em %ux%u", ctx->width, ctx->height, reduced.width, reduced.height);
+        ctx->width = reduced.width;
+        ctx->height = reduced.height;
     }
     ctx->outputWidth = ctx->width;
     ctx->outputHeight = ctx->height;
@@ -13757,8 +13796,8 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
         // output dimensions or shutter samples.
         const bool limitedBacking = config_.enableTrackedGpuAdmission && trackedBudget < (192ull << 20);
         const u32 want = limitedBacking || config_.exportExecutionProfile == ExportExecutionProfile::HighQuality ? 1u
-            : std::clamp<u32>(config_.exportPipelineDepth ? config_.exportPipelineDepth
-                                                         : (policyDepth ? policyDepth : 3u), 1u, 4u);
+            : address_space::export_readback_slots(std::clamp<u32>(config_.exportPipelineDepth ? config_.exportPipelineDepth
+                                                         : (policyDepth ? policyDepth : 3u), 1u, 4u));
         const u64 slotBytes = static_cast<u64>(ctx->width) * ctx->height * 3 / 2;
         ctx->queueByteLimit = config_.exportFrameQueueBudgetBytes ? config_.exportFrameQueueBudgetBytes
             : std::min<u64>(64ull << 20, std::max<u64>(8ull << 20, caps_.memory_budget_bytes() / 8));
@@ -13795,6 +13834,11 @@ Status Engine::start_export_checked(const ExportSettings& settings, const char* 
                 if (bu.ok()) gpu_->destroy_buffer(*bu);
                 const Errc code = slotFailure.code();
                 if (code != Errc::OutOfMemory && code != Errc::OutOfDeviceMemory && code != Errc::BudgetExceeded) {
+                    // 0.2.6: com um slot pronto, segue com menos. O mapa que
+                    // falha no GLES de 32 bits é falta de ENDEREÇO, não defeito
+                    // do export. Sem nenhum slot, volta a causa real (a escada
+                    // de tentativas decide o que fazer com ela).
+                    if (!ctx->slots.empty()) break;
                     ctx->sink->abort();
                     return slotFailure;
                 }
@@ -14043,7 +14087,7 @@ Status Engine::prepare_export_resources(ExportContext& ctx) noexcept {
 Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
     ctx.resourceGpuGeneration = gpuGeneration_;
     ctx.offline = std::make_unique<OfflineFrameRenderer>();
-    const u64 renderBudget = std::max<u64>(32ull << 20, caps_.memory_budget_bytes() / 2);
+    const u64 renderBudget = address_space::export_render_budget(std::max<u64>(32ull << 20, caps_.memory_budget_bytes() / 2));
     if (const Status initialized = ctx.offline->initialize(*gpu_, effectRegistry_, config_.mediaFactory,
             &memory_, renderBudget, static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull); !initialized.ok())
         return initialized;
@@ -14058,9 +14102,14 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
         if (const auto it = c.frozenHdris.find(id.pack()); it != c.frozenHdris.end()) return it->second;
         const Asset* asset = c.frozenProject->asset(id);
         if (!asset || asset->kind != AssetKind::Environment) return {};
-        const auto pixels = read_hdri_file(asset->sourcePath, c.frozenAssetBudget).pixels;
-        if (!pixels) c.frozenAssetStatus = Errc::MediaSourceMissing;
-        else c.frozenAssetBudget -= std::min<u64>(c.frozenAssetBudget, pixels->rgb.capacity() * sizeof(f32));
+        // 0.2.6: como na prévia (Engine::hdri_lookup), HDRI ausente, ilegível
+        // ou grande demais para o orçamento (32 bits: ~85 MB) vira o estúdio
+        // neutro — o vídeo sai como a tela mostrou, em vez de o export falhar
+        // com "mídia ausente" (erro 18).
+        static const std::shared_ptr<const scene3d::HdriPixels> neutral = std::make_shared<const scene3d::HdriPixels>();
+        std::shared_ptr<const scene3d::HdriPixels> pixels = read_hdri_file(asset->sourcePath, c.frozenAssetBudget).pixels;
+        if (pixels) c.frozenAssetBudget -= std::min<u64>(c.frozenAssetBudget, pixels->rgb.capacity() * sizeof(f32));
+        else pixels = neutral;
         c.frozenHdris[id.pack()] = pixels;
         return pixels;
     }, &ctx);

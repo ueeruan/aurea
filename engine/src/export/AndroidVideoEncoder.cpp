@@ -2,6 +2,7 @@
 
 #if defined(__ANDROID__)
 
+#include "AndroidCodecName.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/core/Time.hpp"
@@ -173,7 +174,11 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
         const jclass version = env->FindClass("android/os/Build$VERSION");
         if (!version) break;
         const jfieldID sdk = env->GetStaticFieldID(version, "SDK_INT", "I");
-        if (!sdk || env->GetStaticIntField(version, sdk) < 29) break;
+        if (!sdk) break;
+        // Android 8/9: sem isHardwareAccelerated/isSoftwareOnly (API 29); o nome
+        // do codec classifica (AndroidCodecName.hpp). Antes desistia aqui e o
+        // export ia direto para o software.
+        const bool modern = env->GetStaticIntField(version, sdk) >= 29;
         const jclass listClass = env->FindClass("android/media/MediaCodecList");
         const jclass infoClass = env->FindClass("android/media/MediaCodecInfo");
         const jclass capClass = env->FindClass("android/media/MediaCodecInfo$CodecCapabilities");
@@ -184,8 +189,8 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
         const auto ctor = env->GetMethodID(listClass, "<init>", "(I)V");
         const auto infos = env->GetMethodID(listClass, "getCodecInfos", "()[Landroid/media/MediaCodecInfo;");
         const auto isEncoder = env->GetMethodID(infoClass, "isEncoder", "()Z");
-        const auto isHardware = env->GetMethodID(infoClass, "isHardwareAccelerated", "()Z");
-        const auto isSoftware = env->GetMethodID(infoClass, "isSoftwareOnly", "()Z");
+        const auto isHardware = modern ? env->GetMethodID(infoClass, "isHardwareAccelerated", "()Z") : nullptr;
+        const auto isSoftware = modern ? env->GetMethodID(infoClass, "isSoftwareOnly", "()Z") : nullptr;
         const auto types = env->GetMethodID(infoClass, "getSupportedTypes", "()[Ljava/lang/String;");
         const auto name = env->GetMethodID(infoClass, "getName", "()Ljava/lang/String;");
         const auto capabilities = env->GetMethodID(infoClass, "getCapabilitiesForType",
@@ -201,7 +206,7 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
             "[Landroid/media/MediaCodecInfo$CodecProfileLevel;");
         const auto profileField = env->GetFieldID(levelClass, "profile", "I");
         const auto levelField = env->GetFieldID(levelClass, "level", "I");
-        if (!ctor || !infos || !isEncoder || !isHardware || !isSoftware || !types || !name || !capabilities ||
+        if (!ctor || !infos || !isEncoder || (modern && (!isHardware || !isSoftware)) || !types || !name || !capabilities ||
             !videoCaps || !encCaps || !supports || !bitrateMode || !formatsField || !levelsField ||
             !profileField || !levelField) break;
         const jobject list = env->NewObject(listClass, ctor, 1 /* ALL_CODECS */);
@@ -213,8 +218,17 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
         for (jsize i = 0; i < count && !found; ++i) {
             if (env->PushLocalFrame(32) < 0) { env->ExceptionClear(); break; }
             const jobject info = env->GetObjectArrayElement(array, i);
+            const auto softwareByName = [&]() {
+                const auto codec = static_cast<jstring>(env->CallObjectMethod(info, name));
+                if (!codec || env->ExceptionCheck()) { env->ExceptionClear(); return true; }
+                const char* text = env->GetStringUTFChars(codec, nullptr);
+                const bool software = android_codec::software_by_name(text);
+                if (text) env->ReleaseStringUTFChars(codec, text);
+                return software;
+            };
             const bool classified = info && env->CallBooleanMethod(info, isEncoder) && !env->ExceptionCheck() &&
-                (hardware ? env->CallBooleanMethod(info, isHardware) : env->CallBooleanMethod(info, isSoftware)) &&
+                (modern ? (hardware ? env->CallBooleanMethod(info, isHardware) : env->CallBooleanMethod(info, isSoftware))
+                        : (hardware ? !softwareByName() : softwareByName())) &&
                 !env->ExceptionCheck();
             const auto supported = classified ? static_cast<jobjectArray>(env->CallObjectMethod(info, types)) : nullptr;
             for (jsize t = 0; supported && !env->ExceptionCheck() && t < env->GetArrayLength(supported); ++t) {

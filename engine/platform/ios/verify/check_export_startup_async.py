@@ -51,7 +51,18 @@ assert "self.projectGeneration == project, self.pendingExportURL == url" in prep
 assert prepare.index("if succeeded {") < prepare.index("self.startExportPolling()")
 assert "exportStartup?.cancel()" in cancel
 assert poll.index("!self.exportPreparing") < poll.index("self.engine.exportProgress()")
-assert "self.prepareExport(url, options: options, safeMode: next)" in poll
+assert "self.prepareExport(url, options: options, safeMode: next & 0xFF)" in poll
+# 0.2.6: a escada de tentativas do motor (export/ExportAttempts.hpp) decide o
+# próximo degrau no início, no meio e quando a tela desiste por falta de progresso.
+assert "Self.nextExportAttempt(level, code: code" in prepare
+assert "Self.nextExportAttempt(self.exportSafeMode, code: Int32(result)" in poll
+assert "stalled: true" in poll
+ladder = "\n".join([
+    source[source.index("    nonisolated static let exportAttemptWait"):source.index("\n", source.index("    nonisolated static let exportBusyRetries"))],
+    block("nonisolated static func nextExportAttempt("),
+    block("nonisolated static func exportReducedShortSide("),
+    block("nonisolated static func exportRetryNotice("),
+])
 assert "result == 0 && !self.exportCancelled" in poll
 assert "startVideoExport" not in source
 assert "suggested > current && suggested <= safeModeMax ? suggested : 0" in retry_level
@@ -105,6 +116,21 @@ enum ProblemReport {
     static func recordExportDiagnostics(_ raw: String) {}
 }
 let AureaExportFailure = "failure"
+// A regra do motor (export/ExportAttempts.hpp) no que este harness exercita:
+// nada ajuda (cancelado/sem espaço/mídia ausente/acima de 3 h), ocupado
+// (refaz igual) e o resto sobe um degrau.
+enum AureaEngine {
+    static func exportNextAttempt(_ attempt: UInt32, code: Int32, failure: UInt32, stalled: Bool, tooLong: Bool,
+                                  shortSide: UInt32, fps: Double, hevc: Bool, upscale: Bool) -> UInt32 {
+        if tooLong { return 0 }
+        if failure == 0 && !stalled && [0, 18, 25, 28].contains(code) { return 0 }
+        if failure == 0 && !stalled && [5, 26, 32].contains(code) { return attempt | 0x100 }
+        return attempt < 5 ? attempt + 1 : 0
+    }
+    static func exportAttemptShortSide(_ attempt: UInt32, requested: UInt32) -> UInt32 {
+        attempt >= 5 ? min(requested, 480) : attempt >= 3 ? min(requested, 720) : requested
+    }
+}
 final class Native: @unchecked Sendable {
     struct Call { let kind: UInt32?, safeMode: UInt32, fps: Double, height: UInt32, main: Bool }
     private let lock = NSLock()
@@ -160,6 +186,7 @@ final class Native: @unchecked Sendable {
     var exportedURL: URL?, pendingExportURL: URL?
     var exportMessage: String?, toast: String?
     var exportSafeMode: UInt32 = 0
+    var exportReducedSide: UInt32 = 0
     var exportTimer: Timer?
     var exportStartup: ExportStartupRequest?
     var exportWatch = ExportStallWatch()
@@ -179,6 +206,7 @@ final class Native: @unchecked Sendable {
     IMAGE_FPS
     CANCEL
     PREPWATCH
+    LADDER
     WATCH
     FAILURE
     POLL
@@ -263,15 +291,15 @@ final class Native: @unchecked Sendable {
         await wait { !retry.exporting }
 
         let stale = Subject()
-        stale.engine.setProgress(["running": false, "finished": true, "result": 26,
+        stale.engine.setProgress(["running": false, "finished": true, "result": 28,
                                   "flags": 1 << 16, "failure": 1, "message": "old codec failure"])
-        stale.engine.codes = [26] // admission failed before clearing an old context
+        stale.engine.codes = [28] // admission failed before clearing an old context
         stale.startExport()
         await wait { stale.engine.calls.count == 1 }
         stale.engine.release.signal()
         await wait { !stale.exporting }
         precondition(stale.engine.calls.count == 1 && stale.exportProgress["flags"] == nil)
-        precondition((stale.exportProgress["result"] as? NSNumber)?.intValue == 26)
+        precondition((stale.exportProgress["result"] as? NSNumber)?.intValue == 28)
 
         let closed = Subject()
         closed.startExport()
@@ -303,6 +331,7 @@ final class Native: @unchecked Sendable {
             block("private func stopPreparingWatch()").replace("private func", "func", 1),
             block("private func abandonPreparingExport(").replace("private func", "func", 1),
         ]),
+        "LADDER": ladder,
         "WATCH": block("struct ExportStallWatch {"),
         "FAILURE": block("static func exportFailureReason("),
         "POLL": poll.replace("private func", "func", 1),

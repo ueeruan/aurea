@@ -1105,6 +1105,14 @@ NS_SWIFT_NAME(AureaEngine)
 /// com os que falharam antes), para o log e o diagnóstico do relato de bug.
 /// Vazio = nenhum export neste processo. Mesmo texto do Android.
 + (NSString*)lastExportEncoderPath;
+/// A escada de tentativas do export (export/ExportAttempts.hpp): o próximo
+/// degrau depois de uma falha. 0 = nada mais ajuda; bit 0x100 = esperar e
+/// refazer o mesmo degrau. A mesma regra do Android.
++ (uint32_t)exportNextAttempt:(uint32_t)attempt code:(int32_t)code failure:(uint32_t)failure stalled:(BOOL)stalled
+                       tooLong:(BOOL)tooLong shortSide:(uint32_t)shortSide fps:(double)fps hevc:(BOOL)hevc
+                       upscale:(BOOL)upscale NS_SWIFT_NAME(exportNextAttempt(_:code:failure:stalled:tooLong:shortSide:fps:hevc:upscale:));
+/// O lado menor que o degrau exporta (`requested` 0 = o da composição).
++ (uint32_t)exportAttemptShortSide:(uint32_t)attempt requested:(uint32_t)requested NS_SWIFT_NAME(exportAttemptShortSide(_:requested:));
 - (void)cancelExport;
 /// Explicitly restores the checked export snapshot, then restarts from zero.
 - (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath;

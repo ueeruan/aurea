@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.6: escada de tentativas do export (export/ExportAttempts.hpp). -->
+<resources>
+    <string name="export_retry_compatible">Menyesuaikan ekspor untuk perangkat ini: mulai ulang dalam mode kompatibel (mungkin lebih lama).</string>
+    <string name="export_retry_lower">Menyesuaikan ekspor untuk perangkat ini: mulai ulang di %1$dp.</string>
+    <string name="export_done_reduced">Diekspor dalam %1$dp agar berjalan di perangkat ini.</string>
+</resources>

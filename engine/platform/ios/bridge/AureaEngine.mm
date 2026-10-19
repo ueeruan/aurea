@@ -32,6 +32,7 @@
 #include "aurea/core/Trackball.hpp"
 #include "aurea/timeline/CanvasFit.hpp"
 #include "aurea/export/BitratePolicy.hpp"
+#include "aurea/export/ExportAttempts.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/FFmpegExportSink.hpp"
 #include "aurea/vector/Vector.hpp"
@@ -4094,6 +4095,22 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return path ? path : @"";
 }
 
++ (uint32_t)exportNextAttempt:(uint32_t)attempt code:(int32_t)code failure:(uint32_t)failure stalled:(BOOL)stalled
+                       tooLong:(BOOL)tooLong shortSide:(uint32_t)shortSide fps:(double)fps hevc:(BOOL)hevc
+                       upscale:(BOOL)upscale {
+    const aurea::ExportRetryKind kind = aurea::export_retry_kind(code, failure, stalled != NO, tooLong != NO);
+    aurea::ExportRequestShape shape;
+    shape.shortSide = shortSide;
+    shape.fps = fps > 0.0 ? fps : 0.0;
+    shape.hevc = hevc != NO;
+    shape.upscale = upscale != NO;
+    return aurea::export_next_attempt(std::min(attempt, aurea::kExportAttemptMax), kind, shape);
+}
+
++ (uint32_t)exportAttemptShortSide:(uint32_t)attempt requested:(uint32_t)requested {
+    return aurea::export_attempt_short_side(std::min(attempt, aurea::kExportAttemptMax), requested);
+}
+
 - (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
                height:(uint32_t)height fps:(double)fps
           bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps {
@@ -4167,7 +4184,8 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     settings.aiUpscale = aiUpscale;
     settings.trimToContent = trimToContent != NO;
     settings.quality = std::min<uint32_t>(quality, 2u);
-    settings.safeMode = std::min<uint32_t>(safeMode, aurea::kExportSafeModeMax);
+    // O degrau da escada de tentativas (export/ExportAttempts.hpp); 0..2 = o encoder de antes.
+    settings.safeMode = std::min<uint32_t>(safeMode, aurea::kExportAttemptMax);
     settings.container = 0;   // MP4, o mesmo do Android
     const std::string out = to_std(path);
     return e->start_export(settings, out.c_str()).raw();

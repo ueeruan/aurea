@@ -38,6 +38,7 @@ extern "C" {
 #include "aurea/core/GestureMath.hpp"
 #include "aurea/core/Trackball.hpp"
 #include "aurea/export/BitratePolicy.hpp"
+#include "aurea/export/ExportAttempts.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/ui/BuiltinPropertySchema.hpp"
 
@@ -3919,7 +3920,8 @@ AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, js
     settings.trimToContent = trimToContent == JNI_TRUE;
     settings.quality = static_cast<u32>(std::clamp<jint>(quality, 0, 2));
     settings.rateMode = rateMode == 0 ? 0u : 1u;
-    settings.safeMode = static_cast<u32>(std::clamp<jint>(safeMode, 0, static_cast<jint>(kExportSafeModeMax)));
+    // O degrau da escada de tentativas (export/ExportAttempts.hpp); 0..2 = o encoder de antes.
+    settings.safeMode = static_cast<u32>(std::clamp<jint>(safeMode, 0, static_cast<jint>(kExportAttemptMax)));
     settings.audioBitrateKbps = kExportAudioKbps;
     return static_cast<jint>(c->engine.start_export(settings, p.c_str()).raw());
 }
@@ -3929,6 +3931,28 @@ AUREA_JNI jint AUREA_FN(nativeRestartExport)(JNIEnv* env, jclass, jlong handle, 
     if (!c) return static_cast<jint>(Errc::InvalidState);
     const std::string recovery = to_string(env, recoveryPath), output = to_string(env, outputPath);
     return static_cast<jint>(c->engine.restart_export(recovery.c_str(), output.c_str()).raw());
+}
+
+/// A escada de tentativas do export (export/ExportAttempts.hpp): o próximo
+/// degrau depois de uma falha. 0 = nada mais ajuda; bit 0x100 = esperar e
+/// refazer o mesmo degrau. A mesma regra do iOS.
+AUREA_JNI jint AUREA_FN(nativeExportNextAttempt)(JNIEnv*, jclass, jint attempt, jint code, jint failure, jboolean stalled,
+                                                 jboolean tooLong, jint shortSide, jdouble fps, jboolean hevc, jboolean upscale) {
+    const ExportRetryKind kind = export_retry_kind(code, static_cast<u32>(std::max<jint>(0, failure)), stalled == JNI_TRUE,
+                                                   tooLong == JNI_TRUE);
+    ExportRequestShape shape;
+    shape.shortSide = static_cast<u32>(std::max<jint>(0, shortSide));
+    shape.fps = fps > 0.0 ? fps : 0.0;
+    shape.hevc = hevc == JNI_TRUE;
+    shape.upscale = upscale == JNI_TRUE;
+    return static_cast<jint>(export_next_attempt(static_cast<u32>(std::clamp<jint>(attempt, 0, static_cast<jint>(kExportAttemptMax))),
+                                                 kind, shape));
+}
+
+/// O lado menor que o degrau exporta (`requested` 0 = o da composição).
+AUREA_JNI jint AUREA_FN(nativeExportAttemptShortSide)(JNIEnv*, jclass, jint attempt, jint requested) {
+    return static_cast<jint>(export_attempt_short_side(static_cast<u32>(std::clamp<jint>(attempt, 0, static_cast<jint>(kExportAttemptMax))),
+                                                       static_cast<u32>(std::max<jint>(0, requested))));
 }
 
 /// A taxa de vídeo (bps) que o export usaria — a mesma regra do motor, para a

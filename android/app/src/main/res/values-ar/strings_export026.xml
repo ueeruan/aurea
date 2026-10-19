@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.6: escada de tentativas do export (export/ExportAttempts.hpp). -->
+<resources>
+    <string name="export_retry_compatible">جارٍ ضبط التصدير لهذا الجهاز: البدء من جديد في الوضع المتوافق (قد يستغرق وقتًا أطول).</string>
+    <string name="export_retry_lower">جارٍ ضبط التصدير لهذا الجهاز: البدء من جديد بدقة %1$dp.</string>
+    <string name="export_done_reduced">تم التصدير بدقة %1$dp ليعمل على هذا الجهاز.</string>
+</resources>

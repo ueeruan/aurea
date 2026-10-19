@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.6: escada de tentativas do export (export/ExportAttempts.hpp). -->
+<resources>
+    <string name="export_retry_compatible">Adjusting the export for this device: starting over in compatible mode (may take longer).</string>
+    <string name="export_retry_lower">Adjusting the export for this device: starting over at %1$dp.</string>
+    <string name="export_done_reduced">Exported at %1$dp to work on this device.</string>
+</resources>

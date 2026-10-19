@@ -1,6 +1,7 @@
 #include "aurea/export/FFmpegExportSink.hpp"
 #include "aurea/export/NV12Copy.hpp"
 #include "aurea/export/ExportPacketLog.hpp"
+#include "AndroidCodecName.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/project/FileIO.hpp"
@@ -160,7 +161,10 @@ usize android_codecs(AVCodecID id, const VideoStreamConfig& config, bool wantHar
         const jclass version = env->FindClass("android/os/Build$VERSION");
         if (!version) break;
         const jfieldID sdk = env->GetStaticFieldID(version, "SDK_INT", "I");
-        if (!sdk || env->GetStaticIntField(version, sdk) < 29) break;
+        if (!sdk) break;
+        // Android 8/9: sem isHardwareAccelerated/isSoftwareOnly/isAlias (API 29);
+        // o nome classifica (AndroidCodecName.hpp) e não há alias.
+        const bool modern = env->GetStaticIntField(version, sdk) >= 29;
         const jclass listClass = env->FindClass("android/media/MediaCodecList");
         const jclass infoClass = env->FindClass("android/media/MediaCodecInfo");
         const jclass capClass = env->FindClass("android/media/MediaCodecInfo$CodecCapabilities");
@@ -171,9 +175,9 @@ usize android_codecs(AVCodecID id, const VideoStreamConfig& config, bool wantHar
         const auto ctor = env->GetMethodID(listClass, "<init>", "(I)V");
         const auto infos = env->GetMethodID(listClass, "getCodecInfos", "()[Landroid/media/MediaCodecInfo;");
         const auto encoder = env->GetMethodID(infoClass, "isEncoder", "()Z");
-        const auto hardware = env->GetMethodID(infoClass, "isHardwareAccelerated", "()Z");
-        const auto software = env->GetMethodID(infoClass, "isSoftwareOnly", "()Z");
-        const auto alias = env->GetMethodID(infoClass, "isAlias", "()Z");
+        const auto hardware = modern ? env->GetMethodID(infoClass, "isHardwareAccelerated", "()Z") : nullptr;
+        const auto software = modern ? env->GetMethodID(infoClass, "isSoftwareOnly", "()Z") : nullptr;
+        const auto alias = modern ? env->GetMethodID(infoClass, "isAlias", "()Z") : nullptr;
         const auto types = env->GetMethodID(infoClass, "getSupportedTypes", "()[Ljava/lang/String;");
         const auto name = env->GetMethodID(infoClass, "getName", "()Ljava/lang/String;");
         const auto capabilities = env->GetMethodID(infoClass, "getCapabilitiesForType",
@@ -188,7 +192,7 @@ usize android_codecs(AVCodecID id, const VideoStreamConfig& config, bool wantHar
         const auto formatCtor = env->GetMethodID(formatClass, "<init>", "()V");
         const auto setInteger = env->GetMethodID(formatClass, "setInteger", "(Ljava/lang/String;I)V");
         const auto setString = env->GetMethodID(formatClass, "setString", "(Ljava/lang/String;Ljava/lang/String;)V");
-        if (!ctor || !infos || !encoder || !hardware || !software || !alias || !types || !name ||
+        if (!ctor || !infos || !encoder || (modern && (!hardware || !software || !alias)) || !types || !name ||
             !capabilities || !videoCaps || !encoderCaps || !supports || !modeSupported ||
             !formatSupported || !formatCtor || !setInteger || !setString) break;
         const jobject list = env->NewObject(listClass, ctor, 1 /* ALL_CODECS */);
@@ -208,8 +212,17 @@ usize android_codecs(AVCodecID id, const VideoStreamConfig& config, bool wantHar
         for (jsize i = 0; i < n && found < output.size(); ++i) {
             if (env->PushLocalFrame(32) < 0) { env->ExceptionClear(); break; }
             const jobject info = env->GetObjectArrayElement(array, i);
-            if (info && env->CallBooleanMethod(info, encoder) && !env->CallBooleanMethod(info, alias) &&
-                (wantHardware ? env->CallBooleanMethod(info, hardware) : env->CallBooleanMethod(info, software)) &&
+            const auto softwareByName = [&]() {
+                const auto codec = static_cast<jstring>(env->CallObjectMethod(info, name));
+                if (!codec || env->ExceptionCheck()) { env->ExceptionClear(); return true; }
+                const char* text = env->GetStringUTFChars(codec, nullptr);
+                const bool soft = android_codec::software_by_name(text);
+                if (text) env->ReleaseStringUTFChars(codec, text);
+                return soft;
+            };
+            if (info && env->CallBooleanMethod(info, encoder) && !(modern && env->CallBooleanMethod(info, alias)) &&
+                (modern ? (wantHardware ? env->CallBooleanMethod(info, hardware) : env->CallBooleanMethod(info, software))
+                        : (wantHardware ? !softwareByName() : softwareByName())) &&
                 !env->ExceptionCheck()) {
                 const auto supported = static_cast<jobjectArray>(env->CallObjectMethod(info, types));
                 if (supported && !env->ExceptionCheck()) {
@@ -1022,6 +1035,11 @@ Status FFmpegSink::open_rung(const RungEntry& rung) noexcept {
 
 Status FFmpegSink::open_video(usize firstRung) noexcept {
     Status last{Errc::EncoderUnavailable, "nenhum encoder FFmpeg compativel disponivel"};
+    // 0.2.6: falta de memória num degrau não encerra a escada. O encoder do
+    // aparelho que fica sem memória (32 bits, sessões de codec esgotadas)
+    // não impede o de software de abrir; se todos falharem, o motivo é memória
+    // e a tela refaz com menos pixels (export/ExportAttempts.hpp).
+    bool sawOutOfMemory = false;
     for (usize i = firstRung; i < rungs_.size(); ++i) {
         if (cancelled()) break;
         rung_ = i;
@@ -1048,11 +1066,11 @@ Status FFmpegSink::open_video(usize firstRung) noexcept {
         char why[160];
         std::snprintf(why, sizeof(why), "%.*s", static_cast<int>(text.size()), text.data());
         note_failure(why);
-        if (last.code() == Errc::OutOfMemory) break;
+        if (last.code() == Errc::OutOfMemory) sawOutOfMemory = true;
     }
     rung_ = rungs_.size();
     return error(cancelled() ? Errc::Cancelled :
-        last.code() == Errc::OutOfMemory ? Errc::OutOfMemory : Errc::EncoderUnavailable,
+        sawOutOfMemory ? Errc::OutOfMemory : Errc::EncoderUnavailable,
         "FFmpeg nao abriu encoder solicitado nem fallback por software");
 }
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.6: escada de tentativas do export (export/ExportAttempts.hpp). -->
+<resources>
+    <string name="export_retry_compatible">इस डिवाइस के लिए एक्सपोर्ट को समायोजित किया जा रहा है: संगत मोड में फिर से शुरू हो रहा है (ज़्यादा समय लग सकता है)।</string>
+    <string name="export_retry_lower">इस डिवाइस के लिए एक्सपोर्ट को समायोजित किया जा रहा है: %1$dp में फिर से शुरू हो रहा है।</string>
+    <string name="export_done_reduced">इस डिवाइस पर चलने के लिए %1$dp में एक्सपोर्ट किया गया।</string>
+</resources>

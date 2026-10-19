@@ -180,6 +180,19 @@ class AureaEngine private constructor() {
          * antes). Para o diagnóstico do relato de bug; vazio = nenhum export ainda.
          */
         @JvmStatic external fun nativeLastExportEncoderPath(): String
+        /**
+         * A escada de tentativas do export (export/ExportAttempts.hpp no motor):
+         * o próximo degrau depois de uma falha. 0 = nada mais ajuda;
+         * [EXPORT_ATTEMPT_WAIT] = esperar e refazer o mesmo degrau.
+         */
+        @JvmStatic external fun nativeExportNextAttempt(attempt: Int, code: Int, failure: Int, stalled: Boolean, tooLong: Boolean,
+                                                        shortSide: Int, fps: Double, hevc: Boolean, upscale: Boolean): Int
+        /** O lado menor que o degrau exporta (`requested` 0 = o da composição). */
+        @JvmStatic external fun nativeExportAttemptShortSide(attempt: Int, requested: Int): Int
+        /** kExportAttemptWait: refazer o mesmo degrau depois de esperar. */
+        const val EXPORT_ATTEMPT_WAIT = 0x100
+        /** kExportAttemptBusyRetries. */
+        const val EXPORT_ATTEMPT_BUSY_RETRIES = 2
     }
 
     /** Ponteiro para o contexto nativo. 0 = destruído. */

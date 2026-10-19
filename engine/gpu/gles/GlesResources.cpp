@@ -1,5 +1,6 @@
 #include "GlesInternal.hpp"
 #include "aurea/scene3d/Environment.hpp"
+#include <limits>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -97,7 +98,17 @@ Result<BufferHandle> Backend::create_buffer(const BufferDesc& desc) noexcept {
     if (!scope.valid) return Status{Errc::InvalidState};
     if (!desc.bytes) return Status{Errc::InvalidArgument};
     Buffer b; b.desc = desc; b.gpuBytes = desc.bytes;
-    if (desc.access != MemoryAccess::GpuOnly) b.cpu.resize(desc.bytes);
+    // A cópia na CPU num processo de 32 bits pode não caber (endereços
+    // fragmentados). Este alvo compila sem exceções (o vector abortaria o
+    // app): o bloco é sondado antes, e a falta de memória volta como erro — o
+    // export usa menos slots ou refaz menor.
+    if (desc.access != MemoryAccess::GpuOnly) {
+        if (desc.bytes > static_cast<u64>(std::numeric_limits<usize>::max())) return Status{Errc::OutOfMemory, "buffer GLES"};
+        void* probe = std::malloc(static_cast<usize>(desc.bytes));
+        if (!probe) return Status{Errc::OutOfMemory, "buffer GLES"};
+        std::free(probe);
+        b.cpu.resize(static_cast<usize>(desc.bytes));
+    }
     glGenBuffers(1, &b.id); glBindBuffer(GL_COPY_WRITE_BUFFER, b.id);
     glBufferData(GL_COPY_WRITE_BUFFER, desc.bytes, nullptr,
                  desc.access == MemoryAccess::Readback ? GL_STREAM_READ : GL_DYNAMIC_DRAW);

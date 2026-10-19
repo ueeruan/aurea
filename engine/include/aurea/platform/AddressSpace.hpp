@@ -12,7 +12,8 @@
 //
 //  Toda decisão daqui é uma função pura que recebe a largura do ponteiro: o
 //  teste do host (64 bits) chama com 32 e confere o ramo do aparelho. No build
-//  de 64 bits todas devolvem o comportamento de sempre — nada muda no export.
+//  de 64 bits todas devolvem o comportamento de sempre. O export de 32 bits
+//  (0.2.6) segura menos quadros a caminho do encoder e um cache menor.
 // =============================================================================
 #pragma once
 
@@ -71,6 +72,22 @@ inline constexpr u32 kNarrowSourceIdleFrames = 60;
 inline constexpr u32 kNarrowAiIdleReleaseMs = 5'000;
 [[nodiscard]] constexpr u32 ai_idle_release_ms(u32 requested, u32 pointerBits = kPointerBits) noexcept {
     return narrow(pointerBits) && requested > kNarrowAiIdleReleaseMs ? kNarrowAiIdleReleaseMs : requested;
+}
+
+/// Slots de leitura do export (quadros a caminho do encoder) num processo de
+/// 32 bits. No GLES cada slot custa ~4× o que a fila conta (cópia na CPU e
+/// buffer RGBA mapeado): 2 bastam para a GPU e o encoder trabalharem juntos.
+inline constexpr u32 kNarrowExportReadbackSlots = 2;
+[[nodiscard]] constexpr u32 export_readback_slots(u32 want, u32 pointerBits = kPointerBits) noexcept {
+    return narrow(pointerBits) && want > kNarrowExportReadbackSlots ? kNarrowExportReadbackSlots : want;
+}
+
+/// Cache do renderer do export (texturas de efeito, mídia decodificada) num
+/// processo de 32 bits: metade do orçamento (128 MB) deixava pouco endereço
+/// para o encoder de software e a checagem do arquivo no fim.
+inline constexpr u64 kNarrowExportRenderBudget = 64ull << 20;
+[[nodiscard]] constexpr u64 export_render_budget(u64 budget, u32 pointerBits = kPointerBits) noexcept {
+    return narrow(pointerBits) && budget > kNarrowExportRenderBudget ? kNarrowExportRenderBudget : budget;
 }
 
 /// Deslocamento de arquivo representável pelo `off_t` deste build (32 bits

@@ -302,29 +302,55 @@ class Exporter internal constructor(
     }
 
     /**
-     * O vídeo. O encoder do aparelho travou ou recusou no meio: o MOTOR sugere
-     * refazer no modo de segurança (export/ExportWatchdog.hpp — H.264 Baseline
-     * em múltiplos de 16 com taxa menor, depois o encoder de software). Refaz do
-     * começo (um MP4 não continua de onde outro encoder parou), com o aviso na
-     * tela, em vez de a exportação morrer no percentual em que travou.
+     * O vídeo, pela ESCADA DE TENTATIVAS do motor (export/ExportAttempts.hpp,
+     * 0.2.6): se uma tentativa falha por algo que outro jeito de exportar
+     * resolveria (encoder recusou ou travou, memória, GPU, resolução acima do
+     * aparelho, a tela sem progresso), o motor diz o próximo degrau — H.264
+     * compatível, encoder de software, 720p a 30 qps, 480p — e a exportação
+     * recomeça do zero com o aviso na tela. Só aparece falha quando nada ajuda
+     * (cancelado, sem espaço, mídia que sumiu, acima de 3 h) ou a escada acaba.
      */
     private suspend fun runExport(dir: File, file: File, options: ExportOptions, mbps: Int) {
         diagnosticTicket = withContext(Dispatchers.IO) { ExportDiagnosticReport.begin(app, engine.exportDiagnostics()) }
-        var safeMode = 0
+        var attempt = 0
+        var busyLeft = AureaEngine.EXPORT_ATTEMPT_BUSY_RETRIES
         while (true) {
-            val level = safeMode
+            val level = attempt
+            exportedReducedSide = AureaEngine.nativeExportAttemptShortSide(level, options.shortSide)
+                .takeIf { level > 0 && options.shortSide > 0 && it in 1 until options.shortSide } ?: 0
             val suggested = runEngineJob(dir, file, options, level) {
                 engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale,
                     options.trimToContent, options.quality.coerceIn(0, 2), rateModeFor(options.hevc && level == 0), level)
             }
-            val next = ExportStallWatchdog.nextSafeMode(level, suggested)
-            if (next == 0) return
-            android.util.Log.w("AureaExport", "Video encoder stalled/refused; exporting again in safe mode $next")
-            safeMode = next
+            if (suggested == 0) return
+            var next = suggested
+            if (next and AureaEngine.EXPORT_ATTEMPT_WAIT != 0) {
+                // O motor ainda solta o export anterior / a GPU estava ocupada:
+                // espera e refaz o MESMO degrau; ocupado demais, sobe um degrau.
+                if (busyLeft-- > 0) {
+                    state = state.copy(phase = ExportPhase.Running, framesDone = 0, fps = 0f, etaSeconds = 0, message = "", preparing = true)
+                    delay(BUSY_WAIT_MS)
+                    continue
+                }
+                next = AureaEngine.nativeExportNextAttempt(level, ENCODE_FAILED, 0, false, false, options.shortSide, options.fps,
+                    options.hevc, options.aiUpscale > 0)
+                if (next == 0 || next and AureaEngine.EXPORT_ATTEMPT_WAIT != 0) {
+                    state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_busy), preparing = false)
+                    return
+                }
+            }
+            android.util.Log.w("AureaExport", "Export attempt $level failed; trying attempt $next")
+            attempt = next
+            val side = AureaEngine.nativeExportAttemptShortSide(next, options.shortSide)
             state = state.copy(phase = ExportPhase.Running, framesDone = 0, fps = 0f, etaSeconds = 0, message = "",
-                notice = text(R.string.app_export_safe_mode), preparing = true)
+                notice = if (options.shortSide > 0 && side in 1 until options.shortSide) text(R.string.export_retry_lower, side)
+                    else text(R.string.export_retry_compatible),
+                preparing = true)
         }
     }
+
+    /** Lado menor do vídeo quando a escada exportou abaixo do pedido (0 = o pedido). */
+    private var exportedReducedSide = 0
 
     /**
      * Roda um export do motor até o fim e publica. Devolve o modo de segurança
@@ -367,13 +393,16 @@ class Exporter internal constructor(
                     state = state.copy(phase = ExportPhase.Cancelled, message = text(R.string.app_export_cancelled))
                     return 0
                 }
-                if (options.format == ExportFormat.Video && !cancelPending && engine.exportProgress(progressBuffer)) {
-                    progress.readFrom(progressBuffer)
-                    freshFailure = ExportStartupFailure.isFresh(previousProgress, progress, code,
-                        previousToken, diagnosticSessionToken(engine.exportDiagnostics()))
-                    val retry = if (freshFailure)
-                        ExportStallWatchdog.nextSafeMode(safeMode, progress.retrySafeMode) else 0
-                    if (retry > 0) return retry
+                if (options.format == ExportFormat.Video && !cancelPending) {
+                    if (engine.exportProgress(progressBuffer)) {
+                        progress.readFrom(progressBuffer)
+                        freshFailure = ExportStartupFailure.isFresh(previousProgress, progress, code,
+                            previousToken, diagnosticSessionToken(engine.exportDiagnostics()))
+                    }
+                    val retry = AureaEngine.nativeExportNextAttempt(safeMode, code, if (freshFailure) progress.failure else 0, false,
+                        code == NOT_SUPPORTED && plannedSeconds > com.aurea.aurea.editor.EXPORT_MAX_SECONDS,
+                        options.shortSide, options.fps, options.hevc, options.aiUpscale > 0)
+                    if (retry != 0) return retry
                 }
                 val nativeCause = if (freshFailure && progress.message.isNotBlank())
                     EngineText.reason(app, progress.message, code) else startError(code, options)
@@ -402,6 +431,14 @@ class Exporter internal constructor(
                         }
                         ExportStallWatchdog.Verdict.GiveUp -> {
                             android.util.Log.e("AureaExport", "Export engine did not conclude after the stall cancel; releasing the screen")
+                            if (options.format == ExportFormat.Video && !cancelPending) {
+                                val retry = AureaEngine.nativeExportNextAttempt(safeMode, CANCELLED, 0, true, false,
+                                    options.shortSide, options.fps, options.hevc, options.aiUpscale > 0)
+                                if (retry != 0) {
+                                    withContext(Dispatchers.IO) { file.delete() }
+                                    return retry
+                                }
+                            }
                             state = state.copy(phase = ExportPhase.Failed,
                                 message = text(R.string.app_export_failed, text(R.string.expfail_stuck)))
                             return 0
@@ -424,11 +461,12 @@ class Exporter internal constructor(
                 if (!progress.finished) continue
                 // O encoder travou/recusou e o motor sugere o modo de segurança:
                 // nada de "falhou" na tela — o vídeo é refeito (runExport).
-                val retry = if (options.format == ExportFormat.Video && progress.result != 0 && !cancelPending &&
-                    !watchdog.cancelled) ExportStallWatchdog.nextSafeMode(safeMode, progress.retrySafeMode) else 0
-                if (retry > 0) {
+                val retry = if (options.format == ExportFormat.Video && progress.result != 0 && !cancelPending)
+                    AureaEngine.nativeExportNextAttempt(safeMode, progress.result, progress.failure, watchdog.cancelled, false,
+                        options.shortSide, options.fps, options.hevc, options.aiUpscale > 0) else 0
+                if (retry != 0) {
                     android.util.Log.w("AureaExport", "Export failed (reason ${progress.failure}, ${progress.message}); " +
-                        "engine suggests safe mode $retry")
+                        "next attempt $retry")
                     withContext(Dispatchers.IO) { file.delete() }
                     return retry
                 }
@@ -517,7 +555,9 @@ class Exporter internal constructor(
         withContext(NonCancellable + Dispatchers.IO) { file.delete() }
         result.fold(
             onSuccess = { (uri, label) ->
-                val pronto = state.copy(phase = ExportPhase.Done, outputUri = uri, message = label)
+                val reduced = if (format == ExportFormat.Video) exportedReducedSide else 0
+                val pronto = state.copy(phase = ExportPhase.Done, outputUri = uri,
+                    message = if (reduced > 0) label + "\n" + text(R.string.export_done_reduced, reduced) else label)
                 // Publication succeeded independently of the ad SDK. A late
                 // callback must never overwrite a newer export's state.
                 state = pronto
@@ -709,8 +749,11 @@ class Exporter internal constructor(
         const val INVALID_STATE = 5
         const val NOT_SUPPORTED = 6
         const val OUT_OF_MEMORY = 8
+        const val ENCODE_FAILED = 15
         const val CANCELLED = 25
         const val STORAGE_FULL = 28
+        /** Espera antes de refazer quando o motor ainda estava ocupado (kExportAttemptWait). */
+        const val BUSY_WAIT_MS = 1500L
         /** AAC do export (kExportAudioKbps no motor). */
         const val AUDIO_BPS = 192_000.0
     }

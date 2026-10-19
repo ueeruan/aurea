@@ -764,7 +764,10 @@ final class AureaModel: ObservableObject {
     /// A última rede contra o export parado (ExportStallWatch) e o modo de
     /// segurança do vídeo em andamento (export/ExportWatchdog.hpp).
     private var exportWatch = ExportStallWatch()
+    /// O degrau da escada de tentativas em uso (export/ExportAttempts.hpp; 0 = o pedido).
     private var exportSafeMode: UInt32 = 0
+    /// Lado menor do vídeo quando a escada exportou abaixo do pedido (0 = o pedido).
+    private var exportReducedSide: UInt32 = 0
     private let mediaQueue = DispatchQueue(label: "com.aurea.media-import", qos: .userInitiated)
     private let autosaveQueue = DispatchQueue(label: "com.aurea.autosave", qos: .utility)
     private let lifecycleQueue = DispatchQueue(label: "com.aurea.lifecycle", qos: .userInitiated)
@@ -3975,8 +3978,10 @@ final class AureaModel: ObservableObject {
         releaseInterfaceCaches()
         let native = engine, project = projectGeneration
         let imageFps = imageExportFps(options)
+        let plannedTooLong = plannedExportSeconds(options) > Self.exportMaxSeconds
         mediaQueue.async { [weak self] in
             var ok = false, level = safeMode
+            var busyLeft = Self.exportBusyRetries
             var imageCode: Int32 = 0
             var progress: [String: Any] = [:]
             if options.kind == .video {
@@ -3999,11 +4004,23 @@ final class AureaModel: ObservableObject {
                     if ok || request.isCancelled { break }
                     progress = Self.exportStartupProgress(native.exportProgress(), previous: previous, code: code,
                         previousDiagnostics: previousDiagnostics, diagnostics: diagnostics)
-                    let flags = (progress["flags"] as? NSNumber)?.uint32Value ?? 0
-                    let next = ExportStallWatch.nextSafeMode(current: level,
-                        suggested: ExportStallWatch.suggestedSafeMode(flags: flags))
+                    // A escada de tentativas (export/ExportAttempts.hpp, a mesma regra do Android).
+                    let failure = (progress[AureaExportFailure] as? NSNumber)?.uint32Value ?? 0
+                    var next = Self.nextExportAttempt(level, code: code, failure: failure, stalled: false,
+                                                      tooLong: code == 6 && plannedTooLong, options: options)
+                    if next & Self.exportAttemptWait != 0 {
+                        // O motor ainda solta o export anterior: espera e refaz o mesmo degrau.
+                        if busyLeft > 0 { busyLeft -= 1; Thread.sleep(forTimeInterval: 1.5); continue }
+                        next = Self.nextExportAttempt(level, code: 15, failure: 0, stalled: false, tooLong: false, options: options)
+                        if next & Self.exportAttemptWait != 0 { next = 0 }
+                    }
                     if next == 0 { break }
                     level = next
+                    let notice = Self.exportRetryNotice(next, options: options)
+                    DispatchQueue.main.async {
+                        guard let self, self.exportStartup === request else { return }
+                        self.exportMessage = notice
+                    }
                 }
             } else if !request.isCancelled {
                 imageCode = native.startImageExport(to: url.path, format: options.kind.engineCode,
@@ -4022,6 +4039,7 @@ final class AureaModel: ObservableObject {
                 self.exportPreparing = false
                 self.stopPreparingWatch()
                 self.exportSafeMode = usedSafeMode
+                self.exportReducedSide = options.kind == .video ? Self.exportReducedShortSide(usedSafeMode, options: options) : 0
                 self.exportMessage = nil
                 if succeeded {
                     if request.isCancelled || self.exportCancelled { native.cancelExport() }
@@ -4102,6 +4120,29 @@ final class AureaModel: ObservableObject {
     /// Teto do motor (EngineConfig::maxExportSeconds) e a duração pedida, só para
     /// explicar a recusa; a regra continua no motor.
     static let exportMaxSeconds: Double = 3 * 3600
+    /// kExportAttemptWait / kExportAttemptBusyRetries (export/ExportAttempts.hpp).
+    nonisolated static let exportAttemptWait: UInt32 = 0x100
+    nonisolated static let exportBusyRetries = 2
+
+    /// O próximo degrau da escada de tentativas depois de uma falha (a regra do motor).
+    nonisolated static func nextExportAttempt(_ attempt: UInt32, code: Int32, failure: UInt32, stalled: Bool, tooLong: Bool,
+                                              options: ExportOptions) -> UInt32 {
+        AureaEngine.exportNextAttempt(attempt, code: code, failure: failure, stalled: stalled, tooLong: tooLong,
+                                      shortSide: options.shortSide, fps: options.fps, hevc: options.codec == .hevc,
+                                      upscale: options.aiUpscale > 0)
+    }
+
+    /// Lado menor que o degrau exporta, quando fica abaixo do pedido (0 = o pedido).
+    nonisolated static func exportReducedShortSide(_ attempt: UInt32, options: ExportOptions) -> UInt32 {
+        let side = AureaEngine.exportAttemptShortSide(attempt & 0xFF, requested: options.shortSide)
+        return attempt > 0 && options.shortSide > 0 && side > 0 && side < options.shortSide ? side : 0
+    }
+
+    /// O aviso enquanto a exportação recomeça num degrau mais compatível.
+    nonisolated static func exportRetryNotice(_ attempt: UInt32, options: ExportOptions) -> String {
+        let side = exportReducedShortSide(attempt, options: options)
+        return side > 0 ? AureaText.t("export_retry_lower", Int(side)) : AureaText.t("export_retry_compatible")
+    }
     func plannedExportSeconds(_ options: ExportOptions) -> Double {
         Double(engine.exportDuration(options.trimToContent)) / max(1, compositionFps)
     }
@@ -4284,6 +4325,17 @@ final class AureaModel: ObservableObject {
                     case .giveUp:
                         self.exportTimer?.invalidate()
                         self.exportTimer = nil
+                        if self.exportedKind == .video, !self.exportCancelled,
+                           let url = self.pendingExportURL, let options = self.pendingExportOptions {
+                            let next = Self.nextExportAttempt(self.exportSafeMode, code: 25, failure: 0, stalled: true,
+                                                              tooLong: false, options: options)
+                            if next != 0 {
+                                self.exportStalled = false
+                                try? FileManager.default.removeItem(at: url)
+                                self.prepareExport(url, options: options, safeMode: next & 0xFF)
+                                return
+                            }
+                        }
                         self.pendingExportURL = nil
                         self.pendingExportOptions = nil
                         self.exporting = false
@@ -4303,13 +4355,15 @@ final class AureaModel: ObservableObject {
                     // O encoder travou/recusou e o motor sugere o modo de
                     // segurança: refaz o vídeo do começo, com o aviso (nada de
                     // "falhou" na tela).
-                    if result != 0, self.exportedKind == .video, !self.exportCancelled, !self.exportWatch.cancelled,
+                    if result != 0, self.exportedKind == .video, !self.exportCancelled,
                        let url = self.pendingExportURL, let options = self.pendingExportOptions {
-                        let flags = (self.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
-                        let next = ExportStallWatch.nextSafeMode(current: self.exportSafeMode,
-                                                                 suggested: ExportStallWatch.suggestedSafeMode(flags: flags))
-                        if next > 0 {
-                            self.prepareExport(url, options: options, safeMode: next)
+                        let failure = (self.exportProgress[AureaExportFailure] as? NSNumber)?.uint32Value ?? 0
+                        let next = Self.nextExportAttempt(self.exportSafeMode, code: Int32(result), failure: failure,
+                                                          stalled: self.exportWatch.cancelled, tooLong: false, options: options)
+                        if next != 0 {
+                            self.exportStalled = false
+                            try? FileManager.default.removeItem(at: url)
+                            self.prepareExport(url, options: options, safeMode: next & 0xFF)
                             return
                         }
                     }
@@ -4382,8 +4436,10 @@ final class AureaModel: ObservableObject {
                     self?.exportPublishing = false; self?.exporting = false
                     // Confirmação visível: o vídeo está no Fotos (ou o porquê de não estar).
                     if !saved { NSLog("AureaExport: Photos save failed: %@", error?.localizedDescription ?? "-") }
-                    self?.exportMessage = saved ? AureaText.t("ios_export_saved_photos")
-                        : AureaText.t("ios_export_photos_failed") + (error.map { " (\($0.localizedDescription))" } ?? "")
+                    let reduced = kind == .video ? (self?.exportReducedSide ?? 0) : 0
+                    self?.exportMessage = (saved ? AureaText.t("ios_export_saved_photos")
+                        : AureaText.t("ios_export_photos_failed") + (error.map { " (\($0.localizedDescription))" } ?? ""))
+                        + (reduced > 0 ? "\n" + AureaText.t("export_done_reduced", Int(reduced)) : "")
                     self?.toast = AureaText.t(readyKey)
                     AureaAdsManager.shared.showExportInterstitialIfAvailable {}
                 }

@@ -85,7 +85,9 @@ AUREA_TEST(ExportWatchdog, HungEncoderIsAbandonedAndSafeModeRetryFinishes) {
     AUREA_CHECK(r.cap.ptsMonotonic);
     AUREA_CHECK((retry.p.flags & Engine::kExportSafeMode) != 0);
     AUREA_CHECK_EQ(export_retry_from_flags(retry.p.flags), 0u);
-    AUREA_CHECK(r.cap.video.codec == ExportCodec::HEVC);
+    // 0.2.6 (export/ExportAttempts.hpp): o degrau compatível é sempre H.264 —
+    // o HEVC dos aparelhos de entrada é o encoder que mais trava.
+    AUREA_CHECK(r.cap.video.codec == ExportCodec::H264);
     AUREA_CHECK_EQ(r.cap.video.profile, kExportProfileBaseline);
     AUREA_CHECK(r.cap.video.preferSoftware);
     AUREA_CHECK_EQ(r.cap.video.width, 64u);
@@ -345,7 +347,7 @@ AUREA_TEST(ExportWatchdog, AutomaticStallRecoveryReachesSoftwareBeforeRetainedNa
 // Exercise the complete serial export session, not just the codec recipe:
 // frozen project, render/readback, native sink boundary, final validation and
 // staged publication must still work when the compatibility retry is selected.
-AUREA_TEST(OfflineExportSerialGpu, SafeModeTwoPublishesValidatedFramesUsingRequestedCodecAndBitrate) {
+AUREA_TEST(OfflineExportSerialGpu, SafeModeTwoPublishesValidatedFramesInH264AtTheRequestedBitrate) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     const std::string source = "aurea_serial_retry_source.bin";
     struct Cleanup {
@@ -380,7 +382,8 @@ AUREA_TEST(OfflineExportSerialGpu, SafeModeTwoPublishesValidatedFramesUsingReque
     AUREA_CHECK_EQ((result.p.flags >> 8) & 15u, 6u);
     AUREA_CHECK((result.p.flags & Engine::kExportSafeMode) != 0);
     AUREA_CHECK_EQ(export_retry_from_flags(result.p.flags), 0u);
-    AUREA_CHECK_EQ(r.cap.video.codec, ExportCodec::HEVC);
+    // 0.2.6: o degrau 2 é H.264 no software (a taxa pedida continua).
+    AUREA_CHECK_EQ(r.cap.video.codec, ExportCodec::H264);
     AUREA_CHECK_EQ(r.cap.video.profile, kExportProfileBaseline);
     AUREA_CHECK(r.cap.video.preferSoftware);
     AUREA_CHECK_EQ(r.cap.video.bitrateBps, 13'000'000u);

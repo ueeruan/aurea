@@ -22,6 +22,7 @@ import { rotaDeCrash } from "./crash.js";
 // "Relatar um problema" (/api/report): o texto que a pessoa escreve no app.
 import { rotaDeRelato } from "./relato.js";
 import { communityRoute } from "./community.js";
+import { rotaDePaginas } from "./paginas.js";
 
 export { CofreDeVideo } from "./cofre.js";
 
@@ -72,6 +73,9 @@ export default {
 };
 
 async function handle(req, env, ctx, url) {
+    // Política de privacidade e exclusão de conta (URLs públicas da Play/App Store).
+    const pagina = rotaDePaginas(req, url);
+    if (pagina) return pagina;
     const captions = await captionRoute(req, env, url);
     if (captions) return captions;
     const contas = await rotaDeContas(req, env, ctx, url);

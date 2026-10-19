@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Google Play: a política de privacidade também precisa estar dentro do app. -->
+<resources>
+    <string name="settings_privacy_policy">गोपनीयता नीति</string>
+    <string name="settings_privacy_policy_note">Aurea क्या इकट्ठा करता है और खाता कैसे हटाएँ</string>
+</resources>

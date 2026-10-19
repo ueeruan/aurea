@@ -1,5 +1,6 @@
 // Social profiles use the existing account session. Never trust a client email or badge.
 import { lerSessao, lerJson, json, dentroDoLimite } from './contas.js';
+import { enviarEmail } from './email.js';
 
 const BADGES = new Set(['', 'blue', 'green', 'gold']);
 const MAX_FILE = 50 * 1024 * 1024;
@@ -11,6 +12,15 @@ function cursor(value) {
   return m ? [Number(m[1]), m[2]] : null;
 }
 const nextCursor = (items) => items.length === 30 ? `${items.at(-1).createdAt}:${items.at(-1).id}` : null;
+// Moderação (Google Play: conteúdo gerado pelo usuário e IA generativa).
+// Denunciado por HIDE_AFTER pessoas diferentes, o conteúdo sai do feed de todos
+// (menos do autor) até o admin decidir; bloqueio esconde nos dois sentidos.
+const HIDE_AFTER = 3;
+const REPORT_KINDS = new Set(['post', 'comment', 'user', 'preset', 'ai_video']);
+const REPORT_REASONS = new Set(['spam', 'nudity', 'violence', 'hate', 'harassment', 'illegal', 'copyright', 'other']);
+const UUID = /^[0-9a-f-]{36}$/;
+const notBlocked = (column) => `NOT EXISTS(SELECT 1 FROM community_blocks b WHERE (b.blocker=? AND b.blocked=${column}) OR (b.blocker=${column} AND b.blocked=?))`;
+const notHidden = (kind, column, owner) => `(${owner}=? OR (SELECT COUNT(*) FROM community_reports r WHERE r.target_kind='${kind}' AND r.target_id=${column} AND r.status='open') < ${HIDE_AFTER})`;
 // Bound decoded avatar dimensions too: a tiny compressed file can expand to a huge bitmap.
 function avatarMime(data) {
   const dimensions = (width, height) => width > 0 && height > 0 && width <= 2048 && height <= 2048;
@@ -49,15 +59,17 @@ async function profile(env, uid, viewer) {
     (SELECT COUNT(*) FROM community_follows WHERE followed=p.uid) AS followers,
     (SELECT COUNT(*) FROM community_follows WHERE follower=p.uid) AS following,
     (SELECT COUNT(*) FROM community_posts WHERE uid=p.uid) AS posts,
-    EXISTS(SELECT 1 FROM community_follows WHERE follower=? AND followed=p.uid) AS followed
-    FROM community_profiles p WHERE p.uid=?`, viewer, uid).first();
-  return row && { ...author(row), followers: row.followers, following: row.following, posts: row.posts, followed: !!row.followed };
+    EXISTS(SELECT 1 FROM community_follows WHERE follower=? AND followed=p.uid) AS followed,
+    EXISTS(SELECT 1 FROM community_blocks WHERE blocker=? AND blocked=p.uid) AS blocked
+    FROM community_profiles p WHERE p.uid=?`, viewer, viewer, uid).first();
+  return row && { ...author(row), followers: row.followers, following: row.following, posts: row.posts, followed: !!row.followed,
+    blocked: !!row.blocked };
 }
 async function posts(env, url, viewer) {
   const before = cursor(url.searchParams.get('cursor'));
   const uid = url.searchParams.get('user');
   const following = url.searchParams.get('following') === '1';
-  const conditions = [], params = [viewer];
+  const conditions = [notBlocked('p.uid'), notHidden('post', 'p.id', 'p.uid')], params = [viewer, viewer, viewer, viewer];
   if (before) { conditions.push('(p.created_at < ? OR (p.created_at = ? AND p.id < ?))'); params.push(before[0], ...before); }
   if (uid) { conditions.push('p.uid=?'); params.push(uid); }
   if (following) { conditions.push('EXISTS(SELECT 1 FROM community_follows f WHERE f.follower=? AND f.followed=p.uid)'); params.push(viewer); }
@@ -150,6 +162,37 @@ async function upload(req, env, session, url) {
   return json({ id, kind, name, bytes: length }, 201);
 }
 
+// Denúncia: uma por pessoa e alvo (repetir não conta de novo). O dono recebe
+// um e-mail para revisar; com HIDE_AFTER denúncias o conteúdo sai do feed.
+async function report(req, env, ctx, session) {
+  const { valor: v, erro } = await lerJson(req, 4096); if (erro) return problem(erro);
+  const kind = v?.kind, id = typeof v?.id === 'string' ? v.id : '', reason = v?.reason;
+  if (!REPORT_KINDS.has(kind) || !REPORT_REASONS.has(reason)) return problem('invalid_report');
+  if (kind === 'ai_video' ? !/^[A-Za-z0-9_.:-]{1,80}$/.test(id) : !UUID.test(id)) return problem('invalid_report');
+  const details = typeof v.details === 'string' ? [...v.details.trim()].slice(0, 500).join('') : '';
+  if (!(await dentroDoLimite(env, 'community-report', session.uid, { max: 30, janela: 3600 }))) return problem('rate_limited', 429);
+  const table = { post: 'community_posts', comment: 'community_comments', user: 'community_profiles' }[kind];
+  if (table) {
+    const column = kind === 'user' ? 'uid' : 'id';
+    const target = await stmt(env, `SELECT ${column} AS id FROM ${table} WHERE ${column}=?`, id).first();
+    if (!target) return problem('not_found', 404);
+    if (kind === 'user' && id === session.uid) return problem('cannot_report_self');
+  }
+  const result = await stmt(env, `INSERT OR IGNORE INTO community_reports(id,reporter,target_kind,target_id,reason,details,created_at)
+    VALUES(?,?,?,?,?,?,?)`, crypto.randomUUID(), session.uid, kind, id, reason, details, Date.now()).run();
+  const created = (result?.meta?.changes ?? 1) > 0;
+  if (created) {
+    const count = await stmt(env, "SELECT COUNT(*) AS n FROM community_reports WHERE target_kind=? AND target_id=? AND status='open'", kind, id).first();
+    const mail = enviarEmail(env, {
+      assunto: `[Aurea] Denúncia: ${kind} ${id} (${count?.n ?? 1})`,
+      texto: `Tipo: ${kind}\nAlvo: ${id}\nMotivo: ${reason}\nDenúncias abertas: ${count?.n ?? 1}\nDetalhes: ${details || '-'}\n\n` +
+        `Revisar: GET /api/community/reports (admin). Remover: PUT /api/community/reports/${kind}/${id} {"status":"removed"}.`,
+    }).catch(() => {});
+    if (ctx?.waitUntil) ctx.waitUntil(mail); else await mail;
+  }
+  return json({ ok: true }, created ? 201 : 200);
+}
+
 export async function communityRoute(req, env, ctx, url) {
   const path = url.pathname.replace(/\/+$/, '');
   if (!path.startsWith('/api/community')) return null;
@@ -183,7 +226,7 @@ export async function communityRoute(req, env, ctx, url) {
       const rows = await stmt(env, "SELECT * FROM community_profiles WHERE username LIKE ? ESCAPE '\\' ORDER BY username LIMIT 30", q.replace(/_/g, '\\_') + '%').all();
       return json({ items: rows.results.map(author) });
     }
-    const userMatch = /^\/api\/community\/profiles\/([0-9a-f-]{36})(?:\/(follow|verification|followers|following))?$/.exec(path);
+    const userMatch = /^\/api\/community\/profiles\/([0-9a-f-]{36})(?:\/(follow|verification|followers|following|block))?$/.exec(path);
     if (userMatch) {
       const [, uid, action] = userMatch;
       if (!await stmt(env, 'SELECT uid FROM community_profiles WHERE uid=?', uid).first()) return problem('not_found', 404);
@@ -200,6 +243,18 @@ export async function communityRoute(req, env, ctx, url) {
       if (action === 'follow' && ['PUT', 'DELETE'].includes(req.method)) {
         if (uid === session.uid) return problem('cannot_follow_self');
         await stmt(env, req.method === 'PUT' ? 'INSERT OR IGNORE INTO community_follows(follower,followed) VALUES(?,?)' : 'DELETE FROM community_follows WHERE follower=? AND followed=?', session.uid, uid).run();
+        return json({ profile: await profile(env, uid, session.uid) });
+      }
+      if (action === 'block' && ['PUT', 'DELETE'].includes(req.method)) {
+        if (uid === session.uid) return problem('cannot_block_self');
+        if (req.method === 'PUT') {
+          await env.AUREA_DB.batch([
+            stmt(env, 'INSERT OR IGNORE INTO community_blocks(blocker,blocked,created_at) VALUES(?,?,?)', session.uid, uid, Date.now()),
+            stmt(env, 'DELETE FROM community_follows WHERE (follower=? AND followed=?) OR (follower=? AND followed=?)', session.uid, uid, uid, session.uid),
+          ]);
+        } else {
+          await stmt(env, 'DELETE FROM community_blocks WHERE blocker=? AND blocked=?', session.uid, uid).run();
+        }
         return json({ profile: await profile(env, uid, session.uid) });
       }
       if (['followers', 'following'].includes(action) && req.method === 'GET') {
@@ -227,8 +282,12 @@ export async function communityRoute(req, env, ctx, url) {
       const post = await stmt(env, 'SELECT uid FROM community_posts WHERE id=?', id).first();
       if (!post) return problem('not_found', 404);
       if (!action && req.method === 'DELETE') {
-        if (post.uid !== session.uid) return problem('forbidden', 403);
-        await stmt(env, 'DELETE FROM community_posts WHERE id=?', id).run(); return json({ ok: true });
+        if (post.uid !== session.uid && !admin) return problem('forbidden', 403);
+        await env.AUREA_DB.batch([
+          stmt(env, 'DELETE FROM community_posts WHERE id=?', id),
+          stmt(env, "UPDATE community_reports SET status='removed' WHERE target_kind='post' AND target_id=?", id),
+        ]);
+        return json({ ok: true });
       }
       if (action === 'like' && ['PUT', 'DELETE'].includes(req.method)) {
         await stmt(env, req.method === 'PUT' ? 'INSERT OR IGNORE INTO community_likes(post,uid) VALUES(?,?)' : 'DELETE FROM community_likes WHERE post=? AND uid=?', id, session.uid).run();
@@ -238,7 +297,8 @@ export async function communityRoute(req, env, ctx, url) {
       if (action === 'comments' && req.method === 'GET') {
         const after = cursor(url.searchParams.get('cursor')) ?? [0, ''];
         const rows = await stmt(env, `SELECT c.*, p.username,p.name,p.avatar,p.verification FROM community_comments c JOIN community_profiles p ON p.uid=c.uid
-          WHERE c.post=? AND (c.created_at>? OR (c.created_at=? AND c.id>?)) ORDER BY c.created_at,c.id LIMIT 30`, id, after[0], ...after).all();
+          WHERE c.post=? AND (c.created_at>? OR (c.created_at=? AND c.id>?)) AND ${notBlocked('c.uid')} AND ${notHidden('comment', 'c.id', 'c.uid')}
+          ORDER BY c.created_at,c.id LIMIT 30`, id, after[0], ...after, session.uid, session.uid, session.uid).all();
         const items = rows.results.map(r => ({ id: r.id, body: r.body, createdAt: r.created_at, author: author(r) }));
         return json({ items, cursor: nextCursor(items) });
       }
@@ -251,12 +311,37 @@ export async function communityRoute(req, env, ctx, url) {
         return json({ id: comment }, 201);
       }
     }
+    if (path === '/api/community/reports' && req.method === 'POST') return await report(req, env, ctx, session);
+    if (path === '/api/community/reports' && req.method === 'GET') {
+      if (!admin) return problem('forbidden', 403);
+      const status = ['open', 'removed', 'dismissed'].includes(url.searchParams.get('status')) ? url.searchParams.get('status') : 'open';
+      const rows = await stmt(env, `SELECT target_kind, target_id, COUNT(*) AS reports, MIN(created_at) AS first, MAX(created_at) AS last,
+        GROUP_CONCAT(DISTINCT reason) AS reasons FROM community_reports WHERE status=?
+        GROUP BY target_kind, target_id ORDER BY reports DESC, last DESC LIMIT 100`, status).all();
+      return json({ items: rows.results.map(r => ({ kind: r.target_kind, id: r.target_id, reports: r.reports, first: r.first, last: r.last,
+        reasons: String(r.reasons ?? '').split(',').filter(Boolean) })) });
+    }
+    const reportMatch = /^\/api\/community\/reports\/(post|comment|user|preset|ai_video)\/([A-Za-z0-9_.:-]{1,80})$/.exec(path);
+    if (reportMatch && req.method === 'PUT') {
+      if (!admin) return problem('forbidden', 403);
+      const { valor: v, erro } = await lerJson(req, 256); if (erro || !['removed', 'dismissed'].includes(v?.status)) return problem('invalid_status');
+      const [, kind, id] = reportMatch;
+      const updates = [stmt(env, 'UPDATE community_reports SET status=? WHERE target_kind=? AND target_id=?', v.status, kind, id)];
+      if (v.status === 'removed' && kind === 'post') updates.push(stmt(env, 'DELETE FROM community_posts WHERE id=?', id));
+      if (v.status === 'removed' && kind === 'comment') updates.push(stmt(env, 'DELETE FROM community_comments WHERE id=?', id));
+      await env.AUREA_DB.batch(updates);
+      return json({ ok: true });
+    }
     const commentMatch = /^\/api\/community\/comments\/([0-9a-f-]{36})$/.exec(path);
     if (commentMatch && req.method === 'DELETE') {
       const comment = await stmt(env, 'SELECT uid FROM community_comments WHERE id=?', commentMatch[1]).first();
       if (!comment) return problem('not_found', 404);
-      if (comment.uid !== session.uid) return problem('forbidden', 403);
-      await stmt(env, 'DELETE FROM community_comments WHERE id=?', commentMatch[1]).run(); return json({ ok: true });
+      if (comment.uid !== session.uid && !admin) return problem('forbidden', 403);
+      await env.AUREA_DB.batch([
+        stmt(env, 'DELETE FROM community_comments WHERE id=?', commentMatch[1]),
+        stmt(env, "UPDATE community_reports SET status='removed' WHERE target_kind='comment' AND target_id=?", commentMatch[1]),
+      ]);
+      return json({ ok: true });
     }
     return problem('not_found', 404);
   } catch (e) {

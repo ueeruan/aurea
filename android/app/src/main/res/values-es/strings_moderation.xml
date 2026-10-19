@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Moderação (Google Play: conteúdo gerado pelo usuário e IA generativa). -->
+<resources>
+    <string name="mod_report">Denunciar</string>
+    <string name="mod_report_title">Denunciar contenido</string>
+    <string name="mod_reason_spam">Spam o estafa</string>
+    <string name="mod_reason_nudity">Desnudos o contenido sexual</string>
+    <string name="mod_reason_violence">Violencia</string>
+    <string name="mod_reason_hate">Discurso de odio</string>
+    <string name="mod_reason_harassment">Acoso o bullying</string>
+    <string name="mod_reason_illegal">Actividad ilegal</string>
+    <string name="mod_reason_copyright">Derechos de autor</string>
+    <string name="mod_reason_other">Otro motivo</string>
+    <string name="mod_report_details">Detalles (opcional)</string>
+    <string name="mod_report_send">Enviar denuncia</string>
+    <string name="mod_report_thanks">Denuncia enviada. La revisaremos.</string>
+    <string name="mod_block">Bloquear</string>
+    <string name="mod_unblock">Desbloquear</string>
+    <string name="mod_block_confirm">¿Bloquear a @%1$s? Dejarán de ver las publicaciones y los comentarios del otro.</string>
+    <string name="mod_blocked_note">Bloqueaste este perfil.</string>
+    <string name="mod_report_profile">Denunciar perfil</string>
+    <string name="mod_remove">Eliminar (moderación)</string>
+    <string name="mod_report_ai">Denunciar video</string>
+    <string name="mod_report_preset">Denunciar preset</string>
+    <string name="mod_more_actions">Más acciones</string>
+</resources>

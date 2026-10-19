@@ -65,11 +65,20 @@ val mensagemChaveDeDebug = """
 // abreviados e qualquer outro caminho até o AAB.
 val pedeBundleRelease = gradle.startParameter.taskNames.any {
     val nome = it.substringAfterLast(':')
-    nome == "bundle" || nome == "bundleRelease" || nome == "signReleaseBundle"
+    // packageReleaseUniversalApk monta o APK universal A PARTIR do bundle da Play.
+    nome == "bundle" || nome == "bundleRelease" || nome == "signReleaseBundle" || nome == "packageReleaseUniversalApk"
 }
 if (pedeBundleRelease && releaseComChaveDeDebug && !permitirAssinaturaDeDebug) {
     throw GradleException(mensagemChaveDeDebug)
 }
+
+// Distribuição: "play" (Google Play) ou "sideload" (APK direto). O AAB é sempre
+// para a Play; `-PaureaStore=play` gera um APK com o mesmo comportamento para
+// testar. Na Play não há a tela que exige abrir o TikTok/Instagram do criador
+// nem doação por PIX/PayPal (políticas de pagamentos e de comportamento
+// enganoso); o APK de sideload continua como sempre.
+val aureaStore = providers.gradleProperty("aureaStore").orNull ?: if (pedeBundleRelease) "play" else "sideload"
+require(aureaStore == "play" || aureaStore == "sideload") { "aureaStore invalido: $aureaStore (play ou sideload)" }
 
 // Uma ABI por build. `--split-per-abi` produz um APK por arquitetura com um
 // nome que não bate com o que a loja espera; aqui o filtro é explícito e o APK
@@ -112,6 +121,7 @@ android {
             "String", "AUREA_DISCOVERY_REPO",
             "\"${project.findProperty("aureaDiscoveryRepo") ?: "ueeruan/aurea"}\"",
         )
+        buildConfigField("boolean", "PLAY_STORE", (aureaStore == "play").toString())
         buildConfigField(
             "String", "AUREA_DISCOVERY_BRANCH",
             "\"${project.findProperty("aureaDiscoveryBranch") ?: "main"}\"",
@@ -259,6 +269,14 @@ android {
     lint {
         abortOnError = false
         checkReleaseBuilds = false
+    }
+
+    // Google Play (AAB): o app troca de idioma POR DENTRO (ui/i18n/AppLanguage.kt)
+    // e a busca de efeitos lê o inglês junto (EffectsHuman.kt). Com a divisão
+    // por idioma do bundle, o Play instalaria só o idioma do aparelho e os
+    // outros cairiam no português. Densidade e ABI continuam divididas.
+    bundle {
+        language { enableSplit = false }
     }
 }
 

@@ -15,7 +15,7 @@ import java.net.URLEncoder
 
 internal data class CommunityProfile(val id: String, val username: String, val name: String, val bio: String = "",
     val avatar: String? = null, val verification: String = "", val followers: Int = 0, val following: Int = 0,
-    val posts: Int = 0, val followed: Boolean = false)
+    val posts: Int = 0, val followed: Boolean = false, val blocked: Boolean = false)
 internal data class CommunityAsset(val id: String, val kind: String, val name: String, val bytes: Long)
 internal data class CommunityPost(val id: String, val body: String, val createdAt: Long, val author: CommunityProfile,
     val asset: CommunityAsset?, val likes: Int, val comments: Int, val liked: Boolean)
@@ -23,13 +23,30 @@ internal data class CommunityComment(val id: String, val body: String, val creat
 internal class CommunityFailure(val code: String) : IOException(code)
 internal fun JSONObject.profile() = CommunityProfile(getString("id"), optString("username"), optString("name"),
     optString("bio"), optString("avatar").takeIf { it.isNotBlank() && it != "null" }, optString("verification"),
-    optInt("followers"), optInt("following"), optInt("posts"), optBoolean("followed"))
+    optInt("followers"), optInt("following"), optInt("posts"), optBoolean("followed"), optBoolean("blocked"))
 internal fun JSONObject.asset() = CommunityAsset(getString("id"), getString("kind"), getString("name"), getLong("bytes"))
 internal fun JSONObject.post() = CommunityPost(getString("id"), optString("body"), getLong("createdAt"),
     getJSONObject("author").profile(), optJSONObject("asset")?.asset(), optInt("likes"), optInt("comments"), optBoolean("liked"))
 internal fun JSONObject.comment() = CommunityComment(getString("id"), getString("body"), getLong("createdAt"), getJSONObject("author").profile())
 internal fun <T> JSONArray?.mapObjects(transform: (JSONObject) -> T): List<T> = if (this == null) emptyList() else (0 until length()).map { transform(getJSONObject(it)) }
 internal fun JSONObject.nextCursor(): String? = optString("cursor").takeIf { it.isNotEmpty() && it != "null" }
+
+// Denúncias (Google Play: conteúdo gerado pelo usuário e por IA). Os motivos e os
+// alvos são os mesmos que o servidor aceita; o que não passa aqui ele recusa.
+internal val reportReasons = listOf("spam", "nudity", "violence", "hate", "harassment", "illegal", "copyright", "other")
+internal const val REPORT_DETAILS_MAX = 500
+private val reportKinds = setOf("post", "comment", "user", "ai_video")
+/** Post, comentário e perfil são UUID; o vídeo de IA é o id opaco do job. */
+internal fun isReportTarget(kind: String, id: String): Boolean =
+    kind in reportKinds && id.matches(if (kind == "ai_video") Regex("[A-Za-z0-9_.:-]{1,80}") else Regex("[0-9a-f-]{36}"))
+/** Corta em [REPORT_DETAILS_MAX] sem partir um emoji (par substituto) ao meio. */
+internal fun String.clipReportDetails(): String =
+    if (length <= REPORT_DETAILS_MAX) this else take(if (this[REPORT_DETAILS_MAX - 1].isHighSurrogate()) REPORT_DETAILS_MAX - 1 else REPORT_DETAILS_MAX)
+/** Corpo comum às denúncias da comunidade e dos presets de legenda; detalhe vazio não vai. */
+internal fun reportBody(reason: String, details: String): JSONObject {
+    require(reason in reportReasons) { "invalid_report" }
+    return JSONObject().put("reason", reason).apply { details.trim().clipReportDetails().takeIf { it.isNotEmpty() }?.let { put("details", it) } }
+}
 
 private fun InputStream.readBounded(limit: Int): ByteArray {
     val out = ByteArrayOutputStream(); val buffer = ByteArray(8192)
@@ -71,6 +88,14 @@ internal open class CommunityApi(private val token: String,
             return response(c)
         } finally { c.disconnect() }
     }
+    /** 201 (nova) e 200 (já denunciado por esta conta) são sucesso para quem denuncia. */
+    fun report(kind: String, id: String, reason: String, details: String = "") {
+        if (!isReportTarget(kind, id)) throw CommunityFailure("invalid_report")
+        request("/reports", "POST", reportBody(reason, details).put("kind", kind).put("id", id))
+    }
+    /** Bloquear também desfaz o seguir nos dois sentidos; o servidor esconde o resto. */
+    fun block(id: String, blocked: Boolean): CommunityProfile =
+        request("/profiles/$id/block", if (blocked) "PUT" else "DELETE").getJSONObject("profile").profile()
     fun upload(file: File, kind: String, name: String = file.name): CommunityAsset {
         val max = if (kind == "avatar") 512L * 1024 else if (kind == "preset") 1024L * 1024 else 50L * 1024 * 1024
         if (file.length() !in 1..max) throw CommunityFailure("file_too_large")

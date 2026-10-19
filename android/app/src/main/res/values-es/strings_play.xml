@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Google Play: a política de privacidade também precisa estar dentro do app. -->
+<resources>
+    <string name="settings_privacy_policy">Política de privacidad</string>
+    <string name="settings_privacy_policy_note">Qué recopila Aurea y cómo eliminar la cuenta</string>
+</resources>

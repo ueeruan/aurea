@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Google Play: a política de privacidade também precisa estar dentro do app. -->
+<resources>
+    <string name="settings_privacy_policy">Политика конфиденциальности</string>
+    <string name="settings_privacy_policy_note">Что собирает Aurea и как удалить аккаунт</string>
+</resources>

@@ -27,6 +27,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
@@ -72,12 +73,16 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
     var people by remember { mutableStateOf<String?>(null) }
     var peopleList by remember { mutableStateOf(emptyList<CommunityProfile>()) }
     var peopleCursor by remember { mutableStateOf<String?>(null) }
+    // Moderação: alvo da denúncia (tipo, id) e perfil esperando a confirmação do bloqueio.
+    var reporting by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var blocking by remember { mutableStateOf<CommunityProfile?>(null) }
     fun failure(e: Exception) { error = context.getString(when ((e as? CommunityFailure)?.code) {
         "username_taken" -> R.string.social_username_taken
         "profile_required" -> R.string.social_profile_required
         "invalid_profile" -> R.string.social_profile_hint
         "file_too_large" -> R.string.social_file_limit
         "unauthorized" -> R.string.social_session_error
+        "rate_limited" -> R.string.app_community_limit
         else -> R.string.social_error
     }) }
     fun work(action: suspend () -> Unit) {
@@ -156,10 +161,21 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
                             TextButton(enabled = !busy, onClick = { listPeople("following") }) { Text("${p.following} " + stringResource(R.string.social_following)) }
                         }
                         if (p.id == me?.id) Button(onClick = { edit = true }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("social.edit")) { Text(stringResource(R.string.social_edit_profile)) }
+                        // Bloqueado: o servidor já desfez o seguir e esconde o conteúdo dos dois lados.
+                        else if (p.blocked) Text(stringResource(R.string.mod_blocked_note), color = AureaColors.Muted, style = AureaType.BodySmall, modifier = Modifier.testTag("social.blocked"))
                         else Button(enabled = !busy, onClick = { work {
                             profile = withContext(Dispatchers.IO) { api.request("/profiles/${p.id}/follow", if (p.followed) "DELETE" else "PUT") }.getJSONObject("profile").profile()
                         } }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(if (p.followed) R.string.social_unfollow else R.string.social_follow)) }
                         if (canVerify) OutlinedButton(onClick = { verifying = true }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.social_verification)) }
+                        if (p.id != me?.id) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Bloquear pede confirmação; desbloquear não (é só desfazer).
+                            OutlinedButton(enabled = !busy, onClick = { if (p.blocked) work {
+                                profile = withContext(Dispatchers.IO) { api.block(p.id, false) }; loadFeed()
+                            } else blocking = p }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("social.block")) {
+                                Text(stringResource(if (p.blocked) R.string.mod_unblock else R.string.mod_block), textAlign = TextAlign.Center) }
+                            OutlinedButton(enabled = !busy, onClick = { reporting = "user" to p.id }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("social.report.profile")) {
+                                Text(stringResource(R.string.mod_report_profile), textAlign = TextAlign.Center) }
+                        }
                     }
                 }
             }
@@ -169,8 +185,9 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
             }
             if (!busy && feed.isEmpty()) item("empty") { Text(stringResource(R.string.social_empty), color = AureaColors.Muted, modifier = Modifier.padding(vertical = 24.dp)) }
             items(feed, key = { it.id }) { post ->
-                CommunityPostCard(post, api, busy, me?.id == post.author.id,
+                CommunityPostCard(post, api, busy, me?.id == post.author.id, canVerify,
                     onProfile = { showProfile(post.author.id) }, onComments = { commentsFor = post }, onDelete = { deleting = post },
+                    onReport = { reporting = "post" to post.id },
                     onLike = { work {
                         val r = withContext(Dispatchers.IO) { api.request("/posts/${post.id}/like", if (post.liked) "DELETE" else "PUT") }
                         feed = feed.map { if (it.id == post.id) it.copy(likes = r.getInt("likes"), liked = r.getBoolean("liked")) else it }
@@ -198,7 +215,8 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
     if (edit && me != null) CommunityEditProfile(me!!, api, onError = ::failure,
         onDismiss = { edit = false }, onSaved = { me = it; if (profileMode || profile?.id == it.id) profile = it; edit = false })
     if (composing) CommunityCompose(store, api, onError = ::failure, onDismiss = { composing = false }, onPosted = { composing = false; work { refresh() } })
-    commentsFor?.let { post -> CommunityComments(post, me?.id, api, ::failure, { commentsFor = null; work { loadFeed() } }, { id -> commentsFor = null; showProfile(id) }) }
+    commentsFor?.let { post -> CommunityComments(post, me?.id, canVerify, api, ::failure, { commentsFor = null; work { loadFeed() } }, { id -> commentsFor = null; showProfile(id) },
+        onReport = { c -> reporting = "comment" to c.id }) }
     if (legacy) ModalBottomSheet(onDismissRequest = { legacy = false }, containerColor = AureaColors.Background) { Box(Modifier.fillMaxHeight(.88f)) { CommunityPresetsTab() } }
     if (verifying && profile != null) AlertDialog(onDismissRequest = { verifying = false }, title = { Text(stringResource(R.string.social_verification)) }, text = {
         Column { for ((badge, label) in badgeOptions) TextButton(enabled = !busy, onClick = { val id = profile!!.id; verifying = false; work {
@@ -216,6 +234,16 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
             if (peopleCursor != null) item { TextButton(enabled = !busy, onClick = { listPeople(type, true) }) { Text(stringResource(R.string.social_more)) } }
         }
     } }
+    blocking?.let { target -> AlertDialog(onDismissRequest = { blocking = null }, title = { Text(stringResource(R.string.mod_block)) },
+        text = { Text(stringResource(R.string.mod_block_confirm, target.username.ifBlank { target.name })) },
+        confirmButton = { TextButton(modifier = Modifier.testTag("social.block.confirm"), onClick = { blocking = null; work {
+            val blocked = withContext(Dispatchers.IO) { api.block(target.id, true) }
+            if (profile?.id == blocked.id) profile = blocked; loadFeed()
+        } }) { Text(stringResource(R.string.mod_block)) } },
+        dismissButton = { TextButton(onClick = { blocking = null }) { Text(stringResource(R.string.editor_fechar)) } }) }
+    // Por último: abre por cima da folha de comentários quando a denúncia vem de lá.
+    reporting?.let { (kind, id) -> key(kind, id) { ReportDialog(onDismiss = { reporting = null },
+        onSent = { reporting = null; store.showToast(context.getString(R.string.mod_report_thanks)) }) { reason, details -> api.report(kind, id, reason, details) } } }
 }
 
 private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" to R.string.social_badge_green, "gold" to R.string.social_badge_gold, "" to R.string.social_badge_none)
@@ -238,8 +266,8 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
         }
     }
 }
-@Composable private fun CommunityPostCard(post: CommunityPost, api: CommunityApi, busy: Boolean, owned: Boolean,
-    onProfile: () -> Unit, onComments: () -> Unit, onDelete: () -> Unit, onLike: () -> Unit, onDownload: () -> Unit) {
+@Composable private fun CommunityPostCard(post: CommunityPost, api: CommunityApi, busy: Boolean, owned: Boolean, canModerate: Boolean,
+    onProfile: () -> Unit, onComments: () -> Unit, onDelete: () -> Unit, onReport: () -> Unit, onLike: () -> Unit, onDownload: () -> Unit) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(AureaColors.Surface).padding(16.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         CommunityAuthor(post.author, api, Modifier.fillMaxWidth().clickable(enabled = !busy, onClick = onProfile))
         Text(android.text.format.DateUtils.getRelativeTimeSpanString(post.createdAt).toString(), style = AureaType.Note, color = AureaColors.Muted)
@@ -255,6 +283,18 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
             TextButton(enabled = !busy, onClick = onComments) { Text("${post.comments} " + stringResource(R.string.social_comments)) }
             Spacer(Modifier.weight(1f))
             if (owned) IconButton(enabled = !busy, onClick = onDelete) { val label = stringResource(R.string.social_delete_post); Box(Modifier.semantics { contentDescription = label }) { CupertinoIcon(CupertinoGlyph.Trash, 19.dp, AureaColors.Muted) } }
+            // De outra pessoa: denunciar; o admin também remove (mesma confirmação do excluir).
+            else Box {
+                var menu by remember { mutableStateOf(false) }; val label = stringResource(R.string.mod_more_actions)
+                IconButton(enabled = !busy, onClick = { menu = true }, modifier = Modifier.testTag("social.more.${post.id}").semantics { contentDescription = label }) {
+                    CupertinoIcon(CupertinoGlyph.Ellipsis, 19.dp, AureaColors.Muted) }
+                DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.mod_report)) }, onClick = { menu = false; onReport() },
+                        leadingIcon = { CupertinoIcon(CupertinoGlyph.Flag, 17.dp, AureaColors.Muted) }, modifier = Modifier.testTag("social.report.${post.id}"))
+                    if (canModerate) DropdownMenuItem(text = { Text(stringResource(R.string.mod_remove), color = AureaColors.Danger) }, onClick = { menu = false; onDelete() },
+                        leadingIcon = { CupertinoIcon(CupertinoGlyph.Trash, 17.dp, AureaColors.Danger) }, modifier = Modifier.testTag("social.remove.${post.id}"))
+                }
+            }
         }
     }
 }
@@ -360,8 +400,10 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun CommunityComments(post: CommunityPost, ownId: String?, api: CommunityApi, onError: (Exception) -> Unit, onDismiss: () -> Unit, onProfile: (String) -> Unit) {
+@Composable private fun CommunityComments(post: CommunityPost, ownId: String?, canModerate: Boolean, api: CommunityApi, onError: (Exception) -> Unit,
+    onDismiss: () -> Unit, onProfile: (String) -> Unit, onReport: (CommunityComment) -> Unit) {
     var items by remember { mutableStateOf(emptyList<CommunityComment>()) }; var cursor by remember { mutableStateOf<String?>(null) }
+    var removing by remember { mutableStateOf<CommunityComment?>(null) }
     var text by remember { mutableStateOf("") }; var busy by remember { mutableStateOf(false) }; var error by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     suspend fun load(more: Boolean = false) {
@@ -382,6 +424,10 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
                 items(items, key = { it.id }) { c -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     CommunityAuthor(c.author, api, Modifier.fillMaxWidth().clickable(enabled = !busy) { onProfile(c.author.id) }); Text(c.body)
                     if (c.author.id == ownId) TextButton(enabled = !busy, onClick = { work { withContext(Dispatchers.IO) { api.request("/comments/${c.id}", "DELETE") }; load() } }) { Text(stringResource(R.string.social_delete)) }
+                    else Row {
+                        TextButton(enabled = !busy, onClick = { onReport(c) }, modifier = Modifier.testTag("social.comment.report.${c.id}")) { Text(stringResource(R.string.mod_report), color = AureaColors.Muted) }
+                        if (canModerate) TextButton(enabled = !busy, onClick = { removing = c }, modifier = Modifier.testTag("social.comment.remove.${c.id}")) { Text(stringResource(R.string.mod_remove), color = AureaColors.Danger) }
+                    }
                 } }
                 if (cursor != null) item { TextButton(enabled = !busy, onClick = { work { load(true) } }) { Text(stringResource(R.string.social_more)) } }
             }
@@ -394,4 +440,9 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
             Spacer(Modifier.height(24.dp))
         }
     }
+    // Remoção pelo admin de um comentário alheio: confirma antes (o próprio apaga direto, como sempre).
+    removing?.let { c -> AlertDialog(onDismissRequest = { removing = null }, title = { Text(stringResource(R.string.mod_remove)) }, text = { Text(c.body.take(160)) },
+        confirmButton = { TextButton(modifier = Modifier.testTag("social.comment.remove.confirm"), onClick = { removing = null
+            work { withContext(Dispatchers.IO) { api.request("/comments/${c.id}", "DELETE") }; load() } }) { Text(stringResource(R.string.social_delete)) } },
+        dismissButton = { TextButton(onClick = { removing = null }) { Text(stringResource(R.string.editor_fechar)) } }) }
 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Google Play: a política de privacidade também precisa estar dentro do app. -->
+<resources>
+    <string name="settings_privacy_policy">Kebijakan privasi</string>
+    <string name="settings_privacy_policy_note">Apa yang dikumpulkan Aurea dan cara menghapus akun</string>
+</resources>

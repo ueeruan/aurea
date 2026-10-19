@@ -61,6 +61,8 @@ class CaptionPresetStore(private val context: Context) {
         val result=JSONObject(entry.toString()).put("preset",received.getJSONObject("preset"));write(result,false);return result
     }
     fun like(entry: JSONObject) { val id=entry.getString("id");require(id.matches(Regex("[a-f0-9-]{36}")));api("/presets/$id/like",JSONObject(),true) }
+    /** Denúncia com a mesma sessão anônima do curtir; repetir não conta de novo (200). */
+    fun report(entry: JSONObject, reason: String, details: String) { val id=entry.getString("id");require(id.matches(Regex("[a-f0-9-]{36}")));api("/presets/$id/report",com.aurea.aurea.community.reportBody(reason,details),true) }
     fun publish(entry: JSONObject, author: String): JSONObject = api("/presets",JSONObject().put("id",entry.getString("id")).put("author",author).put("preset",entry.getJSONObject("preset")),true)
     private fun java.io.InputStream.readBytesLimited(limit: Int): ByteArray {
         val output=java.io.ByteArrayOutputStream();val bytes=ByteArray(8192)

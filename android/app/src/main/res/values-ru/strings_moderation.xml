@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Moderação (Google Play: conteúdo gerado pelo usuário e IA generativa). -->
+<resources>
+    <string name="mod_report">Пожаловаться</string>
+    <string name="mod_report_title">Пожаловаться на контент</string>
+    <string name="mod_reason_spam">Спам или мошенничество</string>
+    <string name="mod_reason_nudity">Нагота или сексуальный контент</string>
+    <string name="mod_reason_violence">Насилие</string>
+    <string name="mod_reason_hate">Разжигание ненависти</string>
+    <string name="mod_reason_harassment">Травля или оскорбления</string>
+    <string name="mod_reason_illegal">Незаконная деятельность</string>
+    <string name="mod_reason_copyright">Авторские права</string>
+    <string name="mod_reason_other">Другое</string>
+    <string name="mod_report_details">Подробности (необязательно)</string>
+    <string name="mod_report_send">Отправить жалобу</string>
+    <string name="mod_report_thanks">Жалоба отправлена. Мы её проверим.</string>
+    <string name="mod_block">Заблокировать</string>
+    <string name="mod_unblock">Разблокировать</string>
+    <string name="mod_block_confirm">Заблокировать @%1$s? Вы перестанете видеть публикации и комментарии друг друга.</string>
+    <string name="mod_blocked_note">Вы заблокировали этот профиль.</string>
+    <string name="mod_report_profile">Пожаловаться на профиль</string>
+    <string name="mod_remove">Удалить (модерация)</string>
+    <string name="mod_report_ai">Пожаловаться на видео</string>
+    <string name="mod_report_preset">Пожаловаться на пресет</string>
+    <string name="mod_more_actions">Другие действия</string>
+</resources>

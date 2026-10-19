@@ -86,6 +86,10 @@ internal fun CommunityPresetsTab() {
                         finally { downloading = null }
                     }
                 }) { Text(stringResource(if (offline) R.string.home_downloaded else if (downloading == id) R.string.home_downloading else R.string.home_download)) }
+                // Moderação (Google Play, conteúdo do usuário): denunciar o preset publicado.
+                if (!offline) com.aurea.aurea.community.CaptionPresetReportAction(entry, library) {
+                    failed = false; message = context.getString(R.string.mod_report_thanks)
+                }
             }
         }
     }

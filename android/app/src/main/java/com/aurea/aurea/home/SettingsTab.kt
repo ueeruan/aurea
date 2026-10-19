@@ -252,6 +252,12 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
                 )
                 GroupDivider()
                 TapRow(stringResource(R.string.licenses_title), "MiDaS · U2-Net · Tencent/ncnn") { licenses = true }
+                GroupDivider()
+                // Google Play: a política publicada também fica acessível dentro do app.
+                TapRow(stringResource(R.string.settings_privacy_policy), stringResource(R.string.settings_privacy_policy_note)) {
+                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse(PRIVACY_POLICY_URL))) }
+                }
             }
             Spacer(Modifier.height(AureaDims.S4))
             BetaBanner(version, onTap = {
@@ -482,3 +488,6 @@ private fun ThemePicker(current: String, onPick: (String) -> Unit) {
         }
     }
 }
+
+/** A política de privacidade publicada (discovery/paginas.js); a mesma URL vai no Play Console. */
+internal const val PRIVACY_POLICY_URL = "https://aurea-ai-discovery.aureaapp.workers.dev/privacidade"

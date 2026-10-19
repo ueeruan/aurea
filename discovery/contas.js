@@ -370,6 +370,17 @@ async function excluirConta(req, env) {
     }
   }
 
+  // Moderação (migração 0006): denúncias feitas pela conta, as contra o perfil
+  // dela e os bloqueios nos dois sentidos. Banco sem a migração: nada a apagar.
+  try {
+    await db.batch([
+      q("DELETE FROM community_reports WHERE reporter = ? OR (target_kind = 'user' AND target_id = ?)", s.uid, s.uid),
+      q("DELETE FROM community_blocks WHERE blocker = ? OR blocked = ?", s.uid, s.uid),
+    ]);
+  } catch {
+    // Tabelas de moderação ausentes.
+  }
+
   const minhasPublicacoes = "SELECT id FROM community_posts WHERE uid = ?";
   const comunidade = [
     q("DELETE FROM community_verifications WHERE uid = ? OR admin = ?", s.uid, s.uid),

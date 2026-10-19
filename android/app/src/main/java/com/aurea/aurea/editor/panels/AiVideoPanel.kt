@@ -18,12 +18,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -56,8 +59,13 @@ import com.aurea.aurea.ai.podeGerar
 import com.aurea.aurea.ai.recursoDoModo
 import com.aurea.aurea.ai.rotulo
 import com.aurea.aurea.ai.rotuloRes
+import com.aurea.aurea.community.CommunityApi
+import com.aurea.aurea.community.ReportDialog
+import com.aurea.aurea.community.isReportTarget
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
+import com.aurea.aurea.ui.theme.CupertinoGlyph
+import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 import kotlinx.coroutines.launch
 
@@ -251,6 +259,28 @@ internal fun AiVideoPanel(env: PanelEnv) {
                         Botao(stringResource(R.string.ai_salvar_galeria), secundario = true) { ai.salvarNaGaleria() }
                     }
                     Nota(stringResource(R.string.ai_ficou_no_aparelho), AureaColors.Subtle)
+                    // Denúncia do resultado (Google Play, IA generativa): o alvo é o id do job,
+                    // que também é o nome do arquivo baixado. Sem sessão da conta, não aparece.
+                    val alvo = listOfNotNull(ai.ultimoArquivo?.nameWithoutExtension, ai.job?.id)
+                        .firstOrNull { isReportTarget("ai_video", it) }
+                    val token = remember(ai.ultimoArquivo) {
+                        com.aurea.aurea.captions.KeyVault(app).get("conta_token").orEmpty()
+                    }
+                    var denunciando by remember(ai.ultimoArquivo) { mutableStateOf(false) }
+                    if (alvo != null && token.isNotBlank()) {
+                        TextButton(
+                            onClick = { denunciando = true },
+                            modifier = Modifier.heightIn(min = 48.dp).testTag("ai.report"),
+                        ) {
+                            CupertinoIcon(CupertinoGlyph.Flag, 15.dp, AureaColors.Muted)
+                            Text(stringResource(R.string.mod_report_ai), modifier = Modifier.padding(start = 6.dp),
+                                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+                        }
+                        if (denunciando) ReportDialog(
+                            onDismiss = { denunciando = false },
+                            onSent = { denunciando = false; store.showToast(AppText.get(app, R.string.mod_report_thanks)) },
+                        ) { motivo, detalhe -> CommunityApi(token).report("ai_video", alvo, motivo, detalhe) }
+                    }
                 }
             }
         } else if (ai.baixando) {

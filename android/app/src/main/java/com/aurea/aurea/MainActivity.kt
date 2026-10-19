@@ -303,7 +303,9 @@ private fun MainActivity.CreatorWelcome(content: @Composable () -> Unit) {
         }
         return
     }
-    if (opened == 3) { content(); return }
+    // Google Play: abrir os perfis do criador não pode ser condição para usar o
+    // app (e travaria a revisão). O APK de sideload mantém a tela.
+    if (opened == 3 || BuildConfig.PLAY_STORE) { content(); return }
     BackHandler { finish() }
     MaterialTheme(colorScheme = darkColorScheme()) {
         Surface(Modifier.fillMaxSize()) {

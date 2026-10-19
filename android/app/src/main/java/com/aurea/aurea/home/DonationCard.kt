@@ -26,7 +26,9 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 
 internal object AureaDonations {
-    var launchPromptPending by mutableStateOf(true)
+    /** Na Google Play não há doação por PIX/PayPal (política de pagamentos). */
+    val enabled: Boolean = !com.aurea.aurea.BuildConfig.PLAY_STORE
+    var launchPromptPending by mutableStateOf(enabled)
     const val PIX = "00020126360014br.gov.bcb.pix0114+55889961267175204000053039865802BR5911Ruan  Pablo6009Sao Paulo62240520daqr16872346348818576304A1F0"
     const val PAYPAL = "https://www.paypal.com/donate/?business=C7C2A2UH88NGW&no_recurring=0&item_name=Manter+o+Aurea+APP+funcionando+de+gra%C3%A7a.&currency_code=BRL"
 }
@@ -34,6 +36,7 @@ internal object AureaDonations {
 /** Optional, user-opened support sheet. Never leaves an active export for a browser. */
 @Composable
 internal fun DonationCard(exporting: Boolean = false) {
+    if (!AureaDonations.enabled) return
     var open by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf(false) }
     val context = LocalContext.current

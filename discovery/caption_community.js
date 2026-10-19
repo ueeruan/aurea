@@ -1,5 +1,10 @@
 import { DurableObject } from 'cloudflare:workers';
 import { validatePreset, previewSvg, MAX_PRESET_BYTES } from './caption_schema.mjs';
+import { enviarEmail } from './email.js';
+// Moderação (Google Play: conteúdo gerado pelo usuário): denunciado por
+// HIDE_AFTER sessões diferentes, o preset sai da lista até o dono decidir.
+const HIDE_AFTER = 3;
+const REASONS = new Set(['spam', 'nudity', 'violence', 'hate', 'harassment', 'illegal', 'copyright', 'other']);
 const json = (body,status=200) => new Response(JSON.stringify(body), {status,headers:{'content-type':'application/json','cache-control':'no-store','x-content-type-options':'nosniff'}});
 const hash = async value => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),n=>n.toString(16).padStart(2,'0')).join('');
 async function body(req) {
@@ -40,7 +45,9 @@ export class CaptionCommunity extends DurableObject {
       CREATE INDEX IF NOT EXISTS popular ON presets(likes DESC,downloads DESC);
       CREATE TABLE IF NOT EXISTS versions(id TEXT,version INTEGER,data TEXT,PRIMARY KEY(id,version));
       CREATE TABLE IF NOT EXISTS reactions(id TEXT,user TEXT,kind TEXT,PRIMARY KEY(id,user,kind));
-      CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY,count INTEGER,expires INTEGER);`);
+      CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY,count INTEGER,expires INTEGER);
+      CREATE TABLE IF NOT EXISTS reports(id TEXT,user TEXT,reason TEXT,details TEXT,created INTEGER,PRIMARY KEY(id,user));`);
+    this.env=env;
   }
   rate(key,max,seconds) {
     const now=Math.floor(Date.now()/1000),bucket=Math.floor(now/seconds);key+=`:${bucket}`;
@@ -62,10 +69,10 @@ export class CaptionCommunity extends DurableObject {
       if(path==='/presets'&&req.method==='GET') {
         const q=(url.searchParams.get('q')??'').slice(0,80),offset=Math.max(0,Math.min(10000,Number(url.searchParams.get('offset'))||0));
         const order=url.searchParams.get('sort')==='popular'?'likes DESC,downloads DESC,created DESC':'created DESC,id';
-        const rows=this.sql.exec(`SELECT id,name,author,version,created,downloads,likes FROM presets WHERE name LIKE ? ORDER BY ${order} LIMIT 31 OFFSET ?`,'%'+q.replace(/[\\%_]/g,'')+'%',offset).toArray();
+        const rows=this.sql.exec(`SELECT id,name,author,version,created,downloads,likes FROM presets WHERE name LIKE ? AND (SELECT COUNT(*) FROM reports r WHERE r.id=presets.id) < ${HIDE_AFTER} ORDER BY ${order} LIMIT 31 OFFSET ?`,'%'+q.replace(/[\\%_]/g,'')+'%',offset).toArray();
         return json({items:rows.slice(0,30).map(p=>({...p,minAppVersion:2113,thumbnail:`/api/captions/presets/${p.id}/preview`})),next:rows.length>30?offset+30:null});
       }
-      const match=path.match(/^\/presets\/([a-f0-9-]{36})(?:\/(download|like|preview))?$/);
+      const match=path.match(/^\/presets\/([a-f0-9-]{36})(?:\/(download|like|preview|report))?$/);
       if(match&&req.method==='GET'&&match[2]==='preview') {
         const p=this.sql.exec('SELECT name FROM presets WHERE id=?',match[1]).toArray()[0];if(!p)return json({error:'not_found'},404);
         return new Response(previewSvg(p.name),{headers:{'content-type':'image/svg+xml','content-security-policy':"default-src 'none'; style-src 'unsafe-inline'",'cache-control':'public,max-age=300','x-content-type-options':'nosniff'}});
@@ -88,6 +95,21 @@ export class CaptionCommunity extends DurableObject {
           this.sql.exec('INSERT INTO presets(id,owner,name,author,version,created,data) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,author=excluded.author,version=excluded.version,created=excluded.created,data=excluded.data',id,user,data.name,input.author.trim(),version,created,encoded);
         });
         return json({id,name:data.name,author:input.author,version,created,downloads:old?.downloads??0,likes:old?.likes??0,minAppVersion:2113},201);
+      }
+      if(match&&req.method==='POST'&&match[2]==='report') {
+        const id=match[1],p=this.sql.exec('SELECT name,author FROM presets WHERE id=?',id).toArray()[0];if(!p)return json({error:'not_found'},404);
+        if(!this.rate(`report:${user}`,30,3600))return json({error:'action_limit'},429);
+        const input=await body(req);
+        if(!REASONS.has(input?.reason))return json({error:'invalid_report'},400);
+        const details=typeof input.details==='string'?[...input.details.trim()].slice(0,500).join(''):'';
+        const before=this.sql.exec('SELECT 1 FROM reports WHERE id=? AND user=?',id,user).toArray().length;
+        this.sql.exec('INSERT OR IGNORE INTO reports VALUES(?,?,?,?,?)',id,user,input.reason,details,Date.now());
+        if(!before) {
+          const n=this.sql.exec('SELECT COUNT(*) AS n FROM reports WHERE id=?',id).toArray()[0]?.n ?? 1;
+          this.ctx.waitUntil(enviarEmail(this.env,{assunto:`[Aurea] Denúncia: preset de legenda ${id} (${n})`,
+            texto:`Preset: ${p.name}\nAutor: ${p.author}\nMotivo: ${input.reason}\nDenúncias: ${n}\nDetalhes: ${details||'-'}\n`}).catch(()=>{}));
+        }
+        return json({reported:true},before?200:201);
       }
       if(match&&req.method==='POST'&&['download','like'].includes(match[2])) {
         const id=match[1],kind=match[2],p=this.sql.exec('SELECT * FROM presets WHERE id=?',id).toArray()[0];if(!p)return json({error:'not_found'},404);

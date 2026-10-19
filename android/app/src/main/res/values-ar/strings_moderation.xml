@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Moderação (Google Play: conteúdo gerado pelo usuário e IA generativa). -->
+<resources>
+    <string name="mod_report">إبلاغ</string>
+    <string name="mod_report_title">الإبلاغ عن محتوى</string>
+    <string name="mod_reason_spam">رسائل مزعجة أو احتيال</string>
+    <string name="mod_reason_nudity">عري أو محتوى جنسي</string>
+    <string name="mod_reason_violence">عنف</string>
+    <string name="mod_reason_hate">خطاب كراهية</string>
+    <string name="mod_reason_harassment">تحرش أو تنمر</string>
+    <string name="mod_reason_illegal">نشاط غير قانوني</string>
+    <string name="mod_reason_copyright">حقوق النشر</string>
+    <string name="mod_reason_other">سبب آخر</string>
+    <string name="mod_report_details">تفاصيل (اختياري)</string>
+    <string name="mod_report_send">إرسال البلاغ</string>
+    <string name="mod_report_thanks">تم إرسال البلاغ. سنراجعه.</string>
+    <string name="mod_block">حظر</string>
+    <string name="mod_unblock">إلغاء الحظر</string>
+    <string name="mod_block_confirm">حظر @%1$s؟ لن يرى أي منكما منشورات الآخر وتعليقاته.</string>
+    <string name="mod_blocked_note">لقد حظرت هذا الملف الشخصي.</string>
+    <string name="mod_report_profile">الإبلاغ عن الملف الشخصي</string>
+    <string name="mod_remove">إزالة (إشراف)</string>
+    <string name="mod_report_ai">الإبلاغ عن الفيديو</string>
+    <string name="mod_report_preset">الإبلاغ عن الإعداد المسبق</string>
+    <string name="mod_more_actions">إجراءات أخرى</string>
+</resources>

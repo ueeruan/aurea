@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Moderação (Google Play: conteúdo gerado pelo usuário e IA generativa). -->
+<resources>
+    <string name="mod_report">Report</string>
+    <string name="mod_report_title">Report content</string>
+    <string name="mod_reason_spam">Spam or scam</string>
+    <string name="mod_reason_nudity">Nudity or sexual content</string>
+    <string name="mod_reason_violence">Violence</string>
+    <string name="mod_reason_hate">Hate speech</string>
+    <string name="mod_reason_harassment">Harassment or bullying</string>
+    <string name="mod_reason_illegal">Illegal activity</string>
+    <string name="mod_reason_copyright">Copyright</string>
+    <string name="mod_reason_other">Something else</string>
+    <string name="mod_report_details">Details (optional)</string>
+    <string name="mod_report_send">Send report</string>
+    <string name="mod_report_thanks">Report sent. We will review it.</string>
+    <string name="mod_block">Block</string>
+    <string name="mod_unblock">Unblock</string>
+    <string name="mod_block_confirm">Block @%1$s? You will no longer see each other\'s posts and comments.</string>
+    <string name="mod_blocked_note">You blocked this profile.</string>
+    <string name="mod_report_profile">Report profile</string>
+    <string name="mod_remove">Remove (moderation)</string>
+    <string name="mod_report_ai">Report video</string>
+    <string name="mod_report_preset">Report preset</string>
+    <string name="mod_more_actions">More actions</string>
+</resources>

@@ -133,3 +133,60 @@ test('avatar uploads reject oversized decoded dimensions and truncated image hea
   assert.equal((await upload(widePng)).status, 400);
   assert.equal(files.size, 2);
 });
+// Moderação (Google Play: conteúdo gerado pelo usuário e IA generativa).
+test('reports: one per person and target, three people hide a post from all but its author, admin resolves', async () => {
+  const { env, call, users } = await fixture();
+  const id = (await call('/posts', 1, 'POST', { body: 'Look at this' })).data.id;
+  assert.equal((await call('/reports', 2, 'POST', { kind: 'post', id, reason: 'bogus' })).status, 400);
+  assert.equal((await call('/reports', 2, 'POST', { kind: 'post', id: crypto.randomUUID(), reason: 'spam' })).status, 404);
+  assert.equal((await call('/reports', 2, 'POST', { kind: 'post', id, reason: 'spam', details: 'x'.repeat(900) })).status, 201);
+  assert.equal((await call('/reports', 2, 'POST', { kind: 'post', id, reason: 'spam' })).status, 200);   // repetida: não conta
+  assert.equal((await call('/reports', 0, 'POST', { kind: 'post', id, reason: 'hate' })).status, 201);
+  assert.equal((await call('/posts', 2)).data.items.length, 1);   // 2 pessoas: ainda aparece
+  // Uma terceira pessoa (conta direto no banco) denuncia.
+  const third = crypto.randomUUID();
+  env.AUREA_DB.sqlite.prepare('INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)').run(third, 'third@example.com', 'x', 1);
+  env.AUREA_DB.sqlite.prepare("INSERT INTO community_reports(id,reporter,target_kind,target_id,reason,created_at) VALUES(?,?,'post',?,'nudity',?)")
+    .run(crypto.randomUUID(), third, id, Date.now());
+  assert.equal((await call('/posts', 2)).data.items.length, 0);   // escondido para os outros
+  assert.equal((await call('/posts', 1)).data.items.length, 1);   // o autor ainda vê
+  // Só o admin revisa; "removed" apaga o post.
+  assert.equal((await call('/reports', 2)).status, 403);
+  const open = (await call('/reports', 0)).data.items;
+  assert.equal(open.length, 1);
+  assert.equal(open[0].reports, 3);
+  assert.deepEqual(open[0].reasons.sort(), ['hate', 'nudity', 'spam']);
+  assert.equal((await call(`/reports/post/${id}`, 2, 'PUT', { status: 'removed' })).status, 403);
+  assert.equal((await call(`/reports/post/${id}`, 0, 'PUT', { status: 'removed' })).status, 200);
+  assert.equal((await call(`/posts/${id}/like`, 2, 'PUT')).status, 404);
+  assert.equal((await call('/reports', 0)).data.items.length, 0);
+  // Perfil, vídeo de IA e preset de legenda também podem ser denunciados.
+  assert.equal((await call('/reports', 2, 'POST', { kind: 'user', id: users[1].uid, reason: 'harassment' })).status, 201);
+  assert.equal((await call('/reports', 2, 'POST', { kind: 'user', id: users[2].uid, reason: 'spam' })).status, 400);
+  assert.equal((await call('/reports', 2, 'POST', { kind: 'ai_video', id: 'job_8s:123', reason: 'violence' })).status, 201);
+  assert.equal((await call('/reports', 2, 'POST', { kind: 'ai_video', id: '../x', reason: 'violence' })).status, 400);
+  assert.equal((await call('/reports', 2, 'POST', { kind: 'preset', id: crypto.randomUUID(), reason: 'copyright' })).status, 201);
+});
+test('blocking hides both people from each other, ends follows and can be undone; admin moderates any comment', async () => {
+  const { call, users } = await fixture();
+  const post1 = (await call('/posts', 1, 'POST', { body: 'From one' })).data.id;
+  await call('/posts', 2, 'POST', { body: 'From two' });
+  await call(`/profiles/${users[1].uid}/follow`, 2, 'PUT');
+  await call(`/profiles/${users[2].uid}/follow`, 1, 'PUT');
+  const comment = (await call(`/posts/${post1}/comments`, 2, 'POST', { body: 'Hi' })).data.id;
+  assert.equal((await call(`/profiles/${users[2].uid}/block`, 2, 'PUT')).status, 400);   // a si mesmo, não
+  const blocked = await call(`/profiles/${users[1].uid}/block`, 2, 'PUT');
+  assert.equal(blocked.status, 200);
+  assert.equal(blocked.data.profile.blocked, true);
+  assert.equal(blocked.data.profile.followers, 0);
+  assert.equal((await call(`/profiles/${users[2].uid}`, 1)).data.profile.followers, 0);
+  assert.deepEqual((await call('/posts', 2)).data.items.map(p => p.body), ['From two']);
+  assert.deepEqual((await call('/posts', 1)).data.items.map(p => p.body), ['From one']);
+  assert.equal((await call(`/posts/${post1}/comments`, 1)).data.items.length, 0);
+  assert.equal((await call(`/profiles/${users[1].uid}/block`, 2, 'DELETE')).data.profile.blocked, false);
+  assert.equal((await call('/posts', 2)).data.items.length, 2);
+  // Moderação: o admin apaga o comentário de outra pessoa; quem não é admin, não.
+  assert.equal((await call(`/comments/${comment}`, 1, 'DELETE')).status, 403);
+  assert.equal((await call(`/comments/${comment}`, 0, 'DELETE')).status, 200);
+  assert.equal((await call(`/posts/${post1}`, 0, 'DELETE')).status, 200);
+});

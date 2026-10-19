@@ -9,6 +9,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.captions.CaptionPresetStore
 import com.aurea.aurea.captions.CaptionsState
+import com.aurea.aurea.community.CaptionPresetReportAction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -23,6 +24,7 @@ internal fun CaptionPresetBrowser(captions: CaptionsState) {
     var items by remember { mutableStateOf<List<JSONObject>>(emptyList()) };var message by remember { mutableStateOf<String?>(null) };var busy by remember { mutableStateOf(false) }
     val savedMsg=stringResource(R.string.edt_cp_saved);val publishedMsg=stringResource(R.string.edt_cp_published);val appliedMsg=stringResource(R.string.edt_cp_applied)
     val offlineMsg=stringResource(R.string.edt_cp_offline);val likedMsg=stringResource(R.string.edt_cp_liked);val onDevice=stringResource(R.string.edt_cp_on_device)
+    val reportedMsg=stringResource(R.string.mod_report_thanks)
     fun load(){scope.launch{busy=true;runCatching{withContext(Dispatchers.IO){when(tab){0->library.local(true,search);4->library.local(false,search);else->library.community(search,tab==2)}}}.onSuccess{items=it;message=null}.onFailure{message=it.message};busy=false}}
     TextButton(onClick={open=!open;if(open)load()}){Text(stringResource(R.string.edt_cp_title))}
     if(!open)return
@@ -42,10 +44,12 @@ internal fun CaptionPresetBrowser(captions: CaptionsState) {
         Column(Modifier.fillMaxWidth().padding(vertical=8.dp)) {
             Text(entry.optString("name"),style=MaterialTheme.typography.titleMedium)
             Text(stringResource(R.string.edt_cp_meta,entry.optString("author",onDevice),entry.optInt("version",1),entry.optInt("likes"),entry.optInt("downloads")))
-            Row {
+            FlowRow {
                 TextButton(enabled=captions.track!=null&&!busy,onClick={scope.launch{busy=true;runCatching{withContext(Dispatchers.IO){library.download(entry)}}.onSuccess{captions.applyPreset(it.getJSONObject("preset").toString());message=appliedMsg}.onFailure{message=it.message};busy=false}}){Text(stringResource(R.string.edt_cp_use))}
                 TextButton(enabled=!busy,onClick={scope.launch{busy=true;runCatching{withContext(Dispatchers.IO){library.download(entry)}}.onSuccess{message=offlineMsg}.onFailure{message=it.message};busy=false}}){Text(stringResource(R.string.edt_cp_download))}
                 if(tab in 1..3)TextButton(enabled=!busy,onClick={scope.launch{busy=true;runCatching{withContext(Dispatchers.IO){library.like(entry)}}.onSuccess{message=likedMsg}.onFailure{message=it.message};busy=false}}){Text(stringResource(R.string.edt_cp_like))}
+                // Comunidade e baixados vieram de outra pessoa: dá para denunciar ("Meus" não).
+                if(tab!=0)CaptionPresetReportAction(entry,library,enabled=!busy){message=reportedMsg}
             }
         }
     }

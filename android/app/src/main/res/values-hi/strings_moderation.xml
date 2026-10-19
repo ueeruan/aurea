@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Moderação (Google Play: conteúdo gerado pelo usuário e IA generativa). -->
+<resources>
+    <string name="mod_report">रिपोर्ट करें</string>
+    <string name="mod_report_title">सामग्री की रिपोर्ट करें</string>
+    <string name="mod_reason_spam">स्पैम या धोखाधड़ी</string>
+    <string name="mod_reason_nudity">नग्नता या यौन सामग्री</string>
+    <string name="mod_reason_violence">हिंसा</string>
+    <string name="mod_reason_hate">नफ़रत भरी भाषा</string>
+    <string name="mod_reason_harassment">उत्पीड़न या धमकाना</string>
+    <string name="mod_reason_illegal">गैरकानूनी गतिविधि</string>
+    <string name="mod_reason_copyright">कॉपीराइट</string>
+    <string name="mod_reason_other">कुछ और</string>
+    <string name="mod_report_details">विवरण (वैकल्पिक)</string>
+    <string name="mod_report_send">रिपोर्ट भेजें</string>
+    <string name="mod_report_thanks">रिपोर्ट भेज दी गई। हम इसकी समीक्षा करेंगे।</string>
+    <string name="mod_block">ब्लॉक करें</string>
+    <string name="mod_unblock">अनब्लॉक करें</string>
+    <string name="mod_block_confirm">@%1$s को ब्लॉक करें? आप एक-दूसरे की पोस्ट और टिप्पणियाँ नहीं देख पाएँगे।</string>
+    <string name="mod_blocked_note">आपने इस प्रोफ़ाइल को ब्लॉक किया है।</string>
+    <string name="mod_report_profile">प्रोफ़ाइल की रिपोर्ट करें</string>
+    <string name="mod_remove">हटाएँ (मॉडरेशन)</string>
+    <string name="mod_report_ai">वीडियो की रिपोर्ट करें</string>
+    <string name="mod_report_preset">प्रीसेट की रिपोर्ट करें</string>
+    <string name="mod_more_actions">और कार्य</string>
+</resources>

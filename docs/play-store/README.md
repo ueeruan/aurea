@@ -30,18 +30,17 @@ continua `com.aurea.aurea`.
 
 ## Antes de enviar (nesta ordem)
 
-### 1. Publicar o servidor (você)
+### 1. Publicar o servidor — feito em 19/10/2026
 
-As rotas de denúncia, bloqueio, privacidade e exclusão de conta só existem depois do
-deploy. Na pasta `discovery/`:
+Migração `0006_moderacao` aplicada no D1 e Worker publicado (versão `7fe8db29`).
+Isso também colocou no ar a exclusão de conta (`/api/auth/delete`), que estava no
+código desde 07/10 mas nunca tinha sido publicada.
 
-```bash
-npx wrangler d1 migrations apply aurea-contas --remote
-```
-
-```bash
-npx wrangler deploy
-```
+**Para os próximos deploys:** a conta Cloudflare não tem o R2 ativado, e o Worker no
+ar roda sem o bucket `aurea-community-files` (os arquivos da Comunidade respondem
+503, como antes). `npx wrangler deploy` direto falha (código 10085). Até ativar o R2
+e criar o bucket, publique com uma cópia do `wrangler.toml` sem o bloco
+`[[r2_buckets]]` (`npx wrangler deploy -c <cópia>`), e apague a cópia depois.
 
 Depois abra `https://aurea-ai-discovery.aureaapp.workers.dev/privacidade` e
 `.../excluir-conta` no navegador para conferir. A política usa

@@ -13,12 +13,16 @@ public:
     void token(const std::string& text, double start, double end,
                double segmentStart, double segmentEnd) {
         if (text.empty()) return;
-        if (text.find_first_of(" \r\n\t") == 0) flush();
         const auto first = text.find_first_not_of(" \r\n\t");
-        if (first == std::string::npos) return;
+        const std::string piece = first == std::string::npos ? std::string{} : text.substr(first);
+        // Pontuação solta (" ?", " ,") continua na palavra; em chinês/japonês
+        // não há espaço, então cada ideograma novo começa outra palavra.
+        const bool attach = !word_.text.empty() && caption_closing_punctuation(piece);
+        if ((text.find_first_of(" \r\n\t") == 0 && !attach) || caption_script_boundary(word_.text, piece)) flush();
+        if (piece.empty()) return;
         const bool timed = std::isfinite(start) && std::isfinite(end) && start >= 0 && end >= start;
         if (word_.text.empty()) word_.start = offset_ + (timed ? start : segmentStart);
-        word_.text += text.substr(first);
+        word_.text += piece;
         word_.end = std::max(word_.end, offset_ + (timed ? end : segmentEnd));
     }
     void flush() {

@@ -341,6 +341,25 @@ NS_SWIFT_NAME(AureaEngine)
 #endif
 /// O que o motor decidiu para ESTE aparelho (chaves do DeviceReport do Android).
 - (NSDictionary<NSString*, NSNumber*>*)deviceReport;
+
+// --- Proxy de edição ("Otimizar vídeos pesados", 0.2.5) ---------------------
+// A política, a fila e o cache são do motor (PreviewProxyService); a UI escolhe
+// o modo, lê o progresso e limpa. Mesmo contrato do nativeProxy* do Android.
+/// 0 Automático · 1 Sempre · 2 Desligado.
+- (void)setProxyMode:(uint32_t)mode NS_SWIFT_NAME(setProxyMode(_:));
+- (uint32_t)proxyMode NS_SWIFT_NAME(proxyMode());
+/// Pedidos desta sessão de projeto: "queued", "generating", "ready", "failed"
+/// e "progress" (0..1, do vídeo sendo otimizado).
+- (NSDictionary<NSString*, NSNumber*>*)proxySummary NS_SWIFT_NAME(proxySummary());
+/// Proxy do vídeo da camada: "state" (0 nenhum · 1 na fila · 2 gerando ·
+/// 3 pronto · 4 falhou) e "progress" (0..1).
+- (NSDictionary<NSString*, NSNumber*>*)proxyStatus:(long long)layer NS_SWIFT_NAME(proxyStatus(_:));
+- (BOOL)regenerateProxy:(long long)layer NS_SWIFT_NAME(regenerateProxy(_:));
+- (BOOL)cancelProxy:(long long)layer NS_SWIFT_NAME(cancelProxy(_:));
+/// Bytes da mídia otimizada em disco (percorre a pasta: fora da main thread).
+- (uint64_t)proxyCacheBytes NS_SWIFT_NAME(proxyCacheBytes());
+/// Apaga a mídia otimizada; devolve os bytes liberados. O export segue no original.
+- (uint64_t)clearProxyCache NS_SWIFT_NAME(clearProxyCache());
 /// Export em andamento (chaves AureaExport*).
 - (NSDictionary<NSString*, id>*)exportProgress;
 - (NSString*)exportDiagnostics;
@@ -429,6 +448,19 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)rippleDeleteLayers:(NSArray<NSNumber*>*)layerIds;
 - (void)setEditMode:(BOOL)on;
 @property(nonatomic, readonly) BOOL timelineEditMode;
+/// Interface do projeto (0.2.5): 0 = Composição (padrão), 1 = Edição. Ligar a Edição liga o ímã.
+- (BOOL)setProjectUiMode:(uint32_t)mode NS_SWIFT_NAME(setProjectUiMode(_:));
+@property(nonatomic, readonly) uint32_t projectUiMode;
+/// O trecho de mídia mais fundo: a linha dele é a trilha principal da Edição (0 = nenhum).
+@property(nonatomic, readonly) long long mainTrackAnchor;
+/// "Para camada": linha própria acima da trilha principal; atFrame >= 0 leva ao quadro. Um passo de desfazer.
+- (BOOL)moveClipToOverlay:(long long)layerId atFrame:(int64_t)frame NS_SWIFT_NAME(moveClipToOverlay(_:atFrame:));
+/// "Para trilha principal": entra no fim dela, magnético. Um passo de desfazer.
+- (BOOL)moveClipToMainTrack:(long long)layerId NS_SWIFT_NAME(moveClipToMainTrack(_:));
+/// Transição num corte: saída de `outgoing` e entrada de `incoming` (0 nenhuma … 5 girar). Um passo de desfazer.
+- (BOOL)setCutTransitionFrom:(long long)outgoing to:(long long)incoming type:(uint32_t)type frames:(uint32_t)frames
+    NS_SWIFT_NAME(setCutTransition(from:to:type:frames:));
+- (uint32_t)cutTransitionInto:(long long)incoming NS_SWIFT_NAME(cutTransition(into:));
 /// LINHA MAGNÉTICA da camada: cortes dela andam como faixa de montagem.
 - (BOOL)setLayer:(long long)layerId magneticTrack:(BOOL)on;
 - (BOOL)layerMagneticTrack:(long long)layerId;

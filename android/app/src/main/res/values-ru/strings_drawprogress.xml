@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.2.5: Прогресс рисунка (название эффекта на английском во всех языках; переведённое участвует в поиске). -->
+    <string name="fx_name_drawing_progress">Прогресс рисунка</string>
+    <string name="drawing_progress_desc">Рисует рисунок штрих за штрихом: у векторов каждый контур растёт вдоль своего пути — по очереди или все сразу, а заливка появляется, когда контур замыкается. Изображения проявляются проходом: тёмные чернила раньше светлой бумаги.</string>
+    <string name="fxl_draw_order">Порядок</string>
+    <string name="fxo_simultaneous">Одновременно</string>
+    <string name="fxl_tip_softness">Мягкость кончика</string>
+    <string name="drawprog_reverse">В обратную сторону</string>
+</resources>

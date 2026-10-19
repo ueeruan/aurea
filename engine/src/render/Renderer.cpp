@@ -1777,6 +1777,38 @@ VideoFlowFx video_flow_fx(const Layer& l, f64 timelineTime, f64 compShutter) noe
     return fx;
 }
 
+/// O corte dos contornos da camada vetorial no instante (Progresso do
+/// desenho): o primeiro efeito ligado que age na geometria
+/// (`Effect::edits_vector_geometry`) manda. A regra mora no efeito e em
+/// vector::build_mesh; aqui só se avaliam os valores dele, como no plano.
+vector::DrawProgress vector_draw_progress(const Layer& l, const EffectRegistry* registry, f64 local) noexcept {
+    vector::DrawProgress none;
+    if (!registry) return none;
+    std::vector<ParamValue> values;
+    for (u32 i = 0; i < l.effects.size(); ++i) {
+        const EffectInstance& inst = l.effects[i];
+        if (!inst.enabled) continue;
+        const Effect* fx = registry->find(inst.type);
+        if (!fx || !fx->edits_vector_geometry()) continue;
+        const ParameterRegistry* params = registry->params(inst.type);
+        if (!params) continue;
+        values.clear();
+        for (u32 p = 0; p < params->count(); ++p) values.push_back(evaluate_param_f(l.tracks, inst, p, params->at(p), local));
+        EffectEval e;
+        e.effect = fx;
+        e.instance = &inst;
+        e.values = values.data();
+        e.count = params->count();
+        e.effectIndex = i;
+        e.localTime = FrameIndex{static_cast<i64>(std::floor(local))};
+        e.fractionalTime = local;
+        e.layer = &l;
+        vector::DrawProgress out;
+        if (fx->vector_progress(e, out)) return out;
+    }
+    return none;
+}
+
 // =============================================================================
 // CAMADA DE AJUSTE COM EFEITO DE TEMPO (0.1.8 BETA 2). Numa camada comum os
 // efeitos de tempo pedem a FONTE noutro instante ao decoder; numa camada de
@@ -2542,12 +2574,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     std::vector<VectorGroup> ev;
                     ev.reserve(sh.vector.groups.size());
                     for (u32 gi = 0; gi < sh.vector.groups.size(); ++gi) ev.push_back(vector::evaluate_group(sh.vector.groups[gi], l->tracks, gi, lf));
-                    const u64 key = vector::content_hash(ev, lf) ^ (static_cast<u64>(dens * 64.0f) * 0x9E3779B97F4A7C15ull);
+                    // Progresso do desenho: o efeito corta os contornos aqui, na malha.
+                    const vector::DrawProgress draw = vector_draw_progress(*l, effects_, lf);
+                    const u64 key = vector::content_hash(ev, lf, draw) ^ (static_cast<u64>(dens * 64.0f) * 0x9E3779B97F4A7C15ull);
                     VectorCacheEntry& ce = vectorCache_[rid.pack()];
                     if (ce.key != key || ce.lastFrame == 0) {
                         ++heavyStats_.vectorTessellations;
                         vector::VectorMesh mesh;
-                        vector::build_mesh(ev, lf, dens, mesh);
+                        vector::build_mesh(ev, lf, dens, mesh, draw);
                         ce.verts = std::move(mesh.verts);
                         ce.paints = std::move(mesh.paints);
                         ce.min = mesh.min;

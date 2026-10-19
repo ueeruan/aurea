@@ -37,6 +37,9 @@ struct MediaProbe {
     u32 audioSampleRate = 0;
     u32 audioChannels = 0;
     i64 audioDurationUs = 0;
+    /// Tamanho do arquivo (0 = a plataforma não soube): com a duração dá o
+    /// bitrate que a política do proxy de edição lê (PreviewProxy.hpp).
+    u64 fileBytes = 0;
 };
 
 class VideoSourceFactory {
@@ -75,6 +78,7 @@ public:
     void set_memory(MemoryManager* memory) noexcept;
     [[nodiscard]] VideoSourceFactory* factory() const noexcept { return factory_; }
     PreviewProxyService& proxies() noexcept { return proxies_; }
+    const PreviewProxyService& proxies() const noexcept { return proxies_; }
 
     /// Keeps preview requests on originals while exact captures wait outside
     /// the render lock. Counted because several captures may overlap/cancel.

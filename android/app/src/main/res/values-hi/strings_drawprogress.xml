@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.2.5: ड्रॉइंग प्रगति (इफ़ेक्ट का नाम हर भाषा में अंग्रेज़ी में; अनुवादित नाम खोज में काम आता है)। -->
+    <string name="fx_name_drawing_progress">ड्रॉइंग प्रगति</string>
+    <string name="drawing_progress_desc">ड्रॉइंग को स्ट्रोक-दर-स्ट्रोक बनाता है: वेक्टर में हर आउटलाइन अपने ही पाथ पर बढ़ती है, एक के बाद एक या सब साथ, और आउटलाइन बंद होते ही फ़िल आ जाता है। इमेज में यह स्वीप से दिखाता है: हल्के काग़ज़ से पहले गहरी स्याही।</string>
+    <string name="fxl_draw_order">क्रम</string>
+    <string name="fxo_simultaneous">एक साथ</string>
+    <string name="fxl_tip_softness">सिरे की कोमलता</string>
+    <string name="drawprog_reverse">उल्टी दिशा</string>
+</resources>

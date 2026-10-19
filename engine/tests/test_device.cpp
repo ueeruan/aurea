@@ -541,7 +541,7 @@ AUREA_TEST(DeviceClass, LowProfileAppliesTheLowPlan) {
     const DeviceCapabilities low = caps_for(low_profile());
     const DevicePolicy p = low.policy();
     // §107: preview 1/4, custo das operações caras pela metade, sombra e
-    // partículas menores, proxy acima de 720p, cache de decode menor, prévias
+    // partículas menores, proxy de 540p acima de 720p, cache de decode menor, prévias
     // de efeito menores.
     AUREA_CHECK_EQ(low.recommended_initial_scale(1920, 1080), PreviewScale::Quarter);
     AUREA_CHECK_EQ(low.recommended_initial_scale(1080, 1920), PreviewScale::Quarter);
@@ -549,7 +549,8 @@ AUREA_TEST(DeviceClass, LowProfileAppliesTheLowPlan) {
     AUREA_CHECK_NEAR(p.heavyScale, 0.5f, 1e-6f);
     AUREA_CHECK(p.shadowMapSize < device_policy(DeviceTier::Mid, ThermalTier::Normal).shadowMapSize);
     AUREA_CHECK(p.particleScale < 1.0f);
-    AUREA_CHECK_EQ(p.preferProxyAboveShortSide, 720u);
+    AUREA_CHECK_EQ(p.proxyShortSide, 540u);
+    AUREA_CHECK_EQ(p.proxyHeavyPixels, 1280ull * 720ull);
     AUREA_CHECK(p.decodedFramesBudgetPercent < 24u);
     AUREA_CHECK(p.effectPreviewMaxSide < 320u);
     // Export: teto do CODIFICADOR (1920×1088 → 1080p) e o motivo registrado.

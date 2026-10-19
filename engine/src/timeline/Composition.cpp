@@ -143,7 +143,9 @@ LayerId Composition::add_layer(LayerKind kind, std::string name) {
     // a sequência ficar lado a lado em vez de virar uma pilha de camadas.
     // Sem modo Edição — ou sem nenhuma linha magnética — cada camada nova abre
     // a linha dela, como sempre foi.
-    if (editMode_ && (kind == LayerKind::Video || kind == LayerKind::Audio || kind == LayerKind::Composition)) {
+    // Foto também é trecho (0.2.5, interface de Edição): entra na sequência como o vídeo.
+    if (editMode_ && (kind == LayerKind::Video || kind == LayerKind::Image || kind == LayerKind::Audio
+                      || kind == LayerKind::Composition)) {
         u32 lastTrack = kInvalidIndex;
         i64 trackEnd = 0;
         layers_.for_each([&](LayerId, const Layer& other) {

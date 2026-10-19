@@ -1465,6 +1465,10 @@ final class AureaModel: ObservableObject {
             deviceReport = engine.deviceReport()
             startStatusTimer()
             observeMemoryWarnings()
+            // "Otimizar vídeos pesados": o modo gravado vale antes do primeiro projeto.
+            ProxyOptimizer.shared.onOptimized = { [weak self] in self?.toast = AureaText.t("proxy_ready") }
+            ProxyOptimizer.shared.onFailed = { [weak self] in self?.toast = AureaText.t("proxy_failed") }
+            ProxyOptimizer.shared.attach(engine)
         } else {
             started = false
             startError = (error as String?).map { AureaEngineText.sentence($0) } ?? AureaText.t("ios_engine_not_started")
@@ -1662,6 +1666,7 @@ final class AureaModel: ObservableObject {
         }
         statusTimer?.invalidate()
         statusTimer = nil
+        ProxyOptimizer.shared.detach()
         followPlayback(false)
         thumbnailTask?.cancel()
         started = false
@@ -1672,6 +1677,7 @@ final class AureaModel: ObservableObject {
             native.suspend()
             native.cancelPreRender()
             captures.sync {}
+            ProxyOptimizer.shared.drain()
             native.stop()
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -1801,6 +1807,10 @@ final class AureaModel: ObservableObject {
         refreshPreviewBufferRanges(revision: status.modelRevision)
         let nextEditMode = engine.timelineEditMode
         if editMode != nextEditMode { editMode = nextEditMode }
+        let nextUiMode = engine.projectUiMode
+        if uiMode != nextUiMode { uiMode = nextUiMode }
+        let nextAnchor = engine.mainTrackAnchor
+        if mainTrackAnchor != nextAnchor { mainTrackAnchor = nextAnchor }
         // Desfazer/refazer, abrir projeto e ripple também mexem nas marcas: a
         // lista local não pode ficar velha (a âncora acendia numa marca extinta).
         refreshMarkers()
@@ -2478,7 +2488,8 @@ final class AureaModel: ObservableObject {
     /// (RGB sRGB) é o fundo com que a composição nasce, fora do histórico;
     /// nil = preto, como sempre (`home/ProjectMenu.kt`).
     @discardableResult
-    func newProject(width: UInt32, height: UInt32, fps: Double, title: String, background: [Float]? = nil) -> Bool {
+    func newProject(width: UInt32, height: UInt32, fps: Double, title: String, background: [Float]? = nil,
+                    uiMode: UInt32 = AureaUiMode.composition) -> Bool {
         guard canChangeProject() else { return false }
         guard started else {
             toast = startError ?? AureaText.t("engine_not_ready")
@@ -2498,6 +2509,8 @@ final class AureaModel: ObservableObject {
             toast = AureaText.t("msg_nao_foi_possivel_criar_o_projeto")
             return false
         }
+        // A interface escolhida na folha entra ANTES do primeiro salvar: o arquivo já nasce nela.
+        if uiMode != AureaUiMode.composition { _ = engine.setProjectUiMode(uiMode) }
         let url = uniqueProjectURL(name)
         // The engine already owns the new document. A failed first save must
         // never leave the previous project's path attached to that document.
@@ -2782,6 +2795,9 @@ final class AureaModel: ObservableObject {
         operationMessage = AureaText.t("ios_importing_media")
         pause()
         let importer = engine
+        // "Camada" da Edição: cada mídia numa linha própria, no cabeçote.
+        let asOverlay = pendingOverlayImport, overlayFrame = status.playhead
+        pendingOverlayImport = false
         let scoped = items.map(\.0).filter { $0.startAccessingSecurityScopedResource() }
         mediaQueue.async { [weak self] in
             defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
@@ -2802,6 +2818,7 @@ final class AureaModel: ObservableObject {
                 guard let self else { return }
                 self.importingMedia = false
                 if !ids.isEmpty {
+                    if asOverlay { self.engine.run { e in ids.forEach { _ = e.moveClipToOverlay($0, atFrame: overlayFrame) } } }
                     self.engine.selectLayers(ids.map { NSNumber(value: $0) })
                     self.selection = Set(ids)
                     self.refreshModel(force: true)
@@ -4442,6 +4459,14 @@ final class AureaModel: ObservableObject {
     @Published private(set) var hudVisible = false
     /// Modo Edição (timeline magnética).
     @Published private(set) var editMode = false
+    /// INTERFACE do projeto (0.2.5): `AureaUiMode.composition` (a principal,
+    /// padrão) ou `.edit` (trilha principal, cortes em sequência). Vem do
+    /// motor: fica gravada no projeto e pode ser trocada a qualquer momento.
+    @Published private(set) var uiMode: UInt32 = AureaUiMode.composition
+    /// O trecho de mídia mais fundo: a linha dele é a trilha principal da Edição (0 = nenhum).
+    @Published private(set) var mainTrackAnchor: Int64 = 0
+    /// A próxima importação de mídia vai para uma linha própria no cabeçote ("Camada" da Edição).
+    var pendingOverlayImport = false
     /// Marcas do projeto (só os quadros; o motor guarda cor e tipo).
     @Published private(set) var markerFrames: [Int64] = []
     struct MarkerEditingFrame: Identifiable {
@@ -4620,6 +4645,43 @@ final class AureaModel: ObservableObject {
         var settings = motionBlurControls
         settings.adaptiveLimit = UInt32(min(256, max(Float(settings.samples), value.rounded())))
         writeMotionBlur(settings)
+    }
+
+    // --- Interface do projeto (0.2.5) ---------------------------------------
+    /// Troca a interface do projeto; a Edição liga o ímã (regra do motor).
+    func setUiMode(_ mode: UInt32, announce: Bool = true) {
+        guard mode != uiMode, engine.setProjectUiMode(mode) else { return }
+        if status.playing != 0 { pause() }
+        clearSelection()
+        refreshModel(force: true)
+        if announce { toast = AureaText.t(mode == AureaUiMode.edit ? "ui_mode_switched_edit" : "ui_mode_switched_composition") }
+    }
+
+    /// Transição num corte da trilha (meio segundo de cada lado; regra do motor, um passo de desfazer).
+    @discardableResult
+    func setCutTransition(_ outgoing: Int64, _ incoming: Int64, type: UInt32) -> Bool {
+        if status.playing != 0 { pause() }
+        let frames = UInt32(max(1, (compositionFps * 0.5).rounded()))
+        var ok = false
+        engine.run { ok = $0.setCutTransition(from: outgoing, to: incoming, type: type, frames: frames) }
+        if ok { refreshModel(force: true) }
+        return ok
+    }
+
+    /// "Para camada" (Edição): o corte vai para uma linha própria acima da trilha principal.
+    func moveClipToOverlay(_ id: Int64) {
+        if status.playing != 0 { pause() }
+        var ok = false
+        engine.run { ok = $0.moveClipToOverlay(id, atFrame: -1) }
+        if ok { refreshModel(force: true) }
+    }
+
+    /// "Para trilha principal" (Edição): o corte entra no fim da trilha principal.
+    func moveClipToMainTrack(_ id: Int64) {
+        if status.playing != 0 { pause() }
+        var ok = false
+        engine.run { ok = $0.moveClipToMainTrack(id) }
+        if ok { refreshModel(force: true) }
     }
 
     // --- Modo Edição ---------------------------------------------------------
@@ -5738,4 +5800,10 @@ extension AureaModel {
 enum DeviceMemoryClass {
     static let lowTotalBytes: UInt64 = 4608 * 1024 * 1024
     static let low: Bool = ProcessInfo.processInfo.physicalMemory < lowTotalBytes
+}
+
+/// Interfaces do projeto (0.2.5). A Composição é a principal e o padrão.
+enum AureaUiMode {
+    static let composition: UInt32 = 0
+    static let edit: UInt32 = 1
 }

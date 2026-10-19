@@ -15,3 +15,10 @@ decodes frames from each resulting MP4 to verify that the files are readable.
 `animated-character.fbx` is the small synthetic skinned mesh produced by
 `write_skinned_fbx()` in `engine/tests/test_scene3d.cpp`: five vertices, two
 animated takes and an embedded 8 × 8 test texture. It contains no user model.
+
+`video-with-tone.mp4` is synthetic too: FFmpeg `testsrc2` at 160 × 90, 30 fps,
+three seconds, H.264 baseline, with a 330 Hz sine tone in AAC 64 kbps.
+`EditModeUiTest.editClipsShowTheAudioWave` imports it to check the audio
+waveform under the video clip in the Editing interface. Command:
+
+    ffmpeg -f lavfi -i "testsrc2=size=160x90:rate=30:duration=3" -f lavfi -i "sine=frequency=330:sample_rate=48000:duration=3,volume=0.6" -c:v libx264 -pix_fmt yuv420p -profile:v baseline -crf 30 -c:a aac -b:a 64k -shortest -movflags +faststart video-with-tone.mp4

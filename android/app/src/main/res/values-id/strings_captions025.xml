@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legendas automáticas 0.2.5: idioma da fala e qualidade do Whisper no aparelho. -->
+<resources>
+    <string name="cap025_lang_auto">Deteksi otomatis</string>
+    <string name="cap025_quality">Kualitas transkripsi</string>
+    <string name="cap025_quality_fast">Cepat</string>
+    <string name="cap025_quality_balanced">Seimbang</string>
+    <string name="cap025_quality_accurate">Akurat</string>
+    <string name="cap025_quality_fast_hint">Model ringan: transkripsi lebih cepat, tetapi lebih sering salah kata.</string>
+    <string name="cap025_quality_balanced_hint">Keseimbangan antara kecepatan dan ketepatan.</string>
+    <string name="cap025_quality_accurate_hint">Model lebih besar: lebih tepat mengenali kata dan nama, tetapi lebih lama.</string>
+    <string name="cap025_quality_unavailable">Memori bebas di perangkat ini tidak cukup untuk kualitas ini sekarang.</string>
+    <string name="cap025_quality_ready">Model sudah diunduh: berfungsi tanpa internet.</string>
+    <string name="cap025_quality_needs_download">Mengunduh %1$d MB saat pertama kali dipakai; setelah itu berfungsi tanpa internet.</string>
+    <string name="cap025_quality_fallback">Memori bebas sedang rendah: memakai kualitas %1$s.</string>
+</resources>

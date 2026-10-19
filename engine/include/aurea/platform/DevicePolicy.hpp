@@ -151,10 +151,13 @@ struct DevicePolicy {
     f32 particleScale = 1.0f;
 
     // --- Mídia ------------------------------------------------------------------
-    /// Fonte com lado menor ACIMA disto prefere proxy no preview (0 = nunca).
-    /// Gancho 8C/8E: o motor ainda não gera proxy de preview (só o de análise
-    /// do rastreio); quem ligar o proxy consulta este limite.
-    u32 preferProxyAboveShortSide = 0;
+    /// Lado menor do proxy de edição (PreviewProxy.hpp): 720, 540 no LOW.
+    /// QUANDO gerar não depende da classe — é o custo de decode da fonte
+    /// (proxy_wanted): um aparelho de topo também engasga com 4K60 HEVC.
+    u32 proxyShortSide = 720;
+    /// Área acima da qual o Automático já trata a fonte como pesada: 1080p em
+    /// toda classe; no LOW, 720p (o 1080p comum já engasga nesses aparelhos).
+    u64 proxyHeavyPixels = 1920ull * 1080ull;
     /// Fatia do orçamento de memória para quadros decodificados (%).
     /// Hoje: Engine::apply_memory_budgets (MemoryClass::DecodedFrames).
     u32 decodedFramesBudgetPercent = 24;

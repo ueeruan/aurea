@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Navegador de efeitos 0.2.5: destaques, recentes/favoritos e ladrilhos de categoria. -->
+<resources>
+    <string name="fxui_group_repeat">التكرار</string>
+    <string name="fxui_group_visibility">العتامة والظهور</string>
+    <string name="fx_browser_title">متصفح المؤثرات</string>
+    <string name="fx_browser_featured">مميزة</string>
+    <string name="fx_browser_quick">الأخيرة والمفضلة</string>
+    <string name="fx_browser_recent_empty">تظهر هنا المؤثرات التي تستخدمها.</string>
+    <string name="fx_browser_favorites_empty">اضغط مطولًا على مؤثر لحفظه في المفضلة.</string>
+    <string name="fx_browser_page_recent">عرض الأخيرة</string>
+    <string name="fx_browser_page_favorites">عرض المفضلة</string>
+    <string name="fx_browser_categories">الفئات</string>
+    <string name="fx_browser_prev_group">الفئة السابقة: %1$s</string>
+    <string name="fx_browser_next_group">الفئة التالية: %1$s</string>
+    <string name="fx_browser_heavy">مؤثر ثقيل</string>
+    <string name="fx_browser_open_group">فتح الفئة %1$s</string>
+</resources>

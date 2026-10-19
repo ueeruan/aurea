@@ -244,6 +244,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     val captions by lazy { com.aurea.aurea.captions.CaptionsState(app, engine, viewModelScope) { refreshNow() } }
 
     /**
+     * "Otimizar vídeos pesados" (0.2.5): modo gravado, fila do proxy de edição
+     * e cache (ver `ProxyState`). A decisão e a geração são do motor.
+     */
+    val proxies by lazy {
+        ProxyState(
+            app, engine, viewModelScope,
+            onOptimized = { showToast(appText(R.string.proxy_ready)) },
+            onFailed = { showToast(appText(R.string.proxy_failed)) },
+        )
+    }
+
+    /**
      * Aurea AI (Fase 9.4): geracao remota de video.
      *
      * Nao mexe em timeline nem no motor de render: o unico ponto de contato com
@@ -989,6 +1001,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 // Fechou por crash nativo com vídeo aberto na sessão anterior:
                 // sem zero-copy daqui em diante neste aparelho (qualquer marca).
                 if (ok && ExitDiagnostics.safeVideoMode(app)) engine.useReadableVideoPlanes()
+                // O modo de "Otimizar vídeos pesados" vale antes do primeiro projeto abrir.
+                if (ok) proxies.pushModeToEngine()
                 if (ok) ExitDiagnostics.mark(app, Phase.ENGINE_READY)
                 if (ok) pendingSurface?.let { (s, w, h) -> engine.attachSurface(s, w, h) }
                 pendingSurface = null
@@ -1007,6 +1021,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         effectPreviews = EffectPreviewStore(dirs.cache, installStamp() + "-compare-v3", ::renderEffectPreview,
                             ::renderEffectPreviewSequence)
                         startStatusLoop()
+                        proxies.startTracking()
                     } else {
                         errorMessage = appText(R.string.msg_nao_foi_possivel_iniciar_o_motor) +
                             "\n\n${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE}" +
@@ -1628,6 +1643,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         captionTracks = com.aurea.aurea.captions.parseCaptionTracks(engine.captionTracks())
         refreshMarkers()
         editMode = engine.editMode()
+        uiMode = engine.projectUiMode()
+        mainTrackAnchor = engine.mainTrackAnchor()
         precompDepth = engine.precompDepth()
         run {
             val out = FloatArray(6)
@@ -3847,8 +3864,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** One bounded import job, retaining selection order without parallel decoders. */
-    fun importMediaBatch(uris: List<Uri>) {
+    fun importMediaBatch(uris: List<Uri>, asOverlay: Boolean = false) {
         if (uris.isEmpty() || !acceptsImport()) return
+        val overlayFrame = playhead.toLong()
         val app = getApplication<Application>()
         val requested = uris.distinct()
         val imported = mutableListOf<Long>()
@@ -3885,6 +3903,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
                     }
                 }
+                // "Camada" da Edição: cada mídia numa linha própria, no cabeçote.
+                if (asOverlay) imported.forEach { engine.moveClipToOverlay(it, overlayFrame) }
                 refreshNow()
                 if (imported.isNotEmpty()) {
                     selection = imported.toCollection(LinkedHashSet())
@@ -6182,6 +6202,51 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var editMode by mutableStateOf(false)
         private set
 
+    /**
+     * INTERFACE do projeto (0.2.5): [UI_MODE_COMPOSITION] (a principal, padrão)
+     * ou [UI_MODE_EDIT] (trilha principal, cortes em sequência). Vem do motor:
+     * fica gravada no projeto e pode ser trocada a qualquer momento.
+     */
+    var uiMode by mutableStateOf(UI_MODE_COMPOSITION)
+        private set
+
+    /** O trecho de mídia mais fundo: a linha dele é a trilha principal da Edição (0 = nenhum). */
+    var mainTrackAnchor by mutableStateOf(0L)
+        private set
+
+    /** "Para camada" (Edição): o corte vai para uma linha própria acima da trilha principal. */
+    fun moveClipToOverlay(layer: Long) {
+        if (playing) pause()
+        if (engine.moveClipToOverlay(layer)) refreshNow()
+    }
+
+    /** "Para trilha principal" (Edição): o corte entra no fim da trilha principal. */
+    fun moveClipToMainTrack(layer: Long) {
+        if (playing) pause()
+        if (engine.moveClipToMainTrack(layer)) refreshNow()
+    }
+
+    /** O tipo da transição no corte que entra em [incoming] (0 = nenhuma). */
+    fun cutTransition(incoming: Long): Int = engine.cutTransition(incoming)
+
+    /** Transição num corte da trilha (meio segundo de cada lado; regra do motor, um passo de desfazer). */
+    fun setCutTransition(outgoing: Long, incoming: Long, type: Int): Boolean {
+        if (playing) pause()
+        val frames = ((project.fps.takeIf { it > 0f } ?: 30f) * 0.5f).roundToInt().coerceAtLeast(1)
+        val ok = engine.setCutTransition(outgoing, incoming, type, frames)
+        if (ok) refreshNow()
+        return ok
+    }
+
+    /** Troca a interface do projeto; a Edição liga o ímã (regra do motor). */
+    fun setUiMode(mode: Int, announce: Boolean = true) {
+        if (mode == uiMode || !engine.setProjectUiMode(mode)) return
+        if (playing) pause()
+        clearSelection()
+        refreshNow()
+        if (announce) showToast(appText(if (mode == UI_MODE_EDIT) R.string.ui_mode_switched_edit else R.string.ui_mode_switched_composition))
+    }
+
     fun toggleEditMode() {
         engine.setEditMode(!editMode)
         refreshNow()
@@ -7371,11 +7436,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         newProject(width, height, fps.toDouble(), title, null)
 
     /** fps livre (1–240) e, opcional, o fundo inicial em RGBA sRGB (nulo = preto). */
-    fun newProject(width: Int, height: Int, fps: Double, title: String, background: FloatArray?) {
+    fun newProject(width: Int, height: Int, fps: Double, title: String, background: FloatArray?, uiMode: Int = UI_MODE_COMPOSITION) {
         if (!acceptsProjectChange()) return
         projectGeneration++
         launchProjectWork launch@{
-            val ok = withContext(Dispatchers.Default) { engine.newProject(width, height, fps, title, background) }
+            val ok = withContext(Dispatchers.Default) {
+                // A interface escolhida na folha entra ANTES do primeiro salvar: o arquivo já nasce nela.
+                engine.newProject(width, height, fps, title, background) &&
+                    (uiMode == UI_MODE_COMPOSITION || engine.setProjectUiMode(uiMode))
+            }
             if (!ok) {
                 errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_projeto)
                 return@launch
@@ -8104,3 +8173,8 @@ enum class Text3DPreset(val labelRes: Int) {
     CinematicMetal(R.string.pn_t3d_preset_cinematic);
 
 }
+
+/** Interface de Composição (camadas): a principal e o padrão de todo projeto novo. */
+const val UI_MODE_COMPOSITION = 0
+/** Interface de Edição (trilha principal magnética, cortes em sequência). */
+const val UI_MODE_EDIT = 1

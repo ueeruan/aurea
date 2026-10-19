@@ -1052,18 +1052,21 @@ import UIKit
 
     func testEffectsPanelAddsWithOneTapAndKeepsTheStackAtHand() throws {
         _ = try launch("effects")
-        // Camada sem efeito: o painel abre direto na tela cheia "Adicionar efeito"
-        // (✕ · título · 🔍, destaques, recentes e ladrilhos de categoria).
+        // Camada sem efeito: o painel abre direto no navegador de efeitos
+        // (✕ · título · 🔍, destaques, recentes/favoritos e ladrilhos de categoria).
         let addTab = app.buttons["effects.close"].firstMatch
         XCTAssertTrue(addTab.waitForExistence(timeout: 5))
         let search = app.buttons["effects.search"].firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5)); XCTAssertTrue(search.isHittable)
         XCTAssertGreaterThanOrEqual(search.frame.height, 44)
+        // Destaques e o relógio/estrela de Recentes/Favoritos ficam no topo.
+        XCTAssertTrue(app.buttons["effects.quick.recent"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["effects.quick.favorites"].firstMatch.exists)
         // Os ladrilhos de categoria ficam embaixo dos destaques (grade preguiçosa).
         let home = app.scrollViews["effects.home"].firstMatch
-        let all = app.buttons["effects.category.all"].firstMatch
-        for _ in 0..<6 where !(all.exists && all.isHittable) && home.exists { home.swipeUp() }
-        XCTAssertTrue(all.exists); XCTAssertGreaterThanOrEqual(all.frame.height, 44)
+        let first = app.buttons["effects.category.color_light"].firstMatch
+        for _ in 0..<6 where !(first.exists && first.isHittable) && home.exists { home.swipeUp() }
+        XCTAssertTrue(first.exists); XCTAssertGreaterThanOrEqual(first.frame.height, 44)
 
         // Busca: o campo abre focado acima do teclado; um toque no resultado adiciona.
         search.tap()

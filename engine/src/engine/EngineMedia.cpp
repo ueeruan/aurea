@@ -353,6 +353,9 @@ Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request)
     asset.duration = asset.video.frameCount;
     asset.profile.bitDepth = v.color.bitDepth;
     asset.profile.hdr = v.color.hdr();
+    // Codec e tamanho: a política do proxy de edição pesa HEVC/AV1 e bitrate.
+    asset.profile.codecTag = proxy_codec_tag(v.codec);
+    asset.fileSizeBytes = probe.fileBytes;
     asset.profile.transfer = v.color.transfer == TransferFunction::PQ ? ColorSpace::HDR10
                            : v.color.transfer == TransferFunction::HLG ? ColorSpace::HLG : ColorSpace::Rec709;
     asset.profile.primaries = v.color.primaries == ColorPrimaries::BT2020 ? ColorSpace::Rec2020
@@ -378,6 +381,8 @@ Result<u64> Engine::replace_layer_video(u64 layerId, const VideoImport& request)
     const i64 sourceFrames = static_cast<i64>(std::ceil(static_cast<f64>(v.durationUs) * comp->fps() / 1e6 - 1e-6));
     clamp_to_source(*l, sourceFrames);
     l->cacheKey = 0;
+    // Vídeo pesado: o proxy começa já, em segundo plano.
+    if (const Asset* added = project_->asset(assetId)) (void)media_.proxies().request(*added);
 
     project_->mark_dirty();
     request_render();

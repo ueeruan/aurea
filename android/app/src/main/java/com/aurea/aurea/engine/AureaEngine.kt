@@ -237,6 +237,36 @@ class AureaEngine private constructor() {
     /** "Adreno (TM) 740 · driver 0x…" — o aparelho, não um rótulo genérico. */
     fun deviceSummary(): String = nativeDeviceSummary(nativeHandle) ?: ""
 
+    // --- Proxy de edição ("Otimizar vídeos pesados", 0.2.5) -----------------
+    // Política, fila e cache são do motor (PreviewProxyService). Daqui só o
+    // modo escolhido, o progresso e a limpeza. Par do AureaEngine.mm.
+
+    /** [ProxyMode]: 0 Automático · 1 Sempre · 2 Desligado. */
+    fun setProxyMode(mode: Int) = nativeWork.run(Unit) { nativeSetProxyMode(nativeHandle, mode) }
+    fun proxyMode(): Int = nativeWork.run(0) { nativeProxyMode(nativeHandle) }
+    /** Pedidos desta sessão de projeto. Nulo = motor fora do ar. */
+    fun proxySummary(): ProxySummary? = nativeWork.run<ProxySummary?>(null) {
+        val out = LongArray(ProxySummary.SLOTS)
+        if (nativeProxySummary(nativeHandle, out)) ProxySummary.decode(out) else null
+    }
+    /** Proxy do vídeo da camada [layer]. */
+    fun proxyStatus(layer: Long): ProxyClipStatus =
+        nativeWork.run(ProxyClipStatus.NONE) { ProxyClipStatus.decode(nativeProxyStatus(nativeHandle, layer)) }
+    fun regenerateProxy(layer: Long): Boolean = nativeWork.run(false) { nativeRegenerateProxy(nativeHandle, layer) }
+    fun cancelProxy(layer: Long): Boolean = nativeWork.run(false) { nativeCancelProxy(nativeHandle, layer) }
+    /** Bytes da mídia otimizada (percorre a pasta: chamar fora da main thread). */
+    fun proxyCacheBytes(): Long = nativeWork.run(0L) { nativeProxyCacheBytes(nativeHandle) }
+    /** Apaga a mídia otimizada; devolve os bytes liberados. O export segue no original. */
+    fun clearProxyCache(): Long = nativeWork.run(0L) { nativeClearProxyCache(nativeHandle) }
+    private external fun nativeSetProxyMode(handle: Long, mode: Int)
+    private external fun nativeProxyMode(handle: Long): Int
+    private external fun nativeProxySummary(handle: Long, out: LongArray): Boolean
+    private external fun nativeProxyStatus(handle: Long, layer: Long): Int
+    private external fun nativeRegenerateProxy(handle: Long, layer: Long): Boolean
+    private external fun nativeCancelProxy(handle: Long, layer: Long): Boolean
+    private external fun nativeProxyCacheBytes(handle: Long): Long
+    private external fun nativeClearProxyCache(handle: Long): Long
+
     /** Foto de base das prévias de efeito (RGBA8, alfa reto). */
     fun setEffectPreviewSource(rgba: ByteArray, width: Int, height: Int): Boolean =
         nativeWork.run(false) { nativeSetEffectPreviewSource(nativeHandle, rgba, width, height) }
@@ -970,6 +1000,19 @@ class AureaEngine private constructor() {
     /** Modo Edição (timeline magnética) da composição atual. */
     fun setEditMode(on: Boolean) = nativeSetEditMode(nativeHandle, on)
     fun editMode(): Boolean = nativeEditMode(nativeHandle)
+    /** Interface do projeto (0.2.5): 0 = Composição (padrão), 1 = Edição. Ligar a Edição liga o ímã. */
+    fun setProjectUiMode(mode: Int): Boolean = nativeSetProjectUiMode(nativeHandle, mode)
+    fun projectUiMode(): Int = nativeProjectUiMode(nativeHandle)
+    /** O trecho de mídia mais fundo: a linha dele é a trilha principal da Edição (0 = nenhum). */
+    fun mainTrackAnchor(): Long = nativeMainTrackAnchor(nativeHandle)
+    /** "Para camada": linha própria acima da trilha principal; [atFrame] >= 0 leva ao quadro. Um passo de desfazer. */
+    fun moveClipToOverlay(layer: Long, atFrame: Long = -1): Boolean = nativeMoveClipToOverlay(nativeHandle, layer, atFrame)
+    /** "Para trilha principal": entra no fim dela, magnético. Um passo de desfazer. */
+    fun moveClipToMainTrack(layer: Long): Boolean = nativeMoveClipToMainTrack(nativeHandle, layer)
+    /** Transição num corte: saída de [outgoing] e entrada de [incoming] (0 nenhuma … 5 girar). Um passo de desfazer. */
+    fun setCutTransition(outgoing: Long, incoming: Long, type: Int, frames: Int): Boolean =
+        nativeSetCutTransition(nativeHandle, outgoing, incoming, type, frames)
+    fun cutTransition(incoming: Long): Int = nativeCutTransition(nativeHandle, incoming)
     /** Exclui e fecha só os buracos criados (um passo de desfazer). */
     fun rippleDelete(ids: LongArray): Boolean = nativeRippleDelete(nativeHandle, ids)
     /** Fecha todos os espaços vazios. Devolve os frames removidos. */
@@ -1264,6 +1307,13 @@ class AureaEngine private constructor() {
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
     private external fun nativeMarkBeatLive(handle: Long): Long
     private external fun nativeSetEditMode(handle: Long, on: Boolean)
+    private external fun nativeSetProjectUiMode(handle: Long, mode: Int): Boolean
+    private external fun nativeProjectUiMode(handle: Long): Int
+    private external fun nativeMainTrackAnchor(handle: Long): Long
+    private external fun nativeMoveClipToOverlay(handle: Long, layer: Long, atFrame: Long): Boolean
+    private external fun nativeMoveClipToMainTrack(handle: Long, layer: Long): Boolean
+    private external fun nativeSetCutTransition(handle: Long, outgoing: Long, incoming: Long, type: Int, frames: Int): Boolean
+    private external fun nativeCutTransition(handle: Long, incoming: Long): Int
     private external fun nativeSetMotionBlur(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetLayerAdjustment(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetLayerGuide(handle: Long, layer: Long, on: Boolean): Boolean

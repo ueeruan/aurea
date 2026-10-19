@@ -1,5 +1,9 @@
 # Textos de efeito do lado Kotlin (EffectsHuman, EffectCatalogMeta, telas de efeito).
 # chave<TAB>texto pt-BR. Rotulo curto repetido reusa a chave do catalogo do motor.
+fx_name_raster_extrude	Extrusão 3D
+fx_desc_raster_extrude	Dá profundidade real à silhueta alfa da camada. Use os controles 3D de rotação e câmera.
+fxl_side_color	Cor lateral
+fxl_shading	Sombreamento
 fx_pivo	Pivô
 fx_compensacao	Compensação
 fx_tons_medios	Tons médios

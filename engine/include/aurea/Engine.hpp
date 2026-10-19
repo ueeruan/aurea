@@ -1401,6 +1401,34 @@ public:
     /// já existe não muda — a opção de cada uma manda.
     void set_edit_mode(bool on) noexcept;
     [[nodiscard]] bool edit_mode() noexcept;
+    /// INTERFACE DO PROJETO (0.2.5): 0 = Composição (padrão), 1 = Edição. Fica
+    /// no projeto — cada projeto reabre na interface em que foi deixado — e não
+    /// entra no desfazer (é um modo de tela, não uma edição). Passar para a
+    /// Edição liga o ímã da composição atual e, se nenhuma linha for magnética,
+    /// faz da linha de vídeo/imagem mais funda a TRILHA PRINCIPAL magnética —
+    /// isso sim num passo de desfazer. Voltar à Composição não desliga o ímã:
+    /// a pessoa decide no menu. false = sem projeto ou modo inválido.
+    bool set_project_ui_mode(u32 mode) noexcept;
+    [[nodiscard]] u32 project_ui_mode() noexcept;
+    /// A TRILHA PRINCIPAL da interface de Edição: o trecho de vídeo/imagem/
+    /// composição mais fundo na pilha (id empacotado). A linha dele (`trackId`)
+    /// é a trilha principal; 0 = nenhuma mídia ainda.
+    [[nodiscard]] u64 main_track_anchor() noexcept;
+    /// "Para camada" da Edição: o corte sai da trilha principal para uma linha
+    /// só dele logo ACIMA dela, solto no tempo; o buraco que ficou na trilha
+    /// principal fecha. `atFrame` >= 0 também leva o corte para esse quadro (a
+    /// mídia importada como camada entra no cabeçote). Um passo de desfazer.
+    bool move_clip_to_overlay(u64 layerId, i64 atFrame = -1) noexcept;
+    /// "Para trilha principal": o corte entra no FIM da trilha principal,
+    /// magnético, logo abaixo do trecho mais alto dela. Um passo de desfazer.
+    bool move_clip_to_main_track(u64 layerId) noexcept;
+    /// TRANSIÇÃO NUM CORTE da trilha (o quadradinho entre dois trechos): a saída
+    /// de `outgoing` e a entrada de `incoming` com o mesmo tipo (0 nenhuma, 1
+    /// dissolver, 2 deslizar p/ cima, 3 deslizar da esquerda, 4 zoom, 5 girar) e
+    /// a mesma duração em quadros (cada lado limitado à metade do trecho). Um
+    /// passo de desfazer. O tipo do corte é o da entrada de `incoming`.
+    bool set_cut_transition(u64 outgoing, u64 incoming, u32 type, u32 frames) noexcept;
+    [[nodiscard]] u32 cut_transition(u64 incoming) noexcept;
 
     /// LINHA MAGNÉTICA da camada (um passo de desfazer). Ligada, os cortes
     /// dela se comportam como uma faixa de montagem: aparar e apagar mexem só
@@ -1628,6 +1656,23 @@ public:
     [[nodiscard]] f32 preview_heavy_scale() const noexcept;
     /// Degrau de reduções que o estado térmico impõe (0 normal, 1 quente, 2 crítico).
     [[nodiscard]] u32 thermal_heavy_level() const noexcept;
+
+    // --- Proxy de edição ("Otimizar vídeos pesados", 0.2.5; EngineProxy.cpp) --
+    /// ProxyMode: 0 Automático, 1 Sempre, 2 Desligado. O app grava a escolha e
+    /// manda na abertura; trocar põe na fila do projeto o que passou a valer.
+    void set_proxy_mode(u32 mode) noexcept;
+    [[nodiscard]] u32 proxy_mode() const noexcept;
+    /// Proxy do vídeo da camada (estado e progresso). Sem vídeo: None.
+    [[nodiscard]] ProxyStatus proxy_status(u64 layerId) noexcept;
+    /// Pedidos desta sessão de projeto: o selo "Otimizando 42%".
+    [[nodiscard]] ProxySummary proxy_summary() noexcept;
+    /// Gera de novo (descarta o arquivo) / para de otimizar o vídeo da camada.
+    bool regenerate_proxy(u64 layerId) noexcept;
+    bool cancel_proxy(u64 layerId) noexcept;
+    /// Mídia otimizada em disco (bytes) / apaga tudo e devolve os liberados.
+    /// O export continua no original de qualquer jeito.
+    [[nodiscard]] u64 proxy_cache_bytes() noexcept;
+    u64 clear_proxy_cache() noexcept;
 
     /// O frame do playhead em RGBA8 sRGB (alfa reto), com o lado maior em
     /// `maxDim`. Captura exata, com qualidade final. Síncrono (espera a GPU).
@@ -1928,6 +1973,9 @@ private:
     void drain_capture_target_locked() noexcept;
     void retain_failed_export_gpu_locked() noexcept;
     void render_thread_main() noexcept;
+    /// Põe na fila do proxy os vídeos usados pelo projeto (import, abertura,
+    /// troca de modo/escala). Só consulta o disco ou gera em segundo plano.
+    void queue_project_proxies_locked() noexcept;
     void update_perf(const FrameStats& stats, const RenderTimings& timings,
                      const FrameSnapshot& snap, u64 frameStartNs) noexcept;
     [[nodiscard]] RenderSettings current_render_settings() noexcept;
@@ -2158,6 +2206,10 @@ private:
     CompositionId pausedTimelineEventComposition_{};
     void configure_playback_locked(const Composition* comp, i64 rawDuration = -1) noexcept;
     i64 new_layer_end_locked(const Composition* comp, const Layer* self, i64 start) const noexcept;
+    /// Mídia importada que o modo Edição pôs numa LINHA MAGNÉTICA entra encostada
+    /// no fim dela (nunca no cabeçote, que sobreporia os cortes); `length` em
+    /// quadros. Devolve se reposicionou. Chamar com `modelMutex_` travado.
+    bool place_on_magnetic_line_locked(Composition& comp, LayerId id, i64 length) noexcept;
     [[nodiscard]] i64 navigation_end_locked(const Composition* comp) const noexcept;
     u64  nextFrameDueNs_ = 0;                 ///< quando o playhead muda de frame (tocando)
     std::atomic<bool> renderRunning_{false};

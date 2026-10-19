@@ -36,6 +36,8 @@
 #include <initializer_list>
 #include <vector>
 
+namespace aurea::vector { struct DrawProgress; }
+
 namespace aurea {
 
 enum class EffectClass : u8 {
@@ -545,6 +547,20 @@ public:
     [[nodiscard]] virtual bool fold_into_composite(const EffectEval& eval, Mat4& layerMatrix,
                                                    f32& opacity) const noexcept {
         (void)eval; (void)layerMatrix; (void)opacity;
+        return false;
+    }
+
+    /// Efeito que age na GEOMETRIA da camada vetorial, antes de ela virar
+    /// pixel (Progresso do desenho). O renderer só avalia os valores de quem
+    /// diz sim aqui — a pergunta é barata, a avaliação não.
+    [[nodiscard]] virtual bool edits_vector_geometry() const noexcept { return false; }
+    /// O corte dos contornos da camada vetorial no instante: o renderer chama
+    /// ao montar a malha (sob o lock do modelo; `eval.layer` é a camada) e
+    /// desenha só o que `out` disser. Devolve true se escreveu. A cadeia de
+    /// pixels segue o contrato de sempre: o efeito diz em `is_identity` se,
+    /// numa camada vetorial, ainda tem passe a montar.
+    [[nodiscard]] virtual bool vector_progress(const EffectEval& eval, vector::DrawProgress& out) const noexcept {
+        (void)eval; (void)out;
         return false;
     }
 };

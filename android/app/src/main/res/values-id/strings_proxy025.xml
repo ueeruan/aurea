@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Optimalkan video berat (proxy pengeditan), 0.2.5. -->
+<resources>
+    <string name="proxy_settings_title">Optimalkan video berat</string>
+    <string name="proxy_mode_auto">Otomatis</string>
+    <string name="proxy_mode_always">Selalu</string>
+    <string name="proxy_mode_off">Mati</string>
+    <string name="proxy_settings_note">Video 4K, di atas 60 fps, HEVC/10-bit, atau dengan bitrate sangat tinggi mendapat salinan ringan (720p) khusus untuk mengedit, dibuat di latar belakang. Ekspor selalu memakai file asli. Selalu: juga semua yang di atas 720p.</string>
+    <string name="proxy_clear_title">Hapus media teroptimasi (%1$s MB)</string>
+    <string name="proxy_clear_title_unknown">Hapus media teroptimasi</string>
+    <string name="proxy_clear_note">Menghapus salinan ringan untuk mengedit; akan dibuat ulang saat diperlukan</string>
+    <string name="proxy_cleared">Media teroptimasi dihapus: %1$s MB</string>
+    <string name="proxy_optimizing">Mengoptimalkan %1$d%%</string>
+    <string name="proxy_optimizing_description">Mengoptimalkan video berat untuk diedit: %1$d%%</string>
+    <string name="proxy_queued">Video berat menunggu dioptimalkan</string>
+    <string name="proxy_ready">Video dioptimalkan: pengeditan jadi lebih ringan</string>
+    <string name="proxy_failed">Tidak dapat mengoptimalkan video; pratinjau memakai file asli</string>
+</resources>

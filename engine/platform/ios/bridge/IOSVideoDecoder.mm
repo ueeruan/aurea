@@ -785,6 +785,10 @@ public:
             NSArray<AVAssetTrack*>* video = [asset tracksWithMediaType:AVMediaTypeVideo];
             NSArray<AVAssetTrack*>* audio = [asset tracksWithMediaType:AVMediaTypeAudio];
             if (video.count == 0 && audio.count == 0) return false;
+            // Bitrate médio do arquivo para a política do proxy de edição.
+            id bytes = nil;
+            if ([url getResourceValue:&bytes forKey:NSURLFileSizeKey error:nil] && [bytes isKindOfClass:[NSNumber class]])
+                out.fileBytes = [(NSNumber*)bytes unsignedLongLongValue];
 
             if (video.count > 0) {
                 AVAssetTrack* track = video.firstObject;

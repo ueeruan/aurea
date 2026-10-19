@@ -288,6 +288,9 @@ fun EditorScreen(store: EditorStore) {
                     fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale)
                 if (store.sceneEditor) {
                     SceneLayoutWorkspace(store, ui, stage)
+                } else if (store.uiMode == com.aurea.aurea.state.UI_MODE_EDIT) {
+                    // A interface de Edição (0.2.5): trilha principal e Dock em níveis.
+                    EditModeEditor(store, ui, stage)
                 } else if (wide) {
                     WideEditor(store, ui, content, h, sheetWidth, stage)
                 } else {

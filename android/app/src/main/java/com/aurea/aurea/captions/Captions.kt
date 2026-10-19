@@ -1,23 +1,12 @@
 package com.aurea.aurea.captions
 
 import android.content.Context
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
-import android.media.MediaMuxer
-import android.net.Uri
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import com.aurea.aurea.R
-import com.aurea.aurea.ui.i18n.AppText
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.nio.ByteBuffer
 import java.security.KeyStore
 import java.security.MessageDigest
 import javax.crypto.Cipher
@@ -27,17 +16,6 @@ import javax.crypto.spec.GCMParameterSpec
 
 /** Uma palavra falada, em segundos da mídia. */
 data class Word(val text: String, val start: Double, val end: Double)
-
-/**
- * Quem transcreve. O editor não depende de nenhum: sem provedor (sem chave),
- * tudo funciona e as legendas podem vir de um SRT.
- */
-interface SpeechToTextProvider {
-    val name: String
-    /** Transcreve o áudio (bloqueante; chamar fora da thread da UI). */
-    @Throws(IOException::class)
-    fun transcribe(audio: File, language: String?): List<Word>
-}
 
 /**
  * Chave da API guardada SÓ no aparelho: cifrada com AES-GCM por uma chave do
@@ -86,48 +64,6 @@ class KeyVault(context: Context) {
     companion object {
         private const val ALIAS = "aurea_cofre_v1"
         const val GROQ = "groq_api_key"
-    }
-}
-
-/**
- * O som da mídia num .m4a pequeno, sem recodificar (a trilha AAC é copiada
- * como está). Trilha que não cabe em MP4 → erro claro, nada é enviado.
- */
-object AudioExtractor {
-    @Throws(IOException::class)
-    fun extract(context: Context, source: String, out: File): File {
-        val ex = MediaExtractor()
-        try {
-            if (source.startsWith("content://")) ex.setDataSource(context, Uri.parse(source), null) else ex.setDataSource(source)
-            var track = -1
-            for (i in 0 until ex.trackCount) {
-                val mime = ex.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: ""
-                if (mime.startsWith("audio/")) { track = i; break }
-            }
-            if (track < 0) throw IOException(AppText.get(context, R.string.app_media_no_audio))
-            val format = ex.getTrackFormat(track)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-            if (mime != MediaFormat.MIMETYPE_AUDIO_AAC) throw IOException(AppText.get(context, R.string.app_audio_format_unsupported, mime))
-            ex.selectTrack(track)
-            out.parentFile?.mkdirs()
-            val mux = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            val dst = mux.addTrack(format)
-            mux.start()
-            val buf = ByteBuffer.allocate(1 shl 20)
-            val info = MediaCodec.BufferInfo()
-            while (true) {
-                val n = ex.readSampleData(buf, 0)
-                if (n < 0) break
-                info.set(0, n, ex.sampleTime, if (ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
-                mux.writeSampleData(dst, buf, info)
-                ex.advance()
-            }
-            mux.stop()
-            mux.release()
-            return out
-        } finally {
-            ex.release()
-        }
     }
 }
 

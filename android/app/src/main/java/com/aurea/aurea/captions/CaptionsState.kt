@@ -39,11 +39,12 @@ data class CaptionSettings(
 )
 
 /**
- * Estado das legendas da camada escolhida: a transcrição (do cache, da Groq
- * ou de um SRT), a edição palavra a palavra e a geração das camadas.
+ * Estado das legendas da camada escolhida: a transcrição (do cache, do
+ * Whisper no aparelho ou de um SRT), a edição palavra a palavra e a geração
+ * das camadas.
  *
- * O áudio só sai do aparelho em [transcribe], que a UI chama no toque de
- * "Gerar legendas" — e só com a chave configurada.
+ * O áudio nunca sai do aparelho: [transcribe] roda o Whisper local; a rede só
+ * baixa os pesos do modelo na primeira vez de cada qualidade.
  */
 class CaptionsState(
     private val app: Application,
@@ -61,6 +62,7 @@ class CaptionsState(
         track = null
         captionCount = 0
         error = null
+        notice = null
         setWords(emptyList(), null)
     }
     private val vault = KeyVault(app)
@@ -96,7 +98,37 @@ class CaptionsState(
     var settings by mutableStateOf(CaptionSettings())
     var captionCount by mutableStateOf(0)
         private set
-    /** De onde veio a transcrição mostrada ("Groq", "SRT", "cache"). */
+
+    // 0.2.5: idioma da fala e qualidade ficam guardados entre aberturas do
+    // painel (e entre sessões); o padrão é o idioma do app e a melhor qualidade.
+    private val prefs = app.getSharedPreferences("aurea.captions", android.content.Context.MODE_PRIVATE)
+    /** Código do Whisper ("pt", "ja"…); nulo = detectar automaticamente. */
+    var speechLanguage by mutableStateOf(
+        if (prefs.contains(KEY_LANGUAGE)) prefs.getString(KEY_LANGUAGE, "").orEmpty().takeIf { it in SpeechLanguages.codes }
+        else SpeechLanguages.preferred(app),
+    )
+        private set
+    var quality by mutableStateOf(
+        WhisperQuality.entries.getOrNull(prefs.getInt(KEY_QUALITY, -1)) ?: WhisperModels.best(app),
+    )
+        private set
+    /** Aviso sem erro (a qualidade pedida não coube na memória livre e outra foi usada). */
+    var notice by mutableStateOf<String?>(null)
+        private set
+
+    fun chooseLanguage(code: String?) {
+        speechLanguage = code?.takeIf { it in SpeechLanguages.codes }
+        prefs.edit().putString(KEY_LANGUAGE, speechLanguage.orEmpty()).apply()
+    }
+    fun chooseQuality(value: WhisperQuality) {
+        quality = value
+        notice = null
+        prefs.edit().putInt(KEY_QUALITY, value.ordinal).apply()
+    }
+    fun qualityFits(value: WhisperQuality) = WhisperModels.fits(app, value)
+    fun qualityDownloaded(value: WhisperQuality) = WhisperModels.downloaded(app, value)
+
+    /** De onde veio a transcrição mostrada ("Whisper", "SRT", "cache"). */
     var source by mutableStateOf<String?>(null)
         private set
 
@@ -184,17 +216,21 @@ class CaptionsState(
         transcription?.cancel()
         engine.captionProgress(true)
     }
-    fun transcribe(language: String?, thenGenerate: Boolean = true, translateEnglish: Boolean = false) {
+    fun transcribe(language: String? = speechLanguage, thenGenerate: Boolean = true, translateEnglish: Boolean = false) {
         if (busy != null) return
         val id = layer ?: return
         if (engine.layerMediaPath(id) == null) { error = AppText.get(app, R.string.app_caption_no_audio_layer); return }
         val request = generation
+        // A memória livre muda: a qualidade pedida cai para a melhor que cabe agora.
+        val wanted = quality
+        val chosen = WhisperModels.usable(app, wanted)
+        notice = if (chosen != wanted) AppText.get(app, R.string.cap025_quality_fallback, AppText.get(app, chosen.label)) else null
         busy = AppText.get(app, R.string.app_caption_preparing_whisper); error = null
         transcription = scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
                     val context = currentCoroutineContext()
-                    val model = WhisperModels.prepare(app) { stage ->
+                    val model = WhisperModels.prepare(app, chosen) { stage ->
                         context.ensureActive()
                         scope.launch(Dispatchers.Main) { if (context.isActive && generation == request) busy = stage }
                     }
@@ -219,7 +255,7 @@ class CaptionsState(
                 else { setWords(result, AppText.get(app, R.string.i18n_caption_source_whisper)); persist(); if (thenGenerate) generate() }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) {
-                if (generation == request) error = AppText.get(app, R.string.app_caption_transcription_failed)
+                if (generation == request) error = (failure as? WhisperModels.Failure)?.message ?: AppText.get(app, R.string.app_caption_transcription_failed)
             } finally {
                 // A new generation owns its own busy state after transcribe hands off.
                 if (generation == request && busy != AppText.get(app, R.string.app_caption_creating)) busy = null
@@ -306,5 +342,10 @@ class CaptionsState(
         engine.removeCaptions(id)
         captionCount = engine.captionCount(id)
         onModelChanged()
+    }
+
+    private companion object {
+        const val KEY_LANGUAGE = "speech_language"
+        const val KEY_QUALITY = "whisper_quality"
     }
 }

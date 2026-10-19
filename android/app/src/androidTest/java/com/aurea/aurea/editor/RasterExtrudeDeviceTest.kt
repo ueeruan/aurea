@@ -88,7 +88,9 @@ class RasterExtrudeDeviceTest {
         commands(engine) { setEffectVector(layer, effect.effectId, 1, 0f, 1f, 0f, 1f); setEffectParam(layer, effect.effectId, 2, 0f) }
         val cap = capture(engine, "cap", directory)
         assertEquals(0, cap[(96 * 256 + 128) * 4 + 3].toInt() and 255)
-        assertTrue((cap[(96 * 256 + 112) * 4 + 3].toInt() and 255) in 126..130)
+        // importImage fits 64x48 to the 256x192 composition. Choose a cap
+        // interior outside the enlarged hole, not its perspective wall.
+        assertTrue((cap[(96 * 256 + 64) * 4 + 3].toInt() and 255) in 126..130)
         val report = File(directory, "result.txt"); report.writeText("Native Vulkan/GLES selected by engine; straight RGBA cap/alpha hole\n")
         for (quality in 0..2) {
             commands(engine) { setRotation(layer, 0f, 60f, 0f); setEffectParam(layer, effect.effectId, 3, quality.toFloat()) }
@@ -102,8 +104,12 @@ class RasterExtrudeDeviceTest {
         val effect = effects(engine, layer).single(); assertEquals(6, effect.paramCount)
         assertFalse(detail(engine, layer).flags and PodLayout.FLAG_THREE_D != 0)
         commands(engine) { setEffectVector(layer, effect.effectId, 1, 0f, 1f, 0f, 1f); setEffectParam(layer, effect.effectId, 5, 32f) }
+        // A native fixture has no presentation loop; this query drains the
+        // accepted command queue before reading the resulting layer flags.
+        params(engine, layer, effect.effectId)
         assertTrue(detail(engine, layer).flags and PodLayout.FLAG_THREE_D != 0)
         commands(engine) { undo() }
+        params(engine, layer, effect.effectId)
         assertFalse(detail(engine, layer).flags and PodLayout.FLAG_THREE_D != 0)
         assertEquals(0f, params(engine, layer, effect.effectId).single { it.index == 5 }.value[0], .0001f)
         commands(engine) { setEffectParam(layer, effect.effectId, 5, 32f); setRotation(layer, 0f, 55f, 0f) }

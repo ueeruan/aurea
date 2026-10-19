@@ -188,6 +188,19 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.transition.luma_dissolve", FxEffectHuman(
         keywords: "luma dissolve dissolveluma dissolver luminancia luminance brilho transicao transition sumir aparecer fade entrada saida gradiente gradient ruido noise queimar burn padrao pattern pixel grao grain blocos blocks hexagonal halftone camuflagem camo chamas flame tinta ink respingos splatter bolinhas polkadot estilhacos shards",
         principal: [0, 3, 1, 10, 2, 8, 9, 5, 12, 13])),
+    // --- 0.2.5: Progresso do desenho — corte exato no vetor, varredura nas imagens.
+    // Mesmos rótulos e principais do Android (EffectsHuman.kt).
+    ("aurea.draw.drawing_progress", FxEffectHuman(
+        name: "fx_name_drawing_progress",
+        keywords: "progresso do desenho drawing progress write on writeon desenhar desenho draw traco traço stroke contorno linha line art aparar trim path vetor vector caneta pen lapis tinta ink nanquim revelar reveal escrita handwriting caligrafia assinatura signature",
+        principal: [0, 1, 2, 3, 4],
+        params: [
+            0: FxParamHuman(label: "fx_progresso", decimals: 0),
+            1: FxParamHuman(label: "fxl_draw_order"),
+            2: FxParamHuman(label: "drawprog_reverse"),
+            3: FxParamHuman(label: "fxl_tip_softness", decimals: 0),
+            4: FxParamHuman(label: "fx_angulo"),
+        ])),
     ("aurea.transform", FxEffectHuman(
         name: "fx_name_transform",
         keywords: "transform mover posicao escala girar rotacao opacidade",
@@ -1677,7 +1690,7 @@ func fxSwipeCommits(dx: CGFloat, width: CGFloat, minimum: CGFloat) -> Bool {
 
 /// Ordem das categorias no navegador; o que o motor inventar entra no fim.
 let fxEffectCategoryOrder = [
-    "Distorcer", "Glitch", "Estilizar", "Cor", "Luz", "Desfoque", "Ruído",
+    "Distorcer", "Glitch", "Estilizar", "Desenho", "Cor", "Luz", "Desfoque", "Ruído",
     "Nitidez", "Tempo", "Transição", "Recorte", "Gerar", "Utilitário",
     "Controles de expressão",
 ]
@@ -1716,6 +1729,8 @@ func fxEffectCategoryLabel(_ category: String) -> String {
     case "keying": return AureaText.t("cat_cutout")
     case "text": return AureaText.t("panel_texto")
     case "transform": return AureaText.t("panel_transformar")
+    // Progresso do desenho (0.2.5): o mesmo "Desenho" da aba de adicionar.
+    case "desenho", "drawing": return AureaText.t("sh_add_tab_draw")
     default: return category
     }
 }
@@ -1732,6 +1747,7 @@ func fxCategoryGlyph(_ category: String) -> Character {
     case "tempo": return CupertinoGlyph.Timer
     case "controles de expressao": return CupertinoGlyph.SliderHorizontal3
     case "audio": return CupertinoGlyph.MusicNote
+    case "desenho", "drawing": return CupertinoGlyph.PencilOutline
     default: return CupertinoGlyph.WandStars
     }
 }
@@ -1914,6 +1930,8 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     // --- 0.1.8 BETA 2 (também em camada de ajuste: vale para o que está abaixo) ---
     put("aurea.light.saber", "saber_desc", FxVisualTargets + [.cena3D], "saber sabre lightsaber neon energia energy brilho glow laser eletrico electric fogo fire plasma световой меч неон नियॉन نيون")
     put("aurea.transition.luma_dissolve", "luma_dissolve_desc", FxVisualTargets + [.cena3D], "luma dissolve dissolveluma dissolver luminancia luminance transicao transition fade disolver растворение विलय تلاشي")
+    // --- 0.2.5: o vetor primeiro (corte exato do traço); nas outras, varredura ---
+    put("aurea.draw.drawing_progress", "drawing_progress_desc", [.vetor, .imagem, .video, .texto, .forma, .preComposicao], "write on progreso del dibujo dibujar trazo прорисовка рисование штрих रेखांकन ड्रॉइंग स्ट्रोक رسم تقدم خط progres gambar goresan menggambar")
     put("aurea.generate.particular", "afx_desc_particular", FxAllTargets, "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh")
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", "fx_desc_ai_depth_map", [.imagem, .video], "profundidade depth mapa ia ai midas distancia perto longe z matte fundo")

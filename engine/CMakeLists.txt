@@ -177,6 +177,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/CCTransitions.cpp
     src/effects/builtin/SaberEffect.cpp
     src/effects/builtin/LumaDissolveEffect.cpp
+    src/effects/builtin/DrawingProgressEffect.cpp
     src/expr/Expression.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp
@@ -206,6 +207,7 @@ set(AUREA_CORE_SOURCES
     src/text/TextTransform.cpp
     src/text/Captions.cpp
     src/engine/EngineCaptions.cpp
+    src/engine/EngineUiMode.cpp
     src/engine/EngineCaptionPresets.cpp
     src/vector/Vector.cpp
     src/vector/Clipper.cpp
@@ -218,6 +220,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineShape3D.cpp
     src/engine/EngineRigPose.cpp
     src/engine/EngineMedia.cpp
+    src/engine/EngineProxy.cpp
     src/engine/EngineLayerAnim.cpp
     src/engine/EngineRoto.cpp
     src/playback/Playback.cpp

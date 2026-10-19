@@ -634,6 +634,8 @@ void register_builtin_effects(EffectRegistry& registry) {
     // Saber (Luz) e Luma Dissolve (Transição) — 0.1.8 BETA 2. No fim.
     builtin::register_saber_effect(registry);
     builtin::register_luma_dissolve_effect(registry);
+    // Progresso do desenho (Desenho) — 0.2.5. No fim.
+    builtin::register_drawing_progress_effect(registry);
 }
 
 } // namespace aurea

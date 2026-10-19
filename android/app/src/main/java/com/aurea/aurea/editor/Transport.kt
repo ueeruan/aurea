@@ -187,28 +187,47 @@ private fun PreviewResolutionButton(store: EditorStore, side: androidx.compose.u
     // (toque longo) é recurso de usuário — também está no menu "Diagnóstico na tela".
     val testeRaw = com.aurea.aurea.BuildConfig.DEBUG
     val chipDescription = stringResource(R.string.editor_resolucao_previa_segure_diagnostico)
+    // "Otimizar vídeos pesados" (0.2.5): enquanto o motor gera a versão leve,
+    // um fio de progresso no chip da prévia — e o estado falado pelo leitor.
+    val proxy = store.proxies.summary
+    val optimizing = proxy.generating > 0
+    val proxyState = when {
+        optimizing -> stringResource(R.string.proxy_optimizing_description, proxy.percent)
+        proxy.busy -> stringResource(R.string.proxy_queued)
+        else -> ""
+    }
     Box(Modifier.width(side).height(ShellDims.Transport)) {
         Box(
             Modifier
                 .fillMaxWidth().height(ShellDims.Transport)
                 .testTag("transport.resolution")
-                .semantics { contentDescription = chipDescription }
+                .semantics {
+                    contentDescription = chipDescription
+                    if (proxyState.isNotEmpty()) stateDescription = proxyState
+                }
                 .tocavel(haptic = true, onLongClick = { store.toggleHud() }) { open = true },
             contentAlignment = Alignment.Center,
         ) {
             Box(
                 Modifier.padding(horizontal = 3.dp).fillMaxWidth().height(26.dp)
+                    .clip(RoundedCornerShape(4.dp))
                     .border(1.dp, AureaColors.Border, RoundedCornerShape(4.dp)),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Text)))
+                if (optimizing) Box(
+                    Modifier.align(Alignment.BottomStart).fillMaxWidth(proxy.progress.coerceIn(0.05f, 1f))
+                        .height(2.dp).background(AureaColors.Accent),
+                )
             }
         }
         if (open) com.aurea.aurea.ui.i18n.LocaleDirection {
             val current = store.preview.scaleLabel
             ShellPopupMenu(
                 items = listOfNotNull(
+                    // Informativo: tocar só fecha o menu.
+                    if (optimizing) PopupItem(stringResource(R.string.proxy_optimizing, proxy.percent), false) {} else null,
                     // Teste de reprodução crua: só depuração. `store.rawPlayback`
                     // ligado (impossível no release) ainda mostra a volta.
                     if (testeRaw || store.rawPlayback) PopupItem(if (store.rawPlayback) stringResource(R.string.edt_back_to_compositor) else "AUREA RAW PLAYBACK TEST", store.rawPlayback) { store.toggleRawPlayback() } else null,

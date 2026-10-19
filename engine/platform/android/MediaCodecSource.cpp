@@ -1351,6 +1351,8 @@ bool MediaCodecFactory::probe(const char* sourcePath, MediaProbe& out) {
     AMediaExtractor* ex = AMediaExtractor_new();
     if (!ex) return false;
     bool ok = false;
+    // Bitrate médio do arquivo para a política do proxy de edição.
+    out.fileBytes = fd.length > 0 ? static_cast<u64>(fd.length) : 0;
     if (AMediaExtractor_setDataSourceFd(ex, fd.fd, fd.offset, fd.length) == AMEDIA_OK) {
         const size_t n = AMediaExtractor_getTrackCount(ex);
         for (size_t i = 0; i < n; ++i) {

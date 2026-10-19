@@ -28,7 +28,7 @@ on:
         default: ''
         type: string
   push:
-    branches: ['codex/native-beta2-ipa']
+    branches: ['codex/native-beta2-ipa', 'claude/release-2194']
     paths: ['engine/**', '.github/workflows/build-ipa.yml']
 concurrency:
   group: native-ipa-${{ github.ref }}-${{ github.sha }}${{ inputs.capture_only && '-capture' || '' }}

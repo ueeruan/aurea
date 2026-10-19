@@ -612,10 +612,22 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     media_.set_factory(config.mediaFactory);
     media_.set_memory(&memory_);
     media_.set_ready_callback(&Engine::on_frame_ready, this);
+    // Proxy de edição (0.2.5): 2 GB no máximo, nunca o último 1 GB livre do
+    // aparelho (PreviewProxyService::make_room).
     media_.proxies().configure(config.mediaFactory, config.exportSinkFactory, config.exportSinkContext,
-        config.cacheDirectory.empty() ? std::string{} : config.cacheDirectory + "/preview-proxies", 512ull << 20,
+        config.cacheDirectory.empty() ? std::string{} : config.cacheDirectory + "/preview-proxies", 2048ull << 20,
         [](const std::string& path, void* context) { return static_cast<Engine*>(context)->resolve_asset_path(path); }, this);
-    media_.proxies().set_policy(caps_.policy().preferProxyAboveShortSide, caps_.policy().backgroundPauseMs);
+    {
+        ProxyThresholds proxyThresholds;
+        proxyThresholds.heavyPixels = caps_.policy().proxyHeavyPixels;
+        media_.proxies().set_thresholds(proxyThresholds);
+    }
+    // Pronto → redesenha já (mesmo parado): o quadro seguinte abre o proxy, e
+    // o play e o arrasto seguintes já decodificam a versão leve.
+    media_.proxies().set_ready_callback([](void* self) { static_cast<Engine*>(self)->request_render(); }, this);
+    media_.proxies().set_reduced_preview(config.initialPreviewScale == PreviewScale::Half
+        || config.initialPreviewScale == PreviewScale::Quarter || config.initialPreviewScale == PreviewScale::Eighth);
+    media_.proxies().set_policy(caps_.policy().proxyShortSide, caps_.policy().backgroundPauseMs);
     media_.proxies().set_pause_reason(PreviewProxyService::Thermal, caps_.thermal().severe());
     // Som: cache de blocos na verba de áudio; com saída, o áudio passa a ser o
     // relógio mestre do playback.
@@ -2011,6 +2023,8 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
     lastLoadMissing_.store(missingTotal, std::memory_order_relaxed);
     lastLoadNotice_.store(notice, std::memory_order_relaxed);
     set_last_error(OkStatus, nullptr);
+    // Proxies de outra sessão voltam do disco; os que faltam são gerados.
+    queue_project_proxies_locked();
     request_render();
     return OkStatus;
 }
@@ -2192,6 +2206,9 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     asset.duration = asset.video.frameCount;
     asset.profile.bitDepth = v.color.bitDepth;
     asset.profile.hdr = v.color.hdr();
+    // Codec e tamanho: a política do proxy de edição pesa HEVC/AV1 e bitrate.
+    asset.profile.codecTag = proxy_codec_tag(v.codec);
+    asset.fileSizeBytes = probe.fileBytes;
     asset.profile.transfer = v.color.transfer == TransferFunction::PQ ? ColorSpace::HDR10
                            : v.color.transfer == TransferFunction::HLG ? ColorSpace::HLG : ColorSpace::Rec709;
     asset.profile.primaries = v.color.primaries == ColorPrimaries::BT2020 ? ColorSpace::Rec2020
@@ -2207,6 +2224,8 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
         asset.audio.channels = 0;
     }
     const AssetId assetId = project_->add_asset(std::move(asset));
+    // Vídeo pesado: o proxy começa já, em segundo plano (um por vez, pausa no play).
+    if (const Asset* added = project_->asset(assetId)) (void)media_.proxies().request(*added);
 
     // Importing media must preserve the format explicitly chosen for the project.
     // Fit the layer below; only the duration grows to accommodate the clip.
@@ -2222,6 +2241,8 @@ Result<u64> Engine::import_video(const VideoImport& request) noexcept {
     l->source = assetId;
     l->start = FrameIndex{insertionFrame};
     l->end = FrameIndex{endFrame};
+    // Modo Edição: na linha magnética o trecho entra no fim dela, não no cabeçote.
+    if (place_on_magnetic_line_locked(*comp, lid, frames)) l = comp->layer(lid);
     l->transform.anchor = Vec3{static_cast<f32>(dispW) * 0.5f, static_cast<f32>(dispH) * 0.5f, 0.0f};
     l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
     const f32 fit = std::min(static_cast<f32>(comp->width()) / static_cast<f32>(dispW),
@@ -2289,6 +2310,7 @@ Result<u64> Engine::import_audio(const VideoImport& request) noexcept {
     l->source = assetId;
     l->start = FrameIndex{insertionFrame};
     l->end = FrameIndex{endFrame};
+    if (place_on_magnetic_line_locked(*comp, lid, frames)) l = comp->layer(lid);
     configure_playback_locked(comp);
     project_->mark_dirty();
     request_render();
@@ -8777,6 +8799,8 @@ Result<u64> Engine::import_image(const u8* rgba, u32 width, u32 height, const ch
     l->start = FrameIndex{std::max<i64>(0, playback_.current().value)};
     l->end = FrameIndex{new_layer_end_locked(comp, l, l->start.value)};
     if (l->end.value > comp->duration().value) comp->set_duration(l->end);
+    // Modo Edição: a foto é um trecho de 3 s no fim da linha magnética (como nos editores de vídeo).
+    if (place_on_magnetic_line_locked(*comp, lid, std::max<i64>(1, std::llround(comp->fps() * 3.0)))) l = comp->layer(lid);
     l->transform.anchor = Vec3{static_cast<f32>(width) * 0.5f, static_cast<f32>(height) * 0.5f, 0.0f};
     l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
     const f32 fit = std::min(static_cast<f32>(comp->width()) / static_cast<f32>(width),
@@ -9872,7 +9896,10 @@ Result<u32> Engine::create_captions(u64 sourceLayer, const std::vector<text::Cap
     const Layer* src = comp->layer(LayerId::unpack(sourceLayer));
     if (!src || (src->kind != LayerKind::Video && src->kind != LayerKind::Audio)) return Status{Errc::NotFound, "camada sem fala"};
     if (!text::default_font()) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
-    const std::vector<text::CaptionGroup> groups = text::group_captions(words, opt);
+    // 0.2.5: pontuação solta grudada, espaços e maiúscula depois de ponto. Os
+    // blocos guardam estas palavras (o texto do bloco e as palavras batem).
+    const std::vector<text::CaptionWord> clean = text::normalize_caption_words(words);
+    const std::vector<text::CaptionGroup> groups = text::group_captions(clean, opt);
     if (groups.empty()) return Status{Errc::InvalidArgument, "nenhuma palavra"};
     history_.before_mutation(*comp, project_->timeline().current(), "gerar legendas");
     bump_model_revision_locked();
@@ -9927,7 +9954,7 @@ Result<u32> Engine::create_captions(u64 sourceLayer, const std::vector<text::Cap
         text::CaptionSegment segment;
         segment.id = ++made; segment.start = a; segment.end = b; segment.text = cg.text;
         for (u32 w = 0; w < cg.count; ++w) {
-            const auto& input = words[cg.first + w];
+            const auto& input = clean[cg.first + w];
             i64 begin = frame_of(input.start), finish = frame_of(input.end);
             begin = std::clamp(begin < 0 ? b - 1 : begin, a, b - 1);
             finish = std::clamp(finish < 0 ? b : finish, begin + 1, b);
@@ -11091,7 +11118,7 @@ void Engine::set_thermal(u32 level, bool throttling) noexcept {
     // não lê nada disto (§37).
     const DevicePolicy p = caps_.policy();
     thumbs_.set_pacing_ms(p.backgroundPauseMs);
-    media_.proxies().set_policy(p.preferProxyAboveShortSide, p.backgroundPauseMs);
+    media_.proxies().set_policy(p.proxyShortSide, p.backgroundPauseMs);
     media_.proxies().set_pause_reason(PreviewProxyService::Thermal, t.severe());
     if (p.thermal != before) {
         AUREA_LOG_INFO("termico: %s -> %s (preview x%.2f, fundo %u ms)", thermal_tier_name(before),
@@ -12876,6 +12903,7 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
             effect_type_id(effect_keys::kStarField), effect_type_id(effect_keys::kHexTile),
             effect_type_id(effect_keys::kBurnFilm), effect_type_id(effect_keys::kJaws),
             effect_type_id(effect_keys::kSaber), effect_type_id(effect_keys::kLumaDissolve),
+            effect_type_id(effect_keys::kDrawingProgress),
         };
         row.reserved = std::find(std::begin(newlyAdded), std::end(newlyAdded), e.type_id()) != std::end(newlyAdded) ? 1u : 0u;
         (void)put_string(blob, blobCapacity, cursor, e.info().name, row.nameOffset, row.nameLength);
@@ -15892,6 +15920,11 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (Layer* s = comp->layer(second)) {
                 s->start = originalStart; s->end = originalEnd; s->offset = originalOffset;
                 trim_clip_copy(*s, at.value, originalEnd.value, sourceLimit);
+                // Interface de Edição (0.2.5): dividir um corte da LINHA MAGNÉTICA
+                // mantém os dois pedaços na mesma trilha (a trilha principal não
+                // vira duas fileiras). Na Composição o pedaço segue ganhando a linha dele.
+                if (project_->editor_settings().uiMode == 1 && l->magneticTrack && l->trackId != 0)
+                    s->trackId = l->trackId;
             }
             return OkStatus;
         }
@@ -16963,6 +16996,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::ViewportSetPreviewScale: {
             if (cmd.preview_scale.automatic) {
                 adapt().set_user_scale(PreviewScale::Auto);
+                media_.proxies().set_reduced_preview(false);
                 return OkStatus;
             }
             const u32 num = cmd.preview_scale.scaleNumerator;
@@ -16973,6 +17007,9 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             else if (den >= 4) scale = PreviewScale::Quarter;
             else if (den >= 2) scale = PreviewScale::Half;
             adapt().set_user_scale(scale);
+            // Prévia reduzida escolhida: o proxy vale para tudo acima de 720p.
+            media_.proxies().set_reduced_preview(scale != PreviewScale::Full);
+            queue_project_proxies_locked();
             return OkStatus;
         }
 

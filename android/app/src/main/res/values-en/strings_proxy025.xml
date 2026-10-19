@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Optimise heavy videos (editing proxy), 0.2.5. -->
+<resources>
+    <string name="proxy_settings_title">Optimise heavy videos</string>
+    <string name="proxy_mode_auto">Automatic</string>
+    <string name="proxy_mode_always">Always</string>
+    <string name="proxy_mode_off">Off</string>
+    <string name="proxy_settings_note">4K, above 60 fps, HEVC/10-bit or very high bitrate videos get a light copy (720p) just for editing, made in the background. Export always uses the original file. Always: everything above 720p too.</string>
+    <string name="proxy_clear_title">Clear optimised media (%1$s MB)</string>
+    <string name="proxy_clear_title_unknown">Clear optimised media</string>
+    <string name="proxy_clear_note">Deletes the light editing copies; they are rebuilt when needed</string>
+    <string name="proxy_cleared">Optimised media removed: %1$s MB</string>
+    <string name="proxy_optimizing">Optimising %1$d%%</string>
+    <string name="proxy_optimizing_description">Optimising heavy video for editing: %1$d%%</string>
+    <string name="proxy_queued">Heavy video waiting to be optimised</string>
+    <string name="proxy_ready">Video optimised: editing is now lighter</string>
+    <string name="proxy_failed">Could not optimise a video; the preview uses the original</string>
+</resources>

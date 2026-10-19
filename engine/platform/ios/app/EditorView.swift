@@ -38,6 +38,9 @@ struct EditorView: View {
             Group {
                 if model.sceneEditor {
                     SceneLayoutWorkspace(height: geometry.size.height)
+                } else if model.uiMode == AureaUiMode.edit {
+                    // A interface de Edição (0.2.5): trilha principal e Dock em níveis.
+                    EditModeView(height: geometry.size.height)
                 } else if wide {
                     VStack(spacing: 0) {
                         TopBarView().frame(height: EditorLayout.topBar)
@@ -273,7 +276,8 @@ private struct ModelOptimizePrompt: ViewModifier {
 // =============================================================================
 // O palco: o preview do motor e os gestos
 // =============================================================================
-@MainActor private struct PreviewStage: View {
+/// Interno (não privado): a interface de Edição usa o mesmo palco.
+@MainActor struct PreviewStage: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     let height: CGFloat
@@ -684,7 +688,8 @@ private struct ShellStageBanner: View {
 // =============================================================================
 // A folha contextual: a doca de painéis ou o painel aberto
 // =============================================================================
-private struct ContextSheet: View {
+/// Interno (não privado): a interface de Edição usa o mesmo hospedeiro de painéis.
+struct ContextSheet: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var realCamera = RealCameraState.shared
     let metrics: EditorMetrics

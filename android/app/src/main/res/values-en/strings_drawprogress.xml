@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.2.5: Drawing Progress (effect names stay in English in every language; the localized name feeds search). -->
+    <string name="fx_name_drawing_progress">Drawing Progress</string>
+    <string name="drawing_progress_desc">Draws your drawing stroke by stroke: on vectors each outline grows along its own path, one after another or all together, and the fill comes in as the outline closes. For images, it reveals in a sweep, dark ink before light paper.</string>
+    <string name="fxl_draw_order">Order</string>
+    <string name="fxo_simultaneous">Simultaneous</string>
+    <string name="fxl_tip_softness">Tip softness</string>
+    <string name="drawprog_reverse">Reverse</string>
+</resources>

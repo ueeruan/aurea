@@ -265,6 +265,11 @@ namespace effect_keys {
     inline constexpr const char* kSaber                = "aurea.light.saber";
     /// Luma Dissolve (Transição): some/aparece pelo brilho (LumaDissolveEffect.cpp).
     inline constexpr const char* kLumaDissolve         = "aurea.transition.luma_dissolve";
+    // --- 0.2.5 ---
+    /// Progresso do desenho (Desenho): o desenho aparece traço a traço — corte
+    /// exato dos contornos na camada vetorial (Effect::vector_progress), varredura
+    /// nas outras (DrawingProgressEffect.cpp).
+    inline constexpr const char* kDrawingProgress      = "aurea.draw.drawing_progress";
 }
 
 /// Teto do atraso do Detectar movimento (quadros). O renderer decodifica a

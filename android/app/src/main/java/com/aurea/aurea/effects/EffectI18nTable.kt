@@ -7,7 +7,7 @@ import com.aurea.aurea.R
 internal object EffectI18nTable {
     /** (typeId << 16 | índice do parâmetro) → [rótulo, opção 0, opção 1, ...] (recursos). */
     val entries: Map<Long, IntArray> by lazy {
-        HashMap<Long, IntArray>(3786).apply {
+        HashMap<Long, IntArray>(3796).apply {
             part0(this)
             part1(this)
             part2(this)
@@ -1966,6 +1966,11 @@ internal object EffectI18nTable {
         m.put("aurea.transition.luma_dissolve", 11, /* center */ intArrayOf(R.string.fxl_gradient_center))
         m.put("aurea.transition.luma_dissolve", 12, /* pattern_rotation */ intArrayOf(R.string.fxl_pattern_rotation))
         m.put("aurea.transition.luma_dissolve", 13, /* pattern_detail */ intArrayOf(R.string.fxl_pattern_detail))
+        m.put("aurea.draw.drawing_progress", 0, /* progress */ intArrayOf(R.string.fx_progresso))
+        m.put("aurea.draw.drawing_progress", 1, /* order */ intArrayOf(R.string.fxl_draw_order, R.string.fxo_sequential, R.string.fxo_simultaneous))
+        m.put("aurea.draw.drawing_progress", 2, /* reverse */ intArrayOf(R.string.drawprog_reverse))
+        m.put("aurea.draw.drawing_progress", 3, /* softness */ intArrayOf(R.string.fxl_tip_softness))
+        m.put("aurea.draw.drawing_progress", 4, /* angle */ intArrayOf(R.string.fx_angulo))
     }
 
     /** (typeId << 16 | índice do parâmetro) → dica (recurso). */

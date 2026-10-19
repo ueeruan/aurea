@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Оптимизация тяжёлых видео (прокси для монтажа), 0.2.5. -->
+<resources>
+    <string name="proxy_settings_title">Оптимизировать тяжёлые видео</string>
+    <string name="proxy_mode_auto">Автоматически</string>
+    <string name="proxy_mode_always">Всегда</string>
+    <string name="proxy_mode_off">Выключено</string>
+    <string name="proxy_settings_note">Видео 4K, выше 60 кадр/с, HEVC/10 бит или с очень высоким битрейтом получают лёгкую копию (720p) только для монтажа, она создаётся в фоне. Экспорт всегда использует исходный файл. «Всегда»: также всё выше 720p.</string>
+    <string name="proxy_clear_title">Очистить оптимизированные медиа (%1$s МБ)</string>
+    <string name="proxy_clear_title_unknown">Очистить оптимизированные медиа</string>
+    <string name="proxy_clear_note">Удаляет лёгкие копии для монтажа; при необходимости они создаются заново</string>
+    <string name="proxy_cleared">Оптимизированные медиа удалены: %1$s МБ</string>
+    <string name="proxy_optimizing">Оптимизация %1$d%%</string>
+    <string name="proxy_optimizing_description">Оптимизация тяжёлого видео для монтажа: %1$d%%</string>
+    <string name="proxy_queued">Тяжёлое видео ждёт оптимизации</string>
+    <string name="proxy_ready">Видео оптимизировано: монтаж стал легче</string>
+    <string name="proxy_failed">Не удалось оптимизировать видео; в превью используется оригинал</string>
+</resources>

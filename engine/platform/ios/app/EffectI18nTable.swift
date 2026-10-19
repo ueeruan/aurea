@@ -1910,6 +1910,11 @@ enum EffectI18nTable {
     aurea.transition.luma_dissolve|11|center|fxl_gradient_center|
     aurea.transition.luma_dissolve|12|pattern_rotation|fxl_pattern_rotation|
     aurea.transition.luma_dissolve|13|pattern_detail|fxl_pattern_detail|
+    aurea.draw.drawing_progress|0|progress|fx_progresso|
+    aurea.draw.drawing_progress|1|order|fxl_draw_order|fxo_sequential,fxo_simultaneous
+    aurea.draw.drawing_progress|2|reverse|drawprog_reverse|
+    aurea.draw.drawing_progress|3|softness|fxl_tip_softness|
+    aurea.draw.drawing_progress|4|angle|fx_angulo|
     """
 
     /// "typeId#índice" → dica do parâmetro.

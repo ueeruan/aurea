@@ -2,7 +2,7 @@
 //  Aurea / text / Captions.hpp
 //
 //  Legendas automáticas (Fase 7C). O motor não sabe de onde vêm as palavras:
-//  quem transcreve (Groq Whisper, SRT importado, outro provedor) entrega
+//  quem transcreve (Whisper local, SRT importado, outro provedor) entrega
 //  palavras com tempo, e aqui elas viram camadas de texto — agrupadas ou uma
 //  por palavra, com quebra de linha, área segura, estilos e destaque da
 //  palavra falada (animador de texto, keyframes = dados).
@@ -70,8 +70,32 @@ inline constexpr u32 kCaptionStyleCount = 8;
 /// 0 Clássico, 1 Caixa, 2 Destaque, 3 Neon, 4 Karaokê, 5 Pop.
 [[nodiscard]] const char* caption_style_name(u32 id) noexcept;
 
-/// Agrupa as palavras (limites de palavras, caracteres, linhas e pausas).
+/// Tempo mínimo na tela, duração máxima de um bloco e vão que some (0.2.5).
+inline constexpr f64 kCaptionMinDisplaySec = 0.8;
+inline constexpr f64 kCaptionMaxBlockSec = 4.0;
+inline constexpr f64 kCaptionGapCloseSec = 0.3;
+
+/// Agrupa as palavras. Limites rígidos: palavras, caracteres por linha,
+/// linhas, pausa (`breakOnPause`) e 4 s por bloco. Dentro deles escolhe os
+/// cortes de menor custo na frase inteira: fim de frase, vírgula/oração e
+/// pausa são bons; terminar em artigo/preposição, bloco de uma palavra só e
+/// bloco curto demais custam. Linhas equilibradas; o fim de cada bloco cobre
+/// vãos < 0,3 s e o mínimo de 0,8 s na tela, sem invadir o seguinte.
 [[nodiscard]] std::vector<CaptionGroup> group_captions(const std::vector<CaptionWord>& words, const CaptionOptions& opt);
+
+/// Largura na tela em colunas: ideograma/emoji = 2, marca combinante = 0.
+[[nodiscard]] u32 caption_width(const std::string& s) noexcept;
+/// Junta duas palavras como a legenda mostra: sem espaço entre ideogramas e
+/// kana (chinês/japonês não separam palavras) nem antes de pontuação.
+[[nodiscard]] std::string caption_join(const std::string& left, const std::string& right);
+/// Dois pedaços de escrita sem espaço (ideograma/kana completos dos dois
+/// lados): o Whisper não marca a fronteira com espaço, e cada token vira palavra.
+[[nodiscard]] bool caption_script_boundary(const std::string& left, const std::string& right) noexcept;
+/// Só pontuação de fechamento ("," "?" "。" "»"…): gruda na palavra anterior.
+[[nodiscard]] bool caption_closing_punctuation(const std::string& s) noexcept;
+/// Limpeza antes de agrupar: espaços, pontuação solta grudada na vizinha,
+/// tempos inválidos e maiúscula depois de fim de frase. Idempotente.
+[[nodiscard]] std::vector<CaptionWord> normalize_caption_words(const std::vector<CaptionWord>& words);
 
 /// CAIXA ALTA para exibição (ASCII + latino suplementar, igual ao agrupamento).
 /// Aplicar na renderização deixa a opção "caixa alta" viva: um preset que a

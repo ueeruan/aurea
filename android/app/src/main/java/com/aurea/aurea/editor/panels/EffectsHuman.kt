@@ -217,6 +217,19 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.transition.luma_dissolve", EffectHuman(
         keywords = "luma dissolve dissolveluma dissolver luminancia luminance brilho transicao transition sumir aparecer fade entrada saida gradiente gradient ruido noise queimar burn padrao pattern pixel grao grain blocos blocks hexagonal halftone camuflagem camo chamas flame tinta ink respingos splatter bolinhas polkadot estilhacos shards",
         principal = listOf(0, 3, 1, 10, 2, 8, 9, 5, 12, 13)))
+    // --- 0.2.5: Progresso do desenho — corte exato no vetor, varredura nas imagens.
+    // Mesmos rótulos e principais no iOS (EffectsHuman.swift).
+    put("aurea.draw.drawing_progress", EffectHuman(
+        name = R.string.fx_name_drawing_progress,
+        keywords = "progresso do desenho drawing progress write on writeon desenhar desenho draw traco traço stroke contorno linha line art aparar trim path vetor vector caneta pen lapis tinta ink nanquim revelar reveal escrita handwriting caligrafia assinatura signature",
+        principal = listOf(0, 1, 2, 3, 4),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx_progresso, decimals = 0),
+            1 to ParamHuman(label = R.string.fxl_draw_order),
+            2 to ParamHuman(label = R.string.drawprog_reverse),
+            3 to ParamHuman(label = R.string.fxl_tip_softness, decimals = 0),
+            4 to ParamHuman(label = R.string.fx_angulo),
+        )))
     put("aurea.stylize.omino_diffusion", EffectHuman(
         name = R.string.fx_name_omino_diffusion, keywords = "omino omine diffusion difusao glitch paleta faixas",
         principal = listOf(0, 1, 2, 5, 6), params = mapOf(
@@ -1652,6 +1665,7 @@ internal fun categoryGlyph(category: String): Char = when (normalizeSearch(categ
     "tempo" -> CupertinoGlyph.Timer
     "controles de expressao" -> CupertinoGlyph.SliderHorizontal3
     "audio" -> CupertinoGlyph.MusicNote
+    "desenho", "drawing" -> CupertinoGlyph.PencilOutline
     else -> CupertinoGlyph.WandStars
 }
 

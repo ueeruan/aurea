@@ -621,14 +621,15 @@ DevicePolicy device_policy(DeviceTier tier, ThermalTier thermal) noexcept {
     switch (tier) {
         case DeviceTier::Low:
             // Perfil de entrada (§107): preview 1/4, metade do custo das
-            // operações caras, sombra e partículas menores, proxy para tudo
-            // acima de 720p, metade do cache de decode, prévias de
+            // operações caras, sombra e partículas menores, proxy de 540p
+            // para tudo acima de 720p, metade do cache de decode, prévias de
             // efeito com metade do lado, pipeline de export raso (memória).
             p.previewInitialDenominator  = 4;
             p.heavyScale                 = 0.5f;
             p.shadowMapSize              = 1024;
             p.particleScale              = 0.5f;
-            p.preferProxyAboveShortSide  = 720;
+            p.proxyShortSide             = 540;
+            p.proxyHeavyPixels           = 1280ull * 720ull;
             // 12 % (era 16): menos quadros decodificados à frente por fonte.
             // Galaxy A15/A16 de 4 GB morriam por LOW_MEMORY em primeiro plano.
             p.decodedFramesBudgetPercent = 12;
@@ -637,15 +638,15 @@ DevicePolicy device_policy(DeviceTier tier, ThermalTier thermal) noexcept {
             break;
         case DeviceTier::Mid:
             // O plano de sempre (o de antes da Fase 8): nada muda para quem já
-            // funcionava. Proxy só para fonte acima de 1440p (4K).
-            p.preferProxyAboveShortSide  = 1440;
+            // funcionava. Proxy de edição: o padrão (720p, fonte acima de 1080p).
             break;
         case DeviceTier::High:
-            p.preferProxyAboveShortSide  = 2160;   // só acima de 4K
+            // 0.2.5: antes só acima de 4K (e nunca no ULTRA) — um Snapdragon
+            // 8s Gen 4 engasgava editando 4K mesmo em 1/8. O decode da fonte
+            // custa igual em qualquer escala; o proxy vale para toda classe.
             p.effectPreviewMaxSide       = 512;
             break;
         case DeviceTier::Ultra:
-            p.preferProxyAboveShortSide  = 0;      // nunca
             p.effectPreviewMaxSide       = 512;
             p.exportPipelineDepth        = 4;
             break;
@@ -741,7 +742,7 @@ void write_device_report(const DeviceCapabilities& caps, i64 out[kDeviceReportSl
     out[27] = base.decodedFramesBudgetPercent;
     out[28] = static_cast<i64>(pol.thermal);
     out[29] = base.shadowMapSize;
-    out[30] = base.preferProxyAboveShortSide;
+    out[30] = base.proxyShortSide;
     out[31] = caps.cpu().maxFrequencyKhz / 1000;
 }
 

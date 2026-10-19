@@ -111,6 +111,11 @@ struct EditorSettings {
     bool showGrid = false;
     u32  selectedLayerCount = 0;
     std::vector<u64> selectedLayers;   ///< handles empacotados
+    /// INTERFACE do projeto (0.2.5): 0 = Composição (camadas empilhadas, a
+    /// principal e o padrão), 1 = Edição (trilha principal magnética, à moda
+    /// dos editores de vídeo). Gravada no fim da seção do projeto: arquivo
+    /// antigo, sem o byte, abre em Composição.
+    u8   uiMode = 0;
 };
 
 struct ProjectMetadata {

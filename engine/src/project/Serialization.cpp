@@ -1783,6 +1783,9 @@ std::vector<u8> build_project_section(const Project& p) {
     w.boolv(ed.showGrid);
     w.u32v(static_cast<u32>(ed.selectedLayers.size()));
     for (u64 id : ed.selectedLayers) w.u64v(id);
+    // 0.2.5: a interface do projeto vai no FIM — quem lê um arquivo antigo
+    // não acha o byte e fica na Composição; versão antiga ignora o que sobra.
+    w.u8v(ed.uiMode);
 
     return std::vector<u8>(w.bytes().begin(), w.bytes().end());
 }
@@ -1952,6 +1955,12 @@ void apply_project_section(const u8* data, usize size, Project& p) {
         if (n <= 4096u) {
             for (u32 i = 0; i < n && r.good(); ++i) ed.selectedLayers.push_back(r.u64v());
         }
+    }
+    // Interface do projeto (0.2.5): ausente = Composição; valor desconhecido também.
+    ed.uiMode = 0;
+    if (r.good() && r.remaining() >= 1) {
+        const u8 mode = r.u8v();
+        ed.uiMode = mode <= 1 ? mode : 0;
     }
 }
 

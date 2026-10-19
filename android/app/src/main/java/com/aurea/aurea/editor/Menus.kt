@@ -547,6 +547,13 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         MenuItemRow(ShellGlyph.ScissorsAlt, stringResource(R.string.editor_remover_espacos_vazios), act { store.removeGaps() })
 
         MenuSection(stringResource(R.string.editor_projeto_cbe9))
+        // Interface do projeto (0.2.5): a Composição é esta; a Edição é a de montagem.
+        MenuItemRow(
+            CupertinoGlyph.RectangleStack,
+            stringResource(R.string.ui_mode_switch_to_edit),
+            act { store.setUiMode(com.aurea.aurea.state.UI_MODE_EDIT) },
+            detail = stringResource(R.string.ui_mode_edit_hint),
+        )
         MenuItemRow(
             ShellGlyph.ScissorsAlt,
             stringResource(R.string.editor_aparar_projeto_cabecote),

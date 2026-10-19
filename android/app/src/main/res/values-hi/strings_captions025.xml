@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legendas automáticas 0.2.5: idioma da fala e qualidade do Whisper no aparelho. -->
+<resources>
+    <string name="cap025_lang_auto">अपने आप पहचानें</string>
+    <string name="cap025_quality">ट्रांसक्रिप्शन की गुणवत्ता</string>
+    <string name="cap025_quality_fast">तेज़</string>
+    <string name="cap025_quality_balanced">संतुलित</string>
+    <string name="cap025_quality_accurate">सटीक</string>
+    <string name="cap025_quality_fast_hint">हल्का मॉडल: तेज़ी से लिखता है, लेकिन ज़्यादा शब्दों में गलती करता है।</string>
+    <string name="cap025_quality_balanced_hint">गति और सटीकता के बीच संतुलन।</string>
+    <string name="cap025_quality_accurate_hint">बड़ा मॉडल: ज़्यादा शब्द और नाम सही पहचानता है, लेकिन समय ज़्यादा लेता है।</string>
+    <string name="cap025_quality_unavailable">इस डिवाइस में अभी इस गुणवत्ता के लिए पर्याप्त खाली मेमोरी नहीं है।</string>
+    <string name="cap025_quality_ready">मॉडल पहले से डाउनलोड है: बिना इंटरनेट के काम करता है।</string>
+    <string name="cap025_quality_needs_download">पहली बार %1$d MB डाउनलोड होता है; उसके बाद बिना इंटरनेट के काम करता है।</string>
+    <string name="cap025_quality_fallback">अभी खाली मेमोरी कम है: %1$s गुणवत्ता का उपयोग हो रहा है।</string>
+</resources>

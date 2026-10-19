@@ -61,9 +61,11 @@ add_executable(aurea_tests
     test_audio_fx.cpp
     test_audio_transport.cpp
     test_captions.cpp
+    test_captions_quality.cpp
     test_cliptime.cpp
     test_beats.cpp
     test_edit.cpp
+    test_ui_mode.cpp
     test_editor_reference.cpp
     test_trackball.cpp
     test_tracking.cpp
@@ -81,6 +83,7 @@ add_executable(aurea_tests
     test_keyframe_shape.cpp
     test_vector.cpp
     test_vector_gpu.cpp
+    test_drawing_progress.cpp
     test_editing_tools.cpp
     test_export.cpp
     test_export_recovery.cpp

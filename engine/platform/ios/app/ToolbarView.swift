@@ -332,6 +332,8 @@ struct TransportView: View {
             .lineLimit(1).minimumScaleFactor(0.7)
             .frame(width: max(1, side - 6), height: 26)
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(AureaColors.border, lineWidth: 1))
+            // "Otimizar vídeos pesados": o fio de progresso da versão leve em geração.
+            .modifier(ProxyChipBar())
             .frame(width: side, height: 48)
             .overlay { GeometryReader { bounds in
                 Color.clear.contentShape(Rectangle())
@@ -339,6 +341,7 @@ struct TransportView: View {
                     .onLongPressGesture(minimumDuration: 0.5) { model.toggleHud() }
             }}
             .accessibilityLabel(AureaText.t("editor_resolucao_previa_segure_diagnostico"))
+            .modifier(ProxyChipAccessibility())
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("transport.resolution")
     }
@@ -711,6 +714,8 @@ private struct ShellMenuRow: View {
     }
     private var resolutionPopup: some View {
         VStack(spacing: 0) {
+            // Informativo ("Otimizando 42%"), só enquanto a versão leve é gerada.
+            ProxyMenuStatus()
             // Teste de reprodução crua (texto fixo, sem tradução): só no build
             // Debug — é o que a CI de gestos usa. Na App Store/Play não aparece.
             #if DEBUG
@@ -914,6 +919,8 @@ private struct ShellMenuRow: View {
         ShellMenuRow(CupertinoGlyph.SuitDiamond, "editor_keyframes_todas_camadas", checked: model.showAllKeyframes, detail: "editor_keyframes_todas_camadas_detalhe") { act { model.showAllKeyframes.toggle() } }
         ShellMenuRow(CupertinoGlyph.Link, "editor_timeline_magnetica_modo_edicao", checked: model.editMode, detail: "editor_aparar_empurra_camadas_seguintes_excluir_fecha") { act { model.toggleEditMode() } }
         ShellMenuRow(ShellGlyph.ScissorsAlt, "editor_remover_espacos_vazios") { act { model.removeGaps() } }
+        // Interface do projeto (0.2.5): a Composição é esta; a Edição é a de montagem.
+        ShellMenuRow(CupertinoGlyph.RectangleStack, "ui_mode_switch_to_edit", detail: "ui_mode_edit_hint") { act { model.setUiMode(AureaUiMode.edit) } }
         ShellMenuSection("editor_marcas_ritmo")
         // Editar a marca do cabeçote (o segurar do antigo botão da marca); tocar a
         // régua em cima de uma marca também abre o editor dela.

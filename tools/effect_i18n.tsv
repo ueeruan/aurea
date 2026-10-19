@@ -2573,3 +2573,10 @@ aurea.transition.luma_dissolve	10	mode	1	fxo_appear
 aurea.transition.luma_dissolve	11	center	-1	fxl_gradient_center
 aurea.transition.luma_dissolve	12	pattern_rotation	-1	fxl_pattern_rotation
 aurea.transition.luma_dissolve	13	pattern_detail	-1	fxl_pattern_detail
+aurea.draw.drawing_progress	0	progress	-1	fx_progresso
+aurea.draw.drawing_progress	1	order	-1	fxl_draw_order
+aurea.draw.drawing_progress	1	order	0	fxo_sequential
+aurea.draw.drawing_progress	1	order	1	fxo_simultaneous
+aurea.draw.drawing_progress	2	reverse	-1	drawprog_reverse
+aurea.draw.drawing_progress	3	softness	-1	fxl_tip_softness
+aurea.draw.drawing_progress	4	angle	-1	fx_angulo

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Navegador de efeitos 0.2.5: destaques, recentes/favoritos e ladrilhos de categoria. -->
+<resources>
+    <string name="fxui_group_repeat">दोहराएँ</string>
+    <string name="fxui_group_visibility">अपारदर्शिता और दृश्यता</string>
+    <string name="fx_browser_title">इफ़ेक्ट ब्राउज़र</string>
+    <string name="fx_browser_featured">चुने हुए</string>
+    <string name="fx_browser_quick">हाल के और पसंदीदा</string>
+    <string name="fx_browser_recent_empty">आप जो इफ़ेक्ट इस्तेमाल करेंगे, वे यहाँ दिखेंगे।</string>
+    <string name="fx_browser_favorites_empty">किसी इफ़ेक्ट को पसंदीदा में रखने के लिए उसे दबाकर रखें।</string>
+    <string name="fx_browser_page_recent">हाल के दिखाएँ</string>
+    <string name="fx_browser_page_favorites">पसंदीदा दिखाएँ</string>
+    <string name="fx_browser_categories">श्रेणियाँ</string>
+    <string name="fx_browser_prev_group">पिछली श्रेणी: %1$s</string>
+    <string name="fx_browser_next_group">अगली श्रेणी: %1$s</string>
+    <string name="fx_browser_heavy">भारी इफ़ेक्ट</string>
+    <string name="fx_browser_open_group">श्रेणी %1$s खोलें</string>
+</resources>

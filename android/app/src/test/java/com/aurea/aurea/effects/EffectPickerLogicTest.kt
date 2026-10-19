@@ -66,6 +66,19 @@ class EffectPickerLogicTest {
     }
 
     @Test
+    fun rasterExtrusionUsesThe3dGroupAndOnlyOffersRasterLayers() {
+        val extrusion = fx("aurea.generate.raster_extrude", "Extrusão 3D", "Gerar")
+        assertEquals(EffectGroup.ThreeD, effectGroupOf(extrusion))
+        val choices = listOf(glow, extrusion)
+        for (kind in listOf(1, 2, 4, 5, 12)) {
+            assertEquals(choices, pickableEffects(choices, layerHasAudio = false, layerKind = kind))
+        }
+        for (kind in listOf(0, 3, 6, 7, 8, 9, 10, 11)) {
+            assertEquals(listOf(glow), pickableEffects(choices, layerHasAudio = true, layerKind = kind))
+        }
+    }
+
+    @Test
     fun recentsKeepUseOrderAndDropWhatIsNotOffered() {
         val recents = listOf(glow.typeId, 12345, gaussian.typeId, glow.typeId, reverb.typeId)
         val silent = pickableEffects(catalog, layerHasAudio = false)
@@ -230,6 +243,40 @@ class EffectPickerLogicTest {
     fun featuredFollowsTheCuratedOrderAndOnlyWhatExists() {
         val deep = fx("aurea.light.deep_glow", "Deep Glow", "Luz")
         val captions = toolCatalogEntry(EffectTool.Captions, "Legendas")
-        assertEquals(listOf(captions, deep, vhs), featuredEntries(listOf(gaussian, vhs, deep, captions)))
+        assertEquals(listOf(deep, vhs, captions), featuredEntries(listOf(gaussian, vhs, deep, captions)))
+    }
+
+    @Test
+    fun featuredAppendsNewEffectsOnceAfterTheCuratedOnes() {
+        val chroma = fx("aurea.key.chroma", "Chroma key", "Recorte")
+        val fresh = EffectCatalogEntry(typeId = effectTypeId("aurea.stylize.novo"), effectClass = 0, paramCount = 0,
+            name = "Novo", category = "Estilizar", flags = 1)
+        assertEquals(listOf(chroma, fresh), featuredEntries(listOf(fresh, gaussian, chroma)))
+    }
+
+    @Test
+    fun newGroupsTakeRepeatAndVisibilityEffects() {
+        assertEquals(EffectGroup.Repeat, effectGroupOf(fx("aurea.stylize.motion_tile", "Motion Tile", "Estilizar")))
+        assertEquals(EffectGroup.Visibility, effectGroupOf(fx("aurea.transition.linear_wipe", "Limpar linear", "Transição")))
+        assertEquals(EffectGroup.DrawEdge, effectGroupOf(fx("aurea.draw.drawing_progress", "Progresso do desenho", "Desenho")))
+        assertEquals(EffectGroup.Time, effectGroupOf(fx("aurea.time.echo", "Eco", "Tempo")))
+    }
+
+    @Test
+    fun adjacentGroupsStopAtTheEnds() {
+        val order = listOf(EffectGroup.ColorLight, EffectGroup.Blur, EffectGroup.Glitch)
+        assertEquals(null to EffectGroup.Blur, adjacentGroups(order, EffectGroup.ColorLight))
+        assertEquals(EffectGroup.ColorLight to EffectGroup.Glitch, adjacentGroups(order, EffectGroup.Blur))
+        assertEquals(null to null, adjacentGroups(order, EffectGroup.Audio))
+    }
+
+    @Test
+    fun effectOnlyCropTakesTheRightHalfAndFillsTheTile() {
+        // Prévia 320×200: metade "depois" começa em 161; quadrado = 159×159 centrado.
+        val square = effectOnlyCrop(320, 200, 1f)
+        assertEquals(listOf(161, 20, 159, 159), square.toList())
+        // Ladrilho largo: usa a largura toda da metade e corta em altura.
+        val wide = effectOnlyCrop(320, 200, 2f)
+        assertEquals(161, wide[0]); assertEquals(159, wide[2]); assertTrue(wide[3] < 200)
     }
 }

@@ -2175,6 +2175,63 @@ AUREA_JNI jstring AUREA_FN(nativeDeviceSummary)(JNIEnv* env, jclass, jlong handl
     return env->NewStringUTF(s.c_str());
 }
 
+// --- Proxy de edição ("Otimizar vídeos pesados", 0.2.5) ---------------------
+// A política e a fila são do motor (PreviewProxyService); a UI escolhe o modo,
+// lê o progresso e limpa o cache. Mesmo contrato do AureaEngine.mm.
+
+/// 0 Automático · 1 Sempre · 2 Desligado.
+AUREA_JNI void AUREA_FN(nativeSetProxyMode)(JNIEnv*, jclass, jlong handle, jint mode) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.set_proxy_mode(static_cast<u32>(std::max(0, mode)));
+}
+
+AUREA_JNI jint AUREA_FN(nativeProxyMode)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.proxy_mode()) : 0;
+}
+
+/// [0] na fila · [1] gerando · [2] prontos · [3] falharam · [4] progresso do
+/// que está sendo gerado, em milésimos.
+AUREA_JNI jboolean AUREA_FN(nativeProxySummary)(JNIEnv* env, jclass, jlong handle, jlongArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 5) return JNI_FALSE;
+    const ProxySummary s = c->engine.proxy_summary();
+    const jlong v[5] = {static_cast<jlong>(s.queued), static_cast<jlong>(s.generating), static_cast<jlong>(s.ready),
+                        static_cast<jlong>(s.failed), static_cast<jlong>(s.progress * 1000.0f + 0.5f)};
+    env->SetLongArrayRegion(out, 0, 5, v);
+    return JNI_TRUE;
+}
+
+/// Proxy do vídeo da camada: estado (ProxyState) nos 8 bits baixos, progresso
+/// em milésimos acima deles.
+AUREA_JNI jint AUREA_FN(nativeProxyStatus)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    const ProxyStatus s = c->engine.proxy_status(static_cast<u64>(layer));
+    return static_cast<jint>(static_cast<u32>(s.state) | (static_cast<u32>(s.progress * 1000.0f + 0.5f) << 8));
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRegenerateProxy)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.regenerate_proxy(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeCancelProxy)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.cancel_proxy(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// Bytes da mídia otimizada em disco (percorre a pasta: fora da main thread).
+AUREA_JNI jlong AUREA_FN(nativeProxyCacheBytes)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jlong>(c->engine.proxy_cache_bytes()) : 0;
+}
+
+/// Apaga a mídia otimizada; devolve os bytes liberados.
+AUREA_JNI jlong AUREA_FN(nativeClearProxyCache)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jlong>(c->engine.clear_proxy_cache()) : 0;
+}
+
 namespace {
 std::string font_line(const aurea::text::FontEntry& e) {
     return e.family + "\t" + e.style + "\t" + std::to_string(e.weight) + "\t" + (e.italic ? "1" : "0") + "\t" + e.path + "\t" + (e.imported ? "1" : "0");
@@ -3299,6 +3356,43 @@ AUREA_JNI void AUREA_FN(nativeSetEditMode)(JNIEnv*, jclass, jlong handle, jboole
 AUREA_JNI jboolean AUREA_FN(nativeEditMode)(JNIEnv*, jclass, jlong handle) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.edit_mode() ? JNI_TRUE : JNI_FALSE;
+}
+
+// Interface do projeto (0.2.5): 0 = Composição, 1 = Edição.
+AUREA_JNI jboolean AUREA_FN(nativeSetProjectUiMode)(JNIEnv*, jclass, jlong handle, jint mode) {
+    NativeContext* c = ctx_of(handle);
+    return c && mode >= 0 && c->engine.set_project_ui_mode(static_cast<u32>(mode)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeProjectUiMode)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.project_ui_mode()) : 0;
+}
+
+AUREA_JNI jlong AUREA_FN(nativeMainTrackAnchor)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jlong>(c->engine.main_track_anchor()) : 0;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMoveClipToOverlay)(JNIEnv*, jclass, jlong handle, jlong layer, jlong atFrame) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.move_clip_to_overlay(static_cast<u64>(layer), static_cast<i64>(atFrame)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetCutTransition)(JNIEnv*, jclass, jlong handle, jlong outgoing, jlong incoming, jint type, jint frames) {
+    NativeContext* c = ctx_of(handle);
+    return c && type >= 0 && frames >= 0 && c->engine.set_cut_transition(static_cast<u64>(outgoing), static_cast<u64>(incoming),
+        static_cast<u32>(type), static_cast<u32>(frames)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeCutTransition)(JNIEnv*, jclass, jlong handle, jlong incoming) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.cut_transition(static_cast<u64>(incoming))) : 0;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMoveClipToMainTrack)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.move_clip_to_main_track(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeRippleDelete)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Navegador de efeitos 0.2.5: destaques, recentes/favoritos e ladrilhos de categoria. -->
+<resources>
+    <string name="fxui_group_repeat">Повтор</string>
+    <string name="fxui_group_visibility">Непрозрачность и видимость</string>
+    <string name="fx_browser_title">Обзор эффектов</string>
+    <string name="fx_browser_featured">Рекомендуемые</string>
+    <string name="fx_browser_quick">Недавние и избранное</string>
+    <string name="fx_browser_recent_empty">Здесь появятся эффекты, которые вы используете.</string>
+    <string name="fx_browser_favorites_empty">Удерживайте эффект, чтобы добавить его в избранное.</string>
+    <string name="fx_browser_page_recent">Показать недавние</string>
+    <string name="fx_browser_page_favorites">Показать избранное</string>
+    <string name="fx_browser_categories">Категории</string>
+    <string name="fx_browser_prev_group">Предыдущая категория: %1$s</string>
+    <string name="fx_browser_next_group">Следующая категория: %1$s</string>
+    <string name="fx_browser_heavy">Ресурсоёмкий эффект</string>
+    <string name="fx_browser_open_group">Открыть категорию %1$s</string>
+</resources>

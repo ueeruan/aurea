@@ -760,9 +760,56 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
         @"decodeCachePercent": @(report[27]),
         @"thermalTier":        @(report[28]),
         @"shadowSize":         @(report[29]),
-        @"proxyAboveShort":    @(report[30]),
+        @"proxyShortSide":     @(report[30]),
         @"maxFrequencyMhz":    @(report[31]),
     };
+}
+
+// =============================================================================
+// Proxy de edição ("Otimizar vídeos pesados", 0.2.5)
+// =============================================================================
+- (void)setProxyMode:(uint32_t)mode {
+    if (auto* e = self.engine) e->set_proxy_mode(mode);
+}
+
+- (uint32_t)proxyMode {
+    auto* e = self.engine;
+    return e ? e->proxy_mode() : 0;
+}
+
+- (NSDictionary<NSString*, NSNumber*>*)proxySummary {
+    auto* e = self.engine;
+    if (!e) return @{};
+    const aurea::ProxySummary s = e->proxy_summary();
+    return @{@"queued": @(s.queued), @"generating": @(s.generating), @"ready": @(s.ready),
+             @"failed": @(s.failed), @"progress": @(s.progress)};
+}
+
+- (NSDictionary<NSString*, NSNumber*>*)proxyStatus:(long long)layer {
+    auto* e = self.engine;
+    if (!e) return @{@"state": @0, @"progress": @0};
+    const aurea::ProxyStatus s = e->proxy_status(static_cast<u64>(layer));
+    return @{@"state": @(static_cast<uint32_t>(s.state)), @"progress": @(s.progress)};
+}
+
+- (BOOL)regenerateProxy:(long long)layer {
+    auto* e = self.engine;
+    return e && e->regenerate_proxy(static_cast<u64>(layer)) ? YES : NO;
+}
+
+- (BOOL)cancelProxy:(long long)layer {
+    auto* e = self.engine;
+    return e && e->cancel_proxy(static_cast<u64>(layer)) ? YES : NO;
+}
+
+- (uint64_t)proxyCacheBytes {
+    auto* e = self.engine;
+    return e ? e->proxy_cache_bytes() : 0;
+}
+
+- (uint64_t)clearProxyCache {
+    auto* e = self.engine;
+    return e ? e->clear_proxy_cache() : 0;
 }
 
 - (NSDictionary<NSString*, id>*)exportProgress {
@@ -1142,6 +1189,41 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 - (BOOL)timelineEditMode {
     auto* e = self.engine;
     return e && e->edit_mode();
+}
+
+- (BOOL)setProjectUiMode:(uint32_t)mode {
+    auto* e = self.engine;
+    return e && e->set_project_ui_mode(mode);
+}
+
+- (uint32_t)projectUiMode {
+    auto* e = self.engine;
+    return e ? e->project_ui_mode() : 0;
+}
+
+- (long long)mainTrackAnchor {
+    auto* e = self.engine;
+    return e ? static_cast<long long>(e->main_track_anchor()) : 0;
+}
+
+- (BOOL)moveClipToOverlay:(long long)layerId atFrame:(int64_t)frame {
+    auto* e = self.engine;
+    return e && e->move_clip_to_overlay(static_cast<aurea::u64>(layerId), static_cast<aurea::i64>(frame));
+}
+
+- (BOOL)setCutTransitionFrom:(long long)outgoing to:(long long)incoming type:(uint32_t)type frames:(uint32_t)frames {
+    auto* e = self.engine;
+    return e && e->set_cut_transition(static_cast<aurea::u64>(outgoing), static_cast<aurea::u64>(incoming), type, frames);
+}
+
+- (uint32_t)cutTransitionInto:(long long)incoming {
+    auto* e = self.engine;
+    return e ? e->cut_transition(static_cast<aurea::u64>(incoming)) : 0;
+}
+
+- (BOOL)moveClipToMainTrack:(long long)layerId {
+    auto* e = self.engine;
+    return e && e->move_clip_to_main_track(static_cast<aurea::u64>(layerId));
 }
 
 - (BOOL)setLayer:(long long)layerId magneticTrack:(BOOL)on {

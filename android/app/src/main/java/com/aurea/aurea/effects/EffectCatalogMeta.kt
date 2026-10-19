@@ -31,6 +31,7 @@ val EffectCategoryOrder = listOf(
     "Distorcer",
     "Glitch",
     "Estilizar",
+    "Desenho",
     "Cor",
     "Luz",
     "Desfoque",
@@ -381,6 +382,10 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.transition.luma_dissolve", EffectMeta(R.string.luma_dissolve_desc,
         listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D, EffectTarget.Ajuste),
         "luma dissolve dissolveluma dissolver luminancia luminance transicao transition fade disolver растворение विलय تلاشي"))
+    // --- 0.2.5: o vetor primeiro (corte exato do traço); nas outras, varredura ---
+    put("aurea.draw.drawing_progress", EffectMeta(R.string.drawing_progress_desc,
+        listOf(EffectTarget.Vetor, EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Forma, EffectTarget.PreComposicao),
+        "write on progreso del dibujo dibujar trazo прорисовка рисование штрих रेखांकन ड्रॉइंग स्ट्रोक رسم تقدم خط progres gambar goresan menggambar"))
     put("aurea.shape3d.layout", EffectMeta(R.string.fx_desc_shape3d_layout, listOf(EffectTarget.Cena3D),
         "forma 3d shape partes parts girar espalhar explodir atraso aleatorio"))
     // --- Ferramentas que moram no catálogo (EffectTool): a ficha e os sinônimos ---
@@ -489,6 +494,8 @@ fun effectCategoryLabel(category: String): String = when (normalizeSearch(catego
     "keying" -> stringResource(R.string.cat_cutout)
     "text" -> stringResource(R.string.panel_texto)
     "transform" -> stringResource(R.string.panel_transformar)
+    // Progresso do desenho (0.2.5): o mesmo "Desenho" da aba de adicionar.
+    "desenho", "drawing" -> stringResource(R.string.sh_add_tab_draw)
     else -> category
 }
 
@@ -528,6 +535,7 @@ fun categoryGlyph(category: String): Char = when (normalizeSearch(category)) {
     "gerar" -> CupertinoGlyph.WandStars
     "controles de expressao" -> CupertinoGlyph.SliderHorizontal3
     "audio" -> CupertinoGlyph.MusicNote
+    "desenho", "drawing" -> CupertinoGlyph.PencilOutline
     else -> CupertinoGlyph.WandStars
 }
 
@@ -636,6 +644,8 @@ fun effectGroupLabelRes(group: EffectGroup): Int = when (group) {
     EffectGroup.Blur -> R.string.fxui_group_blur
     EffectGroup.Distort -> R.string.fxui_group_distort
     EffectGroup.Motion -> R.string.fxui_group_motion
+    EffectGroup.Repeat -> R.string.fxui_group_repeat
+    EffectGroup.Visibility -> R.string.fxui_group_visibility
     EffectGroup.Stylize -> R.string.fxui_group_stylize
     EffectGroup.Glitch -> R.string.fxui_group_glitch
     EffectGroup.DrawEdge -> R.string.fxui_group_draw_edge
@@ -654,6 +664,8 @@ fun effectGroupGlyph(group: EffectGroup): Char = when (group) {
     EffectGroup.ColorLight -> CupertinoGlyph.Sparkles
     EffectGroup.Blur -> CupertinoGlyph.DropFill
     EffectGroup.Distort, EffectGroup.Motion -> CupertinoGlyph.Move
+    EffectGroup.Repeat -> CupertinoGlyph.SquareGrid2x2
+    EffectGroup.Visibility -> CupertinoGlyph.Sparkles
     EffectGroup.Stylize -> CupertinoGlyph.SquareGrid2x2
     EffectGroup.Glitch -> CupertinoGlyph.Bolt
     EffectGroup.DrawEdge -> CupertinoGlyph.PencilOutline

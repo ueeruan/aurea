@@ -113,24 +113,27 @@ fun toolCatalogEntry(tool: EffectTool, name: String): EffectCatalogEntry =
 // --- Grupos da tela "Adicionar efeito" -----------------------------------------
 
 /**
- * Os GRUPOS (os ladrilhos de categoria da tela "Adicionar efeito"). O motor
+ * Os GRUPOS (os ladrilhos de categoria do navegador de efeitos). O motor
  * publica categorias em português e em inglês, misturadas ("Cor" e "Color",
  * "Distorcer" e "Distort"); a tela junta tudo em grupos de gente, na ordem
- * abaixo. [id] é o testTag/identificador (`effects.category.<id>`), igual no iOS.
+ * abaixo (a ordem dos ladrilhos na tela). [id] é o testTag/identificador
+ * (`effects.category.<id>`), igual no iOS.
  */
 enum class EffectGroup(val id: String) {
     ColorLight("color_light"),
+    DrawEdge("draw_edge"),
     Blur("blur"),
     Distort("distort"),
+    Procedural("procedural"),
+    ThreeD("3d"),
     Motion("motion"),
+    Repeat("repeat"),
+    Matte("matte"),
+    Visibility("visibility"),
     Stylize("stylize"),
     Glitch("glitch"),
-    DrawEdge("draw_edge"),
-    Procedural("procedural"),
-    Matte("matte"),
     Time("time"),
     Text("text"),
-    ThreeD("3d"),
     Audio("audio"),
     Utility("utility"),
     Other("other"),
@@ -139,14 +142,17 @@ enum class EffectGroup(val id: String) {
 /** Categoria do motor (normalizada) → grupo. Categoria nova sem entrada cai em "Outros". */
 private val GroupByCategory: Map<String, EffectGroup> = buildMap {
     listOf("cor", "color", "colour", "luz", "light", "glow e luz").forEach { put(it, EffectGroup.ColorLight) }
+    listOf("desenho", "drawing", "contorno", "edge").forEach { put(it, EffectGroup.DrawEdge) }
     listOf("desfoque", "blur", "nitidez", "sharpen").forEach { put(it, EffectGroup.Blur) }
     listOf("distorcer", "distort", "distorcao").forEach { put(it, EffectGroup.Distort) }
     listOf("transform", "transformar", "movimento", "motion", "rastreio", "tracking").forEach { put(it, EffectGroup.Motion) }
+    listOf("repetir", "repeat").forEach { put(it, EffectGroup.Repeat) }
     listOf("estilizar", "stylize", "stylise").forEach { put(it, EffectGroup.Stylize) }
     put("glitch", EffectGroup.Glitch)
     listOf("gerar", "generate", "pattern", "ruido", "noise").forEach { put(it, EffectGroup.Procedural) }
     listOf("recorte", "keying", "key", "mascara", "matte").forEach { put(it, EffectGroup.Matte) }
-    listOf("tempo", "time", "transicao", "transition").forEach { put(it, EffectGroup.Time) }
+    listOf("transicao", "transition", "opacidade", "opacity", "visibilidade", "visibility").forEach { put(it, EffectGroup.Visibility) }
+    listOf("tempo", "time").forEach { put(it, EffectGroup.Time) }
     listOf("texto", "text").forEach { put(it, EffectGroup.Text) }
     put("3d", EffectGroup.ThreeD)
     listOf("audio", "som", "sound").forEach { put(it, EffectGroup.Audio) }
@@ -159,12 +165,16 @@ private val GroupByKey: Map<Int, EffectGroup> by lazy {
         put(effectTypeId("aurea.generate.raster_extrude"), EffectGroup.ThreeD)
         listOf(
             "aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.drop_shadow",
-            "aurea.stylize.find_edges", "aurea.stylize.bevel_alpha",
+            "aurea.stylize.find_edges", "aurea.stylize.bevel_alpha", "aurea.draw.drawing_progress",
         ).forEach { put(effectTypeId(it), EffectGroup.DrawEdge) }
         listOf(
             "aurea.transform", "aurea.motion.oscillate.cycles", "aurea.motion.swing", "aurea.motion.wiggle",
             "aurea.motion.twitch", "aurea.distort.shake", "aurea.distort.corner_pin", "aurea.transform.parenting_helper",
         ).forEach { put(effectTypeId(it), EffectGroup.Motion) }
+        listOf(
+            "aurea.stylize.repeat_tile", "aurea.stylize.motion_tile", "aurea.stylize.tiler", "aurea.stylize.hex_tile",
+            "aurea.distort.kaleidoscope", "aurea.distort.mirror", "aurea.distort.griddler", "aurea.stylize.ball_grid",
+        ).forEach { put(effectTypeId(it), EffectGroup.Repeat) }
     }
 }
 
@@ -184,11 +194,13 @@ private val GroupBannerKeys: Map<EffectGroup, String> = mapOf(
     EffectGroup.Blur to "aurea.blur.radial",
     EffectGroup.Distort to "aurea.distort.wave_warp",
     EffectGroup.Motion to "aurea.distort.corner_pin",
+    EffectGroup.Repeat to "aurea.stylize.motion_tile",
     EffectGroup.Stylize to "aurea.stylize.halftone",
     EffectGroup.Glitch to "aurea.glitch.glitchify",
     EffectGroup.DrawEdge to "aurea.stylize.find_edges",
     EffectGroup.Procedural to "aurea.generate.fractal_noise",
     EffectGroup.Matte to "aurea.key.chroma",
+    EffectGroup.Visibility to "aurea.transition.radial_wipe",
     EffectGroup.Time to "aurea.time.warp_rgb",
 )
 
@@ -203,14 +215,46 @@ fun groupBannerEntry(group: EffectGroup, entries: List<EffectCatalogEntry>): Eff
 
 /** A faixa de DESTAQUES: estes, na ordem, os que existirem para esta camada. */
 private val FeaturedKeys = listOf(
-    EffectTool.Captions.key, "aurea.light.deep_glow", "aurea.glitch.vhs", "aurea.stylize.halftone",
-    "aurea.distort.wave_warp", "aurea.light.rays", "aurea.color.colorama", "aurea.blur.radial",
-    "aurea.stylize.pixel_sort", "aurea.generate.fractal_noise",
+    "aurea.draw.drawing_progress", "aurea.key.chroma", "aurea.blur.directional", "aurea.light.deep_glow",
+    "aurea.glitch.vhs", EffectTool.Captions.key, "aurea.stylize.halftone", "aurea.distort.wave_warp",
+    "aurea.light.rays", "aurea.color.colorama", "aurea.stylize.pixel_sort", "aurea.generate.fractal_noise",
 )
 
+/** Os destaques fixos e, depois deles, os efeitos marcados como novos pelo motor (sem repetir). */
 fun featuredEntries(sorted: List<EffectCatalogEntry>): List<EffectCatalogEntry> {
     val byId = sorted.associateBy { it.typeId }
-    return FeaturedKeys.mapNotNull { byId[effectTypeId(it)] }
+    val curated = FeaturedKeys.mapNotNull { byId[effectTypeId(it)] }
+    val ids = curated.mapTo(HashSet()) { it.typeId }
+    return curated + sorted.filter { it.isNew && it.typeId !in ids }
+}
+
+/** Quantas miniaturas cabem numa página de Recentes/Favoritos (5 por linha, 2 linhas). */
+const val QUICK_PAGE_SIZE = 10
+
+/** O grupo antes e o depois de [group] na ordem da tela (nulo nas pontas). */
+fun adjacentGroups(groups: List<EffectGroup>, group: EffectGroup): Pair<EffectGroup?, EffectGroup?> {
+    val i = groups.indexOf(group)
+    if (i < 0) return null to null
+    return groups.getOrNull(i - 1) to groups.getOrNull(i + 1)
+}
+
+/**
+ * O recorte da prévia de comparação que mostra SÓ o efeito: a prévia do motor
+ * é "antes | depois" lado a lado (`preview_compare.frag`), então a metade da
+ * direita é o resultado. Devolve (x, y, largura, altura) em pixels da imagem,
+ * cortado para preencher [dstAspect] (largura/altura) sem esticar.
+ */
+fun effectOnlyCrop(width: Int, height: Int, dstAspect: Float): IntArray {
+    val left = width / 2 + 1
+    val halfW = (width - left).coerceAtLeast(1)
+    val srcAspect = halfW.toFloat() / height.coerceAtLeast(1)
+    return if (srcAspect > dstAspect) {
+        val w = (height * dstAspect).toInt().coerceIn(1, halfW)
+        intArrayOf(left + (halfW - w) / 2, 0, w, height)
+    } else {
+        val h = (halfW / dstAspect).toInt().coerceIn(1, height)
+        intArrayOf(left, (height - h) / 2, halfW, h)
+    }
 }
 
 // --- Navegar -----------------------------------------------------------------

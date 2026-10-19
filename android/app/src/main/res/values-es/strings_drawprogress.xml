@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.2.5: Progreso del dibujo (el nombre del efecto se muestra en inglés en todos los idiomas; el traducido entra en la búsqueda). -->
+    <string name="fx_name_drawing_progress">Progreso del dibujo</string>
+    <string name="drawing_progress_desc">Dibuja el dibujo trazo a trazo: en vectores, cada contorno crece por su propio trazado, uno tras otro o todos a la vez, y el relleno entra cuando el contorno se cierra. En imágenes, lo revela con un barrido: la tinta oscura antes que el papel claro.</string>
+    <string name="fxl_draw_order">Orden</string>
+    <string name="fxo_simultaneous">Simultáneo</string>
+    <string name="fxl_tip_softness">Suavidad de la punta</string>
+    <string name="drawprog_reverse">Invertir sentido</string>
+</resources>

@@ -158,6 +158,15 @@ class EditModeUiTest {
         compose.runOnIdle { store.seek(15) }
 
         compose.waitUntil(20000) { hasWave(videoId, 90) && hasWave(audioId, 90) }
+        // O tom do vídeo de teste tem pico perto de -2 dBFS: a onda sai cheia (raiz do pico ≈ 0,88).
+        compose.runOnIdle {
+            val out = ByteBuffer.allocateDirect(256)
+            val got = store.queryWaveform(videoId, 0.0, 1.4, 64, out)
+            assertTrue((0 until got).maxOf { out.get(it).toInt() and 0xFF } > 180)
+            // Na Edição o áudio solto vai para uma linha só dele, embaixo da trilha principal.
+            val main = store.layers.first { it.id == store.mainTrackAnchor }
+            assertTrue(store.layers.first { it.id == audioId }.trackId != main.trackId)
+        }
         compose.waitUntil(5000) {
             compose.onAllNodesWithTag("edit.clip.$videoId.wave").fetchSemanticsNodes().isNotEmpty() &&
                 compose.onAllNodesWithTag("edit.clip.$audioId.wave").fetchSemanticsNodes().isNotEmpty()

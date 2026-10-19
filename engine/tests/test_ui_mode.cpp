@@ -3,8 +3,10 @@
 //  no projeto; ligar a Edição liga o ímã e escolhe a trilha principal.
 // =============================================================================
 #include "TestFramework.hpp"
+#include "SyntheticVideo.hpp"
 
 #include "aurea/Engine.hpp"
+#include "aurea/core/Time.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -12,6 +14,7 @@
 #include <vector>
 
 using namespace aurea;
+using namespace aurea::test;
 
 namespace {
 
@@ -219,4 +222,78 @@ AUREA_TEST(UiMode, SplitKeepsBothPiecesOnTheMainTrackOnlyInEditing) {
     u32 after = 0;
     r.comp()->layers().for_each([&](LayerId, const Layer& l) { if (l.trackId == r.L(*a)->trackId) ++after; });
     AUREA_CHECK_EQ(after, 2u);
+}
+
+// Interface de Edição: áudio importado vai para uma LINHA DE ÁUDIO no cabeçote,
+// embaixo da trilha principal — nunca para a sequência dos vídeos (no 0.2.5 ele
+// entrava encostado no fim da trilha principal). Um segundo áudio no mesmo
+// trecho abre outra linha; um que não se sobrepõe reaproveita a primeira.
+// Na Composição, nada muda.
+AUREA_TEST(UiMode, AudioGoesToAnAudioLineAtThePlayheadOnlyInEditing) {
+    SyntheticConfig cfg;
+    cfg.width = 64; cfg.height = 36; cfg.frameCount = 60;
+    cfg.audioRate = 48000; cfg.audioChannels = 2; cfg.audioFreq = 440.0; cfg.audioSeconds = 2.0;
+    SyntheticFactory f(cfg);
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    ec.mediaFactory = &f;
+    Engine e;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    AUREA_CHECK(e.set_project_ui_mode(1));
+    auto comp = [&] { return e.project()->timeline().composition(e.project()->timeline().current()); };
+    auto seek = [&](i64 frame) {
+        Command c;
+        c.type = CommandType::PlaybackSeek;
+        c.seek.time = tick_at(FrameIndex{frame}, 30.0);
+        AUREA_CHECK(e.apply_command(c).ok());
+    };
+    VideoImport vi;
+    vi.sourcePath = "video.mp4"; vi.displayName = "video";
+    const auto v1 = e.import_video(vi);
+    const auto v2 = e.import_video(vi);
+    AUREA_CHECK(v1.ok() && v2.ok());
+    if (!v1.ok() || !v2.ok()) { e.shutdown(); return; }
+    const Layer* a = comp()->layer(LayerId::unpack(*v1));
+    const Layer* b = comp()->layer(LayerId::unpack(*v2));
+    AUREA_CHECK(a && b && a->trackId == b->trackId && a->end == b->start);
+    const u32 mainTrack = a ? a->trackId : 0;
+    const i64 videoEnd = b ? b->end.value : 0;
+
+    seek(20);
+    VideoImport ai;
+    ai.sourcePath = "musica.m4a"; ai.displayName = "musica";
+    const auto s1 = e.import_audio(ai);
+    AUREA_CHECK(s1.ok());
+    const Layer* m1 = s1.ok() ? comp()->layer(LayerId::unpack(*s1)) : nullptr;
+    AUREA_CHECK(m1 != nullptr);
+    if (!m1) { e.shutdown(); return; }
+    AUREA_CHECK(m1->trackId != mainTrack);
+    AUREA_CHECK(!m1->magneticTrack);
+    AUREA_CHECK_EQ(m1->start.value, 20);
+    // A trilha principal não andou: o áudio não entrou na sequência.
+    AUREA_CHECK_EQ(comp()->layer(LayerId::unpack(*v2))->end.value, videoEnd);
+    std::printf("    musica na linha %u (principal %u), %lld..%lld\n", m1->trackId, mainTrack,
+                static_cast<long long>(m1->start.value), static_cast<long long>(m1->end.value));
+
+    // Outro áudio no mesmo trecho: outra linha de áudio.
+    const auto s2 = e.import_audio(ai);
+    const Layer* m2 = s2.ok() ? comp()->layer(LayerId::unpack(*s2)) : nullptr;
+    AUREA_CHECK(m2 && m2->trackId != mainTrack && m2->trackId != comp()->layer(LayerId::unpack(*s1))->trackId);
+    // Depois do fim do primeiro: volta para a primeira linha de áudio.
+    seek(comp()->layer(LayerId::unpack(*s1))->end.value + 5);
+    const auto s3 = e.import_audio(ai);
+    const Layer* m3 = s3.ok() ? comp()->layer(LayerId::unpack(*s3)) : nullptr;
+    AUREA_CHECK(m3 && m3->trackId == comp()->layer(LayerId::unpack(*s1))->trackId);
+
+    // "Extrair áudio" de um corte da trilha principal: linha de áudio, mesmo trecho.
+    const auto x = e.extract_audio(*v1);
+    AUREA_CHECK(x.ok());
+    const Layer* xa = x.ok() ? comp()->layer(LayerId::unpack(*x)) : nullptr;
+    AUREA_CHECK(xa && xa->trackId != mainTrack && xa->start == comp()->layer(LayerId::unpack(*v1))->start);
+
+    // Composição: o áudio continua como sempre (no cabeçote, linha dele).
+    AUREA_CHECK(e.set_project_ui_mode(0));
+    e.shutdown();
 }

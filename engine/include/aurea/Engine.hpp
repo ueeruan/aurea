@@ -2210,6 +2210,11 @@ private:
     /// no fim dela (nunca no cabeçote, que sobreporia os cortes); `length` em
     /// quadros. Devolve se reposicionou. Chamar com `modelMutex_` travado.
     bool place_on_magnetic_line_locked(Composition& comp, LayerId id, i64 length) noexcept;
+    /// Interface de Edição: o áudio vai para uma LINHA DE ÁUDIO (só áudio, sem
+    /// ímã) no tempo que já tem, embaixo da trilha principal — a primeira linha de
+    /// áudio livre nesse trecho, ou uma nova. Nunca entra na sequência dos vídeos.
+    /// Chamar com `modelMutex_` travado.
+    void place_on_audio_line_locked(Composition& comp, LayerId id) noexcept;
     [[nodiscard]] i64 navigation_end_locked(const Composition* comp) const noexcept;
     u64  nextFrameDueNs_ = 0;                 ///< quando o playhead muda de frame (tocando)
     std::atomic<bool> renderRunning_{false};

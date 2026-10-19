@@ -2310,7 +2310,10 @@ Result<u64> Engine::import_audio(const VideoImport& request) noexcept {
     l->source = assetId;
     l->start = FrameIndex{insertionFrame};
     l->end = FrameIndex{endFrame};
-    if (place_on_magnetic_line_locked(*comp, lid, frames)) l = comp->layer(lid);
+    // Interface de Edição: áudio no cabeçote, numa linha de áudio embaixo da
+    // trilha principal (nunca na sequência dos vídeos). Composição: como sempre.
+    if (project_->editor_settings().uiMode == 1) place_on_audio_line_locked(*comp, lid);
+    else if (place_on_magnetic_line_locked(*comp, lid, frames)) l = comp->layer(lid);
     configure_playback_locked(comp);
     project_->mark_dirty();
     request_render();
@@ -2346,6 +2349,9 @@ Result<u64> Engine::extract_audio(u64 videoLayerId) noexcept {
     l->fadeIn = src.fadeIn;
     l->fadeOut = src.fadeOut;
     l->solo = src.solo;
+    // Interface de Edição: o som extraído vai para a linha de áudio, embaixo do
+    // corte (não fica sobreposto ao vídeo na trilha principal).
+    if (project_->editor_settings().uiMode == 1) place_on_audio_line_locked(*comp, lid);
     if (const Track* vt = src.tracks.find(TrackProperty::AudioVolume)) {
         l->tracks.get_or_create(TrackProperty::AudioVolume) = *vt;
     }

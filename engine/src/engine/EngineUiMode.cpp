@@ -120,6 +120,28 @@ bool Engine::place_on_magnetic_line_locked(Composition& comp, LayerId id, i64 le
     return true;
 }
 
+void Engine::place_on_audio_line_locked(Composition& comp, LayerId id) noexcept {
+    Layer* layer = comp.layer(id);
+    if (!layer) return;
+    const i64 start = layer->start.value, end = layer->end.value;
+    // Linhas que só têm áudio (e quem ocupa o trecho [start, end) nelas).
+    std::vector<u32> audioTracks, busy;
+    u32 maxTrack = 0;
+    comp.layers().for_each([&](LayerId other, const Layer& l) {
+        maxTrack = std::max(maxTrack, l.trackId);
+        if (other == id || l.trackId == 0) return;
+        if (l.kind != LayerKind::Audio) { busy.push_back(l.trackId); return; }
+        if (std::find(audioTracks.begin(), audioTracks.end(), l.trackId) == audioTracks.end()) audioTracks.push_back(l.trackId);
+        if (l.start.value < end && l.end.value > start) busy.push_back(l.trackId);
+    });
+    std::sort(audioTracks.begin(), audioTracks.end());
+    u32 track = 0;
+    for (const u32 t : audioTracks)
+        if (std::find(busy.begin(), busy.end(), t) == busy.end()) { track = t; break; }
+    layer->trackId = track ? track : maxTrack + 1;
+    layer->magneticTrack = false;
+}
+
 bool Engine::set_cut_transition(u64 outgoing, u64 incoming, u32 type, u32 frames) noexcept {
     if (type > 5 || outgoing == incoming) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);

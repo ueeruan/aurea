@@ -39,7 +39,7 @@ function pagina(titulo, corpo, script = '') {
 
 const PRIVACIDADE = pagina('Aurea — Política de Privacidade / Privacy Policy', `
 <h1>Aurea — Política de Privacidade</h1>
-<p class="muted">Aplicativo Aurea (Android: com.aurea.aurea; iOS: com.aurea.aurea). Última atualização: ${ATUALIZADO}.</p>
+<p class="muted">Aplicativo Aurea (Android: com.aurea.editor na Google Play e com.aurea.aurea no APK; iOS: com.aurea.aurea). Última atualização: ${ATUALIZADO}.</p>
 <nav><a href="#pt">Português</a><a href="#en">English</a><a href="/excluir-conta">Excluir conta / Delete account</a></nav>
 
 <section lang="pt-BR" id="pt">

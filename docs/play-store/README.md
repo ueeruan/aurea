@@ -1,6 +1,8 @@
 # Aurea na Google Play — o que está pronto e o que falta fazer
 
-Atualizado em 19/10/2026 (Aurea 0.2.6, versionCode 2194, `applicationId com.aurea.aurea`).
+Atualizado em 19/10/2026 (Aurea 0.2.6, versionCode 2194). Pacote na Play:
+`com.aurea.editor` (fixo: o app do Console foi criado com ele). O APK de sideload
+continua `com.aurea.aurea`.
 
 ## Pronto no código
 
@@ -14,7 +16,8 @@ Atualizado em 19/10/2026 (Aurea 0.2.6, versionCode 2194, `applicationId com.aure
   o app troca de idioma por dentro; sem isso a Play instalaria só o idioma do aparelho.
 - **Build da Play** (`BuildConfig.PLAY_STORE`, automático no `bundleRelease`; para
   um APK de teste: `-PaureaStore=play`): sem a tela que exige abrir o TikTok e o
-  Instagram e sem doação por PIX/PayPal. O APK de sideload não muda.
+  Instagram e sem doação por PIX/PayPal, com o pacote `com.aurea.editor`. O APK de
+  sideload não muda.
 - **Moderação** (políticas de conteúdo do usuário e de IA generativa), no Android:
   denunciar post, comentário, perfil, preset de legenda e vídeo de IA; bloquear
   perfis; conteúdo denunciado por 3 pessoas sai do feed até a revisão; o admin
@@ -95,11 +98,11 @@ com a chave de debug.
 
 ## Atenção: quem usa o APK de sideload
 
-O APK distribuído hoje é assinado com a chave de debug desta máquina; o da Play é
-assinado pelo Google. **Não dá para atualizar de um para o outro**: quem tem o APK
-precisa desinstalar antes de instalar pela Play — e a desinstalação apaga os
-projetos guardados no app. Avise para salvar os projetos antes ("Exportar arquivo do
-projeto", que gera um `.aureaproj`) e importá-los depois.
+O app da Play (`com.aurea.editor`) e o APK (`com.aurea.aurea`) são apps diferentes
+no aparelho: os dois podem ficar instalados juntos, e a Play não atualiza o APK.
+Os projetos não passam sozinhos de um para o outro: para levar um projeto, use
+"Exportar arquivo do projeto" (gera um `.aureaproj`) no APK e importe no app da
+Play. Só desinstale o APK depois de levar os projetos — a desinstalação os apaga.
 
 ## Pendências conhecidas (não bloqueiam o envio)
 

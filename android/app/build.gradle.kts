@@ -79,6 +79,10 @@ if (pedeBundleRelease && releaseComChaveDeDebug && !permitirAssinaturaDeDebug) {
 // enganoso); o APK de sideload continua como sempre.
 val aureaStore = providers.gradleProperty("aureaStore").orNull ?: if (pedeBundleRelease) "play" else "sideload"
 require(aureaStore == "play" || aureaStore == "sideload") { "aureaStore invalido: $aureaStore (play ou sideload)" }
+// O app do Play Console foi criado com com.aurea.editor, e a Play não deixa
+// trocar o pacote depois. O APK de sideload continua com.aurea.aurea: no
+// aparelho são dois apps distintos, cada um com seus projetos.
+val aureaApplicationId = if (aureaStore == "play") "com.aurea.editor" else "com.aurea.aurea"
 
 // Uma ABI por build. `--split-per-abi` produz um APK por arquitetura com um
 // nome que não bate com o que a loja espera; aqui o filtro é explícito e o APK
@@ -100,7 +104,10 @@ android {
     ndkVersion = "28.2.13676358"
 
     defaultConfig {
-        applicationId = "com.aurea.aurea"
+        applicationId = aureaApplicationId
+        // Afinidade da MainActivity (AndroidManifest): o pacote de cada distribuição,
+        // para o app da Play e o de sideload não dividirem a mesma tarefa.
+        manifestPlaceholders["aureaTaskAffinity"] = aureaApplicationId
 
         // 26 (Android 8.0) é o piso: abaixo disso não há AHardwareBuffer nem
         // Vulkan de forma confiável, e o pipeline zero-copy do motor não roda.

@@ -196,6 +196,19 @@ bool roto_instance_strokes(const EffectInstance& instance, RotoStrokes& out) {
     return roto_decode(instance.curves[ref], out) && !out.empty();
 }
 
+RotoRefineSettings roto_instance_refine(const EffectInstance& instance) noexcept {
+    RotoRefineSettings s;
+    auto value = [&](u32 index, f32 fallback) {
+        if (index >= instance.params.size()) return fallback;
+        const f32 v = instance.params[index].constant.v[0];
+        return std::isfinite(v) ? v : fallback;
+    };
+    s.radius = std::max(0.0f, value(kRotoEdgeRadiusParam, 0.0f));
+    s.chatter = std::clamp(value(kRotoChatterParam, 0.0f) * 0.01f, 0.0f, 1.0f);
+    s.decontaminate = value(kRotoDecontaminateParam, 0.0f) > 0.0f;
+    return s;
+}
+
 std::vector<i64> roto_bases(const RotoStrokes& strokes) {
     std::vector<i64> b;
     for (const RotoStroke& s : strokes) b.push_back(s.frame);

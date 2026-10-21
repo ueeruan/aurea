@@ -201,7 +201,7 @@ void write_time_remap(Layer& l, FrameIndex local, f32 sourceFrames, Interpolatio
 } // namespace
 
 namespace {
-constexpr u32 kCameraTrackerVersion = 3;
+constexpr u32 kCameraTrackerVersion = 4;   // 4: zoom variável, lente, cena plana
 using CameraTrackResult = tracking::CameraTrackData;
 } // namespace
 
@@ -3788,9 +3788,10 @@ bool Engine::restore_camera_track(u64 layerId) noexcept {
     return true;
 }
 
-bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov) noexcept {
+bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov, u32 shotType, u32 lens) noexcept {
     if (motion_track_status().state == 1) return false;
-    if (mode > 2 || motion > 2 || !std::isfinite(knownFov) || knownFov < 0 || knownFov > 150) return false;
+    if (mode > 2 || motion > 3 || shotType > 2 || lens > 1 || !std::isfinite(knownFov) || knownFov < 0 || knownFov > 150) return false;
+    if (shotType == 2 && knownFov <= 0) return false;   // "FOV informada" sem o valor
     // Uma análise por vez; uma CANCELADA ainda saindo não bloqueia a próxima
     // (decode e solve olham o cancelamento a cada quadro/iteração).
     if (cameraTrack_ && !cameraTrack_->finished.load() && !cameraTrack_->cancel.load()) return false;
@@ -3842,6 +3843,7 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov)
         for (i64 us : targetUs) mix(&us, sizeof(us));
         mix(&analysisH, sizeof(analysisH));
         mix(&mode, sizeof(mode)); mix(&motion, sizeof(motion)); mix(&knownFov, sizeof(knownFov));
+        mix(&shotType, sizeof(shotType)); mix(&lens, sizeof(lens));
         const u32 ver = kCameraTrackerVersion;
         mix(&ver, sizeof(ver));
         if (l->cameraTrack && l->cameraTrack->sourceSignature == sourceSignature && l->cameraTrack->cacheKey == key && l->cameraTrack->sourceUs == targetUs)
@@ -3875,7 +3877,7 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov)
     job->state.store(1);
     job->finished.store(false);
     VideoSourceFactory* factory = config_.mediaFactory;
-    job->thread = std::thread([this, job, asset, targetUs, analysisH, mode, motion, knownFov, factory, sourceSignature]() {
+    job->thread = std::thread([this, job, asset, targetUs, analysisH, mode, motion, knownFov, shotType, lens, factory, sourceSignature]() {
         struct Completion { CameraTrackJob* job; ~Completion() { job->finished.store(true); } } completion{job};
         auto fail = [&](const char* why) {
             std::lock_guard<std::mutex> g(job->mutex);
@@ -3912,6 +3914,9 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov)
         if (ft.tracks().frames != targetUs.size()) return fail("video incompleto: nao foi possivel analisar todo o trecho");
         tracking::SolveOptions opt;
         opt.mode = tm; opt.motion = motion; opt.knownFovDeg = knownFov;
+        opt.shotType = shotType; opt.lens = lens;
+        // Erro em px da FONTE (o "Average Error" do AE), não da análise.
+        opt.sourceScale = static_cast<f32>(std::max(asset.video.width, asset.video.height)) / static_cast<f32>(std::max({aw, ah, 1u}));
         std::atomic<f32> solveProgress{0.0f};
         // O solve informa 0..1; a análise mostra 0,5..1.
         std::thread watcher([&] {
@@ -3959,21 +3964,33 @@ bool Engine::start_camera_track(u64 layerId, u32 mode, u32 motion, f32 knownFov)
     return true;
 }
 
-bool Engine::refine_camera_track(bool removeSelected, u32 motion, f32 knownFov) noexcept {
-    if (!cameraTrack_ || !cameraTrack_->finished.load() || cameraTrack_->state.load()!=2 || motion>2 ||
-        !std::isfinite(knownFov) || knownFov<0 || knownFov>150) return false;
+bool Engine::refine_camera_track(bool removeSelected, u32 motion, f32 knownFov, u32 shotType, u32 lens) noexcept {
+    if (!cameraTrack_ || !cameraTrack_->finished.load() || cameraTrack_->state.load()!=2 || motion>3 || shotType>2 || lens>1 ||
+        !std::isfinite(knownFov) || knownFov<0 || knownFov>150 || (shotType==2 && knownFov<=0)) return false;
     join_camera_track();
     auto* job=cameraTrack_.get();
     std::shared_ptr<const CameraTrackResult> original;
     std::vector<u32> rejected;
     { std::lock_guard<std::mutex> g(job->mutex);original=job->result;rejected=job->selectedTracks; }
     if (!original || (removeSelected && rejected.empty())) return false;
+    // px da fonte por px da análise (o erro médio é dado em px da FONTE).
+    f32 sourceScale = 1.0f;
+    {
+        std::lock_guard<std::mutex> g(modelMutex_);
+        const Composition* comp = project_ && projectSession_ == job->session ? project_->timeline().composition(job->composition) : nullptr;
+        const Layer* layer = comp ? comp->layer(LayerId::unpack(job->layerId)) : nullptr;
+        const Asset* a = layer ? project_->asset(layer->source) : nullptr;
+        if (a && original->analysisW && original->analysisH)
+            sourceScale = static_cast<f32>(std::max(a->video.width, a->video.height)) / static_cast<f32>(std::max(original->analysisW, original->analysisH));
+        if (!(sourceScale > 0.0f) || !std::isfinite(sourceScale)) sourceScale = 1.0f;
+    }
     job->cancel.store(false);job->finished.store(false);job->state.store(1);job->progress.store(0);
-    job->thread=std::thread([this,job,original,rejected,removeSelected,motion,knownFov] {
+    job->thread=std::thread([this,job,original,rejected,removeSelected,motion,knownFov,shotType,lens,sourceScale] {
         struct Done { CameraTrackJob* j; ~Done(){j->finished.store(true);} } done{job};
         auto next=std::make_shared<CameraTrackResult>(*original);
         if(removeSelected)for(u32 id:rejected)if(id<next->tracks.pos.size())std::fill(next->tracks.pos[id].begin(),next->tracks.pos[id].end(),Vec2{NAN,NAN});
         tracking::SolveOptions opt;opt.mode=static_cast<tracking::TrackMode>(next->mode);opt.motion=motion;opt.knownFovDeg=knownFov;
+        opt.shotType=shotType;opt.lens=lens;opt.sourceScale=sourceScale;
         auto solution=tracking::solve_camera(next->tracks,opt,&job->cancel,&job->progress);
         // A solução anterior continua na camada e no trabalho: cancelar ou
         // falhar o "resolver de novo" não pode travar Criar câmera/âncoras.
@@ -3982,6 +3999,7 @@ bool Engine::refine_camera_track(bool removeSelected, u32 motion, f32 knownFov) 
         next->solution=std::move(solution);next->sceneCalibration=Mat4::identity();
         next->cacheKey^=0x9e3779b97f4a7c15ull;for(auto id:rejected)next->cacheKey=(next->cacheKey^id)*1099511628211ull;
         next->cacheKey^=static_cast<u64>(knownFov*10000)+motion;
+        next->cacheKey=(next->cacheKey^(static_cast<u64>(shotType)<<8|lens))*1099511628211ull;
         {
             std::lock_guard<std::mutex> g(modelMutex_);
             auto* comp=project_&&projectSession_==job->session?project_->timeline().composition(job->composition):nullptr;
@@ -4021,6 +4039,19 @@ Engine::CameraTrackStatus Engine::camera_track_status() noexcept {
         st.confidence = s.confidence;
         st.fovDeg = s.fovY / kDeg2Rad;
         st.rotationOnly = s.rotationOnly;
+        st.shotType = s.shotType;
+        st.method = s.method;
+        st.fovStartDeg = st.fovEndDeg = st.fovMinDeg = st.fovMaxDeg = st.fovDeg;
+        if (!s.frameFovY.empty()) {
+            st.fovStartDeg = s.frameFovY.front() / kDeg2Rad;
+            st.fovEndDeg = s.frameFovY.back() / kDeg2Rad;
+            const auto [lo, hi] = std::minmax_element(s.frameFovY.begin(), s.frameFovY.end());
+            st.fovMinDeg = *lo / kDeg2Rad;
+            st.fovMaxDeg = *hi / kDeg2Rad;
+        }
+        st.k1 = s.k1; st.k2 = s.k2;
+        st.lensSolved = s.lensSolved; st.k2Solved = s.k2Solved;
+        st.averageErrorPx = s.averageErrorPx;
         if (job->state.load() == 2 && job->thread.joinable()) {
             // Terminou: guarda no cache (reanalisar o mesmo vídeo é instantâneo).
             // Result already belongs to the video layer and is serialized.
@@ -4152,6 +4183,11 @@ Result<u64> Engine::apply_camera_track(i64 selectionFrame, Vec4 selectionRect, u
                                    TrackProperty::RotationX, TrackProperty::RotationY, TrackProperty::RotationZ}) {
         cam->tracks.get_or_create(property).clear();
     }
+    // Zoom variável: a FOV de cada quadro vira keyframe (a trilha de distância
+    // focal sai — ela manda quando tem chave). FOV fixa: a constante de sempre.
+    if (Track* focalTrack = cam->tracks.find(TrackProperty::FocalLength)) focalTrack->clear();
+    if (Track* fovTrack = cam->tracks.find(TrackProperty::Fov)) fovTrack->clear();
+    Track* zoomTrack = s.frameFovY.empty() ? nullptr : &cam->tracks.get_or_create(TrackProperty::Fov);
     Track& px = *cam->tracks.find(TrackProperty::PositionX);
     Track& py = *cam->tracks.find(TrackProperty::PositionY);
     Track& pz = *cam->tracks.find(TrackProperty::PositionZ);
@@ -4180,6 +4216,7 @@ Result<u64> Engine::apply_camera_track(i64 selectionFrame, Vec4 selectionRect, u
         rx.set(local, e.x);
         ry.set(local, e.y);
         rz.set(local, e.z);
+        if (zoomTrack) zoomTrack->set(local, s.fov_at(i) / kDeg2Rad);
     }
     if (!px.keys.empty()) {
         cam->transform.position = Vec3{px.keys.front().value, py.keys.front().value, pz.keys.front().value};
@@ -4283,12 +4320,14 @@ u32 Engine::camera_track_target(i64 frame,f32* xy,u32 capacity) noexcept {
     const f32 depth=static_cast<f32>(pose.R[6]*center.x+pose.R[7]*center.y+pose.R[8]*center.z+pose.t[2]);if(depth<=0)return 0;
     if(!tracking::dominant_plane(points,depth*.02f,.5f,center,normal))normal={static_cast<f32>(pose.R[6]),static_cast<f32>(pose.R[7]),static_cast<f32>(pose.R[8])};
     Vec3 x=Vec3{1,0,0}-normal*normal.x;if(x.length()<1e-4f)x=Vec3{0,0,1}-normal*normal.z;x=x.normalized();const auto y=normal.cross(x).normalized();
-    const f32 focal=.5f*res->analysisH/std::tan(res->solution.fovY*.5f),radius=depth*24/focal;
+    const f32 focal=.5f*res->analysisH/std::tan(res->solution.fov_at(static_cast<u32>(local))*.5f),radius=depth*24/focal;
+    const f32 halfH=std::max(1.f,.5f*res->analysisH);
     const auto matrix=layer_comp_matrix(*comp,*video,FrameIndex{frame});
     for(u32 i=0;i<32;++i){const f32 angle=static_cast<f32>(i)*6.283185307f/32;auto p=center+(x*std::cos(angle)+y*std::sin(angle))*radius;
         const f64 z=pose.R[6]*p.x+pose.R[7]*p.y+pose.R[8]*p.z+pose.t[2];if(z<=0)return 0;
-        const f32 u=static_cast<f32>(focal*(pose.R[0]*p.x+pose.R[1]*p.y+pose.R[2]*p.z+pose.t[0])/z+res->analysisW*.5);
-        const f32 v=static_cast<f32>(focal*(pose.R[3]*p.x+pose.R[4]*p.y+pose.R[5]*p.z+pose.t[1])/z+res->analysisH*.5);
+        const Vec2 dd=tracking::lens_distort({static_cast<f32>(focal*(pose.R[0]*p.x+pose.R[1]*p.y+pose.R[2]*p.z+pose.t[0])/z)/halfH,
+                                               static_cast<f32>(focal*(pose.R[3]*p.x+pose.R[4]*p.y+pose.R[5]*p.z+pose.t[1])/z)/halfH},res->solution.k1,res->solution.k2);
+        const f32 u=dd.x*halfH+res->analysisW*.5f,v=dd.y*halfH+res->analysisH*.5f;
         auto q=matrix*Vec4{u*asset->video.width/res->analysisW,v*asset->video.height/res->analysisH,0,1};if(q.w<=0)return 0;
         xy[i*2]=q.x/q.w;xy[i*2+1]=q.y/q.w;
     }return 32;
@@ -4375,7 +4414,10 @@ u32 Engine::camera_track_features_detail(i64 frame, f32* out, u32 maxPoints) noe
     const i64 sourceUs = static_cast<i64>(std::llround(std::max(0.0, l->source_frame(FrameIndex{frame})) * 1e6 / comp->fps()));
     if (sourceUs != res->sourceUs[static_cast<usize>(index)]) return 0;
     const auto& s = res->solution;
-    const f64 focal = 0.5 * res->analysisH / std::tan(s.fovY * 0.5);
+    // Zoom variável: a focal do quadro; lente: o ponto volta com a distorção
+    // (o overlay casa com o vídeo filmado, que é o distorcido).
+    const f64 focal = 0.5 * res->analysisH / std::tan(s.fov_at(static_cast<u32>(index)) * 0.5);
+    const f64 halfH = std::max(1.0, 0.5 * res->analysisH);
     const auto* pose = index < static_cast<i64>(s.poses.size()) && s.poses[static_cast<usize>(index)].valid ? &s.poses[static_cast<usize>(index)] : nullptr;
     const Mat4 m = layer_comp_matrix(*comp, *l, FrameIndex{frame});
     const f32 kx = static_cast<f32>(a->video.width) / res->analysisW, ky = static_cast<f32>(a->video.height) / res->analysisH;
@@ -4393,7 +4435,8 @@ u32 Engine::camera_track_features_detail(i64 frame, f32* out, u32 maxPoints) noe
             const f64 y = pose->R[3]*p.x + pose->R[4]*p.y + pose->R[5]*p.z + pose->t[1];
             const f64 z = pose->R[6]*p.x + pose->R[7]*p.y + pose->R[8]*p.z + pose->t[2];
             if (z <= 0) continue;
-            pixel = Vec2{static_cast<f32>(focal*x/z + res->analysisW*0.5), static_cast<f32>(focal*y/z + res->analysisH*0.5)};
+            const Vec2 d = tracking::lens_distort(Vec2{static_cast<f32>(focal*x/z/halfH), static_cast<f32>(focal*y/z/halfH)}, s.k1, s.k2);
+            pixel = Vec2{static_cast<f32>(d.x*halfH + res->analysisW*0.5), static_cast<f32>(d.y*halfH + res->analysisH*0.5)};
             error = std::hypot(pixel.x-observed.x, pixel.y-observed.y);
             confidence = 1.0f / (1.0f + error);
         }
@@ -4443,6 +4486,52 @@ u32 Engine::camera_track_features(i64 frame, f32* out, u32 maxPoints) noexcept {
 
 std::vector<Vec3> Engine::camera_track_points() noexcept {
     return cameraTrack_ ? cameraTrack_->appliedPoints : std::vector<Vec3>{};
+}
+
+u32 Engine::camera_track_frame_info(f32* out2, u32 capacity) noexcept {
+    if (!cameraTrack_ || !out2 || !capacity) return 0;
+    std::shared_ptr<const CameraTrackResult> res;
+    { std::lock_guard<std::mutex> g(cameraTrack_->mutex); res = cameraTrack_->result; }
+    if (!res || !res->solution.ok) return 0;
+    const auto& s = res->solution;
+    const u32 n = std::min<u32>(capacity, static_cast<u32>(s.poses.size()));
+    for (u32 i = 0; i < n; ++i) {
+        out2[i * 2] = s.fov_at(i) / kDeg2Rad;
+        out2[i * 2 + 1] = i < s.frameErrorPx.size() ? s.frameErrorPx[i] : -1.0f;
+    }
+    return n;
+}
+
+Result<u32> Engine::add_camera_track_lens_effect(u64 layerId, bool redistort) noexcept {
+    if (!cameraTrack_ || cameraTrack_->state.load() != 2) return Status{Errc::InvalidState, "rastreio nao terminou"};
+    std::shared_ptr<const CameraTrackResult> res;
+    { std::lock_guard<std::mutex> g(cameraTrack_->mutex); res = cameraTrack_->result; }
+    if (!res || !res->solution.ok || !res->solution.lensSolved) return Status{Errc::InvalidState, "solve sem distorcao da lente"};
+    const EffectTypeId type = effect_type_id(effect_keys::kLensDistortionMatch);
+    const ParameterRegistry* specs = effectRegistry_.params(type);
+    if (!specs) return Status{Errc::NotFound, "efeito de lente indisponivel"};
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer) return Status{Errc::NotFound, "camada sumiu"};
+    if (layer->locked) return Status{Errc::InvalidState, "camada travada"};
+    if (layer->effects.size() >= kMaxEffectCount) return Status{Errc::InvalidState, "limite de efeitos"};
+    history_.before_mutation(*comp, project_->timeline().current(), redistort ? "Aplicar distorção da lente" : "Remover distorção da lente");
+    bump_model_revision_locked();
+    EffectInstance effect;
+    effect.id = layer->alloc_effect_id();
+    effect.type = type;
+    initialize_instance(effect, *specs);
+    // O modelo é normalizado pela meia altura: vale para a camada inteira,
+    // em qualquer resolução (a análise, o vídeo e a CG do mesmo quadro).
+    effect.params[0].constant = ParamValue::scalar(res->solution.k1);
+    effect.params[1].constant = ParamValue::scalar(res->solution.k2);
+    effect.params[4].constant = ParamValue::scalar(redistort ? 1.0f : 0.0f);
+    const u32 id = effect.id;
+    layer->effects.push_back(std::move(effect));
+    project_->mark_dirty();
+    request_render();
+    return id;
 }
 
 bool Engine::set_echo(u64 layerId, u32 count, f32 delay, f32 decay) noexcept {

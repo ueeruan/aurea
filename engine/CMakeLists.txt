@@ -173,6 +173,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/VhsLookEffect.cpp
     src/effects/builtin/DepthEffects.cpp
     src/effects/builtin/RotobrushEffect.cpp
+    src/effects/builtin/LensDistortionEffect.cpp
     src/effects/builtin/AudioPackEffects.cpp
     src/effects/builtin/ParticularEffect.cpp
     src/effects/builtin/DisintegrateEffect.cpp
@@ -202,6 +203,7 @@ set(AUREA_CORE_SOURCES
     src/ai/DepthMapService.cpp
     src/ai/RotoMatte.cpp
     src/ai/RotoService.cpp
+    src/ai/RotoRefine.cpp
     src/audio/AudioCore.cpp
     src/audio/AudioBlockCache.cpp
     src/audio/AudioMixer.cpp

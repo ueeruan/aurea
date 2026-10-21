@@ -19,9 +19,12 @@
 //     é decidida de novo pelas arestas do quadro novo e pela rede.
 //   - Quadros com traço viram base nova; os seguintes dependem dela.
 //
-//  Tudo em CPU, na grade da rede (320×320 da fonte inteira), em worker.
+//  Tudo em CPU, na grade da rede (320×320 da fonte inteira), em worker. A
+//  borda na resolução do quadro (Refinar borda, "Raio da borda") é do
+//  RotoRefine, sobre este recorte.
 // =============================================================================
 
+#include "aurea/ai/RotoRefine.hpp"
 #include "aurea/effects/Parameter.hpp"
 
 #include <memory>
@@ -40,6 +43,11 @@ using RotoStrokes = std::vector<RotoStroke>;
 
 /// O parâmetro de curva oculto do Rotobrush que guarda os traços.
 inline constexpr u32 kRotoStrokesParam = 11;
+/// Outros parâmetros do Rotobrush que o Roto lê (índices gravados nos
+/// projetos: nunca reordenar; os novos só no fim, depois dos traços).
+inline constexpr u32 kRotoChatterParam = 8;         ///< "Reduzir trepidação" (%)
+inline constexpr u32 kRotoDecontaminateParam = 9;   ///< "Descontaminar cores da borda" (%)
+inline constexpr u32 kRotoEdgeRadiusParam = 12;     ///< "Raio da borda" (px da fonte; 0 = grade, como antes)
 inline constexpr u32 kRotoMaxPoints = 4000;     ///< teto do canal de curva (4096 na leitura)
 inline constexpr u32 kRotoMaxStrokePoints = 256;
 
@@ -49,6 +57,9 @@ inline constexpr u32 kRotoMaxStrokePoints = 256;
 void roto_encode(const RotoStrokes& strokes, CurveData& curve);
 /// Os traços da instância (nada quando o parâmetro não existe/está vazio).
 [[nodiscard]] bool roto_instance_strokes(const EffectInstance& instance, RotoStrokes& out);
+/// O Refinar borda da instância pelos valores constantes (raio em px da
+/// FONTE; slot ausente = 0, o projeto antigo fica na grade).
+[[nodiscard]] RotoRefineSettings roto_instance_refine(const EffectInstance& instance) noexcept;
 
 /// Quadros-base (com traço), em ordem.
 [[nodiscard]] std::vector<i64> roto_bases(const RotoStrokes& strokes);

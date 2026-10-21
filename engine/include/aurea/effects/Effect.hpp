@@ -255,6 +255,11 @@ struct DepthMapRequest {
     /// Separa o estado da suavização de quem pede o mapa de OUTRA camada
     /// (a camada de ajuste lê o da foto/vídeo abaixo dela).
     u64 stateSalt = 0;
+    /// Rotobrush com traços — Refinar borda (ai::RotoRefine): raio em px da
+    /// FONTE (0 = o recorte da grade, como antes) e a cor do objeto na borda.
+    /// `smoothing` leva o "Reduzir trepidação".
+    f32 rotoEdgeRadius = 0.0f;
+    bool rotoDecontaminate = false;
 };
 
 /// A disparidade 256×256 da FONTE da camada (R: normalizada pelos percentis
@@ -271,6 +276,9 @@ struct DepthMapResult {
     /// em `w`. Zero = o mapa cobre a caixa natural de quem pede.
     Vec4 mapX{};
     Vec4 mapY{};
+    /// Rotobrush: 0 = a grade (R16F kSize²); 1 = alfa refinado (R8, resolução
+    /// do quadro); 2 = RGBA8 refinado (cor do objeto na borda + alfa).
+    u8 rotoRefined = 0;
 };
 
 /// O que a Forma de onda e o Espectro de áudio pedem ao renderer: o som de

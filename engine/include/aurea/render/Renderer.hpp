@@ -1298,6 +1298,10 @@ private:
                                           const std::vector<ai::RotoStroke>& strokes) noexcept;
     std::string foregroundModelDirectory_;
     std::unordered_map<u64, LutTexture> depthTex_;     ///< por quadro-fonte
+    /// Recortes refinados do Roto (R8/RGBA8 na resolução do quadro, até 8 MB
+    /// cada em 1080p): poucos vivos — o do quadro e os vizinhos de agora.
+    std::unordered_map<u64, LutTexture> rotoRefinedTex_;
+    static constexpr usize kRotoRefinedTexturesKept = 3;
     std::unordered_map<u64, DepthState> depthState_;   ///< por (camada, efeito, export?)
     void release_depth(bool destroyTextures) noexcept;
     [[nodiscard]] DepthMapResult depth_map_preview() noexcept;

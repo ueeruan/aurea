@@ -215,23 +215,64 @@ DepthMapPtr DepthMapService::run_video_locked(const Job& job) {
     return result;
 }
 
+namespace {
+
+/// A chave do quadro cru `index` da fonte (a mesma de `run_video_locked`).
+u64 raw_frame_key(u64 sourceKey, i64 index) noexcept {
+    u64 key = sourceKey ^ (static_cast<u64>(index) + 0x72E46D87FA912BC3ull);
+    key = (key ^ (key >> 30)) * 0xBF58476D1CE4E5B9ull;
+    return key ^ (key >> 27);
+}
+
+/// O quadro decodificado como a camada o mostra (recorte, rotação), RGB8,
+/// lado maior até `maxSide` — a resolução do Refinar borda.
+RotoImagePtr roto_image_of(const DecodedFrame& f, u32 maxSide) {
+    auto image = std::make_shared<RotoImage>();
+    const u32 vw = f.visibleWidth ? f.visibleWidth : f.width;
+    const u32 vh = f.visibleHeight ? f.visibleHeight : f.height;
+    if (f.format == PixelFormat::RGBA8 && f.planes[0] && f.rotation == 0) {
+        // Caminho comum: redução por área direto do buffer do decoder.
+        const u8* origin = f.planes[0] + static_cast<usize>(f.cropTop) * f.strides[0] + f.cropLeft * 4u;
+        roto_image_from(origin, vw, vh, f.strides[0], 4, maxSide, *image);
+        return image->width ? image : nullptr;
+    }
+    // Girado ou YUV: a conversão das miniaturas (matriz, faixa, rotação), por ponto.
+    const bool sideways = f.rotation == 90 || f.rotation == 270;
+    u32 dw = 0, dh = 0;
+    roto_refine_size(sideways ? vh : vw, sideways ? vw : vh, maxSide, dw, dh);
+    ThumbnailService::Image rgba;
+    if (!frame_to_thumbnail(f, dh, rgba) || !rgba.width) return nullptr;
+    roto_image_from(rgba.rgba.data(), rgba.width, rgba.height, rgba.width * 4, 4, 0, *image);
+    return image->width ? image : nullptr;
+}
+
+} // namespace
+
 DepthMapPtr DepthMapService::foreground_video_frame(VideoSourceFactory* factory, const Asset& asset, u64 sourceKey,
-                                                    i64 index, f64 fps) try {
+                                                    i64 index, f64 fps, RotoImagePtr* source, u32 sourceMaxSide) try {
+    if (source) source->reset();
     if (!foregroundMode_ || !factory || !(fps > 0.0)) return nullptr;
     const i64 last = asset.video.frameCount.value > 0 ? asset.video.frameCount.value - 1 : std::max<i64>(index, 0);
     index = std::clamp(index, i64{0}, last);
     // A mesma chave de `run_video_locked` (vizinhos crus): um cache só.
-    u64 key = sourceKey ^ (static_cast<u64>(index) + 0x72E46D87FA912BC3ull);
-    key = (key ^ (key >> 30)) * 0xBF58476D1CE4E5B9ull;
-    key ^= key >> 27;
-    if (DepthMapPtr hit = find(key)) return hit;
+    const u64 key = raw_frame_key(sourceKey, index);
     Job job;
     job.key = key; job.asset = asset; job.sourceKey = sourceKey; job.factory = factory;
     job.frameUs = std::max<i64>(1, static_cast<i64>(std::llround(1e6 / fps)));
     job.targetUs = static_cast<i64>(std::llround(static_cast<f64>(index) * 1e6 / fps));
+    if (!source) {
+        if (DepthMapPtr hit = find(key)) return hit;
+        std::lock_guard<std::mutex> work(work_);
+        if (DepthMapPtr hit = cached(key)) return hit;
+        return run_video_raw_locked(job);
+    }
     std::lock_guard<std::mutex> work(work_);
-    if (DepthMapPtr hit = cached(key)) return hit;
-    return run_video_raw_locked(job);
+    if (DepthMapPtr hit = cached(key)) {
+        // Mapa já pronto: só o quadro do refino (guardado ou decodificado).
+        *source = source_locked(job, sourceMaxSide);
+        return hit;
+    }
+    return run_video_raw_locked(job, source, sourceMaxSide);
 } catch (const std::bad_alloc&) {
     report_failure("memoria insuficiente para o mapa");
     return nullptr;
@@ -240,9 +281,41 @@ DepthMapPtr DepthMapService::foreground_video_frame(VideoSourceFactory* factory,
     return nullptr;
 }
 
-DepthMapPtr DepthMapService::run_video_raw_locked(const Job& job) {
-    if (!job.factory) return nullptr;
-    if (!ensure_model_locked()) return nullptr;
+RotoImagePtr DepthMapService::source_video_frame(VideoSourceFactory* factory, const Asset& asset, u64 sourceKey,
+                                                 i64 index, f64 fps, u32 maxSide) try {
+    if (!factory || !(fps > 0.0)) return nullptr;
+    const i64 last = asset.video.frameCount.value > 0 ? asset.video.frameCount.value - 1 : std::max<i64>(index, 0);
+    index = std::clamp(index, i64{0}, last);
+    Job job;
+    job.key = raw_frame_key(sourceKey, index); job.asset = asset; job.sourceKey = sourceKey; job.factory = factory;
+    job.frameUs = std::max<i64>(1, static_cast<i64>(std::llround(1e6 / fps)));
+    job.targetUs = static_cast<i64>(std::llround(static_cast<f64>(index) * 1e6 / fps));
+    std::lock_guard<std::mutex> work(work_);
+    return source_locked(job, maxSide);
+} catch (const std::bad_alloc&) {
+    report_failure("memoria insuficiente para o quadro do refino");
+    return nullptr;
+}
+
+RotoImagePtr DepthMapService::source_locked(const Job& job, u32 maxSide) {
+    for (const SourceSlot& slot : sourceSlots_)
+        if (slot.image && slot.key == job.key && slot.maxSide == maxSide) return slot.image;
+    FrameRef frame;
+    if (!decode_locked(job, frame)) return nullptr;
+    RotoImagePtr image = roto_image_of(*frame.get(), maxSide);
+    keep_source_locked(job.key, maxSide, image);
+    return image;
+}
+
+void DepthMapService::keep_source_locked(u64 key, u32 maxSide, const RotoImagePtr& image) {
+    if (!image) return;
+    // Dois lugares: o mais antigo sai (a cadeia anda um quadro por vez).
+    sourceSlots_[1] = std::move(sourceSlots_[0]);
+    sourceSlots_[0] = SourceSlot{key, maxSide, image};
+}
+
+bool DepthMapService::decode_locked(const Job& job, FrameRef& frame) {
+    if (!job.factory) return false;
     // Um decoder por asset, reaproveitado: quadros seguidos (export, playback)
     // andam para a frente sem seek.
     if (!decoder_ || decoderAsset_ != job.sourceKey || decoderFactory_ != job.factory) {
@@ -251,7 +324,7 @@ DepthMapPtr DepthMapService::run_video_raw_locked(const Job& job) {
         decoderAsset_ = job.sourceKey;
         decoderFactory_ = job.factory;
         decoderPts_ = -1;
-        if (!decoder_) return nullptr;
+        if (!decoder_) return false;
     }
     VideoDecoderBackend& dec = *decoder_;
     const i64 half = std::max<i64>(1, job.frameUs / 2);
@@ -259,13 +332,13 @@ DepthMapPtr DepthMapService::run_video_raw_locked(const Job& job) {
     const bool forward = decoderPts_ >= 0 && deliverFrom > decoderPts_
                       && job.targetUs - decoderPts_ <= std::max<i64>(dec.keyframe_interval_us(), 4 * job.frameUs);
     if (!forward) {
-        if (!dec.seek_to_keyframe(job.targetUs).ok()) return nullptr;
+        if (!dec.seek_to_keyframe(job.targetUs).ok()) return false;
         decoderPts_ = -1;
     }
-    FrameRef frame;
+    frame = FrameRef{};
     // Um GOP longo no máximo: um decoder que nunca chega ao alvo não prende o worker.
     for (u32 i = 0; i < 1200 && !frame; ++i) {
-        if (cancel_.load(std::memory_order_relaxed)) return nullptr;
+        if (cancel_.load(std::memory_order_relaxed)) return false;
         i64 pts = 0;
         bool eos = false;
         if (!dec.next_frame(deliverFrom, frame, pts, eos).ok()) break;
@@ -274,7 +347,21 @@ DepthMapPtr DepthMapService::run_video_raw_locked(const Job& job) {
     }
     if (!frame) {
         decoderPts_ = -1;   // a posição é desconhecida: o próximo pedido faz seek
-        return nullptr;
+        return false;
+    }
+    return true;
+}
+
+DepthMapPtr DepthMapService::run_video_raw_locked(const Job& job, RotoImagePtr* source, u32 sourceMaxSide) {
+    if (!job.factory) return nullptr;
+    if (!ensure_model_locked()) return nullptr;
+    FrameRef frame;
+    if (!decode_locked(job, frame)) return nullptr;
+    if (source) {
+        // Refinar borda: o quadro na resolução do refino sai da MESMA
+        // decodificação (sem voltar o decoder para o mesmo quadro).
+        *source = roto_image_of(*frame.get(), sourceMaxSide);
+        keep_source_locked(job.key, sourceMaxSide, *source);
     }
     // Quadro na CPU → RGBA8 com a matriz, a faixa, o recorte e a rotação do
     // próprio vídeo. 512 linhas amostradas por ponto; a redução por área até
@@ -430,6 +517,7 @@ void DepthMapService::trim() noexcept {
     decoderAsset_ = 0;
     decoderFactory_ = nullptr;
     decoderPts_ = -1;
+    for (SourceSlot& slot : sourceSlots_) slot = SourceSlot{};   // quadros do refino (~6 MB cada em 1080p)
     std::lock_guard<std::mutex> lock(mutex_);
     stats_.modelLoaded = false;
 }

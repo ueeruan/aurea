@@ -878,6 +878,17 @@ NS_SWIFT_NAME(AureaEngine)
 - (int)trackballHit:(NSArray<NSNumber*>*)axes x:(float)x y:(float)y radius:(float)radius tolerance:(float)tolerance NS_SWIFT_NAME(trackballHit(_:x:y:radius:tolerance:));
 - (void)cancelCameraTracking;
 - (BOOL)refineCameraTrack:(BOOL)remove motion:(uint32_t)motion fov:(float)fov;
+/// Rastreio de câmera com tipo de tomada (0 FOV fixa, 1 zoom variável, 2 FOV informada — exige fov > 0),
+/// método (0 automático, 1 típico, 2 tripé, 3 cena quase plana) e lente (1 = estimar k1; k2 se estável).
+- (BOOL)startCameraTrack:(long long)layerId mode:(uint32_t)mode motion:(uint32_t)motion fov:(float)fov
+                shotType:(uint32_t)shotType lens:(uint32_t)lens NS_SWIFT_NAME(startCameraTrack(_:mode:motion:fov:shotType:lens:));
+- (BOOL)refineCameraTrack:(BOOL)remove motion:(uint32_t)motion fov:(float)fov shotType:(uint32_t)shotType lens:(uint32_t)lens
+    NS_SWIFT_NAME(refineCameraTrack(_:motion:fov:shotType:lens:));
+/// Por quadro analisado: [FOV°, erro médio em px da fonte (−1 = sem pose)] intercalados.
+- (NSArray<NSNumber*>*)cameraTrackFrameInfo;
+/// Efeito "Distorção da lente" com o k1/k2 do solve na camada (redistort: NO remove, YES aplica).
+/// Devolve "" ou a mensagem do erro.
+- (NSString*)addCameraTrackLensEffect:(long long)layerId redistort:(BOOL)redistort NS_SWIFT_NAME(addCameraTrackLensEffect(_:redistort:));
 - (NSArray<NSNumber*>*)cameraTrackTarget:(long long)frame;
 - (BOOL)calibrateCameraScene:(uint32_t)operation distance:(float)distance;
 - (BOOL)placeModelOnTrack:(long long)layer NS_SWIFT_NAME(placeModelOnTrack(_:));

@@ -1167,6 +1167,7 @@ void Renderer::forget_device() noexcept {
     luts_.clear();
     spectra_.clear();
     depthTex_.clear();
+    rotoRefinedTex_.clear();
     depthState_.clear();
     uploads_.clear();
     particleExtraBufs_.forget();

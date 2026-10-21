@@ -91,6 +91,9 @@ bool Renderer::roto_propagate(const Project& project, const Composition& comp, c
     src.frameCount = total;
     src.layerW = static_cast<f32>(asset->video.width);
     src.layerH = static_cast<f32>(asset->video.height);
+    // "Propagar clipe" já leva o Refinar borda (o refinado entra no cache junto).
+    src.refine = ai::roto_instance_refine(instance);
+    src.refineMaxSide = lowMemoryDevice_ ? 1280u : ai::kRotoRefineMaxSide;
     auto source_index = [&](i64 timelineTime) {
         const f64 sf = layer.source_frame(FrameIndex{timelineTime});
         if (!std::isfinite(sf)) return i64{0};
@@ -127,9 +130,16 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
     }
     const bool wait = planFinal_ && !planDeferLocalAi_;
     const u64 sourceKey = rmix(l.source.pack() ^ 0xDA561CD33ull, rhash(asset->sourcePath) ^ asset->contentHash);
+    const f32 chatter = std::clamp(request.smoothing, 0.0f, 1.0f);
     ai::RotoService::Source src;
     src.fg = foreground_.get();
     src.sourceKey = sourceKey;
+    // Refinar borda: o raio vem em px da fonte; a classe LOW refina em 1280.
+    src.refine.radius = std::isfinite(request.rotoEdgeRadius) ? std::max(0.0f, request.rotoEdgeRadius) : 0.0f;
+    src.refine.chatter = chatter;
+    src.refine.decontaminate = request.rotoDecontaminate;
+    src.refineMaxSide = lowMemoryDevice_ ? 1280u : ai::kRotoRefineMaxSide;
+    const bool refine = src.refine.on();
     i64 frame = 0, sourceTimeUs = -1;
     if (l.kind == LayerKind::Image) {
         const ImagePixels* px = planImageLookup_ ? planImageLookup_(planImageCtx_, l.source) : nullptr;
@@ -141,6 +151,8 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
         src.layerW = static_cast<f32>(px->width);
         src.layerH = static_cast<f32>(px->height);
         src.frameCount = 1;
+        if (refine) src.imageFrame = roto_->image_frame(frameKey, px->rgba.data(), px->width, px->height, px->width * 4,
+                                                        src.refineMaxSide);
         if (!src.image) {
             if (planFinal_) { if (planDeferLocalAi_) localAiPending_ |= 2u; return none; }
             mark_incomplete(__FILE__, __LINE__);
@@ -164,38 +176,93 @@ DepthMapResult Renderer::roto_map(const DepthMapRequest& request, const std::vec
         src.layerH = static_cast<f32>(asset->video.height);
     }
     const u64 track = roto_track(planComp_, l, request.instance, asset);
-    const f32 chatter = std::clamp(request.smoothing, 0.0f, 1.0f);
+    const u64 refineKey = refine ? src.refine.hash() : 0;
     auto tex_key = [&](i64 f) {
         const u64 k = rmix(rmix(track, static_cast<u64>(f)), ai::roto_dependency(strokes, f));
         return rmix(k, std::bit_cast<u32>(chatter));
     };
     ai::RotoService::MattePtr matte = roto_->cached(track, strokes, frame);
-    if (!matte) {
+    ai::RotoService::RefinedPtr refined = refine && matte ? roto_->cached_refined(track, strokes, src.refine, frame) : nullptr;
+    if (!matte || (refine && !refined)) {
         if (wait) {
             // Export: o recorte exato deste quadro, com prazo (a cadeia desde a base).
-            matte = roto_->compute(track, strokes, src, frame, monotonic_ns() + 90'000'000'000ull);
-            if (!matte) return none;
+            ai::RotoService::Result r = roto_->compute_all(track, strokes, src, frame, monotonic_ns() + 90'000'000'000ull);
+            if (!r.matte) return none;
+            matte = std::move(r.matte);
+            refined = std::move(r.refined);
+            // Refino que falhou (quadro ilegível na resolução cheia): a grade, sem
+            // inventar borda — o export não trava por isso.
         } else {
             roto_->request(track, strokes, src, frame);
             if (planFinal_) { localAiPending_ |= 2u; return none; }
             mark_incomplete(__FILE__, __LINE__);
-            // Preview: segura a textura de um quadro vizinho já pronto (melhor
-            // atrasado que piscando o original). TOCANDO, o vídeo acompanha o
-            // instante dele (recorte e imagem casam); PARADO/scrub, o vídeo
-            // fica no quadro atual com o recorte aproximado - prender o vídeo
-            // num quadro antigo era o "quadro congelado" ao pintar.
-            for (i64 d = 1; d <= 6 && l.kind == LayerKind::Video; ++d) {
-                for (const i64 f : {frame - d, frame + d}) {
-                    if (f < 0) continue;
-                    auto it = depthTex_.find(tex_key(f));
-                    if (it == depthTex_.end()) continue;
-                    it->second.lastFrame = frameNumber_;
-                    const i64 pinUs = planPlayback_ ? static_cast<i64>(std::llround(static_cast<f64>(f) * 1e6 / src.fps)) : -1;
-                    return DepthMapResult{it->second.texture, 0.0f, 1.0f, false, pinUs};
+            // Com o recorte da grade pronto e o refinado a caminho, a grade
+            // segura o quadro (a borda fina chega no próximo desenho).
+            if (!matte) {
+                // Preview: segura a textura de um quadro vizinho já pronto (melhor
+                // atrasado que piscando o original). TOCANDO, o vídeo acompanha o
+                // instante dele (recorte e imagem casam); PARADO/scrub, o vídeo
+                // fica no quadro atual com o recorte aproximado - prender o vídeo
+                // num quadro antigo era o "quadro congelado" ao pintar.
+                for (i64 d = 1; d <= 6 && l.kind == LayerKind::Video; ++d) {
+                    for (const i64 f : {frame - d, frame + d}) {
+                        if (f < 0) continue;
+                        auto it = depthTex_.find(tex_key(f));
+                        if (it == depthTex_.end()) continue;
+                        it->second.lastFrame = frameNumber_;
+                        const i64 pinUs = planPlayback_ ? static_cast<i64>(std::llround(static_cast<f64>(f) * 1e6 / src.fps)) : -1;
+                        return DepthMapResult{it->second.texture, 0.0f, 1.0f, false, pinUs};
+                    }
                 }
+                return none;
             }
-            return none;
         }
+    }
+    if (refined && refined->width && refined->height && refined->alpha.size() == static_cast<usize>(refined->width) * refined->height) {
+        // Refinado: R8 (só o alfa) ou RGBA8 (cor do objeto na borda + alfa),
+        // na resolução do quadro do refino. Poucos vivos (até 8 MB cada).
+        const bool rgba = refined->fg.size() == refined->alpha.size() * 3;
+        const u64 key = rmix(rmix(tex_key(frame), refineKey), rgba ? 2u : 1u);
+        TextureHandle tex{};
+        if (auto it = rotoRefinedTex_.find(key); it != rotoRefinedTex_.end()) {
+            it->second.lastFrame = frameNumber_;
+            tex = it->second.texture;
+        } else {
+            while (rotoRefinedTex_.size() >= kRotoRefinedTexturesKept) {
+                // Sai a usada há mais tempo — nunca uma deste quadro (ainda no grafo).
+                auto old = std::min_element(rotoRefinedTex_.begin(), rotoRefinedTex_.end(),
+                                            [](const auto& a, const auto& b) { return a.second.lastFrame < b.second.lastFrame; });
+                if (old->second.lastFrame >= frameNumber_) break;
+                backend_->destroy_texture(old->second.texture);   // destruição adiada até a GPU largar
+                rotoRefinedTex_.erase(old);
+            }
+            TextureDesc d;
+            d.width = refined->width; d.height = refined->height;
+            d.format = rgba ? SurfaceFormat::RGBA8 : SurfaceFormat::R8;
+            d.sampled = true; d.transferDst = true; d.debugName = "roto-refinado";
+            auto created = backend_->create_texture(d);
+            if (!created.ok()) { mark_incomplete(__FILE__, __LINE__); return none; }
+            PendingUpload up;
+            up.texture = *created;
+            const usize n = refined->alpha.size();
+            up.bytesPerRow = refined->width * (rgba ? 4u : 1u);
+            if (rgba) {
+                up.data.resize(n * 4);
+                for (usize i = 0; i < n; ++i) {
+                    u8* t = &up.data[i * 4];
+                    t[0] = refined->fg[i * 3]; t[1] = refined->fg[i * 3 + 1]; t[2] = refined->fg[i * 3 + 2];
+                    t[3] = refined->alpha[i];
+                }
+            } else {
+                up.data = refined->alpha;
+            }
+            uploads_.push_back(std::move(up));
+            rotoRefinedTex_[key] = LutTexture{*created, frameNumber_};
+            tex = *created;
+        }
+        DepthMapResult result{tex, 0.0f, 1.0f, false, sourceTimeUs};
+        result.rotoRefined = rgba ? 2 : 1;
+        return result;
     }
     // Reduzir trepidação: média com os vizinhos já calculados.
     std::vector<f32> values;
@@ -285,8 +352,10 @@ bool Renderer::roto_status(const Project& project, const Composition& comp, cons
     if (!roto_) return true;   // traços sem serviço ainda: nada calculado
     const auto p = roto_->progress();
     if (p.track == track) { out8[0] = p.done; out8[1] = p.total; out8[2] = p.running ? 1 : 0; out8[3] = p.failed ? 1 : 0; }
-    out8[4] = roto_->ready(track, strokes, sourceFrame) ? 1 : 0;
-    out8[5] = roto_->ready_count(track, strokes, first, last);
+    // Com Refinar borda, "pronto" é o refinado também.
+    const u64 refineKey = ai::roto_instance_refine(instance).hash();
+    out8[4] = roto_->ready(track, strokes, sourceFrame, refineKey) ? 1 : 0;
+    out8[5] = roto_->ready_count(track, strokes, first, last, refineKey);
     return true;
 } catch (...) {
     return false;

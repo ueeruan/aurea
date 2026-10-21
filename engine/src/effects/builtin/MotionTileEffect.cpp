@@ -584,6 +584,7 @@ void register_builtin_effects(EffectRegistry& registry) {
     // Mapa de profundidade (IA): no fim, depois de todos.
     builtin::register_depth_effects(registry);
     builtin::register_rotobrush_effect(registry);
+    builtin::register_lens_distortion_effect(registry);
     builtin::register_grid_layout_effects(registry);
     // Pacote de áudio: os efeitos de som da camada (categoria Áudio) e os
     // visuais Forma de onda, Espectro de áudio e Bolas. Sempre no fim.

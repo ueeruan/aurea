@@ -33,6 +33,8 @@ namespace aurea { namespace vk = gles; }
 
 #include "aurea/Engine.hpp"
 #include "aurea/effects/EffectGraph.hpp"
+#include "aurea/ai/RotoMatte.hpp"
+#include "aurea/tracking/CameraTracker.hpp"
 #include "aurea/media/YuvLayout.hpp"
 #include "aurea/effects/MotionTile.hpp"
 #include "aurea/effects/RandomEdits.hpp"
@@ -13370,6 +13372,137 @@ AUREA_TEST(Gpu, RotoBrushStrokeCutsCaptureAndSurvivesReload) {
     AUREA_CHECK(undone.rgba.size() == plain.rgba.size());
     if (undone.rgba.size() == plain.rgba.size()) AUREA_CHECK(undone.at(128, 128)[0] > 180);
     std::remove(source.c_str()); std::remove(path.c_str()); std::remove((path + ".bak").c_str());
+}
+
+AUREA_TEST(Gpu, RotoBrushRefineEdgeFollowsTheSourceEdgeInTheRender) {
+    // O caminho inteiro (rede + traço + refino + textura R8/RGBA8 + shader):
+    // numa foto 1280×720 o recorte refinado acompanha a borda do disco melhor
+    // que a grade 320² (raio 0 = o desenho de antes).
+    AUREA_REQUIRE_GPU();
+    const u32 W = 1280, H = 720;
+    Scene3DRig rig(W, H, true);
+    auto pixels = uniform_image(W, H, 30, 120, 70);
+    std::vector<f32> truth(static_cast<usize>(W) * H, 0.f);
+    const f32 cx = 610.f, cy = 380.f, r = 230.f;
+    for (u32 y = 0; y < H; ++y) for (u32 x = 0; x < W; ++x) {
+        u32 hit = 0;
+        for (u32 sy = 0; sy < 4; ++sy) for (u32 sx = 0; sx < 4; ++sx) {
+            const f32 dx = x + (sx + .5f) / 4 - cx, dy = y + (sy + .5f) / 4 - cy;
+            hit += dx * dx + dy * dy < r * r;
+        }
+        const f32 a = hit / 16.f;
+        truth[static_cast<usize>(y) * W + x] = a;
+        auto* p = &pixels.rgba[(static_cast<usize>(y) * W + x) * 4];
+        const f32 tex = static_cast<f32>(((x * 73856093u) ^ (y * 19349663u)) % 21) - 10.f;
+        const f32 bg[3] = {30.f + tex, 120.f + tex + x / 32.f, 70.f + y / 24.f}, fg[3] = {220.f, 40.f, 30.f};
+        for (u32 c = 0; c < 3; ++c) p[c] = static_cast<u8>(std::clamp(a * fg[c] + (1 - a) * bg[c], 0.f, 255.f));
+    }
+    std::filesystem::create_directories("build/reference");
+    const std::string source = std::filesystem::absolute("build/reference/roto-refine-source.png").string();
+    Image8 sourceImage; sourceImage.width = W; sourceImage.height = H; sourceImage.rgba = pixels.rgba;
+    AUREA_CHECK(write_png(source, sourceImage));
+    const auto id = rig.e.import_image(pixels.rgba.data(), W, H, "disc", source.c_str());
+    AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    comp->set_background(Color{0, 0, 0, 1});
+    comp->set_transparent_background(false);
+    auto* layer = comp->layer(LayerId::unpack(*id));
+    EffectInstance effect;
+    effect.id = layer->alloc_effect_id(); effect.type = effect_type_id(effect_keys::kRotobrush);
+    initialize_instance(effect, *rig.e.effects().params(effect.type));
+    const u32 effectId = effect.id;
+    layer->effects.push_back(std::move(effect));
+    const f32 xy[] = {cx - 40.f, cy, cx + 40.f, cy};
+    AUREA_CHECK(rig.e.roto_add_stroke(*id, effectId, false, 10.f, xy, 2));
+    // Fundo: um anel em volta do disco (como quem corrige um vazamento da
+    // rede na textura); o teste mede a BORDA, não a segmentação.
+    std::vector<f32> ring;
+    for (u32 i = 0; i <= 48; ++i) {
+        const f32 t = static_cast<f32>(i) / 48.f * 6.2831853f;
+        ring.push_back(std::clamp(cx + (r + 60.f) * std::cos(t), 2.f, W - 3.f));
+        ring.push_back(std::clamp(cy + (r + 60.f) * std::sin(t), 2.f, H - 3.f));
+    }
+    AUREA_CHECK(rig.e.roto_add_stroke(*id, effectId, true, 10.f, ring.data(), static_cast<u32>(ring.size() / 2)));
+    auto& fx = comp->layer(LayerId::unpack(*id))->effects.back();
+    AUREA_CHECK(fx.params.size() > ai::kRotoEdgeRadiusParam);
+    if (fx.params.size() <= ai::kRotoEdgeRadiusParam) return;
+    AUREA_CHECK_NEAR(fx.params[ai::kRotoEdgeRadiusParam].constant.v[0], 6.f, 1e-6);   // instância nova: refino ligado
+    const auto refined = rig.capture(W);
+    fx.params[ai::kRotoEdgeRadiusParam].constant = ParamValue::scalar(0.f);            // a grade, como antes
+    const auto grid = rig.capture(W);
+    AUREA_CHECK(refined.rgba.size() == static_cast<usize>(W) * H * 4 && grid.rgba.size() == refined.rgba.size());
+    if (refined.rgba.size() != grid.rgba.size() || refined.rgba.size() != static_cast<usize>(W) * H * 4) return;
+    // Borda: o vermelho de saída esperado = α·I (fundo preto), comparado em linear.
+    auto lin = [](f32 v) { v /= 255.f; return v <= .04045f ? v / 12.92f : std::pow((v + .055f) / 1.055f, 2.4f); };
+    f64 eRef = 0, eGrid = 0; u64 n = 0;
+    for (u32 y = 0; y < H; ++y) for (u32 x = 0; x < W; ++x) {
+        const f32 d = std::hypot(x + .5f - cx, y + .5f - cy) - r;
+        if (std::fabs(d) > 4.f) continue;
+        const usize i = static_cast<usize>(y) * W + x;
+        const f32 expected = truth[i] * lin(pixels.rgba[i * 4]);
+        eRef += std::fabs(lin(refined.rgba[i * 4]) - expected);
+        eGrid += std::fabs(lin(grid.rgba[i * 4]) - expected);
+        ++n;
+    }
+    eRef /= std::max<u64>(1, n); eGrid /= std::max<u64>(1, n);
+    std::printf("    disco 1280x720: erro do vermelho na borda (linear) grade %.4f, refinado %.4f (%llu px)\n", eGrid, eRef,
+                static_cast<unsigned long long>(n));
+    (void)write_png("build/roto-refine-grid.png", grid);
+    (void)write_png("build/roto-refine-refined.png", refined);
+    AUREA_CHECK(eRef < 0.8 * eGrid);
+    AUREA_CHECK(refined.at(static_cast<u32>(cx), static_cast<u32>(cy))[0] > 180);   // o objeto fica
+    AUREA_CHECK(refined.at(40, 40)[1] < 20);                                         // o fundo sai
+    std::remove(source.c_str());
+}
+
+AUREA_TEST(Gpu, LensDistortionEffectMovesPixelsLikeTheSolverModel) {
+    // O efeito usa o mesmo modelo do rastreio (tracking::lens_distort): um
+    // ponto vai para onde a conta da CPU diz, nas duas direções.
+    AUREA_REQUIRE_GPU();
+    const u32 W = 640, H = 360;
+    for (const u32 direction : {0u, 1u}) {
+        Scene3DRig rig(W, H);
+        auto pixels = uniform_image(W, H, 0, 0, 0);
+        const f32 px = 480.f, py = 100.f;   // perto da borda o bastante para a curva mexer, dentro nas duas direções
+        for (int dy = -3; dy <= 3; ++dy) for (int dx = -3; dx <= 3; ++dx) {
+            auto* p = &pixels.rgba[(static_cast<usize>(py + dy) * W + static_cast<usize>(px + dx)) * 4];
+            p[0] = p[1] = p[2] = 255;
+        }
+        const auto id = rig.e.import_image(pixels.rgba.data(), W, H, "dot");
+        AUREA_CHECK(id.ok()); if (!id.ok()) return;
+        auto* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+        comp->set_background(Color{0, 0, 0, 1});
+        comp->set_transparent_background(false);
+        auto* layer = comp->layer(LayerId::unpack(*id));
+        EffectInstance effect;
+        effect.id = layer->alloc_effect_id(); effect.type = effect_type_id(effect_keys::kLensDistortionMatch);
+        const auto* specs = rig.e.effects().params(effect.type);
+        AUREA_CHECK(specs != nullptr); if (!specs) return;
+        initialize_instance(effect, *specs);
+        const f32 k1 = -0.12f, k2 = 0.01f;
+        effect.params[0].constant = ParamValue::scalar(k1);
+        effect.params[1].constant = ParamValue::scalar(k2);
+        effect.params[4].constant = ParamValue::scalar(static_cast<f32>(direction));
+        layer->effects.push_back(std::move(effect));
+        const auto img = rig.capture(W);
+        AUREA_CHECK(img.width == W && img.height == H); if (img.width != W || img.height != H) return;
+        f64 sx = 0, sy = 0, sw = 0;
+        for (u32 y = 0; y < H; ++y) for (u32 x = 0; x < W; ++x) {
+            const f32 v = img.at(x, y)[1];
+            if (v < 40) continue;
+            sx += (x + .5) * v; sy += (y + .5) * v; sw += v;
+        }
+        AUREA_CHECK(sw > 0); if (sw <= 0) return;
+        const f32 h = H * .5f;
+        const Vec2 q{(px + .5f - W * .5f) / h, (py + .5f - H * .5f) / h};
+        // Remover: a saída tem o ponto sem distorção; aplicar: o distorcido.
+        const Vec2 m = direction == 0 ? tracking::lens_undistort(q, k1, k2) : tracking::lens_distort(q, k1, k2);
+        const f32 ex = W * .5f + m.x * h, ey = H * .5f + m.y * h;
+        std::printf("    lente %s: ponto (%.1f, %.1f) -> render (%.1f, %.1f), conta da CPU (%.1f, %.1f)\n",
+                    direction == 0 ? "remover" : "aplicar", px + .5f, py + .5f, sx / sw, sy / sw, ex, ey);
+        AUREA_CHECK(std::hypot(sx / sw - ex, sy / sw - ey) < 1.5);
+        AUREA_CHECK(std::hypot(ex - (px + .5f), ey - (py + .5f)) > 10.0);   // a distorção mexeu mesmo
+    }
 }
 
 AUREA_TEST(Gpu, NewToolsGridVisibleAndMorphChangesFrame) {

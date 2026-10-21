@@ -309,6 +309,15 @@ u32 Renderer::collect_depth(u64 frameNumber, u64 idleFrames) noexcept {
             ++it;
         }
     }
+    for (auto it = rotoRefinedTex_.begin(); it != rotoRefinedTex_.end();) {
+        if (frameNumber > it->second.lastFrame + idleFrames) {
+            if (backend_) backend_->destroy_texture(it->second.texture);
+            ++n;
+            it = rotoRefinedTex_.erase(it);
+        } else {
+            ++it;
+        }
+    }
     for (auto it = depthState_.begin(); it != depthState_.end();) {
         if (frameNumber > it->second.lastFrame + idleFrames) it = depthState_.erase(it);
         else ++it;
@@ -319,8 +328,10 @@ u32 Renderer::collect_depth(u64 frameNumber, u64 idleFrames) noexcept {
 void Renderer::release_depth(bool destroyTextures) noexcept {
     if (destroyTextures && backend_) {
         for (auto& [k, t] : depthTex_) backend_->destroy_texture(t.texture);
+        for (auto& [k, t] : rotoRefinedTex_) backend_->destroy_texture(t.texture);
     }
     depthTex_.clear();
+    rotoRefinedTex_.clear();
     depthState_.clear();
     if (depth_) depth_->clear();
     if (foreground_) foreground_->clear();

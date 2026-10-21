@@ -37,6 +37,7 @@
 #include "aurea/export/FFmpegExportSink.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/ui/BuiltinPropertySchema.hpp"
+#include "aurea/tracking/CameraTrackData.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -3002,6 +3003,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return @{@"state": @(s.state), @"progress": @(s.progress), @"frames": @(s.frames), @"solved": @(s.framesSolved),
              @"confidence": @(s.confidence), @"error": @(s.rmsError), @"rotationOnly": @(s.rotationOnly),
              @"cached": @(s.cached), @"fovDeg": @(s.fovDeg),
+             @"shotType": @(s.shotType), @"method": @(s.method), @"fovStartDeg": @(s.fovStartDeg), @"fovEndDeg": @(s.fovEndDeg),
+             @"fovMinDeg": @(s.fovMinDeg), @"fovMaxDeg": @(s.fovMaxDeg), @"k1": @(s.k1), @"k2": @(s.k2),
+             @"lensSolved": @(s.lensSolved), @"k2Solved": @(s.k2Solved), @"averageErrorPx": @(s.averageErrorPx),
              @"message": [NSString stringWithUTF8String:s.message.c_str()] ?: @""};
 }
 - (NSArray<NSNumber*>*)gizmo:(long long)layerId length:(float)length {
@@ -3046,6 +3050,26 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 - (void)cancelCameraTracking { if (auto* e = self.engine) e->cancel_camera_track(); }
 - (BOOL)refineCameraTrack:(BOOL)remove motion:(uint32_t)motion fov:(float)fov { auto* e=self.engine;return e&&e->refine_camera_track(remove,motion,fov); }
+- (BOOL)startCameraTrack:(long long)layerId mode:(uint32_t)mode motion:(uint32_t)motion fov:(float)fov
+                shotType:(uint32_t)shotType lens:(uint32_t)lens {
+    auto* e = self.engine;
+    return e && e->start_camera_track(static_cast<aurea::u64>(layerId), mode, motion, fov, shotType, lens);
+}
+- (BOOL)refineCameraTrack:(BOOL)remove motion:(uint32_t)motion fov:(float)fov shotType:(uint32_t)shotType lens:(uint32_t)lens {
+    auto* e = self.engine;
+    return e && e->refine_camera_track(remove, motion, fov, shotType, lens);
+}
+- (NSArray<NSNumber*>*)cameraTrackFrameInfo {
+    auto* e = self.engine; if (!e) return @[];
+    std::vector<float> values(static_cast<size_t>(aurea::tracking::kMaxCameraTrackFrames) * 2);
+    const auto n = e->camera_track_frame_info(values.data(), aurea::tracking::kMaxCameraTrackFrames);
+    return floats_to_array(values.data(), n * 2);
+}
+- (NSString*)addCameraTrackLensEffect:(long long)layerId redistort:(BOOL)redistort {
+    auto* e = self.engine; if (!e) return @"Motor indisponível";
+    const auto r = e->add_camera_track_lens_effect(static_cast<aurea::u64>(layerId), redistort == YES);
+    return r.ok() ? @"" : ([NSString stringWithUTF8String:std::string(r.status().detail()).c_str()] ?: @"Não foi possível adicionar o efeito");
+}
 - (NSArray<NSNumber*>*)cameraTrackTarget:(long long)frame { auto* e=self.engine;if(!e)return @[];float xy[64]{};const auto n=e->camera_track_target(frame,xy,32);return floats_to_array(xy,n*2); }
 - (BOOL)calibrateCameraScene:(uint32_t)operation distance:(float)distance { auto* e=self.engine;return e&&e->calibrate_camera_scene(operation,distance); }
 - (BOOL)placeModelOnTrack:(long long)layer { auto* e=self.engine;return e&&e->place_model_on_track(layer); }

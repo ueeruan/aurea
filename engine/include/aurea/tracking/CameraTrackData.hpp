@@ -21,6 +21,7 @@ struct CameraTrackData {
             + solution.poses.capacity() * sizeof(CameraPose)
             + solution.points.capacity() * sizeof(Vec3)
             + solution.trackSolved.capacity() + solution.failure.capacity()
+            + (solution.frameFovY.capacity() + solution.frameErrorPx.capacity()) * sizeof(f32)
             + tracks.pos.capacity() * sizeof(std::vector<Vec2>);
         for (const auto& row : tracks.pos) bytes += row.capacity() * sizeof(Vec2);
         return bytes;

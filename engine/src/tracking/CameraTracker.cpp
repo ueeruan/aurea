@@ -592,20 +592,161 @@ void refine_point(V3& X, const std::vector<const Pose*>& poses, const std::vecto
     }
 }
 
+/// Pose e focal por Gauss-Newton robusto (Huber, px) com prior na focal:
+/// o zoom variável quadro a quadro. `px` = observações centradas (u − cx, v − cy).
+bool refine_pose_focal(Pose& P, f64& f, const std::vector<V3>& X, const std::vector<V3>& px, f64 fPrior, f64 priorPx) {
+    if (X.size() < 8 || !(f > 1.0) || !(fPrior > 1.0)) return false;
+    const f64 huber = 1.5;
+    for (int it = 0; it < 12; ++it) {
+        f64 H[49] = {0}, g[7] = {0};
+        for (usize i = 0; i < X.size(); ++i) {
+            const V3 RX = mul(P.R, X[i]);
+            const V3 c = RX + P.t;
+            if (c.z <= 1e-9) continue;
+            const f64 iz = 1.0 / c.z;
+            const f64 ru = f * c.x * iz - px[i].x, rv = f * c.y * iz - px[i].y;
+            const f64 e = std::sqrt(ru * ru + rv * rv);
+            const f64 w = e <= huber ? 1.0 : huber / e;
+            const f64 Ju[3] = {f * iz, 0, -f * c.x * iz * iz}, Jv[3] = {0, f * iz, -f * c.y * iz * iz};
+            const f64 S[9] = {0, RX.z, -RX.y, -RX.z, 0, RX.x, RX.y, -RX.x, 0};
+            f64 Ju7[7], Jv7[7];
+            for (int k = 0; k < 3; ++k) {
+                Ju7[k] = Ju[0] * S[k] + Ju[1] * S[3 + k] + Ju[2] * S[6 + k];
+                Jv7[k] = Jv[0] * S[k] + Jv[1] * S[3 + k] + Jv[2] * S[6 + k];
+                Ju7[3 + k] = Ju[k];
+                Jv7[3 + k] = Jv[k];
+            }
+            Ju7[6] = c.x * iz;
+            Jv7[6] = c.y * iz;
+            for (int a = 0; a < 7; ++a) {
+                g[a] += w * (Ju7[a] * ru + Jv7[a] * rv);
+                for (int b = 0; b < 7; ++b) H[a * 7 + b] += w * (Ju7[a] * Ju7[b] + Jv7[a] * Jv7[b]);
+            }
+        }
+        // Prior: um desvio de 1/priorPx da focal anterior custa 1 px.
+        const f64 jp = priorPx / fPrior, rp = jp * (f - fPrior);
+        H[48] += jp * jp;
+        g[6] += jp * rp;
+        for (int a = 0; a < 7; ++a) { H[a * 7 + a] *= 1.0 + 1e-6; H[a * 7 + a] += 1e-12; g[a] = -g[a]; }
+        if (!solve_linear(7, H, g)) return false;
+        P.R = mul(rodrigues(V3{g[0], g[1], g[2]}), P.R);
+        P.t = P.t + V3{g[3], g[4], g[5]};
+        f = std::max(1.0, f + g[6]);
+        if (g[0] * g[0] + g[1] * g[1] + g[2] * g[2] + g[3] * g[3] + g[4] * g[4] + g[5] * g[5] < 1e-16 && g[6] * g[6] < 1e-8) break;
+    }
+    return true;
+}
+
+/// Homografia x2 ~ H·x1 (DLT normalizado, raios normalizados).
+bool homography4(const std::vector<V3>& x1, const std::vector<V3>& x2, const std::vector<u32>& idx, M3& H) {
+    if (idx.size() < 4) return false;
+    V3 c1{}, c2{};
+    for (u32 i : idx) { c1 = c1 + x1[i]; c2 = c2 + x2[i]; }
+    c1 = c1 * (1.0 / idx.size()); c2 = c2 * (1.0 / idx.size());
+    f64 d1 = 0, d2 = 0;
+    for (u32 i : idx) { d1 += std::hypot(x1[i].x - c1.x, x1[i].y - c1.y); d2 += std::hypot(x2[i].x - c2.x, x2[i].y - c2.y); }
+    if (d1 < 1e-12 || d2 < 1e-12) return false;
+    const f64 z1 = std::sqrt(2.0) * idx.size() / d1, z2 = std::sqrt(2.0) * idx.size() / d2;
+    M3 T1, T2;
+    T1(0, 0) = T1(1, 1) = z1; T1(0, 2) = -c1.x * z1; T1(1, 2) = -c1.y * z1;
+    T2(0, 0) = T2(1, 1) = z2; T2(0, 2) = -c2.x * z2; T2(1, 2) = -c2.y * z2;
+    std::vector<f64> AtA(81, 0.0);
+    for (u32 i : idx) {
+        const V3 a = mul(T1, x1[i]), b = mul(T2, x2[i]);
+        const f64 r0[9] = {0, 0, 0, -a.x, -a.y, -1, b.y * a.x, b.y * a.y, b.y};
+        const f64 r1[9] = {a.x, a.y, 1, 0, 0, 0, -b.x * a.x, -b.x * a.y, -b.x};
+        for (int p = 0; p < 9; ++p)
+            for (int q = 0; q < 9; ++q) AtA[static_cast<usize>(p * 9 + q)] += r0[p] * r0[q] + r1[p] * r1[q];
+    }
+    const std::vector<f64> h = null_vector(AtA, 9);
+    M3 Hn;
+    for (int k = 0; k < 9; ++k) Hn.m[k] = h[static_cast<usize>(k)];
+    // H = T2⁻¹·Hn·T1.
+    M3 T2i;
+    T2i(0, 0) = T2i(1, 1) = 1.0 / z2; T2i(0, 2) = c2.x; T2i(1, 2) = c2.y;
+    H = mul(mul(T2i, Hn), T1);
+    return std::isfinite(H.m[0]) && std::fabs(det(H)) > 1e-18;
+}
+
+/// Erro de transferência (raio normalizado) de x1 por H até x2, ao quadrado.
+f64 transfer2(const M3& H, V3 a, V3 b) {
+    const V3 p = mul(H, a);
+    if (std::fabs(p.z) < 1e-12) return 1e30;
+    const f64 dx = p.x / p.z - b.x, dy = p.y / p.z - b.y;
+    return dx * dx + dy * dy;
+}
+
+/// As soluções fisicamente possíveis de H = R + T·Nᵀ (plano Nᵀ·X = 1 na
+/// câmera 1), Ma, Soatto, Košecká e Sastry, §5.3.3. Até duas (as outras
+/// duas põem o plano atrás da câmera); T normalizado (escala livre).
+std::vector<Pose> decompose_homography(M3 H, const std::vector<V3>& x1, const std::vector<V3>& x2, const std::vector<u32>& inl) {
+    std::vector<Pose> out;
+    // Sinal: x2ᵀ·H·x1 > 0 (profundidades positivas nos dois quadros).
+    f64 sign = 0;
+    for (u32 i : inl) sign += dot(x2[i], mul(H, x1[i])) > 0 ? 1.0 : -1.0;
+    if (sign < 0) for (f64& v : H.m) v = -v;
+    std::vector<f64> HtH(9, 0.0), V, w;
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c)
+            for (int k = 0; k < 3; ++k) HtH[static_cast<usize>(r * 3 + c)] += H(k, r) * H(k, c);
+    jacobi_eigen(3, HtH, V, w);   // crescente: σ3², σ2², σ1²
+    if (!(w[1] > 1e-18)) return out;
+    const f64 s2 = std::sqrt(w[1]);
+    for (f64& v : H.m) v /= s2;   // σ2 = 1
+    const f64 l1 = w[2] / w[1], l3 = w[0] / w[1];
+    const V3 v1{V[2], V[5], V[8]}, v2{V[1], V[4], V[7]}, v3{V[0], V[3], V[6]};
+    if (l1 - l3 < 1e-9) return out;   // só rotação: sem translação, sem plano
+    const f64 a = std::sqrt(std::max(0.0, 1.0 - l3)), b = std::sqrt(std::max(0.0, l1 - 1.0)), n = std::sqrt(l1 - l3);
+    const V3 u1 = (v1 * a + v3 * b) * (1.0 / n), u2 = (v1 * a - v3 * b) * (1.0 / n);
+    auto solution = [&](V3 u, f64 s) {
+        const V3 Hv2 = mul(H, v2), Hu = mul(H, u);
+        M3 U, W;
+        const V3 cu = cross(v2, u), cw = cross(Hv2, Hu);
+        for (int r = 0; r < 3; ++r) {
+            U(r, 0) = (&v2.x)[r]; U(r, 1) = (&u.x)[r]; U(r, 2) = (&cu.x)[r];
+            W(r, 0) = (&Hv2.x)[r]; W(r, 1) = (&Hu.x)[r]; W(r, 2) = (&cw.x)[r];
+        }
+        const M3 R = mul(W, transpose(U));
+        V3 N = cu * s;
+        M3 HR;
+        for (int k = 0; k < 9; ++k) HR.m[k] = H.m[k] - R.m[k];
+        V3 T = mul(HR, cu) * s;
+        // O plano na frente: Nᵀ·e3 > 0.
+        if (N.z <= 0) return;
+        const f64 tn = norm(T);
+        if (tn < 1e-9 || det(R) < 0.5) return;
+        out.push_back(Pose{R, T * (1.0 / tn), true});
+    };
+    solution(u1, 1.0); solution(u1, -1.0); solution(u2, 1.0); solution(u2, -1.0);
+    return out;
+}
+
 struct SolveState {
     std::vector<Pose> poses;
     std::vector<V3> X;
     std::vector<u8> hasX;
     std::vector<u8> rotationTracks;
+    std::vector<f64> focal;   // px da análise, por quadro (FOV fixa: todos iguais)
     f64 rms = 1e30;
     u32 solved = 0, inliers = 0;
     u32 fixedFrame = 0;
     bool rotationOnly = false;
+    bool homography = false;  // o par inicial veio da homografia (cena plana)
     std::string failure;
 };
 
+struct SolveCfg {
+    bool zoom = false;   // focal por quadro
+    u32 init = 0;        // par inicial: 0 essencial, 1 homografia
+};
+
+// Zoom variável: prior da focal no PnP quadro a quadro (1/kZoomPrior da
+// focal custa 1 px) e na 2ª diferença entre quadros-chave do BA.
+constexpr f64 kZoomPrior = 40.0;
+constexpr f64 kZoomSmooth = 400.0;
+
 /// Erro final (px) e inliers: ponto com erro > 4 px em algum quadro sai.
-void evaluate(SolveState& S, const Tracks2D& T, f64 f) {
+void evaluate(SolveState& S, const Tracks2D& T) {
     const u32 N = T.frames, M = static_cast<u32>(T.pos.size());
     const f64 cx = static_cast<f64>(T.width) * 0.5, cy = static_cast<f64>(T.height) * 0.5;
     f64 sum = 0;
@@ -621,6 +762,7 @@ void evaluate(SolveState& S, const Tracks2D& T, f64 f) {
             if (!Tracks2D::present(o) || !S.poses[fr].valid) continue;
             f64 u, v;
             if (!project(S.poses[fr], S.X[t], u, v)) { bad = true; break; }
+            const f64 f = S.focal[fr];
             const f64 e = std::hypot(u * f + cx - o.x, v * f + cy - o.y);
             if (e > 4.0) { bad = true; break; }
             st += e * e;
@@ -663,14 +805,24 @@ bool cholesky_solve(int n, std::vector<f64>& A, std::vector<f64>& b) {
     return true;
 }
 
+/// O que o bundle adjustment libera além das poses e dos pontos.
+struct BAParams {
+    bool freeFocal = false;   // focal livre
+    bool perKey = false;      // zoom variável: uma focal por quadro-chave (+ prior de suavidade)
+    u32 lens = 0;             // 0: k1/k2 presos; 1: k1 livre; 2: k1 e k2 livres
+    f64 k1 = 0, k2 = 0;       // meia altura = 1
+};
+
 /// Bundle adjustment (Levenberg-Marquardt, complemento de Schur) sobre os
-/// quadros-chave: poses, pontos e a distância focal ao mesmo tempo, erro em
-/// px com peso de Huber. O quadro fixo prende o referencial. Depois, os
-/// quadros fora da chave ganham pose pelos pontos refinados.
-void bundle_adjust(SolveState& S, const Tracks2D& T, f64& f, bool freeFocal, u32 maxKeys, int iterations,
-                   const std::atomic<bool>* cancel) {
-    const u32 N = T.frames, M = static_cast<u32>(T.pos.size());
-    const f64 cx = static_cast<f64>(T.width) * 0.5, cy = static_cast<f64>(T.height) * 0.5;
+/// quadros-chave: poses, pontos, a(s) focal(is) e a distorção ao mesmo tempo,
+/// erro em px nas observações CRUAS (com distorção), peso de Huber. O
+/// quadro fixo prende o referencial. Depois, os rastros sem distorção
+/// (`und`) e os quadros fora da chave ganham pose pelos pontos refinados.
+void bundle_adjust(SolveState& S, const Tracks2D& raw, const Tracks2D& undIn, BAParams& bp, u32 maxKeys, int iterations,
+                   const std::atomic<bool>* cancel, Tracks2D* undOut = nullptr) {
+    const u32 N = raw.frames, M = static_cast<u32>(raw.pos.size());
+    const f64 cx = static_cast<f64>(raw.width) * 0.5, cy = static_cast<f64>(raw.height) * 0.5;
+    const f64 halfH = std::max(1.0, static_cast<f64>(raw.height) * 0.5), ih2 = 1.0 / (halfH * halfH);
     std::vector<u32> valid;
     for (u32 i = 0; i < N; ++i) if (S.poses[i].valid) valid.push_back(i);
     if (valid.size() < 3) return;
@@ -685,8 +837,12 @@ void bundle_adjust(SolveState& S, const Tracks2D& T, f64& f, bool freeFocal, u32
     std::vector<i32> block(K, -1);
     i32 nb = 0;
     for (u32 k = 0; k < K; ++k) if (keys[k] != S.fixedFrame) block[k] = nb++;
-    const int nc = nb * 6 + (freeFocal ? 1 : 0);
-    const int fi = nc - 1;   // índice da focal (se livre)
+    // Parâmetros de câmera: [poses 6·nb][focal(is)][k1][k2].
+    const bool perKey = bp.perKey && bp.freeFocal;
+    const int nf = bp.freeFocal ? (perKey ? static_cast<int>(K) : 1) : 0;
+    const int f0 = nb * 6, k1i = bp.lens >= 1 ? f0 + nf : -1, k2i = bp.lens >= 2 ? f0 + nf + 1 : -1;
+    const int nc = nb * 6 + nf + (bp.lens >= 1 ? 1 : 0) + (bp.lens >= 2 ? 1 : 0);
+    auto focal_index = [&](u32 key) { return !bp.freeFocal ? -1 : (perKey ? f0 + static_cast<int>(key) : f0); };
     struct O { u32 key; f64 u, v; };
     std::vector<u32> pts;
     std::vector<std::vector<O>> obs;
@@ -694,76 +850,107 @@ void bundle_adjust(SolveState& S, const Tracks2D& T, f64& f, bool freeFocal, u32
         if (!S.hasX[t]) continue;
         std::vector<O> o;
         for (u32 k = 0; k < K; ++k) {
-            const Vec2 p = T.pos[t][keys[k]];
+            const Vec2 p = raw.pos[t][keys[k]];
             if (Tracks2D::present(p)) o.push_back({k, static_cast<f64>(p.x) - cx, static_cast<f64>(p.y) - cy});
         }
         if (o.size() >= 2) { pts.push_back(t); obs.push_back(std::move(o)); }
     }
     if (pts.size() < 20) return;
     const f64 huber = 2.0;
-    auto cost = [&](const std::vector<Pose>& P, const std::vector<V3>& X, f64 ff) {
+    std::vector<f64> F(K);
+    for (u32 k = 0; k < K; ++k) F[k] = S.focal[keys[k]];
+    f64 fmean = 0;
+    for (f64 v : F) fmean += v;
+    fmean /= static_cast<f64>(K);
+    const f64 wz = kZoomSmooth / std::max(1.0, fmean);
+    // Previsão em px (centrada, com distorção) de q = f·(x/z, y/z).
+    auto distort = [&](f64 qx, f64 qy, f64 k1, f64 k2, f64& px, f64& py) {
+        const f64 s = (qx * qx + qy * qy) * ih2, d = 1.0 + k1 * s + k2 * s * s;
+        px = qx * d; py = qy * d;
+    };
+    auto cost = [&](const std::vector<Pose>& P, const std::vector<V3>& X, const std::vector<f64>& Fk, f64 k1, f64 k2) {
         f64 c = 0;
         for (usize i = 0; i < pts.size(); ++i)
             for (const O& o : obs[i]) {
                 const V3 q = mul(P[o.key].R, X[i]) + P[o.key].t;
                 if (q.z <= 1e-9) { c += huber * huber * 4; continue; }
-                const f64 e = std::hypot(ff * q.x / q.z - o.u, ff * q.y / q.z - o.v);
+                f64 pu, pv;
+                distort(Fk[o.key] * q.x / q.z, Fk[o.key] * q.y / q.z, k1, k2, pu, pv);
+                const f64 e = std::hypot(pu - o.u, pv - o.v);
                 c += e <= huber ? e * e : 2 * huber * e - huber * huber;
             }
+        if (perKey) for (u32 k = 1; k + 1 < K; ++k) { const f64 r = wz * (Fk[k - 1] - 2 * Fk[k] + Fk[k + 1]); c += r * r; }
         return c;
     };
     std::vector<Pose> P(K);
     for (u32 k = 0; k < K; ++k) P[k] = S.poses[keys[k]];
     std::vector<V3> X(pts.size());
     for (usize i = 0; i < pts.size(); ++i) X[i] = S.X[pts[i]];
+    f64 k1 = bp.k1, k2 = bp.k2;
     f64 lambda = 1e-3;
-    f64 c0 = cost(P, X, f);
+    f64 c0 = cost(P, X, F, k1, k2);
+    constexpr int kC = 9;   // 6 da pose + focal + k1 + k2
     std::vector<f64> Sm(static_cast<usize>(nc) * nc), rhs(static_cast<usize>(nc));
     for (int it = 0; it < iterations; ++it) {
         if (cancel && cancel->load()) return;
         std::fill(Sm.begin(), Sm.end(), 0.0);
         std::fill(rhs.begin(), rhs.end(), 0.0);
         // Por ponto: V (3×3), g_p, e os blocos W por observação.
-        struct PtSys { f64 V[9]; f64 g[3]; std::vector<std::array<f64, 21>> W; std::vector<u32> keys; };
+        struct PtSys { f64 V[9]; f64 g[3]; std::vector<std::array<f64, kC * 3>> W; std::vector<u32> keys; };
         std::vector<PtSys> sys(pts.size());
+        auto indices = [&](u32 key, int idx[kC]) {
+            const i32 b = block[key];
+            for (int k = 0; k < 6; ++k) idx[k] = b >= 0 ? b * 6 + k : -1;
+            idx[6] = focal_index(key);
+            idx[7] = k1i;
+            idx[8] = k2i;
+        };
         for (usize i = 0; i < pts.size(); ++i) {
             PtSys& ps = sys[i];
             std::fill(std::begin(ps.V), std::end(ps.V), 0.0);
             std::fill(std::begin(ps.g), std::end(ps.g), 0.0);
             for (const O& o : obs[i]) {
                 const Pose& Pk = P[o.key];
+                const f64 f = F[o.key];
                 const V3 RX = mul(Pk.R, X[i]);
                 const V3 q = RX + Pk.t;
                 if (q.z <= 1e-9) continue;
                 const f64 iz = 1.0 / q.z;
-                const f64 ru = f * q.x * iz - o.u, rv = f * q.y * iz - o.v;
+                const f64 qx = f * q.x * iz, qy = f * q.y * iz;
+                const f64 s = (qx * qx + qy * qy) * ih2, d = 1.0 + k1 * s + k2 * s * s;
+                const f64 ru = qx * d - o.u, rv = qy * d - o.v;
                 const f64 e = std::sqrt(ru * ru + rv * rv);
                 const f64 w = e <= huber ? 1.0 : huber / e;
+                // ∂pred/∂q = d·I + 2(k1 + 2k2·s)/h²·q·qᵀ.
+                const f64 dd = 2.0 * (k1 + 2.0 * k2 * s) * ih2;
+                const f64 A00 = d + dd * qx * qx, A01 = dd * qx * qy, A11 = d + dd * qy * qy;
                 const f64 Ju[3] = {f * iz, 0, -f * q.x * iz * iz}, Jv[3] = {0, f * iz, -f * q.y * iz * iz};
                 const f64 Sk[9] = {0, RX.z, -RX.y, -RX.z, 0, RX.x, RX.y, -RX.x, 0};
-                f64 Jc_u[7], Jc_v[7];   // 6 da pose + focal
+                f64 Qu[kC], Qv[kC];   // ∂q/∂(câmera)
                 for (int k = 0; k < 3; ++k) {
-                    Jc_u[k] = Ju[0] * Sk[k] + Ju[1] * Sk[3 + k] + Ju[2] * Sk[6 + k];
-                    Jc_v[k] = Jv[0] * Sk[k] + Jv[1] * Sk[3 + k] + Jv[2] * Sk[6 + k];
-                    Jc_u[3 + k] = Ju[k];
-                    Jc_v[3 + k] = Jv[k];
+                    Qu[k] = Ju[0] * Sk[k] + Ju[1] * Sk[3 + k] + Ju[2] * Sk[6 + k];
+                    Qv[k] = Jv[0] * Sk[k] + Jv[1] * Sk[3 + k] + Jv[2] * Sk[6 + k];
+                    Qu[3 + k] = Ju[k];
+                    Qv[3 + k] = Jv[k];
                 }
-                Jc_u[6] = q.x * iz;
-                Jc_v[6] = q.y * iz;
+                Qu[6] = q.x * iz; Qv[6] = q.y * iz;
+                f64 Jc_u[kC], Jc_v[kC];
+                for (int k = 0; k < 7; ++k) { Jc_u[k] = A00 * Qu[k] + A01 * Qv[k]; Jc_v[k] = A01 * Qu[k] + A11 * Qv[k]; }
+                Jc_u[7] = qx * s; Jc_v[7] = qy * s;
+                Jc_u[8] = qx * s * s; Jc_v[8] = qy * s * s;
                 f64 Jp_u[3], Jp_v[3];
                 for (int k = 0; k < 3; ++k) {
-                    Jp_u[k] = Ju[0] * Pk.R(0, k) + Ju[1] * Pk.R(1, k) + Ju[2] * Pk.R(2, k);
-                    Jp_v[k] = Jv[0] * Pk.R(0, k) + Jv[1] * Pk.R(1, k) + Jv[2] * Pk.R(2, k);
+                    const f64 a = Ju[0] * Pk.R(0, k) + Ju[1] * Pk.R(1, k) + Ju[2] * Pk.R(2, k);
+                    const f64 b = Jv[0] * Pk.R(0, k) + Jv[1] * Pk.R(1, k) + Jv[2] * Pk.R(2, k);
+                    Jp_u[k] = A00 * a + A01 * b;
+                    Jp_v[k] = A01 * a + A11 * b;
                 }
-                // Índices dos 7 parâmetros de câmera desta observação (−1 = fixo).
-                int idx[7];
-                const i32 b = block[o.key];
-                for (int k = 0; k < 6; ++k) idx[k] = b >= 0 ? b * 6 + k : -1;
-                idx[6] = freeFocal ? fi : -1;
-                for (int a = 0; a < 7; ++a) {
+                int idx[kC];
+                indices(o.key, idx);
+                for (int a = 0; a < kC; ++a) {
                     if (idx[a] < 0) continue;
                     rhs[static_cast<usize>(idx[a])] -= w * (Jc_u[a] * ru + Jc_v[a] * rv);
-                    for (int c = 0; c < 7; ++c) {
+                    for (int c = 0; c < kC; ++c) {
                         if (idx[c] < 0) continue;
                         Sm[static_cast<usize>(idx[a]) * nc + static_cast<usize>(idx[c])] += w * (Jc_u[a] * Jc_u[c] + Jc_v[a] * Jc_v[c]);
                     }
@@ -772,11 +959,21 @@ void bundle_adjust(SolveState& S, const Tracks2D& T, f64& f, bool freeFocal, u32
                     ps.g[a] -= w * (Jp_u[a] * ru + Jp_v[a] * rv);
                     for (int c = 0; c < 3; ++c) ps.V[a * 3 + c] += w * (Jp_u[a] * Jp_u[c] + Jp_v[a] * Jp_v[c]);
                 }
-                std::array<f64, 21> Wo{};
-                for (int a = 0; a < 7; ++a)
+                std::array<f64, kC * 3> Wo{};
+                for (int a = 0; a < kC; ++a)
                     for (int c = 0; c < 3; ++c) Wo[static_cast<usize>(a * 3 + c)] = w * (Jc_u[a] * Jp_u[c] + Jc_v[a] * Jp_v[c]);
                 ps.W.push_back(Wo);
                 ps.keys.push_back(o.key);
+            }
+        }
+        // Zoom variável: prior na 2ª diferença das focais dos quadros-chave.
+        if (perKey) for (u32 k = 1; k + 1 < K; ++k) {
+            const int ia[3] = {f0 + static_cast<int>(k) - 1, f0 + static_cast<int>(k), f0 + static_cast<int>(k) + 1};
+            const f64 J[3] = {wz, -2.0 * wz, wz};
+            const f64 r = wz * (F[k - 1] - 2 * F[k] + F[k + 1]);
+            for (int a = 0; a < 3; ++a) {
+                rhs[static_cast<usize>(ia[a])] -= J[a] * r;
+                for (int c = 0; c < 3; ++c) Sm[static_cast<usize>(ia[a]) * nc + static_cast<usize>(ia[c])] += J[a] * J[c];
             }
         }
         // Amortecimento (LM) na diagonal das câmeras e dos pontos.
@@ -791,37 +988,33 @@ void bundle_adjust(SolveState& S, const Tracks2D& T, f64& f, bool freeFocal, u32
             for (int a = 0; a < 3; ++a) V[a * 3 + a] = V[a * 3 + a] * (1.0 + lambda) + 1e-9;
             M3 Vm;
             for (int a = 0; a < 9; ++a) Vm.m[a] = V[a];
-            const f64 d = det(Vm);
-            if (std::fabs(d) < 1e-30) { okV = false; break; }
+            const f64 dV = det(Vm);
+            if (std::fabs(dV) < 1e-30) { okV = false; break; }
             std::array<f64, 9> inv{};
-            inv[0] = (V[4] * V[8] - V[5] * V[7]) / d; inv[1] = (V[2] * V[7] - V[1] * V[8]) / d; inv[2] = (V[1] * V[5] - V[2] * V[4]) / d;
-            inv[3] = (V[5] * V[6] - V[3] * V[8]) / d; inv[4] = (V[0] * V[8] - V[2] * V[6]) / d; inv[5] = (V[2] * V[3] - V[0] * V[5]) / d;
-            inv[6] = (V[3] * V[7] - V[4] * V[6]) / d; inv[7] = (V[1] * V[6] - V[0] * V[7]) / d; inv[8] = (V[0] * V[4] - V[1] * V[3]) / d;
+            inv[0] = (V[4] * V[8] - V[5] * V[7]) / dV; inv[1] = (V[2] * V[7] - V[1] * V[8]) / dV; inv[2] = (V[1] * V[5] - V[2] * V[4]) / dV;
+            inv[3] = (V[5] * V[6] - V[3] * V[8]) / dV; inv[4] = (V[0] * V[8] - V[2] * V[6]) / dV; inv[5] = (V[2] * V[3] - V[0] * V[5]) / dV;
+            inv[6] = (V[3] * V[7] - V[4] * V[6]) / dV; inv[7] = (V[1] * V[6] - V[0] * V[7]) / dV; inv[8] = (V[0] * V[4] - V[1] * V[3]) / dV;
             Vinv[i] = inv;
             const usize no = ps.W.size();
-            std::vector<std::array<f64, 21>> Y(no);   // W·V⁻¹
+            std::vector<std::array<f64, kC * 3>> Y(no);   // W·V⁻¹
             for (usize a = 0; a < no; ++a)
-                for (int r = 0; r < 7; ++r)
+                for (int r = 0; r < kC; ++r)
                     for (int c = 0; c < 3; ++c)
                         Y[a][static_cast<usize>(r * 3 + c)] = ps.W[a][static_cast<usize>(r * 3)] * inv[c] + ps.W[a][static_cast<usize>(r * 3 + 1)] * inv[3 + c]
                                                             + ps.W[a][static_cast<usize>(r * 3 + 2)] * inv[6 + c];
             for (usize a = 0; a < no; ++a) {
-                int ia[7];
-                const i32 ba = block[ps.keys[a]];
-                for (int k = 0; k < 6; ++k) ia[k] = ba >= 0 ? ba * 6 + k : -1;
-                ia[6] = freeFocal ? fi : -1;
-                for (int r = 0; r < 7; ++r) {
+                int ia[kC];
+                indices(ps.keys[a], ia);
+                for (int r = 0; r < kC; ++r) {
                     if (ia[r] < 0) continue;
                     rhs[static_cast<usize>(ia[r])] -= Y[a][static_cast<usize>(r * 3)] * ps.g[0] + Y[a][static_cast<usize>(r * 3 + 1)] * ps.g[1] + Y[a][static_cast<usize>(r * 3 + 2)] * ps.g[2];
                 }
                 for (usize bIdx = 0; bIdx < no; ++bIdx) {
-                    int ib[7];
-                    const i32 bb = block[ps.keys[bIdx]];
-                    for (int k = 0; k < 6; ++k) ib[k] = bb >= 0 ? bb * 6 + k : -1;
-                    ib[6] = freeFocal ? fi : -1;
-                    for (int r = 0; r < 7; ++r) {
+                    int ib[kC];
+                    indices(ps.keys[bIdx], ib);
+                    for (int r = 0; r < kC; ++r) {
                         if (ia[r] < 0) continue;
-                        for (int c = 0; c < 7; ++c) {
+                        for (int c = 0; c < kC; ++c) {
                             if (ib[c] < 0) continue;
                             Sm[static_cast<usize>(ia[r]) * nc + static_cast<usize>(ib[c])] -=
                                 Y[a][static_cast<usize>(r * 3)] * ps.W[bIdx][static_cast<usize>(c * 3)] + Y[a][static_cast<usize>(r * 3 + 1)] * ps.W[bIdx][static_cast<usize>(c * 3 + 1)]
@@ -837,7 +1030,9 @@ void bundle_adjust(SolveState& S, const Tracks2D& T, f64& f, bool freeFocal, u32
         // Passo candidato.
         std::vector<Pose> P2 = P;
         std::vector<V3> X2 = X;
-        f64 f2 = freeFocal ? f + dc[static_cast<usize>(fi)] : f;
+        std::vector<f64> F2 = F;
+        if (bp.freeFocal) for (u32 k = 0; k < K; ++k) F2[k] = F[k] + dc[static_cast<usize>(focal_index(k))];
+        const f64 k1n = k1i >= 0 ? k1 + dc[static_cast<usize>(k1i)] : k1, k2n = k2i >= 0 ? k2 + dc[static_cast<usize>(k2i)] : k2;
         for (u32 k = 0; k < K; ++k) {
             if (block[k] < 0) continue;
             const f64* d = &dc[static_cast<usize>(block[k]) * 6];
@@ -848,22 +1043,25 @@ void bundle_adjust(SolveState& S, const Tracks2D& T, f64& f, bool freeFocal, u32
             const PtSys& ps = sys[i];
             f64 r[3] = {ps.g[0], ps.g[1], ps.g[2]};
             for (usize a = 0; a < ps.W.size(); ++a) {
-                const i32 ba = block[ps.keys[a]];
-                for (int row = 0; row < 7; ++row) {
-                    const int id = row < 6 ? (ba >= 0 ? ba * 6 + row : -1) : (freeFocal ? fi : -1);
-                    if (id < 0) continue;
-                    for (int c = 0; c < 3; ++c) r[c] -= ps.W[a][static_cast<usize>(row * 3 + c)] * dc[static_cast<usize>(id)];
+                int ia[kC];
+                indices(ps.keys[a], ia);
+                for (int row = 0; row < kC; ++row) {
+                    if (ia[row] < 0) continue;
+                    for (int c = 0; c < 3; ++c) r[c] -= ps.W[a][static_cast<usize>(row * 3 + c)] * dc[static_cast<usize>(ia[row])];
                 }
             }
             const auto& vi = Vinv[i];
             X2[i] = X[i] + V3{vi[0] * r[0] + vi[1] * r[1] + vi[2] * r[2], vi[3] * r[0] + vi[4] * r[1] + vi[5] * r[2], vi[6] * r[0] + vi[7] * r[1] + vi[8] * r[2]};
         }
-        const f64 c1 = cost(P2, X2, f2);
-        if (c1 < c0 && f2 > 1.0) {
+        const bool sane = std::all_of(F2.begin(), F2.end(), [](f64 v) { return v > 1.0; })
+                       && std::fabs(k1n) < 2.0 && std::fabs(k2n) < 2.0 && std::isfinite(k1n) && std::isfinite(k2n);
+        const f64 c1 = sane ? cost(P2, X2, F2, k1n, k2n) : 1e300;
+        if (c1 < c0) {
             const bool small = (c0 - c1) < 1e-7 * c0;
             P.swap(P2);
             X.swap(X2);
-            f = f2;
+            F.swap(F2);
+            k1 = k1n; k2 = k2n;
             c0 = c1;
             lambda = std::max(1e-7, lambda / 3.0);
             if (small) break;
@@ -874,40 +1072,75 @@ void bundle_adjust(SolveState& S, const Tracks2D& T, f64& f, bool freeFocal, u32
     }
     for (u32 k = 0; k < K; ++k) S.poses[keys[k]] = P[k];
     for (usize i = 0; i < pts.size(); ++i) S.X[pts[i]] = X[i];
-    // Quadros fora da chave e pontos fora do BA, com a focal nova.
-    const f64 fcx = cx, fcy = cy;
+    // Focal dos quadros: a dos quadros-chave; entre eles, interpolação no log.
+    // Focal presa: a de cada quadro fica como estava.
+    if (bp.freeFocal && perKey) {
+        for (u32 fr = 0; fr < N; ++fr) {
+            const auto it = std::lower_bound(keys.begin(), keys.end(), fr);
+            if (it == keys.end()) { S.focal[fr] = F[K - 1]; continue; }
+            const u32 hi = static_cast<u32>(it - keys.begin());
+            if (keys[hi] == fr || hi == 0) { S.focal[fr] = F[hi]; continue; }
+            const f64 t = static_cast<f64>(fr - keys[hi - 1]) / static_cast<f64>(keys[hi] - keys[hi - 1]);
+            S.focal[fr] = std::exp(std::log(F[hi - 1]) * (1 - t) + std::log(F[hi]) * t);
+        }
+    } else if (bp.freeFocal) {
+        std::fill(S.focal.begin(), S.focal.end(), F[0]);
+    }
+    // A distorção nova muda os raios: os rastros sem distorção são refeitos.
+    Tracks2D fresh;
+    const Tracks2D* undp = &undIn;
+    if (k1 != bp.k1 || k2 != bp.k2 || undIn.pos.size() != raw.pos.size()) {
+        fresh = undistort_tracks(raw, static_cast<f32>(k1), static_cast<f32>(k2));
+        undp = &fresh;
+    }
+    const Tracks2D& und = *undp;
+    bp.k1 = k1; bp.k2 = k2;
+    // Quadros fora da chave e pontos fora do BA, com a focal (e a lente) novas.
     auto ray = [&](u32 track, u32 frame) {
-        const Vec2 q = T.pos[track][frame];
-        return V3{(static_cast<f64>(q.x) - fcx) / f, (static_cast<f64>(q.y) - fcy) / f, 1.0};
+        const Vec2 q = und.pos[track][frame];
+        return V3{(static_cast<f64>(q.x) - cx) / S.focal[frame], (static_cast<f64>(q.y) - cy) / S.focal[frame], 1.0};
     };
     for (u32 fr = 0; fr < N; ++fr) {
         if (!S.poses[fr].valid || std::binary_search(keys.begin(), keys.end(), fr)) continue;
         std::vector<V3> Xs, rs;
-        for (u32 t = 0; t < M; ++t) if (S.hasX[t] && Tracks2D::present(T.pos[t][fr])) { Xs.push_back(S.X[t]); rs.push_back(ray(t, fr)); }
-        if (Xs.size() >= 8) refine_pose(S.poses[fr], Xs, rs, f);
+        for (u32 t = 0; t < M; ++t) if (S.hasX[t] && Tracks2D::present(und.pos[t][fr])) { Xs.push_back(S.X[t]); rs.push_back(ray(t, fr)); }
+        if (Xs.size() < 8) continue;
+        if (perKey) {
+            // Pose e focal do quadro, presa à interpolação dos vizinhos.
+            std::vector<V3> px(rs.size());
+            for (usize i = 0; i < rs.size(); ++i) px[i] = V3{rs[i].x * S.focal[fr], rs[i].y * S.focal[fr], 0};
+            f64 f = S.focal[fr];
+            if (refine_pose_focal(S.poses[fr], f, Xs, px, S.focal[fr], kZoomPrior * 4)) S.focal[fr] = f;
+        } else {
+            refine_pose(S.poses[fr], Xs, rs, S.focal[fr]);
+        }
     }
     for (u32 t = 0; t < M; ++t) {
         if (!S.hasX[t]) continue;
         std::vector<const Pose*> ps;
         std::vector<V3> rs;
-        for (u32 fr = 0; fr < N; ++fr) if (Tracks2D::present(T.pos[t][fr]) && S.poses[fr].valid) { ps.push_back(&S.poses[fr]); rs.push_back(ray(t, fr)); }
-        if (ps.size() >= 2) refine_point(S.X[t], ps, rs, f);
+        for (u32 fr = 0; fr < N; ++fr) if (Tracks2D::present(und.pos[t][fr]) && S.poses[fr].valid) { ps.push_back(&S.poses[fr]); rs.push_back(ray(t, fr)); }
+        if (ps.size() >= 2) refine_point(S.X[t], ps, rs, S.focal[0]);
     }
+    if (undOut && undp == &fresh) *undOut = std::move(fresh);
 }
 
-/// Um solve completo com a distância focal `f` (px da análise).
-SolveState solve_with_focal(const Tracks2D& T, f64 f, TrackMode mode, const std::atomic<bool>* cancel) {
+/// Um solve completo com a distância focal inicial `f` (px da análise), nos
+/// rastros SEM distorção. Zoom variável: a focal acompanha quadro a quadro.
+SolveState solve_with_focal(const Tracks2D& T, f64 f, TrackMode mode, const std::atomic<bool>* cancel, const SolveCfg& cfg = {}) {
     SolveState S;
     const u32 N = T.frames, M = static_cast<u32>(T.pos.size());
     const f64 cx = static_cast<f64>(T.width) * 0.5, cy = static_cast<f64>(T.height) * 0.5;
+    S.focal.assign(N, f);
     auto ray = [&](u32 track, u32 frame) {
         const Vec2 p = T.pos[track][frame];
-        return V3{(static_cast<f64>(p.x) - cx) / f, (static_cast<f64>(p.y) - cy) / f, 1.0};
+        return V3{(static_cast<f64>(p.x) - cx) / S.focal[frame], (static_cast<f64>(p.y) - cy) / S.focal[frame], 1.0};
     };
     auto has = [&](u32 track, u32 frame) { return Tracks2D::present(T.pos[track][frame]); };
     S.poses.assign(N, Pose{});
     S.X.assign(M, V3{});
     S.hasX.assign(M, 0);
+    S.homography = cfg.init == 1;
     std::mt19937 rng(1234u);
     const int ransacIters = mode == TrackMode::Fast ? 200 : (mode == TrackMode::High ? 800 : 400);
     const f64 thr2 = (1.5 / f) * (1.5 / f);
@@ -924,22 +1157,68 @@ SolveState solve_with_focal(const Tracks2D& T, f64 f, TrackMode mode, const std:
         for (u32 t = 0; t < M; ++t) if (has(t, a) && has(t, cand)) { x1.push_back(ray(t, a)); x2.push_back(ray(t, cand)); ids.push_back(t); }
         if (x1.size() < 30) continue;
         std::vector<u32> bestInl;
-        M3 bestE;
-        std::uniform_int_distribution<u32> pick(0, static_cast<u32>(x1.size() - 1));
-        for (int it = 0; it < ransacIters; ++it) {
-            std::vector<u32> smp;
-            while (smp.size() < 8) { const u32 r = pick(rng); if (std::find(smp.begin(), smp.end(), r) == smp.end()) smp.push_back(r); }
-            M3 E;
-            if (!essential8(x1, x2, smp, E)) continue;
-            std::vector<u32> inl;
-            for (u32 i = 0; i < x1.size(); ++i) if (sampson(E, x1[i], x2[i]) < thr2) inl.push_back(i);
-            if (inl.size() > bestInl.size()) { bestInl = std::move(inl); bestE = E; }
-        }
-        if (bestInl.size() < 30) continue;
-        M3 E;
-        if (!essential8(x1, x2, bestInl, E)) continue;
         Pose P;
-        if (!decompose(E, x1, x2, bestInl, P)) continue;
+        std::uniform_int_distribution<u32> pick(0, static_cast<u32>(x1.size() - 1));
+        if (cfg.init == 1) {
+            // Cena plana: homografia (4 pontos) com RANSAC, decomposta; a
+            // ambiguidade das duas soluções sai num terceiro quadro (PnP).
+            M3 bestH;
+            for (int it = 0; it < ransacIters; ++it) {
+                std::vector<u32> smp;
+                while (smp.size() < 4) { const u32 r = pick(rng); if (std::find(smp.begin(), smp.end(), r) == smp.end()) smp.push_back(r); }
+                M3 Hc;
+                if (!homography4(x1, x2, smp, Hc)) continue;
+                std::vector<u32> inl;
+                for (u32 i = 0; i < x1.size(); ++i) if (transfer2(Hc, x1[i], x2[i]) < 2.0 * thr2) inl.push_back(i);
+                if (inl.size() > bestInl.size()) { bestInl = std::move(inl); bestH = Hc; }
+            }
+            if (bestInl.size() < 30) continue;
+            M3 H;
+            if (!homography4(x1, x2, bestInl, H)) continue;
+            const std::vector<Pose> sols = decompose_homography(H, x1, x2, bestInl);
+            if (sols.empty()) continue;
+            const Pose I{M3{}, V3{}, true};
+            const u32 third = std::min(N - 1, cand + std::max<u32>(4, cand / 2));
+            f64 bestScore = 1e300;
+            for (const Pose& sol : sols) {
+                // Pontos na frente das duas câmeras e o erro do PnP no terceiro quadro.
+                std::vector<V3> Xs, rs;
+                u32 front = 0;
+                for (u32 i : bestInl) {
+                    V3 X;
+                    if (!triangulate({&I, &sol}, {x1[i], x2[i]}, X)) continue;
+                    f64 u, v;
+                    if (X.z <= 0 || !project(sol, X, u, v)) continue;
+                    ++front;
+                    if (third != cand && has(ids[i], third)) { Xs.push_back(X); rs.push_back(ray(ids[i], third)); }
+                }
+                f64 score = 1e6 * (static_cast<f64>(bestInl.size()) - front);
+                if (Xs.size() >= 8) {
+                    Pose P3 = sol;
+                    if (refine_pose(P3, Xs, rs, f)) {
+                        f64 e = 0;
+                        for (usize i = 0; i < Xs.size(); ++i) { f64 u, v; e += project(P3, Xs[i], u, v) ? std::hypot(u - rs[i].x, v - rs[i].y) : 1.0; }
+                        score += e / static_cast<f64>(Xs.size());
+                    }
+                }
+                if (score < bestScore) { bestScore = score; P = sol; }
+            }
+        } else {
+            M3 bestE;
+            for (int it = 0; it < ransacIters; ++it) {
+                std::vector<u32> smp;
+                while (smp.size() < 8) { const u32 r = pick(rng); if (std::find(smp.begin(), smp.end(), r) == smp.end()) smp.push_back(r); }
+                M3 E;
+                if (!essential8(x1, x2, smp, E)) continue;
+                std::vector<u32> inl;
+                for (u32 i = 0; i < x1.size(); ++i) if (sampson(E, x1[i], x2[i]) < thr2) inl.push_back(i);
+                if (inl.size() > bestInl.size()) { bestInl = std::move(inl); bestE = E; }
+            }
+            if (bestInl.size() < 30) continue;
+            M3 E;
+            if (!essential8(x1, x2, bestInl, E)) continue;
+            if (!decompose(E, x1, x2, bestInl, P)) continue;
+        }
         // Paralaxe mediana dos inliers triangulados.
         const Pose I{M3{}, V3{}, true};
         std::vector<f64> ang;
@@ -987,24 +1266,27 @@ SolveState solve_with_focal(const Tracks2D& T, f64 f, TrackMode mode, const std:
             V3 X;
             if (!triangulate(ps, rs, X)) continue;
             if (parallax(S.poses[first], S.poses[frame], X) < 1.0 * kPi / 180.0) continue;
-            refine_point(X, ps, rs, f);
+            refine_point(X, ps, rs, S.focal[frame]);
             bool good = true;
             for (usize i = 0; i < ps.size() && good; ++i) {
                 f64 u, v;
-                good = project(*ps[i], X, u, v) && std::hypot(u - rs[i].x, v - rs[i].y) * f < 2.0;
+                good = project(*ps[i], X, u, v) && std::hypot(u - rs[i].x, v - rs[i].y) * S.focal[frame] < 2.0;
             }
             if (good) { S.X[t] = X; S.hasX[t] = 1; }
         }
     };
     for (u32 fr = a + 1; fr < N; ++fr) {
         if (cancel && cancel->load()) return S;
+        // Zoom: o quadro começa com a focal do anterior (o PnP a corrige).
+        if (cfg.zoom && fr != k) S.focal[fr] = S.focal[fr - 1];
+        const f64 ff = S.focal[fr];
         std::vector<V3> Xs, rs;
         std::vector<u32> ids;
         for (u32 t = 0; t < M; ++t) if (S.hasX[t] && has(t, fr)) { Xs.push_back(S.X[t]); rs.push_back(ray(t, fr)); ids.push_back(t); }
         if (Xs.size() < 8) break;   // perdeu a cena: para aqui
         Pose P = S.poses[fr].valid && fr == k ? S.poses[fr] : S.poses[fr - 1];
         std::vector<u8> inl;
-        if (!refine_pose(P, Xs, rs, f, &inl)) break;
+        if (!refine_pose(P, Xs, rs, ff, &inl)) break;
         // Segunda passada só com os inliers (o ponto errado não puxa a pose).
         std::vector<V3> X2, r2;
         for (usize i = 0; i < inl.size(); ++i) if (inl[i]) { X2.push_back(Xs[i]); r2.push_back(rs[i]); }
@@ -1019,17 +1301,28 @@ SolveState solve_with_focal(const Tracks2D& T, f64 f, TrackMode mode, const std:
                 std::vector<V3> xx, rr;
                 for (usize id : indices) { xx.push_back(Xs[id]); rr.push_back(rs[id]); }
                 Pose candidate = S.poses[fr - 1];
-                if (!refine_pose(candidate, xx, rr, f)) continue;
+                if (!refine_pose(candidate, xx, rr, ff)) continue;
                 xx.clear(); rr.clear();
                 for (usize id = 0; id < Xs.size(); ++id) {
                     f64 u, v;
-                    if (project(candidate, Xs[id], u, v) && std::hypot(u - rs[id].x, v - rs[id].y) * f < 2.5) { xx.push_back(Xs[id]); rr.push_back(rs[id]); }
+                    if (project(candidate, Xs[id], u, v) && std::hypot(u - rs[id].x, v - rs[id].y) * ff < 2.5) { xx.push_back(Xs[id]); rr.push_back(rs[id]); }
                 }
                 if (xx.size() > X2.size()) { P = candidate; X2 = std::move(xx); r2 = std::move(rr); }
             }
         }
         if (X2.size() < 8) break;
-        refine_pose(P, X2, r2, f);
+        refine_pose(P, X2, r2, ff);
+        if (cfg.zoom && fr != k) {
+            // A focal do quadro com a pose (prior: a do quadro anterior).
+            std::vector<V3> px(r2.size());
+            for (usize i = 0; i < r2.size(); ++i) px[i] = V3{r2[i].x * ff, r2[i].y * ff, 0};
+            Pose Pz = P;
+            f64 fz = ff;
+            if (refine_pose_focal(Pz, fz, X2, px, S.focal[fr - 1], kZoomPrior) && fz > 0.2 * ff && fz < 5.0 * ff) {
+                P = Pz;
+                S.focal[fr] = fz;
+            }
+        }
         P.valid = true;
         S.poses[fr] = P;
         triangulate_new(fr);
@@ -1038,8 +1331,8 @@ SolveState solve_with_focal(const Tracks2D& T, f64 f, TrackMode mode, const std:
         // made the pose solver lose otherwise textured handheld sequences.
         if (fr > k && fr % 20 == 0) {
             S.fixedFrame = a;
-            f64 fixedFocal = f;
-            bundle_adjust(S, T, fixedFocal, false, 12, 5, cancel);
+            BAParams bp;   // focal e lente presas: só poses e pontos
+            bundle_adjust(S, T, T, bp, 12, 5, cancel);
             triangulate_new(fr);
         }
     }
@@ -1059,7 +1352,7 @@ SolveState solve_with_focal(const Tracks2D& T, f64 f, TrackMode mode, const std:
             if (!S.poses[fr].valid || fr == a) continue;   // a fica na origem (fixa o referencial)
             std::vector<V3> Xs, rs;
             for (u32 t = 0; t < M; ++t) if (S.hasX[t] && has(t, fr)) { Xs.push_back(S.X[t]); rs.push_back(ray(t, fr)); }
-            if (Xs.size() >= 8) refine_pose(S.poses[fr], Xs, rs, f);
+            if (Xs.size() >= 8) refine_pose(S.poses[fr], Xs, rs, S.focal[fr]);
         }
         // Referencial: a base a→k volta a valer 1 (o refinamento pode encolher tudo).
         const f64 base = norm(S.poses[k].t);
@@ -1070,20 +1363,22 @@ SolveState solve_with_focal(const Tracks2D& T, f64 f, TrackMode mode, const std:
     }
 
     S.fixedFrame = a;
-    evaluate(S, T, f);
+    evaluate(S, T);
     return S;
 }
 
 /// Tripé: rotação entre quadros por Kabsch (3 raios + RANSAC), acumulada.
-SolveState solve_rotation(const Tracks2D& T, f64 f, const std::atomic<bool>* cancel) {
+SolveState solve_rotation(const Tracks2D& T, f64 f, const std::atomic<bool>* cancel, bool zoom = false) {
     SolveState S;
     S.rotationOnly = true;
     const u32 N = T.frames, M = static_cast<u32>(T.pos.size());
     const f64 cx = static_cast<f64>(T.width) * 0.5, cy = static_cast<f64>(T.height) * 0.5;
-    auto dir = [&](u32 track, u32 frame) {
+    S.focal.assign(N, f);
+    auto dir_f = [&](u32 track, u32 frame, f64 ff) {
         const Vec2 p = T.pos[track][frame];
-        return normalized(V3{(static_cast<f64>(p.x) - cx) / f, (static_cast<f64>(p.y) - cy) / f, 1.0});
+        return normalized(V3{(static_cast<f64>(p.x) - cx) / ff, (static_cast<f64>(p.y) - cy) / ff, 1.0});
     };
+    auto dir = [&](u32 track, u32 frame) { return dir_f(track, frame, S.focal[frame]); };
     auto has = [&](u32 track, u32 frame) { return Tracks2D::present(T.pos[track][frame]); };
     auto kabsch = [](const std::vector<V3>& A, const std::vector<V3>& B, const std::vector<u32>& idx) {
         // R tal que B ≈ R·A.
@@ -1110,6 +1405,8 @@ SolveState solve_rotation(const Tracks2D& T, f64 f, const std::atomic<bool>* can
     std::vector<u32> accepted(M, 0), observed(M, 0);
     for (u32 fr = 1; fr < N; ++fr) {
         if (cancel && cancel->load()) return S;
+        // Zoom: o quadro começa com a focal do anterior.
+        if (zoom) S.focal[fr] = S.focal[fr - 1];
         std::vector<V3> A, B;
         std::vector<u32> ids;
         for (u32 t = 0; t < M; ++t) if (has(t, fr - 1) && has(t, fr)) { A.push_back(dir(t, fr - 1)); B.push_back(dir(t, fr)); ids.push_back(t); }
@@ -1128,11 +1425,35 @@ SolveState solve_rotation(const Tracks2D& T, f64 f, const std::atomic<bool>* can
             if (inl.size() > best.size()) { best = std::move(inl); bestR = R; }
         }
         if (best.size() < 8) break;
+        if (zoom) {
+            // Tripé com zoom: a focal deste quadro pela seção áurea (±15% da
+            // anterior) no erro dos inliers; o giro de cada focal por Kabsch.
+            auto residual = [&](f64 ff) {
+                std::vector<V3> Bf(B.size());
+                for (u32 i : best) Bf[i] = dir_f(ids[i], fr, ff);
+                const M3 Rf = kabsch(A, Bf, best);
+                f64 e2 = 0;
+                for (u32 i : best) {
+                    const V3 q = mul(Rf, A[i]);
+                    if (q.z <= 1e-9) { e2 += 1e6; continue; }
+                    const f64 du = ff * (q.x / q.z - Bf[i].x / Bf[i].z), dv = ff * (q.y / q.z - Bf[i].y / Bf[i].z);
+                    e2 += std::min(du * du + dv * dv, 9.0);   // Huber leve: um erro grande não decide
+                }
+                return e2;
+            };
+            f64 lo = S.focal[fr] * 0.85, hi = S.focal[fr] * 1.15;
+            for (int it = 0; it < 24; ++it) {
+                const f64 a = lo + (hi - lo) * 0.381966, b = lo + (hi - lo) * 0.618034;
+                if (residual(a) < residual(b)) hi = b; else lo = a;
+            }
+            S.focal[fr] = 0.5 * (lo + hi);
+            for (u32 i = 0; i < ids.size(); ++i) B[i] = dir(ids[i], fr);
+        }
         const M3 R = kabsch(A, B, best);
         for (u32 id : ids) ++observed[id];
         for (u32 i : best) {
             const V3 p = mul(R, A[i]);
-            const f64 e = std::hypot(p.x / p.z - B[i].x / B[i].z, p.y / p.z - B[i].y / B[i].z) * f;
+            const f64 e = std::hypot(p.x / p.z - B[i].x / B[i].z, p.y / p.z - B[i].y / B[i].z) * S.focal[fr];
             sum += e * e;
             ++n;
             if (std::isfinite(e) && e < 1.5) ++accepted[ids[i]];
@@ -1159,7 +1480,7 @@ SolveState solve_rotation(const Tracks2D& T, f64 f, const std::atomic<bool>* can
             const V3 predicted = mul(S.poses[fr].R, world), actual = dir(t, fr);
             if (predicted.z <= 1e-9) continue;
             const f64 e = std::hypot(predicted.x / predicted.z - actual.x / actual.z,
-                                      predicted.y / predicted.z - actual.y / actual.z) * f;
+                                      predicted.y / predicted.z - actual.y / actual.z) * S.focal[fr];
             if (std::isfinite(e) && e < 1.5) { ++good; trackSum += e * e; }
         }
         if (count == 0 || good < count - count / 5) continue;
@@ -1175,12 +1496,49 @@ SolveState solve_rotation(const Tracks2D& T, f64 f, const std::atomic<bool>* can
 
 } // namespace
 
+Vec2 lens_distort(Vec2 p, f32 k1, f32 k2) noexcept {
+    const f32 r2 = p.x * p.x + p.y * p.y;
+    const f32 d = 1.0f + k1 * r2 + k2 * r2 * r2;
+    return Vec2{p.x * d, p.y * d};
+}
+
+Vec2 lens_undistort(Vec2 pd, f32 k1, f32 k2) noexcept {
+    if (k1 == 0.0f && k2 == 0.0f) return pd;
+    Vec2 p = pd;
+    for (int i = 0; i < 30; ++i) {
+        const f32 r2 = p.x * p.x + p.y * p.y;
+        const f32 d = 1.0f + k1 * r2 + k2 * r2 * r2;
+        if (!(d > 0.1f)) break;   // fora do domínio do modelo: devolve a última estimativa
+        const Vec2 n{pd.x / d, pd.y / d};
+        const f32 change = std::fabs(n.x - p.x) + std::fabs(n.y - p.y);
+        p = n;
+        if (change < 1e-7f) break;
+    }
+    return p;
+}
+
+Tracks2D undistort_tracks(const Tracks2D& tracks, f32 k1, f32 k2) {
+    Tracks2D out = tracks;
+    if (k1 == 0.0f && k2 == 0.0f) return out;
+    const f32 cx = static_cast<f32>(tracks.width) * 0.5f, cy = static_cast<f32>(tracks.height) * 0.5f;
+    const f32 h = std::max(1.0f, static_cast<f32>(tracks.height) * 0.5f);
+    for (auto& row : out.pos)
+        for (Vec2& p : row) {
+            if (!Tracks2D::present(p)) continue;
+            const Vec2 q = lens_undistort(Vec2{(p.x - cx) / h, (p.y - cy) / h}, k1, k2);
+            p = Vec2{cx + q.x * h, cy + q.y * h};
+        }
+    return out;
+}
+
 CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, const std::atomic<bool>* cancel,
                             std::atomic<f32>* progress) {
     CameraSolution out;
-    if (opt.motion > 2 || !std::isfinite(opt.knownFovDeg) || opt.knownFovDeg < 0 || opt.knownFovDeg > 150) {
+    if (opt.motion > 3 || opt.shotType > 2 || opt.lens > 2 || !std::isfinite(opt.knownFovDeg) || opt.knownFovDeg < 0 ||
+        opt.knownFovDeg > 150 || !std::isfinite(opt.sourceScale) || opt.sourceScale <= 0) {
         out.failure = "invalid camera constraints"; return out;
     }
+    if (opt.shotType == 2 && !(opt.knownFovDeg > 0.0f)) { out.failure = "informe o campo de visao (FOV) da tomada"; return out; }
     const u32 N = tracks.frames;
     if (cancel && cancel->load()) { out.failure = "cancelado"; return out; }
     if (tracks.width == 0 || tracks.height == 0 ||
@@ -1205,13 +1563,30 @@ CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, con
         const f64 missing = static_cast<f64>(N - s.solved) / static_cast<f64>(N);
         return s.rms + 100.0 * missing;
     };
-    auto run = [&](f64 fovDeg, bool rot) { return rot ? solve_rotation(tracks, focalOf(fovDeg), cancel) : solve_with_focal(tracks, focalOf(fovDeg), opt.mode, cancel); };
-
     const bool known = opt.knownFovDeg > 0.0f;
+    // FOV informada vence o zoom (a focal do quadro não é estimada).
+    const bool zoom = opt.shotType == 1 && !known;
+    SolveCfg cfg;
+    cfg.zoom = zoom;
+    cfg.init = opt.motion == 3 ? 1u : 0u;
+    auto run = [&](f64 fovDeg, bool rot) {
+        return rot ? solve_rotation(tracks, focalOf(fovDeg), cancel, zoom) : solve_with_focal(tracks, focalOf(fovDeg), opt.mode, cancel, cfg);
+    };
+
     const f64 lo = known ? opt.knownFovDeg : std::max(5.0f, opt.fovMinDeg);
     const f64 hi = known ? opt.knownFovDeg : std::min(150.0f, opt.fovMaxDeg);
     // Tripé? A FOV do meio decide o modo.
     SolveState probe = run(0.5 * (lo + hi), false);
+    if (opt.motion == 0 && !(cancel && cancel->load())) {
+        // Automático: num plano a essencial é degenerada (o 8 pontos tem
+        // solução demais) e a cena inicial sai errada — às vezes com erro
+        // baixo (medido: 0,73 px numa cena plana, câmera 96% fora do caminho).
+        // A homografia também tenta; ela só fica com uma vitória clara (10%).
+        SolveCfg flat = cfg;
+        flat.init = 1;
+        SolveState fp = solve_with_focal(tracks, focalOf(0.5 * (lo + hi)), opt.mode, cancel, flat);
+        if (score(fp) < 0.9 * score(probe)) { probe = std::move(fp); cfg = flat; }
+    }
     SolveState rotationProbe = run(0.5 * (lo + hi), true);
     // Essential matrices are degenerate under pure rotation. Foreground motion
     // can invent an apparently valid translation, so test the competing model
@@ -1275,33 +1650,105 @@ CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, con
             if (va < vb) right = b; else left = a;
         }
     }
+    // Os rastros sem distorção (iguais aos crus enquanto a lente não é resolvida).
+    Tracks2D undStore;
+    const Tracks2D* und = &tracks;
+    BAParams bp;
+    bool k2Solved = false;
     if (!rot && best.solved >= 3 && !(cancel && cancel->load())) {
-        // Bundle adjustment com a focal livre (ou presa, se conhecida).
-        f64 f = focalOf(bestFov);
+        // Bundle adjustment com a focal livre (ou presa, se conhecida); zoom:
+        // uma focal por quadro-chave, suave.
         const u32 keysMax = opt.mode == TrackMode::Fast ? 30 : (opt.mode == TrackMode::High ? 90 : 60);
         const int iters = opt.mode == TrackMode::Fast ? 12 : (opt.mode == TrackMode::High ? 40 : 25);
-        for (int pass = 0; pass < 2; ++pass) {
-            bundle_adjust(best, tracks, f, !known, keysMax, iters, cancel);
-            evaluate(best, tracks, f);
-        }
+        bp.freeFocal = !known;
+        bp.perKey = zoom;
+        auto adjust = [&](SolveState& s, BAParams& p, int passes) {
+            for (int pass = 0; pass < passes; ++pass) {
+                Tracks2D fresh;
+                bundle_adjust(s, tracks, *und, p, keysMax, iters, cancel, &fresh);
+                if (fresh.frames) { undStore = std::move(fresh); und = &undStore; }
+                evaluate(s, *und);
+            }
+        };
+        auto median_focal = [](const SolveState& s) {
+            std::vector<f64> v;
+            for (usize i = 0; i < s.focal.size(); ++i) if (s.poses[i].valid) v.push_back(s.focal[i]);
+            if (v.empty()) return s.focal.empty() ? 1.0 : s.focal[0];
+            std::nth_element(v.begin(), v.begin() + static_cast<long>(v.size() / 2), v.end());
+            return v[v.size() / 2];
+        };
         // A coarse focal seed can lose PnP support before global BA recovers
         // the lens. Reuse the tracked images with that refined focal instead
         // of accepting the short prefix or decoding the footage again.
-        if (!known && best.solved < N && !(cancel && cancel->load())) {
-            SolveState recovered = solve_with_focal(tracks, f, opt.mode, cancel);
+        auto recover = [&] {
+            if (known || best.solved >= N || (cancel && cancel->load())) return;
+            SolveState recovered = solve_with_focal(*und, median_focal(best), opt.mode, cancel, cfg);
             if (recovered.solved > best.solved) {
                 best = std::move(recovered);
-                bundle_adjust(best, tracks, f, true, keysMax, iters, cancel);
-                evaluate(best, tracks, f);
+                adjust(best, bp, 1);
             }
+        };
+        adjust(best, bp, 2);
+        recover();
+        if (opt.lens >= 1 && !(cancel && cancel->load())) {
+            // Distorção: k1 livre junto com tudo (nas observações cruas). `u` =
+            // os rastros sem a distorção atual (cópia: as tentativas não sujam).
+            auto adjust_into = [&](SolveState& s, BAParams& p, int passes, Tracks2D& u) {
+                for (int pass = 0; pass < passes; ++pass) {
+                    Tracks2D fresh;
+                    bundle_adjust(s, tracks, u, p, keysMax, iters, cancel, &fresh);
+                    if (fresh.frames) u = std::move(fresh);
+                    evaluate(s, u);
+                }
+            };
+            Tracks2D u = *und;
+            bp.lens = 1;
+            adjust_into(best, bp, 1, u);
+            if (std::fabs(bp.k1) > 0.003 && !(cancel && cancel->load())) {
+                // A busca da FOV e o par inicial viram a distorção como erro: o
+                // solve de novo nos rastros sem ela (medido: k1 −0,06 → FOV 34,8°
+                // sem lente, 60,2° com; verdade 60°). Fica o de menor erro.
+                SolveState again = solve_with_focal(u, median_focal(best), opt.mode, cancel, cfg);
+                if (again.solved >= 3) {
+                    BAParams pa = bp;
+                    Tracks2D ua = u;
+                    adjust_into(again, pa, 2, ua);
+                    if (score(again) < score(best)) { best = std::move(again); bp = pa; u = std::move(ua); }
+                }
+            }
+            // k2 só quando estável: as mesmas iterações com e sem ele; fica com
+            // melhora clara do erro e valor plausível.
+            SolveState s1 = best, s2 = best;
+            BAParams b1 = bp, b2 = bp;
+            b2.lens = 2;
+            Tracks2D u1 = u, u2 = u;
+            adjust_into(s1, b1, 1, u1);
+            adjust_into(s2, b2, 1, u2);
+            if (s2.solved >= s1.solved && s2.rms < 0.97 * s1.rms && std::fabs(b2.k2) < 0.5 && std::fabs(b2.k1) < 1.0) {
+                best = std::move(s2); bp = b2; u = std::move(u2);
+                k2Solved = true;
+            } else {
+                best = std::move(s1); bp = b1; u = std::move(u1);
+                bp.k2 = 0;
+            }
+            bp.lens = 0;
+            undStore = std::move(u);
+            und = &undStore;
+            recover();
         }
-        bestFov = 2.0 * std::atan(0.5 * h / f) * 180.0 / kPi;
+        const u32 first = static_cast<u32>(std::find_if(best.poses.begin(), best.poses.end(), [](const Pose& p) { return p.valid; }) - best.poses.begin());
+        bestFov = 2.0 * std::atan(0.5 * h / best.focal[std::min(first, N - 1)]) * 180.0 / kPi;
         if (progress) progress->store(1.0f);
     }
     if (cancel && cancel->load()) { out.failure = "cancelado"; return out; }
+    out.method = rot ? static_cast<u8>(SolveMethod::Tripod) : (best.homography ? static_cast<u8>(SolveMethod::FlatScene)
+                                                                                 : static_cast<u8>(SolveMethod::Typical));
+    out.shotType = known ? static_cast<u8>(ShotType::SpecifyFov) : (zoom ? static_cast<u8>(ShotType::VariableZoom)
+                                                                           : static_cast<u8>(ShotType::FixedFov));
     if (best.solved != N || best.rms > 3.0) {
         out.failure = best.solved < 2 ? "nao deu para resolver a camera (pouca paralaxe ou cena sem textura)"
                                       : "solve fraco: erro alto ou poucos quadros resolvidos";
+        if (best.solved >= 2 && !rot && zoom) out.failure += " (zoom variavel: zoom e movimento para a frente se confundem)";
         out.rmsError = static_cast<f32>(std::min(best.rms, 999.0));
         out.framesSolved = best.solved;
         return out;
@@ -1309,6 +1756,14 @@ CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, con
     out.ok = true;
     out.rotationOnly = rot;
     out.fovY = static_cast<f32>(bestFov * kPi / 180.0);
+    if (zoom) {
+        out.frameFovY.resize(N);
+        for (u32 i = 0; i < N; ++i) out.frameFovY[i] = static_cast<f32>(2.0 * std::atan(0.5 * h / best.focal[i]));
+    }
+    out.k1 = static_cast<f32>(bp.k1);
+    out.k2 = static_cast<f32>(bp.k2);
+    out.lensSolved = !rot && opt.lens >= 1;
+    out.k2Solved = out.lensSolved && k2Solved;
     out.poses.resize(N);
     for (u32 i = 0; i < N; ++i) {
         const Pose& p = best.poses[i];
@@ -1325,6 +1780,56 @@ CameraSolution solve_camera(const Tracks2D& tracks, const SolveOptions& opt, con
     out.inliers = rot ? best.inliers : static_cast<u32>(out.points.size());
     out.framesSolved = best.solved;
     out.rmsError = static_cast<f32>(best.rms);
+    // "Average Error": média de |reprojeção| nas observações CRUAS (com a
+    // distorção), em px da fonte; e por quadro.
+    {
+        const f64 cx = static_cast<f64>(tracks.width) * 0.5, cy = static_cast<f64>(tracks.height) * 0.5;
+        const f64 halfH = std::max(1.0, h * 0.5);
+        std::vector<f64> sum(N, 0.0);
+        std::vector<u32> cnt(N, 0);
+        auto add = [&](u32 fr, f64 qx, f64 qy, Vec2 o) {
+            const Vec2 d = lens_distort(Vec2{static_cast<f32>(qx / halfH), static_cast<f32>(qy / halfH)}, out.k1, out.k2);
+            const f64 e = std::hypot(d.x * halfH + cx - o.x, d.y * halfH + cy - o.y);
+            if (!std::isfinite(e)) return;
+            sum[fr] += e;
+            ++cnt[fr];
+        };
+        for (usize t = 0; t < tracks.pos.size(); ++t) {
+            if (rot) {
+                if (t >= best.rotationTracks.size() || !best.rotationTracks[t]) continue;
+                // Tripé: a direção no mundo vem da primeira observação.
+                V3 world{};
+                bool have = false;
+                for (u32 fr = 0; fr < N; ++fr) {
+                    const Vec2 o = tracks.pos[t][fr];
+                    if (!best.poses[fr].valid || !Tracks2D::present(o)) continue;
+                    const f64 f = best.focal.empty() ? focalOf(bestFov) : best.focal[fr];
+                    if (!have) { world = mul(transpose(best.poses[fr].R), normalized(V3{(o.x - cx) / f, (o.y - cy) / f, 1.0})); have = true; continue; }
+                    const V3 c = mul(best.poses[fr].R, world);
+                    if (c.z <= 1e-9) continue;
+                    add(fr, f * c.x / c.z, f * c.y / c.z, o);
+                }
+                continue;
+            }
+            if (!best.hasX[t]) continue;
+            for (u32 fr = 0; fr < N; ++fr) {
+                const Vec2 o = tracks.pos[t][fr];
+                if (!best.poses[fr].valid || !Tracks2D::present(o)) continue;
+                f64 u, v;
+                if (!project(best.poses[fr], best.X[t], u, v)) continue;
+                add(fr, u * best.focal[fr], v * best.focal[fr], o);
+            }
+        }
+        f64 total = 0;
+        u64 n = 0;
+        out.frameErrorPx.assign(N, -1.0f);
+        for (u32 fr = 0; fr < N; ++fr) {
+            total += sum[fr];
+            n += cnt[fr];
+            if (cnt[fr]) out.frameErrorPx[fr] = static_cast<f32>(sum[fr] / cnt[fr] * opt.sourceScale);
+        }
+        out.averageErrorPx = n ? static_cast<f32>(total / static_cast<f64>(n) * opt.sourceScale) : 0.0f;
+    }
     const f32 share = static_cast<f32>(out.inliers) / static_cast<f32>(std::max<u32>(1, out.tracks));
     out.confidence = std::clamp((1.0f - out.rmsError / 2.0f) * std::min(1.0f, share * 2.0f)
                                 * static_cast<f32>(out.framesSolved) / static_cast<f32>(N), 0.0f, 1.0f);

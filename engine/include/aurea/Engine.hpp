@@ -1178,15 +1178,36 @@ public:
         bool rotationOnly = false;
         bool cached = false;              ///< resultado veio do cache (vídeo e ajustes iguais)
         std::string message;
+        // Tipo de tomada, método e lente que o solve USOU (tracking::CameraSolution).
+        u32 shotType = 0;                 ///< 0 FOV fixa, 1 zoom variável, 2 FOV informada
+        u32 method = 1;                   ///< 1 típico, 2 tripé, 3 cena quase plana
+        f32 fovStartDeg = 0.0f, fovEndDeg = 0.0f;   ///< zoom variável: FOV do 1º e do último quadro
+        f32 fovMinDeg = 0.0f, fovMaxDeg = 0.0f;     ///< e a faixa no trecho
+        f32 k1 = 0.0f, k2 = 0.0f;         ///< distorção radial (meia altura = 1)
+        bool lensSolved = false, k2Solved = false;
+        f32 averageErrorPx = 0.0f;        ///< "Average Error" do AE: px da FONTE
     };
     /// Analisa o vídeo da camada em segundo plano (0 rápido, 1 equilibrado,
     /// 2 alta qualidade). Uma análise por vez; a UI continua navegando.
     /// Camada acima de tracking::kMaxCameraTrackFrames: devolve true com o
     /// estado 3 e a mensagem do porquê (dividir o clipe).
-    bool start_camera_track(u64 layerId, u32 mode, u32 motion = 0, f32 knownFov = 0) noexcept;
+    /// `motion` = método (0 automático, 1 típico, 2 tripé, 3 cena quase plana);
+    /// `shotType` = 0 FOV fixa, 1 zoom variável, 2 FOV informada (exige
+    /// `knownFov` > 0); `lens` = 1 estima a distorção radial (k1; k2 se estável).
+    bool start_camera_track(u64 layerId, u32 mode, u32 motion = 0, f32 knownFov = 0, u32 shotType = 0,
+                            u32 lens = 0) noexcept;
     /// Remove selected feature tracks and re-solve the saved observations.
     /// No decode, no UI blocking; previous camera/objects stay until applied.
-    bool refine_camera_track(bool removeSelected = true, u32 motion = 0, f32 knownFov = 0) noexcept;
+    bool refine_camera_track(bool removeSelected = true, u32 motion = 0, f32 knownFov = 0, u32 shotType = 0,
+                             u32 lens = 0) noexcept;
+    /// Por quadro analisado: {FOV vertical em graus, erro médio em px da fonte
+    /// (−1 = sem pose)}. Devolve quantos quadros escreveu (até `capacity`).
+    u32 camera_track_frame_info(f32* out2, u32 capacity) noexcept;
+    /// Põe o efeito "Distorção da lente" (aurea.distort.lens_distortion_match)
+    /// com o k1/k2 resolvidos na camada `layerId`: `redistort` = false remove a
+    /// distorção (no vídeo), true aplica (na CG). Um passo de desfazer; devolve
+    /// o id do efeito. Falha sem solve com lente.
+    [[nodiscard]] Result<u32> add_camera_track_lens_effect(u64 layerId, bool redistort) noexcept;
     /// 0 selected origin, 1 selected ground/origin, 2 distance between two
     /// selected points in scene units. Rebase camera and anchors together.
     bool calibrate_camera_scene(u32 operation, f32 distance = 100) noexcept;

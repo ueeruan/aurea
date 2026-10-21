@@ -169,6 +169,20 @@ private struct AddLayerPickers: ViewModifier {
                     } else { model.importMediaBatch(items) }
                 }
             }
+            // 0.3.0: de onde vem a sequência de imagens (rememberImageSequencePicker do Android).
+            .confirmationDialog(AureaText.t("seq_title"), isPresented: $shell.sequenceChooser, titleVisibility: .visible) {
+                Button(AureaText.t("seq_pick_folder")) { shell.addPicker = .sequenceFolder }
+                    .accessibilityIdentifier("seq.pick.folder")
+                Button(AureaText.t("seq_pick_files")) { shell.addPicker = .sequenceFiles }
+                    .accessibilityIdentifier("seq.pick.files")
+                Button(AureaText.t("common_cancel"), role: .cancel) { model.pendingOverlayImport = false }
+            } message: {
+                Text(AureaText.t("seq_hint"))
+            }
+            .sheet(item: Binding(get: { model.sequenceDraft }, set: { if $0 == nil { model.cancelImageSequence() } })) { draft in
+                ImageSequenceSheet(draft: draft).environmentObject(model)
+                    .presentationDetents([.medium, .large])
+            }
     }
     /// Arquivo (modelo 3D, texturas/.mtl, SVG, PSD, áudio): seletor do UIKit
     /// pelo controlador do topo (DocumentImportPicker). Antes o modelo vinha
@@ -178,8 +192,8 @@ private struct AddLayerPickers: ViewModifier {
     private func presentFilePicker(_ kind: ShellAddPicker) {
         let project = pickerProject
         let model = self.model
-        let multiple = kind == .model || kind == .modelTextures
-        DocumentImportPicker.present(types: Self.fileTypes(kind), multiple: multiple) { urls in
+        let multiple = kind == .model || kind == .modelTextures || kind == .sequenceFiles
+        DocumentImportPicker.present(types: Self.fileTypes(kind), multiple: multiple, asCopy: kind != .sequenceFolder) { urls in
             guard project == model.projectGeneration, let urls, let url = urls.first else { return }
             switch kind {
             // Seleção múltipla/pasta: o FBX/OBJ/glTF vem com as texturas, o .bin e o .mtl.
@@ -187,6 +201,7 @@ private struct AddLayerPickers: ViewModifier {
             case .modelTextures: model.importModelTextures(urls: urls)
             case .svg: model.importSvg(url: url)
             case .psd: model.importPsd(url: url)
+            case .sequenceFolder, .sequenceFiles: model.prepareImageSequence(urls: urls)
             default: model.importMedia(url: url, kind: .audio)
             }
         }
@@ -195,6 +210,9 @@ private struct AddLayerPickers: ViewModifier {
         switch kind {
         case .svg: return [UTType(filenameExtension: "svg") ?? .data, .data]
         case .psd: return [UTType(filenameExtension: "psd") ?? .data, .data]
+        case .sequenceFolder: return [.folder]
+        // EXR e TGA não têm tipo registrado em muitos provedores: o filtro é o motor.
+        case .sequenceFiles: return [.image, .zip, UTType(filenameExtension: "exr") ?? .data, UTType(filenameExtension: "tga") ?? .data, .data]
         case .model: return DocumentImportPicker.modelTypes
         // .mtl (texto), .bin e texturas: alguns provedores não marcam public.data.
         case .modelTextures: return DocumentImportPicker.modelTypes + [.image, .text]
@@ -1431,7 +1449,9 @@ enum FontImportPicker {
 enum DocumentImportPicker {
     private static var delegate: Delegate?
     /// `picked(nil)` = cancelado; lista vazia nunca chega.
-    static func present(types: [UTType], multiple: Bool = false, _ picked: @escaping ([URL]?) -> Void) {
+    /// `asCopy` false = abrir no lugar (PASTA: o sistema não copia diretório); o chamador
+    /// pede o acesso com `startAccessingSecurityScopedResource`.
+    static func present(types: [UTType], multiple: Bool = false, asCopy: Bool = true, _ picked: @escaping ([URL]?) -> Void) {
         let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
         guard var presenter = (windows.first(where: \.isKeyWindow) ?? windows.first)?.rootViewController else {
             NSLog("Aurea file picker: sem janela para apresentar")
@@ -1441,8 +1461,8 @@ enum DocumentImportPicker {
         // `.item` no fim: provedor que não marca public.data (FBX/OBJ/MTL/GLB
         // sem tipo registrado) não fica cinza no seletor; o import valida.
         var all = types
-        if !all.contains(.item) { all.append(.item) }
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: all, asCopy: true)
+        if asCopy && !all.contains(.item) { all.append(.item) }
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: all, asCopy: asCopy)
         // O UIKit guarda o delegate fraco: o dono fica aqui até a escolha.
         let owner = Delegate { urls in
             DocumentImportPicker.delegate = nil
@@ -1713,6 +1733,8 @@ private struct AddLayerSheet: View {
                         card("editor_foto", glyph: CupertinoGlyph.Photo) { photos(.photo) }
                         card("editor_video", glyph: CupertinoGlyph.Videocam) { photos(.video) }
                         card("sh_add_ai_video", glyph: CupertinoGlyph.WandStars) { model.openPanel(.aiVideo) }
+                        card("seq_title", glyph: CupertinoGlyph.SquareStack3dUp) { openSequenceChooser() }
+                            .accessibilityIdentifier("add.sequence")
                     case 2:
                         card("editor_musica_ou_som", glyph: CupertinoGlyph.MusicNote, accent: true) { files(.audioFile) }
                         card("voice_title", glyph: CupertinoGlyph.MicFill, color: AureaColors.danger) { openVoiceRecorder() }
@@ -1802,6 +1824,17 @@ private struct AddLayerSheet: View {
     }
     private func photos(_ kind: ShellAddPicker) { request(kind) }
     private func files(_ kind: ShellAddPicker) { request(kind) }
+    /// Sequência de imagens: a escolha pasta × quadros mora na raiz (AddLayerPickers).
+    private func openSequenceChooser() {
+        close()
+        model.pendingOverlayImport = false
+        let shell = shell
+        if inSheet {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { shell.sequenceChooser = true }
+        } else {
+            shell.sequenceChooser = true
+        }
+    }
     /// Fecha o diálogo e pede o seletor à raiz do editor (que continua na tela
     /// durante todo o abrir/fechar do seletor). Dentro de uma folha, espera ela
     /// fechar: duas apresentações ao mesmo tempo, o sistema recusa a segunda.
@@ -2390,5 +2423,79 @@ private struct DockSheetShape: Shape {
         p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
         p.closeSubpath()
         return p
+    }
+}
+
+// =============================================================================
+// Sequência de imagens (0.3.0, ImageSequenceSheet.kt): o que a sondagem achou —
+// padrão, quadros, buracos e formato — e a taxa, a transparência e a cor antes
+// de entrar na timeline. Fechar a folha cancela (a cópia sai).
+// =============================================================================
+struct ImageSequenceSheet: View {
+    @EnvironmentObject private var model: AureaModel
+    let draft: AureaModel.ImageSequenceDraft
+    @State private var rate = 0
+    @State private var alpha = 0
+    @State private var color = 0
+    private var rates: [Double] {
+        let suggested = draft.double("suggestedFps") > 0 ? draft.double("suggestedFps") : 24
+        var out = [suggested]
+        for r in [23.976, 24, 25, 30, 50, 60] where !out.contains(where: { abs($0 - r) < 1e-6 }) { out.append(r) }
+        return out
+    }
+    private func fpsLabel(_ fps: Double) -> String {
+        abs(fps - fps.rounded()) < 1e-6 ? String(Int(fps.rounded())) : String(format: "%.3f", fps).replacingOccurrences(of: "0+$", with: "", options: .regularExpression)
+    }
+    private func chips(_ labels: [String], _ selected: Int, _ id: String, _ pick: @escaping (Int) -> Void) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(labels.enumerated()), id: \.offset) { i, label in
+                    NativePanelChip(label, selected: i == selected) { pick(i) }.accessibilityIdentifier("\(id).\(i)")
+                }
+            }
+        }.frame(height: 40)
+    }
+    private func section(_ key: String) -> some View {
+        Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 10)
+    }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(AureaText.t("seq_title")).font(.aurea(size: 17, weight: .semibold))
+                Text(draft.string("pattern")).font(.system(size: 13, design: .monospaced)).foregroundStyle(AureaColors.accent)
+                    .accessibilityIdentifier("seq.pattern")
+                Text(AureaText.t("seq_frames", draft.int("frameCount"), draft.int("first"), draft.int("last"))).font(.aurea(size: 13))
+                if draft.int("missingCount") > 0 {
+                    let list = (draft.info["missing"] as? [NSNumber] ?? []).prefix(12).map { $0.stringValue }.joined(separator: ", ")
+                    Text(AureaText.t("seq_missing", draft.int("missingCount"), list + (draft.int("missingCount") > 12 ? "…" : "")))
+                        .font(.aurea(size: 13)).foregroundStyle(AureaColors.warning)
+                }
+                Text(AureaText.t("seq_format", draft.int("width"), draft.int("height"), draft.string("format").uppercased(), draft.int("bitDepth"),
+                                 AureaText.t(draft.bool("hasAlpha") ? "seq_alpha_yes" : "seq_alpha_no"))).font(.aurea(size: 13))
+                if draft.int("candidates") > 1 { Text(AureaText.t("seq_candidates", draft.int("candidates"))).font(.aurea(size: 13)) }
+
+                section("seq_rate")
+                chips(rates.enumerated().map { i, r in fpsLabel(r) + (i == 0 ? " (\(AureaText.t("seq_suggested")))" : "") }, rate, "seq.rate") { rate = $0 }
+                section("seq_alpha_mode")
+                chips(["seq_auto", "seq_alpha_straight", "seq_alpha_premultiplied", "seq_alpha_ignore"].map { AureaText.t($0) }, alpha, "seq.alpha") { alpha = $0 }
+                section("seq_color_mode")
+                chips(["seq_auto", "seq_color_srgb", "seq_color_linear"].map { AureaText.t($0) }, color, "seq.color") { color = $0 }
+                Text(AureaText.t("seq_auto_note")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+
+                HStack(spacing: 10) {
+                    Button { model.cancelImageSequence() } label: {
+                        Text(AureaText.t("common_cancel")).font(.aurea(size: 15, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 46)
+                            .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
+                    }.buttonStyle(.plain).accessibilityIdentifier("seq.cancel")
+                    Button { model.importImageSequence(fps: rate == 0 ? 0 : rates[rate], alphaMode: Int32(alpha), colorMode: Int32(color)) } label: {
+                        Text(AureaText.t("seq_import")).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.onAccent)
+                            .frame(maxWidth: .infinity, minHeight: 46).background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 12))
+                    }.buttonStyle(.plain).accessibilityIdentifier("seq.import")
+                }.padding(.top, 14)
+            }
+            .foregroundStyle(AureaColors.text)
+            .padding(.horizontal, 18).padding(.vertical, 16)
+        }
+        .background(AureaColors.surface.ignoresSafeArea())
     }
 }

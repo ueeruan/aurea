@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: importar sequência de imagens (PNG/EXR/TGA/JPG/BMP numerados). -->
+<resources>
+    <string name="seq_title">تسلسل صور</string>
+    <string name="seq_dock">تسلسل</string>
+    <string name="seq_hint">إطارات مرقّمة (render_0001.png…) بصيغة PNG أو EXR أو TGA أو JPG أو BMP، مثل مخرجات Blender. تبقى الشفافية محفوظة.</string>
+    <string name="seq_pick_folder">اختيار مجلد</string>
+    <string name="seq_pick_files">اختيار إطارات أو ملف .zip</string>
+    <string name="seq_reading">جارٍ قراءة التسلسل…</string>
+    <string name="seq_copying">جارٍ نسخ الإطارات… %1$d من %2$d</string>
+    <string name="seq_importing">جارٍ استيراد التسلسل…</string>
+    <string name="seq_imported">تم استيراد التسلسل: %1$d إطار</string>
+    <string name="seq_none_found">لا توجد إطارات مرقّمة هنا. استخدم PNG أو EXR أو TGA أو JPG أو BMP مع رقم في الاسم (render_0001.png).</string>
+    <string name="seq_no_space">المساحة غير كافية: يحتاج التسلسل إلى %1$s متاحة.</string>
+    <string name="seq_failed">تعذّر استيراد التسلسل: %1$s</string>
+    <string name="seq_frames">%1$d إطار (من %2$d إلى %3$d)</string>
+    <string name="seq_missing">%1$d مفقودة — يظهر الإطار السابق مكانها: %2$s</string>
+    <string name="seq_format">%1$d×%2$d · %3$s · %4$d بت · %5$s</string>
+    <string name="seq_alpha_yes">مع شفافية</string>
+    <string name="seq_alpha_no">بدون شفافية</string>
+    <string name="seq_candidates">يحتوي المجلد على %1$d تسلسلات؛ هذا هو الأكبر.</string>
+    <string name="seq_rate">إطارات في الثانية</string>
+    <string name="seq_suggested">مقترح</string>
+    <string name="seq_alpha_mode">الشفافية</string>
+    <string name="seq_auto">تلقائي</string>
+    <string name="seq_alpha_straight">مباشرة</string>
+    <string name="seq_alpha_premultiplied">مضروبة مسبقًا</string>
+    <string name="seq_alpha_ignore">تجاهل</string>
+    <string name="seq_color_mode">اللون</string>
+    <string name="seq_color_srgb">sRGB</string>
+    <string name="seq_color_linear">خطي</string>
+    <string name="seq_auto_note">تلقائي: PNG وTGA بشفافية مباشرة؛ EXR بلون خطي مضروب مسبقًا؛ بدون قناة ألفا يكون معتمًا.</string>
+    <string name="seq_import">استيراد</string>
+</resources>

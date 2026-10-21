@@ -254,6 +254,8 @@ final class ShellPresentation: ObservableObject {
     /// ou pelo menu da engrenagem (apresentados pela barra do topo).
     @Published var commandSearch = false
     @Published var performanceTest = false
+    /// 0.3.0: "Sequência de imagens" — pasta ou quadros/.zip (ImageSequenceSheet.kt).
+    @Published var sequenceChooser = false
     @Published var resolutionAnchor: CGRect?
     @Published var timeInput = ""
     @Published var grabbedHandle = -1
@@ -279,7 +281,9 @@ final class ShellPresentation: ObservableObject {
 /// fotos; áudio, modelo 3D e SVG pelo de arquivos).
 enum ShellAddPicker: Equatable {
     case gallery, photo, video, audioFromVideo, audioFile, model, svg, psd, modelTextures
-    var isFile: Bool { self == .audioFile || self == .model || self == .svg || self == .psd || self == .modelTextures }
+    /// 0.3.0: sequência de imagens pela pasta (render do Blender) ou pelos quadros/.zip.
+    case sequenceFolder, sequenceFiles
+    var isFile: Bool { self == .audioFile || self == .model || self == .svg || self == .psd || self == .modelTextures || self == .sequenceFolder || self == .sequenceFiles }
 }
 
 enum ShellStageGeometry {

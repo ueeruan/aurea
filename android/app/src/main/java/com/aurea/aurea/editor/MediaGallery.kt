@@ -96,6 +96,8 @@ private fun galleryPermissions(): Array<String> = when {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
         if (uris.isNotEmpty()) { store.importMediaBatch(uris); close() }
     }
+    // 0.3.0: sequência de imagens (renders do Blender etc.) pela pasta ou pelos quadros.
+    val sequence = rememberImageSequencePicker(store, onPicked = close)
     LaunchedEffect(Unit) {
         if (!requested && !context.galleryFull(false) && !context.galleryFull(true) && !context.galleryPartial()) {
             requested = true; permissions.launch(galleryPermissions())
@@ -128,6 +130,9 @@ private fun galleryPermissions(): Array<String> = when {
             }
             ChromeButton(CupertinoGlyph.Folder, stringResource(R.string.gallery_files), size = 20.dp, width = 48.dp, height = 48.dp,
                 onClick = { picker.launch(PickVisualMediaRequest(if (video) ActivityResultContracts.PickVisualMedia.VideoOnly else ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+            Box(Modifier.testTag("gallery.sequence")) {
+                ChromeButton(CupertinoGlyph.SquareStack3dUp, stringResource(R.string.seq_title), size = 20.dp, width = 48.dp, height = 48.dp, onClick = sequence)
+            }
             ChromeButton(CupertinoGlyph.WandStars, stringResource(R.string.sh_add_ai_video), size = 20.dp, width = 48.dp, height = 48.dp, onClick = openAI)
         }
         if (partial && !full) {

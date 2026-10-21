@@ -107,6 +107,8 @@ fun AureaApp(store: EditorStore) {
             }
             // "Otimizar modelo": o modelo pesado demais para o aparelho como está.
             store.modelOptimize?.let { req -> ModelOptimizeDialog(store, req) }
+            // 0.3.0: o que a sondagem da sequência de imagens achou, antes de entrar na timeline.
+            store.sequenceDraft?.let { draft -> com.aurea.aurea.editor.ImageSequenceSheet(store, draft) }
             store.errorMessage?.let { msg ->
                 AureaAlert(
                     title = "Aurea",

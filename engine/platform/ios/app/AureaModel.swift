@@ -3084,6 +3084,8 @@ final class AureaModel: ObservableObject {
     }
     @Published var modelOptimize: ModelOptimizeRequest?
     @Published var modelOptimizeQuality = 1
+    /// 0.3.0: o que a sondagem da sequência de imagens achou (ImageSequenceSheet), antes de "Importar".
+    @Published var sequenceDraft: ImageSequenceDraft?
 
     /// "1,2 mi" / "850 mil" — triângulos curtos para o alerta e o aviso.
     static func modelCount(_ n: Int64) -> String {
@@ -3528,6 +3530,142 @@ final class AureaModel: ObservableObject {
                 self.toast = AureaText.t(gif ? "gif_imported" : "psd_imported")
                 _ = self.saveProject(writeThumbnail: false)
             }
+        }
+    }
+
+    // MARK: Sequência de imagens (0.3.0, EditorStore.prepareImageSequence)
+    // Quadros numerados (PNG, EXR, TGA, JPG, BMP), como os renders do Blender, entram como
+    // clipe com transparência. O motor lê caminhos: os quadros vão para
+    // Documents/Media/sequences/ (guardado relativo, sobrevive a reabrir e ao pacote);
+    // um .zip vai para Caches e o motor o extrai em Documents/Media/sequences/.
+
+    struct ImageSequenceDraft: Identifiable {
+        let id = UUID()
+        let paths: [String]
+        let info: [String: Any]
+        let copied: URL?
+        let tempZip: URL?
+        let asOverlay: Bool
+        func int(_ key: String) -> Int { (info[key] as? NSNumber)?.intValue ?? 0 }
+        func double(_ key: String) -> Double { (info[key] as? NSNumber)?.doubleValue ?? 0 }
+        func string(_ key: String) -> String { info[key] as? String ?? "" }
+        func bool(_ key: String) -> Bool { (info[key] as? NSNumber)?.boolValue ?? false }
+    }
+
+    nonisolated static let sequenceFrameExtensions: Set<String> = ["png", "exr", "tga", "jpg", "jpeg", "bmp"]
+
+    /// Pasta (aberta no lugar) ou quadros/.zip (cópias do seletor). Copia, sonda e abre a folha.
+    func prepareImageSequence(urls: [URL]) {
+        guard !urls.isEmpty, !importingMedia else { return }
+        let asOverlay = pendingOverlayImport
+        pendingOverlayImport = false
+        importingMedia = true; operationMessage = AureaText.t("seq_reading")
+        let native = engine
+        mediaQueue.async { [weak self] in
+            let fm = FileManager.default
+            let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
+            defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
+            var frames: [URL] = [], zip: URL?
+            for url in urls {
+                if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                    // Só o primeiro nível da pasta, como o Blender grava.
+                    let items = (try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles])) ?? []
+                    frames += items.filter { AureaModel.sequenceFrameExtensions.contains($0.pathExtension.lowercased()) }
+                } else if url.pathExtension.lowercased() == "zip" {
+                    zip = url
+                } else if AureaModel.sequenceFrameExtensions.contains(url.pathExtension.lowercased()) {
+                    frames.append(url)
+                }
+            }
+            func finish(_ draft: ImageSequenceDraft?, _ message: String?) {
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.importingMedia = false
+                    if let message { self.toast = message }
+                    self.sequenceDraft = draft
+                }
+            }
+            if zip == nil && frames.isEmpty { finish(nil, AureaText.t("seq_none_found")); return }
+            let sources = zip.map { [$0] } ?? frames
+            let bytes = sources.reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+            let free = (try? AureaPaths.documents.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage) ?? Int64.max
+            // O .zip ocupa duas vezes (a cópia e o que o motor extrai).
+            let needed = bytes * (zip != nil ? 2 : 1) + 64 * 1024 * 1024
+            if bytes > 0, needed > free {
+                finish(nil, AureaText.t("seq_no_space", ByteCountFormatter.string(fromByteCount: needed, countStyle: .file))); return
+            }
+            var copied: URL?, tempZip: URL?, paths: [String] = []
+            do {
+                if let zip {
+                    let dir = AureaPaths.caches.appendingPathComponent("sequences", isDirectory: true)
+                    try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+                    let target = dir.appendingPathComponent("seq-\(Int(Date().timeIntervalSince1970 * 1000)).zip")
+                    try fm.copyItem(at: zip, to: target)
+                    tempZip = target; paths = [target.path]
+                } else {
+                    let dir = AureaPaths.media.appendingPathComponent("sequences/seq-\(Int(Date().timeIntervalSince1970 * 1000))", isDirectory: true)
+                    try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+                    copied = dir
+                    for (i, frame) in frames.enumerated() {
+                        if i % 8 == 0 {
+                            let text = AureaText.t("seq_copying", i + 1, frames.count)
+                            DispatchQueue.main.async { self?.operationMessage = text }
+                        }
+                        try fm.copyItem(at: frame, to: dir.appendingPathComponent(frame.lastPathComponent))
+                    }
+                    paths = [dir.path]
+                }
+            } catch {
+                if let copied { try? fm.removeItem(at: copied) }
+                if let tempZip { try? fm.removeItem(at: tempZip) }
+                finish(nil, AureaText.t("ios_import_copy_failed", error.localizedDescription)); return
+            }
+            DispatchQueue.main.async { self?.operationMessage = AureaText.t("seq_reading") }
+            let info = native.probeImageSequence(paths)
+            guard (info["ok"] as? NSNumber)?.boolValue == true else {
+                if let copied { try? fm.removeItem(at: copied) }
+                if let tempZip { try? fm.removeItem(at: tempZip) }
+                let detail = info["detail"] as? String ?? ""
+                finish(nil, AureaText.t("seq_failed", detail.isEmpty ? AureaText.t("msg_nao_consegui_ler_esse_arquivo") : AureaEngineText.sentence(detail, code: (info["error"] as? NSNumber)?.intValue ?? 0)))
+                return
+            }
+            finish(ImageSequenceDraft(paths: paths, info: info, copied: copied, tempZip: tempZip, asOverlay: asOverlay), nil)
+        }
+    }
+
+    /// "Importar" da folha: fps 0 = o sugerido; modos na ordem do motor (0 = automático).
+    func importImageSequence(fps: Double, alphaMode: Int32, colorMode: Int32) {
+        guard let draft = sequenceDraft, !importingMedia else { return }
+        sequenceDraft = nil
+        importingMedia = true; operationMessage = AureaText.t("seq_importing")
+        let native = engine, overlayFrame = status.playhead
+        mediaQueue.async { [weak self] in
+            let id = native.importImageSequence(draft.paths, fps: fps, alphaMode: alphaMode, colorMode: colorMode)
+            if let zip = draft.tempZip { try? FileManager.default.removeItem(at: zip) }
+            if id < 0, let copied = draft.copied { try? FileManager.default.removeItem(at: copied) }
+            let raw = id < 0 ? native.lastImportError : ""
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                guard id >= 0 else {
+                    self.toast = AureaText.t("seq_failed", raw.isEmpty ? AureaText.t("ios_import_failed_code", String(-id)) : AureaEngineText.sentence(raw, code: Int(-id)))
+                    return
+                }
+                if draft.asOverlay { self.engine.run { _ = $0.moveClipToOverlay(id, atFrame: overlayFrame) } }
+                self.syncAfterEdit(); self.select(layerId: id, additive: false)
+                self.toast = AureaText.t("seq_imported", draft.int("frameCount"))
+                _ = self.saveProject(writeThumbnail: false)
+            }
+        }
+    }
+
+    /// "Cancelar" (ou fechar a folha): apaga a cópia — nada entrou na timeline.
+    func cancelImageSequence() {
+        guard let draft = sequenceDraft else { return }
+        sequenceDraft = nil
+        mediaQueue.async {
+            if let copied = draft.copied { try? FileManager.default.removeItem(at: copied) }
+            if let zip = draft.tempZip { try? FileManager.default.removeItem(at: zip) }
         }
     }
 

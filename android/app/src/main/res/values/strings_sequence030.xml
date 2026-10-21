@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: importar sequência de imagens (PNG/EXR/TGA/JPG/BMP numerados). -->
+<resources>
+    <string name="seq_title">Sequência de imagens</string>
+    <string name="seq_dock">Sequência</string>
+    <string name="seq_hint">Quadros numerados (render_0001.png…) em PNG, EXR, TGA, JPG ou BMP, como os renders do Blender. A transparência é mantida.</string>
+    <string name="seq_pick_folder">Escolher pasta</string>
+    <string name="seq_pick_files">Escolher quadros ou .zip</string>
+    <string name="seq_reading">Lendo a sequência…</string>
+    <string name="seq_copying">Copiando quadros… %1$d de %2$d</string>
+    <string name="seq_importing">Importando a sequência…</string>
+    <string name="seq_imported">Sequência importada: %1$d quadros</string>
+    <string name="seq_none_found">Nenhum quadro numerado aqui. Use PNG, EXR, TGA, JPG ou BMP com o número no nome (render_0001.png).</string>
+    <string name="seq_no_space">Espaço insuficiente: a sequência precisa de %1$s livres.</string>
+    <string name="seq_failed">Não foi possível importar a sequência: %1$s</string>
+    <string name="seq_frames">%1$d quadros (%2$d a %3$d)</string>
+    <string name="seq_missing">%1$d faltando — no lugar aparece o quadro anterior: %2$s</string>
+    <string name="seq_format">%1$d×%2$d · %3$s · %4$d bits · %5$s</string>
+    <string name="seq_alpha_yes">com transparência</string>
+    <string name="seq_alpha_no">sem transparência</string>
+    <string name="seq_candidates">A pasta tem %1$d sequências; esta é a maior.</string>
+    <string name="seq_rate">Quadros por segundo</string>
+    <string name="seq_suggested">sugerido</string>
+    <string name="seq_alpha_mode">Transparência</string>
+    <string name="seq_auto">Automático</string>
+    <string name="seq_alpha_straight">Reta</string>
+    <string name="seq_alpha_premultiplied">Pré-multiplicada</string>
+    <string name="seq_alpha_ignore">Ignorar</string>
+    <string name="seq_color_mode">Cor</string>
+    <string name="seq_color_srgb">sRGB</string>
+    <string name="seq_color_linear">Linear</string>
+    <string name="seq_auto_note">Automático: PNG e TGA com transparência reta; EXR em cor linear pré-multiplicada; sem canal alfa, opaco.</string>
+    <string name="seq_import">Importar</string>
+</resources>

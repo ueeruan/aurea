@@ -375,6 +375,9 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
         if (uri != null && replaceTarget != 0L) store.replaceMedia(replaceTarget, uri)
     }
     val visual = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+    // 0.3.0: sequência de imagens (render do Blender com alfa) numa linha própria, no
+    // cabeçote, como a "Camada": é para compor por cima do vídeo.
+    val sequence = rememberImageSequencePicker(store, asOverlay = true)
     val noClip = stringResource(R.string.edit_no_clip_here)
     return remember(store, ui, noClip) {
         val addMedia = { if (store.playing) store.pause(); media.launch(visual) }
@@ -426,6 +429,7 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                     EditDockItem("overlay", CupertinoGlyph.SquareOnSquare, R.string.edit_dock_overlay) {
                         if (store.playing) store.pause(); overlay.launch(visual)
                     },
+                    EditDockItem("sequence", CupertinoGlyph.SquareStack3dUp, R.string.seq_dock) { sequence() },
                     EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_dock_effects) { globalEffect() },
                     EditDockItem("captions", CupertinoGlyph.CaptionsBubble, R.string.edit_dock_captions) { panel(EditorPanel.Captions) },
                     EditDockItem("filters", CupertinoGlyph.ColorFilter, R.string.edit_dock_filters) { globalColor(EditorPanel.Filters) },

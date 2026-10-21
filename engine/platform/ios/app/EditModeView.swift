@@ -261,6 +261,12 @@ struct EditModeView: View {
                     model.pendingOverlayImport = true
                     shell.addPicker = .gallery
                 },
+                // 0.3.0: sequência de imagens (render do Blender com alfa) numa linha própria, no cabeçote.
+                item("sequence", CupertinoGlyph.SquareStack3dUp, "seq_dock") {
+                    if model.status.playing != 0 { model.pause() }
+                    model.pendingOverlayImport = true
+                    shell.sequenceChooser = true
+                },
                 item("effects", CupertinoGlyph.Sparkles, "edit_dock_effects") { globalEffect() },
                 item("captions", CupertinoGlyph.CaptionsBubble, "edit_dock_captions") { panel(.captions) },
                 item("filters", CupertinoGlyph.ColorFilter, "edit_dock_filters") { globalColor(.filters) },

@@ -154,6 +154,8 @@ data class PreviewState(
 private const val ERRC_UNSUPPORTED_FORMAT = 17L
 /** Linhas de parâmetro lidas por efeito (o iOS dobra o buffer quando enche; aqui cabe o maior efeito). */
 private const val MAX_EFFECT_PARAM_ROWS = 128
+/** Quadros que o leitor de sequência do motor abre (media/ImageSequence.hpp). */
+private val SEQUENCE_FRAME_EXTENSIONS = setOf("png", "exr", "tga", "jpg", "jpeg", "bmp")
 /** `aurea::Errc::IoError` / `StorageFull` (TEMP_STORAGE_FULL). */
 private const val ERRC_IO = 10
 private const val ERRC_STORAGE_FULL = 28
@@ -2171,6 +2173,149 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             val name = displayName(uri)?.substringBeforeLast('.') ?: if (gif) "GIF" else "PSD"
             if (gif) engine.importGif(temp.absolutePath, name) else engine.importPsd(temp.absolutePath, name)
         } catch (_: Exception) { -10L } finally { temp?.delete() }
+    }
+
+    // =========================================================================
+    // Sequência de imagens (0.3.0): quadros numerados (PNG, EXR, TGA, JPG, BMP),
+    // como os renders do Blender, entram como um clipe de vídeo com transparência.
+    // O motor lê CAMINHOS: os quadros são copiados para projetos/Media/sequences/
+    // (guardado relativo, sobrevive a reabrir e ao pacote do projeto); um .zip vai
+    // para o cache e o motor o extrai na mesma pasta de Documentos.
+    // =========================================================================
+
+    /** O que a sondagem achou, à espera de "Importar" (ImageSequenceSheet). */
+    class ImageSequenceDraft(
+        val paths: Array<String>,
+        val info: org.json.JSONObject,
+        internal val copied: File?,
+        internal val tempZip: File?,
+        val asOverlay: Boolean,
+    )
+    var sequenceDraft by mutableStateOf<ImageSequenceDraft?>(null)
+        private set
+
+    /**
+     * [tree] = pasta escolhida (OpenDocumentTree) ou [uris] = quadros soltos / um .zip.
+     * Copia, sonda e abre a folha de opções; nada entra na timeline ainda.
+     */
+    fun prepareImageSequence(uris: List<Uri>, tree: Uri? = null, asOverlay: Boolean = false) {
+        if ((uris.isEmpty() && tree == null) || !acceptsImport()) return
+        if (busyMessage != null) return
+        val app = getApplication<Application>()
+        busyMessage = appText(R.string.seq_reading)
+        launchImport launch@{
+            val sources: List<Pair<Uri, String>> = withContext(Dispatchers.IO) {
+                if (tree != null) sequenceTreeFiles(tree) else uris.map { it to (displayName(it) ?: it.lastPathSegment.orEmpty()) }
+            }
+            val zip = sources.singleOrNull()?.takeIf { it.second.lowercase(java.util.Locale.ROOT).endsWith(".zip") }
+            val frames = if (zip != null) emptyList() else sources.filter { sequenceFrameName(it.second) }
+            if (zip == null && frames.isEmpty()) { busyMessage = null; errorMessage = appText(R.string.seq_none_found); return@launch }
+            val bytes = withContext(Dispatchers.IO) { (zip?.let { listOf(it) } ?: frames).sumOf { sizeOf(app, it.first) } }
+            val free = android.os.StatFs(app.filesDir.absolutePath).availableBytes
+            // O .zip ocupa duas vezes (a cópia e o que o motor extrai).
+            val needed = bytes * (if (zip != null) 2 else 1) + 64L * 1024 * 1024
+            if (bytes > 0 && needed > free) {
+                busyMessage = null
+                errorMessage = appText(R.string.seq_no_space, android.text.format.Formatter.formatShortFileSize(app, needed))
+                return@launch
+            }
+            var copied: File? = null
+            var tempZip: File? = null
+            val paths: Array<String>
+            try {
+                if (zip != null) {
+                    tempZip = withContext(Dispatchers.IO) {
+                        val f = File(File(app.cacheDir, "sequences").apply { mkdirs() }, "seq-${System.currentTimeMillis()}.zip")
+                        copyUri(app, zip.first, f); f
+                    }
+                    paths = arrayOf(tempZip.absolutePath)
+                } else {
+                    val dir = File(directories().projects, "Media/sequences/seq-${System.currentTimeMillis()}").apply { mkdirs() }
+                    copied = dir
+                    frames.forEachIndexed { i, (uri, name) ->
+                        if (i % 8 == 0) busyMessage = appText(R.string.seq_copying, i + 1, frames.size)
+                        withContext(Dispatchers.IO) { copyUri(app, uri, File(dir, File(name).name)) }
+                    }
+                    paths = arrayOf(dir.absolutePath)
+                }
+                busyMessage = appText(R.string.seq_reading)
+                val json = withContext(Dispatchers.IO) { engine.probeImageSequence(paths) }
+                val info = json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
+                if (info == null || !info.optBoolean("ok")) {
+                    val detail = info?.optString("detail").orEmpty().ifEmpty { appText(R.string.msg_nao_consegui_ler_esse_arquivo) }
+                    errorMessage = appText(R.string.seq_failed, detail)
+                    withContext(Dispatchers.IO) { copied?.deleteRecursively(); tempZip?.delete() }
+                    return@launch
+                }
+                sequenceDraft = ImageSequenceDraft(paths, info, copied, tempZip, asOverlay)
+            } catch (failure: Exception) {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { copied?.deleteRecursively(); tempZip?.delete() }
+                throw failure
+            } finally { busyMessage = null }
+        }
+    }
+
+    /** "Importar" da folha: [fps] 0 = o sugerido; modos na ordem do motor (0 = automático). */
+    fun importImageSequence(fps: Double, alphaMode: Int, colorMode: Int) {
+        val draft = sequenceDraft ?: return
+        if (!acceptsImport()) return
+        sequenceDraft = null
+        val overlayFrame = playhead.toLong()
+        busyMessage = appText(R.string.seq_importing)
+        launchImport launch@{
+            val id = withContext(Dispatchers.IO) { engine.importImageSequence(draft.paths, fps, alphaMode, colorMode) }
+            withContext(Dispatchers.IO) { draft.tempZip?.delete() }
+            busyMessage = null
+            if (id < 0) {
+                withContext(Dispatchers.IO) { draft.copied?.deleteRecursively() }
+                errorMessage = appText(R.string.seq_failed, humanError(-id.toInt()))
+                return@launch
+            }
+            if (draft.asOverlay) engine.moveClipToOverlay(id, overlayFrame)
+            refreshNow(); select(id)
+            showToast(appText(R.string.seq_imported, draft.info.optInt("frameCount")))
+        }
+    }
+
+    /** "Cancelar": apaga a cópia (nada entrou na timeline). */
+    fun cancelImageSequence() {
+        val draft = sequenceDraft ?: return
+        sequenceDraft = null
+        viewModelScope.launch(Dispatchers.IO) { draft.copied?.deleteRecursively(); draft.tempZip?.delete() }
+    }
+
+    /** Os arquivos da pasta escolhida (só o primeiro nível, como o Blender grava). */
+    private fun sequenceTreeFiles(tree: Uri): List<Pair<Uri, String>> {
+        val resolver = getApplication<Application>().contentResolver
+        val parent = android.provider.DocumentsContract.getTreeDocumentId(tree)
+        val children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, parent)
+        val out = ArrayList<Pair<Uri, String>>()
+        resolver.query(children, arrayOf(
+            android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE,
+        ), null, null, null)?.use { c ->
+            while (c.moveToNext()) {
+                if (c.getString(2) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR) continue
+                val name = c.getString(1) ?: continue
+                out.add(android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0)) to name)
+            }
+        }
+        return out
+    }
+
+    private fun sequenceFrameName(name: String): Boolean =
+        name.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT) in SEQUENCE_FRAME_EXTENSIONS
+
+    private fun sizeOf(app: Application, uri: Uri): Long = try {
+        app.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else 0L
+        } ?: 0L
+    } catch (_: Exception) { 0L }
+
+    private fun copyUri(app: Application, uri: Uri, target: File) {
+        val input = app.contentResolver.openInputStream(uri) ?: throw java.io.IOException("sem leitura: $uri")
+        input.use { i -> target.outputStream().use { o -> i.copyTo(o, 256 * 1024) } }
     }
 
     /** O motivo da falha (0.2.7): antes toda falha de PSD dizia a mesma coisa. */

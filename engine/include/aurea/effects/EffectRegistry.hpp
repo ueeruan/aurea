@@ -280,6 +280,11 @@ namespace effect_keys {
     /// Constelação (3D): pontos 3D ligados por linhas quando perto, com faces,
     /// ruído, campo esférico e a câmera da composição (ConstellationEffect.cpp).
     inline constexpr const char* kConstellation        = "aurea.generate.constellation";
+    /// Aprimorar (Nitidez): restauração espaço-temporal no espírito dos
+    /// modelos de aprimoramento de vídeo (compressão, ruído, detalhe, halos,
+    /// serrilhado, grão), com estimativa automática na GPU e vizinhos no
+    /// tempo compensados por optical flow (EnhanceEffect.cpp).
+    inline constexpr const char* kEnhance              = "aurea.enhance.video";
 }
 
 /// Teto do atraso do Detectar movimento (quadros). O renderer decodifica a

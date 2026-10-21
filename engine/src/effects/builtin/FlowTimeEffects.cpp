@@ -40,6 +40,15 @@ public:
         p.add_enum("vectors", "Qualidade dos vetores", quality, 3, 1);
         p.add_float("motion_blur", "Desfoque de movimento", 0.0f, 0.0f, 200.0f, kAnimPct, "%");
         p.typed_range(0.0f, 400.0f);
+        // 0.3.0 — o "substituir quadros duplicados" dos interpoladores de
+        // vídeo: o quadro da fonte que repete o anterior (30 dentro de 60,
+        // quadro perdido/congelado) é refeito pelo optical flow entre os
+        // quadros DISTINTOS em volta. A detecção compara assinaturas de luma
+        // 32×18 (uma por quadro da fonte, guardada) no renderer.
+        const u32 dup = p.add_bool("replace_duplicates", "Substituir quadros duplicados", false, kParamNone);
+        const u32 sens = p.add_float("duplicate_sensitivity", "Sensibilidade", 10.0f, 0.0f, 100.0f, kParamPercent, "%");
+        p.set_tip(sens, "Mais alta: quadros só parecidos também contam como repetidos.");
+        p.add_section("duplicates", "Substituir quadros duplicados", {sens}, dup, true);
     }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };

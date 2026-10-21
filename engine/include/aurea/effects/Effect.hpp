@@ -162,6 +162,21 @@ struct EffectPreset {
     std::span<const EffectPresetValue> values;
 };
 
+/// Vizinhos no tempo (Aprimorar, 0.3.0): até três quadros da FONTE de cada lado.
+inline constexpr u32 kMaxTemporalNeighbors = 6;
+
+/// A FONTE da camada noutros quadros (Aprimorar: redução de ruído temporal),
+/// na mesma região e densidade da entrada. Como `LayerImage::history`, só a
+/// imagem que sai da fonte traz isto; o EffectGraph leva cada vizinho pelas
+/// etapas anteriores ao efeito que pede (`Effect::wants_neighbors`) e entrega
+/// pelo contexto (`EffectBuildContext::neighbors`). `offset` em quadros da
+/// fonte (−3..3, nunca 0); textura inválida = o vizinho não chegou.
+struct TemporalNeighbors {
+    FGTexture texture[kMaxTemporalNeighbors]{};
+    i8 offset[kMaxTemporalNeighbors]{};
+    u8 count = 0;
+};
+
 /// Uma imagem no plano da layer: a textura e o retângulo (px da layer, em
 /// resolução cheia) que ela cobre. Com efeito que expande (blur sem repetir
 /// borda, Motion Tile), a região passa da caixa da layer.
@@ -175,6 +190,8 @@ struct LayerImage {
     /// o EffectGraph passa pelas etapas anteriores ao efeito que pede e a
     /// entrega pelo contexto (`EffectBuildContext::history`).
     FGTexture history{};
+    /// Vizinhos no tempo da FONTE (Aprimorar), na mesma região e densidade.
+    TemporalNeighbors neighbors{};
     /// A cropped source's original transparent canvas. Motion Tile keeps this
     /// domain for its period instead of treating the occupied crop as a tile.
     Rect virtualSourceRegion{};
@@ -427,6 +444,16 @@ public:
     [[nodiscard]] const LayerImage& history() const noexcept { return history_; }
     void set_history(const LayerImage& image) noexcept { history_ = image; }
 
+    /// Os vizinhos no tempo (Aprimorar), já pelas etapas que vêm antes do
+    /// efeito (só durante o `build` de um efeito com `Effect::wants_neighbors`).
+    /// Vazio = a fonte não tem tempo (foto, texto) ou o efeito não pediu.
+    struct NeighborImage {
+        LayerImage image{};
+        i32 offset = 0;   ///< quadros da fonte (−3..3, sem o 0)
+    };
+    [[nodiscard]] std::span<const NeighborImage> neighbors() const noexcept { return neighbors_; }
+    void set_neighbors(std::span<const NeighborImage> images) noexcept { neighbors_ = images; }
+
     /// Outra camada da composição desenhada como ENTRADA de um efeito (o mapa
     /// do Mapa de deslocamento): a imagem dela no quadro da composição
     /// (região 0,0..largura,altura da composição, em px da composição), com
@@ -452,6 +479,7 @@ private:
     SurfaceFormat    workFormat_;
     u32              maxTexture_;
     LayerImage       history_{};
+    std::span<const NeighborImage> neighbors_{};
     std::span<const LayerInput> layerInputs_{};
 };
 
@@ -524,6 +552,18 @@ public:
     /// Zero uses the current source. Existing temporal effects retain their
     /// renderer contracts; new effects can request a deterministic past frame.
     [[nodiscard]] virtual f64 history_delay_frames(const EffectEval& eval) const noexcept { (void)eval; return 0.0; }
+
+    /// O efeito lê VIZINHOS no tempo da fonte (Aprimorar: redução de ruído
+    /// temporal compensada por movimento). O EffectGraph leva os vizinhos que
+    /// o renderer trouxe pelas etapas anteriores até ele.
+    [[nodiscard]] virtual bool wants_neighbors() const noexcept { return false; }
+    /// Quais vizinhos, nos valores atuais (avaliado sob o lock do modelo):
+    /// escreve até `kMaxTemporalNeighbors` deslocamentos em quadros da FONTE
+    /// (±1..±3, os mais perto primeiro) e devolve quantos. 0 = só espacial.
+    [[nodiscard]] virtual u32 temporal_neighbors(const EffectEval& eval, i32* offsets) const noexcept {
+        (void)eval; (void)offsets;
+        return 0;
+    }
 
     /// Índice do parâmetro (referência a camada) cuja camada o efeito LÊ como
     /// imagem (Mapa de deslocamento); −1 = nenhum. O renderer inclui essa

@@ -552,58 +552,212 @@ public:
 };
 
 // -----------------------------------------------------------------------------
-// Ordenar pixels
+// Ordenar pixels (reescrito na 0.3.0)
+//
+// Uma ordenação de verdade por intervalo (shaders/effects/pixel_sort.comp):
+// os pixels que passam no limiar formam intervalos ao longo da direção, e as
+// cores de cada intervalo são PERMUTADAS pela chave — nada duplica nem mistura.
+// Tudo é medido na camada: o comprimento é a fração da extensão da camada
+// naquela direção, o passo e as barreiras sorteadas são px da camada. A
+// prévia em 1/2 e o export em 4K cortam e ordenam nos mesmos lugares.
+//
+// Horizontal e vertical ordenam a própria imagem (exato, sem reamostrar).
+// Diagonal, ângulo livre, radial e passo > 1 px vão a uma GRADE em que a
+// direção vira as linhas (pixel_sort_space.frag), ordenam, e voltam; onde
+// nada se moveu, o pixel original fica intacto.
+//
+// Antes: cada pixel refazia uma ordenação de 64 amostras fixas por ladrilho
+// de 64 texels (emendas, comprimento que dependia da resolução, diagonal e
+// radial borrados pela amostragem bilinear, 1,9 ms em 1080p numa RTX 3050).
 // -----------------------------------------------------------------------------
 class PixelSort final : public Effect {
 public:
     enum : u32 { kThresholdLow = 0, kThresholdHigh, kLength, kRandomness, kDirection, kReverse,
-                 kMode, kSeed, kBandMode, kStep };
+                 kMode, kSeed, kBandMode, kStep,
+                 // 0.3.0
+                 kAngle, kCenter };
+    enum : u32 { kHorizontal = 0, kVertical, kDiagonal, kRadial, kFreeAngle };
 
     const EffectInfo& info() const noexcept override {
-        static const EffectInfo i{effect_keys::kPixelSort, "Ordenar pixels", "Estilizar", EffectClass::Domain};
+        static const EffectInfo i{effect_keys::kPixelSort, "Ordenar pixels", "Estilizar", EffectClass::Neighborhood};
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        static const char* const kDirs[] = {"Horizontal", "Vertical", "Diagonal", "Radial"};
-        static const char* const kModes[] = {"Luz", "Tom", "Vermelho", "Verde", "Azul"};
+        static const char* const kDirs[] = {"Horizontal", "Vertical", "Diagonal", "Radial", "Ângulo"};
+        static const char* const kModes[] = {"Luz", "Tom", "Vermelho", "Verde", "Azul", "Saturação"};
         p.add_float("threshold_low", "Limiar baixo", 25.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("threshold_high", "Limiar alto", 90.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("length", "Comprimento", 60.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("randomness", "Aleatoriedade", 25.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
-        p.add_enum("direction", "Direção", kDirs, 4, 0);
+        p.add_enum("direction", "Direção", kDirs, 5, 0);
         p.add_bool("reverse", "Sentido inverso", false);
-        p.add_enum("mode", "Ordenar por", kModes, 5, 0);
+        p.add_enum("mode", "Ordenar por", kModes, 6, 0);
         p.add_int("seed", "Semente", 71, 0, 9999);
         p.add_bool("band_mode", "Por faixa de tom", false);
-        p.add_float("step", "Passo", 1.0f, 1.0f, 16.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("step", "Passo", 1.0f, 1.0f, 64.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_angle("angle", "Ângulo", 30.0f);
+        p.add_point2("center", "Centro", Vec2{0.5f, 0.5f}, -1.0f, 2.0f, kParamAnimatable | kParamRelative);
     }
-    bool is_identity(const EffectEval& e) const noexcept override { return e.f(kLength) < 0.005f; }
-    f32 input_margin(const EffectEval&) const noexcept override { return 0; }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return e.f(kLength) < 0.005f || e.f(kThresholdLow) > e.f(kThresholdHigh);
+    }
+    /// Um intervalo pode atravessar a camada inteira: as etapas anteriores
+    /// mantêm a imagem toda (não só a parte que aparece no quadro).
+    bool needs_full_input() const noexcept override { return true; }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kThresholdLow] = ParamValue::scalar(48.0f);
         v[kThresholdHigh] = ParamValue::scalar(100.0f);
         v[kLength] = ParamValue::scalar(45.0f);
         return true;
     }
-    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
-                 LayerImage& out) const override {
-        const Rect region=input.region;
-        const u32 w=input.width, h=input.height;
-        EffectUniforms u=base_uniforms(input);
-        u.p0 = Vec4{e.f(kThresholdLow) / 100.0f, e.f(kThresholdHigh) / 100.0f, e.f(kLength) / 100.0f,
-                    e.f(kRandomness) / 100.0f};
-        u.p1 = Vec4{static_cast<f32>(e.e(kDirection)), e.b(kReverse) ? 1.0f : 0.0f,
-                    static_cast<f32>(e.e(kMode)), static_cast<f32>(e.e(kSeed))};
-        u.p2 = Vec4{e.b(kBandMode) ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
-        u.p3 = Vec4{e.f(kStep), 0.0f, 0.0f, 0.0f};
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::compute_shader(ShaderId::effects_pixel_sort_comp));
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_pixel_sort_space_frag, work));
+    }
 
-        out = LayerImage{ctx.texture("ordenar-pixels", w, h), region, w, h};
-        if (ctx.fullscreen_pass("ordenar-pixels", PassStage::Transform, out.texture,
-                                ShaderId::effects_pixel_sort_frag,
-                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
-                                &u, sizeof(u)) == kInvalidIndex) {
-            return Errc::PipelineCompileFailed;
+    /// Ordena as linhas (eixo 0) ou colunas (eixo 1) de `src` em `dst`.
+    /// `density` = texels por px da camada; `origin` = px da camada do texel 0.
+    static Status sort_pass(EffectBuildContext& ctx, const EffectEval& e, FGTexture src, FGTexture dst,
+                            u32 w, u32 h, u32 axis, bool reverse, f32 density, Vec2 origin, f32 extentPx) {
+        auto pipeline = ctx.shaders().pipeline(PipelineKey::compute_shader(ShaderId::effects_pixel_sort_comp));
+        if (!pipeline.ok()) return pipeline.status();
+        struct Uniforms { Vec4 p0, p1, p2, p3; } u{};
+        const f32 length = std::clamp(e.f(kLength), 0.0f, 100.0f);
+        // Comprimento: fração da extensão da camada na direção (100 % = sem limite).
+        const f32 maxElements = length >= 99.5f ? 0.0f
+            : std::max(1.0f, std::round(length * 0.01f * extentPx * density));
+        u.p0 = Vec4{std::clamp(e.f(kThresholdLow), 0.0f, 100.0f) * 0.01f, std::clamp(e.f(kThresholdHigh), 0.0f, 100.0f) * 0.01f,
+                    maxElements, std::clamp(e.f(kRandomness), 0.0f, 100.0f) * 0.01f * 0.15f};
+        u.p1 = Vec4{static_cast<f32>(axis), reverse ? 1.0f : 0.0f, static_cast<f32>(std::min<u32>(e.e(kMode), 5u)),
+                    static_cast<f32>(std::max(0, static_cast<i32>(e.f(kSeed))))};
+        u.p2 = Vec4{e.b(kBandMode) ? 1.0f : 0.0f, density, std::max(1.0f, e.f(kStep)), 0.0f};
+        u.p3 = Vec4{origin.x, origin.y, static_cast<f32>(w), static_cast<f32>(h)};
+        const u32 lines = axis ? w : h;
+        const u32 along = axis ? h : w;
+        const u32 chunks = (along + 2047u) / 2048u;
+        const auto sampler = ctx.shaders().sampler(CommonSampler::NearestClamp);
+        const auto pipe = *pipeline;
+        const u32 pass = ctx.graph().add_compute_pass("ordenar-pixels", PassStage::Effects,
+            [u, src, dst, sampler, pipe, lines, chunks](PassContext& pc) {
+                pc.cmds.bind_pipeline(pipe);
+                pc.cmds.bind_texture(0, pc.texture(src), sampler);
+                pc.cmds.bind_storage_image(0, pc.texture(dst));
+                pc.cmds.set_uniforms(&u, sizeof(u));
+                pc.cmds.dispatch(lines, chunks, 1);
+            });
+        ctx.graph().read(pass, src);
+        ctx.graph().write_storage(pass, dst);
+        return OkStatus;
+    }
+
+    static FGTexture storage_texture(EffectBuildContext& ctx, const char* name, u32 w, u32 h) {
+        TextureDesc d;
+        d.width = w; d.height = h; d.sampled = true; d.storage = true; d.renderTarget = true;
+        d.format = SurfaceFormat::RGBA16F;
+        d.debugName = name;
+        return ctx.graph().create_texture(name, d);
+    }
+
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        const Rect region = input.region;
+        const u32 w = input.width, h = input.height;
+        if (!w || !h || region.w <= 0.0f || region.h <= 0.0f) { out = input; return OkStatus; }
+        const f32 density = input.texel_scale_x();   // texels por px da camada
+        const f32 stepPx = std::max(1.0f, e.f(kStep));
+        const u32 dir = std::min<u32>(e.e(kDirection), kFreeAngle);
+        bool reverse = e.b(kReverse);
+        const f32 layerW = e.placement && e.placement->layerWidth ? static_cast<f32>(e.placement->layerWidth) : region.w;
+        const f32 layerH = e.placement && e.placement->layerHeight ? static_cast<f32>(e.placement->layerHeight) : region.h;
+
+        // Ângulo da direção (graus, sentido de x para y).
+        f32 degrees = dir == kVertical ? 90.0f : dir == kDiagonal ? 45.0f : dir == kFreeAngle ? e.f(kAngle) : 0.0f;
+        if (!std::isfinite(degrees)) degrees = 0.0f;
+        degrees -= 360.0f * std::floor(degrees / 360.0f);
+        // Múltiplos de 90° e passo de um texel: a própria imagem, sem reamostrar.
+        const f32 quarter = std::round(degrees / 90.0f);
+        const bool aligned = dir != kRadial && std::fabs(degrees - quarter * 90.0f) < 1e-3f;
+        // Passo 1 = sem blocos (na densidade da imagem, também acima de 1 texel/px).
+        const bool unitStep = stepPx <= 1.0001f;
+        if (aligned && unitStep) {
+            const u32 q = static_cast<u32>(quarter) % 4u;      // 0 → x, 1 → y, 2 → −x, 3 → −y
+            const u32 axis = q % 2u;
+            if (q >= 2u) reverse = !reverse;
+            out = LayerImage{storage_texture(ctx, "ordenar-pixels", w, h), region, w, h};
+            return sort_pass(ctx, e, input.texture, out.texture, w, h, axis, reverse, density,
+                             Vec2{region.x, region.y}, axis ? layerH : layerW);
         }
+
+        // GRADE: a direção vira as linhas. Densidade = a da imagem (passo 1) ou
+        // um texel por bloco de `passo` px da camada.
+        f32 gd = unitStep ? density : std::min(density, 1.0f / stepPx);
+        gd = std::clamp(gd, 1e-4f, 16.0f);
+        // O centro do giro é o da CAMADA (não o da região, que muda quando uma
+        // etapa anterior recorta): a grade fica parada no tempo.
+        const Vec2 rel = e.p2(kCenter);
+        Vec2 center{layerW * 0.5f, layerH * 0.5f};
+        if (dir == kRadial) center = Vec2{std::isfinite(rel.x) ? rel.x * layerW : layerW * 0.5f,
+                                          std::isfinite(rel.y) ? rel.y * layerH : layerH * 0.5f};
+        const Vec2 corners[4] = {Vec2{region.x, region.y}, Vec2{region.x + region.w, region.y},
+                                 Vec2{region.x, region.y + region.h}, Vec2{region.x + region.w, region.y + region.h}};
+        struct SpaceUniforms { Vec4 a0, a1, a2, a3; } su{};
+        f32 gwf = 1.0f, ghf = 1.0f, extentPx = 0.0f, c = 1.0f, s = 0.0f;
+        Vec2 origin{0.0f, 0.0f};
+        if (dir == kRadial) {
+            // Raio até o canto mais longe da região; uma linha por ângulo.
+            f32 rmax = 1.0f;
+            for (Vec2 k : corners) rmax = std::max(rmax, std::hypot(k.x - center.x, k.y - center.y));
+            gwf = rmax * gd;
+            ghf = std::max(8.0f, kTwoPi * rmax * gd);
+            extentPx = rmax;
+        } else {
+            const f32 rad = degrees * kDeg2Rad;
+            c = std::cos(rad); s = std::sin(rad);
+            // Meia caixa da região no referencial girado (em volta do centro).
+            f32 hx = 0.5f, hy = 0.5f;
+            for (Vec2 k : corners) {
+                const Vec2 d{k.x - center.x, k.y - center.y};
+                hx = std::max(hx, std::fabs(c * d.x + s * d.y));
+                hy = std::max(hy, std::fabs(-s * d.x + c * d.y));
+            }
+            gwf = 2.0f * hx * gd;
+            ghf = 2.0f * hy * gd;
+            extentPx = std::fabs(layerW * c) + std::fabs(layerH * s);
+        }
+        // Teto do aparelho: a densidade cai junto (a grade inteira cabe).
+        const f32 maxTex = static_cast<f32>(std::max<u32>(64u, std::min<u32>(ctx.max_texture_size(), 8192u)));
+        if (gwf > maxTex || ghf > maxTex) {
+            const f32 k = maxTex / std::max(gwf, ghf);
+            gd *= k; gwf *= k; ghf *= k;
+        }
+        const u32 gw = static_cast<u32>(std::clamp(std::ceil(gwf), 1.0f, maxTex));
+        const u32 gh = static_cast<u32>(std::clamp(std::ceil(ghf), 1.0f, maxTex));
+        if (dir == kRadial) {
+            su.a0 = Vec4{2.0f, 1.0f, 0.0f, gd};
+            su.a3 = Vec4{static_cast<f32>(gh), 0, 0, 0};
+        } else {
+            su.a0 = Vec4{0.0f, c, s, gd};
+            // Barreiras em px do referencial girado, a partir do centro.
+            origin = Vec2{-0.5f * static_cast<f32>(gw) / gd, -0.5f * static_cast<f32>(gh) / gd};
+        }
+        su.a1 = Vec4{center.x, center.y, static_cast<f32>(gw), static_cast<f32>(gh)};
+        su.a2 = Vec4{region.x, region.y, region.w, region.h};
+        // Em blocos (passo, alinhado), a grade é amostrada no ponto; girada, bilinear.
+        const CommonSampler gridSampler = aligned ? CommonSampler::NearestClamp : CommonSampler::LinearClamp;
+        const FGTexture before = ctx.texture("ordenar-pixels-grade", gw, gh);
+        if (ctx.fullscreen_pass("ordenar-pixels-grade", PassStage::Effects, before, ShaderId::effects_pixel_sort_space_frag,
+                                {PassTexture{input.texture, {}, gridSampler}}, &su, sizeof(su)) == kInvalidIndex)
+            return Errc::PipelineCompileFailed;
+        const FGTexture sorted = storage_texture(ctx, "ordenar-pixels-ordenada", gw, gh);
+        if (const Status st = sort_pass(ctx, e, before, sorted, gw, gh, 0, reverse, gd, origin, extentPx); !st.ok())
+            return st;
+        su.a0.x = dir == kRadial ? 3.0f : 1.0f;
+        out = LayerImage{ctx.texture("ordenar-pixels", w, h), region, w, h};
+        if (ctx.fullscreen_pass("ordenar-pixels-volta", PassStage::Effects, out.texture, ShaderId::effects_pixel_sort_space_frag,
+                                {PassTexture{sorted, {}, gridSampler}, PassTexture{before, {}, gridSampler},
+                                 PassTexture{input.texture, {}, CommonSampler::NearestClamp}},
+                                &su, sizeof(su)) == kInvalidIndex)
+            return Errc::PipelineCompileFailed;
         return OkStatus;
     }
 };

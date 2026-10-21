@@ -30,7 +30,9 @@ struct CurveEase: Equatable {
         case 1: return [1 / 3, 1 / 3, 2 / 3, 2 / 3]
         case 3: return [1 / 3, 0, 2 / 3, 1 / 3]
         case 4: return [1 / 3, 2 / 3, 2 / 3, 1]
-        case 5: return [0.5, 0, 0.5, 1]
+        // O suave nos dois lados do motor são duas parábolas: a bézier mais
+        // próxima delas (CurvePanel.kt). A (0,5;0)(0,5;1) era outra curva.
+        case 5: return [0.484, 0.042, 0.516, 0.958]
         default: return [x1, y1, x2, y2]
         }
     }
@@ -305,12 +307,14 @@ func curvePowered(_ s: Double, _ power: Int) -> Double {
     return out
 }
 
-/// A inversa: raiz `power` com sinal (par e negativo = o espelho positivo).
+/// A inversa: raiz `power` com sinal. Com força par a velocidade não fica
+/// negativa: abaixo de zero a alça para em zero (SpeedGraphHandles.kt).
 func curveRooted(_ v: Double, _ power: Int) -> Double {
     let p = min(3, max(1, power))
     if p == 1 { return v }
+    if v < 0 && p % 2 == 0 { return 0 }
     let r = pow(abs(v), 1.0 / Double(p))
-    return v < 0 && p % 2 == 1 ? -r : r
+    return v < 0 ? -r : r
 }
 
 /// Próxima força ao tocar no texto (CurveMath.kt `nextPower`): ×1 → ×2 → ×3 → ×1.
@@ -1749,7 +1753,9 @@ func graphCurve(_ keys: [CurveKey], from: Double, to: Double, pointsPerFrame: Do
     var out: [CGPoint] = []
     func add(_ frame: Double, _ value: Float) { if value.isFinite { out.append(CGPoint(x: frame, y: Double(value))) } }
     let density: Double = pointsPerFrame.isFinite && pointsPerFrame > 0 ? pointsPerFrame : 1
-    add(from, speed ? 0 : sampleCurve(keys, from))
+    // A borda da janela: a velocidade DALI (com zoom ela cai no meio de um
+    // trecho; o zero riscava uma vertical nas laterais). Par do GraphCurve.kt.
+    add(from, speed ? sampleCurveVelocity(keys, from, fps: fps) : sampleCurve(keys, from))
     for i in 0..<(keys.count - 1) {
         let a = keys[i], b = keys[i + 1]
         let t0 = Double(a.time), t1 = Double(b.time)
@@ -1781,7 +1787,28 @@ func graphCurve(_ keys: [CurveKey], from: Double, to: Double, pointsPerFrame: Do
         if !speed && t1 <= to { add(t1, b.value) }
         if speed && i + 1 == keys.count - 1 && t1 < to { add(t1, 0) }
     }
-    add(to, speed ? 0 : sampleCurve(keys, to))
+    add(to, speed ? sampleCurveVelocity(keys, to, fps: fps) : sampleCurve(keys, to))
+    return out
+}
+
+/// Velocidade ESPACIAL (o módulo do vetor de velocidade de X/Y/Z, como o
+/// gráfico de velocidade da Posição no AE). Par do `spatialSpeedCurve` do Android.
+func spatialSpeedCurve(_ axes: [[CurveKey]], from: Double, to: Double, pointsPerFrame: Double, fps: Float) -> [CGPoint] {
+    guard !axes.isEmpty, from.isFinite, to.isFinite, to > from else { return [] }
+    let density: Double = pointsPerFrame.isFinite && pointsPerFrame > 0 ? pointsPerFrame : 1
+    let n = min(4096, max(16, Int(ceil((to - from) * density))))
+    var frames: [Double] = (0...n).map { from + (to - from) * Double($0) / Double(n) }
+    for axis in axes { for k in axis { let t = Double(k.time); if t > from && t < to { frames += [t - 1e-3, t] } } }
+    frames.sort()
+    var out: [CGPoint] = []
+    var previous = Double.nan
+    for f in frames where f != previous {
+        previous = f
+        var sq = 0.0
+        for axis in axes { let v = Double(sampleCurveVelocity(axis, f, fps: fps)); sq += v * v }
+        let speed = sq.squareRoot()
+        if speed.isFinite { out.append(CGPoint(x: f, y: speed)) }
+    }
     return out
 }
 
@@ -1883,31 +1910,49 @@ private struct NativeTrackGraph: View {
         let key: KeyframeItem
         let end: KeyframeItem
         let incoming: Bool
+        /// As alças GRAVADAS (sem prender): o arrasto só escreve o par desta alça.
         let handles: [Float]
         let base: Double
         var power: Int = 1
-        var influence: Double { Double(incoming ? 1 - handles[2] : handles[0]) }
+        var influence: Double { min(0.99, max(0.01, Double(incoming ? 1 - handles[2] : handles[0]))) }
         private var slope: Double { Double(incoming ? 1 - handles[3] : handles[1]) / influence }
         var velocity: Double { base * curvePowered(slope, power) }
-        var frame: Double { Double(key.time) + (Double(end.time) - Double(key.time)) * Double(incoming ? handles[2] : handles[0]) }
+        var frame: Double { Double(key.time) + (Double(end.time) - Double(key.time)) * (incoming ? 1 - influence : influence) }
         func changed(frame: Double, velocity: Double) -> [Float] {
             var h = handles
             let fraction = min(0.99, max(0.01, (frame - Double(key.time)) / (Double(end.time) - Double(key.time))))
             let s = curveRooted(velocity / base, power)
-            if incoming { h[2] = Float(fraction); h[3] = Float(1 - s * (1 - fraction)) }
-            else { h[0] = Float(fraction); h[1] = Float(s * fraction) }
+            // y nos mesmos −2..3 da curva, do preset e do motor.
+            if incoming { h[2] = Float(fraction); h[3] = Float(min(3, max(-2, 1 - s * (1 - fraction)))) }
+            else { h[0] = Float(fraction); h[1] = Float(min(3, max(-2, s * fraction))) }
             return h
         }
+    }
+    /// Posição com outro eixo marcado nos MESMOS instantes: velocidade espacial.
+    private var spatialAxes: [[KeyframeItem]] {
+        guard speed, let first = keys.first, first.property < 3 else { return [] }
+        return group.filter { !curveSameTrack($0[0], first) && $0[0].property < 3 && $0[0].effectIndex == first.effectIndex }
+            .filter { axis in keys.allSatisfy { k in axis.contains { $0.time == k.time } } }
     }
     private var speedHandles: [SpeedHandle] {
         guard speed, keys.count >= 2 else { return [] }
         var result: [SpeedHandle] = []
         let fps: Double = max(1, Double(model.status.compFps))
+        let axes = spatialAxes
         for index in 0..<(keys.count - 1) {
             let a: KeyframeItem = keys[index]
             let b: KeyframeItem = keys[index + 1]
             let duration: Double = Double(b.time) - Double(a.time)
-            let difference: Double = Double(b.value) - Double(a.value)
+            var difference: Double = Double(b.value) - Double(a.value)
+            if !axes.isEmpty {
+                // |Δp|: o módulo do deslocamento nos eixos do grupo.
+                var sq = difference * difference
+                for axis in axes {
+                    guard let va = axis.first(where: { $0.time == a.time }), let vb = axis.first(where: { $0.time == b.time }) else { continue }
+                    let d = Double(vb.value) - Double(va.value); sq += d * d
+                }
+                difference = sq.squareRoot()
+            }
             let base: Double = difference * fps / duration
             let raw = model.engine.trackEasing(layer, property: a.property, effect: a.effectIndex, param: a.paramIndex, time: a.time).map(\.floatValue)
             guard raw.count >= 4, base.isFinite, abs(base) > 0.000001 else { continue }
@@ -1915,8 +1960,8 @@ private struct NativeTrackGraph: View {
             guard ease.hasHandles else { continue }
             var h: [Float] = ease.handles
             if a.interpolation == 1 { h = [0.33333334,0.33333334,0.6666667,0.6666667] }
-            h[0] = min(0.99,max(0.01,h[0])); h[2] = min(0.99,max(0.01,h[2]))
-            let power = a.interpolation == 1 ? 1 : min(3, max(1, ease.power))
+            // As curvas nomeadas ignoram a força no motor (`keyframe_ease`).
+            let power = ease.isBezier ? min(3, max(1, ease.power)) : 1
             result.append(SpeedHandle(key:a,end:b,incoming:false,handles:h,base:base,power:power))
             result.append(SpeedHandle(key:a,end:b,incoming:true,handles:h,base:base,power:power))
         }
@@ -1958,7 +2003,11 @@ private struct NativeTrackGraph: View {
         guard to > from else { return [] }
         let fps = Float(max(1, Double(model.status.compFps)))
         let density = perFrame ?? (width > 0 ? Double(width) / max(1, to - from) / 2 : 1)
-        return group.map { graphCurve(graphCurveKeys($0, ease: ease), from: from, to: to, pointsPerFrame: density, speed: speed, fps: fps) }
+        let curves = group.map { graphCurveKeys($0, ease: ease) }
+        let perAxis = curves.map { graphCurve($0, from: from, to: to, pointsPerFrame: density, speed: speed, fps: fps) }
+        // Espacial: os eixos apagados embaixo e o módulo como curva ativa (a última).
+        if !spatialAxes.isEmpty { return perAxis + [spatialSpeedCurve(curves, from: from, to: to, pointsPerFrame: density, fps: fps)] }
+        return perAxis
     }
     private func reload() { samples = read(from: viewport.from, to: viewport.to) }
     private func fit() {
@@ -1968,7 +2017,9 @@ private struct NativeTrackGraph: View {
         let full = read(from: Double(low), to: Double(to), perFrame: 2).flatMap { $0 }
         let values = full.map { Double($0.y) } + (speed ? speedHandles.map(\.velocity) + [0] : tracks.flatMap { $0 }.map { Double($0.value) })
         let bottom = values.min() ?? 0, top = values.max() ?? 1
-        let margin = max(0.1, max(top - bottom, abs(top) * 0.05) * 0.12)
+        // Margem relativa à faixa (o piso de 0,1 achatava faixas pequenas).
+        let span = top - bottom
+        let margin = span > 1e-6 ? span * 0.12 : max(abs(top) * 0.1, 0.05)
         let timeMargin = max(1, (Double(to) - Double(low)) * 0.06)
         viewport = TrackGraphViewport(from: Double(low) - timeMargin, to: Double(to) + timeMargin, low: bottom - margin, high: top + margin)
         reload()
@@ -2185,10 +2236,12 @@ private struct NativeTrackGraph: View {
                 velocity:handle.velocity-Double(value.translation.height/size.height)*current.initial.range)
             guard h.allSatisfy({ $0.isFinite }) else { return }
             if !current.began { model.beginGesture("editar velocidade do intervalo");current.began = true }
-            for peer in model.graphKeyGroup(layer, handle.key) {
-                model.engine.editTrackKey(layer,property:peer.property,effect:peer.effectIndex,param:peer.paramIndex,
-                    time:peer.time,action:3,value:peer.value,targetTime:peer.time,interpolation:2,handles:h.map { NSNumber(value:$0) })
-            }
+            // A curva é da PROPRIEDADE, como no painel de curva: força 0 (mantém)
+            // e eixos ligados — o motor leva a mesma curva a X/Y/Z (também na 2D).
+            let key = handle.key
+            model.engine.editTrackKey(layer,property:key.property,effect:key.effectIndex,param:key.paramIndex,
+                time:key.time,action:3,value:key.value,targetTime:key.time,interpolation:2,
+                handles:h.map { NSNumber(value:$0) } + [NSNumber(value: 0), NSNumber(value: 1)])
             drag = current; model.refreshModel(force:true)
         } else if let key = current.key {
             guard current.began || hypot(value.translation.width, value.translation.height) >= 4 else { return }

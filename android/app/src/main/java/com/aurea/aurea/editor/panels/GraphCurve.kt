@@ -89,7 +89,10 @@ internal fun graphCurve(keys: List<CurveKey>, from: Double, to: Double, pointsPe
         if (value.isFinite()) out += GraphSample(frame.toFloat(), value)
     }
     val density = if (pointsPerFrame.isFinite() && pointsPerFrame > 0) pointsPerFrame else 1.0
-    fun edge(frame: Double) = if (speed) 0f else sampleCurve(keys, frame)
+    // A borda da janela: o valor (ou a velocidade) DALI. Com zoom, a borda cai
+    // no meio de um trecho animado; o zero de antes riscava uma reta vertical
+    // até o eixo nas duas laterais do gráfico de velocidade.
+    fun edge(frame: Double) = if (speed) sampleVelocity(keys, frame, fps) else sampleCurve(keys, frame)
     add(from, edge(from))
     for (i in 0 until keys.size - 1) {
         val a = keys[i]
@@ -138,6 +141,37 @@ internal fun graphCurve(keys: List<CurveKey>, from: Double, to: Double, pointsPe
         if (speed && i + 1 == keys.lastIndex && t1 < to) add(t1, 0f)
     }
     add(to, edge(to))
+    return out
+}
+
+/**
+ * A velocidade ESPACIAL (o módulo do vetor de velocidade das trilhas [axes],
+ * X/Y/Z da posição) em [from]..[to]: o que o gráfico de velocidade do AE
+ * mostra para a Posição. Amostrada na densidade da tela e nos dois lados de
+ * cada marca (a velocidade pode saltar ali).
+ */
+internal fun spatialSpeedCurve(axes: List<List<CurveKey>>, from: Double, to: Double, pointsPerFrame: Double, fps: Float): List<GraphSample> {
+    if (axes.isEmpty() || !from.isFinite() || !to.isFinite() || to <= from) return emptyList()
+    val density = if (pointsPerFrame.isFinite() && pointsPerFrame > 0) pointsPerFrame else 1.0
+    val frames = ArrayList<Double>()
+    val n = ceil((to - from) * density).toInt().coerceIn(16, 4096)
+    for (j in 0..n) frames += from + (to - from) * j / n
+    val eps = 1e-3
+    for (axis in axes) for (k in axis) {
+        val t = k.time.toDouble()
+        if (t > from && t < to) { frames += t - eps; frames += t }
+    }
+    frames.sort()
+    val out = ArrayList<GraphSample>(frames.size)
+    var previous = Double.NaN
+    for (f in frames) {
+        if (f == previous) continue
+        previous = f
+        var sq = 0.0
+        for (axis in axes) { val v = sampleVelocity(axis, f, fps).toDouble(); sq += v * v }
+        val speed = kotlin.math.sqrt(sq).toFloat()
+        if (speed.isFinite()) out += GraphSample(f.toFloat(), speed)
+    }
     return out
 }
 

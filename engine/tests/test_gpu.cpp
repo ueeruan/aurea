@@ -1176,6 +1176,137 @@ AUREA_TEST(Gpu, PixelSortOrdersRatherThanDuplicatesBrightPixels) {
     for(u32 x=0;x<64;++x) AUREA_CHECK_NEAR(reversed.v(x,8).x,sorted.v(63-x,8).x,.003f);
 }
 
+// -----------------------------------------------------------------------------
+// Ordenar pixels 0.3.0 (pixel_sort.comp): permutação exata em toda direção,
+// comprimento medido na CAMADA (prévia = export), pixels parados intactos.
+// -----------------------------------------------------------------------------
+namespace {
+ImagePixels sort_noise_image(u32 w, u32 h) {
+    ImagePixels px = uniform_image(w, h, 0, 0, 0);
+    for (u32 y = 0; y < h; ++y) for (u32 x = 0; x < w; ++x) {
+        u32 v = (x * 73856093u) ^ (y * 19349663u);
+        v ^= v >> 13; v *= 0x5bd1e995u; v ^= v >> 15;
+        u8* p = &px.rgba[(static_cast<usize>(y) * w + x) * 4];
+        p[0] = static_cast<u8>(v); p[1] = static_cast<u8>(v >> 8); p[2] = static_cast<u8>(v >> 16); p[3] = 255;
+    }
+    return px;
+}
+std::vector<f32> sorted_channel(const FloatImage& img, u32 x0, u32 y0, u32 n, bool vertical) {
+    std::vector<f32> v;
+    for (u32 i = 0; i < n; ++i) v.push_back(vertical ? img.v(x0, y0 + i).x : img.v(x0 + i, y0).x);
+    std::sort(v.begin(), v.end());
+    return v;
+}
+f32 sort_diff(const FloatImage& a, const FloatImage& b) {
+    f32 d = 0.0f;
+    for (usize i = 0; i < a.px.size() && i < b.px.size(); ++i) d = std::max(d, std::fabs(a.px[i] - b.px[i]));
+    return d;
+}
+} // namespace
+
+AUREA_TEST(Gpu, PixelSortIsAPermutationOfEachLineInBothAxes) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 48);
+    const auto id = s.image(sort_noise_image(96, 48), 48, 24);
+    const auto original = s.render();
+    auto& e = s.add_effect(id, effect_keys::kPixelSort);
+    e.params[0].constant = ParamValue::scalar(20);
+    e.params[1].constant = ParamValue::scalar(85);
+    e.params[2].constant = ParamValue::scalar(40);
+    e.params[3].constant = ParamValue::scalar(30);
+    for (u32 dir : {0u, 1u}) {
+        e.params[4].constant = ParamValue::scalar(static_cast<f32>(dir));
+        const auto sorted = s.render();
+        f32 changed = 0.0f;
+        const u32 lines = dir ? 96u : 48u, along = dir ? 48u : 96u;
+        for (u32 l = 0; l < lines; l += 5) {
+            const auto a = sorted_channel(original, dir ? l : 0, dir ? 0 : l, along, dir == 1);
+            const auto b = sorted_channel(sorted, dir ? l : 0, dir ? 0 : l, along, dir == 1);
+            for (u32 i = 0; i < along; ++i) AUREA_CHECK_NEAR(a[i], b[i], 1e-3f);
+        }
+        changed = sort_diff(original, sorted);
+        AUREA_CHECK_MSG(changed > 0.05f, "a ordenação devia mexer na imagem");
+    }
+}
+
+AUREA_TEST(Gpu, PixelSortLengthIsMeasuredInLayerPixelsNotTexels) {
+    // Cinza caindo da esquerda para a direita: com comprimento 25 % (32 px),
+    // cada intervalo fica crescente e o salto para baixo cai em x = 32, no
+    // export e na prévia em 1/2 — antes o comprimento era em texels.
+    AUREA_REQUIRE_GPU();
+    Scene s(128, 8);
+    ImagePixels px = uniform_image(128, 8, 0, 0, 0);
+    for (u32 y = 0; y < 8; ++y) for (u32 x = 0; x < 128; ++x)
+        for (u32 c = 0; c < 3; ++c) px.rgba[(y * 128 + x) * 4 + c] = static_cast<u8>(250 - x);
+    const auto id = s.image(px, 64, 4);
+    auto& e = s.add_effect(id, effect_keys::kPixelSort);
+    e.params[0].constant = ParamValue::scalar(0);
+    e.params[1].constant = ParamValue::scalar(100);
+    e.params[2].constant = ParamValue::scalar(25);
+    e.params[3].constant = ParamValue::scalar(0);
+    const auto full = s.render(FrameIndex{0}, 1, true);
+    AUREA_CHECK(full.v(30, 4).x < full.v(31, 4).x);
+    AUREA_CHECK_MSG(full.v(31, 4).x > full.v(32, 4).x + 0.05f, "o intervalo devia acabar em x = 32");
+    const auto half = s.render(FrameIndex{0}, 2, false);
+    AUREA_CHECK(half.v(14, 2).x < half.v(15, 2).x);
+    AUREA_CHECK_MSG(half.v(15, 2).x > half.v(16, 2).x + 0.05f, "na prévia em 1/2 o corte cai no mesmo px da camada");
+}
+
+AUREA_TEST(Gpu, PixelSortAngleAndRadialLeaveUntouchedPixelsExact) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 96);
+    ImagePixels px = sort_noise_image(96, 96);
+    for (u32 y = 0; y < 96; ++y) for (u32 x = 0; x < 48; ++x) {
+        u8* p = &px.rgba[(static_cast<usize>(y) * 96 + x) * 4];
+        p[0] = p[1] = p[2] = 4;   // escuro: fora do limiar
+    }
+    const auto id = s.image(px, 48, 48);
+    const auto original = s.render();
+    auto& e = s.add_effect(id, effect_keys::kPixelSort);
+    e.params[0].constant = ParamValue::scalar(12);
+    e.params[1].constant = ParamValue::scalar(100);
+    e.params[2].constant = ParamValue::scalar(100);
+    e.params[3].constant = ParamValue::scalar(0);
+    for (u32 dir : {2u, 3u, 4u}) {
+        e.params[4].constant = ParamValue::scalar(static_cast<f32>(dir));
+        const auto img = s.render();
+        f32 dark = 0.0f;
+        for (u32 y = 4; y < 92; ++y) for (u32 x = 2; x < 40; ++x) dark = std::max(dark, std::fabs(img.v(x, y).x - original.v(x, y).x));
+        AUREA_CHECK_MSG(dark < 1e-3f, "a metade escura (fora do limiar) devia ficar intacta");
+        AUREA_CHECK_MSG(sort_diff(img, original) > 0.05f, "a metade clara devia ser ordenada");
+    }
+}
+
+AUREA_TEST(Gpu, PixelSortReportsFullHdGpuCost) {
+    AUREA_REQUIRE_GPU();
+    Scene s(1920, 1080);
+    const auto id = s.image(sort_noise_image(480, 270), 960, 540, 4.0f);
+    auto& e = s.add_effect(id, effect_keys::kPixelSort);
+    for (u32 dir : {0u, 4u}) {
+        e.params[4].constant = ParamValue::scalar(static_cast<f32>(dir));
+        (void)s.render(FrameIndex{0}, 1, true);
+        Gpu& g = gpu();
+        RenderSettings rs;
+        rs.gpuTimers = true;
+        rs.finalQuality = true;
+        OffscreenTarget off{g.target(1920, 1080), 1920, 1080};
+        f32 best = 1e9f;
+        static u64 frame = 930000;
+        for (int r = 0; r < 6; ++r) {
+            FrameSnapshot snap;
+            FrameStats stats;
+            RenderTimings timings;
+            g.renderer.prepare(*s.comp, s.project, FrameIndex{r}, &s.media, &Scene::lookup, &s, rs, ++frame, 0,
+                               DecodeMode::Still, 1.0f, snap);
+            AUREA_CHECK(g.renderer.render(snap, rs, &off, stats, timings).ok());
+            g.backend.wait_idle();
+            if (timings.gpuMeasured && timings.gpuEffectsMs > 0.0f) best = std::min(best, timings.gpuEffectsMs);
+        }
+        std::printf("\n    ordenar pixels 1080p %s: GPU dos efeitos %.2f ms", dir ? "angulo 30" : "horizontal", best);
+    }
+    std::printf("\n");
+}
+
 AUREA_TEST(Gpu, LensBlurRetainsPremultipliedEnergyAtTransparentEdges) {
     AUREA_REQUIRE_GPU();
     Scene s(192,192);
@@ -7289,6 +7420,71 @@ AUREA_TEST(EffectPackGpu, AuroraReferenceSettingsPreview) {
     AUREA_CHECK(img.mean().y > 0.005f);
 }
 
+AUREA_TEST(EffectPackGpu, AuroraFollowsTheCompositionCameraLikeA3DSky) {
+    // 0.3.0: a Aurora é um efeito 3D — com câmera na composição, o céu gira
+    // com ela (a aurora fica no lugar dela no mundo). "Seguir a câmera 3D"
+    // desligado = o céu da câmera virtual de sempre.
+    AUREA_REQUIRE_GPU();
+    Scene s(160, 90);
+    const auto id = s.image(uniform_image(160, 90, 0, 0, 0), 80, 45);
+    auto& fx = s.add_effect(id, effect_keys::kAurora);
+    fx.params[1].constant = ParamValue::scalar(160.0f);
+    const auto plain = s.render(FrameIndex{10});
+    const LayerId cam = s.comp->add_layer(LayerKind::Camera, "camera");
+    Layer* c = s.comp->layer(cam);
+    c->start = FrameIndex{0};
+    c->end = s.comp->duration();
+    c->transform.anchor = Vec3{0, 0, 0};
+    c->transform.position = Vec3{80, 45, -108};
+    c->camera.fov = 50.0f;
+    c->camera.active = true;
+    const auto straight = s.render(FrameIndex{10});
+    c->transform.rotation = Vec3{0, 35, 0};
+    const auto turned = s.render(FrameIndex{10});
+    AUREA_CHECK_MSG(max_abs_diff(straight, turned) > 0.005f, "girar a câmera devia girar o céu");
+    AUREA_CHECK(turned.mean().y > 0.002f);
+    fx.params[22].constant = ParamValue::boolean(false);   // não seguir
+    AUREA_CHECK_MSG(max_abs_diff(plain, s.render(FrameIndex{10})) < 1e-4f, "sem seguir, a câmera não mexe na aurora");
+}
+
+AUREA_TEST(EffectPackGpu, AuroraQualityLevelsAgreeAndReportFullHdCost) {
+    // A cúpula muda só a densidade e o número de lâminas: as três qualidades
+    // dão o mesmo céu (média), e o custo em 1080p fica impresso.
+    AUREA_REQUIRE_GPU();
+    Scene s(1920, 1080);
+    const auto id = s.image(uniform_image(1920, 1080, 0, 0, 0), 960, 540);
+    auto& fx = s.add_effect(id, effect_keys::kAurora);
+    fx.params[1].constant = ParamValue::scalar(140.0f);
+    Vec4 means[3];
+    for (u32 q = 0; q < 3; ++q) {
+        fx.params[23].constant = ParamValue::scalar(static_cast<f32>(q));
+        means[q] = s.render(FrameIndex{30}).mean();   // aquece o pipeline
+        // Tempo de GPU dos efeitos (consultas de tempo), o melhor de 8 quadros.
+        Gpu& g = gpu();
+        RenderSettings rs;
+        rs.gpuTimers = true;
+        rs.finalQuality = true;
+        OffscreenTarget off{g.target(1920, 1080), 1920, 1080};
+        f32 best = 1e9f;
+        static u64 frame = 910000;
+        for (int r = 0; r < 8; ++r) {
+            FrameSnapshot snap;
+            FrameStats stats;
+            RenderTimings timings;
+            g.renderer.prepare(*s.comp, s.project, FrameIndex{31 + r}, &s.media, &Scene::lookup, &s, rs, ++frame, 0,
+                               DecodeMode::Still, 1.0f, snap);
+            AUREA_CHECK(g.renderer.render(snap, rs, &off, stats, timings).ok());
+            g.backend.wait_idle();
+            if (timings.gpuMeasured && timings.gpuEffectsMs > 0.0f) best = std::min(best, timings.gpuEffectsMs);
+        }
+        std::printf("\n    aurora 1080p qualidade %u: GPU dos efeitos %.2f ms, media verde %.4f", q, best, means[q].y);
+    }
+    std::printf("\n");
+    AUREA_CHECK(means[1].y > 0.003f);
+    AUREA_CHECK(std::fabs(means[0].y - means[2].y) < 0.35f * means[2].y);
+    AUREA_CHECK(std::fabs(means[1].y - means[2].y) < 0.25f * means[2].y);
+}
+
 AUREA_TEST(EffectPackGpu, OscillatorDepthDoesNotClipTwoDAndThreeDStillProjectsDepth) {
     AUREA_REQUIRE_GPU();
     Scene s(96, 96);
@@ -8359,7 +8555,7 @@ AUREA_TEST(Gpu, AnimatedPreviewMovesTheSourceForTimeEffectsAndClampsFrames) {
     constexpr u32 W = 80, H = 50;
     constexpr usize frameBytes = static_cast<usize>(W) * H * 4;
     for (const char* key : {effect_keys::kEchoTrail, effect_keys::kTimeWarpRgb, effect_keys::kMotionDetect,
-                            effect_keys::kPosterizeTime, effect_keys::kTimeSlice}) {
+                            effect_keys::kPosterizeTime, effect_keys::kTimeSlice, effect_keys::kWideTime}) {
         std::vector<u8> a, b;
         EffectPreviewSequenceInfo info;
         const Status s = g.renderer.render_effect_preview_sequence(g.effects, effect_type_id(key), W, H, 16,
@@ -8676,6 +8872,73 @@ AUREA_TEST(Gpu, TimeSliceDensityChangeResamplesStoredSlices) {
     AUREA_CHECK(time_slice_settle(s, t, exported, true));
     // Cinza uniforme por faixa: a reamostrada é o mesmo instante do export.
     AUREA_CHECK(max_abs_diff(fine.img, exported.img) < 0.01f);
+}
+
+// -----------------------------------------------------------------------------
+// Tempo amplo (CC Wide Time, 0.3.0): a média de pesos iguais dos quadros de
+// t − trás a t + frente. No vídeo, cada amostra é o quadro DAQUELE instante
+// (o Eco repetia o quadro de agora); na camada que anda, com "Incluir
+// movimento", cada amostra vai para a posição daquele instante.
+// -----------------------------------------------------------------------------
+AUREA_TEST(Gpu, WideTimeAveragesTheNeighbouringFramesOfAVideo) {
+    AUREA_REQUIRE_GPU();
+    Scene s(96, 24, 30.0);
+    SyntheticConfig cfg;
+    cfg.width = 96;
+    cfg.height = 24;
+    cfg.frameCount = 120;
+    cfg.gop = 30;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    const LayerId id = s.video(cfg, 48.0f, 12.0f);
+    std::vector<FloatImage> refs;
+    for (i64 f = 43; f <= 48; ++f) {
+        SliceFrame r;
+        AUREA_CHECK(time_slice_settle(s, FrameIndex{f}, r, true));
+        refs.push_back(r.img);
+    }
+    EffectInstance& e = s.add_effect(id, effect_keys::kWideTime);
+    e.params[0].constant = ParamValue::scalar(3.0f);   // frente: 46, 47, 48
+    e.params[1].constant = ParamValue::scalar(2.0f);   // trás: 43, 44
+    e.params[3].constant = ParamValue::boolean(false);
+    SliceFrame wide;
+    AUREA_CHECK_MSG(time_slice_settle(s, FrameIndex{45}, wide, true), "o Tempo amplo nunca fechou os quadros");
+    f32 worst = 0.0f, moved = 0.0f;
+    for (usize k = 0; k < wide.img.px.size(); k += 4) {
+        f32 avg = 0.0f;
+        for (const FloatImage& r : refs) avg += r.px[k] / static_cast<f32>(refs.size());
+        worst = std::max(worst, std::fabs(wide.img.px[k] - avg));
+        moved = std::max(moved, std::fabs(wide.img.px[k] - refs[2].px[k]));
+    }
+    AUREA_CHECK_MSG(worst < 0.01f, "o quadro devia ser a média dos quadros 43..48");
+    AUREA_CHECK_MSG(moved > 0.005f, "a média devia diferir do quadro de agora");
+    // Sem passos, o efeito some (o quadro de agora).
+    e.params[0].constant = ParamValue::scalar(0.0f);
+    e.params[1].constant = ParamValue::scalar(0.0f);
+    SliceFrame off;
+    AUREA_CHECK(time_slice_settle(s, FrameIndex{45}, off, true));
+    AUREA_CHECK(max_abs_diff(off.img, refs[2]) < 0.01f);
+}
+
+AUREA_TEST(Gpu, WideTimeFollowsTheLayerMotionOnlyWhenAsked) {
+    AUREA_REQUIRE_GPU();
+    Scene s(200, 40, 30.0);
+    const LayerId id = s.solid(10, 10, Vec4{1, 1, 1, 1}, 20, 20);
+    Track& px = s.comp->layer(id)->tracks.get_or_create(TrackProperty::PositionX);
+    (void)px.set(FrameIndex{0}, 20.0f);
+    (void)px.set(FrameIndex{10}, 220.0f);   // 20 px por quadro
+    EffectInstance& e = s.add_effect(id, effect_keys::kWideTime);
+    e.params[0].constant = ParamValue::scalar(1.0f);
+    e.params[1].constant = ParamValue::scalar(1.0f);
+    const FloatImage img = s.render(FrameIndex{4}, 1, true);   // 100 agora, 80 antes, 120 depois
+    const f32 before = img.at(80, 20)[0], now = img.at(100, 20)[0], after = img.at(120, 20)[0];
+    AUREA_CHECK_MSG(std::fabs(before - 1.0f / 3.0f) < 0.03f, "a cópia de trás devia ter 1/3");
+    AUREA_CHECK_MSG(std::fabs(now - 1.0f / 3.0f) < 0.03f, "a de agora devia ter 1/3");
+    AUREA_CHECK_MSG(std::fabs(after - 1.0f / 3.0f) < 0.03f, "a da frente devia ter 1/3");
+    // Desligado (como no AE): a forma não muda no tempo — nada a somar.
+    e.params[3].constant = ParamValue::boolean(false);
+    const FloatImage still = s.render(FrameIndex{4}, 1, true);
+    AUREA_CHECK(still.at(80, 20)[0] < 0.01f);
+    AUREA_CHECK(still.at(100, 20)[0] > 0.97f);
 }
 
 // -----------------------------------------------------------------------------

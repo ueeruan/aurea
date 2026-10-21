@@ -975,6 +975,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     motionDetectType_ = effects.find_key(effect_keys::kMotionDetect);
     datamoshType_ = effects.find_key(effect_keys::kDatamosh);
     timeSliceType_ = effects.find_key(effect_keys::kTimeSlice);
+    wideTimeType_ = effects.find_key(effect_keys::kWideTime);
     if (const Status s = shaders_.initialize(backend); !s.ok()) {
         shaders_.shutdown();
         backend_ = nullptr;
@@ -1818,7 +1819,7 @@ vector::DrawProgress vector_draw_progress(const Layer& l, const EffectRegistry* 
 // renderizando-a de novo naquele instante. Aqui só se leem os parâmetros (a
 // mesma conta do caminho da camada comum); o prepare pede os fundos.
 // =============================================================================
-struct AdjustTimeTypes { EffectTypeId echo, rgb, motionDetect, datamosh; };
+struct AdjustTimeTypes { EffectTypeId echo, rgb, motionDetect, datamosh, wide = 0; };
 
 struct AdjustTimeAsk {
     f64 shown = 0.0;          ///< instante da composição mostrado no lugar do atual
@@ -1967,6 +1968,30 @@ AdjustTimeAsk adjust_time_ask(const Layer& l, const EffectRegistry& registry, co
                     if (w < 0.01f) break;
                     ask.echo.push_back({t0 - static_cast<f64>(k) * d, w, Vec3{0, 0, 0}});
                 }
+                break;
+            }
+        }
+    }
+    // TEMPO AMPLO (0.3.0): o uso do AE — numa camada de ajuste, a média da
+    // composição abaixo de t − trás a t + frente (pesos iguais). Cada quadro é
+    // um fundo re-renderizado; com mais quadros que o orçamento do quadro
+    // (24 fundos), a janela é amostrada em passo uniforme, pesos iguais. Aqui
+    // a amostra já é o quadro inteiro da composição abaixo em cada instante;
+    // o "Desfoque nativo" (subamostras) vale para a camada que se move.
+    if (types.wide && ask.echo.empty() && !ask.rgb) {
+        if (const ParameterRegistry* wp = registry.params(types.wide); wp && wp->count() >= 4) {
+            for (const EffectInstance& inst : l.effects) {
+                if (!inst.enabled || inst.type != types.wide) continue;
+                const i32 fwd = std::clamp(evaluate_param(l.tracks, inst, 0, wp->at(0), local).as_int(), 0, 30);
+                const i32 back = std::clamp(evaluate_param(l.tracks, inst, 1, wp->at(1), local).as_int(), 0, 30);
+                if (fwd + back == 0) break;
+                const i32 stride = (fwd + back + 1 + 22) / 23;   // ≤ 23 fundos extras + o de agora
+                std::vector<i32> offsets;   // o de agora e as pontas sempre entram
+                for (i32 k = -back; k <= fwd; ++k)
+                    if (k % stride == 0 || k == -back || k == fwd) offsets.push_back(k);
+                const f32 w = 1.0f / static_cast<f32>(offsets.size());
+                const f64 t0 = static_cast<f64>(time.value);
+                for (const i32 k : offsets) ask.echo.push_back({t0 + static_cast<f64>(k), w, Vec3{0, 0, 0}});
                 break;
             }
         }
@@ -2370,7 +2395,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // resultado no scrub, na reprodução e no export.
             const AdjustTimeAsk ask = adjust_time_ask(*l, *effects_, adjustPlan, time, layerTime, fps,
                 static_cast<f64>(comp.motion_blur().shutterAngle) / 360.0, rl.adjustScope == 0,
-                AdjustTimeTypes{echoType_, rgbTimeType_, motionDetectType_, datamoshType_});
+                AdjustTimeTypes{echoType_, rgbTimeType_, motionDetectType_, datamoshType_, wideTimeType_});
             const bool canAdjust = !(rl.adjustScope == 1 && lastDrawOrder == ~0u);
             if (ask.any() && canAdjust && prepareDepth_ < 8) {
                 const u32 targets = rl.adjustScope == 2 ? static_cast<u32>(l->adjustmentTargets.size()) : 1u;
@@ -3530,6 +3555,49 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 break;   // um TimeSlice por camada
             }
         }
+        // TEMPO AMPLO (CC Wide Time, 0.3.0): média de pesos iguais das amostras
+        // de t − trás a t + frente. Vídeo e pré-composição trazem o CONTEÚDO de
+        // cada instante (`content`: o decoder/a filha, como as faixas do
+        // TimeSlice); com "Incluir movimento" cada amostra também vai para o
+        // transform daquele instante. "Desfoque nativo" preenche o intervalo
+        // entre passos com subamostras: no conteúdo, os dois quadros vizinhos
+        // misturados pela fração. Manda sobre Eco, RGB no tempo e o desfoque.
+        if (effects_ && wideTimeType_ && !wants_3d(comp, *l, time)) {
+            const ParameterRegistry* wp = effects_->params(wideTimeType_);
+            for (const EffectInstance& inst : l->effects) {
+                if (!inst.enabled || inst.type != wideTimeType_ || !wp || wp->count() < 4) continue;
+                const i32 fwd = std::clamp(evaluate_param(l->tracks, inst, 0, wp->at(0), local).as_int(), 0, 30);
+                const i32 back = std::clamp(evaluate_param(l->tracks, inst, 1, wp->at(1), local).as_int(), 0, 30);
+                const bool native = evaluate_param(l->tracks, inst, 2, wp->at(2), local).as_bool();
+                const bool motion = evaluate_param(l->tracks, inst, 3, wp->at(3), local).as_bool();
+                const bool content = rl.source.kind == LayerSource::Kind::Video || rl.source.kind == LayerSource::Kind::Nested;
+                if (fwd + back == 0 || (!content && !motion)) break;
+                const u32 span = static_cast<u32>(fwd + back);
+                const u32 sub = native ? std::clamp<u32>(comp.motion_blur().samples / std::max<u32>(1u, span / 4u + 1u), 2u, 8u) : 1u;
+                const u32 total = span * sub + 1u;
+                const f32 w = 1.0f / static_cast<f32>(total);
+                const f64 t0 = static_cast<f64>(time.value);
+                rl.temporal.clear();
+                rl.blurMatrices.clear();
+                rgbOn = false;
+                for (u32 j = 0; j < total; ++j) {
+                    const f64 ts = t0 - static_cast<f64>(back) + static_cast<f64>(j) / static_cast<f64>(sub);
+                    const bool now = std::fabs(ts - t0) < 1e-9;
+                    const Mat4 sm = (!motion || now) ? m : world_2d_frac(comp, *l, ts) * shiftM;
+                    if (!content) { rl.temporal.push_back({sm, w, Vec3{0, 0, 0}, ts}); continue; }
+                    const f64 lo = std::floor(ts + 1e-6), frac = ts - lo;
+                    RenderLayer::TemporalSample a{sm, w * static_cast<f32>(frac > 1e-3 ? 1.0 - frac : 1.0), Vec3{0, 0, 0}, lo};
+                    a.content = true;
+                    rl.temporal.push_back(std::move(a));
+                    if (frac > 1e-3) {
+                        RenderLayer::TemporalSample b{sm, w * static_cast<f32>(frac), Vec3{0, 0, 0}, lo + 1.0};
+                        b.content = true;
+                        rl.temporal.push_back(std::move(b));
+                    }
+                }
+                break;   // um Tempo amplo por camada
+            }
+        }
         // DETECTAR MOVIMENTO: o atraso (quadros) do primeiro efeito ligado. A
         // fonte nesse instante é buscada no bloco de vídeo (o decoder); a
         // comparação acontece na cadeia de efeitos (EffectGraph::build).
@@ -3677,6 +3745,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // Vai para a cena 3D (plano no mundo): o corte pela área visível da
             // composição não se aplica — ver LayerPlacement::inScene3d.
             placement.inScene3d = inScene3d;
+            if (effectCameraActive) {
+                placement.cameraActive = true;
+                placement.cameraView = cam3d.view;
+                placement.cameraFovY = cam3d.fovY;
+            }
             if (particularSheet || cameraEmitter) {
                 placement.particleSpace = true;
                 placement.worldFromLayer = particularSheet ? particularWorld : world_3d(comp, *l, time) * shiftM;
@@ -4005,7 +4078,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // quando passam pela janela do playback (as de trás já viraram
                 // textura quando estavam à frente); a que ainda não chegou sai
                 // aproximada. Parado, o render seguinte busca o resto.
-                if (!rl.temporal.empty() && rl.temporal.front().slice.w > 0.0f) {
+                if (rl.per_sample_content()) {
                     bool requestedMissing = !exact || (settings.previewPlaying && !settings.finalQuality);
                     const u64 sliceKey = rl.id.pack();
                     for (RenderLayer::TemporalSample& sample : rl.temporal) {
@@ -6489,10 +6562,13 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
         // recortada no shader (composite/time_slice.frag) e somada num alvo do
         // tamanho da composição. Sem interpolar, cada pixel recebe uma amostra
         // de peso 1; com interpolar, duas cujos pesos somam 1.
-        if (!layer.temporal.empty() && layer.temporal.front().slice.w > 0.0f
+        if (layer.per_sample_content()
             && (layer.source.kind == LayerSource::Kind::Video || layer.source.kind == LayerSource::Kind::Nested)) {
-            auto pSlice = shaders_.pipeline(PipelineKey::graphics(
-                ShaderId::composite_layer_vert, ShaderId::composite_time_slice_frag, kWorkFormat, true, BlendMode::Add));
+            // Tempo amplo: a mesma busca por instante, desenhada inteira
+            // (composite_layer.frag com o peso) em vez de recortada na faixa.
+            const bool wide = layer.temporal.front().slice.w <= 0.0f;
+            auto pSlice = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
+                wide ? ShaderId::composite_layer_frag : ShaderId::composite_time_slice_frag, kWorkFormat, true, BlendMode::Add));
             const u32 k = static_cast<u32>(layer.temporal.size());
             FGTexture* perSample = pSlice.ok() ? arena_.alloc_array<FGTexture>(k) : nullptr;
             if (!perSample) { mark_incomplete(__FILE__, __LINE__); return true; }
@@ -6640,15 +6716,25 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             static_assert(sizeof(SlicePush) <= binding::kPushConstantBytes, "push constants do time_slice.frag");
             struct Cap {
                 const RenderLayer* layer; Mat4 fold; u32 k; PipelineHandle p; u64 sampler; Rect region;
-                f32 w, h; const FGTexture* perSample; Vec2 axis;
-            } cap{&layer, fold, k, *pSlice, draw.sampler, draw.region, compW, compH, perSample, axis};
-            const u32 pass = graph_.add_raster_pass("timeslice", PassStage::Composite, acc, LoadOp::Clear,
+                f32 w, h; const FGTexture* perSample; Vec2 axis; bool wide;
+            } cap{&layer, fold, k, *pSlice, draw.sampler, draw.region, compW, compH, perSample, axis, wide};
+            const u32 pass = graph_.add_raster_pass(wide ? "tempo-amplo" : "timeslice", PassStage::Composite, acc, LoadOp::Clear,
                                                     Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
                 const Mat4 clip = clip_from_comp(cap.w, cap.h);
                 pc.cmds.bind_pipeline(cap.p);
                 for (u32 s = 0; s < cap.k; ++s) {
                     const auto& sample = cap.layer->temporal[s];
                     pc.cmds.bind_texture(0, pc.texture(cap.perSample[s]), SamplerHandle{cap.sampler});
+                    if (cap.wide) {
+                        LayerPush push;
+                        push.clipFromLayer = clip * (sample.m * cap.fold);
+                        push.params = Vec4{sample.weight, 0, 0, 0};
+                        push.region = Vec4{cap.region.x, cap.region.y, cap.region.w, cap.region.h};
+                        push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+                        pc.cmds.push_constants(&push, sizeof(push));
+                        pc.cmds.draw(6);
+                        continue;
+                    }
                     SlicePush push;
                     push.clipFromLayer = clip * (sample.m * cap.fold);
                     push.region = Vec4{cap.region.x, cap.region.y, cap.region.w, cap.region.h};

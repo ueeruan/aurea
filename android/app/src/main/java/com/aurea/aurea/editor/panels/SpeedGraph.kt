@@ -30,9 +30,16 @@ import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-/** Faixa vertical do gráfico de velocidade, em log2: 0,1× embaixo, 10× em cima (1× no meio). */
-private const val SPEED_LOG_MIN = -3.3219f
-private const val SPEED_LOG_MAX = 3.3219f
+/**
+ * Faixa vertical do gráfico de velocidade, em log2: a MESMA do motor
+ * (`edit_speed_key`: 0,05× a 16×). Antes era 0,1×–10×: a chave de 16× (ou o
+ * 0,08× do preset "bala") era desenhada presa na borda e tocar nela já a
+ * reescrevia para 10×.
+ */
+private const val SPEED_MIN = 0.05f
+private const val SPEED_MAX = 16f
+private const val SPEED_LOG_MIN = -4.321928f
+private const val SPEED_LOG_MAX = 4f
 
 /**
  * GRÁFICO DE VELOCIDADE (0.1.8, pedido dos testers: "velocidade como no AE").
@@ -87,12 +94,9 @@ internal fun SpeedGraph(
                 fun w() = (size.width - left - pad).coerceAtLeast(1f)
                 fun h() = (size.height - pad * 2).coerceAtLeast(1f)
                 fun xOf(t: Int) = left + w() * ((t - lo).toFloat() / (hi - lo))
-                fun yOf(v: Float) = pad + h() * (1f - (log2(v) - SPEED_LOG_MIN) / (SPEED_LOG_MAX - SPEED_LOG_MIN))
+                // O ponto é desenhado e tocado no MESMO lugar (preso na faixa).
+                fun yOf(v: Float) = (pad + h() * (1f - (log2(v) - SPEED_LOG_MIN) / (SPEED_LOG_MAX - SPEED_LOG_MIN))).coerceIn(pad, pad + h())
                 fun timeAt(x: Float) = lo + (((x - left) / w()).coerceIn(0f, 1f) * (hi - lo)).roundToInt()
-                fun speedAt(y: Float): Float {
-                    val u = (1f - (y - pad) / h()).coerceIn(0f, 1f)
-                    return snapGraphSpeed(2f.pow(SPEED_LOG_MIN + u * (SPEED_LOG_MAX - SPEED_LOG_MIN)))
-                }
                 awaitEachGesture {
                     val down = awaitFirstDown()
                     down.consume()
@@ -101,17 +105,26 @@ internal fun SpeedGraph(
                     }?.takeIf { i -> hypot(xOf(readKeys[i].first) - down.position.x, yOf(readKeys[i].second) - down.position.y) <= 22.dp.toPx() } ?: -1
                     var moving = false
                     if (hit >= 0) readSelect(hit) else readScrub(timeAt(down.position.x))
-                    // Ponto pego: guarda a distância do dedo ao ponto (o ponto não pula para o dedo).
-                    val grabDx = if (hit >= 0) xOf(readKeys[hit].first) - down.position.x else 0f
-                    val grabDy = if (hit >= 0) yOf(readKeys[hit].second) - down.position.y else 0f
+                    // Ponto pego: o arrasto é RELATIVO ao valor dele. Só o eixo que
+                    // o dedo moveu muda — arrastar de lado não reescreve a velocidade
+                    // (antes o valor saía da altura do dedo, arredondado e preso).
+                    val origT = if (hit >= 0) readKeys[hit].first else 0
+                    val origV = if (hit >= 0) readKeys[hit].second else 1f
+                    val slop = 6.dp.toPx()
                     while (true) {
                         val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
                         if (!change.pressed) break
                         change.consume()
                         if (hit >= 0) {
-                            if (!moving && (change.position - down.position).getDistance() < 4.dp.toPx()) continue
+                            val delta = change.position - down.position
+                            if (!moving && delta.getDistance() < 4.dp.toPx()) continue
                             if (!moving) { moving = true; readMoveStart() }
-                            readMove(hit, timeAt(change.position.x + grabDx), speedAt(change.position.y + grabDy))
+                            val t = if (abs(delta.x) > slop) timeAt(xOf(origT) + delta.x) else origT
+                            val v = if (abs(delta.y) > slop) {
+                                val log = log2(origV) - delta.y / h() * (SPEED_LOG_MAX - SPEED_LOG_MIN)
+                                snapGraphSpeed(2f.pow(log)).coerceIn(SPEED_MIN, SPEED_MAX)
+                            } else origV
+                            readMove(hit, t, v)
                         } else {
                             readScrub(timeAt(change.position.x))
                         }
@@ -127,8 +140,8 @@ internal fun SpeedGraph(
                 fun xOf(t: Float) = left + w * ((t - lo) / (hi - lo))
                 fun yOf(v: Float) = pad + h * (1f - (log2(v) - SPEED_LOG_MIN) / (SPEED_LOG_MAX - SPEED_LOG_MIN))
                 drawRect(AureaColors.Surface.copy(alpha = 0.6f))
-                // Linhas de referência: 0,25× · 0,5× · 1× · 2× · 4× · 8×.
-                for (v in floatArrayOf(0.25f, 0.5f, 1f, 2f, 4f, 8f)) {
+                // Linhas de referência: 0,1× · 0,25× · 0,5× · 1× · 2× · 4× · 8× · 16×.
+                for (v in floatArrayOf(0.1f, 0.25f, 0.5f, 1f, 2f, 4f, 8f, 16f)) {
                     val y = yOf(v)
                     drawLine(if (v == 1f) muted.copy(alpha = 0.6f) else grid, Offset(left, y), Offset(size.width - pad, y), strokeWidth = if (v == 1f) 1.5f else 1f)
                     val label = measurer.measure(graphSpeedLabel(v), labelStyle)
@@ -163,8 +176,8 @@ private fun log2(v: Float): Float = ln(v.coerceIn(0.01f, 64f)) / ln(2f)
 
 /** Encosta nos valores redondos do gráfico quando passa perto. */
 private fun snapGraphSpeed(s: Float): Float {
-    for (v in floatArrayOf(0.25f, 0.5f, 1f, 2f, 4f, 8f)) if (abs(s - v) / v < 0.04f) return v
-    return (s * 100f).roundToInt() / 100f
+    for (v in floatArrayOf(0.1f, 0.25f, 0.5f, 1f, 2f, 4f, 8f, 16f)) if (abs(s - v) / v < 0.04f) return v
+    return ((s * 100f).roundToInt() / 100f).coerceAtLeast(SPEED_MIN)
 }
 
 private fun graphSpeedLabel(v: Float): String = when {

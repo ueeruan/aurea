@@ -216,7 +216,7 @@ void scene_at(const EffectPreviewSequence& s, f64 t, std::vector<u8>& out) noexc
     }
 }
 
-enum class TemporalKind : u8 { None, Echo, RgbTime, Posterize, Slice, Remap, Retime, FlowBlur, RandomEdits };
+enum class TemporalKind : u8 { None, Echo, RgbTime, Posterize, Slice, Remap, Retime, FlowBlur, RandomEdits, WideTime };
 
 TemporalKind temporal_kind(std::string_view key) noexcept {
     if (key == effect_keys::kEchoTrail) return TemporalKind::Echo;
@@ -227,6 +227,7 @@ TemporalKind temporal_kind(std::string_view key) noexcept {
     if (key == effect_keys::kFlowRetime) return TemporalKind::Retime;
     if (key == effect_keys::kFlowMotionBlur) return TemporalKind::FlowBlur;
     if (key == effect_keys::kRandomEdits) return TemporalKind::RandomEdits;
+    if (key == effect_keys::kWideTime) return TemporalKind::WideTime;
     return TemporalKind::None;
 }
 
@@ -388,6 +389,14 @@ bool compose_temporal(TemporalKind kind, const std::vector<ParamValue>& v, Scene
             constexpr u32 K = 8;
             for (u32 k = 0; k < K; ++k)
                 add(scene.at(t - window * static_cast<f64>(k) / static_cast<f64>(K - 1)), 1.0f / K, 1, 1, 1);
+            break;
+        }
+        case TemporalKind::WideTime: {
+            // Renderer: média de pesos iguais de t − trás a t + frente.
+            const i32 fwd = std::clamp(v.size() > 0 ? v[0].as_int() : 3, 0, 30);
+            const i32 back = std::clamp(v.size() > 1 ? v[1].as_int() : 3, 0, 30);
+            const f32 wgt = 1.0f / static_cast<f32>(fwd + back + 1);
+            for (i32 j = -back; j <= fwd; ++j) add(scene.at(t + static_cast<f64>(j)), wgt, 1, 1, 1);
             break;
         }
         case TemporalKind::None:

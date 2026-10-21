@@ -301,10 +301,17 @@ struct RenderLayer {
     /// TimeSlice: `slice` = (dx, dy, índice, número de faixas) — w = 0 fora do
     /// TimeSlice. Em vídeo, `sourceUs` é o instante da fonte da faixa e
     /// `frame` o quadro decodificado dele (vazio = já está no cache da GPU).
+    /// `content` (Tempo amplo): como a faixa do TimeSlice, a amostra traz o
+    /// conteúdo do SEU instante, mas cobre a camada inteira (sem recorte).
     struct TemporalSample {
         Mat4 m; f32 weight = 1.0f; Vec3 mask{0, 0, 0}; f64 time = 0.0; u32 nested = ~0u;
         Vec4 slice{0, 0, 0, 0}; i64 sourceUs = -1; FrameRef frame;
+        bool content = false;
     };
+    /// As amostras trazem o conteúdo de cada instante (TimeSlice, Tempo amplo).
+    [[nodiscard]] bool per_sample_content() const noexcept {
+        return !temporal.empty() && (temporal.front().slice.w > 0.0f || temporal.front().content);
+    }
     std::vector<TemporalSample> temporal;
     /// Camada 2D no espaço 3D que vive dentro de um grupo de cena (desenhada
     /// com profundidade pelo grupo, não na composição): índice do grupo, ou −1.
@@ -1027,6 +1034,7 @@ private:
     EffectTypeId motionDetectType_ = 0;   ///< Detectar movimento: a fonte em t − atraso
     EffectTypeId datamoshType_ = 0;       ///< Datamosh: a fonte presa por "Quadros segurados"
     EffectTypeId timeSliceType_ = 0;      ///< TimeSlice: uma faixa por instante
+    EffectTypeId wideTimeType_ = 0;       ///< Tempo amplo: média de instantes (0.3.0)
     /// TimeSlice em vídeo: o quadro de cada faixa já convertido, por (camada,
     /// instante da fonte). O decoder segura poucos quadros ao mesmo tempo; as
     /// faixas precisam de até 64. De um quadro para o seguinte quase todas se

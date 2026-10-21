@@ -126,7 +126,9 @@ namespace effect_keys {
     inline constexpr const char* kTimeWarpRgb        = "aurea.time.warp_rgb";
     inline constexpr const char* kTimeSlice          = "aurea.time.slice";
     inline constexpr const char* kRandomEdits        = "aurea.time.random_edits";
-    inline constexpr const char* kTimeRemap          = "aurea.time.remap";
+    /// Média de quadros para a frente e para trás (o CC Wide Time do AE, 0.3.0).
+    inline constexpr const char* kWideTime           = "aurea.time.wide_time";
+    inline constexpr const char* kTimeRemap        = "aurea.time.remap";
     // Controles de expressão (não desenham; ver ExpressionControls.cpp).
     inline constexpr const char* kSliderControl      = "aurea.control.slider";
     inline constexpr const char* kAngleControl       = "aurea.control.angle";

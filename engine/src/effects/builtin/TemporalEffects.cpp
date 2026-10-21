@@ -209,6 +209,41 @@ public:
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
 
+// -----------------------------------------------------------------------------
+// Tempo amplo (0.3.0) — o CC Wide Time do AE
+//
+// A camada no quadro t vira a MÉDIA (pesos iguais, soma 1) das amostras em
+//     t − Passos para trás … t + Passos para a frente
+// de um em um quadro. Com "Desfoque de movimento nativo", o intervalo entre
+// dois passos é preenchido por subamostras (as do desfoque de movimento da
+// composição): o rastro vira um borrão contínuo em vez de cópias.
+//
+// O AE só vê o CONTEÚDO da camada em outros instantes (efeito não enxerga o
+// próprio transform: por isso lá se pré-compõe). "Incluir movimento da camada"
+// soma também a posição/escala/rotação de cada instante — o uso comum no
+// celular, sem pré-compor. Desligado = o comportamento do AE.
+//
+// Declarativo como o TimeSlice: o renderer busca cada instante (decoder do
+// vídeo, filha da pré-composição) e soma no acúmulo temporal.
+// -----------------------------------------------------------------------------
+class WideTime final : public Effect {
+public:
+    enum : u32 { kForward = 0, kBackward, kNativeBlur, kLayerMotion };
+    static constexpr i32 kMaxSteps = 30;
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kWideTime, "Tempo amplo", "Tempo", EffectClass::Temporal};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_int("forward_steps", "Passos para a frente", 3, 0, kMaxSteps);
+        p.add_int("backward_steps", "Passos para trás", 3, 0, kMaxSteps);
+        p.add_bool("native_motion_blur", "Desfoque de movimento nativo", false);
+        p.add_bool("layer_motion", "Incluir movimento da camada", true);
+    }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
 } // namespace
 
 // -----------------------------------------------------------------------------
@@ -259,6 +294,7 @@ void register_temporal_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<TimeWarpRgb>());
     (void)r.add(std::make_unique<TimeRemapEffect>());
     (void)r.add(std::make_unique<TimeSlice>());
+    (void)r.add(std::make_unique<WideTime>());
 }
 
 void register_random_edits_effect(EffectRegistry& r) { (void)r.add(std::make_unique<RandomEdits>()); }

@@ -218,6 +218,16 @@ void read_track(ByteReader& r, Track& t) {
         k.tangentIn = r.f32v(); k.tangentOut = r.f32v();
         k.easingPreset = r.u16v();
         k.easePower = g_readingTimelineVersion >= 35 ? clamp_ease_power(r.u8v()) : u8{1};
+        // Arquivo corrompido: NaN/Inf nas alças ou no valor entravam no
+        // avaliador e no gráfico (só os comandos checavam). Como a malha de
+        // deformação: o padrão no lugar do lixo.
+        if (!std::isfinite(k.value)) k.value = 0.0f;
+        if (!std::isfinite(k.bx1) || !std::isfinite(k.by1) || !std::isfinite(k.bx2) || !std::isfinite(k.by2)) {
+            const Keyframe neutral{};
+            k.bx1 = neutral.bx1; k.by1 = neutral.by1; k.bx2 = neutral.bx2; k.by2 = neutral.by2;
+        }
+        if (!std::isfinite(k.tangentIn)) k.tangentIn = 0.0f;
+        if (!std::isfinite(k.tangentOut)) k.tangentOut = 0.0f;
         t.keys.push_back(k);
     }
     // Projetos antigos podem trazer tempos repetidos ou fora de ordem.

@@ -115,11 +115,18 @@ internal fun overshootCurve(t: Float, amount: Float, reverse: Boolean): Float {
     return if (reverse) 1f - v else v
 }
 
+/**
+ * O `std::round` do motor (meio para longe do zero; nos valores ≥ 0 daqui é
+ * floor(x+½)). O `kotlin.math.round` arredonda o meio para o PAR: x1 = 0,3125
+ * dava 2 ciclos aqui e 3 no motor.
+ */
+internal fun roundHalfUp(x: Float): Int = kotlin.math.floor(x + 0.5f).toInt()
+
 /** `elastic_ease` (core/Math.hpp): ciclos inteiros (1..8), amortecimento k = 2 + 16·B. */
 internal fun elasticCurve(t: Float, cycles01: Float, damping01: Float, reverse: Boolean): Float {
     if (t <= 0f) return 0f
     if (t >= 1f) return 1f
-    val n = kotlin.math.round(cycles01 * 8f).toInt().coerceIn(1, 8).toFloat()
+    val n = roundHalfUp(cycles01 * 8f).coerceIn(1, 8).toFloat()
     val k = 2f + 16f * damping01.coerceIn(0f, 1f)
     val time = if (reverse) 1f - t else t
     val v = (1f - kotlin.math.exp(-k * time) * kotlin.math.cos(2f * Math.PI.toFloat() * n * time)) / (1f - kotlin.math.exp(-k))
@@ -147,12 +154,12 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
     fun overshoot(amount: Float = overshootAmount) =
         Ease(Interp.OVERSHOOT, amount.coerceIn(0f, 1f), 0f, if (interp == Interp.OVERSHOOT && marked) x2 else 1f, EASE_PARAM_MARKER)
 
-    val elasticCycles get() = if (interp == Interp.ELASTIC && marked) kotlin.math.round(x1 * 8).toInt().coerceIn(1, 8) else ELASTIC_DEFAULT_CYCLES
+    val elasticCycles get() = if (interp == Interp.ELASTIC && marked) roundHalfUp(x1 * 8).coerceIn(1, 8) else ELASTIC_DEFAULT_CYCLES
     val elasticDamping get() = if (interp == Interp.ELASTIC && marked) y1.coerceIn(0f, 1f) else ELASTIC_DEFAULT_DAMPING
     fun elastic(cycles: Int = elasticCycles, damping: Float = elasticDamping) =
         Ease(Interp.ELASTIC, cycles.coerceIn(1, 8) / 8f, damping.coerceIn(0f, 1f), if (interp == Interp.ELASTIC && marked) x2 else 1f, EASE_PARAM_MARKER)
 
-    val bounceCount get() = if (y2 == -10f) kotlin.math.round(x1 * 8).toInt().coerceIn(1, 8) else 3
+    val bounceCount get() = if (y2 == -10f) roundHalfUp(x1 * 8).coerceIn(1, 8) else 3
     val bounceStrength get() = if (y2 == -10f) y1.coerceIn(.1f, .9f) else .5f
     fun bounce(count: Int = bounceCount, strength: Float = bounceStrength) =
         Ease(Interp.BOUNCE, count / 8f, strength, if (y2 == -10f) x2 else 1f, -10f)
@@ -215,7 +222,11 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
         Interp.LINEAR -> floatArrayOf(1f / 3f, 1f / 3f, 2f / 3f, 2f / 3f)
         Interp.EASE_IN -> floatArrayOf(1f / 3f, 0f, 2f / 3f, 1f / 3f)
         Interp.EASE_OUT -> floatArrayOf(1f / 3f, 2f / 3f, 2f / 3f, 1f)
-        Interp.EASE_IN_OUT -> floatArrayOf(0.5f, 0f, 0.5f, 1f)
+        // O suave nos dois lados do motor são duas parábolas (2t² / 1−2(1−t)²);
+        // a bézier simétrica mais próxima delas (erro máximo 0,003) — a
+        // (0,5;0)(0,5;1) de antes errava 0,02, e o primeiro arrasto da alça
+        // mudava o trecho sem movê-la.
+        Interp.EASE_IN_OUT -> floatArrayOf(0.484f, 0.042f, 0.516f, 0.958f)
         else -> floatArrayOf(x1, y1, x2, y2)
     }
 

@@ -5400,9 +5400,17 @@ bool Engine::apply_speed_curve(u64 layerId, u32 preset) noexcept {
             if (shape.find_exact(at) == kInvalidIndex) (void)shape.set(at, static_cast<f32>(p.r), Interpolation::EaseInOut);
         }
         // A mesma fonte de antes: escala as velocidades pela integral do desenho.
-        const f64 integral = Layer::speed_integral(shape, static_cast<f64>(hi)) - Layer::speed_integral(shape, static_cast<f64>(lo));
-        const f64 k = integral > 1e-6 && source > 0.0 ? source / integral : 1.0;
-        for (Keyframe& key : shape.keys) key.value = static_cast<f32>(std::clamp(static_cast<f64>(key.value) * k, 0.05, 16.0));
+        // Prender em 0,05..16 depois de escalar mudava a integral (o "bala"
+        // num clipe longo perdia o fim da fonte); a escala repete até a fonte
+        // fechar — as chaves presas ficam na borda e as outras compensam.
+        for (int pass = 0; pass < 8; ++pass) {
+            const f64 integral = Layer::speed_integral(shape, static_cast<f64>(hi)) - Layer::speed_integral(shape, static_cast<f64>(lo));
+            if (!(integral > 1e-6) || !(source > 0.0)) break;
+            const f64 k = source / integral;
+            if (std::fabs(k - 1.0) < 1e-5) break;
+            for (Keyframe& key : shape.keys) key.value = static_cast<f32>(std::clamp(static_cast<f64>(key.value) * k, 0.05, 16.0));
+            shape.lastIndex = 0;
+        }
         Track& t = l->tracks.get_or_create(TrackProperty::Speed);
         t.keys = shape.keys;
         t.lastIndex = 0;

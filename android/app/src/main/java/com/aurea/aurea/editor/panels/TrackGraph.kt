@@ -47,11 +47,26 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
     val first = track.firstOrNull() ?: return
     val fps = store.project.fps.coerceAtLeast(1f)
     val revision = store.curveRevision
-    val handles = remember(layer, track, revision, speed, fps) { if (speed) speedHandles(store, layer, track, fps) else emptyList() }
-    val currentHandles by rememberUpdatedState(handles)
     val layerKeys = store.keyframes[layer].orEmpty()
     // O grupo inteiro aparece; a trilha escolhida vai por último (por cima) e é a editável.
     val group = remember(layerKeys, track) { graphGroup(layerKeys, track).sortedBy { if (it[0].sameTrack(first)) 1 else 0 } }
+    // Velocidade da POSIÇÃO com dois ou mais eixos marcados nos mesmos
+    // instantes: a curva ativa é a velocidade espacial (o módulo, como no AE)
+    // e as alças mexem na curva comum dos eixos.
+    val spatialAxes = remember(group, speed) {
+        if (!speed || first.property !in 0..2) emptyList()
+        else group.filter { !it[0].sameTrack(first) && it[0].property in 0..2 && it[0].effectIndex == first.effectIndex }
+            .filter { axis -> track.all { k -> axis.any { it.time == k.time } } }
+    }
+    val spatial = spatialAxes.isNotEmpty()
+    val handles = remember(layer, track, revision, speed, fps, spatialAxes) {
+        when {
+            !speed -> emptyList()
+            spatial -> spatialSpeedHandles(store, layer, track, spatialAxes, fps)
+            else -> speedHandles(store, layer, track, fps)
+        }
+    }
+    val currentHandles by rememberUpdatedState(handles)
     val curves = remember(group, revision) { group.map { t -> curveKeys(t) { easeOf(store, layer, it) } } }
     val currentGroup by rememberUpdatedState(group)
     val groupId = remember(group) { group.joinToString { "${it[0].property}:${it[0].effectIndex}:${it[0].paramIndex}" } }
@@ -60,10 +75,14 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
     fun fit(): GraphViewport {
         val values = ArrayList<Float>()
         curves.forEach { keys -> graphCurve(keys, fullFrom.toDouble(), fullTo.toDouble(), 2.0, speed, fps).forEach { values += it.value } }
+        if (spatial) spatialSpeedCurve(curves, fullFrom.toDouble(), fullTo.toDouble(), 2.0, fps).forEach { values += it.value }
         if (speed) { handles.forEach { values += it.velocity }; values += 0f } else group.forEach { t -> t.forEach { values += it.value } }
         val low = values.minOrNull() ?: 0f
         val high = values.maxOrNull() ?: 1f
-        val margin = max(0.1f, max(high - low, abs(high) * 0.05f) * 0.12f)
+        // Margem relativa à faixa: o piso fixo de 0,1 achatava propriedades de
+        // faixa pequena (0..0,05) numa linha no meio do gráfico.
+        val span = high - low
+        val margin = if (span > 1e-6f) span * 0.12f else max(abs(high) * 0.1f, 0.05f)
         val timeMargin = max(1f, (fullTo.toLong() - fullFrom).toFloat() * 0.06f)
         return GraphViewport(fullFrom - timeMargin, fullTo + timeMargin, low - margin, high + margin)
     }
@@ -71,9 +90,11 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
     val from = floor(view.from).toInt()
     val to = max(from + 1, ceil(view.to).toInt())
     var widthPx by remember { mutableIntStateOf(0) }
-    val samples = remember(curves, view, widthPx, speed, fps) {
+    val samples = remember(curves, view, widthPx, speed, fps, spatial) {
         val perFrame = if (widthPx > 0) widthPx / view.duration.toDouble() / 2.0 else 1.0
-        curves.map { graphCurve(it, view.from.toDouble(), view.to.toDouble(), perFrame, speed, fps) }
+        val perAxis = curves.map { graphCurve(it, view.from.toDouble(), view.to.toDouble(), perFrame, speed, fps) }
+        // Espacial: os eixos ficam apagados embaixo e o módulo é a curva ativa (a última).
+        if (spatial) perAxis + listOf(spatialSpeedCurve(curves, view.from.toDouble(), view.to.toDouble(), perFrame, fps)) else perAxis
     }
     // O cabeçote saiu da janela (scrub, play, outro trecho): a janela vai atrás dele.
     // Nunca no meio de um arrasto (como no iOS): a janela pulando movia na tela
@@ -175,7 +196,10 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                             if (!began) { store.beginGesture("editar velocidade do intervalo"); began = true }
                             val h = activeHandle.changed(activeHandle.frame + delta.x / size.width * initial.duration,
                                 activeHandle.velocity - delta.y / size.height * initial.range)
-                            if (h.all { it.isFinite() }) store.setKeyframeEasing(layer, activeHandle.key, Interp.BEZIER, h[0], h[1], h[2], h[3])
+                            // A curva é da PROPRIEDADE, como no painel de curva: os
+                            // eixos irmãos levam a mesma (antes, só na camada 3D — na
+                            // 2D o X e o Y ficavam com tempos diferentes).
+                            if (h.all { it.isFinite() }) store.setKeyframeEasing(layer, activeHandle.key, Interp.BEZIER, h[0], h[1], h[2], h[3], linkAxes = true)
                         } else if (activeKey != null) {
                             val dy = change.position.y - down.position.y
                             val dx = change.position.x - down.position.x

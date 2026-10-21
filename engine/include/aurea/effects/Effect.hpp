@@ -133,6 +133,13 @@ struct LayerPlacement {
     /// para o rastro por partícula (a folha em si não se move).
     f32 shutterAngle = 0.0f;
     f32 shutterPhase = 0.0f;
+    /// Câmera ATIVA da composição (camada de câmera, ou a da composição-mãe
+    /// que passa por esta): `cameraView` = vista ← mundo (x direita, y baixo,
+    /// z frente) e o campo de visão vertical. Efeitos de ambiente 3D (Aurora)
+    /// orientam o céu por ela; falso = sem câmera (a câmera padrão, parada).
+    bool cameraActive = false;
+    Mat4 cameraView = Mat4::identity();
+    f32 cameraFovY = 0.0f;   ///< radianos
 };
 
 /// Retângulo, em pixels da layer, que o quadro inteiro da composição cobre

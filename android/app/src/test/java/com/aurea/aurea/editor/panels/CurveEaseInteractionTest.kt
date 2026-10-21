@@ -52,15 +52,20 @@ class CurveEaseInteractionTest {
         val ease = Ease(Interp.EASE_IN_OUT, .2f, .1f, .8f, .9f)
         assertTrue(ease.hasHandles)
         assertFalse(ease.isBezier)
-        assertArrayEquals(floatArrayOf(.5f, 0f, .5f, 1f), ease.handles(), 0f)
+        assertArrayEquals(floatArrayOf(.484f, .042f, .516f, .958f), ease.handles(), 0f)
         assertEquals(Interp.EASE_IN_OUT, ease.interp)
         assertEquals(.125f, ease.transform(.25f), 0f)
         assertEquals(.5f, ease.transform(.5f), 0f)
         assertEquals(.875f, ease.transform(.75f), 0f)
-        // Merely exposing the handles cannot substitute the different cubic.
+        // 0.3.0: the exposed handles are the closest cubic to the two parabolas,
+        // so the first drag of a handle (which turns the segment into Bézier)
+        // no longer visibly reshapes the curve. The (0.5,0)(0.5,1) stand-in was off by 0.02.
         val h = ease.handles()
         val edited = Ease(Interp.BEZIER, h[0], h[1], h[2], h[3])
-        assertTrue(kotlin.math.abs(edited.transform(.25f)-ease.transform(.25f)) > .01f)
+        for (i in 1..19) {
+            val t = i / 20f
+            assertTrue(kotlin.math.abs(edited.transform(t) - ease.transform(t)) < .005f)
+        }
     }
 
     @Test fun holdHasNoContinuousHandlesButEveryContinuousBuiltInDoes() {

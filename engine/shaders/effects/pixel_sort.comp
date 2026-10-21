@@ -1,0 +1,141 @@
+#version 450
+// =============================================================================
+//  Aurea / shaders / effects / pixel_sort.comp
+//
+//  Ordenar pixels (GlitchEffects.cpp, 0.3.0): uma ORDENAÇÃO de verdade por
+//  linha. Um grupo de trabalho por linha (ou coluna) e trecho de até 2048
+//  elementos:
+//   1. classifica cada elemento: chave (luz, tom, R, G, B, saturação, em
+//      valores de tela), se entra (limiar; transparente nunca entra) e se é
+//      uma barreira sorteada — sorteio em coordenadas da CAMADA, não do texel:
+//      prévia e export cortam os intervalos nos mesmos lugares;
+//   2. numera os intervalos (uma passada; o comprimento máximo também corta);
+//   3. ordena a palavra (intervalo · chave · índice) com bitônica em memória
+//      compartilhada. Intervalos crescem ao longo da linha, então cada um
+//      volta exatamente para o seu trecho, e o índice desempata: estável;
+//   4. cada elemento recebe a cor de quem caiu no lugar dele.
+//  É uma permutação exata das cores (nada duplica, nada mistura). A versão
+//  anterior refazia, POR PIXEL, uma ordenação de 64 amostras fixas por
+//  ladrilho de 64 texels — emendas, borrão no diagonal e comprimento que
+//  dependia da resolução da prévia.
+// =============================================================================
+#include "../common/bindings.glsl"
+#include "../common/color.glsl"
+#include "common.glsl"
+
+#define CHUNK 2048
+#define THREADS 128
+
+layout(local_size_x = THREADS, local_size_y = 1, local_size_z = 1) in;
+layout(set = 0, binding = AUREA_TEX0) uniform sampler2D u_src;
+layout(set = 0, binding = AUREA_IMG0, rgba16f) writeonly uniform image2D u_dst;
+
+layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
+    vec4 p0;   // x = limiar baixo, y = limiar alto (0..1), z = comprimento máximo (elementos; 0 = sem), w = chance da barreira
+    vec4 p1;   // x = eixo (0 linhas, 1 colunas), y = 1 inverter, z = modo, w = semente
+    vec4 p2;   // x = 1 limiar pela chave, y = elementos por px da camada, z = passo (px da camada), w = 0
+    vec4 p3;   // xy = px da camada do elemento (0,0), zw = tamanho da imagem (texels)
+} p;
+
+shared uint words[CHUNK];
+
+ivec2 element(int i, int line) { return p.p1.x > 0.5 ? ivec2(line, i) : ivec2(i, line); }
+
+/// A chave de ordenação em valores de tela (como o limiar).
+float key_of(vec3 c) {
+    const int mode = int(p.p1.z + 0.5);
+    const float hi = max(c.r, max(c.g, c.b)), lo = min(c.r, min(c.g, c.b)), d = hi - lo;
+    if (mode == 1) {
+        if (d < 1e-6) return 0.0;
+        const float h = hi == c.r ? (c.g - c.b) / d : hi == c.g ? 2.0 + (c.b - c.r) / d : 4.0 + (c.r - c.g) / d;
+        return fract(h / 6.0);
+    }
+    if (mode == 2) return c.r;
+    if (mode == 3) return c.g;
+    if (mode == 4) return c.b;
+    if (mode == 5) return hi > 1e-6 ? d / hi : 0.0;
+    return aurea_luma(c);
+}
+
+void main() {
+    const int line = int(gl_WorkGroupID.x);
+    const ivec2 size = ivec2(p.p3.zw + 0.5);
+    const int length = p.p1.x > 0.5 ? size.y : size.x;
+    const int start = int(gl_WorkGroupID.y) * CHUNK;
+    const int n = min(CHUNK, length - start);
+    if (n <= 0) return;   // o grupo inteiro sai junto
+    const int tid = int(gl_LocalInvocationID.x);
+    const uint seed = uint(p.p1.w + 0.5);
+    const float step = max(p.p2.z, 1.0);
+    const float density = max(p.p2.y, 1e-6);
+
+    // 1. Classificar. Palavra provisória: entra (bit 31), barreira (30), chave (10 bits).
+    for (int i = tid; i < CHUNK; i += THREADS) {
+        uint w = 0xFFFFFFFFu;
+        if (i < n) {
+            const ivec2 at = element(start + i, line);
+            const vec4 c = texelFetch(u_src, at, 0);
+            const vec3 s = aurea_linear_to_srgb(clamp(unpremultiply(c).rgb, vec3(0.0), vec3(1.0)));
+            const float k = clamp(key_of(s), 0.0, 1.0);
+            const float th = p.p2.x > 0.5 ? k : aurea_luma(s);
+            const bool ok = c.a > 1e-6 && th >= p.p0.x && th <= p.p0.y;
+            bool bar = false;
+            if (p.p0.w > 0.0) {
+                // Célula de `passo` px da camada no ponto do elemento.
+                const vec2 layer = p.p3.xy + (vec2(at) + 0.5) / density;
+                bar = aurea_hash(uvec2(ivec2(floor(layer / step))) ^ uvec2(seed, seed * 2654435761u)) < p.p0.w;
+            }
+            uint kq = uint(k * 1023.0 + 0.5);
+            if (p.p1.y > 0.5) kq = 1023u - kq;
+            w = (ok ? 0x80000000u : 0u) | (bar ? 0x40000000u : 0u) | (kq << 11);
+        }
+        words[i] = w;
+    }
+    memoryBarrierShared();
+    barrier();
+
+    // 2. Intervalos: um número por trecho contíguo que entra; quem não entra
+    // é um intervalo de um elemento só (fica onde está).
+    if (tid == 0) {
+        const int maxLen = int(p.p0.z + 0.5);
+        uint run = 0u;
+        int len = 0;
+        bool prevOk = false;
+        for (int i = 0; i < n; ++i) {
+            const uint w = words[i];
+            const bool ok = (w & 0x80000000u) != 0u;
+            const bool bar = (w & 0x40000000u) != 0u;
+            const bool fresh = !ok || !prevOk || bar || (maxLen > 0 && len >= maxLen);
+            if (i > 0 && fresh) ++run;
+            len = fresh ? 1 : len + 1;
+            prevOk = ok;
+            words[i] = (run << 21) | (ok ? ((w >> 11) & 1023u) << 11 : 0u) | uint(i);
+        }
+    }
+    memoryBarrierShared();
+    barrier();
+
+    // 3. Bitônica no tamanho potência de 2 (as sobras = 0xFFFFFFFF vão ao fim).
+    int count = 1;
+    while (count < n) count <<= 1;
+    for (int k = 2; k <= count; k <<= 1) {
+        for (int j = k >> 1; j > 0; j >>= 1) {
+            for (int i = tid; i < count; i += THREADS) {
+                const int other = i ^ j;
+                if (other > i) {
+                    const uint a = words[i], b = words[other];
+                    const bool ascending = (i & k) == 0;
+                    if ((a > b) == ascending) { words[i] = b; words[other] = a; }
+                }
+            }
+            memoryBarrierShared();
+            barrier();
+        }
+    }
+
+    // 4. Cada lugar recebe a cor de quem caiu nele.
+    for (int i = tid; i < n; i += THREADS) {
+        const int from = int(words[i] & 2047u);
+        imageStore(u_dst, element(start + i, line), texelFetch(u_src, element(start + from, line), 0));
+    }
+}

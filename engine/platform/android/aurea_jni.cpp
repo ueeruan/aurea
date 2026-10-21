@@ -1096,6 +1096,92 @@ AUREA_JNI jlong AUREA_FN(nativeImportAudio)(JNIEnv* env, jclass, jlong handle, j
     return static_cast<jlong>(*r);
 }
 
+// --- Sequência de imagens (ImageSequence.hpp) --------------------------------
+// O Kotlin copia os arquivos de `content://` para o armazenamento do app e
+// passa os caminhos ABSOLUTOS: os quadros, um quadro só (o motor acha os
+// irmãos), a pasta, ou um .zip.
+namespace {
+std::vector<std::string> jni_string_list(JNIEnv* env, jobjectArray items) {
+    std::vector<std::string> out;
+    if (!items) return out;
+    const jsize n = env->GetArrayLength(items);
+    out.reserve(static_cast<usize>(std::max<jsize>(0, n)));
+    for (jsize i = 0; i < n; ++i) {
+        auto* s = static_cast<jstring>(env->GetObjectArrayElement(items, i));
+        out.push_back(to_string(env, s));
+        if (s) env->DeleteLocalRef(s);
+    }
+    return out;
+}
+
+std::string json_string(const std::string& s) {
+    std::string out = "\"";
+    for (const char ch : s) {
+        const auto c = static_cast<unsigned char>(ch);
+        if (c == '"' || c == '\\') { out += '\\'; out += ch; }
+        else if (c < 0x20) { char u[8]; std::snprintf(u, sizeof(u), "\\u%04x", c); out += u; }
+        else out += ch;
+    }
+    return out + "\"";
+}
+
+/// {"ok":true,"directory":…,"pattern":…,…} ou {"ok":false,"error":<Errc>,"detail":…}.
+std::string image_sequence_probe_json(const Result<ImageSequenceProbe>& r) {
+    if (!r.ok()) {
+        return "{\"ok\":false,\"error\":" + std::to_string(static_cast<int>(r.status().code())) + ",\"detail\":"
+             + json_string(std::string(r.status().detail())) + "}";
+    }
+    const ImageSequenceProbe& p = *r;
+    char fps[48];
+    std::snprintf(fps, sizeof(fps), "%.10g", p.suggestedFps);
+    std::string missing = "[";
+    for (usize i = 0; i < p.missing.size(); ++i) missing += (i ? "," : "") + std::to_string(p.missing[i]);
+    missing += "]";
+    return "{\"ok\":true,\"directory\":" + json_string(p.directory) + ",\"prefix\":" + json_string(p.prefix)
+         + ",\"suffix\":" + json_string(p.suffix) + ",\"pattern\":" + json_string(p.pattern)
+         + ",\"firstFile\":" + json_string(p.firstFile) + ",\"format\":" + json_string(p.format)
+         + ",\"padding\":" + std::to_string(p.padding) + ",\"first\":" + std::to_string(p.first)
+         + ",\"last\":" + std::to_string(p.last) + ",\"frameCount\":" + std::to_string(p.frameCount)
+         + ",\"presentCount\":" + std::to_string(p.presentCount) + ",\"missingCount\":" + std::to_string(p.missingCount)
+         + ",\"missing\":" + missing + ",\"width\":" + std::to_string(p.width) + ",\"height\":" + std::to_string(p.height)
+         + ",\"channels\":" + std::to_string(p.channels) + ",\"bitDepth\":" + std::to_string(p.bitDepth)
+         + ",\"hasAlpha\":" + (p.hasAlpha ? "true" : "false") + ",\"linear\":" + (p.linear ? "true" : "false")
+         + ",\"suggestedFps\":" + fps + ",\"suggestedAlphaMode\":" + std::to_string(static_cast<int>(p.suggestedAlpha))
+         + ",\"suggestedColorMode\":" + std::to_string(static_cast<int>(p.suggestedColor))
+         + ",\"candidates\":" + std::to_string(p.candidates) + ",\"fromArchive\":" + (p.fromArchive ? "true" : "false")
+         + ",\"totalBytes\":" + std::to_string(p.totalBytes) + "}";
+}
+} // namespace
+
+/// Sondagem da sequência: o JSON acima (null só sem motor). Pode extrair um
+/// .zip: chamar fora da thread da UI.
+AUREA_JNI jstring AUREA_FN(nativeProbeImageSequence)(JNIEnv* env, jclass, jlong handle, jobjectArray absolutePaths) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    const std::string json = image_sequence_probe_json(c->engine.probe_image_sequence(jni_string_list(env, absolutePaths)));
+    return env->NewStringUTF(json.c_str());
+}
+
+/// Importa a sequência como clipe. `fps` 0 = o sugerido; `alphaMode` 0 auto,
+/// 1 reto, 2 pré-multiplicado, 3 ignorar; `colorMode` 0 auto, 1 sRGB, 2 linear.
+/// Devolve o id da camada (≥ 0) ou `-Errc`.
+AUREA_JNI jlong AUREA_FN(nativeImportImageSequence)(JNIEnv* env, jclass, jlong handle, jobjectArray absolutePaths,
+                                                    jdouble fps, jint alphaMode, jint colorMode) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    ImageSequenceImport request;
+    request.paths = jni_string_list(env, absolutePaths);
+    request.fps = fps;
+    request.alpha = alphaMode >= 0 && alphaMode <= 3 ? static_cast<SequenceAlphaMode>(alphaMode) : SequenceAlphaMode::Auto;
+    request.color = colorMode >= 0 && colorMode <= 2 ? static_cast<SequenceColorMode>(colorMode) : SequenceColorMode::Auto;
+    const Result<u64> r = c->engine.import_image_sequence(request);
+    if (!r.ok()) {
+        AUREA_LOG_ERROR("importacao de sequencia falhou: %s", r.status().message().data());
+        return -static_cast<jlong>(r.status().code());
+    }
+    return static_cast<jlong>(*r);
+}
+
 /// Waveform: `count` baldes u8 em `out` (buffer direto). Devolve os escritos (0 = sem som).
 AUREA_JNI jint AUREA_FN(nativeQueryWaveform)(JNIEnv* env, jclass, jlong handle, jlong layerId, jdouble startFrame,
                                              jdouble framesPerBucket, jint count, jobject out) {

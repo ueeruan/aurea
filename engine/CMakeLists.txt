@@ -185,6 +185,7 @@ set(AUREA_CORE_SOURCES
     src/media/P010Upload.cpp
     src/media/VideoSource.cpp
     src/media/MediaManager.cpp
+    src/media/ImageSequence.cpp
     src/media/ThumbnailService.cpp
     src/media/PreviewProxy.cpp
     src/ai/DepthMapService.cpp
@@ -221,6 +222,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineShape3D.cpp
     src/engine/EngineRigPose.cpp
     src/engine/EngineMedia.cpp
+    src/engine/EngineImageSequence.cpp
     src/engine/EngineProxy.cpp
     src/engine/EngineLayerAnim.cpp
     src/engine/EngineRoto.cpp
@@ -337,6 +339,8 @@ set(AUREA_IMPORT_BOUNDARIES
     src/audio/AudioBlockCache.cpp
     src/engine/Engine.cpp
     src/engine/EngineMedia.cpp
+    src/engine/EngineImageSequence.cpp
+    src/media/ImageSequence.cpp
     src/engine/EnginePsd.cpp
     src/engine/EngineRoto.cpp
     src/render/RendererRoto.cpp

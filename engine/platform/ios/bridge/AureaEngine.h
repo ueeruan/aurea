@@ -667,6 +667,20 @@ NS_SWIFT_NAME(AureaEngine)
 /// Devolve o id da camada, ou −Errc (ver `-lastImportError`).
 - (long long)importVideo:(NSString*)path name:(NSString*)name;
 - (long long)importAudio:(NSString*)path name:(NSString*)name;
+/// Sequência de imagens (PNG/JPG/TGA/BMP/EXR numerados, ou um .zip deles).
+/// `paths`: caminhos no sandbox — os quadros, um quadro só (o motor acha os
+/// irmãos), a pasta ou o .zip (extraído em Documents/Media/sequences/<hash>/).
+/// Devolve @{ok, pattern, directory, prefix, suffix, format, firstFile, padding,
+/// first, last, frameCount, presentCount, missingCount, missing (NSArray),
+/// width, height, channels, bitDepth, hasAlpha, linear, suggestedFps,
+/// suggestedAlphaMode, suggestedColorMode, candidates, fromArchive, totalBytes}
+/// ou @{ok: NO, error: Errc, detail}. Bloqueia: fora da thread principal.
+- (NSDictionary<NSString*, id>*)probeImageSequence:(NSArray<NSString*>*)paths NS_SWIFT_NAME(probeImageSequence(_:));
+/// Importa como clipe de vídeo. `fps` 0 = o sugerido; `alphaMode` 0 auto,
+/// 1 reto, 2 pré-multiplicado, 3 ignorar; `colorMode` 0 auto, 1 sRGB, 2 linear.
+/// Id da camada, ou −Errc (motivo em `-lastImportError`).
+- (long long)importImageSequence:(NSArray<NSString*>*)paths fps:(double)fps alphaMode:(int)alphaMode
+                       colorMode:(int)colorMode NS_SWIFT_NAME(importImageSequence(_:fps:alphaMode:colorMode:));
 - (long long)extractAudioFromLayer:(long long)layerId;
 /// RGBA8 sRGB de alfa reto, já decodificado pelo Swift (ImageIO num helper não
 /// é necessário: use `-importImageFile:` para o caminho sem cópia de ida).

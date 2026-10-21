@@ -448,6 +448,11 @@ std::string Engine::layer_source_path(u64 layerId) noexcept {
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || (l->kind != LayerKind::Video && l->kind != LayerKind::Audio && l->kind != LayerKind::Image)) return {};
     const Asset* a = project_->asset(l->source);
+    if (ImageSequenceSpec sequence; a && decode_image_sequence(a->sourcePath, sequence)) {
+        // Sequência de imagens: a receita não é um arquivo; o primeiro quadro é.
+        const std::string dir = resolve_asset_path(sequence.directory);
+        return dir.empty() ? std::string{} : dir + "/" + sequence.file_name(sequence.first);
+    }
     return a && !a->sourcePath.empty() ? resolve_asset_path(a->sourcePath) : std::string{};
 }
 

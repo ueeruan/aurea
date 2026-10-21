@@ -4953,7 +4953,13 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
     // host de testes). Uma textura por plano, persistente por layer, sobe a
     // cada frame novo.
     if (!f->prepare_cpu_planes()) return false;
-    const bool rgb = f->format == PixelFormat::RGBA8;
+    // RGBA da CPU: o vídeo de sempre é RGBA8 opaco; a sequência de imagens
+    // (ImageSequence.hpp) também traz RGBA16F (PNG 16 bits, EXR) e alfa.
+    const bool halfRgba = f->format == PixelFormat::RGBA16F;
+    const bool rgb = f->format == PixelFormat::RGBA8 || halfRgba;
+    // Com alfa (ou meia precisão, que pode passar de 1): rgba_to_linear, que
+    // mantém o alfa. A conversão de vídeo força alfa 1 e corta acima do branco.
+    const bool keepAlpha = rgb && (halfRgba || f->alpha != FrameAlpha::Opaque);
     const bool tenBit = f->format == PixelFormat::P010;
     const bool halfP010 = tenBit && !backend_->capabilities().r16UnormSampled;
     const bool threePlane = f->format == PixelFormat::YUV420P;
@@ -4965,7 +4971,7 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
     // an RGBA row is four bytes per coded pixel, including native row padding.
     for (u32 p = 0; p < planes; ++p) {
         const u64 width = p == 0 ? f->width : (static_cast<u64>(f->width) + 1) / 2;
-        const u64 bytesPerPixel = rgb ? 4u : ((p && !threePlane ? 2u : 1u) * (tenBit ? 2u : 1u));
+        const u64 bytesPerPixel = rgb ? (halfRgba ? 8u : 4u) : ((p && !threePlane ? 2u : 1u) * (tenBit ? 2u : 1u));
         if (!f->planes[p] || f->strides[p] < width * bytesPerPixel) return false;
     }
     // O quadro seguinte da mistura sobe em texturas próprias (senão o upload
@@ -5002,7 +5008,7 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
             TextureDesc d;
             d.width = p == 0 ? f->width : (f->width + 1) / 2;
             d.height = p == 0 ? f->height : (f->height + 1) / 2;
-            d.format = rgb ? SurfaceFormat::RGBA8
+            d.format = rgb ? (halfRgba ? SurfaceFormat::RGBA16F : SurfaceFormat::RGBA8)
                           : (p == 0 || threePlane ? (tenBit ? (halfP010 ? SurfaceFormat::R16F : SurfaceFormat::R16) : SurfaceFormat::R8)
                                                 : (tenBit ? (halfP010 ? SurfaceFormat::RG16F : SurfaceFormat::RG16) : SurfaceFormat::RG8));
             d.sampled = true;
@@ -5061,6 +5067,20 @@ bool Renderer::build_video_source(const RenderLayer& layer, u32 layerIndex, u32 
         }
         // Publish only after every plane succeeds; a partial upload must retry.
         pt.contentId = f->content_id();
+    }
+
+    if (keepAlpha) {
+        // Linear e pré-multiplicado, como o resto do espaço de trabalho: alfa
+        // reto é multiplicado aqui; EXR (já linear e pré-multiplicado) passa
+        // direto. Sequência não tem recorte nem rotação de contêiner.
+        struct { Vec4 flags; Vec4 texel; } rp{
+            Vec4{f->color.transfer == TransferFunction::Linear ? 1.0f : 0.0f,
+                 f->alpha == FrameAlpha::Premultiplied ? 1.0f : 0.0f,
+                 f->alpha == FrameAlpha::Opaque ? 1.0f : 0.0f, taps ? 1.0f : 0.0f},
+            Vec4{1.0f / cw, 1.0f / ch, 1.0f / static_cast<f32>(std::max(1u, w)), 1.0f / static_cast<f32>(std::max(1u, h))}};
+        EffectBuildContext actx(graph_, shaders_, arena_, *this, kWorkFormat, 4096);
+        return actx.fullscreen_pass("cor-da-sequencia", PassStage::Decode, target, ShaderId::video_rgba_to_linear_frag,
+                                    {PassTexture{{}, pt.plane[0], CommonSampler::LinearClamp}}, &rp, sizeof(rp)) != kInvalidIndex;
     }
 
     const f32 layoutKind = f->format == PixelFormat::NV21 ? 1.0f : (threePlane ? 2.0f : 0.0f);
@@ -5780,7 +5800,7 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             slot->lastFrame = frameNumber;
             out.texture = graph_.import_texture("layer-imagem", slot->tex, ld);
             EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
-            const Vec4 flags{0.0f, 0.0f, 0.0f, 0.0f};
+            const Vec4 flags[2]{Vec4{0.0f, 0.0f, 0.0f, 0.0f}, Vec4{0.0f, 0.0f, 0.0f, 0.0f}};   // rgba_to_linear: flags + texel
             const u32 pass = ctx.fullscreen_pass("imagem", PassStage::Decode, out.texture, ShaderId::video_rgba_to_linear_frag,
                                                  {PassTexture{{}, img.texture, CommonSampler::LinearClamp}},
                                                  &flags, sizeof(flags));
@@ -8170,7 +8190,7 @@ Status Renderer::render_effect_preview_impl(const EffectRegistry& effects, Effec
         if (!t.ok()) return false;
         owned.handles[owned.count++] = *t;
         if (!backend_->upload_texture(*t, rgba, width * 4).ok()) return false;
-        const Vec4 flags{0.0f, 0.0f, 0.0f, 0.0f};
+        const Vec4 flags[2]{Vec4{0.0f, 0.0f, 0.0f, 0.0f}, Vec4{0.0f, 0.0f, 0.0f, 0.0f}};   // rgba_to_linear: flags + texel
         return ctx.fullscreen_pass(name, PassStage::Decode, target, ShaderId::video_rgba_to_linear_frag,
                                    {PassTexture{{}, *t, CommonSampler::LinearClamp}}, &flags, sizeof(flags)) != kInvalidIndex;
     };
@@ -8207,7 +8227,7 @@ Status Renderer::render_effect_preview_impl(const EffectRegistry& effects, Effec
             ld.width = previewSrcW_;
             ld.height = previewSrcH_;
             const FGTexture lin = graph_.create_texture("foto-linear", ld);
-            const Vec4 flags{0.0f, 0.0f, 0.0f, 0.0f};
+            const Vec4 flags[2]{Vec4{0.0f, 0.0f, 0.0f, 0.0f}, Vec4{0.0f, 0.0f, 0.0f, 0.0f}};   // rgba_to_linear: flags + texel
             const f32 src = static_cast<f32>(previewSrcW_) / static_cast<f32>(previewSrcH_);
             const f32 dst = static_cast<f32>(width) / static_cast<f32>(height);
             Vec4 map{1.0f, 1.0f, 0.0f, 0.0f};   // uv = v_uv * xy + zw

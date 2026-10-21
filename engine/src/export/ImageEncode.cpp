@@ -1082,12 +1082,16 @@ Status StoredZipWriter::finish() noexcept {
         cd.insert(cd.end(), e.name.begin(), e.name.end());
     }
     const u64 cdOffset = offset_;
+    // Tamanho do diretório central SEM o EOCD. Antes era `cd.size() - 22` com só
+    // 12 bytes do EOCD já no buffer: 10 bytes a menos (descompactadores comuns
+    // aceitam; o leitor do pacote, estrito, recusava).
+    const usize cdBytes = cd.size();
     put_le32(cd, 0x06054b50u);
     put_le16(cd, 0);
     put_le16(cd, 0);
     put_le16(cd, static_cast<u32>(entries_.size()));
     put_le16(cd, static_cast<u32>(entries_.size()));
-    put_le32(cd, static_cast<u32>(cd.size() - 22));
+    put_le32(cd, static_cast<u32>(cdBytes));
     put_le32(cd, static_cast<u32>(cdOffset));
     put_le16(cd, 0);
     const bool ok = std::fwrite(cd.data(), 1, cd.size(), f_) == cd.size() && std::fflush(f_) == 0;

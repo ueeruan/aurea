@@ -1,5 +1,6 @@
 #include "aurea/media/PreviewProxy.hpp"
 #include "aurea/media/MediaManager.hpp"
+#include "aurea/media/ImageSequence.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/core/Log.hpp"
 #include <algorithm>
@@ -192,7 +193,9 @@ u64 proxy_source_bitrate(const Asset& a) noexcept {
 }
 
 bool proxy_source_heavy(const Asset& a, const ProxyThresholds& t) noexcept {
-    if (a.kind != AssetKind::Video || !a.has_video()) return false;
+    // Sequência de imagens: o proxy é um MP4 (perderia o alfa) e o decoder
+    // dela já reduz e antecipa os quadros na CPU.
+    if (a.kind != AssetKind::Video || !a.has_video() || is_image_sequence(a.sourcePath)) return false;
     const u64 pixels = static_cast<u64>(a.video.width) * a.video.height;
     if (pixels > t.heavyPixels) return true;
     // 59,94 e 60,0x não contam como "acima de 60".
@@ -203,7 +206,7 @@ bool proxy_source_heavy(const Asset& a, const ProxyThresholds& t) noexcept {
 }
 
 bool proxy_wanted(const Asset& a, ProxyMode mode, bool reducedPreview, const ProxyThresholds& t) noexcept {
-    if (mode == ProxyMode::Off || a.kind != AssetKind::Video || !a.has_video()) return false;
+    if (mode == ProxyMode::Off || a.kind != AssetKind::Video || !a.has_video() || is_image_sequence(a.sourcePath)) return false;
     if (proxy_source_heavy(a, t)) return true;
     const u64 pixels = static_cast<u64>(a.video.width) * a.video.height;
     return (mode == ProxyMode::Always || reducedPreview) && pixels > t.alwaysPixels;

@@ -2075,6 +2075,49 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return static_cast<long long>(*r);
 }
 
+- (NSDictionary<NSString*, id>*)probeImageSequence:(NSArray<NSString*>*)paths {
+    auto* e = self.engine;
+    if (!e) return @{ @"ok": @NO, @"error": @(static_cast<int>(aurea::Errc::InvalidState)), @"detail": @"" };
+    std::vector<std::string> list;
+    for (NSString* p in paths) list.push_back(to_std(p));
+    const aurea::Result<aurea::ImageSequenceProbe> r = e->probe_image_sequence(list);
+    if (!r.ok()) {
+        return @{ @"ok": @NO, @"error": @(static_cast<int>(r.status().code())),
+                  @"detail": to_ns(std::string(r.status().detail())) };
+    }
+    const aurea::ImageSequenceProbe& p = *r;
+    NSMutableArray<NSNumber*>* missing = [NSMutableArray arrayWithCapacity:p.missing.size()];
+    for (const aurea::i64 n : p.missing) [missing addObject:@(n)];
+    return @{ @"ok": @YES, @"directory": to_ns(p.directory), @"prefix": to_ns(p.prefix), @"suffix": to_ns(p.suffix),
+              @"pattern": to_ns(p.pattern), @"firstFile": to_ns(p.firstFile), @"format": to_ns(p.format),
+              @"padding": @(p.padding), @"first": @(p.first), @"last": @(p.last), @"frameCount": @(p.frameCount),
+              @"presentCount": @(p.presentCount), @"missingCount": @(p.missingCount), @"missing": missing,
+              @"width": @(p.width), @"height": @(p.height), @"channels": @(p.channels), @"bitDepth": @(p.bitDepth),
+              @"hasAlpha": @(p.hasAlpha), @"linear": @(p.linear), @"suggestedFps": @(p.suggestedFps),
+              @"suggestedAlphaMode": @(static_cast<int>(p.suggestedAlpha)),
+              @"suggestedColorMode": @(static_cast<int>(p.suggestedColor)), @"candidates": @(p.candidates),
+              @"fromArchive": @(p.fromArchive), @"totalBytes": @(p.totalBytes) };
+}
+
+- (long long)importImageSequence:(NSArray<NSString*>*)paths fps:(double)fps alphaMode:(int)alphaMode colorMode:(int)colorMode {
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    aurea::ImageSequenceImport request;
+    for (NSString* p in paths) request.paths.push_back(to_std(p));
+    request.fps = fps;
+    request.alpha = alphaMode >= 0 && alphaMode <= 3 ? static_cast<aurea::SequenceAlphaMode>(alphaMode)
+                                                     : aurea::SequenceAlphaMode::Auto;
+    request.color = colorMode >= 0 && colorMode <= 2 ? static_cast<aurea::SequenceColorMode>(colorMode)
+                                                     : aurea::SequenceColorMode::Auto;
+    const aurea::Result<aurea::u64> r = e->import_image_sequence(request);
+    if (!r.ok()) {
+        _lastImportError = to_ns(std::string(r.status().message()));
+        return -static_cast<long long>(r.status().code());
+    }
+    _lastImportError = @"";
+    return static_cast<long long>(*r);
+}
+
 - (long long)importAudio:(NSString*)path name:(NSString*)name {
     auto* e = self.engine;
     if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);

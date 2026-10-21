@@ -1,4 +1,5 @@
 #include "aurea/media/MediaManager.hpp"
+#include "aurea/media/ImageSequence.hpp"
 #include "aurea/core/Log.hpp"
 
 #include <cstring>
@@ -148,6 +149,10 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
             entries_[i] = std::move(entries_.back()); entries_.pop_back();
         } else ++i;
     }
+    // Sequência de imagens (ImageSequence.hpp): decoder de CPU, sem sessão de
+    // codec do aparelho. Não conta no teto de decoders nem espera um codec
+    // antigo fechar.
+    const bool softwareOnly = is_image_sequence(decodeAsset.sourcePath);
     u32 priorFailures = 0;
     for (usize i = 0; i < entries_.size(); ++i) {
         Entry& e = entries_[i];
@@ -158,7 +163,7 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
             // Nova tentativa depois de um intervalo, poucas vezes — um arquivo
             // que o aparelho não decodifica não pode reabrir o codec a cada quadro.
             if (e.failed && e.failures < kOpenAttempts && frameNumber > e.failedFrame + kOpenRetryFrames && factory_) {
-                {
+                if (!softwareOnly) {
                     // Mesma regra do open novo (abaixo): nada de codec novo
                     // enquanto outro fecha. A entrada fica — e a contagem com ela.
                     std::lock_guard<std::mutex> closing(retireMutex_);
@@ -198,12 +203,12 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
     // lugar; o open novo espera o fechamento dela (logo abaixo), como sempre.
     // Ponteiro devolvido neste quadro tem lastUsedFrame == frameNumber: nunca
     // é a vítima. Capturas exatas em curso seguram tudo. 64 bits: sem teto.
-    if (const u32 cap = address_space::max_video_sources(pointerBits_); cap && originalSourceLeases_ == 0) {
+    if (const u32 cap = address_space::max_video_sources(pointerBits_); cap && originalSourceLeases_ == 0 && !softwareOnly) {
         u32 live = 0;
         usize victim = entries_.size();
         for (usize i = 0; i < entries_.size(); ++i) {
             const Entry& c = entries_[i];
-            if (c.failed) continue;
+            if (c.failed || is_image_sequence(c.path)) continue;
             ++live;
             if (frameNumber <= c.lastUsedFrame + address_space::kSourceEvictIdleFrames) continue;
             if (victim == entries_.size() || c.lastUsedFrame < entries_[victim].lastUsedFrame) victim = i;
@@ -215,7 +220,7 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
         }
     }
 
-    {
+    if (!softwareOnly) {
         std::lock_guard<std::mutex> closing(retireMutex_);
         // Do not accumulate replacement codecs while an old platform session
         // is stuck closing. Completion wakes the renderer to retry admission.

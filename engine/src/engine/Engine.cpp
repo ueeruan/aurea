@@ -537,6 +537,15 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     }
     offscreenCancelled_.store(false, std::memory_order_release);
     config_ = config;
+    // Sequência de imagens (ImageSequence.hpp): a fábrica da plataforma fica
+    // embrulhada — "aurea-seq:" é decodificada aqui no motor (Android, iOS,
+    // Windows e testes), todo o resto segue para ela como antes.
+    if (config.mediaFactory) {
+        sequenceFactory_.set_inner(config.mediaFactory);
+        sequenceFactory_.set_memory(&memory_);
+        sequenceFactory_.set_path_resolver([this](const std::string& stored) { return resolve_asset_path(stored); });
+        config_.mediaFactory = &sequenceFactory_;
+    }
     renderer_.set_foreground_model_directory(config.documentsDirectory + "/ai/rotobrush");
     startup_ = StartupTimings{};
     const u64 tStart = monotonic_ns();
@@ -612,12 +621,12 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         text::FontManager::instance().set_imported_dirs({config.documentsDirectory + "/fontes",
                                                          config.documentsDirectory + "/Media"});
     }
-    media_.set_factory(config.mediaFactory);
+    media_.set_factory(config_.mediaFactory);
     media_.set_memory(&memory_);
     media_.set_ready_callback(&Engine::on_frame_ready, this);
     // Proxy de edição (0.2.5): 2 GB no máximo, nunca o último 1 GB livre do
     // aparelho (PreviewProxyService::make_room).
-    media_.proxies().configure(config.mediaFactory, config.exportSinkFactory, config.exportSinkContext,
+    media_.proxies().configure(config_.mediaFactory, config.exportSinkFactory, config.exportSinkContext,
         config.cacheDirectory.empty() ? std::string{} : config.cacheDirectory + "/preview-proxies", 2048ull << 20,
         [](const std::string& path, void* context) { return static_cast<Engine*>(context)->resolve_asset_path(path); }, this);
     {
@@ -634,17 +643,17 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     media_.proxies().set_pause_reason(PreviewProxyService::Thermal, caps_.thermal().severe());
     // Som: cache de blocos na verba de áudio; com saída, o áudio passa a ser o
     // relógio mestre do playback.
-    audio_.initialize(config.mediaFactory, config.audioOutput, memory_.budget(MemoryClass::Audio));
+    audio_.initialize(config_.mediaFactory, config.audioOutput, memory_.budget(MemoryClass::Audio));
     playback_.clock().set_master(&audio_);
     // Forma de onda / Espectro de áudio leem os MESMOS blocos que tocam.
     renderer_.set_audio_source(audio_.cache(), &Engine::audio_path_resolver, this);
-    waveforms_ = std::make_unique<audio::WaveformCache>(config.mediaFactory);
+    waveforms_ = std::make_unique<audio::WaveformCache>(config_.mediaFactory);
     // Picos guardados em disco: reabrir o projeto não decodifica o áudio de novo (8D).
     if (!config_.cacheDirectory.empty()) waveforms_->set_disk_directory(config_.cacheDirectory + "/waveform");
     waveforms_->attach(&memory_);
-    thumbs_.set_factory(config.mediaFactory);
+    thumbs_.set_factory(config_.mediaFactory);
     thumbs_.attach(&memory_);
-    if (config.mediaFactory) thumbs_.start();
+    if (config_.mediaFactory) thumbs_.start();
 
     adapt().configure(1920, 1080, config.displayRefreshRate);
     adapt().set_user_scale(config.initialPreviewScale);

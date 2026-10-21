@@ -88,8 +88,10 @@ struct ImportResult {
 /// Extract model ZIPs (stored/deflate) into a NEW directory. Relative paths are
 /// preserved; unsafe names, CRC errors and excessive memory/disk costs fail
 /// without leaving partial files. Native pickers call the same implementation.
+/// `diskLimit`: soma dos arquivos extraídos (modelo 3D: 512 MB; sequência de
+/// imagens: maior, ver EngineImageSequence.cpp).
 [[nodiscard]] Status extract_model_archive(const std::string& archivePath, const std::string& directory,
-                                          std::vector<std::string>& files) noexcept;
+                                          std::vector<std::string>& files, u64 diskLimit = 512ull << 20) noexcept;
 
 /// Troca o caminho das mídias do `.aurea` (chave = caminho gravado). Devolve
 /// quantos assets mudaram. Usado pelo `read_package`; exposto para teste.

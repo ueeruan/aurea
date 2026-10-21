@@ -2,6 +2,7 @@
 #include "aurea/project/FileIO.hpp"
 #include "aurea/project/Serialization.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/media/ImageSequence.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/Text3D.hpp"
 #include "aurea/text/FontManager.hpp"
@@ -26,7 +27,9 @@ namespace aurea::export_recovery {
 namespace {
 constexpr u32 kMagic = 0x43455241; // AREC, little endian.
 constexpr u32 kVersion = 1;
-constexpr u32 kMaxDependencies = 16384;
+// Uma sequência de imagens tem um arquivo por quadro: 65536 cobrem 45 min a
+// 24 fps (o teto de 4 MB do manifesto abaixo continua valendo).
+constexpr u32 kMaxDependencies = 65536;
 constexpr usize kMaxPathBytes = 32768;
 constexpr usize kMaxGltfJsonBytes = 8ull << 20;
 
@@ -46,7 +49,10 @@ bool unsupported_uri(const std::string& p) noexcept {
     return colon != std::string::npos && (slash == std::string::npos || colon < slash) && !(colon == 1 && p.size() > 2 &&
         ((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z')));
 }
-Status add_path(Package& package, std::string& path, const PathResolver& resolve, bool allowUri = false) {
+/// `index` (opcional): os caminhos já listados, para não procurar na lista
+/// inteira a cada quadro de uma sequência.
+Status add_path(Package& package, std::string& path, const PathResolver& resolve, bool allowUri = false,
+                std::unordered_set<std::string>* index = nullptr) {
     if (path.empty()) return OkStatus;
     std::string real = resolve ? resolve(path) : path;
     // Sem recuperação (0.2.4, C3): a plataforma valida a URI e a devolve como
@@ -83,6 +89,10 @@ Status add_path(Package& package, std::string& path, const PathResolver& resolve
     path = utf8(absolute);
     if (path.size() > kMaxPathBytes || package.dependencies.size() >= kMaxDependencies)
         return Errc::BudgetExceeded;
+    if (index) {
+        if (index->insert(path).second) package.dependencies.push_back({path, 0, 0});
+        return OkStatus;
+    }
     if (std::none_of(package.dependencies.begin(), package.dependencies.end(), [&](const Dependency& d) { return d.path == path; }))
         package.dependencies.push_back({path, 0, 0});
     return OkStatus;
@@ -267,7 +277,22 @@ Status capture_snapshot(std::vector<u8> initial, CompositionId composition, cons
                 std::find(retainedImages->begin(), retainedImages->end(), id.pack()) != retainedImages->end()) return;
             scene3d::Text3DSpec text;
             scene3d::Shape3DSpec shape;
-            if (scene3d::decode_text3d(asset.sourcePath, text)) {
+            ImageSequenceSpec sequence;
+            if (decode_image_sequence(asset.sourcePath, sequence)) {
+                // Sequência de imagens: cada quadro presente é uma dependência,
+                // e a receita congelada aponta para a pasta já resolvida.
+                std::unordered_set<std::string> index;
+                for (const Dependency& d : candidate.dependencies) index.insert(d.path);
+                std::string folder;
+                for (i64 n : sequence.present_numbers()) {
+                    std::string path = sequence.directory + "/" + sequence.file_name(n);
+                    status = add_path(candidate, path, resolve, false, &index);
+                    if (!status.ok()) return;
+                    if (folder.empty()) folder = utf8(std::filesystem::u8path(path).parent_path());
+                }
+                if (!folder.empty()) sequence.directory = folder;
+                asset.sourcePath = encode_image_sequence(sequence);
+            } else if (scene3d::decode_text3d(asset.sourcePath, text)) {
                 if (const auto font = scene3d::text3d_font(text)) {
                     text.fontPath = font->source_path();
                     TextData data; data.content = text.content;

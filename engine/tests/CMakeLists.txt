@@ -93,6 +93,7 @@ add_executable(aurea_tests
     test_offline_frame_queue.cpp
     test_offline_audio.cpp
     test_image_export.cpp
+    test_image_sequence.cpp
     test_project_settings.cpp
     test_perf.cpp
     test_timeline_scale.cpp

@@ -9,6 +9,7 @@
 #include "aurea/project/ProjectPackage.hpp"
 
 #include "aurea/project/FileIO.hpp"
+#include "aurea/media/ImageSequence.hpp"
 #include "aurea/platform/AddressSpace.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/project/Serialization.hpp"
@@ -293,8 +294,14 @@ Status read_directory(std::FILE* f, std::vector<ZipEntry>& out) {
     }
     if (eocd == std::string::npos) return Status{Errc::UnsupportedFormat, "nao e um pacote"};
     const u32 count = get16(&b[eocd + 10]);
-    const u32 cdSize = get32(&b[eocd + 12]);
+    u32 cdSize = get32(&b[eocd + 12]);
     const u32 cdOffset = get32(&b[eocd + 16]);
+    // A sequência PNG exportada pelo app até a 0.2.7 gravava o tamanho do
+    // diretório 10 bytes a menos (StoredZipWriter). Sem ZIP64, o diretório
+    // termina onde o EOCD começa: um tamanho declarado MENOR que esse espaço
+    // usa o espaço real (cada registro continua conferido abaixo).
+    if (const u64 eocdAt = total - tail + eocd; cdOffset <= eocdAt && static_cast<u64>(cdOffset) + cdSize < eocdAt)
+        cdSize = static_cast<u32>(eocdAt - cdOffset);
     if (get16(&b[eocd + 4]) || get16(&b[eocd + 6]) || get16(&b[eocd + 8]) != count)
         return Status{Errc::UnsupportedFormat, "pacote em varios volumes"};
     if (static_cast<u64>(cdOffset) + cdSize > total - tail + eocd || count > cdSize / 46)
@@ -398,6 +405,12 @@ std::string free_path(const fs::path& dir, const std::string& name) {
     return utf8_of(candidate);
 }
 
+/// Chave de um quadro de sequência no pacote: a pasta como gravada + o nome
+/// (o Engine resolve "docs:…/render_0001.png" como qualquer mídia).
+std::string sequence_frame_key(const ImageSequenceSpec& s, i64 number) {
+    return s.directory + "/" + s.file_name(number);
+}
+
 u32 distinct_media(const std::string& aureaPath) {
     std::vector<MediaRef> refs;
     if (!list_media(aureaPath, refs).ok()) return 0;
@@ -421,6 +434,11 @@ Status list_media(const std::string& aureaPath, std::vector<MediaRef>& out) noex
         out.push_back(std::move(ref));
     };
     p.for_each_asset([&](AssetId, const Asset& a) {
+        // Sequência de imagens: a receita não é arquivo; cada quadro presente é.
+        if (ImageSequenceSpec sequence; a.kind == AssetKind::Video && decode_image_sequence(a.sourcePath, sequence)) {
+            for (i64 n : sequence.present_numbers()) add(AssetKind::Image, sequence_frame_key(sequence, n), sequence.file_name(n));
+            return;
+        }
         // Procedural 3D source strings are complete recipes stored in the
         // project, not external files. Counting them as missing media made
         // portable projects with many 3D shapes/texts report false losses.
@@ -522,6 +540,31 @@ Status relink_media(const std::string& aureaPath,
     };
     p.for_each_asset([&](AssetId, Asset& a) {
         bool changed = relink(a.sourcePath);
+        if (ImageSequenceSpec sequence; !changed && a.kind == AssetKind::Video && decode_image_sequence(a.sourcePath, sequence)) {
+            // Os quadros só religam juntos: mesma pasta nova, mesmos nomes (o
+            // padrão do nome é a receita). Senão a sequência fica como estava.
+            std::string folder;
+            u32 moved = 0;
+            bool together = true;
+            for (i64 number : sequence.present_numbers()) {
+                const auto it = map.find(sequence_frame_key(sequence, number));
+                if (it == map.end()) continue;
+                const fs::path to = fs::u8path(it->second);
+                const std::string parent = utf8_of(to.parent_path());
+                if (utf8_of(to.filename()) != sequence.file_name(number) || (!folder.empty() && parent != folder)) {
+                    together = false;
+                    break;
+                }
+                folder = parent;
+                ++moved;
+            }
+            if (together && moved) {
+                sequence.directory = folder;
+                a.sourcePath = encode_image_sequence(sequence);
+                n += moved;
+                changed = true;
+            }
+        }
         if (a.kind == AssetKind::Model3D) {
             scene3d::Text3DSpec text;
             scene3d::Shape3DSpec shape;
@@ -627,10 +670,12 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
     }
 
     std::vector<std::string> written;
+    std::vector<std::string> createdSequenceDirs;
     const auto rollback = [&] {
         for (const std::string& w : written) fileio::remove_file(w);
         fileio::remove_file(projectOut);
         std::error_code e2;
+        for (const std::string& d : createdSequenceDirs) if (fs::is_empty(fs::u8path(d), e2)) fs::remove(fs::u8path(d), e2);
         if (fs::is_empty(fs::u8path(mediaDir), e2)) fs::remove(fs::u8path(mediaDir), e2);
     };
 
@@ -638,13 +683,28 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
         fileio::remove_file(projectOut);
         return s;
     }
+    // Quadros de sequência de imagens: cada sequência numa pasta própria, com
+    // os nomes originais (o nome é o padrão da receita; "render_0001-2.png"
+    // por colisão quebraria a sequência).
+    std::map<std::string, std::pair<usize, std::string>> sequenceFrames;   // chave → (sequência, nome)
+    std::vector<std::string> sequenceNames;
     {
         Project p;
         if (const Status s = load_project(p, projectOut); !s.ok()) {
             fileio::remove_file(projectOut);
             return s.code() == Errc::UnsupportedVersion ? s : Status{Errc::CorruptData, "projeto ilegivel"};
         }
+        p.for_each_asset([&](AssetId, const Asset& a) {
+            ImageSequenceSpec sequence;
+            if (a.kind != AssetKind::Video || !decode_image_sequence(a.sourcePath, sequence)) return;
+            const usize index = sequenceNames.size();
+            std::string folder = safe_file_name(sequence.prefix.empty() ? std::string("sequencia") : sequence.prefix + "sequencia");
+            sequenceNames.push_back(std::move(folder));
+            for (i64 number : sequence.present_numbers())
+                sequenceFrames.emplace(sequence_frame_key(sequence, number), std::make_pair(index, sequence.file_name(number)));
+        });
     }
+    std::vector<std::string> sequenceDirs(sequenceNames.size());
 
     std::vector<std::pair<std::string, std::string>> relink;
     if (!mediaLines.empty()) {
@@ -660,7 +720,21 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
             name = name.substr(4);
             if (name.empty()) name = "media";
         }
-        const std::string dest = free_path(fs::u8path(mediaDir), name);
+        std::string dest;
+        if (const auto frame = sequenceFrames.find(stored); frame != sequenceFrames.end()) {
+            std::string& folder = sequenceDirs[frame->second.first];
+            if (folder.empty()) {
+                folder = free_path(fs::u8path(mediaDir), sequenceNames[frame->second.first]);
+                if (folder.empty() || !fs::create_directories(fs::u8path(folder), ec) || ec) {
+                    rollback();
+                    return Status{Errc::IoError, "pasta da sequencia"};
+                }
+                createdSequenceDirs.push_back(folder);
+            }
+            dest = free_path(fs::u8path(folder), frame->second.second);
+        } else {
+            dest = free_path(fs::u8path(mediaDir), name);
+        }
         if (dest.empty()) { rollback(); return Status{Errc::AlreadyExists, "nenhum nome de midia disponivel"}; }
         if (const Status s = extract(f.f, *e, dest); !s.ok()) {
             fileio::remove_file(dest);
@@ -681,7 +755,7 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
 }
 
 Status extract_model_archive(const std::string& archivePath, const std::string& directory,
-                             std::vector<std::string>& files) noexcept {
+                             std::vector<std::string>& files, u64 diskLimit) noexcept {
     files.clear();
     if (directory.empty()) return Errc::InvalidArgument;
     const fs::path root = fs::u8path(directory);
@@ -694,7 +768,6 @@ Status extract_model_archive(const std::string& archivePath, const std::string& 
     // Plan all names and costs before creating anything. Extract one file at a
     // time; stored entries stream, compressed entries have a bounded scratch peak.
     constexpr u64 scratchLimit = kAddressSpace32 ? 64ull << 20 : 256ull << 20;
-    constexpr u64 diskLimit = 512ull << 20;
     u64 total = 0;
     std::vector<std::pair<const ZipEntry*, fs::path>> plan;
     std::set<std::string> destinations;

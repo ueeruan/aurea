@@ -28,9 +28,65 @@ inline f32 sample(const u8* plane, u32 stride, u32 x, u32 y, bool tenBit, u32 pi
     return static_cast<f32>(plane[static_cast<usize>(y) * stride + static_cast<usize>(x) * pixelStride + component]) / 255.0f;
 }
 
+f32 half_to_f32(u16 v) noexcept {
+    const u32 sign = (v >> 15) & 1u, exp = (v >> 10) & 31u, man = v & 1023u;
+    f32 f;
+    if (exp == 0) f = std::ldexp(static_cast<f32>(man), -24);
+    else if (exp == 31) f = man ? 0.0f : 65504.0f;
+    else f = std::ldexp(static_cast<f32>(man | 1024u), static_cast<int>(exp) - 25);
+    return sign ? -f : f;
+}
+
+f32 linear_to_srgb(f32 v) noexcept {
+    v = std::clamp(v, 0.0f, 1.0f);
+    return v <= 0.0031308f ? v * 12.92f : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
+}
+
+/// Quadro RGBA da CPU (sequência de imagens): alfa reto ou pré-multiplicado,
+/// 8 bits sRGB ou meia precisão (sRGB ou linear). O transparente aparece sobre
+/// um xadrez cinza, como nos editores — a miniatura em si é opaca.
+bool rgba_frame_to_thumbnail(const DecodedFrame& f, u32 height, ThumbnailService::Image& out) {
+    const bool half = f.format == PixelFormat::RGBA16F;
+    const u32 vw = f.visibleWidth ? f.visibleWidth : f.width;
+    const u32 vh = f.visibleHeight ? f.visibleHeight : f.height;
+    if (static_cast<u64>(f.cropLeft) + vw > f.width || static_cast<u64>(f.cropTop) + vh > f.height || !vw || !vh
+        || f.strides[0] < static_cast<u64>(f.width) * (half ? 8u : 4u)) return false;
+    const f64 width = std::max(1.0, std::round(static_cast<f64>(height) * vw / vh));
+    if (width > 4096 || width * height > 4.0 * 1024 * 1024) return false;
+    out.height = height;
+    out.width = static_cast<u32>(width);
+    out.rgba.assign(static_cast<usize>(out.width) * out.height * 4, 255);
+    const bool linear = f.color.transfer == TransferFunction::Linear;
+    for (u32 oy = 0; oy < out.height; ++oy) {
+        const u32 sy = std::min(f.height - 1, f.cropTop + static_cast<u32>((oy + 0.5f) * static_cast<f32>(vh) / static_cast<f32>(out.height)));
+        for (u32 ox = 0; ox < out.width; ++ox) {
+            const u32 sx = std::min(f.width - 1, f.cropLeft + static_cast<u32>((ox + 0.5f) * static_cast<f32>(vw) / static_cast<f32>(out.width)));
+            f32 c[4];
+            if (half) {
+                const u16* p = reinterpret_cast<const u16*>(f.planes[0] + static_cast<usize>(sy) * f.strides[0]) + static_cast<usize>(sx) * 4;
+                for (u32 i = 0; i < 4; ++i) c[i] = half_to_f32(p[i]);
+            } else {
+                const u8* p = f.planes[0] + static_cast<usize>(sy) * f.strides[0] + static_cast<usize>(sx) * 4;
+                for (u32 i = 0; i < 4; ++i) c[i] = static_cast<f32>(p[i]) / 255.0f;
+            }
+            f32 a = f.alpha == FrameAlpha::Opaque ? 1.0f : std::clamp(c[3], 0.0f, 1.0f);
+            if (f.alpha == FrameAlpha::Premultiplied && a > 1e-6f) for (u32 i = 0; i < 3; ++i) c[i] /= a;
+            if (linear) for (u32 i = 0; i < 3; ++i) c[i] = linear_to_srgb(c[i]);
+            const f32 checker = ((ox / 6u + oy / 6u) & 1u) ? 0.42f : 0.28f;
+            u8* px = out.rgba.data() + (static_cast<usize>(oy) * out.width + ox) * 4;
+            for (u32 i = 0; i < 3; ++i) px[i] = to_u8(c[i] * a + checker * (1.0f - a));
+            px[3] = 255;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 bool frame_to_thumbnail(const DecodedFrame& f, u32 height, ThumbnailService::Image& out) {
+    if ((f.format == PixelFormat::RGBA8 || f.format == PixelFormat::RGBA16F) && f.planeCount >= 1 && f.planes[0]
+        && f.width && f.height && height && height <= 4096 && f.width <= 65536 && f.height <= 65536)
+        return rgba_frame_to_thumbnail(f, height, out);
     if (f.planeCount < 2 || !f.planes[0] || !f.planes[1] || f.width == 0 || f.height == 0 || height == 0
         || height > 4096 || f.width > 65536 || f.height > 65536) return false;
     const bool threePlane = f.format == PixelFormat::YUV420P;

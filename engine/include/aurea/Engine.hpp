@@ -46,6 +46,7 @@
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/expr/Expression.hpp"
 #include "aurea/jobs/JobSystem.hpp"
+#include "aurea/media/ImageSequence.hpp"
 #include "aurea/media/MediaManager.hpp"
 #include "aurea/media/ThumbnailService.hpp"
 #include "aurea/memory/MemoryManager.hpp"
@@ -313,6 +314,21 @@ struct VideoImport {
     std::string displayName;
 };
 
+/// Pedido de importação de SEQUÊNCIA DE IMAGENS (ImageSequence.hpp). Os
+/// caminhos são arquivos locais (o Android copia o que vem de `content://`
+/// para o armazenamento do app antes de chamar).
+struct ImageSequenceImport {
+    /// Os quadros (qualquer ordem); OU um quadro só (o motor acha os irmãos na
+    /// pasta); OU uma pasta; OU um .zip de imagens (extraído em
+    /// Documentos/Media/sequences/<hash>/ — inclusive o .zip da sequência PNG
+    /// que o próprio app exporta).
+    std::vector<std::string> paths;
+    f64 fps = 0.0;                                         ///< 0 = o sugerido pela sondagem
+    SequenceAlphaMode alpha = SequenceAlphaMode::Auto;     ///< Auto: PNG/TGA reto, EXR pré-multiplicado, sem canal = opaco
+    SequenceColorMode color = SequenceColorMode::Auto;     ///< Auto: EXR linear, o resto sRGB
+    std::string displayName;                               ///< vazio = o padrão ("render_####.png")
+};
+
 class Engine {
 public:
     Engine();
@@ -453,6 +469,15 @@ public:
     /// topo, a partir do início. Sendo o primeiro conteúdo, a composição adota
     /// a duração do som.
     [[nodiscard]] Result<u64> import_audio(const VideoImport& request) noexcept;
+    /// Sequência de imagens (EngineImageSequence.cpp): acha o padrão
+    /// (prefixo, dígitos, sufixo), a numeração, os quadros ausentes, tamanho,
+    /// alfa, profundidade e o fps sugerido. Não muda o projeto. Um .zip é
+    /// extraído aqui (a importação seguinte reaproveita a pasta).
+    [[nodiscard]] Result<ImageSequenceProbe> probe_image_sequence(const std::vector<std::string>& paths) noexcept;
+    /// Cria o asset (AssetKind::Video com a receita "aurea-seq:") e a camada,
+    /// do mesmo jeito que `import_video` (no topo, no cabeçote; no modo Edição,
+    /// no fim da linha magnética). Duração = quadros / fps. Devolve o id da camada.
+    [[nodiscard]] Result<u64> import_image_sequence(const ImageSequenceImport& request) noexcept;
     /// "Substituir mídia" (EngineMedia.cpp): troca a fonte da camada de vídeo
     /// ou imagem por outro vídeo/foto, mantendo transform, keyframes, efeitos,
     /// máscaras e tempo. A mídia nova ocupa a MESMA caixa na tela (cabe dentro
@@ -2067,6 +2092,9 @@ private:
     u64                gpuGeneration_ = 0; ///< under renderMutex_; survives backend/device recreation
     bool               gpuRecoveryPending_ = false; ///< renderMutex_; failed rebuild remains retryable
     Renderer           renderer_;
+    /// Embrulha a fábrica da plataforma (sequência de imagens no motor). Antes
+    /// de media_/thumbs_/audio_: eles usam a fábrica até serem destruídos.
+    ImageSequenceFactory sequenceFactory_;
     MediaManager       media_;
     ThumbnailService   thumbs_;
     PlaybackController playback_;
@@ -2149,6 +2177,12 @@ private:
     [[nodiscard]] u32 caption_count_locked(const Composition& comp, u64 sourceLayer) const noexcept;
     void migrate_echo_to_effect() noexcept;
     [[nodiscard]] std::string store_asset_path(const std::string& absolute) const;
+    /// Arquivos de entrada da sequência: pastas listadas, um quadro vira os
+    /// irmãos da pasta, um .zip é extraído (EngineImageSequence.cpp).
+    [[nodiscard]] Status collect_sequence_inputs(const std::vector<std::string>& paths, std::vector<std::string>& files,
+                                                 std::string& preferred, bool& fromArchive) noexcept;
+    [[nodiscard]] Result<ImageSequenceProbe> probe_sequence_files(const std::vector<std::string>& paths,
+                                                                  ImageSequenceSpec& spec) noexcept;
 
     LayerId rawPlaybackLayer_{};
     SceneEditorView sceneEditor_{}; ///< modelMutex protected, never serialized

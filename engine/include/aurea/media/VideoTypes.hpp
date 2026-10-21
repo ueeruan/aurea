@@ -28,6 +28,11 @@ enum class ColorPrimaries : u8 { BT709 = 0, BT2020 = 1, P3 = 2, BT601 = 3 };
 /// Matriz Y'CbCr → R'G'B'.
 enum class YCbCrMatrix : u8 { BT601 = 0, BT709, BT2020 };
 
+/// Alfa de um quadro RGBA na CPU. Vídeo é sempre opaco (o caminho de sempre
+/// força alfa 1); a sequência de imagens (ImageSequence.hpp) traz o alfa do
+/// arquivo, reto (PNG) ou pré-multiplicado (EXR).
+enum class FrameAlpha : u8 { Opaque = 0, Straight = 1, Premultiplied = 2 };
+
 struct VideoColorInfo {
     YCbCrMatrix      matrix = YCbCrMatrix::BT709;
     bool             fullRange = false;
@@ -132,6 +137,8 @@ public:
     u32 rotation = 0;
     PixelFormat format = PixelFormat::Opaque;
     VideoColorInfo color{};
+    /// RGBA8/RGBA16F da CPU: como ler o canal alfa. Opaque = vídeo comum.
+    FrameAlpha alpha = FrameAlpha::Opaque;
 
     /// Caminho zero-copy: AHardwareBuffer* (Android) / CVPixelBufferRef (iOS).
     void* hardwareBuffer = nullptr;

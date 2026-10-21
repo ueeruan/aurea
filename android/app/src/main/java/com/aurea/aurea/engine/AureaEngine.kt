@@ -522,6 +522,26 @@ class AureaEngine private constructor() {
     fun importAudio(source: String, displayName: String): Long =
         nativeWork.run(-5L) { nativeImportAudio(nativeHandle, source, displayName) }
 
+    /**
+     * Sequência de imagens (PNG/JPG/TGA/BMP/EXR numerados, ou um .zip deles): sondagem.
+     * `absolutePaths` = arquivos JÁ copiados para o armazenamento do app (os quadros,
+     * um quadro só, a pasta ou o .zip). Devolve o JSON do motor:
+     * `{"ok":true,"pattern","directory","first","last","frameCount","presentCount",
+     * "missingCount","missing":[…],"width","height","bitDepth","hasAlpha","linear",
+     * "suggestedFps","suggestedAlphaMode","suggestedColorMode",…}` ou
+     * `{"ok":false,"error":<Errc>,"detail"}`. Nulo = motor encerrando. Fora da thread da UI.
+     */
+    fun probeImageSequence(absolutePaths: Array<String>): String? =
+        nativeWork.run<String?>(null) { nativeProbeImageSequence(nativeHandle, absolutePaths) }
+
+    /**
+     * Importa a sequência como clipe de vídeo. `fps` 0 = o sugerido; `alphaMode`
+     * 0 auto, 1 reto, 2 pré-multiplicado, 3 ignorar; `colorMode` 0 auto, 1 sRGB,
+     * 2 linear. Id da camada ≥ 0 ou −Errc.
+     */
+    fun importImageSequence(absolutePaths: Array<String>, fps: Double, alphaMode: Int, colorMode: Int): Long =
+        nativeWork.run(-5L) { nativeImportImageSequence(nativeHandle, absolutePaths, fps, alphaMode, colorMode) }
+
     /** O som do vídeo vira camada própria; o vídeo fica mudo. Id ≥ 0 ou −Errc. */
     fun extractAudio(layer: Long): Long = nativeExtractAudio(nativeHandle, layer)
 
@@ -1305,6 +1325,10 @@ class AureaEngine private constructor() {
     private external fun nativeClearSelection(handle: Long)
     private external fun nativeImportVideo(handle: Long, source: String, name: String): Long
     private external fun nativeImportAudio(handle: Long, source: String, name: String): Long
+    private external fun nativeProbeImageSequence(handle: Long, absolutePaths: Array<String>): String?
+    private external fun nativeImportImageSequence(
+        handle: Long, absolutePaths: Array<String>, fps: Double, alphaMode: Int, colorMode: Int,
+    ): Long
     private external fun nativeExtractAudio(handle: Long, layer: Long): Long
     private external fun nativeAddShape(handle: Long, preset: Int): Long
     private external fun nativeSetSceneEditor(handle: Long, enabled: Boolean, yaw: Float, pitch: Float, distance: Float)

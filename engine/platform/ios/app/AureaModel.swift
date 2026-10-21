@@ -798,7 +798,8 @@ final class AureaModel: ObservableObject {
     }
 
     enum Screen { case home, editor, upscale }
-    enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, clipEdit, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo }
+    /// `filters`/`adjust` (0.3.0): as telas próprias do modo de edição (EditModeView.swift).
+    enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, clipEdit, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo, filters, adjust }
     @Published var curveProperty: UInt32 = 0
     @Published var timelineFocus: [TimelineTrack]? = nil
     /// Keyframes escolhidos na timeline (várias trilhas de UMA camada; ações em

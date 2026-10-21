@@ -754,6 +754,10 @@ struct ContextSheet: View {
                 VectorPanel()
             case .aiVideo:
                 AiVideoPanel()
+            case .filters:
+                EditFiltersView()
+            case .adjust:
+                EditAdjustView()
             }
             }
         }

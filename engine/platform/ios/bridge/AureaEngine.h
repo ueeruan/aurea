@@ -577,6 +577,18 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSString*>*)effectPresets:(uint32_t)typeId NS_SWIFT_NAME(effectPresets(_:));
 /// Aplica o preset (todos os valores, um passo de desfazer).
 - (BOOL)applyEffectPreset:(uint32_t)preset effect:(uint32_t)effectId forLayer:(long long)layerId NS_SWIFT_NAME(applyEffectPreset(_:effect:forLayer:));
+/// Correção de cor do modo de edição (0.3.0, EngineColor.cpp). Papel 1 = Filtro, 2 = Ajustar.
+/// Devolve o id do efeito; -1 = falhou.
+- (int32_t)ensureColorGradeForLayer:(long long)layerId role:(uint32_t)role NS_SWIFT_NAME(ensureColorGrade(forLayer:role:));
+- (BOOL)applyColorLook:(int32_t)look effect:(uint32_t)effectId forLayer:(long long)layerId NS_SWIFT_NAME(applyColorLook(_:effect:forLayer:));
+- (BOOL)resetColorGradeEffect:(uint32_t)effectId forLayer:(long long)layerId NS_SWIFT_NAME(resetColorGrade(effect:forLayer:));
+/// Miniaturas dos looks sobre o quadro do cabeçote (a 0 é o quadro sem look), como
+/// as prévias de efeito: bytes RGBA8 sRGB em sequência em @"data", com @"width",
+/// @"height" e @"count". nil = ocupado.
+- (nullable NSDictionary<NSString *, id> *)colorLookThumbnails:(uint32_t)maxDim NS_SWIFT_NAME(colorLookThumbnails(_:));
+/// Scopes: @"width", @"height", @"columns", @"histogram" (1024 NSNumber), @"waveform",
+/// @"parade", @"vectorscope" (NSData de uint16). nil = sem quadro.
+- (nullable NSDictionary<NSString *, id> *)colorScopes:(uint32_t)maxDim NS_SWIFT_NAME(colorScopes(_:));
 /// Roto Brush do Rotobrush IA: pontos em px da composição (x,y intercalados).
 - (BOOL)rotoAddStroke:(NSArray<NSNumber *> *)xy background:(BOOL)background radius:(float)radius effect:(uint32_t)effectId forLayer:(long long)layerId NS_SWIFT_NAME(rotoAddStroke(_:background:radius:effect:forLayer:));
 - (BOOL)rotoUndoStrokeForEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(rotoUndoStroke(effect:layer:));

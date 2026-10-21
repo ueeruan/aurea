@@ -3733,6 +3733,41 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     if (auto* e = self.engine) return e->apply_effect_preset(static_cast<aurea::u64>(layerId), effectId, preset) ? YES : NO;
     return NO;
 }
+- (int32_t)ensureColorGradeForLayer:(long long)layerId role:(uint32_t)role {
+    auto* e = self.engine;
+    if (!e) return -1;
+    const aurea::u32 id = e->ensure_color_grade(static_cast<aurea::u64>(layerId), role);
+    return id == aurea::kInvalidIndex ? -1 : static_cast<int32_t>(id);
+}
+- (BOOL)applyColorLook:(int32_t)look effect:(uint32_t)effectId forLayer:(long long)layerId {
+    if (auto* e = self.engine) return e->apply_color_look(static_cast<aurea::u64>(layerId), effectId, look) ? YES : NO;
+    return NO;
+}
+- (BOOL)resetColorGradeEffect:(uint32_t)effectId forLayer:(long long)layerId {
+    if (auto* e = self.engine) return e->reset_color_grade(static_cast<aurea::u64>(layerId), effectId) ? YES : NO;
+    return NO;
+}
+- (nullable NSDictionary<NSString *, id> *)colorLookThumbnails:(uint32_t)maxDim {
+    auto* e = self.engine;
+    if (!e) return nil;
+    std::vector<aurea::u8> rgba;
+    aurea::u32 w = 0, h = 0, n = 0;
+    if (!e->render_color_looks(maxDim, rgba, w, h, n).ok() || !w || !h || !n) return nil;
+    return @{@"width": @(w), @"height": @(h), @"count": @(n),
+             @"data": [NSData dataWithBytes:rgba.data() length:rgba.size()]};
+}
+- (nullable NSDictionary<NSString *, id> *)colorScopes:(uint32_t)maxDim {
+    auto* e = self.engine;
+    if (!e) return nil;
+    aurea::Engine::Scopes s;
+    if (!e->compute_scopes(maxDim, s).ok()) return nil;
+    NSMutableArray<NSNumber *>* hist = [NSMutableArray arrayWithCapacity:s.histogram.size()];
+    for (aurea::u32 v : s.histogram) [hist addObject:@(v)];
+    return @{@"width": @(s.width), @"height": @(s.height), @"columns": @(s.columns), @"histogram": hist,
+             @"waveform": [NSData dataWithBytes:s.waveform.data() length:s.waveform.size() * 2],
+             @"parade": [NSData dataWithBytes:s.parade.data() length:s.parade.size() * 2],
+             @"vectorscope": [NSData dataWithBytes:s.vectorscope.data() length:s.vectorscope.size() * 2]};
+}
 - (BOOL)setGroupCameraPassThrough:(BOOL)on forLayer:(long long)layerId {
     if (auto* e = self.engine) return e->set_group_camera_pass_through(static_cast<aurea::u64>(layerId), on != NO);
     return NO;

@@ -392,16 +392,27 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                     store.playhead >= it.startFrame && store.playhead < it.endFrame
             }
         }
+        /** A camada de ajuste do projeto sob o cabeçote (reaproveitada) ou uma nova. */
+        fun globalAdjustment() {
+            val existing = store.layers.lastOrNull {
+                it.adjustment && store.playhead >= it.startFrame && store.playhead < it.endFrame
+            }
+            if (existing != null) store.select(existing.id) else store.addAdjustmentLayer()
+        }
         fun globalEffect() {
-            // Efeito/filtro/ajuste do projeto: uma camada de ajuste por cima, aberta
-            // no editor de efeitos. Uma camada de ajuste VAZIA sob o cabeçote é
-            // reaproveitada: cancelar e tocar de novo não empilha "Ajuste" vazios.
+            // 0.3.0: Efeitos, Filtros e Ajustar têm cada um a sua tela (antes os três
+            // abriam o mesmo editor). Efeito do projeto: a camada de ajuste por cima
+            // e o NAVEGADOR de efeitos direto; escolhido o efeito, a pilha abre.
             val empty = store.layers.firstOrNull {
                 it.adjustment && it.effectCount == 0 && store.playhead >= it.startFrame && store.playhead < it.endFrame
             }
             if (empty != null) store.select(empty.id) else store.addAdjustmentLayer()
-            effects()
+            if (store.playing) store.pause()
+            ui.effectsBrowser = true
         }
+        /** Filtros / Ajustar do projeto: a mesma camada de ajuste, na tela própria. */
+        fun globalColor(p: EditorPanel) { if (store.playing) store.pause(); globalAdjustment(); panel(p) }
+        fun clipColor(p: EditorPanel) { if (store.playing) store.pause(); panel(p) }
         val itemsFor: (EditDockLevel, LayerRow?) -> List<EditDockItem> = { level, clip ->
             when (level) {
                 EditDockLevel.Root -> listOf(
@@ -417,8 +428,8 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                     },
                     EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_dock_effects) { globalEffect() },
                     EditDockItem("captions", CupertinoGlyph.CaptionsBubble, R.string.edit_dock_captions) { panel(EditorPanel.Captions) },
-                    EditDockItem("filters", CupertinoGlyph.ColorFilter, R.string.edit_dock_filters) { globalEffect() },
-                    EditDockItem("adjust", CupertinoGlyph.SliderHorizontal3, R.string.edit_dock_adjust) { globalEffect() },
+                    EditDockItem("filters", CupertinoGlyph.ColorFilter, R.string.edit_dock_filters) { globalColor(EditorPanel.Filters) },
+                    EditDockItem("adjust", CupertinoGlyph.SliderHorizontal3, R.string.edit_dock_adjust) { globalColor(EditorPanel.Adjust) },
                     EditDockItem("ratio", CupertinoGlyph.Crop, R.string.edit_dock_ratio) { openSheet(store, ui, ShellSheet.ProjectSettings) },
                     EditDockItem("background", CupertinoGlyph.Paintbrush, R.string.edit_dock_background) { openSheet(store, ui, ShellSheet.ProjectSettings) },
                 )
@@ -444,6 +455,8 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                     add(EditDockItem("speed", CupertinoGlyph.Speedometer, R.string.edit_clip_speed) { panel(EditorPanel.Speed) })
                     add(EditDockItem("animations", CupertinoGlyph.WandStars, R.string.edit_clip_animations) { panel(EditorPanel.Presets) })
                     add(EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_clip_effects) { effects() })
+                    add(EditDockItem("filters", CupertinoGlyph.ColorFilter, R.string.edit_dock_filters) { clipColor(EditorPanel.Filters) })
+                    add(EditDockItem("adjust", CupertinoGlyph.SliderHorizontal3, R.string.edit_dock_adjust) { clipColor(EditorPanel.Adjust) })
                     add(EditDockItem("delete", CupertinoGlyph.Trash, R.string.edit_clip_delete) { store.deleteLayers() })
                     add(EditDockItem("mask", ShellGlyph.SquareSplit2x2, R.string.edit_clip_mask) { panel(EditorPanel.Mask) })
                     if (video) add(EditDockItem("volume", CupertinoGlyph.Speaker2, R.string.edit_clip_volume) { panel(EditorPanel.Audio) })
@@ -481,6 +494,8 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                 )
                 EditDockLevel.OtherClip -> listOf(
                     EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_clip_effects) { effects() },
+                    EditDockItem("filters", CupertinoGlyph.ColorFilter, R.string.edit_dock_filters) { clipColor(EditorPanel.Filters) },
+                    EditDockItem("adjust", CupertinoGlyph.SliderHorizontal3, R.string.edit_dock_adjust) { clipColor(EditorPanel.Adjust) },
                     EditDockItem("transform", CupertinoGlyph.Move, R.string.edit_clip_transform) { panel(EditorPanel.Transform) },
                     EditDockItem("opacity", CupertinoGlyph.CircleLefthalfFill, R.string.edit_clip_opacity) { panel(EditorPanel.Appearance) },
                     EditDockItem("mask", ShellGlyph.SquareSplit2x2, R.string.edit_clip_mask) { panel(EditorPanel.Mask) },

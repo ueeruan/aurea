@@ -692,6 +692,20 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             4: FxParamHuman(label: "fx_intensidade", decimals: 0),
             5: FxParamHuman(label: "fx_prender_nas_pontas"),
         ])),
+    // Correção de cor (0.3.0). Par do EffectsHuman.kt.
+    ("aurea.color.grade", FxEffectHuman(
+        name: "fx030_name_color_grade",
+        keywords: "correcao de cor color grade grading lumetri resolve log slog vlog logc apple log lut rodas wheels lift gamma gain hsl curvas temperatura",
+        principal: [0, 1, 2, 3, 4, 11, 12, 76],
+        params: [
+            1: FxParamHuman(label: "grade_temperature", decimals: 0),
+            2: FxParamHuman(label: "grade_tint", decimals: 0),
+            3: FxParamHuman(label: "grade_exposure", suffix: "EV", decimals: 2),
+            4: FxParamHuman(label: "grade_contrast", decimals: 0),
+            11: FxParamHuman(label: "grade_saturation", decimals: 0),
+            12: FxParamHuman(label: "grade_vibrance", decimals: 0),
+            76: FxParamHuman(label: "grade_intensity", decimals: 0),
+        ])),
     // Tempo amplo (0.3.0): o CC Wide Time do AE. Par do EffectsHuman.kt.
     ("aurea.time.wide_time", FxEffectHuman(
         name: "fx030_name_wide_time",
@@ -1889,6 +1903,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.time.warp_rgb", "fx_desc_time_warp_rgb", [.video, .preComposicao, .imagem], "rgb no tempo canais separados atraso de cor")
     put("aurea.time.slice", "fx_desc_time_slice", [.video, .preComposicao], "timeslice fatias faixas tempo slit scan helice")
     put("aurea.time.wide_time", "fx030_desc_wide_time", FxAllTargets, "wide time cc tempo amplo rastro eco borrao quadros frente tras trail")
+    put("aurea.color.grade", "fx030_desc_color_grade", FxAllTargets, "correcao de cor color grade grading lumetri resolve log lut rodas hsl curvas")
     put("aurea.time.random_edits", "fx027_desc_random_edits", [.video, .preComposicao], "edicoes aleatorias random edits cortes embaralhar jump cut")
     put("aurea.generate.aurora", "fx030_desc_aurora", FxAllTargets, "aurora boreal northern lights ceu estrelas reflexo polar 3d camera")
     put("aurea.time.motion_detect", "fx_desc_time_motion_detect", [.video], "detectar movimento diferenca quadro anterior")

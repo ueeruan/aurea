@@ -51,6 +51,8 @@ enum class EditorPanel {
     Vector,        // camada vetorial: caminhos, tinta, contorno, aparar, repetidor
     ShapeEdit,     // Frente D (7.2): editar forma — tamanho, raio, pontas; alças no palco
     AiVideo,       // Aurea AI: gerar vídeo remoto (MiniMax H3) e trazer para a timeline
+    Filters,       // 0.3.0, modo de edição: looks prontos com intensidade (ColorToolsPanels.kt)
+    Adjust,        // 0.3.0, modo de edição: ajustes de cor, HSL, curvas, rodas, scopes
 }
 
 /**
@@ -146,6 +148,8 @@ fun PanelContent(
                     EditorPanel.Mask -> MaskPanel(env)
                     EditorPanel.Vector -> VectorPanel(env)
                     EditorPanel.ShapeEdit -> ShapeEditPanel(env)
+                    EditorPanel.Filters -> FiltersPanel(env)
+                    EditorPanel.Adjust -> AdjustPanel(env)
                 }
             }
         }
@@ -195,4 +199,6 @@ internal fun panelSectionTitle(store: EditorStore, panel: EditorPanel): String =
     EditorPanel.Vector -> stringResource(R.string.panel_vetor)
     EditorPanel.ShapeEdit -> stringResource(R.string.panel_editar_forma)
     EditorPanel.AiVideo -> stringResource(R.string.panel_ai_video)
+    EditorPanel.Filters -> stringResource(R.string.grade_title_filters)
+    EditorPanel.Adjust -> stringResource(R.string.grade_title_adjust)
 }

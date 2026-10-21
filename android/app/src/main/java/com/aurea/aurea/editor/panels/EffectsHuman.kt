@@ -1334,6 +1334,20 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             22 to ParamHuman(label = R.string.fx030_follow_camera),
             23 to ParamHuman(label = R.string.fxl_quality),
         )))
+    // Correção de cor (0.3.0): o corretor completo (os painéis Filtros/Ajustar usam o mesmo efeito).
+    put("aurea.color.grade", EffectHuman(
+        name = R.string.fx030_name_color_grade,
+        keywords = "correcao de cor color grade grading lumetri resolve log slog vlog logc apple log lut rodas wheels lift gamma gain hsl curvas temperatura",
+        principal = listOf(0, 1, 2, 3, 4, 11, 12, 76),
+        params = mapOf(
+            1 to ParamHuman(label = R.string.grade_temperature, decimals = 0),
+            2 to ParamHuman(label = R.string.grade_tint, decimals = 0),
+            3 to ParamHuman(label = R.string.grade_exposure, suffix = "EV", decimals = 2),
+            4 to ParamHuman(label = R.string.grade_contrast, decimals = 0),
+            11 to ParamHuman(label = R.string.grade_saturation, decimals = 0),
+            12 to ParamHuman(label = R.string.grade_vibrance, decimals = 0),
+            76 to ParamHuman(label = R.string.grade_intensity, decimals = 0),
+        )))
     // Tempo amplo (0.3.0): o CC Wide Time do AE.
     put("aurea.time.wide_time", EffectHuman(
         name = R.string.fx030_name_wide_time,

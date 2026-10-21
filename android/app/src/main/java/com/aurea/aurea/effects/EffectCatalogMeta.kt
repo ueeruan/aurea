@@ -181,6 +181,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         listOf(EffectTarget.Video, EffectTarget.PreComposicao),
         "edicoes aleatorias random edits cortes embaralhar jump cut",
     ))
+    put("aurea.color.grade", EffectMeta(R.string.fx030_desc_color_grade, AllTargets,
+        "correcao de cor color grade grading lumetri resolve log lut rodas hsl curvas"))
     put("aurea.time.wide_time", EffectMeta(
         R.string.fx030_desc_wide_time,
         AllTargets,

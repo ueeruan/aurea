@@ -54,6 +54,8 @@ struct TopBarView: View {
         case .captions: return AureaText.t("panel_legendas")
         case .vector: return AureaText.t("panel_vetor")
         case .aiVideo: return AureaText.t("panel_ai_video")
+        case .filters: return AureaText.t("grade_title_filters")
+        case .adjust: return AureaText.t("grade_title_adjust")
         }
     }
 

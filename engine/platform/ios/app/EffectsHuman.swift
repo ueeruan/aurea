@@ -1550,7 +1550,7 @@ var fxEffectTableCount: Int { FxTable.count }
 
 /// Stable English names; localized names remain searchable aliases.
 func fxEffectDisplayName(_ typeId: UInt32, _ engineName: String) -> String {
-    guard let key = FxTableById[typeId]?.name else { return FxEnglishEffectNames[typeId] ?? engineName }
+    guard let key = FxTableById[typeId]?.name else { return FxEnglishEffectNames[typeId] ?? FxPluginTexts.name(typeId, "en") ?? engineName }
     return AureaText.english(key)
 }
 
@@ -2108,6 +2108,8 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
 /// frase leva a CATEGORIA, que é rótulo traduzido).
 func fxEffectDescription(_ typeId: UInt32, _ category: String) -> String {
     if let key = FxMetaTable[typeId]?.description { return AureaText.t(key) }
+    // Plugin (0.3.0): a descrição do plugin.json, no idioma do app.
+    if let text = FxPluginTexts.description(typeId, FxPluginTexts.appTag), !text.isEmpty { return text }
     return AureaText.t("effect_default_description", fxEffectCategoryLabel(category))
 }
 
@@ -2278,6 +2280,12 @@ private let FxUnitKeys: [String: String] = ["quadros": "fxu_frames", "px/quadro"
 func fxLocalizedParam(_ typeId: UInt32, index: Int, label: String, unit: String, options: [String]) -> (label: String, unit: String, options: [String]) {
     let entry = EffectI18nTable.entries["\(typeId)#\(index)"]
     let localizedUnit = FxUnitKeys[unit].map { AureaText.t($0) } ?? unit
+    // Plugin (0.3.0): rótulo e opções do plugin.json, no idioma do app.
+    if let decl = FxPluginTexts.param(typeId, index) {
+        let tag = FxPluginTexts.appTag
+        let pluginOptions = decl.options.count == options.count ? zip(decl.options, options).map { FxPluginTexts.pick($0.0, tag) ?? $0.1 } : options
+        return (FxPluginTexts.pick(decl.labels, tag) ?? label, localizedUnit, pluginOptions)
+    }
     guard let entry else { return (label, localizedUnit, options) }
     // Opções só pela identidade completa: se o motor mudou a lista, fica a dele.
     let localizedOptions = entry.options.count == options.count ? entry.options.map { AureaText.t($0) } : options
@@ -2306,4 +2314,68 @@ func fxLocalizedSpec(_ typeId: UInt32, _ spec: [String: Any]) -> [String: Any] {
     out["unit"] = text.unit
     out["enumLabels"] = text.options
     return out
+}
+
+// MARK: - Plugins de efeito (0.3.0, PluginTexts.kt)
+// O motor publica o nome e os parâmetros de cada plugin em pt-BR no catálogo, e
+// os textos de TODOS os idiomas do plugin.json em `pluginsJSON`. Escolha: a
+// etiqueta exata, o idioma, "*" (todos), inglês, pt-BR e o primeiro que houver.
+
+struct FxPluginParam {
+    let id: String
+    let labels: [String: String]
+    let options: [[String: String]]
+}
+
+struct FxPluginInfo: Identifiable {
+    let id: String
+    let version: String
+    let author: String
+    let kind: String
+    let effectTypeId: UInt32
+    let names: [String: String]
+    let descriptions: [String: String]
+    let ok: Bool
+    let error: String
+    let testRenderMs: Double
+    let params: [FxPluginParam]
+}
+
+enum FxPluginTexts {
+    private(set) static var plugins: [FxPluginInfo] = []
+    private static var byType: [UInt32: FxPluginInfo] = [:]
+    /// O idioma do app, na etiqueta do plugin.json ("pt-BR", "en", …).
+    static var appTag: String { AureaText.language.resolved.rawValue }
+
+    static func update(_ json: String) {
+        let rows = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] ?? []
+        func texts(_ value: Any?) -> [String: String] { (value as? [String: Any] ?? [:]).compactMapValues { $0 as? String } }
+        plugins = rows.map { o in
+            FxPluginInfo(
+                id: o["id"] as? String ?? "", version: o["version"] as? String ?? "", author: o["author"] as? String ?? "",
+                kind: o["kind"] as? String ?? "", effectTypeId: UInt32(truncatingIfNeeded: (o["effectTypeId"] as? NSNumber)?.int64Value ?? 0),
+                names: texts(o["name"]), descriptions: texts(o["description"]), ok: (o["ok"] as? NSNumber)?.boolValue ?? false,
+                error: o["error"] as? String ?? "", testRenderMs: (o["testRenderMs"] as? NSNumber)?.doubleValue ?? 0,
+                params: (o["params"] as? [[String: Any]] ?? []).map { q in
+                    FxPluginParam(id: q["id"] as? String ?? "", labels: texts(q["label"]),
+                                  options: (q["options"] as? [Any] ?? []).map { texts($0) })
+                })
+        }
+        byType = Dictionary(plugins.map { ($0.effectTypeId, $0) }, uniquingKeysWith: { _, last in last })
+    }
+
+    static func pick(_ texts: [String: String], _ tag: String) -> String? {
+        guard !texts.isEmpty else { return nil }
+        let lang = tag.split(separator: "-").first.map(String.init)?.lowercased() ?? tag
+        if let exact = texts[tag] ?? texts.first(where: { $0.key.caseInsensitiveCompare(tag) == .orderedSame })?.value { return exact }
+        if let same = texts.first(where: { ($0.key.split(separator: "-").first.map(String.init)?.lowercased() ?? "") == lang })?.value { return same }
+        return texts["*"] ?? texts["en"] ?? texts["pt-BR"] ?? texts.sorted { $0.key < $1.key }.first?.value
+    }
+
+    static func name(_ typeId: UInt32, _ tag: String) -> String? { byType[typeId].flatMap { pick($0.names, tag) } }
+    static func description(_ typeId: UInt32, _ tag: String) -> String? { byType[typeId].flatMap { pick($0.descriptions, tag) } }
+    static func param(_ typeId: UInt32, _ index: Int) -> FxPluginParam? {
+        guard let p = byType[typeId], index >= 0, index < p.params.count else { return nil }
+        return p.params[index]
+    }
 }

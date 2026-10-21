@@ -136,6 +136,8 @@ enum class EffectGroup(val id: String) {
     Text("text"),
     Audio("audio"),
     Utility("utility"),
+    /** 0.3.0: efeitos instalados por plugin (categoria "Plugins" do motor). */
+    Plugins("plugins"),
     Other("other"),
 }
 
@@ -155,6 +157,7 @@ private val GroupByCategory: Map<String, EffectGroup> = buildMap {
     listOf("tempo", "time").forEach { put(it, EffectGroup.Time) }
     listOf("texto", "text").forEach { put(it, EffectGroup.Text) }
     put("3d", EffectGroup.ThreeD)
+    put("plugins", EffectGroup.Plugins)
     listOf("audio", "som", "sound").forEach { put(it, EffectGroup.Audio) }
     listOf("utilitario", "utility", "controles de expressao", "expression controls").forEach { put(it, EffectGroup.Utility) }
 }

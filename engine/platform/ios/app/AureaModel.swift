@@ -1877,6 +1877,8 @@ final class AureaModel: ObservableObject {
         if dirty != (status.dirty != 0) { dirty = status.dirty != 0 }
         // O catálogo de efeitos é fixo na sessão: lido uma vez, não a cada revisão.
         if effectCatalog.isEmpty {
+            // Plugins (0.3.0): o motor já os carregou de Documents/Plugins; os textos por idioma vêm antes do catálogo.
+            refreshPlugins()
             effectCatalog = engine.effectCatalog().map { row in
                 EffectCatalogItem(effectClass: (row["effectClass"] as? NSNumber)?.uint32Value ?? 0, flags: (row["flags"] as? NSNumber)?.uint32Value ?? 0, typeId: (row["typeId"] as? NSNumber)?.uint32Value ?? 0,
                                   name: row["name"] as? String ?? "",
@@ -3086,6 +3088,8 @@ final class AureaModel: ObservableObject {
     @Published var modelOptimizeQuality = 1
     /// 0.3.0: o que a sondagem da sequência de imagens achou (ImageSequenceSheet), antes de "Importar".
     @Published var sequenceDraft: ImageSequenceDraft?
+    /// 0.3.0: plugins de efeito instalados (FxPluginTexts guarda os textos por idioma).
+    @Published private(set) var plugins: [FxPluginInfo] = []
 
     /// "1,2 mi" / "850 mil" — triângulos curtos para o alerta e o aviso.
     static func modelCount(_ n: Int64) -> String {
@@ -3531,6 +3535,60 @@ final class AureaModel: ObservableObject {
                 _ = self.saveProject(writeThumbnail: false)
             }
         }
+    }
+
+    // MARK: Plugins de efeito (0.3.0, EditorStore.installPlugin; docs/plugins/README.md)
+    // Pacotes .aureaplugin ou shaders ISF (.fs) que acrescentam efeitos à categoria
+    // "Plugins". O motor valida, compila no aparelho e faz um quadro de teste.
+
+    /// Relê a lista do motor (os nomes por idioma do navegador e dos cartões).
+    func refreshPlugins() {
+        FxPluginTexts.update(engine.pluginsJSON)
+        plugins = FxPluginTexts.plugins
+    }
+
+    func installPlugin(url: URL) {
+        guard !importingMedia else { return }
+        importingMedia = true; operationMessage = AureaText.t("plug_installing")
+        let native = engine
+        mediaQueue.async { [weak self] in
+            let fm = FileManager.default
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            // O id de um ISF sai do nome do arquivo: o nome original fica (só os caracteres seguros).
+            let dir = AureaPaths.caches.appendingPathComponent("plugin-install", isDirectory: true)
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            var name = url.lastPathComponent.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+            if !["fs", "aureaplugin", "zip"].contains((name as NSString).pathExtension.lowercased()) { name += ".aureaplugin" }
+            let temp = dir.appendingPathComponent(name)
+            try? fm.removeItem(at: temp)
+            var raw = "error:" + AureaText.t("msg_nao_consegui_ler_esse_arquivo")
+            if (try? fm.copyItem(at: url, to: temp)) != nil { raw = native.installPlugin(temp.path) }
+            try? fm.removeItem(at: temp)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                self.refreshPlugins()
+                // O catálogo é lido uma vez por sessão: vazio = relido na próxima revisão.
+                self.effectCatalog = []
+                self.refreshModel(force: true)
+                if raw.hasPrefix("ok:") {
+                    let id = String(raw.dropFirst(3))
+                    let shown = self.plugins.first { $0.id == id }.flatMap { FxPluginTexts.pick($0.names, FxPluginTexts.appTag) } ?? id
+                    self.toast = AureaText.t("plug_installed", shown)
+                } else {
+                    self.toast = AureaText.t("plug_failed", raw.hasPrefix("error:") ? String(raw.dropFirst(6)) : raw)
+                }
+            }
+        }
+    }
+
+    /// Projetos que usam o efeito guardam os valores; reinstalar o plugin devolve o efeito.
+    func removePlugin(id: String) {
+        guard engine.removePlugin(id) else { return }
+        refreshPlugins()
+        effectCatalog = []
+        refreshModel(force: true)
     }
 
     // MARK: Sequência de imagens (0.3.0, EditorStore.prepareImageSequence)

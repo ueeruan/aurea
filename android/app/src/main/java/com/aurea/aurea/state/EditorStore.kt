@@ -1019,6 +1019,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         deviceName = engine.deviceSummary()
                         startThermalWatch()
                         engineReady = true
+                        // Plugins (0.3.0): o motor já os carregou da pasta; os textos por idioma vêm antes do catálogo.
+                        refreshPlugins()
                         catalog = readCatalog()
                         // Abertura (Fase 8I §59–63): a foto das prévias NÃO é
                         // decodificada aqui (era JPEG + cópia de 1,6 MB no main
@@ -2318,6 +2320,62 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         input.use { i -> target.outputStream().use { o -> i.copyTo(o, 256 * 1024) } }
     }
 
+    // =========================================================================
+    // Plugins de efeito (0.3.0, docs/plugins/README.md): pacotes .aureaplugin ou
+    // shaders ISF (.fs) que acrescentam efeitos à categoria "Plugins". O motor
+    // valida, compila no aparelho e faz um quadro de teste antes de aceitar.
+    // =========================================================================
+
+    var plugins by mutableStateOf<List<com.aurea.aurea.effects.PluginTexts.Plugin>>(emptyList())
+        private set
+
+    /** Relê a lista do motor (nomes por idioma para o navegador e os cartões). */
+    fun refreshPlugins() {
+        if (!engineReady) return
+        com.aurea.aurea.effects.PluginTexts.update(engine.pluginsJson())
+        plugins = com.aurea.aurea.effects.PluginTexts.plugins
+    }
+
+    /** Instala o arquivo escolhido (cópia temporária: o motor lê caminho). Compila e testa: fora da thread da interface. */
+    fun installPlugin(uri: Uri) {
+        if (!acceptsImport() || busyMessage != null) return
+        val app = getApplication<Application>()
+        busyMessage = appText(R.string.plug_installing)
+        launchImport launch@{
+            val display = displayName(uri) ?: uri.lastPathSegment.orEmpty()
+            val result = withContext(Dispatchers.IO) {
+                val dir = File(app.cacheDir, "plugin-install").apply { mkdirs() }
+                // O id de um ISF sai do nome do arquivo: o nome original fica (só os caracteres seguros).
+                val base = File(display).name.replace(Regex("[^A-Za-z0-9._-]"), "_").ifEmpty { "plugin.aureaplugin" }
+                val ext = base.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
+                val temp = File(dir, if (ext == "fs" || ext == "aureaplugin" || ext == "zip") base else "$base.aureaplugin")
+                try { copyUri(app, uri, temp); engine.installPlugin(temp.absolutePath) } finally { temp.delete() }
+            }
+            busyMessage = null
+            refreshPlugins()
+            catalog = readCatalog()
+            specCache.clear()
+            if (result.ok) {
+                val tag = app.resources.configuration.locales[0].toLanguageTag()
+                val name = plugins.firstOrNull { it.id == result.id }?.let { com.aurea.aurea.effects.PluginTexts.pick(it.names, tag) } ?: result.id
+                showToast(appText(R.string.plug_installed, name))
+            } else {
+                errorMessage = appText(R.string.plug_failed, result.error.ifEmpty { appText(R.string.msg_nao_consegui_ler_esse_arquivo) })
+            }
+        }
+    }
+
+    /** Projetos que usam o efeito guardam os valores; reinstalar o plugin devolve o efeito. */
+    fun removePlugin(id: String) {
+        if (!engineReady) return
+        if (engine.removePlugin(id)) {
+            refreshPlugins()
+            catalog = readCatalog()
+            specCache.clear()
+            refreshNow()
+        }
+    }
+
     /** O motivo da falha (0.2.7): antes toda falha de PSD dizia a mesma coisa. */
     private fun layeredImportError(gif: Boolean, code: Long): String = when {
         gif -> appText(R.string.gif_failed)
@@ -2910,8 +2968,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // Buffers próprios da ficha do catálogo: `effectSpecs` é chamado do
     // navegador, que pode estar compondo enquanto o laço de frame usa o
     // `rowBuffer`. Compartilhar os dois seria uma corrida silenciosa.
-    private val specRows = directBuffer(64 * EffectParam.ROW_BYTES)
-    private val specBlob = directBuffer(16 * 1024)
+    private val specRows = directBuffer(MAX_EFFECT_PARAM_ROWS * EffectParam.ROW_BYTES)
+    private val specBlob = directBuffer(32 * 1024)
     private val specCache = HashMap<Int, List<EffectParam>>()
 
     /**
@@ -2928,7 +2986,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             specLocale = locale
         }
         return specCache.getOrPut(typeId) {
-            val n = engine.queryEffectSpecs(typeId, specRows, 64, specBlob)
+            val n = engine.queryEffectSpecs(typeId, specRows, MAX_EFFECT_PARAM_ROWS, specBlob)
             localizeEffectParams(res, typeId, List(max(0, n)) { EffectParam.read(specRows, it, specBlob) })
         }
     }

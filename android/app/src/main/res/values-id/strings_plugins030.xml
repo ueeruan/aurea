@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: plugins de efeito (instalar, gerenciar, como criar). -->
+<resources>
+    <string name="fxui_group_plugins">Plugin</string>
+    <string name="plug_title">Plugin efek</string>
+    <string name="plug_manage">Plugin: pasang dan kelola</string>
+    <string name="plug_install">Pasang plugin</string>
+    <string name="plug_installing">Memasang plugin (mengompilasi dan menguji di perangkat)…</string>
+    <string name="plug_installed">Plugin terpasang: %1$s. Ada di kategori Plugin pada efek.</string>
+    <string name="plug_failed">Plugin tidak terpasang: %1$s</string>
+    <string name="plug_remove">Hapus</string>
+    <string name="plug_remove_title">Hapus %1$s?</string>
+    <string name="plug_remove_body">Proyek yang memakai efek ini menyimpan nilainya dan berfungsi lagi jika plugin dipasang ulang.</string>
+    <string name="plug_empty">Belum ada plugin terpasang.</string>
+    <string name="plug_by">%1$s · versi %2$s</string>
+    <string name="plug_kind_shader">Shader GPU</string>
+    <string name="plug_kind_stack">Kombinasi efek</string>
+    <string name="plug_error">Tidak berfungsi di perangkat ini: %1$s</string>
+    <string name="plug_hint">Plugin adalah efek buatan editor lain: file .aureaplugin atau shader ISF (.fs). Setelah dipasang, ada di kategori Plugin pada penjelajah efek.</string>
+    <string name="plug_safety">Plugin hanya berjalan di GPU, tanpa akses ke file Anda. Aurea mengompilasi dan menguji setiap plugin di perangkat ini sebelum memasangnya.</string>
+    <string name="plug_help_title">Cara membuat plugin</string>
+    <string name="plug_help_body">1. Buat folder berisi plugin.json (id, nama, parameter) dan shader .frag dengan fungsi vec4 aurea_main(vec2 uv).\n2. Parameter menjadi nama di shader; aurea_source adalah gambar lapisan dan aurea.time waktunya.\n3. Untuk menggabungkan efek Aurea tanpa shader, gunakan jenis \"stack\".\n4. Kemas dengan pack_plugin.py lalu pasang di sini. Shader ISF (.fs) juga bisa langsung.\nPanduan lengkap beserta contoh ada di docs/plugins Aurea.</string>
+    <string name="plug_render_ms">Bingkai uji: %1$s md</string>
+</resources>

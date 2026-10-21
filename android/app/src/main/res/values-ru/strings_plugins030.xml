@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: plugins de efeito (instalar, gerenciar, como criar). -->
+<resources>
+    <string name="fxui_group_plugins">Плагины</string>
+    <string name="plug_title">Плагины эффектов</string>
+    <string name="plug_manage">Плагины: установка и управление</string>
+    <string name="plug_install">Установить плагин</string>
+    <string name="plug_installing">Установка плагина (компиляция и проверка на устройстве)…</string>
+    <string name="plug_installed">Плагин установлен: %1$s. Он в категории «Плагины» эффектов.</string>
+    <string name="plug_failed">Плагин не установлен: %1$s</string>
+    <string name="plug_remove">Удалить</string>
+    <string name="plug_remove_title">Удалить %1$s?</string>
+    <string name="plug_remove_body">Проекты с этим эффектом сохранят значения и снова заработают после переустановки плагина.</string>
+    <string name="plug_empty">Плагины ещё не установлены.</string>
+    <string name="plug_by">%1$s · версия %2$s</string>
+    <string name="plug_kind_shader">Шейдер на GPU</string>
+    <string name="plug_kind_stack">Комбинация эффектов</string>
+    <string name="plug_error">Не работает на этом устройстве: %1$s</string>
+    <string name="plug_hint">Плагины — это эффекты от других монтажёров: файлы .aureaplugin или шейдеры ISF (.fs). После установки они в категории «Плагины» браузера эффектов.</string>
+    <string name="plug_safety">Плагины работают только на GPU, без доступа к вашим файлам. Aurea компилирует и проверяет каждый на этом устройстве перед установкой.</string>
+    <string name="plug_help_title">Как создать плагин</string>
+    <string name="plug_help_body">1. Создайте папку с plugin.json (id, имя, параметры) и шейдером .frag с функцией vec4 aurea_main(vec2 uv).\n2. Параметры становятся именами в шейдере; aurea_source — изображение слоя, aurea.time — время.\n3. Чтобы объединить эффекты Aurea без шейдера, используйте тип \"stack\".\n4. Упакуйте через pack_plugin.py и установите здесь. Шейдер ISF (.fs) тоже подходит напрямую.\nПолное руководство с примерами — в docs/plugins Aurea.</string>
+    <string name="plug_render_ms">Тестовый кадр: %1$s мс</string>
+</resources>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: plugins de efeito (instalar, gerenciar, como criar). -->
+<resources>
+    <string name="fxui_group_plugins">الإضافات</string>
+    <string name="plug_title">إضافات التأثيرات</string>
+    <string name="plug_manage">الإضافات: التثبيت والإدارة</string>
+    <string name="plug_install">تثبيت إضافة</string>
+    <string name="plug_installing">جارٍ تثبيت الإضافة (التجميع والاختبار على الجهاز)…</string>
+    <string name="plug_installed">تم تثبيت الإضافة: %1$s. ستجدها في فئة الإضافات ضمن التأثيرات.</string>
+    <string name="plug_failed">لم تُثبَّت الإضافة: %1$s</string>
+    <string name="plug_remove">إزالة</string>
+    <string name="plug_remove_title">إزالة %1$s؟</string>
+    <string name="plug_remove_body">تحتفظ المشاريع التي تستخدم هذا التأثير بقيمها وتعمل مجددًا إذا أعدت تثبيت الإضافة.</string>
+    <string name="plug_empty">لا توجد إضافات مثبتة بعد.</string>
+    <string name="plug_by">%1$s · الإصدار %2$s</string>
+    <string name="plug_kind_shader">مُظلِّل على GPU</string>
+    <string name="plug_kind_stack">مزيج تأثيرات</string>
+    <string name="plug_error">لا تعمل على هذا الجهاز: %1$s</string>
+    <string name="plug_hint">الإضافات تأثيرات صنعها محررون آخرون: ملفات .aureaplugin أو مظلّلات ISF ‏(.fs). بعد التثبيت تجدها في فئة الإضافات في متصفح التأثيرات.</string>
+    <string name="plug_safety">تعمل الإضافات على GPU فقط، دون الوصول إلى ملفاتك. يجمّع Aurea كل إضافة ويختبرها على هذا الجهاز قبل تثبيتها.</string>
+    <string name="plug_help_title">كيف تصنع إضافة</string>
+    <string name="plug_help_body">1. أنشئ مجلدًا فيه plugin.json (المعرّف والاسم والمعاملات) ومظلّل ‎.frag بالدالة vec4 aurea_main(vec2 uv).\n2. تصبح المعاملات أسماءً في المظلّل؛ aurea_source صورة الطبقة وaurea.time الوقت.\n3. لدمج تأثيرات Aurea دون مظلّل، استخدم النوع \"stack\".\n4. اجمعها بـ pack_plugin.py ثم ثبّتها هنا. مظلّل ISF ‏(.fs) يعمل مباشرة أيضًا.\nالدليل الكامل مع الأمثلة في docs/plugins الخاص بـ Aurea.</string>
+    <string name="plug_render_ms">إطار الاختبار: %1$s مللي ثانية</string>
+</resources>

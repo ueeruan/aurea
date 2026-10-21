@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: plugins de efeito (instalar, gerenciar, como criar). -->
+<resources>
+    <string name="fxui_group_plugins">Plugins</string>
+    <string name="plug_title">Effect plugins</string>
+    <string name="plug_manage">Plugins: install and manage</string>
+    <string name="plug_install">Install plugin</string>
+    <string name="plug_installing">Installing the plugin (compiling and testing on this device)…</string>
+    <string name="plug_installed">Plugin installed: %1$s. It is in the Plugins category of effects.</string>
+    <string name="plug_failed">The plugin was not installed: %1$s</string>
+    <string name="plug_remove">Remove</string>
+    <string name="plug_remove_title">Remove %1$s?</string>
+    <string name="plug_remove_body">Projects that use this effect keep its values and work again if you reinstall the plugin.</string>
+    <string name="plug_empty">No plugins installed yet.</string>
+    <string name="plug_by">%1$s · version %2$s</string>
+    <string name="plug_kind_shader">GPU shader</string>
+    <string name="plug_kind_stack">Effect combination</string>
+    <string name="plug_error">Doesn’t work on this device: %1$s</string>
+    <string name="plug_hint">Plugins are effects made by other editors: .aureaplugin files or ISF shaders (.fs). Once installed, they are in the Plugins category of the effects browser.</string>
+    <string name="plug_safety">Plugins run only on the GPU, with no access to your files. Aurea compiles and tests each one on this device before installing it.</string>
+    <string name="plug_help_title">How to make a plugin</string>
+    <string name="plug_help_body">1. Make a folder with plugin.json (id, name, parameters) and a .frag shader with the function vec4 aurea_main(vec2 uv).\n2. Parameters become names in the shader; aurea_source is the layer image and aurea.time the time.\n3. To combine Aurea effects without a shader, use the \"stack\" kind.\n4. Pack it with pack_plugin.py and install it here. An ISF shader (.fs) also works directly.\nThe full guide, with examples, is in Aurea\'s docs/plugins.</string>
+    <string name="plug_render_ms">Test frame: %1$s ms</string>
+</resources>

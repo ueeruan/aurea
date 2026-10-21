@@ -24,7 +24,8 @@ private val UnitRes = mapOf(
 
 /** Os parâmetros de um efeito do tipo [typeId] com rótulo, opções e unidade traduzidos. */
 internal fun localizeEffectParams(res: Resources, typeId: Int, params: List<EffectParam>): List<EffectParam> =
-    params.map { p ->
+    // Plugin (0.3.0): os textos vêm do plugin.json, no idioma do app.
+    PluginTexts.localize(typeId, params, res.configuration.locales[0].toLanguageTag()) ?: params.map { p ->
         val ids = EffectI18nTable.entries[EffectI18nTable.slot(typeId, p.index)]
         val unit = UnitRes[p.unit]?.let(res::getString) ?: p.unit
         // Dica (ⓘ) e título da seção: também pela identidade (efeito + índice / ordinal).

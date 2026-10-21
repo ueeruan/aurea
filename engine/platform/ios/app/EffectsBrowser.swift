@@ -3,6 +3,7 @@
 // (destaques, recentes, ladrilhos de categoria, busca) e as ferramentas-efeito.
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 private enum EffectPickerLayout {
     static let cardMin: CGFloat = 152
@@ -285,7 +286,7 @@ enum FxEffectGroup: String, CaseIterable {
     case colorLight = "color_light", drawEdge = "draw_edge", blur, distort, procedural, threeD = "3d"
     // `repeat` é palavra reservada do Swift: o caso se chama repeatTiles, o id continua "repeat".
     case motion, repeatTiles = "repeat", matte, visibility, stylize, glitch, time, text
-    case audio, utility, other
+    case audio, utility, plugins, other
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -305,6 +306,7 @@ enum FxEffectGroup: String, CaseIterable {
         case .threeD: return AureaText.t("fxui_group_3d")
         case .audio: return AureaText.t("fxui_group_audio")
         case .utility: return AureaText.t("fxui_group_utility")
+        case .plugins: return AureaText.t("fxui_group_plugins")
         case .other: return AureaText.t("fxui_group_other")
         }
     }
@@ -324,6 +326,7 @@ enum FxEffectGroup: String, CaseIterable {
         case .audio: return CupertinoGlyph.MusicNote
         case .utility: return CupertinoGlyph.SliderHorizontal3
         case .threeD, .other: return CupertinoGlyph.WandStars
+        case .plugins: return CupertinoGlyph.SquareStack3dUp
         }
     }
 }
@@ -344,6 +347,7 @@ private let fxGroupByCategory: [String: FxEffectGroup] = {
     for c in ["tempo", "time"] { map[c] = .time }
     for c in ["texto", "text"] { map[c] = .text }
     map["3d"] = .threeD
+    map["plugins"] = .plugins
     for c in ["audio", "som", "sound"] { map[c] = .audio }
     for c in ["utilitario", "utility", "controles de expressao", "expression controls"] { map[c] = .utility }
     return map
@@ -472,6 +476,8 @@ struct EffectAddSheet: View {
     @State private var groupId: String?
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var searching: Bool
+    /// 0.3.0: plugins de efeito (instalar, ver, remover) — PluginManagerSheet.kt.
+    @State private var managingPlugins = false
 
     init(request: EffectSearchRequest, close: @escaping () -> Void) {
         _prefs = ObservedObject(wrappedValue: request.prefs)
@@ -516,9 +522,10 @@ struct EffectAddSheet: View {
                 FxBrowserHome(featured: fxFeaturedEntries(sorted), recents: fxRecentEffects(prefs.recents, sorted),
                               favorites: fxFavoriteEffects(prefs.favorites, sorted), groups: groups, prefs: prefs,
                               store: model.effectPreviews, onPick: pick, onFavorite: toggleFavorite,
-                              onGroup: { groupId = $0.id })
+                              onPlugins: { managingPlugins = true }, onGroup: { groupId = $0.id })
             }
         }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel.ignoresSafeArea())
+            .sheet(isPresented: $managingPlugins) { PluginManagerView().environmentObject(model).presentationDetents([.large]) }
     }
 
     /// ✕ (ou ‹ dentro de um grupo) · título · 🔍 — `effects.close`, `effects.back`, `effects.search`.
@@ -568,6 +575,7 @@ private struct FxBrowserHome: View {
     let store: EffectPreviewStore
     let onPick: (EffectCatalogItem) -> Void
     let onFavorite: (EffectCatalogItem) -> Void
+    let onPlugins: () -> Void
     let onGroup: (FxEffectGroup) -> Void
     @State private var quickPage = 0
 
@@ -591,6 +599,15 @@ private struct FxBrowserHome: View {
                             if start + 1 >= groups.count { Color.clear.frame(maxWidth: .infinity) }
                         }.padding(.horizontal, 16)
                     }
+                    // 0.3.0: a porta dos plugins fica sempre à vista (a categoria só aparece com um instalado).
+                    Button(action: onPlugins) {
+                        HStack(spacing: 10) {
+                            CupertinoGlyph.text(CupertinoGlyph.SquareStack3dUp, size: 20, color: AureaColors.accent)
+                            Text(AureaText.t("plug_manage")).font(.aurea(size: 14)).frame(maxWidth: .infinity, alignment: .leading)
+                            CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.muted).mirrorsInRtl(true)
+                        }.padding(.horizontal, 14).padding(.vertical, 12)
+                            .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
+                    }.buttonStyle(AureaPressStyle(shrink: 1)).padding(.horizontal, 16).accessibilityIdentifier("effects.plugins")
                 }.padding(.top, AureaDims.s2).padding(.bottom, AureaDims.s6)
             }.accessibilityIdentifier("effects.home")
         }
@@ -1323,5 +1340,77 @@ struct EffectAboutSheet: View {
         return String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), Double(value))
             .replacingOccurrences(of: "0+$", with: "", options: .regularExpression)
             .replacingOccurrences(of: "\\.$", with: "", options: .regularExpression)
+    }
+}
+
+// =============================================================================
+//  PLUGINS DE EFEITO (0.3.0, PluginManagerSheet.kt): instalar um .aureaplugin ou
+//  um shader ISF (.fs), ver o que está instalado (autor, versão, se funciona neste
+//  aparelho) e remover. O guia de criação completo mora em docs/plugins.
+// =============================================================================
+struct PluginManagerView: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var removing: FxPluginInfo?
+    @State private var help = false
+    private var tag: String { FxPluginTexts.appTag }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(AureaText.t("plug_title")).font(.aurea(size: 17, weight: .semibold))
+                Text(AureaText.t("plug_hint")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                Button {
+                    DocumentImportPicker.present(types: [UTType(filenameExtension: "aureaplugin") ?? .data, UTType(filenameExtension: "fs") ?? .data, .zip, .data]) { urls in
+                        if let url = urls?.first { model.installPlugin(url: url) }
+                    }
+                } label: {
+                    Text(AureaText.t("plug_install")).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.onAccent)
+                        .frame(maxWidth: .infinity, minHeight: 46).background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 12))
+                }.buttonStyle(.plain).disabled(model.importingMedia).accessibilityIdentifier("plugins.install")
+                if model.importingMedia { Text(model.operationMessage).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted) }
+                if model.plugins.isEmpty {
+                    Text(AureaText.t("plug_empty")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.vertical, 8)
+                }
+                ForEach(model.plugins) { p in row(p) }
+                Text(AureaText.t("plug_safety")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                Button { help.toggle() } label: {
+                    Text(AureaText.t("plug_help_title")).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.accent)
+                }.buttonStyle(.plain).padding(.top, 6).accessibilityIdentifier("plugins.help")
+                if help { Text(AureaText.t("plug_help_body")).font(.aurea(size: 13)).fixedSize(horizontal: false, vertical: true) }
+            }
+            .foregroundStyle(AureaColors.text)
+            .padding(.horizontal, 18).padding(.vertical, 16)
+        }
+        .background(AureaColors.surface.ignoresSafeArea())
+        .onAppear { model.refreshPlugins() }
+        .alert(AureaText.t("plug_remove_title", removing.flatMap { FxPluginTexts.pick($0.names, tag) } ?? removing?.id ?? ""),
+               isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+            Button(AureaText.t("plug_remove"), role: .destructive) { if let p = removing { model.removePlugin(id: p.id) }; removing = nil }
+            Button(AureaText.t("common_cancel"), role: .cancel) { removing = nil }
+        } message: {
+            Text(AureaText.t("plug_remove_body"))
+        }
+    }
+
+    private func row(_ p: FxPluginInfo) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(FxPluginTexts.pick(p.names, tag) ?? p.id).font(.aurea(size: 14, weight: .semibold))
+                Text(AureaText.t("plug_by", p.author.isEmpty ? p.id : p.author, p.version) + " · "
+                     + AureaText.t(p.kind == "stack" ? "plug_kind_stack" : "plug_kind_shader"))
+                    .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+                if let d = FxPluginTexts.pick(p.descriptions, tag), !d.isEmpty { Text(d).font(.aurea(size: 12)) }
+                if !p.ok {
+                    Text(AureaText.t("plug_error", p.error)).font(.aurea(size: 12)).foregroundStyle(AureaColors.warning)
+                } else if p.testRenderMs > 0 {
+                    Text(AureaText.t("plug_render_ms", String(format: "%.1f", p.testRenderMs))).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            Button { removing = p } label: {
+                Text(AureaText.t("plug_remove")).font(.aurea(size: 13)).foregroundStyle(AureaColors.danger)
+            }.buttonStyle(.plain).accessibilityIdentifier("plugins.remove.\(p.id)")
+        }
+        .padding(12).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier("plugins.row.\(p.id)")
     }
 }

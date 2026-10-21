@@ -451,6 +451,8 @@ class EffectMeta(
 @Composable
 fun effectDescription(typeId: Int, category: String): String =
     Table[typeId]?.let { stringResource(it.description) }
+        // Plugin (0.3.0): a descrição do plugin.json, no idioma do app.
+        ?: PluginTexts.description(typeId, androidx.compose.ui.platform.LocalConfiguration.current.locales[0].toLanguageTag())
         ?: stringResource(R.string.effect_default_description, effectCategoryLabel(category))
 
 /** Onde ele funciona. Fora da tabela, em todo lugar (é o que o motor faz). */
@@ -501,6 +503,7 @@ fun effectCategoryLabel(category: String): String = when (normalizeSearch(catego
     "controles de expressao" -> stringResource(R.string.cat_expr)
     "pattern" -> stringResource(R.string.cat_pattern)
     "audio" -> stringResource(R.string.cat_audio)
+    "plugins" -> stringResource(R.string.fxui_group_plugins)
     // Ferramentas que viraram efeito (EffectTool): categoria em pt fixa.
     "texto" -> stringResource(R.string.panel_texto)
     "rastreio" -> stringResource(R.string.panel_rastreio)
@@ -676,6 +679,7 @@ fun effectGroupLabelRes(group: EffectGroup): Int = when (group) {
     EffectGroup.ThreeD -> R.string.fxui_group_3d
     EffectGroup.Audio -> R.string.fxui_group_audio
     EffectGroup.Utility -> R.string.fxui_group_utility
+    EffectGroup.Plugins -> R.string.fxui_group_plugins
     EffectGroup.Other -> R.string.fxui_group_other
 }
 
@@ -696,4 +700,5 @@ fun effectGroupGlyph(group: EffectGroup): Char = when (group) {
     EffectGroup.Audio -> CupertinoGlyph.MusicNote
     EffectGroup.Utility -> CupertinoGlyph.SliderHorizontal3
     EffectGroup.ThreeD, EffectGroup.Other -> CupertinoGlyph.WandStars
+    EffectGroup.Plugins -> CupertinoGlyph.SquareStack3dUp
 }

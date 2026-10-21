@@ -1768,7 +1768,8 @@ internal fun effectDisplayName(typeId: Int, engineName: String): String {
 }
 
 internal fun englishEffectName(typeId: Int, engineName: String, english: android.content.res.Resources): String =
-    Table[typeId]?.name?.let { english.getString(it) } ?: EnglishEffectNames[typeId] ?: engineName
+    Table[typeId]?.name?.let { english.getString(it) } ?: EnglishEffectNames[typeId]
+        ?: com.aurea.aurea.effects.PluginTexts.name(typeId, "en") ?: engineName
 
 private val EnglishEffectNames = mapOf(
     "aurea.light.scene_flare" to "3D Flare", "aurea.color.cube_lut" to "LUT (.cube)",

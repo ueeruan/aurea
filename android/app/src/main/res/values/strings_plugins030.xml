@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: plugins de efeito (instalar, gerenciar, como criar). -->
+<resources>
+    <string name="fxui_group_plugins">Plugins</string>
+    <string name="plug_title">Plugins de efeito</string>
+    <string name="plug_manage">Plugins: instalar e gerenciar</string>
+    <string name="plug_install">Instalar plugin</string>
+    <string name="plug_installing">Instalando o plugin (compilando e testando no aparelho)…</string>
+    <string name="plug_installed">Plugin instalado: %1$s. Ele está na categoria Plugins dos efeitos.</string>
+    <string name="plug_failed">O plugin não foi instalado: %1$s</string>
+    <string name="plug_remove">Remover</string>
+    <string name="plug_remove_title">Remover %1$s?</string>
+    <string name="plug_remove_body">Projetos que usam este efeito guardam os valores e voltam a funcionar se você instalar o plugin de novo.</string>
+    <string name="plug_empty">Nenhum plugin instalado ainda.</string>
+    <string name="plug_by">%1$s · versão %2$s</string>
+    <string name="plug_kind_shader">Shader na GPU</string>
+    <string name="plug_kind_stack">Combinação de efeitos</string>
+    <string name="plug_error">Não funciona neste aparelho: %1$s</string>
+    <string name="plug_hint">Plugins são efeitos feitos por outros editores: arquivos .aureaplugin ou shaders ISF (.fs). Depois de instalados, ficam na categoria Plugins do navegador de efeitos.</string>
+    <string name="plug_safety">Plugins rodam só na GPU, sem acesso aos seus arquivos. O Aurea compila e testa cada um neste aparelho antes de instalar.</string>
+    <string name="plug_help_title">Como criar um plugin</string>
+    <string name="plug_help_body">1. Crie uma pasta com plugin.json (id, nome, parâmetros) e o shader .frag com a função vec4 aurea_main(vec2 uv).\n2. Os parâmetros viram nomes no shader; aurea_source é a imagem da camada e aurea.time o tempo.\n3. Para combinar efeitos do Aurea sem shader, use o tipo \"stack\".\n4. Empacote com pack_plugin.py e instale aqui. Um shader ISF (.fs) também entra direto.\nO guia completo, com exemplos, está em docs/plugins do Aurea.</string>
+    <string name="plug_render_ms">Quadro de teste: %1$s ms</string>
+</resources>

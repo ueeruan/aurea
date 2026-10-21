@@ -87,6 +87,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.aurea.aurea.R
@@ -174,6 +176,7 @@ private fun EffectAddSheetBody(
     val groups = remember(sorted) { groupEntries(sorted) }
     val group = groups.firstOrNull { it.first.id == groupId }
     var searching by remember { mutableStateOf(false) }
+    var managingPlugins by remember { mutableStateOf(false) }
     val recents = remember(prefs.recents, sorted) { recentEffects(prefs.recents, sorted) }
     val favorites = remember(prefs.favorites, sorted) { favoriteEffects(prefs.favorites, sorted) }
     val featured = remember(sorted) { featuredEntries(sorted) }
@@ -191,7 +194,7 @@ private fun EffectAddSheetBody(
         )
         CompositionLocalProvider(LocalEffectPreviewsOn provides prefs.previewsEnabled) {
             if (group == null) {
-                BrowserHome(store, featured, recents, favorites, groups, prefs.favorites, pick, onFavorite) { onGroup(it.id) }
+                BrowserHome(store, featured, recents, favorites, groups, prefs.favorites, pick, onFavorite, { managingPlugins = true }) { onGroup(it.id) }
             } else {
                 val (previous, next) = adjacentGroups(groups.map { it.first }, group.first)
                 GroupGrid(store, group.first, group.second, prefs.favorites, previous, next, pick, onFavorite) { onGroup(it.id) }
@@ -199,6 +202,8 @@ private fun EffectAddSheetBody(
         }
     }
     if (searching) EffectSearchSheet(store, sorted, prefs.favorites, { searching = false; pick(it) }, onFavorite, { searching = false })
+    // 0.3.0: plugins de efeito (instalar, ver, remover); o catálogo relido entra nos grupos acima.
+    if (managingPlugins) PluginManagerSheet(store) { managingPlugins = false }
 }
 
 /**
@@ -217,6 +222,7 @@ private fun BrowserHome(
     favoriteIds: Set<Int>,
     onPick: (EffectCatalogEntry) -> Unit,
     onFavorite: (EffectCatalogEntry, String) -> Unit,
+    onPlugins: () -> Unit,
     onGroup: (EffectGroup) -> Unit,
 ) {
     val screen = LocalConfiguration.current.screenWidthDp.dp
@@ -249,6 +255,20 @@ private fun BrowserHome(
                     GroupTile(g, entries, store.effectPreviews, Modifier.weight(1f)) { onGroup(g) }
                 }
                 if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+        // 0.3.0: a porta dos plugins fica sempre à vista (a categoria só aparece com um instalado).
+        item(key = "plugins") {
+            Row(
+                Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(AureaColors.Chip)
+                    .testTag("effects.plugins").tocavel(onClick = onPlugins).padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CupertinoIcon(CupertinoGlyph.SquareStack3dUp, 20.dp, AureaColors.Accent)
+                Spacer(Modifier.width(10.dp))
+                Text(stringResource(R.string.plug_manage), modifier = Modifier.weight(1f),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text)))
+                CupertinoIcon(CupertinoGlyph.ChevronRight, 14.dp, AureaColors.Muted)
             }
         }
     }

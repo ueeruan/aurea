@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: plugins de efeito (instalar, gerenciar, como criar). -->
+<resources>
+    <string name="fxui_group_plugins">प्लगइन</string>
+    <string name="plug_title">इफ़ेक्ट प्लगइन</string>
+    <string name="plug_manage">प्लगइन: इंस्टॉल और मैनेज करें</string>
+    <string name="plug_install">प्लगइन इंस्टॉल करें</string>
+    <string name="plug_installing">प्लगइन इंस्टॉल हो रहा है (डिवाइस पर कंपाइल और टेस्ट)…</string>
+    <string name="plug_installed">प्लगइन इंस्टॉल हुआ: %1$s। यह इफ़ेक्ट की प्लगइन कैटेगरी में है।</string>
+    <string name="plug_failed">प्लगइन इंस्टॉल नहीं हुआ: %1$s</string>
+    <string name="plug_remove">हटाएँ</string>
+    <string name="plug_remove_title">%1$s हटाएँ?</string>
+    <string name="plug_remove_body">इस इफ़ेक्ट वाले प्रोजेक्ट उसके मान रखते हैं और प्लगइन दोबारा इंस्टॉल करने पर फिर काम करते हैं।</string>
+    <string name="plug_empty">अभी कोई प्लगइन इंस्टॉल नहीं है।</string>
+    <string name="plug_by">%1$s · वर्ज़न %2$s</string>
+    <string name="plug_kind_shader">GPU शेडर</string>
+    <string name="plug_kind_stack">इफ़ेक्ट का संयोजन</string>
+    <string name="plug_error">इस डिवाइस पर काम नहीं करता: %1$s</string>
+    <string name="plug_hint">प्लगइन दूसरे एडिटर्स के बनाए इफ़ेक्ट हैं: .aureaplugin फ़ाइलें या ISF शेडर (.fs)। इंस्टॉल होने पर वे इफ़ेक्ट ब्राउज़र की प्लगइन कैटेगरी में मिलते हैं।</string>
+    <string name="plug_safety">प्लगइन सिर्फ़ GPU पर चलते हैं, आपकी फ़ाइलों तक पहुँच के बिना। Aurea हर एक को इंस्टॉल करने से पहले इस डिवाइस पर कंपाइल और टेस्ट करता है।</string>
+    <string name="plug_help_title">प्लगइन कैसे बनाएँ</string>
+    <string name="plug_help_body">1. plugin.json (id, नाम, पैरामीटर) और vec4 aurea_main(vec2 uv) फ़ंक्शन वाले .frag शेडर के साथ एक फ़ोल्डर बनाएँ।\n2. पैरामीटर शेडर में नाम बन जाते हैं; aurea_source लेयर की इमेज है और aurea.time समय।\n3. बिना शेडर Aurea इफ़ेक्ट जोड़ने के लिए \"stack\" टाइप इस्तेमाल करें।\n4. pack_plugin.py से पैक करें और यहाँ इंस्टॉल करें। ISF शेडर (.fs) भी सीधे चलता है।\nउदाहरणों के साथ पूरी गाइड Aurea के docs/plugins में है।</string>
+    <string name="plug_render_ms">टेस्ट फ़्रेम: %1$s ms</string>
+</resources>

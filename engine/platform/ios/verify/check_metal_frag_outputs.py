@@ -59,7 +59,11 @@ def static_audit(mrt):
     if not mrt:
         raise ValueError('no fragment shader declares location >= 1; the MRT contract lost its subject')
     tool = 'engine/tools/metal-shaders/main.cpp'
-    must(tool, 'enable_frag_output_mask', 'translator must mask outputs for the single-target variant')
+    # 0.3.0: a tradução SPIR-V → MSL mora em shaderxlate/ (a mesma do build e dos
+    # plugins no aparelho); a ferramenta pede a variante com a máscara 0x1.
+    must('engine/shaderxlate/ShaderTranslate.cpp', 'enable_frag_output_mask',
+         'translator must mask outputs for the single-target variant')
+    must(tool, '"fs_main_c0", 0x1u', 'tool must ask the shared translator for the location-0-only variant')
     must(tool, '"fs_main_c0"', 'translator must emit the fs_main_c0 entry point')
     must(tool, '.c0.metal', 'translator must write the variant to <out>.c0.metal')
     script = 'engine/tools/metal-shaders/compile_metal.cmake'

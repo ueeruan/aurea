@@ -1702,6 +1702,33 @@ public:
     /// A captura exata e a exportação mantêm a qualidade final.
     [[nodiscard]] Status capture_preview_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, u32& height) noexcept;
 
+    // --- Correção de cor no modo de edição (0.3.0, EngineColor.cpp) ---------
+    /// A "Correção de cor" da camada com o papel `role` (1 Filtro, 2 Ajustar):
+    /// a que existe ou uma nova (o Filtro antes do Ajustar). Devolve o id do
+    /// efeito; kInvalidIndex = falhou (camada travada, cheia, papel inválido).
+    u32 ensure_color_grade(u64 layerId, u32 role) noexcept;
+    /// O look `look` (índice dos presets da Correção de cor; −1 = nenhum) na
+    /// instância `effectId`: parâmetros e chaves voltam ao padrão (menos papel
+    /// e intensidade), o look é escrito e anotado. Um passo de desfazer.
+    bool apply_color_look(u64 layerId, u32 effectId, i32 look) noexcept;
+    /// Todos os parâmetros da Correção de cor ao padrão (menos papel e intensidade).
+    bool reset_color_grade(u64 layerId, u32 effectId) noexcept;
+    /// Miniaturas dos looks sobre o quadro do cabeçote: `count` = 1 + nº de
+    /// looks (a 0 é o quadro sem look), `width`×`height` RGBA8 sRGB cada, em sequência.
+    [[nodiscard]] Status render_color_looks(u32 maxDim, std::vector<u8>& out, u32& width, u32& height,
+                                            u32& count) noexcept;
+    /// Scopes do quadro do cabeçote (a prévia reduzida a `maxDim`), em valores
+    /// de tela: histograma 4×256 (R, G, B, luz), forma de onda colunas×128,
+    /// parade 3×colunas×128 e vetorscópio 128×128 (Cb na horizontal, Cr na vertical).
+    struct Scopes {
+        u32 width = 0, height = 0, columns = 0;
+        std::vector<u32> histogram;
+        std::vector<u16> waveform;
+        std::vector<u16> parade;
+        std::vector<u16> vectorscope;
+    };
+    [[nodiscard]] Status compute_scopes(u32 maxDim, Scopes& out) noexcept;
+
     /// A PRÉVIA DE UM EFEITO (Fase 7.3): o efeito, com os valores padrão, sobre
     /// a cartela de demonstração. RGBA8 sRGB de alfa reto. Não depende de
     /// projeto nem de composição aberta — o navegador de efeitos existe antes

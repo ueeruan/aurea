@@ -872,6 +872,16 @@ class AureaEngine private constructor() {
     fun effectPresets(typeId: Int): List<Pair<String, String>> =
         (nativeEffectPresets(nativeHandle, typeId) ?: emptyArray()).toList().chunked(2).filter { it.size == 2 }.map { it[0] to it[1] }
     fun applyEffectPreset(layer: Long, effectId: Int, preset: Int): Boolean = nativeApplyEffectPreset(nativeHandle, layer, effectId, preset)
+    // Correção de cor no modo de edição (0.3.0): papéis 1 = Filtro, 2 = Ajustar.
+    fun ensureColorGrade(layer: Long, role: Int): Int = nativeWork.run(-1) { nativeEnsureColorGrade(nativeHandle, layer, role) }
+    fun applyColorLook(layer: Long, effectId: Int, look: Int): Boolean =
+        nativeWork.run(false) { nativeApplyColorLook(nativeHandle, layer, effectId, look) }
+    fun resetColorGrade(layer: Long, effectId: Int): Boolean = nativeWork.run(false) { nativeResetColorGrade(nativeHandle, layer, effectId) }
+    /** Miniaturas dos looks em [out]; [size] = largura, altura, quantidade. */
+    fun renderColorLooks(maxDim: Int, out: java.nio.ByteBuffer, size: IntArray): Boolean =
+        nativeRenderColorLooks(nativeHandle, maxDim, out, size)
+    fun computeScopes(maxDim: Int, histogram: IntArray, waveform: ShortArray, parade: ShortArray, vectorscope: ShortArray,
+                      size: IntArray): Boolean = nativeComputeScopes(nativeHandle, maxDim, histogram, waveform, parade, vectorscope, size)
     // Roto Brush do Rotobrush IA: pontos em px da composição (x,y intercalados).
     fun rotoAddStroke(layer: Long, effectId: Int, background: Boolean, radius: Float, xy: FloatArray): Boolean =
         nativeRotoAddStroke(nativeHandle, layer, effectId, background, radius, xy)
@@ -1396,6 +1406,12 @@ class AureaEngine private constructor() {
     private external fun nativeQueryAdjustmentTargets(handle: Long, layer: Long): LongArray?
     private external fun nativeEffectPresets(handle: Long, typeId: Int): Array<String>?
     private external fun nativeApplyEffectPreset(handle: Long, layer: Long, effectId: Int, preset: Int): Boolean
+    private external fun nativeEnsureColorGrade(handle: Long, layer: Long, role: Int): Int
+    private external fun nativeApplyColorLook(handle: Long, layer: Long, effectId: Int, look: Int): Boolean
+    private external fun nativeResetColorGrade(handle: Long, layer: Long, effectId: Int): Boolean
+    private external fun nativeRenderColorLooks(handle: Long, maxDim: Int, out: java.nio.ByteBuffer, size: IntArray): Boolean
+    private external fun nativeComputeScopes(handle: Long, maxDim: Int, histogram: IntArray, waveform: ShortArray,
+                                             parade: ShortArray, vectorscope: ShortArray, size: IntArray): Boolean
     private external fun nativeRotoAddStroke(handle: Long, layer: Long, effectId: Int, background: Boolean, radius: Float, xy: FloatArray): Boolean
     private external fun nativeRotoUndoStroke(handle: Long, layer: Long, effectId: Int): Boolean
     private external fun nativeRotoPropagate(handle: Long, layer: Long, effectId: Int): Boolean

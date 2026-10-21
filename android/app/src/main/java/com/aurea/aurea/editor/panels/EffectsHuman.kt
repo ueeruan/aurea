@@ -667,8 +667,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.stylize.pixel_sort",
         EffectHuman(
             name = R.string.fx_name_pixel_sort,
-            keywords = "pixel sort ordenar pixels derreter listras glitch sort",
-            principal = listOf(0, 1, 2, 4),
+            keywords = "pixel sort ordenar pixels derreter listras glitch sort angulo radial intervalo",
+            principal = listOf(0, 1, 2, 4, 10),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_limiar_baixo, decimals = 0),
                 1 to ParamHuman(label = R.string.fx_limiar_alto, decimals = 0),
@@ -677,8 +677,11 @@ private val Table: Map<Int, EffectHuman> = buildMap {
                 4 to ParamHuman(label = R.string.fx_direcao),
                 5 to ParamHuman(label = R.string.fx_sentido_inverso),
                 6 to ParamHuman(label = R.string.fx_ordenar),
+                7 to ParamHuman(label = R.string.fxl_seed, decimals = 0),
                 8 to ParamHuman(label = R.string.fx_faixa_tom),
                 9 to ParamHuman(label = R.string.fx_passo, suffix = "px", decimals = 0),
+                10 to ParamHuman(label = R.string.fx_angulo, suffix = "°", decimals = 1),
+                11 to ParamHuman(label = R.string.fx_centro),
             ),
         ),
     )
@@ -1300,10 +1303,10 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             14 to ParamHuman(label = R.string.fx_mistura_camada),
             15 to ParamHuman(label = R.string.fx_preencher_caixa),
         )))
-    // Aurora (Gerar, 0.2.7): os controles na ordem de um gerador de aurora do AE.
+    // Aurora (3D desde a 0.3.0): os controles na ordem de um gerador de aurora do AE.
     put("aurea.generate.aurora", EffectHuman(
         name = R.string.fx027_name_aurora,
-        keywords = "aurora boreal northern lights ceu estrelas noite reflexo agua polar crates",
+        keywords = "aurora boreal northern lights ceu estrelas noite reflexo agua polar crates 3d camera",
         principal = listOf(1, 3, 4, 8, 9, 12),
         params = mapOf(
             0 to ParamHuman(label = R.string.fxs_distortion, decimals = 1),
@@ -1328,6 +1331,19 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             19 to ParamHuman(label = R.string.fxl_field_of_view, suffix = "°", decimals = 0),
             20 to ParamHuman(label = R.string.fx027_sky_height, decimals = 0),
             21 to ParamHuman(label = R.string.fxl_opacity, decimals = 0),
+            22 to ParamHuman(label = R.string.fx030_follow_camera),
+            23 to ParamHuman(label = R.string.fxl_quality),
+        )))
+    // Tempo amplo (0.3.0): o CC Wide Time do AE.
+    put("aurea.time.wide_time", EffectHuman(
+        name = R.string.fx030_name_wide_time,
+        keywords = "wide time cc tempo amplo rastro eco borrao quadros frente tras echo time blend trail edit",
+        principal = listOf(0, 1, 2, 3),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx030_forward_steps, decimals = 0),
+            1 to ParamHuman(label = R.string.fx030_backward_steps, decimals = 0),
+            2 to ParamHuman(label = R.string.fx030_native_motion_blur),
+            3 to ParamHuman(label = R.string.fx030_layer_motion),
         )))
     put("aurea.generate.gradient_ramp", EffectHuman(
         name = R.string.fx_name_gradient_ramp,

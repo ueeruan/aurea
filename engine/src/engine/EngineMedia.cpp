@@ -41,15 +41,20 @@ Status Engine::import_color_lut(u64 layerId, u32 effectId, const char* path) noe
     auto parsed = read_color_table(path);
     if (!parsed.ok()) return parsed.status();
     const u32 type = effect_type_id(palette ? "aurea.color.palettize" : effect_keys::kCubeLut);
+    const u32 gradeType = effect_type_id(effect_keys::kColorGrade);
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return Errc::InvalidState;
     auto effect = std::find_if(layer->effects.begin(), layer->effects.end(), [&](const EffectInstance& e) {
-        return e.id == effectId && e.type == type;
+        return e.id == effectId && (e.type == type || (!palette && e.type == gradeType));
     });
-    if (effect == layer->effects.end() || effect->params.size() < (palette ? 2u : 6u)) return Errc::NotFound;
+    // Correção de cor (0.3.0): a LUT criativa e os campos escondidos dela
+    // (tamanho, dimensões, domínio) moram no fim dos parâmetros.
+    const bool grade = effect != layer->effects.end() && effect->type == gradeType;
+    const u32 base = grade ? 70u : 0u;   // ColorGradeEffect.cpp: kLut
+    if (effect == layer->effects.end() || effect->params.size() < (palette ? 2u : base + 6u)) return Errc::NotFound;
     history_.before_mutation(*comp, project_->timeline().current(), palette ? "importar paleta" : "importar LUT");
     Asset asset; asset.kind = AssetKind::Lut;
     asset.sourcePath = store_asset_path(path);
@@ -65,12 +70,12 @@ Status Engine::import_color_lut(u64 layerId, u32 effectId, const char* path) noe
         bump_model_revision_locked();
         project_->mark_dirty(); request_render(); return OkStatus;
     }
-    effect->params[0].constant.ref = id.pack();
-    effect->params[2].constant = ParamValue::scalar(static_cast<f32>(parsed->size));
-    effect->params[3].constant = ParamValue::scalar(static_cast<f32>(parsed->dimensions));
+    effect->params[base + 0].constant.ref = id.pack();
+    effect->params[base + 2].constant = ParamValue::scalar(static_cast<f32>(parsed->size));
+    effect->params[base + 3].constant = ParamValue::scalar(static_cast<f32>(parsed->dimensions));
     const Vec3 lo = parsed->domainMin, hi = parsed->domainMax;
-    effect->params[4].constant = ParamValue::vec3(lo.x, lo.y, lo.z);
-    effect->params[5].constant = ParamValue::vec3(hi.x, hi.y, hi.z);
+    effect->params[base + 4].constant = ParamValue::vec3(lo.x, lo.y, lo.z);
+    effect->params[base + 5].constant = ParamValue::vec3(hi.x, hi.y, hi.z);
     if (cubeLuts_.size() >= 8) cubeLuts_.clear();
     cubeLuts_[id.pack()] = std::make_shared<const CubeLut>(std::move(*parsed));
     bump_model_revision_locked();

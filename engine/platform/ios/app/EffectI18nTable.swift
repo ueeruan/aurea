@@ -420,12 +420,14 @@ enum EffectI18nTable {
     aurea.stylize.pixel_sort|1|threshold_high|fx_limiar_alto|
     aurea.stylize.pixel_sort|2|length|fx_comprimento|
     aurea.stylize.pixel_sort|3|randomness|fx_aleatoriedade|
-    aurea.stylize.pixel_sort|4|direction|fx_direcao|fxo_horizontal,fxo_vertical,fxo_diagonal,fxo_radial
+    aurea.stylize.pixel_sort|4|direction|fx_direcao|fxo_horizontal,fxo_vertical,fxo_diagonal,fxo_radial,fx_angulo
     aurea.stylize.pixel_sort|5|reverse|fx_sentido_inverso|
-    aurea.stylize.pixel_sort|6|mode|fx_ordenar|fxo_brightness,afx_name_tone,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d
+    aurea.stylize.pixel_sort|6|mode|fx_ordenar|fxo_brightness,fx_matiz,fx_vermelho_c031,fx_verde_14e6,fx_azul_582d,fx_saturacao
     aurea.stylize.pixel_sort|7|seed|fxl_seed|
     aurea.stylize.pixel_sort|8|band_mode|fx_faixa_tom|
     aurea.stylize.pixel_sort|9|step|fx_passo|
+aurea.stylize.pixel_sort|10|angle|fx_angulo|
+aurea.stylize.pixel_sort|11|center|fx_centro|
     aurea.time.posterize|0|frame_rate|fx_quadros_segundo|
     aurea.time.posterize|1|hold|fx_segurar_quadro|
     aurea.time.low_fps|0|frame_rate|fx_quadros_segundo|
@@ -441,7 +443,37 @@ enum EffectI18nTable {
     aurea.time.warp_rgb|5|clamp|fx_prender_nas_pontas|
     aurea.time.remap|0|time|fx_tempo|
     aurea.time.remap|1|interpolation|fx_interpolacao_do_tempo|fxo_linear,fxo_smooth,fxo_hold,fxo_ease_in,fxo_ease_out
-    aurea.time.slice|0|direction|fxl_slice_direction|
+    aurea.time.wide_time|0|forward_steps|fx030_forward_steps|
+aurea.time.wide_time|1|backward_steps|fx030_backward_steps|
+aurea.time.wide_time|2|native_motion_blur|fx030_native_motion_blur|
+aurea.time.wide_time|3|layer_motion|fx030_layer_motion|
+aurea.time.random_edits|0|edit_length|fx027_edit_length|
+aurea.time.random_edits|1|seed|fxl_seed|
+aurea.generate.aurora|0|warp|fxs_distortion|
+aurea.generate.aurora|1|amount|fx027_amount|
+aurea.generate.aurora|2|scale|fxl_scale|
+aurea.generate.aurora|3|length|fxl_length|
+aurea.generate.aurora|4|exposure|fxl_exposure|
+aurea.generate.aurora|5|detail|fxl_detail|
+aurea.generate.aurora|6|curvature|fx3_curvatura|
+aurea.generate.aurora|7|sky_glow|fx027_sky_glow|
+aurea.generate.aurora|8|color|fxl_color|
+aurea.generate.aurora|9|secondary_color|fx027_secondary_color|
+aurea.generate.aurora|10|sky_color|fx027_sky_color|
+aurea.generate.aurora|11|time_offset|fx027_time_offset|
+aurea.generate.aurora|12|speed|fxl_speed|
+aurea.generate.aurora|13|horizon|fx027_horizon|
+aurea.generate.aurora|14|reflection|fx027_reflection|
+aurea.generate.aurora|15|ripple|fx027_ripple|
+aurea.generate.aurora|16|stars|fx027_stars|
+aurea.generate.aurora|17|tilt|fx027_tilt|
+aurea.generate.aurora|18|pan|fx027_pan|
+aurea.generate.aurora|19|fov|fxl_field_of_view|
+aurea.generate.aurora|20|sky_height|fx027_sky_height|
+aurea.generate.aurora|21|opacity|fxl_opacity|
+aurea.generate.aurora|22|follow_camera|fx030_follow_camera|
+aurea.generate.aurora|23|quality|fxl_quality|fxo_fast,fxo_normal,fxo_high
+aurea.time.slice|0|direction|fxl_slice_direction|
     aurea.time.slice|1|slices|fxl_slice_number|
     aurea.time.slice|2|frame_offset|fxl_frame_offset|
     aurea.time.slice|3|interpolate|fxl_interpolate_frames|

@@ -79,6 +79,8 @@ namespace effect_keys {
     inline constexpr const char* kColorMatrix        = "aurea.color.matrix";
     inline constexpr const char* kLevels             = "aurea.color.levels";
     inline constexpr const char* kCurves             = "aurea.color.curves";
+    /// O corretor de cor completo (0.3.0, ColorGradeEffect.cpp).
+    inline constexpr const char* kColorGrade         = "aurea.color.grade";
     inline constexpr const char* kGaussianBlur       = "aurea.blur.gaussian";
     inline constexpr const char* kSharpen            = "aurea.blur.sharpen";
     inline constexpr const char* kGlow               = "aurea.light.glow";

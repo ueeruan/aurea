@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Tempo amplo (CC Wide Time), Aurora 3D, Ordenar pixels reescrito. -->
+<resources>
+    <string name="fx030_name_wide_time">الوقت الواسع</string>
+    <string name="fx030_desc_wide_time">يمزج الإطارات التي تسبق الإطار الحالي وتليه، مثل CC Wide Time في After Effects: آثار وضبابية حركة بأسلوب الإيديت. يعمل مع الفيديو والتركيبات المسبقة وطبقات الضبط.</string>
+    <string name="fx030_forward_steps">خطوات للأمام</string>
+    <string name="fx030_backward_steps">خطوات للخلف</string>
+    <string name="fx030_native_motion_blur">ضبابية الحركة الأصلية</string>
+    <string name="fx030_layer_motion">تضمين حركة الطبقة</string>
+    <string name="fx030_follow_camera">اتباع الكاميرا ثلاثية الأبعاد</string>
+    <string name="fx030_desc_aurora">شفق قطبي ثلاثي الأبعاد في سماء مرصعة بالنجوم مع انعكاس على الماء. يتبع كاميرا التركيب. يمكن ضبط الستائر والألوان والسماء والجودة.</string>
+    <string name="fx030_desc_pixel_sort">يرتّب بكسلات كل مقطع حسب السطوع أو التدرج اللوني أو اللون أو التشبع، في الاتجاه الذي تختاره: أفقي أو عمودي أو قطري أو بزاوية أو شعاعي.</string>
+</resources>

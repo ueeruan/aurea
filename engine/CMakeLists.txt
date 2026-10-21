@@ -89,6 +89,8 @@ set(AUREA_CORE_SOURCES
     src/timeline/GridLayout.cpp
     src/effects/builtin/GridLayoutEffect.cpp
     src/effects/builtin/AuroraEffect.cpp
+    src/effects/builtin/ColorGradeEffect.cpp
+    src/engine/EngineColor.cpp
     src/project/ProjectPackage.cpp
     src/export/ImageEncode.cpp
     src/export/ExportRecovery.cpp

@@ -14381,3 +14381,5 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "ClipMaskGpu.inl"
 #include "Scene3DImageBlurGpu.inl"
 
+// Correção de cor (0.3.0).
+#include "ColorGradeTests.inl"

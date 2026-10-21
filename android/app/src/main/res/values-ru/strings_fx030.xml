@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Tempo amplo (CC Wide Time), Aurora 3D, Ordenar pixels reescrito. -->
+<resources>
+    <string name="fx030_name_wide_time">Широкое время</string>
+    <string name="fx030_desc_wide_time">Смешивает кадры до и после текущего, как CC Wide Time в After Effects: шлейфы и размытие движения в стиле эдитов. Работает с видео, прекомпозициями и корректирующими слоями.</string>
+    <string name="fx030_forward_steps">Шагов вперёд</string>
+    <string name="fx030_backward_steps">Шагов назад</string>
+    <string name="fx030_native_motion_blur">Встроенное размытие движения</string>
+    <string name="fx030_layer_motion">Учитывать движение слоя</string>
+    <string name="fx030_follow_camera">Следовать за 3D-камерой</string>
+    <string name="fx030_desc_aurora">Объёмное северное сияние на звёздном небе с отражением в воде. Следует за камерой композиции. Настраиваются шторы, цвета, небо и качество.</string>
+    <string name="fx030_desc_pixel_sort">Сортирует пиксели каждого интервала по яркости, тону, цвету или насыщенности в выбранном направлении: по горизонтали, вертикали, диагонали, под углом или радиально.</string>
+</resources>

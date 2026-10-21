@@ -533,8 +533,8 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.stylize.pixel_sort", FxEffectHuman(
         name: "fx_name_pixel_sort",
-        keywords: "pixel sort ordenar pixels derreter listras glitch sort",
-        principal: [0, 1, 2, 4],
+        keywords: "pixel sort ordenar pixels derreter listras glitch sort angulo radial intervalo",
+        principal: [0, 1, 2, 4, 10],
         params: [
             0: FxParamHuman(label: "fx_limiar_baixo", decimals: 0),
             1: FxParamHuman(label: "fx_limiar_alto", decimals: 0),
@@ -543,8 +543,11 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             4: FxParamHuman(label: "fx_direcao"),
             5: FxParamHuman(label: "fx_sentido_inverso"),
             6: FxParamHuman(label: "fx_ordenar"),
+            7: FxParamHuman(label: "fxl_seed", decimals: 0),
             8: FxParamHuman(label: "fx_faixa_tom"),
             9: FxParamHuman(label: "fx_passo", suffix: "px", decimals: 0),
+            10: FxParamHuman(label: "fx_angulo", suffix: "°", decimals: 1),
+            11: FxParamHuman(label: "fx_centro"),
         ])),
     ("aurea.stylize.film_damage", FxEffectHuman(
         name: "fx_name_film_damage",
@@ -688,6 +691,57 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             3: FxParamHuman(label: "fx_unidade"),
             4: FxParamHuman(label: "fx_intensidade", decimals: 0),
             5: FxParamHuman(label: "fx_prender_nas_pontas"),
+        ])),
+    // Tempo amplo (0.3.0): o CC Wide Time do AE. Par do EffectsHuman.kt.
+    ("aurea.time.wide_time", FxEffectHuman(
+        name: "fx030_name_wide_time",
+        keywords: "wide time cc tempo amplo rastro eco borrao quadros frente tras echo time blend trail edit",
+        principal: [0, 1, 2, 3],
+        params: [
+            0: FxParamHuman(label: "fx030_forward_steps", decimals: 0),
+            1: FxParamHuman(label: "fx030_backward_steps", decimals: 0),
+            2: FxParamHuman(label: "fx030_native_motion_blur"),
+            3: FxParamHuman(label: "fx030_layer_motion"),
+        ])),
+    // Edições aleatórias (0.2.7): trechos embaralhados pela semente.
+    ("aurea.time.random_edits", FxEffectHuman(
+        name: "fx027_name_random_edits",
+        keywords: "edicoes aleatorias random edits cortes embaralhar remontar jump cut sapphire",
+        principal: [0, 1],
+        params: [
+            0: FxParamHuman(label: "fx027_edit_length", suffix: "quadros", decimals: 0),
+            1: FxParamHuman(label: "fxl_seed", decimals: 3),
+        ])),
+    // Aurora (3D desde a 0.3.0): os controles na ordem de um gerador de aurora do AE.
+    ("aurea.generate.aurora", FxEffectHuman(
+        name: "fx027_name_aurora",
+        keywords: "aurora boreal northern lights ceu estrelas noite reflexo agua polar crates 3d camera",
+        principal: [1, 3, 4, 8, 9, 12],
+        params: [
+            0: FxParamHuman(label: "fxs_distortion", decimals: 1),
+            1: FxParamHuman(label: "fx027_amount", decimals: 0),
+            2: FxParamHuman(label: "fxl_scale", decimals: 2),
+            3: FxParamHuman(label: "fxl_length", decimals: 1),
+            4: FxParamHuman(label: "fxl_exposure", decimals: 1),
+            5: FxParamHuman(label: "fxl_detail", decimals: 1),
+            6: FxParamHuman(label: "fx3_curvatura", decimals: 2),
+            7: FxParamHuman(label: "fx027_sky_glow", decimals: 1),
+            8: FxParamHuman(label: "fxl_color"),
+            9: FxParamHuman(label: "fx027_secondary_color"),
+            10: FxParamHuman(label: "fx027_sky_color"),
+            11: FxParamHuman(label: "fx027_time_offset", suffix: "s", decimals: 2),
+            12: FxParamHuman(label: "fxl_speed", decimals: 1),
+            13: FxParamHuman(label: "fx027_horizon", decimals: 0),
+            14: FxParamHuman(label: "fx027_reflection", decimals: 0),
+            15: FxParamHuman(label: "fx027_ripple", decimals: 0),
+            16: FxParamHuman(label: "fx027_stars", decimals: 0),
+            17: FxParamHuman(label: "fx027_tilt", suffix: "°", decimals: 1),
+            18: FxParamHuman(label: "fx027_pan", suffix: "°", decimals: 1),
+            19: FxParamHuman(label: "fxl_field_of_view", suffix: "°", decimals: 0),
+            20: FxParamHuman(label: "fx027_sky_height", decimals: 0),
+            21: FxParamHuman(label: "fxl_opacity", decimals: 0),
+            22: FxParamHuman(label: "fx030_follow_camera"),
+            23: FxParamHuman(label: "fxl_quality"),
         ])),
     ("aurea.time.slice", FxEffectHuman(
         name: "fx_name_time_slice",
@@ -1820,7 +1874,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.stylize.halftone", "fx_desc_stylize_halftone")
     put("aurea.stylize.minimax", "fx_desc_stylize_minimax")
     put("aurea.stylize.omino_diffusion", "fx_desc_omino_diffusion")
-    put("aurea.stylize.pixel_sort", "fx_desc_stylize_pixel_sort")
+    put("aurea.stylize.pixel_sort", "fx030_desc_pixel_sort")
     put("aurea.stylize.film_damage", "fx_desc_stylize_film_damage")
     put("aurea.stylize.jpeg_damage", "fx_desc_stylize_jpeg_damage")
     put("aurea.stylize.holomatrix", "fx_desc_stylize_holomatrix")
@@ -1834,6 +1888,9 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.time.flow_motion_blur", "fx_desc_time_flow_motion_blur", [.video], "rsmb reelsmart desfoque de movimento vetores borrao")
     put("aurea.time.warp_rgb", "fx_desc_time_warp_rgb", [.video, .preComposicao, .imagem], "rgb no tempo canais separados atraso de cor")
     put("aurea.time.slice", "fx_desc_time_slice", [.video, .preComposicao], "timeslice fatias faixas tempo slit scan helice")
+    put("aurea.time.wide_time", "fx030_desc_wide_time", FxAllTargets, "wide time cc tempo amplo rastro eco borrao quadros frente tras trail")
+    put("aurea.time.random_edits", "fx027_desc_random_edits", [.video, .preComposicao], "edicoes aleatorias random edits cortes embaralhar jump cut")
+    put("aurea.generate.aurora", "fx030_desc_aurora", FxAllTargets, "aurora boreal northern lights ceu estrelas reflexo polar 3d camera")
     put("aurea.time.motion_detect", "fx_desc_time_motion_detect", [.video], "detectar movimento diferenca quadro anterior")
     put("aurea.stylize.crt_emulator", "fx_desc_stylize_crt_emulator", FxAllTargets, "crt tv tubo retro varredura fosforo")
     put("aurea.glitch.dissolve_shake", "fx_desc_glitch_dissolve_shake", FxAllTargets, "tremor dissolver fragmentos quebrar")

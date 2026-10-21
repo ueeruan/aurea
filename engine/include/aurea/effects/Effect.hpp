@@ -340,6 +340,9 @@ struct EffectEval {
     /// espectro do som, por exemplo) e que VIAJA até a montagem — como a LUT
     /// da curva no ColorOp. Textura persistente do renderer, fora do grafo.
     TextureHandle         aux{};
+    /// Mais recursos persistentes do planejamento, para efeitos que leem
+    /// várias tabelas (Correção de cor: curvas RGB, curvas de matiz e a LUT).
+    TextureHandle         auxExtra[2]{};
     Vec4                  auxInfo{};   ///< o que o efeito quiser anotar junto (nº de faixas...)
     f64                   auxTimeFrames = std::numeric_limits<f64>::quiet_NaN();
     i64                   foregroundSourceTimeUs = -1;

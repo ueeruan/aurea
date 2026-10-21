@@ -8075,6 +8075,16 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     return render_effect_preview_impl(effects, type, width, height, spec, outRgba);
 }
 
+Status Renderer::render_effect_preset_preview(const EffectRegistry& effects, EffectTypeId type, u32 width, u32 height,
+                                              const u8* sourceRgba, const EffectPreset* preset,
+                                              std::vector<u8>& outRgba) noexcept {
+    if (!sourceRgba || !preset) return Status{Errc::InvalidArgument, "miniatura sem fonte ou preset"};
+    PreviewFrameSpec spec;
+    spec.source = sourceRgba;
+    spec.preset = preset;
+    return render_effect_preview_impl(effects, type, width, height, spec, outRgba);
+}
+
 Status Renderer::render_effect_preview_impl(const EffectRegistry& effects, EffectTypeId type, u32 width, u32 height,
                                             const PreviewFrameSpec& spec, std::vector<u8>& outRgba) noexcept {
     const bool comparison = spec.comparison;
@@ -8241,8 +8251,20 @@ Status Renderer::render_effect_preview_impl(const EffectRegistry& effects, Effec
     std::vector<ParamValue> values(params->count());
     for (u32 i = 0; i < params->count(); ++i) values[i] = instance.params[i].constant;
     // A prévia mostra o efeito LIGADO: com os padrões de fábrica (quase sempre
-    // neutros) a cartela sairia intacta e a prévia não diria nada.
-    (void)effect->demo_values(instance, values);
+    // neutros) a cartela sairia intacta e a prévia não diria nada. Miniatura
+    // de look: os valores do preset no lugar dos de demonstração.
+    if (spec.preset) {
+        for (const EffectPresetValue& pv : spec.preset->values) {
+            if (pv.param >= values.size() || !std::isfinite(pv.value)) continue;
+            const ParamSpec& ps = params->at(pv.param);
+            ParamValue& dst = values[pv.param];
+            if (ps.type == ParamType::Bool) dst = ParamValue::boolean(pv.value >= 0.5f);
+            else if (ps.type == ParamType::Int || ps.type == ParamType::Enum) dst.v[0] = std::round(pv.value);
+            else dst.v[std::min<u32>(pv.component, 3u)] = pv.value;
+        }
+    } else {
+        (void)effect->demo_values(instance, values);
+    }
     // Sequência animada: os parâmetros de demonstração andam desde o padrão
     // (ver effect_preview_apply_sweep).
     if (std::isfinite(spec.sweep)) effect_preview_apply_sweep(*params, instance, values, spec.sweep);

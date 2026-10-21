@@ -51,6 +51,10 @@ val keystoreProperties = Properties()
 // (key.properties → debug.keystore do dono), senão quem tem o APK instalado
 // não consegue atualizar sem desinstalar — e desinstalar apaga os projetos.
 // Os dois arquivos estão no .gitignore.
+// 0.3.0: o APK de sideload ainda passa por `tools/sideload_rotation.ps1
+// -Mode sign` depois deste build — rotação v3 da chave da 0.2.0 (55bf3cc8…,
+// D:\Users\Ruan\.android\debug.keystore) para a de key.properties (d7c008c5…).
+// Sem isso, quem tem a 0.2.0 não atualiza (docs/releases/0.3.0.md, "Assinatura").
 val keystorePropertiesFile = (if (aureaStore == "play") listOf("keystore.properties") else listOf("key.properties"))
     .map { rootProject.file(it) }
     .firstOrNull { it.exists() }

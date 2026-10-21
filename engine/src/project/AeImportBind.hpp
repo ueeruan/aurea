@@ -222,6 +222,12 @@ struct EffectAlias {
     std::string name;        ///< nome da instância, nome em inglês ou matchName (sem \t)
     std::string aureaRef;    ///< "aurea.control.slider" ou "aurea.control.slider 2"
     const ERule* rule = nullptr;
+    /// effect("X")(N) do AE: N = posição na lista do efeito na ordem da
+    /// interface, contando os marcadores de grupo (observado nos presets:
+    /// Fractal Noise (13) = Offset Turbulence, (24) = Evolution; Transform (4)
+    /// = Scale Height). Aqui, o número do parâmetro (-NNNN) de cada posição;
+    /// vazio = a ordem das regras da tabela.
+    std::vector<u16> uiOrder;
 };
 [[nodiscard]] std::string rewrite_expression(std::string_view src, const std::vector<EffectAlias>& aliases);
 [[nodiscard]] bool iequals(std::string_view a, std::string_view b) noexcept;

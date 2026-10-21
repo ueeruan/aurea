@@ -439,6 +439,47 @@ AUREA_TEST(AeImport, SyntheticFfxTextAnimator) {
     AUREA_CHECK(group && !group->keys.empty() && std::fabs(group->keys[0].value - 1.0f) < 1e-6f);   // palavra
 }
 
+AUREA_TEST(AeImport, SyntheticFfxTextAnimatorLinkIsBaked) {
+    // O segundo animador liga o Start ao do primeiro por expressão
+    // (text.animator(...)), como nos presets da Adobe: vira cópia das keys.
+    const u32 ts = 24000;
+    auto animator = [&](const char* name, const std::string& start) {
+        const std::string range = list("tdgp", tdsb(1) + tdsn("Range Selector 1") +
+            tdmn("ADBE Text Percent Start") + start + tdmn("ADBE Group End"));
+        const std::string selectors = list("tdgp", tdsb(1) + tdsn("") + tdmn("ADBE Text Selector") + range + tdmn("ADBE Group End"));
+        const std::string props = list("tdgp", tdsb(1) + tdsn("") +
+            tdmn("ADBE Text Opacity") + prop("", 1, {0.0}, ts) + tdmn("ADBE Group End"));
+        return list("tdgp", tdsb(1) + tdsn(name) + tdmn("ADBE Text Selectors") + selectors +
+                    tdmn("ADBE Text Animator Properties") + props + tdmn("ADBE Group End"));
+    };
+    const std::string lead = animator("Lider", prop_keys("", 1, {FKey{0, {0.0}}, FKey{48000, {100.0}}}, ts));
+    const std::string follow = animator("Segue", prop_expr("", 1, {0.0}, ts,
+        "text.animator(\"Lider\").selector(\"Range Selector 1\").start"));
+    const std::string animators = list("tdgp", tdsb(1) + tdsn("") + tdmn("ADBE Text Animator") + lead +
+                                               tdmn("ADBE Text Animator") + follow + tdmn("ADBE Group End"));
+    const std::string file = ffx(ts, {{{{"ADBE Text Properties", -1}, {"ADBE Text Animators", -1}}, "Animators"}}, {animators});
+    AeRig rig;
+    const u64 layer = rig.text("LIGADOS");
+    rig.seek(0);
+    const ae::ImportReport r = rig.e.import_ae_data(file, "link.ffx", layer);
+    if (!r.ok || !r.skipped.empty()) dump(r);
+    AUREA_CHECK(r.ok);
+    AUREA_CHECK(r.skipped.empty());
+    AUREA_CHECK_EQ(r.animators, 2u);
+    AUREA_CHECK_EQ(r.expressions, 0u);
+    AUREA_CHECK(has_item(r.notes, "text.animator"));
+    const Track* a = rig.track(layer, TrackProperty::TextAnimParam, 0, text::kSelStart);
+    const Track* b = rig.track(layer, TrackProperty::TextAnimParam, 1, text::kSelStart);
+    AUREA_CHECK(a && b);
+    if (!a || !b) return;
+    AUREA_CHECK(!b->expression);
+    AUREA_CHECK_EQ(b->keys.size(), a->keys.size());
+    for (usize i = 0; i < a->keys.size() && i < b->keys.size(); ++i) {
+        AUREA_CHECK_EQ(b->keys[i].time.value, a->keys[i].time.value);
+        AUREA_CHECK_NEAR(b->keys[i].value, a->keys[i].value, 1e-6);
+    }
+}
+
 AUREA_TEST(AeImport, SyntheticFfxUnknownEffectIsReported) {
     const u32 ts = 24000;
     const std::string calc = effect("ADBE Calculations", "Calculations", {{"Input Channel", 7}}, {{1, prop("", 1, {1.0}, ts)}});
@@ -494,6 +535,46 @@ AUREA_TEST(AeImport, SyntheticFfxExpressionRewritesEffectReference) {
     AUREA_CHECK(info.source.find("(\"slider\")") != std::string::npos);
     AUREA_CHECK(info.error.ok);
     AUREA_CHECK_NEAR(info.value, 90.0, 1e-3);
+}
+
+AUREA_TEST(AeImport, SyntheticFfxPseudoEffectBecomesOneControlPerParameter) {
+    // Efeito de controles do AE (Pseudo/…) com três parâmetros: viram três
+    // controles do Aurea, e a expressão escolhe o controle pelo nome do parâmetro.
+    const u32 ts = 24000;
+    const std::string geom = effect("ADBE Geometry2", "Transform", {{"Anchor Point", 6}, {"Position", 6}},
+        {{7, prop_expr("Rotation", 1, {0.0}, ts,
+                       "effect(\"Controles\")(\"Amount\") * effect(\"Controles\")(2) * 2")}});
+    const std::string controls = effect("Pseudo/aurea_teste", "Controles", {{"Amount", 10}, {"Enable", 4}, {"Tint", 5}},
+        {{1, prop("Amount", 1, {30.0}, ts)}, {2, prop("Enable", 1, {1.0}, ts)},
+         {3, prop("Tint", 4, {255.0, 255.0, 0.0, 0.0}, ts)}});
+    const std::string file = ffx(ts,
+        {{{{"ADBE Effect Parade", -1}, {"ADBE Geometry2", 0}}, "Transform"},
+         {{{"ADBE Effect Parade", -1}, {"Pseudo/aurea_teste", 1}}, "Controles"}},
+        {geom, controls});
+    AeRig rig;
+    const u64 layer = rig.shape();
+    const ae::ImportReport r = rig.e.import_ae_data(file, "pseudo.ffx", layer);
+    if (!r.ok || !r.skipped.empty()) dump(r);
+    AUREA_CHECK(r.ok);
+    AUREA_CHECK(r.skipped.empty());
+    AUREA_CHECK_EQ(r.effects, 4u);   // Transform + 3 controles
+    Layer* l = rig.L(layer);
+    if (!l || l->effects.size() != 4) { AUREA_CHECK(false); return; }
+    AUREA_CHECK(l->effects[1].type == effect_type_id("aurea.control.slider"));
+    AUREA_CHECK(l->effects[2].type == effect_type_id("aurea.control.checkbox"));
+    AUREA_CHECK(l->effects[3].type == effect_type_id("aurea.control.color"));
+    AUREA_CHECK_NEAR(l->effects[1].params[0].constant.v[0], 30.0, 1e-4);
+    AUREA_CHECK_NEAR(l->effects[3].params[0].constant.v[0], 1.0, 1e-4);   // vermelho (ARGB 255,255,0,0)
+    AUREA_CHECK_NEAR(l->effects[3].params[0].constant.v[1], 0.0, 1e-4);
+    const u32 rot = param_index(rig.e, "aurea.transform", "rotation");
+    Engine::ExpressionInfo info;
+    AUREA_CHECK(rig.e.query_expression(layer, static_cast<u32>(TrackProperty::EffectParam), l->effects[0].id,
+                                       param_track_key(rot, 0), info));
+    AUREA_CHECK(info.source.find("effect(\"aurea.control.slider\")(\"slider\")") != std::string::npos);
+    AUREA_CHECK(info.source.find("effect(\"aurea.control.checkbox\")(\"checkbox\")") != std::string::npos);
+    if (!info.error.ok) std::printf("\n      %s", info.source.c_str());
+    AUREA_CHECK(info.error.ok);
+    AUREA_CHECK_NEAR(info.value, 60.0, 1e-3);
 }
 
 // =============================================================================

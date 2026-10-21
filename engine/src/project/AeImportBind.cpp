@@ -447,6 +447,7 @@ bool write_expression(WriteCtx& w, const Binding& b, const std::string& source) 
         return false;
     }
     bool ok = true, any = false;
+    const Track* first = nullptr;
     for (const Channel& c : b.ch) {
         if (c.src == kConstSrc) {
             f32 out = 0;
@@ -462,6 +463,20 @@ bool write_expression(WriteCtx& w, const Binding& b, const std::string& source) 
         t.expressionEnabled = true;
         if (t.expression && !t.expression->parseError.ok) ok = false;
         any = true;
+        first = &t;
+    }
+    // Compilou: uma avaliação de prova no início da camada pega o erro de
+    // execução mais comum (camada, efeito ou função que o Aurea não tem). Quem
+    // chama segura o lock do modelo; a timeline vem do provedor do motor.
+    if (ok && any && first && first->expression && w.report) {
+        (void)expr::evaluate_track_f(*first, 0.0, nullptr);
+        const expr::Diagnostic d = first->expression->error();
+        if (!d.ok) {
+            w.report->skip("expressao", b.label,
+                           "a expressão dá erro no Aurea (" + d.message + "); ficou gravada para corrigir", w.line);
+            mark_props(l, b);
+            return false;
+        }
     }
     if (!any) {
         if (w.report) w.report->skip("expressao", b.label, "esta propriedade não aceita expressão no Aurea", w.line);
@@ -469,8 +484,10 @@ bool write_expression(WriteCtx& w, const Binding& b, const std::string& source) 
     }
     mark_props(l, b);
     if (!ok && w.report) {
+        // Fica gravada (a pessoa pode corrigir), mas não funciona: conta como
+        // "de fora" para o relatório não prometer o que não acontece.
         const auto d = expr::check_syntax(source);
-        w.report->note("expressao", b.label,
+        w.report->skip("expressao", b.label,
                        "a expressão não compila no Aurea (" + d.message + ", linha " + std::to_string(d.line) +
                            "); ficou gravada para corrigir", w.line);
     }
@@ -885,38 +902,57 @@ std::string rewrite_expression(std::string_view src, const std::vector<EffectAli
                     if (end >= src.size() || src[end] != ')') end = std::string_view::npos;
                 }
             }
-            const EffectAlias* hit = nullptr;
+            // Todos os apelidos com esse nome: um efeito de controles do AE com
+            // vários parâmetros vira vários controles do Aurea com o mesmo nome,
+            // e o parâmetro citado escolhe qual.
+            std::vector<const EffectAlias*> hits;
             if (end != std::string_view::npos) {
                 const std::string want = trim_name(name);
-                for (const EffectAlias& a : aliases) if (iequals(trim_name(a.name), want)) { hit = &a; break; }
+                for (const EffectAlias& a : aliases) if (iequals(trim_name(a.name), want)) hits.push_back(&a);
             }
-            if (hit) {
-                out += "effect(\"" + hit->aureaRef + "\")";
+            if (!hits.empty()) {
                 usize k = skip_ws(src, end + 1);
                 // O parâmetro logo depois: ("Nome" | "matchName-NNNN" | número).
-                if (hit->rule && k < src.size() && src[k] == '(') {
+                if (k < src.size() && src[k] == '(') {
                     usize a = skip_ws(src, k + 1);
-                    u16 ae = 0;
                     usize close = std::string_view::npos;
                     std::string pname;
+                    u32 num = 0;
+                    bool byName = false;
                     if (const usize e = read_string(src, a, pname); e != std::string_view::npos) {
-                        ae = effect_param_number(*hit->rule, trim_name(pname));
+                        byName = true;
                         close = skip_ws(src, e);
                     } else {
                         usize d = a;
-                        u32 num = 0;
                         while (d < src.size() && src[d] >= '0' && src[d] <= '9') num = num * 10 + static_cast<u32>(src[d++] - '0');
-                        if (d > a) { ae = effect_param_by_position(*hit->rule, num); close = skip_ws(src, d); }
+                        if (d > a) close = skip_ws(src, d);
                     }
-                    const char* id = ae ? aurea_param_for(*hit->rule, ae) : nullptr;
-                    if (id && close < src.size() && src[close] == ')') {
-                        out += "(\"" + std::string(id) + "\")";
-                        i = close + 1;
-                        continue;
+                    // Por número: a posição na interface do efeito do preset
+                    // (`uiOrder`); sem ela, a ordem das regras (efeitos do .jsx).
+                    if (close < src.size() && src[close] == ')') {
+                        bool done = false;
+                        for (const EffectAlias* h : hits) {
+                            if (!h->rule) continue;
+                            u16 ae = 0;
+                            if (byName) ae = effect_param_number(*h->rule, trim_name(pname));
+                            else if (!h->uiOrder.empty()) ae = num >= 1 && num <= h->uiOrder.size() ? h->uiOrder[num - 1] : 0;
+                            else if (hits.size() == 1) ae = effect_param_by_position(*h->rule, num);
+                            const char* id = ae ? aurea_param_for(*h->rule, ae) : nullptr;
+                            if (!id) continue;
+                            out += "effect(\"" + h->aureaRef + "\")(\"" + std::string(id) + "\")";
+                            i = close + 1;
+                            done = true;
+                            break;
+                        }
+                        if (done) continue;
                     }
                 }
-                i = end + 1;
-                continue;
+                if (hits.size() == 1) {
+                    out += "effect(\"" + hits.front()->aureaRef + "\")";
+                    i = end + 1;
+                    continue;
+                }
+                // Vários candidatos e nenhum resolveu: o texto fica como veio.
             }
         }
         out.push_back(src[i++]);

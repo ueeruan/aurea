@@ -22,9 +22,11 @@
 #include "aurea/timeline/Composition.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <deque>
+#include <span>
 
 namespace aurea::ae {
 using namespace detail;
@@ -107,59 +109,96 @@ struct Applier {
     }
 
     // --- efeitos --------------------------------------------------------------
-    const ERule* pseudo_control(const Node& n) {
-        if (!(starts(n.match, "Pseudo/") || starts(n.match, "ADBE CM "))) return nullptr;
-        const EffectParamDef* only = nullptr;
-        u32 count = 0;
+    /// Efeito de controles do AE ("Pseudo/…" dos presets e "ADBE CM …" dos
+    /// Behaviors): cada parâmetro vira um controle de expressão do Aurea
+    /// (deslizante, ângulo, caixa, cor, ponto), com valor, keys e expressão. As
+    /// expressões que citam effect("Nome")("Parâmetro") vão para o controle certo.
+    /// Parâmetros de outro tipo (camada, caminho, dado próprio) entram em `missing`.
+    std::vector<const ERule*> pseudo_controls(const Node& n, std::vector<std::string>& missing) {
+        std::vector<const ERule*> out;
+        if (!(starts(n.match, "Pseudo/") || starts(n.match, "ADBE CM "))) return out;
         for (const EffectParamDef& d : n.params) {
             const u16 num = suffix(d.match, n.match);
             if (num == 0 || d.type == 13 || d.type == 14 || d.type == 9 || d.type == 15) continue;
-            ++count;
-            only = &d;
+            const char* key = nullptr;
+            PConv conv = PConv::Same;
+            const char* id = nullptr;
+            switch (d.type) {
+                case 1: case 2: case 7: case 10: key = effect_keys::kSliderControl; id = "slider"; break;
+                case 3: key = effect_keys::kAngleControl; id = "angle"; break;
+                case 4: key = effect_keys::kCheckboxControl; id = "checkbox"; conv = PConv::Bool; break;
+                case 5: key = effect_keys::kColorControl; id = "color"; conv = PConv::Color; break;
+                case 6: key = effect_keys::kPointControl; id = "point"; conv = PConv::PointPx; break;
+                default: break;
+            }
+            if (!key) {
+                // Só relata quando o preset guarda algo nele (camada escolhida, keys...).
+                for (const Node& c : n.children) {
+                    if (c.kind != Node::Kind::Property || c.match != d.match) continue;
+                    const bool used = animated(c) || (c.hasValue && !c.value.empty() && std::fabs(c.value[0]) > 1e-9);
+                    if (used) missing.push_back(d.name.empty() ? d.match : d.name);
+                }
+                continue;
+            }
+            PRule p;
+            p.ae = num;
+            p.aeName = d.name.c_str();
+            p.id = id;
+            p.conv = conv;
+            synthParams.push_back(p);
+            ERule r;
+            r.ae = n.match.c_str();
+            r.aeName = n.effectName.c_str();
+            r.key = key;
+            r.params = &synthParams.back();
+            r.paramCount = 1;
+            synthRules.push_back(r);
+            out.push_back(&synthRules.back());
         }
-        if (count != 1 || !only) return nullptr;
-        const char* key = nullptr;
-        PConv conv = PConv::Same;
-        const char* id = nullptr;
-        switch (only->type) {
-            case 1: case 2: case 7: case 10: key = effect_keys::kSliderControl; id = "slider"; break;
-            case 3: key = effect_keys::kAngleControl; id = "angle"; break;
-            case 4: key = effect_keys::kCheckboxControl; id = "checkbox"; conv = PConv::Bool; break;
-            case 5: key = effect_keys::kColorControl; id = "color"; conv = PConv::Color; break;
-            case 6: key = effect_keys::kPointControl; id = "point"; conv = PConv::PointPx; break;
-            default: return nullptr;
-        }
-        PRule p;
-        p.ae = suffix(only->match, n.match);
-        p.aeName = only->name.c_str();
-        p.id = id;
-        p.conv = conv;
-        synthParams.push_back(p);
-        ERule r;
-        r.ae = n.match.c_str();
-        r.aeName = n.effectName.c_str();
-        r.key = key;
-        r.params = &synthParams.back();
-        r.paramCount = 1;
-        r.reason = only->type == 7 ? "menu suspenso virou controle deslizante (o valor é o número da opção)"
-                                   : "controle próprio do AE virou o controle de expressão do Aurea";
-        synthRules.push_back(r);
-        return &synthRules.back();
+        return out;
     }
 
     void effect(const Node& n) {
         if (n.kind != Node::Kind::Effect) return;
         const std::string shown = !n.effectName.empty() ? n.effectName : !n.name.empty() ? n.name : n.match;
         const ERule* rule = find_effect_rule(n.match);
-        if (!rule) rule = pseudo_control(n);
         if (!rule) {
-            rep.skip("efeito", shown + " (" + n.match + ")", "efeito sem equivalente no Aurea");
+            std::vector<std::string> missing;
+            const std::vector<const ERule*> controls = pseudo_controls(n, missing);
+            if (controls.empty()) {
+                rep.skip("efeito", shown + " (" + n.match + ")", "efeito sem equivalente no Aurea");
+                return;
+            }
+            bool menu = false;
+            for (const ERule* c : controls) {
+                apply_effect(n, shown, c, static_cast<i32>(c->params[0].ae));
+                for (const EffectParamDef& d : n.params)
+                    if (suffix(d.match, n.match) == c->params[0].ae && d.type == 7) menu = true;
+            }
+            if (!missing.empty()) {
+                std::string names;
+                for (const std::string& s : missing) names += (names.empty() ? "" : ", ") + s;
+                rep.skip("parametro", shown + ": " + names, "parâmetro sem equivalente no Aurea (o resto do efeito entrou)");
+            }
+            rep.note("efeito", shown,
+                     controls.size() == 1
+                         ? (menu ? "menu suspenso virou controle deslizante (o valor é o número da opção)"
+                                 : "controle próprio do AE virou o controle de expressão do Aurea")
+                         : "os " + std::to_string(controls.size()) +
+                               " parâmetros viraram controles de expressão do Aurea (um por parâmetro)" +
+                               (menu ? "; menus viram o número da opção" : ""));
             return;
         }
         if (!rule->key) {
             rep.skip("efeito", shown, rule->reason ? rule->reason : "efeito sem equivalente no Aurea");
             return;
         }
+        apply_effect(n, shown, rule, -1);
+    }
+
+    /// Cria o efeito do Aurea da regra e aplica os parâmetros do nó. `onlyAe`
+    /// ≥ 0: só esse parâmetro do AE (controles sintetizados, um por parâmetro).
+    void apply_effect(const Node& n, const std::string& shown, const ERule* rule, i32 onlyAe) {
         const EffectTypeId type = effect_type_id(rule->key);
         const u32 id = host.add_effect(lid, type);
         refresh();
@@ -184,7 +223,7 @@ struct Applier {
         for (const Node& c : n.children) {
             if (c.kind != Node::Kind::Property) continue;
             const u16 ae = suffix(c.match, n.match);
-            if (ae == 0) continue;
+            if (ae == 0 || (onlyAe >= 0 && ae != onlyAe)) continue;
             in.values.push_back(PostIn::V{ae, c.hasValue ? c.value : std::vector<f64>{}, animated(c)});
             const Binding b = bind_effect_param(*rule, id, ae, std::max<u32>(1, c.dims), host.registry(), layerW, layerH, w.fps);
             if (!b.ok()) {
@@ -231,9 +270,14 @@ struct Applier {
             if (e.id == id) break;
         }
         const std::string ref = ordinal <= 1 ? std::string(rule->key) : std::string(rule->key) + " " + std::to_string(ordinal);
+        // Posições de effect("X")(N): a lista do preset na ordem da interface,
+        // sem a entrada (-0000) e o bloco embutido, com os marcadores de grupo.
+        std::vector<u16> order;
+        for (const EffectParamDef& d : n.params)
+            if (const u16 num = suffix(d.match, n.match); num > 0) order.push_back(num);
         for (const std::string* nm : {&n.name, &n.effectName, &n.match})
-            if (!nm->empty()) aliases.push_back(EffectAlias{*nm, ref, rule});
-        aliases.push_back(EffectAlias{rule->aeName, ref, rule});
+            if (!nm->empty()) aliases.push_back(EffectAlias{*nm, ref, rule, order});
+        aliases.push_back(EffectAlias{rule->aeName, ref, rule, order});
         ++rep.effects;
         ++applied;
     }
@@ -560,6 +604,88 @@ struct Applier {
         }
     }
 
+    /// Expressão que só LIGA a outra propriedade de animador do mesmo texto
+    /// (`text.animator("A").selector("S").maxAmount`, `….property.position`):
+    /// os presets da Adobe usam para vários animadores andarem juntos. O Aurea
+    /// não lê `text.animator`, então os valores e keys da origem são copiados
+    /// (o resultado é o mesmo enquanto ninguém mexer na origem).
+    bool bake_text_link(Layer& l, const PendingExpr& pe) {
+        std::string_view s = pe.src;
+        auto trim = [](std::string_view& v) {
+            while (!v.empty() && (v.front() == ' ' || v.front() == '\t' || v.front() == '\r' || v.front() == '\n')) v.remove_prefix(1);
+            while (!v.empty() && (v.back() == ' ' || v.back() == '\t' || v.back() == '\r' || v.back() == '\n' || v.back() == ';'))
+                v.remove_suffix(1);
+        };
+        auto eat = [&](std::string_view word) {
+            if (s.substr(0, word.size()) != word) return false;
+            s.remove_prefix(word.size());
+            return true;
+        };
+        auto quoted = [&](std::string& out) {
+            if (s.empty() || (s.front() != '"' && s.front() != '\'')) return false;
+            const char q = s.front();
+            const usize e = s.find(q, 1);
+            if (e == std::string_view::npos) return false;
+            out = std::string(s.substr(1, e - 1));
+            s.remove_prefix(e + 1);
+            return true;
+        };
+        trim(s);
+        std::string anim, sel;
+        if (!eat("text.animator(") || !quoted(anim) || !eat(")")) return false;
+        const bool isSel = eat(".selector(");
+        if (isSel && (!quoted(sel) || !eat(")"))) return false;
+        if (!isSel && !eat(".property")) return false;
+        if (!eat(".")) return false;
+        const std::string attr(s);
+        for (const char c : attr) if (!std::isalnum(static_cast<unsigned char>(c))) return false;
+        struct Attr { const char* name; const char* match; u32 kind; };
+        static constexpr Attr kSel[] = {
+            {"start", "ADBE Text Percent Start", 0}, {"end", "ADBE Text Percent End", 0},
+            {"offset", "ADBE Text Percent Offset", 0}, {"amount", "ADBE Text Selector Max Amount", 0},
+            {"smoothness", "ADBE Text Selector Smoothness", 0}, {"easeHigh", "ADBE Text Levels Max Ease", 0},
+            {"easeLow", "ADBE Text Levels Min Ease", 0}, {"maxAmount", "ADBE Text Wiggly Max Amount", 1},
+            {"minAmount", "ADBE Text Wiggly Min Amount", 1}, {"wigglesSecond", "ADBE Text Temporal Freq", 1},
+            {"correlation", "ADBE Text Character Correlation", 1}, {"temporalPhase", "ADBE Text Temporal Phase", 1},
+            {"spatialPhase", "ADBE Text Spatial Phase", 1},
+        };
+        static constexpr Attr kProp[] = {
+            {"position", "ADBE Text Position 3D", 0}, {"scale", "ADBE Text Scale 3D", 0},
+            {"rotation", "ADBE Text Rotation", 0}, {"opacity", "ADBE Text Opacity", 0},
+            {"fillColor", "ADBE Text Fill Color", 0}, {"strokeColor", "ADBE Text Stroke Color", 0},
+            {"strokeWidth", "ADBE Text Stroke Width", 0}, {"trackingAmount", "ADBE Text Tracking Amount", 0},
+            {"blur", "ADBE Text Blur", 0}, {"skew", "ADBE Text Skew", 0}, {"skewAxis", "ADBE Text Skew Axis", 0},
+            {"characterOffset", "ADBE Text Character Offset", 0},
+        };
+        const Attr* hit = nullptr;
+        for (const Attr& a : isSel ? std::span<const Attr>(kSel) : std::span<const Attr>(kProp))
+            if (attr == a.name) hit = &a;
+        if (!hit) return false;
+        u32 src = kInvalidIndex;
+        for (u32 i = 0; i < l.text.animators.size(); ++i)
+            if (iequals(l.text.animators[i].name, anim)) { src = i; break; }
+        if (src == kInvalidIndex) return false;
+        const Binding sb = isSel ? bind_text_selector(l, src, hit->kind, hit->match, 0) : bind_text_property(l, src, hit->match);
+        if (!sb.ok() || sb.ch.size() != pe.b.ch.size()) return false;
+        // Valor parado primeiro (todos os componentes), depois as keys trilha a trilha.
+        write_static(w, pe.b, read_value(l, sb, w.localAnchor), false);
+        for (usize i = 0; i < sb.ch.size(); ++i) {
+            const Channel& a = sb.ch[i];
+            const Channel& b = pe.b.ch[i];
+            if (a.home != Home::Track && a.home != Home::TrackOnly) continue;
+            const Track* from = l.tracks.find(a.prop, a.ei, a.pi);
+            if (!from || from->keys.empty()) continue;
+            const Track copy = *from;
+            Track& to = l.tracks.get_or_create(b.prop, b.ei, b.pi);
+            to.keys = copy.keys;
+            to.staticValue = copy.staticValue;
+            to.lastIndex = 0;
+        }
+        rep.note("expressao", pe.b.label,
+                 "a ligação text.animator(\"" + anim + "\") virou cópia dos valores e keys (o Aurea não lê text.animator)");
+        return true;
+    }
+
     void finish() {
         Layer* l = w.layer;
         if (!l) return;
@@ -583,6 +709,7 @@ struct Applier {
             rep.note("texto", "Grouping Alignment",
                      "o Aurea gira e escala cada caractere pelo centro; no AE (alinhamento 0%, 0%) o pivô fica na linha de base");
         for (PendingExpr& pe : exprs) {
+            if (bake_text_link(*l, pe)) continue;
             const std::string src = rewrite_expression(pe.src, aliases);
             write_expression(w, pe.b, src);
             ++rep.expressions;

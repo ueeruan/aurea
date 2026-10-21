@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Aprimorar (restauração estilo Topaz). -->
+<resources>
+    <string name="fx030e_name">تحسين</string>
+    <string name="fx030e_desc">يستعيد الفيديو بأسلوب Topaz: يعكس الضغط، يستعيد التفاصيل، يزيل التشويش بالإطارات المجاورة، يزيل الهالات ويضيف الحبيبات — تلقائيًا أو يدويًا.</string>
+    <string name="fxp_enhance_auto">تلقائي</string>
+    <string name="fxp_enhance_social">الهاتف ووسائل التواصل</string>
+    <string name="fxp_enhance_restore">استعادة فيديو قديم</string>
+    <string name="fxp_enhance_anime">رسوم متحركة نظيفة</string>
+    <string name="fxp_enhance_upscaled">فيديو مكبّر</string>
+    <string name="fxp_enhance_film">فيلم بحبيبات</string>
+</resources>

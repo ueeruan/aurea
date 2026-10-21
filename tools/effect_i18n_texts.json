@@ -4967,5 +4967,821 @@
   "hi": "पैटर्न विवरण",
   "id": "Detail pola",
   "ru": "Детализация узора"
+ },
+ "Substituir quadros duplicados": {
+  "en": "Replace duplicate frames",
+  "es": "Reemplazar fotogramas duplicados",
+  "ru": "Заменять повторяющиеся кадры",
+  "hi": "डुप्लिकेट फ़्रेम बदलें",
+  "id": "Ganti bingkai duplikat",
+  "ar": "استبدال الإطارات المكررة"
+ },
+ "Mais alta: quadros só parecidos também contam como repetidos.": {
+  "en": "Higher: frames that are only similar also count as repeats.",
+  "es": "Más alta: los fotogramas solo parecidos también cuentan como repetidos.",
+  "ru": "Выше: похожие кадры тоже считаются повторами.",
+  "hi": "ज़्यादा: सिर्फ़ मिलते-जुलते फ़्रेम भी दोहराए गए माने जाते हैं।",
+  "id": "Lebih tinggi: bingkai yang hanya mirip juga dianggap berulang.",
+  "ar": "أعلى: تُعد الإطارات المتشابهة فقط مكررة أيضًا."
+ },
+ "Perfil da câmera": {
+  "en": "Camera profile",
+  "es": "Perfil de cámara",
+  "ru": "Профиль камеры",
+  "hi": "कैमरा प्रोफ़ाइल",
+  "id": "Profil kamera",
+  "ar": "ملف الكاميرا"
+ },
+ "Nenhum (Rec.709)": {
+  "en": "None (Rec.709)",
+  "es": "Ninguno (Rec.709)",
+  "ru": "Нет (Rec.709)",
+  "hi": "कोई नहीं (Rec.709)",
+  "id": "Tidak ada (Rec.709)",
+  "ar": "بلا (Rec.709)"
+ },
+ "S-Log3 (Sony)": {
+  "en": "S-Log3 (Sony)",
+  "es": "S-Log3 (Sony)",
+  "ru": "S-Log3 (Sony)",
+  "hi": "S-Log3 (Sony)",
+  "id": "S-Log3 (Sony)",
+  "ar": "S-Log3 (Sony)"
+ },
+ "LogC3 (ARRI)": {
+  "en": "LogC3 (ARRI)",
+  "es": "LogC3 (ARRI)",
+  "ru": "LogC3 (ARRI)",
+  "hi": "LogC3 (ARRI)",
+  "id": "LogC3 (ARRI)",
+  "ar": "LogC3 (ARRI)"
+ },
+ "V-Log (Panasonic)": {
+  "en": "V-Log (Panasonic)",
+  "es": "V-Log (Panasonic)",
+  "ru": "V-Log (Panasonic)",
+  "hi": "V-Log (Panasonic)",
+  "id": "V-Log (Panasonic)",
+  "ar": "V-Log (Panasonic)"
+ },
+ "Apple Log": {
+  "en": "Apple Log",
+  "es": "Apple Log",
+  "ru": "Apple Log",
+  "hi": "Apple Log",
+  "id": "Apple Log",
+  "ar": "Apple Log"
+ },
+ "Cineon": {
+  "en": "Cineon",
+  "es": "Cineon",
+  "ru": "Cineon",
+  "hi": "Cineon",
+  "id": "Cineon",
+  "ar": "Cineon"
+ },
+ "Pivô do contraste": {
+  "en": "Contrast pivot",
+  "es": "Pivote del contraste",
+  "ru": "Центр контраста",
+  "hi": "कंट्रास्ट पिवट",
+  "id": "Pivot kontras",
+  "ar": "محور التباين"
+ },
+ "Realces": {
+  "en": "Highlights",
+  "es": "Altas luces",
+  "ru": "Света",
+  "hi": "हाइलाइट्स",
+  "id": "Sorotan",
+  "ar": "الإضاءات"
+ },
+ "Brancos": {
+  "en": "Whites",
+  "es": "Blancos",
+  "ru": "Белые",
+  "hi": "सफ़ेद",
+  "id": "Putih",
+  "ar": "الأبيض"
+ },
+ "Pretos": {
+  "en": "Blacks",
+  "es": "Negros",
+  "ru": "Чёрные",
+  "hi": "काले",
+  "id": "Hitam",
+  "ar": "الأسود"
+ },
+ "Lift (sombras)": {
+  "en": "Lift (shadows)",
+  "es": "Lift (sombras)",
+  "ru": "Lift (тени)",
+  "hi": "Lift (छाया)",
+  "id": "Lift (bayangan)",
+  "ar": "Lift (الظلال)"
+ },
+ "Luz do lift": {
+  "en": "Lift luminance",
+  "es": "Luminancia del lift",
+  "ru": "Яркость lift",
+  "hi": "Lift ल्यूमिनेंस",
+  "id": "Luminans lift",
+  "ar": "إنارة Lift"
+ },
+ "Gamma (meios-tons)": {
+  "en": "Gamma (midtones)",
+  "es": "Gamma (medios tonos)",
+  "ru": "Gamma (полутона)",
+  "hi": "Gamma (मिडटोन)",
+  "id": "Gamma (nada tengah)",
+  "ar": "Gamma (الدرجات المتوسطة)"
+ },
+ "Luz do gamma": {
+  "en": "Gamma luminance",
+  "es": "Luminancia del gamma",
+  "ru": "Яркость gamma",
+  "hi": "Gamma ल्यूमिनेंस",
+  "id": "Luminans gamma",
+  "ar": "إنارة Gamma"
+ },
+ "Gain (realces)": {
+  "en": "Gain (highlights)",
+  "es": "Gain (altas luces)",
+  "ru": "Gain (света)",
+  "hi": "Gain (हाइलाइट्स)",
+  "id": "Gain (sorotan)",
+  "ar": "Gain (الإضاءات)"
+ },
+ "Luz do gain": {
+  "en": "Gain luminance",
+  "es": "Luminancia del gain",
+  "ru": "Яркость gain",
+  "hi": "Gain ल्यूमिनेंस",
+  "id": "Luminans gain",
+  "ar": "إنارة Gain"
+ },
+ "Offset (tudo)": {
+  "en": "Offset (global)",
+  "es": "Offset (global)",
+  "ru": "Offset (всё)",
+  "hi": "Offset (सब)",
+  "id": "Offset (global)",
+  "ar": "Offset (الكل)"
+ },
+ "Luz do offset": {
+  "en": "Offset luminance",
+  "es": "Luminancia del offset",
+  "ru": "Яркость offset",
+  "hi": "Offset ल्यूमिनेंस",
+  "id": "Luminans offset",
+  "ar": "إنارة Offset"
+ },
+ "Curvas RGB": {
+  "en": "RGB curves",
+  "es": "Curvas RGB",
+  "ru": "Кривые RGB",
+  "hi": "RGB कर्व्स",
+  "id": "Kurva RGB",
+  "ar": "منحنيات RGB"
+ },
+ "Curvas de matiz": {
+  "en": "Hue curves",
+  "es": "Curvas de tono",
+  "ru": "Кривые тона",
+  "hi": "ह्यू कर्व्स",
+  "id": "Kurva rona",
+  "ar": "منحنيات التدرج"
+ },
+ "Correção secundária": {
+  "en": "Secondary correction",
+  "es": "Corrección secundaria",
+  "ru": "Вторичная коррекция",
+  "hi": "सेकेंडरी करेक्शन",
+  "id": "Koreksi sekunder",
+  "ar": "تصحيح ثانوي"
+ },
+ "Matiz escolhida": {
+  "en": "Selected hue",
+  "es": "Tono elegido",
+  "ru": "Выбранный тон",
+  "hi": "चुना गया ह्यू",
+  "id": "Rona terpilih",
+  "ar": "التدرج المختار"
+ },
+ "Largura da matiz": {
+  "en": "Hue width",
+  "es": "Ancho del tono",
+  "ru": "Ширина тона",
+  "hi": "ह्यू की चौड़ाई",
+  "id": "Lebar rona",
+  "ar": "عرض التدرج"
+ },
+ "Saturação mínima": {
+  "en": "Minimum saturation",
+  "es": "Saturación mínima",
+  "ru": "Мин. насыщенность",
+  "hi": "न्यूनतम संतृप्ति",
+  "id": "Saturasi minimum",
+  "ar": "أدنى تشبع"
+ },
+ "Saturação máxima": {
+  "en": "Maximum saturation",
+  "es": "Saturación máxima",
+  "ru": "Макс. насыщенность",
+  "hi": "अधिकतम संतृप्ति",
+  "id": "Saturasi maksimum",
+  "ar": "أقصى تشبع"
+ },
+ "Luz mínima": {
+  "en": "Minimum luminance",
+  "es": "Luminancia mínima",
+  "ru": "Мин. яркость",
+  "hi": "न्यूनतम ल्यूमिनेंस",
+  "id": "Luminans minimum",
+  "ar": "أدنى إنارة"
+ },
+ "Luz máxima": {
+  "en": "Maximum luminance",
+  "es": "Luminancia máxima",
+  "ru": "Макс. яркость",
+  "hi": "अधिकतम ल्यूमिनेंस",
+  "id": "Luminans maksimum",
+  "ar": "أقصى إنارة"
+ },
+ "Suavidade da seleção": {
+  "en": "Selection softness",
+  "es": "Suavidad de la selección",
+  "ru": "Мягкость выделения",
+  "hi": "चयन की नरमी",
+  "id": "Kelembutan seleksi",
+  "ar": "نعومة التحديد"
+ },
+ "Inverter seleção": {
+  "en": "Invert selection",
+  "es": "Invertir selección",
+  "ru": "Инвертировать выделение",
+  "hi": "चयन उलटें",
+  "id": "Balik seleksi",
+  "ar": "عكس التحديد"
+ },
+ "Mostrar seleção": {
+  "en": "Show selection",
+  "es": "Mostrar selección",
+  "ru": "Показать выделение",
+  "hi": "चयन दिखाएँ",
+  "id": "Tampilkan seleksi",
+  "ar": "إظهار التحديد"
+ },
+ "Girar matiz": {
+  "en": "Hue shift",
+  "es": "Girar tono",
+  "ru": "Сдвиг тона",
+  "hi": "ह्यू शिफ़्ट",
+  "id": "Geser rona",
+  "ar": "إزاحة التدرج"
+ },
+ "Saturação da seleção": {
+  "en": "Selection saturation",
+  "es": "Saturación de la selección",
+  "ru": "Насыщенность выделения",
+  "hi": "चयन की संतृप्ति",
+  "id": "Saturasi seleksi",
+  "ar": "تشبع التحديد"
+ },
+ "Exposição da seleção": {
+  "en": "Selection exposure",
+  "es": "Exposición de la selección",
+  "ru": "Экспозиция выделения",
+  "hi": "चयन का एक्सपोज़र",
+  "id": "Eksposur seleksi",
+  "ar": "تعريض التحديد"
+ },
+ "Desbotado": {
+  "en": "Fade",
+  "es": "Desvanecido",
+  "ru": "Выцветание",
+  "hi": "फ़ेड",
+  "id": "Pudar",
+  "ar": "البهتان"
+ },
+ "Tom das sombras": {
+  "en": "Shadow tint",
+  "es": "Tono de sombras",
+  "ru": "Оттенок теней",
+  "hi": "छाया टिंट",
+  "id": "Rona bayangan",
+  "ar": "صبغة الظلال"
+ },
+ "Tom dos realces": {
+  "en": "Highlight tint",
+  "es": "Tono de altas luces",
+  "ru": "Оттенок светов",
+  "hi": "हाइलाइट टिंट",
+  "id": "Rona sorotan",
+  "ar": "صبغة الإضاءات"
+ },
+ "Equilíbrio dos tons": {
+  "en": "Tint balance",
+  "es": "Equilibrio de tonos",
+  "ru": "Баланс оттенков",
+  "hi": "टिंट संतुलन",
+  "id": "Keseimbangan rona",
+  "ar": "توازن الصبغة"
+ },
+ "Início da vinheta": {
+  "en": "Vignette start",
+  "es": "Inicio de la viñeta",
+  "ru": "Начало виньетки",
+  "hi": "विनेट शुरुआत",
+  "id": "Awal vinyet",
+  "ar": "بداية التظليل"
+ },
+ "Suavidade da vinheta": {
+  "en": "Vignette feather",
+  "es": "Suavidad de la viñeta",
+  "ru": "Мягкость виньетки",
+  "hi": "विनेट की नरमी",
+  "id": "Kelembutan vinyet",
+  "ar": "نعومة التظليل"
+ },
+ "LUT criativa (.cube)": {
+  "en": "Creative LUT (.cube)",
+  "es": "LUT creativa (.cube)",
+  "ru": "Творческая LUT (.cube)",
+  "hi": "क्रिएटिव LUT (.cube)",
+  "id": "LUT kreatif (.cube)",
+  "ar": "LUT إبداعي (.cube)"
+ },
+ "Intensidade da LUT": {
+  "en": "LUT intensity",
+  "es": "Intensidad de la LUT",
+  "ru": "Интенсивность LUT",
+  "hi": "LUT तीव्रता",
+  "id": "Intensitas LUT",
+  "ar": "شدة LUT"
+ },
+ "Básico": {
+  "en": "Basic",
+  "es": "Básico",
+  "ru": "Основное",
+  "hi": "बेसिक",
+  "id": "Dasar",
+  "ar": "أساسي"
+ },
+ "Rodas de cor": {
+  "en": "Color wheels",
+  "es": "Ruedas de color",
+  "ru": "Цветовые круги",
+  "hi": "कलर व्हील्स",
+  "id": "Roda warna",
+  "ar": "عجلات الألوان"
+ },
+ "HSL": {
+  "en": "HSL",
+  "es": "HSL",
+  "ru": "HSL",
+  "hi": "HSL",
+  "id": "HSL",
+  "ar": "HSL"
+ },
+ "Criativo": {
+  "en": "Creative",
+  "es": "Creativo",
+  "ru": "Творческое",
+  "hi": "क्रिएटिव",
+  "id": "Kreatif",
+  "ar": "إبداعي"
+ },
+ "LUT": {
+  "en": "LUT",
+  "es": "LUT",
+  "ru": "LUT",
+  "hi": "LUT",
+  "id": "LUT",
+  "ar": "LUT"
+ },
+ "Nuvem": {
+  "en": "Cloud",
+  "es": "Nube",
+  "ru": "Облако",
+  "hi": "बादल",
+  "id": "Awan",
+  "ar": "سحابة"
+ },
+ "Anel": {
+  "en": "Ring",
+  "es": "Anillo",
+  "ru": "Кольцо",
+  "hi": "रिंग",
+  "id": "Cincin",
+  "ar": "حلقة"
+ },
+ "Plano": {
+  "en": "Plane",
+  "es": "Plano",
+  "ru": "Плоскость",
+  "hi": "समतल",
+  "id": "Bidang",
+  "ar": "مستوٍ"
+ },
+ "Caminho da camada": {
+  "en": "Layer path",
+  "es": "Trazado de la capa",
+  "ru": "Контур слоя",
+  "hi": "लेयर पथ",
+  "id": "Jalur lapisan",
+  "ar": "مسار الطبقة"
+ },
+ "Cor própria": {
+  "en": "Own color",
+  "es": "Color propio",
+  "ru": "Свой цвет",
+  "hi": "अपना रंग",
+  "id": "Warna sendiri",
+  "ar": "لون خاص"
+ },
+ "Cor dos pontos": {
+  "en": "Point color",
+  "es": "Color de los puntos",
+  "ru": "Цвет точек",
+  "hi": "पॉइंट्स का रंग",
+  "id": "Warna titik",
+  "ar": "لون النقاط"
+ },
+ "Sobre": {
+  "en": "Over",
+  "es": "Encima",
+  "ru": "Поверх",
+  "hi": "ऊपर",
+  "id": "Di atas",
+  "ar": "فوق"
+ },
+ "Transformação": {
+  "en": "Transform",
+  "es": "Transformación",
+  "ru": "Трансформация",
+  "hi": "ट्रांसफ़ॉर्म",
+  "id": "Transformasi",
+  "ar": "التحويل"
+ },
+ "Campo esférico": {
+  "en": "Spherical field",
+  "es": "Campo esférico",
+  "ru": "Сферическое поле",
+  "hi": "गोलाकार क्षेत्र",
+  "id": "Medan bola",
+  "ar": "الحقل الكروي"
+ },
+ "Desenho dos pontos": {
+  "en": "Point look",
+  "es": "Aspecto de los puntos",
+  "ru": "Вид точек",
+  "hi": "पॉइंट्स का रूप",
+  "id": "Tampilan titik",
+  "ar": "مظهر النقاط"
+ },
+ "Modelo": {
+  "en": "Model",
+  "es": "Modelo",
+  "ru": "Модель",
+  "hi": "मॉडल",
+  "id": "Model",
+  "ar": "النموذج"
+ },
+ "Vídeo comprimido": {
+  "en": "Compressed video",
+  "es": "Video comprimido",
+  "ru": "Сжатое видео",
+  "hi": "कंप्रेस्ड वीडियो",
+  "id": "Video terkompresi",
+  "ar": "فيديو مضغوط"
+ },
+ "Vídeo antigo / ruidoso": {
+  "en": "Old / noisy video",
+  "es": "Video antiguo / ruidoso",
+  "ru": "Старое / шумное видео",
+  "hi": "पुराना / नॉइज़ वाला वीडियो",
+  "id": "Video lama / berderau",
+  "ar": "فيديو قديم / مشوش"
+ },
+ "Animação": {
+  "en": "Animation",
+  "es": "Animación",
+  "ru": "Анимация",
+  "hi": "एनिमेशन",
+  "id": "Animasi",
+  "ar": "رسوم متحركة"
+ },
+ "Baixa resolução / borrado": {
+  "en": "Low resolution / blurry",
+  "es": "Baja resolución / borroso",
+  "ru": "Низкое разрешение / размыто",
+  "hi": "कम रेज़ोल्यूशन / धुंधला",
+  "id": "Resolusi rendah / buram",
+  "ar": "دقة منخفضة / ضبابي"
+ },
+ "Manual": {
+  "en": "Manual",
+  "es": "Manual",
+  "ru": "Вручную",
+  "hi": "मैनुअल",
+  "id": "Manual",
+  "ar": "يدوي"
+ },
+ "Automático estima compressão, ruído e borrado a cada quadro. Nos modelos e no Automático os ajustes somam ao modelo; no Manual eles são os valores.": {
+  "en": "Automatic estimates compression, noise and blur on every frame. In the models and Automatic the sliders add to the model; in Manual they are the values.",
+  "es": "Automático estima compresión, ruido y desenfoque en cada fotograma. En los modelos y en Automático los ajustes se suman al modelo; en Manual son los valores.",
+  "ru": "«Авто» оценивает сжатие, шум и размытие в каждом кадре. В моделях и «Авто» ползунки добавляются к модели; в «Вручную» это сами значения.",
+  "hi": "स्वचालित हर फ़्रेम में कंप्रेशन, नॉइज़ और धुंधलापन आँकता है। मॉडल और स्वचालित में स्लाइडर मॉडल में जुड़ते हैं; मैनुअल में वही मान होते हैं।",
+  "id": "Otomatis memperkirakan kompresi, derau, dan buram di setiap bingkai. Pada model dan Otomatis penggeser ditambahkan ke model; pada Manual itulah nilainya.",
+  "ar": "يقدّر الوضع التلقائي الضغط والتشويش والضبابية في كل إطار. في النماذج والتلقائي تُضاف المنزلقات إلى النموذج؛ وفي اليدوي هي القيم نفسها."
+ },
+ "Reverter compressão": {
+  "en": "Revert compression",
+  "es": "Revertir compresión",
+  "ru": "Убрать артефакты сжатия",
+  "hi": "कंप्रेशन हटाएँ",
+  "id": "Balikkan kompresi",
+  "ar": "عكس الضغط"
+ },
+ "Recuperar detalhes": {
+  "en": "Recover details",
+  "es": "Recuperar detalles",
+  "ru": "Восстановить детали",
+  "hi": "डिटेल वापस लाएँ",
+  "id": "Pulihkan detail",
+  "ar": "استعادة التفاصيل"
+ },
+ "Reduzir ruído": {
+  "en": "Reduce noise",
+  "es": "Reducir ruido",
+  "ru": "Уменьшить шум",
+  "hi": "नॉइज़ कम करें",
+  "id": "Kurangi derau",
+  "ar": "تقليل التشويش"
+ },
+ "Remover halos": {
+  "en": "Dehalo",
+  "es": "Eliminar halos",
+  "ru": "Убрать ореолы",
+  "hi": "हेलो हटाएँ",
+  "id": "Hapus halo",
+  "ar": "إزالة الهالات"
+ },
+ "Antisserrilhado / desborrar": {
+  "en": "Anti-alias / deblur",
+  "es": "Antialiasing / desenfoque",
+  "ru": "Сглаживание / резкость",
+  "hi": "एंटी-एलियास / डीब्लर",
+  "id": "Anti-alias / hapus buram",
+  "ar": "تنعيم الحواف / إزالة الضبابية"
+ },
+ "Adicionar ruído": {
+  "en": "Add noise",
+  "es": "Añadir ruido",
+  "ru": "Добавить шум",
+  "hi": "नॉइज़ जोड़ें",
+  "id": "Tambah derau",
+  "ar": "إضافة تشويش"
+ },
+ "Recuperar detalhe original": {
+  "en": "Recover original detail",
+  "es": "Recuperar detalle original",
+  "ru": "Вернуть исходные детали",
+  "hi": "मूल डिटेल वापस लाएँ",
+  "id": "Pulihkan detail asli",
+  "ar": "استعادة التفاصيل الأصلية"
+ },
+ "Quadros vizinhos": {
+  "en": "Neighbouring frames",
+  "es": "Fotogramas vecinos",
+  "ru": "Соседние кадры",
+  "hi": "आस-पास के फ़्रेम",
+  "id": "Bingkai sekitar",
+  "ar": "الإطارات المجاورة"
+ },
+ "Quadros de cada lado usados pela redução de ruído, alinhados pelo movimento. 0 = só o quadro atual.": {
+  "en": "Frames on each side used by noise reduction, aligned by motion. 0 = only the current frame.",
+  "es": "Fotogramas a cada lado usados por la reducción de ruido, alineados por el movimiento. 0 = solo el fotograma actual.",
+  "ru": "Кадры с каждой стороны для шумоподавления, выровненные по движению. 0 = только текущий кадр.",
+  "hi": "नॉइज़ घटाने में हर तरफ़ के फ़्रेम, मोशन के हिसाब से मिलाए गए। 0 = सिर्फ़ मौजूदा फ़्रेम।",
+  "id": "Bingkai di setiap sisi untuk pengurangan derau, diselaraskan menurut gerakan. 0 = hanya bingkai saat ini.",
+  "ar": "الإطارات على كل جانب المستخدمة لتقليل التشويش، محاذاة حسب الحركة. 0 = الإطار الحالي فقط."
+ },
+ "Ajustes": {
+  "en": "Adjustments",
+  "es": "Ajustes",
+  "ru": "Настройки",
+  "hi": "समायोजन",
+  "id": "Penyesuaian",
+  "ar": "تعديلات"
+ },
+ "Grão e detalhe original": {
+  "en": "Grain and original detail",
+  "es": "Grano y detalle original",
+  "ru": "Зерно и исходные детали",
+  "hi": "ग्रेन और मूल डिटेल",
+  "id": "Grain dan detail asli",
+  "ar": "الحبيبات والتفاصيل الأصلية"
+ },
+ "Tempo e qualidade": {
+  "en": "Time and quality",
+  "es": "Tiempo y calidad",
+  "ru": "Время и качество",
+  "hi": "समय और गुणवत्ता",
+  "id": "Waktu dan kualitas",
+  "ar": "الوقت والجودة"
+ },
+ "Vermelho: matiz": {
+  "en": "Red: hue",
+  "es": "Rojo: tono",
+  "ru": "Красный: тон",
+  "hi": "लाल: ह्यू",
+  "id": "Merah: rona",
+  "ar": "أحمر: التدرج"
+ },
+ "Vermelho: saturação": {
+  "en": "Red: saturation",
+  "es": "Rojo: saturación",
+  "ru": "Красный: насыщенность",
+  "hi": "लाल: संतृप्ति",
+  "id": "Merah: saturasi",
+  "ar": "أحمر: التشبع"
+ },
+ "Vermelho: luz": {
+  "en": "Red: luminance",
+  "es": "Rojo: luminancia",
+  "ru": "Красный: яркость",
+  "hi": "लाल: ल्यूमिनेंस",
+  "id": "Merah: luminans",
+  "ar": "أحمر: الإنارة"
+ },
+ "Laranja: matiz": {
+  "en": "Orange: hue",
+  "es": "Naranja: tono",
+  "ru": "Оранжевый: тон",
+  "hi": "नारंगी: ह्यू",
+  "id": "Oranye: rona",
+  "ar": "برتقالي: التدرج"
+ },
+ "Laranja: saturação": {
+  "en": "Orange: saturation",
+  "es": "Naranja: saturación",
+  "ru": "Оранжевый: насыщенность",
+  "hi": "नारंगी: संतृप्ति",
+  "id": "Oranye: saturasi",
+  "ar": "برتقالي: التشبع"
+ },
+ "Laranja: luz": {
+  "en": "Orange: luminance",
+  "es": "Naranja: luminancia",
+  "ru": "Оранжевый: яркость",
+  "hi": "नारंगी: ल्यूमिनेंस",
+  "id": "Oranye: luminans",
+  "ar": "برتقالي: الإنارة"
+ },
+ "Amarelo: matiz": {
+  "en": "Yellow: hue",
+  "es": "Amarillo: tono",
+  "ru": "Жёлтый: тон",
+  "hi": "पीला: ह्यू",
+  "id": "Kuning: rona",
+  "ar": "أصفر: التدرج"
+ },
+ "Amarelo: saturação": {
+  "en": "Yellow: saturation",
+  "es": "Amarillo: saturación",
+  "ru": "Жёлтый: насыщенность",
+  "hi": "पीला: संतृप्ति",
+  "id": "Kuning: saturasi",
+  "ar": "أصفر: التشبع"
+ },
+ "Amarelo: luz": {
+  "en": "Yellow: luminance",
+  "es": "Amarillo: luminancia",
+  "ru": "Жёлтый: яркость",
+  "hi": "पीला: ल्यूमिनेंस",
+  "id": "Kuning: luminans",
+  "ar": "أصفر: الإنارة"
+ },
+ "Verde: matiz": {
+  "en": "Green: hue",
+  "es": "Verde: tono",
+  "ru": "Зелёный: тон",
+  "hi": "हरा: ह्यू",
+  "id": "Hijau: rona",
+  "ar": "أخضر: التدرج"
+ },
+ "Verde: saturação": {
+  "en": "Green: saturation",
+  "es": "Verde: saturación",
+  "ru": "Зелёный: насыщенность",
+  "hi": "हरा: संतृप्ति",
+  "id": "Hijau: saturasi",
+  "ar": "أخضر: التشبع"
+ },
+ "Verde: luz": {
+  "en": "Green: luminance",
+  "es": "Verde: luminancia",
+  "ru": "Зелёный: яркость",
+  "hi": "हरा: ल्यूमिनेंस",
+  "id": "Hijau: luminans",
+  "ar": "أخضر: الإنارة"
+ },
+ "Ciano: matiz": {
+  "en": "Cyan: hue",
+  "es": "Cian: tono",
+  "ru": "Голубой: тон",
+  "hi": "सियान: ह्यू",
+  "id": "Sian: rona",
+  "ar": "سماوي: التدرج"
+ },
+ "Ciano: saturação": {
+  "en": "Cyan: saturation",
+  "es": "Cian: saturación",
+  "ru": "Голубой: насыщенность",
+  "hi": "सियान: संतृप्ति",
+  "id": "Sian: saturasi",
+  "ar": "سماوي: التشبع"
+ },
+ "Ciano: luz": {
+  "en": "Cyan: luminance",
+  "es": "Cian: luminancia",
+  "ru": "Голубой: яркость",
+  "hi": "सियान: ल्यूमिनेंस",
+  "id": "Sian: luminans",
+  "ar": "سماوي: الإنارة"
+ },
+ "Azul: matiz": {
+  "en": "Blue: hue",
+  "es": "Azul: tono",
+  "ru": "Синий: тон",
+  "hi": "नीला: ह्यू",
+  "id": "Biru: rona",
+  "ar": "أزرق: التدرج"
+ },
+ "Azul: saturação": {
+  "en": "Blue: saturation",
+  "es": "Azul: saturación",
+  "ru": "Синий: насыщенность",
+  "hi": "नीला: संतृप्ति",
+  "id": "Biru: saturasi",
+  "ar": "أزرق: التشبع"
+ },
+ "Azul: luz": {
+  "en": "Blue: luminance",
+  "es": "Azul: luminancia",
+  "ru": "Синий: яркость",
+  "hi": "नीला: ल्यूमिनेंस",
+  "id": "Biru: luminans",
+  "ar": "أزرق: الإنارة"
+ },
+ "Roxo: matiz": {
+  "en": "Purple: hue",
+  "es": "Morado: tono",
+  "ru": "Фиолетовый: тон",
+  "hi": "बैंगनी: ह्यू",
+  "id": "Ungu: rona",
+  "ar": "بنفسجي: التدرج"
+ },
+ "Roxo: saturação": {
+  "en": "Purple: saturation",
+  "es": "Morado: saturación",
+  "ru": "Фиолетовый: насыщенность",
+  "hi": "बैंगनी: संतृप्ति",
+  "id": "Ungu: saturasi",
+  "ar": "بنفسجي: التشبع"
+ },
+ "Roxo: luz": {
+  "en": "Purple: luminance",
+  "es": "Morado: luminancia",
+  "ru": "Фиолетовый: яркость",
+  "hi": "बैंगनी: ल्यूमिनेंस",
+  "id": "Ungu: luminans",
+  "ar": "بنفسجي: الإنارة"
+ },
+ "Magenta: matiz": {
+  "en": "Magenta: hue",
+  "es": "Magenta: tono",
+  "ru": "Пурпурный: тон",
+  "hi": "मैजेंटा: ह्यू",
+  "id": "Magenta: rona",
+  "ar": "أرجواني: التدرج"
+ },
+ "Magenta: saturação": {
+  "en": "Magenta: saturation",
+  "es": "Magenta: saturación",
+  "ru": "Пурпурный: насыщенность",
+  "hi": "मैजेंटा: संतृप्ति",
+  "id": "Magenta: saturasi",
+  "ar": "أرجواني: التشبع"
+ },
+ "Magenta: luz": {
+  "en": "Magenta: luminance",
+  "es": "Magenta: luminancia",
+  "ru": "Пурпурный: яркость",
+  "hi": "मैजेंटा: ल्यूमिनेंस",
+  "id": "Magenta: luminans",
+  "ar": "أرجواني: الإنارة"
  }
 }

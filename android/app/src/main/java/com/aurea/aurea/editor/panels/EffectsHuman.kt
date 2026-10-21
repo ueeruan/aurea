@@ -994,8 +994,27 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     // Câmera lenta por vetores e desfoque calculado da filmagem (0.1.8). Nomes
     // próprios; a busca acha pelos nomes dos plugins de mesmo propósito.
     put("aurea.time.flow_retime", EffectHuman(
-        keywords = "twixtor flow retime camera lenta slow motion super slow optical flow vetores interpolar quadros velocidade remapear tempo time remap timewarp suave",
-        principal = listOf(0, 1, 2, 3)))
+        keywords = "twixtor flow retime camera lenta slow motion super slow optical flow vetores interpolar quadros velocidade remapear tempo time remap timewarp suave duplicados repetidos duplicate frames chronos topaz",
+        principal = listOf(0, 1, 2, 3, 4),
+        params = mapOf(5 to ParamHuman(suffix = "%", decimals = 0))))
+    // Aprimorar (0.3.0): a restauração do Topaz (Proteus) com nome próprio.
+    put("aurea.enhance.video", EffectHuman(
+        name = R.string.fx030e_name,
+        keywords = "aprimorar enhance topaz proteus restaurar melhorar qualidade upscale ruido denoise compressao deblock nitidez sharpen halo grao grain detalhe",
+        principal = listOf(0, 1, 2, 3, 4, 12),
+        params = mapOf(
+            1 to ParamHuman(suffix = "%", decimals = 0),
+            2 to ParamHuman(suffix = "%", decimals = 0),
+            3 to ParamHuman(suffix = "%", decimals = 0),
+            4 to ParamHuman(suffix = "%", decimals = 0),
+            5 to ParamHuman(suffix = "%", decimals = 0),
+            6 to ParamHuman(suffix = "%", decimals = 0),
+            7 to ParamHuman(suffix = "%", decimals = 0),
+            8 to ParamHuman(suffix = "px", decimals = 1),
+            9 to ParamHuman(suffix = "%", decimals = 0),
+            10 to ParamHuman(decimals = 0),
+            12 to ParamHuman(suffix = "%", decimals = 0),
+        )))
     put("aurea.time.flow_motion_blur", EffectHuman(
         keywords = "rsmb reelsmart motion blur desfoque de movimento borrao vetores optical flow obturador shutter",
         principal = listOf(0, 1, 2)))

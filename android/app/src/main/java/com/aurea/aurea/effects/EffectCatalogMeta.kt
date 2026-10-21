@@ -164,8 +164,12 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.time.flow_retime", EffectMeta(
         R.string.fx_desc_time_flow_retime,
         listOf(EffectTarget.Video),
-        "twixtor camera lenta slow motion optical flow quadros inventados",
+        "twixtor camera lenta slow motion optical flow quadros inventados duplicados repetidos",
     ))
+    // Aprimorar (0.3.0): vídeo, pré-composição e camada de ajuste usam os quadros vizinhos; foto, só o quadro.
+    put("aurea.enhance.video", EffectMeta(R.string.fx030e_desc,
+        listOf(EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Ajuste, EffectTarget.Imagem),
+        "aprimorar topaz restaurar ruido compressao nitidez grao"))
     put("aurea.time.flow_motion_blur", EffectMeta(
         R.string.fx_desc_time_flow_motion_blur,
         listOf(EffectTarget.Video),

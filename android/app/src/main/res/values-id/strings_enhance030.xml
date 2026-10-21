@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Aprimorar (restauração estilo Topaz). -->
+<resources>
+    <string name="fx030e_name">Tingkatkan</string>
+    <string name="fx030e_desc">Memulihkan video ala Topaz: membalik kompresi, memulihkan detail, menghapus derau dengan bingkai sekitar, menghapus halo, dan menambah grain — otomatis atau manual.</string>
+    <string name="fxp_enhance_auto">Otomatis</string>
+    <string name="fxp_enhance_social">Ponsel dan media sosial</string>
+    <string name="fxp_enhance_restore">Pulihkan video lama</string>
+    <string name="fxp_enhance_anime">Animasi bersih</string>
+    <string name="fxp_enhance_upscaled">Video diperbesar</string>
+    <string name="fxp_enhance_film">Film dengan grain</string>
+</resources>

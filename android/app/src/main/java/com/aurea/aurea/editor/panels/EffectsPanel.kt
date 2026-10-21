@@ -1155,6 +1155,12 @@ private fun effectPresetLabel(id: String): Int? = when (id) {
     "sphere" -> R.string.fx030c_src_sphere
     "dust" -> R.string.fxp_constellation_dust
     "living_grid" -> R.string.fxp_constellation_living_grid
+    "auto" -> R.string.fxp_enhance_auto
+    "social" -> R.string.fxp_enhance_social
+    "restore" -> R.string.fxp_enhance_restore
+    "anime" -> R.string.fxp_enhance_anime
+    "upscaled" -> R.string.fxp_enhance_upscaled
+    "film" -> R.string.fxp_enhance_film
     else -> null
 }
 

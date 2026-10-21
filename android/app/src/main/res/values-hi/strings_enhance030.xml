@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Aprimorar (restauração estilo Topaz). -->
+<resources>
+    <string name="fx030e_name">एन्हांस</string>
+    <string name="fx030e_desc">Topaz की तरह वीडियो रीस्टोर करता है: कंप्रेशन हटाता है, डिटेल लौटाता है, पास के फ़्रेम से नॉइज़ हटाता है, हेलो हटाता है और ग्रेन जोड़ता है — ऑटो या मैनुअल।</string>
+    <string name="fxp_enhance_auto">स्वचालित</string>
+    <string name="fxp_enhance_social">फ़ोन और सोशल मीडिया</string>
+    <string name="fxp_enhance_restore">पुराना वीडियो रीस्टोर करें</string>
+    <string name="fxp_enhance_anime">साफ़ एनिमेशन</string>
+    <string name="fxp_enhance_upscaled">अपस्केल वीडियो</string>
+    <string name="fxp_enhance_film">ग्रेन वाली फ़िल्म</string>
+</resources>

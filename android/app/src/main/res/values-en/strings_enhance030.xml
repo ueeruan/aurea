@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Aprimorar (restauração estilo Topaz). -->
+<resources>
+    <string name="fx030e_name">Enhance</string>
+    <string name="fx030e_desc">Restores video in the style of Topaz: reverts compression, recovers detail, removes noise using neighbouring frames, removes halos and adds grain — automatic or manual.</string>
+    <string name="fxp_enhance_auto">Automatic</string>
+    <string name="fxp_enhance_social">Phone and social media</string>
+    <string name="fxp_enhance_restore">Restore old video</string>
+    <string name="fxp_enhance_anime">Clean animation</string>
+    <string name="fxp_enhance_upscaled">Upscaled video</string>
+    <string name="fxp_enhance_film">Film with grain</string>
+</resources>

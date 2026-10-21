@@ -921,8 +921,27 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     // Câmera lenta por vetores e desfoque calculado da filmagem (0.1.8).
     ("aurea.time.flow_retime", FxEffectHuman(
-        keywords: "twixtor flow retime camera lenta slow motion super slow optical flow vetores interpolar quadros velocidade remapear tempo time remap timewarp suave",
-        principal: [0, 1, 2, 3])),
+        keywords: "twixtor flow retime camera lenta slow motion super slow optical flow vetores interpolar quadros velocidade remapear tempo time remap timewarp suave duplicados repetidos duplicate frames chronos topaz",
+        principal: [0, 1, 2, 3, 4],
+        params: [5: FxParamHuman(suffix: "%", decimals: 0)])),
+    // Aprimorar (0.3.0): a restauração do Topaz (Proteus) com nome próprio.
+    ("aurea.enhance.video", FxEffectHuman(
+        name: "fx030e_name",
+        keywords: "aprimorar enhance topaz proteus restaurar melhorar qualidade upscale ruido denoise compressao deblock nitidez sharpen halo grao grain detalhe",
+        principal: [0, 1, 2, 3, 4, 12],
+        params: [
+            1: FxParamHuman(suffix: "%", decimals: 0),
+            2: FxParamHuman(suffix: "%", decimals: 0),
+            3: FxParamHuman(suffix: "%", decimals: 0),
+            4: FxParamHuman(suffix: "%", decimals: 0),
+            5: FxParamHuman(suffix: "%", decimals: 0),
+            6: FxParamHuman(suffix: "%", decimals: 0),
+            7: FxParamHuman(suffix: "%", decimals: 0),
+            8: FxParamHuman(suffix: "px", decimals: 1),
+            9: FxParamHuman(suffix: "%", decimals: 0),
+            10: FxParamHuman(decimals: 0),
+            12: FxParamHuman(suffix: "%", decimals: 0),
+        ])),
     ("aurea.time.flow_motion_blur", FxEffectHuman(
         keywords: "rsmb reelsmart motion blur desfoque de movimento borrao vetores optical flow obturador shutter",
         principal: [0, 1, 2])),
@@ -1970,7 +1989,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.glitch.signal", "fx_desc_glitch_signal")
     put("aurea.glitch.cross", "fx_desc_glitch_cross")
     put("aurea.time.posterize", "fx_desc_time_posterize", FxTimeTargets, "stop motion quadros taxa travada")
-    put("aurea.time.flow_retime", "fx_desc_time_flow_retime", [.video], "twixtor camera lenta slow motion optical flow quadros inventados")
+    put("aurea.time.flow_retime", "fx_desc_time_flow_retime", [.video], "twixtor camera lenta slow motion optical flow quadros inventados duplicados repetidos")
     put("aurea.time.flow_motion_blur", "fx_desc_time_flow_motion_blur", [.video], "rsmb reelsmart desfoque de movimento vetores borrao")
     put("aurea.time.warp_rgb", "fx_desc_time_warp_rgb", [.video, .preComposicao, .imagem], "rgb no tempo canais separados atraso de cor")
     put("aurea.time.slice", "fx_desc_time_slice", [.video, .preComposicao], "timeslice fatias faixas tempo slit scan helice")
@@ -1979,6 +1998,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.time.random_edits", "fx027_desc_random_edits", [.video, .preComposicao], "edicoes aleatorias random edits cortes embaralhar jump cut")
     put("aurea.generate.aurora", "fx030_desc_aurora", FxAllTargets, "aurora boreal northern lights ceu estrelas reflexo polar 3d camera")
     put("aurea.generate.constellation", "fx030c_desc", FxAllTargets, "constelacao plexus rede pontos linhas triangulos conexoes 3d camera")
+    put("aurea.enhance.video", "fx030e_desc", [.video, .preComposicao, .ajuste, .imagem], "aprimorar topaz restaurar ruido compressao nitidez grao")
     put("aurea.time.motion_detect", "fx_desc_time_motion_detect", [.video], "detectar movimento diferenca quadro anterior")
     put("aurea.stylize.crt_emulator", "fx_desc_stylize_crt_emulator", FxAllTargets, "crt tv tubo retro varredura fosforo")
     put("aurea.glitch.dissolve_shake", "fx_desc_glitch_dissolve_shake", FxAllTargets, "tremor dissolver fragmentos quebrar")

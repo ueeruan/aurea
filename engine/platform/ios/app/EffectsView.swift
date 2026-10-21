@@ -1369,6 +1369,7 @@ struct FxPresetRow: View {
             return AureaText.t("fxp_" + pid)
         case "classic", "dust", "living_grid": return AureaText.t("fxp_constellation_" + pid)
         case "sphere": return AureaText.t("fx030c_src_sphere")
+        case "auto", "social", "restore", "anime", "upscaled", "film": return AureaText.t("fxp_enhance_" + pid)
         default: return fallback
         }
     }

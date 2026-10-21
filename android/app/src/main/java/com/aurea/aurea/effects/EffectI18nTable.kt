@@ -7,7 +7,7 @@ import com.aurea.aurea.R
 internal object EffectI18nTable {
     /** (typeId << 16 | índice do parâmetro) → [rótulo, opção 0, opção 1, ...] (recursos). */
     val entries: Map<Long, IntArray> by lazy {
-        HashMap<Long, IntArray>(3796).apply {
+        HashMap<Long, IntArray>(4166).apply {
             part0(this)
             part1(this)
             part2(this)
@@ -24,6 +24,8 @@ internal object EffectI18nTable {
             part13(this)
             part14(this)
             part15(this)
+            part16(this)
+            part17(this)
         }
     }
 
@@ -440,9 +442,9 @@ internal object EffectI18nTable {
         m.put("aurea.stylize.pixel_sort", 1, /* threshold_high */ intArrayOf(R.string.fx_limiar_alto))
         m.put("aurea.stylize.pixel_sort", 2, /* length */ intArrayOf(R.string.fx_comprimento))
         m.put("aurea.stylize.pixel_sort", 3, /* randomness */ intArrayOf(R.string.fx_aleatoriedade))
-        m.put("aurea.stylize.pixel_sort", 4, /* direction */ intArrayOf(R.string.fx_direcao, R.string.fxo_horizontal, R.string.fxo_vertical, R.string.fxo_diagonal, R.string.fxo_radial, R.string.fx_angulo))
+        m.put("aurea.stylize.pixel_sort", 4, /* direction */ intArrayOf(R.string.fx_direcao, R.string.fxo_horizontal, R.string.fxo_vertical, R.string.fxo_diagonal, R.string.fxo_radial, R.string.fxl_angle))
         m.put("aurea.stylize.pixel_sort", 5, /* reverse */ intArrayOf(R.string.fx_sentido_inverso))
-        m.put("aurea.stylize.pixel_sort", 6, /* mode */ intArrayOf(R.string.fx_ordenar, R.string.fxo_brightness, R.string.fx_matiz, R.string.fx_vermelho_c031, R.string.fx_verde_14e6, R.string.fx_azul_582d, R.string.fx_saturacao))
+        m.put("aurea.stylize.pixel_sort", 6, /* mode */ intArrayOf(R.string.fx_ordenar, R.string.fxo_brightness, R.string.afx_name_tone, R.string.fx_vermelho_c031, R.string.fx_verde_14e6, R.string.fx_azul_582d, R.string.fx_saturacao))
         m.put("aurea.stylize.pixel_sort", 7, /* seed */ intArrayOf(R.string.fxl_seed))
         m.put("aurea.stylize.pixel_sort", 8, /* band_mode */ intArrayOf(R.string.fx_faixa_tom))
         m.put("aurea.stylize.pixel_sort", 9, /* step */ intArrayOf(R.string.fx_passo))
@@ -467,6 +469,10 @@ internal object EffectI18nTable {
         m.put("aurea.time.slice", 1, /* slices */ intArrayOf(R.string.fxl_slice_number))
         m.put("aurea.time.slice", 2, /* frame_offset */ intArrayOf(R.string.fxl_frame_offset))
         m.put("aurea.time.slice", 3, /* interpolate */ intArrayOf(R.string.fxl_interpolate_frames))
+        m.put("aurea.time.wide_time", 0, /* forward_steps */ intArrayOf(R.string.fx030_forward_steps))
+        m.put("aurea.time.wide_time", 1, /* backward_steps */ intArrayOf(R.string.fx030_backward_steps))
+        m.put("aurea.time.wide_time", 2, /* native_motion_blur */ intArrayOf(R.string.fx030_native_motion_blur))
+        m.put("aurea.time.wide_time", 3, /* layer_motion */ intArrayOf(R.string.fx030_layer_motion))
         m.put("aurea.transition.linear_wipe", 0, /* completion */ intArrayOf(R.string.fx_conclusao))
         m.put("aurea.transition.linear_wipe", 1, /* angle */ intArrayOf(R.string.fxl_start_angle))
         m.put("aurea.transition.linear_wipe", 2, /* feather */ intArrayOf(R.string.fxl_softness))
@@ -513,15 +519,15 @@ internal object EffectI18nTable {
         m.put("aurea.light.scene_flare", 6, /* style */ intArrayOf(R.string.fxl_style, R.string.fxo_flare_classic, R.string.fxo_flare_anamorphic, R.string.fxo_flare_summer, R.string.fxo_star, R.string.fxo_flare_neon, R.string.fxo_flare_cinema, R.string.fxo_flare_rainbow, R.string.fxo_flare_scifi, R.string.fxo_flare_sunset))
         m.put("aurea.light.scene_flare", 7, /* tint_amount */ intArrayOf(R.string.fxl_flare_tint_amount))
         m.put("aurea.light.scene_flare", 8, /* rotation */ intArrayOf(R.string.fxl_flare_rotation))
+    }
+
+    private fun part4(m: HashMap<Long, IntArray>) {
         m.put("aurea.light.scene_flare", 9, /* streak */ intArrayOf(R.string.fxl_flare_streak))
         m.put("aurea.light.scene_flare", 10, /* rays */ intArrayOf(R.string.fxl_rays))
         m.put("aurea.light.scene_flare", 11, /* flicker */ intArrayOf(R.string.fxl_flicker))
         m.put("aurea.color.rgb_split", 0, /* red_x */ intArrayOf(R.string.fxl_red_x))
         m.put("aurea.color.rgb_split", 1, /* red_y */ intArrayOf(R.string.fxl_red_y))
         m.put("aurea.color.rgb_split", 2, /* green_x */ intArrayOf(R.string.fxl_green_x))
-    }
-
-    private fun part4(m: HashMap<Long, IntArray>) {
         m.put("aurea.color.rgb_split", 3, /* green_y */ intArrayOf(R.string.fxl_green_y))
         m.put("aurea.color.rgb_split", 4, /* blue_x */ intArrayOf(R.string.fxl_blue_x))
         m.put("aurea.color.rgb_split", 5, /* blue_y */ intArrayOf(R.string.fxl_blue_y))
@@ -636,15 +642,15 @@ internal object EffectI18nTable {
         m.put("aurea.stylize.bevel_alpha", 4, /* shadow */ intArrayOf(R.string.fxl_shadow))
         m.put("aurea.color.gradient_map", 0, /* shadows */ intArrayOf(R.string.fx_sombras))
         m.put("aurea.color.gradient_map", 1, /* midtones */ intArrayOf(R.string.fx_tons_medios))
+    }
+
+    private fun part5(m: HashMap<Long, IntArray>) {
         m.put("aurea.color.gradient_map", 2, /* highlights */ intArrayOf(R.string.fx_luzes))
         m.put("aurea.color.gradient_map", 3, /* midpoint */ intArrayOf(R.string.fxl_midpoint))
         m.put("aurea.color.gradient_map", 4, /* mix */ intArrayOf(R.string.fxl_mix))
         m.put("aurea.pattern.checkerboard", 0, /* width */ intArrayOf(R.string.fx_largura_celula))
         m.put("aurea.pattern.checkerboard", 1, /* height */ intArrayOf(R.string.fx_altura_celula))
         m.put("aurea.pattern.checkerboard", 2, /* anchor */ intArrayOf(R.string.fx_ancora))
-    }
-
-    private fun part5(m: HashMap<Long, IntArray>) {
         m.put("aurea.pattern.checkerboard", 3, /* rotation */ intArrayOf(R.string.fx_rotacao))
         m.put("aurea.pattern.checkerboard", 4, /* feather */ intArrayOf(R.string.fx_suavidade_borda))
         m.put("aurea.pattern.checkerboard", 5, /* invert */ intArrayOf(R.string.fx_inverter))
@@ -759,15 +765,15 @@ internal object EffectI18nTable {
         m.put("aurea.motion.oscillate", 2, /* frequency */ intArrayOf(R.string.fx_frequencia))
         m.put("aurea.motion.oscillate", 3, /* phase */ intArrayOf(R.string.fx_fase))
         m.put("aurea.motion.oscillate", 4, /* rotation */ intArrayOf(R.string.fx_rotacao))
+    }
+
+    private fun part6(m: HashMap<Long, IntArray>) {
         m.put("aurea.motion.oscillate", 5, /* scale */ intArrayOf(R.string.fx_pulso_escala))
         m.put("aurea.motion.oscillate", 6, /* waveform */ intArrayOf(R.string.fx_forma_onda, R.string.fxo_sine, R.string.fxo_triangle, R.string.fxo_square_2, R.string.fxo_sawtooth, R.string.fxo_random))
         m.put("aurea.motion.oscillate", 7, /* seed */ intArrayOf(R.string.fx_semente))
         m.put("aurea.motion.oscillate", 8, /* decay */ intArrayOf(R.string.fx_decaimento))
         m.put("aurea.motion.oscillate", 9, /* pivot */ intArrayOf(R.string.fx_pivo))
         m.put("aurea.motion.oscillate.cycles", 0, /* direction */ intArrayOf(R.string.fxl_direction, R.string.fxl_angle, R.string.fxo_depth, R.string.fxo_orbit))
-    }
-
-    private fun part6(m: HashMap<Long, IntArray>) {
         m.put("aurea.motion.oscillate.cycles", 1, /* angle */ intArrayOf(R.string.fxl_angle))
         m.put("aurea.motion.oscillate.cycles", 2, /* frequency */ intArrayOf(R.string.fx_frequencia))
         m.put("aurea.motion.oscillate.cycles", 3, /* magnitude */ intArrayOf(R.string.fx_amplitude))
@@ -867,174 +873,6 @@ internal object EffectI18nTable {
         m.put("aurea.generate.fractal_noise", 13, /* opacity */ intArrayOf(R.string.fx_opacidade))
         m.put("aurea.generate.fractal_noise", 14, /* blend */ intArrayOf(R.string.fx_mistura_camada, R.string.fxo_normal, R.string.fxo_multiply, R.string.fxo_screen, R.string.fxo_overlay, R.string.fxo_add))
         m.put("aurea.generate.fractal_noise", 15, /* fill_box */ intArrayOf(R.string.fx_preencher_caixa))
-        m.put("aurea.generate.aurora", 0, intArrayOf(R.string.fxs_distortion))
-        m.put("aurea.generate.aurora", 1, intArrayOf(R.string.fx027_amount))
-        m.put("aurea.generate.aurora", 2, intArrayOf(R.string.fxl_scale))
-        m.put("aurea.generate.aurora", 3, intArrayOf(R.string.fxl_length))
-        m.put("aurea.generate.aurora", 4, intArrayOf(R.string.fxl_exposure))
-        m.put("aurea.generate.aurora", 5, intArrayOf(R.string.fxl_detail))
-        m.put("aurea.generate.aurora", 6, intArrayOf(R.string.fx3_curvatura))
-        m.put("aurea.generate.aurora", 7, intArrayOf(R.string.fx027_sky_glow))
-        m.put("aurea.generate.aurora", 8, intArrayOf(R.string.fxl_color))
-        m.put("aurea.generate.aurora", 9, intArrayOf(R.string.fx027_secondary_color))
-        m.put("aurea.generate.aurora", 10, intArrayOf(R.string.fx027_sky_color))
-        m.put("aurea.generate.aurora", 11, intArrayOf(R.string.fx027_time_offset))
-        m.put("aurea.generate.aurora", 12, intArrayOf(R.string.fxl_speed))
-        m.put("aurea.generate.aurora", 13, intArrayOf(R.string.fx027_horizon))
-        m.put("aurea.generate.aurora", 14, intArrayOf(R.string.fx027_reflection))
-        m.put("aurea.generate.aurora", 15, intArrayOf(R.string.fx027_ripple))
-        m.put("aurea.generate.aurora", 16, intArrayOf(R.string.fx027_stars))
-        m.put("aurea.generate.aurora", 17, intArrayOf(R.string.fx027_tilt))
-        m.put("aurea.generate.aurora", 18, intArrayOf(R.string.fx027_pan))
-        m.put("aurea.generate.aurora", 19, intArrayOf(R.string.fxl_field_of_view))
-        m.put("aurea.generate.aurora", 20, intArrayOf(R.string.fx027_sky_height))
-        m.put("aurea.generate.aurora", 21, intArrayOf(R.string.fxl_opacity))
-        m.put("aurea.generate.aurora", 22, /* follow_camera */ intArrayOf(R.string.fx030_follow_camera))
-        m.put("aurea.generate.aurora", 23, /* quality */ intArrayOf(R.string.fxl_quality, R.string.fxo_fast, R.string.fxo_normal, R.string.fxo_high))
-        m.put("aurea.color.grade", 0, /* log_profile */ intArrayOf(R.string.grade_log_profile, R.string.grade_log_none, R.string.grade_log_slog3, R.string.grade_log_logc3, R.string.grade_log_vlog, R.string.grade_log_applelog, R.string.grade_log_cineon))
-        m.put("aurea.color.grade", 1, /* temperature */ intArrayOf(R.string.grade_temperature))
-        m.put("aurea.color.grade", 2, /* tint */ intArrayOf(R.string.grade_tint))
-        m.put("aurea.color.grade", 3, /* exposure */ intArrayOf(R.string.grade_exposure))
-        m.put("aurea.color.grade", 4, /* contrast */ intArrayOf(R.string.grade_contrast))
-        m.put("aurea.color.grade", 5, /* pivot */ intArrayOf(R.string.grade_pivot))
-        m.put("aurea.color.grade", 6, /* highlights */ intArrayOf(R.string.grade_highlights))
-        m.put("aurea.color.grade", 7, /* shadows */ intArrayOf(R.string.grade_shadows))
-        m.put("aurea.color.grade", 8, /* whites */ intArrayOf(R.string.grade_whites))
-        m.put("aurea.color.grade", 9, /* blacks */ intArrayOf(R.string.grade_blacks))
-        m.put("aurea.color.grade", 10, /* brightness */ intArrayOf(R.string.grade_brightness))
-        m.put("aurea.color.grade", 11, /* saturation */ intArrayOf(R.string.grade_saturation))
-        m.put("aurea.color.grade", 12, /* vibrance */ intArrayOf(R.string.grade_vibrance))
-        m.put("aurea.color.grade", 13, /* lift */ intArrayOf(R.string.grade_lift))
-        m.put("aurea.color.grade", 14, /* lift_luma */ intArrayOf(R.string.grade_lift_luma))
-        m.put("aurea.color.grade", 15, /* gamma */ intArrayOf(R.string.grade_gamma))
-        m.put("aurea.color.grade", 16, /* gamma_luma */ intArrayOf(R.string.grade_gamma_luma))
-        m.put("aurea.color.grade", 17, /* gain */ intArrayOf(R.string.grade_gain))
-        m.put("aurea.color.grade", 18, /* gain_luma */ intArrayOf(R.string.grade_gain_luma))
-        m.put("aurea.color.grade", 19, /* offset */ intArrayOf(R.string.grade_offset))
-        m.put("aurea.color.grade", 20, /* offset_luma */ intArrayOf(R.string.grade_offset_luma))
-        m.put("aurea.color.grade", 21, /* curves */ intArrayOf(R.string.grade_curves_rgb))
-        m.put("aurea.color.grade", 22, /* hue_curves */ intArrayOf(R.string.grade_curves_hue))
-        m.put("aurea.color.grade", 23, /* red_hue */ intArrayOf(R.string.grade_hsl_red_hue))
-        m.put("aurea.color.grade", 24, /* red_sat */ intArrayOf(R.string.grade_hsl_red_sat))
-        m.put("aurea.color.grade", 25, /* red_lum */ intArrayOf(R.string.grade_hsl_red_lum))
-        m.put("aurea.color.grade", 26, /* orange_hue */ intArrayOf(R.string.grade_hsl_orange_hue))
-        m.put("aurea.color.grade", 27, /* orange_sat */ intArrayOf(R.string.grade_hsl_orange_sat))
-        m.put("aurea.color.grade", 28, /* orange_lum */ intArrayOf(R.string.grade_hsl_orange_lum))
-        m.put("aurea.color.grade", 29, /* yellow_hue */ intArrayOf(R.string.grade_hsl_yellow_hue))
-        m.put("aurea.color.grade", 30, /* yellow_sat */ intArrayOf(R.string.grade_hsl_yellow_sat))
-        m.put("aurea.color.grade", 31, /* yellow_lum */ intArrayOf(R.string.grade_hsl_yellow_lum))
-        m.put("aurea.color.grade", 32, /* green_hue */ intArrayOf(R.string.grade_hsl_green_hue))
-        m.put("aurea.color.grade", 33, /* green_sat */ intArrayOf(R.string.grade_hsl_green_sat))
-        m.put("aurea.color.grade", 34, /* green_lum */ intArrayOf(R.string.grade_hsl_green_lum))
-        m.put("aurea.color.grade", 35, /* aqua_hue */ intArrayOf(R.string.grade_hsl_aqua_hue))
-        m.put("aurea.color.grade", 36, /* aqua_sat */ intArrayOf(R.string.grade_hsl_aqua_sat))
-        m.put("aurea.color.grade", 37, /* aqua_lum */ intArrayOf(R.string.grade_hsl_aqua_lum))
-        m.put("aurea.color.grade", 38, /* blue_hue */ intArrayOf(R.string.grade_hsl_blue_hue))
-        m.put("aurea.color.grade", 39, /* blue_sat */ intArrayOf(R.string.grade_hsl_blue_sat))
-        m.put("aurea.color.grade", 40, /* blue_lum */ intArrayOf(R.string.grade_hsl_blue_lum))
-        m.put("aurea.color.grade", 41, /* purple_hue */ intArrayOf(R.string.grade_hsl_purple_hue))
-        m.put("aurea.color.grade", 42, /* purple_sat */ intArrayOf(R.string.grade_hsl_purple_sat))
-        m.put("aurea.color.grade", 43, /* purple_lum */ intArrayOf(R.string.grade_hsl_purple_lum))
-        m.put("aurea.color.grade", 44, /* magenta_hue */ intArrayOf(R.string.grade_hsl_magenta_hue))
-        m.put("aurea.color.grade", 45, /* magenta_sat */ intArrayOf(R.string.grade_hsl_magenta_sat))
-        m.put("aurea.color.grade", 46, /* magenta_lum */ intArrayOf(R.string.grade_hsl_magenta_lum))
-        m.put("aurea.color.grade", 47, /* qualifier */ intArrayOf(R.string.grade_secondary))
-        m.put("aurea.color.grade", 48, /* q_hue */ intArrayOf(R.string.grade_q_hue))
-        m.put("aurea.color.grade", 49, /* q_hue_width */ intArrayOf(R.string.grade_q_width))
-        m.put("aurea.color.grade", 50, /* q_sat_low */ intArrayOf(R.string.grade_q_sat_low))
-        m.put("aurea.color.grade", 51, /* q_sat_high */ intArrayOf(R.string.grade_q_sat_high))
-        m.put("aurea.color.grade", 52, /* q_luma_low */ intArrayOf(R.string.grade_q_luma_low))
-        m.put("aurea.color.grade", 53, /* q_luma_high */ intArrayOf(R.string.grade_q_luma_high))
-        m.put("aurea.color.grade", 54, /* q_softness */ intArrayOf(R.string.grade_q_softness))
-        m.put("aurea.color.grade", 55, /* q_invert */ intArrayOf(R.string.grade_q_invert))
-        m.put("aurea.color.grade", 56, /* q_show_mask */ intArrayOf(R.string.grade_q_show))
-        m.put("aurea.color.grade", 57, /* q_hue_shift */ intArrayOf(R.string.grade_q_hue_shift))
-        m.put("aurea.color.grade", 58, /* q_saturation */ intArrayOf(R.string.grade_q_saturation))
-        m.put("aurea.color.grade", 59, /* q_exposure */ intArrayOf(R.string.grade_q_exposure))
-        m.put("aurea.color.grade", 60, /* fade */ intArrayOf(R.string.grade_fade))
-        m.put("aurea.color.grade", 61, /* shadow_tint */ intArrayOf(R.string.grade_shadow_tint))
-        m.put("aurea.color.grade", 62, /* highlight_tint */ intArrayOf(R.string.grade_highlight_tint))
-        m.put("aurea.color.grade", 63, /* tint_balance */ intArrayOf(R.string.grade_tint_balance))
-        m.put("aurea.color.grade", 64, /* sharpen */ intArrayOf(R.string.grade_sharpen))
-        m.put("aurea.color.grade", 65, /* vignette */ intArrayOf(R.string.grade_vignette))
-        m.put("aurea.color.grade", 66, /* vignette_mid */ intArrayOf(R.string.grade_vignette_mid))
-        m.put("aurea.color.grade", 67, /* vignette_feather */ intArrayOf(R.string.grade_vignette_feather))
-        m.put("aurea.color.grade", 68, /* grain */ intArrayOf(R.string.grade_grain))
-        m.put("aurea.color.grade", 69, /* grain_size */ intArrayOf(R.string.grade_grain_size))
-        m.put("aurea.color.grade", 70, /* lut */ intArrayOf(R.string.grade_lut))
-        m.put("aurea.color.grade", 71, /* lut_intensity */ intArrayOf(R.string.grade_lut_intensity))
-        m.put("aurea.color.grade", 76, /* mix */ intArrayOf(R.string.grade_intensity))
-        m.put("aurea.generate.constellation", 0, /* source */ intArrayOf(R.string.fx030c_source, R.string.fx030c_src_cloud, R.string.fx030c_src_sphere, R.string.fx030c_src_grid, R.string.fx030c_src_ring, R.string.fx030c_src_plane, R.string.fx030c_src_path))
-        m.put("aurea.generate.constellation", 1, /* count */ intArrayOf(R.string.fx030c_count))
-        m.put("aurea.generate.constellation", 2, /* seed */ intArrayOf(R.string.fxl_seed))
-        m.put("aurea.generate.constellation", 3, /* width */ intArrayOf(R.string.fx030c_width))
-        m.put("aurea.generate.constellation", 4, /* height */ intArrayOf(R.string.fx030c_height))
-        m.put("aurea.generate.constellation", 5, /* depth */ intArrayOf(R.string.fx030c_depth))
-        m.put("aurea.generate.constellation", 6, /* radius */ intArrayOf(R.string.fx030c_radius))
-        m.put("aurea.generate.constellation", 7, /* tube_radius */ intArrayOf(R.string.fx030c_tube_radius))
-        m.put("aurea.generate.constellation", 8, /* grid_x */ intArrayOf(R.string.fx030c_grid_x))
-        m.put("aurea.generate.constellation", 9, /* grid_y */ intArrayOf(R.string.fx030c_grid_y))
-        m.put("aurea.generate.constellation", 10, /* grid_z */ intArrayOf(R.string.fx030c_grid_z))
-        m.put("aurea.generate.constellation", 11, /* path_layer */ intArrayOf(R.string.fx030c_path_layer))
-        m.put("aurea.generate.constellation", 12, /* jitter */ intArrayOf(R.string.fx030c_jitter))
-        m.put("aurea.generate.constellation", 13, /* center */ intArrayOf(R.string.fx030c_center))
-        m.put("aurea.generate.constellation", 14, /* position_z */ intArrayOf(R.string.fx030c_position_z))
-        m.put("aurea.generate.constellation", 15, /* scale */ intArrayOf(R.string.fx030c_scale))
-        m.put("aurea.generate.constellation", 16, /* rotation_x */ intArrayOf(R.string.fx030c_rotation_x))
-        m.put("aurea.generate.constellation", 17, /* rotation_y */ intArrayOf(R.string.fx030c_rotation_y))
-        m.put("aurea.generate.constellation", 18, /* rotation_z */ intArrayOf(R.string.fx030c_rotation_z))
-        m.put("aurea.generate.constellation", 19, /* spin_x */ intArrayOf(R.string.fx030c_spin_x))
-        m.put("aurea.generate.constellation", 20, /* spin_y */ intArrayOf(R.string.fx030c_spin_y))
-        m.put("aurea.generate.constellation", 21, /* spin_z */ intArrayOf(R.string.fx030c_spin_z))
-        m.put("aurea.generate.constellation", 22, /* noise */ intArrayOf(R.string.fx030c_noise))
-        m.put("aurea.generate.constellation", 23, /* noise_amount */ intArrayOf(R.string.fx030c_noise_amount))
-        m.put("aurea.generate.constellation", 24, /* noise_scale */ intArrayOf(R.string.fx030c_noise_scale))
-        m.put("aurea.generate.constellation", 25, /* noise_speed */ intArrayOf(R.string.fx030c_noise_speed))
-        m.put("aurea.generate.constellation", 26, /* noise_octaves */ intArrayOf(R.string.fx030c_noise_octaves))
-        m.put("aurea.generate.constellation", 27, /* field */ intArrayOf(R.string.fx030c_field))
-        m.put("aurea.generate.constellation", 28, /* field_center */ intArrayOf(R.string.fx030c_field_center))
-        m.put("aurea.generate.constellation", 29, /* field_z */ intArrayOf(R.string.fx030c_field_z))
-        m.put("aurea.generate.constellation", 30, /* field_radius */ intArrayOf(R.string.fx030c_field_radius))
-        m.put("aurea.generate.constellation", 31, /* field_strength */ intArrayOf(R.string.fx030c_field_strength))
-        m.put("aurea.generate.constellation", 32, /* lines */ intArrayOf(R.string.fx030c_lines))
-        m.put("aurea.generate.constellation", 33, /* line_max_distance */ intArrayOf(R.string.fx030c_line_max))
-        m.put("aurea.generate.constellation", 34, /* line_min_distance */ intArrayOf(R.string.fx030c_line_min))
-        m.put("aurea.generate.constellation", 35, /* max_connections */ intArrayOf(R.string.fx030c_connections))
-        m.put("aurea.generate.constellation", 36, /* line_width */ intArrayOf(R.string.fx030c_line_width))
-        m.put("aurea.generate.constellation", 37, /* line_opacity */ intArrayOf(R.string.fx030c_line_opacity))
-        m.put("aurea.generate.constellation", 38, /* line_falloff */ intArrayOf(R.string.fx030c_line_falloff))
-        m.put("aurea.generate.constellation", 39, /* line_color_mode */ intArrayOf(R.string.fx030c_line_color_mode, R.string.fx030c_color_own, R.string.fx030c_color_points))
-        m.put("aurea.generate.constellation", 40, /* line_color */ intArrayOf(R.string.fx030c_line_color))
-        m.put("aurea.generate.constellation", 41, /* line_perspective */ intArrayOf(R.string.fx030c_line_perspective))
-        m.put("aurea.generate.constellation", 42, /* points */ intArrayOf(R.string.fx030c_points))
-        m.put("aurea.generate.constellation", 43, /* point_size */ intArrayOf(R.string.fx030c_point_size))
-        m.put("aurea.generate.constellation", 44, /* point_opacity */ intArrayOf(R.string.fx030c_point_opacity))
-        m.put("aurea.generate.constellation", 45, /* point_color */ intArrayOf(R.string.fx030c_color_points))
-        m.put("aurea.generate.constellation", 46, /* point_perspective */ intArrayOf(R.string.fx030c_point_perspective))
-        m.put("aurea.generate.constellation", 47, /* point_softness */ intArrayOf(R.string.fx030c_point_softness))
-        m.put("aurea.generate.constellation", 48, /* only_connected */ intArrayOf(R.string.fx030c_only_connected))
-        m.put("aurea.generate.constellation", 49, /* triangles */ intArrayOf(R.string.fx030c_triangles))
-        m.put("aurea.generate.constellation", 50, /* triangle_max_distance */ intArrayOf(R.string.fx030c_tri_max))
-        m.put("aurea.generate.constellation", 51, /* triangle_opacity */ intArrayOf(R.string.fx030c_tri_opacity))
-        m.put("aurea.generate.constellation", 52, /* triangle_color_mode */ intArrayOf(R.string.fx030c_tri_color_mode, R.string.fx030c_color_own, R.string.fx030c_color_points))
-        m.put("aurea.generate.constellation", 53, /* triangle_color */ intArrayOf(R.string.fx030c_tri_color))
-        m.put("aurea.generate.constellation", 54, /* depth_fog */ intArrayOf(R.string.fx030c_depth_fog))
-        m.put("aurea.generate.constellation", 55, /* depth_near */ intArrayOf(R.string.fx030c_depth_near))
-        m.put("aurea.generate.constellation", 56, /* depth_far */ intArrayOf(R.string.fx030c_depth_far))
-        m.put("aurea.generate.constellation", 57, /* depth_color */ intArrayOf(R.string.fx030c_depth_color))
-        m.put("aurea.generate.constellation", 58, /* near_color */ intArrayOf(R.string.fx030c_near_color))
-        m.put("aurea.generate.constellation", 59, /* far_color */ intArrayOf(R.string.fx030c_far_color))
-        m.put("aurea.generate.constellation", 60, /* opacity */ intArrayOf(R.string.fxl_opacity))
-        m.put("aurea.generate.constellation", 61, /* blend */ intArrayOf(R.string.fx030c_blend, R.string.fx030c_blend_over, R.string.fx030c_blend_add))
-        m.put("aurea.generate.constellation", 62, /* show_layer */ intArrayOf(R.string.fx030c_show_layer))
-        m.put("aurea.generate.constellation", 63, /* follow_camera */ intArrayOf(R.string.fx030_follow_camera))
-        m.put("aurea.generate.constellation", 64, /* fov */ intArrayOf(R.string.fxl_field_of_view))
-        m.put("aurea.time.wide_time", 0, /* forward_steps */ intArrayOf(R.string.fx030_forward_steps))
-        m.put("aurea.time.wide_time", 1, /* backward_steps */ intArrayOf(R.string.fx030_backward_steps))
-        m.put("aurea.time.wide_time", 2, /* native_motion_blur */ intArrayOf(R.string.fx030_native_motion_blur))
-        m.put("aurea.time.wide_time", 3, /* layer_motion */ intArrayOf(R.string.fx030_layer_motion))
-        m.put("aurea.time.random_edits", 0, /* edit_length */ intArrayOf(R.string.fx027_edit_length))
-        m.put("aurea.time.random_edits", 1, /* seed */ intArrayOf(R.string.fxl_seed))
         m.put("aurea.generate.gradient_ramp", 0, /* shape */ intArrayOf(R.string.fx_forma, R.string.fxo_linear, R.string.fxo_radial))
         m.put("aurea.generate.gradient_ramp", 1, /* start */ intArrayOf(R.string.fx_ponto_inicial))
         m.put("aurea.generate.gradient_ramp", 2, /* end */ intArrayOf(R.string.fx_ponto_final))
@@ -1050,15 +888,15 @@ internal object EffectI18nTable {
         m.put("aurea.generate.four_color_gradient", 3, /* point_4 */ intArrayOf(R.string.fx_ponto_4))
         m.put("aurea.generate.four_color_gradient", 4, /* color_1 */ intArrayOf(R.string.fx_cor_1))
         m.put("aurea.generate.four_color_gradient", 5, /* color_2 */ intArrayOf(R.string.fx_cor_2))
+    }
+
+    private fun part7(m: HashMap<Long, IntArray>) {
         m.put("aurea.generate.four_color_gradient", 6, /* color_3 */ intArrayOf(R.string.fx_cor_3))
         m.put("aurea.generate.four_color_gradient", 7, /* color_4 */ intArrayOf(R.string.fx_cor_4))
         m.put("aurea.generate.four_color_gradient", 8, /* softness */ intArrayOf(R.string.fx_suavidade))
         m.put("aurea.generate.four_color_gradient", 9, /* jitter */ intArrayOf(R.string.fx_ruido))
         m.put("aurea.generate.four_color_gradient", 10, /* opacity */ intArrayOf(R.string.fx_opacidade))
         m.put("aurea.generate.four_color_gradient", 11, /* blend */ intArrayOf(R.string.fx_mistura_camada, R.string.fxo_normal, R.string.fxo_multiply, R.string.fxo_screen, R.string.fxo_overlay, R.string.fxo_add))
-    }
-
-    private fun part7(m: HashMap<Long, IntArray>) {
         m.put("aurea.generate.four_color_gradient", 12, /* fill_box */ intArrayOf(R.string.fx_preencher_caixa))
         m.put("aurea.generate.audio_spectrum", 0, /* source */ intArrayOf(R.string.fx_fonte_som, R.string.fxo_automatic, R.string.fxo_this_layer, R.string.fxo_first_with_audio))
         m.put("aurea.generate.audio_spectrum", 1, /* bands */ intArrayOf(R.string.fx_bandas))
@@ -1173,15 +1011,15 @@ internal object EffectI18nTable {
         m.put("aurea.audio.parametric_eq", 1, /* band1_frequency */ intArrayOf(R.string.afx_p_band1_freq))
         m.put("aurea.audio.parametric_eq", 2, /* band1_bandwidth */ intArrayOf(R.string.afx_p_band1_width))
         m.put("aurea.audio.parametric_eq", 3, /* band1_gain */ intArrayOf(R.string.afx_p_band1_gain))
+    }
+
+    private fun part8(m: HashMap<Long, IntArray>) {
         m.put("aurea.audio.parametric_eq", 4, /* band2_enable */ intArrayOf(R.string.afx_p_band2_enable))
         m.put("aurea.audio.parametric_eq", 5, /* band2_frequency */ intArrayOf(R.string.afx_p_band2_freq))
         m.put("aurea.audio.parametric_eq", 6, /* band2_bandwidth */ intArrayOf(R.string.afx_p_band2_width))
         m.put("aurea.audio.parametric_eq", 7, /* band2_gain */ intArrayOf(R.string.afx_p_band2_gain))
         m.put("aurea.audio.parametric_eq", 8, /* band3_enable */ intArrayOf(R.string.afx_p_band3_enable))
         m.put("aurea.audio.parametric_eq", 9, /* band3_frequency */ intArrayOf(R.string.afx_p_band3_freq))
-    }
-
-    private fun part8(m: HashMap<Long, IntArray>) {
         m.put("aurea.audio.parametric_eq", 10, /* band3_bandwidth */ intArrayOf(R.string.afx_p_band3_width))
         m.put("aurea.audio.parametric_eq", 11, /* band3_gain */ intArrayOf(R.string.afx_p_band3_gain))
         m.put("aurea.audio.room_reverb", 0, /* reverb_time */ intArrayOf(R.string.afx_p_reverb_time))
@@ -1296,15 +1134,15 @@ internal object EffectI18nTable {
         m.put("aurea.generate.particular", 41, /* plexus_distance */ intArrayOf(R.string.fxl_plexus_distance))
         m.put("aurea.generate.particular", 42, /* plexus_width */ intArrayOf(R.string.fxl_plexus_width))
         m.put("aurea.generate.particular", 43, /* plexus_opacity */ intArrayOf(R.string.fxl_plexus_opacity))
+    }
+
+    private fun part9(m: HashMap<Long, IntArray>) {
         m.put("aurea.generate.particular", 44, /* plexus_points */ intArrayOf(R.string.fxl_plexus_points))
         m.put("aurea.generate.particular", 45, /* plexus_surface */ intArrayOf(R.string.fxl_network_surface))
         m.put("aurea.generate.particular", 46, /* plexus_surface_opacity */ intArrayOf(R.string.fxl_surface_opacity))
         m.put("aurea.generate.particular", 47, /* plexus_surface_points */ intArrayOf(R.string.fxl_surface_points))
         m.put("aurea.shape3d.layout", 0, /* rotation_x */ intArrayOf(R.string.fxl_part_rotation_x))
         m.put("aurea.shape3d.layout", 1, /* rotation_y */ intArrayOf(R.string.fxl_part_rotation_y))
-    }
-
-    private fun part9(m: HashMap<Long, IntArray>) {
         m.put("aurea.shape3d.layout", 2, /* rotation_z */ intArrayOf(R.string.fxl_part_rotation_z))
         m.put("aurea.shape3d.layout", 3, /* bend */ intArrayOf(R.string.fxl_bend))
         m.put("aurea.shape3d.layout", 4, /* spread */ intArrayOf(R.string.fxl_spread_2))
@@ -1419,15 +1257,15 @@ internal object EffectI18nTable {
         m.put("aurea.distort.squeeze", 0, /* strength */ intArrayOf(R.string.fxl_strength))
         m.put("aurea.distort.squeeze", 1, /* center */ intArrayOf(R.string.fxl_center))
         m.put("aurea.distort.squeeze", 2, /* angle */ intArrayOf(R.string.fxl_axis))
+    }
+
+    private fun part10(m: HashMap<Long, IntArray>) {
         m.put("aurea.distort.fisheye", 0, /* strength */ intArrayOf(R.string.fxl_strength))
         m.put("aurea.distort.fisheye", 1, /* center */ intArrayOf(R.string.fxl_center))
         m.put("aurea.distort.fisheye", 2, /* reverse */ intArrayOf(R.string.fxl_reverse_distortion))
         m.put("aurea.repeat.basic", 0, /* count */ intArrayOf(R.string.fxl_count))
         m.put("aurea.repeat.basic", 1, /* spacing */ intArrayOf(R.string.fxl_spacing))
         m.put("aurea.repeat.basic", 2, /* angle */ intArrayOf(R.string.fxl_rotation_per_copy))
-    }
-
-    private fun part10(m: HashMap<Long, IntArray>) {
         m.put("aurea.repeat.basic", 3, /* scale */ intArrayOf(R.string.fxl_scale_per_copy))
         m.put("aurea.repeat.basic", 4, /* end_opacity */ intArrayOf(R.string.fxl_end_opacity))
         m.put("aurea.repeat.linear", 0, /* count */ intArrayOf(R.string.fxl_count))
@@ -1542,15 +1380,15 @@ internal object EffectI18nTable {
         m.put("aurea.stylize.eight_bit", 8, /* color_c */ intArrayOf(R.string.fx_cor_3))
         m.put("aurea.stylize.eight_bit", 9, /* color_d */ intArrayOf(R.string.fx_cor_4))
         m.put("aurea.stylize.eight_bit", 10, /* mix */ intArrayOf(R.string.fxl_mix))
+    }
+
+    private fun part11(m: HashMap<Long, IntArray>) {
         m.put("aurea.transition.disintegrate", 0, /* completion */ intArrayOf(R.string.fx_conclusao))
         m.put("aurea.transition.disintegrate", 1, /* direction */ intArrayOf(R.string.fxl_direction))
         m.put("aurea.transition.disintegrate", 2, /* particle_size */ intArrayOf(R.string.fxl_particle_size))
         m.put("aurea.transition.disintegrate", 3, /* randomness */ intArrayOf(R.string.fxl_randomness))
         m.put("aurea.transition.disintegrate", 4, /* spread */ intArrayOf(R.string.fxl_spread))
         m.put("aurea.transition.disintegrate", 5, /* speed */ intArrayOf(R.string.fxl_speed))
-    }
-
-    private fun part11(m: HashMap<Long, IntArray>) {
         m.put("aurea.transition.disintegrate", 6, /* turbulence */ intArrayOf(R.string.particular_turbulence))
         m.put("aurea.transition.disintegrate", 7, /* gravity */ intArrayOf(R.string.fxl_gravity))
         m.put("aurea.transition.disintegrate", 8, /* fade */ intArrayOf(R.string.fxl_fade))
@@ -1665,15 +1503,15 @@ internal object EffectI18nTable {
         m.put("aurea.stylize.pixel_encoder", 14, /* invert */ intArrayOf(R.string.fx_inverter))
         m.put("aurea.stylize.pixel_encoder", 15, /* tone_detection */ intArrayOf(R.string.fxl_tone_detection, R.string.fxo_rec_601_luminance, R.string.fxo_rgb_average, R.string.fx_vermelho_c031, R.string.fx_verde_14e6, R.string.fx_azul_582d, R.string.fxo_rec_709_luminance))
         m.put("aurea.light.starglow", 0, /* length */ intArrayOf(R.string.fx_comprimento))
+    }
+
+    private fun part12(m: HashMap<Long, IntArray>) {
         m.put("aurea.light.starglow", 1, /* boost */ intArrayOf(R.string.fxl_light_boost))
         m.put("aurea.light.starglow", 2, /* threshold */ intArrayOf(R.string.fx_limiar))
         m.put("aurea.light.starglow", 3, /* threshold_softness */ intArrayOf(R.string.fxl_threshold_softness_2))
         m.put("aurea.light.starglow", 4, /* channel */ intArrayOf(R.string.fxl_input_channel, R.string.fx_luminosidade, R.string.fxo_luminance, R.string.fx_vermelho_c031, R.string.fx_verde_14e6, R.string.fx_azul_582d, R.string.fxo_alpha_2))
         m.put("aurea.light.starglow", 5, /* circle_mask */ intArrayOf(R.string.fxl_circular_mask))
         m.put("aurea.light.starglow", 6, /* mask_center */ intArrayOf(R.string.fxl_mask_center))
-    }
-
-    private fun part12(m: HashMap<Long, IntArray>) {
         m.put("aurea.light.starglow", 7, /* mask_radius */ intArrayOf(R.string.fxl_mask_radius))
         m.put("aurea.light.starglow", 8, /* mask_feather */ intArrayOf(R.string.fxl_mask_softness))
         m.put("aurea.light.starglow", 9, /* shimmer_amount */ intArrayOf(R.string.fxl_flicker))
@@ -1788,15 +1626,15 @@ internal object EffectI18nTable {
         m.put("aurea.glitch.video_glitch", 38, /* flicker_peak */ intArrayOf(R.string.fxl_peak_flicker))
         m.put("aurea.glitch.video_glitch", 39, /* flicker_randomness */ intArrayOf(R.string.fxl_randomness_flicker))
         m.put("aurea.glitch.video_glitch", 40, /* flicker_offset */ intArrayOf(R.string.fxl_offset_flicker))
+    }
+
+    private fun part13(m: HashMap<Long, IntArray>) {
         m.put("aurea.glitch.video_glitch", 41, /* flicker_seed */ intArrayOf(R.string.fxl_seed_flicker))
         m.put("aurea.glitch.video_glitch", 42, /* block_size */ intArrayOf(R.string.fx_tamanho_bloco))
         m.put("aurea.glitch.video_glitch", 43, /* damage_pattern */ intArrayOf(R.string.fxl_damage_pattern, R.string.fx_blocos, R.string.fxo_horizontal_bands, R.string.fxo_vertical_bands, R.string.fxo_fragments))
         m.put("aurea.glitch.video_glitch", 44, /* shift_x */ intArrayOf(R.string.fxl_horizontal_shift))
         m.put("aurea.glitch.video_glitch", 45, /* shift_y */ intArrayOf(R.string.fxl_vertical_shift))
         m.put("aurea.glitch.video_glitch", 46, /* shift_bands */ intArrayOf(R.string.fxl_shift_bands))
-    }
-
-    private fun part13(m: HashMap<Long, IntArray>) {
         m.put("aurea.glitch.video_glitch", 47, /* duplicate */ intArrayOf(R.string.fxl_duplicate_bands))
         m.put("aurea.glitch.video_glitch", 48, /* skew */ intArrayOf(R.string.fxl_band_skew))
         m.put("aurea.glitch.video_glitch", 49, /* shake_xy */ intArrayOf(R.string.fxl_shake_xy))
@@ -1890,6 +1728,8 @@ internal object EffectI18nTable {
         m.put("aurea.time.flow_retime", 1, /* frames */ intArrayOf(R.string.fxo_frames, R.string.fxo_nearest, R.string.fxl_mix, R.string.core2_fx_motion_mode))
         m.put("aurea.time.flow_retime", 2, /* vectors */ intArrayOf(R.string.fxl_vector_quality, R.string.fxo_fast, R.string.fxo_good, R.string.fxo_best))
         m.put("aurea.time.flow_retime", 3, /* motion_blur */ intArrayOf(R.string.fxl_motion_blur_2))
+        m.put("aurea.time.flow_retime", 4, /* replace_duplicates */ intArrayOf(R.string.fxl_replace_duplicate_frames))
+        m.put("aurea.time.flow_retime", 5, /* duplicate_sensitivity */ intArrayOf(R.string.fx_sensibilidade))
         m.put("aurea.time.flow_motion_blur", 0, /* amount */ intArrayOf(R.string.fxl_count))
         m.put("aurea.time.flow_motion_blur", 1, /* shutter */ intArrayOf(R.string.fxl_shutter))
         m.put("aurea.time.flow_motion_blur", 2, /* vectors */ intArrayOf(R.string.fxl_vector_quality, R.string.fxo_fast, R.string.fxo_good, R.string.fxo_best))
@@ -1909,6 +1749,9 @@ internal object EffectI18nTable {
         m.put("aurea.distort.sphere_wrap", 8, /* light_direction */ intArrayOf(R.string.fx_deform_light_direction))
         m.put("aurea.distort.sphere_wrap", 9, /* light_height */ intArrayOf(R.string.fxl_light_height))
         m.put("aurea.distort.sphere_wrap", 10, /* ambient */ intArrayOf(R.string.fxl_ambient))
+    }
+
+    private fun part14(m: HashMap<Long, IntArray>) {
         m.put("aurea.distort.sphere_wrap", 11, /* diffuse */ intArrayOf(R.string.fxl_diffuse))
         m.put("aurea.distort.sphere_wrap", 12, /* specular */ intArrayOf(R.string.fxl_specular))
         m.put("aurea.distort.sphere_wrap", 13, /* roughness */ intArrayOf(R.string.fxl_roughness))
@@ -1917,9 +1760,6 @@ internal object EffectI18nTable {
         m.put("aurea.distort.cylinder_wrap", 1, /* position */ intArrayOf(R.string.fx_posicao))
         m.put("aurea.distort.cylinder_wrap", 2, /* rotation_x */ intArrayOf(R.string.fxl_rotation_x))
         m.put("aurea.distort.cylinder_wrap", 3, /* rotation_y */ intArrayOf(R.string.fxl_rotation_y))
-    }
-
-    private fun part14(m: HashMap<Long, IntArray>) {
         m.put("aurea.distort.cylinder_wrap", 4, /* rotation_z */ intArrayOf(R.string.fxl_rotation_z))
         m.put("aurea.distort.cylinder_wrap", 5, /* render */ intArrayOf(R.string.fxl_render, R.string.fxo_full, R.string.fxo_outside_2, R.string.fxo_inside_2))
         m.put("aurea.distort.cylinder_wrap", 6, /* light_intensity */ intArrayOf(R.string.fxl_light_boost))
@@ -2032,6 +1872,9 @@ internal object EffectI18nTable {
         m.put("aurea.stylize.glass", 3, /* displacement */ intArrayOf(R.string.fxl_offset))
         m.put("aurea.stylize.glass", 4, /* light_intensity */ intArrayOf(R.string.fxl_light_boost))
         m.put("aurea.stylize.glass", 5, /* light_color */ intArrayOf(R.string.fxl_light_color))
+    }
+
+    private fun part15(m: HashMap<Long, IntArray>) {
         m.put("aurea.stylize.glass", 6, /* light_direction */ intArrayOf(R.string.fx_deform_light_direction))
         m.put("aurea.stylize.glass", 7, /* light_height */ intArrayOf(R.string.fxl_light_height))
         m.put("aurea.stylize.glass", 8, /* ambient */ intArrayOf(R.string.fxl_ambient))
@@ -2040,9 +1883,6 @@ internal object EffectI18nTable {
         m.put("aurea.stylize.glass", 11, /* roughness */ intArrayOf(R.string.fxl_roughness))
         m.put("aurea.stylize.glass", 12, /* metal */ intArrayOf(R.string.fxl_metal))
         m.put("aurea.stylize.kernel", 0, /* w1 */ intArrayOf(R.string.fxl_weight_1))
-    }
-
-    private fun part15(m: HashMap<Long, IntArray>) {
         m.put("aurea.stylize.kernel", 1, /* w2 */ intArrayOf(R.string.fxl_weight_2))
         m.put("aurea.stylize.kernel", 2, /* w3 */ intArrayOf(R.string.fxl_weight_3))
         m.put("aurea.stylize.kernel", 3, /* w4 */ intArrayOf(R.string.fxl_weight_4))
@@ -2141,6 +1981,189 @@ internal object EffectI18nTable {
         m.put("aurea.draw.drawing_progress", 2, /* reverse */ intArrayOf(R.string.drawprog_reverse))
         m.put("aurea.draw.drawing_progress", 3, /* softness */ intArrayOf(R.string.fxl_tip_softness))
         m.put("aurea.draw.drawing_progress", 4, /* angle */ intArrayOf(R.string.fx_angulo))
+        m.put("aurea.generate.aurora", 0, /* warp */ intArrayOf(R.string.fxs_distortion))
+        m.put("aurea.generate.aurora", 1, /* amount */ intArrayOf(R.string.fx027_amount))
+        m.put("aurea.generate.aurora", 2, /* scale */ intArrayOf(R.string.fxl_scale))
+        m.put("aurea.generate.aurora", 3, /* length */ intArrayOf(R.string.fxl_length))
+        m.put("aurea.generate.aurora", 4, /* exposure */ intArrayOf(R.string.fxl_exposure))
+        m.put("aurea.generate.aurora", 5, /* detail */ intArrayOf(R.string.fxl_detail))
+        m.put("aurea.generate.aurora", 6, /* curvature */ intArrayOf(R.string.fx3_curvatura))
+        m.put("aurea.generate.aurora", 7, /* sky_glow */ intArrayOf(R.string.fx027_sky_glow))
+        m.put("aurea.generate.aurora", 8, /* color */ intArrayOf(R.string.fxl_color))
+        m.put("aurea.generate.aurora", 9, /* secondary_color */ intArrayOf(R.string.fx027_secondary_color))
+        m.put("aurea.generate.aurora", 10, /* sky_color */ intArrayOf(R.string.fx027_sky_color))
+        m.put("aurea.generate.aurora", 11, /* time_offset */ intArrayOf(R.string.fx027_time_offset))
+        m.put("aurea.generate.aurora", 12, /* speed */ intArrayOf(R.string.fxl_speed))
+        m.put("aurea.generate.aurora", 13, /* horizon */ intArrayOf(R.string.fx027_horizon))
+    }
+
+    private fun part16(m: HashMap<Long, IntArray>) {
+        m.put("aurea.generate.aurora", 14, /* reflection */ intArrayOf(R.string.fx027_reflection))
+        m.put("aurea.generate.aurora", 15, /* ripple */ intArrayOf(R.string.fx027_ripple))
+        m.put("aurea.generate.aurora", 16, /* stars */ intArrayOf(R.string.fx027_stars))
+        m.put("aurea.generate.aurora", 17, /* tilt */ intArrayOf(R.string.fx027_tilt))
+        m.put("aurea.generate.aurora", 18, /* pan */ intArrayOf(R.string.fx027_pan))
+        m.put("aurea.generate.aurora", 19, /* fov */ intArrayOf(R.string.fxl_field_of_view))
+        m.put("aurea.generate.aurora", 20, /* sky_height */ intArrayOf(R.string.fx027_sky_height))
+        m.put("aurea.generate.aurora", 21, /* opacity */ intArrayOf(R.string.fxl_opacity))
+        m.put("aurea.generate.aurora", 22, /* follow_camera */ intArrayOf(R.string.fx030_follow_camera))
+        m.put("aurea.generate.aurora", 23, /* quality */ intArrayOf(R.string.fxl_quality, R.string.fxo_fast, R.string.fxo_normal, R.string.fxo_high))
+        m.put("aurea.time.random_edits", 0, /* edit_length */ intArrayOf(R.string.fx027_edit_length))
+        m.put("aurea.time.random_edits", 1, /* seed */ intArrayOf(R.string.fxl_seed))
+        m.put("aurea.color.grade", 0, /* log_profile */ intArrayOf(R.string.fxl_camera_profile, R.string.fxo_none_rec_709, R.string.fxo_s_log3_sony, R.string.fxo_logc3_arri, R.string.fxo_v_log_panasonic, R.string.fxo_apple_log, R.string.fxo_cineon))
+        m.put("aurea.color.grade", 1, /* temperature */ intArrayOf(R.string.grade_temperature))
+        m.put("aurea.color.grade", 2, /* tint */ intArrayOf(R.string.grade_tint))
+        m.put("aurea.color.grade", 3, /* exposure */ intArrayOf(R.string.grade_exposure))
+        m.put("aurea.color.grade", 4, /* contrast */ intArrayOf(R.string.grade_contrast))
+        m.put("aurea.color.grade", 5, /* pivot */ intArrayOf(R.string.fxl_contrast_pivot))
+        m.put("aurea.color.grade", 6, /* highlights */ intArrayOf(R.string.fxl_highlights))
+        m.put("aurea.color.grade", 7, /* shadows */ intArrayOf(R.string.fx_sombras))
+        m.put("aurea.color.grade", 8, /* whites */ intArrayOf(R.string.fxl_whites))
+        m.put("aurea.color.grade", 9, /* blacks */ intArrayOf(R.string.fxl_blacks))
+        m.put("aurea.color.grade", 10, /* brightness */ intArrayOf(R.string.fxo_tracery_brightness))
+        m.put("aurea.color.grade", 11, /* saturation */ intArrayOf(R.string.grade_saturation))
+        m.put("aurea.color.grade", 12, /* vibrance */ intArrayOf(R.string.grade_vibrance))
+        m.put("aurea.color.grade", 13, /* lift */ intArrayOf(R.string.fxl_lift_shadows))
+        m.put("aurea.color.grade", 14, /* lift_luma */ intArrayOf(R.string.fxl_lift_luminance))
+        m.put("aurea.color.grade", 15, /* gamma */ intArrayOf(R.string.fxl_gamma_midtones))
+        m.put("aurea.color.grade", 16, /* gamma_luma */ intArrayOf(R.string.fxl_gamma_luminance))
+        m.put("aurea.color.grade", 17, /* gain */ intArrayOf(R.string.fxl_gain_highlights))
+        m.put("aurea.color.grade", 18, /* gain_luma */ intArrayOf(R.string.fxl_gain_luminance))
+        m.put("aurea.color.grade", 19, /* offset */ intArrayOf(R.string.fxl_offset_global))
+        m.put("aurea.color.grade", 20, /* offset_luma */ intArrayOf(R.string.fxl_offset_luminance))
+        m.put("aurea.color.grade", 21, /* curves */ intArrayOf(R.string.fxl_rgb_curves))
+        m.put("aurea.color.grade", 22, /* hue_curves */ intArrayOf(R.string.fxl_hue_curves))
+        m.put("aurea.color.grade", 23, /* red_hue */ intArrayOf(R.string.fxl_red_hue))
+        m.put("aurea.color.grade", 24, /* red_sat */ intArrayOf(R.string.fxl_red_saturation))
+        m.put("aurea.color.grade", 25, /* red_lum */ intArrayOf(R.string.fxl_red_luminance))
+        m.put("aurea.color.grade", 26, /* orange_hue */ intArrayOf(R.string.fxl_orange_hue))
+        m.put("aurea.color.grade", 27, /* orange_sat */ intArrayOf(R.string.fxl_orange_saturation))
+        m.put("aurea.color.grade", 28, /* orange_lum */ intArrayOf(R.string.fxl_orange_luminance))
+        m.put("aurea.color.grade", 29, /* yellow_hue */ intArrayOf(R.string.fxl_yellow_hue))
+        m.put("aurea.color.grade", 30, /* yellow_sat */ intArrayOf(R.string.fxl_yellow_saturation))
+        m.put("aurea.color.grade", 31, /* yellow_lum */ intArrayOf(R.string.fxl_yellow_luminance))
+        m.put("aurea.color.grade", 32, /* green_hue */ intArrayOf(R.string.fxl_green_hue))
+        m.put("aurea.color.grade", 33, /* green_sat */ intArrayOf(R.string.fxl_green_saturation))
+        m.put("aurea.color.grade", 34, /* green_lum */ intArrayOf(R.string.fxl_green_luminance))
+        m.put("aurea.color.grade", 35, /* aqua_hue */ intArrayOf(R.string.fxl_cyan_hue))
+        m.put("aurea.color.grade", 36, /* aqua_sat */ intArrayOf(R.string.fxl_cyan_saturation))
+        m.put("aurea.color.grade", 37, /* aqua_lum */ intArrayOf(R.string.fxl_cyan_luminance))
+        m.put("aurea.color.grade", 38, /* blue_hue */ intArrayOf(R.string.fxl_blue_hue))
+        m.put("aurea.color.grade", 39, /* blue_sat */ intArrayOf(R.string.fxl_blue_saturation))
+        m.put("aurea.color.grade", 40, /* blue_lum */ intArrayOf(R.string.fxl_blue_luminance))
+        m.put("aurea.color.grade", 41, /* purple_hue */ intArrayOf(R.string.fxl_purple_hue))
+        m.put("aurea.color.grade", 42, /* purple_sat */ intArrayOf(R.string.fxl_purple_saturation))
+        m.put("aurea.color.grade", 43, /* purple_lum */ intArrayOf(R.string.fxl_purple_luminance))
+        m.put("aurea.color.grade", 44, /* magenta_hue */ intArrayOf(R.string.fxl_magenta_hue))
+        m.put("aurea.color.grade", 45, /* magenta_sat */ intArrayOf(R.string.fxl_magenta_saturation))
+        m.put("aurea.color.grade", 46, /* magenta_lum */ intArrayOf(R.string.fxl_magenta_luminance))
+        m.put("aurea.color.grade", 47, /* qualifier */ intArrayOf(R.string.fxl_secondary_correction))
+        m.put("aurea.color.grade", 48, /* q_hue */ intArrayOf(R.string.fxl_selected_hue))
+        m.put("aurea.color.grade", 49, /* q_hue_width */ intArrayOf(R.string.fxl_hue_width))
+        m.put("aurea.color.grade", 50, /* q_sat_low */ intArrayOf(R.string.fxl_minimum_saturation))
+        m.put("aurea.color.grade", 51, /* q_sat_high */ intArrayOf(R.string.fxl_maximum_saturation))
+        m.put("aurea.color.grade", 52, /* q_luma_low */ intArrayOf(R.string.fxl_minimum_luminance))
+        m.put("aurea.color.grade", 53, /* q_luma_high */ intArrayOf(R.string.fxl_maximum_luminance))
+        m.put("aurea.color.grade", 54, /* q_softness */ intArrayOf(R.string.fxl_selection_softness))
+        m.put("aurea.color.grade", 55, /* q_invert */ intArrayOf(R.string.fxl_invert_selection))
+        m.put("aurea.color.grade", 56, /* q_show_mask */ intArrayOf(R.string.fxl_show_selection))
+        m.put("aurea.color.grade", 57, /* q_hue_shift */ intArrayOf(R.string.fxl_hue_shift))
+        m.put("aurea.color.grade", 58, /* q_saturation */ intArrayOf(R.string.fxl_selection_saturation))
+        m.put("aurea.color.grade", 59, /* q_exposure */ intArrayOf(R.string.fxl_selection_exposure))
+        m.put("aurea.color.grade", 60, /* fade */ intArrayOf(R.string.fxl_fade_2))
+        m.put("aurea.color.grade", 61, /* shadow_tint */ intArrayOf(R.string.fxl_shadow_tint))
+        m.put("aurea.color.grade", 62, /* highlight_tint */ intArrayOf(R.string.fxl_highlight_tint))
+        m.put("aurea.color.grade", 63, /* tint_balance */ intArrayOf(R.string.fxl_tint_balance))
+        m.put("aurea.color.grade", 64, /* sharpen */ intArrayOf(R.string.fx_name_sharpen))
+        m.put("aurea.color.grade", 65, /* vignette */ intArrayOf(R.string.fx_vinheta))
+        m.put("aurea.color.grade", 66, /* vignette_mid */ intArrayOf(R.string.fxl_vignette_start))
+        m.put("aurea.color.grade", 67, /* vignette_feather */ intArrayOf(R.string.fxl_vignette_feather))
+        m.put("aurea.color.grade", 68, /* grain */ intArrayOf(R.string.fx_name_grain))
+        m.put("aurea.color.grade", 69, /* grain_size */ intArrayOf(R.string.fx_tamanho_grao))
+        m.put("aurea.color.grade", 70, /* lut */ intArrayOf(R.string.fxl_creative_lut_cube))
+        m.put("aurea.color.grade", 71, /* lut_intensity */ intArrayOf(R.string.fxl_lut_intensity))
+        m.put("aurea.color.grade", 76, /* mix */ intArrayOf(R.string.grade_intensity))
+        m.put("aurea.generate.constellation", 0, /* source */ intArrayOf(R.string.fx030c_source, R.string.fxo_cloud, R.string.fxo_sphere, R.string.fx_grade, R.string.fxo_ring, R.string.fxo_plane, R.string.fxo_layer_path))
+        m.put("aurea.generate.constellation", 1, /* count */ intArrayOf(R.string.fx030c_count))
+        m.put("aurea.generate.constellation", 2, /* seed */ intArrayOf(R.string.fxl_seed))
+        m.put("aurea.generate.constellation", 3, /* width */ intArrayOf(R.string.fx030c_width))
+        m.put("aurea.generate.constellation", 4, /* height */ intArrayOf(R.string.fx030c_height))
+        m.put("aurea.generate.constellation", 5, /* depth */ intArrayOf(R.string.fx030c_depth))
+        m.put("aurea.generate.constellation", 6, /* radius */ intArrayOf(R.string.fx030c_radius))
+        m.put("aurea.generate.constellation", 7, /* tube_radius */ intArrayOf(R.string.fx030c_tube_radius))
+        m.put("aurea.generate.constellation", 8, /* grid_x */ intArrayOf(R.string.fx030c_grid_x))
+        m.put("aurea.generate.constellation", 9, /* grid_y */ intArrayOf(R.string.fx030c_grid_y))
+        m.put("aurea.generate.constellation", 10, /* grid_z */ intArrayOf(R.string.fx030c_grid_z))
+        m.put("aurea.generate.constellation", 11, /* path_layer */ intArrayOf(R.string.fx030c_path_layer))
+        m.put("aurea.generate.constellation", 12, /* jitter */ intArrayOf(R.string.fx030c_jitter))
+        m.put("aurea.generate.constellation", 13, /* center */ intArrayOf(R.string.fx030c_center))
+        m.put("aurea.generate.constellation", 14, /* position_z */ intArrayOf(R.string.fx030c_position_z))
+        m.put("aurea.generate.constellation", 15, /* scale */ intArrayOf(R.string.fx030c_scale))
+        m.put("aurea.generate.constellation", 16, /* rotation_x */ intArrayOf(R.string.fx030c_rotation_x))
+        m.put("aurea.generate.constellation", 17, /* rotation_y */ intArrayOf(R.string.fx030c_rotation_y))
+        m.put("aurea.generate.constellation", 18, /* rotation_z */ intArrayOf(R.string.fx030c_rotation_z))
+        m.put("aurea.generate.constellation", 19, /* spin_x */ intArrayOf(R.string.fx030c_spin_x))
+        m.put("aurea.generate.constellation", 20, /* spin_y */ intArrayOf(R.string.fx030c_spin_y))
+        m.put("aurea.generate.constellation", 21, /* spin_z */ intArrayOf(R.string.fx030c_spin_z))
+        m.put("aurea.generate.constellation", 22, /* noise */ intArrayOf(R.string.fx030c_noise))
+        m.put("aurea.generate.constellation", 23, /* noise_amount */ intArrayOf(R.string.fx030c_noise_amount))
+        m.put("aurea.generate.constellation", 24, /* noise_scale */ intArrayOf(R.string.fx030c_noise_scale))
+        m.put("aurea.generate.constellation", 25, /* noise_speed */ intArrayOf(R.string.fx030c_noise_speed))
+        m.put("aurea.generate.constellation", 26, /* noise_octaves */ intArrayOf(R.string.fx030c_noise_octaves))
+        m.put("aurea.generate.constellation", 27, /* field */ intArrayOf(R.string.fx030c_field))
+        m.put("aurea.generate.constellation", 28, /* field_center */ intArrayOf(R.string.fx030c_field_center))
+        m.put("aurea.generate.constellation", 29, /* field_z */ intArrayOf(R.string.fx030c_field_z))
+        m.put("aurea.generate.constellation", 30, /* field_radius */ intArrayOf(R.string.fx030c_field_radius))
+        m.put("aurea.generate.constellation", 31, /* field_strength */ intArrayOf(R.string.fx030c_field_strength))
+        m.put("aurea.generate.constellation", 32, /* lines */ intArrayOf(R.string.fx030c_lines))
+        m.put("aurea.generate.constellation", 33, /* line_max_distance */ intArrayOf(R.string.fx030c_line_max))
+        m.put("aurea.generate.constellation", 34, /* line_min_distance */ intArrayOf(R.string.fx030c_line_min))
+    }
+
+    private fun part17(m: HashMap<Long, IntArray>) {
+        m.put("aurea.generate.constellation", 35, /* max_connections */ intArrayOf(R.string.fx030c_connections))
+        m.put("aurea.generate.constellation", 36, /* line_width */ intArrayOf(R.string.fx030c_line_width))
+        m.put("aurea.generate.constellation", 37, /* line_opacity */ intArrayOf(R.string.fx030c_line_opacity))
+        m.put("aurea.generate.constellation", 38, /* line_falloff */ intArrayOf(R.string.fx030c_line_falloff))
+        m.put("aurea.generate.constellation", 39, /* line_color_mode */ intArrayOf(R.string.fx030c_line_color_mode, R.string.fxo_own_color, R.string.fxo_point_color))
+        m.put("aurea.generate.constellation", 40, /* line_color */ intArrayOf(R.string.fx030c_line_color))
+        m.put("aurea.generate.constellation", 41, /* line_perspective */ intArrayOf(R.string.fx030c_line_perspective))
+        m.put("aurea.generate.constellation", 42, /* points */ intArrayOf(R.string.fx030c_points))
+        m.put("aurea.generate.constellation", 43, /* point_size */ intArrayOf(R.string.fx030c_point_size))
+        m.put("aurea.generate.constellation", 44, /* point_opacity */ intArrayOf(R.string.fx030c_point_opacity))
+        m.put("aurea.generate.constellation", 45, /* point_color */ intArrayOf(R.string.fx030c_color_points))
+        m.put("aurea.generate.constellation", 46, /* point_perspective */ intArrayOf(R.string.fx030c_point_perspective))
+        m.put("aurea.generate.constellation", 47, /* point_softness */ intArrayOf(R.string.fx030c_point_softness))
+        m.put("aurea.generate.constellation", 48, /* only_connected */ intArrayOf(R.string.fx030c_only_connected))
+        m.put("aurea.generate.constellation", 49, /* triangles */ intArrayOf(R.string.fx030c_triangles))
+        m.put("aurea.generate.constellation", 50, /* triangle_max_distance */ intArrayOf(R.string.fx030c_tri_max))
+        m.put("aurea.generate.constellation", 51, /* triangle_opacity */ intArrayOf(R.string.fx030c_tri_opacity))
+        m.put("aurea.generate.constellation", 52, /* triangle_color_mode */ intArrayOf(R.string.fx030c_tri_color_mode, R.string.fxo_own_color, R.string.fxo_point_color))
+        m.put("aurea.generate.constellation", 53, /* triangle_color */ intArrayOf(R.string.fx030c_tri_color))
+        m.put("aurea.generate.constellation", 54, /* depth_fog */ intArrayOf(R.string.fx030c_depth_fog))
+        m.put("aurea.generate.constellation", 55, /* depth_near */ intArrayOf(R.string.fx030c_depth_near))
+        m.put("aurea.generate.constellation", 56, /* depth_far */ intArrayOf(R.string.fx030c_depth_far))
+        m.put("aurea.generate.constellation", 57, /* depth_color */ intArrayOf(R.string.fx030c_depth_color))
+        m.put("aurea.generate.constellation", 58, /* near_color */ intArrayOf(R.string.fx030c_near_color))
+        m.put("aurea.generate.constellation", 59, /* far_color */ intArrayOf(R.string.fx030c_far_color))
+        m.put("aurea.generate.constellation", 60, /* opacity */ intArrayOf(R.string.fxl_opacity))
+        m.put("aurea.generate.constellation", 61, /* blend */ intArrayOf(R.string.fx030c_blend, R.string.fxo_over, R.string.fxo_add_2))
+        m.put("aurea.generate.constellation", 62, /* show_layer */ intArrayOf(R.string.fx030c_show_layer))
+        m.put("aurea.generate.constellation", 63, /* follow_camera */ intArrayOf(R.string.fx030_follow_camera))
+        m.put("aurea.generate.constellation", 64, /* fov */ intArrayOf(R.string.fxl_field_of_view))
+        m.put("aurea.enhance.video", 0, /* model */ intArrayOf(R.string.fxl_model, R.string.fxo_automatic, R.string.fxo_compressed_video, R.string.fxo_old_noisy_video, R.string.fxo_animation, R.string.fxo_low_resolution_blurry, R.string.fxo_manual))
+        m.put("aurea.enhance.video", 1, /* revert_compression */ intArrayOf(R.string.fxl_revert_compression))
+        m.put("aurea.enhance.video", 2, /* recover_details */ intArrayOf(R.string.fxl_recover_details))
+        m.put("aurea.enhance.video", 3, /* sharpen */ intArrayOf(R.string.fx_name_sharpen))
+        m.put("aurea.enhance.video", 4, /* reduce_noise */ intArrayOf(R.string.fxl_reduce_noise))
+        m.put("aurea.enhance.video", 5, /* dehalo */ intArrayOf(R.string.fxl_dehalo))
+        m.put("aurea.enhance.video", 6, /* antialias_deblur */ intArrayOf(R.string.fxl_anti_alias_deblur))
+        m.put("aurea.enhance.video", 7, /* add_noise */ intArrayOf(R.string.fxl_add_noise))
+        m.put("aurea.enhance.video", 8, /* grain_size */ intArrayOf(R.string.fx_tamanho_grao))
+        m.put("aurea.enhance.video", 9, /* recover_original_detail */ intArrayOf(R.string.fxl_recover_original_detail))
+        m.put("aurea.enhance.video", 10, /* temporal_frames */ intArrayOf(R.string.fxl_neighbouring_frames))
+        m.put("aurea.enhance.video", 11, /* quality */ intArrayOf(R.string.fxl_quality, R.string.fxo_fast, R.string.fxo_normal, R.string.fxo_high))
+        m.put("aurea.enhance.video", 12, /* mix */ intArrayOf(R.string.fxl_mix))
     }
 
     /** (typeId << 16 | índice do parâmetro) → dica (recurso). */
@@ -2150,29 +2173,17 @@ internal object EffectI18nTable {
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.deep_glow"), 0), R.string.fxt_only_what_is_brighter_than_the_threshold) // threshold
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.raster_extrude"), 4), R.string.fxt_the_reflection_uses_the_3d_scene_s_hdri) // reflection
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.3d.shatter"), 4), R.string.fxt_tap_the_point_s_name_then_drag_it_on_the) // center
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.time.flow_retime"), 5), R.string.fxt_higher_frames_that_are_only_similar_also) // duplicate_sensitivity
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 9), R.string.fxt_used_when_the_core_is_layer_text) // core_layer
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 22), R.string.fxt_applies_to_the_layer_masks_core) // mask_evolution
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.enhance.video"), 0), R.string.fxt_automatic_estimates_compression_noise_an) // model
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.enhance.video"), 10), R.string.fxt_frames_on_each_side_used_by_noise_reduct) // temporal_frames
         }
     }
 
     /** (typeId << 16 | ordinal da seção) → título (recurso). */
     val sections: Map<Long, Int> by lazy {
         HashMap<Long, Int>().apply {
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.aurora"), 1), R.string.fx027_environment) // environment
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 1), R.string.fx030c_sec_points) // points
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 2), R.string.fx030c_sec_transform) // transform
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 3), R.string.fx030c_noise) // noise
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 4), R.string.fx030c_field) // field
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 5), R.string.fx030c_lines) // lines
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 6), R.string.fx030c_sec_point_look) // point_look
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 7), R.string.fx030c_triangles) // triangles
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 1), R.string.grade_section_basic) // grade_section_basic
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 2), R.string.grade_tab_wheels) // grade_tab_wheels
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 3), R.string.grade_tab_curves) // grade_tab_curves
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 4), R.string.grade_tab_hsl) // grade_tab_hsl
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 5), R.string.grade_secondary) // grade_secondary
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 6), R.string.grade_section_creative) // grade_section_creative
-            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 7), R.string.grade_lut) // grade_lut
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.distort.turbulence"), 1), R.string.fxl_cycle_evolution) // cycle
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.distort.turbulence"), 2), R.string.fxl_offset) // offset
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.distort.turbulence"), 3), R.string.fxl_edges) // edges
@@ -2187,6 +2198,7 @@ internal object EffectI18nTable {
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.3d.shatter"), 1), R.string.fxl_pieces) // pieces
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.3d.shatter"), 2), R.string.fxs_physics) // physics
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.3d.shatter"), 3), R.string.fxs_appearance) // look
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.time.flow_retime"), 1), R.string.fxl_replace_duplicate_frames) // duplicates
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 1), R.string.fxs_outer_glow) // glow
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 2), R.string.fxs_core) // core
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 3), R.string.fxs_core_shape) // core_shape
@@ -2194,6 +2206,24 @@ internal object EffectI18nTable {
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 5), R.string.fxl_flicker) // flicker
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 6), R.string.fxs_distortion) // distortion
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 7), R.string.fxs_output) // output
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.aurora"), 1), R.string.fxl_ambient) // environment
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 1), R.string.fxs_basic) // basic
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 2), R.string.fxs_color_wheels) // wheels
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 3), R.string.fx_name_curves) // curves
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 4), R.string.fxs_hsl) // hsl
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 5), R.string.fxl_secondary_correction) // secondary
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 6), R.string.fxs_creative) // creative
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.color.grade"), 7), R.string.fxs_lut) // lut
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 1), R.string.fxo_dots) // points
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 2), R.string.fxs_transform) // transform
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 3), R.string.fx_ruido) // noise
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 4), R.string.fxs_spherical_field) // field
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 5), R.string.fxo_lines) // lines
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 6), R.string.fxs_point_look) // point_look
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.constellation"), 7), R.string.fxl_triangles) // triangles
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.enhance.video"), 1), R.string.fxs_adjustments) // adjust
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.enhance.video"), 2), R.string.fxs_grain_and_original_detail) // grain
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.enhance.video"), 3), R.string.fxs_time_and_quality) // time
         }
     }
 

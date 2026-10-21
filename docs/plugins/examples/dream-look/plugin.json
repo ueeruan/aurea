@@ -1,0 +1,42 @@
+{
+  "aureaPlugin": 1,
+  "id": "com.aurea.examples.dreamlook",
+  "version": "1.0.0",
+  "author": "AUREA (exemplo)",
+  "name": {
+    "pt-BR": "Look sonho",
+    "en": "Dream Look",
+    "es": "Look de sueño",
+    "ru": "Мечтательный образ",
+    "hi": "स्वप्निल लुक",
+    "id": "Tampilan Mimpi",
+    "ar": "مظهر الحلم"
+  },
+  "description": {
+    "pt-BR": "Pilha de efeitos do app: desfoque gaussiano, brilho com a cor escolhida e menos saturação.",
+    "en": "A stack of built-in effects: Gaussian blur, a glow in the chosen colour and less saturation."
+  },
+  "category": "Looks",
+  "kind": "stack",
+  "params": [
+    { "id": "softness", "type": "float", "label": { "pt-BR": "Suavidade", "en": "Softness" },
+      "default": 0.4, "min": 0, "max": 1 },
+    { "id": "glow", "type": "float", "label": { "pt-BR": "Brilho", "en": "Glow" },
+      "default": 0.5, "min": 0, "max": 1 },
+    { "id": "warmth", "type": "color", "label": { "pt-BR": "Cor do brilho", "en": "Glow colour" },
+      "default": "#FFE0C0" }
+  ],
+  "stack": [
+    { "effect": "aurea.blur.gaussian",
+      "set": { "blurriness": "softness * 12" } },
+    { "effect": "aurea.light.glow",
+      "set": {
+        "threshold": "60 - glow * 30",
+        "radius": "20 + glow * 60",
+        "intensity": "0.5 + glow * 1.5",
+        "color": "warmth"
+      } },
+    { "effect": "aurea.color.saturation",
+      "set": { "saturation": "-25 * softness" } }
+  ]
+}

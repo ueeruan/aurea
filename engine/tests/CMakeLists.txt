@@ -112,6 +112,7 @@ add_executable(aurea_tests
     test_rig.cpp
     test_shape3d.cpp
     test_shape3d_split.cpp
+    test_plugins.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE
@@ -120,6 +121,12 @@ target_include_directories(aurea_tests PRIVATE
 )
 
 target_link_libraries(aurea_tests PRIVATE aurea_core)
+# Plugins: os testes conferem também a tradução SPIR-V → ESSL/MSL dos shaders
+# de plugin (o mesmo tradutor dos backends GLES e Metal).
+include(${PROJECT_SOURCE_DIR}/cmake/AureaShaderXlate.cmake)
+target_link_libraries(aurea_tests PRIVATE aurea_shader_xlate)
+target_compile_definitions(aurea_tests PRIVATE
+    AUREA_PLUGIN_EXAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../docs/plugins/examples")
 if(TARGET aurea_ffmpeg)
     target_sources(aurea_tests PRIVATE test_ffmpeg_export.cpp)
     # Small device/host entry point for real codec and file verification. The

@@ -1,5 +1,6 @@
 #include "aurea/render/ShaderLibrary.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/render/RuntimeShaders.hpp"
 #include "aurea/core/Time.hpp"
 
 #include <cmath>
@@ -128,7 +129,83 @@ Status ShaderLibrary::initialize(GPUBackend& backend) noexcept {
     return OkStatus;
 }
 
+const char* ShaderLibrary::shader_name(ShaderId id, std::string& storage) const {
+    const u32 i = static_cast<u32>(id);
+    if (i < kShaderCount) return kShaderNames[i];
+    if (is_runtime_shader(id)) {
+        if (const auto source = runtime_shaders::find(id)) storage = source->name;
+        else storage = "shader de plugin removido";
+        return storage.c_str();
+    }
+    return "?";
+}
+
+std::string ShaderLibrary::runtime_shader_error(ShaderId id) const {
+    const auto it = runtime_.find(static_cast<u16>(id));
+    return it == runtime_.end() ? std::string{} : it->second.error;
+}
+
+bool ShaderLibrary::ensure_runtime_shader(ShaderId id) noexcept {
+    if (!backend_) return false;
+    RuntimeShader& entry = runtime_[static_cast<u16>(id)];
+    if (entry.handle.valid()) return true;
+    if (entry.retryRequests && --entry.retryRequests) return false;
+    const auto source = runtime_shaders::find(id);
+    if (!source || source->spirv.empty()) {
+        entry.error = "shader de plugin nao registrado";
+        entry.retryRequests = kRetryAfter;
+        return false;
+    }
+    ShaderDesc desc;
+    desc.stage = source->stage;
+    desc.spirv = source->spirv.data();
+    desc.spirvBytes = source->spirv.size() * sizeof(u32);
+    desc.debugName = source->name.c_str();
+    std::string error;
+    auto created = backend_->create_runtime_shader(desc, &error);
+    if (!created.ok()) {
+        entry.error = error.empty() ? std::string(to_string(created.code())) : error;
+        lastError_ = "shader de plugin nao criado: " + source->name + ": " + entry.error;
+        AUREA_LOG_ERROR("%s", lastError_.c_str());
+        ++failures_;
+        entry.retryRequests = kRetryAfter;
+        return false;
+    }
+    entry.handle = *created;
+    entry.error.clear();
+    entry.retryRequests = 0;
+    return true;
+}
+
+void ShaderLibrary::sweep_runtime_shaders() noexcept {
+    runtimeGeneration_ = runtime_shaders::generation();
+    for (auto it = runtime_.begin(); it != runtime_.end();) {
+        const ShaderId id = static_cast<ShaderId>(it->first);
+        if (runtime_shaders::find(id)) { ++it; continue; }
+        // O plugin saiu (ou foi reinstalado com outros ids): todo pipeline com
+        // este shader sai junto. A destruição no backend é adiada até a GPU
+        // terminar os quadros que podem tê-lo usado (GPUBackend::destroy_*).
+        for (auto p = pipelines_.begin(); p != pipelines_.end();) {
+            const PipelineKey& k = p->first;
+            if (k.vertex == id || k.fragment == id || k.compute == id) {
+                if (backend_) backend_->destroy_pipeline(p->second);
+                p = pipelines_.erase(p);
+            } else {
+                ++p;
+            }
+        }
+        for (auto f = failedKeys_.begin(); f != failedKeys_.end();) {
+            const PipelineKey& k = f->first;
+            if (k.vertex == id || k.fragment == id || k.compute == id) f = failedKeys_.erase(f);
+            else ++f;
+        }
+        if (backend_ && it->second.handle.valid()) backend_->destroy_shader(it->second.handle);
+        it = runtime_.erase(it);
+    }
+}
+
 bool ShaderLibrary::ensure_shader(ShaderId id) noexcept {
+    if (is_runtime_shader(id)) return ensure_runtime_shader(id);
     const u32 i = static_cast<u32>(id);
     if (!backend_ || i >= kShaderCount) return false;
     if (shaders_[i].valid()) return true;
@@ -163,6 +240,9 @@ void ShaderLibrary::shutdown() noexcept {
         if (s.valid()) backend_->destroy_shader(s);
         s = ShaderHandle{};
     }
+    for (auto& [id, entry] : runtime_) {
+        if (entry.handle.valid()) backend_->destroy_shader(entry.handle);
+    }
     for (SamplerHandle& s : samplers_) {
         if (s.valid()) backend_->destroy_sampler(s);
         s = SamplerHandle{};
@@ -181,12 +261,19 @@ void ShaderLibrary::forget_device() noexcept {
     std::fill(std::begin(rejectedShaders_), std::end(rejectedShaders_), false);
     for (ShaderHandle& s : shaders_) s = ShaderHandle{};
     for (SamplerHandle& s : samplers_) s = SamplerHandle{};
+    runtime_.clear();
+    runtimeGeneration_ = 0;
     backend_ = nullptr;
 }
 
 ShaderHandle ShaderLibrary::shader(ShaderId id) const noexcept {
     const u32 i = static_cast<u32>(id);
-    return i < kShaderCount ? shaders_[i] : ShaderHandle{};
+    if (i < kShaderCount) return shaders_[i];
+    if (is_runtime_shader(id)) {
+        const auto it = runtime_.find(static_cast<u16>(id));
+        return it == runtime_.end() ? ShaderHandle{} : it->second.handle;
+    }
+    return ShaderHandle{};
 }
 
 SamplerHandle ShaderLibrary::sampler(CommonSampler s) const noexcept {
@@ -200,8 +287,12 @@ Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept 
         && (key.vertex == testFailing_ || key.fragment == testFailing_ || key.compute == testFailing_)) {
         return Status{Errc::PipelineCompileFailed, "teste: pipeline recusado"};
     }
+    const bool runtimeKey = is_runtime_shader(key.vertex) || is_runtime_shader(key.fragment)
+                         || is_runtime_shader(key.compute);
+    // Um plugin entrou ou saiu do registro: solta o que dele ficou aqui.
+    if (!runtime_.empty() && runtimeGeneration_ != runtime_shaders::generation()) sweep_runtime_shaders();
     if (const auto it = pipelines_.find(key); it != pipelines_.end()) return it->second;
-    if (deferredShaders_) {
+    if (deferredShaders_ || runtimeKey) {
         // Requested shaders only: unrelated effects never enter a GLES driver
         // compiler during renderer startup. prewarm uses this same path.
         if (key.is_compute()) {
@@ -228,8 +319,8 @@ Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept 
             ++failures_;
             const ShaderId named = key.is_compute() ? key.compute
                                  : key.fragment != ShaderId::Count ? key.fragment : key.vertex;
-            lastError_ = std::string("pipeline sem shader: ")
-                       + (static_cast<u32>(named) < kShaderCount ? kShaderNames[static_cast<u32>(named)] : "?");
+            std::string storage;
+            lastError_ = std::string("pipeline sem shader: ") + shader_name(named, storage);
             AUREA_LOG_ERROR("%s", lastError_.c_str());
             failedKeys_[key] = kRetryAfter;
             return Status{Errc::ShaderCompileFailed};
@@ -237,15 +328,15 @@ Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept 
     }
 
     PipelineDesc desc;
+    std::string nameStorage;
     desc.isCompute = key.is_compute();
     if (desc.isCompute) {
         desc.computeShader = shader(key.compute);
-        desc.debugName = kShaderNames[static_cast<u32>(key.compute)];
+        desc.debugName = shader_name(key.compute, nameStorage);
     } else {
         desc.vertexShader = shader(key.vertex);
         desc.fragmentShader = shader(key.fragment);
-        desc.debugName = key.fragment != ShaderId::Count
-                       ? kShaderNames[static_cast<u32>(key.fragment)] : "pipeline";
+        desc.debugName = key.fragment != ShaderId::Count ? shader_name(key.fragment, nameStorage) : "pipeline";
     }
     desc.blendEnabled = key.blendEnabled;
     desc.blend = key.blend;

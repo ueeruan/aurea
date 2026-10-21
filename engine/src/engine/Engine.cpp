@@ -566,6 +566,11 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
     apply_memory_budgets();
 
     if (effectRegistry_.count() == 0) register_builtin_effects(effectRegistry_);
+    // Plugins instalados (só CPU: glslang → SPIR-V); o módulo de GPU de cada
+    // um sai sob demanda, quando um projeto usa o efeito.
+    if (!plugins_) plugins_ = std::make_unique<plugins::PluginManager>(effectRegistry_);
+    plugins_->set_directory(config.pluginDirectory);
+    if (!config.pluginDirectory.empty()) (void)plugins_->load_all();
     startup_.jobsMs = ms_since(tStart);
 
     {
@@ -1026,6 +1031,9 @@ void Engine::shutdown() noexcept {
         hdris_.clear();
     cubeLuts_.clear();
     }
+    // Os efeitos de plugin saem do registro (aposentados) e os shaders do
+    // registro global: um motor novo no mesmo processo recarrega da pasta.
+    if (plugins_) plugins_->shutdown();
     state_ = EngineState::Uninitialized;
 }
 
@@ -11704,6 +11712,116 @@ bool Engine::set_effect_preview_source(const u8* rgba, u32 width, u32 height) no
     return true;
 }
 
+// =============================================================================
+// Plugins de efeito
+// =============================================================================
+bool Engine::plugin_test_render(const EffectRegistry& registry, EffectTypeId typeId, f32& ms,
+                                std::string& error) noexcept {
+    ms = -1.0f;
+    const u32 side = plugins::kTestRenderSize;
+    // O preview do editor (ou uma captura) pode estar com a GPU: espera até
+    // ~4 s, como a prévia do catálogo espera, sem roubar o quadro dele.
+    for (u32 attempt = 0; attempt < 200; ++attempt) {
+        const bool busy = livePreviewGraphActive_.load(std::memory_order_acquire)
+                       || offscreenReaders_.load(std::memory_order_acquire);
+        if (!busy) {
+            std::lock_guard<std::mutex> rl(renderMutex_);
+            if (!gpu_ || !renderer_.ready()) return true;   // sem GPU: valeu só a compilação
+            if (!renderer_.preview_graph_pending() && !offscreenReaders_.load(std::memory_order_acquire)
+                && poll_export_gpu_locked().ok()) {
+                std::vector<u8> out;
+                // 1º quadro: cria os pipelines (o custo do driver não entra na medida).
+                Status s = renderer_.render_effect_preview(registry, typeId, side, side, out);
+                if (s.ok()) {
+                    const u64 t0 = monotonic_ns();
+                    s = renderer_.render_effect_preview(registry, typeId, side, side, out);
+                    ms = static_cast<f32>(static_cast<f64>(monotonic_ns() - t0) * 1e-6);
+                }
+                if (!s.ok()) {
+                    error = std::string(s.message());
+                    if (!s.detail().empty()) error += ": " + std::string(s.detail());
+                    const std::string& why = renderer_.shaders().last_error();
+                    if (!why.empty()) error += " (" + why + ")";
+                    return false;
+                }
+                if (gpu_->is_device_lost()) {
+                    error = "a GPU reiniciou durante o quadro de teste (laco infinito ou shader pesado demais)";
+                    return false;
+                }
+                return true;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    error = "a GPU esta ocupada (preview ou export); tente instalar de novo";
+    return false;
+}
+
+Result<std::string> Engine::install_plugin(const char* path) noexcept {
+    if (!path || !*path) return Status{Errc::InvalidArgument, "caminho do plugin vazio"};
+    if (!plugins_ || state_ == EngineState::Uninitialized) return Status{Errc::InvalidState, "motor nao inicializado"};
+    plugins::InstallHooks hooks;
+    hooks.compileOnBackend = [this](const runtime_shaders::Source& shader) -> std::string {
+        std::lock_guard<std::mutex> rl(renderMutex_);
+        if (!gpu_) return {};
+        ShaderDesc desc;
+        desc.stage = shader.stage;
+        desc.spirv = shader.spirv.data();
+        desc.spirvBytes = shader.spirv.size() * sizeof(u32);
+        desc.debugName = shader.name.c_str();
+        std::string error;
+        auto created = gpu_->create_runtime_shader(desc, &error);
+        if (!created.ok()) return error.empty() ? std::string(to_string(created.code())) : error;
+        gpu_->destroy_shader(*created);
+        return {};
+    };
+    hooks.testRender = [this](const EffectRegistry& registry, EffectTypeId typeId, f32& ms, std::string& error) {
+        return plugin_test_render(registry, typeId, ms, error);
+    };
+    Result<std::string> installed = plugins_->install(path, hooks);
+    if (installed.ok()) {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        bump_model_revision_locked();   // o catálogo e o painel releem
+    }
+    request_render();
+    return installed;
+}
+
+std::vector<plugins::PluginInfo> Engine::list_plugins() const {
+    return plugins_ ? plugins_->list() : std::vector<plugins::PluginInfo>{};
+}
+
+std::string Engine::plugins_json() const {
+    return plugins_ ? plugins_->list_json() : std::string("[]");
+}
+
+bool Engine::remove_plugin(const char* id) noexcept {
+    if (!id || !*id || !plugins_) return false;
+    const bool removed = plugins_->remove(id);
+    if (removed) {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        bump_model_revision_locked();
+    }
+    request_render();
+    return removed;
+}
+
+void Engine::set_plugin_directory(const char* path) noexcept {
+    if (!plugins_) plugins_ = std::make_unique<plugins::PluginManager>(effectRegistry_);
+    config_.pluginDirectory = path ? path : "";
+    plugins_->set_directory(config_.pluginDirectory);
+    (void)plugins_->load_all();
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        bump_model_revision_locked();
+    }
+    request_render();
+}
+
+std::string Engine::plugin_directory() const {
+    return plugins_ ? plugins_->directory() : std::string{};
+}
+
 Status Engine::render_effect_preview(u32 typeId, u32 width, u32 height, std::vector<u8>& out, u32& outWidth,
                                      u32& outHeight) noexcept {
     if (livePreviewGraphActive_.load(std::memory_order_acquire)
@@ -12927,6 +13045,8 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
     };
     u32 cursor = 0, written = 0;
     for (u32 i = 0; i < effectRegistry_.count() && written < capacity; ++i) {
+        // Plugin removido ou trocado por versão nova: a posição fica, o catálogo não.
+        if (effectRegistry_.retired_at(i)) continue;
         const Effect& e = effectRegistry_.at(i);
         if (std::find(std::begin(kRetired), std::end(kRetired), e.type_id()) != std::end(kRetired)) continue;
         bridge::EffectCatalogRow row;

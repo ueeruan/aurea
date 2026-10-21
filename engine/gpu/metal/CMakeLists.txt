@@ -39,6 +39,12 @@ add_library(aurea_metal STATIC ${AUREA_METAL_SOURCES})
 
 target_include_directories(aurea_metal PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(aurea_metal PUBLIC aurea_core)
+# Shaders de plugin: o MESMO SPIR-V → MSL do aurea-metal-compiler, em runtime.
+# Os objetos do tradutor (SPIRV-Cross) entram na própria libaurea_metal.a, que
+# o projeto do Xcode já liga.
+set(AUREA_XLATE_MSL ON)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/AureaShaderXlate.cmake")
+target_link_libraries(aurea_metal PRIVATE aurea_shader_xlate)
 
 # O backend se identifica para quem pergunta (e para um eventual build que queira
 # escolher o alvo em tempo de configuração).

@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 #include "aurea/render/GPUBackend.hpp"
 #include <memory>
 
@@ -33,6 +34,8 @@ public:
     Result<SamplerHandle> create_sampler(const SamplerDesc&) noexcept override;
     bool defer_shader_creation() const noexcept override { return true; }
     Result<ShaderHandle> create_shader(const ShaderDesc&) noexcept override;
+    /// Plugins: SPIR-V → ESSL 3.10 com o tradutor do build (shaderxlate) e compilação no driver.
+    Result<ShaderHandle> create_runtime_shader(const ShaderDesc&, std::string* error) noexcept override;
     Result<PipelineHandle> create_pipeline(const PipelineDesc&) noexcept override;
     void destroy_texture(TextureHandle) noexcept override;
     void destroy_buffer(BufferHandle) noexcept override;
@@ -62,6 +65,8 @@ public:
     PipelineCacheInfo pipeline_cache_info() const noexcept override;
 private:
     struct Impl;
+    /// Compila no driver um ESSL pronto (embutido ou traduzido em runtime).
+    Result<ShaderHandle> compile_essl(const ShaderDesc&, const char* source, std::string* error) noexcept;
     std::unique_ptr<Impl> impl_;
 };
 } // namespace aurea::gles

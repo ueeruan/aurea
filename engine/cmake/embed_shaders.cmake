@@ -3,7 +3,14 @@
 #
 #  Lê os .spv (na ordem do enum ShaderId) e escreve um .cpp com os bytes. Os
 #  arrays são `alignas(4)` porque o Vulkan lê SPIR-V como palavras de 32 bits.
+#
+#  A lista chega em SPV_LIST (um caminho por linha — ver AureaShaders.cmake) ou,
+#  no formato antigo, em SPV_FILES.
 # =============================================================================
+if(DEFINED SPV_LIST)
+    file(STRINGS "${SPV_LIST}" SPV_FILES)
+    list(FILTER SPV_FILES EXCLUDE REGEX "^$")
+endif()
 set(_out "// GERADO por cmake/embed_shaders.cmake — nao editar.\n")
 string(APPEND _out "#include \"aurea/shaders/ShaderIds.hpp\"\n\nnamespace aurea {\nnamespace {\n\n")
 

@@ -403,6 +403,11 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
         _host.reset();
         return NO;
     }
+    // Plugins de efeito: Documents/Plugins. O motor lê e registra o que houver.
+    if (auto* e = self.engine) {
+        NSString* plugins = [_documentsDirectory stringByAppendingPathComponent:@"Plugins"];
+        e->set_plugin_directory(to_std(plugins).c_str());
+    }
     return YES;
 }
 
@@ -2663,6 +2668,34 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (NSString*)builtinPropertySchemaJSON {
     const auto schema = aurea::ui::builtin_property_schema_json();
     return [[NSString alloc] initWithBytes:schema.data() length:schema.size() encoding:NSUTF8StringEncoding] ?: @"";
+}
+
+// =============================================================================
+// Plugins de efeito (a regra mora no motor: plugins/PluginManager.hpp)
+// =============================================================================
+- (NSString*)installPlugin:(NSString*)path {
+    auto* e = self.engine;
+    if (!e) return @"error:motor indisponivel";
+    const aurea::Result<std::string> installed = e->install_plugin(to_std(path).c_str());
+    if (installed.ok()) return to_ns("ok:" + *installed);
+    const aurea::Status st = installed.status();
+    const std::string why = st.detail().empty() ? std::string(st.message()) : std::string(st.detail());
+    return to_ns("error:" + why);
+}
+
+- (NSString*)pluginsJSON {
+    auto* e = self.engine;
+    return e ? to_ns(e->plugins_json()) : @"[]";
+}
+
+- (BOOL)removePlugin:(NSString*)pluginId {
+    auto* e = self.engine;
+    return e && e->remove_plugin(to_std(pluginId).c_str()) ? YES : NO;
+}
+
+- (NSString*)pluginDirectory {
+    auto* e = self.engine;
+    return e ? to_ns(e->plugin_directory()) : @"";
 }
 
 - (NSArray<NSNumber*>*)effectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel samples:(BOOL)samples {

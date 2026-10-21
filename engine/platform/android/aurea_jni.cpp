@@ -393,7 +393,7 @@ void read_codecs(const jint* rows, jsize len, PlatformInfo& info) noexcept {
 /// ignorado e orçamento de memória menor que o possível.
 AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle, jfloat refreshRate,
                                               jstring cacheDir, jstring documentsDir, jboolean debug,
-                                              jlongArray probe, jintArray codecs) {
+                                              jlongArray probe, jintArray codecs, jstring pluginDir) {
     NativeContext* c = ctx_of(handle);
     if (!c) return JNI_FALSE;
     if (c->initialized) return JNI_TRUE;
@@ -465,6 +465,8 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
             AUREA_LOG_WARN("export cleanup: app cache parent unavailable error=%d", cacheError.value());
     }
     config.documentsDirectory = to_string(env, documentsDir);
+    // Plugins de efeito instalados (files/plugins): lidos na inicialização.
+    config.pluginDirectory = to_string(env, pluginDir);
     config.displayRefreshRate = refreshRate > 0.0f ? refreshRate : 60.0f;
     config.platformInfo = info;
     config.hasPlatformInfo = hasInfo;
@@ -4492,4 +4494,69 @@ AUREA_JNI jboolean AUREA_FN(nativeSetSceneSetting)(JNIEnv*, jclass, jlong handle
     case 6: return e.set_scene3d_bloom(post[3] > 0, value, post[5]);
     default: return false;
     }
+}
+
+// =============================================================================
+// Plugins de efeito (docs/plugins/README.md). A regra mora no motor
+// (plugins/PluginManager.hpp); aqui só se traduz o texto.
+// =============================================================================
+namespace {
+/// UTF-8 → jstring pela UTF-16: mensagens do glslang e nomes de arquivo podem
+/// ter caracteres que o "UTF-8 modificado" do NewStringUTF recusa (emoji).
+jstring utf8_jstring(JNIEnv* env, const std::string& s) {
+    std::u16string out;
+    out.reserve(s.size());
+    for (usize i = 0; i < s.size();) {
+        const u8 c = static_cast<u8>(s[i]);
+        u32 cp = 0xFFFD;
+        usize n = 1;
+        if (c < 0x80) cp = c;
+        else if ((c >> 5) == 0x6 && i + 1 < s.size()) { cp = ((c & 0x1Fu) << 6) | (static_cast<u8>(s[i + 1]) & 0x3Fu); n = 2; }
+        else if ((c >> 4) == 0xE && i + 2 < s.size()) {
+            cp = ((c & 0x0Fu) << 12) | ((static_cast<u8>(s[i + 1]) & 0x3Fu) << 6) | (static_cast<u8>(s[i + 2]) & 0x3Fu); n = 3;
+        } else if ((c >> 3) == 0x1E && i + 3 < s.size()) {
+            cp = ((c & 0x07u) << 18) | ((static_cast<u8>(s[i + 1]) & 0x3Fu) << 12)
+               | ((static_cast<u8>(s[i + 2]) & 0x3Fu) << 6) | (static_cast<u8>(s[i + 3]) & 0x3Fu); n = 4;
+        }
+        i += n;
+        if (cp >= 0x10000 && cp <= 0x10FFFF) {
+            cp -= 0x10000;
+            out += static_cast<char16_t>(0xD800 + (cp >> 10));
+            out += static_cast<char16_t>(0xDC00 + (cp & 0x3FF));
+        } else {
+            out += static_cast<char16_t>(cp > 0xFFFF ? 0xFFFD : cp);
+        }
+    }
+    return env->NewString(reinterpret_cast<const jchar*>(out.data()), static_cast<jsize>(out.size()));
+}
+} // namespace
+
+/// "ok:<id>" ou "error:<mensagem>" (mensagem para a pessoa; erro de shader com arquivo:linha).
+AUREA_JNI jstring AUREA_FN(nativeInstallPlugin)(JNIEnv* env, jclass, jlong handle, jstring path) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return utf8_jstring(env, "error:motor indisponivel");
+    const std::string file = to_string(env, path);
+    const Result<std::string> installed = c->engine.install_plugin(file.c_str());
+    if (installed.ok()) return utf8_jstring(env, "ok:" + *installed);
+    const Status st = installed.status();
+    const std::string why = st.detail().empty() ? std::string(st.message()) : std::string(st.detail());
+    return utf8_jstring(env, "error:" + why);
+}
+
+/// Os plugins instalados em JSON (formato em docs/plugins/README.md, "API").
+AUREA_JNI jstring AUREA_FN(nativeListPlugins)(JNIEnv* env, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return utf8_jstring(env, c ? c->engine.plugins_json() : std::string("[]"));
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeRemovePlugin)(JNIEnv* env, jclass, jlong handle, jstring id) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return JNI_FALSE;
+    const std::string pluginId = to_string(env, id);
+    return c->engine.remove_plugin(pluginId.c_str()) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jstring AUREA_FN(nativePluginDirectory)(JNIEnv* env, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return utf8_jstring(env, c ? c->engine.plugin_directory() : std::string());
 }

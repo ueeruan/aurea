@@ -34,6 +34,7 @@
 #include <cmath>
 
 #include <initializer_list>
+#include <utility>
 #include <vector>
 
 namespace aurea::vector { struct DrawProgress; }
@@ -209,6 +210,14 @@ struct LayerImage {
 
 class Effect;
 struct Layer;
+
+/// Um passo de um efeito-PILHA (plugin do tipo "stack"): um efeito embutido e
+/// os valores parados que ele recebe NESTE instante. Os parâmetros que não
+/// aparecem em `values` ficam no padrão da declaração do embutido.
+struct StackStep {
+    EffectTypeId type = 0;
+    std::vector<std::pair<u32, ParamValue>> values;   ///< (índice do parâmetro, valor)
+};
 
 /// De qual camada o Espectro de áudio lê o som (ver `EffectResources::audio_spectrum`).
 enum class AudioSpectrumSource : u8 {
@@ -590,6 +599,21 @@ public:
                                        LayerImage& out) const {
         (void)ctx; (void)eval; (void)input; (void)margin; (void)out;
         return Status{Errc::NotImplemented, "efeito sem passe"};
+    }
+
+    /// Efeito que é uma PILHA de efeitos embutidos (plugin de pilha). No
+    /// PLANEJAMENTO o EffectGraph troca a instância pelos passos que isto
+    /// devolve, com os valores já resolvidos no instante (keyframes e
+    /// expressões do usuário incluídos). Cada embutido entra no plano como se a
+    /// pessoa o tivesse posto ali: fusão de cor, identidade, recursos
+    /// (`resolve_resources`), margens e a dobra do Transform final valem igual.
+    /// Falso = efeito comum (o padrão). `expands_stack` é a pergunta barata
+    /// que o planejamento faz antes (só o plugin de pilha diz sim).
+    [[nodiscard]] virtual bool expands_stack() const noexcept { return false; }
+    [[nodiscard]] virtual bool expand_stack(const ParamValue* values, u32 count,
+                                            std::vector<StackStep>& out) const {
+        (void)values; (void)count; (void)out;
+        return false;
     }
 
     /// Transform: quando é o ÚLTIMO efeito da layer, ele não precisa de passe —

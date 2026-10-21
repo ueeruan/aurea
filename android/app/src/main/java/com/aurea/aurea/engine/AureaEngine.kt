@@ -29,6 +29,16 @@ class AureaEngine private constructor() {
         /** [saveProjectIfDirty]: o projeto já estava gravado, nada foi escrito. */
         const val SAVE_CLEAN = -1
 
+        /**
+         * Pasta padrão dos plugins de efeito: `files/plugins`, irmã da pasta de
+         * projetos (`files/projetos`) que o app passa como `documentsDir`.
+         */
+        @JvmStatic
+        fun defaultPluginDir(documentsDir: String): String {
+            val docs = java.io.File(documentsDir)
+            return java.io.File(docs.parentFile ?: docs, "plugins").absolutePath
+        }
+
         /** Códigos de `Errc` (core/Result.hpp, com `static_assert` lá). */
         const val ERR_NOT_IMPLEMENTED = 7
         const val ERR_SHUTTING_DOWN = 27
@@ -225,7 +235,49 @@ class AureaEngine private constructor() {
         debug: Boolean,
         probe: LongArray? = null,
         codecs: IntArray? = null,
-    ): Boolean = nativeInitialize(nativeHandle, refreshRate, cacheDir, documentsDir, debug, probe, codecs)
+        /** Pasta dos plugins de efeito. Padrão: `files/plugins` (irmã de `files/projetos`). */
+        pluginDir: String = defaultPluginDir(documentsDir),
+    ): Boolean = nativeInitialize(nativeHandle, refreshRate, cacheDir, documentsDir, debug, probe, codecs, pluginDir)
+
+    // -------------------------------------------------------------------------
+    // Plugins de efeito (docs/plugins/README.md). Um plugin acrescenta um efeito
+    // à categoria "Plugins" do catálogo (chave `plugin.<id>`). Instalar compila
+    // e desenha um quadro de teste: chamar FORA da thread da UI.
+    // -------------------------------------------------------------------------
+
+    /** Resultado de [installPlugin]: o id instalado, ou a mensagem de recusa. */
+    data class PluginInstallResult(val ok: Boolean, val id: String, val error: String)
+
+    /**
+     * Instala um `.aureaplugin` (ZIP com plugin.json) ou um `.fs` (ISF 2.0) do
+     * caminho dado (o app copia o arquivo escolhido para o sandbox antes).
+     * Mesmo id com versão igual ou mais nova substitui a instalada.
+     */
+    fun installPlugin(path: String): PluginInstallResult {
+        val raw = nativeWork.run("error:motor encerrado") { nativeInstallPlugin(nativeHandle, path) }
+        return when {
+            raw.startsWith("ok:") -> PluginInstallResult(true, raw.substring(3), "")
+            raw.startsWith("error:") -> PluginInstallResult(false, "", raw.substring(6))
+            else -> PluginInstallResult(false, "", raw)
+        }
+    }
+
+    /** O texto cru da ponte: `ok:<id>` ou `error:<mensagem>`. */
+    fun installPluginRaw(path: String): String =
+        nativeWork.run("error:motor encerrado") { nativeInstallPlugin(nativeHandle, path) }
+
+    /**
+     * Plugins instalados em JSON (lista de objetos: id, version, author, kind,
+     * category, name/description por idioma, effectKey, effectTypeId, ok,
+     * errorCode, error, directory, passCount, testRenderMs, params).
+     */
+    fun pluginsJson(): String = nativeWork.run("[]") { nativeListPlugins(nativeHandle) }
+
+    /** Desinstala; o efeito sai do catálogo (projetos guardam os valores). */
+    fun removePlugin(id: String): Boolean = nativeWork.run(false) { nativeRemovePlugin(nativeHandle, id) }
+
+    /** A pasta de plugins em uso pelo motor. */
+    fun pluginDirectory(): String = nativeWork.run("") { nativePluginDirectory(nativeHandle) }
 
     fun startupError(): String = nativeStartupError(nativeHandle)
     private external fun nativeStartupError(handle: Long): String
@@ -1272,8 +1324,12 @@ class AureaEngine private constructor() {
     // -------------------------------------------------------------------------
     private external fun nativeInitialize(
         handle: Long, refreshRate: Float, cacheDir: String, documentsDir: String, debug: Boolean,
-        probe: LongArray?, codecs: IntArray?,
+        probe: LongArray?, codecs: IntArray?, pluginDir: String,
     ): Boolean
+    private external fun nativeInstallPlugin(handle: Long, path: String): String
+    private external fun nativeListPlugins(handle: Long): String
+    private external fun nativeRemovePlugin(handle: Long, id: String): Boolean
+    private external fun nativePluginDirectory(handle: Long): String
     private external fun nativeDeviceReport(handle: Long, out: LongArray): Boolean
     private external fun nativeDeviceSummary(handle: Long): String?
     private external fun nativeSetEffectPreviewSource(handle: Long, rgba: ByteArray, width: Int, height: Int): Boolean

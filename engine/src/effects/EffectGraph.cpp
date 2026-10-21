@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <deque>
 
 namespace aurea {
 
@@ -239,25 +240,66 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
     out.clear();
     out.placement = placement;
 
-    struct Source { const Layer* owner; const EffectInstance* effect; f64 time; };
+    // `index`: a posição do efeito na camada (o que o painel, `blockers` e
+    // `foldEffectIndex` usam). Os passos de um plugin de pilha herdam a do
+    // plugin; os Motion Tile de um nulo pai vêm depois de todos os da camada.
+    struct Source { const Layer* owner; const EffectInstance* effect; f64 time; u32 index; };
     // Memória de trabalho do planejamento, reaproveitada entre quadros (o
     // caminho quente não aloca: Perf8C.SteadyPlaybackOf50Layers...).
     static thread_local std::vector<Source> sources;
     static thread_local std::vector<Mat4> downstream;
     static thread_local std::vector<u8> hasDownstream;
     static thread_local std::vector<ParamValue> scratch;
+    // Plugins de pilha: as instâncias dos embutidos que o plugin vira neste
+    // instante (endereços estáveis: deque) e a posição de cada eval em `sources`.
+    static thread_local std::deque<EffectInstance> expanded;
+    static thread_local std::vector<StackStep> steps;
+    static thread_local std::vector<ParamValue> stackValues;
+    static thread_local std::vector<u32> evalSource;
     sources.clear();
-    for (const auto& effect : layer.effects) sources.push_back({&layer, &effect, localTime});
+    expanded.clear();
+    evalSource.clear();
+    for (u32 k = 0; k < static_cast<u32>(layer.effects.size()); ++k) {
+        const EffectInstance& effect = layer.effects[k];
+        const Effect* fx = effect.enabled ? registry.find(effect.type) : nullptr;
+        const ParameterRegistry* fxParams = fx && fx->expands_stack() ? registry.params(effect.type) : nullptr;
+        if (fxParams) {
+            stackValues.clear();
+            for (u32 p = 0; p < fxParams->count(); ++p)
+                stackValues.push_back(evaluate_param_f(layer.tracks, effect, p, fxParams->at(p), localTime));
+            steps.clear();
+            if (fx->expand_stack(stackValues.data(), fxParams->count(), steps)) {
+                for (const StackStep& step : steps) {
+                    const ParameterRegistry* sub = registry.params(step.type);
+                    if (!sub || !registry.find(step.type)) continue;
+                    EffectInstance& inst = expanded.emplace_back();
+                    // Id fora do alcance das trilhas da camada: o passo usa só
+                    // as constantes que o plugin calculou.
+                    inst.id = 0xFFFE0000u + static_cast<u32>(expanded.size());
+                    inst.type = step.type;
+                    inst.enabled = true;
+                    initialize_instance(inst, *sub);
+                    for (const auto& [index, value] : step.values)
+                        if (index < inst.params.size()) inst.params[index].constant = value;
+                    sources.push_back({&layer, &inst, localTime, k});
+                }
+                continue;
+            }
+        }
+        sources.push_back({&layer, &effect, localTime, k});
+    }
     const f64 globalTime = localTime + layer.start.value - layer.offset.value;
     const FrameIndex global{static_cast<i64>(std::floor(globalTime))};
     // A null has no pixels. Its Motion Tile controls the raster of each child;
     // sample the null's animation clock, not the child's trimmed/remapped clock.
     const Layer* parent = composition ? composition->layer(layer.parent) : nullptr;
+    u32 parentSources = 0;
     for (u32 depth = 0; parent && parent != &layer && depth < 16; ++depth) {
         if (parent->kind == LayerKind::Null && parent->contains_time(global))
             for (const auto& effect : parent->effects)
                 if (effect.type == effect_type_id(effect_keys::kMotionTile))
-                    sources.push_back({parent, &effect, globalTime - parent->start.value + parent->offset.value});
+                    sources.push_back({parent, &effect, globalTime - parent->start.value + parent->offset.value,
+                                       static_cast<u32>(layer.effects.size()) + parentSources++});
         parent = composition->layer(parent->parent);
     }
     // 0. A geometria afim DEPOIS de cada efeito (de trás para a frente): o
@@ -287,7 +329,7 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
             e.instance = &inst;
             e.values = scratch.data();
             e.count = params->count();
-            e.effectIndex = static_cast<u32>(i);
+            e.effectIndex = source.index;
             e.localTime = FrameIndex{static_cast<i64>(std::floor(source.time))};
             e.fractionalTime = source.time;
             e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
@@ -324,7 +366,7 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
             // Projeto de uma versão com um efeito que esta não tem: fica no
             // projeto, não desenha, e o painel mostra por quê.
             ++out.droppedUnknown;
-            out.blockers.emplace_back(i, "efeito desconhecido nesta versao");
+            out.blockers.emplace_back(source.index, "efeito desconhecido nesta versao");
             continue;
         }
 
@@ -340,7 +382,7 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
         e.values = out.values.data() + offset;
         e.valueOffset = offset;
         e.count = params->count();
-        e.effectIndex = i;
+        e.effectIndex = source.index;
         e.localTime = FrameIndex{static_cast<i64>(std::floor(source.time))};
         e.fractionalTime = source.time;
         e.framesPerSecond = std::isfinite(framesPerSecond) && framesPerSecond > 0 ? framesPerSecond : 30.0;
@@ -358,7 +400,7 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
         if (effect->is_identity(e)) {
             Mat4 identityFold = Mat4::identity();
             f32 identityOpacity = 1.f;
-            if (effect->fold_into_composite(e, identityFold, identityOpacity)) out.foldEffectIndex = i;
+            if (effect->fold_into_composite(e, identityFold, identityOpacity)) out.foldEffectIndex = source.index;
             ++out.droppedIdentity;
             out.values.resize(offset);
             continue;
@@ -378,6 +420,7 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
         e.placement = &out.placement;
         out.evals.push_back(e);
         out.colorOps.push_back(op);
+        evalSource.push_back(i);
     }
 
     // Os ponteiros para `values` só ficam estáveis depois que o vetor parou
@@ -397,6 +440,7 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
             out.foldEffectIndex = last.effectIndex;
             out.evals.pop_back();
             out.colorOps.pop_back();
+            evalSource.pop_back();
         }
     }
 
@@ -447,7 +491,7 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
     //     pixel não mede o quadro: só as etapas de um efeito levam a matriz.
     for (EffectStage& st : out.stages) {
         if (st.kind != EffectStage::Kind::Single) continue;
-        const u32 src = out.evals[st.begin].effectIndex;
+        const u32 src = evalSource[st.begin];   // posição em `sources` (não na camada)
         if (src < downstream.size() && hasDownstream[src]) {
             st.after = downstream[src];
             st.hasAfter = true;
@@ -669,31 +713,58 @@ u64 EffectGraph::bypassed_total() noexcept { return g_bypassed.load(std::memory_
 // =============================================================================
 // Registro
 // =============================================================================
+EffectRegistry::EffectRegistry() : slots_(std::make_unique<std::unique_ptr<Entry>[]>(kCapacity)) {}
+
+EffectRegistry::~EffectRegistry() = default;
+
 Status EffectRegistry::add(std::unique_ptr<Effect> effect) {
     if (!effect) return Errc::InvalidArgument;
     const EffectTypeId id = effect->type_id();
-    for (const Entry& e : entries_) {
-        if (e.id == id) {
-            AUREA_LOG_ERROR("efeito com chave repetida: %s", effect->info().key);
-            return Errc::AlreadyExists;
-        }
+    std::lock_guard<std::mutex> lock(writeMutex_);
+    if (live(id)) {
+        AUREA_LOG_ERROR("efeito com chave repetida: %s", effect->info().key);
+        return Errc::AlreadyExists;
     }
-    Entry entry;
-    entry.id = id;
-    effect->declare_parameters(entry.params);
-    entry.effect = std::move(effect);
-    entries_.push_back(std::move(entry));
+    const u32 n = count_.load(std::memory_order_relaxed);
+    if (n >= kCapacity) {
+        AUREA_LOG_ERROR("registro de efeitos cheio: %s", effect->info().key);
+        return Errc::BudgetExceeded;
+    }
+    auto entry = std::make_unique<Entry>();
+    entry->id = id;
+    effect->declare_parameters(entry->params);
+    entry->effect = std::move(effect);
+    slots_[n] = std::move(entry);
+    // Publica: quem ler `count` com acquire vê a entrada inteira.
+    count_.store(n + 1, std::memory_order_release);
     return OkStatus;
 }
 
-const Effect* EffectRegistry::find(EffectTypeId id) const noexcept {
-    for (const Entry& e : entries_) if (e.id == id) return e.effect.get();
+bool EffectRegistry::retire(EffectTypeId id) noexcept {
+    std::lock_guard<std::mutex> lock(writeMutex_);
+    const Entry* e = live(id);
+    if (!e) return false;
+    const_cast<Entry*>(e)->retired.store(true, std::memory_order_release);
+    return true;
+}
+
+const EffectRegistry::Entry* EffectRegistry::live(EffectTypeId id) const noexcept {
+    const u32 n = count_.load(std::memory_order_acquire);
+    for (u32 i = 0; i < n; ++i) {
+        const Entry* e = slots_[i].get();
+        if (e->id == id && !e->retired.load(std::memory_order_acquire)) return e;
+    }
     return nullptr;
 }
 
+const Effect* EffectRegistry::find(EffectTypeId id) const noexcept {
+    const Entry* e = live(id);
+    return e ? e->effect.get() : nullptr;
+}
+
 const ParameterRegistry* EffectRegistry::params(EffectTypeId id) const noexcept {
-    for (const Entry& e : entries_) if (e.id == id) return &e.params;
-    return nullptr;
+    const Entry* e = live(id);
+    return e ? &e->params : nullptr;
 }
 
 EffectTypeId EffectRegistry::find_key(std::string_view key) const noexcept {
@@ -703,7 +774,11 @@ EffectTypeId EffectRegistry::find_key(std::string_view key) const noexcept {
 
 void EffectRegistry::collect_pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const {
     out.push_back(PipelineKey::fullscreen(ShaderId::effects_color_stack_frag, work));
-    for (const Entry& e : entries_) e.effect->pipelines(out, work);
+    const u32 n = count();
+    for (u32 i = 0; i < n; ++i) {
+        if (retired_at(i)) continue;
+        slots_[i]->effect->pipelines(out, work);
+    }
 }
 
 } // namespace aurea

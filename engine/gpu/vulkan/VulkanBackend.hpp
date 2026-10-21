@@ -433,6 +433,8 @@ public:
     [[nodiscard]] Result<BufferHandle>   create_buffer(const BufferDesc& desc) noexcept override;
     [[nodiscard]] Result<SamplerHandle>  create_sampler(const SamplerDesc& desc) noexcept override;
     [[nodiscard]] Result<ShaderHandle>   create_shader(const ShaderDesc& desc) noexcept override;
+    /// Plugins: o SPIR-V do glslang entra direto, como o embutido.
+    [[nodiscard]] Result<ShaderHandle>   create_runtime_shader(const ShaderDesc& desc, std::string* error) noexcept override;
     [[nodiscard]] Result<PipelineHandle> create_pipeline(const PipelineDesc& desc) noexcept override;
 
     void destroy_texture(TextureHandle h) noexcept override;

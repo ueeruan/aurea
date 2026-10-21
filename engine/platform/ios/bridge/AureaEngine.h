@@ -1014,6 +1014,25 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSDictionary<NSString*, id>*>*)effectParamsForLayer:(long long)layerId effectId:(uint32_t)effectId;
 /// Metadados built-in versionados de propriedades 3D; leituras/escritas continuam nas APIs atuais.
 - (NSString*)builtinPropertySchemaJSON NS_SWIFT_NAME(builtinPropertySchemaJSON());
+
+// --- Plugins de efeito (docs/plugins/README.md) -----------------------------
+// Um plugin acrescenta um efeito à categoria "Plugins" do catálogo (chave
+// `plugin.<id>`). A pasta é Documents/Plugins (ligada no startWithDevice:).
+// Instalar compila os shaders e desenha um quadro de teste: chamar FORA da
+// main thread.
+
+/// Instala um `.aureaplugin` (ZIP com plugin.json) ou um `.fs` (ISF 2.0) do
+/// caminho no sandbox. Devolve "ok:<id>" ou "error:<mensagem>" (os erros de
+/// shader trazem arquivo:linha). Mesmo id com versão igual ou mais nova substitui.
+- (NSString*)installPlugin:(NSString*)path NS_SWIFT_NAME(installPlugin(_:));
+/// Os plugins instalados em JSON: lista de objetos com id, version, author,
+/// kind, category, name/description (objeto idioma -> texto), effectKey,
+/// effectTypeId, ok, errorCode, error, directory, passCount, testRenderMs, params.
+@property (nonatomic, readonly, copy) NSString* pluginsJSON;
+/// Desinstala (o efeito sai do catálogo; projetos guardam os valores).
+- (BOOL)removePlugin:(NSString*)pluginId NS_SWIFT_NAME(removePlugin(_:));
+/// A pasta de plugins em uso pelo motor.
+@property (nonatomic, readonly, copy) NSString* pluginDirectory;
 - (NSArray<NSNumber*>*)effectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel samples:(BOOL)samples NS_SWIFT_NAME(effectCurve(_:effect:param:channel:samples:));
 - (int32_t)editEffectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel action:(uint32_t)action point:(uint32_t)point x:(float)x y:(float)y NS_SWIFT_NAME(editEffectCurve(_:effect:param:channel:action:point:x:y:));
 /// Declaração dos parâmetros de um TIPO (o catálogo, sem camada).

@@ -12,8 +12,11 @@
 //  AS TRÊS DECISÕES QUE MOLDAM A INTERFACE:
 //
 //   1. SHADER É SPIR-V COMPILADO NO BUILD. Não existe compilação de GLSL em
-//      runtime: o custo (dezenas de ms) cairia no meio do playback. O Metal
-//      recebe MSL gerado do mesmo SPIR-V, também no build.
+//      runtime no caminho do quadro: o custo (dezenas de ms) cairia no meio do
+//      playback. O Metal recebe MSL gerado do mesmo SPIR-V, também no build.
+//      A exceção são os PLUGINS de efeito: o GLSL deles vira SPIR-V no aparelho
+//      ao instalar/abrir (RuntimeShaders.hpp), nunca durante o playback, e
+//      entra por `create_runtime_shader`.
 //
 //   2. LAYOUT DE RECURSOS UNIVERSAL. Todo pipeline do Aurea enxerga o mesmo
 //      conjunto de slots (ver `binding::`). Um efeito novo não cria layout de
@@ -34,6 +37,7 @@
 #include "aurea/core/Math.hpp"
 #include "aurea/render/GPUCapabilities.hpp"
 #include <limits>
+#include <string>
 
 namespace aurea {
 
@@ -278,7 +282,8 @@ enum class ShaderStage : u8 { Vertex = 0, Fragment, Compute };
 
 struct ShaderDesc {
     ShaderStage stage = ShaderStage::Fragment;
-    /// SPIR-V gerado no build (glslc). Nunca GLSL em runtime.
+    /// SPIR-V gerado no build (glslc) — ou, em `create_runtime_shader`, pelo
+    /// glslang no aparelho (plugins). Nunca GLSL cru.
     const u32* spirv = nullptr;
     usize      spirvBytes = 0;
     const char* entryPoint = "main";
@@ -662,6 +667,19 @@ public:
     /// an actual pipeline/prewarm requests them. Other APIs keep eager modules.
     [[nodiscard]] virtual bool defer_shader_creation() const noexcept { return false; }
     [[nodiscard]] virtual Result<ShaderHandle>   create_shader(const ShaderDesc&) noexcept = 0;
+    /// Shader de PLUGIN: `desc.spirv` é SPIR-V gerado no aparelho (glslang,
+    /// RuntimeShaders.hpp), não um blob embutido. O backend o leva à própria
+    /// API — o Vulkan usa o SPIR-V; o GLES traduz para ESSL 3.10 e o Metal para
+    /// MSL com o MESMO tradutor e as MESMAS opções do build
+    /// (shaderxlate/ShaderTranslate.hpp) e compilam o texto no driver. `error`
+    /// (opcional) recebe a mensagem do tradutor ou do driver. O handle é um
+    /// shader comum: `create_pipeline` e `destroy_shader` valem igual.
+    [[nodiscard]] virtual Result<ShaderHandle> create_runtime_shader(const ShaderDesc& desc,
+                                                                     std::string* error) noexcept {
+        (void)desc;
+        if (error) *error = "este backend nao compila shaders de plugin";
+        return Status{Errc::NotSupported, "backend sem shaders de runtime"};
+    }
     [[nodiscard]] virtual Result<PipelineHandle> create_pipeline(const PipelineDesc&) noexcept = 0;
 
     /// Destruição ADIADA: o objeto só morre quando a GPU terminou todo frame

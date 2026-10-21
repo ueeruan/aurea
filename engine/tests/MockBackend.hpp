@@ -11,6 +11,7 @@
 #include "aurea/render/GPUBackend.hpp"
 
 #include <cstring>
+#include <string>
 #include <vector>
 #include <functional>
 #include <unordered_map>
@@ -230,6 +231,20 @@ public:
         if (failShader && d.debugName && std::strcmp(failShader, d.debugName) == 0) return Status{Errc::ShaderCompileFailed};
         ++shadersCreated;
         return ShaderHandle{++ids_};
+    }
+    /// Shaders de plugin (RuntimeShaders.hpp): contados à parte; `failRuntimeShaders`
+    /// simula o driver que recusa o shader traduzido.
+    u32 runtimeShadersCreated = 0;
+    bool failRuntimeShaders = false;
+    Result<ShaderHandle> create_runtime_shader(const ShaderDesc& d, std::string* error) noexcept override {
+        if (failRuntimeShaders) {
+            if (error) *error = "driver falso: shader recusado";
+            return Status{Errc::ShaderCompileFailed};
+        }
+        auto created = create_shader(d);
+        if (created.ok()) ++runtimeShadersCreated;
+        else if (error) *error = "SPIR-V invalido";
+        return created;
     }
     Result<PipelineHandle> create_pipeline(const PipelineDesc&) noexcept override {
         if (failPipelines) return Status{Errc::PipelineCompileFailed};

@@ -29,9 +29,9 @@ namespace {
 
 /// O registro de efeitos, só para enumerar as chaves (o motor tem o dele).
 const EffectRegistry& gpu_effects() {
-    static EffectRegistry reg = [] {
-        EffectRegistry r;
-        register_builtin_effects(r);
+    static EffectRegistry& reg = *[] {
+        auto* r = new EffectRegistry();
+        register_builtin_effects(*r);
         return r;
     }();
     return reg;

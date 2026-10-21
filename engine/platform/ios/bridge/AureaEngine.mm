@@ -2842,6 +2842,20 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     else report.error = e ? "arquivo vazio" : "motor indisponivel";
     return to_ns(aurea::presets::alight_import_envelope(json, report));
 }
+- (NSString*)importAeFile:(NSString*)path layer:(uint64_t)layer {
+    auto* e = self.engine;
+    aurea::ae::ImportReport report;
+    if (e) report = e->import_ae_file(to_std(path).c_str(), layer);
+    else report.message = "motor indisponivel";
+    return to_ns(aurea::ae::report_json(report));
+}
+- (NSString*)importAeData:(NSData*)data fileName:(NSString*)fileName layer:(uint64_t)layer {
+    auto* e = self.engine;
+    aurea::ae::ImportReport report;
+    if (e && data) report = e->import_ae_data(std::string(static_cast<const char*>(data.bytes), data.length), to_std(fileName), layer);
+    else report.message = e ? "arquivo vazio" : "motor indisponivel";
+    return to_ns(aurea::ae::report_json(report));
+}
 - (NSString*)applyPreset:(long long)layerId json:(NSString*)json duration:(int64_t)duration {
     auto* e = self.engine;
     if (!e) return @"Motor indisponível";

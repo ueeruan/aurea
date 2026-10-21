@@ -26,6 +26,7 @@
 
 #include "aurea/text/Captions.hpp"
 #include "aurea/effects/CubeLut.hpp"
+#include "aurea/project/AeImport.hpp"
 #include "aurea/project/AlightMotion.hpp"
 #include "aurea/project/Presets.hpp"
 #include "aurea/project/ProjectPackage.hpp"
@@ -1415,6 +1416,19 @@ public:
     /// essa duração. JSON inválido ou tipo que não serve à camada → false, sem
     /// mudar nada. `error` (opcional) diz o porquê.
     bool apply_preset(u64 layerId, const std::string& json, i64 durationFrames = 0, std::string* error = nullptr) noexcept;
+
+    // --- After Effects (project/AeImport.hpp; EngineAeImport.cpp) -------------------
+    /// Preset de animação (.ffx) ou script (.jsx) do After Effects. O tipo vem
+    /// do conteúdo (RIFX/FaFX) e da extensão. O .ffx vai para `targetLayer`
+    /// (os keyframes começam no cabeçote, como no AE); o .jsx roda no sandbox
+    /// (sem arquivo, rede ou sistema) com `targetLayer` como camada
+    /// selecionada (0 = nenhuma) e pode criar camadas. TUDO num passo de
+    /// desfazer — nada mudou, nenhum passo. O relatório diz o que entrou e o
+    /// que ficou de fora (`ae::report_json` é o JSON das pontes).
+    [[nodiscard]] ae::ImportReport import_ae_file(const char* path, u64 targetLayer) noexcept;
+    /// O mesmo com o conteúdo já lido (`fileName` só serve para a extensão).
+    [[nodiscard]] ae::ImportReport import_ae_data(const std::string& data, const std::string& fileName,
+                                                  u64 targetLayer) noexcept;
 
     // --- Modo Edição (timeline magnética) ------------------------------------------
     /// Ligar/desligar o modo Edição da COMPOSIÇÃO. Ele é o PADRÃO das camadas

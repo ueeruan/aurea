@@ -73,7 +73,7 @@ enum GlobalId : u32 {
     GTime = 1, GValue, GIndex, GFps, GFrame, GThisLayer, GThisComp, GThisProperty, GTransform,
     GPosition, GScale, GRotation, GOpacity, GAnchor, GVelocity, GSpeed, GNumKeys, GInPoint,
     GOutPoint, GWidth, GHeight, GMath, GTextIndex, GTextTotal, GLocalTime,
-    GTimeMs, GMarker,
+    GTimeMs, GMarker, GSelectorValue,
     // Funções (valor K::Fn quando citadas sem chamar).
     FWiggle = 100, FLoopOut, FLoopIn, FLoopOutDur, FLoopInDur, FLinear, FEase, FEaseIn, FEaseOut,
     FClamp, FRandom, FGaussRandom, FSeedRandom, FNoise, FSin, FCos, FTan, FAsin, FAcos, FAtan,
@@ -97,6 +97,9 @@ constexpr NameEntry kGlobals[] = {
     {"numKeys", GNumKeys}, {"inPoint", GInPoint}, {"outPoint", GOutPoint}, {"width", GWidth},
     {"height", GHeight}, {"Math", GMath},
     {"textIndex", GTextIndex}, {"textTotal", GTextTotal}, {"localTime", GLocalTime},
+    // Seletor de expressão do AE: o valor dos seletores anteriores. No Aurea o
+    // animador tem um seletor só, então é a seleção cheia (100 %).
+    {"selectorValue", GSelectorValue},
     {"wiggle", FWiggle}, {"loopOut", FLoopOut}, {"loopIn", FLoopIn}, {"loopOutDuration", FLoopOutDur},
     {"loopInDuration", FLoopInDur}, {"linear", FLinear}, {"ease", FEase}, {"easeIn", FEaseIn},
     {"easeOut", FEaseOut}, {"clamp", FClamp}, {"random", FRandom}, {"gaussRandom", FGaussRandom},
@@ -1077,11 +1080,25 @@ PropDesc desc_for_track(const Layer* l, LayerId id, const Track& t, f64 fps, u32
             d.count = static_cast<u8>(std::clamp<u32>(comps, 1, 4));
             break;
         }
-        case TP::TextAnimParam:
+        case TP::TextAnimParam: {
             d.kind = 3;
             d.effectIndex = t.effectIndex;
             d.key0 = t.effectParamIndex;
+            // Propriedades vetoriais do animador (posição XYZ, escala XY, cores
+            // RGB): a expressão devolve o vetor inteiro, como no After Effects,
+            // e cada trilha pega o SEU componente (antes todas pegavam o [0]).
+            const u32 p = t.effectParamIndex;
+            auto group = [&](u32 first, u32 n) {
+                d.key0 = first;
+                d.count = static_cast<u8>(n);
+                outComponent = p - first;
+            };
+            if (p >= text::kPosX && p <= text::kPosZ) group(text::kPosX, 3);
+            else if (p >= text::kScaleX && p <= text::kScaleY) group(text::kScaleX, 2);
+            else if (p >= text::kFillR && p <= text::kFillB) group(text::kFillR, 3);
+            else if (p >= text::kStrokeR && p <= text::kStrokeB) group(text::kStrokeR, 3);
             break;
+        }
         case TP::MaskParam:
             d.kind = 5; d.effectIndex = t.effectIndex; d.key0 = t.effectParamIndex;
             break;
@@ -1701,6 +1718,10 @@ Val Ctx::global(u32 id, u32 pos) {
         case GLocalTime: return Val::num(now_local() / e.fps);
         case GTextIndex: return Val::num(static_cast<u32>(g_textContext));
         case GTextTotal: return Val::num(static_cast<u32>(g_textContext >> 32));
+        case GSelectorValue: {
+            const f64 full[3] = {100.0, 100.0, 100.0};
+            return Val::vec(full, 3);
+        }
         case GValue: return nowValue;
         case GFps: return Val::num(e.fps);
         case GFrame: return Val::num(std::floor(nowF));

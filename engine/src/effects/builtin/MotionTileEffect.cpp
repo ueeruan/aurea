@@ -640,6 +640,8 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_aurora_effect(registry);
     // Edições aleatórias (Tempo) — 0.2.7. No fim.
     builtin::register_random_edits_effect(registry);
+    // Constelação (3D) — 0.3.0. No fim.
+    builtin::register_constellation_effect(registry);
 }
 
 } // namespace aurea

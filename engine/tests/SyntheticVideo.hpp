@@ -25,12 +25,17 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
 namespace aurea::test {
 
-enum class SyntheticPattern : u8 { Quadrants = 0, FrameGray, MovingSquare, FastSquare, Scene3D, PanTexture, PanOcclusion };
+/// PanTable: a textura do PanTexture tirada de uma tabela calculada uma vez,
+/// com deslocamento INTEIRO por quadro (⌊5,25·i⌋, ⌊1,75·i⌋). O "decode" em
+/// 1080p custa uma cópia em vez de 2 milhões de senos: benchmark de efeito de
+/// tempo sem a GPU esfriar esperando a CPU (EffectPerf).
+enum class SyntheticPattern : u8 { Quadrants = 0, FrameGray, MovingSquare, FastSquare, Scene3D, PanTexture, PanOcclusion, PanTable };
 
 struct SyntheticConfig {
     u32 width = 64;
@@ -119,6 +124,35 @@ inline f64 pan_texture_value(f64 x, f64 y, f64 frame) {
     const f64 a = std::sin(u * 0.21) * std::cos(v * 0.17) + 0.6 * std::sin((u + 2.0 * v) * 0.083)
                 + 0.45 * std::cos(std::sqrt(std::fabs(u * u * 0.7 + v * v * 1.3)) * 0.31);
     return std::clamp(128.0 + 52.0 * a, 16.0, 235.0);
+}
+
+/// Tabela do padrão PanTable: o PanTexture do quadro 0 numa área que cobre o
+/// deslocamento de todos os quadros. Calculada uma vez por tamanho (o decoder
+/// roda em outra thread: sob mutex) e nunca solta — é dado de teste.
+struct PanTable {
+    u32 width = 0, height = 0, shiftX = 0, shiftY = 0;
+    std::vector<u8> luma;
+};
+inline const PanTable& pan_table(u32 w, u32 h, u32 frameCount) {
+    static std::mutex m;
+    static std::vector<std::unique_ptr<PanTable>> tables;
+    std::lock_guard<std::mutex> lock(m);
+    const u32 sx = static_cast<u32>(std::ceil(kPanTextureVx * frameCount)) + 1;
+    const u32 sy = static_cast<u32>(std::ceil(kPanTextureVy * frameCount)) + 1;
+    for (const auto& t : tables)
+        if (t->width == w + sx && t->height == h + sy) return *t;
+    auto t = std::make_unique<PanTable>();
+    t->width = w + sx;
+    t->height = h + sy;
+    t->shiftX = sx;
+    t->shiftY = sy;
+    t->luma.resize(static_cast<usize>(t->width) * t->height);
+    for (u32 y = 0; y < t->height; ++y)
+        for (u32 x = 0; x < t->width; ++x)
+            t->luma[static_cast<usize>(y) * t->width + x] = static_cast<u8>(std::lround(
+                pan_texture_value(static_cast<f64>(x) - sx, static_cast<f64>(y) - sy, 0.0)));
+    tables.push_back(std::move(t));
+    return *tables.back();
 }
 
 /// Oclusão (o caso difícil do optical flow): o fundo texturizado anda para a
@@ -316,6 +350,20 @@ private:
             // pixel (em 4K o laço levava ~40 ms e virava o gargalo de qualquer
             // benchmark — um decoder de hardware entrega bem mais rápido).
             f->y.assign(static_cast<usize>(w) * h, frame_gray_code(index));
+            f->uv.assign(static_cast<usize>((w + 1) / 2) * ((h + 1) / 2) * 2, 128);
+            f->planes[0] = f->y.data();
+            f->planes[1] = f->uv.data();
+            return f;
+        }
+        if (cfg_.pattern == SyntheticPattern::PanTable) {
+            const PanTable& t = pan_table(w, h, cfg_.frameCount);
+            // Quadro i = a tabela deslocada (o conteúdo anda para a direita e
+            // para baixo, como no PanTexture): u = x − ⌊vx·i⌋.
+            const u32 ox = t.shiftX - std::min(t.shiftX, static_cast<u32>(std::floor(kPanTextureVx * index)));
+            const u32 oy = t.shiftY - std::min(t.shiftY, static_cast<u32>(std::floor(kPanTextureVy * index)));
+            f->y.resize(static_cast<usize>(w) * h);
+            for (u32 yy = 0; yy < h; ++yy)
+                std::memcpy(&f->y[static_cast<usize>(yy) * w], &t.luma[static_cast<usize>(yy + oy) * t.width + ox], w);
             f->uv.assign(static_cast<usize>((w + 1) / 2) * ((h + 1) / 2) * 2, 128);
             f->planes[0] = f->y.data();
             f->planes[1] = f->uv.data();

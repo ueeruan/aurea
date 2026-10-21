@@ -12937,7 +12937,7 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
             effect_type_id(effect_keys::kStarField), effect_type_id(effect_keys::kHexTile),
             effect_type_id(effect_keys::kBurnFilm), effect_type_id(effect_keys::kJaws),
             effect_type_id(effect_keys::kSaber), effect_type_id(effect_keys::kLumaDissolve),
-            effect_type_id(effect_keys::kDrawingProgress),
+            effect_type_id(effect_keys::kDrawingProgress), effect_type_id(effect_keys::kEnhance),
         };
         row.reserved = std::find(std::begin(newlyAdded), std::end(newlyAdded), e.type_id()) != std::end(newlyAdded) ? 1u : 0u;
         (void)put_string(blob, blobCapacity, cursor, e.info().name, row.nameOffset, row.nameLength);
@@ -15657,7 +15657,9 @@ std::optional<std::pair<i64, i64>> preview_local_range(const Composition& comp, 
             // Camada de ajuste com efeito que lê o PASSADO da composição abaixo
             // (Datamosh, Glitch de vídeo, Low FPS): editar uma camada abaixo
             // muda quadros DEPOIS do trecho dela.
-            if (l.adjustment && (fx->wants_history() || e.type == effect_type_id(effect_keys::kLowFps))) { safe = false; return; }
+            // Aprimorar com vizinhos no tempo: idem, até 3 quadros para os dois lados.
+            if (l.adjustment && (fx->wants_history() || fx->wants_neighbors()
+                                 || e.type == effect_type_id(effect_keys::kLowFps))) { safe = false; return; }
             if (const auto* specs = registry.params(e.type)) {
                 for (u32 p = 0; p < specs->count(); ++p)
                     if (specs->at(p).type == ParamType::LayerReference) { safe = false; return; }

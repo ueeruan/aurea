@@ -1189,6 +1189,7 @@ void Renderer::release_project_resources_impl(bool gpuDone) noexcept {
     renderInstancePath_.clear();
     nestedNamespaces_.clear();
     nestSalt_ = 0;
+    signatures_.clear();   // assinaturas de duplicados: eram das fontes do projeto
     if (!backend_) return;
     incomplete_ = false;
     // Called between frames under the engine's render mutex. Complete the old
@@ -1711,6 +1712,10 @@ TextureHandle Renderer::audio_spectrum(const AudioSpectrumRequest& request) noex
 // =============================================================================
 namespace {
 
+/// Aprimorar: a chave dos vizinhos no cache das faixas (camada ^ sal), separada
+/// da do TimeSlice da mesma camada (cada um solta as suas entradas).
+constexpr u64 kNeighborSliceSalt = 0xE7A4'0000'0000'0000ull;
+
 /// Parâmetro de efeito no instante LOCAL da camada (trilha, se houver).
 f32 flow_fx_param(const Layer& l, const EffectInstance& e, u32 i, f64 local, f32 fallback, bool stepped) noexcept {
     f32 v = i < e.params.size() ? e.params[i].constant.as_float() : fallback;
@@ -1748,6 +1753,9 @@ struct VideoFlowFx {
     f32 flowBase = 0.0f;     ///< base do optical flow (0 = padrão)
     f32 vectorAmount = 0.0f; ///< desfoque vetorial (0 = não)
     f64 shutter = 0.5;       ///< obturador em fração de quadro
+    /// Flow Retime "Substituir quadros duplicados" (0.3.0) e a sensibilidade (0..100).
+    bool replaceDuplicates = false;
+    f32 duplicateSensitivity = 10.0f;
 };
 
 VideoFlowFx video_flow_fx(const Layer& l, f64 timelineTime, f64 compShutter) noexcept {
@@ -1770,6 +1778,8 @@ VideoFlowFx video_flow_fx(const Layer& l, f64 timelineTime, f64 compShutter) noe
             fx.flowBase = kBase[std::clamp(static_cast<i32>(std::lround(flow_fx_param(l, e, 2, local, 1.0f, true))), 0, 2)];
             const f32 blur = std::clamp(flow_fx_param(l, e, 3, local, 0.0f, false), 0.0f, 400.0f) / 100.0f;
             if (blur > 0.0f) fx.vectorAmount = std::max(fx.vectorAmount, blur);
+            fx.replaceDuplicates = flow_fx_param(l, e, 4, local, 0.0f, true) >= 0.5f;
+            fx.duplicateSensitivity = std::clamp(flow_fx_param(l, e, 5, local, 10.0f, true), 0.0f, 100.0f);
         } else if (e.type == blurType) {
             const f32 amount = std::clamp(flow_fx_param(l, e, 0, local, 100.0f, false), 0.0f, 400.0f) / 100.0f;
             if (amount <= 0.0f) continue;
@@ -1836,10 +1846,39 @@ struct AdjustTimeAsk {
     struct Echo { f64 at; f32 weight; Vec3 mask; };
     std::vector<Echo> echo;
     bool bare = false;        ///< efeito que lê o alfa: a pilha sem a cor de fundo
+    std::vector<i32> neighbors;   ///< Aprimorar: a composição abaixo em t ± k
     [[nodiscard]] bool any() const noexcept {
-        return replaced || rgb || historyDelay > 0 || !echo.empty() || bare || vector > 0.0f || frameBlend > 0;
+        return replaced || rgb || historyDelay > 0 || !echo.empty() || bare || vector > 0.0f || frameBlend > 0
+            || !neighbors.empty();
     }
 };
+
+/// Aprimorar e quem mais pedir vizinhos no tempo (Effect::temporal_neighbors):
+/// os deslocamentos do PRIMEIRO efeito ligado que pede, nos valores do quadro.
+/// O mesmo para a camada comum e para a de ajuste.
+void temporal_neighbor_offsets(const Layer& l, const EffectRegistry& registry, FrameIndex local, f64 fps,
+                               std::vector<i32>& out) {
+    out.clear();
+    for (const EffectInstance& inst : l.effects) {
+        if (!inst.enabled) continue;
+        const Effect* fx = registry.find(inst.type);
+        if (!fx || !fx->wants_neighbors()) continue;
+        const ParameterRegistry* specs = registry.params(inst.type);
+        if (!specs) continue;
+        std::vector<ParamValue> values;
+        values.reserve(specs->count());
+        for (u32 p = 0; p < specs->count(); ++p) values.push_back(evaluate_param(l.tracks, inst, p, specs->at(p), local));
+        EffectEval evaluation;
+        evaluation.effect = fx; evaluation.instance = &inst; evaluation.layer = &l;
+        evaluation.values = values.data(); evaluation.count = specs->count();
+        evaluation.localTime = local; evaluation.framesPerSecond = fps;
+        i32 offsets[kMaxTemporalNeighbors]{};
+        const u32 n = std::min<u32>(fx->temporal_neighbors(evaluation, offsets), kMaxTemporalNeighbors);
+        for (u32 k = 0; k < n; ++k)
+            if (offsets[k] != 0 && std::abs(offsets[k]) <= 3) out.push_back(offsets[k]);
+        if (!out.empty()) return;
+    }
+}
 
 /// Efeitos que leem o ALFA da camada (desenham fora dela ou no transparente):
 /// numa camada de ajuste de tudo abaixo eles veem a pilha SEM a cor de fundo
@@ -2000,6 +2039,8 @@ AdjustTimeAsk adjust_time_ask(const Layer& l, const EffectRegistry& registry, co
     }
     if (allBelow)
         for (const EffectEval& ev : plan.evals) ask.bare |= ev.effect && adjust_reads_alpha(ev.effect->type_id());
+    // Aprimorar: os vizinhos são quadros da composição abaixo (t ± k).
+    temporal_neighbor_offsets(l, registry, local, fps, ask.neighbors);
     return ask;
 }
 
@@ -2480,6 +2521,17 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         sample.time = ask.echo[k].at;
                         sample.nested = backdropAt(ask.echo[k].at, 7 + k, false);
                         at.echo.push_back(sample);
+                    }
+                    // Aprimorar: a composição abaixo nos quadros vizinhos. Fora
+                    // da composição (antes do 0) não há vizinho: o lado some.
+                    for (u32 k = 0; k < ask.neighbors.size(); ++k) {
+                        const f64 at0 = static_cast<f64>(time.value + ask.neighbors[k]);
+                        if (at0 < 0.0) continue;
+                        RenderLayer::NeighborSample nb;
+                        nb.offset = ask.neighbors[k];
+                        nb.time = at0;
+                        nb.nested = backdropAt(at0, 0x40 + k, false);
+                        if (nb.nested != ~0u) at.neighbors.push_back(std::move(nb));
                     }
                 }
             }
@@ -3644,6 +3696,21 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
         }
 
+        // APRIMORAR (temporal, 0.3.0): os vizinhos no tempo da FONTE que o
+        // efeito pede (Effect::temporal_neighbors). Só vídeo e pré-composição
+        // têm outro quadro; foto, texto e forma ficam no espacial. O vídeo
+        // busca os quadros no bloco do decoder; a pré-composição, logo abaixo.
+        rl.neighbors.clear();
+        if (effects_ && (rl.source.kind == LayerSource::Kind::Video || rl.source.kind == LayerSource::Kind::Nested)) {
+            std::vector<i32> offsets;
+            temporal_neighbor_offsets(*l, *effects_, local, fps, offsets);
+            for (const i32 off : offsets) {
+                RenderLayer::NeighborSample nb;
+                nb.offset = off;
+                rl.neighbors.push_back(std::move(nb));
+            }
+        }
+
         // PRÉ-COMPOSIÇÃO COM EFEITO DE TEMPO (beta 2140): o vídeo busca o
         // passado no decoder; a pré-composição não tem decoder — o passado
         // dela é a FILHA renderizada naquele instante. Sem isto, o eco somava
@@ -3654,7 +3721,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // velocidade, reverso, remapeamento) e um espaço de ids próprio por
         // vaga: decoders e caches da filha principal não são puxados para trás.
         if (rl.source.kind == LayerSource::Kind::Nested && prepareDepth_ < 8
-            && (rgbOn || motionDelay > 0 || !rl.temporal.empty())) {
+            && (rgbOn || motionDelay > 0 || !rl.temporal.empty() || !rl.neighbors.empty())) {
             const Composition* child = project.timeline().composition(l->nested.composition);
             if (child && child != &comp) {
                 const f64 childFps = child->fps() > 0.0 ? child->fps() : fps;
@@ -3669,8 +3736,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const i64 mainCf = std::clamp<i64>(static_cast<i64>(std::floor(l->source_frame(layerTime) * childFps / fps + 1e-6)), 0, lastChild);
                 std::vector<std::pair<i64, u32>> made;   // quadro da filha → índice
                 u32 slot = 0;
-                auto nestedAt = [&](f64 compTime) -> u32 {
-                    const i64 cf = childFrame(compTime);
+                auto nestedAtFrame = [&](i64 cf) -> u32 {
                     if (cf == mainCf) return rl.source.nestedIndex;
                     for (const auto& [frame, index] : made) if (frame == cf) return index;
                     auto snap = std::make_unique<FrameSnapshot>();
@@ -3712,6 +3778,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     made.emplace_back(cf, index);
                     return index;
                 };
+                auto nestedAt = [&](f64 compTime) -> u32 { return nestedAtFrame(childFrame(compTime)); };
                 if (rgbOn) {
                     for (u32 c = 0; c < 3; ++c)
                         rl.source.nestedChannel[c] = nestedAt(static_cast<f64>(time.value)
@@ -3719,7 +3786,21 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
                 if (motionDelay > 0) rl.source.nestedHistory = nestedAt(static_cast<f64>(time.value - motionDelay));
                 for (RenderLayer::TemporalSample& sample : rl.temporal) sample.nested = nestedAt(sample.time);
+                // Aprimorar: os vizinhos são quadros da FILHA (±k na grade dela).
+                // Na ponta da filha o vizinho cairia no próprio quadro: sai.
+                std::vector<RenderLayer::NeighborSample> kept;
+                for (RenderLayer::NeighborSample& nb : rl.neighbors) {
+                    const i64 cf = mainCf + nb.offset;
+                    if (cf < 0 || cf > lastChild) continue;
+                    nb.nested = nestedAtFrame(cf);
+                    if (nb.nested != ~0u && nb.nested != rl.source.nestedIndex) kept.push_back(std::move(nb));
+                }
+                rl.neighbors = std::move(kept);
+            } else {
+                rl.neighbors.clear();
             }
+        } else if (rl.source.kind == LayerSource::Kind::Nested) {
+            rl.neighbors.clear();
         }
 
         // Partículas (8.2, ParticleScene.cpp): cena 3D, espaço mundo, emissão no
@@ -3873,7 +3954,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 const VideoFlowFx flowFx = video_flow_fx(*l, static_cast<f64>(layerTime.value),
                                                          static_cast<f64>(comp.motion_blur().shutterAngle) / 360.0);
                 const f64 srcFrameF = l->source_frame_f(flowFx.srcTimeline);
-                const u8 frameBlend = flowFx.frameBlend;
+                u8 frameBlend = flowFx.frameBlend;
                 i64 mediaUs = static_cast<i64>(std::llround(srcFrameF * 1e6 / fps));
                 // Mistura de quadros: posição FRACIONÁRIA na grade da fonte.
                 i64 nextUs = -1;
@@ -3928,6 +4009,79 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
                 const i64 dur = streamInfo.durationUs;
                 if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0, last_source_timestamp(streamInfo,src->frame_duration_us()));
+                // FLOW RETIME, "Substituir quadros duplicados" (0.3.0): o quadro da
+                // fonte que REPETE o anterior (30 dentro de 60, quadro perdido ou
+                // congelado) é refeito pelo optical flow entre os quadros
+                // DISTINTOS em volta — P, o começo da série repetida, e N, o
+                // primeiro diferente depois dela; na posição fracionária `pos` da
+                // fonte, o instante entre os dois é t = (pos − P)/(N − P). A
+                // decisão vem das assinaturas de luma (uma por quadro da fonte,
+                // guardadas): a que falta faz a prévia mostrar o quadro como está
+                // e o export esperar o quadro chegar.
+                bool duplicateMissing = false;
+                i64 duplicateWantUs = -1;
+                if (flowFx.retime && flowFx.replaceDuplicates && streamInfo.fps > 0.0) {
+                    const f64 srcFps = streamInfo.fps;
+                    const i64 lastUs = dur > 0 ? last_source_timestamp(streamInfo, src->frame_duration_us())
+                                               : std::numeric_limits<i64>::max() / 4;
+                    const i64 lastIndex = static_cast<i64>(std::floor(static_cast<f64>(lastUs) * srcFps / 1e6 + 1e-3));
+                    const f64 pos = std::clamp(srcFrameF / fps * srcFps, 0.0, static_cast<f64>(lastIndex));
+                    const i64 base = static_cast<i64>(std::floor(pos + 1e-3));
+                    auto usOf = [&](i64 i) { return static_cast<i64>(std::llround(static_cast<f64>(i) * 1e6 / srcFps)); };
+                    const u64 assetKey = l->source.pack();
+                    // A assinatura do quadro i; `pending` = o quadro ainda não chegou.
+                    // Quadro presente sem pixels legíveis na CPU: sem assinatura,
+                    // e conta como distinto (nunca prende o export).
+                    auto sigOf = [&](i64 i, bool& pending) -> const FrameSignature* {
+                        const i64 us = usOf(i);
+                        if (const FrameSignature* s = find_signature(assetKey, us)) return s;
+                        bool ex = false;
+                        const FrameRef f = src->frame_for(us, &ex);
+                        if (f && ex) return frame_signature(assetKey, us, f.get());
+                        if (duplicateWantUs < 0) duplicateWantUs = us;
+                        duplicateMissing = true;
+                        pending = true;
+                        return nullptr;
+                    };
+                    // 1 = repete o anterior, 0 = distinto, −1 = ainda não se sabe.
+                    auto dupAt = [&](i64 i) -> int {
+                        if (i <= 0) return 0;
+                        bool pending = false;
+                        const FrameSignature* a = sigOf(i, pending);
+                        const FrameSignature* b = sigOf(i - 1, pending);
+                        if (pending) return -1;
+                        if (!a || !b) return 0;
+                        return signatures_match(*a, *b, flowFx.duplicateSensitivity) ? 1 : 0;
+                    };
+                    constexpr i64 kReach = 6;   // série repetida mais longa que se refaz
+                    bool known = true;
+                    i64 first = base;
+                    for (i64 k = 0; k < kReach; ++k) {
+                        const int d = dupAt(first);
+                        if (d < 0) { known = false; break; }
+                        if (d == 0) break;
+                        --first;
+                    }
+                    i64 next = base + 1;
+                    for (i64 k = 0; known && k < kReach && next <= lastIndex; ++k) {
+                        const int d = dupAt(next);
+                        if (d < 0) { known = false; break; }
+                        if (d == 0) break;
+                        ++next;
+                    }
+                    if (known && next <= lastIndex && first < next && !(first == base && next == base + 1)) {
+                        const f64 t = (pos - static_cast<f64>(first)) / static_cast<f64>(next - first);
+                        mediaUs = usOf(first);
+                        if (t > 1e-3) {
+                            nextUs = usOf(next);
+                            blendT = static_cast<f32>(std::clamp(t, 0.0, 1.0));
+                            frameBlend = frameBlend == 1 ? u8{1} : u8{2};   // a mistura, se pedida; senão o movimento
+                        } else {
+                            nextUs = -1;
+                            blendT = 0.0f;
+                        }
+                    }
+                }
                 if (!settings.finalQuality) {
                     for (const auto& effect : out.plans[used].evals) {
                         if (effect.foregroundSourceTimeUs < 0) continue;
@@ -3965,6 +4119,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     req.direction = b > a + 1e-6 ? 1 : (b < a - 1e-6 ? -1 : 0);
                 }
                 req.speed = speed * std::max(0.0f, l->speed) * static_cast<f32>(flowFx.rate);
+                // O pedido do quadro principal: quem pede um quadro EXTRA (vizinho
+                // do Aprimorar, assinatura de duplicado) só pede se ninguém trocou.
+                const i64 mainTargetUs = req.targetUs;
+                const DecodeMode mainMode = req.mode;
                 bool exact = false;
                 rl.source.frame = src->frame_for(mediaUs, &exact,
                     decodeMode == DecodeMode::Playback && !settings.finalQuality ? req.direction : 0);
@@ -4114,6 +4272,75 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             if (requiredCount < 8) requiredTimes[requiredCount++] = sliceUs;
                         }
                     }
+                }
+                // APRIMORAR: os vizinhos no tempo — quadros da FONTE ±k em volta
+                // do que está na tela. O exato vira textura no MESMO cache das
+                // faixas do TimeSlice (o que já virou textura não é pedido de
+                // novo); um pedido ao decoder por prepare, só depois do quadro
+                // atual, e nenhum tocando (o playback traz os da frente; os de
+                // trás viraram textura quando estavam à frente). Vizinho que
+                // falta: a prévia segue sem ele (parada, marcada incompleta) e o
+                // export espera. Na grade da fonte (fps constante) o instante é
+                // exato; com tempo por quadro (VFR) vale o quadro vizinho que o
+                // cache tiver, sem espera — um alvo entre dois quadros nunca
+                // ficaria "exato" e prenderia o export.
+                if (!rl.neighbors.empty()) {
+                    const bool grid = !streamInfo.preciseFrameTiming && streamInfo.fps > 0.0;
+                    const i64 frameUs = src->frame_duration_us() > 0 ? src->frame_duration_us()
+                        : static_cast<i64>(std::llround(1e6 / std::max(1.0, streamInfo.fps)));
+                    const i64 lastUs = streamInfo.durationUs > 0 ? last_source_timestamp(streamInfo, src->frame_duration_us())
+                                                                 : std::numeric_limits<i64>::max() / 4;
+                    const i64 baseUs = rl.source.frame ? rl.source.frame->ptsUs : mediaUs;
+                    const f64 baseIndex = grid ? std::floor(static_cast<f64>(baseUs) * streamInfo.fps / 1e6 + 0.5) : 0.0;
+                    const u64 sliceKey = rl.id.pack() ^ kNeighborSliceSalt;
+                    const bool mayAsk = settings.finalQuality || !settings.previewPlaying;
+                    bool asked = req.targetUs != mainTargetUs || req.mode != mainMode;
+                    std::vector<RenderLayer::NeighborSample> kept;
+                    kept.reserve(rl.neighbors.size());
+                    for (RenderLayer::NeighborSample& nb : rl.neighbors) {
+                        const i64 us = grid ? static_cast<i64>(std::llround((baseIndex + nb.offset) * 1e6 / streamInfo.fps))
+                                            : baseUs + static_cast<i64>(nb.offset) * frameUs;
+                        if (us < 0 || us > lastUs || us == baseUs) continue;   // além da fonte: esse lado não tem vizinho
+                        nb.sourceUs = us;
+                        nb.frame.reset();
+                        if (has_slice_texture(sliceKey, us)) { kept.push_back(std::move(nb)); continue; }
+                        bool ex = false;
+                        FrameRef f = src->frame_for(us, &ex);
+                        if (f && ex) { nb.frame = std::move(f); kept.push_back(std::move(nb)); continue; }
+                        if (!grid) {
+                            // Tempo por quadro: o vizinho do lado certo que houver.
+                            if (f && (f->ptsUs - baseUs) * nb.offset > 0) {
+                                nb.sourceUs = f->ptsUs;
+                                nb.frame = std::move(f);
+                                kept.push_back(std::move(nb));
+                            }
+                            continue;
+                        }
+                        if (requiredCount < 8) requiredTimes[requiredCount++] = us;
+                        if (mayAsk && exact && !asked) {
+                            req.targetUs = us;
+                            req.mode = DecodeMode::Still;
+                            req.direction = 0;
+                            req.retainPreroll = true;
+                            asked = true;
+                        }
+                        if (settings.finalQuality) ++out.missingVideoFrames;
+                        else if (!settings.previewPlaying) mark_incomplete(__FILE__, __LINE__);
+                    }
+                    rl.neighbors = std::move(kept);
+                }
+                // Substituir duplicados: a assinatura que falta (um pedido por prepare).
+                if (duplicateMissing && duplicateWantUs >= 0) {
+                    if (requiredCount < 8) requiredTimes[requiredCount++] = duplicateWantUs;
+                    const bool asked = req.targetUs != mainTargetUs || req.mode != mainMode;
+                    if ((settings.finalQuality || !settings.previewPlaying) && exact && !asked) {
+                        req.targetUs = duplicateWantUs;
+                        req.mode = DecodeMode::Still;
+                        req.direction = 0;
+                        req.retainPreroll = true;
+                    }
+                    if (settings.finalQuality) ++out.missingVideoFrames;
+                    else if (!settings.previewPlaying) mark_incomplete(__FILE__, __LINE__);
                 }
                 // DETECTAR MOVIMENTO: a mesma fonte `motionDelay` quadros da
                 // timeline ANTES (no começo do clipe, presa ao primeiro quadro:
@@ -5282,6 +5509,15 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             if (past.valid()) out.history = past;
             else mark_incomplete(__FILE__, __LINE__);
         }
+        // Aprimorar: a filha nos quadros vizinhos.
+        for (const RenderLayer::NeighborSample& n : layer.neighbors) {
+            if (out.neighbors.count >= kMaxTemporalNeighbors) break;
+            const FGTexture t = other(n.nested);
+            if (!t.valid()) { mark_incomplete(__FILE__, __LINE__); continue; }
+            out.neighbors.texture[out.neighbors.count] = t;
+            out.neighbors.offset[out.neighbors.count] = static_cast<i8>(n.offset);
+            ++out.neighbors.count;
+        }
         return true;
     }
     if (layer.source.kind == LayerSource::Kind::Scene3D) {
@@ -5518,6 +5754,29 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                     out.history = past;
                     if (layer.source.historyFrame->hardwareBuffer) framesUsed.push_back(layer.source.historyFrame);
                 } else mark_incomplete(__FILE__, __LINE__);
+            }
+            // APRIMORAR: os vizinhos no tempo, na mesma área e densidade; a
+            // cadeia de efeitos os leva até o efeito (LayerImage::neighbors).
+            for (u32 k = 0; k < layer.neighbors.size() && out.neighbors.count < kMaxTemporalNeighbors; ++k) {
+                const FGTexture t = neighbor_video_texture(layer, layerIndex, layer.neighbors[k], k, w, h, frameNumber);
+                if (!t.valid()) { mark_incomplete(__FILE__, __LINE__); continue; }
+                out.neighbors.texture[out.neighbors.count] = t;
+                out.neighbors.offset[out.neighbors.count] = static_cast<i8>(layer.neighbors[k].offset);
+                ++out.neighbors.count;
+            }
+            if (!layer.neighbors.empty()) {
+                // Fora da janela: os vizinhos desta camada que não serviram neste
+                // quadro nem no anterior saem (memória de ~7 quadros por camada).
+                const u64 key = layer.id.pack() ^ kNeighborSliceSalt;
+                std::lock_guard<std::mutex> sl(sliceMutex_);
+                for (auto it = sliceCache_.begin(); it != sliceCache_.end();) {
+                    if (it->layer == key && it->lastFrame + 1 < frameNumber) {
+                        if (it->tex.valid()) backend_->destroy_texture(it->tex);
+                        it = sliceCache_.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
             }
             // Quadro seguinte da fonte: mistura, movimento de pixels e/ou
             // desfoque vetorial (os dois últimos pelo optical flow, em cache).
@@ -6358,6 +6617,16 @@ void Renderer::adjust_time_input(const FrameSnapshot& snap, const RenderLayer& l
     // 4. O passado (Detectar movimento, Datamosh, Glitch de vídeo): o
     //    EffectGraph o leva pelas etapas anteriores até o efeito que pede.
     if (at.hasHistory) in.history = backdrop(at.history, present);
+    // 5. Aprimorar: a composição abaixo nos quadros vizinhos.
+    in.neighbors = TemporalNeighbors{};
+    for (const RenderLayer::NeighborSample& n : at.neighbors) {
+        if (in.neighbors.count >= kMaxTemporalNeighbors) break;
+        const FGTexture t = backdrop(n.nested, FGTexture{});
+        if (!t.valid()) continue;
+        in.neighbors.texture[in.neighbors.count] = t;
+        in.neighbors.offset[in.neighbors.count] = static_cast<i8>(n.offset);
+        ++in.neighbors.count;
+    }
 }
 
 void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const TextureDesc& compDesc, u64 frameNumber,
@@ -6680,6 +6949,8 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 }
                 LayerImage sampleImg = raw;
                 sampleImg.texture = image;
+                // Os vizinhos do Aprimorar são do quadro de agora, não deste instante.
+                sampleImg.neighbors = TemporalNeighbors{};
                 if (video) { sampleImg.width = sw; sampleImg.height = sh; }
                 apply_masks(layer, sampleImg, frameNumber);
                 LayerImage sampleFin = sampleImg;
@@ -6794,6 +7065,7 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                         if (!other || !other->target.valid()) { mark_incomplete(__FILE__, __LINE__); continue; }
                         LayerImage sample = raw;
                         sample.texture = other->target;
+                        sample.neighbors = TemporalNeighbors{};   // os vizinhos são do quadro de agora
                         apply_masks(layer, sample, frameNumber);
                         LayerImage sampleFin = sample;
                         if (hasEffects) (void)EffectGraph::build(snap.plans[i], ctx, sample, sampleFin);
@@ -8517,6 +8789,180 @@ void Renderer::release_slice_cache(bool destroy) noexcept {
     std::lock_guard<std::mutex> sl(sliceMutex_);
     if (destroy && backend_) for (SliceTexture& s : sliceCache_) if (s.tex.valid()) backend_->destroy_texture(s.tex);
     sliceCache_.clear();
+}
+
+// =============================================================================
+// APRIMORAR: o vizinho no tempo de uma camada de vídeo. O quadro exato da
+// fonte é convertido UMA vez para uma textura persistente no cache das faixas
+// (chave própria: camada + sal, para não brigar com o TimeSlice da mesma
+// camada) e reaproveitado enquanto estiver na janela dos vizinhos: tocando,
+// cada quadro converte só o vizinho novo da frente. O que saiu da janela (não
+// usado há 2 quadros) é solto na hora — a memória fica em ~7 quadros por camada.
+// =============================================================================
+FGTexture Renderer::neighbor_video_texture(const RenderLayer& layer, u32 layerIndex, const RenderLayer::NeighborSample& n,
+                                           u32 slot, u32 w, u32 h, u64 frameNumber) noexcept {
+    if (n.sourceUs < 0 || !backend_) return FGTexture{};
+    TextureDesc sd;
+    sd.width = w;
+    sd.height = h;
+    sd.format = kWorkFormat;
+    sd.sampled = true;
+    sd.renderTarget = true;
+    sd.debugName = "aprimorar-vizinho";
+    const u64 key = layer.id.pack() ^ kNeighborSliceSalt;
+    FGTexture image{};
+    bool convert = false;
+    bool resample = false;
+    {
+        std::lock_guard<std::mutex> sl(sliceMutex_);
+        SliceTexture* entry = nullptr;
+        for (SliceTexture& e : sliceCache_) {
+            if (e.layer == key && e.us == n.sourceUs && e.tex.valid()) { entry = &e; break; }
+        }
+        if (!entry && n.frame) {
+            auto t = backend_->create_texture(sd);
+            if (!t.ok()) return FGTexture{};
+            sliceCache_.push_back(SliceTexture{});
+            entry = &sliceCache_.back();
+            entry->layer = key;
+            entry->us = n.sourceUs;
+            entry->tex = *t;
+            entry->w = w;
+            entry->h = h;
+            convert = true;
+        }
+        if (!entry) return FGTexture{};
+        entry->lastFrame = frameNumber;
+        if (convert) {
+            image = graph_.import_texture("aprimorar-vizinho", entry->tex, sd);
+            entry->fg = image;
+            entry->fgFrame = frameNumber;
+            entry->created = frameNumber;
+            sliceGraphFrame_ = frameNumber;
+        } else if (entry->fgFrame == frameNumber) {
+            image = entry->fg;
+            resample = entry->w != w || entry->h != h;
+        } else {
+            TextureDesc ed = sd;
+            ed.width = entry->w;
+            ed.height = entry->h;
+            image = graph_.import_texture("aprimorar-vizinho", entry->tex, ed);
+            entry->fg = image;
+            entry->fgFrame = frameNumber;
+            resample = entry->w != w || entry->h != h;
+        }
+    }
+    if (convert) {
+        sliceSalt_ = 0x5E1A0000000ull + slot;   // planos de CPU próprios por vizinho
+        const bool built = build_video_source(layer, layerIndex, w, h, image, frameNumber, n.frame.get());
+        sliceSalt_ = 0;
+        if (!built) {
+            // Conversão que não gravou: a entrada não pode ficar como pronta.
+            std::lock_guard<std::mutex> sl(sliceMutex_);
+            for (auto it = sliceCache_.begin(); it != sliceCache_.end(); ++it) {
+                if (it->layer != key || it->us != n.sourceUs) continue;
+                if (it->tex.valid()) backend_->destroy_texture(it->tex);
+                sliceCache_.erase(it);
+                break;
+            }
+            return FGTexture{};
+        }
+        if (n.frame->hardwareBuffer) framesInFlight_.push_back(n.frame);
+    }
+    if (resample) {
+        // A densidade mudou (AUTO, zoom): o instante certo noutra resolução.
+        const FGTexture stored = image;
+        const Vec4 copyMap{1.0f, 1.0f, 0.0f, 0.0f};
+        EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, std::min<u32>(backend_->capabilities().maxTexture2D, 8192));
+        image = graph_.create_texture("aprimorar-vizinho-reamostrado", sd);
+        if (ctx.fullscreen_pass("aprimorar-vizinho-reamostrado", PassStage::Decode, image, ShaderId::common_copy_frag,
+                                {PassTexture{stored, {}, CommonSampler::LinearClamp}}, &copyMap, sizeof(copyMap)) == kInvalidIndex)
+            return FGTexture{};
+    }
+    return image;
+}
+
+// =============================================================================
+// FLOW RETIME, "Substituir quadros duplicados": a assinatura de cada quadro da
+// fonte — 32×18 células, cada uma a soma de 2×2 amostras de luma — vem dos
+// planos de CPU do quadro uma vez só (no decode por hardware sem planos, uma
+// cópia para a CPU por quadro-fonte) e fica guardada por asset + instante
+// (até 512 por asset, sai a menos usada). Comparar dois quadros é comparar
+// 576 números: nada na GPU, nada esperando.
+// =============================================================================
+const Renderer::FrameSignature* Renderer::find_signature(u64 asset, i64 pts) noexcept {
+    const auto track = signatures_.find(asset);
+    if (track == signatures_.end()) return nullptr;
+    const auto it = track->second.frames.find(pts);
+    if (it == track->second.frames.end()) return nullptr;
+    it->second.used = ++track->second.clock;
+    return &it->second;
+}
+
+const Renderer::FrameSignature* Renderer::frame_signature(u64 asset, i64 pts, DecodedFrame* f) noexcept {
+    if (const FrameSignature* s = find_signature(asset, pts)) return s;
+    if (!f || f->width == 0 || f->height == 0) return nullptr;
+    if ((!f->planes[0] || f->planeCount == 0) && !f->prepare_cpu_planes()) return nullptr;
+    if (!f->planes[0] || f->strides[0] == 0) return nullptr;
+    const bool rgba = f->format == PixelFormat::RGBA8;
+    const bool tenBit = f->format == PixelFormat::P010;
+    const bool yuv = f->format == PixelFormat::NV12 || f->format == PixelFormat::NV21
+                  || f->format == PixelFormat::YUV420P || tenBit;
+    if (!rgba && !yuv) return nullptr;
+    // RGBA da cópia para a CPU já vem só com a área visível.
+    const u32 x0 = rgba ? 0u : f->cropLeft, y0 = rgba ? 0u : f->cropTop;
+    const u32 vw = !rgba && f->visibleWidth ? std::min(f->visibleWidth, f->width - std::min(x0, f->width)) : f->width;
+    const u32 vh = !rgba && f->visibleHeight ? std::min(f->visibleHeight, f->height - std::min(y0, f->height)) : f->height;
+    if (vw == 0 || vh == 0) return nullptr;
+    const u8* plane = f->planes[0];
+    const usize stride = f->strides[0];
+    auto luma = [&](u32 x, u32 y) -> u32 {
+        x = std::min(x, vw - 1) + x0;
+        y = std::min(y, vh - 1) + y0;
+        const u8* row = plane + static_cast<usize>(y) * stride;
+        if (rgba) {
+            const u8* p = row + static_cast<usize>(x) * 4;
+            return (54u * p[0] + 183u * p[1] + 19u * p[2]) >> 8;
+        }
+        if (tenBit) return row[static_cast<usize>(x) * 2 + 1];   // byte alto do P010
+        return row[x];
+    };
+    FrameSignature s;
+    s.pts = pts;
+    for (u32 cy = 0; cy < 18; ++cy) {
+        for (u32 cx = 0; cx < 32; ++cx) {
+            const u32 px = static_cast<u32>((static_cast<u64>(cx) * 2 + 1) * vw / 64);
+            const u32 py = static_cast<u32>((static_cast<u64>(cy) * 2 + 1) * vh / 36);
+            const u32 qx = px > 0 ? px - 1 : 0, qy = py > 0 ? py - 1 : 0;
+            s.luma[cy * 32 + cx] = static_cast<u16>(luma(qx, qy) + luma(px, qy) + luma(qx, py) + luma(px, py));
+        }
+    }
+    SignatureTrack& track = signatures_[asset];
+    if (track.frames.size() >= 512) {
+        auto oldest = track.frames.begin();
+        for (auto it = track.frames.begin(); it != track.frames.end(); ++it)
+            if (it->second.used < oldest->second.used) oldest = it;
+        track.frames.erase(oldest);
+    }
+    s.used = ++track.clock;
+    auto [it, inserted] = track.frames.insert_or_assign(pts, s);
+    (void)inserted;
+    return &it->second;
+}
+
+bool Renderer::signatures_match(const FrameSignature& a, const FrameSignature& b, f32 sensitivity) noexcept {
+    // Em quartos de código: a média das diferenças e as células que mudaram de
+    // verdade (> 6 códigos — um objeto pequeno andando num quadro parado).
+    u32 sum = 0, moved = 0;
+    for (u32 i = 0; i < kSignatureCells; ++i) {
+        const u32 d = static_cast<u32>(std::abs(static_cast<i32>(a.luma[i]) - static_cast<i32>(b.luma[i])));
+        sum += d;
+        moved += d > 24u ? 1u : 0u;
+    }
+    const f32 s = std::clamp(std::isfinite(sensitivity) ? sensitivity : 10.0f, 0.0f, 100.0f);
+    const f32 mad = static_cast<f32>(sum) / (4.0f * static_cast<f32>(kSignatureCells));   // códigos
+    return mad <= 0.15f + 0.05f * s
+        && static_cast<f32>(moved) <= static_cast<f32>(kSignatureCells) * (0.004f + 0.0006f * s);
 }
 
 void Renderer::collect_resources(u64 frameNumber) noexcept {

@@ -313,6 +313,21 @@ struct RenderLayer {
         return !temporal.empty() && (temporal.front().slice.w > 0.0f || temporal.front().content);
     }
     std::vector<TemporalSample> temporal;
+    /// APRIMORAR (temporal, 0.3.0): a FONTE da camada noutros quadros (±1..±3
+    /// quadros da fonte), que a cadeia de efeitos recebe como vizinhos
+    /// (`LayerImage::neighbors`). Vídeo: `sourceUs` e o quadro decodificado
+    /// (vazio = já convertido no cache das faixas, ou ainda a caminho);
+    /// pré-composição e camada de ajuste: a filha / o fundo re-renderizado
+    /// naquele instante (`nested`). Vazio = sem o efeito ou fonte parada.
+    struct NeighborSample {
+        i32 offset = 0;          ///< quadros da fonte (o sinal diz o lado)
+        f64 time = 0.0;          ///< instante da composição (pré-composição/ajuste)
+        i64 sourceUs = -1;       ///< vídeo: o instante da fonte
+        FrameRef frame;          ///< vídeo: o quadro a converter (exato ou aproximado)
+        u32 nested = ~0u;        ///< índice em FrameSnapshot::nested
+        bool approximate = false;///< prévia: o quadro exato ainda não chegou
+    };
+    std::vector<NeighborSample> neighbors;
     /// Camada 2D no espaço 3D que vive dentro de um grupo de cena (desenhada
     /// com profundidade pelo grupo, não na composição): índice do grupo, ou −1.
     i32 planeGroup = -1;
@@ -367,8 +382,11 @@ struct RenderLayer {
         /// sombra, borda, contorno, Solid Matte). Só no escopo 0.
         u32 bare = ~0u;
         std::vector<TemporalSample> echo;   ///< Eco: amostras (nested ~0u = agora)
+        /// Aprimorar: a composição abaixo em t ± k (os vizinhos do efeito).
+        std::vector<NeighborSample> neighbors;
         [[nodiscard]] bool active() const noexcept {
-            return now != ~0u || rgb || hasHistory || bare != ~0u || !echo.empty() || vectorBlur > 0.0f;
+            return now != ~0u || rgb || hasHistory || bare != ~0u || !echo.empty() || vectorBlur > 0.0f
+                || !neighbors.empty();
         }
     };
     std::vector<AdjustTime> adjustTime;
@@ -440,6 +458,7 @@ struct FrameSnapshot {
             layer.source.historyFrame.reset();
             for (auto& channel : layer.source.channel) channel.frame.reset();
             for (auto& sample : layer.temporal) sample.frame.reset();
+            for (auto& sample : layer.neighbors) sample.frame.reset();
         }
         for (auto& child : nested) if (child) child->release_video_frames();
     }
@@ -1056,6 +1075,33 @@ private:
     bool sliceApprox_ = false;      ///< este quadro desenhou faixa aproximada (o instante ainda não chegou)
     [[nodiscard]] bool has_slice_texture(u64 layer, i64 us) const noexcept;
     void release_slice_cache(bool destroy) noexcept;
+    /// Aprimorar: a textura do vizinho `slot` de uma camada de vídeo no tamanho
+    /// `w`×`h` — o quadro exato vira textura persistente no MESMO cache das
+    /// faixas do TimeSlice (chave camada + instante), o aproximado é transitório.
+    [[nodiscard]] FGTexture neighbor_video_texture(const RenderLayer& layer, u32 layerIndex,
+                                                   const RenderLayer::NeighborSample& n, u32 slot, u32 w, u32 h,
+                                                   u64 frameNumber) noexcept;
+    /// Flow Retime "Substituir quadros duplicados": a assinatura de luma 32×18
+    /// de cada quadro da fonte (soma de 2×2 amostras do plano Y por célula, em
+    /// quartos de código), calculada uma vez por quadro e guardada por asset +
+    /// instante.
+    static constexpr u32 kSignatureCells = 32 * 18;
+    struct FrameSignature {
+        i64 pts = 0;
+        u64 used = 0;
+        u16 luma[kSignatureCells]{};
+    };
+    struct SignatureTrack {
+        std::unordered_map<i64, FrameSignature> frames;   ///< por instante (referências estáveis)
+        u64 clock = 0;
+    };
+    std::unordered_map<u64, SignatureTrack> signatures_;
+    /// A assinatura do quadro (calcula e guarda se ainda não existe); nula se
+    /// o quadro não tem pixels legíveis na CPU.
+    [[nodiscard]] const FrameSignature* frame_signature(u64 asset, i64 pts, DecodedFrame* frame) noexcept;
+    [[nodiscard]] const FrameSignature* find_signature(u64 asset, i64 pts) noexcept;
+    /// Dois quadros iguais para a sensibilidade (0..100) do Flow Retime.
+    [[nodiscard]] static bool signatures_match(const FrameSignature& a, const FrameSignature& b, f32 sensitivity) noexcept;
     ShaderLibrary shaders_;
     scene3d::SceneRenderer scene3d_;
     scene3d::PoseWorkspace poseWorkspace_;

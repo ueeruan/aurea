@@ -548,6 +548,27 @@ Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
     LayerImage hist;
     const bool carryHistory = input.history.valid() && lastHistory < plan.stages.size();
     if (carryHistory) hist = LayerImage{input.history, input.region, input.width, input.height};
+    cur.neighbors = TemporalNeighbors{};
+
+    // APRIMORAR: os vizinhos no tempo da fonte andam como o passado — pelas
+    // MESMAS etapas anteriores ao efeito que os lê (senão uma cor antes dele
+    // faria o vizinho não casar com o quadro), e saem depois da última.
+    usize lastNeighbors = plan.stages.size();
+    for (usize i = 0; i < plan.stages.size(); ++i) {
+        const EffectStage& st = plan.stages[i];
+        if (st.kind == EffectStage::Kind::Single && plan.evals[st.begin].effect->wants_neighbors()) lastNeighbors = i;
+    }
+    EffectBuildContext::NeighborImage nb[kMaxTemporalNeighbors];
+    u32 nbLive = 0;
+    if (lastNeighbors < plan.stages.size()) {
+        const u32 n = std::min<u32>(input.neighbors.count, kMaxTemporalNeighbors);
+        for (u32 k = 0; k < n; ++k) {
+            if (!input.neighbors.texture[k].valid() || input.neighbors.offset[k] == 0) continue;
+            nb[nbLive++] = EffectBuildContext::NeighborImage{
+                LayerImage{input.neighbors.texture[k], input.region, input.width, input.height},
+                static_cast<i32>(input.neighbors.offset[k])};
+        }
+    }
 
     // Uma etapa sobre `img`. false = bypass (a imagem segue a mesma).
     auto run = [&](const EffectStage& st, LayerImage& img, bool past) -> bool {
@@ -603,15 +624,21 @@ Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
         }
         const bool wants = !past && e.effect->wants_history();
         if (wants) ctx.set_history(carryHistory ? hist : LayerImage{});
+        // Os vizinhos só vão para a imagem do instante; no passado e nos
+        // próprios vizinhos o efeito monta só o espacial.
+        const bool wantsNeighbors = !past && nbLive > 0 && e.effect->wants_neighbors();
+        if (wantsNeighbors) ctx.set_neighbors(std::span<const EffectBuildContext::NeighborImage>(nb, nbLive));
         LayerImage next;
         const Status s = e.effect->build(ctx, e, img, st.margin, next);
         if (wants) ctx.set_history(LayerImage{});
+        if (wantsNeighbors) ctx.set_neighbors({});
         if (!s.ok() || !next.valid()) {
             // Bypass: `img` segue sendo a entrada; o quadro não cai por um efeito.
             note_bypass(e.effect->type_id(), e.effect->info().name);
             return false;
         }
         next.history = FGTexture{};
+        next.neighbors = TemporalNeighbors{};
         // A parede do Motion Tile segue parede enquanto a imagem passar da
         // caixa da camada (um efeito que recorta à caixa a encerra).
         if (img.tiled && !next.tiled) {
@@ -628,6 +655,9 @@ Status EffectGraph::build(const EffectPlan& plan, EffectBuildContext& ctx,
         (void)run(st, cur, false);
         // A imagem do passado anda junto até a última etapa que a lê.
         if (carryHistory && i < lastHistory) (void)run(st, hist, true);
+        // Os vizinhos idem, até a última etapa que os lê.
+        if (i < lastNeighbors)
+            for (u32 k = 0; k < nbLive; ++k) (void)run(st, nb[k].image, true);
     }
 
     out = cur;

@@ -644,6 +644,8 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_color_grade_effect(registry);
     // Constelação (3D) — 0.3.0. No fim.
     builtin::register_constellation_effect(registry);
+    // Aprimorar (Nitidez) — 0.3.0. No fim.
+    builtin::register_enhance_effect(registry);
 }
 
 } // namespace aurea

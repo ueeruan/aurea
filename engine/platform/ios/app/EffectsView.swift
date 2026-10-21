@@ -1367,6 +1367,8 @@ struct FxPresetRow: View {
         case "saber_default", "saber_lightsaber", "saber_neon", "saber_electric", "saber_fire",
              "saber_plasma", "saber_energy", "saber_soft", "saber_magic":
             return AureaText.t("fxp_" + pid)
+        case "classic", "dust", "living_grid": return AureaText.t("fxp_constellation_" + pid)
+        case "sphere": return AureaText.t("fx030c_src_sphere")
         default: return fallback
         }
     }

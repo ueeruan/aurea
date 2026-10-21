@@ -921,8 +921,6 @@ private struct ShellMenuRow: View {
         ShellMenuRow(CupertinoGlyph.SuitDiamond, "editor_keyframes_todas_camadas", checked: model.showAllKeyframes, detail: "editor_keyframes_todas_camadas_detalhe") { act { model.showAllKeyframes.toggle() } }
         ShellMenuRow(CupertinoGlyph.Link, "editor_timeline_magnetica_modo_edicao", checked: model.editMode, detail: "editor_aparar_empurra_camadas_seguintes_excluir_fecha") { act { model.toggleEditMode() } }
         ShellMenuRow(ShellGlyph.ScissorsAlt, "editor_remover_espacos_vazios") { act { model.removeGaps() } }
-        // Interface do projeto (0.2.5): a Composição é esta; a Edição é a de montagem.
-        ShellMenuRow(CupertinoGlyph.RectangleStack, "ui_mode_switch_to_edit", detail: "ui_mode_edit_hint") { act { model.setUiMode(AureaUiMode.edit) } }
         ShellMenuSection("editor_marcas_ritmo")
         // Editar a marca do cabeçote (o segurar do antigo botão da marca); tocar a
         // régua em cima de uma marca também abre o editor dela.
@@ -939,6 +937,9 @@ private struct ShellMenuRow: View {
         let marked: Bool = model.markerFrames.contains(model.status.playhead)
         let zoomLock: Bool = StageViewZoom.shared.zoomLock
         ShellMenuSection("editor_projeto_cbe9")
+        // Interface do projeto (0.2.5): a Composição é esta; a Edição é a de montagem. Primeiro
+        // item do menu (Menus.kt, 0.2.7): no fim, a "timeline magnética" era confundida com ela.
+        ShellMenuRow(CupertinoGlyph.RectangleStack, "ui_mode_switch_to_edit", detail: "ui_mode_edit_hint") { act { model.setUiMode(AureaUiMode.edit) } }
         ShellMenuRow(CupertinoGlyph.Gear, "editor_ajustes_projeto") { act { pause(); model.showProjectSettings = true } }
         ShellMenuRow(CupertinoGlyph.Search, "edt_cmd_search_desc") { act { pause(); shell.commandSearch = true } }
             .accessibilityIdentifier("commandSearchOpen")

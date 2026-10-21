@@ -2805,19 +2805,31 @@ final class AureaModel: ObservableObject {
         let scoped = items.map(\.0).filter { $0.startAccessingSecurityScopedResource() }
         mediaQueue.async { [weak self] in
             defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
-            var imported: [Int64] = [], failures = 0
+            var imported: [Int64] = [], failures = 0, layeredFailure: (Bool, Int64)?
             for (url, video) in items {
                 let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
                 do {
                     try AureaPaths.copyImport(url, to: destination)
                     let name = url.deletingPathExtension().lastPathComponent
+                    // 0.2.7 (EditorStore.importMediaBatch): GIF toca (quadros numa pré-composição) e
+                    // PSD chega com as camadas — antes os dois viravam uma imagem parada. O motor lê
+                    // o arquivo inteiro na importação, então a cópia sai depois.
+                    let ext = url.pathExtension.lowercased()
+                    let layered = !video && (ext == "gif" || ext == "psd")
                     let result = video ? importer.importVideo(destination.path, name: name)
+                        : ext == "gif" ? importer.importGIF(destination.path, name: name)
+                        : ext == "psd" ? importer.importPSD(destination.path, name: name)
                         : importer.importImageFile(destination.path, name: name)
+                    if layered { try? FileManager.default.removeItem(at: destination) }
                     if result >= 0 { imported.append(result) }
-                    else { failures += 1; try? FileManager.default.removeItem(at: destination) }
+                    else {
+                        failures += 1
+                        if layered { layeredFailure = (ext == "gif", -result) }
+                        else { try? FileManager.default.removeItem(at: destination) }
+                    }
                 } catch { failures += 1 }
             }
-            let ids = imported, failed = failures
+            let ids = imported, failed = failures, layeredError = layeredFailure
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.importingMedia = false
@@ -2828,7 +2840,8 @@ final class AureaModel: ObservableObject {
                     self.refreshModel(force: true)
                     _ = self.saveProject(writeThumbnail: false)
                 }
-                if failed > 0 { self.toast = AureaText.t("msg_nao_consegui_ler_esse_arquivo") }
+                if let layeredError { self.toast = AureaModel.layeredImportError(gif: layeredError.0, code: layeredError.1) }
+                else if failed > 0 { self.toast = AureaText.t("msg_nao_consegui_ler_esse_arquivo") }
             }
         }
     }
@@ -3492,22 +3505,40 @@ final class AureaModel: ObservableObject {
         }
     }
 
-    func importPsd(url: URL) {
+    func importPsd(url: URL) { importLayered(url: url, gif: false) }
+
+    /// GIF animado (0.2.7, EditorStore.importGif): os quadros numa pré-composição, em loop.
+    func importGif(url: URL) { importLayered(url: url, gif: true) }
+
+    /// PSD (camadas) ou GIF (quadros) — EditorStore.importLayeredFile. O motor lê o arquivo inteiro na importação.
+    private func importLayered(url: URL, gif: Bool) {
         guard !importingMedia else { return }
-        importingMedia = true; operationMessage = AureaText.t("psd_importing")
+        importingMedia = true; operationMessage = AureaText.t(gif ? "gif_importing" : "psd_importing")
         let native = engine
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let scoped = url.startAccessingSecurityScopedResource()
-            let id = native.importPSD(url.path, name: url.deletingPathExtension().lastPathComponent)
+            let name = url.deletingPathExtension().lastPathComponent
+            let id = gif ? native.importGIF(url.path, name: name) : native.importPSD(url.path, name: name)
             if scoped { url.stopAccessingSecurityScopedResource() }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.importingMedia = false
-                guard id >= 0 else { self.toast = AureaText.t("psd_failed"); return }
+                guard id >= 0 else { self.toast = AureaModel.layeredImportError(gif: gif, code: -id); return }
                 self.showAddLayer = false; self.syncAfterEdit(); self.select(layerId: id, additive: false)
-                self.toast = AureaText.t("psd_imported")
+                self.toast = AureaText.t(gif ? "gif_imported" : "psd_imported")
                 _ = self.saveProject(writeThumbnail: false)
             }
+        }
+    }
+
+    /// O motivo da falha (EditorStore.layeredImportError): 8/9 memória, 17 formato, 11 arquivo danificado.
+    static func layeredImportError(gif: Bool, code: Int64) -> String {
+        if gif { return AureaText.t("gif_failed") }
+        switch code {
+        case 8, 9: return AureaText.t("psd_failed_too_big")
+        case 17: return AureaText.t("psd_failed_format")
+        case 11: return AureaText.t("psd_failed_corrupt")
+        default: return AureaText.t("psd_failed")
         }
     }
 

@@ -230,6 +230,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         "fractal noise nuvem fumaca textura turbulencia"))
     put("aurea.generate.aurora", EffectMeta(R.string.fx030_desc_aurora, AllTargets,
         "aurora boreal northern lights ceu estrelas reflexo polar 3d camera"))
+    put("aurea.generate.constellation", EffectMeta(R.string.fx030c_desc, AllTargets,
+        "constelacao plexus rede pontos linhas triangulos conexoes 3d camera"))
     put("aurea.generate.gradient_ramp", EffectMeta(R.string.fx_desc_generate_gradient_ramp, AllTargets,
         "ramp gradiente degrade linear radial"))
     put("aurea.generate.four_color_gradient", EffectMeta(R.string.fx_desc_generate_four_color_gradient, AllTargets,

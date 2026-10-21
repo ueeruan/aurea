@@ -152,6 +152,8 @@ data class PreviewState(
 
 /** `aurea::Errc::UnsupportedFormat` (core/Result.hpp). */
 private const val ERRC_UNSUPPORTED_FORMAT = 17L
+/** Linhas de parâmetro lidas por efeito (o iOS dobra o buffer quando enche; aqui cabe o maior efeito). */
+private const val MAX_EFFECT_PARAM_ROWS = 128
 /** `aurea::Errc::IoError` / `StorageFull` (TEMP_STORAGE_FULL). */
 private const val ERRC_IO = 10
 private const val ERRC_STORAGE_FULL = 28
@@ -907,8 +909,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private val statusBuffer = directBuffer(PodLayout.STATUS_BYTES)
     private val perfBuffer = directBuffer(PerfStats.BYTES)
     private val detailBuffer = directBuffer(LayerDetail.BYTES)
-    private val rowBuffer = directBuffer(64 * EffectParam.ROW_BYTES)
-    private val textBlob = directBuffer(16 * 1024)
+    // 0.3.0: a Correção de cor tem 79 parâmetros e a Constelação 65; com 64 linhas
+    // o papel, o look e a intensidade (77, 78, 76) não chegavam à interface.
+    private val rowBuffer = directBuffer(MAX_EFFECT_PARAM_ROWS * EffectParam.ROW_BYTES)
+    private val textBlob = directBuffer(32 * 1024)
     private val status = EngineStatus()
 
     // =========================================================================
@@ -2816,7 +2820,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         val res = getApplication<Application>().resources
         effectParams = effects.associate { e ->
-            val n = engine.queryEffectParams(id, e.effectId, rowBuffer, 64, textBlob)
+            val n = engine.queryEffectParams(id, e.effectId, rowBuffer, MAX_EFFECT_PARAM_ROWS, textBlob)
             e.effectId to localizeEffectParams(res, e.typeId, List(max(0, n)) { EffectParam.read(rowBuffer, it, textBlob) })
         }
     }

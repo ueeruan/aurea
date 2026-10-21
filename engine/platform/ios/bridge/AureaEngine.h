@@ -950,10 +950,17 @@ NS_SWIFT_NAME(AureaEngine)
 - (long long)addFreehand:(long long)layerId points:(NSArray<NSNumber*>*)points error:(float)error;
 - (long long)importSVG:(NSString*)text name:(NSString*)name;
 - (long long)importPSD:(NSString*)path name:(NSString*)name;
+/// GIF animado (0.2.7, AureaEngine.kt `importGif`): os quadros numa pré-composição em loop. Id ou −código.
+- (long long)importGIF:(NSString*)path name:(NSString*)name;
 - (NSString*)foregroundModelDirectory;
 - (long long)createGrid:(NSArray<NSNumber*>*)layers;
 - (NSArray<NSNumber*>*)textPath:(long long)layerId;
 - (BOOL)setTextPath:(long long)layerId target:(long long)target offset:(float)offset perpendicular:(BOOL)perpendicular reversed:(BOOL)reversed;
+/// Texto no caminho completo (0.2.7, AureaEngine.kt `queryTextPath`): [guia, margem inicial,
+/// perpendicular, invertido, máscara (-1 = usa a guia), margem final, forçar alinhamento]; vazio = sem texto.
+- (NSArray<NSNumber*>*)textPathOptions:(long long)layerId;
+- (BOOL)setTextPathOptions:(long long)layerId target:(long long)target mask:(int32_t)mask firstMargin:(float)firstMargin
+                lastMargin:(float)lastMargin perpendicular:(BOOL)perpendicular reversed:(BOOL)reversed forceAlign:(BOOL)forceAlign;
 - (BOOL)setTextSpan:(long long)layerId start:(uint32_t)start end:(uint32_t)end color:(NSArray<NSNumber*>*)color weight:(uint32_t)weight scale:(float)scale;
 - (BOOL)clearTextSpans:(long long)layerId start:(uint32_t)start end:(uint32_t)end;
 - (BOOL)setText3DColor:(long long)layerId region:(uint32_t)region values:(NSArray<NSNumber*>*)values;

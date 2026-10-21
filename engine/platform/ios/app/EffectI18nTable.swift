@@ -516,6 +516,71 @@ enum EffectI18nTable {
     aurea.color.grade|70|lut|grade_lut|
     aurea.color.grade|71|lut_intensity|grade_lut_intensity|
     aurea.color.grade|76|mix|grade_intensity|
+    aurea.generate.constellation|0|source|fx030c_source|fx030c_src_cloud,fx030c_src_sphere,fx030c_src_grid,fx030c_src_ring,fx030c_src_plane,fx030c_src_path
+    aurea.generate.constellation|1|count|fx030c_count|
+    aurea.generate.constellation|2|seed|fxl_seed|
+    aurea.generate.constellation|3|width|fx030c_width|
+    aurea.generate.constellation|4|height|fx030c_height|
+    aurea.generate.constellation|5|depth|fx030c_depth|
+    aurea.generate.constellation|6|radius|fx030c_radius|
+    aurea.generate.constellation|7|tube_radius|fx030c_tube_radius|
+    aurea.generate.constellation|8|grid_x|fx030c_grid_x|
+    aurea.generate.constellation|9|grid_y|fx030c_grid_y|
+    aurea.generate.constellation|10|grid_z|fx030c_grid_z|
+    aurea.generate.constellation|11|path_layer|fx030c_path_layer|
+    aurea.generate.constellation|12|jitter|fx030c_jitter|
+    aurea.generate.constellation|13|center|fx030c_center|
+    aurea.generate.constellation|14|position_z|fx030c_position_z|
+    aurea.generate.constellation|15|scale|fx030c_scale|
+    aurea.generate.constellation|16|rotation_x|fx030c_rotation_x|
+    aurea.generate.constellation|17|rotation_y|fx030c_rotation_y|
+    aurea.generate.constellation|18|rotation_z|fx030c_rotation_z|
+    aurea.generate.constellation|19|spin_x|fx030c_spin_x|
+    aurea.generate.constellation|20|spin_y|fx030c_spin_y|
+    aurea.generate.constellation|21|spin_z|fx030c_spin_z|
+    aurea.generate.constellation|22|noise|fx030c_noise|
+    aurea.generate.constellation|23|noise_amount|fx030c_noise_amount|
+    aurea.generate.constellation|24|noise_scale|fx030c_noise_scale|
+    aurea.generate.constellation|25|noise_speed|fx030c_noise_speed|
+    aurea.generate.constellation|26|noise_octaves|fx030c_noise_octaves|
+    aurea.generate.constellation|27|field|fx030c_field|
+    aurea.generate.constellation|28|field_center|fx030c_field_center|
+    aurea.generate.constellation|29|field_z|fx030c_field_z|
+    aurea.generate.constellation|30|field_radius|fx030c_field_radius|
+    aurea.generate.constellation|31|field_strength|fx030c_field_strength|
+    aurea.generate.constellation|32|lines|fx030c_lines|
+    aurea.generate.constellation|33|line_max_distance|fx030c_line_max|
+    aurea.generate.constellation|34|line_min_distance|fx030c_line_min|
+    aurea.generate.constellation|35|max_connections|fx030c_connections|
+    aurea.generate.constellation|36|line_width|fx030c_line_width|
+    aurea.generate.constellation|37|line_opacity|fx030c_line_opacity|
+    aurea.generate.constellation|38|line_falloff|fx030c_line_falloff|
+    aurea.generate.constellation|39|line_color_mode|fx030c_line_color_mode|fx030c_color_own,fx030c_color_points
+    aurea.generate.constellation|40|line_color|fx030c_line_color|
+    aurea.generate.constellation|41|line_perspective|fx030c_line_perspective|
+    aurea.generate.constellation|42|points|fx030c_points|
+    aurea.generate.constellation|43|point_size|fx030c_point_size|
+    aurea.generate.constellation|44|point_opacity|fx030c_point_opacity|
+    aurea.generate.constellation|45|point_color|fx030c_color_points|
+    aurea.generate.constellation|46|point_perspective|fx030c_point_perspective|
+    aurea.generate.constellation|47|point_softness|fx030c_point_softness|
+    aurea.generate.constellation|48|only_connected|fx030c_only_connected|
+    aurea.generate.constellation|49|triangles|fx030c_triangles|
+    aurea.generate.constellation|50|triangle_max_distance|fx030c_tri_max|
+    aurea.generate.constellation|51|triangle_opacity|fx030c_tri_opacity|
+    aurea.generate.constellation|52|triangle_color_mode|fx030c_tri_color_mode|fx030c_color_own,fx030c_color_points
+    aurea.generate.constellation|53|triangle_color|fx030c_tri_color|
+    aurea.generate.constellation|54|depth_fog|fx030c_depth_fog|
+    aurea.generate.constellation|55|depth_near|fx030c_depth_near|
+    aurea.generate.constellation|56|depth_far|fx030c_depth_far|
+    aurea.generate.constellation|57|depth_color|fx030c_depth_color|
+    aurea.generate.constellation|58|near_color|fx030c_near_color|
+    aurea.generate.constellation|59|far_color|fx030c_far_color|
+    aurea.generate.constellation|60|opacity|fxl_opacity|
+    aurea.generate.constellation|61|blend|fx030c_blend|fx030c_blend_over,fx030c_blend_add
+    aurea.generate.constellation|62|show_layer|fx030c_show_layer|
+    aurea.generate.constellation|63|follow_camera|fx030_follow_camera|
+    aurea.generate.constellation|64|fov|fxl_field_of_view|
     aurea.time.wide_time|0|forward_steps|fx030_forward_steps|
     aurea.time.wide_time|1|backward_steps|fx030_backward_steps|
     aurea.time.wide_time|2|native_motion_blur|fx030_native_motion_blur|
@@ -2055,6 +2120,13 @@ enum EffectI18nTable {
 
     private static let sectionsTable = """
     aurea.generate.aurora|1|environment|fx027_environment
+    aurea.generate.constellation|1|points|fx030c_sec_points
+    aurea.generate.constellation|2|transform|fx030c_sec_transform
+    aurea.generate.constellation|3|noise|fx030c_noise
+    aurea.generate.constellation|4|field|fx030c_field
+    aurea.generate.constellation|5|lines|fx030c_lines
+    aurea.generate.constellation|6|point_look|fx030c_sec_point_look
+    aurea.generate.constellation|7|triangles|fx030c_triangles
     aurea.color.grade|1|basic|grade_section_basic
     aurea.color.grade|2|wheels|grade_tab_wheels
     aurea.color.grade|3|curves|grade_tab_curves

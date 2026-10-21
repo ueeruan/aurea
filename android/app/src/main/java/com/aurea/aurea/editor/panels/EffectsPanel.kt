@@ -1151,6 +1151,10 @@ private fun effectPresetLabel(id: String): Int? = when (id) {
     "saber_energy" -> R.string.fxp_saber_energy
     "saber_soft" -> R.string.fxp_saber_soft
     "saber_magic" -> R.string.fxp_saber_magic
+    "classic" -> R.string.fxp_constellation_classic
+    "sphere" -> R.string.fx030c_src_sphere
+    "dust" -> R.string.fxp_constellation_dust
+    "living_grid" -> R.string.fxp_constellation_living_grid
     else -> null
 }
 

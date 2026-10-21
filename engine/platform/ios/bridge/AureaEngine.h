@@ -850,6 +850,13 @@ NS_SWIFT_NAME(AureaEngine)
 /// XML do Alight Motion (ou os bytes do pacote .zip/.amproj) → envelope JSON
 /// {"preset", "name", "layer", "mapped", "skipped", "warnings", "error"}; "preset" vai para applyPreset.
 - (NSString*)importAlightMotion:(NSData*)data NS_SWIFT_NAME(importAlightMotion(_:));
+/// Preset (.ffx) ou script (.jsx) do After Effects (Engine::import_ae_file) na camada `layer`
+/// (0 = nenhuma; o script pode criar camadas), num passo de desfazer. Relatório JSON:
+/// {"ok":bool,"kind":"ffx|jsx","effects":n,"keyframes":n,"layers":n,"expressions":n,"animators":n,
+///  "skipped":[{"kind","name","reason","line"}],"notes":[…],"message":"…"}.
+- (NSString*)importAeFile:(NSString*)path layer:(uint64_t)layer NS_SWIFT_NAME(importAeFile(_:layer:));
+/// O mesmo com os bytes já lidos; `fileName` só dá a extensão.
+- (NSString*)importAeData:(NSData*)data fileName:(NSString*)fileName layer:(uint64_t)layer NS_SWIFT_NAME(importAeData(_:fileName:layer:));
 - (NSArray<NSNumber*>*)parseCaptionPreset:(NSString*)json NS_SWIFT_NAME(parseCaptionPreset(_:));
 - (NSString*)makeCaptionPreset:(NSString*)name options:(NSDictionary<NSString*, NSNumber*>*)options NS_SWIFT_NAME(makeCaptionPreset(_:options:));
 - (NSArray<NSNumber*>*)parseCurvePreset:(NSString*)json NS_SWIFT_NAME(parseCurvePreset(_:));

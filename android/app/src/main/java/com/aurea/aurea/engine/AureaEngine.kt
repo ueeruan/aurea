@@ -996,6 +996,21 @@ class AureaEngine private constructor() {
     fun importAlightMotion(data: ByteArray): String =
         nativeImportAlightMotion(nativeHandle, data)?.toString(Charsets.UTF_8) ?: """{"preset":"","error":"motor indisponivel"}"""
     fun importAlightMotion(xml: String): String = importAlightMotion(xml.toByteArray(Charsets.UTF_8))
+    /**
+     * Preset (.ffx) ou script (.jsx) do After Effects na camada [layer] (0 =
+     * nenhuma; o script pode criar camadas), num passo de desfazer. O caminho
+     * é um arquivo já copiado para a pasta do app. Devolve o relatório JSON:
+     * {"ok":bool,"kind":"ffx|jsx","effects":n,"keyframes":n,"layers":n,
+     *  "expressions":n,"animators":n,"skipped":[{"kind","name","reason","line"}],
+     *  "notes":[…],"message":"…"}.
+     */
+    fun importAeFile(path: String, layer: Long): String =
+        nativeImportAeFile(nativeHandle, path.toByteArray(Charsets.UTF_8), layer)?.toString(Charsets.UTF_8)
+            ?: """{"ok":false,"skipped":[],"notes":[],"message":"motor indisponivel"}"""
+    /** O mesmo com os bytes já lidos (ex.: content://); [fileName] só dá a extensão. */
+    fun importAeData(data: ByteArray, fileName: String, layer: Long): String =
+        nativeImportAeData(nativeHandle, data, fileName.toByteArray(Charsets.UTF_8), layer)?.toString(Charsets.UTF_8)
+            ?: """{"ok":false,"skipped":[],"notes":[],"message":"motor indisponivel"}"""
     /** Um passo de desfazer. Nulo = aplicado; senão, o motivo. `duration` > 0 estica a animação. */
     fun applyPreset(layer: Long, json: String, duration: Long = 0): String? =
         nativeApplyPreset(nativeHandle, layer, json.toByteArray(Charsets.UTF_8), duration)?.toString(Charsets.UTF_8)
@@ -1525,6 +1540,8 @@ class AureaEngine private constructor() {
     private external fun nativeSaveEffectPreset(handle: Long, layer: Long, effectId: Int, name: ByteArray): ByteArray?
     private external fun nativeImportAlightMotion(handle: Long, data: ByteArray): ByteArray?
     private external fun nativeApplyPreset(handle: Long, layer: Long, json: ByteArray, duration: Long): ByteArray?
+    private external fun nativeImportAeFile(handle: Long, path: ByteArray, layer: Long): ByteArray?
+    private external fun nativeImportAeData(handle: Long, data: ByteArray, fileName: ByteArray, layer: Long): ByteArray?
     private external fun nativeMakeCaptionPreset(name: ByteArray, ints: IntArray, floats: FloatArray): ByteArray?
     private external fun nativeParseCaptionPreset(json: ByteArray): FloatArray?
     private external fun nativeMakeCurvePreset(name: ByteArray, interp: Int, x1: Float, y1: Float, x2: Float, y2: Float, power: Int): ByteArray?

@@ -3076,6 +3076,29 @@ AUREA_JNI jbyteArray AUREA_FN(nativeImportAlightMotion)(JNIEnv* env, jclass, jlo
     return bytes_of(env, presets::alight_import_envelope(js, report));
 }
 
+/// Preset (.ffx) ou script (.jsx) do After Effects (Engine::import_ae_file):
+/// aplica na camada `layer` (0 = nenhuma; o script pode criar camadas) num
+/// passo de desfazer. Devolve o relatório em JSON UTF-8 (ae::report_json):
+/// {"ok","kind","effects","keyframes","layers","expressions","animators",
+///  "skipped":[{"kind","name","reason","line"}],"notes":[…],"message"}.
+AUREA_JNI jbyteArray AUREA_FN(nativeImportAeFile)(JNIEnv* env, jclass, jlong handle, jbyteArray path, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    ae::ImportReport report;
+    if (c) report = c->engine.import_ae_file(utf8_of(env, path).c_str(), static_cast<u64>(layer));
+    else report.message = "motor indisponivel";
+    return bytes_of(env, ae::report_json(report));
+}
+
+/// O mesmo com os bytes já lidos (content:// lido pela plataforma);
+/// `fileName` só serve para a extensão (.ffx/.jsx).
+AUREA_JNI jbyteArray AUREA_FN(nativeImportAeData)(JNIEnv* env, jclass, jlong handle, jbyteArray data, jbyteArray fileName, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    ae::ImportReport report;
+    if (c) report = c->engine.import_ae_data(utf8_of(env, data), utf8_of(env, fileName), static_cast<u64>(layer));
+    else report.message = "motor indisponivel";
+    return bytes_of(env, ae::report_json(report));
+}
+
 /// Aplica (um passo de desfazer). Nulo = aplicado; senão, o motivo (UTF-8).
 AUREA_JNI jbyteArray AUREA_FN(nativeApplyPreset)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray json, jlong duration) {
     NativeContext* c = ctx_of(handle);

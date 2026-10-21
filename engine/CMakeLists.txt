@@ -83,6 +83,13 @@ set(AUREA_CORE_SOURCES
     src/project/FileIO.cpp
     src/project/Presets.cpp
     src/project/AlightMotion.cpp
+    src/project/AeImportFfx.cpp
+    src/project/AeImportBind.cpp
+    src/project/AeImportTable.cpp
+    src/project/AeImportApply.cpp
+    src/project/AeScript.cpp
+    src/project/AeScriptDom.cpp
+    src/engine/EngineAeImport.cpp
     src/project/Psd.cpp
     src/engine/EnginePsd.cpp
     src/engine/EngineGrid.cpp

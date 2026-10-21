@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Tempo amplo (CC Wide Time), Aurora 3D, Ordenar pixels reescrito. -->
+<resources>
+    <string name="fx030_name_wide_time">Waktu Lebar</string>
+    <string name="fx030_desc_wide_time">Mencampur frame sebelum dan sesudah frame saat ini, seperti CC Wide Time di After Effects: jejak dan motion blur gaya edit. Berfungsi pada video, prekomposisi, dan lapisan penyesuaian.</string>
+    <string name="fx030_forward_steps">Langkah maju</string>
+    <string name="fx030_backward_steps">Langkah mundur</string>
+    <string name="fx030_native_motion_blur">Motion blur bawaan</string>
+    <string name="fx030_layer_motion">Sertakan gerakan lapisan</string>
+    <string name="fx030_follow_camera">Ikuti kamera 3D</string>
+    <string name="fx030_desc_aurora">Aurora 3D di langit berbintang, terpantul di air. Mengikuti kamera komposisi. Tirai, warna, langit, dan kualitas dapat diatur.</string>
+    <string name="fx030_desc_pixel_sort">Mengurutkan piksel tiap interval berdasarkan kecerahan, rona, warna, atau saturasi, ke arah pilihan Anda: horizontal, vertikal, diagonal, sudut, atau radial.</string>
+</resources>

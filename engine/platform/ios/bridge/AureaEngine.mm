@@ -3410,6 +3410,7 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 - (long long)importSVG:(NSString*)text name:(NSString*)name { auto* e = self.engine; if (!e) return -1; const auto r = e->import_svg(to_std(text), name.UTF8String); return r.ok() ? static_cast<long long>(*r) : -1; }
 - (long long)importPSD:(NSString*)path name:(NSString*)name { auto* e = self.engine; if (!e) return -1; const auto r=e->import_psd(to_std(path),name.UTF8String); return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code()); }
+- (long long)importGIF:(NSString*)path name:(NSString*)name { auto* e = self.engine; if (!e) return -1; const auto r=e->import_gif(to_std(path),name.UTF8String); return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code()); }
 - (NSString*)foregroundModelDirectory { auto* e=self.engine;return e?to_ns(e->foreground_model_directory()):@""; }
 - (long long)createGrid:(NSArray<NSNumber*>*)layers { auto* e=self.engine;if(!e)return -1;std::vector<aurea::u64> ids;for(NSNumber* v in layers)ids.push_back(v.unsignedLongLongValue);const auto r=e->create_grid(ids.data(),static_cast<aurea::u32>(ids.size()));return r.ok()?static_cast<long long>(*r):-static_cast<long long>(r.status().code()); }
 - (NSArray<NSNumber*>*)textPath:(long long)layerId {
@@ -3418,6 +3419,22 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return @[@(target), @(offset), @(perpendicular), @(reverse)];
 }
 - (BOOL)setTextPath:(long long)layerId target:(long long)target offset:(float)offset perpendicular:(BOOL)perpendicular reversed:(BOOL)reversed { auto* e = self.engine; return e && e->set_text_path(layerId, target, offset, perpendicular, reversed); }
+- (NSArray<NSNumber*>*)textPathOptions:(long long)layerId {
+    auto* e = self.engine; aurea::Engine::TextPathOptions o;
+    if (!e || !e->query_text_path_options(static_cast<u64>(layerId), o)) return @[];
+    return @[@(static_cast<long long>(o.pathLayer)), @(o.firstMargin), @(o.perpendicular), @(o.reverse),
+             @(o.mask == aurea::kInvalidIndex ? -1 : static_cast<long long>(o.mask)), @(o.lastMargin), @(o.forceAlign)];
+}
+- (BOOL)setTextPathOptions:(long long)layerId target:(long long)target mask:(int32_t)mask firstMargin:(float)firstMargin
+                lastMargin:(float)lastMargin perpendicular:(BOOL)perpendicular reversed:(BOOL)reversed forceAlign:(BOOL)forceAlign {
+    auto* e = self.engine; if (!e) return NO;
+    aurea::Engine::TextPathOptions o;
+    o.pathLayer = static_cast<u64>(target);
+    o.mask = mask < 0 ? aurea::kInvalidIndex : static_cast<aurea::u32>(mask);
+    o.firstMargin = firstMargin; o.lastMargin = lastMargin;
+    o.perpendicular = perpendicular; o.reverse = reversed; o.forceAlign = forceAlign;
+    return e->set_text_path_options(static_cast<u64>(layerId), o);
+}
 - (BOOL)setTextSpan:(long long)layerId start:(uint32_t)start end:(uint32_t)end color:(NSArray<NSNumber*>*)color weight:(uint32_t)weight scale:(float)scale {
     auto* e = self.engine; aurea::Vec4 c{1,1,1,1}; if (color.count == 4) c = {color[0].floatValue, color[1].floatValue, color[2].floatValue, color[3].floatValue};
     return e && e->set_text_span(layerId, start, end, color.count == 4, c, weight, scale);
@@ -3775,6 +3792,41 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (BOOL)applyEffectPreset:(uint32_t)preset effect:(uint32_t)effectId forLayer:(long long)layerId {
     if (auto* e = self.engine) return e->apply_effect_preset(static_cast<aurea::u64>(layerId), effectId, preset) ? YES : NO;
     return NO;
+}
+- (int32_t)ensureColorGradeForLayer:(long long)layerId role:(uint32_t)role {
+    auto* e = self.engine;
+    if (!e) return -1;
+    const aurea::u32 id = e->ensure_color_grade(static_cast<aurea::u64>(layerId), role);
+    return id == aurea::kInvalidIndex ? -1 : static_cast<int32_t>(id);
+}
+- (BOOL)applyColorLook:(int32_t)look effect:(uint32_t)effectId forLayer:(long long)layerId {
+    if (auto* e = self.engine) return e->apply_color_look(static_cast<aurea::u64>(layerId), effectId, look) ? YES : NO;
+    return NO;
+}
+- (BOOL)resetColorGradeEffect:(uint32_t)effectId forLayer:(long long)layerId {
+    if (auto* e = self.engine) return e->reset_color_grade(static_cast<aurea::u64>(layerId), effectId) ? YES : NO;
+    return NO;
+}
+- (nullable NSDictionary<NSString *, id> *)colorLookThumbnails:(uint32_t)maxDim {
+    auto* e = self.engine;
+    if (!e) return nil;
+    std::vector<aurea::u8> rgba;
+    aurea::u32 w = 0, h = 0, n = 0;
+    if (!e->render_color_looks(maxDim, rgba, w, h, n).ok() || !w || !h || !n) return nil;
+    return @{@"width": @(w), @"height": @(h), @"count": @(n),
+             @"data": [NSData dataWithBytes:rgba.data() length:rgba.size()]};
+}
+- (nullable NSDictionary<NSString *, id> *)colorScopes:(uint32_t)maxDim {
+    auto* e = self.engine;
+    if (!e) return nil;
+    aurea::Engine::Scopes s;
+    if (!e->compute_scopes(maxDim, s).ok()) return nil;
+    NSMutableArray<NSNumber *>* hist = [NSMutableArray arrayWithCapacity:s.histogram.size()];
+    for (aurea::u32 v : s.histogram) [hist addObject:@(v)];
+    return @{@"width": @(s.width), @"height": @(s.height), @"columns": @(s.columns), @"histogram": hist,
+             @"waveform": [NSData dataWithBytes:s.waveform.data() length:s.waveform.size() * 2],
+             @"parade": [NSData dataWithBytes:s.parade.data() length:s.parade.size() * 2],
+             @"vectorscope": [NSData dataWithBytes:s.vectorscope.data() length:s.vectorscope.size() * 2]};
 }
 - (BOOL)setGroupCameraPassThrough:(BOOL)on forLayer:(long long)layerId {
     if (auto* e = self.engine) return e->set_group_camera_pass_through(static_cast<aurea::u64>(layerId), on != NO);

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Tempo amplo (CC Wide Time), Aurora 3D, Ordenar pixels reescrito. -->
+<resources>
+    <string name="fx030_name_wide_time">Wide Time</string>
+    <string name="fx030_desc_wide_time">Blends the frames ahead of and behind the current one, like CC Wide Time in After Effects: trails and edit-style motion smear. Works on video, precomps and adjustment layers.</string>
+    <string name="fx030_forward_steps">Forward steps</string>
+    <string name="fx030_backward_steps">Backward steps</string>
+    <string name="fx030_native_motion_blur">Native motion blur</string>
+    <string name="fx030_layer_motion">Include layer motion</string>
+    <string name="fx030_follow_camera">Follow the 3D camera</string>
+    <string name="fx030_desc_aurora">3D northern lights in a starry sky, reflected in water. Follows the composition camera. Curtains, colors, sky and quality are adjustable.</string>
+    <string name="fx030_desc_pixel_sort">Sorts the pixels of each interval by brightness, hue, color or saturation, in the direction you choose: horizontal, vertical, diagonal, angle or radial.</string>
+</resources>

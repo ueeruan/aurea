@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Tempo amplo (CC Wide Time), Aurora 3D, Ordenar pixels reescrito. -->
+<resources>
+    <string name="fx030_name_wide_time">Tempo amplo</string>
+    <string name="fx030_desc_wide_time">Mistura os quadros à frente e atrás do atual, como o CC Wide Time do After Effects: rastros e borrão de movimento de edit. Funciona em vídeo, pré-composição e camada de ajuste.</string>
+    <string name="fx030_forward_steps">Passos para a frente</string>
+    <string name="fx030_backward_steps">Passos para trás</string>
+    <string name="fx030_native_motion_blur">Desfoque de movimento nativo</string>
+    <string name="fx030_layer_motion">Incluir movimento da camada</string>
+    <string name="fx030_follow_camera">Seguir a câmera 3D</string>
+    <string name="fx030_desc_aurora">Aurora boreal 3D num céu estrelado, com reflexo na água. Acompanha a câmera da composição. Cortinas, cores, céu e qualidade ajustáveis.</string>
+    <string name="fx030_desc_pixel_sort">Ordena os pixels de cada intervalo pela luz, matiz, cor ou saturação, na direção que você escolher: horizontal, vertical, diagonal, ângulo ou radial.</string>
+</resources>

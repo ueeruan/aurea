@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Tempo amplo (CC Wide Time), Aurora 3D, Ordenar pixels reescrito. -->
+<resources>
+    <string name="fx030_name_wide_time">वाइड टाइम</string>
+    <string name="fx030_desc_wide_time">मौजूदा फ़्रेम से आगे और पीछे के फ़्रेम मिलाता है, After Effects के CC Wide Time जैसा: एडिट जैसी ट्रेल और मोशन ब्लर। वीडियो, प्रीकंपोज़िशन और एडजस्टमेंट लेयर पर काम करता है।</string>
+    <string name="fx030_forward_steps">आगे के कदम</string>
+    <string name="fx030_backward_steps">पीछे के कदम</string>
+    <string name="fx030_native_motion_blur">नेटिव मोशन ब्लर</string>
+    <string name="fx030_layer_motion">लेयर की गति शामिल करें</string>
+    <string name="fx030_follow_camera">3D कैमरा का पालन करें</string>
+    <string name="fx030_desc_aurora">तारों भरे आसमान में 3D ध्रुवीय ज्योति, पानी में प्रतिबिंब के साथ। कंपोज़िशन के कैमरे के साथ चलती है। पर्दे, रंग, आसमान और गुणवत्ता समायोज्य हैं।</string>
+    <string name="fx030_desc_pixel_sort">हर अंतराल के पिक्सल को चमक, ह्यू, रंग या संतृप्ति से छाँटता है, आपकी चुनी दिशा में: क्षैतिज, ऊर्ध्वाधर, विकर्ण, कोण या रेडियल।</string>
+</resources>

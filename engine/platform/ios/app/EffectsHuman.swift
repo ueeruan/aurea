@@ -533,8 +533,8 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.stylize.pixel_sort", FxEffectHuman(
         name: "fx_name_pixel_sort",
-        keywords: "pixel sort ordenar pixels derreter listras glitch sort",
-        principal: [0, 1, 2, 4],
+        keywords: "pixel sort ordenar pixels derreter listras glitch sort angulo radial intervalo",
+        principal: [0, 1, 2, 4, 10],
         params: [
             0: FxParamHuman(label: "fx_limiar_baixo", decimals: 0),
             1: FxParamHuman(label: "fx_limiar_alto", decimals: 0),
@@ -543,8 +543,11 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             4: FxParamHuman(label: "fx_direcao"),
             5: FxParamHuman(label: "fx_sentido_inverso"),
             6: FxParamHuman(label: "fx_ordenar"),
+            7: FxParamHuman(label: "fxl_seed", decimals: 0),
             8: FxParamHuman(label: "fx_faixa_tom"),
             9: FxParamHuman(label: "fx_passo", suffix: "px", decimals: 0),
+            10: FxParamHuman(label: "fx_angulo", suffix: "°", decimals: 1),
+            11: FxParamHuman(label: "fx_centro"),
         ])),
     ("aurea.stylize.film_damage", FxEffectHuman(
         name: "fx_name_film_damage",
@@ -688,6 +691,143 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             3: FxParamHuman(label: "fx_unidade"),
             4: FxParamHuman(label: "fx_intensidade", decimals: 0),
             5: FxParamHuman(label: "fx_prender_nas_pontas"),
+        ])),
+    // Correção de cor (0.3.0). Par do EffectsHuman.kt.
+    ("aurea.color.grade", FxEffectHuman(
+        name: "fx030_name_color_grade",
+        keywords: "correcao de cor color grade grading lumetri resolve log slog vlog logc apple log lut rodas wheels lift gamma gain hsl curvas temperatura",
+        principal: [0, 1, 2, 3, 4, 11, 12, 76],
+        params: [
+            1: FxParamHuman(label: "grade_temperature", decimals: 0),
+            2: FxParamHuman(label: "grade_tint", decimals: 0),
+            3: FxParamHuman(label: "grade_exposure", suffix: "EV", decimals: 2),
+            4: FxParamHuman(label: "grade_contrast", decimals: 0),
+            11: FxParamHuman(label: "grade_saturation", decimals: 0),
+            12: FxParamHuman(label: "grade_vibrance", decimals: 0),
+            76: FxParamHuman(label: "grade_intensity", decimals: 0),
+        ])),
+    // Tempo amplo (0.3.0): o CC Wide Time do AE. Par do EffectsHuman.kt.
+    ("aurea.time.wide_time", FxEffectHuman(
+        name: "fx030_name_wide_time",
+        keywords: "wide time cc tempo amplo rastro eco borrao quadros frente tras echo time blend trail edit",
+        principal: [0, 1, 2, 3],
+        params: [
+            0: FxParamHuman(label: "fx030_forward_steps", decimals: 0),
+            1: FxParamHuman(label: "fx030_backward_steps", decimals: 0),
+            2: FxParamHuman(label: "fx030_native_motion_blur"),
+            3: FxParamHuman(label: "fx030_layer_motion"),
+        ])),
+    // Edições aleatórias (0.2.7): trechos embaralhados pela semente.
+    ("aurea.time.random_edits", FxEffectHuman(
+        name: "fx027_name_random_edits",
+        keywords: "edicoes aleatorias random edits cortes embaralhar remontar jump cut sapphire",
+        principal: [0, 1],
+        params: [
+            0: FxParamHuman(label: "fx027_edit_length", suffix: "quadros", decimals: 0),
+            1: FxParamHuman(label: "fxl_seed", decimals: 3),
+        ])),
+    // Aurora (3D desde a 0.3.0): os controles na ordem de um gerador de aurora do AE.
+    ("aurea.generate.aurora", FxEffectHuman(
+        name: "fx027_name_aurora",
+        keywords: "aurora boreal northern lights ceu estrelas noite reflexo agua polar crates 3d camera",
+        principal: [1, 3, 4, 8, 9, 12],
+        params: [
+            0: FxParamHuman(label: "fxs_distortion", decimals: 1),
+            1: FxParamHuman(label: "fx027_amount", decimals: 0),
+            2: FxParamHuman(label: "fxl_scale", decimals: 2),
+            3: FxParamHuman(label: "fxl_length", decimals: 1),
+            4: FxParamHuman(label: "fxl_exposure", decimals: 1),
+            5: FxParamHuman(label: "fxl_detail", decimals: 1),
+            6: FxParamHuman(label: "fx3_curvatura", decimals: 2),
+            7: FxParamHuman(label: "fx027_sky_glow", decimals: 1),
+            8: FxParamHuman(label: "fxl_color"),
+            9: FxParamHuman(label: "fx027_secondary_color"),
+            10: FxParamHuman(label: "fx027_sky_color"),
+            11: FxParamHuman(label: "fx027_time_offset", suffix: "s", decimals: 2),
+            12: FxParamHuman(label: "fxl_speed", decimals: 1),
+            13: FxParamHuman(label: "fx027_horizon", decimals: 0),
+            14: FxParamHuman(label: "fx027_reflection", decimals: 0),
+            15: FxParamHuman(label: "fx027_ripple", decimals: 0),
+            16: FxParamHuman(label: "fx027_stars", decimals: 0),
+            17: FxParamHuman(label: "fx027_tilt", suffix: "°", decimals: 1),
+            18: FxParamHuman(label: "fx027_pan", suffix: "°", decimals: 1),
+            19: FxParamHuman(label: "fxl_field_of_view", suffix: "°", decimals: 0),
+            20: FxParamHuman(label: "fx027_sky_height", decimals: 0),
+            21: FxParamHuman(label: "fxl_opacity", decimals: 0),
+            22: FxParamHuman(label: "fx030_follow_camera"),
+            23: FxParamHuman(label: "fxl_quality"),
+        ])),
+    // Constelação (0.3.0): rede 3D de pontos, linhas e triângulos (como o Plexus do AE).
+    ("aurea.generate.constellation", FxEffectHuman(
+        name: "fx030c_name",
+        keywords: "constelacao constellation plexus rede network pontos linhas triangulos particulas 3d conexoes trapcode",
+        principal: [0, 1, 33, 43, 20, 61],
+        params: [
+            0: FxParamHuman(label: "fx030c_source"),
+            1: FxParamHuman(label: "fx030c_count", decimals: 0),
+            2: FxParamHuman(label: "fxl_seed", decimals: 0),
+            3: FxParamHuman(label: "fx030c_width", suffix: "%", decimals: 0),
+            4: FxParamHuman(label: "fx030c_height", suffix: "%", decimals: 0),
+            5: FxParamHuman(label: "fx030c_depth", suffix: "%", decimals: 0),
+            6: FxParamHuman(label: "fx030c_radius", suffix: "%", decimals: 0),
+            7: FxParamHuman(label: "fx030c_tube_radius", suffix: "%", decimals: 0),
+            8: FxParamHuman(label: "fx030c_grid_x", decimals: 0),
+            9: FxParamHuman(label: "fx030c_grid_y", decimals: 0),
+            10: FxParamHuman(label: "fx030c_grid_z", decimals: 0),
+            11: FxParamHuman(label: "fx030c_path_layer"),
+            12: FxParamHuman(label: "fx030c_jitter", suffix: "px", decimals: 0),
+            13: FxParamHuman(label: "fx030c_center"),
+            14: FxParamHuman(label: "fx030c_position_z", suffix: "px", decimals: 0),
+            15: FxParamHuman(label: "fx030c_scale", suffix: "%", decimals: 0),
+            16: FxParamHuman(label: "fx030c_rotation_x", suffix: "°", decimals: 1),
+            17: FxParamHuman(label: "fx030c_rotation_y", suffix: "°", decimals: 1),
+            18: FxParamHuman(label: "fx030c_rotation_z", suffix: "°", decimals: 1),
+            19: FxParamHuman(label: "fx030c_spin_x", suffix: "°/s", decimals: 1),
+            20: FxParamHuman(label: "fx030c_spin_y", suffix: "°/s", decimals: 1),
+            21: FxParamHuman(label: "fx030c_spin_z", suffix: "°/s", decimals: 1),
+            22: FxParamHuman(label: "fx030c_noise"),
+            23: FxParamHuman(label: "fx030c_noise_amount", suffix: "px", decimals: 0),
+            24: FxParamHuman(label: "fx030c_noise_scale", suffix: "px", decimals: 0),
+            25: FxParamHuman(label: "fx030c_noise_speed", decimals: 2),
+            26: FxParamHuman(label: "fx030c_noise_octaves", decimals: 0),
+            27: FxParamHuman(label: "fx030c_field"),
+            28: FxParamHuman(label: "fx030c_field_center"),
+            29: FxParamHuman(label: "fx030c_field_z", suffix: "px", decimals: 0),
+            30: FxParamHuman(label: "fx030c_field_radius", suffix: "px", decimals: 0),
+            31: FxParamHuman(label: "fx030c_field_strength", suffix: "px", decimals: 0),
+            32: FxParamHuman(label: "fx030c_lines"),
+            33: FxParamHuman(label: "fx030c_line_max", suffix: "px", decimals: 0),
+            34: FxParamHuman(label: "fx030c_line_min", suffix: "px", decimals: 0),
+            35: FxParamHuman(label: "fx030c_connections", decimals: 0),
+            36: FxParamHuman(label: "fx030c_line_width", suffix: "px", decimals: 1),
+            37: FxParamHuman(label: "fx030c_line_opacity", suffix: "%", decimals: 0),
+            38: FxParamHuman(label: "fx030c_line_falloff", decimals: 2),
+            39: FxParamHuman(label: "fx030c_line_color_mode"),
+            40: FxParamHuman(label: "fx030c_line_color"),
+            41: FxParamHuman(label: "fx030c_line_perspective"),
+            42: FxParamHuman(label: "fx030c_points"),
+            43: FxParamHuman(label: "fx030c_point_size", suffix: "px", decimals: 1),
+            44: FxParamHuman(label: "fx030c_point_opacity", suffix: "%", decimals: 0),
+            45: FxParamHuman(label: "fx030c_color_points"),
+            46: FxParamHuman(label: "fx030c_point_perspective"),
+            47: FxParamHuman(label: "fx030c_point_softness", suffix: "%", decimals: 0),
+            48: FxParamHuman(label: "fx030c_only_connected"),
+            49: FxParamHuman(label: "fx030c_triangles"),
+            50: FxParamHuman(label: "fx030c_tri_max", suffix: "px", decimals: 0),
+            51: FxParamHuman(label: "fx030c_tri_opacity", suffix: "%", decimals: 0),
+            52: FxParamHuman(label: "fx030c_tri_color_mode"),
+            53: FxParamHuman(label: "fx030c_tri_color"),
+            54: FxParamHuman(label: "fx030c_depth_fog"),
+            55: FxParamHuman(label: "fx030c_depth_near", suffix: "%", decimals: 0),
+            56: FxParamHuman(label: "fx030c_depth_far", suffix: "%", decimals: 0),
+            57: FxParamHuman(label: "fx030c_depth_color"),
+            58: FxParamHuman(label: "fx030c_near_color"),
+            59: FxParamHuman(label: "fx030c_far_color"),
+            60: FxParamHuman(label: "fxl_opacity", suffix: "%", decimals: 0),
+            61: FxParamHuman(label: "fx030c_blend"),
+            62: FxParamHuman(label: "fx030c_show_layer"),
+            63: FxParamHuman(label: "fx030_follow_camera"),
+            64: FxParamHuman(label: "fxl_field_of_view", suffix: "°", decimals: 0),
         ])),
     ("aurea.time.slice", FxEffectHuman(
         name: "fx_name_time_slice",
@@ -1820,7 +1960,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.stylize.halftone", "fx_desc_stylize_halftone")
     put("aurea.stylize.minimax", "fx_desc_stylize_minimax")
     put("aurea.stylize.omino_diffusion", "fx_desc_omino_diffusion")
-    put("aurea.stylize.pixel_sort", "fx_desc_stylize_pixel_sort")
+    put("aurea.stylize.pixel_sort", "fx030_desc_pixel_sort")
     put("aurea.stylize.film_damage", "fx_desc_stylize_film_damage")
     put("aurea.stylize.jpeg_damage", "fx_desc_stylize_jpeg_damage")
     put("aurea.stylize.holomatrix", "fx_desc_stylize_holomatrix")
@@ -1834,6 +1974,11 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.time.flow_motion_blur", "fx_desc_time_flow_motion_blur", [.video], "rsmb reelsmart desfoque de movimento vetores borrao")
     put("aurea.time.warp_rgb", "fx_desc_time_warp_rgb", [.video, .preComposicao, .imagem], "rgb no tempo canais separados atraso de cor")
     put("aurea.time.slice", "fx_desc_time_slice", [.video, .preComposicao], "timeslice fatias faixas tempo slit scan helice")
+    put("aurea.time.wide_time", "fx030_desc_wide_time", FxAllTargets, "wide time cc tempo amplo rastro eco borrao quadros frente tras trail")
+    put("aurea.color.grade", "fx030_desc_color_grade", FxAllTargets, "correcao de cor color grade grading lumetri resolve log lut rodas hsl curvas")
+    put("aurea.time.random_edits", "fx027_desc_random_edits", [.video, .preComposicao], "edicoes aleatorias random edits cortes embaralhar jump cut")
+    put("aurea.generate.aurora", "fx030_desc_aurora", FxAllTargets, "aurora boreal northern lights ceu estrelas reflexo polar 3d camera")
+    put("aurea.generate.constellation", "fx030c_desc", FxAllTargets, "constelacao plexus rede pontos linhas triangulos conexoes 3d camera")
     put("aurea.time.motion_detect", "fx_desc_time_motion_detect", [.video], "detectar movimento diferenca quadro anterior")
     put("aurea.stylize.crt_emulator", "fx_desc_stylize_crt_emulator", FxAllTargets, "crt tv tubo retro varredura fosforo")
     put("aurea.glitch.dissolve_shake", "fx_desc_glitch_dissolve_shake", FxAllTargets, "tremor dissolver fragmentos quebrar")

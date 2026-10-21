@@ -1160,7 +1160,8 @@ private struct PartTextureImageRow: View {
 }
 
 @MainActor
-private struct CubeLutImportRow: View {
+/// Interno (0.3.0): a aba "Mais" do Ajustar (modo de edição) usa o mesmo importador.
+struct CubeLutImportRow: View {
     let layer: Int64
     let effect: UInt32
     @EnvironmentObject private var model: AureaModel
@@ -1366,6 +1367,8 @@ struct FxPresetRow: View {
         case "saber_default", "saber_lightsaber", "saber_neon", "saber_electric", "saber_fire",
              "saber_plasma", "saber_energy", "saber_soft", "saber_magic":
             return AureaText.t("fxp_" + pid)
+        case "classic", "dust", "living_grid": return AureaText.t("fxp_constellation_" + pid)
+        case "sphere": return AureaText.t("fx030c_src_sphere")
         default: return fallback
         }
     }
@@ -1436,18 +1439,23 @@ private struct EffectStackThumb: View {
 
 
 @MainActor
-private struct ColorCurveEditor: View {
+struct ColorCurveEditor: View {
     let layer: Int64
     let effect: UInt32
     let param: UInt32
+    /// Nomes dos 4 canais (curvas de matiz da Correção de cor, 0.3.0); nil = RGB/R/G/B.
+    var channelNames: [String]? = nil
     @EnvironmentObject private var model: AureaModel
     @State private var channel: UInt32 = 0
     @State private var selected = 0
     @State private var points: [Float] = []
     @State private var samples: [Float] = []
     @State private var gesturing = false
-    private var labels: [String] { ["RGB", AureaText.t("curve_color_red"), AureaText.t("curve_color_green"), AureaText.t("curve_color_blue")] }
-    private var tint: Color { [AureaColors.text, Color(red: 1, green: 0.45, blue: 0.45), Color(red: 0.41, green: 0.84, blue: 0.61), Color(red: 0.45, green: 0.72, blue: 1)][Int(channel)] }
+    private var labels: [String] { channelNames ?? ["RGB", AureaText.t("curve_color_red"), AureaText.t("curve_color_green"), AureaText.t("curve_color_blue")] }
+    private var tint: Color {
+        channelNames != nil ? AureaColors.text
+            : [AureaColors.text, Color(red: 1, green: 0.45, blue: 0.45), Color(red: 0.41, green: 0.84, blue: 0.61), Color(red: 0.45, green: 0.72, blue: 1)][Int(channel)]
+    }
     private func reload() {
         points = model.engine.effectCurve(layer, effect: effect, param: param, channel: channel, samples: false).map { $0.floatValue }
         samples = model.engine.effectCurve(layer, effect: effect, param: param, channel: channel, samples: true).map { $0.floatValue }
@@ -1511,7 +1519,8 @@ private struct ColorCurveEditor: View {
             HStack(spacing: 4) {
                 ForEach(0..<4, id: \.self) { i in
                     Button { finish(); channel = UInt32(i); selected = 0; reload() } label: {
-                        Text(["RGB", "R", "G", "B"][i]).font(.aurea(size: 13)).frame(maxWidth: .infinity, minHeight: 44)
+                        Text(channelNames?[i] ?? ["RGB", "R", "G", "B"][i]).font(.aurea(size: channelNames == nil ? 13 : 10))
+                            .lineLimit(2).multilineTextAlignment(.center).frame(maxWidth: .infinity, minHeight: 44)
                             .background(channel == UInt32(i) ? AureaColors.accent.opacity(0.18) : AureaColors.chip).clipShape(RoundedRectangle(cornerRadius: 8))
                     }.buttonStyle(.plain).foregroundStyle(channel == UInt32(i) ? AureaColors.accent : AureaColors.text)
                         .accessibilityLabel(labels[i]).accessibilityAddTraits(channel == UInt32(i) ? .isSelected : [])

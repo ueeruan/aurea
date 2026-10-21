@@ -710,6 +710,11 @@ public:
     void set_rig_setup_layer(u64 layerId) noexcept { rigSetupLayer_.store(layerId, std::memory_order_relaxed); }
     [[nodiscard]] Status render_effect_preview(const EffectRegistry& effects, EffectTypeId type,
                                                u32 width, u32 height, std::vector<u8>& outRgba, bool comparison = false) noexcept;
+    /// O efeito com os valores de um PRESET sobre uma imagem da CPU (RGBA8 sRGB
+    /// de alfa reto, `width`×`height`): as miniaturas dos looks (Filtros).
+    [[nodiscard]] Status render_effect_preset_preview(const EffectRegistry& effects, EffectTypeId type, u32 width,
+                                                      u32 height, const u8* sourceRgba, const EffectPreset* preset,
+                                                      std::vector<u8>& outRgba) noexcept;
 
     /// PRÉVIA ANIMADA (ver EffectPreviewScene). `prepare` captura as fontes
     /// (a foto/cartela com folga, uma vez); cada `frame` renderiza UM quadro
@@ -1264,6 +1269,8 @@ private:
         i64 localTime = 0;
         f32 clipProgress = 0.0f;
         f32 sweep = std::numeric_limits<f32>::quiet_NaN();   ///< 0..1 da varredura; NaN = sem
+        /// Os valores do preset no lugar dos de demonstração (miniatura de look).
+        const EffectPreset* preset = nullptr;
     };
     [[nodiscard]] Status render_effect_preview_impl(const EffectRegistry& effects, EffectTypeId type, u32 width,
                                                     u32 height, const PreviewFrameSpec& spec,

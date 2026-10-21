@@ -191,10 +191,30 @@ struct EditModeView: View {
 
     private func panel(_ kind: AureaModel.PanelKind) { model.openPanel(kind) }
 
-    /// Efeito/filtro/ajuste do projeto: uma camada de ajuste por cima, e os efeitos nela.
+    /// Efeito do projeto: uma camada de ajuste por cima, e os efeitos nela. A
+    /// camada de ajuste VAZIA sob o cabeçote é reaproveitada (antes cada toque
+    /// empilhava mais um "Ajuste"; par do EditModeScreen.kt).
     private func globalEffect() {
-        model.addAdjustmentLayer()
+        let frame = model.status.playhead
+        if let empty = model.layers.first(where: { $0.adjustment && $0.effectCount == 0 && frame >= Int64($0.startFrame) && frame < Int64($0.endFrame) }) {
+            model.select(layerId: empty.id)
+        } else {
+            model.addAdjustmentLayer()
+        }
         model.openPanel(.effects)
+    }
+
+    /// 0.3.0: Filtros e Ajustar têm cada um a sua tela. No nível de cima valem
+    /// para a camada de ajuste do projeto sob o cabeçote (reaproveitada).
+    private func globalColor(_ kind: AureaModel.PanelKind) {
+        if model.status.playing != 0 { model.pause() }
+        let frame = model.status.playhead
+        if let existing = model.layers.last(where: { $0.adjustment && frame >= Int64($0.startFrame) && frame < Int64($0.endFrame) }) {
+            model.select(layerId: existing.id)
+        } else {
+            model.addAdjustmentLayer()
+        }
+        model.openPanel(kind)
     }
 
     private var mainAnchor: LayerItem? { model.layers.first { $0.id == model.mainTrackAnchor } }
@@ -225,6 +245,8 @@ struct EditModeView: View {
         let opacity = item("opacity", CupertinoGlyph.CircleLefthalfFill, "edit_clip_opacity") { panel(.appearance) }
         let mask = item("mask", ShellGlyph.SquareSplit2x2, "edit_clip_mask") { panel(.mask) }
         let animations = item("animations", CupertinoGlyph.WandStars, "edit_clip_animations") { panel(.presets) }
+        let filters = item("filters", CupertinoGlyph.ColorFilter, "edit_dock_filters") { if model.status.playing != 0 { model.pause() }; panel(.filters) }
+        let adjust = item("adjust", CupertinoGlyph.SliderHorizontal3, "edit_dock_adjust") { if model.status.playing != 0 { model.pause() }; panel(.adjust) }
         switch level {
         case .root:
             return [
@@ -241,8 +263,8 @@ struct EditModeView: View {
                 },
                 item("effects", CupertinoGlyph.Sparkles, "edit_dock_effects") { globalEffect() },
                 item("captions", CupertinoGlyph.CaptionsBubble, "edit_dock_captions") { panel(.captions) },
-                item("filters", CupertinoGlyph.ColorFilter, "edit_dock_filters") { globalEffect() },
-                item("adjust", CupertinoGlyph.SliderHorizontal3, "edit_dock_adjust") { globalEffect() },
+                item("filters", CupertinoGlyph.ColorFilter, "edit_dock_filters") { globalColor(.filters) },
+                item("adjust", CupertinoGlyph.SliderHorizontal3, "edit_dock_adjust") { globalColor(.adjust) },
                 item("ratio", CupertinoGlyph.Crop, "edit_dock_ratio") { model.showProjectSettings = true },
                 item("background", CupertinoGlyph.Paintbrush, "edit_dock_background") { model.showProjectSettings = true },
             ]
@@ -264,7 +286,7 @@ struct EditModeView: View {
         case .videoClip:
             guard let clip = model.selectedLayer else { return [] }
             let video = clip.kind == 1
-            var list = [split, item("speed", CupertinoGlyph.Speedometer, "edit_clip_speed") { panel(.speed) }, animations, effects, delete, mask]
+            var list = [split, item("speed", CupertinoGlyph.Speedometer, "edit_clip_speed") { panel(.speed) }, animations, effects, filters, adjust, delete, mask]
             if video { list.append(item("volume", CupertinoGlyph.Speaker2, "edit_clip_volume") { panel(.audio) }) }
             list += [transform, opacity, duplicate]
             if clip.kind != 12 { list.append(item("replace", CupertinoGlyph.Arrow2Squarepath, "edit_clip_replace") { replaceTarget = clip }) }
@@ -295,7 +317,7 @@ struct EditModeView: View {
                 effects, split, duplicate, delete,
             ]
         case .otherClip:
-            return [effects, transform, opacity, mask, split, duplicate, delete]
+            return [effects, filters, adjust, transform, opacity, mask, split, duplicate, delete]
         }
     }
 }
@@ -838,5 +860,481 @@ private struct CutTransitionSheet: View {
         .foregroundStyle(AureaColors.text)
         .background(AureaColors.editorPanel.ignoresSafeArea())
         .onAppear { current = model.engine.cutTransition(into: cut.incoming) }
+    }
+}
+
+// =============================================================================
+//  FILTROS e AJUSTAR do modo de edição (0.3.0) — par do ColorToolsPanels.kt.
+//  Cada um tem a sua tela (antes Efeitos, Filtros e Ajustar abriam o mesmo
+//  editor). Os dois mexem na "Correção de cor" do motor (aurea.color.grade),
+//  cada um numa instância própria (papel 1 = Filtro, 2 = Ajustar).
+// =============================================================================
+enum GradeParam {
+    static let log: UInt32 = 0, temperature: UInt32 = 1, tint: UInt32 = 2, exposure: UInt32 = 3, contrast: UInt32 = 4
+    static let pivot: UInt32 = 5, highlights: UInt32 = 6, shadows: UInt32 = 7, whites: UInt32 = 8, blacks: UInt32 = 9
+    static let brightness: UInt32 = 10, saturation: UInt32 = 11, vibrance: UInt32 = 12
+    static let lift: UInt32 = 13, liftLuma: UInt32 = 14, gamma: UInt32 = 15, gammaLuma: UInt32 = 16
+    static let gain: UInt32 = 17, gainLuma: UInt32 = 18, offset: UInt32 = 19, offsetLuma: UInt32 = 20
+    static let curves: UInt32 = 21, hueCurves: UInt32 = 22, hsl: UInt32 = 23
+    static let qualifier: UInt32 = 47, qHue: UInt32 = 48, qWidth: UInt32 = 49, qSoft: UInt32 = 54, qInvert: UInt32 = 55, qShow: UInt32 = 56
+    static let qHueShift: UInt32 = 57, qSat: UInt32 = 58, qExposure: UInt32 = 59
+    static let fade: UInt32 = 60, shadowTint: UInt32 = 61, highlightTint: UInt32 = 62, tintBalance: UInt32 = 63
+    static let sharpen: UInt32 = 64, vignette: UInt32 = 65, grain: UInt32 = 68, lutIntensity: UInt32 = 71, mix: UInt32 = 76, look: UInt32 = 78
+}
+
+private let gradeLookKeys = ["look_cinema", "look_warm", "look_cool", "look_vintage", "look_mono", "look_noir", "look_vivid",
+                             "look_faded", "look_sunset", "look_teal", "look_film", "look_anime", "look_matte"]
+
+struct GradeScopes {
+    let columns: Int
+    let histogram: [UInt32]
+    let waveform: [UInt16]
+    let parade: [UInt16]
+    let vectorscope: [UInt16]
+}
+
+extension AureaModel {
+    /// A Correção de cor com o papel `role` na camada escolhida (criada na primeira vez).
+    func colorGrade(role: UInt32) -> UInt32? {
+        guard let layer = primarySelection else { return nil }
+        let id = engine.ensureColorGrade(forLayer: layer, role: role)
+        guard id >= 0 else { return nil }
+        refreshSelectedLayer()
+        loadParams(layerId: layer, effectId: UInt32(id))
+        return UInt32(id)
+    }
+    func gradeParam(_ index: UInt32) -> EffectParamItem? { effectParams.first { $0.index == index } }
+    /// Um componente (o mesmo contrato do EffectsView: animado → chave no cabeçote).
+    func writeGrade(_ effect: UInt32, index: UInt32, component: Int = 0, value: Float) {
+        guard value.isFinite, let layer = primarySelection, let param = gradeParam(index) else { return }
+        let count = fxComponentCount(Int(param.type))
+        if param.animated {
+            engine.keyParameter(layer, property: 31, effect: effect, param: index * 4 + UInt32(component), time: localPlayhead, value: value)
+        } else if count <= 1 {
+            engine.setEffect(effect, forLayer: layer, paramIndex: index, value: value)
+        } else {
+            var v = Array((param.value + [0, 0, 0, 1]).prefix(4)); v[component] = value
+            engine.setEffectColor(effect, forLayer: layer, paramIndex: index, r: v[0], g: v[1], b: v[2], a: v[3])
+        }
+        commitPendingCommands(); loadParams(layerId: layer, effectId: effect)
+    }
+    /// O ponto inteiro (roda de cor) num comando só.
+    func writeGradePoint(_ effect: UInt32, index: UInt32, x: Float, y: Float) {
+        guard x.isFinite, y.isFinite, let layer = primarySelection, let param = gradeParam(index) else { return }
+        if param.animated {
+            engine.keyParameter(layer, property: 31, effect: effect, param: index * 4, time: localPlayhead, value: x)
+            engine.keyParameter(layer, property: 31, effect: effect, param: index * 4 + 1, time: localPlayhead, value: y)
+        } else {
+            let v = Array((param.value + [0, 0, 0, 1]).prefix(4))
+            engine.setEffectColor(effect, forLayer: layer, paramIndex: index, r: x, g: y, b: v[2], a: v[3])
+        }
+        commitPendingCommands(); loadParams(layerId: layer, effectId: effect)
+    }
+    func applyColorLook(_ look: Int32, effect: UInt32) {
+        guard let layer = primarySelection else { return }
+        if engine.applyColorLook(look, effect: effect, forLayer: layer) { refreshModel(force: true); loadParams(layerId: layer, effectId: effect) }
+    }
+    func resetColorGrade(effect: UInt32) {
+        guard let layer = primarySelection else { return }
+        if engine.resetColorGrade(effect: effect, forLayer: layer) { refreshModel(force: true); loadParams(layerId: layer, effectId: effect) }
+    }
+    nonisolated static func lookImages(from dict: [String: Any]?) -> [UIImage]? {
+        guard let dict, let data = dict["data"] as? Data,
+              let w = (dict["width"] as? NSNumber)?.intValue, let h = (dict["height"] as? NSNumber)?.intValue,
+              let n = (dict["count"] as? NSNumber)?.intValue, w > 0, h > 0, n > 0 else { return nil }
+        let bytes = w * h * 4
+        return (0..<n).compactMap { k in
+            guard data.count >= (k + 1) * bytes else { return nil }
+            return UIImage.fromRGBA(data.subdata(in: (k * bytes)..<((k + 1) * bytes)), width: w, height: h)
+        }
+    }
+    nonisolated static func gradeScopes(from dict: [String: Any]?) -> GradeScopes? {
+        guard let dict, let cols = (dict["columns"] as? NSNumber)?.intValue else { return nil }
+        func shorts(_ key: String) -> [UInt16] {
+            guard let d = dict[key] as? Data else { return [] }
+            return d.withUnsafeBytes { Array($0.bindMemory(to: UInt16.self)) }
+        }
+        let hist = (dict["histogram"] as? [NSNumber])?.map(\.uint32Value) ?? []
+        return GradeScopes(columns: cols, histogram: hist, waveform: shorts("waveform"), parade: shorts("parade"), vectorscope: shorts("vectorscope"))
+    }
+}
+
+/// Um controle deslizante de parâmetro da Correção de cor (um passo de desfazer por arrasto).
+private struct GradeSliderRow: View {
+    @EnvironmentObject private var model: AureaModel
+    let effect: UInt32
+    let index: UInt32
+    let label: String
+    let range: ClosedRange<Float>
+    var component: Int = 0
+    @State private var editing = false
+    var body: some View {
+        let value = model.gradeParam(index)?.value[safe: component] ?? 0
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(label).font(.aurea(size: 13)).foregroundStyle(AureaColors.text).lineLimit(1)
+                Spacer()
+                Text(range.upperBound - range.lowerBound > 20 ? "\(Int(value.rounded()))" : String(format: "%.2f", value))
+                    .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+            }
+            Slider(value: Binding(get: { Double(min(max(value, range.lowerBound), range.upperBound)) },
+                                  set: { model.writeGrade(effect, index: index, component: component, value: Float($0)) }),
+                   in: Double(range.lowerBound)...Double(range.upperBound),
+                   onEditingChanged: { active in
+                       if active && !editing { editing = true; model.beginGesture(label) }
+                       if !active && editing { editing = false; model.endGesture() }
+                   })
+                .frame(minHeight: 44).accessibilityLabel(label).accessibilityIdentifier("grade.slider.\(index)")
+        }.padding(.horizontal, 4)
+    }
+}
+
+private extension Array {
+    subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
+}
+
+struct EditFiltersView: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var effect: UInt32?
+    @State private var thumbs: [UIImage] = []
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let effect {
+                let look = Int((model.gradeParam(GradeParam.look)?.scalar ?? -1).rounded())
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(-1..<gradeLookKeys.count, id: \.self) { value in
+                            let label = AureaText.t(value < 0 ? "grade_none" : gradeLookKeys[value])
+                            Button { model.applyColorLook(Int32(value), effect: effect) } label: {
+                                VStack(spacing: 4) {
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 10).fill(AureaColors.chip)
+                                        if let image = thumbs[safe: value + 1] { Image(uiImage: image).resizable().scaledToFill() }
+                                    }
+                                    .frame(width: 70, height: 70).clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(value == look ? AureaColors.accent : .clear, lineWidth: 2))
+                                    Text(label).font(.aurea(size: 11)).lineLimit(1)
+                                        .foregroundStyle(value == look ? AureaColors.accent : AureaColors.text)
+                                }.frame(width: 74)
+                            }.buttonStyle(.plain).accessibilityLabel(label).accessibilityIdentifier("grade.look.\(value)")
+                        }
+                    }.padding(.horizontal, 10)
+                }
+                if look >= 0 {
+                    GradeSliderRow(effect: effect, index: GradeParam.mix, label: AureaText.t("grade_intensity"), range: 0...100)
+                        .padding(.horizontal, 10)
+                }
+                if model.selectedLayer?.adjustment == true {
+                    Text(AureaText.t("grade_global_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.horizontal, 14)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 8)
+        .onAppear { effect = model.colorGrade(role: 1); loadThumbs() }
+        .onChange(of: model.primarySelection) { _ in effect = model.colorGrade(role: 1); loadThumbs() }
+        .onChange(of: model.status.playhead / 15) { _ in loadThumbs() }
+    }
+    private func loadThumbs() {
+        // O motor fora da thread principal (o modelo é @MainActor); as imagens
+        // são montadas de volta nela.
+        let engine = model.engine
+        DispatchQueue.global(qos: .userInitiated).async {
+            var dict: [String: Any]? = nil
+            for attempt in 0..<6 {
+                dict = engine.colorLookThumbnails(144)
+                if dict != nil { break }
+                Thread.sleep(forTimeInterval: 0.16 * Double(attempt + 1))
+            }
+            let result = dict
+            DispatchQueue.main.async { if let images = AureaModel.lookImages(from: result) { thumbs = images } }
+        }
+    }
+}
+
+struct EditAdjustView: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var effect: UInt32?
+    @State private var tab = 0
+    @State private var tool = 0
+    @State private var band = 0
+    @State private var wheel = 0
+    @State private var hueCurves = false
+    @State private var scopes = false
+    @State private var scopeKind = 0
+    @State private var scopeData: GradeScopes?
+    private let tools: [(UInt32, String, ClosedRange<Float>, Float)] = [
+        (GradeParam.brightness, "grade_brightness", -100...100, 0), (GradeParam.contrast, "grade_contrast", -100...100, 0),
+        (GradeParam.saturation, "grade_saturation", 0...200, 100), (GradeParam.exposure, "grade_exposure", -5...5, 0),
+        (GradeParam.temperature, "grade_temperature", -100...100, 0), (GradeParam.tint, "grade_tint", -100...100, 0),
+        (GradeParam.highlights, "grade_highlights", -100...100, 0), (GradeParam.shadows, "grade_shadows", -100...100, 0),
+        (GradeParam.whites, "grade_whites", -100...100, 0), (GradeParam.blacks, "grade_blacks", -100...100, 0),
+        (GradeParam.vibrance, "grade_vibrance", -100...100, 0), (GradeParam.sharpen, "grade_sharpen", 0...100, 0),
+        (GradeParam.vignette, "grade_vignette", -100...100, 0), (GradeParam.grain, "grade_grain", 0...100, 0),
+        (GradeParam.fade, "grade_fade", 0...100, 0),
+    ]
+    private let bands: [(String, Color)] = [
+        ("grade_band_red", Color(red: 0.90, green: 0.22, blue: 0.21)), ("grade_band_orange", Color(red: 0.98, green: 0.55, blue: 0)),
+        ("grade_band_yellow", Color(red: 0.99, green: 0.85, blue: 0.21)), ("grade_band_green", Color(red: 0.26, green: 0.63, blue: 0.28)),
+        ("grade_band_aqua", Color(red: 0, green: 0.67, blue: 0.76)), ("grade_band_blue", Color(red: 0.12, green: 0.53, blue: 0.90)),
+        ("grade_band_purple", Color(red: 0.56, green: 0.14, blue: 0.67)), ("grade_band_magenta", Color(red: 0.85, green: 0.11, blue: 0.38)),
+    ]
+    private let wheels: [(UInt32, UInt32?, String)] = [
+        (GradeParam.lift, GradeParam.liftLuma, "grade_lift"), (GradeParam.gamma, GradeParam.gammaLuma, "grade_gamma"),
+        (GradeParam.gain, GradeParam.gainLuma, "grade_gain"), (GradeParam.offset, GradeParam.offsetLuma, "grade_offset"),
+        (GradeParam.shadowTint, nil, "grade_shadow_tint"), (GradeParam.highlightTint, nil, "grade_highlight_tint"),
+    ]
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack {
+                Button(AureaText.t("grade_scopes")) { scopes.toggle(); loadScopes() }
+                    .font(.aurea(size: 12)).padding(.horizontal, 10).frame(minHeight: 36)
+                    .background(scopes ? AureaColors.accent.opacity(0.2) : AureaColors.chip).clipShape(Capsule())
+                    .accessibilityIdentifier("grade.scopes")
+                Spacer()
+                if let effect {
+                    Button(AureaText.t("grade_reset")) { model.resetColorGrade(effect: effect) }
+                        .font(.aurea(size: 13)).frame(minHeight: 44).accessibilityIdentifier("grade.reset")
+                }
+            }.padding(.horizontal, 10)
+            if scopes { scopesView }
+            Picker("", selection: $tab) {
+                Text(AureaText.t("grade_tab_basic")).tag(0); Text(AureaText.t("grade_tab_hsl")).tag(1)
+                Text(AureaText.t("grade_tab_curves")).tag(2); Text(AureaText.t("grade_tab_wheels")).tag(3)
+                Text(AureaText.t("grade_tab_more")).tag(4)
+            }.pickerStyle(.segmented).padding(.horizontal, 10)
+            if let effect, let layer = model.primarySelection {
+                ScrollView {
+                    switch tab {
+                    case 0: basicTab(effect)
+                    case 1: hslTab(effect)
+                    case 2: curvesTab(effect, layer: layer)
+                    case 3: wheelsTab(effect)
+                    default: moreTab(effect, layer: layer)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 6)
+        .onAppear { effect = model.colorGrade(role: 2) }
+        .onChange(of: model.primarySelection) { _ in effect = model.colorGrade(role: 2) }
+        .onChange(of: model.status.modelRevision) { _ in if scopes { loadScopes() } }
+
+    }
+    @ViewBuilder private func basicTab(_ effect: UInt32) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(tools.indices, id: \.self) { i in
+                        let t = tools[i]
+                        let v = model.gradeParam(t.0)?.scalar ?? t.3
+                        let changed = abs(v - t.3) > 0.001
+                        Button { tool = i } label: {
+                            VStack(spacing: 4) {
+                                Text(changed ? "\(Int(v.rounded()))" : "•").font(.aurea(size: 11))
+                                    .frame(width: 40, height: 40).background(i == tool ? AureaColors.accent.opacity(0.2) : AureaColors.chip)
+                                    .clipShape(Circle()).foregroundStyle(changed ? AureaColors.accent : AureaColors.muted)
+                                Text(AureaText.t(t.1)).font(.aurea(size: 11)).lineLimit(1)
+                                    .foregroundStyle(i == tool ? AureaColors.accent : AureaColors.text)
+                            }.frame(width: 68)
+                        }.buttonStyle(.plain).accessibilityLabel(AureaText.t(t.1)).accessibilityIdentifier("grade.tool.\(t.0)")
+                    }
+                }.padding(.horizontal, 10)
+            }
+            let t = tools[min(max(tool, 0), tools.count - 1)]
+            GradeSliderRow(effect: effect, index: t.0, label: AureaText.t(t.1), range: t.2).padding(.horizontal, 10)
+        }
+    }
+    @ViewBuilder private func hslTab(_ effect: UInt32) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                ForEach(bands.indices, id: \.self) { i in
+                    Circle().fill(bands[i].1).frame(width: 32, height: 32)
+                        .overlay(Circle().stroke(AureaColors.text, lineWidth: i == band ? 3 : 0))
+                        .onTapGesture { band = i }.accessibilityLabel(AureaText.t(bands[i].0)).accessibilityIdentifier("grade.band.\(i)")
+                    if i < bands.count - 1 { Spacer(minLength: 0) }
+                }
+            }.padding(.horizontal, 12)
+            Text(AureaText.t(bands[band].0)).font(.aurea(size: 14)).foregroundStyle(AureaColors.text).padding(.horizontal, 14)
+            let base = GradeParam.hsl + UInt32(band * 3)
+            GradeSliderRow(effect: effect, index: base, label: AureaText.t("grade_hue"), range: -100...100)
+            GradeSliderRow(effect: effect, index: base + 1, label: AureaText.t("grade_saturation"), range: -100...100)
+            GradeSliderRow(effect: effect, index: base + 2, label: AureaText.t("grade_luminance"), range: -100...100)
+        }.padding(.horizontal, 10)
+    }
+    @ViewBuilder private func curvesTab(_ effect: UInt32, layer: Int64) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("", selection: $hueCurves) { Text("RGB").tag(false); Text(AureaText.t("grade_hue")).tag(true) }
+                .pickerStyle(.segmented).accessibilityIdentifier("grade.curves.mode")
+            if hueCurves {
+                ColorCurveEditor(layer: layer, effect: effect, param: GradeParam.hueCurves,
+                                 channelNames: [AureaText.t("grade_hue_vs_hue"), AureaText.t("grade_hue_vs_sat"),
+                                                AureaText.t("grade_hue_vs_luma"), AureaText.t("grade_luma_vs_sat")])
+                    .id("hue-\(effect)")
+            } else {
+                ColorCurveEditor(layer: layer, effect: effect, param: GradeParam.curves).id("rgb-\(effect)")
+            }
+        }.padding(.horizontal, 10)
+    }
+    @ViewBuilder private func wheelsTab(_ effect: UInt32) -> some View {
+        let w = wheels[min(max(wheel, 0), wheels.count - 1)]
+        VStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(wheels.indices, id: \.self) { i in
+                        Button(AureaText.t(wheels[i].2)) { wheel = i }.font(.aurea(size: 12)).padding(.horizontal, 10).frame(minHeight: 36)
+                            .background(i == wheel ? AureaColors.accent.opacity(0.2) : AureaColors.chip).clipShape(Capsule())
+                            .accessibilityIdentifier("grade.wheel.tab.\(i)")
+                    }
+                }.padding(.horizontal, 10)
+            }
+            let value = model.gradeParam(w.0)?.value ?? [0, 0]
+            GradeWheelView(x: value[safe: 0] ?? 0, y: value[safe: 1] ?? 0, label: AureaText.t(w.2),
+                           onBegin: { model.beginGesture(AureaText.t(w.2)) },
+                           onChange: { x, y in model.writeGradePoint(effect, index: w.0, x: x, y: y) },
+                           onEnd: { model.endGesture() })
+                .frame(width: 200, height: 200).accessibilityIdentifier("grade.wheel.\(w.0)")
+            Text(AureaText.t("grade_wheel_hint")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
+            if let luma = w.1 { GradeSliderRow(effect: effect, index: luma, label: AureaText.t("grade_luminance"), range: -100...100).padding(.horizontal, 10) }
+            if w.0 == GradeParam.shadowTint || w.0 == GradeParam.highlightTint {
+                GradeSliderRow(effect: effect, index: GradeParam.tintBalance, label: AureaText.t("grade_tint_balance"), range: -100...100).padding(.horizontal, 10)
+            }
+        }
+    }
+    @ViewBuilder private func moreTab(_ effect: UInt32, layer: Int64) -> some View {
+        let profiles = [AureaText.t("grade_log_none"), "S-Log3 (Sony)", "LogC3 (ARRI)", "V-Log (Panasonic)", "Apple Log", "Cineon"]
+        let profile = Int((model.gradeParam(GradeParam.log)?.scalar ?? 0).rounded())
+        let qualifier = (model.gradeParam(GradeParam.qualifier)?.scalar ?? 0) >= 0.5
+        VStack(alignment: .leading, spacing: 8) {
+            Text(AureaText.t("grade_log_profile")).font(.aurea(size: 13)).foregroundStyle(AureaColors.text)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(profiles.indices, id: \.self) { i in
+                        Button(profiles[i]) { model.writeGrade(effect, index: GradeParam.log, value: Float(i)) }
+                            .font(.aurea(size: 12)).padding(.horizontal, 10).frame(minHeight: 36)
+                            .background(i == profile ? AureaColors.accent.opacity(0.2) : AureaColors.chip).clipShape(Capsule())
+                            .accessibilityIdentifier("grade.log.\(i)")
+                    }
+                }
+            }
+            Text(AureaText.t("grade_lut")).font(.aurea(size: 13)).foregroundStyle(AureaColors.text)
+            CubeLutImportRow(layer: layer, effect: effect)
+            GradeSliderRow(effect: effect, index: GradeParam.lutIntensity, label: AureaText.t("grade_lut_intensity"), range: 0...100)
+            Toggle(AureaText.t("grade_secondary"), isOn: Binding(get: { qualifier },
+                set: { model.writeGrade(effect, index: GradeParam.qualifier, value: $0 ? 1 : 0) }))
+                .font(.aurea(size: 13)).accessibilityIdentifier("grade.secondary")
+            if qualifier {
+                GradeSliderRow(effect: effect, index: GradeParam.qHue, label: AureaText.t("grade_q_hue"), range: 0...360)
+                GradeSliderRow(effect: effect, index: GradeParam.qWidth, label: AureaText.t("grade_q_width"), range: 1...180)
+                GradeSliderRow(effect: effect, index: GradeParam.qSoft, label: AureaText.t("grade_q_softness"), range: 0...100)
+                ForEach([(GradeParam.qShow, "grade_q_show"), (GradeParam.qInvert, "grade_q_invert")], id: \.0) { item in
+                    Toggle(AureaText.t(item.1), isOn: Binding(get: { (model.gradeParam(item.0)?.scalar ?? 0) >= 0.5 },
+                        set: { model.writeGrade(effect, index: item.0, value: $0 ? 1 : 0) }))
+                        .font(.aurea(size: 13)).accessibilityIdentifier("grade.switch.\(item.0)")
+                }
+                GradeSliderRow(effect: effect, index: GradeParam.qHueShift, label: AureaText.t("grade_q_hue_shift"), range: -180...180)
+                GradeSliderRow(effect: effect, index: GradeParam.qSat, label: AureaText.t("grade_saturation"), range: -100...100)
+                GradeSliderRow(effect: effect, index: GradeParam.qExposure, label: AureaText.t("grade_exposure"), range: -3...3)
+            }
+            GradeSliderRow(effect: effect, index: GradeParam.pivot, label: AureaText.t("grade_pivot"), range: 0...100)
+        }.padding(.horizontal, 10)
+    }
+    private func loadScopes() {
+        guard scopes else { return }
+        let engine = model.engine
+        DispatchQueue.global(qos: .userInitiated).async {
+            let dict = engine.colorScopes(192)
+            DispatchQueue.main.async { scopeData = AureaModel.gradeScopes(from: dict) }
+        }
+    }
+    @ViewBuilder private var scopesView: some View {
+        VStack(spacing: 4) {
+            Picker("", selection: $scopeKind) {
+                Text(AureaText.t("grade_scope_histogram")).tag(0); Text(AureaText.t("grade_scope_waveform")).tag(1)
+                Text(AureaText.t("grade_scope_parade")).tag(2); Text(AureaText.t("grade_scope_vectorscope")).tag(3)
+            }.pickerStyle(.segmented)
+            Canvas { context, size in
+                guard let s = scopeData else { return }
+                switch scopeKind {
+                case 0:
+                    let peak = CGFloat(max(1, s.histogram.max() ?? 1))
+                    let colors: [Color] = [.red, .green, .blue, .white]
+                    for c in 0..<4 where s.histogram.count >= (c + 1) * 256 {
+                        var path = Path()
+                        for i in 0..<256 {
+                            let p = CGPoint(x: CGFloat(i) / 255 * size.width, y: size.height - CGFloat(s.histogram[c * 256 + i]) / peak * size.height)
+                            if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+                        }
+                        context.stroke(path, with: .color(colors[c].opacity(c == 3 ? 0.55 : 0.8)), lineWidth: 1.2)
+                    }
+                case 1, 2:
+                    let parade = scopeKind == 2
+                    let groups = parade ? 3 : 1
+                    let cols = max(1, s.columns)
+                    let source = parade ? s.parade : s.waveform
+                    let peak = Double(max(1, source.max() ?? 1))
+                    let cw = size.width / CGFloat(cols * groups), ch = size.height / 128
+                    let tint: [Color] = [.red, .green, .blue]
+                    for g in 0..<groups { for x in 0..<cols { for yb in 0..<128 {
+                        let idx = parade ? (g * cols + x) * 128 + yb : x * 128 + yb
+                        guard idx < source.count, source[idx] > 0 else { continue }
+                        let a = min(1, 0.15 + 0.85 * (Double(source[idx]) / peak).squareRoot())
+                        context.fill(Path(CGRect(x: CGFloat(g * cols + x) * cw, y: size.height - CGFloat(yb + 1) * ch, width: cw + 0.5, height: ch + 0.5)),
+                                     with: .color((parade ? tint[g] : Color(red: 0.62, green: 1, blue: 0.66)).opacity(a)))
+                    } } }
+                default:
+                    let side = min(size.width, size.height), ox = (size.width - side) / 2, cell = side / 128
+                    let peak = Double(max(1, s.vectorscope.max() ?? 1))
+                    context.stroke(Path(ellipseIn: CGRect(x: ox, y: 0, width: side, height: side)), with: .color(.white.opacity(0.2)))
+                    for vy in 0..<128 { for vx in 0..<128 {
+                        let v = s.vectorscope[safe: vy * 128 + vx] ?? 0
+                        guard v > 0 else { continue }
+                        let a = min(1, 0.2 + 0.8 * (Double(v) / peak).squareRoot())
+                        context.fill(Path(CGRect(x: ox + CGFloat(vx) * cell, y: CGFloat(vy) * cell, width: cell + 0.5, height: cell + 0.5)),
+                                     with: .color(Color(red: 0.62, green: 1, blue: 0.66).opacity(a)))
+                    } }
+                }
+            }
+            .frame(height: 118).background(Color(white: 0.06)).accessibilityIdentifier("grade.scope.view")
+        }.padding(.horizontal, 10)
+    }
+}
+
+/// Roda de cor: o ponto no disco é (cos, sen) da matiz × força, como o `wheel()`
+/// do color_grade.frag (matiz 0 = vermelho, sentido anti-horário com y para cima).
+private struct GradeWheelView: View {
+    let x: Float
+    let y: Float
+    let label: String
+    let onBegin: () -> Void
+    let onChange: (Float, Float) -> Void
+    let onEnd: () -> Void
+    @State private var dragging = false
+    var body: some View {
+        GeometryReader { geo in
+            let r = min(geo.size.width, geo.size.height) / 2
+            let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+            ZStack {
+                // Cores no sentido horário a partir das 3 h: matiz = 1 − t.
+                Circle().fill(AngularGradient(gradient: Gradient(colors: (0...12).map { Color(hue: Double((12 - $0) % 12) / 12, saturation: 1, brightness: 1) }),
+                                              center: .center, startAngle: .degrees(0), endAngle: .degrees(360)))
+                Circle().fill(RadialGradient(colors: [Color(white: 0.55), Color(white: 0.55).opacity(0)], center: .center, startRadius: 0, endRadius: r))
+                Circle().stroke(Color.white.opacity(0.35), lineWidth: 1)
+                Circle().stroke(Color.white, lineWidth: 2.5).frame(width: 18, height: 18)
+                    .background(Circle().fill(Color.black.opacity(0.45)).frame(width: 22, height: 22))
+                    .position(x: center.x + CGFloat(min(max(x, -1), 1)) * r, y: center.y - CGFloat(min(max(y, -1), 1)) * r)
+            }
+            .contentShape(Circle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                if !dragging { dragging = true; onBegin() }
+                var px = Float((value.location.x - center.x) / r), py = Float(-(value.location.y - center.y) / r)
+                let d = (px * px + py * py).squareRoot()
+                if d > 1 { px /= d; py /= d }
+                onChange(px, py)
+            }.onEnded { _ in if dragging { dragging = false; onEnd() } })
+            .simultaneousGesture(TapGesture(count: 2).onEnded { onBegin(); onChange(0, 0); onEnd() })
+        }
+        .accessibilityLabel(label)
     }
 }

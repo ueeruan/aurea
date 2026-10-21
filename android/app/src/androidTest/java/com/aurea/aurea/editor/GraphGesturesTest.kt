@@ -65,13 +65,18 @@ class GraphGesturesTest {
         }
         compose.waitUntil(5000) { store.queryKeyframeEasing(id,first)?.toList()!=original }
         compose.runOnIdle {
-            assertEquals(before.filter { it.property==1 },store.keyframes[id].orEmpty().filter { it.property==1 })
-            assertEquals(before.map { it.time to it.value },store.keyframes[id].orEmpty().map { it.time to it.value })
+            val after=store.keyframes[id].orEmpty()
+            // Tempos e valores de todos os eixos ficam. Desde a 0.3.0 a curva é da
+            // PROPRIEDADE (como no AE e no painel de curva): o Y leva a mesma interpolação.
+            assertEquals(before.map { Triple(it.property,it.time,it.value) },after.map { Triple(it.property,it.time,it.value) })
+            assertEquals(after.first { it.property==0 && it.time==0 }.interpolation,after.first { it.property==1 && it.time==0 }.interpolation)
             val h=store.queryKeyframeEasing(id,first)!!
             assertTrue(h[1]/h[0] < .9f)
             store.undo()
         }
         compose.waitUntil(5000) { store.queryKeyframeEasing(id,first)?.toList()==original }
+        // Um desfazer volta os dois eixos.
+        compose.runOnIdle { assertEquals(before.filter { it.property==1 },store.keyframes[id].orEmpty().filter { it.property==1 }) }
     }
 
     @Test fun editingRotationXKeysOnlyItsXYZGroup() {

@@ -1529,7 +1529,9 @@ std::vector<Vec4> Renderer::repeat_path(const Layer* host, u32 count, f32 phase,
     const auto toHost=affine(hostMatrix).inverse()*affine(layer_world_matrix(comp,*guide,planTime_));
     for(auto& point:contour.pts)point=toHost.apply(point);
     const double length=vector::length_of(contour); if(length<1e-6)return result;
-    count=std::min(count,64u); result.reserve(count);
+    // Teto de 2048 amostras: a Constelação põe até 2000 pontos no caminho; a
+    // Repetição (64 cópias) e o Mover no caminho (1) já pedem menos que isso.
+    count=std::min(count,2048u); result.reserve(count);
     for(u32 i=0;i<count;++i) {
         double unit=double(i)/double(contour.closed?count:std::max(1u,count-1))+phase;
         unit=contour.closed?unit-std::floor(unit):std::clamp(unit,0.,1.);
@@ -8095,6 +8097,16 @@ Status Renderer::render_effect_preview(const EffectRegistry& effects, EffectType
     return render_effect_preview_impl(effects, type, width, height, spec, outRgba);
 }
 
+Status Renderer::render_effect_preset_preview(const EffectRegistry& effects, EffectTypeId type, u32 width, u32 height,
+                                              const u8* sourceRgba, const EffectPreset* preset,
+                                              std::vector<u8>& outRgba) noexcept {
+    if (!sourceRgba || !preset) return Status{Errc::InvalidArgument, "miniatura sem fonte ou preset"};
+    PreviewFrameSpec spec;
+    spec.source = sourceRgba;
+    spec.preset = preset;
+    return render_effect_preview_impl(effects, type, width, height, spec, outRgba);
+}
+
 Status Renderer::render_effect_preview_impl(const EffectRegistry& effects, EffectTypeId type, u32 width, u32 height,
                                             const PreviewFrameSpec& spec, std::vector<u8>& outRgba) noexcept {
     const bool comparison = spec.comparison;
@@ -8261,8 +8273,20 @@ Status Renderer::render_effect_preview_impl(const EffectRegistry& effects, Effec
     std::vector<ParamValue> values(params->count());
     for (u32 i = 0; i < params->count(); ++i) values[i] = instance.params[i].constant;
     // A prévia mostra o efeito LIGADO: com os padrões de fábrica (quase sempre
-    // neutros) a cartela sairia intacta e a prévia não diria nada.
-    (void)effect->demo_values(instance, values);
+    // neutros) a cartela sairia intacta e a prévia não diria nada. Miniatura
+    // de look: os valores do preset no lugar dos de demonstração.
+    if (spec.preset) {
+        for (const EffectPresetValue& pv : spec.preset->values) {
+            if (pv.param >= values.size() || !std::isfinite(pv.value)) continue;
+            const ParamSpec& ps = params->at(pv.param);
+            ParamValue& dst = values[pv.param];
+            if (ps.type == ParamType::Bool) dst = ParamValue::boolean(pv.value >= 0.5f);
+            else if (ps.type == ParamType::Int || ps.type == ParamType::Enum) dst.v[0] = std::round(pv.value);
+            else dst.v[std::min<u32>(pv.component, 3u)] = pv.value;
+        }
+    } else {
+        (void)effect->demo_values(instance, values);
+    }
     // Sequência animada: os parâmetros de demonstração andam desde o padrão
     // (ver effect_preview_apply_sweep).
     if (std::isfinite(spec.sweep)) effect_preview_apply_sweep(*params, instance, values, spec.sweep);
@@ -8290,6 +8314,7 @@ Status Renderer::render_effect_preview_impl(const EffectRegistry& effects, Effec
     eval.placement = &placement;
     // Recurso resolvido fora do grafo (o mapa de profundidade da foto das
     // prévias); sem camada nem projeto, os outros devolvem vazio.
+    const usize previewUploadsFrom = uploads_.size();
     effect->resolve_resources(eval);
 
     const LayerImage input{plate, Rect{0.0f, 0.0f, static_cast<f32>(width), static_cast<f32>(height)}, width, height};
@@ -8424,6 +8449,22 @@ Status Renderer::render_effect_preview_impl(const EffectRegistry& effects, Effec
         }
     }
     graph_.set_output(shown, ResourceState::TransferSrc);
+
+    // Textura de DADO pedida no planejamento DESTA prévia (data_texture: a
+    // Constelação, a paleta do Quantizar cores): fora do laço de render
+    // ninguém a mandaria para a GPU antes do passe que a lê, e a prévia sairia
+    // com a textura vazia. Sobe aqui, no frame aberto, antes dos passes; só os
+    // pedidos novos — os da composição seguem para o próximo quadro.
+    {
+        usize keep = std::min(previewUploadsFrom, uploads_.size());
+        for (usize i = keep; i < uploads_.size(); ++i) {
+            PendingUpload& up = uploads_[i];
+            if (backend_->upload_texture(up.texture, up.data.data(), up.bytesPerRow).ok()) continue;
+            if (keep != i) uploads_[keep] = std::move(up);
+            ++keep;
+        }
+        uploads_.resize(keep);
+    }
 
     const Status compiled = graph_.compile(pool_);
     if (compiled.ok()) {

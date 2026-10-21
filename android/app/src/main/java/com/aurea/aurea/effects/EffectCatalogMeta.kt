@@ -147,7 +147,7 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.stylize.halftone", EffectMeta(R.string.fx_desc_stylize_halftone, AllTargets))
     put("aurea.stylize.minimax", EffectMeta(R.string.fx_desc_stylize_minimax, AllTargets))
     put("aurea.stylize.omino_diffusion", EffectMeta(R.string.fx_desc_omino_diffusion, AllTargets))
-    put("aurea.stylize.pixel_sort", EffectMeta(R.string.fx_desc_stylize_pixel_sort, AllTargets))
+    put("aurea.stylize.pixel_sort", EffectMeta(R.string.fx030_desc_pixel_sort, AllTargets))
     put("aurea.stylize.film_damage", EffectMeta(R.string.fx_desc_stylize_film_damage, AllTargets))
     put("aurea.stylize.jpeg_damage", EffectMeta(R.string.fx_desc_stylize_jpeg_damage, AllTargets))
     put("aurea.stylize.holomatrix", EffectMeta(R.string.fx_desc_stylize_holomatrix, AllTargets))
@@ -180,6 +180,13 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         R.string.fx027_desc_random_edits,
         listOf(EffectTarget.Video, EffectTarget.PreComposicao),
         "edicoes aleatorias random edits cortes embaralhar jump cut",
+    ))
+    put("aurea.color.grade", EffectMeta(R.string.fx030_desc_color_grade, AllTargets,
+        "correcao de cor color grade grading lumetri resolve log lut rodas hsl curvas"))
+    put("aurea.time.wide_time", EffectMeta(
+        R.string.fx030_desc_wide_time,
+        AllTargets,
+        "wide time cc tempo amplo rastro eco borrao quadros frente tras trail",
     ))
     put("aurea.time.slice", EffectMeta(
         R.string.fx_desc_time_slice,
@@ -221,8 +228,10 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     // --- Geradores e recorte do editor antigo ---
     put("aurea.generate.fractal_noise", EffectMeta(R.string.fx_desc_generate_fractal_noise, AllTargets,
         "fractal noise nuvem fumaca textura turbulencia"))
-    put("aurea.generate.aurora", EffectMeta(R.string.fx027_desc_aurora, AllTargets,
-        "aurora boreal northern lights ceu estrelas reflexo polar"))
+    put("aurea.generate.aurora", EffectMeta(R.string.fx030_desc_aurora, AllTargets,
+        "aurora boreal northern lights ceu estrelas reflexo polar 3d camera"))
+    put("aurea.generate.constellation", EffectMeta(R.string.fx030c_desc, AllTargets,
+        "constelacao plexus rede pontos linhas triangulos conexoes 3d camera"))
     put("aurea.generate.gradient_ramp", EffectMeta(R.string.fx_desc_generate_gradient_ramp, AllTargets,
         "ramp gradiente degrade linear radial"))
     put("aurea.generate.four_color_gradient", EffectMeta(R.string.fx_desc_generate_four_color_gradient, AllTargets,

@@ -85,9 +85,27 @@ def model_members(source):
     return members
 
 
+def extension_bodies(source, type_name):
+    """Corpos de `extension <tipo> { ... }` (chaves casadas) — membros declarados fora do arquivo do tipo."""
+    bodies = []
+    for match in re.finditer(r"\bextension\s+%s\b[^{]*\{" % re.escape(type_name), source):
+        depth, i = 1, match.end()
+        while i < len(source) and depth:
+            depth += {"{": 1, "}": -1}.get(source[i], 0)
+            i += 1
+        bodies.append(source[match.end():i - 1])
+    return bodies
+
+
 def main():
     model_source = strip_comments(read(os.path.join(APP, "AureaModel.swift")))
     members = model_members(model_source)
+    # Membros em `extension AureaModel` de outros arquivos (EditModeView.swift: a Correção de cor).
+    for base, _, files in os.walk(APP):
+        for name in files:
+            if name.endswith(".swift") and name != "AureaModel.swift":
+                for body in extension_bodies(strip_comments(read(os.path.join(base, name))), "AureaModel"):
+                    members |= model_members(body)
     # O que a sessao expoe por extensao (AureaEngine.run, etc).
     for extra in ["engine", "device", "toast", "language", "showExport", "showAddLayer",
                   "fullscreen", "panel", "searchQuery", "sort", "exportOptions", "showPerf",

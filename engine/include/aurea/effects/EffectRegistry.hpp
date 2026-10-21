@@ -79,6 +79,8 @@ namespace effect_keys {
     inline constexpr const char* kColorMatrix        = "aurea.color.matrix";
     inline constexpr const char* kLevels             = "aurea.color.levels";
     inline constexpr const char* kCurves             = "aurea.color.curves";
+    /// O corretor de cor completo (0.3.0, ColorGradeEffect.cpp).
+    inline constexpr const char* kColorGrade         = "aurea.color.grade";
     inline constexpr const char* kGaussianBlur       = "aurea.blur.gaussian";
     inline constexpr const char* kSharpen            = "aurea.blur.sharpen";
     inline constexpr const char* kGlow               = "aurea.light.glow";
@@ -274,6 +276,10 @@ namespace effect_keys {
     /// exato dos contornos na camada vetorial (Effect::vector_progress), varredura
     /// nas outras (DrawingProgressEffect.cpp).
     inline constexpr const char* kDrawingProgress      = "aurea.draw.drawing_progress";
+    // --- 0.3.0 ---
+    /// Constelação (3D): pontos 3D ligados por linhas quando perto, com faces,
+    /// ruído, campo esférico e a câmera da composição (ConstellationEffect.cpp).
+    inline constexpr const char* kConstellation        = "aurea.generate.constellation";
 }
 
 /// Teto do atraso do Detectar movimento (quadros). O renderer decodifica a

@@ -152,6 +152,8 @@ data class PreviewState(
 
 /** `aurea::Errc::UnsupportedFormat` (core/Result.hpp). */
 private const val ERRC_UNSUPPORTED_FORMAT = 17L
+/** Linhas de parâmetro lidas por efeito (o iOS dobra o buffer quando enche; aqui cabe o maior efeito). */
+private const val MAX_EFFECT_PARAM_ROWS = 128
 /** `aurea::Errc::IoError` / `StorageFull` (TEMP_STORAGE_FULL). */
 private const val ERRC_IO = 10
 private const val ERRC_STORAGE_FULL = 28
@@ -907,8 +909,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private val statusBuffer = directBuffer(PodLayout.STATUS_BYTES)
     private val perfBuffer = directBuffer(PerfStats.BYTES)
     private val detailBuffer = directBuffer(LayerDetail.BYTES)
-    private val rowBuffer = directBuffer(64 * EffectParam.ROW_BYTES)
-    private val textBlob = directBuffer(16 * 1024)
+    // 0.3.0: a Correção de cor tem 79 parâmetros e a Constelação 65; com 64 linhas
+    // o papel, o look e a intensidade (77, 78, 76) não chegavam à interface.
+    private val rowBuffer = directBuffer(MAX_EFFECT_PARAM_ROWS * EffectParam.ROW_BYTES)
+    private val textBlob = directBuffer(32 * 1024)
     private val status = EngineStatus()
 
     // =========================================================================
@@ -2816,7 +2820,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         val res = getApplication<Application>().resources
         effectParams = effects.associate { e ->
-            val n = engine.queryEffectParams(id, e.effectId, rowBuffer, 64, textBlob)
+            val n = engine.queryEffectParams(id, e.effectId, rowBuffer, MAX_EFFECT_PARAM_ROWS, textBlob)
             e.effectId to localizeEffectParams(res, e.typeId, List(max(0, n)) { EffectParam.read(rowBuffer, it, textBlob) })
         }
     }
@@ -5799,6 +5803,68 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshNow()
             refreshDetail()
         }
+    }
+
+    // --- Correção de cor no modo de edição (0.3.0, engine/src/engine/EngineColor.cpp) ---
+    /**
+     * A "Correção de cor" com o papel [role] (1 Filtro, 2 Ajustar) na camada
+     * escolhida: a que existe ou uma nova (o motor decide a ordem). Nulo = sem
+     * camada ou o motor recusou (travada, pilha cheia).
+     */
+    fun colorGradeFor(role: Int): Int? {
+        val id = primary ?: return null
+        val effectId = engine.ensureColorGrade(id, role)
+        if (effectId < 0) return null
+        if (effects.none { it.effectId == effectId }) { refreshNow(); refreshDetail() }
+        return effectId
+    }
+
+    /** O look [look] (−1 = nenhum) no Filtro [effectId]: um passo de desfazer. */
+    fun applyColorLook(effectId: Int, look: Int) {
+        val id = primary ?: return
+        if (engine.applyColorLook(id, effectId, look)) { refreshNow(); refreshDetail() }
+    }
+
+    /** Todos os ajustes de cor ao padrão (menos a intensidade). */
+    fun resetColorGrade(effectId: Int) {
+        val id = primary ?: return
+        if (engine.resetColorGrade(id, effectId)) { refreshNow(); refreshDetail() }
+    }
+
+    /** Miniaturas dos looks sobre o quadro do cabeçote (a 0 é o quadro sem look). Nulo = ocupado. */
+    fun colorLookThumbnails(maxDim: Int): List<Bitmap>? {
+        val generation = projectGeneration
+        val cap = maxDim * maxDim * 4 * 16
+        val buf = directBuffer(cap)
+        val size = IntArray(3)
+        if (!engine.renderColorLooks(maxDim, buf, size) || projectGeneration != generation) return null
+        val (w, h, n) = Triple(size[0], size[1], size[2])
+        if (w <= 0 || h <= 0 || n <= 0) return null
+        val bytes = w * h * 4
+        return List(n) { k ->
+            val pixels = IntArray(w * h)
+            for (i in 0 until w * h) {
+                val o = k * bytes + i * 4
+                val r = buf.get(o).toInt() and 0xff; val g = buf.get(o + 1).toInt() and 0xff
+                val b = buf.get(o + 2).toInt() and 0xff; val a = buf.get(o + 3).toInt() and 0xff
+                pixels[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
+            }
+            Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+        }
+    }
+
+    /** Os scopes do quadro do cabeçote (engine Scopes). Nulo = sem quadro. */
+    class Scopes(val width: Int, val height: Int, val columns: Int, val histogram: IntArray,
+                 val waveform: ShortArray, val parade: ShortArray, val vectorscope: ShortArray)
+    fun colorScopes(maxDim: Int): Scopes? {
+        val columns = maxDim.coerceIn(32, 256)
+        val histogram = IntArray(1024)
+        val waveform = ShortArray(columns * 128)
+        val parade = ShortArray(columns * 128 * 3)
+        val vectorscope = ShortArray(128 * 128)
+        val size = IntArray(3)
+        if (!engine.computeScopes(maxDim, histogram, waveform, parade, vectorscope, size)) return null
+        return Scopes(size[0], size[1], size[2], histogram, waveform, parade, vectorscope)
     }
 
     /** Roto Brush (editor/RotoPaint.kt): depois de traço/desfazer no motor. */

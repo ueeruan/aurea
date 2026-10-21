@@ -117,39 +117,94 @@ struct TextAppearanceControls: View {
     }
 }
 
+/// TextPathSection.kt (opções completas do 0.2.7, as Path Options do After Effects): o caminho
+/// vem de uma camada vetorial OU de uma máscara da própria camada (que, usada como caminho, não
+/// recorta o texto); margens inicial e final animáveis, forçar alinhamento, perpendicular e sentido.
 private struct NativeTextPathSection: View {
     @EnvironmentObject private var model: AureaModel
     @State private var target: Int64 = 0
-    @State private var offset: Float = 0
-    @State private var perpendicular = false
+    @State private var mask: Int32 = -1
+    @State private var firstMargin: Float = 0
+    @State private var lastMargin: Float = 0
+    @State private var perpendicular = true
     @State private var reversed = false
+    @State private var forceAlign = false
+    @State private var ownMasks: [UInt32] = []
     private var id: Int64 { model.primarySelection ?? 0 }
+    private var onPath: Bool { target != 0 || mask >= 0 }
     private var candidates: [LayerItem] { model.layers.filter { $0.id != id && $0.kind == 5 && ((model.engine.layerDetail($0.id)?["shapeTypePoints"] as? NSNumber)?.uint32Value ?? 0) & 0xFFFF == 11 } }
+    /// Máscaras da camada de texto (cabeçalho de 12 valores por máscara em `maskData`, como `refreshMasks`).
+    private func loadMasks() {
+        let data = model.engine.maskData(id).map(\.floatValue)
+        var ids: [UInt32] = []
+        if data.count >= 7 {
+            var offset = 7
+            for _ in 0..<Int(data[6]) {
+                guard offset + 12 <= data.count else { break }
+                let count = Int(data[offset + 7]) * 6
+                ids.append(UInt32(data[offset]))
+                offset += 12 + max(0, count)
+            }
+        }
+        ownMasks = ids
+    }
     private func load() {
-        let v = model.engine.textPath(id)
-        guard v.count >= 4 else { return }
-        target = v[0].int64Value; offset = v[1].floatValue; perpendicular = v[2].boolValue; reversed = v[3].boolValue
+        loadMasks()
+        let v = model.engine.textPathOptions(id)
+        guard v.count >= 7 else { return }
+        target = v[0].int64Value; firstMargin = v[1].floatValue; perpendicular = v[2].boolValue; reversed = v[3].boolValue
+        mask = v[4].int32Value; lastMargin = v[5].floatValue; forceAlign = v[6].boolValue
     }
     private func write() {
-        _ = model.engine.setTextPath(id, target: target, offset: offset, perpendicular: perpendicular, reversed: reversed)
+        _ = model.engine.setTextPathOptions(id, target: mask >= 0 ? 0 : target, mask: mask, firstMargin: firstMargin, lastMargin: lastMargin,
+                                            perpendicular: perpendicular, reversed: reversed, forceAlign: forceAlign)
         model.refreshModel(force: true); load()
+    }
+    /// Margens animáveis (TrackProperty.TEXT_PATH_FIRST_MARGIN = 46, LAST = 47), o losango do Android.
+    private func marginRow(_ key: String, property: UInt32, value: Float, identifier: String, set: @escaping (Float) -> Void) -> some View {
+        let keys = (model.keyframes[id] ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }
+        let here = keys.contains { $0.time == model.localPlayhead }
+        return NativePanelRuler(label: AureaText.t(key), value: value, step: 1, range: -20000...20000, unit: "px", keypad: true,
+            look: here ? .keyHere : keys.isEmpty ? .none : .animated, toggleKey: {
+                guard !(model.selectedLayer?.locked ?? false) else { return }
+                let layer = id
+                model.mutate { engine in
+                    if here { engine.deleteKeyframe(forLayer: layer, property: property, time: model.localPlayhead) }
+                    else { engine.insertKeyframe(forLayer: layer, property: property, time: model.localPlayhead, value: value) }
+                }
+                model.refreshModel(force: true); load()
+            }, identifier: identifier, set: set)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(AureaText.t("panel_texto_caminho")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 6)
-            if candidates.isEmpty && target == 0 {
-                Text(AureaText.t("panel_crie_camada_vetorial_desenho_vetorial_servir")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.vertical, 8)
+            if candidates.isEmpty && ownMasks.isEmpty && !onPath {
+                Text(AureaText.t("text027_path_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.vertical, 8)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        NativePanelChip(AureaText.t("panel_linha_reta"), selected: target == 0) { target = 0; write() }
-                        ForEach(candidates) { layer in NativePanelChip(layer.name, selected: target == layer.id) { target = layer.id; write() } }
+                        NativePanelChip(AureaText.t("panel_linha_reta"), selected: !onPath) { target = 0; mask = -1; write() }
+                            .accessibilityIdentifier("text.path.none")
+                        ForEach(Array(ownMasks.enumerated()), id: \.offset) { n, m in
+                            NativePanelChip(AureaText.t("text027_path_mask", n + 1), selected: mask == Int32(m)) { target = 0; mask = Int32(m); write() }
+                                .accessibilityIdentifier("text.path.mask.\(n)")
+                        }
+                        ForEach(candidates) { layer in
+                            NativePanelChip(layer.name.isEmpty ? AureaText.t("panel_vetor") : layer.name, selected: mask < 0 && target == layer.id) { target = layer.id; mask = -1; write() }
+                                .accessibilityIdentifier("text.path.layer.\(layer.id)")
+                        }
                     }.frame(height: 44)
                 }
-                if target != 0 {
-                    NativePanelRuler(label: AureaText.t("panel_margem_inicial"), value: offset, step: 1, range: -20000...20000, unit: "px", plainLabelWidth: 110) { offset = $0; write() }
+                if onPath {
+                    marginRow("panel_margem_inicial", property: 46, value: firstMargin, identifier: "text.path.first.key") { firstMargin = $0; write() }
+                    marginRow("text027_path_last_margin", property: 47, value: lastMargin, identifier: "text.path.last.key") { lastMargin = $0; write() }
+                    NativePanelToggle(AureaText.t("text027_path_force_align"), checked: forceAlign, fontSize: 13, weight: .regular) { forceAlign = $0; write() }
+                        .accessibilityIdentifier("text.path.force")
                     NativePanelToggle(AureaText.t("panel_perpendicular_caminho"), checked: perpendicular, fontSize: 13, weight: .regular) { perpendicular = $0; write() }
+                        .accessibilityIdentifier("text.path.perpendicular")
                     NativePanelToggle(AureaText.t("panel_inverter_sentido"), checked: reversed, fontSize: 13, weight: .regular) { reversed = $0; write() }
+                        .accessibilityIdentifier("text.path.reverse")
+                    Text(AureaText.t("text027_path_alignment_note")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.vertical, 6)
                 }
             }
         }.onAppear { load() }.onChange(of: id) { _ in load() }.onChange(of: model.status.modelRevision) { _ in load() }

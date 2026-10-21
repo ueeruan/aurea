@@ -19,13 +19,20 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
 import com.aurea.aurea.ui.theme.AureaColors
 import kotlin.math.roundToInt
 
 /** The graph uses the same native spline as the rendered LUT. */
 @Composable
-internal fun ColorCurveEditor(env: PanelEnv, effect: Int, param: Int) {
+internal fun ColorCurveEditor(
+    env: PanelEnv, effect: Int, param: Int,
+    /** Nomes dos 4 canais (curvas de matiz da Correção de cor); nulo = RGB/R/G/B. */
+    channelNames: List<String>? = null,
+    /** Faixa de matiz embaixo do gráfico (eixo x = matiz). */
+    hueBackdrop: Boolean = false,
+) {
     val store = env.store
     val layer = store.primary ?: return
     var channel by remember(layer, effect) { mutableIntStateOf(0) }
@@ -47,14 +54,15 @@ internal fun ColorCurveEditor(env: PanelEnv, effect: Int, param: Int) {
     }
     LaunchedEffect(layer, effect, param, channel, store.sceneSettingsRevision) { if (!gesturing) reload() }
     DisposableEffect(layer, effect, param) { onDispose { finish() } }
-    val channelLabels = listOf("RGB", stringResource(R.string.curve_color_red), stringResource(R.string.curve_color_green), stringResource(R.string.curve_color_blue))
+    val channelLabels = channelNames ?: listOf("RGB", stringResource(R.string.curve_color_red), stringResource(R.string.curve_color_green), stringResource(R.string.curve_color_blue))
     val graphLabel = stringResource(R.string.curve_color_graph)
-    val color = listOf(AureaColors.Text, Color(0xffff7474), Color(0xff68d69b), Color(0xff73b8ff))[channel]
+    val color = if (channelNames != null) AureaColors.Text else listOf(AureaColors.Text, Color(0xffff7474), Color(0xff68d69b), Color(0xff73b8ff))[channel]
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             channelLabels.forEachIndexed { index, label ->
                 FilterChip(channel == index, { finish(); channel = index; selected = 0 },
-                    label = { Text(if (index == 0) label else listOf("", "R", "G", "B")[index]) },
+                    label = { Text(if (index == 0 || channelNames != null) label else listOf("", "R", "G", "B")[index],
+                        fontSize = if (channelNames != null) 10.sp else androidx.compose.ui.unit.TextUnit.Unspecified, maxLines = 2) },
                     modifier = Modifier.weight(1f).heightIn(min = 44.dp).testTag("fx.curve.channel.$index").semantics { contentDescription = label })
             }
         }
@@ -92,6 +100,12 @@ internal fun ColorCurveEditor(env: PanelEnv, effect: Int, param: Int) {
             }) {
             val pad = 18.dp.toPx(); val w = size.width - 2 * pad; val h = size.height - 2 * pad
             fun at(x: Float, y: Float) = Offset(pad + x * w, pad + (1 - y) * h)
+            // Curvas de matiz: o eixo x é a matiz (canais 0–2); o 4º canal é a luz.
+            if (hueBackdrop && channel < 3) {
+                val hues = List(13) { Color.hsv(it * 30f % 360f, .8f, .9f) }
+                drawRect(androidx.compose.ui.graphics.Brush.horizontalGradient(hues, pad, pad + w),
+                    Offset(pad, size.height - pad + 4.dp.toPx()), androidx.compose.ui.geometry.Size(w, 6.dp.toPx()))
+            }
             for (i in 0..4) {
                 val v = i / 4f
                 drawLine(AureaColors.Muted.copy(alpha = .18f), at(v, 0f), at(v, 1f))

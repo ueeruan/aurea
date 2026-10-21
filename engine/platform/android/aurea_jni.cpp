@@ -2904,6 +2904,69 @@ AUREA_JNI jboolean AUREA_FN(nativeApplyEffectPreset)(JNIEnv*, jclass, jlong hand
         && c->engine.apply_effect_preset(static_cast<u64>(layer), static_cast<u32>(effectId), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
 }
 
+// --- Correção de cor no modo de edição (0.3.0, EngineColor.cpp) --------------
+AUREA_JNI jint AUREA_FN(nativeEnsureColorGrade)(JNIEnv*, jclass, jlong handle, jlong layer, jint role) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || role < 1 || role > 2) return -1;
+    const u32 id = c->engine.ensure_color_grade(static_cast<u64>(layer), static_cast<u32>(role));
+    return id == kInvalidIndex ? -1 : static_cast<jint>(id);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeApplyColorLook)(JNIEnv*, jclass, jlong handle, jlong layer, jint effectId, jint look) {
+    NativeContext* c = ctx_of(handle);
+    return c && effectId >= 0 && c->engine.apply_color_look(static_cast<u64>(layer), static_cast<u32>(effectId), look)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeResetColorGrade)(JNIEnv*, jclass, jlong handle, jlong layer, jint effectId) {
+    NativeContext* c = ctx_of(handle);
+    return c && effectId >= 0 && c->engine.reset_color_grade(static_cast<u64>(layer), static_cast<u32>(effectId))
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+/// As miniaturas dos looks (RGBA8 sRGB em sequência) em `out`; `outSize` =
+/// largura, altura, quantidade (a 0 é o quadro sem look). Falso = ocupado/sem GPU.
+AUREA_JNI jboolean AUREA_FN(nativeRenderColorLooks)(JNIEnv* env, jclass, jlong handle, jint maxDim, jobject out,
+                                                    jintArray outSize) {
+    NativeContext* c = ctx_of(handle);
+    auto* dst = static_cast<u8*>(buffer_ptr(env, out));
+    if (!c || !dst || maxDim <= 0) return JNI_FALSE;
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0, n = 0;
+    if (!c->engine.render_color_looks(static_cast<u32>(maxDim), rgba, w, h, n).ok()) return JNI_FALSE;
+    if (rgba.empty() || static_cast<jlong>(rgba.size()) > buffer_capacity(env, out)) return JNI_FALSE;
+    std::memcpy(dst, rgba.data(), rgba.size());
+    if (outSize && env->GetArrayLength(outSize) >= 3) {
+        const jint whn[3] = {static_cast<jint>(w), static_cast<jint>(h), static_cast<jint>(n)};
+        env->SetIntArrayRegion(outSize, 0, 3, whn);
+    }
+    return JNI_TRUE;
+}
+
+/// Scopes do quadro do cabeçote. `histogram` 1024 (R, G, B, luz × 256);
+/// `waveform` colunas×128; `parade` 3×colunas×128; `vectorscope` 128×128.
+/// `outSize` = largura, altura e colunas da amostra.
+AUREA_JNI jboolean AUREA_FN(nativeComputeScopes)(JNIEnv* env, jclass, jlong handle, jint maxDim, jintArray histogram,
+                                                 jshortArray waveform, jshortArray parade, jshortArray vectorscope,
+                                                 jintArray outSize) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || maxDim <= 0 || !histogram || !waveform || !parade || !vectorscope || !outSize) return JNI_FALSE;
+    Engine::Scopes s;
+    if (!c->engine.compute_scopes(static_cast<u32>(maxDim), s).ok()) return JNI_FALSE;
+    if (env->GetArrayLength(histogram) < 1024 || env->GetArrayLength(vectorscope) < 128 * 128
+        || env->GetArrayLength(waveform) < static_cast<jsize>(s.waveform.size())
+        || env->GetArrayLength(parade) < static_cast<jsize>(s.parade.size()) || env->GetArrayLength(outSize) < 3)
+        return JNI_FALSE;
+    std::vector<jint> hist(s.histogram.begin(), s.histogram.end());
+    env->SetIntArrayRegion(histogram, 0, 1024, hist.data());
+    env->SetShortArrayRegion(waveform, 0, static_cast<jsize>(s.waveform.size()), reinterpret_cast<const jshort*>(s.waveform.data()));
+    env->SetShortArrayRegion(parade, 0, static_cast<jsize>(s.parade.size()), reinterpret_cast<const jshort*>(s.parade.data()));
+    env->SetShortArrayRegion(vectorscope, 0, 128 * 128, reinterpret_cast<const jshort*>(s.vectorscope.data()));
+    const jint size[3] = {static_cast<jint>(s.width), static_cast<jint>(s.height), static_cast<jint>(s.columns)};
+    env->SetIntArrayRegion(outSize, 0, 3, size);
+    return JNI_TRUE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetGroupCameraPassThrough)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_group_camera_pass_through(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;

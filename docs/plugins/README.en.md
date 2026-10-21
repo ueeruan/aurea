@@ -389,8 +389,12 @@ end depends on a computed value.
    app.
 3. To compile on a computer first, prepend the section 4 header to your file and
    run the Vulkan SDK `glslangValidator -V` (the same compiler, glslang).
-4. Copy the `.aureaplugin` to the device and install it from the app. A refusal
-   names the file and line.
+4. Copy the `.aureaplugin` (or the `.fs`) to the device and install it from the
+   app: **Effects → "Plugins: install and manage" → Install plugin** (Android
+   and iOS). The same screen shows the author, version, whether the plugin
+   works on this device and the test-frame time, and removes it. The effect
+   appears in the **Plugins** group of the browser. A refusal names the file
+   and line.
 5. Test the effect on a layer with transparency, on a small layer in a big frame
    and in an export: the result must match the preview.
 

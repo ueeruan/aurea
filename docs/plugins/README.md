@@ -393,8 +393,11 @@ laço cujo fim depende de um valor calculado.
 3. Para compilar o GLSL no computador antes, junte o cabeçalho da seção 4 com
    o seu arquivo e use o `glslangValidator -V` do Vulkan SDK (o mesmo
    compilador, glslang).
-4. Copie o `.aureaplugin` para o aparelho e instale pelo app. A mensagem de
-   recusa diz o arquivo e a linha.
+4. Copie o `.aureaplugin` (ou o `.fs`) para o aparelho e instale pelo app:
+   **Efeitos → "Plugins: instalar e gerenciar" → Instalar plugin** (Android e
+   iOS). A mesma tela mostra autor, versão, se o plugin funciona neste aparelho
+   e o tempo do quadro de teste, e remove. O efeito aparece no grupo
+   **Plugins** do navegador. A mensagem de recusa diz o arquivo e a linha.
 5. Teste o efeito numa camada com transparência, numa camada pequena num
    quadro grande e no export: o resultado deve ser o mesmo do preview.
 

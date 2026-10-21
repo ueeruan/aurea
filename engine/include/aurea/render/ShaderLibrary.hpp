@@ -199,8 +199,30 @@ public:
     /// (sem tocar no cache). `ShaderId::Count` desliga.
     void set_test_failing_shader(ShaderId id) noexcept { testFailing_ = id; }
 
+    // --- Shaders de runtime (plugins, RuntimeShaders.hpp) ---------------------
+    //
+    // Um `ShaderId` acima de `kRuntimeShaderBase` não é do enum gerado: é um
+    // shader de plugin registrado em `runtime_shaders`. A biblioteca cria o
+    // módulo do backend na primeira vez que um pipeline o pede (como os
+    // embutidos adiados) e, quando o registro some (plugin removido ou
+    // reinstalado), solta o módulo e todo pipeline que o usava.
+
+    /// Mensagem do backend (tradutor ou driver) do último fracasso ao criar o
+    /// shader de runtime `id`; vazio = nenhum.
+    [[nodiscard]] std::string runtime_shader_error(ShaderId id) const;
+    /// Shaders de runtime com módulo vivo nesta biblioteca (testes).
+    [[nodiscard]] u32 runtime_shader_count() const noexcept {
+        u32 n = 0;
+        for (const auto& [id, entry] : runtime_) n += entry.handle.valid() ? 1u : 0u;
+        return n;
+    }
+
 private:
     [[nodiscard]] bool ensure_shader(ShaderId id) noexcept;
+    [[nodiscard]] bool ensure_runtime_shader(ShaderId id) noexcept;
+    /// Solta os módulos e pipelines de shaders de runtime que saíram do registro.
+    void sweep_runtime_shaders() noexcept;
+    [[nodiscard]] const char* shader_name(ShaderId id, std::string& storage) const;
     GPUBackend* backend_ = nullptr;
     bool deferredShaders_ = false;
     ShaderId testFailing_ = ShaderId::Count;
@@ -224,6 +246,14 @@ private:
     PipelineCreationProbe pipelineProbe_ = nullptr;
     void* pipelineProbeContext_ = nullptr;
     std::string lastError_;
+
+    struct RuntimeShader {
+        ShaderHandle handle{};
+        u32 retryRequests = 0;   ///< recusado: pedidos até tentar de novo
+        std::string error;
+    };
+    std::unordered_map<u16, RuntimeShader> runtime_;
+    u64 runtimeGeneration_ = 0;
 };
 
 } // namespace aurea

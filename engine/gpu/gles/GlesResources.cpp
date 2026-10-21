@@ -1,5 +1,6 @@
 #include "GlesInternal.hpp"
 #include "aurea/scene3d/Environment.hpp"
+#include "ShaderTranslate.hpp"
 #include <limits>
 #include <cstdio>
 #include <cstdlib>
@@ -194,13 +195,17 @@ void Backend::destroy_sampler(SamplerHandle h) noexcept {
     auto& d = *impl_; Impl::Scope scope(d); auto it = d.samplers.find(h.id);
     if (scope.valid && it != d.samplers.end()) { glDeleteSamplers(1, &it->second.id); d.samplers.erase(it); }
 }
-Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
-    auto& d = *impl_; Impl::Scope scope(d); if (!scope.valid) return Status{Errc::InvalidState};
-    const char* source = shader_source(desc.spirv, desc.spirvBytes);
-    if (!source) return Status{Errc::ShaderCompileFailed, "SPIR-V has no matching build-time ES translation"};
+/// Compila um ESSL já pronto (do build ou do tradutor de runtime) no driver.
+/// `error` recebe o log do compilador do GL quando ele recusa. Chamado sob o
+/// escopo de contexto de quem pediu.
+Result<ShaderHandle> Backend::compile_essl(const ShaderDesc& desc, const char* source, std::string* error) noexcept {
+    auto& d = *impl_;
     Shader shader; shader.id = glCreateShader(desc.stage == ShaderStage::Vertex ? GL_VERTEX_SHADER
         : desc.stage == ShaderStage::Fragment ? GL_FRAGMENT_SHADER : GL_COMPUTE_SHADER);
-    if (!shader.id) return Status{Errc::ShaderCompileFailed, "GLES shader object creation failed"};
+    if (!shader.id) {
+        if (error) *error = "GLES shader object creation failed";
+        return Status{Errc::ShaderCompileFailed, "GLES shader object creation failed"};
+    }
     const char* tracing = std::getenv("AUREA_GLES_SHADER_TRACE");
     const bool trace = tracing && std::strcmp(tracing, "1") == 0;
     if (trace) {
@@ -217,6 +222,7 @@ Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
     if (!ok) {
         char log[8192]{}; glGetShaderInfoLog(shader.id, sizeof(log), nullptr, log);
         AUREA_LOG_ERROR("GLES shader %s: %s", desc.debugName ? desc.debugName : "", log);
+        if (error) *error = std::string("driver GLES: ") + log;
         glDeleteShader(shader.id); return Status{Errc::ShaderCompileFailed};
     }
     shader.hash = 14695981039346656037ull;
@@ -224,6 +230,31 @@ Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
     // Translator fixes must invalidate binaries even when the SPIR-V is unchanged.
     for (const char* p = source; *p; ++p) { shader.hash ^= static_cast<u8>(*p); shader.hash *= 1099511628211ull; }
     const u64 id = d.nextId++; d.shaders.emplace(id, shader); return ShaderHandle{id};
+}
+
+Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
+    auto& d = *impl_; Impl::Scope scope(d); if (!scope.valid) return Status{Errc::InvalidState};
+    const char* source = shader_source(desc.spirv, desc.spirvBytes);
+    if (!source) return Status{Errc::ShaderCompileFailed, "SPIR-V has no matching build-time ES translation"};
+    return compile_essl(desc, source, nullptr);
+}
+
+Result<ShaderHandle> Backend::create_runtime_shader(const ShaderDesc& desc, std::string* error) noexcept {
+    auto& d = *impl_; Impl::Scope scope(d);
+    if (!scope.valid) { if (error) *error = "contexto GLES indisponivel"; return Status{Errc::InvalidState}; }
+    if (!desc.spirv || desc.spirvBytes < 20 || desc.spirvBytes % 4) {
+        if (error) *error = "SPIR-V invalido";
+        return Status{Errc::InvalidArgument, "SPIR-V invalido"};
+    }
+    // O MESMO tradutor do aurea-gles-compiler (bindings, nomes, borda
+    // transparente): o shader do plugin chega ao driver como um embutido.
+    std::string essl, why;
+    if (!xlate::spirv_to_essl(desc.spirv, desc.spirvBytes / 4, essl, why)) {
+        AUREA_LOG_ERROR("GLES: traducao de '%s' falhou: %s", desc.debugName ? desc.debugName : "?", why.c_str());
+        if (error) *error = "traducao para ESSL: " + why;
+        return Status{Errc::ShaderCompileFailed, "traducao SPIR-V -> ESSL falhou"};
+    }
+    return compile_essl(desc, essl.c_str(), error);
 }
 void Backend::destroy_shader(ShaderHandle h) noexcept {
     auto& d = *impl_; Impl::Scope scope(d); auto it = d.shaders.find(h.id);

@@ -106,6 +106,7 @@ set(AUREA_CORE_SOURCES
     src/render/GPUCapabilities.cpp
     src/render/FrameGraph.cpp
     src/render/ShaderLibrary.cpp
+    src/render/RuntimeShaders.cpp
     src/render/RenderScheduler.cpp
     src/render/Renderer.cpp
     src/render/PreRenderCache.cpp
@@ -183,6 +184,12 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/LumaDissolveEffect.cpp
     src/effects/builtin/DrawingProgressEffect.cpp
     src/expr/Expression.cpp
+    src/plugins/PluginExpr.cpp
+    src/plugins/PluginManifest.cpp
+    src/plugins/PluginIsf.cpp
+    src/plugins/PluginShader.cpp
+    src/plugins/PluginEffects.cpp
+    src/plugins/PluginManager.cpp
     src/media/DecodedFrameCache.cpp
     src/media/YuvLayout.cpp
     src/media/P010Upload.cpp
@@ -285,6 +292,13 @@ add_library(aurea_core STATIC ${AUREA_CORE_SOURCES})
 include(cmake/AureaNcnn.cmake)
 include(cmake/AureaWhisper.cmake)
 target_link_libraries(aurea_core PUBLIC aurea_thirdparty)
+# Plugins de efeito: o glslang que compila o GLSL deles no aparelho (o do ncnn
+# quando ele já está no binário; senão o mesmo, fixado, compilado aqui).
+include(cmake/AureaRuntimeShaders.cmake)
+if(AUREA_RUNTIME_SHADERS_READY)
+    target_link_libraries(aurea_core PRIVATE ${AUREA_RUNTIME_GLSLANG_LINK})
+    set_source_files_properties(src/render/RuntimeShaders.cpp PROPERTIES COMPILE_DEFINITIONS AUREA_RUNTIME_SHADERS=1)
+endif()
 include(cmake/AureaFFmpeg.cmake)
 target_link_libraries(aurea_core PUBLIC aurea_ffmpeg)
 

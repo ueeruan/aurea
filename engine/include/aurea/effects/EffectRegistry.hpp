@@ -1,42 +1,75 @@
 // =============================================================================
 //  Aurea / effects / EffectRegistry.hpp
 //
-//  Os tipos de efeito disponíveis. Preenchido uma vez na inicialização do
-//  motor; depois é só leitura (seguro entre threads).
+//  Os tipos de efeito disponíveis. Os embutidos entram na inicialização do
+//  motor; os de PLUGIN entram e saem com o motor rodando (instalar, remover,
+//  reinstalar — plugins/PluginManager.hpp).
+//
+//  Seguro entre threads SEM lock na leitura (o render, o export e a UI leem a
+//  qualquer momento): as entradas moram em posições FIXAS que nunca se movem
+//  nem morrem antes do registro. Acrescentar publica a entrada nova com uma
+//  barreira de liberação; tirar um tipo só o APOSENTA (`retire`): ele some de
+//  `find`/`params`, mas o objeto continua vivo — um quadro já planejado que
+//  ainda segura o `const Effect*` termina normalmente. Quem varre por índice
+//  (`count`/`at`) pula os aposentados com `retired_at`.
 // =============================================================================
 #pragma once
 
 #include "aurea/effects/Effect.hpp"
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace aurea {
 
 class EffectRegistry {
 public:
-    /// Registra um tipo. Recusa chave repetida — duas implementações com a
-    /// mesma chave fariam o projeto abrir com o efeito errado.
+    EffectRegistry();
+    ~EffectRegistry();
+    EffectRegistry(const EffectRegistry&) = delete;
+    EffectRegistry& operator=(const EffectRegistry&) = delete;
+
+    /// Registra um tipo. Recusa chave repetida entre os vivos — duas
+    /// implementações com a mesma chave fariam o projeto abrir com o efeito
+    /// errado. Pode ser chamado com leitores em outras threads.
     [[nodiscard]] Status add(std::unique_ptr<Effect> effect);
+    /// Tira o tipo do registro sem destruí-lo (plugin removido ou trocado por
+    /// uma versão nova). Projeto com o efeito passa a vê-lo como desconhecido:
+    /// a instância e os valores ficam, e ele não desenha. Falso = não havia.
+    bool retire(EffectTypeId id) noexcept;
 
     [[nodiscard]] const Effect* find(EffectTypeId id) const noexcept;
     [[nodiscard]] const ParameterRegistry* params(EffectTypeId id) const noexcept;
     [[nodiscard]] EffectTypeId find_key(std::string_view key) const noexcept;
 
-    [[nodiscard]] u32 count() const noexcept { return static_cast<u32>(entries_.size()); }
-    [[nodiscard]] const Effect& at(u32 i) const noexcept { return *entries_[i].effect; }
-    [[nodiscard]] const ParameterRegistry& params_at(u32 i) const noexcept { return entries_[i].params; }
+    /// Posições ocupadas (vivas e aposentadas), em ordem de registro.
+    [[nodiscard]] u32 count() const noexcept { return count_.load(std::memory_order_acquire); }
+    [[nodiscard]] const Effect& at(u32 i) const noexcept { return *slots_[i]->effect; }
+    [[nodiscard]] const ParameterRegistry& params_at(u32 i) const noexcept { return slots_[i]->params; }
+    /// A posição `i` foi aposentada (não está mais no catálogo).
+    [[nodiscard]] bool retired_at(u32 i) const noexcept {
+        return slots_[i]->retired.load(std::memory_order_acquire);
+    }
 
-    /// Todos os pipelines de todos os efeitos — o pré-aquecimento.
+    /// Todos os pipelines de todos os efeitos vivos — o pré-aquecimento.
     void collect_pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const;
+
+    /// Teto de posições (embutidos ~330 + plugins + aposentados).
+    static constexpr u32 kCapacity = 2048;
 
 private:
     struct Entry {
         std::unique_ptr<Effect> effect;
         ParameterRegistry params;
         EffectTypeId id = 0;
+        std::atomic<bool> retired{false};
     };
-    std::vector<Entry> entries_;
+    [[nodiscard]] const Entry* live(EffectTypeId id) const noexcept;
+    std::unique_ptr<std::unique_ptr<Entry>[]> slots_;
+    std::atomic<u32> count_{0};
+    std::mutex writeMutex_;
 };
 
 /// Registra os efeitos embutidos do Aurea.

@@ -2624,9 +2624,10 @@ Diagnostic check_syntax(std::string_view source) {
 }
 
 const EffectRegistry& builtin_effects() {
-    static const EffectRegistry reg = [] {
-        EffectRegistry r;
-        register_builtin_effects(r);
+    // O registro não se copia nem se move (posições fixas, leitura sem lock).
+    static const EffectRegistry& reg = *[] {
+        auto* r = new EffectRegistry();
+        register_builtin_effects(*r);
         return r;
     }();
     return reg;

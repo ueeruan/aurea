@@ -1,0 +1,36 @@
+{
+  "aureaPlugin": 1,
+  "id": "com.aurea.examples.softglow",
+  "version": "1.0.0",
+  "author": "AUREA (exemplo)",
+  "name": {
+    "pt-BR": "Brilho suave",
+    "en": "Soft Glow",
+    "es": "Brillo suave",
+    "ru": "Мягкое свечение",
+    "hi": "कोमल चमक",
+    "id": "Cahaya Lembut",
+    "ar": "توهج ناعم"
+  },
+  "description": {
+    "pt-BR": "Brilho em dois passes: as partes claras desfocadas num quarto da resolução e somadas de volta.",
+    "en": "Two-pass glow: the bright parts blurred at a quarter of the resolution and added back."
+  },
+  "category": "Luz",
+  "kind": "shader",
+  "params": [
+    { "id": "threshold", "type": "float", "label": { "pt-BR": "Limiar", "en": "Threshold" },
+      "default": 0.6, "min": 0, "max": 1 },
+    { "id": "radius", "type": "float", "label": { "pt-BR": "Raio (px)", "en": "Radius (px)" },
+      "default": 24, "min": 1, "max": 100 },
+    { "id": "intensity", "type": "float", "label": { "pt-BR": "Intensidade", "en": "Intensity" },
+      "default": 1.0, "min": 0, "max": 4 },
+    { "id": "tint", "type": "color", "label": { "pt-BR": "Cor", "en": "Tint" },
+      "default": "#FFE6B3" }
+  ],
+  "passes": [
+    { "shader": "bright_blur.frag", "target": "bloom", "scale": 0.25 },
+    { "shader": "combine.frag", "inputs": { "bloom": "bloom" } }
+  ],
+  "margin": 100
+}

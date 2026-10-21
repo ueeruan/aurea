@@ -231,13 +231,20 @@ const ShaderBlob& shader_blob(ShaderId id) noexcept;
     endif()
 
     set(_blob_cpp "${_gen_dir}/ShaderBlobs.cpp")
+    # A lista vai num ARQUIVO, não na linha de comando: com ~230 caminhos
+    # absolutos ela passa dos 32 767 caracteres do CreateProcess num worktree
+    # (ou numa pasta de build) de caminho longo. file(GENERATE) só regrava
+    # quando a lista muda.
+    set(_embed_rsp "${_gen_dir}/ShaderBlobs.list")
+    list(JOIN _embed_list "\n" _embed_lines)
+    file(GENERATE OUTPUT "${_embed_rsp}" CONTENT "${_embed_lines}\n")
     add_custom_command(
         OUTPUT "${_blob_cpp}"
         COMMAND ${CMAKE_COMMAND}
-                "-DSPV_FILES=${_embed_list}"
+                "-DSPV_LIST=${_embed_rsp}"
                 "-DOUT_CPP=${_blob_cpp}"
                 -P "${PROJECT_SOURCE_DIR}/cmake/embed_shaders.cmake"
-        DEPENDS ${_embed_list} "${PROJECT_SOURCE_DIR}/cmake/embed_shaders.cmake"
+        DEPENDS ${_embed_list} "${_embed_rsp}" "${PROJECT_SOURCE_DIR}/cmake/embed_shaders.cmake"
         COMMENT "Embutindo ${_count} shaders SPIR-V"
         VERBATIM)
 

@@ -77,6 +77,10 @@ add_custom_command(OUTPUT "${_blob}"
 add_library(aurea_gles STATIC GlesDevice.cpp GlesResources.cpp GlesCommands.cpp "${_blob}")
 target_include_directories(aurea_gles PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(aurea_gles PUBLIC aurea_core EGL GLESv3)
+# Shaders de plugin: o MESMO SPIR-V → ESSL do aurea-gles-compiler, em runtime
+# (os objetos do tradutor entram na própria libaurea_gles.a).
+include("${PROJECT_SOURCE_DIR}/cmake/AureaShaderXlate.cmake")
+target_link_libraries(aurea_gles PRIVATE aurea_shader_xlate)
 target_compile_options(aurea_gles PRIVATE -Wall -Wextra -fno-exceptions)
 add_dependencies(aurea_gles aurea_core)
 

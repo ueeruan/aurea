@@ -51,6 +51,7 @@
 #include "aurea/memory/MemoryManager.hpp"
 #include "aurea/platform/DeviceCapabilities.hpp"
 #include "aurea/playback/Playback.hpp"
+#include "aurea/plugins/PluginManager.hpp"
 #include "aurea/tracking/RealCameraCapture.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/render/GPUBackend.hpp"
@@ -270,6 +271,10 @@ struct EngineConfig {
     // user documents (iOS); never infer a cleanup directory from outputPath.
     std::string exportTemporaryDirectory;
     std::string documentsDirectory;
+    /// Pasta dos plugins de efeito instalados (plugins/PluginManager.hpp):
+    /// Android `files/plugins`, iOS `Documents/Plugins`. Vazio = sem plugins.
+    /// Todo plugin da pasta é lido e registrado na inicialização.
+    std::string pluginDirectory;
     u32   workerCount = 0;
     u64   memoryBudgetBytes = 0;
     /// Teto do orçamento medido (0 = sem teto). Android: HyperOS/MIUI mata o
@@ -1729,6 +1734,32 @@ public:
     };
     [[nodiscard]] Status compute_scopes(u32 maxDim, Scopes& out) noexcept;
 
+    // =========================================================================
+    // Plugins de efeito (docs/plugins/README.md)
+    //
+    // Um plugin acrescenta UM efeito ao catálogo, na categoria "Plugins", com a
+    // chave `plugin.<id>`: o projeto o salva como um embutido. Sem o plugin, a
+    // instância e os valores ficam no projeto (efeito desconhecido, não
+    // desenha); instalar de novo o faz voltar.
+    // =========================================================================
+    /// Instala um `.aureaplugin` (ZIP com plugin.json) ou um `.fs` (ISF 2.0).
+    /// Confere, compila (glslang + o backend ativo), desenha um quadro de teste
+    /// em 256×256 (teto de 250 ms) e registra. Mesmo id com versão igual ou
+    /// mais nova substitui. Devolve o id; na recusa, `status().detail()` traz a
+    /// mensagem para a pessoa (com arquivo:linha nos erros de shader).
+    [[nodiscard]] Result<std::string> install_plugin(const char* path) noexcept;
+    /// Os plugins da pasta, com nomes/descrições por idioma, a chave do efeito
+    /// e, nos que não carregaram, o motivo.
+    [[nodiscard]] std::vector<plugins::PluginInfo> list_plugins() const;
+    /// `list_plugins` em JSON (o formato das pontes; docs/plugins/README.md).
+    [[nodiscard]] std::string plugins_json() const;
+    /// Desinstala (efeito sai do catálogo, a pasta é apagada). Falso = não havia.
+    bool remove_plugin(const char* id) noexcept;
+    /// Troca a pasta de plugins e carrega o que houver nela (a ponte do iOS
+    /// chama depois de subir o motor). Vazio = sem plugins.
+    void set_plugin_directory(const char* path) noexcept;
+    [[nodiscard]] std::string plugin_directory() const;
+
     /// A PRÉVIA DE UM EFEITO (Fase 7.3): o efeito, com os valores padrão, sobre
     /// a cartela de demonstração. RGBA8 sRGB de alfa reto. Não depende de
     /// projeto nem de composição aberta — o navegador de efeitos existe antes
@@ -2086,6 +2117,12 @@ private:
     [[nodiscard]] Status real_camera_commit_locked() noexcept;
     [[nodiscard]] Layer* real_camera_preview_layer_locked() noexcept;
     EffectRegistry     effectRegistry_{};
+    /// Depois do registro: morre antes dele (tira os efeitos que pôs lá).
+    std::unique_ptr<plugins::PluginManager> plugins_;
+    /// O quadro de teste da instalação: `typeId` sozinho em 256×256, já com os
+    /// pipelines prontos. Toma o renderMutex_ (espera o preview soltar a GPU).
+    [[nodiscard]] bool plugin_test_render(const EffectRegistry& registry, EffectTypeId typeId, f32& ms,
+                                          std::string& error) noexcept;
     AdaptiveResolutionController* adaptive_ = nullptr;
 
     std::unique_ptr<GPUBackend> gpu_;

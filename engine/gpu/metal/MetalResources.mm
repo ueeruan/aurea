@@ -14,6 +14,7 @@
 //   · Não há conjunto de descritores: o índice do recurso é o slot do motor.
 // =============================================================================
 #include "MetalInternal.hpp"
+#include "ShaderTranslate.hpp"
 
 #include "aurea/core/Log.hpp"
 
@@ -521,6 +522,81 @@ Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
             s.threadgroup[0] = threadgroup[0];
             s.threadgroup[1] = threadgroup[1] ? threadgroup[1] : 1u;
             s.threadgroup[2] = threadgroup[2] ? threadgroup[2] : 1u;
+        }
+        return ShaderHandle{d.shaders.add(std::move(s))};
+    }
+}
+
+// =============================================================================
+// Shaders de plugin (SPIR-V do glslang no aparelho → MSL em runtime)
+//
+// O MESMO tradutor e as MESMAS opções do aurea-metal-compiler
+// (shaderxlate/ShaderTranslate.cpp): MSL 2.1 iOS, a tabela fixa de recursos
+// (slot do motor = índice do buffer/textura/sampler), push constants no buffer
+// 30, y invertido no vértice. O texto compila aqui, com `newLibraryWithSource`
+// — o caminho de texto que o create_shader já tem para o MSL embutido —, na
+// instalação ou na abertura do motor, nunca no meio do playback.
+// =============================================================================
+Result<ShaderHandle> Backend::create_runtime_shader(const ShaderDesc& desc, std::string* error) noexcept {
+    @autoreleasepool {
+        Impl& d = *impl_;
+        if (!d.device) {
+            if (error) *error = "backend Metal nao inicializado";
+            return Status{Errc::InvalidState, "backend nao inicializado"};
+        }
+        if (!desc.spirv || desc.spirvBytes < 20 || desc.spirvBytes % 4 != 0) {
+            if (error) *error = "SPIR-V invalido";
+            return Status{Errc::InvalidArgument, "SPIR-V invalido"};
+        }
+        const usize words = desc.spirvBytes / 4;
+        const xlate::Stage stage = desc.stage == ShaderStage::Vertex ? xlate::Stage::Vertex
+                                 : desc.stage == ShaderStage::Fragment ? xlate::Stage::Fragment
+                                 : xlate::Stage::Compute;
+        if (stage == xlate::Stage::Fragment && xlate::spirv_writes_color1_or_more(desc.spirv, words)) {
+            // A variante `fs_main_c0` só existe no metallib do build; um plugin
+            // escreve só a cor 0 (o cabeçalho do motor declara só ela).
+            if (error) *error = "shader de plugin escreve mais de uma cor";
+            return Status{Errc::ShaderCompileFailed, "shader de plugin com MRT"};
+        }
+        std::string msl, why;
+        u32 group[3] = {0, 0, 0};
+        const char* entry = xlate::msl_entry_for(stage);
+        if (!xlate::spirv_to_msl(desc.spirv, words, entry, 0xffffffffu, group, msl, why)) {
+            AUREA_LOG_ERROR("metal: traducao de '%s' falhou: %s", desc.debugName ? desc.debugName : "?", why.c_str());
+            if (error) *error = "traducao para MSL: " + why;
+            return Status{Errc::ShaderCompileFailed, "traducao SPIR-V -> MSL falhou"};
+        }
+        NSString* source = [[NSString alloc] initWithBytes:msl.data() length:msl.size() encoding:NSUTF8StringEncoding];
+        if (!source) {
+            if (error) *error = "MSL gerado nao e UTF-8";
+            return Status{Errc::InvalidArgument, "MSL nao e UTF-8"};
+        }
+        MTLCompileOptions* options = [[MTLCompileOptions alloc] init];
+        NSError* err = nil;
+        ShaderObject s;
+        s.stage = desc.stage;
+        s.library = [d.device newLibraryWithSource:source options:options error:&err];
+        if (!s.library) {
+            const char* text = err && err.localizedDescription ? err.localizedDescription.UTF8String : nullptr;
+            AUREA_LOG_ERROR("metal: shader de plugin '%s' nao compilou: %s", desc.debugName ? desc.debugName : "?",
+                            text ? text : "?");
+            if (error) *error = std::string("compilador Metal: ") + (text ? text : "erro desconhecido");
+            return Status{Errc::ShaderCompileFailed, "MSL do plugin nao compilou"};
+        }
+        set_object_label(s.library, desc.debugName);
+        s.function = [s.library newFunctionWithName:[NSString stringWithUTF8String:entry]];
+        if (!s.function) {
+            if (error) *error = std::string("funcao de entrada ausente no MSL: ") + entry;
+            return Status{Errc::ShaderCompileFailed, "funcao de entrada ausente"};
+        }
+        if (desc.stage == ShaderStage::Compute) {
+            if (group[0] == 0) {
+                if (error) *error = "compute sem tamanho de grupo";
+                return Status{Errc::InvalidArgument, "tamanho do grupo de threads ausente"};
+            }
+            s.threadgroup[0] = group[0];
+            s.threadgroup[1] = group[1] ? group[1] : 1u;
+            s.threadgroup[2] = group[2] ? group[2] : 1u;
         }
         return ShaderHandle{d.shaders.add(std::move(s))};
     }

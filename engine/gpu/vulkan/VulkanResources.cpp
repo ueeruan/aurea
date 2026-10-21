@@ -477,6 +477,14 @@ Result<ShaderHandle> Backend::create_shader(const ShaderDesc& desc) noexcept {
     return ShaderHandle{shaders_.add(std::move(m))};
 }
 
+Result<ShaderHandle> Backend::create_runtime_shader(const ShaderDesc& desc, std::string* error) noexcept {
+    // O Vulkan consome o SPIR-V do plugin como consome o do build: o mesmo
+    // caminho (e o mesmo módulo compartilhado entre os renderers).
+    auto created = create_shader(desc);
+    if (!created.ok() && error) *error = "o driver Vulkan recusou o SPIR-V (vkCreateShaderModule)";
+    return created;
+}
+
 void Backend::destroy_shader(ShaderHandle h) noexcept {
     ShaderModule m;
     if (!shaders_.remove(h.id, m)) return;

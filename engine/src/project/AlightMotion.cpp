@@ -520,9 +520,10 @@ const EffectRule* find_rule(std::string_view shortName) {
 }
 
 const EffectRegistry& builtin_registry() {
-    static const EffectRegistry r = [] {
-        EffectRegistry x;
-        register_builtin_effects(x);
+    // O registro não se copia nem se move (posições fixas, leitura sem lock).
+    static const EffectRegistry& r = *[] {
+        auto* x = new EffectRegistry();
+        register_builtin_effects(*x);
         return x;
     }();
     return r;

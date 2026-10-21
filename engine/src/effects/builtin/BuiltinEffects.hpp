@@ -101,6 +101,8 @@ void register_saber_effect(EffectRegistry& r);
 void register_luma_dissolve_effect(EffectRegistry& r);
 /// Progresso do desenho (DrawingProgressEffect.cpp) — 0.2.5. No fim.
 void register_drawing_progress_effect(EffectRegistry& r);
+/// Constelação (ConstellationEffect.cpp) — 0.3.0. No fim.
+void register_constellation_effect(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

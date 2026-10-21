@@ -1529,7 +1529,9 @@ std::vector<Vec4> Renderer::repeat_path(const Layer* host, u32 count, f32 phase,
     const auto toHost=affine(hostMatrix).inverse()*affine(layer_world_matrix(comp,*guide,planTime_));
     for(auto& point:contour.pts)point=toHost.apply(point);
     const double length=vector::length_of(contour); if(length<1e-6)return result;
-    count=std::min(count,64u); result.reserve(count);
+    // Teto de 2048 amostras: a Constelação põe até 2000 pontos no caminho; a
+    // Repetição (64 cópias) e o Mover no caminho (1) já pedem menos que isso.
+    count=std::min(count,2048u); result.reserve(count);
     for(u32 i=0;i<count;++i) {
         double unit=double(i)/double(contour.closed?count:std::max(1u,count-1))+phase;
         unit=contour.closed?unit-std::floor(unit):std::clamp(unit,0.,1.);
@@ -8292,6 +8294,7 @@ Status Renderer::render_effect_preview_impl(const EffectRegistry& effects, Effec
     eval.placement = &placement;
     // Recurso resolvido fora do grafo (o mapa de profundidade da foto das
     // prévias); sem camada nem projeto, os outros devolvem vazio.
+    const usize previewUploadsFrom = uploads_.size();
     effect->resolve_resources(eval);
 
     const LayerImage input{plate, Rect{0.0f, 0.0f, static_cast<f32>(width), static_cast<f32>(height)}, width, height};
@@ -8426,6 +8429,22 @@ Status Renderer::render_effect_preview_impl(const EffectRegistry& effects, Effec
         }
     }
     graph_.set_output(shown, ResourceState::TransferSrc);
+
+    // Textura de DADO pedida no planejamento DESTA prévia (data_texture: a
+    // Constelação, a paleta do Quantizar cores): fora do laço de render
+    // ninguém a mandaria para a GPU antes do passe que a lê, e a prévia sairia
+    // com a textura vazia. Sobe aqui, no frame aberto, antes dos passes; só os
+    // pedidos novos — os da composição seguem para o próximo quadro.
+    {
+        usize keep = std::min(previewUploadsFrom, uploads_.size());
+        for (usize i = keep; i < uploads_.size(); ++i) {
+            PendingUpload& up = uploads_[i];
+            if (backend_->upload_texture(up.texture, up.data.data(), up.bytesPerRow).ok()) continue;
+            if (keep != i) uploads_[keep] = std::move(up);
+            ++keep;
+        }
+        uploads_.resize(keep);
+    }
 
     const Status compiled = graph_.compile(pool_);
     if (compiled.ok()) {

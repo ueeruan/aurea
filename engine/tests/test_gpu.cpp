@@ -14383,3 +14383,4 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 
 // Correção de cor (0.3.0).
 #include "ColorGradeTests.inl"
+#include "ConstellationTests.inl"

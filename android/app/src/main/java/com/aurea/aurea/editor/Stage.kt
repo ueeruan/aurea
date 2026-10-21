@@ -170,7 +170,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         if (!store.rawPlayback) StageZoomButton(Modifier.align(Alignment.TopStart))
         if (store.selection.size == 1 && !store.rawPlayback) {
             Row(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
-                if (store.gizmo != null) {
+                if (store.gizmoAxes) {
                     val toolLabel = stringResource(R.string.gizmo_tool_label)
                     val toolName = stringResource(when (store.gizmoTool) {
                         GIZMO_ROTATE -> R.string.gizmo_tool_rotate
@@ -194,7 +194,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                 // Mundo/Local vale para mover; girar e escala usam os eixos da camada.
                 val spaceDescription = stringResource(if (store.gizmoLocalSpace) R.string.i18n_local_xyz else R.string.i18n_world_xyz)
                 val autoKeyDescription = stringResource(if (store.autoKeyTransforms) R.string.i18n_autokey_on else R.string.i18n_autokey_off)
-                if (store.gizmo != null && store.gizmoTool == GIZMO_MOVE) androidx.compose.material3.TextButton(
+                if (store.gizmoAxes && store.gizmoTool == GIZMO_MOVE) androidx.compose.material3.TextButton(
                     onClick = store::toggleGizmoSpace,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                     modifier = Modifier.width(48.dp).heightIn(min = 48.dp).background(AureaColors.EditorPanelHigh, RoundedCornerShape(8.dp))
@@ -618,8 +618,8 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         drawPivotCrosshair(Offset(m.sx(p[0]), m.sy(p[1])))
         return
     }
-    // Camada no espaço 3D: as setas do mundo (têm prioridade no toque).
-    store.gizmo?.let { if (!drawTrackball(store, m)) drawGizmo(m, it, store.gizmoTool) }
+    // Setas XYZ e trackball: só no editor de cena 3D (têm prioridade no toque).
+    if (store.gizmoAxes) store.gizmo?.let { if (!drawTrackball(store, m)) drawGizmo(m, it, store.gizmoTool) }
     if (!chrome || store.pointPick != null || ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking) return
     val anchor = m.scratch
     val gizmo = store.gizmo
@@ -627,12 +627,12 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     else d.parentToComp(d.position[0], d.position[1], anchor)
     m.markerAnchorX = m.sx(anchor[0]); m.markerAnchorY = m.sy(anchor[1])
     m.markerAnchorValid = store.pointPick == null
+    // 0.2.7: fora da cena 3D o palco é só POSIÇÃO (arrastar o corpo, o marcador
+    // do centro) e PIVÔ (face Pivô) — sem setas de eixo, como no app antigo.
+    // As setas X/Y/Z voltam no editor de cena 3D (`gizmoAxes`).
     if (gizmo == null) {
-        // Alças brancas de esticar (LayerResizeStage.kt), por baixo das setas.
+        // Alças brancas de esticar (LayerResizeStage.kt).
         drawLayerResizeHandles(m)
-        placeAxisHandles(m)
-        m.handlesValid = true
-        drawAxisHandles(m, ui.grabbedHandle)
     }
     val center = Offset(m.markerAnchorX, m.markerAnchorY)
     val color = if (store.markers.frames.binarySearch(playhead) >= 0) Color(0xFFFFD34D) else Color.White
@@ -642,6 +642,13 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     drawLine(color, center - Offset(radius + 3.dp.toPx(), 0f), center + Offset(radius + 3.dp.toPx(), 0f), 1.dp.toPx())
     drawLine(color, center - Offset(0f, radius + 3.dp.toPx()), center + Offset(0f, radius + 3.dp.toPx()), 1.dp.toPx())
 }
+
+/**
+ * Setas X/Y/Z do gizmo, ferramenta Mover/Girar/Escala, botão Mundo/Local e
+ * trackball: só no editor de cena 3D. No resto o palco é o do app antigo,
+ * POSIÇÃO e PIVÔ (pedido do dono na 0.2.7); a profundidade (Z) fica no painel.
+ */
+internal val EditorStore.gizmoAxes: Boolean get() = (sceneEditor || gizmoAxesForTests) && gizmo != null
 
 /** A face Pivô do Transformar manda no palco (fora da cena 3D solta). */
 internal fun pivotMode(store: EditorStore, ui: EditorUi): Boolean =
@@ -1034,36 +1041,6 @@ private fun DrawScope.outline(m: StageMapper, pts: FloatArray, under: Stroke, ov
     drawPath(p, color, style = over)
 }
 
-/** Alça → canto: giro = TR(1), escala = BR(2), TL(0), BL(3). */
-/**
- * Setas do 2D a partir do centro: X para a direita, Y para cima, 56 dp. Perto
- * da borda do palco a seta vira para o outro lado (continua tocável).
- */
-private fun DrawScope.placeAxisHandles(m: StageMapper) {
-    val len = 56.dp.toPx()
-    val edge = 22.dp.toPx()
-    val cx = m.markerAnchorX
-    val cy = m.markerAnchorY
-    m.handles[0] = if (cx + len > m.boxW - edge) cx - len else cx + len
-    m.handles[1] = cy
-    m.handles[2] = cx
-    m.handles[3] = if (cy - len < edge) cy + len else cy - len
-}
-
-/** Seta de eixo: traço e bola nas cores do gizmo 3D (X vermelho, Y verde). */
-private fun DrawScope.drawAxisHandles(m: StageMapper, grabbed: Int) {
-    val o = Offset(m.markerAnchorX, m.markerAnchorY)
-    for (i in 0..1) {
-        val tip = Offset(m.handles[i * 2], m.handles[i * 2 + 1])
-        val color = if (i == 0) GizmoX else GizmoY
-        drawLine(ShellColors.OutlineUnder, o, tip, 5.dp.toPx())
-        drawLine(color, o, tip, 2.5.dp.toPx())
-        val r = (if (grabbed == i) 9f else 7.5f).dp.toPx()
-        drawCircle(ShellColors.OutlineUnder, r + 1.5.dp.toPx(), tip)
-        drawCircle(color, r, tip)
-    }
-}
-
 // =============================================================================
 // Gestos do palco (§3.4): um dono por gesto, nunca troca no meio
 // =============================================================================
@@ -1234,7 +1211,7 @@ private suspend fun PointerInputScope.stageGestures(
         val gz = store.gizmo
         // Ferramenta Girar: o trackball (TrackballStage.kt) no lugar das alças.
         if (m.valid && trackballActive(store) && trackballGesture(store, m, down, slop)) return@awaitEachGesture
-        if (gz != null && gz.size == 8 && gz.all { it.isFinite() } && store.selection.size == 1 && m.valid && !trackballActive(store)) {
+        if (store.gizmoAxes && gz != null && gz.size == 8 && gz.all { it.isFinite() } && store.selection.size == 1 && m.valid && !trackballActive(store)) {
             val zOff = 44.dp.toPx()
             val tips = gizmoTips(m, gz, zOff)
             val reach = 24.dp.toPx()
@@ -1754,9 +1731,12 @@ private class StageEdit(
         if (mode == MODE_MOVE) {
             previewBasis?.let { basis ->
                 if (moveDetail?.id != store.primary || store.detail?.locked != false) return
-                begin("rotate 3D")
-                store.gizmoSetComponents(TrackProperty.ROTATION_X,
-                    com.aurea.aurea.engine.AureaEngine.previewGestureValue(basis, m.cx(x)-downCx, m.cy(y)-downCy, true))
+                // 0.2.7 (pedido do dono: "só posição e pivô"): um dedo MOVE a
+                // camada 3D no plano da vista, como no 2D. Antes um dedo girava
+                // e só as setas X/Y/Z moviam — e elas agora são do editor de cena.
+                begin("mover 3D")
+                store.gizmoSetComponents(TrackProperty.POSITION_X,
+                    com.aurea.aurea.engine.AureaEngine.previewGestureValue(basis, m.cx(x)-downCx, m.cy(y)-downCy, false))
                 return
             }
             if (group.isNotEmpty()) moveGroup(x, y) else move(x, y)

@@ -462,8 +462,16 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
             meshSelected || ((puppetKey ?: selected)?.let { k -> store.paramOf(k.effectId, k.param)?.let { ParamSlot.of(it).animatable } } ?: false)
         }
     }
-    val curveTrackReady by remember(store, puppetKey) {
-        derivedStateOf { (puppetKey ?: selected)?.let { k -> store.primaryKeys().effectTrack(k.effectId, k.param, k.component).size >= 2 } ?: false }
+    // A trilha que a curva do trilho mira: a da malha (Mesh, 0.2.7: o botão de
+    // curva nunca abria nela) ou a do parâmetro escolhido.
+    val curveTrack: () -> List<com.aurea.aurea.engine.KeyframeRow> = {
+        val mesh = openId
+        if (meshSelected && mesh != null)
+            store.primaryKeys().filter { it.property == TrackProperty.MESH_WARP && it.effectIndex == mesh }.sortedBy { it.time }
+        else railKey?.let { k -> store.primaryKeys().effectTrack(k.effectId, k.param, k.component) } ?: emptyList()
+    }
+    val curveTrackReady by remember(store, puppetKey, meshSelected, openId) {
+        derivedStateOf { curveTrack().size >= 2 }
     }
 
     val byId = effects.associateBy { it.effectId }
@@ -503,13 +511,12 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                     null
                 },
                 curveAnimated = railLook != KeyframeLook.None,
-                onCurve = if (curveTrackReady && railKey?.let { store.curveStart(store.primaryKeys().effectTrack(it.effectId, it.param, it.component)) } != null) {
+                onCurve = if (curveTrackReady && store.curveStart(curveTrack()) != null) {
                     {
-                        val k = railKey
                         val layer = store.primary
                         val t = store.detail?.localFrame(store.playhead)
-                        if (k != null && layer != null && t != null) {
-                            store.curveStart(store.primaryKeys().effectTrack(k.effectId, k.param, k.component))?.let { key ->
+                        if (layer != null && t != null) {
+                            store.curveStart(curveTrack())?.let { key ->
                                 store.selectKeyframe(layer, key)
                                 env.onOpenPanel(EditorPanel.Curve)
                             }

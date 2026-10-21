@@ -480,12 +480,178 @@ AUREA_TEST(VectorGpu, TextFollowsAPathLayer) {
                 100.0f * static_cast<f32>(near) / static_cast<f32>(std::max(1u, lit)), minAng * 57.3f, maxAng * 57.3f);
     AUREA_CHECK(lit > 200);
     AUREA_CHECK(static_cast<f32>(near) > 0.97f * static_cast<f32>(lit));
-    // Começa no topo (−90°, o início do círculo) e anda no sentido horário
-    // pelo comprimento do texto (~370 px de 754 = ~175° de arco).
-    AUREA_CHECK_NEAR(minAng * 57.2958f, -90.0f, 8.0f);
+    // Texto centralizado (o padrão do add_text): como no After Effects, fica no
+    // meio das margens — metade do círculo, embaixo (+90°) — e ocupa o
+    // comprimento do texto (~370 px de 754 = ~175° de arco).
+    AUREA_CHECK_NEAR((minAng + maxAng) * 0.5f * 57.2958f, 90.0f, 8.0f);
     AUREA_CHECK(maxAng - minAng > 2.5f && maxAng - minAng < 3.6f);
     // Mesma tinta: a quantidade de pixels muda pouco (as letras só giram).
     AUREA_CHECK(std::fabs(static_cast<f32>(lit) - static_cast<f32>(litStraight)) < 0.25f * static_cast<f32>(litStraight));
+    // Alinhado à esquerda: começa na margem inicial = o topo (−90°, o início
+    // do círculo) e anda no sentido horário.
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    comp->layer(LayerId::unpack(*text))->text.alignment = 0;
+    const Image8 left = rig.capture(400);
+    f32 leftMin = 1e9f;
+    for (u32 y = 0; y < left.height; ++y)
+        for (u32 x = 0; x < left.width; ++x)
+            if (left.at(x, y)[0] >= 128) leftMin = std::min(leftMin, std::atan2(static_cast<f32>(y) - 200.0f, static_cast<f32>(x) - 200.0f));
+    AUREA_CHECK_NEAR(leftMin * 57.2958f, -90.0f, 8.0f);
+}
+
+namespace {
+/// Caixa dos pixels acesos (vermelho ≥ 128) de uma faixa de linhas.
+struct LitBox { i32 x0 = 1 << 30, y0 = 1 << 30, x1 = -1, y1 = -1; u32 count = 0; };
+LitBox lit_box(const Image8& img) {
+    LitBox b;
+    for (u32 y = 0; y < img.height; ++y)
+        for (u32 x = 0; x < img.width; ++x) {
+            if (img.at(x, y)[0] < 128) continue;
+            ++b.count;
+            b.x0 = std::min<i32>(b.x0, static_cast<i32>(x)); b.x1 = std::max<i32>(b.x1, static_cast<i32>(x));
+            b.y0 = std::min<i32>(b.y0, static_cast<i32>(y)); b.y1 = std::max<i32>(b.y1, static_cast<i32>(y));
+        }
+    return b;
+}
+} // namespace
+
+AUREA_TEST(Vector, TextOnPathMarginsFollowTheParagraphAlignment) {
+    // Linha de 100 px num caminho de 1000: as quatro maneiras do After Effects.
+    const f32 x[3] = {10.0f, 50.0f, 90.0f};   // centros (letras de 20 px)
+    f64 s[3];
+    path_line_positions(1000.0, 30.0f, 70.0f, 0, false, x, 3, 100.0f, s);
+    AUREA_CHECK_NEAR(s[0], 40.0, 1e-9);   // esquerda: a linha começa na margem inicial
+    path_line_positions(1000.0, 30.0f, 70.0f, 2, false, x, 3, 100.0f, s);
+    AUREA_CHECK_NEAR(s[2], 1000.0 - 70.0 - 10.0, 1e-9);   // direita: termina na margem final
+    path_line_positions(1000.0, 30.0f, 70.0f, 1, false, x, 3, 100.0f, s);
+    AUREA_CHECK_NEAR(s[1], 0.5 * (30.0 + 930.0), 1e-9);   // centro: no meio das margens
+    path_line_positions(1000.0, 30.0f, 70.0f, 1, true, x, 3, 100.0f, s);
+    AUREA_CHECK_NEAR(s[0] - 10.0, 30.0, 1e-9);            // forçar: a primeira encosta na inicial
+    AUREA_CHECK_NEAR(s[2] + 10.0, 930.0, 1e-9);           // ... e a última na final
+    AUREA_CHECK_NEAR(s[1] - s[0], s[2] - s[1], 1e-9);     // espaço repartido igual
+}
+
+AUREA_TEST(VectorGpu, TextOnAMaskPathHonoursMarginsKeysAndDoesNotClip) {
+    VEC_REQUIRE_GPU();
+    Rig rig(400, 300);
+    auto text = rig.e.add_text("AUREA");
+    AUREA_CHECK(text.ok());
+    if (!text.ok()) return;
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* l = comp->layer(LayerId::unpack(*text));
+    const LitBox straight = lit_box(rig.capture(400));
+    // Máscara FECHADA na própria camada: um retângulo cuja borda de cima vai
+    // de x = 40 a x = 360 (composição) em y = 200. As letras sobem para fora
+    // dele: se a máscara recortasse, quase nada apareceria.
+    auto layer_point = [&](f32 cx, f32 cy) {
+        return Vec2{l->transform.anchor.x + cx - l->transform.position.x, l->transform.anchor.y + cy - l->transform.position.y};
+    };
+    Mask m;
+    m.id = l->alloc_mask_id();
+    m.name = "Caminho";
+    m.closed = true;
+    for (Vec2 c : {Vec2{40, 200}, Vec2{360, 200}, Vec2{360, 280}, Vec2{40, 280}}) {
+        MaskPoint p;
+        p.position = layer_point(c.x, c.y);
+        m.points.push_back(p);
+    }
+    l->masks.push_back(m);
+    Engine::TextPathOptions o;
+    o.mask = m.id;
+    o.perpendicular = true;
+    o.firstMargin = 20.0f;
+    l->text.alignment = 0;
+    AUREA_CHECK(rig.e.set_text_path_options(*text, o));
+    Engine::TextPathOptions back;
+    AUREA_CHECK(rig.e.query_text_path_options(*text, back));
+    AUREA_CHECK(back.mask == m.id && back.pathLayer == 0 && back.firstMargin == 20.0f);
+    const LitBox leftBox = lit_box(rig.capture(400));
+    std::printf("    reto %u px; esquerda: x %d..%d y %d..%d (%u px)\n", straight.count, leftBox.x0, leftBox.x1, leftBox.y0, leftBox.y1, leftBox.count);
+    AUREA_CHECK(leftBox.count > straight.count * 6 / 10);   // a máscara-caminho não recorta
+    AUREA_CHECK(leftBox.y1 <= 203);                          // as letras sentam na borda de cima
+    AUREA_CHECK(std::abs(leftBox.x0 - 60) <= 6);             // 40 + margem inicial 20
+    // Direita: a margem final conta do fim do CAMINHO. Num caminho aberto só
+    // com a borda de cima, o fim é x = 360.
+    m.closed = false;
+    m.points.resize(2);
+    l->masks.back() = m;
+    l->text.alignment = 2;
+    o.lastMargin = 30.0f;
+    AUREA_CHECK(rig.e.set_text_path_options(*text, o));
+    const LitBox rightBox = lit_box(rig.capture(400));
+    std::printf("    direita: x %d..%d\n", rightBox.x0, rightBox.x1);
+    AUREA_CHECK(std::abs(rightBox.x1 - 330) <= 6);
+    // Centro, margens zero: no meio da borda.
+    l->text.alignment = 1;
+    o.firstMargin = 0.0f;
+    o.lastMargin = 0.0f;
+    AUREA_CHECK(rig.e.set_text_path_options(*text, o));
+    const LitBox centerBox = lit_box(rig.capture(400));
+    AUREA_CHECK(std::abs((centerBox.x0 + centerBox.x1) / 2 - 200) <= 5);
+    // Forçar alinhamento: de uma ponta à outra.
+    o.forceAlign = true;
+    AUREA_CHECK(rig.e.set_text_path_options(*text, o));
+    const LitBox forced = lit_box(rig.capture(400));
+    std::printf("    forcado: x %d..%d\n", forced.x0, forced.x1);
+    AUREA_CHECK(std::abs(forced.x0 - 40) <= 6 && std::abs(forced.x1 - 360) <= 6);
+    // Margem inicial animada: 0 no quadro 0, 200 no quadro 30; no 15 vale 100.
+    o.forceAlign = false;
+    l->text.alignment = 0;
+    AUREA_CHECK(rig.e.set_text_path_options(*text, o));
+    Track& first = l->tracks.get_or_create(TrackProperty::TextPathFirstMargin);
+    (void)first.set(FrameIndex{0}, 0.0f, Interpolation::Linear);
+    (void)first.set(FrameIndex{30}, 200.0f, Interpolation::Linear);
+    Command seek;
+    seek.type = CommandType::PlaybackSeek;
+    seek.seek.time = tick_at(FrameIndex{15}, 30.0);
+    AUREA_CHECK(rig.e.submit_commands(&seek, 1) == 1);
+    AUREA_CHECK(rig.e.query_text_path_options(*text, back));
+    AUREA_CHECK_NEAR(back.firstMargin, 100.0f, 0.01f);
+    const LitBox keyed = lit_box(rig.capture(400));
+    std::printf("    margem animada (quadro 15): x0 %d\n", keyed.x0);
+    AUREA_CHECK(std::abs(keyed.x0 - 140) <= 6);
+    // Mexer na margem com keyframes grava o keyframe do instante.
+    o.firstMargin = 120.0f;
+    AUREA_CHECK(rig.e.set_text_path_options(*text, o));
+    AUREA_CHECK_EQ(l->tracks.find(TrackProperty::TextPathFirstMargin)->keys.size(), static_cast<usize>(3));
+    // Apagar a máscara devolve o texto à linha reta.
+    AUREA_CHECK(rig.e.remove_mask(*text, m.id));
+    AUREA_CHECK(rig.e.query_text_path_options(*text, back));
+    AUREA_CHECK(back.mask == kInvalidIndex);
+}
+
+AUREA_TEST(VectorGpu, TextOnPathFromAnOldProjectKeepsItsPlace) {
+    // Projeto de antes da v49: centralizado, a letra ia para margem + posição
+    // na caixa (como se fosse à esquerda numa linha só). Continua lá.
+    VEC_REQUIRE_GPU();
+    Rig rig(400, 300);
+    VectorGroup g;
+    VectorPath p;
+    p.path.closed = false;
+    BezierVertex a, b;
+    a.p = Vec2{40, 200};
+    b.p = Vec2{360, 200};
+    p.path.v = {a, b};
+    g.paths.push_back(p);
+    g.fill.enabled = false;
+    const u64 guide = rig.layer({g});
+    auto text = rig.e.add_text("AUREA");
+    AUREA_CHECK(text.ok());
+    if (!text.ok()) return;
+    AUREA_CHECK(rig.e.set_text_path(*text, guide, 30.0f, true, false));
+    Composition* comp = rig.e.project()->timeline().composition(rig.e.project()->timeline().current());
+    Layer* l = comp->layer(LayerId::unpack(*text));
+    l->text.pathLegacyLayout = true;
+    const LitBox legacy = lit_box(rig.capture(400));
+    std::printf("    layout antigo: x %d..%d\n", legacy.x0, legacy.x1);
+    AUREA_CHECK(std::abs(legacy.x0 - 70) <= 6);
+    // Forçar o alinhamento (ou trocar o caminho, ou a margem final) passa
+    // para o layout novo.
+    Engine::TextPathOptions o;
+    AUREA_CHECK(rig.e.query_text_path_options(*text, o));
+    o.forceAlign = true;
+    AUREA_CHECK(rig.e.set_text_path_options(*text, o));
+    AUREA_CHECK(!l->text.pathLegacyLayout);
 }
 
 AUREA_TEST(VectorGpu, FreehandStrokeAndSaveReopenIdenticalFrame) {

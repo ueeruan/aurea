@@ -7,6 +7,7 @@
 #include "aurea/Engine.hpp"
 #include "aurea/bridge/BridgePods.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/effects/RandomEdits.hpp"
 
 using namespace aurea;
 
@@ -416,6 +417,47 @@ AUREA_TEST(Composition, RetimeKeepsSecondsNotFrames) {
     AUREA_CHECK(c.layer(id)->end.value > c.layer(id)->start.value);
 }
 
+AUREA_TEST(Composition, RetimeKeepsSecondsOfValuesMeasuredInFrames) {
+    // Export 4K60 de um projeto a 30 (0.2.7): a cópia congelada vira 60 qps.
+    // O que é medido em QUADROS (eco, transição, parâmetros kParamFrames) tem
+    // de dobrar; o que é por quadro (px/quadro) tem de cair pela metade.
+    EffectRegistry registry;
+    register_builtin_effects(registry);
+    Composition c = make_comp(1920, 1080, 30.0);
+    const auto id = c.add_layer(LayerKind::Shape, "eco");
+    Layer* l = c.layer(id);
+    l->transitionInFrames = 10;
+    l->transitionOutFrames = 0;
+    l->echoDelay = 2.0f;
+    l->rgbDelay = 1.5f;
+    const EffectTypeId echo = registry.find_key(effect_keys::kEchoTrail);
+    const ParameterRegistry* specs = registry.params(echo);
+    AUREA_CHECK(specs != nullptr);
+    EffectInstance fx;
+    fx.id = 7;
+    fx.type = echo;
+    initialize_instance(fx, *specs);
+    fx.params[1].constant = ParamValue::scalar(3.0f);              // Intervalo (quadros)
+    l->effects.push_back(fx);
+    Track& delayKeys = l->tracks.get_or_create(TrackProperty::EffectParam, 7, param_track_key(1, 0));
+    delayKeys.keys.push_back(Keyframe{FrameIndex{0}, 2.0f});
+    delayKeys.keys.push_back(Keyframe{FrameIndex{30}, 4.0f});
+
+    c.retime(60.0, &registry);
+    l = c.layer(id);
+    AUREA_CHECK_EQ(l->transitionInFrames, 20u);
+    AUREA_CHECK_EQ(l->transitionOutFrames, 0u);
+    AUREA_CHECK_NEAR(l->echoDelay, 4.0f, 1e-5f);
+    AUREA_CHECK_NEAR(l->rgbDelay, 3.0f, 1e-5f);
+    AUREA_CHECK_NEAR(l->effects[0].params[1].constant.v[0], 6.0f, 1e-5f);
+    AUREA_CHECK_NEAR(l->effects[0].params[2].constant.v[0], 0.6f, 1e-5f);  // decaimento: sem unidade de tempo
+    const Track* keys = l->tracks.find(TrackProperty::EffectParam, 7, param_track_key(1, 0));
+    AUREA_CHECK(keys != nullptr);
+    AUREA_CHECK_EQ(keys->keys[1].time.value, static_cast<i64>(60));
+    AUREA_CHECK_NEAR(keys->keys[0].value, 4.0f, 1e-5f);
+    AUREA_CHECK_NEAR(keys->keys[1].value, 8.0f, 1e-5f);
+}
+
 AUREA_TEST(Composition, RetimeKeepsLastMarkerInsideDuration) {
     Composition c = make_comp(1920, 1080, 60.0);
     c.set_duration(FrameIndex{60});
@@ -602,4 +644,30 @@ AUREA_TEST(Timeline, AbandonedScrubClosesPausedAfterTheTimeout) {
     p.scrub(FrameIndex{60}, 4'200'000'000ull);
     p.end_scrub(4'300'000'000ull);
     AUREA_CHECK(p.playing());
+}
+
+AUREA_TEST(RandomEdits, ShuffleUsesEverySegmentOnceAndIsRepeatableBySeed) {
+    // "Edições aleatórias" (0.2.7): cada trecho aparece uma vez, a mesma
+    // semente dá a mesma montagem e outra semente dá outra.
+    for (u32 count : {2u, 3u, 7u, 50u, 333u, 4096u}) {
+        std::vector<u8> seen(count, 0);
+        for (u32 i = 0; i < count; ++i) {
+            const u32 j = random_edits::permute(i, count, 12345u);
+            AUREA_CHECK(j < count);
+            if (j < count) ++seen[j];
+        }
+        AUREA_CHECK(std::all_of(seen.begin(), seen.end(), [](u8 n) { return n == 1; }));
+    }
+    u32 differs = 0;
+    for (i64 f = 0; f < 120; ++f) {
+        const i64 a = random_edits::frame(f, 120, 4, 0.123f);
+        AUREA_CHECK(a >= 0 && a < 120);
+        AUREA_CHECK_EQ(a, random_edits::frame(f, 120, 4, 0.123f));
+        // Dentro do trecho o tempo anda junto.
+        if (f % 4 != 0) AUREA_CHECK_EQ(a, random_edits::frame(f - 1, 120, 4, 0.123f) + 1);
+        if (a != random_edits::frame(f, 120, 4, 7.5f)) ++differs;
+    }
+    AUREA_CHECK(differs > 30);
+    // Trecho maior que a camada: nada muda.
+    AUREA_CHECK_EQ(random_edits::frame(10, 20, 40, 1.f), i64{10});
 }

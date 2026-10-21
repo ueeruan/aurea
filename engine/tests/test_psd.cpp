@@ -34,10 +34,37 @@ Bytes fixture(bool rle=false) {
 AUREA_TEST(Psd, RawAndPackbitsPreserveLayers) {
     for(bool rle:{false,true}) {psd::Document doc;PSD_REQUIRE(psd::read(fixture(rle),doc).ok());
         AUREA_CHECK_EQ(doc.width,8u);AUREA_CHECK_EQ(doc.layers.size(),2u);
-        AUREA_CHECK_EQ(doc.layers[0].rgba[0],255);AUREA_CHECK_EQ(doc.layers[0].rgba[3],128);
-        AUREA_CHECK_EQ(doc.layers[1].left,3);AUREA_CHECK(!doc.layers[1].visible);
-        AUREA_CHECK_EQ(doc.layers[1].blend,BlendMode::Multiply);
+        // Photoshop grava de baixo para cima: o registro 1 é a camada da frente.
+        AUREA_CHECK_EQ(doc.layers[1].rgba[0],255);AUREA_CHECK_EQ(doc.layers[1].rgba[3],128);
+        AUREA_CHECK_EQ(doc.layers[0].left,3);AUREA_CHECK(!doc.layers[0].visible);
+        AUREA_CHECK_EQ(doc.layers[0].blend,BlendMode::Multiply);
     }
+}
+AUREA_TEST(Psd, PaddedAnd8B64TaggedBlocksAndUnknownTrailersStillImport) {
+    // 0.2.7: o Photoshop alinha os blocos depois da máscara global em 4 bytes e
+    // usa "8B64"; outros programas deixam assinaturas próprias no fim.
+    auto b = fixture();
+    const u32 lmAt = 26 + 4 + 4;   // sem modo de cor nem recursos de imagem
+    Bytes extra; extra.insert(extra.end(), {0, 0});
+    tag(extra, "8B64"); tag(extra, "FMsk"); d(extra, 2); extra.insert(extra.end(), {9, 9});
+    extra.insert(extra.end(), {0, 0}); tag(extra, "XXXX"); tag(extra, "junk"); d(extra, 0);
+    const u32 oldLen = (u32(b[lmAt]) << 24) | (u32(b[lmAt + 1]) << 16) | (u32(b[lmAt + 2]) << 8) | b[lmAt + 3];
+    const u32 newLen = oldLen + static_cast<u32>(extra.size());
+    b[lmAt] = u8(newLen >> 24); b[lmAt + 1] = u8(newLen >> 16); b[lmAt + 2] = u8(newLen >> 8); b[lmAt + 3] = u8(newLen);
+    b.insert(b.begin() + lmAt + 4 + oldLen, extra.begin(), extra.end());
+    psd::Document doc; PSD_REQUIRE(psd::read(b, doc).ok());
+    AUREA_CHECK_EQ(doc.layers.size(), 2u);
+}
+AUREA_TEST(Psd, FlattenedFileImportsTheCompositeAsOneLayer) {
+    // Sem registros de camada: a imagem composta vira uma camada (0.2.7).
+    Bytes b; tag(b,"8BPS");w(b,1); b.insert(b.end(),6,0);w(b,3);d(b,2);d(b,4);w(b,8);w(b,3);d(b,0);d(b,0);d(b,0);
+    w(b,0);   // composta sem compressão, planar: R, G, B
+    for (u8 c : {u8(200), u8(100), u8(50)}) b.insert(b.end(), 8, c);
+    psd::Document doc; PSD_REQUIRE(psd::read(b, doc).ok());
+    PSD_REQUIRE(doc.layers.size() == 1);
+    AUREA_CHECK_EQ(doc.layers[0].width, 4u); AUREA_CHECK_EQ(doc.layers[0].height, 2u);
+    AUREA_CHECK_EQ(doc.layers[0].rgba[0], 200); AUREA_CHECK_EQ(doc.layers[0].rgba[1], 100);
+    AUREA_CHECK_EQ(doc.layers[0].rgba[2], 50); AUREA_CHECK_EQ(doc.layers[0].rgba[3], 255);
 }
 AUREA_TEST(Psd, DecodedBudgetIncludesLayersAndChannelScratch) {
     for (bool rle : {false, true}) {
@@ -185,6 +212,43 @@ AUREA_TEST(Psd, ImportReacquiresParentAfterCompositionTableGrowth) {
     const auto* nested = timeline.composition(parent->layer(LayerId::unpack(*imported))->nested.composition);
     PSD_REQUIRE(nested); AUREA_CHECK_EQ(nested->order().size(), 2u);
     AUREA_CHECK_EQ(timeline.composition_count(), 65u);
+    PSD_REQUIRE(e.history().undo(timeline));
+    AUREA_CHECK(timeline.composition(timeline.root())->order().empty());
+    e.shutdown(); fileio::remove_file(path);
+}
+
+AUREA_TEST(Gif, AnimatedGifBecomesFramesInAPrecompThatLoops) {
+    // 0.2.7 ("o GIF fica parado como imagem"): 2 quadros de 1x1 (vermelho,
+    // azul), 100 ms cada. A 30 qps: 3 quadros por imagem, volta de 6.
+    const Bytes gif = {
+        'G','I','F','8','9','a', 1,0, 1,0, 0x80, 0, 0,
+        255,0,0, 0,0,255,
+        0x21,0xF9,4, 0,10,0, 0, 0,
+        0x2C, 0,0,0,0, 1,0,1,0, 0, 2, 2, 0x44,0x01, 0,
+        0x21,0xF9,4, 0,10,0, 0, 0,
+        0x2C, 0,0,0,0, 1,0,1,0, 0, 2, 2, 0x4C,0x01, 0,
+        0x3B};
+    const std::string path = "aurea_test_anim.gif";
+    PSD_REQUIRE(fileio::write_atomic(path, gif.data(), gif.size()).ok());
+    Engine e; EngineConfig cfg; cfg.disableAutosave = true; cfg.workerCount = 1;
+    PSD_REQUIRE(e.initialize(cfg).ok()); PSD_REQUIRE(e.new_project(8, 4, 30., "gif").ok());
+    auto& timeline = e.project()->timeline();
+    const auto imported = e.import_gif(path, "Anim"); PSD_REQUIRE(imported.ok());
+    const auto* parent = timeline.composition(timeline.root());
+    const auto* outer = parent->layer(LayerId::unpack(*imported)); PSD_REQUIRE(outer);
+    const auto* frames = timeline.composition(outer->nested.composition); PSD_REQUIRE(frames);
+    AUREA_CHECK_EQ(frames->order().size(), 2u);
+    AUREA_CHECK_EQ(frames->duration().value, i64{6});
+    i64 starts[2]{}, ends[2]{}; usize n = 0;
+    frames->layers().for_each([&](LayerId, const Layer& l) { if (n < 2) { starts[n] = l.start.value; ends[n] = l.end.value; ++n; } });
+    AUREA_CHECK_EQ(std::min(starts[0], starts[1]), i64{0});
+    AUREA_CHECK_EQ(std::max(ends[0], ends[1]), i64{6});
+    // Toca em loop até o fim da composição: quadro da fonte volta a 0 a cada 6.
+    if (parent->duration().value > 6) {
+        AUREA_CHECK(outer->timeRemapEnabled);
+        AUREA_CHECK_NEAR(static_cast<f32>(outer->source_frame(FrameIndex{outer->start.value + 4})), 4.f, 1e-4f);
+        AUREA_CHECK_NEAR(static_cast<f32>(outer->source_frame(FrameIndex{outer->start.value + 7})), 1.f, 1e-4f);
+    }
     PSD_REQUIRE(e.history().undo(timeline));
     AUREA_CHECK(timeline.composition(timeline.root())->order().empty());
     e.shutdown(); fileio::remove_file(path);

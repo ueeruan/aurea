@@ -180,8 +180,31 @@ public:
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_angle("direction", "Direção das faixas", 90.0f);
         p.add_int("slices", "Número de faixas", 12, 1, static_cast<i32>(kMaxSlices));
-        p.add_float("frame_offset", "Deslocamento de quadros", 0.0f, -600.0f, 600.0f, kParamAnimatable);
+        p.add_float("frame_offset", "Deslocamento de quadros", 0.0f, -600.0f, 600.0f, kParamAnimatable | kParamFrames);
         p.add_bool("interpolate", "Interpolar quadros", false);
+    }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
+// -----------------------------------------------------------------------------
+// Edições aleatórias (0.2.7)
+//
+// A camada vira trechos de "Duração do corte" quadros remontados numa ordem
+// embaralhada, repetível pela semente (effects/RandomEdits.hpp). Declarativo
+// como o Posterizar tempo: quem troca o tempo da camada é o renderer.
+// -----------------------------------------------------------------------------
+class RandomEdits final : public Effect {
+public:
+    enum : u32 { kLength = 0, kSeed };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kRandomEdits, "Edições aleatórias", "Tempo", EffectClass::Temporal};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_int("edit_length", "Duração do corte", 2, 1, 120, kParamFrames);
+        p.add_float("seed", "Semente", 0.123f, 0.0f, 100.0f, kParamNone);
+        p.typed_range(0.0f, 1000000.0f);
     }
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
@@ -237,6 +260,8 @@ void register_temporal_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<TimeRemapEffect>());
     (void)r.add(std::make_unique<TimeSlice>());
 }
+
+void register_random_edits_effect(EffectRegistry& r) { (void)r.add(std::make_unique<RandomEdits>()); }
 
 
 } // namespace aurea::builtin

@@ -35,6 +35,7 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/media/YuvLayout.hpp"
 #include "aurea/effects/MotionTile.hpp"
+#include "aurea/effects/RandomEdits.hpp"
 #include "aurea/effects/Particular.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/project/Serialization.hpp"
@@ -7243,6 +7244,51 @@ AUREA_TEST(EffectPackGpu, OscillateCyclesMovesPixelsAndMatchesFinalRender) {
     AUREA_CHECK(max_abs_diff(right,s.render(FrameIndex{0}))<.001f);
 }
 
+AUREA_TEST(EffectPackGpu, AuroraLightsTheSkyReflectsInTheWaterAndAnimates) {
+    // Aurora (Gerar, 0.2.7): céu com cortinas na cor principal acima do
+    // horizonte, o reflexo mais fraco embaixo, e o relógio anda.
+    AUREA_REQUIRE_GPU();
+    Scene s(160, 90);
+    const auto id = s.image(uniform_image(160, 90, 0, 0, 0), 80, 45);
+    const auto black = s.render();
+    auto& fx = s.add_effect(id, effect_keys::kAurora);
+    fx.params[1].constant = ParamValue::scalar(160.0f);   // quantidade
+    const auto a = s.render(FrameIndex{0});
+    auto band = [](const FloatImage& img, u32 y0, u32 y1) {
+        Vec4 sum{0, 0, 0, 0}; u32 n = 0;
+        for (u32 y = y0; y < y1; ++y) for (u32 x = 0; x < 160; x += 2) { const Vec4 v = img.v(x, y); sum.x += v.x; sum.y += v.y; sum.z += v.z; ++n; }
+        return Vec4{sum.x / n, sum.y / n, sum.z / n, 0};
+    };
+    const Vec4 sky = band(a, 8, 38), water = band(a, 55, 85);
+    std::printf("\n    aurora: ceu %.4f %.4f %.4f  agua %.4f %.4f %.4f\n", sky.x, sky.y, sky.z, water.x, water.y, water.z);
+    AUREA_CHECK(sky.y > 0.01f);                 // a aurora acende o céu
+    AUREA_CHECK(sky.y > sky.x * 1.5f);          // verde-ciano, não branco
+    AUREA_CHECK(water.y > 0.0005f && water.y < sky.y);   // reflexo, mais fraco
+    const auto later = s.render(FrameIndex{90});
+    AUREA_CHECK(max_abs_diff(a, later) > 0.005f);        // anima
+    AUREA_CHECK(max_abs_diff(a, s.render(FrameIndex{0})) < 1e-5f);   // determinístico
+    fx.params[21].constant = ParamValue::scalar(0.0f);   // opacidade
+    AUREA_CHECK(max_abs_diff(black, s.render(FrameIndex{0})) < 1e-5f);
+}
+
+AUREA_TEST(EffectPackGpu, AuroraReferenceSettingsPreview) {
+    // Os valores da tela de referência (0.2.7): Distorção −24, Quantidade 140,
+    // Escala 7,3, Comprimento 64, Exposição 39, Detalhe 94, Curvatura 6,9,
+    // Brilho do céu 25,3, Deslocamento −332, Velocidade 46. Salva a imagem
+    // para conferir a olho (aurora_referencia.png na pasta do teste).
+    AUREA_REQUIRE_GPU();
+    Scene s(640, 360);
+    const auto id = s.image(uniform_image(640, 360, 0, 0, 0), 320, 180);
+    auto& fx = s.add_effect(id, effect_keys::kAurora);
+    const f32 values[] = {-24.f, 140.f, 7.3f, 64.f, 39.f, 94.f, 6.9f, 25.3f};
+    for (u32 i = 0; i < 8; ++i) fx.params[i].constant = ParamValue::scalar(values[i]);
+    fx.params[11].constant = ParamValue::scalar(-332.f);
+    fx.params[12].constant = ParamValue::scalar(46.f);
+    const auto img = s.render(FrameIndex{22});
+    (void)write_png("aurora_referencia.png", img.encoded());
+    AUREA_CHECK(img.mean().y > 0.005f);
+}
+
 AUREA_TEST(EffectPackGpu, OscillatorDepthDoesNotClipTwoDAndThreeDStillProjectsDepth) {
     AUREA_REQUIRE_GPU();
     Scene s(96, 96);
@@ -7257,7 +7303,10 @@ AUREA_TEST(EffectPackGpu, OscillatorDepthDoesNotClipTwoDAndThreeDStillProjectsDe
         for (f32 phase : {0.f, .5f}) {
             // Depth's extrema are a quarter cycle after Orbit's extrema.
             fx.params[5].constant = ParamValue::scalar(phase + (mode == 1 ? .25f : 0.f));
-            AUREA_CHECK(max_abs_diff(original, s.render()) < .001f);
+            // 0.2.7: no 2D a profundidade é perspectiva (escala), não Z — a
+            // camada nunca some pelo corte de profundidade da GPU.
+            const auto frame = s.render();
+            AUREA_CHECK(original.v(48, 48).x > .9f && frame.v(48, 48).x > .9f);
         }
     }
     s.comp->layer(id)->threeD = true;

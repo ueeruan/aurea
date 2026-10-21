@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: Aurora (Gerar) e Edições aleatórias (Tempo). -->
+<resources>
+    <string name="fx027_name_aurora">Aurora</string>
+    <string name="fx027_name_random_edits">Random edits</string>
+    <string name="fx027_desc_aurora">Animated northern lights in a starry sky, reflected in water. Curtains, colors, sky and camera are adjustable.</string>
+    <string name="fx027_desc_random_edits">Cuts the layer into short segments and reassembles them in random order. The same seed repeats the same edit.</string>
+    <string name="fx027_amount">Amount</string>
+    <string name="fx027_sky_glow">Sky glow</string>
+    <string name="fx027_secondary_color">Secondary color</string>
+    <string name="fx027_sky_color">Sky color</string>
+    <string name="fx027_time_offset">Time offset</string>
+    <string name="fx027_horizon">Horizon</string>
+    <string name="fx027_reflection">Reflection</string>
+    <string name="fx027_ripple">Water ripple</string>
+    <string name="fx027_stars">Stars</string>
+    <string name="fx027_tilt">Camera tilt</string>
+    <string name="fx027_pan">Camera pan</string>
+    <string name="fx027_sky_height">Curtain height</string>
+    <string name="fx027_environment">Environment</string>
+    <string name="fx027_edit_length">Edit length</string>
+</resources>

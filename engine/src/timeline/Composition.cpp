@@ -1,4 +1,5 @@
 #include "aurea/timeline/Composition.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -298,7 +299,7 @@ void retime_track(Track& t, f64 k, bool scaleValues) noexcept {
 
 } // namespace
 
-void Composition::retime(f64 fps) noexcept {
+void Composition::retime(f64 fps, const EffectRegistry* effects, bool coverEnds) noexcept {
     const f64 old = fps_;
     set_fps(fps);
     if (old <= 0.0 || fps_ == old) return;
@@ -306,10 +307,17 @@ void Composition::retime(f64 fps) noexcept {
     const auto scale = [k](FrameIndex f) {
         return FrameIndex{static_cast<i64>(std::llround(static_cast<f64>(f.value) * k))};
     };
-    duration_ = FrameIndex{std::max<i64>(1, scale(duration_).value)};
+    // Fim (exclusivo) cobrindo: o quadro f mostra a camada enquanto
+    // f/fps < fim/fps antigo, ou seja f < ⌈fim·k⌉ — a mesma conta do número
+    // de quadros da exportação (⌈segundos·fps⌉).
+    const auto scaleEnd = [&](FrameIndex f) {
+        if (!coverEnds) return scale(f);
+        return FrameIndex{static_cast<i64>(std::ceil(static_cast<f64>(f.value) * k - 1e-6))};
+    };
+    duration_ = FrameIndex{std::max<i64>(1, scaleEnd(duration_).value)};
     layers_.for_each([&](LayerId, Layer& l) {
         l.start = scale(l.start);
-        l.end = FrameIndex{std::max(l.start.value + 1, scale(l.end).value)};
+        l.end = FrameIndex{std::max(l.start.value + 1, scaleEnd(l.end).value)};
         l.offset = scale(l.offset);
         l.fadeIn = scale(l.fadeIn);
         l.fadeOut = scale(l.fadeOut);
@@ -327,6 +335,30 @@ void Composition::retime(f64 fps) noexcept {
         for (auto& mask : l.masks) { retimePath(mask.pathKeys); mask.cacheKey = 0; }
         for (auto& group : l.shape.vector.groups) for (auto& path : group.paths) retimePath(path.keys);
         for (auto& effect : l.effects) for (auto& mesh : effect.meshes) retimePath(mesh.keys);
+        // Durações guardadas em QUADROS fora das tracks: mesmos segundos.
+        const auto frames = [k](u32 f) { return f ? std::max<u32>(1, static_cast<u32>(std::llround(f * k))) : 0u; };
+        l.transitionInFrames = frames(l.transitionInFrames);
+        l.transitionOutFrames = frames(l.transitionOutFrames);
+        l.echoDelay = static_cast<f32>(l.echoDelay * k);
+        l.rgbDelay = static_cast<f32>(l.rgbDelay * k);
+        if (effects) {
+            for (EffectInstance& effect : l.effects) {
+                const ParameterRegistry* specs = effects->params(effect.type);
+                if (!specs) continue;
+                const u32 count = std::min<u32>(specs->count(), static_cast<u32>(effect.params.size()));
+                for (u32 p = 0; p < count; ++p) {
+                    const ParamSpec& spec = specs->at(p);
+                    const f64 factor = (spec.flags & kParamFrames) ? k : (spec.flags & kParamPerFrame) ? 1.0 / k : 1.0;
+                    if (factor == 1.0) continue;
+                    const u32 comps = std::max(1u, component_count(spec.type));
+                    for (u32 c = 0; c < comps && c < 4; ++c) {
+                        effect.params[p].constant.v[c] = static_cast<f32>(effect.params[p].constant.v[c] * factor);
+                        if (Track* t = l.tracks.find(TrackProperty::EffectParam, effect.id, param_track_key(p, c)))
+                            for (Keyframe& key : t->keys) key.value = static_cast<f32>(key.value * factor);
+                    }
+                }
+            }
+        }
         i64 previousCaptionEnd = 0;
         for (auto& caption : l.captions) {
             caption.start = std::max(previousCaptionEnd, scale(FrameIndex{caption.start}).value);

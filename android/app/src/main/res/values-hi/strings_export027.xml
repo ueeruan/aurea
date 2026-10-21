@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: o que a escada de tentativas mudou além do tamanho (fps, motion blur). -->
+<resources>
+    <string name="export_retry_fps">%1$d fps तक।</string>
+    <string name="export_retry_blur_less">कम मोशन ब्लर सैंपल के साथ।</string>
+    <string name="export_retry_blur_off">मोशन ब्लर के बिना।</string>
+    <string name="export_done_fps">इस डिवाइस पर चलाने के लिए %1$d fps पर एक्सपोर्ट किया गया।</string>
+    <string name="export_done_blur_less">इस डिवाइस पर चलाने के लिए मोशन ब्लर कम किया गया।</string>
+    <string name="export_done_blur_off">इस डिवाइस पर चलाने के लिए मोशन ब्लर के बिना एक्सपोर्ट किया गया।</string>
+</resources>

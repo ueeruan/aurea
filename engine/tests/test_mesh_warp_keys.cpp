@@ -217,3 +217,46 @@ AUREA_TEST(MeshWarpKeys, IncompatibleGridPasteCannotPartiallyApplyMixedScalarAni
     AUREA_CHECK_EQ(f.model()->effects[0].meshes[0].keys.size(), 1u);
     AUREA_CHECK_EQ(f.model()->effects[0].meshes[0].rows, 7u);
 }
+
+AUREA_TEST(MeshWarpKeys, CurvePanelBezierEasesTheWholeMeshAndSurvivesProjectRoundTrip) {
+    // 0.2.7: o botão de curva da Mesh não abria — a key de malha só aceitava
+    // segurar/linear/suave. Agora a mesma curva dos keyframes comuns.
+    MeshKeyFixture f;
+    AUREA_CHECK(f.engine.mesh_warp_drag(f.layer, f.effect, 9, 0, .2f, .2f, false, false));
+    AUREA_CHECK(f.engine.mesh_warp_toggle_key(f.layer, f.effect));
+    f.seek(30);
+    AUREA_CHECK(f.engine.mesh_warp_drag(f.layer, f.effect, 9, 0, .8f, .8f, false, false));
+    constexpr usize vertex = Engine::kMeshWarpHeaderFloats + 9 * kMeshWarpVertexFloats;
+    f.seek(15);
+    AUREA_CHECK_NEAR(f.mesh()[vertex], .5f, 1e-6f);          // linear no meio
+    Command curve; curve.type = CommandType::KeyframeSetInterpolation;
+    curve.keyframe_interp.track = {LayerId::unpack(f.layer), TrackProperty::MeshWarp, f.effect, 0};
+    curve.keyframe_interp.time = FrameIndex{0};
+    curve.keyframe_interp.interp = Interpolation::Bezier;
+    curve.keyframe_interp.bx1 = .9f; curve.keyframe_interp.by1 = 0.f;
+    curve.keyframe_interp.bx2 = .95f; curve.keyframe_interp.by2 = .05f;   // segura e dispara no fim
+    curve.keyframe_interp.power = 2;
+    AUREA_CHECK(f.engine.apply_command(curve).ok());
+    const f32 eased = f.mesh()[vertex];
+    AUREA_CHECK(eased < .3f);                                   // a curva chegou à malha inteira
+    f32 handles[4]{}; u8 power = 0;
+    AUREA_CHECK(f.engine.query_keyframe_easing(f.layer, 44, f.effect, 0, 0, handles, &power));
+    AUREA_CHECK_NEAR(handles[0], .9f, 0); AUREA_CHECK_NEAR(handles[3], .05f, 0);
+    AUREA_CHECK_EQ(power, 2u);
+    bridge::KeyframeRow rows[4]{};
+    AUREA_CHECK_EQ(f.engine.query_keyframes(f.layer, rows, 4), 2u);
+    AUREA_CHECK_EQ(rows[0].interpolation, static_cast<u32>(Interpolation::Bezier));
+    const auto path = std::filesystem::absolute("build/reference/aurea-027-mesh-curve.aurea");
+    std::filesystem::create_directories(path.parent_path());
+    AUREA_CHECK(f.engine.save_project(path.string().c_str()).ok());
+    AUREA_CHECK(f.engine.load_project(path.string().c_str()).ok());
+    f.seek(15);
+    AUREA_CHECK_NEAR(f.mesh()[vertex], eased, 1e-6f);
+    const auto* read = mesh_warp::animation(f.model()->effects[0]);
+    AUREA_CHECK(read != nullptr); if (!read) return;
+    AUREA_CHECK_EQ(read->keys[0].curve, static_cast<u8>(Interpolation::Bezier));
+    AUREA_CHECK_EQ(read->keys[0].easePower, 2u);
+    // Projeto antigo: "suave" continua smoothstep (sem curva própria).
+    MeshWarpKey legacy; legacy.interp = 2;
+    AUREA_CHECK_NEAR(mesh_warp::key_ease(legacy, .25f), .25f * .25f * (3.f - .5f), 1e-6f);
+}

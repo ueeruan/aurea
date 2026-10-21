@@ -636,6 +636,10 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_luma_dissolve_effect(registry);
     // Progresso do desenho (Desenho) — 0.2.5. No fim.
     builtin::register_drawing_progress_effect(registry);
+    // Aurora (Gerar) — 0.2.7. No fim.
+    builtin::register_aurora_effect(registry);
+    // Edições aleatórias (Tempo) — 0.2.7. No fim.
+    builtin::register_random_edits_effect(registry);
 }
 
 } // namespace aurea

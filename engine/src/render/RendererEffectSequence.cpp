@@ -26,6 +26,7 @@
 //  compara com o passado pela cadeia de efeitos (Detectar movimento, Datamosh,
 //  Video Glitch) roda o efeito real com o quadro passado como histórico.
 // =============================================================================
+#include "aurea/effects/RandomEdits.hpp"
 #include "aurea/render/Renderer.hpp"
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Math.hpp"
@@ -215,7 +216,7 @@ void scene_at(const EffectPreviewSequence& s, f64 t, std::vector<u8>& out) noexc
     }
 }
 
-enum class TemporalKind : u8 { None, Echo, RgbTime, Posterize, Slice, Remap, Retime, FlowBlur };
+enum class TemporalKind : u8 { None, Echo, RgbTime, Posterize, Slice, Remap, Retime, FlowBlur, RandomEdits };
 
 TemporalKind temporal_kind(std::string_view key) noexcept {
     if (key == effect_keys::kEchoTrail) return TemporalKind::Echo;
@@ -225,6 +226,7 @@ TemporalKind temporal_kind(std::string_view key) noexcept {
     if (key == effect_keys::kTimeRemap) return TemporalKind::Remap;
     if (key == effect_keys::kFlowRetime) return TemporalKind::Retime;
     if (key == effect_keys::kFlowMotionBlur) return TemporalKind::FlowBlur;
+    if (key == effect_keys::kRandomEdits) return TemporalKind::RandomEdits;
     return TemporalKind::None;
 }
 
@@ -322,6 +324,16 @@ bool compose_temporal(TemporalKind kind, const std::vector<ParamValue>& v, Scene
                 acc[i * 3 + 1] = now.px[i * 3 + 1] + (g.px[i * 3 + 1] - now.px[i * 3 + 1]) * amount;
                 acc[i * 3 + 2] = now.px[i * 3 + 2] + (b.px[i * 3 + 2] - now.px[i * 3 + 2]) * amount;
             }
+            break;
+        }
+        case TemporalKind::RandomEdits: {
+            // Renderer: trechos de N quadros embaralhados (effects/RandomEdits.hpp),
+            // aqui numa janela de 3 s da cena de exemplo.
+            constexpr i64 kWindow = 90;
+            const i64 length = std::max<i64>(1, static_cast<i64>(val(v, 0, 2.0f) + 0.5f));
+            const i64 frame = static_cast<i64>(std::floor(t));
+            const i64 base = frame - (((frame % kWindow) + kWindow) % kWindow);
+            add(scene.at(static_cast<f64>(base + random_edits::frame(frame - base, kWindow, length, val(v, 1, 0.123f)))), 1.0f, 1, 1, 1);
             break;
         }
         case TemporalKind::Posterize: {

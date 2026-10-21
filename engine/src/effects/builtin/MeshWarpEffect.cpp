@@ -12,6 +12,7 @@
 // =============================================================================
 #include "BuiltinEffects.hpp"
 #include "aurea/effects/MeshWarp.hpp"
+#include "aurea/animation/Curve.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -71,6 +72,18 @@ i32 key_at(const MeshWarpData& d, i64 frame) noexcept {
     return -1;
 }
 
+f32 key_ease(const MeshWarpKey& key, f32 t) noexcept {
+    if (key.curve == kMeshCurveLegacy || key.curve > static_cast<u8>(kLastInterpolation)) {
+        if (key.interp == 0) return 0.0f;
+        return key.interp == 2 ? t * t * (3.0f - 2.0f * t) : t;
+    }
+    Keyframe curve;
+    curve.interp = static_cast<Interpolation>(key.curve);
+    curve.bx1 = key.bx1; curve.by1 = key.by1; curve.bx2 = key.bx2; curve.by2 = key.by2;
+    curve.easePower = key.easePower;
+    return keyframe_ease(curve, t);
+}
+
 bool evaluate(const MeshWarpData* d, u32 rows, u32 cols, f64 frame, std::vector<f32>& out) {
     const usize n = value_count(rows, cols);
     auto fallback = [&] { identity(rows, cols, out); return false; };
@@ -95,7 +108,7 @@ bool evaluate(const MeshWarpData* d, u32 rows, u32 cols, f64 frame, std::vector<
     if (b.values.size() != n) return fallback();
     const f64 span = static_cast<f64>(b.frame - a.frame);
     f32 t = span > 0.0 ? static_cast<f32>(std::clamp((frame - static_cast<f64>(a.frame)) / span, 0.0, 1.0)) : 1.0f;
-    if (a.interp == 2) t = t * t * (3.0f - 2.0f * t);
+    t = key_ease(a, t);
     out.resize(n);
     for (usize j = 0; j < n; ++j) out[j] = a.values[j] + (b.values[j] - a.values[j]) * t;
     return !is_identity(out, rows, cols);

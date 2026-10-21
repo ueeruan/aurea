@@ -31,6 +31,8 @@ inline constexpr u32 kHeaderVec4 = 3;
 
 /// A máscara entra na cobertura? (fechada, ≥ 2 pontos, modo ≠ None)
 [[nodiscard]] bool active(const Mask& m) noexcept;
+/// O mesmo, na camada: a máscara que o texto usa como caminho não recorta.
+[[nodiscard]] bool active_in(const Layer& l, const Mask& m) noexcept;
 
 /// Caminho no instante LOCAL fracionário da camada (keys interpolados).
 void evaluate_path(const Mask& m, f64 localFrame, std::vector<MaskPoint>& out);

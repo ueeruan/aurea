@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: Aurora (Gerar) e Edições aleatórias (Tempo). -->
+<resources>
+    <string name="fx027_name_aurora">Аврора</string>
+    <string name="fx027_name_random_edits">Случайный монтаж</string>
+    <string name="fx027_desc_aurora">Анимированное северное сияние на звёздном небе с отражением в воде. Настраиваются завесы, цвета, небо и камера.</string>
+    <string name="fx027_desc_random_edits">Режет слой на короткие отрезки и собирает их в случайном порядке. Одинаковое зерно даёт одинаковый монтаж.</string>
+    <string name="fx027_amount">Количество</string>
+    <string name="fx027_sky_glow">Свечение неба</string>
+    <string name="fx027_secondary_color">Второй цвет</string>
+    <string name="fx027_sky_color">Цвет неба</string>
+    <string name="fx027_time_offset">Сдвиг времени</string>
+    <string name="fx027_horizon">Горизонт</string>
+    <string name="fx027_reflection">Отражение</string>
+    <string name="fx027_ripple">Рябь воды</string>
+    <string name="fx027_stars">Звёзды</string>
+    <string name="fx027_tilt">Наклон камеры</string>
+    <string name="fx027_pan">Поворот камеры</string>
+    <string name="fx027_sky_height">Высота завес</string>
+    <string name="fx027_environment">Окружение</string>
+    <string name="fx027_edit_length">Длина отрезка</string>
+</resources>

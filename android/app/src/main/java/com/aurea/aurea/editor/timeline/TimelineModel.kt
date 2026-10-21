@@ -549,6 +549,8 @@ private fun trackName(track: TimelineTrack, effects: List<Pair<Int, String>>): S
                 else -> track.param.toString()
             })
         42 -> LaneNames.get(R.string.tl_part, track.effect + 1, partAxisName(track.param) ?: track.param.toString())
+        46 -> LaneNames.get(R.string.panel_margem_inicial)
+        47 -> LaneNames.get(R.string.text027_path_last_margin)
         else -> LaneNames.get(R.string.tl_3d, track.property)
     }
 }

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: النص على المسار كاملًا (القناع كمسار، الهامش الأخير، فرض المحاذاة). -->
+<resources>
+    <string name="text027_path_hint">أنشئ طبقة متجهة أو ارسم قناعًا على هذه الطبقة لاستخدامه كمسار.</string>
+    <string name="text027_path_mask">القناع %1$d</string>
+    <string name="text027_path_last_margin">الهامش الأخير</string>
+    <string name="text027_path_force_align">فرض المحاذاة</string>
+    <string name="text027_path_alignment_note">تتبع الهوامش محاذاة الفقرة: النص المحاذى لليسار يبدأ من الهامش الأول، والمحاذى لليمين ينتهي عند الهامش الأخير، والمتوسط يقع بينهما.</string>
+</resources>

@@ -1020,6 +1020,8 @@ f64 static_base(const PropDesc& d, u32 c) noexcept {
         case TP::LightConeAngle: return l->light.coneAngle;
         case TP::LightPenumbra: return l->light.penumbra;
         case TP::TextTracking: return l->text.tracking;
+        case TP::TextPathFirstMargin: return l->text.pathOffset;
+        case TP::TextPathLastMargin: return l->text.pathLastMargin;
         case TP::AudioVolume: return tr ? tr->staticValue : 1.0;
         case TP::Speed: return l->speed;
         default: return tr ? tr->staticValue : 0.0;

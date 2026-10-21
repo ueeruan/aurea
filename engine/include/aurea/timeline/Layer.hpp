@@ -246,6 +246,18 @@ struct TextData {
     f32         pathOffset = 0.0f;
     bool        pathPerpendicular = true;
     bool        pathReverse = false;
+    /// Máscara DESTA camada como caminho (id da máscara; vale mais que
+    /// `pathLayer`). Usada como caminho, ela não recorta o texto.
+    u32         pathMask = kInvalidIndex;
+    /// Margem final (px antes do fim do caminho). As margens seguem o
+    /// alinhamento do parágrafo, como no Text on Path do After Effects:
+    /// esquerda parte da inicial, direita termina na final, centro fica no
+    /// meio das duas. `pathForceAlign` espalha cada linha da inicial à final.
+    f32         pathLastMargin = 0.0f;
+    bool        pathForceAlign = false;
+    /// Projeto de antes da v49: a letra ia para margem + posição na caixa
+    /// (o alinhamento não contava). Fica assim até mexerem no caminho.
+    bool        pathLegacyLayout = false;
 };
 
 struct ShapeData {

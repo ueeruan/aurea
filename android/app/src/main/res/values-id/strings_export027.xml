@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: o que a escada de tentativas mudou além do tamanho (fps, motion blur). -->
+<resources>
+    <string name="export_retry_fps">Hingga %1$d fps.</string>
+    <string name="export_retry_blur_less">Dengan sampel motion blur lebih sedikit.</string>
+    <string name="export_retry_blur_off">Tanpa motion blur.</string>
+    <string name="export_done_fps">Diekspor pada %1$d fps agar berjalan di perangkat ini.</string>
+    <string name="export_done_blur_less">Motion blur dikurangi agar berjalan di perangkat ini.</string>
+    <string name="export_done_blur_off">Diekspor tanpa motion blur agar berjalan di perangkat ini.</string>
+</resources>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: Aurora (Gerar) e Edições aleatórias (Tempo). -->
+<resources>
+    <string name="fx027_name_aurora">ऑरोरा</string>
+    <string name="fx027_name_random_edits">रैंडम एडिट</string>
+    <string name="fx027_desc_aurora">तारों भरे आकाश में एनिमेटेड ऑरोरा, पानी में प्रतिबिंब के साथ। पर्दे, रंग, आकाश और कैमरा समायोज्य हैं।</string>
+    <string name="fx027_desc_random_edits">लेयर को छोटे टुकड़ों में काटकर रैंडम क्रम में जोड़ता है। एक ही सीड वही एडिट दोहराता है।</string>
+    <string name="fx027_amount">मात्रा</string>
+    <string name="fx027_sky_glow">आकाश की चमक</string>
+    <string name="fx027_secondary_color">द्वितीयक रंग</string>
+    <string name="fx027_sky_color">आकाश का रंग</string>
+    <string name="fx027_time_offset">समय ऑफ़सेट</string>
+    <string name="fx027_horizon">क्षितिज</string>
+    <string name="fx027_reflection">प्रतिबिंब</string>
+    <string name="fx027_ripple">पानी की लहरें</string>
+    <string name="fx027_stars">तारे</string>
+    <string name="fx027_tilt">कैमरा झुकाव</string>
+    <string name="fx027_pan">कैमरा घुमाव</string>
+    <string name="fx027_sky_height">पर्दों की ऊँचाई</string>
+    <string name="fx027_environment">वातावरण</string>
+    <string name="fx027_edit_length">कट की लंबाई</string>
+</resources>

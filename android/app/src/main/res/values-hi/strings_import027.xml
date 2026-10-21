@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: PSD com a causa da falha; GIF animado. -->
+<resources>
+    <string name="psd_failed_too_big">यह PSD इस डिवाइस की मेमोरी के लिए बहुत बड़ा है। आकार घटाएँ या Photoshop में लेयर मिलाएँ।</string>
+    <string name="psd_failed_format">यह PSD ऐसा कलर मोड इस्तेमाल करता है जिसे Aurea नहीं पढ़ता (CMYK, Lab या 32-बिट)। इसे 8 या 16-बिट RGB में सेव करें।</string>
+    <string name="psd_failed_corrupt">PSD फ़ाइल खराब या अधूरी है।</string>
+    <string name="gif_importing">GIF इम्पोर्ट हो रहा है…</string>
+    <string name="gif_imported">GIF इम्पोर्ट हुआ: फ़्रेम एक प्रीकॉम्प में हैं और लूप में चलते हैं।</string>
+    <string name="gif_failed">GIF इम्पोर्ट नहीं हो सका।</string>
+</resources>

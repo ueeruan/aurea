@@ -1,4 +1,5 @@
 #include "aurea/render/Renderer.hpp"
+#include "aurea/effects/RandomEdits.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/ShutterPlan.hpp"
 #include "aurea/render/MotionBlurBounds.hpp"
@@ -968,6 +969,7 @@ Status Renderer::initialize(GPUBackend& backend, const EffectRegistry& effects) 
     // por chave é linear no registro).
     posterizeType_ = effects.find_key(effect_keys::kPosterizeTime);
     lowFpsType_ = effects.find_key(effect_keys::kLowFps);
+    randomEditsType_ = effects.find_key(effect_keys::kRandomEdits);
     echoType_ = effects.find_key(effect_keys::kEchoTrail);
     rgbTimeType_ = effects.find_key(effect_keys::kTimeWarpRgb);
     motionDetectType_ = effects.find_key(effect_keys::kMotionDetect);
@@ -2254,6 +2256,23 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     break;
                 }
             }
+            // EDIÇÕES ALEATÓRIAS (0.2.7): a camada em trechos de N quadros,
+            // remontados numa ordem embaralhada pela semente
+            // (effects/RandomEdits.hpp). Depois do Posterizar/Low FPS: o
+            // trecho escolhido ainda anda no ritmo travado.
+            const ParameterRegistry* rp = randomEditsType_ ? effects_->params(randomEditsType_) : nullptr;
+            if (rp && rp->count() >= 2) {
+                for (const EffectInstance& inst : l->effects) {
+                    if (!inst.enabled || inst.type != randomEditsType_) continue;
+                    const FrameIndex lt = l->local_time(layerTime);
+                    const i64 length = std::max<i64>(1, evaluate_param(l->tracks, inst, 0, rp->at(0), lt).as_int());
+                    const f32 seed = evaluate_param(l->tracks, inst, 1, rp->at(1), lt).v[0];
+                    const i64 duration = l->end.value - l->start.value;
+                    const i64 elapsed = layerTime.value - l->start.value;
+                    layerTime = FrameIndex{l->start.value + random_edits::frame(elapsed, duration, length, seed)};
+                    break;
+                }
+            }
         }
         const FrameIndex local = l->local_time(layerTime);
 
@@ -2822,24 +2841,81 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // (pelo centro do avanço), girada pela tangente. O animador age
                 // antes, no lugar de origem da letra.
                 std::vector<Mat4> onPath;
-                if (T.pathLayer != 0) {
-                    const Layer* guide = comp.layer(LayerId::unpack(T.pathLayer));
+                if (T.pathLayer != 0 || T.pathMask != kInvalidIndex) {
                     vector::Contour C;
-                    if (guide && guide != l && guide->kind == LayerKind::Shape && guide->shape.shapeType == kShapeVector
-                        && vector::guide_contour(guide->shape.vector, guide->tracks, static_cast<f64>(guide->local_time(time).value), C)) {
-                        auto aff = [](const Mat4& mm) { return vector::Affine2{mm.col[0].x, mm.col[0].y, mm.col[1].x, mm.col[1].y, mm.col[3].x, mm.col[3].y}; };
-                        // Guia → composição → camada de texto → textura do texto.
-                        const vector::Affine2 toText = aff(layer_world_matrix(comp, *l, time)).inverse() * aff(layer_world_matrix(comp, *guide, time));
-                        for (Vec2& p : C.pts) p = toText.apply(p) + srcShift;
+                    bool havePath = false;
+                    const Mask* pathMask = nullptr;
+                    for (const Mask& m : l->masks) if (m.id == T.pathMask) { pathMask = &m; break; }
+                    if (pathMask) {
+                        // Máscara desta camada: os pontos já estão no espaço da camada.
+                        std::vector<MaskPoint> points;
+                        std::vector<Vec4> edges;
+                        mask::evaluate_path(*pathMask, static_cast<f64>(local.value), points);
+                        mask::flatten(points, pathMask->closed, 0.1f, srcShift, edges);
+                        C.closed = pathMask->closed;
+                        for (const Vec4& e : edges) C.pts.push_back(Vec2{e.x, e.y});
+                        if (!pathMask->closed && !edges.empty()) C.pts.push_back(Vec2{edges.back().z, edges.back().w});
+                        havePath = C.pts.size() >= 2;
+                    } else if (T.pathMask == kInvalidIndex && T.pathLayer != 0) {
+                        const Layer* guide = comp.layer(LayerId::unpack(T.pathLayer));
+                        if (guide && guide != l && guide->kind == LayerKind::Shape && guide->shape.shapeType == kShapeVector
+                            && vector::guide_contour(guide->shape.vector, guide->tracks, static_cast<f64>(guide->local_time(time).value), C)) {
+                            auto aff = [](const Mat4& mm) { return vector::Affine2{mm.col[0].x, mm.col[0].y, mm.col[1].x, mm.col[1].y, mm.col[3].x, mm.col[3].y}; };
+                            // Guia → composição → camada de texto → textura do texto.
+                            const vector::Affine2 toText = aff(layer_world_matrix(comp, *l, time)).inverse() * aff(layer_world_matrix(comp, *guide, time));
+                            for (Vec2& p : C.pts) p = toText.apply(p) + srcShift;
+                            havePath = true;
+                        }
+                    }
+                    if (havePath) {
                         f32 base0 = 0.0f;
                         for (const text::GlyphQuad& q : L.quads) if (q.lineIndex == 0) { base0 = q.baseline; break; }
+                        // Margens animáveis (trilhas próprias; parado = os valores da camada).
+                        auto margin = [&](TrackProperty p, f32 fallback) {
+                            const Track* tr = textTracks->find(p);
+                            const f32 v = tr && tr->driven() ? tr->value_or(local, fallback) : fallback;
+                            return std::isfinite(v) ? std::clamp(v, -100000.0f, 100000.0f) : fallback;
+                        };
+                        const f32 firstMargin = margin(TrackProperty::TextPathFirstMargin, T.pathOffset);
+                        const f32 lastMargin = margin(TrackProperty::TextPathLastMargin, T.pathLastMargin);
+                        // Centro de cada letra ao longo do caminho, linha a linha.
+                        std::vector<f64> along(L.quads.size(), 0.0);
+                        if (T.pathLegacyLayout) {
+                            for (usize g = 0; g < L.quads.size(); ++g)
+                                along[g] = static_cast<f64>(firstMargin) + static_cast<f64>(L.quads[g].penX + L.quads[g].advance * 0.5f - L.pad);
+                        } else {
+                            const f64 pathLength = vector::length_of(C);
+                            const u32 lines = std::max(1u, L.lines);
+                            std::vector<f32> lo(lines, 1e30f), hi(lines, -1e30f);
+                            for (const text::GlyphQuad& q : L.quads) {
+                                const u32 li = std::min(q.lineIndex, lines - 1);
+                                lo[li] = std::min(lo[li], q.penX);
+                                hi[li] = std::max(hi[li], q.penX + q.advance);
+                            }
+                            std::vector<f32> xs;
+                            std::vector<usize> members;
+                            std::vector<f64> placed;
+                            for (u32 li = 0; li < lines; ++li) {
+                                if (lo[li] > hi[li]) continue;
+                                xs.clear(); members.clear();
+                                for (usize g = 0; g < L.quads.size(); ++g) {
+                                    if (std::min(L.quads[g].lineIndex, lines - 1) != li) continue;
+                                    members.push_back(g);
+                                    xs.push_back(L.quads[g].penX + L.quads[g].advance * 0.5f - lo[li]);
+                                }
+                                placed.assign(xs.size(), 0.0);
+                                vector::path_line_positions(pathLength, firstMargin, lastMargin, T.alignment, T.pathForceAlign,
+                                                            xs.data(), xs.size(), hi[li] - lo[li], placed.data());
+                                for (usize i = 0; i < members.size(); ++i) along[members[i]] = placed[i];
+                            }
+                        }
                         onPath.assign(L.quads.size(), Mat4::identity());
                         for (usize g = 0; g < L.quads.size(); ++g) {
                             const text::GlyphQuad& q = L.quads[g];
                             const f32 xc = q.penX + q.advance * 0.5f;
                             Vec2 pos;
                             f32 ang = 0.0f;
-                            if (!vector::place_on_path(C, T.pathOffset, T.pathReverse, T.pathPerpendicular, xc - L.pad, q.baseline - base0, pos, ang)) {
+                            if (!vector::place_on_path_at(C, along[g], T.pathReverse, T.pathPerpendicular, q.baseline - base0, pos, ang)) {
                                 onPath.clear();
                                 break;
                             }
@@ -4257,7 +4333,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 }
                 if (!layer || !in.asset || !in.motionBlur || motion_blur_amount(layer->transform.motionBlurAmount) <= 0.f) continue;
                 deforming[i] = (layer->model.animationClip >= 0 && layer->model.animationClip < static_cast<i32>(in.asset->animations.size()))
-                    || in.asset->textGlyphLayout || in.asset->shapeParts || scene3d::has_part_effects(*layer);
+                    // Texto/forma 3D só deforma quando o conteúdo anima (animadores,
+                    // partes): parado, era tratado como deformando e o motion blur
+                    // fazia 16 cenas por quadro sem nada mudar (0.2.7).
+                    || ((in.asset->textGlyphLayout || in.asset->shapeParts) && !can_share_static_pose(*layer, *in.asset))
+                    || scene3d::has_part_effects(*layer);
                 for (u32 t = 0; t < layer->tracks.size(); ++t)
                     if (layer->tracks.at(t).property == TrackProperty::MaterialParam && layer->tracks.at(t).animated()) deforming[i] = true;
                 changing |= deforming[i];
@@ -4303,13 +4383,26 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                                    static_cast<unsigned long long>(admittedBytes));
                 continue;
             }
-            if (admitted < 2) { mark_incomplete(__FILE__, __LINE__); continue; }
+            // 0.2.7: sem orçamento nem para 2 amostras, o grupo sai sem desfoque
+            // neste quadro (os planos 2D da cena ficam com o desfoque deles).
+            // Marcar incompleto fazia o export refazer o quadro por 30 s e desistir.
+            if (admitted < 2) {
+                if (settings.finalQuality) AUREA_LOG_WARN("motion blur 3D sem orcamento neste quadro (%llu bytes por amostra)",
+                                                          static_cast<unsigned long long>(admittedBytes));
+                continue;
+            }
             if (settings.finalQuality && admitted < std::clamp(mb.samples, 2u, 64u) && (changing || travel >= .01))
                 AUREA_LOG_WARN("motion blur 3D reduzido a %u amostras pelo orcamento do quadro (pedido %u)", admitted, mb.samples);
-            shutter.count = std::max(minimum, capped_shutter_samples(mb, settings.finalQuality,
-                effective_quality(settings).motionBlurSamples, travel, changing, admitted));
+            // Cada amostra é a CENA INTEIRA de novo (sombra, MSAA): no export, o
+            // teto da cena e o teto adaptativo (quadro pesado) valem mesmo abaixo
+            // do piso da prévia — senão 128 cenas por quadro passavam do prazo
+            // da GPU em todo degrau da escada (0.2.7).
+            u32 sceneLimit = admitted;
+            if (settings.finalQuality && exportSceneBlurCap_ >= 1) sceneLimit = std::min(sceneLimit, exportSceneBlurCap_);
+            if (settings.finalQuality && exportBlurCap_ >= 2) sceneLimit = std::min(sceneLimit, exportBlurCap_);
+            shutter.count = std::min(sceneLimit, std::max(minimum, capped_shutter_samples(mb, settings.finalQuality,
+                effective_quality(settings).motionBlurSamples, travel, changing, sceneLimit)));
             if (shutter.count <= 1) continue;
-            if (shutter.count > admitted) { mark_incomplete(__FILE__, __LINE__); continue; }
             stateBudget -= admittedBytes * shutter.count;
             if (batchExposure) out.sceneExposureBatches.push_back(FrameSnapshot::SceneExposureBatch{
                 static_cast<u32>(&f - out.scenes.data()), 0, bytesPerSample - poseBytesPerSample});

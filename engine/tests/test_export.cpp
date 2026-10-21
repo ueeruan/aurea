@@ -976,6 +976,37 @@ AUREA_TEST(Export, TextAnimatorColorsReachExportFramesAndRemainStableAfterReopen
     std::remove(path.c_str());
 }
 
+AUREA_TEST(Export, SixtyFpsFromAThirtyFpsProjectHasADistinctImageEveryFrame) {
+    // 0.2.7 ("prévia lisa, export 4K60 parece 30"): o render pedia quadros
+    // INTEIROS da composição; num projeto a 30, cada quadro saía duas vezes.
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg; cfg.width = 320; cfg.height = 180;
+    Rig r(cfg, 30, 12, 2); AUREA_CHECK(r.ok); if (!r.ok) return;
+    r.comp()->layer(r.video_layer())->visible = false;
+    auto id = r.e.add_text("A"); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    auto* layer = r.comp()->layer(LayerId::unpack(*id));
+    layer->end = FrameIndex{12};
+    auto& x = layer->tracks.get_or_create(TrackProperty::PositionX);
+    (void)x.set(FrameIndex{0}, 40.f, Interpolation::Linear);
+    (void)x.set(FrameIndex{11}, 280.f, Interpolation::Linear);
+    Command duration; duration.type = CommandType::CompositionSetDuration;
+    duration.comp_duration.comp = r.e.project()->timeline().current(); duration.comp_duration.duration = FrameIndex{12};
+    AUREA_CHECK(r.e.apply_command(duration).ok());
+    r.cap.keepFrames = true;
+    const auto result = run_export(r, 180, 60, false, 60);
+    AUREA_CHECK(result.finished && result.p.result == Errc::Ok);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), 24u);
+    // A última key (quadro 11 a 30 = 22 a 60): o quadro 23 já está parado.
+    usize repeated = 0;
+    for (usize i = 1; i <= 22 && i < r.cap.hashes.size(); ++i) if (r.cap.hashes[i] == r.cap.hashes[i - 1]) ++repeated;
+    std::printf("\n    60 qps de um projeto a 30: %zu de %zu quadros iguais ao anterior\n", repeated, r.cap.hashes.size());
+    AUREA_CHECK_EQ(repeated, usize{0});
+    AUREA_CHECK(r.cap.ptsMonotonic);
+    // O documento do editor continua a 30 qps (só a cópia congelada converte).
+    AUREA_CHECK_NEAR(static_cast<f32>(r.comp()->fps()), 30.f, 1e-4f);
+    AUREA_CHECK_EQ(r.comp()->layer(LayerId::unpack(*id))->tracks.find(TrackProperty::PositionX)->keys.back().time.value, i64{11});
+}
+
 AUREA_TEST(Export, MaskScalarAnimationSurvivesProjectReopenInExportedFrames) {
     if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     SyntheticConfig cfg; cfg.width = 320; cfg.height = 180;

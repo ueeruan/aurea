@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: o que a escada de tentativas mudou além do tamanho (fps, motion blur). -->
+<resources>
+    <string name="export_retry_fps">حتى %1$d إطارًا في الثانية.</string>
+    <string name="export_retry_blur_less">مع عينات أقل لتمويه الحركة.</string>
+    <string name="export_retry_blur_off">بدون تمويه الحركة.</string>
+    <string name="export_done_fps">تم التصدير بمعدل %1$d إطارًا في الثانية ليعمل على هذا الجهاز.</string>
+    <string name="export_done_blur_less">تم تقليل تمويه الحركة ليعمل على هذا الجهاز.</string>
+    <string name="export_done_blur_off">تم التصدير بدون تمويه الحركة ليعمل على هذا الجهاز.</string>
+</resources>

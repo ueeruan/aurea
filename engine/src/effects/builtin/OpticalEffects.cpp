@@ -181,7 +181,49 @@ public:
     bool is_identity(const EffectEval& e) const noexcept override {
         return e.f(2) < .0001f || (mode_ == 3 && (!e.placement || !e.placement->sceneFlare));
     }
-    f32 input_margin(const EffectEval& e) const noexcept override { return mode_ == 1 ? e.f(2) : 0.f; }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        if (mode_ == 1) return e.f(2);
+        if (mode_ != 2 || !e.placement) return 0.f;
+        // Compensação óptica (0.2.7): a bolha LÊ pixels fora da camada (num
+        // 16:9 a 96°, centenas de px acima e abaixo). Com margem 0 o Motion
+        // Tile antes dela só ladrilhava o quadro visível e a borda saía preta.
+        // O alcance é a mesma conta do shader (optical.frag) nos pontos da
+        // borda da camada: o mapeamento é radial e monótono, então o ponto
+        // mais longe lido em cada direção vem da borda.
+        const f32 w = static_cast<f32>(e.placement->layerWidth);
+        const f32 h = static_cast<f32>(e.placement->layerHeight);
+        if (!(w >= 1.f && h >= 1.f)) return 0.f;
+        const f32 cx = e.f(0) * w / 100.f, cy = e.f(1) * h / 100.f;
+        const f32 halfWidth = std::max(w * .5f, 1.f);
+        const f32 theta = std::clamp(e.f(2), .001f, 160.f) * .5f * 0.017453292519943295f;
+        const bool reverse = e.f(3) > .5f;
+        const f32 limit = 2.f * std::max(w, h);
+        f32 reach = 0.f;
+        constexpr u32 kSide = 48;
+        for (u32 i = 0; i <= kSide * 4; ++i) {
+            const f32 s = static_cast<f32>(i % kSide) / kSide;
+            const u32 side = std::min(i / kSide, 3u);
+            const f32 px = side == 0 ? s * w : side == 1 ? w : side == 2 ? (1.f - s) * w : 0.f;
+            const f32 py = side == 0 ? 0.f : side == 1 ? s * h : side == 2 ? h : (1.f - s) * h;
+            const f32 dx = px - cx, dy = py - cy;
+            const f32 radius = std::sqrt(dx * dx + dy * dy);
+            if (radius < .001f) continue;
+            const f32 r = radius / halfWidth;
+            f32 mapped;
+            if (reverse) {
+                if (r * theta >= 1.5707f) continue;   // o shader devolve transparente ali
+                mapped = std::tan(r * theta) / std::tan(theta);
+            } else {
+                mapped = std::atan(r * std::tan(theta)) / theta;
+            }
+            const f32 k = mapped / r;
+            const f32 sx = cx + dx * k, sy = cy + dy * k;
+            const f32 out = std::max({-sx, sx - w, -sy, sy - h, 0.f});
+            if (std::isfinite(out)) reach = std::max(reach, out);
+            else reach = limit;
+        }
+        return reach > 0.f ? std::min(reach + 2.f, limit) : 0.f;
+    }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_optical_frag, work));
         if (mode_ == 0 || mode_ == 3) out.push_back(PipelineKey::fullscreen(ShaderId::effects_optical_flares_frag, work));

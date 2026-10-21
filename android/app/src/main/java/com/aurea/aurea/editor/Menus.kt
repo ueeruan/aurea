@@ -465,6 +465,15 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         // morava no topo e no transporte antigos (ajustes, busca, copiar e
         // colar, marcador, lupa) fica aqui em cima — nada se perdeu.
         MenuSection(stringResource(R.string.editor_projeto_cbe9))
+        // Interface do projeto (0.2.5): a Composição é esta; a Edição é a de
+        // montagem (trilha principal, como o CapCut). Primeiro item do menu
+        // (0.2.7): ficava no fim e a "timeline magnética" era confundida com ela.
+        MenuItemRow(
+            CupertinoGlyph.RectangleStack,
+            stringResource(R.string.ui_mode_switch_to_edit),
+            act { store.setUiMode(com.aurea.aurea.state.UI_MODE_EDIT) },
+            detail = stringResource(R.string.ui_mode_edit_hint),
+        )
         MenuItemRow(CupertinoGlyph.GearAltFill, stringResource(R.string.editor_ajustes_projeto), act { ui.sheet = ShellSheet.ProjectSettings })
         MenuItemRow(CupertinoGlyph.Search, stringResource(R.string.edt_cmd_search_desc), act { ui.sheet = ShellSheet.CommandSearch })
         MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_copiar_colar), act { ui.sheet = ShellSheet.CopyPaste })
@@ -547,13 +556,6 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         MenuItemRow(ShellGlyph.ScissorsAlt, stringResource(R.string.editor_remover_espacos_vazios), act { store.removeGaps() })
 
         MenuSection(stringResource(R.string.editor_projeto_cbe9))
-        // Interface do projeto (0.2.5): a Composição é esta; a Edição é a de montagem.
-        MenuItemRow(
-            CupertinoGlyph.RectangleStack,
-            stringResource(R.string.ui_mode_switch_to_edit),
-            act { store.setUiMode(com.aurea.aurea.state.UI_MODE_EDIT) },
-            detail = stringResource(R.string.ui_mode_edit_hint),
-        )
         MenuItemRow(
             ShellGlyph.ScissorsAlt,
             stringResource(R.string.editor_aparar_projeto_cabecote),

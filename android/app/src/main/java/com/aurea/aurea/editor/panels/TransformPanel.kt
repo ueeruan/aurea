@@ -1031,12 +1031,16 @@ private fun PositionFields(env: PanelEnv, x: Float, y: Float, z: Float, zActive:
                     onTap = { keypad(yLabel, y, TrackProperty.POSITION_Y) })
             }
         }
-        Spacer(Modifier.width(28.dp))
-        Box {
-            Box(Modifier.matchParentSize().padding(bottom = 18.dp).clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip))
-            PositionAxis(numeroPtBr(z, 1), "Z", zLabel, if (zActive) AureaColors.Accent else Color.White, enabled, "transform.position.z",
-                onLongPress = { keypad(zLabel, z, TrackProperty.POSITION_Z) },
-                onTap = { if (depth) onDepthPick() else keypad(zLabel, z, TrackProperty.POSITION_Z) })
+        // Z só com profundidade (camada 3D): em 2D a posição é X e Y, como no
+        // app antigo (0.2.7). A profundidade de uma camada 2D liga pelo "3D".
+        if (depth) {
+            Spacer(Modifier.width(28.dp))
+            Box {
+                Box(Modifier.matchParentSize().padding(bottom = 18.dp).clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip))
+                PositionAxis(numeroPtBr(z, 1), "Z", zLabel, if (zActive) AureaColors.Accent else Color.White, enabled, "transform.position.z",
+                    onLongPress = { keypad(zLabel, z, TrackProperty.POSITION_Z) },
+                    onTap = onDepthPick)
+            }
         }
     }
 }

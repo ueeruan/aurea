@@ -230,6 +230,20 @@ bool bounds_of(const std::vector<VectorGroup>& evaluated, f64 frame, Vec2& mn, V
 /// px para baixo da linha de base (linhas seguintes). Fora de um caminho
 /// aberto a letra continua pela tangente da ponta.
 bool place_on_path(const Contour& path, f32 offset, bool reverse, bool perpendicular, f32 x, f32 dy, Vec2& pos, f32& angleDeg) noexcept;
+/// O mesmo, com a posição `s` já medida ao longo do caminho (no sentido de
+/// leitura: com `reverse`, a partir do fim).
+bool place_on_path_at(const Contour& path, f64 s, bool reverse, bool perpendicular, f32 dy, Vec2& pos, f32& angleDeg) noexcept;
+
+/// Texto no caminho com as opções do After Effects (Path Options): onde fica
+/// o centro de cada letra de UMA linha, ao longo do caminho de comprimento
+/// `pathLength`. `x` = centros das letras a partir do início da linha,
+/// `lineWidth` = largura da linha; `alignment` 0 esquerda, 1 centro, 2 direita.
+/// Esquerda: a linha começa na margem inicial. Direita: termina a `lastMargin`
+/// do fim. Centro: no meio das duas margens. Forçar alinhamento: a primeira
+/// letra na margem inicial, a última na final, o espaço que sobra (ou falta)
+/// repartido igual entre as letras.
+void path_line_positions(f64 pathLength, f32 firstMargin, f32 lastMargin, u32 alignment, bool forceAlign,
+                         const f32* x, usize count, f32 lineWidth, f64* out) noexcept;
 
 /// Caminho-guia para texto: o primeiro caminho visível do primeiro grupo com
 /// caminho, achatado, com o transform do grupo (px da camada).

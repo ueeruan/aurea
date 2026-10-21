@@ -255,7 +255,7 @@ private fun TextStyleSections(env: PanelEnv) {
 }
 
 @Composable
-private fun TextRuler(
+internal fun TextRuler(
     env: PanelEnv,
     label: String,
     value: () -> Float,
@@ -265,6 +265,7 @@ private fun TextRuler(
     max: Float,
     gesture: String,
     keyProperty: Int? = null,
+    keyTag: String = "text.tracking.key",
     onValue: (Float) -> Unit,
 ) {
     val store = env.store
@@ -304,7 +305,7 @@ private fun TextRuler(
                     else -> com.aurea.aurea.ui.ds.KeyframeLook.None
                 }
                 val action = stringResource(if (look == com.aurea.aurea.ui.ds.KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui)
-                Box(Modifier.width(48.dp).height(48.dp).testTag("text.tracking.key")
+                Box(Modifier.width(48.dp).height(48.dp).testTag(keyTag)
                     .semantics { contentDescription = "$action · $label" }
                     .tocavel(enabled = row?.locked == false) { store.toggleTransformKeyframe(intArrayOf(keyProperty)) }, contentAlignment = Alignment.Center) {
                     com.aurea.aurea.ui.ds.KeyframeDiamondIcon(look, enabled = row?.locked == false)

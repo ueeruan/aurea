@@ -3300,8 +3300,15 @@ AUREA_TEST(EffectPack, OscillateCyclesAccumulatesFrequencyAndPreservesPhaseThrou
     for(int wave=0;wave<2;++wave) for(int mode=0;mode<3;++mode) {
         fx.params[4].constant=ParamValue::scalar(float(wave));fx.params[0].constant=ParamValue::scalar(float(mode));
         EffectPlan plan;EffectGraph::plan(layer,reg,FrameIndex{300},1,placement(),nullptr,plan);
-        AUREA_CHECK_NEAR(plan.foldMatrix.col[3].x,mode==1?0.f:25.f,.001f);
-        AUREA_CHECK_NEAR(plan.foldMatrix.col[3].z,mode==1?25.f:0.f,.001f);
+        // 0.2.7: camada 2D não tem Z (o composite descarta) — a profundidade
+        // vira perspectiva, escala em volta do centro. Em cena 3D continua Z.
+        AUREA_CHECK_NEAR(plan.foldMatrix.col[3].z,0.f,.001f);
+        if (mode==1) AUREA_CHECK(plan.foldMatrix.col[0].x<.999f);
+        else AUREA_CHECK_NEAR(plan.foldMatrix.col[3].x,25.f,.001f);
+        LayerPlacement deep=placement(); deep.inScene3d=true;
+        EffectPlan scene;EffectGraph::plan(layer,reg,FrameIndex{300},1,deep,nullptr,scene);
+        AUREA_CHECK_NEAR(scene.foldMatrix.col[3].x,mode==1?0.f:25.f,.001f);
+        AUREA_CHECK_NEAR(scene.foldMatrix.col[3].z,mode==1?25.f:0.f,.001f);
     }
     // Trim and placement don't change the effect's local clock.
     layer.start=FrameIndex{120}; layer.offset=FrameIndex{30};

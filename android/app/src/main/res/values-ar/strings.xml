@@ -345,7 +345,7 @@
     <string name="editor_tamanho_livre">مقاس حر</string>
     <string name="editor_tela_cheia">ملء الشاشة</string>
     <string name="editor_tempo">الزمن</string>
-    <string name="editor_timeline_magnetica_modo_edicao">المخطط الزمني المغناطيسي (وضع التحرير)</string>
+    <string name="editor_timeline_magnetica_modo_edicao">المخطط الزمني المغناطيسي</string>
     <string name="editor_toque_num_objeto_tela_editar">اضغط أي كائن على الشاشة لتحريره.</string>
     <string name="editor_toque_trocar_90_180_270_360">اضغط للتبديل (90°، 180°، 270°، 360°): كلما زادت القيمة طال الأثر</string>
     <string name="editor_trazer_frente">إحضار إلى الأمام</string>
@@ -2012,7 +2012,7 @@
     <string name="msg_nenhum_keyframe_no_cabecote">لا يوجد إطار مفتاحي عند رأس التشغيل</string>
     <string name="msg_keyframe_s_colado_s_no_cabecote">لُصق %1$s إطار مفتاحي عند رأس التشغيل</string>
     <string name="msg_nenhuma_propriedade_compativel">لا توجد خاصية متوافقة</string>
-    <string name="msg_modo_edicao_a_timeline_fecha_os">وضع التحرير: يغلق المخطط الزمني الفجوات تلقائيًا</string>
+    <string name="msg_modo_edicao_a_timeline_fecha_os">المخطط الزمني المغناطيسي: يغلق الفجوات تلقائيًا</string>
     <string name="msg_modo_composicao_camadas_livres_no_tempo">وضع التركيب: الطبقات حرة الحركة زمنيًا</string>
     <string name="msg_projeto_aparado_no_cabecote">شُذِّب المشروع عند رأس التشغيل</string>
     <string name="msg_marca_adicionada">أُضيفت العلامة</string>

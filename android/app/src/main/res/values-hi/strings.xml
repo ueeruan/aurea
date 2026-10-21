@@ -323,7 +323,7 @@
     <string name="editor_tamanho_livre">मुक्त आकार</string>
     <string name="editor_tela_cheia">फ़ुल स्क्रीन</string>
     <string name="editor_tempo">समय</string>
-    <string name="editor_timeline_magnetica_modo_edicao">चुंबकीय टाइमलाइन (संपादन मोड)</string>
+    <string name="editor_timeline_magnetica_modo_edicao">चुंबकीय टाइमलाइन</string>
     <string name="editor_toque_num_objeto_tela_editar">संपादन के लिए स्क्रीन पर किसी ऑब्जेक्ट को दबाएँ।</string>
     <string name="editor_toque_trocar_90_180_270_360">बदलने के लिए दबाएँ (90°, 180°, 270°, 360°): बड़ा = लंबा पीछा</string>
     <string name="editor_trazer_frente">आगे लाएँ</string>
@@ -1988,7 +1988,7 @@
     <string name="msg_nenhum_keyframe_no_cabecote">प्लेहेड पर कोई कीफ़्रेम नहीं है</string>
     <string name="msg_keyframe_s_colado_s_no_cabecote">%1$s कीफ़्रेम प्लेहेड पर पेस्ट किए गए</string>
     <string name="msg_nenhuma_propriedade_compativel">कोई संगत प्रॉपर्टी नहीं</string>
-    <string name="msg_modo_edicao_a_timeline_fecha_os">एडिट मोड: टाइमलाइन खाली जगहें अपने आप भर देती है</string>
+    <string name="msg_modo_edicao_a_timeline_fecha_os">चुंबकीय टाइमलाइन: खाली जगहें अपने आप भर जाती हैं</string>
     <string name="msg_modo_composicao_camadas_livres_no_tempo">कंपोज़िशन मोड: लेयर्स समय में स्वतंत्र</string>
     <string name="msg_projeto_aparado_no_cabecote">प्रोजेक्ट प्लेहेड पर ट्रिम किया गया</string>
     <string name="msg_marca_adicionada">मार्कर जोड़ा गया</string>

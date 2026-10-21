@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: texto no caminho completo (máscara como caminho, margem final, forçar alinhamento). -->
+<resources>
+    <string name="text027_path_hint">Crie uma camada vetorial ou desenhe uma máscara nesta camada para servir de caminho.</string>
+    <string name="text027_path_mask">Máscara %1$d</string>
+    <string name="text027_path_last_margin">Margem final</string>
+    <string name="text027_path_force_align">Forçar alinhamento</string>
+    <string name="text027_path_alignment_note">As margens seguem o alinhamento do parágrafo: à esquerda o texto parte da margem inicial, à direita termina na final e centralizado fica entre as duas.</string>
+</resources>

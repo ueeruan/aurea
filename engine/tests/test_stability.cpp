@@ -1744,7 +1744,11 @@ AUREA_TEST(Stability, ExtremeProjectOpensSavesAndRenders) {
             seek.seek.time = tick_at(FrameIndex{static_cast<i64>(i * 9)}, 30.0);
             AUREA_CHECK(e.apply_command(seek).ok());
             const auto t0 = std::chrono::steady_clock::now();
-            AUREA_CHECK(e.render_offscreen(target, 1920, 1080).ok());
+            const Status st = e.render_offscreen(target, 1920, 1080);
+            AUREA_CHECK(st.ok());
+            if (!st.ok() && i == 0)
+                std::printf("(render: erro %d %.*s %.*s) ", static_cast<int>(st.code()), static_cast<int>(st.message().size()),
+                            st.message().data(), static_cast<int>(st.detail().size()), st.detail().data());
             const f64 ms = ms_since(t0);
             renderMs += ms;
             worstMs = std::max(worstMs, ms);

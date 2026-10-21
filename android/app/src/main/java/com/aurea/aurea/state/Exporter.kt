@@ -314,10 +314,13 @@ class Exporter internal constructor(
         diagnosticTicket = withContext(Dispatchers.IO) { ExportDiagnosticReport.begin(app, engine.exportDiagnostics()) }
         var attempt = 0
         var busyLeft = AureaEngine.EXPORT_ATTEMPT_BUSY_RETRIES
+        val usesBlur = withContext(Dispatchers.IO) { runCatching { engine.exportUsesMotionBlur() }.getOrDefault(false) }
         while (true) {
             val level = attempt
             exportedReducedSide = AureaEngine.nativeExportAttemptShortSide(level, options.shortSide)
                 .takeIf { level > 0 && options.shortSide > 0 && it in 1 until options.shortSide } ?: 0
+            exportedFpsCap = attemptFpsCap(level, options.fps)
+            exportedBlurCap = if (level > 0 && usesBlur) AureaEngine.nativeExportAttemptBlurCap(level) else 0
             val suggested = runEngineJob(dir, file, options, level) {
                 engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale,
                     options.trimToContent, options.quality.coerceIn(0, 2), rateModeFor(options.hevc && level == 0), level)
@@ -342,15 +345,33 @@ class Exporter internal constructor(
             android.util.Log.w("AureaExport", "Export attempt $level failed; trying attempt $next")
             attempt = next
             val side = AureaEngine.nativeExportAttemptShortSide(next, options.shortSide)
+            // 0.2.7: o aviso diz tudo o que o degrau muda — a taxa (até 30 qps)
+            // e o motion blur também, não só o tamanho.
+            val notice = buildList {
+                add(if (options.shortSide > 0 && side in 1 until options.shortSide) text(R.string.export_retry_lower, side)
+                    else text(R.string.export_retry_compatible))
+                attemptFpsCap(next, options.fps).takeIf { it > 0 }?.let { add(text(R.string.export_retry_fps, it)) }
+                val blur = if (usesBlur) AureaEngine.nativeExportAttemptBlurCap(next) else 0
+                if (blur == 1) add(text(R.string.export_retry_blur_off)) else if (blur > 1) add(text(R.string.export_retry_blur_less))
+            }.joinToString(" ")
             state = state.copy(phase = ExportPhase.Running, framesDone = 0, fps = 0f, etaSeconds = 0, message = "",
-                notice = if (options.shortSide > 0 && side in 1 until options.shortSide) text(R.string.export_retry_lower, side)
-                    else text(R.string.export_retry_compatible),
-                preparing = true)
+                notice = notice, preparing = true)
         }
     }
 
     /** Lado menor do vídeo quando a escada exportou abaixo do pedido (0 = o pedido). */
     private var exportedReducedSide = 0
+    /** Taxa do vídeo quando a escada a limitou abaixo do pedido (0 = a pedida). */
+    private var exportedFpsCap = 0
+    /** Teto de motion blur do degrau que exportou (0 = o do projeto; 1 = sem desfoque). */
+    private var exportedBlurCap = 0
+
+    /** O teto de fps do degrau, quando fica abaixo do pedido (0 = não limita). */
+    private fun attemptFpsCap(attempt: Int, requested: Double): Int {
+        if (attempt <= 0) return 0
+        val cap = AureaEngine.nativeExportAttemptFpsCap(attempt)
+        return if (cap > 0.0 && requested > cap + 0.01) kotlin.math.round(cap).toInt() else 0
+    }
 
     /**
      * Roda um export do motor até o fim e publica. Devolve o modo de segurança
@@ -555,9 +576,16 @@ class Exporter internal constructor(
         withContext(NonCancellable + Dispatchers.IO) { file.delete() }
         result.fold(
             onSuccess = { (uri, label) ->
-                val reduced = if (format == ExportFormat.Video) exportedReducedSide else 0
+                val video = format == ExportFormat.Video
+                val reduced = if (video) exportedReducedSide else 0
+                val notes = buildList {
+                    if (reduced > 0) add(text(R.string.export_done_reduced, reduced))
+                    if (video && exportedFpsCap > 0) add(text(R.string.export_done_fps, exportedFpsCap))
+                    if (video && exportedBlurCap == 1) add(text(R.string.export_done_blur_off))
+                    else if (video && exportedBlurCap > 1) add(text(R.string.export_done_blur_less))
+                }
                 val pronto = state.copy(phase = ExportPhase.Done, outputUri = uri,
-                    message = if (reduced > 0) label + "\n" + text(R.string.export_done_reduced, reduced) else label)
+                    message = (listOf(label) + notes).joinToString("\n"))
                 // Publication succeeded independently of the ad SDK. A late
                 // callback must never overwrite a newer export's state.
                 state = pronto

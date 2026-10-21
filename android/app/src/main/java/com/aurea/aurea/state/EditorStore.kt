@@ -2130,30 +2130,52 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow(); select(id)
     }
 
-    fun importPsd(uri: Uri) {
+    fun importPsd(uri: Uri) = importLayeredFile(uri, gif = false)
+
+    /** GIF animado (0.2.7): os quadros numa pré-composição, em loop. */
+    fun importGif(uri: Uri) = importLayeredFile(uri, gif = true)
+
+    private fun importLayeredFile(uri: Uri, gif: Boolean) {
         if (!acceptsImport()) return
         if (busyMessage != null) return
-        busyMessage = appText(R.string.psd_importing)
+        busyMessage = appText(if (gif) R.string.gif_importing else R.string.psd_importing)
         launchImport launch@{
-            val id = withContext(Dispatchers.IO) {
-                val app = getApplication<Application>()
-                var temp: java.io.File? = null
-                try {
-                    temp = java.io.File.createTempFile("import-", ".psd", app.cacheDir)
-                    app.contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output ->
-                        val buffer = ByteArray(65536); var total = 0L
-                        while (true) { val n = input.read(buffer); if (n < 0) break; total += n
-                            if (total > 128L * 1024 * 1024) throw java.io.IOException("PSD size")
-                            output.write(buffer, 0, n)
-                        }
-                    } } ?: throw java.io.IOException("PSD read")
-                    engine.importPsd(temp.absolutePath, displayName(uri)?.substringBeforeLast('.') ?: "PSD")
-                } catch (_: Exception) { -11L } finally { temp?.delete() }
-            }
+            val id = withContext(Dispatchers.IO) { importLayeredNow(uri, gif) }
             busyMessage = null
-            if (id < 0) { errorMessage = appText(R.string.psd_failed); return@launch }
-            refreshNow(); select(id); showToast(appText(R.string.psd_imported))
+            if (id < 0) { errorMessage = layeredImportError(gif, -id); return@launch }
+            refreshNow(); select(id); showToast(appText(if (gif) R.string.gif_imported else R.string.psd_imported))
         }
+    }
+
+    /**
+     * Copia a URI para um temporário (o motor lê caminho de arquivo) e importa
+     * o PSD (camadas) ou o GIF (quadros). Na thread de IO; devolve o id ou −código.
+     */
+    private fun importLayeredNow(uri: Uri, gif: Boolean): Long {
+        val app = getApplication<Application>()
+        val limit = if (gif) 64L * 1024 * 1024 else 128L * 1024 * 1024
+        var temp: java.io.File? = null
+        return try {
+            temp = java.io.File.createTempFile("import-", if (gif) ".gif" else ".psd", app.cacheDir)
+            app.contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output ->
+                val buffer = ByteArray(65536); var total = 0L
+                while (true) { val n = input.read(buffer); if (n < 0) break; total += n
+                    if (total > limit) return -9L
+                    output.write(buffer, 0, n)
+                }
+            } } ?: return -10L
+            val name = displayName(uri)?.substringBeforeLast('.') ?: if (gif) "GIF" else "PSD"
+            if (gif) engine.importGif(temp.absolutePath, name) else engine.importPsd(temp.absolutePath, name)
+        } catch (_: Exception) { -10L } finally { temp?.delete() }
+    }
+
+    /** O motivo da falha (0.2.7): antes toda falha de PSD dizia a mesma coisa. */
+    private fun layeredImportError(gif: Boolean, code: Long): String = when {
+        gif -> appText(R.string.gif_failed)
+        code == 8L || code == 9L -> appText(R.string.psd_failed_too_big)
+        code == ERRC_UNSUPPORTED_FORMAT -> appText(R.string.psd_failed_format)
+        code == 11L -> appText(R.string.psd_failed_corrupt)
+        else -> appText(R.string.psd_failed)
     }
 
     /** SVG pelo seletor de documentos do sistema. */
@@ -2184,6 +2206,44 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (!engine.setTextPath(id, pathLayer, offset, perpendicular, reverse)) {
             showToast(appText(R.string.msg_a_guia_precisa_ser_uma_camada))
         }
+        refreshNow()
+    }
+
+    /** Texto no caminho lido do motor (0.2.7): guia OU máscara da camada, margens no cabeçote. */
+    data class TextPathState(
+        val guide: Long,
+        val mask: Int,
+        val firstMargin: Float,
+        val lastMargin: Float,
+        val perpendicular: Boolean,
+        val reverse: Boolean,
+        val forceAlign: Boolean,
+    ) {
+        val onPath get() = guide != 0L || mask >= 0
+        companion object {
+            fun of(v: LongArray?): TextPathState? {
+                if (v == null || v.size < 4) return null
+                return TextPathState(
+                    guide = v[0],
+                    mask = v.getOrElse(4) { -1L }.toInt(),
+                    firstMargin = java.lang.Float.intBitsToFloat(v[1].toInt()),
+                    lastMargin = java.lang.Float.intBitsToFloat(v.getOrElse(5) { 0L }.toInt()),
+                    perpendicular = v[2] != 0L,
+                    reverse = v[3] != 0L,
+                    forceAlign = v.getOrElse(6) { 0L } != 0L,
+                )
+            }
+        }
+    }
+
+    val textPathState: TextPathState? get() = TextPathState.of(textPath)
+
+    /** Texto no caminho completo: margens animáveis, máscara como caminho, forçar alinhamento. */
+    fun setTextPathOptions(state: TextPathState) {
+        val id = primary ?: return
+        val ok = engine.setTextPathOptions(id, if (state.mask >= 0) 0L else state.guide, state.mask, state.firstMargin, state.lastMargin,
+            state.perpendicular, state.reverse, state.forceAlign)
+        if (!ok) showToast(appText(R.string.msg_a_guia_precisa_ser_uma_camada))
         refreshNow()
     }
 
@@ -3367,6 +3427,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         TrackProperty.SKEW_X -> d.skew[0]
         TrackProperty.SKEW_Y -> d.skew[1]
         TrackProperty.TEXT_TRACKING -> textStyle?.getOrNull(19) ?: 0f
+        TrackProperty.TEXT_PATH_FIRST_MARGIN -> textPathState?.firstMargin ?: 0f
+        TrackProperty.TEXT_PATH_LAST_MARGIN -> textPathState?.lastMargin ?: 0f
         else -> 0f
     }
 
@@ -3884,7 +3946,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                                 .getMimeTypeFromExtension(display.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT))
                             val video = mime?.startsWith("video/") == true
                             val name = display.ifEmpty { appText(if (video) R.string.target_video else R.string.target_image) }
-                            if (video) engine.importVideo(source, name)
+                            val ext = display.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
+                            // 0.2.7: GIF toca (quadros numa pré-composição) e PSD
+                            // chega com as camadas — antes os dois viravam uma imagem parada.
+                            val gif = mime == "image/gif" || ext == "gif"
+                            val psd = ext == "psd" || mime == "image/vnd.adobe.photoshop"
+                            if (gif || psd) importLayeredNow(uri, gif)
+                            else if (video) engine.importVideo(source, name)
                             else {
                                 val orientation = AureaEngine.exifOrientation(app, uri)
                                 val bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: return@withContext -1L
@@ -4171,6 +4239,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     var sceneEditor by mutableStateOf(false)
         private set
+    /** Só testes: as setas X/Y/Z no palco comum (a geometria do gizmo é a mesma
+     *  do editor de cena 3D, que é onde elas aparecem para a pessoa — 0.2.7). */
+    @androidx.annotation.VisibleForTesting
+    var gizmoAxesForTests by mutableStateOf(false)
     var sceneYaw by mutableFloatStateOf(-30f)
         private set
     var scenePitch by mutableFloatStateOf(20f)

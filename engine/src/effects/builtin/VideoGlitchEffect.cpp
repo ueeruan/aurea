@@ -18,10 +18,10 @@ public:
         static const char* const edges[]={"Repetir","Refletir","Repetir pixels","Transparente"};
         static const char* const views[]={"Desligado","Sobre preto","Sobre o efeito"};
         p.add_float("intensity","Intensidade",100,0,200,kParamAnimatable | kParamPercent,"%");
-        p.add_float("interval","Intervalo do glitch",60,1,600,kParamAnimatable,"quadros");
+        p.add_float("interval","Intervalo do glitch",60,1,600,kParamAnimatable|kParamFrames,"quadros");
         p.add_float("duration","Duração do glitch",25,0,100,kParamAnimatable | kParamPercent,"%");
         p.add_int("seed","Semente global",1,0,65535);
-        p.add_int("start_frame","Quadro inicial",0,-600,600);
+        p.add_int("start_frame","Quadro inicial",0,-600,600,kParamAnimatable|kParamFrames);
         p.add_enum("trigger","Disparo",triggers,2,0);
         p.add_float("threshold","Limiar de intensidade",50,0,200,kParamAnimatable | kParamPercent,"%");
         p.add_float("intensity_randomness","Variação da intensidade",25,0,100,kParamAnimatable | kParamPercent,"%");
@@ -44,7 +44,7 @@ public:
             p.add_float(ids[g][3],labels[g][3],0,0,100,kParamAnimatable | kParamPercent,"%");
             p.add_float(ids[g][4],labels[g][4],50,1,99,kParamAnimatable | kParamPercent,"%");
             p.add_float(ids[g][5],labels[g][5],100,0,100,kParamAnimatable | kParamPercent,"%");
-            p.add_float(ids[g][6],labels[g][6],0,-600,600,kParamAnimatable,"quadros");
+            p.add_float(ids[g][6],labels[g][6],0,-600,600,kParamAnimatable|kParamFrames,"quadros");
             p.add_int(ids[g][7],labels[g][7],static_cast<i32>(g),0,65535);
         }
         p.add_float("block_size","Tamanho do bloco",16,2,256,kParamAnimatable | kParamPixels,"px");

@@ -280,6 +280,7 @@ struct Engine::ExportContext {
     u32 outputWidth = 0, outputHeight = 0;
     f64 fps = 30.0;
     f64 compFps = 30.0;
+    u32 attemptBlurCap = 0;   ///< teto de motion blur do degrau (ExportAttempts.hpp; 1 = sem desfoque)
     u32 frames = 0;
     bool dither = true;
     bool directSurface = false;        ///< surface-direct pedido (VideoStreamConfig::directSurface)
@@ -3384,6 +3385,7 @@ bool Engine::remove_mask(u64 layerId, u32 maskId) noexcept {
     l->masks.erase(std::remove_if(l->masks.begin(), l->masks.end(), [maskId](const Mask& m) { return m.id == maskId; }),
                    l->masks.end());
     l->tracks.remove_if([&](const Track& tr) { return tr.property == TrackProperty::MaskParam && tr.effectIndex == maskId; });
+    if (l->text.pathMask == maskId) l->text.pathMask = kInvalidIndex;   // o texto volta para a linha reta
     project_->mark_dirty();
     request_render();
     return true;
@@ -7083,7 +7085,7 @@ u32 Engine::paste_layers(i64 frame) noexcept {
         const auto id = retimed.add_layer(entry.second.kind, entry.second.name);
         *retimed.layer(id) = entry.second; retimedIds.push_back(id);
     }
-    retimed.retime(comp->fps());
+    retimed.retime(comp->fps(), &effectRegistry_);
     std::vector<Layer> copied;
     for (const auto id : retimedIds) copied.push_back(*retimed.layer(id));
     restore_clipboard_media_locked(clipboard_.layerMedia, copied);
@@ -12304,7 +12306,7 @@ u32 write_keyframe_rows(const Layer& l, bridge::KeyframeRow* out, u32 capacity) 
             row.paramIndex = 0;
             row.time = static_cast<i32>(key.frame);
             row.value = 0;
-            row.interpolation = static_cast<u32>(mesh_warp::track_interpolation(key.interp));
+            row.interpolation = static_cast<u32>(mesh_warp::key_interpolation(key));
             const i64 timelineFrame = key.frame + l.start.value - l.offset.value;
             if (timelineFrame < l.start.value || timelineFrame > l.end.value)
                 row.timelineFlags |= bridge::kKeyframeTimelineHidden;
@@ -12841,6 +12843,22 @@ bool Engine::query_keyframe_easing(u64 layerId, u32 property, u32 effectIndex, u
     const Composition* comp = current_composition();
     const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     const TrackRef ref{LayerId::unpack(layerId), static_cast<TrackProperty>(property), effectIndex, paramIndex};
+    if (layer && ref.property == TrackProperty::MeshWarp) {
+        // Keys da malha (0.2.7): a curva mora no próprio key, não numa track.
+        for (const EffectInstance& effect : layer->effects) {
+            if (effect.id != effectIndex) continue;
+            const MeshWarpData* data = mesh_warp::animation(effect);
+            if (!data) return false;
+            for (const MeshWarpKey& key : data->keys) {
+                if (key.frame != frame) continue;
+                out4[0] = key.bx1; out4[1] = key.by1; out4[2] = key.bx2; out4[3] = key.by2;
+                if (outPower) *outPower = clamp_ease_power(key.easePower);
+                return true;
+            }
+            return false;
+        }
+        return false;
+    }
     const Track* track = layer ? read_command_track(*layer, ref) : nullptr;
     if (!track) return false;
     const u32 index = track->find_exact(FrameIndex{frame});
@@ -13318,6 +13336,17 @@ i64 Engine::query_navigation_end() noexcept {
     return navigation_end_locked(project_ ? current_composition() : nullptr);
 }
 
+bool Engine::query_export_uses_motion_blur() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return false;
+    bool uses = false;
+    project_->timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        if (uses || !c.motion_blur().enabled) return;
+        c.layers().for_each([&](LayerId, const Layer& l) { if (l.motionBlur) uses = true; });
+    });
+    return uses;
+}
+
 i64 Engine::query_export_duration(bool trimToContent) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
@@ -13451,6 +13480,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         Composition* comp = current_composition();
         if (!comp) return Errc::NotFound;
         ctx->compFps = comp->fps();
+        ctx->attemptBlurCap = attemptPlan.blurCap;
         // Freeze with the established serializer; the editor document and its
         // historical file formats are never rewritten by export.
         const u64 room = source_asset_room_locked();
@@ -13507,6 +13537,20 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
                                       : comp->fps();
         // Degrau compatível: até 30 qps e lado menor até o teto (nunca amplia).
         if (attemptPlan.fpsCap > 0.0 && ctx->fps > attemptPlan.fpsCap + 1e-6) ctx->fps = normalize_fps(attemptPlan.fpsCap);
+        // 0.2.7: saída acima do fps do projeto (30 → 60). O render pede quadros
+        // INTEIROS da composição, então cada quadro do projeto saía duas vezes
+        // e o 4K60 parecia 30. A cópia congelada passa a viver na taxa de saída
+        // mantendo os segundos (keys, máscaras, legendas, parâmetros em
+        // quadros): cada quadro do vídeo vira um instante próprio da animação.
+        // O documento do editor não muda.
+        if (ctx->fps > comp->fps() + 1e-6) {
+            const f64 target = ctx->fps;
+            ctx->frozenProject->timeline().for_each_composition([&](CompositionId, Composition& c) {
+                if (c.fps() + 1e-6 < target) c.retime(target, &effectRegistry_, true);
+            });
+            ctx->compFps = comp->fps();
+            AUREA_LOG_INFO("export: projeto convertido para %.3f qps (saida acima do fps do projeto)", comp->fps());
+        }
         u32 wantShort = settings.height;
         if (attemptPlan.shortSideCap > 0) {
             const u32 compShort = std::min(comp->width(), comp->height());
@@ -14324,7 +14368,17 @@ void Engine::export_thread_main() noexcept {
     constexpr u64 kHeavyFrameNs = 1'500'000'000ull, kLightFrameNs = 250'000'000ull;
     constexpr u32 kLightFramesToRaise = 30;
     u32 lightFrames = 0;
-    if (ctx.offline && !ctx.preRenderMode) ctx.offline->compositor().set_export_blur_cap(kMobileBlurCap);
+    if (ctx.offline && !ctx.preRenderMode) {
+        Renderer& compositor = ctx.offline->compositor();
+        compositor.set_export_blur_cap(kMobileBlurCap);
+        // 0.2.7: cada amostra de motion blur 3D é a cena inteira. Teto por
+        // aparelho (o 1o quadro não pode passar do prazo da GPU antes de o
+        // teto adaptativo agir) e o teto do degrau da escada por cima.
+        compositor.set_export_scene_blur_cap(kAddressSpace32 ? 8u : low_memory_device() ? 16u : 32u);
+        compositor.set_export_blur_hard_cap(ctx.attemptBlurCap);
+        if (ctx.attemptBlurCap)
+            AUREA_LOG_INFO("export: degrau com motion blur limitado a %u amostra(s)", ctx.attemptBlurCap);
+    }
     auto cancelled = [&] { return ctx.cancelRequested.load(std::memory_order_acquire); };
     // Espera a GPU terminar o quadro mais antigo em voo e o passa ao encoder.
     auto deliver_oldest = [&]() -> Status {
@@ -16523,6 +16577,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             for (auto it = l->masks.begin(); it != l->masks.end(); ++it) {
                 if (it->id == cmd.mask_scalar.mask.index) {
                     l->tracks.remove_if([&](const Track& tr) { return tr.property == TrackProperty::MaskParam && tr.effectIndex == it->id; });
+                    if (l->text.pathMask == it->id) l->text.pathMask = kInvalidIndex;
                     l->masks.erase(it); return OkStatus;
                 }
             }
@@ -17001,7 +17056,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return Errc::InvalidArgument;
             const f64 newFps = normalize_fps(cmd.comp_fps.fps);
             const f64 k = newFps / c->fps();
-            c->retime(newFps);
+            c->retime(newFps, &effectRegistry_);
             if (c == comp) {
                 timeline.clock().set_fps(newFps);
                 // O cabeçote fica no mesmo SEGUNDO.

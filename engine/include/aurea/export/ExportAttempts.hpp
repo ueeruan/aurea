@@ -13,6 +13,12 @@
 //    3  H.264 Baseline no aparelho, lado menor até 720, até 30 qps, sem upscale
 //    4  o mesmo no encoder de software
 //    5  software, lado menor até 480, até 30 qps, sem upscale
+//    6  o mesmo, sem motion blur (0.2.7)
+//
+//  0.2.7: cada degrau também tem um TETO DE AMOSTRAS de motion blur (1: 32,
+//  2 e 3: 16, 4: 8, 5: 4, 6: nenhuma). No 3D cada amostra é uma cena inteira
+//  renderizada de novo; sem este teto todos os degraus falhavam igual
+//  (lado menor e codec não mudam o custo de 128 cenas por quadro).
 //
 //  O degrau viaja no lugar do antigo "modo de segurança" (ExportSettings::
 //  safeMode, JNI e ponte do iOS): 0, 1 e 2 continuam significando o mesmo
@@ -31,7 +37,7 @@
 namespace aurea {
 
 /// Último degrau da escada.
-inline constexpr u32 kExportAttemptMax = 5;
+inline constexpr u32 kExportAttemptMax = 6;
 /// Bit da resposta de export_next_attempt: refazer o MESMO degrau depois de
 /// esperar um pouco (o motor ainda solta o export anterior, a GPU estava
 /// ocupada). As telas esperam ~1,5 s e fazem isso no máximo duas vezes.
@@ -46,16 +52,18 @@ struct ExportAttemptPlan {
     u32 shortSideCap = 0;    ///< teto do lado menor (0 = o pedido)
     f64 fpsCap = 0.0;        ///< teto da taxa (0 = a pedida)
     bool noUpscale = false;  ///< sem upscale na GPU
+    u32 blurCap = 0;         ///< teto de amostras de motion blur por quadro (0 = o do projeto; 1 = sem desfoque)
 };
 
 [[nodiscard]] constexpr ExportAttemptPlan export_attempt_plan(u32 attempt) noexcept {
     switch (attempt) {
-        case 0: return {0, false, 0, 0.0, false};
-        case 1: return {1, true, 0, 0.0, false};
-        case 2: return {2, true, 0, 0.0, false};
-        case 3: return {1, true, 720, 30.0, true};
-        case 4: return {2, true, 720, 30.0, true};
-        default: return {2, true, 480, 30.0, true};
+        case 0: return {0, false, 0, 0.0, false, 0};
+        case 1: return {1, true, 0, 0.0, false, 32};
+        case 2: return {2, true, 0, 0.0, false, 16};
+        case 3: return {1, true, 720, 30.0, true, 16};
+        case 4: return {2, true, 720, 30.0, true, 8};
+        case 5: return {2, true, 480, 30.0, true, 4};
+        default: return {2, true, 480, 30.0, true, 1};
     }
 }
 
@@ -73,6 +81,7 @@ enum class ExportRetryKind : u32 {
     Encoder = 2, ///< o encoder recusou/quebrou: o próximo degrau
     Memory = 3,  ///< memória/GPU/tamanho: um degrau com MENOS pixels
     Stall = 4,   ///< parou de andar (encoder, decoder ou a tela desistiu): software e menor
+    GpuTime = 5, ///< a GPU estourou o prazo num quadro (0.2.7): menos amostras de motion blur, depois menos pixels
 };
 
 /// O tipo da falha a partir do que as telas recebem: o código (start ou
@@ -82,6 +91,10 @@ enum class ExportRetryKind : u32 {
 [[nodiscard]] constexpr ExportRetryKind export_retry_kind(i32 code, u32 failure, bool stalled, bool tooLong) noexcept {
     if (tooLong) return ExportRetryKind::None;
     if (stalled) return ExportRetryKind::Stall;
+    // Quadro que passou do prazo da GPU (motion blur 3D: dezenas de cenas
+    // inteiras por quadro): o que ajuda é menos amostras, não outro encoder.
+    if (static_cast<ExportFailure>(failure) == ExportFailure::Render && code == static_cast<i32>(Errc::Timeout))
+        return ExportRetryKind::GpuTime;
     switch (static_cast<ExportFailure>(failure)) {
         case ExportFailure::Encoder: return ExportRetryKind::Encoder;
         case ExportFailure::EncoderStalled: return ExportRetryKind::Stall;
@@ -139,9 +152,16 @@ struct ExportAttemptEffect {
     f64 fps = 0.0;
     bool fpsCapped = false;
     bool upscale = false;
-    [[nodiscard]] constexpr bool same_as(const ExportAttemptEffect& o) const noexcept {
+    u32 blurCap = 0;     ///< 0 = o do projeto
+    /// `withBlur` falso: o teto de motion blur não conta (falha de encoder,
+    /// que amostras a menos não resolvem).
+    [[nodiscard]] constexpr bool same_as(const ExportAttemptEffect& o, bool withBlur = true) const noexcept {
         return safeMode == o.safeMode && hevc == o.hevc && shortSide == o.shortSide && shortCapped == o.shortCapped &&
-               fps == o.fps && fpsCapped == o.fpsCapped && upscale == o.upscale;
+               fps == o.fps && fpsCapped == o.fpsCapped && upscale == o.upscale && (!withBlur || blurCap == o.blurCap);
+    }
+    /// Menos amostras de motion blur que `o` (menos trabalho de GPU por quadro).
+    [[nodiscard]] constexpr bool less_blur_than(const ExportAttemptEffect& o) const noexcept {
+        return blurCap != 0 && (o.blurCap == 0 || blurCap < o.blurCap);
     }
 };
 
@@ -158,6 +178,7 @@ struct ExportAttemptEffect {
     else if (r.fps <= 0.0) { e.fps = p.fpsCap; e.fpsCapped = true; }
     else e.fps = std::min(r.fps, p.fpsCap);
     e.upscale = r.upscale && !p.noUpscale;
+    e.blurCap = p.blurCap;
     return e;
 }
 
@@ -169,32 +190,39 @@ struct ExportAttemptEffect {
     if (kind == ExportRetryKind::Busy) return attempt | kExportAttemptWait;
     if (attempt >= kExportAttemptMax) return 0;
     const ExportAttemptEffect now = export_attempt_effect(attempt, r);
+    u32 lessBlur = 0;   // Memory: só amostras a menos, se nenhum degrau tirar pixels
     for (u32 next = attempt + 1; next <= kExportAttemptMax; ++next) {
         const ExportAttemptEffect e = export_attempt_effect(next, r);
         // Igual a um degrau de baixo (já tentado, ou mais exigente): pula.
         bool repeated = false;
-        for (u32 k = 0; k <= attempt && !repeated; ++k) repeated = e.same_as(export_attempt_effect(k, r));
+        for (u32 k = 0; k <= attempt && !repeated; ++k)
+            repeated = e.same_as(export_attempt_effect(k, r), kind != ExportRetryKind::Encoder);
         if (repeated) continue;
+        const bool fewer = e.shortCapped || (now.shortSide == 0 ? e.shortSide != 0 : e.shortSide < now.shortSide) ||
+                           (now.upscale && !e.upscale);
         switch (kind) {
             case ExportRetryKind::Encoder:
                 return next;
             case ExportRetryKind::Memory: {
                 // Menos pixels (ou sem upscale): trocar só o encoder não ajuda.
-                const bool fewer = e.shortCapped || (now.shortSide == 0 ? e.shortSide != 0 : e.shortSide < now.shortSide) ||
-                                   (now.upscale && !e.upscale);
                 if (fewer) return next;
+                if (!lessBlur && e.less_blur_than(now)) lessBlur = next;
                 break;
             }
+            case ExportRetryKind::GpuTime:
+                // Menos amostras de motion blur primeiro (mantém a resolução).
+                if (e.less_blur_than(now) || fewer) return next;
+                break;
             case ExportRetryKind::Stall:
                 // Software, e menos trabalho por quadro.
                 if (e.safeMode >= 2 && (e.shortCapped || e.shortSide != now.shortSide || e.fpsCapped || e.fps != now.fps ||
-                                        now.safeMode < 2 || (now.upscale && !e.upscale)))
+                                        now.safeMode < 2 || (now.upscale && !e.upscale) || e.less_blur_than(now)))
                     return next;
                 break;
             default: return 0;
         }
     }
-    return 0;
+    return kind == ExportRetryKind::Memory ? lessBlur : 0;
 }
 
 } // namespace aurea

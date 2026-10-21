@@ -285,6 +285,10 @@ void write_effect(ByteWriter& w, const EffectInstance& e) {
             for (const MeshWarpKey& k : m.keys) {
                 w.i64v(k.frame);
                 w.u8v(k.interp);
+                // v49: a curva própria do trecho (0.2.7).
+                w.u8v(k.curve);
+                w.u8v(k.easePower);
+                w.f32v(k.bx1); w.f32v(k.by1); w.f32v(k.bx2); w.f32v(k.by2);
                 w.u32v(static_cast<u32>(k.values.size()));
                 for (f32 f : k.values) w.f32v(f);
             }
@@ -355,6 +359,15 @@ void read_effect(ByteReader& r, EffectInstance& e) {
             for (MeshWarpKey& k : m.keys) {
                 k.frame = r.i64v();
                 k.interp = std::min<u8>(r.u8v(), 2);
+                if (g_readingTimelineVersion >= 49) {
+                    const u8 curve = r.u8v();
+                    k.curve = curve <= static_cast<u8>(kLastInterpolation) ? curve : kMeshCurveLegacy;
+                    k.easePower = clamp_ease_power(r.u8v());
+                    k.bx1 = r.f32v(); k.by1 = r.f32v(); k.bx2 = r.f32v(); k.by2 = r.f32v();
+                    if (!std::isfinite(k.bx1) || !std::isfinite(k.by1) || !std::isfinite(k.bx2) || !std::isfinite(k.by2)) {
+                        k.bx1 = 0.33f; k.by1 = 0.0f; k.bx2 = 0.67f; k.by2 = 1.0f;
+                    }
+                }
                 if (!readValues(k.values)) return;
             }
             std::stable_sort(m.keys.begin(), m.keys.end(),
@@ -940,6 +953,12 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.boolv(l.camera.affectsLayersBelow);
     // v48: máscara de recorte (recortada pela camada abaixo).
     w.boolv(l.clipToBelow);
+    // v49: texto no caminho completo (máscara como caminho, margem final,
+    // forçar alinhamento e o layout antigo de projetos anteriores).
+    w.u32v(l.text.pathMask);
+    w.f32v(l.text.pathLastMargin);
+    w.boolv(l.text.pathForceAlign);
+    w.boolv(l.text.pathLegacyLayout);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -971,6 +990,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
 //      da camada). Antes dela: automático.
 // v48: máscara de recorte da camada (Layer::clipToBelow, um bool no fim da
 //      camada). Antes dela: desligada — nenhuma camada recortada.
+// v49: texto no caminho (máscara-caminho, margem final, forçar alinhamento,
+//      layout antigo), no fim da camada. Antes dela: o layout antigo.
 // v47: CameraData::affectsLayersBelow, one bool at the end of each layer.
 //      Earlier timelines retain the original 3D-only camera behavior.
 // v46: efeitos de imagem no modelo 3D valem (Layer::modelEffects, um bool no
@@ -1553,6 +1574,20 @@ void read_layer(ByteReader& r, Layer& l) {
     l.camera.affectsLayersBelow = g_readingTimelineVersion >= 47 ? r.boolv() : false;
     // Projeto anterior à v48: nenhuma camada recortada (abre como foi feito).
     l.clipToBelow = g_readingTimelineVersion >= 48 ? r.boolv() : false;
+    if (g_readingTimelineVersion >= 49) {
+        l.text.pathMask = r.u32v();
+        const f32 last = r.f32v();
+        l.text.pathLastMargin = std::isfinite(last) ? std::clamp(last, -100000.0f, 100000.0f) : 0.0f;
+        l.text.pathForceAlign = r.boolv();
+        l.text.pathLegacyLayout = r.boolv();
+    } else {
+        // Projeto anterior à v49: o texto no caminho continua onde estava
+        // (margem + posição na caixa, sem o alinhamento do After Effects).
+        l.text.pathMask = kInvalidIndex;
+        l.text.pathLastMargin = 0.0f;
+        l.text.pathForceAlign = false;
+        l.text.pathLegacyLayout = l.text.pathLayer != 0;
+    }
 }
 
 // Values in the old effect's time parameter are seconds; direct TimeRemap

@@ -74,7 +74,7 @@ public:
         p.add_float("block_size", "Tamanho do bloco", 16.0f, 4.0f, 64.0f, kParamAnimatable | kParamPixels, "px");
         p.typed_range(2.0f, 256.0f);
         // O renderer lê este parâmetro pelo id ("hold_frames") para buscar a referência.
-        p.add_int("hold_frames", "Quadros segurados", 12, 1, kDatamoshMaxHold);
+        p.add_int("hold_frames", "Quadros segurados", 12, 1, kDatamoshMaxHold, kParamAnimatable | kParamFrames);
         p.add_float("drag", "Arraste", 1.0f, 0.0f, 4.0f, kParamAnimatable, "x");
         p.typed_range(0.0f, 20.0f);
         p.add_float("corruption", "Corrupção", 10.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");

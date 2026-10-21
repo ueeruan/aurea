@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: Aurora (Gerar) e Edições aleatórias (Tempo). -->
+<resources>
+    <string name="fx027_name_aurora">الشفق القطبي</string>
+    <string name="fx027_name_random_edits">مونتاج عشوائي</string>
+    <string name="fx027_desc_aurora">شفق قطبي متحرك في سماء مرصعة بالنجوم مع انعكاسه في الماء. يمكن ضبط الستائر والألوان والسماء والكاميرا.</string>
+    <string name="fx027_desc_random_edits">يقطع الطبقة إلى مقاطع قصيرة ويعيد ترتيبها عشوائيًا. البذرة نفسها تكرر المونتاج نفسه.</string>
+    <string name="fx027_amount">الكمية</string>
+    <string name="fx027_sky_glow">توهج السماء</string>
+    <string name="fx027_secondary_color">اللون الثانوي</string>
+    <string name="fx027_sky_color">لون السماء</string>
+    <string name="fx027_time_offset">إزاحة الوقت</string>
+    <string name="fx027_horizon">الأفق</string>
+    <string name="fx027_reflection">الانعكاس</string>
+    <string name="fx027_ripple">تموج الماء</string>
+    <string name="fx027_stars">النجوم</string>
+    <string name="fx027_tilt">ميل الكاميرا</string>
+    <string name="fx027_pan">دوران الكاميرا</string>
+    <string name="fx027_sky_height">ارتفاع الستائر</string>
+    <string name="fx027_environment">البيئة</string>
+    <string name="fx027_edit_length">طول المقطع</string>
+</resources>

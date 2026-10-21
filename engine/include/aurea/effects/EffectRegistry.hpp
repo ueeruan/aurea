@@ -125,6 +125,7 @@ namespace effect_keys {
     inline constexpr const char* kLowFps             = "aurea.time.low_fps";
     inline constexpr const char* kTimeWarpRgb        = "aurea.time.warp_rgb";
     inline constexpr const char* kTimeSlice          = "aurea.time.slice";
+    inline constexpr const char* kRandomEdits        = "aurea.time.random_edits";
     inline constexpr const char* kTimeRemap          = "aurea.time.remap";
     // Controles de expressão (não desenham; ver ExpressionControls.cpp).
     inline constexpr const char* kSliderControl      = "aurea.control.slider";
@@ -159,6 +160,7 @@ namespace effect_keys {
     inline constexpr const char* kRasterExtrude      = "aurea.generate.raster_extrude";
     // Geradores (ver GenerateEffects.cpp)
     inline constexpr const char* kFractalNoise       = "aurea.generate.fractal_noise";
+    inline constexpr const char* kAurora             = "aurea.generate.aurora";
     inline constexpr const char* kGradientRamp       = "aurea.generate.gradient_ramp";
     inline constexpr const char* kFourColorGradient  = "aurea.generate.four_color_gradient";
     inline constexpr const char* kAudioSpectrum      = "aurea.generate.audio_spectrum";

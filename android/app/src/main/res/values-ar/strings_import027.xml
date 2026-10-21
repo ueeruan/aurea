@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: PSD com a causa da falha; GIF animado. -->
+<resources>
+    <string name="psd_failed_too_big">ملف PSD كبير جدًا على ذاكرة هذا الجهاز. قلّل حجمه أو ادمج الطبقات في Photoshop.</string>
+    <string name="psd_failed_format">يستخدم ملف PSD هذا وضع ألوان لا يقرؤه Aurea (CMYK أو Lab أو 32 بت). احفظه بصيغة RGB بعمق 8 أو 16 بت.</string>
+    <string name="psd_failed_corrupt">ملف PSD تالف أو غير مكتمل.</string>
+    <string name="gif_importing">جارٍ استيراد GIF…</string>
+    <string name="gif_imported">تم استيراد GIF: الإطارات داخل تركيب مسبق وتعمل بشكل متكرر.</string>
+    <string name="gif_failed">تعذّر استيراد GIF.</string>
+</resources>

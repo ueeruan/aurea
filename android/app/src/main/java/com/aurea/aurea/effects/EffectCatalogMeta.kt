@@ -176,6 +176,11 @@ private val Table: Map<Int, EffectMeta> = buildMap {
         listOf(EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Imagem),
         "rgb no tempo canais separados atraso de cor",
     ))
+    put("aurea.time.random_edits", EffectMeta(
+        R.string.fx027_desc_random_edits,
+        listOf(EffectTarget.Video, EffectTarget.PreComposicao),
+        "edicoes aleatorias random edits cortes embaralhar jump cut",
+    ))
     put("aurea.time.slice", EffectMeta(
         R.string.fx_desc_time_slice,
         listOf(EffectTarget.Video, EffectTarget.PreComposicao),
@@ -216,6 +221,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     // --- Geradores e recorte do editor antigo ---
     put("aurea.generate.fractal_noise", EffectMeta(R.string.fx_desc_generate_fractal_noise, AllTargets,
         "fractal noise nuvem fumaca textura turbulencia"))
+    put("aurea.generate.aurora", EffectMeta(R.string.fx027_desc_aurora, AllTargets,
+        "aurora boreal northern lights ceu estrelas reflexo polar"))
     put("aurea.generate.gradient_ramp", EffectMeta(R.string.fx_desc_generate_gradient_ramp, AllTargets,
         "ramp gradiente degrade linear radial"))
     put("aurea.generate.four_color_gradient", EffectMeta(R.string.fx_desc_generate_four_color_gradient, AllTargets,

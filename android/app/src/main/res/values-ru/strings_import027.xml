@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: PSD com a causa da falha; GIF animado. -->
+<resources>
+    <string name="psd_failed_too_big">PSD слишком большой для памяти этого устройства. Уменьшите размер или объедините слои в Photoshop.</string>
+    <string name="psd_failed_format">Этот PSD использует цветовой режим, который Aurea не читает (CMYK, Lab или 32 бит). Сохраните в RGB 8 или 16 бит.</string>
+    <string name="psd_failed_corrupt">Файл PSD повреждён или неполный.</string>
+    <string name="gif_importing">Импорт GIF…</string>
+    <string name="gif_imported">GIF импортирован: кадры находятся в прекомпозиции и воспроизводятся по кругу.</string>
+    <string name="gif_failed">Не удалось импортировать GIF.</string>
+</resources>

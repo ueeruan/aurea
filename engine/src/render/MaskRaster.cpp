@@ -15,6 +15,11 @@ bool active(const Mask& m) noexcept {
     return m.points.size() >= 2;
 }
 
+bool active_in(const Layer& l, const Mask& m) noexcept {
+    if (l.kind == LayerKind::Text && l.text.pathMask == m.id && m.id != kInvalidIndex) return false;
+    return active(m);
+}
+
 void evaluate_path(const Mask& m, f64 localFrame, std::vector<MaskPoint>& out) {
     const std::vector<MaskPathKey>& keys = m.pathKeys;
     if (keys.empty()) { out = m.points; return; }
@@ -88,7 +93,7 @@ u32 build_block(const Layer& l, f64 localFrame, Vec2 offset, f32 tolerance, std:
     key = 0;
     const usize first = out.size();
     u32 count = 0;
-    for (const Mask& m : l.masks) if (active(m)) ++count;
+    for (const Mask& m : l.masks) if (active_in(l, m)) ++count;
     if (count == 0) return 0;
     out.resize(first + static_cast<usize>(count) * kHeaderVec4);
     std::vector<MaskPoint> pts;
@@ -96,7 +101,7 @@ u32 build_block(const Layer& l, f64 localFrame, Vec2 offset, f32 tolerance, std:
     u32 mi = 0;
     bool firstActive = true;
     for (const Mask& m : l.masks) {
-        if (!active(m)) continue;
+        if (!active_in(l, m)) continue;
         if (firstActive) {
             start = (m.operation == MaskOperation::Subtract || m.operation == MaskOperation::Intersect) ? 1.0f : 0.0f;
             firstActive = false;

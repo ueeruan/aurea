@@ -80,6 +80,28 @@ bool channel(Reader r, u32 w, u32 h, u16 depth, std::vector<u8>& out) {
 }
 }
 
+/// PSD sem registros de camada (achatado, ou "maximizar compatibilidade" só
+/// com a composta): a imagem composta, pelo decodificador do stb (8 e 16 bits).
+static Status merged(std::span<const u8> bytes, Document doc, usize decodedBudget, Document& out) {
+    if (static_cast<usize>(doc.width) * doc.height * 4 > decodedBudget) return Errc::BudgetExceeded;
+    if (bytes.size() > static_cast<usize>(std::numeric_limits<int>::max())) return Errc::BudgetExceeded;
+    int w = 0, h = 0, n = 0;
+    stbi_uc* pixels = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &n, 4);
+    if (!pixels) return Errc::UnsupportedFormat;
+    if (w <= 0 || h <= 0 || static_cast<u32>(w) != doc.width || static_cast<u32>(h) != doc.height) {
+        stbi_image_free(pixels);
+        return Errc::CorruptData;
+    }
+    Layer layer;
+    layer.name = "Imagem";
+    layer.width = doc.width; layer.height = doc.height;
+    layer.rgba.assign(pixels, pixels + static_cast<usize>(w) * h * 4);
+    stbi_image_free(pixels);
+    doc.layers.push_back(std::move(layer));
+    out = std::move(doc);
+    return OkStatus;
+}
+
 Status read(std::span<const u8> bytes, Document& out, usize decodedBudget) {
     if (bytes.size() > kMaxFileBytes) return Errc::BudgetExceeded;
     decodedBudget = std::min(decodedBudget, kMaxDecodedBytes);
@@ -89,20 +111,33 @@ Status read(std::span<const u8> bytes, Document& out, usize decodedBudget) {
     const auto depth = r.word(), mode = r.word();
     if (!r.ok || channels < 1 || channels > 56 || !doc.width || !doc.height || doc.width > 16384 || doc.height > 16384) return Errc::CorruptData;
     if ((depth != 8 && depth != 16) || (mode != 1 && mode != 3)) return Errc::UnsupportedFormat;
-    r.block(); r.block(); auto lm = r.block(); auto info = lm.block();
+    r.block(); r.block(); auto lm = r.block();
+    if (!r.ok) return Errc::CorruptData;
+    // PSD achatado (sem camadas): a imagem composta vira uma camada só.
+    if (lm.data.size() < 4) return merged(bytes, doc, decodedBudget, out);
+    auto info = lm.block();
     // Photoshop stores 16-bit layer records in Lr16 after the global mask.
     if (lm.ok && lm.data.size() - lm.p >= 4) {
         lm.block();
+        // 0.2.7: o Photoshop alinha estes blocos em 4 bytes (zeros entre eles)
+        // e usa "8B64" em algumas chaves; outros programas deixam assinaturas
+        // próprias no fim. Pula o preenchimento e para no desconhecido — um
+        // bloco que o Aurea nem usa recusava o arquivo inteiro.
         while (lm.ok && lm.data.size() - lm.p >= 12) {
-            if (lm.tag() != "8BIM") return Errc::UnsupportedFormat;
+            if (lm.data[lm.p] == 0) { lm.take(1); continue; }
+            const auto signature = lm.tag();
+            if (signature != "8BIM" && signature != "8B64") break;
             const auto key = lm.tag(); const auto length = lm.dword();
-            Reader tagged{lm.take(length)}; lm.take(length % 2);
-            if (key == "Lr16" && depth == 16) info = tagged;
+            if (!lm.ok || length > lm.data.size() - lm.p) break;
+            Reader tagged{lm.take(length)};
+            if ((key == "Lr16" && depth == 16) || (key == "Layr" && info.data.size() < 2)) info = tagged;
         }
     }
+    if (!lm.ok || !info.ok) return Errc::CorruptData;
+    if (info.data.size() < 2) return merged(bytes, doc, decodedBudget, out);
     const i32 signedCount = static_cast<i16>(info.word()); const u32 count = static_cast<u32>(std::abs(signedCount));
-    if (!r.ok || !lm.ok || !info.ok || count > 2048) return Errc::CorruptData;
-    if (!count) return Errc::UnsupportedFormat;
+    if (!info.ok || count > 2048) return Errc::CorruptData;
+    if (!count) return merged(bytes, doc, decodedBudget, out);
     std::vector<Record> records(count); usize budget = 0, largestScratch = 0;
     for (auto& rec : records) {
         auto& l = rec.layer; l.top = info.integer(); l.left = info.integer();
@@ -123,9 +158,10 @@ Status read(std::span<const u8> bytes, Document& out, usize decodedBudget) {
         extra.block(); const usize nameStart = extra.p; const auto nameLen = extra.byte();
         auto name = extra.take(nameLen); l.name.assign(name.begin(), name.end()); extra.take((4 - (extra.p - nameStart) % 4) % 4);
         while (extra.ok && extra.data.size() - extra.p >= 12) {
-            if (extra.tag() != "8BIM") return Errc::CorruptData;
+            if (extra.data[extra.p] == 0) { extra.take(1); continue; }   // alinhamento (0.2.7)
+            const auto signature = extra.tag();
+            if (signature != "8BIM" && signature != "8B64") break;
             const auto key = extra.tag(); const auto len = extra.dword(); Reader item{extra.take(len)};
-            extra.take(len % 2);
             if (key == "lsct" || key == "lsdk") rec.section = item.dword();
             if (key == "luni") {
                 const auto units = item.dword(); if (units > 4096) return Errc::CorruptData;
@@ -181,8 +217,14 @@ Status read(std::span<const u8> bytes, Document& out, usize decodedBudget) {
             auto& a=l.rgba[(static_cast<usize>(y)*l.width+x)*4+3]; a=static_cast<u8>((a*v+127)/255);
         }
     }
+    // O Photoshop grava as camadas de BAIXO para CIMA: o fim do grupo (seção 3)
+    // vem antes dos filhos e a pasta (1/2) depois deles. Lendo de cima para
+    // baixo, a pasta abre e o marcador fecha, e `doc.layers` sai da frente para
+    // o fundo, como o resto do Aurea espera. Ler na ordem do arquivo recusava
+    // todo PSD real com grupo e empilhava sem grupo de cabeça para baixo (0.2.7).
     std::vector<i32> parents;
-    for (auto& rec : records) {
+    for (auto it = records.rbegin(); it != records.rend(); ++it) {
+        auto& rec = *it;
         if (rec.section == 3) { if (parents.empty()) return Errc::CorruptData; parents.pop_back(); continue; }
         if (rec.clipping) doc.approximated = true;
         auto& l=rec.layer; l.parent=parents.empty() ? -1 : parents.back(); l.group=rec.section==1 || rec.section==2;

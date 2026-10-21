@@ -63,6 +63,10 @@ MeshWarpData* ensure_animation(EffectInstance& effect) noexcept {
 Interpolation track_interpolation(u8 legacy) noexcept {
     return legacy == 0 ? Interpolation::Hold : legacy == 2 ? Interpolation::EaseInOut : Interpolation::Linear;
 }
+Interpolation key_interpolation(const MeshWarpKey& key) noexcept {
+    if (key.curve == kMeshCurveLegacy || key.curve > static_cast<u8>(kLastInterpolation)) return track_interpolation(key.interp);
+    return static_cast<Interpolation>(key.curve);
+}
 Status key_command(Layer& layer, const Command& command, FrameIndex playhead) noexcept {
     if (layer.locked) return Errc::InvalidState;
     const bool moving = command.type == CommandType::KeyframeMove;
@@ -112,14 +116,23 @@ Status key_command(Layer& layer, const Command& command, FrameIndex playhead) no
             std::sort(data->keys.begin(), data->keys.end(), [](const auto& a, const auto& b) { return a.frame < b.frame; });
             return OkStatus;
         }
-        case CommandType::KeyframeSetInterpolation: {
-            const Interpolation interp = command.keyframe_interp.interp;
-            if (interp != Interpolation::Hold && interp != Interpolation::Linear && interp != Interpolation::EaseInOut)
-                return Errc::NotSupported;
-            data->keys[static_cast<usize>(at)].interp = interp == Interpolation::Hold ? 0 : interp == Interpolation::EaseInOut ? 2 : 1;
+        case CommandType::KeyframeSetInterpolation:
+        case CommandType::KeyframeSetBezier:
+        case CommandType::KeyframeSetEasing: {
+            // 0.2.7: o painel de curva vale para a malha inteira — o trecho
+            // inteiro anda com a mesma curva dos keyframes comuns (antes só
+            // segura/linear/suave, e o botão de curva não abria).
+            const KeyframeInterpPayload& k = command.keyframe_interp;
+            MeshWarpKey& key = data->keys[static_cast<usize>(at)];
+            key.curve = static_cast<u8>(k.interp);
+            key.interp = k.interp == Interpolation::Hold ? 0 : k.interp == Interpolation::Linear ? 1 : 2;
+            if (k.power != 0) key.easePower = clamp_ease_power(k.power);
+            if (k.interp == Interpolation::Bezier || k.interp == Interpolation::CustomCurve || ease_has_params(k.interp)) {
+                key.bx1 = k.bx1; key.by1 = k.by1; key.bx2 = k.bx2; key.by2 = k.by2;
+            }
             return OkStatus;
         }
-        default: return Errc::NotSupported; // A whole mesh has no scalar value, Bézier graph, or expression.
+        default: return Errc::NotSupported; // A whole mesh has no scalar value or expression.
     }
 }
 } // namespace mesh_warp

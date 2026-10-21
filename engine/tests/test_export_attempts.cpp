@@ -40,6 +40,13 @@ AUREA_TEST(ExportAttempts, PlansGoFromTheRequestToSoftwareAt480) {
     AUREA_CHECK_EQ(export_attempt_plan(5).shortSideCap, 480u);
     AUREA_CHECK(export_attempt_plan(5).noUpscale);
     AUREA_CHECK_EQ(export_attempt_plan(99).shortSideCap, 480u);   // além do fim: o último
+    // 0.2.7: teto de motion blur por degrau; o último sai sem desfoque.
+    AUREA_CHECK_EQ(export_attempt_plan(0).blurCap, 0u);
+    AUREA_CHECK_EQ(export_attempt_plan(1).blurCap, 32u);
+    AUREA_CHECK_EQ(export_attempt_plan(3).blurCap, 16u);
+    AUREA_CHECK_EQ(export_attempt_plan(5).blurCap, 4u);
+    AUREA_CHECK_EQ(export_attempt_plan(6).blurCap, 1u);
+    AUREA_CHECK_EQ(export_attempt_plan(6).shortSideCap, 480u);
     AUREA_CHECK_EQ(export_attempt_short_side(3, 1080), 720u);
     AUREA_CHECK_EQ(export_attempt_short_side(3, 480), 480u);      // nunca amplia
     AUREA_CHECK_EQ(export_attempt_short_side(1, 1080), 1080u);
@@ -69,6 +76,8 @@ AUREA_TEST(ExportAttempts, WhatCanHelpIsDecidedByCodeReasonAndStall) {
     AUREA_CHECK(export_retry_kind(code(Errc::Timeout), why(ExportFailure::EncoderStalled), false, false) == ExportRetryKind::Stall);
     AUREA_CHECK(export_retry_kind(code(Errc::DecodeFailed), why(ExportFailure::Media), false, false) == ExportRetryKind::Stall);
     AUREA_CHECK(export_retry_kind(code(Errc::Cancelled), 0, true, false) == ExportRetryKind::Stall);
+    // Quadro que passou do prazo da GPU (motion blur 3D): menos amostras.
+    AUREA_CHECK(export_retry_kind(code(Errc::Timeout), why(ExportFailure::Render), false, false) == ExportRetryKind::GpuTime);
 }
 
 AUREA_TEST(ExportAttempts, EncoderFailuresClimbEveryRungThenStop) {
@@ -82,14 +91,15 @@ AUREA_TEST(ExportAttempts, EncoderFailuresClimbEveryRungThenStop) {
         if (steps > kExportAttemptMax) break;
     }
     std::printf("\n");
-    AUREA_CHECK_EQ(steps, kExportAttemptMax);   // 1, 2, 3, 4, 5
+    AUREA_CHECK_EQ(steps, kExportAttemptMax - 1);   // 1, 2, 3, 4, 5 (o 6 só tira o motion blur)
 }
 
 AUREA_TEST(ExportAttempts, MemoryFailuresAlwaysTakeFewerPixels) {
     const ExportRequestShape r = shape(1080, 60.0);
     AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Memory, r), 3u);   // 1080 → 720 (hardware)
     AUREA_CHECK_EQ(export_next_attempt(3, ExportRetryKind::Memory, r), 5u);   // 720 → 480
-    AUREA_CHECK_EQ(export_next_attempt(5, ExportRetryKind::Memory, r), 0u);   // acabou
+    AUREA_CHECK_EQ(export_next_attempt(5, ExportRetryKind::Memory, r), 6u);   // sem pixels a tirar: sem motion blur
+    AUREA_CHECK_EQ(export_next_attempt(6, ExportRetryKind::Memory, r), 0u);   // acabou
     AUREA_CHECK_EQ(export_next_attempt(1, ExportRetryKind::Memory, r), 3u);
     // Pedido já pequeno: o primeiro degrau que ainda tira pixels.
     AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Memory, shape(720, 30.0)), 5u);
@@ -104,7 +114,21 @@ AUREA_TEST(ExportAttempts, StallsGoToSoftwareThenSmaller) {
     AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Stall, r), 2u);
     AUREA_CHECK_EQ(export_next_attempt(2, ExportRetryKind::Stall, r), 4u);
     AUREA_CHECK_EQ(export_next_attempt(4, ExportRetryKind::Stall, r), 5u);
-    AUREA_CHECK_EQ(export_next_attempt(5, ExportRetryKind::Stall, r), 0u);
+    AUREA_CHECK_EQ(export_next_attempt(5, ExportRetryKind::Stall, r), 6u);
+    AUREA_CHECK_EQ(export_next_attempt(6, ExportRetryKind::Stall, r), 0u);
+}
+
+AUREA_TEST(ExportAttempts, GpuTimeoutsDropMotionBlurSamplesBeforePixels) {
+    // 0.2.7 (3D com motion blur não exportava): o quadro passa do prazo da
+    // GPU; menos amostras mantêm a resolução, e só depois vêm menos pixels.
+    const ExportRequestShape r = shape(1080, 60.0);
+    AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::GpuTime, r), 1u);   // 32 amostras, 1080
+    AUREA_CHECK_EQ(export_next_attempt(1, ExportRetryKind::GpuTime, r), 2u);   // 16
+    AUREA_CHECK_EQ(export_next_attempt(2, ExportRetryKind::GpuTime, r), 3u);   // 720p
+    AUREA_CHECK_EQ(export_next_attempt(3, ExportRetryKind::GpuTime, r), 4u);   // 8
+    AUREA_CHECK_EQ(export_next_attempt(4, ExportRetryKind::GpuTime, r), 5u);   // 480p, 4
+    AUREA_CHECK_EQ(export_next_attempt(5, ExportRetryKind::GpuTime, r), 6u);   // sem desfoque
+    AUREA_CHECK_EQ(export_next_attempt(6, ExportRetryKind::GpuTime, r), 0u);
 }
 
 AUREA_TEST(ExportAttempts, BusyRepeatsTheSameRungAndNothingRepeatsAnIdenticalOne) {

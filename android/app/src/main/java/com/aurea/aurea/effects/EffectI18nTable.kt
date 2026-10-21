@@ -865,6 +865,30 @@ internal object EffectI18nTable {
         m.put("aurea.generate.fractal_noise", 13, /* opacity */ intArrayOf(R.string.fx_opacidade))
         m.put("aurea.generate.fractal_noise", 14, /* blend */ intArrayOf(R.string.fx_mistura_camada, R.string.fxo_normal, R.string.fxo_multiply, R.string.fxo_screen, R.string.fxo_overlay, R.string.fxo_add))
         m.put("aurea.generate.fractal_noise", 15, /* fill_box */ intArrayOf(R.string.fx_preencher_caixa))
+        m.put("aurea.generate.aurora", 0, intArrayOf(R.string.fxs_distortion))
+        m.put("aurea.generate.aurora", 1, intArrayOf(R.string.fx027_amount))
+        m.put("aurea.generate.aurora", 2, intArrayOf(R.string.fxl_scale))
+        m.put("aurea.generate.aurora", 3, intArrayOf(R.string.fxl_length))
+        m.put("aurea.generate.aurora", 4, intArrayOf(R.string.fxl_exposure))
+        m.put("aurea.generate.aurora", 5, intArrayOf(R.string.fxl_detail))
+        m.put("aurea.generate.aurora", 6, intArrayOf(R.string.fx3_curvatura))
+        m.put("aurea.generate.aurora", 7, intArrayOf(R.string.fx027_sky_glow))
+        m.put("aurea.generate.aurora", 8, intArrayOf(R.string.fxl_color))
+        m.put("aurea.generate.aurora", 9, intArrayOf(R.string.fx027_secondary_color))
+        m.put("aurea.generate.aurora", 10, intArrayOf(R.string.fx027_sky_color))
+        m.put("aurea.generate.aurora", 11, intArrayOf(R.string.fx027_time_offset))
+        m.put("aurea.generate.aurora", 12, intArrayOf(R.string.fxl_speed))
+        m.put("aurea.generate.aurora", 13, intArrayOf(R.string.fx027_horizon))
+        m.put("aurea.generate.aurora", 14, intArrayOf(R.string.fx027_reflection))
+        m.put("aurea.generate.aurora", 15, intArrayOf(R.string.fx027_ripple))
+        m.put("aurea.generate.aurora", 16, intArrayOf(R.string.fx027_stars))
+        m.put("aurea.generate.aurora", 17, intArrayOf(R.string.fx027_tilt))
+        m.put("aurea.generate.aurora", 18, intArrayOf(R.string.fx027_pan))
+        m.put("aurea.generate.aurora", 19, intArrayOf(R.string.fxl_field_of_view))
+        m.put("aurea.generate.aurora", 20, intArrayOf(R.string.fx027_sky_height))
+        m.put("aurea.generate.aurora", 21, intArrayOf(R.string.fxl_opacity))
+        m.put("aurea.time.random_edits", 0, /* edit_length */ intArrayOf(R.string.fx027_edit_length))
+        m.put("aurea.time.random_edits", 1, /* seed */ intArrayOf(R.string.fxl_seed))
         m.put("aurea.generate.gradient_ramp", 0, /* shape */ intArrayOf(R.string.fx_forma, R.string.fxo_linear, R.string.fxo_radial))
         m.put("aurea.generate.gradient_ramp", 1, /* start */ intArrayOf(R.string.fx_ponto_inicial))
         m.put("aurea.generate.gradient_ramp", 2, /* end */ intArrayOf(R.string.fx_ponto_final))
@@ -1988,6 +2012,7 @@ internal object EffectI18nTable {
     /** (typeId << 16 | ordinal da seção) → título (recurso). */
     val sections: Map<Long, Int> by lazy {
         HashMap<Long, Int>().apply {
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.generate.aurora"), 1), R.string.fx027_environment) // environment
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.distort.turbulence"), 1), R.string.fxl_cycle_evolution) // cycle
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.distort.turbulence"), 2), R.string.fxl_offset) // offset
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.distort.turbulence"), 3), R.string.fxl_edges) // edges

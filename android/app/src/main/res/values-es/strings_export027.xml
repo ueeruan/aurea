@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: o que a escada de tentativas mudou além do tamanho (fps, motion blur). -->
+<resources>
+    <string name="export_retry_fps">Hasta %1$d fps.</string>
+    <string name="export_retry_blur_less">Con menos muestras de desenfoque de movimiento.</string>
+    <string name="export_retry_blur_off">Sin desenfoque de movimiento.</string>
+    <string name="export_done_fps">Exportado a %1$d fps para funcionar en este dispositivo.</string>
+    <string name="export_done_blur_less">Se redujo el desenfoque de movimiento para funcionar en este dispositivo.</string>
+    <string name="export_done_blur_off">Exportado sin desenfoque de movimiento para funcionar en este dispositivo.</string>
+</resources>

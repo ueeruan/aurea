@@ -323,7 +323,7 @@
     <string name="editor_tamanho_livre">Tamaño libre</string>
     <string name="editor_tela_cheia">Pantalla completa</string>
     <string name="editor_tempo">Tiempo</string>
-    <string name="editor_timeline_magnetica_modo_edicao">Línea de tiempo magnética (modo Edición)</string>
+    <string name="editor_timeline_magnetica_modo_edicao">Línea de tiempo magnética</string>
     <string name="editor_toque_num_objeto_tela_editar">Toca un objeto en pantalla para editarlo.</string>
     <string name="editor_toque_trocar_90_180_270_360">Toca para cambiar (90°, 180°, 270°, 360°): mayor = estela más larga</string>
     <string name="editor_trazer_frente">Traer al frente</string>
@@ -1986,7 +1986,7 @@ para editar la curva.</string>
     <string name="msg_nenhum_keyframe_no_cabecote">Ningún keyframe en el cabezal</string>
     <string name="msg_keyframe_s_colado_s_no_cabecote">%1$s keyframe(s) pegado(s) en el cabezal</string>
     <string name="msg_nenhuma_propriedade_compativel">Ninguna propiedad compatible</string>
-    <string name="msg_modo_edicao_a_timeline_fecha_os">Modo Edición: la línea de tiempo cierra los huecos sola</string>
+    <string name="msg_modo_edicao_a_timeline_fecha_os">Línea de tiempo magnética: cierra los huecos sola</string>
     <string name="msg_modo_composicao_camadas_livres_no_tempo">Modo Composición: capas libres en el tiempo</string>
     <string name="msg_projeto_aparado_no_cabecote">Proyecto recortado en el cabezal</string>
     <string name="msg_marca_adicionada">Marcador añadido</string>

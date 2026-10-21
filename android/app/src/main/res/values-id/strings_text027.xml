@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: teks pada jalur lengkap (mask sebagai jalur, margin akhir, paksa perataan). -->
+<resources>
+    <string name="text027_path_hint">Buat layer vektor atau gambar mask pada layer ini untuk dipakai sebagai jalur.</string>
+    <string name="text027_path_mask">Mask %1$d</string>
+    <string name="text027_path_last_margin">Margin akhir</string>
+    <string name="text027_path_force_align">Paksa perataan</string>
+    <string name="text027_path_alignment_note">Margin mengikuti perataan paragraf: teks rata kiri mulai dari margin awal, rata kanan berakhir di margin akhir, dan rata tengah berada di antara keduanya.</string>
+</resources>

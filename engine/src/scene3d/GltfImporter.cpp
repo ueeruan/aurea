@@ -47,6 +47,9 @@
 #define STBI_ONLY_TGA
 #define STBI_ONLY_BMP
 #define STBI_ONLY_PSD
+// GIF animado (0.2.7): stbi_load_gif_from_memory devolve os quadros já
+// compostos e as durações (EnginePsd.cpp, Engine::import_gif).
+#define STBI_ONLY_GIF
 #define STBI_FAILURE_USERMSG
 #include "stb_image.h"
 

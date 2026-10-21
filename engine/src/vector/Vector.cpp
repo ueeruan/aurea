@@ -1241,9 +1241,33 @@ u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame, const DrawPr
 }
 
 bool place_on_path(const Contour& path, f32 offset, bool reverse, bool perpendicular, f32 x, f32 dy, Vec2& pos, f32& angleDeg) noexcept {
+    return place_on_path_at(path, static_cast<f64>(offset) + static_cast<f64>(x), reverse, perpendicular, dy, pos, angleDeg);
+}
+
+void path_line_positions(f64 pathLength, f32 firstMargin, f32 lastMargin, u32 alignment, bool forceAlign,
+                         const f32* x, usize count, f32 lineWidth, f64* out) noexcept {
+    if (!x || !out || count == 0) return;
+    const f64 first = static_cast<f64>(firstMargin);
+    const f64 end = pathLength - static_cast<f64>(lastMargin);   // onde a linha termina
+    const f64 width = static_cast<f64>(std::max(0.0f, lineWidth));
+    if (forceAlign) {
+        if (count == 1) { out[0] = 0.5 * (first + end); return; }
+        // A primeira letra encosta na margem inicial e a última na final: a
+        // diferença vira espaçamento igual entre letras vizinhas.
+        const f64 spare = (end - first) - width;
+        for (usize i = 0; i < count; ++i)
+            out[i] = first + static_cast<f64>(x[i]) + spare * static_cast<f64>(i) / static_cast<f64>(count - 1);
+        return;
+    }
+    f64 start = first;
+    if (alignment == 2) start = end - width;
+    else if (alignment == 1) start = 0.5 * (first + end) - 0.5 * width;
+    for (usize i = 0; i < count; ++i) out[i] = start + static_cast<f64>(x[i]);
+}
+
+bool place_on_path_at(const Contour& path, f64 s, bool reverse, bool perpendicular, f32 dy, Vec2& pos, f32& angleDeg) noexcept {
     const f64 L = length_of(path);
     if (L <= 0.0) return false;
-    f64 s = static_cast<f64>(offset) + static_cast<f64>(x);
     if (reverse) s = L - s;
     Vec2 p, t;
     if (!sample_at(path, s, p, t)) return false;

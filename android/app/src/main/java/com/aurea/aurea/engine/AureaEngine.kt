@@ -189,6 +189,10 @@ class AureaEngine private constructor() {
                                                         shortSide: Int, fps: Double, hevc: Boolean, upscale: Boolean): Int
         /** O lado menor que o degrau exporta (`requested` 0 = o da composição). */
         @JvmStatic external fun nativeExportAttemptShortSide(attempt: Int, requested: Int): Int
+        /** Teto de motion blur do degrau (0 = o do projeto; 1 = sem desfoque). */
+        @JvmStatic external fun nativeExportAttemptBlurCap(attempt: Int): Int
+        /** Teto de fps do degrau (0 = o pedido). */
+        @JvmStatic external fun nativeExportAttemptFpsCap(attempt: Int): Double
         /** kExportAttemptWait: refazer o mesmo degrau depois de esperar. */
         const val EXPORT_ATTEMPT_WAIT = 0x100
         /** kExportAttemptBusyRetries. */
@@ -1165,6 +1169,7 @@ class AureaEngine private constructor() {
         nativeWork.run(5) { nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps, aiUpscale, trimToContent, quality, rateMode, safeMode) }
 
     fun exportDuration(trimToContent: Boolean = true): Long = nativeExportDuration(nativeHandle, trimToContent)
+    fun exportUsesMotionBlur(): Boolean = nativeExportUsesMotionBlur(nativeHandle)
 
     /** Native startup may freeze a document; call from the lifecycle worker. */
     fun startPreRender(direction: Int): Int =
@@ -1596,6 +1601,7 @@ class AureaEngine private constructor() {
     private external fun nativeRecoverSession(handle: Long): Int
     private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int, trimToContent: Boolean, quality: Int, rateMode: Int, safeMode: Int): Int
     private external fun nativeExportDuration(handle: Long, trimToContent: Boolean): Long
+    private external fun nativeExportUsesMotionBlur(handle: Long): Boolean
     private external fun nativeStartPreRender(handle: Long, direction: Int): Int
     private external fun nativeCancelPreRender(handle: Long)
     private external fun nativePreRenderProgress(handle: Long): LongArray
@@ -1647,15 +1653,25 @@ class AureaEngine private constructor() {
     fun addFreehandPath(layer: Long, xy: FloatArray, error: Float): Long = nativeAddFreehandPath(nativeHandle, layer, xy, error)
     fun importSvg(bytes: ByteArray, name: String): Long = nativeWork.run(-5L) { nativeImportSvg(nativeHandle, bytes, name) }
     fun importPsd(path: String, name: String): Long = nativeWork.run(-5L) { nativeImportPsd(nativeHandle, path, name) }
+    /** GIF animado: pré-composição com os quadros, em loop (0.2.7). */
+    fun importGif(path: String, name: String): Long = nativeWork.run(-5L) { nativeImportGif(nativeHandle, path, name) }
     fun foregroundModelDirectory(): String = nativeWork.run("") { nativeForegroundModelDirectory(nativeHandle) }
     fun createGrid(ids: LongArray): Long = nativeCreateGrid(nativeHandle, ids)
     private external fun nativeForegroundModelDirectory(handle: Long): String
     private external fun nativeCreateGrid(handle: Long, ids: LongArray): Long
     private external fun nativeImportPsd(handle: Long, path: String, name: String): Long
+    private external fun nativeImportGif(handle: Long, path: String, name: String): Long
     fun setTextPath(layer: Long, pathLayer: Long, offset: Float, perpendicular: Boolean, reverse: Boolean): Boolean =
         nativeSetTextPath(nativeHandle, layer, pathLayer, offset, perpendicular, reverse)
-    /** [guia, bits da margem, perpendicular, invertido] ou nulo. */
+    /**
+     * [guia, bits da margem inicial, perpendicular, invertido, máscara (-1 = nenhuma),
+     * bits da margem final, forçar alinhamento] ou nulo. As margens são as do cabeçote.
+     */
     fun queryTextPath(layer: Long): LongArray? = nativeQueryTextPath(nativeHandle, layer)
+    /** Texto no caminho completo (0.2.7): máscara da própria camada (-1 = usa a guia), as duas margens e forçar alinhamento. */
+    fun setTextPathOptions(layer: Long, pathLayer: Long, mask: Int, firstMargin: Float, lastMargin: Float,
+                           perpendicular: Boolean, reverse: Boolean, forceAlign: Boolean): Boolean =
+        nativeSetTextPathOptions(nativeHandle, layer, pathLayer, mask, firstMargin, lastMargin, perpendicular, reverse, forceAlign)
 
     private external fun nativeAddVectorLayer(handle: Long, preset: Int): Long
     private external fun nativeVectorDocument(handle: Long, layer: Long): FloatArray?
@@ -1679,6 +1695,8 @@ class AureaEngine private constructor() {
     private external fun nativeImportSvg(handle: Long, bytes: ByteArray, name: String): Long
     private external fun nativeSetTextPath(handle: Long, layer: Long, pathLayer: Long, offset: Float, perpendicular: Boolean, reverse: Boolean): Boolean
     private external fun nativeQueryTextPath(handle: Long, layer: Long): LongArray?
+    private external fun nativeSetTextPathOptions(handle: Long, layer: Long, pathLayer: Long, mask: Int, firstMargin: Float, lastMargin: Float,
+                                                  perpendicular: Boolean, reverse: Boolean, forceAlign: Boolean): Boolean
 }
 
 /** The ten-slot JNI contract uses integers, including cache byte counters. */

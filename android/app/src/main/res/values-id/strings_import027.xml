@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: PSD com a causa da falha; GIF animado. -->
+<resources>
+    <string name="psd_failed_too_big">PSD terlalu besar untuk memori perangkat ini. Kecilkan ukurannya atau gabungkan layer di Photoshop.</string>
+    <string name="psd_failed_format">PSD ini memakai mode warna yang tidak dibaca Aurea (CMYK, Lab, atau 32-bit). Simpan sebagai RGB 8 atau 16-bit.</string>
+    <string name="psd_failed_corrupt">File PSD rusak atau tidak lengkap.</string>
+    <string name="gif_importing">Mengimpor GIF…</string>
+    <string name="gif_imported">GIF diimpor: framenya ada di precomp dan diputar berulang.</string>
+    <string name="gif_failed">Tidak dapat mengimpor GIF.</string>
+</resources>

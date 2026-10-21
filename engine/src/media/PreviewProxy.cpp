@@ -21,9 +21,11 @@ constexpr u32 kTagAvc1 = 0x61766331u, kTagHvc1 = 0x68766331u, kTagHev1 = 0x68657
               kTagAv01 = 0x61763031u, kTagVp09 = 0x76703039u;
 
 std::string fingerprint(const Asset& a, u32 target, const std::string& identity = {}) {
+    // "v3" (0.2.7): refaz as mídias otimizadas da 0.2.6 (relatos de vídeo verde;
+    // um arquivo ruim no cache era reaproveitado para sempre).
     // "v2" (0.2.5): GOP curto e dizimação acima de 60 fps. Arquivos do formato
     // anterior (GOP de 1 s, tamanho por classe) não são reaproveitados.
-    std::string input = a.sourcePath + ':' + std::to_string(a.contentHash) + ':' + std::to_string(a.fileSizeBytes) + ':' + std::to_string(target) + ":v2";
+    std::string input = a.sourcePath + ':' + std::to_string(a.contentHash) + ':' + std::to_string(a.fileSizeBytes) + ':' + std::to_string(target) + ":v3";
     input += ':' + identity;
     u64 h = 1469598103934665603ull;
     for (unsigned char c : input) { h ^= c; h *= 1099511628211ull; }

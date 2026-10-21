@@ -48,7 +48,7 @@ internal object TrackballDrag {
 
 /** Ferramenta Girar numa camada 3D (sem parte de forma 3D escolhida): o trackball substitui as alças. */
 internal fun trackballActive(store: EditorStore): Boolean =
-    store.gizmoTool == GIZMO_ROTATE && store.gizmo != null && store.selection.size == 1 &&
+    store.gizmoTool == GIZMO_ROTATE && store.gizmoAxes && store.selection.size == 1 &&
         store.shapePartOf(store.primary) < 0
 
 /** Dica de acessibilidade da ferramenta Girar (o trackball não tem nó próprio: é desenho). */

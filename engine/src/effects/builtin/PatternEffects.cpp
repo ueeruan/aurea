@@ -148,7 +148,7 @@ public:
         p.add_int("first", "Primeira letra", 1, 1, 256);
         p.add_int("last", "Última letra", 256, 1, 256);
         p.add_float("amount", "Intensidade", 100.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("letter_delay", "Atraso por letra", 0.f, 0.f, 30.f, kParamAnimatable, "frames");
+        p.add_float("letter_delay", "Atraso por letra", 0.f, 0.f, 30.f, kParamAnimatable | kParamFrames, "frames");
         p.add_float("rotation_variation", "Variação da rotação", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
         p.add_int("seed", "Semente da variação", 1, 0, 9999);
         // Anexados (os índices acima são os dos projetos salvos): cada letra
@@ -178,7 +178,7 @@ public:
         p.add_int("first", "Primeira parte", 1, 1, 256);
         p.add_int("last", "Última parte", 256, 1, 256);
         p.add_float("amount", "Intensidade", 100.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("part_delay", "Atraso por parte", 0.f, 0.f, 30.f, kParamAnimatable, "frames");
+        p.add_float("part_delay", "Atraso por parte", 0.f, 0.f, 30.f, kParamAnimatable | kParamFrames, "frames");
         p.add_float("rotation_variation", "Variação da rotação", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");
         p.add_int("seed", "Semente da variação", 1, 0, 9999);
         p.add_float("random", "Aleatório", 0.f, 0.f, 100.f, kParamAnimatable | kParamPercent, "%");

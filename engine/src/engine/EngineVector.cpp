@@ -583,32 +583,99 @@ Result<u64> Engine::import_svg(const std::string& text, const char* name) noexce
     return lid.pack();
 }
 
+namespace {
+/// Margem do texto no caminho: com keyframes na trilha, grava o keyframe do
+/// instante (como o espaçamento); senão, o valor parado da camada.
+void write_path_margin(Layer& l, TrackProperty property, f32& still, f32 desired, FrameIndex local) noexcept {
+    desired = std::isfinite(desired) ? std::clamp(desired, -100000.0f, 100000.0f) : 0.0f;
+    Track* tr = l.tracks.find(property);
+    if (tr && !tr->keys.empty()) {
+        if (std::fabs(tr->value_or(local, still) - desired) > 1e-4f) (void)tr->set(local, desired, Interpolation::Linear);
+        return;
+    }
+    still = desired;
+}
+
+f32 read_path_margin(const Layer& l, TrackProperty property, f32 still, FrameIndex local) noexcept {
+    const Track* tr = l.tracks.find(property);
+    return tr && tr->driven() ? tr->value_or(local, still) : still;
+}
+} // namespace
+
 bool Engine::set_text_path(u64 layerId, u64 pathLayer, f32 offset, bool perpendicular, bool reverse) noexcept {
+    TextPathOptions o;
+    if (!query_text_path_options(layerId, o)) return false;
+    o.pathLayer = pathLayer;
+    o.mask = kInvalidIndex;
+    o.firstMargin = offset;
+    o.perpendicular = perpendicular;
+    o.reverse = reverse;
+    return set_text_path_options(layerId, o);
+}
+
+bool Engine::query_text_path(u64 layerId, u64& pathLayer, f32& offset, bool& perpendicular, bool& reverse) noexcept {
+    TextPathOptions o;
+    if (!query_text_path_options(layerId, o)) return false;
+    pathLayer = o.pathLayer;
+    offset = o.firstMargin;
+    perpendicular = o.perpendicular;
+    reverse = o.reverse;
+    return true;
+}
+
+bool Engine::set_text_path_options(u64 layerId, const TextPathOptions& o) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();   // o cabeçote dos comandos já enviados (o keyframe vai no quadro mostrado)
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Text) return false;
-    if (pathLayer != 0 && (pathLayer == layerId || !vector_layer(comp, pathLayer))) return false;
+    if (!l || l->kind != LayerKind::Text || l->locked) return false;
+    if (o.mask != kInvalidIndex) {
+        if (std::none_of(l->masks.begin(), l->masks.end(), [&](const Mask& m) { return m.id == o.mask; })) return false;
+    } else if (o.pathLayer != 0 && (o.pathLayer == layerId || !vector_layer(comp, o.pathLayer))) {
+        return false;
+    }
+    TextData& t = l->text;
+    const u64 guide = o.mask != kInvalidIndex ? 0 : o.pathLayer;
+    const FrameIndex local = l->local_time(playback_.current());
+    const f32 first = read_path_margin(*l, TrackProperty::TextPathFirstMargin, t.pathOffset, local);
+    const f32 last = read_path_margin(*l, TrackProperty::TextPathLastMargin, t.pathLastMargin, local);
+    const bool sourceChanged = t.pathLayer != guide || t.pathMask != o.mask;
+    if (!sourceChanged && t.pathPerpendicular == o.perpendicular && t.pathReverse == o.reverse && t.pathForceAlign == o.forceAlign
+        && std::fabs(first - o.firstMargin) <= 1e-4f && std::fabs(last - o.lastMargin) <= 1e-4f) return true;
     history_.before_mutation(*comp, project_->timeline().current(), "texto no caminho");
     bump_model_revision_locked();
-    l->text.pathLayer = pathLayer;
-    l->text.pathOffset = std::clamp(offset, -100000.0f, 100000.0f);
-    l->text.pathPerpendicular = perpendicular;
-    l->text.pathReverse = reverse;
+    // Trocar o caminho, a margem final ou forçar o alinhamento passa o texto
+    // de um projeto antigo para o layout do After Effects.
+    if (sourceChanged || t.pathForceAlign != o.forceAlign || std::fabs(last - o.lastMargin) > 1e-4f) t.pathLegacyLayout = false;
+    t.pathLayer = guide;
+    t.pathMask = o.mask;
+    t.pathPerpendicular = o.perpendicular;
+    t.pathReverse = o.reverse;
+    t.pathForceAlign = o.forceAlign;
+    write_path_margin(*l, TrackProperty::TextPathFirstMargin, t.pathOffset, o.firstMargin, local);
+    write_path_margin(*l, TrackProperty::TextPathLastMargin, t.pathLastMargin, o.lastMargin, local);
     project_->mark_dirty();
     request_render();
     return true;
 }
 
-bool Engine::query_text_path(u64 layerId, u64& pathLayer, f32& offset, bool& perpendicular, bool& reverse) noexcept {
+bool Engine::query_text_path_options(u64 layerId, TextPathOptions& o) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Text) return false;
-    pathLayer = l->text.pathLayer;
-    offset = l->text.pathOffset;
-    perpendicular = l->text.pathPerpendicular;
-    reverse = l->text.pathReverse;
+    const TextData& t = l->text;
+    const FrameIndex local = l->local_time(playback_.current());
+    const bool maskExists = t.pathMask != kInvalidIndex
+        && std::any_of(l->masks.begin(), l->masks.end(), [&](const Mask& m) { return m.id == t.pathMask; });
+    o.pathLayer = maskExists ? 0 : t.pathLayer;
+    o.mask = maskExists ? t.pathMask : kInvalidIndex;
+    o.firstMargin = read_path_margin(*l, TrackProperty::TextPathFirstMargin, t.pathOffset, local);
+    o.lastMargin = read_path_margin(*l, TrackProperty::TextPathLastMargin, t.pathLastMargin, local);
+    o.perpendicular = t.pathPerpendicular;
+    o.reverse = t.pathReverse;
+    o.forceAlign = t.pathForceAlign;
     return true;
 }
 

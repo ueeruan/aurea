@@ -552,12 +552,33 @@ public:
     /// SVG → camada vetorial nova (um grupo por forma), centrada na composição.
     [[nodiscard]] Result<u64> import_svg(const std::string& text, const char* name) noexcept;
     [[nodiscard]] Result<u64> import_psd(const std::string& path, const char* name, bool* approximated = nullptr) noexcept;
+    /// GIF animado (0.2.7): uma pré-composição com um quadro por camada de
+    /// imagem, cada um com a sua duração, tocando em loop até o fim da
+    /// composição. GIF de um quadro só vira imagem do mesmo jeito.
+    [[nodiscard]] Result<u64> import_gif(const std::string& path, const char* name) noexcept;
     [[nodiscard]] Result<u64> create_grid(const u64* ids, u32 count) noexcept;
     [[nodiscard]] std::string foreground_model_directory() const { return config_.documentsDirectory + "/ai/rotobrush"; }
     /// Texto no caminho: camada-guia vetorial (0 = desliga), margem inicial,
     /// perpendicular, invertido.
     bool set_text_path(u64 layerId, u64 pathLayer, f32 offset, bool perpendicular, bool reverse) noexcept;
     bool query_text_path(u64 layerId, u64& pathLayer, f32& offset, bool& perpendicular, bool& reverse) noexcept;
+    /// Texto no caminho completo (as Path Options do After Effects, 0.2.7).
+    /// `mask` = id de uma máscara da PRÓPRIA camada como caminho (vale mais
+    /// que `pathLayer`; kInvalidIndex = nenhuma). As margens são animáveis
+    /// (TrackProperty::TextPathFirstMargin/LastMargin): com keyframes na
+    /// trilha, mudar a margem grava o keyframe do instante; a consulta devolve
+    /// o valor no cabeçote.
+    struct TextPathOptions {
+        u64  pathLayer = 0;
+        u32  mask = kInvalidIndex;
+        f32  firstMargin = 0.0f;
+        f32  lastMargin = 0.0f;
+        bool perpendicular = true;
+        bool reverse = false;
+        bool forceAlign = false;
+    };
+    bool set_text_path_options(u64 layerId, const TextPathOptions& options) noexcept;
+    bool query_text_path_options(u64 layerId, TextPathOptions& options) noexcept;
     // --- Fontes ---------------------------------------------------------------------
     /// Fontes disponíveis (aparelho + importadas), por família e peso.
     [[nodiscard]] std::vector<text::FontEntry> list_fonts() noexcept;
@@ -1760,6 +1781,9 @@ public:
     /// Composição atual: id empacotado e ajustes (tamanho, fps, duração em
     /// frames, fundo RGBA linear). false = sem projeto.
     [[nodiscard]] i64 query_export_duration(bool trimToContent = true) noexcept;
+    /// O projeto usa motion blur (composição ligada e alguma camada com ele,
+    /// em qualquer composição): a tela só fala de "menos amostras" se usa.
+    [[nodiscard]] bool query_export_uses_motion_blur() noexcept;
     bool query_composition(u64& id, u32& width, u32& height, f64& fps, i64& durationFrames,
                            f32 background[4]) noexcept;
     /// Teto de tamanho de composição do aparelho, como lado maior × lado

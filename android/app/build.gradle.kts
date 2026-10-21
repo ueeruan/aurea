@@ -7,8 +7,8 @@ import java.util.Properties
 //  A parte que mais importa aqui é a ASSINATURA. Duas chaves possíveis:
 //
 //  1. `android/keystore.properties` (Google Play): a CHAVE DE UPLOAD do dono.
-//     Modelo documentado em `android/keystore.properties.example`. Quando o
-//     arquivo existe, TODO build release (APK e AAB) sai com ela.
+//     Modelo documentado em `android/keystore.properties.example`. Vale para
+//     o AAB e para o APK com `-PaureaStore=play`; o APK de sideload nunca usa.
 //  2. `android/key.properties` (legado, sideload): aponta para a chave de
 //     DEBUG da máquina do dono, que assina o Aurea distribuído fora da loja
 //     (auditado: o SHA-256 do aurea-release.apk bate com
@@ -31,10 +31,27 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Pedido de AAB (a Play)? Decide a loja e, por ela, a chave.
+val pedeBundleRelease = gradle.startParameter.taskNames.any {
+    val nome = it.substringAfterLast(':')
+    // packageReleaseUniversalApk monta o APK universal A PARTIR do bundle da Play.
+    nome == "bundle" || nome == "bundleRelease" || nome == "signReleaseBundle" || nome == "packageReleaseUniversalApk"
+}
+// Distribuição: "play" (Google Play) ou "sideload" (APK direto). O AAB é sempre
+// para a Play; `-PaureaStore=play` gera um APK com o mesmo comportamento para
+// testar. Na Play não há a tela que exige abrir o TikTok/Instagram do criador
+// nem doação por PIX/PayPal (políticas de pagamentos e de comportamento
+// enganoso); o APK de sideload continua como sempre.
+val aureaStore = providers.gradleProperty("aureaStore").orNull ?: if (pedeBundleRelease) "play" else "sideload"
+require(aureaStore == "play" || aureaStore == "sideload") { "aureaStore invalido: $aureaStore (play ou sideload)" }
+
 val keystoreProperties = Properties()
-// A chave de upload do Play (keystore.properties) tem prioridade sobre a
-// chave legada de sideload (key.properties). Os dois estão no .gitignore.
-val keystorePropertiesFile = listOf("keystore.properties", "key.properties")
+// Cada loja com a SUA chave (0.2.7): a Play usa a chave de upload
+// (keystore.properties); o APK de sideload continua com a chave legada
+// (key.properties → debug.keystore do dono), senão quem tem o APK instalado
+// não consegue atualizar sem desinstalar — e desinstalar apaga os projetos.
+// Os dois arquivos estão no .gitignore.
+val keystorePropertiesFile = (if (aureaStore == "play") listOf("keystore.properties") else listOf("key.properties"))
     .map { rootProject.file(it) }
     .firstOrNull { it.exists() }
 val temChaveDeRelease = keystorePropertiesFile != null
@@ -63,22 +80,10 @@ val mensagemChaveDeDebug = """
 // Falha ANTES de compilar o motor (minutos), quando a tarefa pedida é o bundle
 // release. A checagem dentro de signReleaseBundle (abaixo) cobre nomes
 // abreviados e qualquer outro caminho até o AAB.
-val pedeBundleRelease = gradle.startParameter.taskNames.any {
-    val nome = it.substringAfterLast(':')
-    // packageReleaseUniversalApk monta o APK universal A PARTIR do bundle da Play.
-    nome == "bundle" || nome == "bundleRelease" || nome == "signReleaseBundle" || nome == "packageReleaseUniversalApk"
-}
 if (pedeBundleRelease && releaseComChaveDeDebug && !permitirAssinaturaDeDebug) {
     throw GradleException(mensagemChaveDeDebug)
 }
 
-// Distribuição: "play" (Google Play) ou "sideload" (APK direto). O AAB é sempre
-// para a Play; `-PaureaStore=play` gera um APK com o mesmo comportamento para
-// testar. Na Play não há a tela que exige abrir o TikTok/Instagram do criador
-// nem doação por PIX/PayPal (políticas de pagamentos e de comportamento
-// enganoso); o APK de sideload continua como sempre.
-val aureaStore = providers.gradleProperty("aureaStore").orNull ?: if (pedeBundleRelease) "play" else "sideload"
-require(aureaStore == "play" || aureaStore == "sideload") { "aureaStore invalido: $aureaStore (play ou sideload)" }
 // O app do Play Console foi criado com com.aurea.editor, e a Play não deixa
 // trocar o pacote depois. O APK de sideload continua com.aurea.aurea: no
 // aparelho são dois apps distintos, cada um com seus projetos.
@@ -116,8 +121,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar os builds 2181–2191 já distribuídos; nunca reduzir o código.
-        versionCode = 2194
-        versionName = "0.2.6"
+        versionCode = 2195
+        versionName = "0.2.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

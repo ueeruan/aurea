@@ -744,6 +744,11 @@ public:
     }
     /// Teto inicial do export (celular): 0 = sem teto.
     void set_export_blur_cap(u32 cap) noexcept { exportBlurCap_ = cap >= 2 ? cap : 0u; }
+    /// Teto rígido do degrau da escada (ExportAttempts.hpp): 0 = nenhum, 1 = sem desfoque.
+    void set_export_blur_hard_cap(u32 cap) noexcept { exportBlurHardCap_ = cap; }
+    /// Teto das amostras de cena 3D no export: cada amostra é a cena inteira
+    /// (sombra, MSAA), então o custo cresce sem limite com o rastro (0.2.7).
+    void set_export_scene_blur_cap(u32 cap) noexcept { exportSceneBlurCap_ = cap; }
     u32 lower_export_blur_cap() noexcept {
         exportBlurCap_ = exportBlurCap_ ? std::max(2u, exportBlurCap_ / 2) : 64u;
         return exportBlurCap_;
@@ -1018,6 +1023,7 @@ private:
     void release_project_resources_impl(bool gpuDone) noexcept;
     const EffectRegistry* effects_ = nullptr;
     EffectTypeId posterizeType_ = 0, echoType_ = 0, rgbTimeType_ = 0, lowFpsType_ = 0;
+    EffectTypeId randomEditsType_ = 0;   ///< Edições aleatórias: trechos embaralhados (0.2.7)
     EffectTypeId motionDetectType_ = 0;   ///< Detectar movimento: a fonte em t − atraso
     EffectTypeId datamoshType_ = 0;       ///< Datamosh: a fonte presa por "Quadros segurados"
     EffectTypeId timeSliceType_ = 0;      ///< TimeSlice: uma faixa por instante
@@ -1275,6 +1281,8 @@ private:
     u32 incompleteLine_ = 0;
     u32 exportGpuStep_ = 0;
     u32 exportBlurCap_ = 0;
+    u32 exportBlurHardCap_ = 0;   ///< degrau da escada (0 = nenhum; 1 = sem desfoque)
+    u32 exportSceneBlurCap_ = 0;  ///< amostras de CENA 3D no export (0 = nenhum)
     /// shutter_sample_count com o teto de amostras do export em GPU fraca.
     [[nodiscard]] u32 capped_shutter_samples(const MotionBlurSettings& settings, bool finalQuality, f32 quality,
             f64 pathPixels, bool changing = false, u32 resourceLimit = ShutterPlan::kHardLimit) const noexcept {
@@ -1293,6 +1301,9 @@ private:
             const u32 floor = std::max(chosen, static_cast<u32>(std::min<f64>(previewDensity, ceiling)));
             resourceLimit = std::min(resourceLimit, std::max(exportBlurCap_, floor));
         }
+        // Degrau da escada (0.2.7): teto RÍGIDO, acima do piso da prévia e das
+        // amostras escolhidas — é a última chance de o export sair.
+        if (finalQuality && exportBlurHardCap_ >= 1) resourceLimit = std::min(resourceLimit, exportBlurHardCap_);
         return shutter_sample_count(settings, finalQuality, quality, pathPixels, changing, resourceLimit);
     }
     void mark_incomplete(const char* file, u32 line) noexcept { incomplete_ = true; incompleteFile_ = file; incompleteLine_ = line; }

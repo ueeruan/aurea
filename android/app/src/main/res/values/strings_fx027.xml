@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: Aurora (Gerar) e Edições aleatórias (Tempo). -->
+<resources>
+    <string name="fx027_name_aurora">Aurora</string>
+    <string name="fx027_name_random_edits">Edições aleatórias</string>
+    <string name="fx027_desc_aurora">Aurora boreal animada num céu estrelado, com o reflexo na água. Cortinas, cores, céu e câmera ajustáveis.</string>
+    <string name="fx027_desc_random_edits">Corta a camada em trechos curtos e remonta numa ordem aleatória. A mesma semente repete a mesma montagem.</string>
+    <string name="fx027_amount">Quantidade</string>
+    <string name="fx027_sky_glow">Brilho do céu</string>
+    <string name="fx027_secondary_color">Cor secundária</string>
+    <string name="fx027_sky_color">Cor do céu</string>
+    <string name="fx027_time_offset">Deslocamento de tempo</string>
+    <string name="fx027_horizon">Horizonte</string>
+    <string name="fx027_reflection">Reflexo</string>
+    <string name="fx027_ripple">Ondulação da água</string>
+    <string name="fx027_stars">Estrelas</string>
+    <string name="fx027_tilt">Inclinação da câmera</string>
+    <string name="fx027_pan">Giro da câmera</string>
+    <string name="fx027_sky_height">Altura das cortinas</string>
+    <string name="fx027_environment">Ambiente</string>
+    <string name="fx027_edit_length">Duração do corte</string>
+</resources>

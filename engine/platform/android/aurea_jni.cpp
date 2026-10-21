@@ -3974,6 +3974,20 @@ AUREA_JNI jstring AUREA_FN(nativeLastExportEncoderPath)(JNIEnv* env, jclass) {
     return env->NewStringUTF(text);
 }
 
+AUREA_JNI jboolean AUREA_FN(nativeExportUsesMotionBlur)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.query_export_uses_motion_blur() ? JNI_TRUE : JNI_FALSE;
+}
+
+/// O que um degrau da escada muda além do lado menor (0.2.7): o teto de
+/// motion blur (0 = o do projeto; 1 = sem desfoque) e o de fps (0 = o pedido).
+AUREA_JNI jint AUREA_FN(nativeExportAttemptBlurCap)(JNIEnv*, jclass, jint attempt) {
+    return static_cast<jint>(export_attempt_plan(static_cast<u32>(std::clamp<jint>(attempt, 0, static_cast<jint>(kExportAttemptMax)))).blurCap);
+}
+AUREA_JNI jdouble AUREA_FN(nativeExportAttemptFpsCap)(JNIEnv*, jclass, jint attempt) {
+    return export_attempt_plan(static_cast<u32>(std::clamp<jint>(attempt, 0, static_cast<jint>(kExportAttemptMax)))).fpsCap;
+}
+
 AUREA_JNI jlong AUREA_FN(nativeExportDuration)(JNIEnv*, jclass, jlong handle, jboolean trimToContent) {
     NativeContext* c = ctx_of(handle);
     return c ? c->engine.query_export_duration(trimToContent == JNI_TRUE) : 0;
@@ -4247,6 +4261,14 @@ AUREA_JNI jlong AUREA_FN(nativeImportPsd)(JNIEnv* env, jclass, jlong handle, jst
     return result_id(c->engine.import_psd(p,n.c_str()));
 }
 
+/// GIF animado (0.2.7): pré-composição com os quadros, em loop.
+AUREA_JNI jlong AUREA_FN(nativeImportGif)(JNIEnv* env, jclass, jlong handle, jstring path, jstring name) {
+    NativeContext* c=ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const auto p=to_string(env,path), n=to_string(env,name);
+    return result_id(c->engine.import_gif(p,n.c_str()));
+}
+
 AUREA_JNI jstring AUREA_FN(nativeForegroundModelDirectory)(JNIEnv* env,jclass,jlong handle) {
     auto* c=ctx_of(handle);return env->NewStringUTF(c?c->engine.foreground_model_directory().c_str():"");
 }
@@ -4263,18 +4285,36 @@ AUREA_JNI jboolean AUREA_FN(nativeSetTextPath)(JNIEnv*, jclass, jlong handle, jl
                ? JNI_TRUE : JNI_FALSE;
 }
 
-/// Texto no caminho: [camada-guia, margem (bits do float), perpendicular, invertido].
+/// Texto no caminho completo (0.2.7): `mask` < 0 = nenhuma máscara.
+AUREA_JNI jboolean AUREA_FN(nativeSetTextPathOptions)(JNIEnv*, jclass, jlong handle, jlong layer, jlong pathLayer, jint mask,
+                                                      jfloat firstMargin, jfloat lastMargin, jboolean perpendicular,
+                                                      jboolean reverse, jboolean forceAlign) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return JNI_FALSE;
+    Engine::TextPathOptions o;
+    o.pathLayer = static_cast<u64>(pathLayer);
+    o.mask = mask < 0 ? kInvalidIndex : static_cast<u32>(mask);
+    o.firstMargin = firstMargin;
+    o.lastMargin = lastMargin;
+    o.perpendicular = perpendicular == JNI_TRUE;
+    o.reverse = reverse == JNI_TRUE;
+    o.forceAlign = forceAlign == JNI_TRUE;
+    return c->engine.set_text_path_options(static_cast<u64>(layer), o) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// Texto no caminho: [camada-guia, margem inicial (bits do float), perpendicular,
+/// invertido, máscara (-1 = nenhuma), margem final (bits), forçar alinhamento].
 AUREA_JNI jlongArray AUREA_FN(nativeQueryTextPath)(JNIEnv* env, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);
-    u64 pl = 0;
-    f32 off = 0.0f;
-    bool perp = true, rev = false;
-    if (!c || !c->engine.query_text_path(static_cast<u64>(layer), pl, off, perp, rev)) return nullptr;
-    u32 offBits = 0;
-    std::memcpy(&offBits, &off, 4);
-    const jlong v[4] = {static_cast<jlong>(pl), static_cast<jlong>(offBits), perp ? 1 : 0, rev ? 1 : 0};
-    jlongArray out = env->NewLongArray(4);
-    if (out) env->SetLongArrayRegion(out, 0, 4, v);
+    Engine::TextPathOptions o;
+    if (!c || !c->engine.query_text_path_options(static_cast<u64>(layer), o)) return nullptr;
+    u32 firstBits = 0, lastBits = 0;
+    std::memcpy(&firstBits, &o.firstMargin, 4);
+    std::memcpy(&lastBits, &o.lastMargin, 4);
+    const jlong v[7] = {static_cast<jlong>(o.pathLayer), static_cast<jlong>(firstBits), o.perpendicular ? 1 : 0, o.reverse ? 1 : 0,
+                        o.mask == kInvalidIndex ? -1 : static_cast<jlong>(o.mask), static_cast<jlong>(lastBits), o.forceAlign ? 1 : 0};
+    jlongArray out = env->NewLongArray(7);
+    if (out) env->SetLongArrayRegion(out, 0, 7, v);
     return out;
 }
 

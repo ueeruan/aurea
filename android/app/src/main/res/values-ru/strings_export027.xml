@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: o que a escada de tentativas mudou além do tamanho (fps, motion blur). -->
+<resources>
+    <string name="export_retry_fps">До %1$d кадр/с.</string>
+    <string name="export_retry_blur_less">С меньшим числом сэмплов размытия движения.</string>
+    <string name="export_retry_blur_off">Без размытия движения.</string>
+    <string name="export_done_fps">Экспортировано с частотой %1$d кадр/с, чтобы работать на этом устройстве.</string>
+    <string name="export_done_blur_less">Размытие движения уменьшено, чтобы работать на этом устройстве.</string>
+    <string name="export_done_blur_off">Экспортировано без размытия движения, чтобы работать на этом устройстве.</string>
+</resources>

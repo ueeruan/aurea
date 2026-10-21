@@ -68,6 +68,9 @@ fun PanelContent(
     onOpenPanel: (EditorPanel) -> Unit,
     onOpenEffectsBrowser: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Interface de Edição: a barra de cima não tem título de seção, então o
+     *  painel mostra "‹ Título" mesmo com camada escolhida. */
+    alwaysHeader: Boolean = false,
 ) {
     var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
     var color by remember { mutableStateOf<ColorRequest?>(null) }
@@ -89,7 +92,13 @@ fun PanelContent(
             onClose = { close() },
             onOpenPanel = { open(it) },
             onOpenEffectsBrowser = { browser() },
-            openKeypad = { keypad = it },
+            // O teclado pertence à camada que o abriu: se a seleção mudar com ele
+            // aberto, o OK não grava na camada nova (a folha antiga não tem dono).
+            openKeypad = { request ->
+                val owner = store.primary
+                keypad = KeypadRequest(request.title, request.initial, request.unit, request.min, request.max,
+                    request.decimals, request.percentBase) { value -> if (store.primary == owner) request.onConfirm(value) }
+            },
             openColor = { color = it },
             returnTo = { returnTo },
             onOpenAnimators = { transformTab = TransformTab.Animadores; open(EditorPanel.Transform) },
@@ -108,7 +117,7 @@ fun PanelContent(
         // Com camada escolhida, o título da seção mora na barra de cima
         // (SectionTopBar, redesenho 2026-09-29); o cabeçalho próprio só fica
         // para o painel aberto sem camada (Aurea AI, legendas).
-        if (panel != EditorPanel.Curve && !hasLayer) PanelHeader(title, onBack = onClose)
+        if (panel != EditorPanel.Curve && (!hasLayer || alwaysHeader)) PanelHeader(title, onBack = onClose)
         Box(Modifier.fillMaxWidth().weight(1f)) {
             // O painel da Aurea AI gera um video e o poe na timeline: nao ha
             // camada escolhida para ele consultar, entao fica FORA do

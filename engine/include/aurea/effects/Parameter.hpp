@@ -104,6 +104,12 @@ enum ParamFlags : u16 {
     /// novo: a instância nova nasce com o padrão (1); a antiga, que não tinha
     /// o slot, continua no desenho de antes.
     kParamLegacyZero  = 1u << 5,
+    /// Duração ou contagem em QUADROS da composição (atraso, intervalo). Ao
+    /// trocar o fps mantendo os segundos (`Composition::retime`), o valor é
+    /// multiplicado pela razão — senão 3 quadros a 30 viram metade do tempo a 60.
+    kParamFrames      = 1u << 6,
+    /// Taxa POR QUADRO (px/quadro). No retime, dividida pela razão.
+    kParamPerFrame    = 1u << 7,
 };
 
 /// Marca de "faixa digitada não declarada": vale a faixa do slider.

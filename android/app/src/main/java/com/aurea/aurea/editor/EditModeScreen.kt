@@ -120,8 +120,10 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
                     // Painel aberto: a linha do tempo encolhe e o painel da Composição sobe.
                     KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().height(112.dp), compact = true, onAddMedia = actions.addMedia, onAddAudio = { level = EditDockLevel.Audio }, onTransition = { a, b -> cut = a to b }) }
                     Box(Modifier.fillMaxWidth().weight(1f).background(AureaColors.EditorPanel)) {
+                        // Na Edição a barra de cima não mostra o título da seção: o painel
+                        // traz o próprio cabeçalho "‹ Título" (o ✕ de cima fecha o projeto).
                         PanelContent(store, panel, onClose = { ui.panel = null }, onOpenPanel = { openPanel(store, ui, it) },
-                            onOpenEffectsBrowser = { ui.effectsBrowser = true })
+                            onOpenEffectsBrowser = { ui.effectsBrowser = true }, alwaysHeader = true)
                     }
                 } else {
                     KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = false, onAddMedia = actions.addMedia, onAddAudio = { level = EditDockLevel.Audio }, onTransition = { a, b -> cut = a to b }) }
@@ -377,7 +379,12 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
     return remember(store, ui, noClip) {
         val addMedia = { if (store.playing) store.pause(); media.launch(visual) }
         fun panel(p: EditorPanel) = openPanel(store, ui, p)
-        fun effects() { if (store.playing) store.pause(); ui.effectsBrowser = true }
+        // 0.2.7: Efeitos abre a PILHA da camada (EffectsPanel): os cartões com os
+        // parâmetros de cada efeito aplicado e o "+ Adicionar efeito". Antes abria
+        // só o navegador de adicionar, e o efeito escolhido não tinha onde ser
+        // ajustado sem trocar para a Composição. Camada sem efeito abre direto na
+        // lista de adicionar e volta aos cartões depois da escolha.
+        fun effects() { if (store.playing) store.pause(); panel(EditorPanel.Effects) }
         fun clipUnderPlayhead(): LayerRow? {
             val anchor = store.layers.firstOrNull { it.id == store.mainTrackAnchor } ?: return null
             return store.layers.firstOrNull {
@@ -386,8 +393,13 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
             }
         }
         fun globalEffect() {
-            // Efeito/filtro/ajuste do projeto: uma camada de ajuste por cima, e o navegador nela.
-            store.addAdjustmentLayer()
+            // Efeito/filtro/ajuste do projeto: uma camada de ajuste por cima, aberta
+            // no editor de efeitos. Uma camada de ajuste VAZIA sob o cabeçote é
+            // reaproveitada: cancelar e tocar de novo não empilha "Ajuste" vazios.
+            val empty = store.layers.firstOrNull {
+                it.adjustment && it.effectCount == 0 && store.playhead >= it.startFrame && store.playhead < it.endFrame
+            }
+            if (empty != null) store.select(empty.id) else store.addAdjustmentLayer()
             effects()
         }
         val itemsFor: (EditDockLevel, LayerRow?) -> List<EditDockItem> = { level, clip ->

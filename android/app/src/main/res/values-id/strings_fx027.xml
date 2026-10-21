@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: Aurora (Gerar) e Edições aleatórias (Tempo). -->
+<resources>
+    <string name="fx027_name_aurora">Aurora</string>
+    <string name="fx027_name_random_edits">Edit acak</string>
+    <string name="fx027_desc_aurora">Aurora animasi di langit berbintang, terpantul di air. Tirai, warna, langit, dan kamera dapat diatur.</string>
+    <string name="fx027_desc_random_edits">Memotong layer menjadi potongan pendek lalu menyusunnya secara acak. Seed yang sama mengulang susunan yang sama.</string>
+    <string name="fx027_amount">Jumlah</string>
+    <string name="fx027_sky_glow">Cahaya langit</string>
+    <string name="fx027_secondary_color">Warna sekunder</string>
+    <string name="fx027_sky_color">Warna langit</string>
+    <string name="fx027_time_offset">Geser waktu</string>
+    <string name="fx027_horizon">Cakrawala</string>
+    <string name="fx027_reflection">Pantulan</string>
+    <string name="fx027_ripple">Riak air</string>
+    <string name="fx027_stars">Bintang</string>
+    <string name="fx027_tilt">Kemiringan kamera</string>
+    <string name="fx027_pan">Putaran kamera</string>
+    <string name="fx027_sky_height">Tinggi tirai</string>
+    <string name="fx027_environment">Lingkungan</string>
+    <string name="fx027_edit_length">Panjang potongan</string>
+</resources>

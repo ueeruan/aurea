@@ -22,9 +22,9 @@ public:
 
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_int("copies", "Cópias", 4, 0, 16);
-        p.add_float("delay", "Intervalo (quadros)", 2.0f, 0.25f, 120.0f);
+        p.add_float("delay", "Intervalo (quadros)", 2.0f, 0.25f, 120.0f, kParamAnimatable | kParamFrames);
         p.add_float("decay", "Decaimento", 0.6f, 0.0f, 1.0f);
-        p.add_float("rgb", "Atraso RGB (quadros)", 0.0f, 0.0f, 60.0f);
+        p.add_float("rgb", "Atraso RGB (quadros)", 0.0f, 0.0f, 60.0f, kParamAnimatable | kParamFrames);
     }
 
     bool is_identity(const EffectEval&) const noexcept override { return true; }

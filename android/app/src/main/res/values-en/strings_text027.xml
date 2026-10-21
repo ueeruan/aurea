@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: full text on path (mask as path, last margin, force alignment). -->
+<resources>
+    <string name="text027_path_hint">Create a vector layer or draw a mask on this layer to use as the path.</string>
+    <string name="text027_path_mask">Mask %1$d</string>
+    <string name="text027_path_last_margin">Last margin</string>
+    <string name="text027_path_force_align">Force alignment</string>
+    <string name="text027_path_alignment_note">The margins follow the paragraph alignment: left-aligned text starts at the first margin, right-aligned text ends at the last margin and centered text sits between them.</string>
+</resources>

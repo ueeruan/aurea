@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: PSD com a causa da falha; GIF animado. -->
+<resources>
+    <string name="psd_failed_too_big">El PSD es demasiado grande para la memoria de este dispositivo. Reduce su tamaño o combina capas en Photoshop.</string>
+    <string name="psd_failed_format">Este PSD usa un modo de color que Aurea no lee (CMYK, Lab o 32 bits). Guárdalo en RGB de 8 o 16 bits.</string>
+    <string name="psd_failed_corrupt">El archivo PSD está dañado o incompleto.</string>
+    <string name="gif_importing">Importando GIF…</string>
+    <string name="gif_imported">GIF importado: los cuadros están en una precomposición y se reproducen en bucle.</string>
+    <string name="gif_failed">No se pudo importar el GIF.</string>
+</resources>

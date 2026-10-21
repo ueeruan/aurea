@@ -156,3 +156,28 @@ AUREA_TEST(FlowTimeGpu, FlowMotionBlurSmearsAlongTheFootageMotion) {
     AUREA_CHECK(blurred.first / sharp.first < blurred.second / sharp.second);
     AUREA_CHECK_NEAR(off.first, sharp.first, sharp.first * 0.01);
 }
+
+AUREA_TEST(FlowTimeGpu, RandomEditsShowsShuffledSegmentsOfTheSource) {
+    // "Edições aleatórias" (0.2.7): trechos de 3 quadros embaralhados pela
+    // semente. Cada quadro mostra o quadro da fonte que a conta compartilhada
+    // (effects/RandomEdits.hpp) manda — e o trecho anda junto, quadro a quadro.
+    AUREA_REQUIRE_GPU();
+    FlowTimeRig rig(SyntheticPattern::FrameGray, 64, 36);
+    if (Layer* l = rig.model()) l->end = FrameIndex{l->start.value + 150};
+    EffectInstance* fx = rig.add(effect_keys::kRandomEdits);
+    AUREA_CHECK(fx != nullptr);
+    if (!fx) return;
+    fx->params[0].constant = ParamValue::scalar(3.0f);
+    fx->params[1].constant = ParamValue::scalar(0.5f);
+    auto shown = [&](i64 frame) { rig.render(frame); return rig.luma(32, 18); };
+    u32 moved = 0;
+    for (i64 frame : {0, 1, 2, 3, 4, 5, 30, 31, 77, 149}) {
+        const i64 source = random_edits::frame(frame, 150, 3, 0.5f);
+        if (source != frame) ++moved;
+        AUREA_CHECK_NEAR(shown(frame), frame_gray_code(static_cast<u32>(source)), 0.5);
+    }
+    AUREA_CHECK(moved >= 6);
+    // Desligado: o tempo normal.
+    fx->enabled = false;
+    AUREA_CHECK_NEAR(shown(31), frame_gray_code(31), 0.5);
+}

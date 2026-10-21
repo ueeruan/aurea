@@ -865,6 +865,15 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             ),
         ),
     )
+    // Edições aleatórias (Tempo, 0.2.7): trechos embaralhados pela semente.
+    put("aurea.time.random_edits", EffectHuman(
+        name = R.string.fx027_name_random_edits,
+        keywords = "edicoes aleatorias random edits cortes embaralhar remontar jump cut sapphire",
+        principal = listOf(0, 1),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx027_edit_length, suffix = "quadros", decimals = 0),
+            1 to ParamHuman(label = R.string.fxl_seed, decimals = 3),
+        )))
     put(
         "aurea.time.slice",
         EffectHuman(
@@ -1290,6 +1299,35 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             13 to ParamHuman(label = R.string.fx_opacidade, decimals = 0),
             14 to ParamHuman(label = R.string.fx_mistura_camada),
             15 to ParamHuman(label = R.string.fx_preencher_caixa),
+        )))
+    // Aurora (Gerar, 0.2.7): os controles na ordem de um gerador de aurora do AE.
+    put("aurea.generate.aurora", EffectHuman(
+        name = R.string.fx027_name_aurora,
+        keywords = "aurora boreal northern lights ceu estrelas noite reflexo agua polar crates",
+        principal = listOf(1, 3, 4, 8, 9, 12),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fxs_distortion, decimals = 1),
+            1 to ParamHuman(label = R.string.fx027_amount, decimals = 0),
+            2 to ParamHuman(label = R.string.fxl_scale, decimals = 2),
+            3 to ParamHuman(label = R.string.fxl_length, decimals = 1),
+            4 to ParamHuman(label = R.string.fxl_exposure, decimals = 1),
+            5 to ParamHuman(label = R.string.fxl_detail, decimals = 1),
+            6 to ParamHuman(label = R.string.fx3_curvatura, decimals = 2),
+            7 to ParamHuman(label = R.string.fx027_sky_glow, decimals = 1),
+            8 to ParamHuman(label = R.string.fxl_color),
+            9 to ParamHuman(label = R.string.fx027_secondary_color),
+            10 to ParamHuman(label = R.string.fx027_sky_color),
+            11 to ParamHuman(label = R.string.fx027_time_offset, suffix = "s", decimals = 2),
+            12 to ParamHuman(label = R.string.fxl_speed, decimals = 1),
+            13 to ParamHuman(label = R.string.fx027_horizon, decimals = 0),
+            14 to ParamHuman(label = R.string.fx027_reflection, decimals = 0),
+            15 to ParamHuman(label = R.string.fx027_ripple, decimals = 0),
+            16 to ParamHuman(label = R.string.fx027_stars, decimals = 0),
+            17 to ParamHuman(label = R.string.fx027_tilt, suffix = "°", decimals = 1),
+            18 to ParamHuman(label = R.string.fx027_pan, suffix = "°", decimals = 1),
+            19 to ParamHuman(label = R.string.fxl_field_of_view, suffix = "°", decimals = 0),
+            20 to ParamHuman(label = R.string.fx027_sky_height, decimals = 0),
+            21 to ParamHuman(label = R.string.fxl_opacity, decimals = 0),
         )))
     put("aurea.generate.gradient_ramp", EffectHuman(
         name = R.string.fx_name_gradient_ramp,

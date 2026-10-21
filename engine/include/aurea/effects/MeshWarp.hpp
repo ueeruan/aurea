@@ -38,10 +38,20 @@ inline constexpr u32 kMeshWarpVertexFloats = 10;
 /// Teto de keys por malha (projeto estragado não aloca sem fim).
 inline constexpr u32 kMeshWarpMaxKeys = 4096;
 
+/// `MeshWarpKey::curve` sem curva própria: o trecho segue `interp` (como antes).
+inline constexpr u8 kMeshCurveLegacy = 0xFF;
+
 struct MeshWarpKey {
     i64 frame = 0;           ///< tempo LOCAL da camada
-    u8  interp = 1;          ///< 0 segura, 1 linear, 2 suave
+    u8  interp = 1;          ///< 0 segura, 1 linear, 2 suave (smoothstep)
     std::vector<f32> values; ///< (rows+1)(cols+1) × kMeshWarpVertexFloats
+    /// 0.2.7 (timeline v49): a curva do trecho que SAI deste key, a mesma dos
+    /// keyframes comuns (`aurea::Interpolation` + alças + força, avaliada por
+    /// `keyframe_ease`). `kMeshCurveLegacy` = sem curva própria: vale `interp`,
+    /// e projetos antigos continuam idênticos (o "suave" deles é smoothstep).
+    u8  curve = kMeshCurveLegacy;
+    u8  easePower = 1;
+    f32 bx1 = 0.33f, by1 = 0.0f, bx2 = 0.67f, by2 = 1.0f;
 };
 
 struct MeshWarpData {
@@ -59,6 +69,10 @@ namespace mesh_warp {
 /// Creates the current grid for first-time key insertion or clipboard paste.
 [[nodiscard]] MeshWarpData* ensure_animation(EffectInstance& effect) noexcept;
 [[nodiscard]] Interpolation track_interpolation(u8 legacy) noexcept;
+/// O tipo de curva do trecho que sai do key: a própria, ou a derivada de `interp`.
+[[nodiscard]] Interpolation key_interpolation(const MeshWarpKey& key) noexcept;
+/// Progresso 0..1 → progresso com a curva do key (a mesma conta dos keyframes).
+[[nodiscard]] f32 key_ease(const MeshWarpKey& key, f32 t01) noexcept;
 /// The caller owns the model lock and the composition undo transaction.
 Status key_command(Layer& layer, const Command& command, FrameIndex playhead) noexcept;
 

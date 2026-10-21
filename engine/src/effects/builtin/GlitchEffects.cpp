@@ -42,7 +42,7 @@ public:
         p.add_float("displace", "Deslocamento", 30.0f, 0.0f, 500.0f, kParamAnimatable | kParamPixels, "px");
         p.add_float("spike", "Picos", 15.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("channel_split", "Separação RGB", 8.0f, 0.0f, 200.0f, kParamAnimatable | kParamPixels, "px");
-        p.add_float("frequency", "Frequência", 3.0f, 0.25f, 60.0f, kParamAnimatable, "quadros");
+        p.add_float("frequency", "Frequência", 3.0f, 0.25f, 60.0f, kParamAnimatable | kParamFrames, "quadros");
         p.add_int("seed", "Semente", 11, 0, 9999);
         p.add_bool("freeze", "Travar o quadro", false);
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
@@ -268,11 +268,11 @@ public:
     void declare_parameters(ParameterRegistry& p) const override {
         p.add_float("band", "Bandas perdidas", 25.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("displace", "Deslocamento", 60.0f, 0.0f, 800.0f, kParamAnimatable | kParamPixels, "px");
-        p.add_float("drift", "Deriva", 0.4f, -20.0f, 20.0f, kParamAnimatable | kParamPixels, "px/quadro");
+        p.add_float("drift", "Deriva", 0.4f, -20.0f, 20.0f, kParamAnimatable | kParamPixels | kParamPerFrame, "px/quadro");
         p.add_float("band_height", "Altura da banda", 40.0f, 2.0f, 400.0f, kParamAnimatable | kParamPixels, "px");
         p.add_float("noise", "Ruído de sinal", 30.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_int("seed", "Semente", 23, 0, 9999);
-        p.add_float("frequency", "Frequência", 4.0f, 0.25f, 60.0f, kParamAnimatable, "quadros");
+        p.add_float("frequency", "Frequência", 4.0f, 0.25f, 60.0f, kParamAnimatable | kParamFrames, "quadros");
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_bool("sync_loss", "Perder a sincronia", true);
         p.add_float("split", "Separação de cor", 4.0f, 0.0f, 60.0f, kParamAnimatable | kParamPixels, "px");
@@ -335,7 +335,7 @@ public:
         p.add_float("background", "Ruído de fundo", 20.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("split", "Separação RGB", 7.0f, 0.0f, 80.0f, kParamAnimatable | kParamPixels, "px");
         p.add_int("seed", "Semente", 31, 0, 9999);
-        p.add_float("frequency", "Frequência", 2.0f, 0.25f, 60.0f, kParamAnimatable, "quadros");
+        p.add_float("frequency", "Frequência", 2.0f, 0.25f, 60.0f, kParamAnimatable | kParamFrames, "quadros");
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_bool("vertical_band", "Faixa vertical", true);
         p.add_bool("horizontal_band", "Faixa horizontal", true);

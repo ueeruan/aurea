@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: पथ पर टेक्स्ट (मास्क को पथ के रूप में, अंतिम मार्जिन, संरेखण बाध्य करें)। -->
+<resources>
+    <string name="text027_path_hint">पथ के रूप में उपयोग करने के लिए एक वेक्टर लेयर बनाएं या इस लेयर पर मास्क बनाएं।</string>
+    <string name="text027_path_mask">मास्क %1$d</string>
+    <string name="text027_path_last_margin">अंतिम मार्जिन</string>
+    <string name="text027_path_force_align">संरेखण बाध्य करें</string>
+    <string name="text027_path_alignment_note">मार्जिन अनुच्छेद संरेखण का पालन करते हैं: बाएँ संरेखित टेक्स्ट पहले मार्जिन से शुरू होता है, दाएँ संरेखित अंतिम मार्जिन पर खत्म होता है और केंद्रित टेक्स्ट दोनों के बीच रहता है।</string>
+</resources>

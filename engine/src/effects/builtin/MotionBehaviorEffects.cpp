@@ -292,8 +292,21 @@ protected:
         const float angle = e.f(kAngle)*kDeg2Rad, distance = e.f(kMagnitude)*wave;
         Pose p;
         if (e.e(kMode) != 1) p.offset = {std::cos(angle)*distance, std::sin(angle)*distance};
-        if (e.e(kMode) == 1) p.depth = distance;
-        if (e.e(kMode) == 2) p.depth = e.f(kMagnitude)*Oscillate::wave(e.e(kWave),turns+0.25,0);
+        const float depth = e.e(kMode) == 1 ? distance
+            : e.e(kMode) == 2 ? e.f(kMagnitude)*Oscillate::wave(e.e(kWave),turns+0.25,0) : 0.0f;
+        if (e.placement && e.placement->inScene3d) {
+            p.depth = depth;
+        } else if (depth != 0.0f) {
+            // 0.2.7: camada 2D não tem Z (o composite descarta). Profundidade
+            // não mexia nada e a Órbita virava a mesma linha do Ângulo. Em 2D a
+            // profundidade aparece como perspectiva (a câmera padrão de 50 mm,
+            // zoom ≈ 1,39 × a largura da composição): perto cresce, longe
+            // diminui, em volta do centro da camada.
+            const float compWidth = e.placement && e.placement->compWidth ? static_cast<float>(e.placement->compWidth) : 1920.0f;
+            const float focal = 1.389f * compWidth;
+            p.scale = std::clamp(focal / std::max(0.2f * focal, focal + depth), 0.2f, 5.0f);
+            if (e.placement) p.pivot = {0.5f * static_cast<float>(e.placement->layerWidth), 0.5f * static_cast<float>(e.placement->layerHeight)};
+        }
         return p;
     }
 };

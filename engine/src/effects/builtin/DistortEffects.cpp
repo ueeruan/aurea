@@ -279,7 +279,7 @@ public:
         p.typed_range(0.0f, 10000.0f);
         p.add_float("wavelength", "Largura de onda", 200.0f, 2.0f, 4000.0f, kParamAnimatable | kParamPixels, "px");
         p.typed_range(2.0f, 40000.0f);
-        p.add_float("speed", "Velocidade", 0.0f, -200.0f, 200.0f, kParamAnimatable | kParamPixels, "px/quadro");
+        p.add_float("speed", "Velocidade", 0.0f, -200.0f, 200.0f, kParamAnimatable | kParamPixels | kParamPerFrame, "px/quadro");
         p.typed_range(-5000.0f, 5000.0f);
         p.add_angle("phase", "Fase", 0.0f);
         p.add_enum("direction", "Direção", kDirs, 5, 0);

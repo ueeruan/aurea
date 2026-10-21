@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: o que a escada de tentativas mudou além do tamanho (fps, motion blur). -->
+<resources>
+    <string name="export_retry_fps">Até %1$d qps.</string>
+    <string name="export_retry_blur_less">Com menos amostras de motion blur.</string>
+    <string name="export_retry_blur_off">Sem motion blur.</string>
+    <string name="export_done_fps">Exportado a %1$d qps para funcionar neste aparelho.</string>
+    <string name="export_done_blur_less">O motion blur foi reduzido para funcionar neste aparelho.</string>
+    <string name="export_done_blur_off">Exportado sem motion blur para funcionar neste aparelho.</string>
+</resources>

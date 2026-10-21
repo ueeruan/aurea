@@ -22,6 +22,8 @@
 
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <cerrno>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -904,16 +906,30 @@ private:
                 observedGeneration = r.imageGeneration;
             }
             // Never hold the listener lock across a native ImageReader call.
-            const media_status_t s = AImageReader_acquireNextImage(r.reader, &out);
+            // 0.2.7 (vídeo verde): a imagem vem COM a cerca do produtor. O
+            // decoder pode ainda estar escrevendo o buffer; ler antes de a cerca
+            // sinalizar desenhava um buffer zerado — Y=U=V=0 vira verde chapado.
+            // Esperar aqui vale para todos os consumidores (GL, Vulkan, CPU).
+            int fence = -1;
+            const media_status_t s = AImageReader_acquireNextImageAsync(r.reader, &out, &fence);
             if (s == AMEDIA_OK && out) {
                 int64_t timestampNs = 0;
                 const media_status_t ts = AImage_getTimestamp(out, &timestampNs);
-                if (ts == AMEDIA_OK && timestampNs == ptsUs * 1000) return OkStatus;
+                if (ts == AMEDIA_OK && timestampNs == ptsUs * 1000) {
+                    if (!wait_producer_fence(fence, deadline)) {
+                        AImage_delete(out);
+                        out = nullptr;
+                        return Status{Errc::Timeout, "o decoder nao terminou de escrever o quadro"};
+                    }
+                    return OkStatus;
+                }
+                if (fence >= 0) close(fence);
                 AImage_delete(out);
                 out = nullptr;
                 if (ts != AMEDIA_OK) return Status{Errc::DecodeFailed, "timestamp do AImage indisponivel"};
                 continue;
             }
+            if (fence >= 0) close(fence);
             if (s == AMEDIA_IMGREADER_MAX_IMAGES_ACQUIRED) {
                 return Status{Errc::BudgetExceeded, "todas as imagens do ImageReader estao presas"};
             }
@@ -925,6 +941,22 @@ private:
                 return Status{Errc::Timeout, "frame renderizado nao chegou ao ImageReader"};
             }
         }
+    }
+
+    /// Espera a cerca de aquisição (sync fence do Android, um fd que sinaliza
+    /// legível) até o prazo, e a fecha. -1 = sem cerca: a imagem já está pronta.
+    static bool wait_producer_fence(int fence, std::chrono::steady_clock::time_point deadline) {
+        if (fence < 0) return true;
+        bool ready = false;
+        for (;;) {
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+            pollfd p{fence, POLLIN, 0};
+            const int n = poll(&p, 1, static_cast<int>(std::clamp<long long>(left, 0, 1000)));
+            if (n > 0) { ready = (p.revents & (POLLERR | POLLNVAL)) == 0; break; }
+            if (n == 0 || (n < 0 && errno != EINTR)) break;
+        }
+        close(fence);
+        return ready;
     }
 
     void drain_stray_images() {

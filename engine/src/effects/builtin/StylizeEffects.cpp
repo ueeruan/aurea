@@ -80,7 +80,7 @@ public:
         p.add_float("offset", "Deslocamento", 0.0f, -100.0f, 100.0f, kParamAnimatable | kParamPixels, "px");
         p.add_float("softness", "Suavidade", 45.0f, 1.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("contrast", "Contraste", 0.0f, -100.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
-        p.add_float("speed", "Velocidade", 0.0f, -20.0f, 20.0f, kParamAnimatable, "px/quadro");
+        p.add_float("speed", "Velocidade", 0.0f, -20.0f, 20.0f, kParamAnimatable | kParamPerFrame, "px/quadro");
         p.add_enum("channel", "Canal", kChannels, 4, 0);
         p.add_float("blur", "Desfoque vertical", 0.0f, 0.0f, 20.0f, kParamAnimatable | kParamPixels, "px");
         p.add_float("roll", "Rolagem", 0.0f, -100.0f, 100.0f, kParamAnimatable | kParamPixels, "px");

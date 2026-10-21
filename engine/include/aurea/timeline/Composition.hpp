@@ -25,6 +25,8 @@
 
 namespace aurea {
 
+class EffectRegistry;
+
 /// Configuração de sombras da composição. Separada porque é por cena, não por
 /// luz: uma cena não precisa de dois orçamentos de shadow map.
 struct ShadowSettings {
@@ -178,8 +180,12 @@ public:
     /// (duração, início/fim/offset e fades das layers, keyframes e o remap)
     /// é reescalado. Sem isto, 30 → 60 fps deixaria o vídeo tocando na
     /// velocidade certa mas cortado na metade, porque o tempo da fonte é
-    /// `frames locais / fps`.
-    void retime(f64 fps) noexcept;
+    /// `frames locais / fps`. Com `effects`, também os parâmetros medidos em
+    /// quadros (`kParamFrames` / `kParamPerFrame`); as transições, o eco e o
+    /// atraso RGB da layer são reescalados sempre. `coverEnds` (cópia da
+    /// exportação): o fim da composição e das layers arredonda para CIMA, e o
+    /// último quadro (⌈segundos·fps⌉) ainda tem o conteúdo que tinha.
+    void retime(f64 fps, const EffectRegistry* effects = nullptr, bool coverEnds = false) noexcept;
 
     [[nodiscard]] f32 aspect() const noexcept {
         return static_cast<f32>(width_) / static_cast<f32>(height_);

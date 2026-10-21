@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.2.7: texto en trazado completo (máscara como trazado, margen final, forzar alineación). -->
+<resources>
+    <string name="text027_path_hint">Crea una capa vectorial o dibuja una máscara en esta capa para usarla como trazado.</string>
+    <string name="text027_path_mask">Máscara %1$d</string>
+    <string name="text027_path_last_margin">Margen final</string>
+    <string name="text027_path_force_align">Forzar alineación</string>
+    <string name="text027_path_alignment_note">Los márgenes siguen la alineación del párrafo: a la izquierda el texto parte del margen inicial, a la derecha termina en el final y centrado queda entre los dos.</string>
+</resources>

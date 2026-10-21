@@ -48,6 +48,11 @@ class GizmoToolsTest {
         compose.waitUntil(15000) { store.project.title == title }
         compose.runOnIdle { store.addNull(true) }
         compose.waitUntil(5000) { store.gizmo != null && store.detail != null }
+        // 0.2.7: para a pessoa, as setas X/Y/Z só existem no editor de cena 3D
+        // (no palco comum é posição e pivô). A geometria é a mesma: estes
+        // testes a exercitam no palco comum pela chave de teste.
+        compose.runOnIdle { store.gizmoAxesForTests = true }
+        compose.waitForIdle()
     }
 
     /** Pontas na tela: [ox, oy, Xx, Xy, Yx, Yy, Zx, Zy]. */
@@ -75,6 +80,23 @@ class GizmoToolsTest {
     private fun selectTool(tool: Int) {
         compose.runOnIdle { while (store.gizmoTool != tool) store.cycleGizmoTool() }
         compose.waitForIdle()
+    }
+
+    @Test fun outsideTheSceneEditorTheStageIsOnlyPositionAndPivot() {
+        openNull("Gizmo comum")
+        compose.runOnIdle { store.gizmoAxesForTests = false }
+        compose.waitForIdle()
+        // Camada 3D no palco comum: sem setas, sem ferramenta, sem Mundo/Local.
+        compose.onNodeWithTag("gizmo.tool").assertDoesNotExist()
+        compose.onNodeWithTag("gizmo.space").assertDoesNotExist()
+        // Arrastar o corpo continua movendo a camada.
+        val before = store.detail!!.position.toFloatArray()
+        // Fora do marcador do centro (tocar nele marca o instante): um dedo move o null escolhido.
+        compose.onNodeWithTag("gizmo.stage").performTouchInput {
+            val start = center + Offset(60f, 50f)
+            down(start); moveBy(Offset(40f, 0f), 16); moveBy(Offset(40f, 0f), 16); up()
+        }
+        compose.waitUntil(5000) { abs(store.detail!!.position[0] - before[0]) > 1f }
     }
 
     @Test fun rotateHandleChangesOnlyItsAxisAndOneUndoRestoresIt() {

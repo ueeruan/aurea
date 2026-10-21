@@ -39,7 +39,7 @@ public:
         return i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
-        p.add_int("delay_frames", "Atraso (quadros)", 1, 1, kMotionDetectMaxDelay);
+        p.add_int("delay_frames", "Atraso (quadros)", 1, 1, kMotionDetectMaxDelay, kParamAnimatable | kParamFrames);
         p.add_float("brightness", "Brilho", 1.0f, 0.0f, 10.0f, kParamAnimatable);
         p.typed_range(0.0f, 100.0f);
         p.add_float("offset_darks", "Levantar escuros", 0.0f, -8.0f, 2.0f, kParamAnimatable);

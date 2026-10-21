@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: rastreio de câmera (zoom, cena quase plana, lente). -->
+<resources>
+    <string name="cam_shot_type">Shot type</string>
+    <string name="cam_shot_fixed">Fixed angle of view</string>
+    <string name="cam_shot_zoom">Variable zoom</string>
+    <string name="cam_shot_known">Specify angle of view</string>
+    <string name="cam_method">Solve method</string>
+    <string name="cam_method_typical">Typical</string>
+    <string name="cam_method_flat">Mostly flat scene</string>
+    <string name="cam_lens_estimate">Estimate lens distortion</string>
+    <string name="cam_lens_hint">For wide and phone lenses; analysis takes longer.</string>
+    <string name="cam_average_error">Average error: %1$s px</string>
+    <string name="cam_zoom_range">zoom from %1$d° to %2$d°</string>
+    <string name="cam_lens_values">lens k1 %1$s, k2 %2$s</string>
+    <string name="cam_lens_remove">Remove distortion from the video</string>
+    <string name="cam_lens_remove_desc">Adds \"Lens Distortion\" to the video: straight lines stay straight so CG matches.</string>
+    <string name="cam_lens_apply">Re-distort on top</string>
+    <string name="cam_lens_apply_desc">Adjustment layer on top with the same lens: video and CG go back to the camera\'s look.</string>
+    <string name="cam_lens_layer">Lens distortion</string>
+    <string name="cam_lens_failed">Couldn’t add the lens distortion.</string>
+    <string name="cam_lens_added_video">Lens distortion removed from the video.</string>
+    <string name="cam_lens_added_cg">Adjustment layer with the lens added on top.</string>
+</resources>

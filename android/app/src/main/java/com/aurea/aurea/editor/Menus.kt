@@ -460,6 +460,12 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         onDismiss()
         block()
     }
+    // 0.3.0: preset .ffx / script .jsx do After Effects. O seletor abre SEM fechar a
+    // folha (o retorno precisa deste lançador vivo); o retorno importa e fecha.
+    val aePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) store.importAeFile(uri)
+        onDismiss()
+    }
     ShellMenuSheet(onDismiss, maxHeightFraction = 0.78f) {
         // Redesenho 2026-09-29: a engrenagem do topo abre este menu, e o que
         // morava no topo e no transporte antigos (ajustes, busca, copiar e
@@ -475,6 +481,12 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
             detail = stringResource(R.string.ui_mode_edit_hint),
         )
         MenuItemRow(CupertinoGlyph.GearAltFill, stringResource(R.string.editor_ajustes_projeto), act { ui.sheet = ShellSheet.ProjectSettings })
+        MenuItemRow(
+            CupertinoGlyph.SquareStack3dUp,
+            stringResource(R.string.ae_import_menu),
+            { if (store.playing) store.pause(); aePicker.launch(arrayOf("*/*")) },
+            detail = stringResource(R.string.ae_import_menu_detail),
+        )
         MenuItemRow(CupertinoGlyph.Search, stringResource(R.string.edt_cmd_search_desc), act { ui.sheet = ShellSheet.CommandSearch })
         MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_copiar_colar), act { ui.sheet = ShellSheet.CopyPaste })
         val marked = store.markers.frames.binarySearch(store.playhead) >= 0

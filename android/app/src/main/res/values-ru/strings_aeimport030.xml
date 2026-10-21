@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: importar presets .ffx e scripts .jsx do After Effects. -->
+<resources>
+    <string name="ae_import_menu">Импорт из After Effects (.ffx, .jsx)</string>
+    <string name="ae_import_menu_detail">Пресет: эффекты, ключи и аниматоры текста на выбранном слое. Скрипт: создаёт и анимирует слои.</string>
+    <string name="ae_importing">Импорт из After Effects…</string>
+    <string name="ae_failed_read">Не удалось прочитать этот файл After Effects.</string>
+    <string name="ae_done_title">Импортировано из After Effects</string>
+    <string name="ae_failed_title">Ничего не импортировано</string>
+    <string name="ae_counts">Эффектов: %1$d · ключей: %2$d · слоёв: %3$d · выражений: %4$d · аниматоров текста: %5$d</string>
+    <string name="ae_skipped_title">Не перенесено (%1$d)</string>
+    <string name="ae_notes_title">Перенесено приблизительно (%1$d)</string>
+    <string name="ae_undo_hint">Всё добавлено одним шагом: «Отменить» вернёт проект как был.</string>
+    <string name="ae_line">строка %1$d</string>
+    <string name="ae_kind_effect">Эффект</string>
+    <string name="ae_kind_param">Параметр</string>
+    <string name="ae_kind_property">Свойство</string>
+    <string name="ae_kind_text">Текст</string>
+    <string name="ae_kind_selector">Селектор</string>
+    <string name="ae_kind_expression">Выражение</string>
+    <string name="ae_kind_layer">Слой</string>
+    <string name="ae_kind_mask">Маска</string>
+    <string name="ae_kind_script">Скрипт</string>
+    <string name="ae_kind_call">Вызов</string>
+    <string name="ae_kind_other">Другое</string>
+</resources>

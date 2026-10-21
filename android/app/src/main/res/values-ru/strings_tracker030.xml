@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: rastreio de câmera (zoom, cena quase plana, lente). -->
+<resources>
+    <string name="cam_shot_type">Тип съёмки</string>
+    <string name="cam_shot_fixed">Фиксированный угол</string>
+    <string name="cam_shot_zoom">Переменный зум</string>
+    <string name="cam_shot_known">Заданный угол</string>
+    <string name="cam_method">Метод решения</string>
+    <string name="cam_method_typical">Обычный</string>
+    <string name="cam_method_flat">Почти плоская сцена</string>
+    <string name="cam_lens_estimate">Оценить дисторсию объектива</string>
+    <string name="cam_lens_hint">Для широкоугольных и телефонных объективов; анализ дольше.</string>
+    <string name="cam_average_error">Средняя ошибка: %1$s пикс.</string>
+    <string name="cam_zoom_range">зум с %1$d° до %2$d°</string>
+    <string name="cam_lens_values">объектив k1 %1$s, k2 %2$s</string>
+    <string name="cam_lens_remove">Убрать дисторсию из видео</string>
+    <string name="cam_lens_remove_desc">Добавляет «Дисторсию объектива» к видео: прямые остаются прямыми, и CG совпадает.</string>
+    <string name="cam_lens_apply">Вернуть дисторсию поверх</string>
+    <string name="cam_lens_apply_desc">Корректирующий слой сверху с тем же объективом: видео и CG возвращаются к виду камеры.</string>
+    <string name="cam_lens_layer">Дисторсия объектива</string>
+    <string name="cam_lens_failed">Не удалось добавить дисторсию объектива.</string>
+    <string name="cam_lens_added_video">Дисторсия убрана из видео.</string>
+    <string name="cam_lens_added_cg">Сверху создан корректирующий слой с объективом.</string>
+</resources>

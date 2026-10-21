@@ -3090,6 +3090,8 @@ final class AureaModel: ObservableObject {
     @Published var sequenceDraft: ImageSequenceDraft?
     /// 0.3.0: plugins de efeito instalados (FxPluginTexts guarda os textos por idioma).
     @Published private(set) var plugins: [FxPluginInfo] = []
+    /// 0.3.0: o relatório da última importação do After Effects (AeImportSheet).
+    @Published var aeImportResult: AeImportResult?
 
     /// "1,2 mi" / "850 mil" — triângulos curtos para o alerta e o aviso.
     static func modelCount(_ n: Int64) -> String {
@@ -3532,6 +3534,73 @@ final class AureaModel: ObservableObject {
                 guard id >= 0 else { self.toast = AureaModel.layeredImportError(gif: gif, code: -id); return }
                 self.showAddLayer = false; self.syncAfterEdit(); self.select(layerId: id, additive: false)
                 self.toast = AureaText.t(gif ? "gif_imported" : "psd_imported")
+                _ = self.saveProject(writeThumbnail: false)
+            }
+        }
+    }
+
+    // MARK: Distorção da lente do rastreio de câmera (0.3.0, EditorStore.addCameraLensEffect)
+    /// Remover: no vídeo rastreado. Aplicar: numa camada de ajuste no topo, que distorce de
+    /// novo o vídeo já corrigido e a CG por cima dele (o fluxo do After Effects).
+    func addCameraLensEffect(redistort: Bool, trackedLayer: Int64?) {
+        guard started else { return }
+        var layer = trackedLayer ?? primarySelection ?? -1
+        if redistort {
+            engine.run { $0.beginUndoGroup() }
+            let adj = engine.addNull(false)
+            if adj >= 0 {
+                engine.setLayer(adj, adjustment: true)
+                engine.setLayer(adj, name: AureaText.t("cam_lens_layer"))
+            }
+            engine.run { $0.endUndoGroup() }
+            layer = adj
+        }
+        guard layer >= 0 else { toast = AureaText.t("cam_lens_failed"); return }
+        let failure = engine.addCameraTrackLensEffect(layer, redistort: redistort)
+        refreshModel(force: true)
+        toast = failure.isEmpty ? AureaText.t(redistort ? "cam_lens_added_cg" : "cam_lens_added_video") : AureaText.t("cam_lens_failed")
+    }
+
+    // MARK: Importar do After Effects (0.3.0, EditorStore.importAeFile)
+    struct AeImportItem: Identifiable { let id = UUID(); let kind: String; let name: String; let reason: String; let line: Int }
+    struct AeImportResult: Identifiable {
+        let id = UUID()
+        let ok: Bool; let fileName: String; let kind: String; let message: String
+        let effects: Int; let keyframes: Int; let layers: Int; let expressions: Int; let animators: Int
+        let skipped: [AeImportItem]; let notes: [AeImportItem]
+    }
+
+    /// Preset .ffx na camada escolhida ou script .jsx (interpretador fechado: sem arquivos, rede
+    /// nem sistema). Um passo de desfazer; o relatório diz o que ficou de fora.
+    func importAeFile(url: URL) {
+        guard !importingMedia else { return }
+        importingMedia = true; operationMessage = AureaText.t("ae_importing")
+        let native = engine, target = UInt64(bitPattern: primarySelection ?? 0)
+        mediaQueue.async { [weak self] in
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            let data = size <= 16 * 1024 * 1024 ? try? Data(contentsOf: url) : nil
+            let json = data.map { native.importAeData($0, fileName: url.lastPathComponent, layer: target) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                guard let json, let raw = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
+                    self.toast = AureaText.t("ae_failed_read"); return
+                }
+                func items(_ key: String) -> [AeImportItem] {
+                    (raw[key] as? [[String: Any]] ?? []).map {
+                        AeImportItem(kind: $0["kind"] as? String ?? "", name: $0["name"] as? String ?? "",
+                                     reason: $0["reason"] as? String ?? "", line: ($0["line"] as? NSNumber)?.intValue ?? 0)
+                    }
+                }
+                func int(_ key: String) -> Int { (raw[key] as? NSNumber)?.intValue ?? 0 }
+                self.aeImportResult = AeImportResult(ok: (raw["ok"] as? NSNumber)?.boolValue ?? false, fileName: url.lastPathComponent,
+                                                     kind: raw["kind"] as? String ?? "", message: raw["message"] as? String ?? "",
+                                                     effects: int("effects"), keyframes: int("keyframes"), layers: int("layers"),
+                                                     expressions: int("expressions"), animators: int("animators"),
+                                                     skipped: items("skipped"), notes: items("notes"))
+                self.syncAfterEdit()
                 _ = self.saveProject(writeThumbnail: false)
             }
         }

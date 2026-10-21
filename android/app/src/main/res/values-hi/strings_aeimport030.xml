@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: importar presets .ffx e scripts .jsx do After Effects. -->
+<resources>
+    <string name="ae_import_menu">After Effects से इम्पोर्ट (.ffx, .jsx)</string>
+    <string name="ae_import_menu_detail">प्रीसेट: चुनी लेयर पर इफ़ेक्ट, कीफ़्रेम और टेक्स्ट एनिमेटर। स्क्रिप्ट: लेयर बनाती और एनिमेट करती है।</string>
+    <string name="ae_importing">After Effects से इम्पोर्ट हो रहा है…</string>
+    <string name="ae_failed_read">यह After Effects फ़ाइल पढ़ी नहीं जा सकी।</string>
+    <string name="ae_done_title">After Effects से इम्पोर्ट हुआ</string>
+    <string name="ae_failed_title">कुछ भी इम्पोर्ट नहीं हुआ</string>
+    <string name="ae_counts">%1$d इफ़ेक्ट · %2$d कीफ़्रेम · %3$d लेयर · %4$d एक्सप्रेशन · %5$d टेक्स्ट एनिमेटर</string>
+    <string name="ae_skipped_title">छूट गया (%1$d)</string>
+    <string name="ae_notes_title">लगभग इम्पोर्ट हुआ (%1$d)</string>
+    <string name="ae_undo_hint">सब एक ही कदम में आया: अनडू प्रोजेक्ट को पहले जैसा कर देगा।</string>
+    <string name="ae_line">लाइन %1$d</string>
+    <string name="ae_kind_effect">इफ़ेक्ट</string>
+    <string name="ae_kind_param">पैरामीटर</string>
+    <string name="ae_kind_property">प्रॉपर्टी</string>
+    <string name="ae_kind_text">टेक्स्ट</string>
+    <string name="ae_kind_selector">सेलेक्टर</string>
+    <string name="ae_kind_expression">एक्सप्रेशन</string>
+    <string name="ae_kind_layer">लेयर</string>
+    <string name="ae_kind_mask">मास्क</string>
+    <string name="ae_kind_script">स्क्रिप्ट</string>
+    <string name="ae_kind_call">कॉल</string>
+    <string name="ae_kind_other">अन्य</string>
+</resources>

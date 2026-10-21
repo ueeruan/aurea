@@ -73,6 +73,9 @@ struct TrackingPanel: View {
     @State private var pointDisplay = false
     @State private var calibration = false
     @State private var objectKind: UInt32 = 1
+    /// 0.3.0 (TrackingPanel.kt): tipo de tomada (0 fixo, 1 zoom, 2 informado) e estimar a lente.
+    @State private var shotType: UInt32 = 0
+    @State private var lens = false
     private let objectTitles = ["cam_create_null_anchor", "cam_create_camera_shape", "cam_create_camera_text", "cam_create_camera_solid"]
     private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
     private var state: Int { (status["state"] as? NSNumber)?.intValue ?? 0 }
@@ -97,7 +100,10 @@ struct TrackingPanel: View {
     @ViewBuilder private var cameraSection: some View {
         Text(AureaText.t(state == 2 ? "cam_step_place" : "cam_step_analyze")).font(.aurea(size: 17, weight: .bold))
         Spacer().frame(height: 6)
-        if state != 1 && state != 2 { qualityPicker }
+        if state != 1 && state != 2 {
+            qualityPicker
+            solveOptions
+        }
         Spacer().frame(height: 8)
         if state == 1 {
             let progress = number("progress").clamped(to: 0...1)
@@ -118,8 +124,16 @@ struct TrackingPanel: View {
             Spacer().frame(height: 4)
             let quality = AureaText.t(number("solved") != number("frames") || number("error") > 2 ? "cam_quality_poor" : number("error") > 1 ? "cam_quality_fair" : number("error") > 0.5 ? "cam_quality_good" : "cam_quality_excellent")
             note(AureaText.t("cam_solve_quality", quality, model.cameraSelectedCount))
+            // 0.3.0: o erro médio em px da fonte (o "Average Error" do AE), a faixa do zoom e a lente.
+            note(solveSummary).accessibilityIdentifier("cam.average_error")
             Spacer().frame(height: 8)
             action("panel_criar_camera", "cam_create_camera_desc") { model.createTrackedObject(0); reload() }
+            if flag("lensSolved") {
+                Spacer().frame(height: 6)
+                action("cam_lens_remove", "cam_lens_remove_desc") { model.addCameraLensEffect(redistort: false, trackedLayer: sourceLayer) }
+                Spacer().frame(height: 6)
+                action("cam_lens_apply", "cam_lens_apply_desc") { model.addCameraLensEffect(redistort: true, trackedLayer: sourceLayer) }
+            }
             if !flag("rotationOnly") {
                 note(AureaText.t("cam_tap_hint")).padding(.top, 12)
             }
@@ -157,17 +171,15 @@ struct TrackingPanel: View {
             if advanced { note(AureaText.t("cam_stats_short", Int(number("solved")), Int(number("frames")), String(format: "%.2f", number("error")), Int(number("fovDeg").rounded()))) }
             if advanced {
                 qualityPicker
-                Picker(AureaText.t("cam_camera"), selection: $cameraMotion) { Text(AureaText.t("trk_auto")).tag(UInt32(0)); Text(AureaText.t("cam_free")).tag(UInt32(1)); Text(AureaText.t("cam_tripod")).tag(UInt32(2)) }
-                Button(knownFov == 0 ? AureaText.t("cam_fov_auto") : AureaText.t("cam_fov_value", Int(knownFov))) { knownFov = knownFov == 0 ? Float(number("fovDeg")).clamped(to: 10...120) : 0 }
-                if knownFov > 0 { Slider(value: $knownFov, in: 10...120).tint(AureaColors.accent) }
+                solveOptions
                 action("cam_resolve", "cam_resolve_desc") {
-                    if !model.engine.refineCameraTrack(false, motion: cameraMotion, fov: knownFov) { model.toast = AureaText.t("app_cam_refine_failed") }
+                    if !model.engine.refineCameraTrack(false, motion: cameraMotion, fov: knownFov, shotType: shotType, lens: lens ? 1 : 0) { model.toast = AureaText.t("app_cam_refine_failed") }
                     reload()
                 }
                 if model.cameraSelectedCount > 0 {
                     action("cam_delete_resolve", "cam_delete_resolve_desc") {
                         // Par do Android: falhou = avisa e mantém a seleção.
-                        if model.engine.refineCameraTrack(true, motion: cameraMotion, fov: knownFov) { model.cameraSelectedCount = 0 }
+                        if model.engine.refineCameraTrack(true, motion: cameraMotion, fov: knownFov, shotType: shotType, lens: lens ? 1 : 0) { model.cameraSelectedCount = 0 }
                         else { model.toast = AureaText.t("app_cam_refine_failed") }
                         reload()
                     }
@@ -201,13 +213,44 @@ struct TrackingPanel: View {
         guard let id = model.primarySelection else { return }
         // Não começou (outra análise rodando, clipe curto): avisa e NÃO adota a
         // camada — antes o painel desta camada mostrava a análise de outra.
-        guard model.engine.setCameraTrack(mode, forLayer: id) else {
+        guard model.engine.startCameraTrack(id, mode: mode, motion: cameraMotion, fov: knownFov, shotType: shotType, lens: lens ? 1 : 0) else {
             model.toast = AureaText.t("msg_nao_foi_possivel_analisar_esta_camada")
             reload()
             return
         }
         sourceLayer = id
         reload()
+    }
+    private var solveSummary: String {
+        var text = AureaText.t("cam_average_error", String(format: "%.2f", number("averageErrorPx")))
+        if Int(number("shotType")) == 1 { text += " · " + AureaText.t("cam_zoom_range", Int(number("fovStartDeg").rounded()), Int(number("fovEndDeg").rounded())) }
+        if flag("lensSolved") { text += " · " + AureaText.t("cam_lens_values", String(format: "%.3f", number("k1")), flag("k2Solved") ? String(format: "%.3f", number("k2")) : "0") }
+        return text
+    }
+    /// 0.3.0: tipo de tomada, método (códigos do motor: 0 auto, 1 típico, 2 tripé, 3 quase plana) e lente.
+    @ViewBuilder private var solveOptions: some View {
+        note(AureaText.t("cam_shot_type")).padding(.top, 8)
+        Picker(AureaText.t("cam_shot_type"), selection: Binding(get: { shotType }, set: { v in
+            shotType = v
+            knownFov = v == 2 ? (knownFov > 0 ? knownFov : (number("fovDeg") > 0 ? Float(number("fovDeg")).clamped(to: 10...120) : 50)) : 0
+        })) {
+            Text(AureaText.t("cam_shot_fixed")).tag(UInt32(0)); Text(AureaText.t("cam_shot_zoom")).tag(UInt32(1)); Text(AureaText.t("cam_shot_known")).tag(UInt32(2))
+        }.pickerStyle(.segmented).accessibilityIdentifier("cam.shot")
+        if shotType == 2 {
+            note(AureaText.t("cam_fov_value", Int(knownFov.rounded())))
+            Slider(value: $knownFov, in: 10...120).tint(AureaColors.accent)
+        }
+        note(AureaText.t("cam_method")).padding(.top, 6)
+        Picker(AureaText.t("cam_method"), selection: $cameraMotion) {
+            Text(AureaText.t("trk_auto")).tag(UInt32(0)); Text(AureaText.t("cam_method_typical")).tag(UInt32(1))
+            Text(AureaText.t("cam_method_flat")).tag(UInt32(3)); Text(AureaText.t("cam_tripod")).tag(UInt32(2))
+        }.pickerStyle(.segmented).accessibilityIdentifier("cam.method")
+        Toggle(isOn: $lens) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(AureaText.t("cam_lens_estimate")).font(.aurea(size: 13))
+                Text(AureaText.t("cam_lens_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+            }
+        }.tint(AureaColors.accent).frame(minHeight: 48).accessibilityIdentifier("cam.lens")
     }
     private var qualityPicker: some View {
         HStack(spacing: 8) {

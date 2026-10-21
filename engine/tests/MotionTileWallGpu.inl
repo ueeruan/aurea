@@ -59,6 +59,9 @@ inline const char* box_sized(const char* key) {
         "aurea.transition.wipe_plasma", "aurea.transition.burn_film", "aurea.distort.page_turn",
         "aurea.distort.sphere_wrap", "aurea.distort.cylinder_wrap", "aurea.stylize.ball_grid",
         "aurea.distort.fisheye", "aurea.distort.mesh_warp", "aurea.distort.puppet",
+        // 0.3.0: a lente do rastreio (k1/k2 na meia altura da camada); longe da caixa o
+        // polinômio da lente sai do quadro filmado, como no Fisheye.
+        "aurea.distort.lens_distortion_match",
     };
     for (const char* k : kBox) if (std::strcmp(k, key) == 0) return k;
     return nullptr;

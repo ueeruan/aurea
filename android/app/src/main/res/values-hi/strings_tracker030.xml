@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: rastreio de câmera (zoom, cena quase plana, lente). -->
+<resources>
+    <string name="cam_shot_type">शॉट का प्रकार</string>
+    <string name="cam_shot_fixed">स्थिर कोण</string>
+    <string name="cam_shot_zoom">बदलता ज़ूम</string>
+    <string name="cam_shot_known">बताया गया कोण</string>
+    <string name="cam_method">सॉल्व का तरीका</string>
+    <string name="cam_method_typical">सामान्य</string>
+    <string name="cam_method_flat">लगभग समतल दृश्य</string>
+    <string name="cam_lens_estimate">लेंस डिस्टॉर्शन आँकें</string>
+    <string name="cam_lens_hint">वाइड और फ़ोन लेंस के लिए; विश्लेषण में ज़्यादा समय लगता है।</string>
+    <string name="cam_average_error">औसत त्रुटि: %1$s px</string>
+    <string name="cam_zoom_range">ज़ूम %1$d° से %2$d°</string>
+    <string name="cam_lens_values">लेंस k1 %1$s, k2 %2$s</string>
+    <string name="cam_lens_remove">वीडियो से डिस्टॉर्शन हटाएँ</string>
+    <string name="cam_lens_remove_desc">वीडियो पर \"लेंस डिस्टॉर्शन\" लगाता है: सीधी रेखाएँ सीधी रहती हैं ताकि CG मेल खाए।</string>
+    <string name="cam_lens_apply">ऊपर से फिर डिस्टॉर्ट करें</string>
+    <string name="cam_lens_apply_desc">ऊपर एक एडजस्टमेंट लेयर उसी लेंस के साथ: वीडियो और CG कैमरा जैसे दिखते हैं।</string>
+    <string name="cam_lens_layer">लेंस डिस्टॉर्शन</string>
+    <string name="cam_lens_failed">लेंस डिस्टॉर्शन नहीं जोड़ा जा सका।</string>
+    <string name="cam_lens_added_video">वीडियो से लेंस डिस्टॉर्शन हटाया गया।</string>
+    <string name="cam_lens_added_cg">ऊपर लेंस वाली एडजस्टमेंट लेयर बनाई गई।</string>
+</resources>

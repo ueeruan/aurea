@@ -4516,4 +4516,9 @@
     <string name="fxs_adjustments">تعديلات</string>
     <string name="fxs_grain_and_original_detail">الحبيبات والتفاصيل الأصلية</string>
     <string name="fxs_time_and_quality">الوقت والجودة</string>
+    <string name="fxl_edge_radius">نصف قطر الحافة</string>
+    <string name="fxl_radial_distortion_k1">التشوّه الشعاعي K1</string>
+    <string name="fxl_radial_distortion_k2">التشوّه الشعاعي K2</string>
+    <string name="fxo_remove_distortion">إزالة التشوّه</string>
+    <string name="fxo_apply_distortion">تطبيق التشوّه</string>
 </resources>

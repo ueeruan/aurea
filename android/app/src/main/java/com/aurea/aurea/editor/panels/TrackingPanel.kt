@@ -35,6 +35,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
+import com.aurea.aurea.ui.ds.AureaToggle
+import com.aurea.aurea.ui.ds.ChoiceChips
+import kotlin.math.roundToInt
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.layout.heightIn
@@ -167,11 +171,17 @@ private fun CameraTrackSection(env: PanelEnv) {
     var calibration by remember { mutableStateOf(false) }
     var objectMenu by remember { mutableStateOf(false) }
     var objectKind by remember { mutableIntStateOf(1) }
+    // 0.3.0: tipo de tomada (0 ângulo fixo, 1 zoom, 2 informado) e estimar a distorção da lente.
+    var shotType by remember { mutableIntStateOf(0) }
+    var lens by remember { mutableStateOf(false) }
     val objectTitles = listOf(R.string.cam_create_null_anchor, R.string.cam_create_camera_shape, R.string.cam_create_camera_text, R.string.cam_create_camera_solid)
     Text(stringResource(if (st?.state == 2) R.string.cam_step_place else R.string.cam_step_analyze),
         style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)))
     Spacer(Modifier.height(6.dp))
-    if (st?.state != 1 && st?.state != 2) CameraQualityPicker(mode) { mode = it }
+    if (st?.state != 1 && st?.state != 2) {
+        CameraQualityPicker(mode) { mode = it }
+        CameraSolveOptions(shotType, { shotType = it }, cameraMotion, { cameraMotion = it }, knownFov, { knownFov = it }, lens, { lens = it })
+    }
     Spacer(Modifier.height(8.dp))
     val s = st
     when {
@@ -193,8 +203,20 @@ private fun CameraTrackSection(env: PanelEnv) {
                 stringResource(R.string.cam_solve_quality, quality, store.cameraSelectedCount),
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
             )
+            // 0.3.0: o erro médio em px da fonte (o "Average Error" do AE), a faixa do zoom e a lente.
+            Text(stringResource(R.string.cam_average_error, "%.2f".format(s.averageErrorPx)) +
+                (if (s.shotType == 1) " · " + stringResource(R.string.cam_zoom_range, s.fovStart.roundToInt(), s.fovEnd.roundToInt()) else "") +
+                (if (s.lensSolved) " · " + stringResource(R.string.cam_lens_values, "%.3f".format(s.k1), if (s.k2Solved) "%.3f".format(s.k2) else "0") else ""),
+                modifier = Modifier.testTag("cam.average_error"),
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
             Spacer(Modifier.height(8.dp))
             Action(stringResource(R.string.panel_criar_camera), stringResource(R.string.cam_create_camera_desc)) { store.createCameraTrackObject(0) }
+            if (s.lensSolved) {
+                Spacer(Modifier.height(6.dp))
+                Action(stringResource(R.string.cam_lens_remove), stringResource(R.string.cam_lens_remove_desc)) { store.addCameraLensEffect(false) }
+                Spacer(Modifier.height(6.dp))
+                Action(stringResource(R.string.cam_lens_apply), stringResource(R.string.cam_lens_apply_desc)) { store.addCameraLensEffect(true) }
+            }
             if (!s.rotationOnly) Text(stringResource(R.string.cam_tap_hint), modifier = Modifier.padding(top = 12.dp),
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -242,16 +264,14 @@ private fun CameraTrackSection(env: PanelEnv) {
             if (advanced) Text(stringResource(R.string.cam_stats, s.solved, s.frames, s.points, s.tracks, "%.2f".format(s.errorPx), "%.1f".format(s.fovDeg)), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
             if (advanced) {
                 CameraQualityPicker(mode) { mode = it }
-                androidx.compose.material3.TextButton(onClick = { cameraMotion = (cameraMotion + 1) % 3 }) { Text(stringResource(R.string.cam_camera_fmt, stringResource(listOf(R.string.trk_auto, R.string.cam_free, R.string.cam_tripod)[cameraMotion]))) }
-                androidx.compose.material3.TextButton(onClick = { knownFov = if (knownFov == 0f) s.fovDeg.coerceIn(10f,120f) else 0f }) { Text(if (knownFov == 0f) stringResource(R.string.cam_fov_auto) else stringResource(R.string.cam_fov_value, knownFov.toInt())) }
-                if (knownFov > 0f) androidx.compose.material3.Slider(value = knownFov, onValueChange = { knownFov = it }, valueRange = 10f..120f)
-                Action(stringResource(R.string.cam_resolve), stringResource(R.string.cam_resolve_desc)) { store.refineCamera(false, cameraMotion, knownFov) }
+                CameraSolveOptions(shotType, { shotType = it }, cameraMotion, { cameraMotion = it }, knownFov, { knownFov = it }, lens, { lens = it }, current = s.fovDeg)
+                Action(stringResource(R.string.cam_resolve), stringResource(R.string.cam_resolve_desc)) { store.refineCamera(false, cameraMotion, knownFov, shotType, if (lens) 1 else 0) }
                 if (store.cameraSelectedCount > 0) {
                     Spacer(Modifier.height(6.dp))
-                    Action(stringResource(R.string.cam_delete_resolve), stringResource(R.string.cam_delete_resolve_desc)) { store.refineCamera(true, cameraMotion, knownFov) }
+                    Action(stringResource(R.string.cam_delete_resolve), stringResource(R.string.cam_delete_resolve_desc)) { store.refineCamera(true, cameraMotion, knownFov, shotType, if (lens) 1 else 0) }
                 }
                 Spacer(Modifier.height(8.dp))
-                Action(stringResource(R.string.panel_analisar_novo), stringResource(R.string.panel_modo_escolhido_acima)) { store.startCameraTrack(mode) }
+                Action(stringResource(R.string.panel_analisar_novo), stringResource(R.string.panel_modo_escolhido_acima)) { store.startCameraTrack(mode, cameraMotion, knownFov, shotType, if (lens) 1 else 0) }
             }
         }
         else -> {
@@ -262,7 +282,9 @@ private fun CameraTrackSection(env: PanelEnv) {
                 )
                 Spacer(Modifier.height(8.dp))
             }
-            Action(stringResource(R.string.panel_analisar_camera), stringResource(R.string.panel_acha_movimento_camera_video_roda_segundo)) { store.startCameraTrack(mode) }
+            Action(stringResource(R.string.panel_analisar_camera), stringResource(R.string.panel_acha_movimento_camera_video_roda_segundo)) {
+                store.startCameraTrack(mode, cameraMotion, knownFov, shotType, if (lens) 1 else 0)
+            }
         }
     }
 }
@@ -291,5 +313,42 @@ private fun CameraQualityPicker(mode: Int, onSelect: (Int) -> Unit) {
                     color = if (mode == index) AureaColors.Accent else AureaColors.Text)), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
+    }
+}
+
+/**
+ * 0.3.0: como o solve trata a câmera — as opções do 3D Camera Tracker do AE com
+ * nome próprio: tipo de tomada (ângulo fixo, zoom variável, ângulo informado),
+ * método (automático, típico, cena quase plana, tripé) e a distorção da lente.
+ * [method] usa os códigos do motor: 0 auto, 1 típico, 2 tripé, 3 quase plana.
+ */
+@Composable
+private fun CameraSolveOptions(
+    shotType: Int, onShot: (Int) -> Unit,
+    method: Int, onMethod: (Int) -> Unit,
+    fov: Float, onFov: (Float) -> Unit,
+    lens: Boolean, onLens: (Boolean) -> Unit,
+    current: Float = 0f,
+) {
+    val label = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted))
+    Text(stringResource(R.string.cam_shot_type), style = label, modifier = Modifier.padding(top = 8.dp))
+    ChoiceChips(listOf(R.string.cam_shot_fixed, R.string.cam_shot_zoom, R.string.cam_shot_known).map { stringResource(it) }, shotType, { picked ->
+        onShot(picked)
+        onFov(if (picked == 2) (if (fov > 0f) fov else if (current > 0f) current.coerceIn(10f, 120f) else 50f) else 0f)
+    }, Modifier.testTag("cam.shot"))
+    if (shotType == 2) {
+        Text(stringResource(R.string.cam_fov_value, fov.roundToInt()), style = label)
+        androidx.compose.material3.Slider(value = fov.coerceIn(10f, 120f), onValueChange = onFov, valueRange = 10f..120f)
+    }
+    Text(stringResource(R.string.cam_method), style = label)
+    val order = listOf(0, 1, 3, 2)
+    ChoiceChips(listOf(R.string.trk_auto, R.string.cam_method_typical, R.string.cam_method_flat, R.string.cam_tripod).map { stringResource(it) },
+        order.indexOf(method).coerceAtLeast(0), { onMethod(order[it]) }, Modifier.testTag("cam.method"))
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.cam_lens_estimate), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            Text(stringResource(R.string.cam_lens_hint), style = label)
+        }
+        Box(Modifier.testTag("cam.lens")) { AureaToggle(checked = lens, onCheckedChange = onLens) }
     }
 }

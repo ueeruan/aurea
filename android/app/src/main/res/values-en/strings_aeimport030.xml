@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: importar presets .ffx e scripts .jsx do After Effects. -->
+<resources>
+    <string name="ae_import_menu">Import from After Effects (.ffx, .jsx)</string>
+    <string name="ae_import_menu_detail">Preset: effects, keyframes and text animators on the selected layer. Script: creates and animates layers.</string>
+    <string name="ae_importing">Importing from After Effects…</string>
+    <string name="ae_failed_read">Couldn’t read this After Effects file.</string>
+    <string name="ae_done_title">Imported from After Effects</string>
+    <string name="ae_failed_title">Nothing was imported</string>
+    <string name="ae_counts">%1$d effects · %2$d keyframes · %3$d layers · %4$d expressions · %5$d text animators</string>
+    <string name="ae_skipped_title">Left out (%1$d)</string>
+    <string name="ae_notes_title">Imported approximately (%1$d)</string>
+    <string name="ae_undo_hint">Everything came in one step: Undo puts the project back as it was.</string>
+    <string name="ae_line">line %1$d</string>
+    <string name="ae_kind_effect">Effect</string>
+    <string name="ae_kind_param">Parameter</string>
+    <string name="ae_kind_property">Property</string>
+    <string name="ae_kind_text">Text</string>
+    <string name="ae_kind_selector">Selector</string>
+    <string name="ae_kind_expression">Expression</string>
+    <string name="ae_kind_layer">Layer</string>
+    <string name="ae_kind_mask">Mask</string>
+    <string name="ae_kind_script">Script</string>
+    <string name="ae_kind_call">Call</string>
+    <string name="ae_kind_other">Other</string>
+</resources>

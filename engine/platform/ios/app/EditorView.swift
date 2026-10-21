@@ -183,6 +183,10 @@ private struct AddLayerPickers: ViewModifier {
                 ImageSequenceSheet(draft: draft).environmentObject(model)
                     .presentationDetents([.medium, .large])
             }
+            // 0.3.0: o relatório da importação do After Effects.
+            .sheet(item: $model.aeImportResult) { result in
+                AeImportSheet(result: result).environmentObject(model).presentationDetents([.medium, .large])
+            }
     }
     /// Arquivo (modelo 3D, texturas/.mtl, SVG, PSD, áudio): seletor do UIKit
     /// pelo controlador do topo (DocumentImportPicker). Antes o modelo vinha
@@ -202,6 +206,7 @@ private struct AddLayerPickers: ViewModifier {
             case .svg: model.importSvg(url: url)
             case .psd: model.importPsd(url: url)
             case .sequenceFolder, .sequenceFiles: model.prepareImageSequence(urls: urls)
+            case .aeImport: model.importAeFile(url: url)
             default: model.importMedia(url: url, kind: .audio)
             }
         }
@@ -211,6 +216,7 @@ private struct AddLayerPickers: ViewModifier {
         case .svg: return [UTType(filenameExtension: "svg") ?? .data, .data]
         case .psd: return [UTType(filenameExtension: "psd") ?? .data, .data]
         case .sequenceFolder: return [.folder]
+        case .aeImport: return [UTType(filenameExtension: "ffx") ?? .data, UTType(filenameExtension: "jsx") ?? .data, .plainText, .data]
         // EXR e TGA não têm tipo registrado em muitos provedores: o filtro é o motor.
         case .sequenceFiles: return [.image, .zip, UTType(filenameExtension: "exr") ?? .data, UTType(filenameExtension: "tga") ?? .data, .data]
         case .model: return DocumentImportPicker.modelTypes
@@ -2492,6 +2498,71 @@ struct ImageSequenceSheet: View {
                             .frame(maxWidth: .infinity, minHeight: 46).background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 12))
                     }.buttonStyle(.plain).accessibilityIdentifier("seq.import")
                 }.padding(.top, 14)
+            }
+            .foregroundStyle(AureaColors.text)
+            .padding(.horizontal, 18).padding(.vertical, 16)
+        }
+        .background(AureaColors.surface.ignoresSafeArea())
+    }
+}
+
+// =============================================================================
+// Importar do After Effects (0.3.0, AeImportSheet.kt): o que entrou e, sem
+// esconder nada, o que ficou de fora e o que entrou aproximado (com a linha).
+// =============================================================================
+struct AeImportSheet: View {
+    @EnvironmentObject private var model: AureaModel
+    let result: AureaModel.AeImportResult
+    @State private var showNotes = false
+    private func kindLabel(_ kind: String) -> String {
+        switch kind {
+        case "efeito": return AureaText.t("ae_kind_effect")
+        case "parametro": return AureaText.t("ae_kind_param")
+        case "propriedade": return AureaText.t("ae_kind_property")
+        case "texto": return AureaText.t("ae_kind_text")
+        case "seletor": return AureaText.t("ae_kind_selector")
+        case "expressao": return AureaText.t("ae_kind_expression")
+        case "camada": return AureaText.t("ae_kind_layer")
+        case "mascara": return AureaText.t("ae_kind_mask")
+        case "script": return AureaText.t("ae_kind_script")
+        case "chamada": return AureaText.t("ae_kind_call")
+        default: return AureaText.t("ae_kind_other")
+        }
+    }
+    private func row(_ item: AureaModel.AeImportItem) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(kindLabel(item.kind) + " · " + item.name + (item.line > 0 ? " · " + AureaText.t("ae_line", item.line) : ""))
+                .font(.aurea(size: 13, weight: .medium))
+            if !item.reason.isEmpty { Text(item.reason).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted) }
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8)
+            .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+    }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(AureaText.t(result.ok ? "ae_done_title" : "ae_failed_title")).font(.aurea(size: 17, weight: .semibold))
+                Text(result.fileName).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                if result.ok {
+                    Text(AureaText.t("ae_counts", result.effects, result.keyframes, result.layers, result.expressions, result.animators))
+                        .font(.aurea(size: 14)).accessibilityIdentifier("ae.counts")
+                }
+                if !result.message.isEmpty { Text(result.message).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
+                if !result.skipped.isEmpty {
+                    Text(AureaText.t("ae_skipped_title", result.skipped.count)).font(.aurea(size: 14, weight: .semibold))
+                        .foregroundStyle(AureaColors.warning).padding(.top, 8)
+                    ForEach(result.skipped.prefix(60)) { row($0) }
+                }
+                if !result.notes.isEmpty {
+                    Button { showNotes.toggle() } label: {
+                        Text(AureaText.t("ae_notes_title", result.notes.count)).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.accent)
+                    }.buttonStyle(.plain).padding(.top, 8).accessibilityIdentifier("ae.notes")
+                    if showNotes { ForEach(result.notes.prefix(60)) { row($0) } }
+                }
+                Text(AureaText.t("ae_undo_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
+                Button { model.aeImportResult = nil } label: {
+                    Text(AureaText.t("common_ok")).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.onAccent)
+                        .frame(maxWidth: .infinity, minHeight: 46).background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 12))
+                }.buttonStyle(.plain).padding(.top, 8).accessibilityIdentifier("ae.ok")
             }
             .foregroundStyle(AureaColors.text)
             .padding(.horizontal, 18).padding(.vertical, 16)

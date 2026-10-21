@@ -283,7 +283,9 @@ enum ShellAddPicker: Equatable {
     case gallery, photo, video, audioFromVideo, audioFile, model, svg, psd, modelTextures
     /// 0.3.0: sequência de imagens pela pasta (render do Blender) ou pelos quadros/.zip.
     case sequenceFolder, sequenceFiles
-    var isFile: Bool { self == .audioFile || self == .model || self == .svg || self == .psd || self == .modelTextures || self == .sequenceFolder || self == .sequenceFiles }
+    /// 0.3.0: preset .ffx ou script .jsx do After Effects.
+    case aeImport
+    var isFile: Bool { self == .audioFile || self == .model || self == .svg || self == .psd || self == .modelTextures || self == .sequenceFolder || self == .sequenceFiles || self == .aeImport }
 }
 
 enum ShellStageGeometry {

@@ -1180,6 +1180,15 @@ aurea.key.rotobrush	10	view	-1	fxl_view
 aurea.key.rotobrush	10	view	0	fxo_roto_final
 aurea.key.rotobrush	10	view	1	fxo_matte
 aurea.key.rotobrush	10	view	2	fxl_overlap
+aurea.key.rotobrush	12	edge_radius	-1	fxl_edge_radius
+aurea.distort.lens_distortion_match	0	k1	-1	fxl_radial_distortion_k1
+aurea.distort.lens_distortion_match	1	k2	-1	fxl_radial_distortion_k2
+aurea.distort.lens_distortion_match	2	center_x	-1	fxl_center_x
+aurea.distort.lens_distortion_match	3	center_y	-1	fxl_center_y
+aurea.distort.lens_distortion_match	4	direction	-1	fxl_direction
+aurea.distort.lens_distortion_match	4	direction	0	fxo_remove_distortion
+aurea.distort.lens_distortion_match	4	direction	1	fxo_apply_distortion
+aurea.distort.lens_distortion_match	5	scale	-1	fxl_scale
 aurea.layout.grid_builder	0	mode	-1	fxl_layout
 aurea.layout.grid_builder	0	mode	0	fxo_rectangular
 aurea.layout.grid_builder	0	mode	1	fxo_radial

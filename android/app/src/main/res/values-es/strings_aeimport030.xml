@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: importar presets .ffx e scripts .jsx do After Effects. -->
+<resources>
+    <string name="ae_import_menu">Importar de After Effects (.ffx, .jsx)</string>
+    <string name="ae_import_menu_detail">Preset: efectos, keyframes y animadores de texto en la capa elegida. Script: crea y anima capas.</string>
+    <string name="ae_importing">Importando de After Effects…</string>
+    <string name="ae_failed_read">No se pudo leer este archivo de After Effects.</string>
+    <string name="ae_done_title">Importado de After Effects</string>
+    <string name="ae_failed_title">No se importó nada</string>
+    <string name="ae_counts">%1$d efectos · %2$d keyframes · %3$d capas · %4$d expresiones · %5$d animadores de texto</string>
+    <string name="ae_skipped_title">Quedó fuera (%1$d)</string>
+    <string name="ae_notes_title">Entró aproximado (%1$d)</string>
+    <string name="ae_undo_hint">Todo entró en un solo paso: Deshacer deja el proyecto como estaba.</string>
+    <string name="ae_line">línea %1$d</string>
+    <string name="ae_kind_effect">Efecto</string>
+    <string name="ae_kind_param">Parámetro</string>
+    <string name="ae_kind_property">Propiedad</string>
+    <string name="ae_kind_text">Texto</string>
+    <string name="ae_kind_selector">Selector</string>
+    <string name="ae_kind_expression">Expresión</string>
+    <string name="ae_kind_layer">Capa</string>
+    <string name="ae_kind_mask">Máscara</string>
+    <string name="ae_kind_script">Script</string>
+    <string name="ae_kind_call">Llamada</string>
+    <string name="ae_kind_other">Otro</string>
+</resources>

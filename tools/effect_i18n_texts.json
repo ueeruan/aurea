@@ -5783,5 +5783,45 @@
   "hi": "मैजेंटा: ल्यूमिनेंस",
   "id": "Magenta: luminans",
   "ar": "أرجواني: الإنارة"
+ },
+ "Raio da borda": {
+  "en": "Edge radius",
+  "es": "Radio del borde",
+  "ru": "Радиус края",
+  "hi": "किनारे की त्रिज्या",
+  "id": "Radius tepi",
+  "ar": "نصف قطر الحافة"
+ },
+ "Distorção radial K1": {
+  "en": "Radial distortion K1",
+  "es": "Distorsión radial K1",
+  "ru": "Радиальная дисторсия K1",
+  "hi": "रेडियल डिस्टॉर्शन K1",
+  "id": "Distorsi radial K1",
+  "ar": "التشوّه الشعاعي K1"
+ },
+ "Distorção radial K2": {
+  "en": "Radial distortion K2",
+  "es": "Distorsión radial K2",
+  "ru": "Радиальная дисторсия K2",
+  "hi": "रेडियल डिस्टॉर्शन K2",
+  "id": "Distorsi radial K2",
+  "ar": "التشوّه الشعاعي K2"
+ },
+ "Remover distorção": {
+  "en": "Remove distortion",
+  "es": "Quitar distorsión",
+  "ru": "Убрать дисторсию",
+  "hi": "डिस्टॉर्शन हटाएँ",
+  "id": "Hapus distorsi",
+  "ar": "إزالة التشوّه"
+ },
+ "Aplicar distorção": {
+  "en": "Apply distortion",
+  "es": "Aplicar distorsión",
+  "ru": "Применить дисторсию",
+  "hi": "डिस्टॉर्शन लगाएँ",
+  "id": "Terapkan distorsi",
+  "ar": "تطبيق التشوّه"
  }
 }

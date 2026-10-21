@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: rastreio de câmera (zoom, cena quase plana, lente). -->
+<resources>
+    <string name="cam_shot_type">Jenis bidikan</string>
+    <string name="cam_shot_fixed">Sudut tetap</string>
+    <string name="cam_shot_zoom">Zoom berubah</string>
+    <string name="cam_shot_known">Sudut ditentukan</string>
+    <string name="cam_method">Metode solve</string>
+    <string name="cam_method_typical">Biasa</string>
+    <string name="cam_method_flat">Adegan hampir datar</string>
+    <string name="cam_lens_estimate">Perkirakan distorsi lensa</string>
+    <string name="cam_lens_hint">Untuk lensa lebar dan ponsel; analisis lebih lama.</string>
+    <string name="cam_average_error">Galat rata-rata: %1$s px</string>
+    <string name="cam_zoom_range">zoom %1$d° ke %2$d°</string>
+    <string name="cam_lens_values">lensa k1 %1$s, k2 %2$s</string>
+    <string name="cam_lens_remove">Hapus distorsi dari video</string>
+    <string name="cam_lens_remove_desc">Menambahkan \"Distorsi lensa\" ke video: garis lurus tetap lurus agar CG cocok.</string>
+    <string name="cam_lens_apply">Distorsi ulang di atas</string>
+    <string name="cam_lens_apply_desc">Lapisan penyesuaian di atas dengan lensa yang sama: video dan CG kembali seperti kamera.</string>
+    <string name="cam_lens_layer">Distorsi lensa</string>
+    <string name="cam_lens_failed">Tidak dapat menambahkan distorsi lensa.</string>
+    <string name="cam_lens_added_video">Distorsi lensa dihapus dari video.</string>
+    <string name="cam_lens_added_cg">Lapisan penyesuaian dengan lensa dibuat di atas.</string>
+</resources>

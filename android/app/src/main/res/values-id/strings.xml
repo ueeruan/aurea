@@ -4468,4 +4468,9 @@ untuk mengedit kurvanya.</string>
     <string name="fxs_adjustments">Penyesuaian</string>
     <string name="fxs_grain_and_original_detail">Grain dan detail asli</string>
     <string name="fxs_time_and_quality">Waktu dan kualitas</string>
+    <string name="fxl_edge_radius">Radius tepi</string>
+    <string name="fxl_radial_distortion_k1">Distorsi radial K1</string>
+    <string name="fxl_radial_distortion_k2">Distorsi radial K2</string>
+    <string name="fxo_remove_distortion">Hapus distorsi</string>
+    <string name="fxo_apply_distortion">Terapkan distorsi</string>
 </resources>

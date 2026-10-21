@@ -918,6 +918,13 @@ enum EffectI18nTable {
     aurea.key.rotobrush|8|chatter|fxl_roto_chatter|
     aurea.key.rotobrush|9|decontaminate|fxl_roto_decontaminate|
     aurea.key.rotobrush|10|view|fxl_view|fxo_roto_final,fxo_matte,fxl_overlap
+    aurea.key.rotobrush|12|edge_radius|fxl_edge_radius|
+    aurea.distort.lens_distortion_match|0|k1|fxl_radial_distortion_k1|
+    aurea.distort.lens_distortion_match|1|k2|fxl_radial_distortion_k2|
+    aurea.distort.lens_distortion_match|2|center_x|fxl_center_x|
+    aurea.distort.lens_distortion_match|3|center_y|fxl_center_y|
+    aurea.distort.lens_distortion_match|4|direction|fxl_direction|fxo_remove_distortion,fxo_apply_distortion
+    aurea.distort.lens_distortion_match|5|scale|fxl_scale|
     aurea.layout.grid_builder|0|mode|fxl_layout|fxo_rectangular,fxo_radial,fxo_path,fxo_sphere
     aurea.layout.grid_builder|1|columns|fxl_columns|
     aurea.layout.grid_builder|2|spacing_x|fxl_x_spacing|

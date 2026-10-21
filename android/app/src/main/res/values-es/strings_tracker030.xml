@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: rastreio de câmera (zoom, cena quase plana, lente). -->
+<resources>
+    <string name="cam_shot_type">Tipo de toma</string>
+    <string name="cam_shot_fixed">Ángulo fijo</string>
+    <string name="cam_shot_zoom">Zoom variable</string>
+    <string name="cam_shot_known">Ángulo indicado</string>
+    <string name="cam_method">Método de resolución</string>
+    <string name="cam_method_typical">Típico</string>
+    <string name="cam_method_flat">Escena casi plana</string>
+    <string name="cam_lens_estimate">Estimar distorsión de la lente</string>
+    <string name="cam_lens_hint">Para lentes gran angulares y de móvil; el análisis tarda más.</string>
+    <string name="cam_average_error">Error medio: %1$s px</string>
+    <string name="cam_zoom_range">zoom de %1$d° a %2$d°</string>
+    <string name="cam_lens_values">lente k1 %1$s, k2 %2$s</string>
+    <string name="cam_lens_remove">Quitar la distorsión del video</string>
+    <string name="cam_lens_remove_desc">Añade \"Distorsión de la lente\" al video: las líneas rectas quedan rectas para que la CG encaje.</string>
+    <string name="cam_lens_apply">Volver a distorsionar encima</string>
+    <string name="cam_lens_apply_desc">Capa de ajuste arriba con la misma lente: video y CG vuelven al aspecto de la cámara.</string>
+    <string name="cam_lens_layer">Distorsión de la lente</string>
+    <string name="cam_lens_failed">No se pudo añadir la distorsión de la lente.</string>
+    <string name="cam_lens_added_video">Distorsión de la lente quitada del video.</string>
+    <string name="cam_lens_added_cg">Capa de ajuste con la lente creada arriba.</string>
+</resources>

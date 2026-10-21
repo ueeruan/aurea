@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: importar presets .ffx e scripts .jsx do After Effects. -->
+<resources>
+    <string name="ae_import_menu">استيراد من After Effects ‏(.ffx، .jsx)</string>
+    <string name="ae_import_menu_detail">إعداد مسبق: تأثيرات وإطارات مفتاحية ومحرّكات نص على الطبقة المختارة. سكربت: ينشئ الطبقات ويحرّكها.</string>
+    <string name="ae_importing">جارٍ الاستيراد من After Effects…</string>
+    <string name="ae_failed_read">تعذّرت قراءة ملف After Effects هذا.</string>
+    <string name="ae_done_title">تم الاستيراد من After Effects</string>
+    <string name="ae_failed_title">لم يُستورد شيء</string>
+    <string name="ae_counts">%1$d تأثيرات · %2$d إطارات مفتاحية · %3$d طبقات · %4$d تعبيرات · %5$d محرّكات نص</string>
+    <string name="ae_skipped_title">لم يُستورد (%1$d)</string>
+    <string name="ae_notes_title">استُورد تقريبيًا (%1$d)</string>
+    <string name="ae_undo_hint">دخل كل شيء في خطوة واحدة: التراجع يعيد المشروع كما كان.</string>
+    <string name="ae_line">السطر %1$d</string>
+    <string name="ae_kind_effect">تأثير</string>
+    <string name="ae_kind_param">معامل</string>
+    <string name="ae_kind_property">خاصية</string>
+    <string name="ae_kind_text">نص</string>
+    <string name="ae_kind_selector">محدِّد</string>
+    <string name="ae_kind_expression">تعبير</string>
+    <string name="ae_kind_layer">طبقة</string>
+    <string name="ae_kind_mask">قناع</string>
+    <string name="ae_kind_script">سكربت</string>
+    <string name="ae_kind_call">استدعاء</string>
+    <string name="ae_kind_other">أخرى</string>
+</resources>

@@ -371,6 +371,8 @@ set(AUREA_IMPORT_BOUNDARIES
     src/engine/EnginePsd.cpp
     src/engine/EngineRoto.cpp
     src/render/RendererRoto.cpp
+    # 0.3.0: o refinamento da borda cria threads (falha sem memória vira menos threads).
+    src/ai/RotoRefine.cpp
     src/project/Psd.cpp
     src/project/Project.cpp
     src/command/History.cpp

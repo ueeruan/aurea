@@ -941,6 +941,15 @@ private struct ShellMenuRow: View {
         // item do menu (Menus.kt, 0.2.7): no fim, a "timeline magnética" era confundida com ela.
         ShellMenuRow(CupertinoGlyph.RectangleStack, "ui_mode_switch_to_edit", detail: "ui_mode_edit_hint") { act { model.setUiMode(AureaUiMode.edit) } }
         ShellMenuRow(CupertinoGlyph.Gear, "editor_ajustes_projeto") { act { pause(); model.showProjectSettings = true } }
+        // 0.3.0 (Menus.kt): preset .ffx / script .jsx do After Effects; o seletor abre pela raiz
+        // (AddLayerPickers) depois que a folha fecha.
+        ShellMenuRow(CupertinoGlyph.SquareStack3dUp, "ae_import_menu", detail: "ae_import_menu_detail") {
+            act {
+                pause()
+                let shell = shell
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { shell.addPicker = .aeImport }
+            }
+        }.accessibilityIdentifier("menu.ae_import")
         ShellMenuRow(CupertinoGlyph.Search, "edt_cmd_search_desc") { act { pause(); shell.commandSearch = true } }
             .accessibilityIdentifier("commandSearchOpen")
         ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_copiar_colar") { shell.sheet = .copyPaste }

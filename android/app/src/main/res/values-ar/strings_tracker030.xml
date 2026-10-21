@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: rastreio de câmera (zoom, cena quase plana, lente). -->
+<resources>
+    <string name="cam_shot_type">نوع اللقطة</string>
+    <string name="cam_shot_fixed">زاوية ثابتة</string>
+    <string name="cam_shot_zoom">زوم متغير</string>
+    <string name="cam_shot_known">زاوية محددة</string>
+    <string name="cam_method">طريقة الحل</string>
+    <string name="cam_method_typical">عادي</string>
+    <string name="cam_method_flat">مشهد شبه مسطح</string>
+    <string name="cam_lens_estimate">تقدير تشوّه العدسة</string>
+    <string name="cam_lens_hint">للعدسات الواسعة وعدسات الهاتف؛ يستغرق التحليل وقتًا أطول.</string>
+    <string name="cam_average_error">متوسط الخطأ: %1$s بكسل</string>
+    <string name="cam_zoom_range">زوم من %1$d° إلى %2$d°</string>
+    <string name="cam_lens_values">العدسة k1 %1$s، k2 %2$s</string>
+    <string name="cam_lens_remove">إزالة التشوّه من الفيديو</string>
+    <string name="cam_lens_remove_desc">يضيف \"تشوّه العدسة\" إلى الفيديو: تبقى الخطوط المستقيمة مستقيمة لتتطابق الرسومات.</string>
+    <string name="cam_lens_apply">إعادة التشويه في الأعلى</string>
+    <string name="cam_lens_apply_desc">طبقة ضبط في الأعلى بالعدسة نفسها: يعود الفيديو والرسومات إلى مظهر الكاميرا.</string>
+    <string name="cam_lens_layer">تشوّه العدسة</string>
+    <string name="cam_lens_failed">تعذّرت إضافة تشوّه العدسة.</string>
+    <string name="cam_lens_added_video">أُزيل تشوّه العدسة من الفيديو.</string>
+    <string name="cam_lens_added_cg">أُنشئت طبقة ضبط بالعدسة في الأعلى.</string>
+</resources>

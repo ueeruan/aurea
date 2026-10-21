@@ -641,6 +641,8 @@ void roto_refine(const f32* coarse, u32 n, const RotoImage& frame, const RotoRef
         for (u32 t; (t = next.fetch_add(1, std::memory_order_relaxed)) < tiles.size();)
             refine_tile(job, tiles[t].x0, tiles[t].y0, tiles[t].x1, tiles[t].y1, wk);
     };
+    // Este arquivo compila COM exceções (AUREA_IMPORT_BOUNDARIES no CMake): num
+    // aparelho sem memória criar thread falha, e os blocos que sobram rodam aqui.
     std::vector<std::thread> pool;
     try {
         for (u32 t = 1; t < threads; ++t) pool.emplace_back(run);

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: importar presets .ffx e scripts .jsx do After Effects. -->
+<resources>
+    <string name="ae_import_menu">Importar do After Effects (.ffx, .jsx)</string>
+    <string name="ae_import_menu_detail">Preset: efeitos, keyframes e animadores de texto na camada escolhida. Script: cria e anima camadas.</string>
+    <string name="ae_importing">Importando do After Effects…</string>
+    <string name="ae_failed_read">Não foi possível ler esse arquivo do After Effects.</string>
+    <string name="ae_done_title">Importado do After Effects</string>
+    <string name="ae_failed_title">Nada foi importado</string>
+    <string name="ae_counts">%1$d efeitos · %2$d keyframes · %3$d camadas · %4$d expressões · %5$d animadores de texto</string>
+    <string name="ae_skipped_title">Ficou de fora (%1$d)</string>
+    <string name="ae_notes_title">Entrou aproximado (%1$d)</string>
+    <string name="ae_undo_hint">Tudo entrou num passo só: Desfazer volta o projeto como estava.</string>
+    <string name="ae_line">linha %1$d</string>
+    <string name="ae_kind_effect">Efeito</string>
+    <string name="ae_kind_param">Parâmetro</string>
+    <string name="ae_kind_property">Propriedade</string>
+    <string name="ae_kind_text">Texto</string>
+    <string name="ae_kind_selector">Seletor</string>
+    <string name="ae_kind_expression">Expressão</string>
+    <string name="ae_kind_layer">Camada</string>
+    <string name="ae_kind_mask">Máscara</string>
+    <string name="ae_kind_script">Script</string>
+    <string name="ae_kind_call">Chamada</string>
+    <string name="ae_kind_other">Outro</string>
+</resources>

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: importar presets .ffx e scripts .jsx do After Effects. -->
+<resources>
+    <string name="ae_import_menu">Impor dari After Effects (.ffx, .jsx)</string>
+    <string name="ae_import_menu_detail">Preset: efek, keyframe, dan animator teks pada lapisan terpilih. Skrip: membuat dan menganimasi lapisan.</string>
+    <string name="ae_importing">Mengimpor dari After Effects…</string>
+    <string name="ae_failed_read">Tidak dapat membaca file After Effects ini.</string>
+    <string name="ae_done_title">Diimpor dari After Effects</string>
+    <string name="ae_failed_title">Tidak ada yang diimpor</string>
+    <string name="ae_counts">%1$d efek · %2$d keyframe · %3$d lapisan · %4$d ekspresi · %5$d animator teks</string>
+    <string name="ae_skipped_title">Tertinggal (%1$d)</string>
+    <string name="ae_notes_title">Diimpor kira-kira (%1$d)</string>
+    <string name="ae_undo_hint">Semua masuk dalam satu langkah: Urungkan mengembalikan proyek seperti semula.</string>
+    <string name="ae_line">baris %1$d</string>
+    <string name="ae_kind_effect">Efek</string>
+    <string name="ae_kind_param">Parameter</string>
+    <string name="ae_kind_property">Properti</string>
+    <string name="ae_kind_text">Teks</string>
+    <string name="ae_kind_selector">Selektor</string>
+    <string name="ae_kind_expression">Ekspresi</string>
+    <string name="ae_kind_layer">Lapisan</string>
+    <string name="ae_kind_mask">Masker</string>
+    <string name="ae_kind_script">Skrip</string>
+    <string name="ae_kind_call">Panggilan</string>
+    <string name="ae_kind_other">Lainnya</string>
+</resources>

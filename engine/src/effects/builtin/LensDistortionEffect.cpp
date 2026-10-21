@@ -55,7 +55,27 @@ public:
         return std::fabs(e.f(0)) < 1e-6f && std::fabs(e.f(1)) < 1e-6f && std::fabs(e.f(5) - 100.f) < 1e-4f;
     }
     /// A curva traz para dentro pixels de fora do quadro visível.
-    bool needs_full_input() const noexcept override { return true; }
+    // Sem needs_full_input: ele recortava a entrada na caixa da camada e a parede do
+    // Motion Tile (antes deste efeito) sumia. O alcance fora da caixa é a margem abaixo,
+    // como na Compensação óptica (OpticalEffects.cpp).
+    /// Quanto além da borda a curva lê (px da camada), no canto, onde o raio é maior:
+    /// |k1|·r³ + |k2|·r⁵ em unidades de meia altura, mais o que a escala < 100 % puxa
+    /// de fora. Sem isto o efeito anterior (Motion Tile) era recortado na caixa e a
+    /// "parede" sumia nos cantos (MotionTileKeepsTheWallWithEveryCatalogEffect).
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        const f32 w = e.placement ? static_cast<f32>(e.placement->layerWidth) : 0.f;
+        const f32 h = e.placement ? static_cast<f32>(e.placement->layerHeight) : 0.f;
+        if (!(w > 0.f) || !(h > 0.f)) return 0.f;
+        auto finite = [](f32 v, f32 fallback) { return std::isfinite(v) ? v : fallback; };
+        const f32 k1 = std::fabs(std::clamp(finite(e.f(0), 0.f), -2.f, 2.f));
+        const f32 k2 = std::fabs(std::clamp(finite(e.f(1), 0.f), -2.f, 2.f));
+        const f32 scale = std::clamp(finite(e.f(5), 100.f), 1.f, 2000.f) * .01f;
+        const f32 half = h * .5f;
+        const f32 r = std::hypot(w * .5f, half) / half;
+        const f32 bend = (k1 * r * r * r + k2 * r * r * r * r * r) * half / std::min(scale, 1.f);
+        const f32 shrink = scale < 1.f ? (1.f / scale - 1.f) * std::max(w, h) * .5f : 0.f;
+        return std::min(bend + shrink + 2.f, 8192.f);
+    }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_lens_distortion_frag, work));
     }

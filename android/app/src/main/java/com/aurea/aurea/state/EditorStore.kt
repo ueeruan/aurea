@@ -2321,6 +2321,57 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     // =========================================================================
+    // Importar do After Effects (0.3.0): preset .ffx (efeitos, keyframes com
+    // easing, animadores de texto, expressões) na camada escolhida, ou script
+    // .jsx num interpretador fechado (sem arquivos, rede nem sistema). Um passo
+    // de desfazer; o que ficou de fora vem listado, com a linha do script.
+    // =========================================================================
+
+    class AeImportItem(val kind: String, val name: String, val reason: String, val line: Int)
+    class AeImportResult(
+        val ok: Boolean, val fileName: String, val kind: String, val message: String,
+        val effects: Int, val keyframes: Int, val layers: Int, val expressions: Int, val animators: Int,
+        val skipped: List<AeImportItem>, val notes: List<AeImportItem>,
+    )
+    var aeImportResult by mutableStateOf<AeImportResult?>(null)
+        private set
+    fun dismissAeImport() { aeImportResult = null }
+
+    fun importAeFile(uri: Uri) {
+        if (!acceptsImport() || busyMessage != null) return
+        val app = getApplication<Application>()
+        val target = primary ?: 0L
+        busyMessage = appText(R.string.ae_importing)
+        launchImport launch@{
+            val name = displayName(uri) ?: uri.lastPathSegment.orEmpty()
+            val json = withContext(Dispatchers.IO) {
+                val bytes = app.contentResolver.openInputStream(uri)?.use { input ->
+                    val out = java.io.ByteArrayOutputStream()
+                    val buf = ByteArray(65536); var total = 0
+                    while (true) {
+                        val n = input.read(buf); if (n < 0) break
+                        total += n; if (total > 16 * 1024 * 1024) return@withContext null
+                        out.write(buf, 0, n)
+                    }
+                    out.toByteArray()
+                } ?: return@withContext null
+                engine.importAeData(bytes, name, target)
+            }
+            busyMessage = null
+            if (json == null) { errorMessage = appText(R.string.ae_failed_read); return@launch }
+            val o = runCatching { org.json.JSONObject(json) }.getOrNull()
+            if (o == null) { errorMessage = appText(R.string.ae_failed_read); return@launch }
+            fun items(key: String) = o.optJSONArray(key)?.let { a ->
+                List(a.length()) { i -> a.getJSONObject(i).let { AeImportItem(it.optString("kind"), it.optString("name"), it.optString("reason"), it.optInt("line")) } }
+            }.orEmpty()
+            aeImportResult = AeImportResult(o.optBoolean("ok"), name, o.optString("kind"), o.optString("message"),
+                o.optInt("effects"), o.optInt("keyframes"), o.optInt("layers"), o.optInt("expressions"), o.optInt("animators"),
+                items("skipped"), items("notes"))
+            refreshNow(); refreshDetail()
+        }
+    }
+
+    // =========================================================================
     // Plugins de efeito (0.3.0, docs/plugins/README.md): pacotes .aureaplugin ou
     // shaders ISF (.fs) que acrescentam efeitos à categoria "Plugins". O motor
     // valida, compila no aparelho e faz um quadro de teste antes de aceitar.
@@ -5367,6 +5418,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     data class CameraTrackUi(
         val state: Int, val progress: Float, val frames: Int, val solved: Int, val tracks: Int, val points: Int,
         val errorPx: Float, val confidence: Float, val fovDeg: Float, val rotationOnly: Boolean, val cached: Boolean, val message: String,
+        // 0.3.0: tipo de tomada (0 fixo, 1 zoom, 2 informado), método (1 típico, 2 tripé, 3 quase plana),
+        // faixa de FOV, distorção da lente e o erro médio em px da FONTE (o "Average Error" do AE).
+        val shotType: Int = 0, val method: Int = 0, val fovStart: Float = 0f, val fovEnd: Float = 0f, val fovMin: Float = 0f, val fovMax: Float = 0f,
+        val k1: Float = 0f, val k2: Float = 0f, val lensSolved: Boolean = false, val k2Solved: Boolean = false, val averageErrorPx: Float = 0f,
     )
     var cameraTrack by mutableStateOf<CameraTrackUi?>(null)
         private set
@@ -5383,16 +5438,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
 
     private fun readCameraTrack(): CameraTrackUi {
-        val f = FloatArray(11)
+        val f = FloatArray(22)
         val msg = engine.cameraTrackStatus(f) ?: ""
         return CameraTrackUi(f[0].toInt(), f[1], f[2].toInt(), f[3].toInt(), f[4].toInt(), f[5].toInt(), f[6], f[7], f[8],
-            f[9] > 0.5f, f[10] > 0.5f, msg)
+            f[9] > 0.5f, f[10] > 0.5f, msg, f[11].toInt(), f[12].toInt(), f[13], f[14], f[15], f[16], f[17], f[18],
+            f[19] > 0.5f, f[20] > 0.5f, f[21])
     }
 
     /** Analisa a câmera do vídeo escolhido em segundo plano (0 rápido, 1 equilibrado, 2 alta). */
-    fun startCameraTrack(mode: Int) {
+    fun startCameraTrack(mode: Int, motion: Int = 0, knownFov: Float = 0f, shotType: Int = 0, lens: Int = 0) {
         val id = primary ?: return
-        if (!engine.startCameraTrack(id, mode)) {
+        // 0.3.0: método (0 auto, 1 típico, 2 tripé, 3 cena quase plana), tipo de tomada e lente.
+        if (!engine.startCameraTrack(id, mode, motion, knownFov, shotType, lens)) {
             errorMessage = appText(R.string.msg_nao_foi_possivel_analisar_esta_camada)
             return
         }
@@ -5494,12 +5551,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshCameraFeatures(true)
     }
 
-    fun refineCamera(remove: Boolean, motion: Int, fov: Float) {
-        if (!engine.refineCameraTrack(remove, motion, fov)) { showToast(appText(R.string.app_cam_refine_failed)); return }
+    fun refineCamera(remove: Boolean, motion: Int, fov: Float, shotType: Int = 0, lens: Int = 0) {
+        if (!engine.refineCameraTrack(remove, motion, fov, shotType, lens)) { showToast(appText(R.string.app_cam_refine_failed)); return }
         cameraTrackPoll?.cancel(); cameraSelectedCount = 0
         cameraTrackPoll = viewModelScope.launch {
             while (true) { cameraTrack = readCameraTrack(); if (cameraTrack?.state != 1) break; kotlinx.coroutines.delay(150) }
         }
+    }
+    /** 0.3.0: "Distorção da lente" com o k1/k2 do solve: [redistort] false tira a distorção do vídeo, true aplica na CG. */
+    fun addCameraLensEffect(redistort: Boolean) {
+        // Remover: no vídeo rastreado. Aplicar: numa camada de ajuste no topo, que distorce
+        // de novo o vídeo já corrigido e a CG por cima dele (o fluxo do AE).
+        val layer = if (!redistort) cameraTrackLayer ?: primary ?: return else {
+            val adj = engine.addNull(false)
+            if (adj < 0) { showToast(appText(R.string.cam_lens_failed)); return }
+            engine.setLayerAdjustment(adj, true)
+            renameLayer(adj, appText(R.string.cam_lens_layer))
+            adj
+        }
+        val id = engine.addCameraTrackLensEffect(layer, redistort)
+        if (id < 0) { showToast(appText(R.string.cam_lens_failed)); return }
+        refreshNow(); refreshDetail()
+        showToast(appText(if (redistort) R.string.cam_lens_added_cg else R.string.cam_lens_added_video))
     }
     fun cancelCameraTrack() {
         engine.cancelCameraTrack()

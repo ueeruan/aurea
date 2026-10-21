@@ -41,6 +41,7 @@ extern "C" {
 #include "aurea/export/ExportAttempts.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/ui/BuiltinPropertySchema.hpp"
+#include "aurea/tracking/CameraTrackData.hpp"
 
 #include <cstdio>
 #include <algorithm>
@@ -3283,21 +3284,54 @@ AUREA_JNI jboolean AUREA_FN(nativeStartCameraTrack)(JNIEnv*, jclass, jlong handl
     return c && c->engine.start_camera_track(static_cast<u64>(layer), static_cast<u32>(mode)) ? JNI_TRUE : JNI_FALSE;
 }
 
+/// Com tipo de tomada (0 FOV fixa, 1 zoom variável, 2 FOV informada), método
+/// (0 auto, 1 típico, 2 tripé, 3 cena quase plana) e lente (1 = estimar k1/k2).
+AUREA_JNI jboolean AUREA_FN(nativeStartCameraTrackEx)(JNIEnv*, jclass, jlong handle, jlong layer, jint mode, jint motion,
+                                                      jfloat knownFov, jint shotType, jint lens) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.start_camera_track(static_cast<u64>(layer), static_cast<u32>(std::max(0, mode)), static_cast<u32>(std::max(0, motion)),
+                                             knownFov, static_cast<u32>(std::max(0, shotType)), static_cast<u32>(std::max(0, lens))) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI void AUREA_FN(nativeCancelCameraTrack)(JNIEnv*, jclass, jlong handle) {
     if (NativeContext* c = ctx_of(handle)) c->engine.cancel_camera_track();
 }
 
 /// {estado, progresso, quadros, resolvidos, rastros, pontos, erro px, confiança,
-///  FOV°, só rotação, do cache}; devolve a mensagem.
+///  FOV°, só rotação, do cache}; com 22 lugares, também {tipo de tomada,
+///  método, FOV inicial°, FOV final°, FOV mín°, FOV máx°, k1, k2, lente
+///  resolvida, k2 resolvido, erro médio em px da fonte}; devolve a mensagem.
 AUREA_JNI jstring AUREA_FN(nativeCameraTrackStatus)(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
     NativeContext* c = ctx_of(handle);
     if (!c || !out || env->GetArrayLength(out) < 11) return nullptr;
     const Engine::CameraTrackStatus s = c->engine.camera_track_status();
-    const f32 v[11] = {static_cast<f32>(s.state), s.progress, static_cast<f32>(s.frames), static_cast<f32>(s.framesSolved),
+    const f32 v[22] = {static_cast<f32>(s.state), s.progress, static_cast<f32>(s.frames), static_cast<f32>(s.framesSolved),
                        static_cast<f32>(s.tracks), static_cast<f32>(s.inliers), s.rmsError, s.confidence, s.fovDeg,
-                       s.rotationOnly ? 1.0f : 0.0f, s.cached ? 1.0f : 0.0f};
-    env->SetFloatArrayRegion(out, 0, 11, v);
+                       s.rotationOnly ? 1.0f : 0.0f, s.cached ? 1.0f : 0.0f,
+                       static_cast<f32>(s.shotType), static_cast<f32>(s.method), s.fovStartDeg, s.fovEndDeg, s.fovMinDeg, s.fovMaxDeg,
+                       s.k1, s.k2, s.lensSolved ? 1.0f : 0.0f, s.k2Solved ? 1.0f : 0.0f, s.averageErrorPx};
+    env->SetFloatArrayRegion(out, 0, env->GetArrayLength(out) >= 22 ? 22 : 11, v);
     return env->NewStringUTF(s.message.c_str());
+}
+
+/// Por quadro analisado: (FOV°, erro médio em px da fonte, −1 = sem pose); devolve quantos.
+AUREA_JNI jint AUREA_FN(nativeCameraTrackFrameInfo)(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out) return 0;
+    const u32 cap = std::min<u32>(tracking::kMaxCameraTrackFrames, static_cast<u32>(env->GetArrayLength(out) / 2));
+    std::vector<f32> v(static_cast<usize>(cap) * 2);
+    const u32 n = c->engine.camera_track_frame_info(v.data(), cap);
+    if (n) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(n * 2), v.data());
+    return static_cast<jint>(n);
+}
+
+/// "Distorção da lente" com o k1/k2 do solve na camada: redistort = false remove
+/// (no vídeo), true aplica (na CG). Devolve o id do efeito ou −código.
+AUREA_JNI jlong AUREA_FN(nativeAddCameraTrackLensEffect)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean redistort) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const Result<u32> r = c->engine.add_camera_track_lens_effect(static_cast<u64>(layer), redistort == JNI_TRUE);
+    return r.ok() ? static_cast<jlong>(*r) : -static_cast<jlong>(r.status().code());
 }
 
 /// Pontos seguidos no quadro (x, y, estado) em px da composição; devolve quantos.
@@ -3320,6 +3354,10 @@ AUREA_JNI jlong AUREA_FN(nativeApplyCameraTrack)(JNIEnv*, jclass, jlong handle, 
 }
 AUREA_JNI jboolean AUREA_FN(nativeRefineCameraTrack)(JNIEnv*,jclass,jlong handle,jboolean remove,jint motion,jfloat fov) {
     auto* c=ctx_of(handle);return c&&c->engine.refine_camera_track(remove,motion,fov)?JNI_TRUE:JNI_FALSE;
+}
+AUREA_JNI jboolean AUREA_FN(nativeRefineCameraTrackEx)(JNIEnv*,jclass,jlong handle,jboolean remove,jint motion,jfloat fov,jint shotType,jint lens) {
+    auto* c=ctx_of(handle);
+    return c&&c->engine.refine_camera_track(remove,static_cast<u32>(std::max(0,motion)),fov,static_cast<u32>(std::max(0,shotType)),static_cast<u32>(std::max(0,lens)))?JNI_TRUE:JNI_FALSE;
 }
 AUREA_JNI jint AUREA_FN(nativeCameraTrackTarget)(JNIEnv* env,jclass,jlong handle,jlong frame,jfloatArray out){
     auto* c=ctx_of(handle);if(!c||!out||env->GetArrayLength(out)<64)return 0;f32 data[64]{};const auto n=c->engine.camera_track_target(frame,data,32);if(n)env->SetFloatArrayRegion(out,0,n*2,data);return static_cast<jint>(n);

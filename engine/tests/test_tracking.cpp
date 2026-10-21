@@ -673,3 +673,228 @@ AUREA_TEST(Tracking, RealFootageProbe) {
     AUREA_CHECK(!solution.rotationOnly);
     AUREA_CHECK(solution.framesSolved == tracks.frames);
 }
+
+// =============================================================================
+//  Tipo de tomada (zoom variável), distorção da lente e cena quase plana.
+//  Cenas sintéticas com câmera, pontos, focal por quadro e k1/k2 conhecidos;
+//  o "antes" é o caminho de sempre (FOV fixa, sem lente, matriz essencial).
+// =============================================================================
+namespace {
+
+struct SceneGen {
+    f64 fovStart = 55, fovEnd = 55;   // FOV vertical (graus); muda com smoothstep no trecho
+    f64 k1 = 0, k2 = 0;               // distorção (meia altura = 1)
+    f64 noise = 0.3;
+    bool flat = false;                // pontos num chão inclinado (cena plana)
+    bool tripod = false;              // centro parado: só gira
+    u32 points = 260;
+};
+
+f64 scene_fov(const SceneGen& g, u32 i, u32 n) {
+    const f64 u = static_cast<f64>(i) / static_cast<f64>(n - 1), s = u * u * (3 - 2 * u);
+    return g.fovStart + (g.fovEnd - g.fovStart) * s;
+}
+
+Tracks2D scene_tracks(const SceneGen& g, u32 W, u32 H, u32 N) {
+    std::vector<std::array<f64, 3>> pts;
+    std::mt19937 rng(42u);
+    std::uniform_real_distribution<f64> ux(-5.0, 5.0), uy(-3.0, 3.0), uz(5.0, 12.0);
+    for (u32 i = 0; i < g.points; ++i) {
+        if (g.flat) { const f64 z = uz(rng), x = ux(rng) * 1.4; pts.push_back({x, 1.8 + 0.05 * z, z}); }
+        else pts.push_back({ux(rng), uy(rng), uz(rng)});
+    }
+    Tracks2D T;
+    T.frames = N; T.width = W; T.height = H;
+    std::mt19937 nrng(5u);
+    std::normal_distribution<f64> noise(0.0, g.noise);
+    const f64 halfH = 0.5 * H;
+    for (const auto& X : pts) {
+        std::vector<Vec2> row(N, Vec2{NAN, NAN});
+        u32 seen = 0;
+        for (u32 i = 0; i < N; ++i) {
+            const f64 f = 0.5 * H / std::tan(0.5 * scene_fov(g, i, N) * kPiT / 180.0);
+            f64 u, v;
+            TruthCam cam = truth_camera(i, N);
+            if (g.tripod) cam.C[0] = cam.C[1] = cam.C[2] = 0.0;
+            if (!project_truth(cam, X.data(), f, 0, 0, u, v)) continue;
+            const f64 s = (u * u + v * v) / (halfH * halfH), d = 1 + g.k1 * s + g.k2 * s * s;
+            u = u * d + W * 0.5; v = v * d + H * 0.5;
+            if (u > 8 && v > 8 && u < W - 8 && v < H - 8) {
+                row[i] = Vec2{static_cast<f32>(u + noise(nrng)), static_cast<f32>(v + noise(nrng))};
+                ++seen;
+            }
+        }
+        if (seen >= 2) T.pos.push_back(std::move(row));
+    }
+    return T;
+}
+
+struct SolveReport { f64 posErr = 1e9, rotErr = 1e9, fovErr = 1e9; };
+SolveReport check_solution(const CameraSolution& s, const SceneGen& g, u32 N, const char* what) {
+    SolveReport r;
+    if (s.ok) {
+        compare(s, N, r.posErr, r.rotErr);
+        if (g.tripod) r.posErr = 0;   // tripé: sem caminho para comparar
+        r.fovErr = 0;
+        for (u32 i = 0; i < N; ++i) r.fovErr = std::max(r.fovErr, std::fabs(s.fov_at(i) * 180.0 / kPiT - scene_fov(g, i, N)));
+    }
+    std::printf("    %s: %s metodo %u tomada %u; FOV %.2f -> %.2f (pior erro %.2f graus); k1 %.4f k2 %.4f (lente %d, k2 %d); "
+                "erro %.3f px (medio %.3f px da fonte); %u/%u quadros; posicao %.2f%%, rotacao %.2f graus %s\n",
+                what, s.ok ? "ok" : "falhou", s.method, s.shotType, s.fovY * 180.0 / kPiT, s.fov_at(N - 1) * 180.0 / kPiT, r.fovErr,
+                s.k1, s.k2, s.lensSolved ? 1 : 0, s.k2Solved ? 1 : 0, s.rmsError, s.averageErrorPx, s.framesSolved, N,
+                r.posErr * 100.0, r.rotErr, s.failure.c_str());
+    return r;
+}
+
+} // namespace
+
+AUREA_TEST(Tracking, VariableZoomRecoversPerFrameFocal) {
+    // Zoom de 55° para 40° durante o travelling. Medido: FOV fixa sai com
+    // 29° e a câmera 150% fora do caminho; zoom variável erra < 0,3°.
+    const u32 W = 640, H = 360, N = 90;
+    SceneGen g;
+    g.fovStart = 55; g.fovEnd = 40;
+    const Tracks2D T = scene_tracks(g, W, H, N);
+    const SolveReport fixed = check_solution(solve_camera(T, SolveOptions{}), g, N, "zoom com FOV fixa (antes)");
+    SolveOptions o;
+    o.shotType = static_cast<u32>(ShotType::VariableZoom);
+    o.sourceScale = 3.0f;   // 1920×1080 analisado em 640×360
+    const CameraSolution s = solve_camera(T, o);
+    const SolveReport zoom = check_solution(s, g, N, "zoom variavel");
+    AUREA_CHECK(s.ok);
+    AUREA_CHECK_EQ(s.shotType, static_cast<u8>(ShotType::VariableZoom));
+    AUREA_CHECK_EQ(s.frameFovY.size(), static_cast<usize>(N));
+    AUREA_CHECK(zoom.fovErr < 1.0);          // FOV de cada quadro
+    AUREA_CHECK(zoom.posErr < 0.03);
+    AUREA_CHECK(zoom.rotErr < 0.5);
+    AUREA_CHECK(zoom.fovErr < fixed.fovErr);
+    AUREA_CHECK(zoom.posErr < fixed.posErr);
+    // Erro médio em px da FONTE (3× a análise) e por quadro.
+    AUREA_CHECK_EQ(s.frameErrorPx.size(), static_cast<usize>(N));
+    AUREA_CHECK(s.averageErrorPx > 0.0f && s.averageErrorPx < 3.0f * 0.8f);
+    AUREA_CHECK(std::all_of(s.frameErrorPx.begin(), s.frameErrorPx.end(), [](f32 e) { return e >= 0.0f && e < 3.0f * 2.0f; }));
+    // Tripé com zoom (50° → 36°): o giro continua só giro e a focal acompanha.
+    SceneGen pan;
+    pan.tripod = true; pan.fovStart = 50; pan.fovEnd = 36; pan.points = 220;
+    const Tracks2D P = scene_tracks(pan, W, H, N);
+    const CameraSolution panFixed = solve_camera(P, SolveOptions{});
+    const SolveReport panBefore = check_solution(panFixed, pan, N, "tripe com zoom, FOV fixa (antes)");
+    const CameraSolution panZoom = solve_camera(P, o);
+    const SolveReport panAfter = check_solution(panZoom, pan, N, "tripe com zoom, zoom variavel");
+    AUREA_CHECK(panZoom.ok && panZoom.rotationOnly);
+    AUREA_CHECK_EQ(panZoom.method, static_cast<u8>(SolveMethod::Tripod));
+    AUREA_CHECK(panAfter.fovErr < 1.0 && panAfter.rotErr < 0.5);
+    AUREA_CHECK(panAfter.fovErr < panBefore.fovErr);
+}
+
+AUREA_TEST(Tracking, LensDistortionK1IsRecoveredWithTheCamera) {
+    // Barril k1 = −0,06 (meia altura = 1). Medido: sem lente a FOV sai 34,8°
+    // (verdade 60°) e a câmera 12% fora; com lente k1 −0,060 e FOV 59,9°.
+    const u32 W = 640, H = 360, N = 90;
+    SceneGen g;
+    g.fovStart = g.fovEnd = 60; g.k1 = -0.06;
+    const Tracks2D T = scene_tracks(g, W, H, N);
+    const SolveReport off = check_solution(solve_camera(T, SolveOptions{}), g, N, "barril sem lente (antes)");
+    SolveOptions o;
+    o.lens = 1;
+    const CameraSolution s = solve_camera(T, o);
+    const SolveReport on = check_solution(s, g, N, "barril com lente");
+    AUREA_CHECK(s.ok && s.lensSolved);
+    AUREA_CHECK(std::fabs(s.k1 - g.k1) < 0.01);
+    AUREA_CHECK(std::fabs(s.k2) < 0.02);
+    AUREA_CHECK(on.fovErr < 2.0);
+    AUREA_CHECK(on.posErr < 0.03 && on.rotErr < 0.5);
+    AUREA_CHECK(on.fovErr < off.fovErr && on.posErr < off.posErr);
+    // O modelo de ida e volta é o mesmo do efeito e do overlay.
+    for (const Vec2 p : {Vec2{0.3f, -0.2f}, Vec2{1.6f, 0.9f}, Vec2{-1.2f, 0.7f}}) {
+        const Vec2 d = lens_distort(p, s.k1, s.k2), back = lens_undistort(d, s.k1, s.k2);
+        AUREA_CHECK_NEAR(back.x, p.x, 1e-4);
+        AUREA_CHECK_NEAR(back.y, p.y, 1e-4);
+    }
+    // Sem distorção nos dados, a lente ligada não inventa uma.
+    SceneGen clean = g;
+    clean.k1 = 0;
+    const CameraSolution none = solve_camera(scene_tracks(clean, W, H, N), o);
+    (void)check_solution(none, clean, N, "sem distorcao, lente ligada");
+    AUREA_CHECK(none.ok && std::fabs(none.k1) < 0.005 && !none.k2Solved);
+}
+
+AUREA_TEST(Tracking, MostlyFlatSceneSolvesWhereTheEssentialFails) {
+    // Todos os pontos num chão: a essencial (8 pontos) é degenerada. Medido:
+    // o caminho típico "resolve" com erro baixo (0,7 px) e a câmera 96% fora
+    // do caminho, 66° de rotação; a homografia acerta (< 1%, < 0,5°).
+    const u32 W = 640, H = 360, N = 90;
+    SceneGen g;
+    g.flat = true; g.points = 300;
+    const Tracks2D T = scene_tracks(g, W, H, N);
+    SolveOptions typical;
+    typical.motion = static_cast<u32>(SolveMethod::Typical);
+    const SolveReport before = check_solution(solve_camera(T, typical), g, N, "chao, metodo tipico (antes)");
+    SolveOptions flat;
+    flat.motion = static_cast<u32>(SolveMethod::FlatScene);
+    const CameraSolution s = solve_camera(T, flat);
+    const SolveReport after = check_solution(s, g, N, "chao, cena quase plana");
+    AUREA_CHECK(s.ok);
+    AUREA_CHECK_EQ(s.method, static_cast<u8>(SolveMethod::FlatScene));
+    AUREA_CHECK(after.posErr < 0.03 && after.rotErr < 1.0 && after.fovErr < 3.0);
+    AUREA_CHECK(after.posErr < before.posErr && after.rotErr < before.rotErr);
+    // Automático: a homografia ganha com folga e o método diz isso.
+    const CameraSolution autoSolve = solve_camera(T, SolveOptions{});
+    const SolveReport autoReport = check_solution(autoSolve, g, N, "chao, automatico");
+    AUREA_CHECK(autoSolve.ok && autoSolve.method == static_cast<u8>(SolveMethod::FlatScene));
+    AUREA_CHECK(autoReport.posErr < 0.03);
+}
+
+AUREA_TEST(Tracking, ZoomAndLensSurviveProjectSave) {
+    // A análise com zoom e lente grava e reabre (v50) com tudo o que o solve deu.
+    const u32 W = 640, H = 360, N = 60;
+    SceneGen g;
+    g.fovStart = 50; g.fovEnd = 42; g.k1 = -0.04;
+    const Tracks2D T = scene_tracks(g, W, H, N);
+    SolveOptions o;
+    o.shotType = static_cast<u32>(ShotType::VariableZoom);
+    o.lens = 1;
+    const CameraSolution s = solve_camera(T, o);
+    (void)check_solution(s, g, N, "zoom + lente (gravacao)");
+    AUREA_CHECK(s.ok);
+    if (!s.ok) return;
+    Engine e;
+    EngineConfig config; config.workerCount = 1; config.disableAutosave = true;
+    AUREA_CHECK(e.initialize(config).ok());
+    AUREA_CHECK(e.new_project(W, H, 30, nullptr).ok());
+    std::vector<u8> pixels(static_cast<usize>(W) * H * 4, 128);
+    const auto imported = e.import_image(pixels.data(), W, H, "camera lens");
+    AUREA_CHECK(imported.ok());
+    if (!imported.ok()) return;
+    auto* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    auto data = std::make_shared<CameraTrackData>();
+    data->solution = s; data->tracks = T; data->frames = N; data->analysisW = W; data->analysisH = H;
+    for (u32 i = 0; i < N; ++i) data->sourceUs.push_back(static_cast<i64>(i) * 33333);
+    comp->layer(LayerId::unpack(*imported))->cameraTrack = data;
+    const char* path = "aurea_test_camera_lens.aurea";
+    AUREA_CHECK(e.save_project(path).ok());
+    Project direct;
+    LoadReport report;
+    AUREA_CHECK(ProjectSerializer::load(direct, path, LoadOptions{}, &report).ok());
+    AUREA_CHECK_EQ(report.timelineVersion, kTimelineSectionVersion);
+    AUREA_CHECK(e.load_project(path).ok());
+    comp = e.project()->timeline().composition(e.project()->timeline().current());
+    bool found = false;
+    comp->layers().for_each([&](LayerId, const Layer& l) {
+        if (!l.cameraTrack) return;
+        found = true;
+        const auto& r = l.cameraTrack->solution;
+        AUREA_CHECK_EQ(r.shotType, s.shotType);
+        AUREA_CHECK_EQ(r.method, s.method);
+        AUREA_CHECK_EQ(r.k1, s.k1);
+        AUREA_CHECK_EQ(r.k2, s.k2);
+        AUREA_CHECK_EQ(r.lensSolved, s.lensSolved);
+        AUREA_CHECK(r.frameFovY == s.frameFovY);
+        AUREA_CHECK(r.frameErrorPx == s.frameErrorPx);
+        AUREA_CHECK_EQ(r.averageErrorPx, s.averageErrorPx);
+    });
+    AUREA_CHECK(found);
+    e.shutdown();
+    std::remove(path);
+    std::remove((std::string(path) + ".bak").c_str());
+}

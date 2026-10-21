@@ -2,6 +2,7 @@
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/ai/RotoMatte.hpp"
 #include <algorithm>
+#include <cmath>
 namespace aurea::builtin {
 namespace {
 class Rotobrush final : public Effect {
@@ -20,20 +21,33 @@ public:
         // acrescentados no fim — projeto antigo ganha os padrões.
         p.add_float("contrast","Contraste",0,0,100,kParamAnimatable|kParamPercent,"%");
         p.add_float("smooth","Suavizar",0,0,100,kParamAnimatable|kParamPercent,"%");
-        p.add_float("chatter","Reduzir trepidação",0,0,100,kParamPercent,"%");
+        // Reduzir trepidação: instância nova nasce em 50% (com o Refinar borda,
+        // é a mistura com o quadro anterior na faixa). Projeto antigo guardou o
+        // valor dele: não muda.
+        p.add_float("chatter","Reduzir trepidação",50,0,100,kParamPercent,"%");
         p.add_float("decontaminate","Descontaminar cores da borda",0,0,100,kParamAnimatable|kParamPercent,"%");
         static const char* const kViews[]={"Final","Máscara","Sobreposição"};
         p.add_enum("view","Visualização",kViews,3,0);
         ParamSpec strokes;strokes.id="strokes";strokes.label="Traços";strokes.type=ParamType::Curve;strokes.flags=kParamHidden;
         [[maybe_unused]] const u32 at=p.add(strokes);   // == ai::kRotoStrokesParam
+        // Refinar borda (ai::RotoRefine): faixa de cada lado da borda, em px da
+        // fonte, decidida de novo na resolução do quadro. 0 = o recorte da grade
+        // 320² (como antes). Instância salva sem o slot vale 0 (kParamLegacyZero):
+        // o projeto antigo abre igual. Não animável: o refinado vai para o cache.
+        [[maybe_unused]] const u32 radius=p.add_float("edge_radius","Raio da borda",6,0,100,kParamPixels|kParamLegacyZero,"px");
+        p.typed_range(0,250);
     }
     bool is_identity(const EffectEval& e) const noexcept override {return e.f(4)<=0;}
     void pipelines(std::vector<PipelineKey>& p,SurfaceFormat work) const override {p.push_back(PipelineKey::fullscreen(ShaderId::effects_rotobrush_frag,work));}
     void resolve_resources(EffectEval& e) const noexcept override {
         if(!e.resources)return;DepthMapRequest req;req.host=e.layer;req.instance=e.instance;req.localTime=e.localTime;req.foreground=true;
         // Com traços, `smoothing` leva o "Reduzir trepidação" (média no tempo dos recortes).
-        req.smoothing=e.count>8?std::clamp(e.f(8)*.01f,0.f,1.f):0.f;
-        const auto r=e.resources->depth_map(req);e.aux=r.texture;e.auxInfo.w=r.failed?1.f:0.f;
+        req.smoothing=e.count>8?std::clamp(e.f(ai::kRotoChatterParam)*.01f,0.f,1.f):0.f;
+        req.rotoEdgeRadius=e.count>ai::kRotoEdgeRadiusParam?std::max(0.f,e.f(ai::kRotoEdgeRadiusParam)):0.f;
+        req.rotoDecontaminate=e.count>9&&e.f(ai::kRotoDecontaminateParam)>0.f;
+        const auto r=e.resources->depth_map(req);e.aux=r.texture;
+        // x: 0 grade, 1 alfa refinado, 2 refinado com a cor do objeto; w: falhou.
+        e.auxInfo={static_cast<f32>(r.rotoRefined),0.f,0.f,r.failed?1.f:0.f};
         e.foregroundSourceTimeUs=r.sourceTimeUs;
     }
     Status build(EffectBuildContext& ctx,const EffectEval& e,const LayerImage& input,f32,LayerImage& out) const override {
@@ -43,8 +57,18 @@ public:
         const bool refine=e.count>10;
         u.p1={e.b(5)?1.f:0.f,e.aux.valid()?1.f:0.f,refine?static_cast<f32>(e.e(10)):0.f,refine?e.f(6)*.01f:0.f};
         u.p2={input.region.x,input.region.y,input.region.w,input.region.h};
-        u.p3={e.placement?static_cast<f32>(e.placement->layerWidth):input.region.w,e.placement?static_cast<f32>(e.placement->layerHeight):input.region.h,
-              refine?e.f(7)*.04f:0.f,refine?e.f(9)*.01f:0.f};
+        const f32 lw=e.placement?static_cast<f32>(e.placement->layerWidth):input.region.w;
+        const f32 lh=e.placement?static_cast<f32>(e.placement->layerHeight):input.region.h;
+        u.p3={lw,lh,refine?e.f(7)*.04f:0.f,refine?e.f(9)*.01f:0.f};
+        // Recorte refinado: a borda já está na resolução do quadro. Suavizar
+        // (o mesmo raio de antes, agora em px da camada) e Suavidade da borda
+        // (fração do raio da borda) viram desfoque; o limiar não esmaga o alfa.
+        const f32 kind=e.aux.valid()?std::clamp(e.auxInfo.x,0.f,2.f):0.f;
+        if(kind>0.f){
+            const f32 radius=e.count>ai::kRotoEdgeRadiusParam?std::max(0.f,e.f(ai::kRotoEdgeRadiusParam)):0.f;
+            const f32 blur=(refine?e.f(7)*.04f*std::max(lw,lh)/320.f:0.f)+std::clamp(e.f(1)*.01f,0.f,1.f)*radius;
+            u.color={kind,std::isfinite(blur)?std::max(0.f,blur):0.f,0.f,0.f};
+        }
         out=input;out.texture=ctx.texture("Rotobrush",input.width,input.height);
         const PassTexture mask=e.aux.valid()?PassTexture{{},e.aux,CommonSampler::LinearClamp}:PassTexture{input.texture,{},CommonSampler::LinearClamp};
         if(ctx.fullscreen_pass("Rotobrush",PassStage::Effects,out.texture,ShaderId::effects_rotobrush_frag,

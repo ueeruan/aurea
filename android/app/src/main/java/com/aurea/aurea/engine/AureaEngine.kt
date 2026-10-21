@@ -991,6 +991,16 @@ class AureaEngine private constructor() {
     private external fun nativeMotionTrackSource(handle: Long): Long
     private external fun nativeApplyMotionTrack(handle: Long, target: Long, apply: Int, lock: Boolean, smooth: Float, maxScale: Float, crop: Int): Long
     fun startCameraTrack(layer: Long, mode: Int): Boolean = nativeStartCameraTrack(nativeHandle, layer, mode)
+    /** motion: 0 auto, 1 típico, 2 tripé, 3 cena quase plana; shotType: 0 FOV fixa, 1 zoom variável,
+     *  2 FOV informada (knownFov > 0); lens: 1 = estimar a distorção radial (k1; k2 se estável). */
+    fun startCameraTrack(layer: Long, mode: Int, motion: Int, knownFov: Float, shotType: Int, lens: Int): Boolean =
+        nativeStartCameraTrackEx(nativeHandle, layer, mode, motion, knownFov, shotType, lens)
+    fun refineCameraTrack(remove: Boolean, motion: Int, fov: Float, shotType: Int, lens: Int): Boolean =
+        nativeRefineCameraTrackEx(nativeHandle, remove, motion, fov, shotType, lens)
+    /** Por quadro: (FOV°, erro médio em px da fonte; −1 = sem pose). Devolve quantos quadros. */
+    fun cameraTrackFrameInfo(out: FloatArray): Int = nativeCameraTrackFrameInfo(nativeHandle, out)
+    /** "Distorção da lente" com o k1/k2 do solve: id do efeito, ou negativo (código do erro). */
+    fun addCameraTrackLensEffect(layer: Long, redistort: Boolean): Long = nativeAddCameraTrackLensEffect(nativeHandle, layer, redistort)
     fun cancelCameraTrack() = nativeCancelCameraTrack(nativeHandle)
     fun refineCameraTrack(remove: Boolean, motion: Int, fov: Float): Boolean = nativeRefineCameraTrack(nativeHandle, remove, motion, fov)
     fun cameraTrackTarget(frame: Long, out: FloatArray): Int = nativeCameraTrackTarget(nativeHandle, frame, out)
@@ -1000,6 +1010,9 @@ class AureaEngine private constructor() {
     private external fun nativeCalibrateCameraScene(handle: Long, operation: Int, distance: Float): Boolean
     private external fun nativePlaceModelOnTrack(handle: Long, layer: Long): Boolean
     private external fun nativeRefineCameraTrack(handle: Long, remove: Boolean, motion: Int, fov: Float): Boolean
+    /** out[0..10]: estado, progresso, quadros, resolvidos, rastros, pontos, erro px (análise), confiança, FOV°,
+     *  só rotação, do cache. Com out.size >= 22, também out[11..21]: tipo de tomada, método, FOV inicial°,
+     *  FOV final°, FOV mín°, FOV máx°, k1, k2, lente resolvida (0/1), k2 resolvido (0/1), erro médio em px da fonte. */
     fun cameraTrackStatus(out: FloatArray): String? = nativeCameraTrackStatus(nativeHandle, out)
     fun applyCameraTrack(frame: Long = -1, rect: FloatArray? = null): Long = nativeApplyCameraTrack(nativeHandle, frame, rect?.get(0) ?: 0f, rect?.get(1) ?: 0f, rect?.get(2) ?: 0f, rect?.get(3) ?: 0f)
     fun cameraTrackFeatures(frame: Long, out: FloatArray): Int = nativeCameraTrackFeatures(nativeHandle, frame, out)
@@ -1469,6 +1482,10 @@ class AureaEngine private constructor() {
     private external fun nativeSetVectorBlur(handle: Long, layer: Long, amount: Float): Boolean
     private external fun nativeSetFrameBlend(handle: Long, layer: Long, mode: Int): Boolean
     private external fun nativeStartCameraTrack(handle: Long, layer: Long, mode: Int): Boolean
+    private external fun nativeStartCameraTrackEx(handle: Long, layer: Long, mode: Int, motion: Int, knownFov: Float, shotType: Int, lens: Int): Boolean
+    private external fun nativeRefineCameraTrackEx(handle: Long, remove: Boolean, motion: Int, fov: Float, shotType: Int, lens: Int): Boolean
+    private external fun nativeCameraTrackFrameInfo(handle: Long, out: FloatArray): Int
+    private external fun nativeAddCameraTrackLensEffect(handle: Long, layer: Long, redistort: Boolean): Long
     private external fun nativeCancelCameraTrack(handle: Long)
     private external fun nativeCameraTrackStatus(handle: Long, out: FloatArray): String?
     private external fun nativeCameraTrackFeatures(handle: Long, frame: Long, out: FloatArray): Int

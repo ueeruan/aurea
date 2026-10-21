@@ -20,6 +20,7 @@
 
 #include "aurea/ai/DepthEstimator.hpp"
 #include "aurea/ai/ForegroundEstimator.hpp"
+#include "aurea/ai/RotoRefine.hpp"
 #include "aurea/project/Asset.hpp"
 
 #include <atomic>
@@ -34,6 +35,7 @@
 namespace aurea {
 class VideoSourceFactory;
 class VideoDecoderBackend;
+class FrameRef;
 }
 
 namespace aurea::ai {
@@ -47,6 +49,7 @@ struct DepthMap {
     f32 inferenceMs = 0.0f;
 };
 using DepthMapPtr = std::shared_ptr<const DepthMap>;
+using RotoImagePtr = std::shared_ptr<const RotoImage>;
 
 class DepthMapService {
 public:
@@ -75,8 +78,15 @@ public:
 
     /// Roto Brush: o mapa CRU (probabilidade + RGB da rede) do quadro `index`
     /// da fonte, esperando — mesma chave/cache dos vizinhos da estabilização.
+    /// Com `source`, também o quadro na resolução do Refinar borda (lado
+    /// maior até `sourceMaxSide`), da MESMA decodificação quando a rede roda.
     [[nodiscard]] DepthMapPtr foreground_video_frame(VideoSourceFactory* factory, const Asset& asset, u64 sourceKey,
-                                                     i64 index, f64 fps);
+                                                     i64 index, f64 fps, RotoImagePtr* source = nullptr,
+                                                     u32 sourceMaxSide = 0);
+    /// Só o quadro na resolução do Refinar borda (sem rede). Guarda os dois
+    /// últimos: a cadeia do Roto pede o atual e o anterior.
+    [[nodiscard]] RotoImagePtr source_video_frame(VideoSourceFactory* factory, const Asset& asset, u64 sourceKey,
+                                                  i64 index, f64 fps, u32 maxSide);
 
     /// O que já está no cache, sem pedir nada.
     [[nodiscard]] DepthMapPtr cached(u64 key);
@@ -120,7 +130,11 @@ private:
     void report_failure(const char* reason) noexcept;
     /// Com `work_` travado: decodifica, infere e guarda. Nulo em falha.
     DepthMapPtr run_video_locked(const Job& job);
-    DepthMapPtr run_video_raw_locked(const Job& job);
+    DepthMapPtr run_video_raw_locked(const Job& job, RotoImagePtr* source = nullptr, u32 sourceMaxSide = 0);
+    /// Decodifica o quadro do pedido (decoder reaproveitado, sem rede).
+    [[nodiscard]] bool decode_locked(const Job& job, FrameRef& frame);
+    [[nodiscard]] RotoImagePtr source_locked(const Job& job, u32 maxSide);
+    void keep_source_locked(u64 key, u32 maxSide, const RotoImagePtr& image);
     DepthMapPtr run_pixels_locked(u64 key, const u8* pixels, u32 width, u32 height, u32 stride, u32 channels);
     [[nodiscard]] bool ensure_model_locked();
     void enqueue(Job job);
@@ -146,6 +160,9 @@ private:
     u64 decoderAsset_ = 0;
     VideoSourceFactory* decoderFactory_ = nullptr;
     i64 decoderPts_ = -1;       ///< último quadro que o decoder entregou/pulou
+    /// Os dois últimos quadros do Refinar borda (chave do quadro + lado maior).
+    struct SourceSlot { u64 key = 0; u32 maxSide = 0; RotoImagePtr image; };
+    SourceSlot sourceSlots_[2];
 
     // Worker (queueMutex_): bounded FIFO, coalescing only the same source.
     std::mutex queueMutex_;

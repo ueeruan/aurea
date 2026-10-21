@@ -67,6 +67,8 @@ namespace effect_keys {
     inline constexpr const char* kCubeLut = "aurea.color.cube_lut";
     inline constexpr const char* kRipple = "aurea.distort.ripple";
     inline constexpr const char* kOpticsCompensation = "aurea.distort.optics_compensation";
+    /// Par do Rastreio de câmera 3D: remove/aplica a distorção radial resolvida.
+    inline constexpr const char* kLensDistortionMatch = "aurea.distort.lens_distortion_match";
     inline constexpr const char* kCornerPin = "aurea.distort.corner_pin";
     inline constexpr const char* kLinearWipe = "aurea.transition.linear_wipe";
     inline constexpr const char* kRadialWipe = "aurea.transition.radial_wipe";

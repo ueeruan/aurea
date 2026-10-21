@@ -547,6 +547,40 @@ std::shared_ptr<const tracking::CameraTrackData> read_camera_track(ByteReader& r
     return d;
 }
 
+// v50: o que o solve da câmera ganhou (tomada, método, lente, zoom, erros).
+void write_camera_lens(ByteWriter& w, const tracking::CameraTrackData& d) {
+    const auto& s = d.solution;
+    w.u8v(s.shotType); w.u8v(s.method);
+    w.f32v(s.k1); w.f32v(s.k2);
+    w.u8v(static_cast<u8>((s.lensSolved ? 1u : 0u) | (s.k2Solved ? 2u : 0u)));
+    w.f32v(s.averageErrorPx);
+    w.u32v(static_cast<u32>(s.frameFovY.size()));
+    for (f32 v : s.frameFovY) w.f32v(v);
+    w.u32v(static_cast<u32>(s.frameErrorPx.size()));
+    for (f32 v : s.frameErrorPx) w.f32v(v);
+}
+
+std::shared_ptr<const tracking::CameraTrackData> read_camera_lens(ByteReader& r, const tracking::CameraTrackData& base) {
+    auto d = std::make_shared<tracking::CameraTrackData>(base);
+    auto& s = d->solution;
+    s.shotType = r.u8v(); s.method = r.u8v();
+    s.k1 = r.f32v(); s.k2 = r.f32v();
+    const u8 flags = r.u8v();
+    s.lensSolved = (flags & 1u) != 0; s.k2Solved = (flags & 2u) != 0;
+    s.averageErrorPx = r.f32v();
+    const u32 fovs = r.u32v();
+    if (!r.good() || s.shotType > 2 || s.method > 3 || !std::isfinite(s.k1) || !std::isfinite(s.k2) || std::fabs(s.k1) > 2 ||
+        std::fabs(s.k2) > 2 || !std::isfinite(s.averageErrorPx) || s.averageErrorPx < 0 || (fovs != 0 && fovs != d->frames) ||
+        r.remaining() < static_cast<u64>(fovs) * 4 + 4) { r.fail(); return {}; }
+    s.frameFovY.resize(fovs);
+    for (f32& v : s.frameFovY) { v = r.f32v(); if (!std::isfinite(v) || v <= 0 || v >= kPi) { r.fail(); return {}; } }
+    const u32 errors = r.u32v();
+    if (!r.good() || (errors != 0 && errors != d->frames) || r.remaining() < static_cast<u64>(errors) * 4) { r.fail(); return {}; }
+    s.frameErrorPx.resize(errors);
+    for (f32& v : s.frameErrorPx) { v = r.f32v(); if (!std::isfinite(v) || v < -1.0f) { r.fail(); return {}; } }
+    return d;
+}
+
 void write_layer(ByteWriter& w, const Layer& l) {
     w.u8v(static_cast<u8>(l.kind));
     w.str(l.name);
@@ -969,6 +1003,8 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.f32v(l.text.pathLastMargin);
     w.boolv(l.text.pathForceAlign);
     w.boolv(l.text.pathLegacyLayout);
+    // v50: lente e zoom da análise de câmera (só quando a camada tem uma).
+    if (l.cameraTrack) write_camera_lens(w, *l.cameraTrack);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -1002,6 +1038,9 @@ void write_layer(ByteWriter& w, const Layer& l) {
 //      camada). Antes dela: desligada — nenhuma camada recortada.
 // v49: texto no caminho (máscara-caminho, margem final, forçar alinhamento,
 //      layout antigo), no fim da camada. Antes dela: o layout antigo.
+// v50: lente e zoom do rastreio de câmera (tipo de tomada, método, k1/k2,
+//      FOV por quadro, erro médio e por quadro em px da fonte), no fim da
+//      camada que tem a análise. Antes dela: FOV fixa, sem distorção.
 // v47: CameraData::affectsLayersBelow, one bool at the end of each layer.
 //      Earlier timelines retain the original 3D-only camera behavior.
 // v46: efeitos de imagem no modelo 3D valem (Layer::modelEffects, um bool no
@@ -1597,6 +1636,17 @@ void read_layer(ByteReader& r, Layer& l) {
         l.text.pathLastMargin = 0.0f;
         l.text.pathForceAlign = false;
         l.text.pathLegacyLayout = l.text.pathLayer != 0;
+    }
+    // v50: lente e zoom da análise de câmera. Antes dela: FOV fixa, sem
+    // distorção, método típico/tripé (os padrões da CameraSolution).
+    if (g_readingTimelineVersion >= 50 && l.cameraTrack) {
+        auto lens = read_camera_lens(r, *l.cameraTrack);
+        if (!lens) return;
+        l.cameraTrack = std::move(lens);
+    } else if (l.cameraTrack && l.cameraTrack->solution.rotationOnly) {
+        auto data = std::make_shared<tracking::CameraTrackData>(*l.cameraTrack);
+        data->solution.method = static_cast<u8>(tracking::SolveMethod::Tripod);
+        l.cameraTrack = std::move(data);
     }
 }
 

@@ -2023,6 +2023,14 @@ public:
         kExportThermalReduced  = 1u << 2,   ///< calor: menos quadros em voo (qualidade igual)
         kExportFrameFallback   = 1u << 3,   ///< algum quadro de vídeo saiu com o decodificado mais próximo
         kExportSafeMode        = 1u << 4,   ///< export no modo de segurança (refeito depois de o encoder travar)
+        // Bits 5..7 e 12: reservados (o Android ainda lê flags antigas neles).
+        // Bits 8..11: fase (kExportPhaseShift, export/OfflineFrameQueue.hpp).
+        // 0.3.2: reduções que antes só iam para o log (docs/diagnostico/export-engine-2.0.md, 1.3).
+        kExportBlurReduced     = 1u << 13,  ///< algum quadro saiu com menos amostras de motion blur que o pedido
+        kExportResolutionCapped = 1u << 14, ///< o aparelho não comporta a resolução pedida: saiu no teto dele
+        kExportEnvironmentFallback = 1u << 15, ///< a imagem HDR do ambiente 3D não coube: ambiente neutro
+        // Bits 16..17: modo de segurança sugerido (kExportRetryShift).
+        kExportModelFallback   = 1u << 18,  ///< modelo 3D "Original" não coube: saiu o modelo da prévia
         // Bits 16..17: o próximo modo de segurança sugerido quando o export
         // falhou pelo encoder (kExportRetryShift, export/ExportWatchdog.hpp).
     };

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.2: reduções do export que antes só iam para o log. -->
+<resources>
+    <string name="export_note_blur_reduced">कुछ फ़्रेम में मोशन ब्लर कम सैंपल के साथ बना (इस डिवाइस की मेमोरी या GPU की सीमा)।</string>
+    <string name="export_note_resolution_capped">यह डिवाइस जितना बड़ा आकार सपोर्ट करता है, उसमें एक्सपोर्ट हुआ।</string>
+    <string name="export_note_environment_fallback">3D वातावरण की HDR इमेज मेमोरी में नहीं समाई: न्यूट्रल वातावरण इस्तेमाल हुआ।</string>
+    <string name="export_note_model_fallback">एक 3D मॉडल प्रीव्यू क्वालिटी में बना (Original वर्शन मेमोरी में नहीं समाया)।</string>
+    <string name="export_service_channel">वीडियो एक्सपोर्ट</string>
+    <string name="export_service_title">वीडियो एक्सपोर्ट हो रहा है</string>
+    <string name="export_service_preparing">तैयारी हो रही है…</string>
+    <string name="export_service_progress">%1$d%% — आप दूसरे ऐप इस्तेमाल कर सकते हैं</string>
+</resources>

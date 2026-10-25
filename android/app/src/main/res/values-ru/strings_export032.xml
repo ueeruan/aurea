@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.2: reduções do export que antes só iam para o log. -->
+<resources>
+    <string name="export_note_blur_reduced">Размытие движения с меньшим числом выборок в некоторых кадрах (лимит памяти или GPU этого устройства).</string>
+    <string name="export_note_resolution_capped">Экспортировано в максимальном размере, который поддерживает это устройство.</string>
+    <string name="export_note_environment_fallback">HDR-изображение 3D-окружения не поместилось в память: использовано нейтральное окружение.</string>
+    <string name="export_note_model_fallback">3D-модель вышла в качестве предпросмотра (версия Original не поместилась в память).</string>
+    <string name="export_service_channel">Экспорт видео</string>
+    <string name="export_service_title">Экспорт видео</string>
+    <string name="export_service_preparing">Подготовка…</string>
+    <string name="export_service_progress">%1$d%% — можно пользоваться другими приложениями</string>
+</resources>

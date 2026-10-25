@@ -128,7 +128,7 @@ int main() {
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", type=Path, default=ROOT / "build/astra-ffmpeg/source/ffmpeg-8.0.3/libavcodec/mediacodecenc.c")
+    parser.add_argument("--source", type=Path, default=ROOT / "build/astra-ffmpeg/source/ffmpeg-9.0.2/libavcodec/mediacodecenc.c")
     parser.add_argument("--label", default="baseline")
     parser.add_argument("--prefix", type=Path, default=ROOT / "build/astra-ffmpeg/host-dev/ffmpeg-8.1.2-full_build-shared")
     args = parser.parse_args()

@@ -13,6 +13,15 @@
          (usesCleartextTraffic="false"). -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
+    <!-- 0.3.2: o export continua com o app em segundo plano (serviço em
+         primeiro plano com a notificação de progresso; wake lock parcial
+         para a CPU não dormir com a tela apagada). mediaProcessing no
+         Android 15+, dataSync antes. Ver state/ExportForegroundService.kt. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
     <!-- Leitura de mídia para a GALERIA do editor (Adicionar → mídia), pedida
          só quando ela abre; o seletor de fotos do sistema (PickVisualMedia)
          continua como alternativa sem permissão. Editor de vídeo = uso
@@ -131,5 +140,9 @@
                 <data android:mimeType="application/x-aurea-project"/>
             </intent-filter>
         </activity>
+        <service
+            android:name=".state.ExportForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|mediaProcessing"/>
     </application>
 </manifest>

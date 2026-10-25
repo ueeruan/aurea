@@ -920,7 +920,10 @@ struct Encoder::Impl {
                 dv[static_cast<usize>(x) * pv.col] = src[2 * x + 1];
             }
         }
-        if (AMediaCodec_queueInputBuffer(codec, static_cast<size_t>(index), 0, capacity, static_cast<u64>(ptsUs), 0) != AMEDIA_OK)
+        // 0.3.2: o tamanho PREENCHIDO (o layout do quadro), não a capacidade do
+        // buffer: alguns encoders recusam ou codificam o resto como imagem (o
+        // caminho legado do FFmpeg já fazia assim, patch mediacodec-safety).
+        if (AMediaCodec_queueInputBuffer(codec, static_cast<size_t>(index), 0, extent, static_cast<u64>(ptsUs), 0) != AMEDIA_OK)
             return fail(Errc::EncodeFailed, "queueInputBuffer recusou o quadro");
         return OkStatus;
     }

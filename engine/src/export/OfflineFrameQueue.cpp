@@ -93,12 +93,13 @@ Status OfflineFrameQueue::begin_validating() noexcept {
     if (phase_.load() != ExportPhase::Finalizing) return Errc::InvalidState;
     phase_.store(ExportPhase::Validating); return OkStatus;
 }
-void OfflineFrameQueue::validated(Status result) noexcept {
+Status OfflineFrameQueue::validated(Status result) noexcept {
     std::lock_guard lock(mutex_);
     if (result.ok() && phase_.load() != ExportPhase::Validating) result = Errc::InvalidState;
     if (result.ok() && cancelled()) result = Errc::Cancelled;
     error_ = result.code();
     phase_.store(result.ok() ? ExportPhase::Completed : result.code() == Errc::Cancelled ? ExportPhase::Cancelled : ExportPhase::Failed);
+    return result;
 }
 void OfflineFrameQueue::fail(Status result) noexcept { if (!result.ok()) end_render(result); }
 } // namespace aurea

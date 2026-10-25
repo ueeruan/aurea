@@ -124,9 +124,13 @@ AUREA_TEST(MotionBlur, DenseMorphUploadsAreAdmittedBeforeSampleExpansion) {
     // 16+ independent multi-megabyte GPU vertex uploads retained by one fence.
     MorphExposureFixture f(100000);
     FrameSnapshot snapshot; f.prepare(snapshot, true);
-    AUREA_CHECK(f.renderer.take_incomplete());
+    // 0.3.2: o quadro sai completo com as amostras que cabem no orçamento fixo
+    // (nunca as 16+ pedidas) e a redução é avisada — antes recusava o quadro.
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK((f.renderer.take_reductions() & Renderer::kReducedMotionBlur) != 0);
     AUREA_CHECK_EQ(snapshot.scenes.size(), 1u); if (snapshot.scenes.empty()) return;
-    AUREA_CHECK(snapshot.scenes[0].blurFrames.empty());
+    AUREA_CHECK(snapshot.scenes[0].blurFrames.size() >= 2);
+    AUREA_CHECK(snapshot.scenes[0].blurFrames.size() <= 5);
     AUREA_CHECK_EQ(snapshot.scenes[0].instances.size(), 1u);
     f.prepare(snapshot, false);
     AUREA_CHECK(!f.renderer.take_incomplete());
@@ -178,9 +182,10 @@ AUREA_TEST(MotionBlur, StaticNonzeroMorphAndZeroCenterAnimatedMorphKeepTheirUplo
             position.set(FrameIndex{0}, 100); position.set(FrameIndex{30}, 200);
         }
         FrameSnapshot snapshot; f.prepare(snapshot, true);
-        AUREA_CHECK(f.renderer.take_incomplete());
+        AUREA_CHECK(!f.renderer.take_incomplete());
+        AUREA_CHECK((f.renderer.take_reductions() & Renderer::kReducedMotionBlur) != 0);
         AUREA_CHECK_EQ(snapshot.scenes.size(), 1u); if (snapshot.scenes.empty()) return;
-        AUREA_CHECK(snapshot.scenes[0].blurFrames.empty());
+        AUREA_CHECK(snapshot.scenes[0].blurFrames.size() >= 2 && snapshot.scenes[0].blurFrames.size() <= 5);
         if (animated) {
             AUREA_CHECK_EQ(snapshot.scenes[0].instances.size(), 1u); if (snapshot.scenes[0].instances.empty()) return;
             const auto& weights = snapshot.scenes[0].instances[0].pose().morphWeights[0];
@@ -195,7 +200,8 @@ AUREA_TEST(MotionBlur, NestedExposuresShareOneBudgetAndResetForTheNextFrame) {
     MorphExposureFixture f(32000);
     f.wrap_in_parent(2);
     FrameSnapshot snapshot; f.prepare(snapshot, true);
-    AUREA_CHECK(f.renderer.take_incomplete());
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK((f.renderer.take_reductions() & Renderer::kReducedMotionBlur) != 0);   // o segundo filho ficou sem orçamento: avisado
     AUREA_CHECK_EQ(snapshot.nested.size(), 2u); if (snapshot.nested.size() != 2) return;
     AUREA_CHECK_EQ(snapshot.nested[0]->scenes.size(), 1u);
     AUREA_CHECK_EQ(snapshot.nested[1]->scenes.size(), 1u);
@@ -214,10 +220,12 @@ AUREA_TEST(MotionBlur, GlyphAndModelExposuresUseTheSameFrameAllowance) {
     const auto textId = f.add_text(2000, true);
     AUREA_CHECK(text::FontManager::instance().font_for(f.comp->layer(textId)->text) != nullptr);
     FrameSnapshot snapshot; f.prepare(snapshot, true);
-    AUREA_CHECK(f.renderer.take_incomplete());
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK((f.renderer.take_reductions() & Renderer::kReducedMotionBlur) != 0);
     AUREA_CHECK(snapshot.glyphs.size() >= 2000u * 16u);
     AUREA_CHECK_EQ(snapshot.scenes.size(), 1u); if (snapshot.scenes.empty()) return;
-    AUREA_CHECK(snapshot.scenes[0].blurFrames.empty());
+    // O texto gastou parte do orçamento do quadro: o modelo fica com menos de 16.
+    AUREA_CHECK(snapshot.scenes[0].blurFrames.size() >= 2 && snapshot.scenes[0].blurFrames.size() < 16u);
     f.comp->layer(textId)->visible = false;
     f.prepare(snapshot, true);
     AUREA_CHECK(!f.renderer.take_incomplete());
@@ -230,11 +238,13 @@ AUREA_TEST(MotionBlur, NoGlyphSetIsAllocatedWhenTheRemainingAllowanceIsTooSmall)
     const auto textId = f.add_text(20000, false); // One set exceeds the child's remaining allowance.
     AUREA_CHECK(text::FontManager::instance().font_for(f.comp->layer(textId)->text) != nullptr);
     FrameSnapshot snapshot; f.prepare(snapshot, true);
-    AUREA_CHECK(f.renderer.take_incomplete());
-    AUREA_CHECK(snapshot.glyphs.empty());
+    // 0.3.2: o texto parado sai (um conjunto de glifos, sem desfoque) em vez de
+    // o quadro ficar incompleto; texto sem desfoque não é "redução".
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK((f.renderer.take_reductions() & Renderer::kReducedMotionBlur) == 0);
+    AUREA_CHECK(snapshot.glyphs.size() >= 20000u && snapshot.glyphs.size() < 2u * 20000u);
     AUREA_CHECK_EQ(snapshot.nested.size(), 1u); if (snapshot.nested.empty()) return;
     AUREA_CHECK_EQ(snapshot.nested[0]->scenes[0].blurFrames.size(), 16u);
-    for (const auto& layer : snapshot.layers) AUREA_CHECK(layer.source.kind != LayerSource::Kind::Text);
 }
 
 AUREA_TEST(MotionBlur, NonFiniteAmountKeepsTheCenterCameraDuringAnotherModelsExposure) {

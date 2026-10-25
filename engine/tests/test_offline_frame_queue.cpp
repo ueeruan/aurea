@@ -113,3 +113,21 @@ AUREA_TEST(OfflineFrameQueue, FinalPictureStillRequiresSuccessfulIndependentVali
     session.validated(OkStatus);
     AUREA_CHECK(session.phase() == ExportPhase::Completed);
 }
+AUREA_TEST(OfflineFrameQueue, CancelDuringValidationIsReportedToTheCaller) {
+    // 0.3.2: cancelar enquanto a saída é validada virava fase Cancelled, mas o
+    // motor seguia com o resultado OK e publicava o arquivo.
+    std::atomic<bool> cancel{false};
+    OfflineFrameQueue session;
+    AUREA_CHECK(session.prepare(1, 1, 4, 4, &cancel).ok());
+    auto slot = session.acquire(1); AUREA_CHECK(slot.ok()); if (!slot.ok()) return;
+    AUREA_CHECK(session.publish(*slot, 0).ok());
+    session.end_render(OkStatus);
+    slot = session.take(); AUREA_CHECK(slot.ok()); if (!slot.ok()) return;
+    AUREA_CHECK(session.encoded(*slot, 0).ok());
+    AUREA_CHECK(session.begin_finalizing().ok());
+    AUREA_CHECK(session.begin_validating().ok());
+    cancel.store(true);
+    const Status result = session.validated(OkStatus);
+    AUREA_CHECK(result.code() == Errc::Cancelled);
+    AUREA_CHECK(session.phase() == ExportPhase::Cancelled);
+}

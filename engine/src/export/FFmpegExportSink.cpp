@@ -451,7 +451,16 @@ private:
         if (diagnostics_) diagnostics_->event(counter);
     }
     bool cancelled() const noexcept { return cancel_ && cancel_->load(std::memory_order_acquire); }
-    static int interrupted(void* user) noexcept { return static_cast<FFmpegSink*>(user)->cancelled() ? 1 : 0; }
+    // 0.3.2: o FFmpeg chama isto em cada leitura/escrita do arquivo. Também é o
+    // sinal de vida do sink: o `av_write_trailer` com +faststart reescreve o
+    // arquivo inteiro sem passar por write_video, e um vídeo grande em
+    // armazenamento lento passava dos 45 s do watchdog e virava "encoder
+    // travou" (docs/diagnostico/export-engine-2.0.md, 1.4).
+    static int interrupted(void* user) noexcept {
+        auto* sink = static_cast<FFmpegSink*>(user);
+        sink->beat();
+        return sink->cancelled() ? 1 : 0;
+    }
     Status error(Errc code, const char* what, int result = 0) noexcept {
         char fferror[AV_ERROR_MAX_STRING_SIZE]{};
         if (result < 0) av_strerror(result, fferror, sizeof(fferror));

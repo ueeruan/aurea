@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.2: reduções do export que antes só iam para o log. -->
+<resources>
+    <string name="export_note_blur_reduced">Motion blur used fewer samples in some frames (this device\'s memory or GPU limit).</string>
+    <string name="export_note_resolution_capped">Exported at the largest size this device supports.</string>
+    <string name="export_note_environment_fallback">The 3D environment HDR image did not fit in memory: the neutral environment was used.</string>
+    <string name="export_note_model_fallback">A 3D model used the preview quality (the Original version did not fit in memory).</string>
+    <string name="export_service_channel">Video export</string>
+    <string name="export_service_title">Exporting the video</string>
+    <string name="export_service_preparing">Preparing…</string>
+    <string name="export_service_progress">%1$d%% — you can use other apps</string>
+</resources>

@@ -195,12 +195,15 @@ AUREA_TEST(MotionBlur, UnsupportedBoundedExposureKeepsTheOriginalAdmission) {
     MorphExposureFixture f(100000);
     f.wrap_in_parent(1);
     FrameSnapshot snapshot; f.prepare(snapshot, true, true);
-    AUREA_CHECK(f.renderer.take_incomplete());
+    // Sem lotes (grupo aninhado): a admissão por amostra de sempre — as que
+    // cabem, com a redução avisada (0.3.2), nunca o quadro incompleto.
+    AUREA_CHECK(!f.renderer.take_incomplete());
+    AUREA_CHECK((f.renderer.take_reductions() & Renderer::kReducedMotionBlur) != 0);
     AUREA_CHECK(snapshot.sceneExposureBatches.empty());
     AUREA_CHECK_EQ(snapshot.nested.size(), 1u);
     if (!snapshot.nested.empty()) {
         AUREA_CHECK(snapshot.nested[0]->sceneExposureBatches.empty());
-        AUREA_CHECK(snapshot.nested[0]->scenes[0].blurFrames.empty());
+        AUREA_CHECK(snapshot.nested[0]->scenes[0].blurFrames.size() <= 5);
     }
     MorphExposureFixture mixed(100000);
     const auto id = mixed.comp->add_layer(LayerKind::Shape, "scene plane");
@@ -208,6 +211,7 @@ AUREA_TEST(MotionBlur, UnsupportedBoundedExposureKeepsTheOriginalAdmission) {
     mixed.comp->layer(id)->shape.bounds = Rect{0, 0, 20, 20};
     mixed.comp->layer(id)->transform.position = Vec3{160, 90, 0};
     mixed.prepare(snapshot, true, true);
-    AUREA_CHECK(mixed.renderer.take_incomplete());
+    AUREA_CHECK(!mixed.renderer.take_incomplete());
+    AUREA_CHECK((mixed.renderer.take_reductions() & Renderer::kReducedMotionBlur) != 0);
     AUREA_CHECK(snapshot.sceneExposureBatches.empty());
 }

@@ -776,36 +776,26 @@ public:
     [[nodiscard]] bool take_incomplete() noexcept { const bool b = incomplete_; incomplete_ = false; return b; }
     /// Onde o último quadro incompleto foi marcado (arquivo:linha do motor), para
     /// o motivo do export dizer QUAL recurso faltou. Nulo = nenhum ainda.
-    /// Export em GPU fraca: degrau de custo 3D (0 = qualidade final cheia).
-    /// Cada degrau corta sombra/MSAA do arquivo para o passe 3D caber no prazo
-    /// do driver móvel (~2 s por envio), em vez de a GPU ser resetada.
+    /// Degrau de custo 3D do export (0 = qualidade final cheia). Cada degrau
+    /// corta sombra/MSAA para o passe 3D caber no prazo do driver móvel (~2 s
+    /// por envio). 0.3.2: vem do DEGRAU DA ESCADA (ExportAttempts.hpp), fixo do
+    /// primeiro ao último quadro — antes subia no meio do export quando um
+    /// quadro demorava, e o vídeo dependia da carga do aparelho.
     [[nodiscard]] u32 export_gpu_step() const noexcept { return exportGpuStep_; }
-    u32 raise_export_gpu_step() noexcept { if (exportGpuStep_ < 4) ++exportGpuStep_; return exportGpuStep_; }
-    /// Export em GPU fraca: teto de amostras de motion blur (0 = sem teto).
-    /// Cada chamada corta pela metade (128 -> 64 -> ... -> 2) quando o quadro
-    /// inteiro passa de ~4 s de GPU (rastro com centenas de passes).
-    [[nodiscard]] u32 export_blur_cap() const noexcept { return exportBlurCap_; }
-    /// Trecho leve de novo: o teto dobra (64 ou mais = sem teto).
-    u32 raise_export_blur_cap() noexcept {
-        if (exportBlurCap_) exportBlurCap_ = exportBlurCap_ >= 32u ? 0u : exportBlurCap_ * 2u;
-        return exportBlurCap_;
-    }
-    /// Teto inicial do export (celular): 0 = sem teto.
-    void set_export_blur_cap(u32 cap) noexcept { exportBlurCap_ = cap >= 2 ? cap : 0u; }
+    void set_export_gpu_step(u32 step) noexcept { exportGpuStep_ = std::min(step, 4u); }
     /// Teto rígido do degrau da escada (ExportAttempts.hpp): 0 = nenhum, 1 = sem desfoque.
     void set_export_blur_hard_cap(u32 cap) noexcept { exportBlurHardCap_ = cap; }
     /// Teto das amostras de cena 3D no export: cada amostra é a cena inteira
     /// (sombra, MSAA), então o custo cresce sem limite com o rastro (0.2.7).
+    /// Fixo por aparelho; quando corta, o quadro registra a redução.
     void set_export_scene_blur_cap(u32 cap) noexcept { exportSceneBlurCap_ = cap; }
-    /// Piso do teto adaptativo (0.3.0): abaixo disso o rastro vira cópias
-    /// separadas da camada (o "fantasma" do export); o próximo passo é o
-    /// degrau de custo 3D (sombra/MSAA), e a escada (ExportAttempts) ainda
-    /// pode tirar mais amostras se a GPU estourar o prazo.
-    static constexpr u32 kMinAdaptiveExportBlur = 8;
-    u32 lower_export_blur_cap() noexcept {
-        exportBlurCap_ = exportBlurCap_ ? std::max(kMinAdaptiveExportBlur, exportBlurCap_ / 2) : 64u;
-        return exportBlurCap_;
-    }
+    /// 0.3.2: o que a qualidade final teve de reduzir nos quadros desde a
+    /// última leitura (bits de RenderReduction). O export avisa a pessoa em vez
+    /// de só registrar no log.
+    enum RenderReduction : u32 {
+        kReducedMotionBlur = 1u << 0,   ///< menos amostras de motion blur que o pedido (ou nenhuma) em algum grupo
+    };
+    [[nodiscard]] u32 take_reductions() noexcept { const u32 r = reductions_; reductions_ = 0; return r; }
     [[nodiscard]] const char* incomplete_file() const noexcept { return incompleteFile_; }
     [[nodiscard]] u32 incomplete_line() const noexcept { return incompleteLine_; }
     [[nodiscard]] u32 local_ai_pending() const noexcept { return localAiPending_; }
@@ -1377,27 +1367,12 @@ private:
     const char* incompleteFile_ = nullptr;
     u32 incompleteLine_ = 0;
     u32 exportGpuStep_ = 0;
-    u32 exportBlurCap_ = 0;
-    u32 exportBlurHardCap_ = 0;   ///< degrau da escada (0 = nenhum; 1 = sem desfoque)
+    u32 exportBlurHardCap_ = 0;
+    u32 reductions_ = 0;          ///< RenderReduction (take_reductions)   ///< degrau da escada (0 = nenhum; 1 = sem desfoque)
     u32 exportSceneBlurCap_ = 0;  ///< amostras de CENA 3D no export (0 = nenhum)
     /// shutter_sample_count com o teto de amostras do export em GPU fraca.
     [[nodiscard]] u32 capped_shutter_samples(const MotionBlurSettings& settings, bool finalQuality, f32 quality,
             f64 pathPixels, bool changing = false, u32 resourceLimit = ShutterPlan::kHardLimit) const noexcept {
-        // 0.2.1 (beta 0.2.0: "na prévia o motion blur 3D está normal, no
-        // export sai outro"): o teto adaptativo do celular cortava o rastro
-        // para 16 amostras (e até 2), enquanto a prévia usa uma amostra a
-        // cada ~0,75 px da PRÉVIA (≈1,5 px do export, a prévia é meia
-        // resolução). Rastro longo virava cópias separadas no arquivo. O teto
-        // agora só tira o excesso acima da densidade da prévia, e nunca desce
-        // abaixo das amostras escolhidas pela pessoa.
-        if (exportBlurCap_ >= 2) {
-            const u32 ceiling = std::clamp(settings.adaptiveLimit, 2u, ShutterPlan::kHardLimit);
-            const u32 chosen = std::min(ceiling, std::clamp(settings.samples, 2u, 64u));
-            const f64 previewDensity = std::isfinite(pathPixels)
-                ? std::ceil(std::max(0.0, pathPixels) / 1.5) + 1.0 : static_cast<f64>(ceiling);
-            const u32 floor = std::max(chosen, static_cast<u32>(std::min<f64>(previewDensity, ceiling)));
-            resourceLimit = std::min(resourceLimit, std::max(exportBlurCap_, floor));
-        }
         // Degrau da escada (0.2.7): teto RÍGIDO, acima do piso da prévia e das
         // amostras escolhidas — é a última chance de o export sair.
         if (finalQuality && exportBlurHardCap_ >= 1) resourceLimit = std::min(resourceLimit, exportBlurHardCap_);

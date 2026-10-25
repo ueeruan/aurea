@@ -21,7 +21,7 @@ import tarfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-FFMPEG_VERSION = "8.0.3"
+FFMPEG_VERSION = "9.0.2"
 OPENH264_VERSION = "2.6.0"
 KVAZAAR_VERSION = "2.3.2"
 X265_VERSION = "4.1"
@@ -29,7 +29,7 @@ X265_SOURCE = ("x265_4.1.tar.gz", "https://github.com/Multicorewareinc/x265/rele
                "a31699c6a89806b74b0151e5e6a7df65de4b49050482fe5ebf8a4379d7af8f29")
 SOURCES = (
     (f"ffmpeg-{FFMPEG_VERSION}.tar.xz", f"https://ffmpeg.org/releases/ffmpeg-{FFMPEG_VERSION}.tar.xz",
-     "6136812ea6d4e68bdba27e33c2a94382711cdf4f8602ffef056ff792bd6f9818"),
+     "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"),
     (f"openh264-{OPENH264_VERSION}.tar.gz", f"https://github.com/cisco/openh264/archive/refs/tags/v{OPENH264_VERSION}.tar.gz",
      "558544ad358283a7ab2930d69a9ceddf913f4a51ee9bf1bfb9e377322af81a69"),
     (f"kvazaar-{KVAZAAR_VERSION}.tar.gz", f"https://github.com/ultravideo/kvazaar/releases/download/v{KVAZAAR_VERSION}/kvazaar-{KVAZAAR_VERSION}.tar.gz",
@@ -168,7 +168,9 @@ def fix_ffmpeg_mediacodec_buffers(source: Path) -> dict[str, str]:
     target above; patch paths cannot select any other workspace file.
     """
     target = source / "libavcodec/mediacodecenc.c"
-    patch = ROOT / "tools/patches/ffmpeg-8.0.3-mediacodec-safety.patch"
+    # 9.0.2: mediacodecenc.c igual ao 8.0.3 sem patch (o mesmo hash "before"):
+    # nenhuma destas correções entrou no upstream.
+    patch = ROOT / "tools/patches/ffmpeg-mediacodec-safety.patch"
     before = "d65e6f3b4e9d60633ad8f80ec917d77ecab354675497a61c39fbab7f78f222c1"
     after = "36b1887bb54b63b9981b43bbc9f2c35fa3348b2a14ed22c2bf05afaaa353e8d0"
     actual = hashlib.sha256(target.read_bytes()).hexdigest()
@@ -330,6 +332,11 @@ def main() -> None:
     ar = "ar"
     nm = "nm"
     ranlib = "ranlib"
+    # 9.0.2: sem --disable-unstable. Ele parece economizar o backend novo do
+    # swscale, mas o 9.0.2 não linka assim: format.c só define
+    # ff_sws_chroma_pos dentro de #if CONFIG_UNSTABLE e graph.c chama sempre
+    # ("undefined symbol: ff_sws_chroma_pos" no libaurea.so). Fica a configuração
+    # padrão, a que o FFmpeg testa.
     common = ["--disable-programs", "--disable-doc", "--disable-network", "--disable-autodetect",
               "--disable-avdevice", "--disable-avfilter", "--disable-everything",
               "--enable-avcodec", "--enable-avformat", "--enable-swscale", "--enable-swresample",
@@ -444,7 +451,9 @@ def main() -> None:
     pkg.write_text("#!/bin/sh\ncase \"$*\" in\n *--version*) echo 1.8.0;;\n"+x265_pkg+kvazaar_pkg+" *--modversion*) echo 2.6.0;;\n *--cflags*) echo '-I"+q(prefix)+"/include';;\n *--libs*) echo '-L"+q(prefix)+"/lib -lopenh264 "+cpp_runtime+" -lm';;\n *openh264*) exit 0;;\n *) exit 1;;\nesac\n", encoding="utf-8")
     pkg.chmod(0o755)
     openh_work = work / "openh264"
-    ff_work = work / "ffmpeg"
+    # Objetos por versão: configurar o 9.x por cima dos objetos do 8.x misturava
+    # arquivos .d/.o de duas árvores de fonte.
+    ff_work = work / f"ffmpeg-{FFMPEG_VERSION}"
     openh_work.mkdir(exist_ok=True)
     ff_work.mkdir(exist_ok=True)
     steps = [

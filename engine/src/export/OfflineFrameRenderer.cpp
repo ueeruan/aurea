@@ -67,6 +67,11 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
     };
     const u64 start = monotonic_ns();
     u64 lastProgress = start, lastWork = media_.decode_work(), lastGeneration = generation_.load();
+    // 0.3.2: "sem progresso" conta só o tempo ESPERANDO (GPU e fontes), não o
+    // trabalho síncrono do quadro — um Roto/IA calculado aqui dentro (até 90 s
+    // no export) fazia o quadro parecer travado e a escada descer como se a
+    // GPU tivesse estourado o prazo (docs/diagnostico/export-engine-2.0.md, 1.4).
+    u64 idleSinceProgress = 0;
     bool reclaimed = false, reopened = false;
     for (;;) {
         if (cancelled()) return Errc::Cancelled;
@@ -130,14 +135,17 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
         snapshot_.release_video_frames();
         const u64 pending = gpu_->last_submitted_frame();
         if (gpuLock.owns_lock()) gpuLock.unlock();
+        const u64 waitBegin = monotonic_ns();
         if (const Status ready = wait_gpu(pending, settings.cancelFlag, pollingMutex, additionalCancel); !ready.ok()) return ready;
         const u64 now = monotonic_ns(), work = media_.decode_work();
+        idleSinceProgress += now - waitBegin;
         const u64 resources = generation_.load(std::memory_order_acquire)
             + (static_cast<u64>(renderer_.shaders().compiles_since_mark()) << 32)
             + (static_cast<u64>(renderer_.pending_uploads()) << 48)
             + (renderer_.environment_pending() ? 1ull << 63 : 0ull);
         if (work != lastWork || resources != lastGeneration) {
             lastProgress = now; lastWork = work; lastGeneration = resources;
+            idleSinceProgress = 0;
         }
         // Decoder parado sem entregar o quadro: reabre a fonte de quem espera
         // (uma vez por quadro). Um codec do aparelho preso depois de um seek
@@ -156,16 +164,19 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
                                static_cast<long long>(time.value),
                                static_cast<unsigned long long>((now - lastProgress) / 1'000'000ull), closed);
                 lastProgress = now;
+                idleSinceProgress = 0;
             }
         }
-        if (now - start > fenceTimeoutNs_ || now - lastProgress > 30'000'000'000ull)
+        if (now - start > fenceTimeoutNs_ || idleSinceProgress > 30'000'000'000ull)
             return Status{exact ? Errc::Timeout : Errc::DecodeFailed,
                 exact ? "recurso de composicao indisponivel; quadro offline nao foi codificado"
                       : "a fonte nao entregou o quadro exato; exportacao interrompida"};
         std::unique_lock lock(wakeMutex_);
+        const u64 sleepBegin = monotonic_ns();
         wake_.wait_for(lock, std::chrono::milliseconds(10), [&] {
             return generation_.load(std::memory_order_acquire) != observed || cancelled();
         });
+        idleSinceProgress += monotonic_ns() - sleepBegin;
     }
 }
 void OfflineFrameRenderer::shutdown() noexcept {

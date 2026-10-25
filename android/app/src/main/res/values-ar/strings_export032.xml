@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.2: reduções do export que antes só iam para o log. -->
+<resources>
+    <string name="export_note_blur_reduced">ضبابية الحركة بعينات أقل في بعض الإطارات (حد الذاكرة أو GPU في هذا الجهاز).</string>
+    <string name="export_note_resolution_capped">صُدِّر بأكبر حجم يدعمه هذا الجهاز.</string>
+    <string name="export_note_environment_fallback">لم تتسع صورة HDR لبيئة 3D في الذاكرة: استُخدمت البيئة المحايدة.</string>
+    <string name="export_note_model_fallback">خرج نموذج 3D بجودة المعاينة (لم تتسع النسخة Original في الذاكرة).</string>
+    <string name="export_service_channel">تصدير الفيديو</string>
+    <string name="export_service_title">جارٍ تصدير الفيديو</string>
+    <string name="export_service_preparing">جارٍ التحضير…</string>
+    <string name="export_service_progress">%1$d%% — يمكنك استخدام تطبيقات أخرى</string>
+</resources>

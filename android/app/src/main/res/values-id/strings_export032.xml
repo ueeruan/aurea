@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.2: reduções do export que antes só iam para o log. -->
+<resources>
+    <string name="export_note_blur_reduced">Motion blur memakai lebih sedikit sampel di beberapa frame (batas memori atau GPU perangkat ini).</string>
+    <string name="export_note_resolution_capped">Diekspor dengan ukuran terbesar yang didukung perangkat ini.</string>
+    <string name="export_note_environment_fallback">Gambar HDR lingkungan 3D tidak muat di memori: lingkungan netral dipakai.</string>
+    <string name="export_note_model_fallback">Satu model 3D memakai kualitas pratinjau (versi Original tidak muat di memori).</string>
+    <string name="export_service_channel">Ekspor video</string>
+    <string name="export_service_title">Mengekspor video</string>
+    <string name="export_service_preparing">Menyiapkan…</string>
+    <string name="export_service_progress">%1$d%% — Anda bisa memakai aplikasi lain</string>
+</resources>

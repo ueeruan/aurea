@@ -131,6 +131,30 @@ AUREA_TEST(ExportAttempts, GpuTimeoutsDropMotionBlurSamplesBeforePixels) {
     AUREA_CHECK_EQ(export_next_attempt(6, ExportRetryKind::GpuTime, r), 0u);
 }
 
+AUREA_TEST(ExportAttempts, GpuCostStepIsFixedPerRungAndOnlyClimbs) {
+    // 0.3.2: o corte de sombra/MSAA (degrau de custo 3D) vem da escada e vale
+    // do primeiro ao último quadro da tentativa (antes subia no meio do export
+    // quando um quadro demorava). Cada degrau nunca é mais pesado que o de cima.
+    u32 previous = 0;
+    for (u32 attempt = 0; attempt <= kExportAttemptMax; ++attempt) {
+        const u32 step = export_attempt_plan(attempt).gpuStep;
+        AUREA_CHECK(step >= previous);
+        AUREA_CHECK(step <= 4u);
+        previous = step;
+    }
+    AUREA_CHECK_EQ(export_attempt_plan(0).gpuStep, 0u);
+    AUREA_CHECK_EQ(export_attempt_plan(1).gpuStep, 0u);   // só o encoder muda
+    AUREA_CHECK_EQ(export_attempt_plan(kExportAttemptMax).gpuStep, 4u);
+    // Um degrau que só fica mais leve no custo 3D também conta como "menos GPU".
+    const ExportRequestShape r = shape(1080, 30.0);
+    ExportAttemptEffect a = export_attempt_effect(2, r), b = a;
+    b.gpuStep = a.gpuStep + 1;
+    AUREA_CHECK(b.less_blur_than(a));
+    AUREA_CHECK(!a.less_blur_than(b));
+    AUREA_CHECK(!a.same_as(b));
+    AUREA_CHECK(a.same_as(b, false));   // falha de encoder: o custo 3D não importa
+}
+
 // 0.3.0: a 200 qps nenhum encoder de hardware se anuncia; o 1o degrau que
 // baixava a taxa era o 3 (junto com 720p). Agora 1 e 2 já ficam em 60 qps,
 // sem mexer no tamanho, e pedidos até 60 seguem iguais.

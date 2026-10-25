@@ -481,6 +481,14 @@ class ExportProgress {
     val thermalReduced: Boolean get() = flags and FLAG_THERMAL_REDUCED != 0
     /** Algum quadro saiu com o vídeo decodificado mais próximo (o exato não veio). */
     val frameFallback: Boolean get() = flags and FLAG_FRAME_FALLBACK != 0
+    /** 0.3.2: motion blur com menos amostras que o pedido em algum quadro. */
+    val blurReduced: Boolean get() = flags and FLAG_BLUR_REDUCED != 0
+    /** 0.3.2: a resolução pedida passou do aparelho; saiu no teto dele. */
+    val resolutionCapped: Boolean get() = flags and FLAG_RESOLUTION_CAPPED != 0
+    /** 0.3.2: a imagem HDR do ambiente não coube; ambiente neutro. */
+    val environmentFallback: Boolean get() = flags and FLAG_ENVIRONMENT_FALLBACK != 0
+    /** 0.3.2: o modelo Original não coube; saiu o da prévia. */
+    val modelFallback: Boolean get() = flags and FLAG_MODEL_FALLBACK != 0
     /** Este export roda no modo de segurança (refeito depois de o encoder travar). */
     val safeMode: Boolean get() = flags and FLAG_SAFE_MODE != 0
     /** Este export continuou um interrompido, do último trecho salvo. */
@@ -529,6 +537,13 @@ class ExportProgress {
         const val FLAG_RESUMABLE = 1 shl 6
         const val FLAG_SOFTWARE_DECODE = 1 shl 7
         const val FLAG_VERIFY_WARNINGS = 1 shl 12
+        /** 0.3.2 (Engine::ExportFlag): reduções que a tela avisa. */
+        const val FLAG_BLUR_REDUCED = 1 shl 13
+        const val FLAG_RESOLUTION_CAPPED = 1 shl 14
+        const val FLAG_ENVIRONMENT_FALLBACK = 1 shl 15
+        const val FLAG_MODEL_FALLBACK = 1 shl 18
+        const val QUALITY_NOTICE_FLAGS = FLAG_BLUR_REDUCED or FLAG_RESOLUTION_CAPPED or
+            FLAG_ENVIRONMENT_FALLBACK or FLAG_MODEL_FALLBACK
         // aurea::kExportRetryShift / kExportRetrySoftwareDecode (ExportWatchdog.hpp).
         const val RETRY_SHIFT = 16
         const val RETRY_SOFTWARE_DECODE = 1 shl 18

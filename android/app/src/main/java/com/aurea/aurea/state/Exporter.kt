@@ -177,6 +177,8 @@ class Exporter internal constructor(
     private val releaseUiCaches: () -> Unit = {},
     /** O projeto aberto (marcador do ProjectGuard durante o export). */
     private val projectPath: () -> String? = { null },
+    /** 0.3.2: a sessão de export acabou (o EditorStore suspende o motor se o app ficou em segundo plano). */
+    private val onSessionEnded: () -> Unit = {},
 ) {
     var state by mutableStateOf(ExportUiState())
         private set
@@ -287,6 +289,8 @@ class Exporter internal constructor(
     /** A failed IO/JNI call is a recoverable export error, never an uncaught UI coroutine. */
     private suspend fun guardedExport(guarded: String?, job: suspend () -> Unit) {
         try {
+            // 0.3.2: o export continua fora do app (serviço em primeiro plano).
+            ExportForegroundService.start(app)
             if (guarded != null) withContext(Dispatchers.IO) { ProjectGuard.begin(app, ProjectGuard.Stage.EXPORT_VIDEO, guarded) }
             job()
         } catch (cancelled: CancellationException) {
@@ -298,6 +302,8 @@ class Exporter internal constructor(
             android.util.Log.e("AureaExport", "Export operation failed", error)
             state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_interrupted), preparing = false)
         } finally {
+            ExportForegroundService.stop(app)
+            onSessionEnded()
             try {
                 if (guarded != null) withContext(NonCancellable + Dispatchers.IO) {
                     runCatching { ProjectGuard.end(app, ProjectGuard.Stage.EXPORT_VIDEO) }
@@ -345,6 +351,7 @@ class Exporter internal constructor(
                 .takeIf { level > 0 && options.shortSide > 0 && it in 1 until options.shortSide } ?: 0
             exportedFpsCap = attemptFpsCap(level, requestedFps)
             exportedBlurCap = if (level > 0 && usesBlur) AureaEngine.nativeExportAttemptBlurCap(level) else 0
+            exportedQualityFlags = 0
             val suggested = runEngineJob(dir, file, options, level) {
                 engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale,
                     options.trimToContent, options.quality.coerceIn(0, 2), rateModeFor(options.hevc && level == 0), level)
@@ -393,6 +400,8 @@ class Exporter internal constructor(
     private var exportedFpsCap = 0
     /** Teto de motion blur do degrau que exportou (0 = o do projeto; 1 = sem desfoque). */
     private var exportedBlurCap = 0
+    /** 0.3.2: as reduções que o motor avisou nesta tentativa (ExportProgress.QUALITY_NOTICE_FLAGS). */
+    private var exportedQualityFlags = 0
 
     /** O teto de fps do degrau, quando fica abaixo do pedido (0 = não limita). */
     private fun attemptFpsCap(attempt: Int, requested: Double): Int {
@@ -500,6 +509,8 @@ class Exporter internal constructor(
                     markedPercent = percent
                     ExitDiagnostics.mark(app, ExitDiagnostics.Phase.PROJECT_EXPORT_VIDEO, "f=${progress.framesDone}/${progress.framesTotal}")
                 }
+                exportedQualityFlags = progress.flags and ExportProgress.QUALITY_NOTICE_FLAGS
+                ExportForegroundService.update(app, progress.framesDone, progress.framesTotal)
                 state = state.copy(
                     framesDone = progress.framesDone,
                     framesTotal = progress.framesTotal,
@@ -611,6 +622,7 @@ class Exporter internal constructor(
                     if (video && exportedFpsCap > 0) add(text(R.string.export_done_fps, exportedFpsCap))
                     if (video && exportedBlurCap == 1) add(text(R.string.export_done_blur_off))
                     else if (video && exportedBlurCap > 1) add(text(R.string.export_done_blur_less))
+                    if (video) addAll(qualityNotes(exportedQualityFlags))
                 }
                 val pronto = state.copy(phase = ExportPhase.Done, outputUri = uri,
                     message = (listOf(label) + notes).joinToString("\n"))
@@ -732,6 +744,14 @@ class Exporter internal constructor(
         else -> null
     }
 
+    /** 0.3.2: o que o motor teve de reduzir (antes só ia para o log). */
+    private fun qualityNotes(flags: Int): List<String> = buildList {
+        if (flags and ExportProgress.FLAG_RESOLUTION_CAPPED != 0) add(text(R.string.export_note_resolution_capped))
+        if (flags and ExportProgress.FLAG_BLUR_REDUCED != 0) add(text(R.string.export_note_blur_reduced))
+        if (flags and ExportProgress.FLAG_ENVIRONMENT_FALLBACK != 0) add(text(R.string.export_note_environment_fallback))
+        if (flags and ExportProgress.FLAG_MODEL_FALLBACK != 0) add(text(R.string.export_note_model_fallback))
+    }
+
     private fun noticeFor(p: ExportProgress, options: ExportOptions): String {
         val lines = ArrayList<String>(4)
         if (lighterAfterClose) lines += text(R.string.export_after_system_close)
@@ -753,6 +773,7 @@ class Exporter internal constructor(
         if (p.frameFallback) {
             lines += text(R.string.app_export_frame_fallback)
         }
+        lines += qualityNotes(p.flags)
         return lines.joinToString("\n")
     }
 

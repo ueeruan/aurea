@@ -542,6 +542,7 @@ struct ExportView: View {
         }
         if flags & AureaExportFlag.thermalReduced.rawValue != 0 { notices.append(AureaText.t("ios_export_thermal")) }
         if flags & AureaExportFlag.frameFallback.rawValue != 0 { notices.append(AureaText.t("ios_export_frame_fallback")) }
+        notices.append(contentsOf: AureaModel.exportQualityNotes(flags))
         return notices.joined(separator: "\n")
     }
     private func formatMbps(_ mbps: Double) -> String {

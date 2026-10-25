@@ -281,6 +281,7 @@ struct Engine::ExportContext {
     f64 fps = 30.0;
     f64 compFps = 30.0;
     u32 attemptBlurCap = 0;   ///< teto de motion blur do degrau (ExportAttempts.hpp; 1 = sem desfoque)
+    u32 attemptGpuStep = 0;   ///< degrau de custo 3D do degrau (fixo na tentativa inteira)
     u32 frames = 0;
     bool dither = true;
     bool directSurface = false;        ///< surface-direct pedido (VideoStreamConfig::directSurface)
@@ -742,7 +743,7 @@ bool model_texture_references_complete(const scene3d::SceneAsset& scene) noexcep
 Status prepare_original_export_models(Project& project, CompositionId root,
         std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>>& models,
         u64& room, const scene3d::DeviceMemoryHint& memory, u32 gpuTextureLimit,
-        std::atomic<bool>& cancel, std::atomic<u64>& extraBytes, bool& promoted) noexcept {
+        std::atomic<bool>& cancel, std::atomic<u64>& extraBytes, bool& promoted, bool& previewFallback) noexcept {
     try {
         std::vector<CompositionId> pending{root};
         std::unordered_set<u64> compositions, assets;
@@ -808,6 +809,7 @@ Status prepare_original_export_models(Project& project, CompositionId root,
                         static_cast<u32>(prior->second->stats.texturesSkipped));
                 AUREA_LOG_WARN("export Original: %s exportado com o modelo da previa (%.*s)", source->name.c_str(),
                     static_cast<int>(why.detail().size()), why.detail().empty() ? "" : why.detail().data());
+                previewFallback = true;   // 0.3.2: a tela avisa (kExportModelFallback)
                 return true;
             };
             const auto dot = source->sourcePath.find_last_of('.');
@@ -13753,6 +13755,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         if (!comp) return Errc::NotFound;
         ctx->compFps = comp->fps();
         ctx->attemptBlurCap = attemptPlan.blurCap;
+        ctx->attemptGpuStep = attemptPlan.gpuStep;
         // Freeze with the established serializer; the editor document and its
         // historical file formats are never rewritten by export.
         const u64 room = source_asset_room_locked();
@@ -13883,6 +13886,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         }
         if (!reduced.width || !reduced.height) return Status{Errc::NotSupported, "resolucao acima do que este aparelho exporta"};
         AUREA_LOG_INFO("export: %ux%u acima do aparelho; saindo em %ux%u", ctx->width, ctx->height, reduced.width, reduced.height);
+        ctx->progress.flags |= kExportResolutionCapped;   // 0.3.2: a tela diz o tamanho que saiu
         ctx->width = reduced.width;
         ctx->height = reduced.height;
     }
@@ -14442,7 +14446,11 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
         static const std::shared_ptr<const scene3d::HdriPixels> neutral = std::make_shared<const scene3d::HdriPixels>();
         std::shared_ptr<const scene3d::HdriPixels> pixels = read_hdri_file(asset->sourcePath, c.frozenAssetBudget).pixels;
         if (pixels) c.frozenAssetBudget -= std::min<u64>(c.frozenAssetBudget, pixels->rgb.capacity() * sizeof(f32));
-        else pixels = neutral;
+        else {
+            pixels = neutral;
+            std::lock_guard<std::mutex> pl(c.mutex);
+            c.progress.flags |= kExportEnvironmentFallback;   // 0.3.2: a tela avisa
+        }
         c.frozenHdris[id.pack()] = pixels;
         return pixels;
     }, &ctx);
@@ -14462,9 +14470,14 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
     // The 2174 Original policy applies to this immutable offline scene only.
     // Track each session's real CPU allocation until its deferred cleanup ends.
     const u64 originalBytesBefore = exportOriginalModelBytes_.load(std::memory_order_relaxed);
+    bool modelFallback = false;
     const Status originals = prepare_original_export_models(*ctx.frozenProject, ctx.recovery.composition,
         ctx.frozenModels, ctx.frozenAssetBudget, model_memory_hint({}), gpu_->capabilities().maxTexture2D,
-        ctx.cancelRequested, exportOriginalModelBytes_, ctx.promotedOriginalModels);
+        ctx.cancelRequested, exportOriginalModelBytes_, ctx.promotedOriginalModels, modelFallback);
+    if (modelFallback) {
+        std::lock_guard<std::mutex> pl(ctx.mutex);
+        ctx.progress.flags |= kExportModelFallback;
+    }
     ctx.originalModelBytes = exportOriginalModelBytes_.load(std::memory_order_relaxed) - originalBytesBefore;
     return originals;
 }
@@ -14577,6 +14590,13 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
         std::lock_guard<std::mutex> pl(c.mutex);
         c.progress.flags |= kExportFrameFallback;
     }
+    // 0.3.2: o motion blur deste quadro saiu com menos amostras que o pedido
+    // (orçamento do quadro, teto de cena do aparelho, degrau da escada): o
+    // export segue e as telas avisam, em vez de só o log saber.
+    if (result.ok() && (c.offline->compositor().take_reductions() & Renderer::kReducedMotionBlur)) {
+        std::lock_guard<std::mutex> pl(c.mutex);
+        c.progress.flags |= kExportBlurReduced;
+    }
     return c.frozenAssetStatus.ok() ? result : c.frozenAssetStatus;
 }
 
@@ -14647,35 +14667,23 @@ void Engine::export_thread_main() noexcept {
 
     // Quadros submetidos à GPU e ainda não entregues ao encoder, em ordem.
     std::deque<u32> inflight;
-    // Motion blur 3D (beta 2185, maioria dos celulares): o export amostrava a
-    // cena a cada 0,5 px do rastro, até 128 renders completos por quadro. Os
-    // degraus de custo existiam no Renderer, mas ninguém os acionava: cada
-    // quadro levava segundos de GPU e o export parecia travado ou o driver
-    // resetava a GPU. O tempo real de cada quadro ajusta: quadro pesado corta
-    // amostras (e depois sombra/MSAA); trecho leve as devolve. Resolução e fps
-    // não mudam.
-    // 0.2.1: sem teto inicial. O teto fixo de 16 no celular fazia o arquivo
-    // sair com menos amostras que a prévia (rastro em cópias separadas onde a
-    // prévia era lisa). Agora o export começa igual à prévia e só reduz se um
-    // quadro passar de 1,5 s — e nunca abaixo das amostras escolhidas
-    // (Renderer::capped_shutter_samples).
-    constexpr u32 kMobileBlurCap = 0;
-    // 0.3.0: o teto volta com 8 quadros abaixo de 0,5 s (antes 30 abaixo de
-    // 0,25 s: um export 3D com desfoque num celular nunca chegava lá e ficava
-    // com o teto mais baixo até o fim).
-    constexpr u64 kHeavyFrameNs = 1'500'000'000ull, kLightFrameNs = 500'000'000ull;
-    constexpr u32 kLightFramesToRaise = 8;
-    u32 lightFrames = 0;
+    // Motion blur 3D (beta 2185): até 128 renders completos da cena por
+    // quadro. Até a 0.3.1 o tempo real de cada quadro ajustava amostras e
+    // sombra/MSAA no meio do export; o arquivo dependia da carga do aparelho
+    // (docs/diagnostico/export-engine-2.0.md, 1.2). 0.3.2: tetos fixos por
+    // aparelho e por degrau da escada; GPU que estoura o prazo falha a
+    // tentativa e a próxima já começa mais leve, com aviso.
     if (ctx.offline && !ctx.preRenderMode) {
         Renderer& compositor = ctx.offline->compositor();
-        compositor.set_export_blur_cap(kMobileBlurCap);
         // 0.2.7: cada amostra de motion blur 3D é a cena inteira. Teto por
-        // aparelho (o 1o quadro não pode passar do prazo da GPU antes de o
-        // teto adaptativo agir) e o teto do degrau da escada por cima.
+        // aparelho (fixo) e o teto do degrau da escada por cima. 0.3.2: o
+        // degrau de custo 3D também vem da escada e não muda no meio do export.
         compositor.set_export_scene_blur_cap(kAddressSpace32 ? 8u : low_memory_device() ? 16u : 32u);
         compositor.set_export_blur_hard_cap(ctx.attemptBlurCap);
-        if (ctx.attemptBlurCap)
-            AUREA_LOG_INFO("export: degrau com motion blur limitado a %u amostra(s)", ctx.attemptBlurCap);
+        compositor.set_export_gpu_step(ctx.attemptGpuStep);
+        (void)compositor.take_reductions();
+        if (ctx.attemptBlurCap || ctx.attemptGpuStep)
+            AUREA_LOG_INFO("export: degrau com motion blur ate %u amostra(s), custo 3D %u", ctx.attemptBlurCap, ctx.attemptGpuStep);
     }
     auto cancelled = [&] { return ctx.cancelRequested.load(std::memory_order_acquire); };
     // Espera a GPU terminar o quadro mais antigo em voo e o passa ao encoder.
@@ -14703,36 +14711,9 @@ void Engine::export_thread_main() noexcept {
         const u64 gpuWaitNs = monotonic_ns() - r0;
         ctx.readNs.fetch_add(gpuWaitNs, std::memory_order_relaxed);
         if (ctx.diagnostics) ctx.diagnostics->event(ExportDiagnostics::Counter::Rendered);
-        if (slot.submitNs && ctx.offline) {
-            // 0.3.0: o custo DESTE quadro (CPU dele + o que ainda faltava de GPU).
-            // Medir do início do render até a entrega somava o quadro seguinte
-            // (pipeline com 2 em voo) e a espera do encoder: projeto pesado
-            // passava de 1,5 s sem a GPU estar no limite, o teto descia até 2
-            // amostras de cena e o arquivo saía com cópias da camada (fantasma)
-            // enquanto a prévia continuava lisa.
-            const u64 took = slot.renderCpuNs + gpuWaitNs;
-            Renderer& compositor = ctx.offline->compositor();
-            const u32 cap = compositor.export_blur_cap();
-            if (took > kHeavyFrameNs) {
-                lightFrames = 0;
-                if (cap == 0 || cap > Renderer::kMinAdaptiveExportBlur) {
-                    const u32 lowered = compositor.lower_export_blur_cap();
-                    AUREA_LOG_WARN("export: quadro %u levou %llu ms; motion blur limitado a %u amostras",
-                                   slot.frame, static_cast<unsigned long long>(took / 1'000'000ull), lowered);
-                } else {
-                    const u32 step = compositor.raise_export_gpu_step();
-                    AUREA_LOG_WARN("export: quadro %u levou %llu ms; custo 3D reduzido (degrau %u)",
-                                   slot.frame, static_cast<unsigned long long>(took / 1'000'000ull), step);
-                }
-            } else if (took < kLightFrameNs && cap && (kMobileBlurCap == 0 || cap < kMobileBlurCap)) {
-                if (++lightFrames >= kLightFramesToRaise) {
-                    lightFrames = 0;
-                    AUREA_LOG_INFO("export: trecho leve; motion blur volta a %u amostras", compositor.raise_export_blur_cap());
-                }
-            } else {
-                lightFrames = 0;
-            }
-        }
+        // 0.3.2: o tempo do quadro não muda mais o conteúdo do vídeo (antes
+        // baixava as amostras de motion blur e o custo 3D quando um quadro
+        // passava de 1,5 s). Ele só entra no diagnóstico (readNs acima).
         inflight.pop_front();
         return ctx.queue->publish(si, slot.frame);
     };
@@ -15024,7 +15005,7 @@ void Engine::export_encoder_main() noexcept {
                         expected.validatedFrames = &c.validatedFrames;
                         if (fin.ok()) fin = c.sink->validate_output(expected);
                         if (c.abandoned_worker()) { retiredExit(); return; }
-                        c.queue->validated(fin);
+                        fin = c.queue->validated(fin);
                         c.publish_export_phase(fin.ok() ? "concluido" : "falha na validacao");
                     }
                     if (!fin.ok()) {

@@ -24,6 +24,12 @@
 //  renderizada de novo; sem este teto todos os degraus falhavam igual
 //  (lado menor e codec não mudam o custo de 128 cenas por quadro).
 //
+//  0.3.2: cada degrau também tem um DEGRAU DE CUSTO 3D fixo (sombra/MSAA,
+//  Renderer::set_export_gpu_step; 2: 1, 3: 1, 4: 2, 5: 3, 6: 4). Antes esse
+//  corte subia no meio do export quando um quadro passava de 1,5 s, e o mesmo
+//  projeto saía diferente conforme a carga do aparelho. Agora vale do primeiro
+//  ao último quadro da tentativa, e a tela avisa o degrau.
+//
 //  O degrau viaja no lugar do antigo "modo de segurança" (ExportSettings::
 //  safeMode, JNI e ponte do iOS): 0, 1 e 2 continuam significando o mesmo
 //  encoder de antes. O motor aplica o degrau ao iniciar (Engine.cpp,
@@ -57,17 +63,18 @@ struct ExportAttemptPlan {
     f64 fpsCap = 0.0;        ///< teto da taxa (0 = a pedida)
     bool noUpscale = false;  ///< sem upscale na GPU
     u32 blurCap = 0;         ///< teto de amostras de motion blur por quadro (0 = o do projeto; 1 = sem desfoque)
+    u32 gpuStep = 0;         ///< degrau de custo 3D (0 = cheio; Renderer::set_export_gpu_step)
 };
 
 [[nodiscard]] constexpr ExportAttemptPlan export_attempt_plan(u32 attempt) noexcept {
     switch (attempt) {
-        case 0: return {0, false, 0, 0.0, false, 0};
-        case 1: return {1, true, 0, 60.0, false, 32};
-        case 2: return {2, true, 0, 60.0, false, 16};
-        case 3: return {1, true, 720, 30.0, true, 16};
-        case 4: return {2, true, 720, 30.0, true, 8};
-        case 5: return {2, true, 480, 30.0, true, 4};
-        default: return {2, true, 480, 30.0, true, 1};
+        case 0: return {0, false, 0, 0.0, false, 0, 0};
+        case 1: return {1, true, 0, 60.0, false, 32, 0};
+        case 2: return {2, true, 0, 60.0, false, 16, 1};
+        case 3: return {1, true, 720, 30.0, true, 16, 1};
+        case 4: return {2, true, 720, 30.0, true, 8, 2};
+        case 5: return {2, true, 480, 30.0, true, 4, 3};
+        default: return {2, true, 480, 30.0, true, 1, 4};
     }
 }
 
@@ -157,15 +164,18 @@ struct ExportAttemptEffect {
     bool fpsCapped = false;
     bool upscale = false;
     u32 blurCap = 0;     ///< 0 = o do projeto
-    /// `withBlur` falso: o teto de motion blur não conta (falha de encoder,
-    /// que amostras a menos não resolvem).
+    u32 gpuStep = 0;     ///< degrau de custo 3D
+    /// `withBlur` falso: o teto de motion blur e o custo 3D não contam (falha
+    /// de encoder, que menos trabalho de GPU não resolve).
     [[nodiscard]] constexpr bool same_as(const ExportAttemptEffect& o, bool withBlur = true) const noexcept {
         return safeMode == o.safeMode && hevc == o.hevc && shortSide == o.shortSide && shortCapped == o.shortCapped &&
-               fps == o.fps && fpsCapped == o.fpsCapped && upscale == o.upscale && (!withBlur || blurCap == o.blurCap);
+               fps == o.fps && fpsCapped == o.fpsCapped && upscale == o.upscale &&
+               (!withBlur || (blurCap == o.blurCap && gpuStep == o.gpuStep));
     }
-    /// Menos amostras de motion blur que `o` (menos trabalho de GPU por quadro).
+    /// Menos trabalho de GPU por quadro que `o`: menos amostras de motion blur
+    /// ou um degrau de custo 3D acima.
     [[nodiscard]] constexpr bool less_blur_than(const ExportAttemptEffect& o) const noexcept {
-        return blurCap != 0 && (o.blurCap == 0 || blurCap < o.blurCap);
+        return (blurCap != 0 && (o.blurCap == 0 || blurCap < o.blurCap)) || gpuStep > o.gpuStep;
     }
 };
 
@@ -183,6 +193,7 @@ struct ExportAttemptEffect {
     else e.fps = std::min(r.fps, p.fpsCap);
     e.upscale = r.upscale && !p.noUpscale;
     e.blurCap = p.blurCap;
+    e.gpuStep = p.gpuStep;
     return e;
 }
 

@@ -3229,7 +3229,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // O orçamento do quadro é FIXO: recusar aqui deixava o quadro
                 // incompleto para sempre e o export morria em 30 s. Usa as
                 // amostras que cabem (no mínimo o texto sem desfoque).
-                if (sets > admitted) sets = std::max(1u, admitted);
+                if (sets > admitted) {
+                    if (settings.finalQuality && sets > 1 && admitted < sets) reductions_ |= kReducedMotionBlur;
+                    sets = std::max(1u, admitted);
+                }
                 exposureBytesRemaining_ -= std::min(exposureBytesRemaining_, bytesPerSet * sets);
                 textShutter.count = sets;
                 for (u32 si = 0; si < sets; ++si) {
@@ -4904,31 +4907,40 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // sempre e o export desistia em 30 s ("recurso de composicao
             // indisponivel"). Agora a cena usa as amostras que CABEM; sem
             // espaço nem para 2, sai sem desfoque neste grupo — mas sai.
+            const bool moving = changing || travel >= .01;
             if (admitted < 2 && minimum <= 1) {
-                if (settings.finalQuality && (changing || travel >= .01))
+                if (settings.finalQuality && moving) {
+                    reductions_ |= kReducedMotionBlur;
                     AUREA_LOG_WARN("motion blur 3D sem orcamento neste quadro: grupo sem desfoque (%llu bytes por amostra)",
                                    static_cast<unsigned long long>(admittedBytes));
+                }
                 continue;
             }
             // 0.2.7: sem orçamento nem para 2 amostras, o grupo sai sem desfoque
             // neste quadro (os planos 2D da cena ficam com o desfoque deles).
             // Marcar incompleto fazia o export refazer o quadro por 30 s e desistir.
             if (admitted < 2) {
-                if (settings.finalQuality) AUREA_LOG_WARN("motion blur 3D sem orcamento neste quadro (%llu bytes por amostra)",
-                                                          static_cast<unsigned long long>(admittedBytes));
+                if (settings.finalQuality) {
+                    if (moving) reductions_ |= kReducedMotionBlur;
+                    AUREA_LOG_WARN("motion blur 3D sem orcamento neste quadro (%llu bytes por amostra)",
+                                   static_cast<unsigned long long>(admittedBytes));
+                }
                 continue;
             }
             if (settings.finalQuality && admitted < std::clamp(mb.samples, 2u, 64u) && (changing || travel >= .01))
                 AUREA_LOG_WARN("motion blur 3D reduzido a %u amostras pelo orcamento do quadro (pedido %u)", admitted, mb.samples);
             // Cada amostra é a CENA INTEIRA de novo (sombra, MSAA): no export, o
-            // teto da cena e o teto adaptativo (quadro pesado) valem mesmo abaixo
-            // do piso da prévia — senão 128 cenas por quadro passavam do prazo
-            // da GPU em todo degrau da escada (0.2.7).
+            // teto da cena (fixo por aparelho) vale mesmo abaixo do piso da
+            // prévia — senão 128 cenas por quadro passavam do prazo da GPU em
+            // todo degrau da escada (0.2.7). 0.3.2: sem teto que muda com o
+            // tempo do quadro; o que for cortado vira aviso no fim do export.
             u32 sceneLimit = admitted;
             if (settings.finalQuality && exportSceneBlurCap_ >= 1) sceneLimit = std::min(sceneLimit, exportSceneBlurCap_);
-            if (settings.finalQuality && exportBlurCap_ >= 2) sceneLimit = std::min(sceneLimit, exportBlurCap_);
             shutter.count = std::min(sceneLimit, std::max(minimum, capped_shutter_samples(mb, settings.finalQuality,
                 effective_quality(settings).motionBlurSamples, travel, changing, sceneLimit)));
+            if (settings.finalQuality && moving
+                && shutter.count < shutter_sample_count(mb, true, 1.f, travel, changing, ShutterPlan::kHardLimit))
+                reductions_ |= kReducedMotionBlur;
             if (shutter.count <= 1) continue;
             stateBudget -= admittedBytes * shutter.count;
             if (batchExposure) out.sceneExposureBatches.push_back(FrameSnapshot::SceneExposureBatch{

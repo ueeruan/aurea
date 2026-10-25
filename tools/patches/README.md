@@ -1,4 +1,4 @@
-The MediaCodec safety patch applies to FFmpeg 8.0.3's LGPL encoder adapter.
+The MediaCodec safety patch applies to FFmpeg 9.0.2's LGPL encoder adapter (byte-identical to 8.0.3's, so the same patch and hashes).
 It does not change compression algorithms, the decoder or AUREA preview.
 `tools/build_ffmpeg.py` checks the exact original and patched source digests,
 applies only `libavcodec/mediacodecenc.c`, records the patch in dependency

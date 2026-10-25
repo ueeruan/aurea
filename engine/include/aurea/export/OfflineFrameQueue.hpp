@@ -25,7 +25,10 @@ public:
     void end_render(Status result) noexcept;
     Status begin_finalizing() noexcept;
     Status begin_validating() noexcept;
-    void validated(Status result) noexcept;
+    /// O resultado EFETIVO: cancelar depois da validação vira Cancelled aqui e
+    /// também para quem chama (0.3.2 — antes o arquivo era publicado como OK
+    /// com a fase Cancelled).
+    Status validated(Status result) noexcept;
     void fail(Status result) noexcept;
     bool drained() const noexcept;
     ExportPhase phase() const noexcept { return phase_.load(std::memory_order_acquire); }

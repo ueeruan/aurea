@@ -208,6 +208,11 @@ typedef NS_OPTIONS(uint32_t, AureaExportFlag) {
     AureaExportFlagFrameFallback   = 1u << 3,
     /// Export refeito no modo de segurança depois de o encoder travar.
     AureaExportFlagSafeMode        = 1u << 4,
+    /// 0.3.2: reduções que a tela avisa (antes só iam para o log).
+    AureaExportFlagBlurReduced     = 1u << 13,
+    AureaExportFlagResolutionCapped = 1u << 14,
+    AureaExportFlagEnvironmentFallback = 1u << 15,
+    AureaExportFlagModelFallback   = 1u << 18,
 };
 
 /// Códigos de codec de saída (ExportCodec).

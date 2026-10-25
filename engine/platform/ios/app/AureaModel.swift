@@ -743,7 +743,13 @@ final class AureaModel: ObservableObject {
     @Published private(set) var exporting = false {
         // A marca de "export em andamento" só sobra se o app morrer no meio
         // (jetsam do iOS, crash): ver previousExportDied.
-        didSet { if !exporting { UserDefaults.standard.removeObject(forKey: Self.exportInFlightKey) } }
+        didSet {
+            if !exporting { UserDefaults.standard.removeObject(forKey: Self.exportInFlightKey) }
+            // 0.3.2: o bloqueio automático da tela encerrava exports longos
+            // (o iOS suspende o app e o motor cancela). Tela acesa durante o
+            // export; o Android já fazia isso (FLAG_KEEP_SCREEN_ON).
+            if exporting != oldValue { UIApplication.shared.isIdleTimerDisabled = exporting }
+        }
     }
     /// Este export começou mais leve porque o app fechou no meio do anterior.
     @Published private(set) var exportLighterAfterClose = false
@@ -852,6 +858,7 @@ final class AureaModel: ObservableObject {
     let playheadClock = PlayheadClock()
     private var playheadLink: CADisplayLink?
     private var memoryWarningObserver: NSObjectProtocol?
+    private var thermalObserver: NSObjectProtocol?
     @Published private(set) var memoryCacheEpoch: UInt64 = 0
     private var memoryCheckAt: TimeInterval = 0
     private var memoryTrimAt: TimeInterval = -.infinity
@@ -1491,6 +1498,7 @@ final class AureaModel: ObservableObject {
             deviceReport = engine.deviceReport()
             startStatusTimer()
             observeMemoryWarnings()
+            observeThermalState()
             // "Otimizar vídeos pesados": o modo gravado vale antes do primeiro projeto.
             ProxyOptimizer.shared.onOptimized = { [weak self] in self?.toast = AureaText.t("proxy_ready") }
             ProxyOptimizer.shared.onFailed = { [weak self] in self?.toast = AureaText.t("proxy_failed") }
@@ -1603,6 +1611,35 @@ final class AureaModel: ObservableObject {
     /// memória SEM derrubar o que está na tela: 15 = RUNNING_CRITICAL, que solta
     /// os quadros decodificados sem uso e o cache de render antigo. O projeto, o
     /// histórico e a timeline nunca entram (é a garantia do `trim_memory`).
+    /// 0.3.2: o estado térmico do iOS vai para o motor (como o PowerManager no
+    /// Android). Antes ninguém chamava `setThermalLevel`: o export não reduzia a
+    /// concorrência com o aparelho quente e o aviso "aparelho quente" nunca
+    /// aparecia. Os níveis são os mesmos (nominal, fair, serious, critical).
+    private func observeThermalState() {
+        guard thermalObserver == nil else { return }
+        let apply: @MainActor (AureaModel) -> Void = { model in
+            let state = ProcessInfo.processInfo.thermalState
+            let level: UInt32
+            switch state {
+            case .nominal: level = 0
+            case .fair: level = 1
+            case .serious: level = 2
+            case .critical: level = 3
+            @unknown default: level = 5
+            }
+            model.engine.setThermalLevel(level, throttling: state == .serious || state == .critical)
+        }
+        apply(self)
+        thermalObserver = NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.started else { return }
+                apply(self)
+            }
+        }
+    }
+
     private func observeMemoryWarnings() {
         guard memoryWarningObserver == nil else { return }
         memoryWarningObserver = NotificationCenter.default.addObserver(
@@ -1689,6 +1726,10 @@ final class AureaModel: ObservableObject {
         if let observer = memoryWarningObserver {
             NotificationCenter.default.removeObserver(observer)
             memoryWarningObserver = nil
+        }
+        if let observer = thermalObserver {
+            NotificationCenter.default.removeObserver(observer)
+            thermalObserver = nil
         }
         statusTimer?.invalidate()
         statusTimer = nil
@@ -4486,6 +4527,17 @@ final class AureaModel: ObservableObject {
     }
 
     /// Taxa que o degrau exporta, quando fica abaixo da pedida (0 = a pedida).
+    /// 0.3.2: o que o motor teve de reduzir (Engine::ExportFlag; antes só ia
+    /// para o log). A mesma lista do Android (Exporter.qualityNotes).
+    nonisolated static func exportQualityNotes(_ flags: UInt32) -> [String] {
+        var notes: [String] = []
+        if flags & AureaExportFlag.resolutionCapped.rawValue != 0 { notes.append(AureaText.t("export_note_resolution_capped")) }
+        if flags & AureaExportFlag.blurReduced.rawValue != 0 { notes.append(AureaText.t("export_note_blur_reduced")) }
+        if flags & AureaExportFlag.environmentFallback.rawValue != 0 { notes.append(AureaText.t("export_note_environment_fallback")) }
+        if flags & AureaExportFlag.modelFallback.rawValue != 0 { notes.append(AureaText.t("export_note_model_fallback")) }
+        return notes
+    }
+
     nonisolated static func exportAttemptReducedFps(_ attempt: UInt32, requestedFps: Double) -> Int {
         let cap = AureaEngine.exportAttemptFpsCap(attempt & 0xFF)
         return attempt & 0xFF > 0 && cap > 0 && requestedFps > cap + 0.01 ? Int(cap.rounded()) : 0
@@ -4795,10 +4847,13 @@ final class AureaModel: ObservableObject {
                     if !saved { NSLog("AureaExport: Photos save failed: %@", error?.localizedDescription ?? "-") }
                     let reduced = kind == .video ? (self?.exportReducedSide ?? 0) : 0
                     let reducedFps = kind == .video ? (self?.exportReducedFps ?? 0) : 0
+                    let qualityFlags = kind == .video ? ((self?.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0) : 0
+                    let qualityNotes = Self.exportQualityNotes(qualityFlags).map { "\n" + $0 }.joined()
                     self?.exportMessage = (saved ? AureaText.t("ios_export_saved_photos")
                         : AureaText.t("ios_export_photos_failed") + (error.map { " (\($0.localizedDescription))" } ?? ""))
                         + (reduced > 0 ? "\n" + AureaText.t("export_done_reduced", Int(reduced)) : "")
                         + (reducedFps > 0 ? "\n" + AureaText.t("export_done_fps", reducedFps) : "")
+                        + qualityNotes
                     self?.toast = AureaText.t(readyKey)
                     AureaAdsManager.shared.showExportInterstitialIfAvailable {}
                 }

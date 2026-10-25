@@ -310,7 +310,21 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Export (tela Exportar). O motor renderiza; aqui só acompanha e publica. */
-    val exporter = Exporter(app, engine, viewModelScope, releaseUiCaches = { releaseExportUiCaches() }) { project.path }
+    val exporter = Exporter(app, engine, viewModelScope, releaseUiCaches = { releaseExportUiCaches() },
+        projectPath = { project.path }, onSessionEnded = { suspendIfLeftDuringExport() })
+
+    /**
+     * 0.3.2: o app foi para o segundo plano com um export rodando. O motor não
+     * é suspenso (suspender cancela o export); ele é suspenso quando o export
+     * termina, se o app ainda estiver fora. Voltar antes disso só cancela a pendência.
+     */
+    @Volatile private var suspendAfterExport = false
+
+    private fun suspendIfLeftDuringExport() {
+        if (!suspendAfterExport) return
+        suspendAfterExport = false
+        enqueueLifecycle { if (ready) engine.suspend() }
+    }
 
     /**
      * O motor cru, só para o teste de estresse. Ele captura quadro por quadro e
@@ -1155,6 +1169,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun onEnterForeground() {
+        suspendAfterExport = false
         enqueueLifecycle { synchronized(lifecycleLock) { if (ready) engine.resume() } }
         if (ready) startStatusLoop()
         // Um export que a suspensão parou continua do trecho salvo.
@@ -1185,6 +1200,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     private fun flushOnLeave(suspendAfter: Boolean) {
         val path = if (screen == Screen.Editor) project.path else null
+        // 0.3.2: com export rodando, o motor fica de pé (o serviço em primeiro
+        // plano segura o processo); a suspensão vem quando ele terminar.
+        val keepForExport = suspendAfter && exporter.busy
+        if (keepForExport) suspendAfterExport = true
         enqueueLifecycle {
             if (path != null && ready) {
                 val t0 = System.nanoTime()
@@ -1194,7 +1213,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
             // suspend junta a thread do export: fora do lifecycleLock, senão o
             // surfaceDestroyed do onStop espera o export terminar na main.
-            if (suspendAfter && ready) engine.suspend()
+            if (suspendAfter && ready && !keepForExport) engine.suspend()
         }
     }
 

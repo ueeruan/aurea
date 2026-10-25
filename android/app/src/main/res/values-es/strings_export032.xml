@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.2: reduções do export que antes só iam para o log. -->
+<resources>
+    <string name="export_note_blur_reduced">Desenfoque de movimiento con menos muestras en algunos cuadros (límite de memoria o GPU de este dispositivo).</string>
+    <string name="export_note_resolution_capped">Se exportó en el mayor tamaño que admite este dispositivo.</string>
+    <string name="export_note_environment_fallback">La imagen HDR del entorno 3D no cupo en la memoria: se usó el entorno neutro.</string>
+    <string name="export_note_model_fallback">Un modelo 3D salió con la calidad de la vista previa (la versión Original no cupo en la memoria).</string>
+    <string name="export_service_channel">Exportación de video</string>
+    <string name="export_service_title">Exportando el video</string>
+    <string name="export_service_preparing">Preparando…</string>
+    <string name="export_service_progress">%1$d%% — puedes usar otras apps</string>
+</resources>

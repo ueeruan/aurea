@@ -34,6 +34,7 @@ Ready-made examples in [`examples/`](examples/):
 | `soft-glow/` → `soft-glow.aureaplugin` | shader, 2 passes | a pass at 1/4 resolution (`scale`), `target` and `inputs` |
 | `dream-look/` → `dream-look.aureaplugin` | stack | built-in blur + glow + saturation driven by expressions |
 | `pulse-vignette.fs` | ISF 2.0 | importing a `.fs` (point2D, color, bool, TIME) |
+| `target-3d/` → `target-3d.aureaplugin` | shader3d, 1 pass | a ring around a 3D null seen through the scene camera; `layer` parameter with `accept`; `aurea_ray` |
 
 ---
 
@@ -51,6 +52,11 @@ same options as the app's own shaders).
 colour...) whose values are computed from the plugin's parameters by simple
 expressions (`amount * 40`). No shader: the safest kind, works on every device.
 It is how you ship a "look" with its own controls.
+
+**`"kind": "shader3d"`** (0.3.1) — a `shader` that also sees the **3D scene**:
+the composition camera and up to 4 linked layers (3D null, camera, light). Use it
+for effects that live in 3D space and follow the camera. See
+[3D plugins](#3d-plugins-kind-shader3d-031) in section 4.
 
 ## 2. The `.aureaplugin` package
 
@@ -109,7 +115,7 @@ UTF-8 text. Full example (from `rgb-wave`):
 | `name` | text or locales | yes | Catalogue name (up to 64). |
 | `description` | text or locales | no | Description (up to 512). |
 | `category` | text | no | Sub-category shown inside **Plugins** (up to 32). |
-| `kind` | `"shader"` or `"stack"` | yes | Section 1. |
+| `kind` | `"shader"`, `"shader3d"` or `"stack"` | yes | Section 1. `shader3d` (0.3.1) is a `shader` that also receives the scene camera and the linked layers (section 4, "3D plugins"). |
 | `params` | list | no | Up to **16** parameters (below). |
 | `passes` | list | shader | 1 to **8** passes (below). |
 | `margin` | number | no | How many **layer px** the effect reads/draws beyond the layer box (0..1024). A glow of radius 50 declares `50`. Without a margin the result is clipped to the box. |
@@ -135,12 +141,13 @@ the engine name of the effect; the UI shows the device language.
 | Field | Description |
 | --- | --- |
 | `id` | Parameter name: letters, digits and `_`, up to 32, starting with a letter or `_`. It is also the **shader name** (a macro) and the expression name. Must not be a GLSL keyword or built-in function (`mix`, `texture`, `float`...), must not start with `gl_`, `aurea`, `isf_`, `IMG_`, `vv_`, and must not contain `__`. |
-| `type` | `float`, `int`, `bool`, `enum`, `color`, `point`, `angle`. |
+| `type` | `float`, `int`, `bool`, `enum`, `color`, `point`, `angle`, `layer` (`shader3d` only). |
 | `label` | Text or locales (up to 48). Default: the `id`. |
 | `default` | Initial value (per type, below). |
 | `min`, `max` | Control range (numbers). |
 | `options` | `enum` only: 1 to 32 texts (or locale objects). |
 | `animatable` | `true` (default) or `false`: accepts keyframes/expressions. |
+| `accept` | `layer` only: a list of `"camera"`, `"null"`, `"light"` or `"any"` (default: any layer). The panel only offers those layers. |
 
 | Type | `default` | default `min`/`max` | In the shader |
 | --- | --- | --- | --- |
@@ -151,6 +158,7 @@ the engine name of the effect; the UI shows the device language.
 | `color` | `"#RRGGBB"`, `"#RRGGBBAA"` or `[r, g, b(, a)]` 0..1 **in sRGB** (like a colour picker) | — | `vec4` **linear** RGBA, straight alpha (with `colorSpace: srgb`, sRGB RGBA) |
 | `point` | `[x, y]` relative to the layer (0..1 = width/height; `[0.5, 0.5]` = centre) | -1..2 | `vec2` **in the pass `uv` space** (converted by the engine) |
 | `angle` | degrees | -360..360 | `float` in **radians** |
+| `layer` | — (no layer) | — | an **integer** (the layer's position among the `layer` parameters) for the `aurea_layer_*` functions (up to **4** per plugin; never animatable) |
 
 ### Passes (`passes`)
 
@@ -261,18 +269,157 @@ output. `aurea.resolution` and `aurea.layer.zw` reflect each pass's `scale`.
 
 ### 3D plugins (`"kind": "shader3d"`, 0.3.1)
 
-A 3D plugin is a `shader` that also sees the **scene camera** (the composition's
-active camera, or the default one) and the **world** of up to 4 layers linked by
-`layer` parameters (a 3D **null** as a target or pivot, a **camera**, a **light**).
-A `layer` parameter accepts `"accept": ["camera", "null", "light", "any"]`, is
-never animatable, and its name becomes its slot for the `aurea_layer_*`
-functions. The `aurea` block gains, after `params[16]`: `view`, `compFromWorld`,
-`compFromLayer`, `camera`, `lens`, `comp`, `layerWorld[4]`, `layerPos[4]`,
-`layerInfo[4]`; and the helpers `aurea_layer_valid/position/matrix/axis/kind/fov`,
-`aurea_camera_position/right/down/forward`, `aurea_comp_px`, `aurea_ray`,
-`aurea_world_to_comp`, `aurea_world_to_view`. World units are composition
-pixels. See the Portuguese README (section 4, "Plugins 3D") for the full table
-and `examples/target-3d` for a complete plugin.
+A 3D plugin is a `shader` that can also see the **3D scene**:
+
+- the **scene camera**: the composition's active camera, or the default camera
+  when there is none;
+- the **world** of up to **4 linked layers**, chosen through `layer`
+  parameters: a **3D null** as a target or pivot, a **camera**, a **light**.
+
+With that the shader can work in 3D: cast the camera ray through each pixel,
+project world points to the screen, measure distances to a null. Moving the
+null, moving the camera or changing the lens updates the effect on the same
+frame, in the preview and in the export. Everything else is the same as a
+`shader`: passes, `margin`, `colorSpace`, parameters with keyframes and
+expressions, and the test frame at install time.
+
+#### The manifest
+
+```json
+{
+  "aureaPlugin": 1,
+  "id": "com.studio.target",
+  "version": "1.0.0",
+  "name": { "pt-BR": "Mira 3D", "en": "3D Target" },
+  "category": "3D",
+  "kind": "shader3d",
+  "params": [
+    { "id": "target", "type": "layer", "accept": ["null"],
+      "label": { "pt-BR": "Alvo (nulo 3D)", "en": "Target (3D null)" } },
+    { "id": "radius", "type": "float", "default": 120, "min": 4, "max": 1200 }
+  ],
+  "passes": [ { "shader": "target.frag" } ]
+}
+```
+
+- `"kind": "shader3d"` turns on the 3D mode. A `layer` parameter in a plain
+  `"shader"` plugin is refused at install time.
+- **`layer` parameter**: in the panel it becomes a list of the composition's
+  layers.
+  - `accept` filters the list: `"camera"`, `"null"`, `"light"`, or `"any"`
+    (any layer; the default without `accept`). They combine:
+    `["null", "camera"]`.
+  - It starts with no layer (`aurea_layer_valid` is false).
+  - It is never animatable: the link is fixed, the linked layer is what moves.
+  - Up to **4** per plugin, counting every `layer` parameter.
+  - Linking the layer that carries the effect has no effect: it reads as no layer.
+
+#### What the shader receives
+
+The `aurea` block gains these fields **after** `params[16]`. Nothing before
+them changes, so a 2D shader pasted into a `shader3d` plugin keeps working:
+
+| Symbol | Type | Contents |
+| --- | --- | --- |
+| `aurea.view` | `mat4` | view ← world (x right, y down, z forward) |
+| `aurea.compFromWorld` | `mat4` | composition px (homogeneous) ← world |
+| `aurea.compFromLayer` | `mat4` | composition px (homogeneous) ← px of the layer that carries the effect |
+| `aurea.camera` | `vec4` | `xyz` camera position in the world; `w` = 1 camera layer, 0 default camera |
+| `aurea.lens` | `vec4` | `x` vertical field of view (rad), `y` near plane (px), `z` aspect (width/height), `w` focal length in px |
+| `aurea.comp` | `vec4` | `xy` composition size (px), `zw` = 1/xy |
+| `aurea.layerWorld[4]` | `mat4` | world ← px of each linked layer (parents included) |
+| `aurea.layerPos[4]` | `vec4` | `xyz` the linked layer's anchor point in the world; `w` = 1 linked, 0 no layer |
+| `aurea.layerInfo[4]` | `vec4` | `x` kind (6 null, 8 camera, 9 light; anything else = another layer), `y` field of view (rad) for a camera, `z` = 1 if the layer is 3D |
+
+Helpers (only in `shader3d`; the header defines `AUREA_SCENE3D 1`):
+
+| Function | What it does |
+| --- | --- |
+| `bool aurea_layer_valid(int i)` | a layer is linked, visible and inside its time span on this frame |
+| `vec3 aurea_layer_position(int i)` | the linked layer's anchor point in the world |
+| `mat4 aurea_layer_matrix(int i)` | world ← linked layer px (position, X/Y/Z rotation, scale and parents) |
+| `vec3 aurea_layer_axis(int i, int a)` | the layer's axis `a` in the world, normalised (0 = x, 1 = y, 2 = z) |
+| `int aurea_layer_kind(int i)` | the kind: 6 null, 8 camera, 9 light |
+| `float aurea_layer_fov(int i)` | the linked camera's vertical field of view (rad) |
+| `vec3 aurea_camera_position()` | the scene camera position |
+| `vec3 aurea_camera_right()`, `aurea_camera_down()`, `aurea_camera_forward()` | the scene camera axes in the world |
+| `vec2 aurea_comp_px(vec2 uv)` | the pass `uv` in composition px |
+| `void aurea_ray(vec2 uv, out vec3 ro, out vec3 rd)` | the camera ray through this pixel: origin `ro` and direction `rd` (normalised) in the world |
+| `vec3 aurea_world_to_comp(vec3 p)` | world point → composition px; `z` = homogeneous depth (≤ 0 = behind the camera) |
+| `vec3 aurea_world_to_view(vec3 p)` | world point → camera space (`z` = distance in front of it) |
+
+`i` is the **name of the `layer` parameter**: the header turns it into its
+position among the `layer` parameters (first `layer` = 0, second = 1...). Write
+`aurea_layer_position(target)`, not `aurea.params[...]`.
+
+#### The AUREA world
+
+- The unit is the **composition pixel**: x to the right, y **down**, z **away**
+  from the camera, as in After Effects.
+- With the default camera, the z = 0 plane shows 1:1 on the composition: the
+  point `(x, y, 0)` lands on pixel `(x, y)`.
+- A layer's position (including z) and anchor point work in the world as in the
+  transform panel. `aurea_layer_position` returns the anchor point with
+  position, rotation, scale and parents applied.
+- `aurea_layer_axis(i, 2)` is the layer's "front" (z): use it as the normal of
+  a plane that turns with the null.
+
+#### Example: a ring around a null
+
+This is `examples/target-3d`, a ring drawn on the null's plane and seen in
+perspective (its parameters: `target`, `radius`, `width`, `tint`; the halo is left out here):
+
+```glsl
+vec4 aurea_main(vec2 uv) {
+    vec4 base = texture(aurea_source, uv);
+    // No null linked: the ring sits at the composition centre, on the z = 0 plane.
+    vec3 center = aurea_layer_valid(target) ? aurea_layer_position(target) : vec3(aurea.comp.xy * 0.5, 0.0);
+    vec3 normal = aurea_layer_valid(target) ? aurea_layer_axis(target, 2) : vec3(0.0, 0.0, 1.0);
+    vec3 ro, rd;
+    aurea_ray(uv, ro, rd);
+    float facing = dot(rd, normal);
+    if (abs(facing) < 1e-5) return base;            // ray parallel to the plane
+    float t = dot(center - ro, normal) / facing;
+    if (t <= 0.0) return base;                       // the plane is behind the camera
+    vec3 hit = ro + rd * t;                          // where the ray crosses the null's plane
+    float d = abs(length(hit - center) - radius);
+    float ring = smoothstep(width, 0.0, d);
+    vec3 light = tint.rgb * ring;
+    return vec4(base.rgb + light, max(base.a, ring));
+}
+```
+
+Other common recipes:
+
+- **A point on screen**: `vec3 s = aurea_world_to_comp(p);` and if `s.z > 0.0`
+  the point shows at `s.xy` (composition px). Compare it with
+  `aurea_comp_px(uv)` to draw a glow, a crosshair or a label.
+- **Size in perspective**: `aurea_world_to_view(p).z` is the distance to the
+  camera; `aurea.lens.w / z` turns world px into screen px at that distance.
+- **Sky or infinite background**: use only the direction `rd` from `aurea_ray`
+  (position does not matter at infinity), like Aurora does.
+- **Linked light**: `aurea_layer_position(light)` gives the light position for a
+  glow or light ray that follows the scene light.
+
+#### Where to apply the plugin
+
+- Apply it to a **2D layer the size of the composition**, such as a transparent
+  solid: the result covers the whole frame and the camera does not move the
+  layer.
+- On a 3D layer the camera also moves the layer itself (the effect lands on its
+  plane). The maths stays right for the pixels the layer covers, but nothing
+  shows outside it.
+- The effect is drawn in the layer's region (plus `margin`). To draw outside it,
+  make the layer or the `margin` bigger.
+
+#### Limits and caveats
+
+- The test frame at install time runs with the default camera and no linked
+  layer. Handle the `aurea_layer_valid(...) == false` case.
+- The 3D block takes 944 of the 1024 parameter bytes per pass; all 16
+  parameters are still available.
+- There is no access to 3D models, meshes or the scene depth: the plugin sees
+  the camera and the linked layers, not the geometry.
 
 ## 5. Stack plugins and expressions
 
@@ -360,6 +507,7 @@ effect, convert it into a `.aureaplugin` with `passes`.
 | Passes | 8 | Every pass is a texture and a memory round trip; memory bandwidth is the bottleneck on mobile GPUs. |
 | Parameters | 16 | The parameter block fits in 320 bytes (the engine allows at most 1 KB per pass). |
 | Inputs per pass | 3 + the source | The engine binds 4 textures per effect pass. |
+| Linked layers (`layer`) | 4, `shader3d` only | Each layer's world travels in the parameter block; the 3D block takes 944 of the 1024 bytes. |
 | Shader | 64 KB per file | On-device compilation costs CPU and memory; large shaders also compile slowly in the driver. |
 | `plugin.json` | 256 KB | — |
 | Package | 16 MB | — |
@@ -401,7 +549,7 @@ end depends on a computed value.
    ```
 
    The script applies the app's rules (format, id, version, parameters, passes,
-   inputs, stack, sizes). GLSL compilation and the test frame happen only in the
+   inputs, stack, sizes, `shader3d`, `layer` and `accept`). GLSL compilation and the test frame happen only in the
    app.
 3. To compile on a computer first, prepend the section 4 header to your file and
    run the Vulkan SDK `glslangValidator -V` (the same compiler, glslang).
@@ -432,10 +580,13 @@ value from your package. The meaning of each:
 | `plugin.json: falta "aureaPlugin": 1 (versao do formato)` / `... nao suportado (este app le a versao 1 do formato)` | Declare `"aureaPlugin": 1`. |
 | `plugin.json: "id" invalido "<id>": use 3 a 64 caracteres a-z, 0-9, '.', '_' ou '-' (ex.: com.estudio.brilho)` | Lower case only; no spaces. |
 | `plugin.json: "version" deve ser "x.y.z" (ex.: "1.0.0")` | — |
-| `plugin.json: "kind" deve ser "shader" ou "stack"` | — |
+| `plugin.json: "kind" deve ser "shader", "shader3d" ou "stack"` | — |
 | `plugin.json: <n> parametros (limite 16)` | Merge parameters or split the plugin. |
 | `plugin.json: parametro "<id>": id invalido (letras, digitos e _, ate 32, sem palavra reservada do GLSL nem prefixo aurea/gl_)` | E.g. `mix`, `texture`, `float`, `uv`, `main`, `time`, `source` are reserved. |
-| `plugin.json: parametro "<id>": tipo desconhecido "<t>" (use float, int, bool, enum, color, point ou angle)` | — |
+| `plugin.json: parametro "<id>": tipo desconhecido "<t>" (use float, int, bool, enum, color, point, angle ou layer)` | — |
+| `plugin.json: parametro "layer" so em plugin "kind": "shader3d"` | Change `"kind": "shader"` to `"shader3d"`. |
+| `plugin.json: <n> parametros "layer" (limite 4)` | Use at most 4 linked layers. |
+| `plugin.json: parametro "<id>": "accept" deve ser uma lista (camera, null, light, any)` / `... "accept" desconhecido "<x>" (camera, null, light ou any)` | E.g. `"accept": ["null", "camera"]`. |
 | `plugin.json: parametro "<id>": "default" fora de [min, max]` | Default outside the range. |
 | `plugin.json: parametro "<id>": enum precisa de "options" (lista de textos)` | — |
 | `plugin.json: <n> passes (limite 8)` | Merge passes. |
@@ -534,6 +685,9 @@ List JSON (`plugins_json` / `nativeListPlugins` / `pluginsJSON`):
 - `errorCode` (stable): `manifest`, `shader_source`, `shader_compile`, `stack`,
   `unsupported`, `duplicate`, `registry`. `testRenderMs` is -1 when the plugin
   was loaded from the folder (not measured this session).
+- `scene3d: true` appears on `"kind": "shader3d"` plugins (the list's `kind`
+  stays `shader`). The UI shows "3D shader (camera and nulls)". `layer`
+  parameters come with `"type": "layer"`.
 
 ## 13. Licences
 

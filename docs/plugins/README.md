@@ -33,6 +33,7 @@ Exemplos prontos em [`examples/`](examples/):
 | `soft-glow/` → `soft-glow.aureaplugin` | shader, 2 passes | passe em 1/4 da resolução (`scale`), `target` e `inputs` |
 | `dream-look/` → `dream-look.aureaplugin` | stack | desfoque + brilho + saturação embutidos, com expressões |
 | `pulse-vignette.fs` | ISF 2.0 | importação de um `.fs` (point2D, color, bool, TIME) |
+| `target-3d/` → `target-3d.aureaplugin` | shader3d, 1 passe | anel em volta de um nulo 3D visto pela câmera da cena; parâmetro `layer` com `accept`; `aurea_ray` |
 
 ---
 
@@ -51,6 +52,11 @@ brilho, cor...) com valores calculados a partir dos parâmetros do plugin por
 expressões simples (`amount * 40`). Não tem shader: é o tipo mais seguro e
 funciona em qualquer aparelho. É o jeito de distribuir um "look" com controles
 próprios.
+
+**`"kind": "shader3d"`** (0.3.1) — um `shader` que também enxerga a **cena 3D**:
+a câmera da composição e até 4 camadas ligadas (nulo 3D, câmera, luz). Serve
+para efeitos que vivem no espaço 3D e acompanham a câmera. Veja
+[Plugins 3D](#plugins-3d-kind-shader3d-031) na seção 4.
 
 ## 2. O pacote `.aureaplugin`
 
@@ -262,57 +268,156 @@ passes anteriores. O último passe é a saída. `aurea.resolution` e
 
 ### Plugins 3D (`"kind": "shader3d"`, 0.3.1)
 
-Um plugin 3D é um `shader` que também enxerga a **câmera da cena** (a câmera
-ativa da composição, ou a padrão quando não há câmera) e o **mundo** de até 4
-camadas ligadas por parâmetros `layer` — um **nulo 3D** como alvo ou pivô, uma
-**câmera**, uma **luz**. O efeito continua sendo desenhado na camada que o
-recebe; o 3D é o que o shader calcula (raios, projeções, distâncias).
+Um plugin 3D é um `shader` que também enxerga a **cena 3D**:
+
+- a **câmera da cena**: a câmera ativa da composição, ou a câmera padrão quando
+  não há nenhuma;
+- o **mundo** de até **4 camadas ligadas** por parâmetros `layer`: um **nulo
+  3D** como alvo ou pivô, uma **câmera**, uma **luz**.
+
+Com isso o shader calcula em 3D: lança o raio da câmera por cada pixel,
+projeta pontos do mundo na tela, mede distâncias até um nulo. Mover o nulo, a
+câmera ou mudar a lente atualiza o efeito no mesmo quadro, no preview e no
+export. Tudo o mais é igual a um `shader`: passes, `margin`, `colorSpace`,
+parâmetros com keyframes e expressões, quadro de teste na instalação.
+
+#### O manifesto
 
 ```json
 {
-  "aureaPlugin": 1, "id": "com.estudio.mira", "version": "1.0.0",
-  "name": { "pt-BR": "Mira 3D", "en": "3D Target" }, "kind": "shader3d",
+  "aureaPlugin": 1,
+  "id": "com.estudio.mira",
+  "version": "1.0.0",
+  "name": { "pt-BR": "Mira 3D", "en": "3D Target" },
+  "category": "3D",
+  "kind": "shader3d",
   "params": [
-    { "id": "alvo", "type": "layer", "accept": ["null"], "label": { "pt-BR": "Alvo", "en": "Target" } },
-    { "id": "raio", "type": "float", "default": 40, "min": 1, "max": 400 }
+    { "id": "alvo", "type": "layer", "accept": ["null"],
+      "label": { "pt-BR": "Alvo (nulo 3D)", "en": "Target (3D null)" } },
+    { "id": "raio", "type": "float", "default": 120, "min": 4, "max": 1200 }
   ],
   "passes": [ { "shader": "mira.frag" } ]
 }
 ```
 
-O bloco `aurea` ganha, **depois** de `params[16]` (nada antes muda):
+- `"kind": "shader3d"` liga o modo 3D. Um parâmetro `layer` num plugin
+  `"shader"` comum é recusado na instalação.
+- **Parâmetro `layer`**: no painel vira uma lista das camadas da composição.
+  - `accept` filtra a lista: `"camera"`, `"null"`, `"light"`, ou `"any"`
+    (qualquer camada; é o padrão sem `accept`). Pode combinar:
+    `["null", "camera"]`.
+  - Começa sem camada (`aurea_layer_valid` = falso).
+  - Nunca é animável: a camada ligada é fixa, o que anima é a camada.
+  - Até **4** por plugin, contando todos os `layer`.
+  - Ligar a própria camada que tem o efeito não vale: fica como sem camada.
+
+#### O que o shader recebe
+
+O bloco `aurea` ganha estes campos **depois** de `params[16]`; nada antes
+muda, então um shader 2D colado num `shader3d` continua funcionando:
 
 | Símbolo | Tipo | Conteúdo |
 | --- | --- | --- |
-| `aurea.view` | `mat4` | vista ← mundo (x direita, y para baixo, z para a frente) |
+| `aurea.view` | `mat4` | vista ← mundo (x para a direita, y para baixo, z para a frente) |
 | `aurea.compFromWorld` | `mat4` | px da composição (homogêneo) ← mundo |
-| `aurea.compFromLayer` | `mat4` | px da composição (homogêneo) ← px da camada |
-| `aurea.camera` | `vec4` | `xyz` posição da câmera no mundo; `w` = 1 câmera de camada, 0 padrão |
-| `aurea.lens` | `vec4` | `x` campo de visão vertical (rad), `y` plano próximo, `z` aspecto, `w` focal em px |
+| `aurea.compFromLayer` | `mat4` | px da composição (homogêneo) ← px da camada que tem o efeito |
+| `aurea.camera` | `vec4` | `xyz` posição da câmera no mundo; `w` = 1 câmera de camada, 0 câmera padrão |
+| `aurea.lens` | `vec4` | `x` campo de visão vertical (rad), `y` plano próximo (px), `z` aspecto (largura/altura), `w` distância focal em px |
 | `aurea.comp` | `vec4` | `xy` tamanho da composição (px), `zw` = 1/xy |
-| `aurea.layerWorld[4]` | `mat4` | mundo ← px de cada camada ligada |
-| `aurea.layerPos[4]` | `vec4` | `xyz` ponto de âncora no mundo; `w` = 1 ligada e visível |
-| `aurea.layerInfo[4]` | `vec4` | `x` tipo (6 nulo, 8 câmera, 9 luz), `y` campo de visão (câmera), `z` 1 = camada 3D |
+| `aurea.layerWorld[4]` | `mat4` | mundo ← px de cada camada ligada (com os pais) |
+| `aurea.layerPos[4]` | `vec4` | `xyz` ponto de âncora da camada ligada no mundo; `w` = 1 ligada, 0 sem camada |
+| `aurea.layerInfo[4]` | `vec4` | `x` tipo (6 nulo, 8 câmera, 9 luz; outros = outra camada), `y` campo de visão (rad) se for câmera, `z` = 1 se a camada é 3D |
 
-Funções (só em `shader3d`; `#define AUREA_SCENE3D 1`):
+Funções prontas (só em `shader3d`; o cabeçalho define `AUREA_SCENE3D 1`):
 
 | Função | O que faz |
 | --- | --- |
-| `bool aurea_layer_valid(int i)` | a camada ligada existe, está visível e no tempo |
-| `vec3 aurea_layer_position(int i)` | posição (âncora) no mundo |
-| `mat4 aurea_layer_matrix(int i)` | mundo ← camada (com pais) |
-| `vec3 aurea_layer_axis(int i, int a)` | eixo `a` (0 x, 1 y, 2 z) da camada no mundo |
-| `int aurea_layer_kind(int i)` / `float aurea_layer_fov(int i)` | tipo / campo de visão da câmera ligada |
-| `vec3 aurea_camera_position()`, `aurea_camera_right()`, `aurea_camera_down()`, `aurea_camera_forward()` | a câmera da cena |
+| `bool aurea_layer_valid(int i)` | há camada ligada, visível e no tempo dela neste quadro |
+| `vec3 aurea_layer_position(int i)` | o ponto de âncora da camada ligada no mundo |
+| `mat4 aurea_layer_matrix(int i)` | mundo ← px da camada ligada (posição, rotação X/Y/Z, escala e pais) |
+| `vec3 aurea_layer_axis(int i, int a)` | o eixo `a` da camada no mundo, normalizado (0 = x, 1 = y, 2 = z) |
+| `int aurea_layer_kind(int i)` | o tipo: 6 nulo, 8 câmera, 9 luz |
+| `float aurea_layer_fov(int i)` | o campo de visão vertical (rad) da câmera ligada |
+| `vec3 aurea_camera_position()` | a posição da câmera da cena |
+| `vec3 aurea_camera_right()`, `aurea_camera_down()`, `aurea_camera_forward()` | os eixos da câmera da cena no mundo |
 | `vec2 aurea_comp_px(vec2 uv)` | o `uv` do passe em px da composição |
-| `void aurea_ray(vec2 uv, out vec3 ro, out vec3 rd)` | o raio da câmera que passa por este pixel (origem e direção no mundo) |
-| `vec3 aurea_world_to_comp(vec3 p)` | ponto do mundo → px da composição (`z` = profundidade homogênea; ≤ 0 = atrás da câmera) |
-| `vec3 aurea_world_to_view(vec3 p)` | ponto do mundo → espaço da câmera |
+| `void aurea_ray(vec2 uv, out vec3 ro, out vec3 rd)` | o raio da câmera que passa por este pixel: origem `ro` e direção `rd` (normalizada) no mundo |
+| `vec3 aurea_world_to_comp(vec3 p)` | ponto do mundo → px da composição; `z` = profundidade homogênea (≤ 0 = atrás da câmera) |
+| `vec3 aurea_world_to_view(vec3 p)` | ponto do mundo → espaço da câmera (`z` = distância à frente dela) |
 
-Unidades: o mundo do AUREA é em **px da composição** (o plano z = 0 com a
-câmera padrão é a composição 1:1). O nome de um parâmetro `layer` vira a
-posição dele entre os `layer` (`alvo` = 0 acima): `aurea_layer_position(alvo)`.
-Exemplo completo: `examples/target-3d`.
+`i` é o **nome do parâmetro `layer`**: no cabeçalho ele vira a posição dele
+entre os parâmetros `layer` (o primeiro `layer` = 0, o segundo = 1...). Escreva
+`aurea_layer_position(alvo)`, não `aurea.params[...]`.
+
+#### O mundo do AUREA
+
+- A unidade é o **px da composição**: x para a direita, y para **baixo**, z
+  para **longe** da câmera, como no After Effects.
+- Com a câmera padrão, o plano z = 0 aparece 1:1 na composição: o ponto
+  `(x, y, 0)` cai no pixel `(x, y)`.
+- A posição de uma camada (incluindo z) e o ponto de âncora valem no mundo como
+  no painel de transformação. `aurea_layer_position` devolve o ponto de
+  âncora já com a posição, a rotação, a escala e os pais aplicados.
+- `aurea_layer_axis(i, 2)` é a "frente" (z) da camada: use como normal de um
+  plano que gira com o nulo.
+
+#### Exemplo: anel em volta de um nulo
+
+Este é o `examples/target-3d`, um anel desenhado no plano do nulo e visto em
+perspectiva (parâmetros dele: `target`, `radius`, `width`, `tint`; aqui sem o halo):
+
+```glsl
+vec4 aurea_main(vec2 uv) {
+    vec4 base = texture(aurea_source, uv);
+    // Sem nulo ligado: o anel fica no centro da composição, no plano z = 0.
+    vec3 center = aurea_layer_valid(target) ? aurea_layer_position(target) : vec3(aurea.comp.xy * 0.5, 0.0);
+    vec3 normal = aurea_layer_valid(target) ? aurea_layer_axis(target, 2) : vec3(0.0, 0.0, 1.0);
+    vec3 ro, rd;
+    aurea_ray(uv, ro, rd);
+    float facing = dot(rd, normal);
+    if (abs(facing) < 1e-5) return base;            // raio paralelo ao plano
+    float t = dot(center - ro, normal) / facing;
+    if (t <= 0.0) return base;                       // o plano está atrás da câmera
+    vec3 hit = ro + rd * t;                          // onde o raio corta o plano do nulo
+    float d = abs(length(hit - center) - radius);
+    float ring = smoothstep(width, 0.0, d);
+    vec3 light = tint.rgb * ring;
+    return vec4(base.rgb + light, max(base.a, ring));
+}
+```
+
+Outras receitas comuns:
+
+- **Ponto na tela**: `vec3 s = aurea_world_to_comp(p);` e se `s.z > 0.0`, o
+  ponto aparece em `s.xy` (px da composição). Compare com
+  `aurea_comp_px(uv)` para desenhar um brilho, uma mira ou um rótulo.
+- **Tamanho em perspectiva**: `aurea_world_to_view(p).z` é a distância à
+  câmera; `aurea.lens.w / z` converte px do mundo em px na tela naquela
+  distância.
+- **Céu ou fundo infinito**: use só a direção `rd` de `aurea_ray` (a posição
+  não importa no infinito), como a Aurora.
+- **Luz ligada**: `aurea_layer_position(luz)` dá a posição da luz para um
+  brilho ou um raio de luz que segue a luz da cena.
+
+#### Onde aplicar o plugin
+
+- Aplique numa camada **2D do tamanho da composição**, como um sólido
+  transparente: o resultado cobre o quadro inteiro e a câmera não move a camada.
+- Numa camada 3D, a câmera também move a própria camada (o efeito sai no plano
+  dela). As contas continuam certas para os pixels que a camada cobre, mas fora
+  dela não aparece nada.
+- O efeito é desenhado na região da camada (mais a `margin`). Para desenhar fora
+  dela, aumente a camada ou a `margin`.
+
+#### Limites e cuidados
+
+- A projeção é a mesma em todas as GPUs (Vulkan, OpenGL ES e Metal), e o
+  quadro de teste da instalação roda com a câmera padrão e sem camada ligada.
+  Teste o caso `aurea_layer_valid(...) == false`.
+- O bloco 3D ocupa 944 dos 1024 bytes de parâmetros por passe; os 16
+  parâmetros continuam valendo.
+- Não existe acesso a modelos 3D, malhas ou profundidade da cena: o plugin
+  enxerga a câmera e as camadas ligadas, não a geometria.
 
 ## 5. Plugins de pilha e expressões
 
@@ -402,6 +507,7 @@ Para um efeito de vários passes, converta para um `.aureaplugin` com `passes`.
 | Passes | 8 | Cada passe é uma textura e uma ida à memória; em GPU de celular a banda é o gargalo. |
 | Parâmetros | 16 | O bloco de parâmetros cabe em 320 bytes (o motor usa no máximo 1 KB por passe). |
 | Entradas por passe | 3 + a fonte | 4 texturas por passe de efeito no motor. |
+| Camadas ligadas (`layer`) | 4, só em `shader3d` | O mundo de cada camada vai no bloco de parâmetros; o bloco 3D ocupa 944 dos 1024 bytes. |
 | Shader | 64 KB por arquivo | Compilar no aparelho custa CPU e memória; shaders grandes também compilam devagar no driver. |
 | `plugin.json` | 256 KB | — |
 | Pacote | 16 MB | — |
@@ -444,7 +550,7 @@ laço cujo fim depende de um valor calculado.
    ```
 
    O script aplica as mesmas regras do app (formato, id, versão, parâmetros,
-   passes, entradas, pilha, tamanhos). A compilação do GLSL e o quadro de teste
+   passes, entradas, pilha, tamanhos, `shader3d`, `layer` e `accept`). A compilação do GLSL e o quadro de teste
    só o app faz.
 3. Para compilar o GLSL no computador antes, junte o cabeçalho da seção 4 com
    o seu arquivo e use o `glslangValidator -V` do Vulkan SDK (o mesmo
@@ -473,10 +579,13 @@ Mensagens exatas da instalação (`<...>` = valor do seu pacote):
 | `plugin.json: falta "aureaPlugin": 1 (versao do formato)` / `... nao suportado (este app le a versao 1 do formato)` | Declare `"aureaPlugin": 1`. |
 | `plugin.json: "id" invalido "<id>": use 3 a 64 caracteres a-z, 0-9, '.', '_' ou '-' (ex.: com.estudio.brilho)` | Só minúsculas; sem espaço. |
 | `plugin.json: "version" deve ser "x.y.z" (ex.: "1.0.0")` | — |
-| `plugin.json: "kind" deve ser "shader" ou "stack"` | — |
+| `plugin.json: "kind" deve ser "shader", "shader3d" ou "stack"` | — |
 | `plugin.json: <n> parametros (limite 16)` | Junte parâmetros ou faça dois plugins. |
 | `plugin.json: parametro "<id>": id invalido (letras, digitos e _, ate 32, sem palavra reservada do GLSL nem prefixo aurea/gl_)` | Ex.: `mix`, `texture`, `float`, `uv`, `main`, `time`, `source` são reservados. |
-| `plugin.json: parametro "<id>": tipo desconhecido "<t>" (use float, int, bool, enum, color, point ou angle)` | — |
+| `plugin.json: parametro "<id>": tipo desconhecido "<t>" (use float, int, bool, enum, color, point, angle ou layer)` | — |
+| `plugin.json: parametro "layer" so em plugin "kind": "shader3d"` | Troque `"kind": "shader"` por `"shader3d"`. |
+| `plugin.json: <n> parametros "layer" (limite 4)` | Use até 4 camadas ligadas. |
+| `plugin.json: parametro "<id>": "accept" deve ser uma lista (camera, null, light, any)` / `... "accept" desconhecido "<x>" (camera, null, light ou any)` | Ex.: `"accept": ["null", "camera"]`. |
 | `plugin.json: parametro "<id>": "default" fora de [min, max]` | — |
 | `plugin.json: parametro "<id>": enum precisa de "options" (lista de textos)` | — |
 | `plugin.json: <n> passes (limite 8)` | Junte passes. |
@@ -576,6 +685,9 @@ JSON da lista (`plugins_json` / `nativeListPlugins` / `pluginsJSON`):
 - `errorCode` (estável): `manifest`, `shader_source`, `shader_compile`, `stack`,
   `unsupported`, `duplicate`, `registry`. `testRenderMs` = -1 quando o plugin foi
   carregado da pasta (não medido nesta sessão).
+- `scene3d: true` aparece nos plugins `"kind": "shader3d"` (o `kind` da lista
+  continua `shader`). A interface mostra "Shader 3D (câmera e nulos)".
+  Parâmetros `layer` vêm com `"type": "layer"`.
 
 ## 13. Licenças
 

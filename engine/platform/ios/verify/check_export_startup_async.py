@@ -62,6 +62,7 @@ ladder = "\n".join([
     block("nonisolated static func nextExportAttempt("),
     block("nonisolated static func exportReducedShortSide("),
     block("nonisolated static func exportRetryNotice("),
+    block("nonisolated static func exportAttemptReducedFps("),
 ])
 assert "result == 0 && !self.exportCancelled" in poll
 assert "startVideoExport" not in source
@@ -130,6 +131,9 @@ enum AureaEngine {
     static func exportAttemptShortSide(_ attempt: UInt32, requested: UInt32) -> UInt32 {
         attempt >= 5 ? min(requested, 480) : attempt >= 3 ? min(requested, 720) : requested
     }
+    // 0.3.1: o teto de taxa do degrau é do motor (fpsCap); aqui sem teto — o
+    // harness confere a taxa pedida passando inalterada para o motor.
+    static func exportAttemptFpsCap(_ attempt: UInt32) -> Double { 0 }
 }
 final class Native: @unchecked Sendable {
     struct Call { let kind: UInt32?, safeMode: UInt32, fps: Double, height: UInt32, main: Bool }
@@ -187,6 +191,11 @@ final class Native: @unchecked Sendable {
     var exportMessage: String?, toast: String?
     var exportSafeMode: UInt32 = 0
     var exportReducedSide: UInt32 = 0
+    var exportReducedFps = 0
+    // 0.3.1: export que morreu no processo anterior (a marca em UserDefaults).
+    var exportLighterAfterClose = false, exportDeathChecked = false
+    nonisolated static let exportInFlightKey = "aurea.export.inFlight.harness"
+    static let previousExportDied = false
     var exportTimer: Timer?
     var exportStartup: ExportStartupRequest?
     var exportWatch = ExportStallWatch()

@@ -22,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -47,10 +49,18 @@ internal fun AeImportSheet(store: EditorStore, result: EditorStore.AeImportResul
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 6.dp).testTag("ae.sheet"),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(stringResource(if (result.ok) R.string.ae_done_title else R.string.ae_failed_title),
+            // 0.3.1: script que parou com erro DEPOIS de mudar o projeto = "importado em
+            // parte" (contagens + o erro); rodou sem mudar nada = "nada foi importado".
+            val partial = !result.ok && (result.hasCounts || result.changes > 0)
+            Text(stringResource(when {
+                    result.ok -> R.string.ae_done_title
+                    partial -> R.string.ae_partial_title
+                    else -> R.string.ae_failed_title
+                }),
+                modifier = Modifier.semantics { heading() },
                 style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W600)))
             Text(result.fileName, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
-            if (result.ok) {
+            if (result.ok || result.hasCounts) {
                 Text(stringResource(R.string.ae_counts, result.effects, result.keyframes, result.layers, result.expressions, result.animators),
                     modifier = Modifier.testTag("ae.counts"), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp)))
             }
@@ -67,8 +77,10 @@ internal fun AeImportSheet(store: EditorStore, result: EditorStore.AeImportResul
                     style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
                 if (showNotes) result.notes.take(60).forEach { ItemRow(it) }
             }
-            Text(stringResource(R.string.ae_undo_hint), modifier = Modifier.padding(top = 6.dp),
-                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+            if (result.ok || partial) {
+                Text(stringResource(R.string.ae_undo_hint), modifier = Modifier.padding(top = 6.dp),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+            }
             Spacer(Modifier.height(6.dp))
             Box(
                 Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(12.dp)).background(AureaColors.Accent)

@@ -225,8 +225,25 @@ struct Camera {
     Mat4 view = Mat4::identity();
     f32 focal = 1.0f;                ///< px da composição (meia altura / tan(fov/2))
     f32 compW = 0.0f, compH = 0.0f;
+    // 0.3.1, mundo (camada 3D como o Particular): camada → mundo → câmera da
+    // cena → px da composição → px da folha chapada.
+    bool world = false;
+    Mat4 worldFromLayer = Mat4::identity(), compFromWorld = Mat4::identity(), layerFromComp = Mat4::identity();
 
     bool project(Vec3 p, f32& sx, f32& sy, f32& ratio) const noexcept {
+        if (world) {
+            const Vec4 wp = worldFromLayer * Vec4{p.x, p.y, p.z, 1.0f};
+            const Vec4 v = view * wp;
+            ratio = v.z / focal;
+            if (!(ratio > 0.01f)) return false;
+            const Vec4 q = compFromWorld * wp;
+            if (!(std::fabs(q.w) > 1e-12f)) return false;
+            const Vec4 l = layerFromComp * Vec4{q.x / q.w, q.y / q.w, 0.0f, 1.0f};
+            if (!(std::fabs(l.w) > 1e-12f)) return false;
+            sx = l.x / l.w;
+            sy = l.y / l.w;
+            return std::isfinite(sx) && std::isfinite(sy);
+        }
         if (!comp) {
             const f32 d = F + p.z;
             ratio = d / F;
@@ -739,6 +756,20 @@ private:
     static Camera camera_of(const EffectEval& e, f32 lw, f32 lh) noexcept {
         Camera cam;
         const LayerPlacement& pl = *e.placement;
+        // Camada 3D (ou com o Particular): a rede vive no mundo da camada e a
+        // câmera da cena a vê — a camada não é um plano que a câmera move.
+        if (e.b(kFollowCamera) && pl.particleSpace && pl.sceneCameraValid && pl.compWidth && pl.compHeight
+            && pl.sceneFovY > 0.01f) {
+            cam.world = true;
+            cam.worldFromLayer = pl.worldFromLayer;
+            cam.compFromWorld = pl.sceneCompFromWorld;
+            cam.layerFromComp = pl.particleLayerFromComp;
+            cam.view = pl.sceneView;
+            cam.compW = static_cast<f32>(pl.compWidth);
+            cam.compH = static_cast<f32>(pl.compHeight);
+            cam.focal = 0.5f * cam.compH / std::tan(0.5f * std::clamp(pl.sceneFovY, 0.02f, 3.0f));
+            return cam;
+        }
         if (e.b(kFollowCamera) && pl.cameraActive && !pl.inScene3d && pl.compWidth && pl.compHeight) {
             const Mat4& m = pl.compFromLayer;
             const bool affine = std::fabs(m.col[0].w) < 1e-6f && std::fabs(m.col[1].w) < 1e-6f

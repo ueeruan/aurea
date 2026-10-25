@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.1: importar do After Effects também pelo menu da camada e pela Edição; sem camada, o preset cria uma. -->
+<resources>
+    <string name="ae_import_layer_detail">Preset: efeitos, keyframes e animadores de texto nesta camada. Script: recebe esta camada como a selecionada.</string>
+    <string name="ae_import_new_layer_detail">Preset: entra numa camada nova (de texto ou um sólido do tamanho da composição), como no After Effects. Script: cria e anima camadas.</string>
+    <string name="ae_partial_title">Importado em parte</string>
+    <string name="ae_too_big">Arquivo grande demais para importar (máximo de 64 MB).</string>
+</resources>

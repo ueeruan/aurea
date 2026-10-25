@@ -36,7 +36,24 @@ vec4 fetch(vec2 uv) {
 
 void main() {
     if (p.flags.w < 0.5) {
-        // Uma amostra (a imagem importada sempre vem por aqui).
+        // Alfa reto com o texel conhecido (imagem importada, 0.3.0): bilinear
+        // da cor PRÉ-multiplicada, com as quatro leituras nos centros dos
+        // texels. O bilinear do sampler sobre alfa reto puxava a cor dos
+        // pixels transparentes (traço apagado num app de desenho) para a
+        // borda — as "linhas" em volta do desenho.
+        if (p.flags.z < 0.5 && p.flags.y < 0.5 && p.texel.x > 0.0 && p.texel.y > 0.0) {
+            vec2 st = v_uv / p.texel.xy - 0.5;
+            vec2 i0 = floor(st);
+            vec2 f = st - i0;
+            vec2 uv0 = (i0 + 0.5) * p.texel.xy;
+            vec4 a = fetch(uv0), b = fetch(uv0 + vec2(p.texel.x, 0.0));
+            vec4 c0 = fetch(uv0 + vec2(0.0, p.texel.y)), e = fetch(uv0 + p.texel.xy);
+            vec4 s = unpremultiply(mix(mix(a, b, f.x), mix(c0, e, f.x), f.y));
+            vec3 lin = p.flags.x > 0.5 ? s.rgb : srgb_to_linear(s.rgb);
+            o_color = premultiply(vec4(lin, s.a));
+            return;
+        }
+        // Uma amostra (sem o texel: os outros usos da imagem).
         vec4 c = texture(u_tex0, v_uv);
         if (p.flags.z > 0.5) c.a = 1.0;
         else if (p.flags.y > 0.5) c = unpremultiply(c);

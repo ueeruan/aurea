@@ -85,15 +85,20 @@ class EffectGraph {
 public:
     /// Resolve e planeja. `resources` pode ser nulo (testes sem GPU): aí
     /// efeitos que precisam de LUT ficam sem ela e o passe fundido a ignora.
+    /// `firstEffect`/`endEffect`: só os efeitos da camada nessa faixa [primeiro,
+    /// fim) — o Copiar fundo divide a pilha em janela (antes) e fundo (depois).
+    /// Os Motion Tile de um nulo pai só entram no plano que começa no 0.
     static void plan(const Layer& layer, const EffectRegistry& registry, FrameIndex localTime,
                      f32 texelScale, const LayerPlacement& placement,
                      EffectResources* resources, EffectPlan& out, f64 framesPerSecond = 30.0,
-                     const Composition* composition = nullptr);
+                     const Composition* composition = nullptr,
+                     u32 firstEffect = 0, u32 endEffect = kInvalidIndex);
 
     static void plan_f(const Layer& layer, const EffectRegistry& registry, f64 localTime,
                        f32 texelScale, const LayerPlacement& placement,
                        EffectResources* resources, EffectPlan& out, f64 framesPerSecond = 30.0,
-                       const Composition* composition = nullptr);
+                       const Composition* composition = nullptr,
+                       u32 firstEffect = 0, u32 endEffect = kInvalidIndex);
 
     /// Declara os passes do plano no FrameGraph e devolve a imagem final da
     /// layer. Sem etapas, devolve a própria entrada.

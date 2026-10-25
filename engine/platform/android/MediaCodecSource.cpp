@@ -628,7 +628,24 @@ public:
     Status finish_rendered_image(FrameRef& out, i64& pts, bool& eos) noexcept {
         pts = renderedPts_; eos = renderedEos_;
         if (!renderedImage_) {
-            if (const Status s = acquire_image(renderedPts_, renderedImage_); !s.ok()) return s;
+            fenceDropped_ = false;
+            if (const Status s = acquire_image(renderedPts_, renderedImage_); !s.ok()) {
+                // Cerca que não sinalizou: o AImage já foi devolvido. Este quadro
+                // é perdido e o decode segue (como um quadro atrasado descartado).
+                // Antes o estado continuava "pendente" esperando um quadro que não
+                // voltaria, e o Timeout fazia o decoder descer de caminho para
+                // sempre (lookahead → planos na CPU → software): vídeo preto ou
+                // play parado no aparelho lento.
+                if (fenceDropped_) {
+                    fenceDropped_ = false;
+                    renderedPending_ = false;
+                    out.reset();
+                    AUREA_LOG_WARN("decoder %s: cerca do quadro %lld nao sinalizou em 500 ms; quadro descartado",
+                                   info_.decoderName, static_cast<long long>(renderedPts_));
+                    return OkStatus;
+                }
+                return s;
+            }
         }
         const Status s = wrap(renderedImage_, renderedPts_, out);
         if (s.code() == Errc::BudgetExceeded) return s; // wrap retains this AImage
@@ -916,9 +933,12 @@ private:
                 int64_t timestampNs = 0;
                 const media_status_t ts = AImage_getTimestamp(out, &timestampNs);
                 if (ts == AMEDIA_OK && timestampNs == ptsUs * 1000) {
-                    if (!wait_producer_fence(fence, deadline)) {
+                    // 0.3.0: a cerca tem prazo PRÓPRIO a partir de agora. Antes
+                    // ficava com a sobra do prazo da imagem (às vezes ~0 ms).
+                    if (!wait_producer_fence(fence, std::chrono::steady_clock::now() + std::chrono::milliseconds(500))) {
                         AImage_delete(out);
                         out = nullptr;
+                        fenceDropped_ = true;
                         return Status{Errc::Timeout, "o decoder nao terminou de escrever o quadro"};
                     }
                     return OkStatus;
@@ -1143,6 +1163,7 @@ private:
     bool renderedEos_ = false;
     i64 renderedPts_ = 0, renderedDuration_ = 0;
     bool legacyLookahead_ = false;
+    bool fenceDropped_ = false;   ///< acquire_image: a cerca do produtor não sinalizou
     ssize_t pendingOutput_ = -1;
     i64 pendingPts_ = 0; // Actual PTS lookahead preserves long VFR presentation intervals.
     bool pendingEos_ = false;

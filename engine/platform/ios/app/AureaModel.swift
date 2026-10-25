@@ -223,6 +223,10 @@ struct ExportOptions: Equatable {
     /// GIF: largura máxima (px) e quadros por segundo. A sequência usa `fps`.
     var gifWidth: UInt32 = 480
     var gifFps: Double = 15
+    /// Codificador (Avançado, 0.3.0): 0 Automático, 1 Compatível (H.264 Baseline
+    /// no encoder do aparelho), 2 Software. É o degrau da escada
+    /// (ExportAttempts.hpp) em que o export COMEÇA; se falhar, segue dali.
+    var encoder: UInt32 = 0
 }
 
 /// Cancel may arrive while the serial media queue is busy or inside native
@@ -736,7 +740,23 @@ final class AureaModel: ObservableObject {
     @Published private(set) var preRenderProgress = PreRenderState()
     private var preRenderStartup: PreRenderStartupRequest?
     private var preRenderCancelled = false
-    @Published private(set) var exporting = false
+    @Published private(set) var exporting = false {
+        // A marca de "export em andamento" só sobra se o app morrer no meio
+        // (jetsam do iOS, crash): ver previousExportDied.
+        didSet { if !exporting { UserDefaults.standard.removeObject(forKey: Self.exportInFlightKey) } }
+    }
+    /// Este export começou mais leve porque o app fechou no meio do anterior.
+    @Published private(set) var exportLighterAfterClose = false
+    private var exportDeathChecked = false
+    nonisolated static let exportInFlightKey = "aurea.export.inFlight"
+    /// 0.3.0: o processo anterior morreu no meio de um export de vídeo (iPhone
+    /// 11/XR com Roto Brush, BCC Glitch, Ball Action: o iOS mata o app por
+    /// memória e a escada nunca sabia). Lido e apagado uma vez por execução.
+    private static let previousExportDied: Bool = {
+        let died = UserDefaults.standard.bool(forKey: exportInFlightKey)
+        UserDefaults.standard.removeObject(forKey: exportInFlightKey)
+        return died
+    }()
     @Published private(set) var exportPreparing = false
     @Published private(set) var exportedURL: URL?
     @Published private(set) var exportMessage: String?
@@ -768,6 +788,8 @@ final class AureaModel: ObservableObject {
     private var exportSafeMode: UInt32 = 0
     /// Lado menor do vídeo quando a escada exportou abaixo do pedido (0 = o pedido).
     private var exportReducedSide: UInt32 = 0
+    /// Taxa do vídeo quando a escada a limitou abaixo do pedido (0 = a pedida).
+    private var exportReducedFps = 0
     private let mediaQueue = DispatchQueue(label: "com.aurea.media-import", qos: .userInitiated)
     private let autosaveQueue = DispatchQueue(label: "com.aurea.autosave", qos: .utility)
     private let lifecycleQueue = DispatchQueue(label: "com.aurea.lifecycle", qos: .userInitiated)
@@ -2378,7 +2400,7 @@ final class AureaModel: ObservableObject {
         else if fullscreen { fullscreen = false }
         else if panel != .none && panel != .dock { panel = .none }
         else if !selection.isEmpty { clearSelection() }
-        else if engine.precompDepth > 0 { _ = engine.closePrecomp(); refreshModel(force: true) }
+        else if engine.precompDepth > 0 { _ = engine.closePrecomp(); resetGroupThumbnails(); refreshModel(force: true) }
         else { closeProject() }
     }
 
@@ -3568,25 +3590,32 @@ final class AureaModel: ObservableObject {
         let ok: Bool; let fileName: String; let kind: String; let message: String
         let effects: Int; let keyframes: Int; let layers: Int; let expressions: Int; let animators: Int
         let skipped: [AeImportItem]; let notes: [AeImportItem]
+        /// Escritas no projeto: com `ok` falso e > 0, o script parou com erro depois de mudar algo.
+        var changes: Int = 0
+        var hasCounts: Bool { effects + keyframes + layers + expressions + animators > 0 }
     }
 
     /// Preset .ffx na camada escolhida ou script .jsx (interpretador fechado: sem arquivos, rede
-    /// nem sistema). Um passo de desfazer; o relatório diz o que ficou de fora.
+    /// nem sistema). Um passo de desfazer; o relatório diz o que ficou de fora. 0.3.1: sem camada
+    /// escolhida, o motor cria uma para o preset (como o AE).
     func importAeFile(url: URL) {
-        guard !importingMedia else { return }
+        // Outra importação em curso: diz o porquê em vez de calar (EditorStore.importAeFile).
+        guard !importingMedia else { toast = AureaText.t("ios_importing_media"); return }
         importingMedia = true; operationMessage = AureaText.t("ae_importing")
         let native = engine, target = UInt64(bitPattern: primarySelection ?? 0)
         mediaQueue.async { [weak self] in
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            // O mesmo teto do motor (kMaxAeFile, 64 MB).
             let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            let data = size <= 16 * 1024 * 1024 ? try? Data(contentsOf: url) : nil
+            let tooBig = size > 64 * 1024 * 1024
+            let data = tooBig ? nil : try? Data(contentsOf: url)
             let json = data.map { native.importAeData($0, fileName: url.lastPathComponent, layer: target) }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.importingMedia = false
                 guard let json, let raw = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else {
-                    self.toast = AureaText.t("ae_failed_read"); return
+                    self.toast = AureaText.t(tooBig ? "ae_too_big" : "ae_failed_read"); return
                 }
                 func items(_ key: String) -> [AeImportItem] {
                     (raw[key] as? [[String: Any]] ?? []).map {
@@ -3599,7 +3628,7 @@ final class AureaModel: ObservableObject {
                                                      kind: raw["kind"] as? String ?? "", message: raw["message"] as? String ?? "",
                                                      effects: int("effects"), keyframes: int("keyframes"), layers: int("layers"),
                                                      expressions: int("expressions"), animators: int("animators"),
-                                                     skipped: items("skipped"), notes: items("notes"))
+                                                     skipped: items("skipped"), notes: items("notes"), changes: int("changes"))
                 self.syncAfterEdit()
                 _ = self.saveProject(writeThumbnail: false)
             }
@@ -4243,8 +4272,25 @@ final class AureaModel: ObservableObject {
         exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
         exportStalled = false
         exportWatch = ExportStallWatch()
-        exportSafeMode = 0
         let options = exportOptions
+        // Codificador escolhido no Avançado: a escada começa nesse degrau. No
+        // Automático, se o app fechou no meio do export anterior, começa no
+        // degrau que a escada usaria para falta de memória, e a tela diz por quê.
+        var startAttempt = min(options.encoder, 2)
+        exportLighterAfterClose = false
+        if !exportDeathChecked {
+            exportDeathChecked = true
+            if Self.previousExportDied && startAttempt == 0 && options.kind == .video {
+                let lighter = Self.nextExportAttempt(0, code: 8, failure: 0, stalled: false, tooLong: false, options: options)
+                if lighter > 0 && lighter <= 6 {
+                    NSLog("AureaExport: previous process died while exporting; starting at attempt %u", lighter)
+                    startAttempt = lighter
+                    exportLighterAfterClose = true
+                }
+            }
+        }
+        exportSafeMode = startAttempt
+        if options.kind == .video { UserDefaults.standard.set(true, forKey: Self.exportInFlightKey) }
         ProblemReport.beginExportDiagnostics(previous: engine.exportDiagnostics())
         if options.kind == .video { startExportDiagnosticsTimer() }
         exportedKind = options.kind
@@ -4257,7 +4303,7 @@ final class AureaModel: ObservableObject {
         }
         pendingExportURL = url
         pendingExportOptions = options
-        prepareExport(url, options: options, safeMode: 0)
+        prepareExport(url, options: options, safeMode: startAttempt)
     }
 
     /// Cleanup, snapshot and codec startup can wait. Publish busy/preparing
@@ -4275,6 +4321,9 @@ final class AureaModel: ObservableObject {
         releaseInterfaceCaches()
         let native = engine, project = projectGeneration
         let imageFps = imageExportFps(options)
+        // A taxa que sai de fato (0 = a do projeto): o aviso "até N qps" vale
+        // também para um projeto a 120 exportado "do projeto".
+        let requestedFps = options.fps > 0 ? options.fps : compositionFps
         let plannedTooLong = plannedExportSeconds(options) > Self.exportMaxSeconds
         mediaQueue.async { [weak self] in
             var ok = false, level = safeMode
@@ -4313,7 +4362,7 @@ final class AureaModel: ObservableObject {
                     }
                     if next == 0 { break }
                     level = next
-                    let notice = Self.exportRetryNotice(next, options: options)
+                    let notice = Self.exportRetryNotice(next, options: options, requestedFps: requestedFps)
                     DispatchQueue.main.async {
                         guard let self, self.exportStartup === request else { return }
                         self.exportMessage = notice
@@ -4337,6 +4386,7 @@ final class AureaModel: ObservableObject {
                 self.stopPreparingWatch()
                 self.exportSafeMode = usedSafeMode
                 self.exportReducedSide = options.kind == .video ? Self.exportReducedShortSide(usedSafeMode, options: options) : 0
+                self.exportReducedFps = options.kind == .video ? Self.exportAttemptReducedFps(usedSafeMode, requestedFps: requestedFps) : 0
                 self.exportMessage = nil
                 if succeeded {
                     if request.isCancelled || self.exportCancelled { native.cancelExport() }
@@ -4435,10 +4485,20 @@ final class AureaModel: ObservableObject {
         return attempt > 0 && options.shortSide > 0 && side > 0 && side < options.shortSide ? side : 0
     }
 
-    /// O aviso enquanto a exportação recomeça num degrau mais compatível.
-    nonisolated static func exportRetryNotice(_ attempt: UInt32, options: ExportOptions) -> String {
+    /// Taxa que o degrau exporta, quando fica abaixo da pedida (0 = a pedida).
+    nonisolated static func exportAttemptReducedFps(_ attempt: UInt32, requestedFps: Double) -> Int {
+        let cap = AureaEngine.exportAttemptFpsCap(attempt & 0xFF)
+        return attempt & 0xFF > 0 && cap > 0 && requestedFps > cap + 0.01 ? Int(cap.rounded()) : 0
+    }
+
+    /// O aviso enquanto a exportação recomeça num degrau mais compatível
+    /// (como no Android desde a 0.2.7: diz também quando a taxa cai).
+    nonisolated static func exportRetryNotice(_ attempt: UInt32, options: ExportOptions, requestedFps: Double) -> String {
         let side = exportReducedShortSide(attempt, options: options)
-        return side > 0 ? AureaText.t("export_retry_lower", Int(side)) : AureaText.t("export_retry_compatible")
+        var notice = side > 0 ? AureaText.t("export_retry_lower", Int(side)) : AureaText.t("export_retry_compatible")
+        let fps = exportAttemptReducedFps(attempt, requestedFps: requestedFps)
+        if fps > 0 { notice += " " + AureaText.t("export_retry_fps", fps) }
+        return notice
     }
     func plannedExportSeconds(_ options: ExportOptions) -> Double {
         Double(engine.exportDuration(options.trimToContent)) / max(1, compositionFps)
@@ -4734,9 +4794,11 @@ final class AureaModel: ObservableObject {
                     // Confirmação visível: o vídeo está no Fotos (ou o porquê de não estar).
                     if !saved { NSLog("AureaExport: Photos save failed: %@", error?.localizedDescription ?? "-") }
                     let reduced = kind == .video ? (self?.exportReducedSide ?? 0) : 0
+                    let reducedFps = kind == .video ? (self?.exportReducedFps ?? 0) : 0
                     self?.exportMessage = (saved ? AureaText.t("ios_export_saved_photos")
                         : AureaText.t("ios_export_photos_failed") + (error.map { " (\($0.localizedDescription))" } ?? ""))
                         + (reduced > 0 ? "\n" + AureaText.t("export_done_reduced", Int(reduced)) : "")
+                        + (reducedFps > 0 ? "\n" + AureaText.t("export_done_fps", reducedFps) : "")
                     self?.toast = AureaText.t(readyKey)
                     AureaAdsManager.shared.showExportInterstitialIfAvailable {}
                 }
@@ -5339,7 +5401,17 @@ final class AureaModel: ObservableObject {
     func openGroup(_ layerId: Int64) {
         guard engine.openPrecomp(layerId) else { return }
         selection = []
+        resetGroupThumbnails()
         refreshModel(force: true)
+    }
+
+    /// 0.3.0: os ids de camada se repetem entre grupos (cada composição tem a
+    /// sua tabela) e as miniaturas da timeline são guardadas pelo id: ao entrar
+    /// ou sair de um grupo elas recomeçam, senão a imagem de um grupo "pulava"
+    /// para a camada de outro.
+    private func resetGroupThumbnails() {
+        thumbOwners.removeAll()
+        memoryCacheEpoch &+= 1
     }
 
     func selectAll() {

@@ -346,12 +346,34 @@ private fun Options(
         Label(stringResource(R.string.exp2_codec))
         val hevcOk = device?.hevcExportAvailable ?: true
         Chips(listOf("H.264", "HEVC"), codecName, if (hevcOk) emptySet() else setOf("HEVC")) {
-            onChange(options.copy(hevc = it == "HEVC"))
+            // HEVC só no Automático: Compatível e Software são H.264 (ExportAttempts.hpp).
+            onChange(options.copy(hevc = it == "HEVC", encoder = if (it == "HEVC") 0 else options.encoder))
         }
         Text(
             if (!hevcOk) device?.hevcExportReason(androidx.compose.ui.platform.LocalContext.current) ?: ""
             else if (options.hevc) stringResource(R.string.editor_hevc_arquivo_menor_mesma_qualidade_alguns)
             else stringResource(R.string.editor_h_264_abre_qualquer_aparelho_rede),
+            style = muted, modifier = Modifier.padding(top = 6.dp),
+        )
+
+        // 0.3.0: o erro do codificador do aparelho não tinha saída na tela.
+        // Aqui a pessoa escolhe em que degrau da escada o export começa.
+        Label(stringResource(R.string.export_encoder))
+        val encoders = listOf(
+            stringResource(R.string.export_encoder_auto),
+            stringResource(R.string.export_encoder_compatible),
+            stringResource(R.string.export_encoder_software),
+        )
+        Chips(encoders, encoders[options.encoder.coerceIn(0, encoders.lastIndex)]) { label ->
+            val chosen = encoders.indexOf(label).coerceAtLeast(0)
+            onChange(options.copy(encoder = chosen, hevc = options.hevc && chosen == 0))
+        }
+        Text(
+            stringResource(when (options.encoder) {
+                1 -> R.string.export_encoder_compatible_note
+                2 -> R.string.export_encoder_software_note
+                else -> R.string.export_encoder_auto_note
+            }),
             style = muted, modifier = Modifier.padding(top = 6.dp),
         )
 

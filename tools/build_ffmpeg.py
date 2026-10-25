@@ -62,12 +62,25 @@ def checked_sources(cache: Path, with_x265: bool = False) -> tuple[Path, Path]:
 
 def windows_native_compiler_environment(env: dict[str, str]) -> dict[str, str]:
     """FFmpeg's configure validates a real host C compiler for table tools."""
-    locator = Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Microsoft Visual Studio/Installer/vswhere.exe"
-    if not locator.exists():
-        raise RuntimeError("Windows Android FFmpeg builds require Visual Studio C++ Build Tools (host C11 compiler)")
-    install = subprocess.check_output([str(locator), "-latest", "-products", "*", "-requires",
-                                      "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"], text=True).strip()
+    roots = [Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Microsoft Visual Studio",
+             Path("C:/Program Files (x86)/Microsoft Visual Studio"), Path("D:/Program Files (x86)/Microsoft Visual Studio")]
+    install = ""
+    for root in roots:
+        locator = root / "Installer/vswhere.exe"
+        if locator.exists():
+            install = subprocess.check_output([str(locator), "-latest", "-products", "*", "-requires",
+                                              "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"],
+                                             text=True).strip()
+        if install:
+            break
     devcmd = Path(install) / "Common7/Tools/VsDevCmd.bat"
+    if not install:
+        # vswhere does not always list a Build Tools instance installed on
+        # another drive; its VsDevCmd.bat is in the usual <version>/<edition> layout.
+        found = sorted(p for root in roots for p in root.glob("*/*/Common7/Tools/VsDevCmd.bat")
+                       if (p.parents[2] / "VC/Tools/MSVC").is_dir())
+        if found:
+            devcmd, install = found[-1], str(found[-1].parents[2])
     if not install or not devcmd.exists():
         raise RuntimeError("Visual Studio C++ Build Tools not found for FFmpeg host checks")
     # cmd uses its own quote rules; list2cmdline backslash-quotes are invalid
@@ -77,6 +90,15 @@ def windows_native_compiler_environment(env: dict[str, str]) -> dict[str, str]:
         key, sep, value = line.partition("=")
         if sep and key.upper() in ("INCLUDE", "LIB", "LIBPATH", "PATH", "VCTOOLSINSTALLDIR", "WINDOWSSDKDIR", "WINDOWSSDKVERSION"):
             env[key.upper() if key.upper() != "PATH" else "PATH"] = value
+    # VsDevCmd only finds a Windows SDK registered on the system drive; with the
+    # SDK on another drive the host compiler had no UCRT headers (ctype.h).
+    if "\\ucrt" not in env.get("INCLUDE", "").lower():
+        kits = sorted(p for root in roots for p in (root.parent / "Windows Kits/10/Include").glob("10.*") if (p / "ucrt").is_dir())
+        if kits:
+            include, version = kits[-1], kits[-1].name
+            lib = include.parents[1] / "Lib" / version
+            env["INCLUDE"] = os.pathsep.join([env.get("INCLUDE", "")] + [str(include / d) for d in ("ucrt", "um", "shared")])
+            env["LIB"] = os.pathsep.join([env.get("LIB", "")] + [str(lib / d / "x64") for d in ("ucrt", "um")])
     return env
 
 def public_header_list(source: Path) -> list[tuple[str, bool]]:

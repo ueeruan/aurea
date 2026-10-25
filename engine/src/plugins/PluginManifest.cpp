@@ -39,6 +39,7 @@ const char* param_kind_name(ParamKind k) noexcept {
         case ParamKind::Color: return "color";
         case ParamKind::Point: return "point";
         case ParamKind::Angle: return "angle";
+        case ParamKind::Layer: return "layer";
     }
     return "float";
 }
@@ -207,16 +208,37 @@ bool read_param(const Value& v, u32 index, ParamDecl& p, Reader& r) {
     static const std::pair<const char*, ParamKind> kKinds[] = {
         {"float", ParamKind::Float}, {"int", ParamKind::Int}, {"bool", ParamKind::Bool}, {"enum", ParamKind::Enum},
         {"color", ParamKind::Color}, {"point", ParamKind::Point}, {"angle", ParamKind::Angle},
+        {"layer", ParamKind::Layer},
     };
     bool known = false;
     for (const auto& [name, kind] : kKinds) if (type->string == name) { p.kind = kind; known = true; }
     if (!known) return r.fail("plugin.json: " + pw + ": tipo desconhecido \"" + type->string
-                              + "\" (use float, int, bool, enum, color, point ou angle)");
+                              + "\" (use float, int, bool, enum, color, point, angle ou layer)");
     if (!read_text(v.get("label"), p.label, "label", 48, false, r)) return false;
     if (p.label.empty()) p.label.emplace_back("*", p.id);
     if (const Value* a = v.get("animatable")) {
         if (a->type != Value::Type::Bool) return r.fail("plugin.json: " + pw + ": \"animatable\" deve ser true ou false");
         p.animatable = a->boolean;
+    }
+    // 0.3.1: "layer" liga uma câmera, um nulo ou uma luz da composição ao
+    // plugin (só "shader3d"; o motor manda o mundo dessa camada). Sem faixa,
+    // sem padrão (nenhuma camada) e nunca animável.
+    if (p.kind == ParamKind::Layer) {
+        p.animatable = false;
+        p.min = -1.0f; p.max = 1.0e6f;
+        p.def[0] = -1.0f; p.def[1] = p.def[2] = 0.0f; p.def[3] = 1.0f;
+        if (const Value* accept = v.get("accept")) {
+            if (!accept->is_array()) return r.fail("plugin.json: " + pw + ": \"accept\" deve ser uma lista (camera, null, light, any)");
+            for (const Value& a : accept->array) {
+                if (!a.is_string()) return r.fail("plugin.json: " + pw + ": \"accept\" deve ter textos");
+                if (a.string == "camera") p.accept |= kAcceptCamera;
+                else if (a.string == "null") p.accept |= kAcceptNull;
+                else if (a.string == "light") p.accept |= kAcceptLight;
+                else if (a.string == "any") p.accept = 0;
+                else return r.fail("plugin.json: " + pw + ": \"accept\" desconhecido \"" + a.string + "\" (camera, null, light ou any)");
+            }
+        }
+        return true;
     }
     // Faixas padrão por tipo.
     switch (p.kind) {
@@ -225,6 +247,7 @@ bool read_param(const Value& v, u32 index, ParamDecl& p, Reader& r) {
         case ParamKind::Bool: case ParamKind::Enum: case ParamKind::Color: p.min = 0.0f; p.max = 1.0f; break;
         case ParamKind::Point: p.min = -1.0f; p.max = 2.0f; break;
         case ParamKind::Angle: p.min = -360.0f; p.max = 360.0f; break;
+        case ParamKind::Layer: break;
     }
     const Value* mn = v.get("min");
     const Value* mx = v.get("max");
@@ -298,6 +321,7 @@ bool read_param(const Value& v, u32 index, ParamDecl& p, Reader& r) {
             }
             break;
         }
+        case ParamKind::Layer: break;
     }
     return true;
 }
@@ -456,9 +480,10 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
         m.category = cat->string;
     }
     const Value* kind = root.get("kind");
-    if (!kind || !kind->is_string() || (kind->string != "shader" && kind->string != "stack"))
-        return r.fail("plugin.json: \"kind\" deve ser \"shader\" ou \"stack\"");
+    if (!kind || !kind->is_string() || (kind->string != "shader" && kind->string != "shader3d" && kind->string != "stack"))
+        return r.fail("plugin.json: \"kind\" deve ser \"shader\", \"shader3d\" ou \"stack\"");
     m.kind = kind->string == "stack" ? Kind::Stack : Kind::Shader;
+    m.scene3d = kind->string == "shader3d";
 
     if (const Value* params = root.get("params")) {
         if (!params->is_array()) return r.fail("plugin.json: \"params\" deve ser uma lista");
@@ -473,6 +498,13 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
             m.params.push_back(std::move(p));
         }
     }
+    u32 layerParams = 0;
+    for (const ParamDecl& p : m.params) if (p.kind == ParamKind::Layer) ++layerParams;
+    if (layerParams && !m.scene3d)
+        return r.fail("plugin.json: parametro \"layer\" so em plugin \"kind\": \"shader3d\"");
+    if (layerParams > kMaxLayerParams)
+        return r.fail("plugin.json: " + std::to_string(layerParams) + " parametros \"layer\" (limite "
+                      + std::to_string(kMaxLayerParams) + ")");
     if (m.kind == Kind::Shader) return read_passes(root, m, r);
     return read_stack(root, m, r);
 }
@@ -514,11 +546,20 @@ void write_param(json::Writer& w, const ParamDecl& p, bool srgbColorDefaults) {
             for (const LocalizedText& o : p.options) write_text(w, o);
             w.end_array();
             break;
+        case ParamKind::Layer:
+            if (p.accept) {
+                w.key("accept").begin_array();
+                if (p.accept & kAcceptCamera) w.value("camera");
+                if (p.accept & kAcceptNull) w.value("null");
+                if (p.accept & kAcceptLight) w.value("light");
+                w.end_array();
+            }
+            break;
         default:
             w.key("default").value(p.def[0]).key("min").value(p.min).key("max").value(p.max);
             break;
     }
-    if (!p.animatable) w.key("animatable").value(false);
+    if (!p.animatable && p.kind != ParamKind::Layer) w.key("animatable").value(false);
     w.end_object();
 }
 
@@ -535,7 +576,7 @@ std::string manifest_json(const Manifest& m) {
     write_text(w, m.name);
     if (!m.description.empty()) { w.key("description"); write_text(w, m.description); }
     if (!m.category.empty()) w.key("category").value(m.category);
-    w.key("kind").value(kind_name(m.kind));
+    w.key("kind").value(m.scene3d ? "shader3d" : kind_name(m.kind));
     w.key("params").begin_array();
     for (const ParamDecl& p : m.params) write_param(w, p, true);
     w.end_array();
@@ -581,6 +622,7 @@ std::string to_json(const std::vector<PluginInfo>& plugins) {
         w.key("version").value(p.version);
         w.key("author").value(p.author);
         w.key("kind").value(kind_name(p.kind));
+        if (p.scene3d) w.key("scene3d").value(true);
         w.key("category").value(p.category);
         // Nomes e descrições SEMPRE como objeto idioma -> texto ("*" = todos).
         w.key("name").begin_object();

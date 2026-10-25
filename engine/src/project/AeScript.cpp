@@ -194,6 +194,10 @@ public:
                         case 'v': t.text.push_back('\v'); break;
                         case '0': t.text.push_back('\0'); break;
                         case '\n': ++line_; break;   // continuação de linha
+                        case '\r':                   // continuação com CRLF (arquivo do Windows)
+                            if (i_ < s_.size() && s_[i_] == '\n') ++i_;
+                            ++line_;
+                            break;
                         case 'x': {
                             int h1 = i_ < s_.size() ? hexv(s_[i_]) : -1, h2 = i_ + 1 < s_.size() ? hexv(s_[i_ + 1]) : -1;
                             if (h1 >= 0 && h2 >= 0) { put_utf8(t.text, static_cast<u32>(h1 * 16 + h2)); i_ += 2; }
@@ -943,7 +947,48 @@ enum Native : u32 {
     OHasOwn, OToString, FCall, FApply,
     // Date
     DGetTime, DZero,
+    // RegExp (só relatado), JSON
+    RxTest, RxExec, JStringify, JParse,
 };
+
+/// Corta o texto em até `n` bytes sem partir um caractere UTF-8 no meio (o
+/// relatório atravessa JNI/NSString, que recusam UTF-8 quebrado).
+std::string cut_utf8(const std::string& s, usize n) {
+    if (s.size() <= n) return s;
+    usize e = n;
+    while (e > 0 && (static_cast<u8>(s[e]) & 0xC0) == 0x80) --e;
+    return s.substr(0, e);
+}
+
+// Métodos embutidos por tipo (também achados por Array.prototype.x etc.).
+constexpr std::pair<const char*, u32> kStringMethods[] = {
+    {"charAt", SCharAt}, {"charCodeAt", SCharCodeAt}, {"indexOf", SIndexOf}, {"lastIndexOf", SLastIndexOf},
+    {"substring", SSubstring}, {"substr", SSubstr}, {"slice", SSlice}, {"split", SSplit}, {"replace", SReplace},
+    {"toUpperCase", SToUpper}, {"toLowerCase", SToLower}, {"concat", SConcat}, {"trim", STrim},
+    {"match", SMatch}, {"search", SSearch}, {"toString", SToString}, {"valueOf", SToString},
+    {"localeCompare", SLocaleCompare}};
+constexpr std::pair<const char*, u32> kArrayMethods[] = {
+    {"push", APush}, {"pop", APop}, {"shift", AShift}, {"unshift", AUnshift}, {"slice", ASlice},
+    {"splice", ASplice}, {"concat", AConcat}, {"join", AJoin}, {"reverse", AReverse}, {"sort", ASort},
+    {"indexOf", AIndexOf}, {"lastIndexOf", ALastIndexOf}, {"toString", AToString}};
+constexpr std::pair<const char*, u32> kNumberMethods[] = {
+    {"toFixed", NumToFixed}, {"toString", NumToString}, {"toPrecision", NumToPrecision}, {"valueOf", NumToString}};
+constexpr std::pair<const char*, u32> kObjectMethods[] = {{"hasOwnProperty", OHasOwn}, {"toString", OToString}};
+constexpr std::pair<const char*, u32> kFunctionMethods[] = {{"call", FCall}, {"apply", FApply}};
+
+/// Método embutido do protótipo do construtor `ctor` ("Array", "String"...); 0 = nenhum.
+u32 builtin_method(std::string_view ctor, const std::string& name) noexcept {
+    auto find = [&](const auto& table) -> u32 {
+        for (const auto& e : table) if (name == e.first) return e.second;
+        return 0;
+    };
+    if (ctor == "String") return find(kStringMethods);
+    if (ctor == "Array") return find(kArrayMethods);
+    if (ctor == "Number") return find(kNumberMethods);
+    if (ctor == "Function") return find(kFunctionMethods);
+    if (ctor == "Object") return find(kObjectMethods);
+    return 0;
+}
 
 } // namespace
 
@@ -1169,6 +1214,24 @@ struct Evaluator {
         return Value::undef();
     }
 
+    /// Método que o script pendurou em <ctor>.prototype (ou em Object.prototype)
+    /// de um construtor embutido: `String.prototype.trim = function () {...}`.
+    Value script_proto(const char* ctor, const std::string& name, bool* hit = nullptr) {
+        if (hit) *hit = false;
+        for (const char* c : {ctor, "Object"}) {
+            bool g = false;
+            const Value fn = in.own(in.global_, c, &g);
+            if (!g || !fn.is_obj() || O(fn).kind != OK::Native) continue;
+            bool pf = false;
+            const Value pr = in.own(fn.r, "prototype", &pf);
+            if (!pf || !pr.is_obj()) continue;
+            bool found = false;
+            const Value v = in.own(pr.r, name, &found);
+            if (found) { if (hit) *hit = true; return v; }
+        }
+        return Value::undef();
+    }
+
     Value make_function(i32 fi, u32 env) {
         const u32 f = in.new_object(OK::Function, "Function");
         in.o(f).fn = fi;
@@ -1194,25 +1257,16 @@ struct Evaluator {
                     for (const char c : s) if ((static_cast<u8>(c) & 0xC0) != 0x80) ++n;
                     return Value::num(n);
                 }
-                static const std::pair<const char*, u32> m[] = {
-                    {"charAt", SCharAt}, {"charCodeAt", SCharCodeAt}, {"indexOf", SIndexOf}, {"lastIndexOf", SLastIndexOf},
-                    {"substring", SSubstring}, {"substr", SSubstr}, {"slice", SSlice}, {"split", SSplit}, {"replace", SReplace},
-                    {"toUpperCase", SToUpper}, {"toLowerCase", SToLower}, {"concat", SConcat}, {"trim", STrim},
-                    {"match", SMatch}, {"search", SSearch}, {"toString", SToString}, {"valueOf", SToString},
-                    {"localeCompare", SLocaleCompare}};
-                for (const auto& e : m) if (name == e.first) return bound(e.second, base);
-                return Value::undef();
+                for (const auto& e : kStringMethods) if (name == e.first) return bound(e.second, base);
+                return script_proto("String", name);
             }
             case T::Num: {
-                if (name == "toFixed") return bound(NumToFixed, base);
-                if (name == "toString") return bound(NumToString, base);
-                if (name == "toPrecision") return bound(NumToPrecision, base);
-                if (name == "valueOf") return bound(NumToString, base);
-                return Value::undef();
+                for (const auto& e : kNumberMethods) if (name == e.first) return bound(e.second, base);
+                return script_proto("Number", name);
             }
             case T::Bool:
                 if (name == "toString") return bound(SToString, base);
-                return Value::undef();
+                return script_proto("Boolean", name);
             case T::Obj: break;
         }
         Object& ob = O(base);
@@ -1228,28 +1282,43 @@ struct Evaluator {
                 const usize i = static_cast<usize>(idx);
                 return i < ob.elems.size() ? ob.elems[i] : Value::undef();
             }
-            static const std::pair<const char*, u32> m[] = {
-                {"push", APush}, {"pop", APop}, {"shift", AShift}, {"unshift", AUnshift}, {"slice", ASlice},
-                {"splice", ASplice}, {"concat", AConcat}, {"join", AJoin}, {"reverse", AReverse}, {"sort", ASort},
-                {"indexOf", AIndexOf}, {"lastIndexOf", ALastIndexOf}, {"toString", AToString}};
-            for (const auto& e : m) if (name == e.first) return bound(e.second, base);
+            for (const auto& e : kArrayMethods) if (name == e.first) return bound(e.second, base);
         }
+        if (ob.kind == OK::Regex && (name == "test" || name == "exec")) return bound(name == "test" ? RxTest : RxExec, base);
         bool found = false;
         const Value v = proto_lookup(base.r, name, found);
         if (found) return v;
         if (ob.kind == OK::Function || ob.kind == OK::Native) {
             if (name == "call") return bound(FCall, base);
             if (name == "apply") return bound(FApply, base);
-            if (name == "prototype" && ob.kind == OK::Function) {
-                const Value pr = in.plain();
+            if (name == "prototype" && (ob.kind == OK::Function || ob.self.t == T::Undef)) {
+                // Construtor embutido (Array, String, Date...): o protótipo é um
+                // objeto onde o script pode pendurar métodos (polyfills como
+                // `if (!Array.prototype.indexOf) {...}` e o json2); os métodos
+                // embutidos também são achados por ele (Array.prototype.slice.call).
+                const Value pr = ob.kind == OK::Function ? in.plain() : in.plain("proto:" + ob.cls);
                 in.own_set(base.r, "prototype", pr);
                 return pr;
             }
             if (name == "length" && ob.kind == OK::Function && ob.fn >= 0)
                 return Value::num(static_cast<f64>(p.funcs[static_cast<usize>(ob.fn)].params.size()));
         }
+        if (ob.kind == OK::Plain && ob.cls.size() > 6 && ob.cls.compare(0, 6, "proto:") == 0) {
+            if (const u32 id = builtin_method(std::string_view(ob.cls).substr(6), name)) return in.native_fn(id);
+        }
         if (ob.kind == OK::Plain && ob.cls == "Date" && name == "getTime") return bound(DGetTime, base);
         if (ob.kind == OK::Plain && ob.cls == "Date" && name.size() > 3 && name.compare(0, 3, "get") == 0) return bound(DZero, base);
+        {
+            // Métodos que o script pendurou no protótipo do construtor embutido.
+            const char* ctor = ob.kind == OK::Array ? "Array"
+                             : ob.kind == OK::Function || ob.kind == OK::Native || ob.kind == OK::BoundHost ? "Function"
+                             : ob.kind == OK::Error ? "Error"
+                             : ob.kind == OK::Regex ? "RegExp"
+                             : ob.kind == OK::Plain && ob.cls == "Date" ? "Date" : "Object";
+            bool hit = false;
+            const Value sv = script_proto(ctor, name, &hit);
+            if (hit) return sv;
+        }
         if (name == "hasOwnProperty") return bound(OHasOwn, base);
         if (name == "toString") return bound(OToString, base);
         return Value::undef();
@@ -1562,6 +1631,223 @@ struct Evaluator {
         return std::min(i, len);
     }
 
+    // --- JSON (o mínimo para valores comuns: os scripts usam no lugar do json2) ---------
+    static void json_quote(std::string& out, const std::string& s) {
+        out.push_back('"');
+        for (const char ch : s) {
+            const u8 c = static_cast<u8>(ch);
+            switch (c) {
+                case '"': out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\n': out += "\\n"; break;
+                case '\r': out += "\\r"; break;
+                case '\t': out += "\\t"; break;
+                case '\b': out += "\\b"; break;
+                case '\f': out += "\\f"; break;
+                default:
+                    if (c < 0x20) {
+                        char b[8];
+                        std::snprintf(b, sizeof b, "\\u%04x", static_cast<unsigned>(c));
+                        out += b;
+                    } else {
+                        out.push_back(ch);
+                    }
+            }
+        }
+        out.push_back('"');
+    }
+
+    /// Falso = o valor não entra (undefined, função): some do objeto, vira null no array.
+    bool json_write(std::string& out, const Value& v, const std::string& gap, const std::string& indent, u32 depth) {
+        if (stop()) return false;
+        if (depth > 64) { in.throw_error("JSON.stringify: estrutura circular ou funda demais"); return false; }
+        if (out.size() > (8u << 20)) { in.abort("texto grande demais"); return false; }
+        switch (v.t) {
+            case T::Undef: return false;
+            case T::Null: out += "null"; return true;
+            case T::Bool: out += v.b ? "true" : "false"; return true;
+            case T::Num: out += std::isfinite(v.n) ? num_to_str(v.n) : std::string("null"); return true;
+            case T::Str: json_quote(out, in.s(v)); return true;
+            case T::Obj: break;
+        }
+        const OK kind = O(v).kind;
+        if (kind == OK::Function || kind == OK::Native || kind == OK::BoundHost) return false;
+        if (kind == OK::Host) { out += "{}"; return true; }   // objeto do AE: sem campos serializáveis
+        if (kind == OK::Plain && O(v).cls == "Date") {
+            // As datas do sandbox não têm relógio (getTime() = 0).
+            bool hit = false;
+            (void)script_proto("Date", "toJSON", &hit);
+            if (!hit) { out += "\"1970-01-01T00:00:00.000Z\""; return true; }
+        }
+        if (kind != OK::Array) {
+            // toJSON do script (o dos polyfills de Date, por exemplo).
+            const Value tj = get(v, "toJSON");
+            if (stop()) return false;
+            if (tj.is_obj() && (O(tj).kind == OK::Function || O(tj).kind == OK::Native)) {
+                const Value r = call_value(tj, v, {in.str("")});
+                if (stop()) return false;
+                if (!r.is_obj() || r.r != v.r) return json_write(out, r, gap, indent, depth + 1);
+            }
+        }
+        const std::string inner = indent + gap;
+        if (kind == OK::Array) {
+            const std::vector<Value> el = O(v).elems;   // cópia: o toJSON pode mexer no array
+            if (el.empty()) { out += "[]"; return true; }
+            out.push_back('[');
+            for (usize i = 0; i < el.size(); ++i) {
+                if (i) out.push_back(',');
+                if (!gap.empty()) { out.push_back('\n'); out += inner; }
+                if (!json_write(out, el[i], gap, inner, depth + 1)) {
+                    if (stop()) return false;
+                    out += "null";
+                }
+            }
+            if (!gap.empty()) { out.push_back('\n'); out += indent; }
+            out.push_back(']');
+            return true;
+        }
+        const auto props = O(v).props;
+        out.push_back('{');
+        bool any = false;
+        for (const auto& pr : props) {
+            const usize mark = out.size();
+            if (any) out.push_back(',');
+            if (!gap.empty()) { out.push_back('\n'); out += inner; }
+            json_quote(out, pr.first);
+            out += gap.empty() ? ":" : ": ";
+            if (!json_write(out, pr.second, gap, inner, depth + 1)) {
+                if (stop()) return false;
+                out.resize(mark);
+                continue;
+            }
+            any = true;
+        }
+        if (any && !gap.empty()) { out.push_back('\n'); out += indent; }
+        out.push_back('}');
+        return true;
+    }
+
+    static void json_ws(const std::string& s, usize& i) {
+        while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) ++i;
+    }
+
+    static bool json_hex4(const std::string& s, usize i, u32& cp) {
+        if (i + 4 > s.size()) return false;
+        cp = 0;
+        for (usize k = 0; k < 4; ++k) {
+            const int h = hexv(s[i + k]);
+            if (h < 0) return false;
+            cp = cp * 16 + static_cast<u32>(h);
+        }
+        return true;
+    }
+
+    bool json_string(const std::string& s, usize& i, std::string& out) {
+        if (i >= s.size() || s[i] != '"') return false;
+        ++i;
+        while (i < s.size() && s[i] != '"') {
+            const char c = s[i];
+            if (static_cast<u8>(c) < 0x20) return false;
+            if (c != '\\') { out.push_back(c); ++i; continue; }
+            if (i + 1 >= s.size()) return false;
+            const char e = s[i + 1];
+            i += 2;
+            switch (e) {
+                case '"': out.push_back('"'); break;
+                case '\\': out.push_back('\\'); break;
+                case '/': out.push_back('/'); break;
+                case 'b': out.push_back('\b'); break;
+                case 'f': out.push_back('\f'); break;
+                case 'n': out.push_back('\n'); break;
+                case 'r': out.push_back('\r'); break;
+                case 't': out.push_back('\t'); break;
+                case 'u': {
+                    u32 cp = 0;
+                    if (!json_hex4(s, i, cp)) return false;
+                    i += 4;
+                    // Par substituto do UTF-16 (😀) → um caractere só.
+                    u32 lo = 0;
+                    if (cp >= 0xD800 && cp <= 0xDBFF && i + 6 <= s.size() && s[i] == '\\' && s[i + 1] == 'u' &&
+                        json_hex4(s, i + 2, lo) && lo >= 0xDC00 && lo <= 0xDFFF) {
+                        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                        i += 6;
+                    }
+                    put_utf8(out, cp);
+                    break;
+                }
+                default: return false;
+            }
+        }
+        if (i >= s.size()) return false;
+        ++i;
+        return true;
+    }
+
+    Value json_value(const std::string& s, usize& i, u32 depth, bool& bad) {
+        json_ws(s, i);
+        if (bad || stop() || i >= s.size() || depth > 256) { bad = true; return Value::undef(); }
+        if (!tick(in.line_)) return Value::undef();
+        const char c = s[i];
+        if (c == '{') {
+            const Value ob = in.plain();
+            ++i;
+            json_ws(s, i);
+            if (i < s.size() && s[i] == '}') { ++i; return ob; }
+            for (;;) {
+                json_ws(s, i);
+                std::string key;
+                if (!json_string(s, i, key)) { bad = true; return Value::undef(); }
+                json_ws(s, i);
+                if (i >= s.size() || s[i] != ':') { bad = true; return Value::undef(); }
+                ++i;
+                const Value v = json_value(s, i, depth + 1, bad);
+                if (bad || stop()) return Value::undef();
+                in.own_set(ob.r, key, v);
+                json_ws(s, i);
+                if (i < s.size() && s[i] == ',') { ++i; continue; }
+                if (i < s.size() && s[i] == '}') { ++i; return ob; }
+                bad = true;
+                return Value::undef();
+            }
+        }
+        if (c == '[') {
+            std::vector<Value> el;
+            ++i;
+            json_ws(s, i);
+            if (i < s.size() && s[i] == ']') { ++i; return in.array(std::move(el)); }
+            for (;;) {
+                el.push_back(json_value(s, i, depth + 1, bad));
+                if (bad || stop()) return Value::undef();
+                json_ws(s, i);
+                if (i < s.size() && s[i] == ',') { ++i; continue; }
+                if (i < s.size() && s[i] == ']') { ++i; return in.array(std::move(el)); }
+                bad = true;
+                return Value::undef();
+            }
+        }
+        if (c == '"') {
+            std::string out;
+            if (!json_string(s, i, out)) { bad = true; return Value::undef(); }
+            return in.str(std::move(out));
+        }
+        if (s.compare(i, 4, "true") == 0) { i += 4; return Value::boolean(true); }
+        if (s.compare(i, 5, "false") == 0) { i += 5; return Value::boolean(false); }
+        if (s.compare(i, 4, "null") == 0) { i += 4; return Value::null(); }
+        if (c == '-' || (c >= '0' && c <= '9')) {
+            const usize b = i;
+            while (i < s.size() && (s[i] == '-' || s[i] == '+' || s[i] == '.' || s[i] == 'e' || s[i] == 'E' ||
+                                    (s[i] >= '0' && s[i] <= '9')))
+                ++i;
+            const std::string num = s.substr(b, i - b);
+            char* end = nullptr;
+            const f64 v = std::strtod(num.c_str(), &end);
+            if (!end || *end != '\0') { bad = true; return Value::undef(); }
+            return Value::num(v);
+        }
+        bad = true;
+        return Value::undef();
+    }
+
     Value native(u32 id, const Value& self, const std::vector<Value>& a, bool construct, const Value& callee) {
         (void)callee;
         switch (id) {
@@ -1605,7 +1891,7 @@ struct Evaluator {
             case NAlert: case NConfirm: case NPrompt: {
                 const std::string msg = a.empty() ? std::string() : in.to_str(a[0]);
                 in.report_.note("script", id == NAlert ? "alert" : id == NConfirm ? "confirm" : "prompt",
-                                "mensagem do script: " + msg.substr(0, 200), in.line_);
+                                "mensagem do script: " + cut_utf8(msg, 200), in.line_);
                 if (id == NConfirm) return Value::boolean(true);
                 if (id == NPrompt) return a.size() > 1 ? a[1] : in.str("");
                 return Value::undef();
@@ -1902,6 +2188,32 @@ struct Evaluator {
                 default: break;
             }
         }
+        if (id == RxTest || id == RxExec) {
+            const Value src = self.is_obj() ? in.own(self.r, "source") : Value::undef();
+            in.unsupported("/" + (src.is_str() ? cut_utf8(in.s(src), 60) : std::string()) + "/." + (id == RxTest ? "test()" : "exec()"),
+                           "expressões regulares não são suportadas");
+            return id == RxTest ? Value::boolean(false) : Value::null();
+        }
+        if (id == JStringify) {
+            if (a.size() > 1 && a[1].is_obj()) in.approx("JSON.stringify()", "o filtro (replacer) do JSON.stringify foi ignorado");
+            std::string gap;
+            if (a.size() > 2 && a[2].is_num()) gap.assign(static_cast<usize>(std::clamp(a[2].n, 0.0, 10.0)), ' ');
+            else if (a.size() > 2 && a[2].is_str()) gap = cut_utf8(in.s(a[2]), 10);
+            std::string out;
+            if (a.empty() || !json_write(out, a[0], gap, std::string(), 0)) return Value::undef();
+            return in.str(std::move(out));
+        }
+        if (id == JParse) {
+            if (a.size() > 1 && a[1].is_obj()) in.approx("JSON.parse()", "a função de reconstrução (reviver) do JSON.parse foi ignorada");
+            const std::string text = a.empty() ? std::string("undefined") : in.to_str(a[0]);
+            usize i = 0;
+            bool bad = false;
+            const Value v = json_value(text, i, 0, bad);
+            if (stop()) return Value::undef();
+            json_ws(text, i);
+            if (bad || i != text.size()) return in.throw_error("JSON.parse: texto inválido na posição " + std::to_string(i));
+            return v;
+        }
         if (id == OHasOwn) {
             if (!self.is_obj() || a.empty()) return Value::boolean(false);
             const std::string k = in.to_str(a[0]);
@@ -1953,9 +2265,11 @@ struct Evaluator {
                 return in.throw_error("'" + n.s + "' não está definido");
             }
             case N::Regex: {
-                in.unsupported("/" + n.s + "/", "expressões regulares não são suportadas");
+                // Só é relatada quando USADA (test/exec/replace/split/match):
+                // bibliotecas como o json2 declaram várias e não usam.
                 const Value r = in.plain("RegExp");
                 O(r).kind = OK::Regex;
+                in.own_set(r.r, "source", in.str(n.s));
                 return r;
             }
             case N::ArrayLit: {
@@ -2321,7 +2635,7 @@ bool Interp::run(std::string_view source, Dom& d) {
     const bool parsed = parser.parse();
     for (const auto& dir : parser.directives()) {
         if (dir.second.find("#include") == 0 || dir.second.find("#includepath") == 0)
-            report_.skip("chamada", dir.second.substr(0, 120), "bloqueado pelo sandbox (inclui outro arquivo): não foi executado", dir.first);
+            report_.skip("chamada", cut_utf8(dir.second, 120), "bloqueado pelo sandbox (inclui outro arquivo): não foi executado", dir.first);
     }
     if (!parsed) {
         report_.skip("script", "sintaxe", parser.error, parser.errLine);
@@ -2359,6 +2673,12 @@ bool Interp::run(std::string_view source, Dom& d) {
         define_global("Math", math);
         const Value str = get(global_object(), "String");
         own_set(str.r, "fromCharCode", native_fn(SFromCharCode));
+        // JSON do ES5 (o ExtendScript não tem; os scripts trazem o json2, que
+        // pula a própria definição quando JSON.stringify já existe).
+        const Value json = plain("JSON");
+        own_set(json.r, "stringify", native_fn(JStringify));
+        own_set(json.r, "parse", native_fn(JParse));
+        define_global("JSON", json);
     }
     d.install(*this);
     Evaluator ev{*this, *program_};
@@ -2376,8 +2696,8 @@ bool Interp::run(std::string_view source, Dom& d) {
             const Value l = own(thrown_.r, "line", &found);
             if (found && l.is_num()) errLine = static_cast<u32>(l.n);
         }
-        report_.skip("script", "erro", "o script parou com um erro não tratado: " + msg.substr(0, 300), errLine);
-        report_.message = "O script parou na linha " + std::to_string(errLine) + ": " + msg.substr(0, 300);
+        report_.skip("script", "erro", "o script parou com um erro não tratado: " + cut_utf8(msg, 300), errLine);
+        report_.message = "O script parou na linha " + std::to_string(errLine) + ": " + cut_utf8(msg, 300);
         ok = false;
     } else if (flow_ == 5) {
         report_.message = "O script foi parado pelo sandbox na linha " + std::to_string(line_) + ".";

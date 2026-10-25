@@ -137,6 +137,12 @@ data class ExportOptions(
     /** GIF: largura máxima (px) e quadros por segundo. A sequência usa `fps`. */
     val gifWidth: Int = ImageExportRules.GIF_DEFAULT_WIDTH,
     val gifFps: Double = ImageExportRules.GIF_DEFAULT_FPS,
+    /**
+     * Codificador (Avançado, 0.3.0): 0 Automático, 1 Compatível (H.264 Baseline
+     * no encoder do aparelho), 2 Software (H.264 pela CPU). É o degrau da escada
+     * (ExportAttempts.hpp) em que o export COMEÇA; se falhar, segue dali.
+     */
+    val encoder: Int = 0,
 )
 
 enum class ExportPhase { Idle, Running, Publishing, Done, Failed, Cancelled }
@@ -238,6 +244,9 @@ class Exporter internal constructor(
         // Taxa: o motor calcula pela qualidade (0 = automático); só o Mbps
         // manual do Avançado é passado como número.
         val mbps = options.customMbps.coerceAtLeast(0)
+        // A taxa que sai de fato (0 = a do projeto): o aviso "até N qps" da
+        // escada vale também para um projeto a 120 exportado "do projeto".
+        requestedFps = if (options.fps > 0.0) options.fps else compFps
 
         state = ExportUiState(ExportPhase.Running, outputLabel = file.nameWithoutExtension,
             notice = text(R.string.msg_preparando), preparing = true)
@@ -312,14 +321,29 @@ class Exporter internal constructor(
      */
     private suspend fun runExport(dir: File, file: File, options: ExportOptions, mbps: Int) {
         diagnosticTicket = withContext(Dispatchers.IO) { ExportDiagnosticReport.begin(app, engine.exportDiagnostics()) }
-        var attempt = 0
+        // Codificador escolhido no Avançado: a escada começa nesse degrau.
+        var attempt = options.encoder.coerceIn(0, ENCODER_SOFTWARE)
+        lighterAfterClose = false
+        // O sistema fechou o app no meio do export anterior (falta de memória,
+        // crash): a escada nunca soube. No Automático, este começa no degrau
+        // que a escada usaria para falta de memória, e a tela diz por quê.
+        if (attempt == 0 && withContext(Dispatchers.IO) { ExitDiagnostics.consumeExportDeath(app) }) {
+            val lighter = AureaEngine.nativeExportNextAttempt(0, OUT_OF_MEMORY, 0, false, false, options.shortSide, options.fps,
+                options.hevc, options.aiUpscale > 0)
+            if (lighter in 1..AureaEngine.EXPORT_ATTEMPT_MAX) {
+                android.util.Log.w("AureaExport", "Previous process died while exporting; starting at attempt $lighter")
+                attempt = lighter
+                lighterAfterClose = true
+                state = state.copy(notice = text(R.string.export_after_system_close))
+            }
+        }
         var busyLeft = AureaEngine.EXPORT_ATTEMPT_BUSY_RETRIES
         val usesBlur = withContext(Dispatchers.IO) { runCatching { engine.exportUsesMotionBlur() }.getOrDefault(false) }
         while (true) {
             val level = attempt
             exportedReducedSide = AureaEngine.nativeExportAttemptShortSide(level, options.shortSide)
                 .takeIf { level > 0 && options.shortSide > 0 && it in 1 until options.shortSide } ?: 0
-            exportedFpsCap = attemptFpsCap(level, options.fps)
+            exportedFpsCap = attemptFpsCap(level, requestedFps)
             exportedBlurCap = if (level > 0 && usesBlur) AureaEngine.nativeExportAttemptBlurCap(level) else 0
             val suggested = runEngineJob(dir, file, options, level) {
                 engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale,
@@ -350,7 +374,7 @@ class Exporter internal constructor(
             val notice = buildList {
                 add(if (options.shortSide > 0 && side in 1 until options.shortSide) text(R.string.export_retry_lower, side)
                     else text(R.string.export_retry_compatible))
-                attemptFpsCap(next, options.fps).takeIf { it > 0 }?.let { add(text(R.string.export_retry_fps, it)) }
+                attemptFpsCap(next, requestedFps).takeIf { it > 0 }?.let { add(text(R.string.export_retry_fps, it)) }
                 val blur = if (usesBlur) AureaEngine.nativeExportAttemptBlurCap(next) else 0
                 if (blur == 1) add(text(R.string.export_retry_blur_off)) else if (blur > 1) add(text(R.string.export_retry_blur_less))
             }.joinToString(" ")
@@ -361,6 +385,10 @@ class Exporter internal constructor(
 
     /** Lado menor do vídeo quando a escada exportou abaixo do pedido (0 = o pedido). */
     private var exportedReducedSide = 0
+    /** Este export começou mais leve porque o app fechou no meio do anterior. */
+    private var lighterAfterClose = false
+    /** A taxa de saída pedida, já com a do projeto no lugar de "do projeto" (0). */
+    private var requestedFps = 0.0
     /** Taxa do vídeo quando a escada a limitou abaixo do pedido (0 = a pedida). */
     private var exportedFpsCap = 0
     /** Teto de motion blur do degrau que exportou (0 = o do projeto; 1 = sem desfoque). */
@@ -706,6 +734,7 @@ class Exporter internal constructor(
 
     private fun noticeFor(p: ExportProgress, options: ExportOptions): String {
         val lines = ArrayList<String>(4)
+        if (lighterAfterClose) lines += text(R.string.export_after_system_close)
         when ((p.flags ushr 8) and 15) {
             4 -> lines += text(R.string.export_v2_finalizing)
             5 -> lines += text(R.string.export_v2_validating)
@@ -779,6 +808,8 @@ class Exporter internal constructor(
         const val OUT_OF_MEMORY = 8
         const val ENCODE_FAILED = 15
         const val CANCELLED = 25
+        /** Último codificador escolhível (ExportOptions.encoder): o degrau 2, software. */
+        const val ENCODER_SOFTWARE = 2
         const val STORAGE_FULL = 28
         /** Espera antes de refazer quando o motor ainda estava ocupado (kExportAttemptWait). */
         const val BUSY_WAIT_MS = 1500L

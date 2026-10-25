@@ -1,0 +1,33 @@
+{
+  "aureaPlugin": 1,
+  "id": "com.aurea.examples.target3d",
+  "version": "1.0.0",
+  "author": "AUREA (exemplo)",
+  "name": {
+    "pt-BR": "Mira 3D",
+    "en": "3D Target",
+    "es": "Mira 3D",
+    "ru": "3D-прицел",
+    "hi": "3D लक्ष्य",
+    "id": "Target 3D",
+    "ar": "هدف ثلاثي الأبعاد"
+  },
+  "description": {
+    "pt-BR": "Um anel de luz em volta de um nulo 3D, visto pela câmera da cena: mova o nulo ou a câmera e o anel acompanha em perspectiva.",
+    "en": "A ring of light around a 3D null, seen through the scene camera: move the null or the camera and the ring follows in perspective."
+  },
+  "category": "3D",
+  "kind": "shader3d",
+  "params": [
+    { "id": "target", "type": "layer", "accept": ["null", "camera", "light"],
+      "label": { "pt-BR": "Alvo (nulo 3D)", "en": "Target (3D null)" } },
+    { "id": "radius", "type": "float", "label": { "pt-BR": "Raio (px)", "en": "Radius (px)" },
+      "default": 120, "min": 4, "max": 1200 },
+    { "id": "width", "type": "float", "label": { "pt-BR": "Espessura (px)", "en": "Thickness (px)" },
+      "default": 6, "min": 0.5, "max": 80 },
+    { "id": "glow", "type": "float", "label": { "pt-BR": "Brilho", "en": "Glow" },
+      "default": 1.5, "min": 0, "max": 8 },
+    { "id": "tint", "type": "color", "label": { "pt-BR": "Cor", "en": "Colour" }, "default": "#4CC9FF" }
+  ],
+  "passes": [ { "shader": "target_3d.frag" } ]
+}

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.1: importar do After Effects também pelo menu da camada e pela Edição; sem camada, o preset cria uma. -->
+<resources>
+    <string name="ae_import_layer_detail">Preset: efek, keyframe, dan animator teks pada lapisan ini. Skrip: menerima lapisan ini sebagai yang terpilih.</string>
+    <string name="ae_import_new_layer_detail">Preset: masuk ke lapisan baru (teks, atau solid seukuran komposisi), seperti di After Effects. Skrip: membuat dan menganimasi lapisan.</string>
+    <string name="ae_partial_title">Diimpor sebagian</string>
+    <string name="ae_too_big">File terlalu besar untuk diimpor (maksimum 64 MB).</string>
+</resources>

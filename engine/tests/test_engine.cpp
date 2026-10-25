@@ -2243,6 +2243,39 @@ AUREA_TEST(Engine, ImagesComeBackWhenTheProjectIsReopened) {
     std::remove(path.c_str());
 }
 
+// 0.3.0 (PNG do Ibis Paint "com linhas"): a cor guardada nos pixels
+// TRANSPARENTES não pode aparecer na miniatura da timeline — vale o xadrez.
+AUREA_TEST(Engine, ImageThumbnailHonoursTransparency) {
+    EngineConfig ec;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    Engine e;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    // 64×32: metade esquerda opaca azul, metade direita vermelha com alfa 0.
+    std::vector<u8> px(64 * 32 * 4);
+    for (u32 y = 0; y < 32; ++y) for (u32 x = 0; x < 64; ++x) {
+        u8* p = px.data() + (static_cast<usize>(y) * 64 + x) * 4;
+        if (x < 32) { p[0] = 0; p[1] = 0; p[2] = 255; p[3] = 255; }
+        else { p[0] = 255; p[1] = 0; p[2] = 0; p[3] = 0; }
+    }
+    const auto id = e.import_image(px.data(), 64, 32, "transparente");
+    AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    std::vector<u8> thumb(64 * 64 * 4);
+    u32 w = 0;
+    AUREA_CHECK(e.query_thumbnail(*id, 0, 16, thumb.data(), static_cast<u32>(thumb.size()), &w) > 0);
+    AUREA_CHECK_EQ(w, 32u);
+    u32 red = 0, blue = 0;
+    for (u32 y = 0; y < 16; ++y) for (u32 x = 0; x < w; ++x) {
+        const u8* p = thumb.data() + (static_cast<usize>(y) * w + x) * 4;
+        if (p[0] > 150 && p[2] < 80) ++red;
+        if (p[2] > 200 && p[0] < 40) ++blue;
+    }
+    AUREA_CHECK_EQ(red, 0u);       // nada da cor escondida
+    AUREA_CHECK(blue >= 16u * 15u);  // a metade opaca continua azul
+    e.shutdown();
+}
+
 AUREA_TEST(Engine, QueuedStringsAreNotGluedToThePreviousOnes) {
     // As strings da fila ficam coladas no blob, sem terminador. Duas edições
     // de texto seguidas (a digitação da UI): a segunda não pode levar a

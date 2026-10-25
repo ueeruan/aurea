@@ -207,6 +207,8 @@ class AureaEngine private constructor() {
         const val EXPORT_ATTEMPT_WAIT = 0x100
         /** kExportAttemptBusyRetries. */
         const val EXPORT_ATTEMPT_BUSY_RETRIES = 2
+        /** kExportAttemptMax: o último degrau da escada. */
+        const val EXPORT_ATTEMPT_MAX = 6
     }
 
     /** Ponteiro para o contexto nativo. 0 = destruído. */

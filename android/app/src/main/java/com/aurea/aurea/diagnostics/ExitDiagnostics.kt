@@ -144,6 +144,32 @@ object ExitDiagnostics {
         return after in 0..VIDEO_READY_WINDOW_MS
     }
 
+    private const val EXPORT_DEATH_SEEN = "export_death_seen_ms"
+
+    /**
+     * 0.3.0: o processo anterior morreu NO MEIO de um export de vídeo (crash,
+     * falta de memória ou morto pelo sistema) e isso ainda não foi usado. A
+     * escada só age em falhas que o app vê; quando o sistema mata o app (4 GB,
+     * "fecha entre os quadros 52 e 62"), o próximo export repetia igual. Uma
+     * vez por morte: o horário dela fica gravado. Chamar fora da main thread.
+     */
+    fun consumeExportDeath(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 30) return false
+        val exit = runCatching { exits(context).firstOrNull() }.getOrNull() ?: return false
+        if (!diedDuringExport(exit.reason, parseSummary(exit.processStateSummary))) return false
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getLong(EXPORT_DEATH_SEEN, 0L) == exit.timestamp) return false
+        prefs.edit().putLong(EXPORT_DEATH_SEEN, exit.timestamp).apply()
+        return true
+    }
+
+    /** O encerramento foi uma morte durante o export de vídeo (não o usuário fechando). */
+    internal fun diedDuringExport(reason: Int, summary: String?): Boolean {
+        if (summary == null || !summary.contains("phase=${Phase.PROJECT_EXPORT_VIDEO.name} ")) return false
+        return reason == ApplicationExitInfo.REASON_CRASH_NATIVE || reason == ApplicationExitInfo.REASON_CRASH ||
+            reason == ApplicationExitInfo.REASON_LOW_MEMORY || reason == ApplicationExitInfo.REASON_SIGNALED
+    }
+
     // O detalhe vai ANTES de uptimeMs: crashedDuringVideo lê o número do fim.
     internal fun marker(phase: Phase, build: Int, uptimeMs: Long, detail: String = ""): ByteArray {
         val extra = cleanDetail(detail)

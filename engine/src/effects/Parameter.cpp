@@ -133,6 +133,15 @@ u32 ParameterRegistry::add_layer_ref(const char* id, const char* label) {
     return add(s);
 }
 
+u32 ParameterRegistry::add_layer_ref(const char* id, const char* label, u16 accept) {
+    ParamSpec s;
+    s.id = id; s.label = label; s.type = ParamType::LayerReference;
+    s.flags = static_cast<u16>(accept & kParamRefKindMask);
+    s.defaultValue = ParamValue::scalar(-1.0f);
+    s.minValue = -1.0f; s.maxValue = 1.0e6f;
+    return add(s);
+}
+
 u32 ParameterRegistry::add_texture_ref(const char* id, const char* label) {
     ParamSpec s;
     s.id = id; s.label = label; s.type = ParamType::TextureReference; s.flags = kParamNone;

@@ -47,40 +47,39 @@ void ImportReport::note(std::string k, std::string n, std::string r, u32 line) {
     push_item(notes, std::move(k), std::move(n), std::move(r), line);
 }
 
-std::string report_json(const ImportReport& r) {
-    json::Writer w;
-    w.begin_object();
-    w.key("ok").value(r.ok);
-    w.key("kind").value(std::string_view(r.kind));
-    w.key("effects").value(r.effects);
-    w.key("keyframes").value(r.keyframes);
-    w.key("layers").value(r.layers);
-    w.key("expressions").value(r.expressions);
-    w.key("animators").value(r.animators);
-    auto list = [&](const char* key, const std::vector<SkipItem>& items) {
-        w.key(key).begin_array();
-        for (const SkipItem& s : items) {
-            w.begin_object();
-            w.key("kind").value(std::string_view(s.kind));
-            w.key("name").value(std::string_view(s.name));
-            w.key("reason").value(std::string_view(s.reason));
-            w.key("line").value(s.line);
-            w.end_object();
+namespace {
+/// UTF-8 válido para as pontes (JNI e NSString recusam o texto inteiro por um
+/// byte quebrado): sequência inválida vira U+FFFD (o escritor JSON escapa os
+/// caracteres de controle).
+std::string valid_utf8(std::string_view s) {
+    std::string o;
+    o.reserve(s.size());
+    usize i = 0;
+    while (i < s.size()) {
+        const u8 c = static_cast<u8>(s[i]);
+        if (c < 0x80) {
+            o.push_back(static_cast<char>(c));
+            ++i;
+            continue;
         }
-        w.end_array();
-    };
-    list("skipped", r.skipped);
-    list("notes", r.notes);
-    w.key("message").value(std::string_view(r.message));
-    w.end_object();
-    return w.str();
+        const usize len = (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
+        bool ok = len > 0 && i + len <= s.size();
+        for (usize k = 1; ok && k < len; ++k) ok = (static_cast<u8>(s[i + k]) & 0xC0) == 0x80;
+        if (ok) {
+            // Sem formas longas, substitutos (D800–DFFF) nem acima de U+10FFFF.
+            const u8 c1 = static_cast<u8>(s[i + 1]);
+            if (len == 2) ok = c >= 0xC2;
+            else if (len == 3) ok = !(c == 0xE0 && c1 < 0xA0) && !(c == 0xED && c1 >= 0xA0);
+            else ok = !(c == 0xF0 && c1 < 0x90) && !(c == 0xF4 && c1 >= 0x90) && c <= 0xF4;
+        }
+        if (ok) { o.append(s.data() + i, len); i += len; }
+        else { o += "\xEF\xBF\xBD"; ++i; }
+    }
+    return o;
 }
 
-void finish_report(ImportReport& r) {
-    if (!r.ok) {
-        if (r.message.empty()) r.message = "Nada do arquivo do After Effects pôde ser importado.";
-        return;
-    }
+/// "1 camada criada, 2 efeitos, ..." (vazio = nada).
+std::string count_parts(const ImportReport& r) {
     std::string parts;
     auto add = [&](u32 n, const char* one, const char* many) {
         if (n == 0) return;
@@ -92,6 +91,51 @@ void finish_report(ImportReport& r) {
     add(r.animators, "animador de texto", "animadores de texto");
     add(r.keyframes, "keyframe", "keyframes");
     add(r.expressions, "expressão", "expressões");
+    return parts;
+}
+} // namespace
+
+std::string report_json(const ImportReport& r) {
+    json::Writer w;
+    w.begin_object();
+    w.key("ok").value(r.ok);
+    w.key("kind").value(std::string_view(r.kind));
+    w.key("effects").value(r.effects);
+    w.key("keyframes").value(r.keyframes);
+    w.key("layers").value(r.layers);
+    w.key("expressions").value(r.expressions);
+    w.key("animators").value(r.animators);
+    w.key("changes").value(r.changes);
+    auto list = [&](const char* key, const std::vector<SkipItem>& items) {
+        w.key(key).begin_array();
+        for (const SkipItem& s : items) {
+            w.begin_object();
+            w.key("kind").value(std::string_view(valid_utf8(s.kind)));
+            w.key("name").value(std::string_view(valid_utf8(s.name)));
+            w.key("reason").value(std::string_view(valid_utf8(s.reason)));
+            w.key("line").value(s.line);
+            w.end_object();
+        }
+        w.end_array();
+    };
+    list("skipped", r.skipped);
+    list("notes", r.notes);
+    w.key("message").value(std::string_view(valid_utf8(r.message)));
+    w.end_object();
+    return w.str();
+}
+
+void finish_report(ImportReport& r) {
+    if (!r.ok) {
+        if (r.message.empty()) r.message = "Nada do arquivo do After Effects pôde ser importado.";
+        // Parou com erro DEPOIS de mudar o projeto: o que entrou fica (e se desfaz num passo).
+        if (r.changes > 0) {
+            const std::string parts = count_parts(r);
+            if (!parts.empty()) r.message += " Antes disso entrou: " + parts + ".";
+        }
+        return;
+    }
+    const std::string parts = count_parts(r);
     std::string m = r.kind == "jsx" ? "Script do After Effects executado" : "Preset do After Effects importado";
     m += parts.empty() ? "." : ": " + parts + ".";
     if (!r.skipped.empty())

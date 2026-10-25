@@ -258,6 +258,22 @@ Each pass is a shader with its own `aurea_main`. Pass N reads `aurea_source`
 and the named `inputs` that point at earlier `target`s. The last pass is the
 output. `aurea.resolution` and `aurea.layer.zw` reflect each pass's `scale`.
 
+
+### 3D plugins (`"kind": "shader3d"`, 0.3.1)
+
+A 3D plugin is a `shader` that also sees the **scene camera** (the composition's
+active camera, or the default one) and the **world** of up to 4 layers linked by
+`layer` parameters (a 3D **null** as a target or pivot, a **camera**, a **light**).
+A `layer` parameter accepts `"accept": ["camera", "null", "light", "any"]`, is
+never animatable, and its name becomes its slot for the `aurea_layer_*`
+functions. The `aurea` block gains, after `params[16]`: `view`, `compFromWorld`,
+`compFromLayer`, `camera`, `lens`, `comp`, `layerWorld[4]`, `layerPos[4]`,
+`layerInfo[4]`; and the helpers `aurea_layer_valid/position/matrix/axis/kind/fov`,
+`aurea_camera_position/right/down/forward`, `aurea_comp_px`, `aurea_ray`,
+`aurea_world_to_comp`, `aurea_world_to_view`. World units are composition
+pixels. See the Portuguese README (section 4, "Plugins 3D") for the full table
+and `examples/target-3d` for a complete plugin.
+
 ## 5. Stack plugins and expressions
 
 ```json

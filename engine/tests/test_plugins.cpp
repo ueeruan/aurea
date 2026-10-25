@@ -281,7 +281,7 @@ AUREA_TEST(Plugins, CompileErrorReportsFileAndLine) {
 
 AUREA_TEST(Plugins, ShadersTranslateForGlesAndMetal) {
     // O mesmo tradutor dos backends GLES (ESSL 3.10) e Metal (MSL 2.1).
-    for (const char* folder : {"rgb-wave", "soft-glow"}) {
+    for (const char* folder : {"rgb-wave", "soft-glow", "target-3d"}) {
         const fs::path root = fs::path(examples()) / folder;
         plugins::Manifest m;
         std::string err;
@@ -303,6 +303,71 @@ AUREA_TEST(Plugins, ShadersTranslateForGlesAndMetal) {
             }
         }
     }
+}
+
+// 0.3.1: plugins "shader3d" — câmera da cena e camadas ligadas (nulo/câmera/luz).
+AUREA_TEST(Plugins, Shader3dManifestLinksCameraAndNullLayers) {
+    const std::string ok =
+        "{\"aureaPlugin\":1,\"id\":\"com.x.mira\",\"version\":\"1.0.0\",\"name\":\"Mira\",\"kind\":\"shader3d\","
+        "\"params\":[{\"id\":\"target\",\"type\":\"layer\",\"accept\":[\"null\",\"camera\"],\"label\":\"Alvo\"},"
+        "{\"id\":\"size\",\"type\":\"float\",\"default\":0.2}],\"passes\":[{\"shader\":\"a.frag\"}]}";
+    plugins::Manifest m;
+    std::string err;
+    AUREA_CHECK_MSG(plugins::parse_manifest(ok, m, err), err.c_str());
+    AUREA_CHECK(m.scene3d);
+    AUREA_CHECK(m.kind == plugins::Kind::Shader);
+    AUREA_CHECK_EQ(m.params.size(), static_cast<usize>(2));
+    if (m.params.size() == 2) {
+        AUREA_CHECK(m.params[0].kind == plugins::ParamKind::Layer);
+        AUREA_CHECK_EQ(m.params[0].accept, static_cast<u16>(plugins::kAcceptNull | plugins::kAcceptCamera));
+        AUREA_CHECK(!m.params[0].animatable);
+    }
+    // Lido de volta igual (o manifesto que a instalação grava).
+    plugins::Manifest again;
+    AUREA_CHECK_MSG(plugins::parse_manifest(plugins::manifest_json(m), again, err), err.c_str());
+    AUREA_CHECK(again.scene3d && again.params[0].accept == m.params[0].accept);
+    // O que é recusado, com o motivo.
+    struct Case { std::string json; const char* expect; };
+    std::string five = "{\"aureaPlugin\":1,\"id\":\"com.x.cinco\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader3d\",\"params\":[";
+    for (int i = 0; i < 5; ++i) five += std::string(i ? "," : "") + "{\"id\":\"l" + std::to_string(i) + "\",\"type\":\"layer\"}";
+    five += "],\"passes\":[{\"shader\":\"a.frag\"}]}";
+    const Case cases[] = {
+        {"{\"aureaPlugin\":1,\"id\":\"com.x.flat\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\","
+         "\"params\":[{\"id\":\"alvo\",\"type\":\"layer\"}],\"passes\":[{\"shader\":\"a.frag\"}]}", "shader3d"},
+        {five, "5 parametros \"layer\" (limite 4)"},
+        {"{\"aureaPlugin\":1,\"id\":\"com.x.acc\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader3d\","
+         "\"params\":[{\"id\":\"alvo\",\"type\":\"layer\",\"accept\":[\"video\"]}],\"passes\":[{\"shader\":\"a.frag\"}]}", "accept"},
+    };
+    for (const Case& c : cases) {
+        plugins::Manifest out;
+        std::string why;
+        AUREA_CHECK_MSG(!plugins::parse_manifest(c.json, out, why), c.expect);
+        if (why.find(c.expect) == std::string::npos) std::printf("\n    esperado '%s', veio '%s'", c.expect, why.c_str());
+        AUREA_CHECK(why.find(c.expect) != std::string::npos);
+    }
+    // O cabeçalho 3D compila e traduz para GLES e Metal, usando cada função de apoio.
+    const char* source =
+        "vec4 aurea_main(vec2 uv) {\n"
+        "    vec3 ro, rd; aurea_ray(uv, ro, rd);\n"
+        "    vec3 p = aurea_layer_valid(target) ? aurea_layer_position(target) : vec3(0.0);\n"
+        "    vec3 c = aurea_world_to_comp(p);\n"
+        "    float d = length(cross(rd, p - ro)) + float(aurea_layer_kind(target)) * 0.0 + aurea_layer_fov(target) * 0.0;\n"
+        "    vec3 v = aurea_world_to_view(p) + aurea_layer_axis(target, 0) + aurea_camera_position() * 0.0;\n"
+        "    return vec4(vec3(step(d, size * 100.0)) + c.z * 0.0 + v.x * 0.0, 1.0) * texture(aurea_source, uv);\n"
+        "}\n";
+    std::vector<u32> spirv;
+    AUREA_CHECK_MSG(plugins::compile_pass(m, 0, source, spirv, err), err.c_str());
+    std::string essl, msl;
+    AUREA_CHECK_MSG(xlate::spirv_to_essl(spirv.data(), spirv.size(), essl, err), err.c_str());
+    if (xlate::msl_available()) {
+        u32 group[3]{};
+        AUREA_CHECK_MSG(xlate::spirv_to_msl(spirv.data(), spirv.size(), "fs_main", 0xffffffffu, group, msl, err), err.c_str());
+    }
+    // Plugin plano (shader) não recebe os símbolos 3D: o cabeçalho dele não mudou.
+    plugins::Manifest flat;
+    AUREA_CHECK(plugins::parse_manifest(one_pass_manifest("com.x.plano"), flat, err));
+    AUREA_CHECK(plugins::shader_header(flat, 0).find("layerWorld") == std::string::npos);
+    AUREA_CHECK(plugins::shader_header(m, 0).find("layerWorld") != std::string::npos);
 }
 
 AUREA_TEST(Plugins, InstallRejectsInvalidPackagesWithMessages) {
@@ -725,6 +790,43 @@ AUREA_TEST(PluginsGpu, RgbWaveShiftsChannelsByTheDeclaredPixels) {
     AUREA_CHECK(near4(middle.at(27, 16), Vec4{0, 0, 0, 1}, 2e-3f, "quadro 5: x=27 fora do alcance de 4 px"));
 }
 
+// 0.3.1: o plugin 3D lê o mundo do nulo ligado (e a câmera padrão sem câmera).
+AUREA_TEST(PluginsGpu, Shader3dReadsTheLinkedNullAndTheSceneCamera) {
+    AUREA_REQUIRE_PLUGIN_GPU();
+    const fs::path work = fresh_dir("cena3d");
+    write_zip(work / "cena3d.aureaplugin", {
+        {"plugin.json", "{\"aureaPlugin\":1,\"id\":\"com.x.cena3d\",\"version\":\"1.0.0\",\"name\":\"Cena\",\"kind\":\"shader3d\","
+                        "\"params\":[{\"id\":\"alvo\",\"type\":\"layer\",\"accept\":[\"null\"]}],"
+                        "\"passes\":[{\"shader\":\"a.frag\"}]}"},
+        {"a.frag", "vec4 aurea_main(vec2 uv) {\n"
+                   "    float linked = aurea_layer_valid(alvo) ? 1.0 : 0.0;\n"
+                   "    vec3 p = aurea_layer_position(alvo);\n"
+                   "    return vec4(linked, clamp(p.x / aurea.comp.x, 0.0, 1.0), clamp(p.y / aurea.comp.y, 0.0, 1.0), 1.0);\n"
+                   "}\n"},
+    });
+    const auto r = rig().install(str(work / "cena3d.aureaplugin"));
+    AUREA_CHECK_MSG(r.ok(), detail_of(r).c_str());
+    Scene s(64, 32);
+    const LayerId img = s.image(uniform(64, 32, 128));
+    const LayerId null = s.comp->add_layer(LayerKind::Null, "alvo");
+    s.comp->layer(null)->transform.position = Vec3{16, 24, 0};
+    EffectInstance& e = s.add_effect(img, "plugin.com.x.cena3d");
+    AUREA_CHECK_EQ(e.params.size(), static_cast<usize>(1));
+    if (e.params.size() != 1) return;
+    // Sem camada ligada: vermelho 0.
+    AUREA_CHECK(near4(s.render().at(10, 10), Vec4{0, 0, 0, 1}, 2e-3f, "sem ligacao"));
+    Layer* l = s.comp->layer(img);
+    l->effects.back().params[0].constant.ref = null.pack();
+    l->effects.back().params[0].constant.v[0] = static_cast<f32>(null.index);
+    // Ligado: a posição do nulo em px da composição (16/64, 24/32).
+    AUREA_CHECK(near4(s.render().at(10, 10), Vec4{1, 0.25f, 0.75f, 1}, 2e-3f, "nulo ligado"));
+    // O nulo anda: o plugin acompanha.
+    s.comp->layer(null)->transform.position = Vec3{48, 8, 0};
+    AUREA_CHECK(near4(s.render().at(10, 10), Vec4{1, 0.75f, 0.25f, 1}, 2e-3f, "nulo movido"));
+    std::error_code ec;
+    fs::remove_all(work, ec);
+}
+
 AUREA_TEST(PluginsGpu, MultiPassIntermediateRunsAtTheDeclaredScale) {
     AUREA_REQUIRE_PLUGIN_GPU();
     // Passe 1 em 1/4 escreve a PRÓPRIA resolução; o passe 2 lê e acrescenta a dele.
@@ -959,7 +1061,8 @@ AUREA_TEST(PluginsGpu, ProjectKeepsPluginEffectWithoutThePluginAndRestoresOnRein
 
 AUREA_TEST(PluginsGpu, EveryExamplePluginRendersFiniteInTheCatalogPreview) {
     AUREA_REQUIRE_PLUGIN_GPU();
-    for (const char* p : {"rgb-wave.aureaplugin", "soft-glow.aureaplugin", "dream-look.aureaplugin", "pulse-vignette.fs"})
+    for (const char* p : {"rgb-wave.aureaplugin", "soft-glow.aureaplugin", "dream-look.aureaplugin", "pulse-vignette.fs",
+                          "target-3d.aureaplugin"})
         ensure_installed(p);
     const auto list = rig().manager->list();
     AUREA_CHECK(list.size() >= 4u);

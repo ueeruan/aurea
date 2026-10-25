@@ -110,7 +110,13 @@ enum ParamFlags : u16 {
     kParamFrames      = 1u << 6,
     /// Taxa POR QUADRO (px/quadro). No retime, dividida pela razão.
     kParamPerFrame    = 1u << 7,
+    /// 0.3.1: referência de camada que só aceita câmera / nulo / luz (nenhum
+    /// destes = qualquer camada). As telas filtram a lista; o motor recusa o resto.
+    kParamRefCamera   = 1u << 8,
+    kParamRefNull     = 1u << 9,
+    kParamRefLight    = 1u << 10,
 };
+inline constexpr u16 kParamRefKindMask = kParamRefCamera | kParamRefNull | kParamRefLight;
 
 /// Marca de "faixa digitada não declarada": vale a faixa do slider.
 inline constexpr f32 kParamSameAsSlider = std::numeric_limits<f32>::quiet_NaN();
@@ -189,6 +195,8 @@ public:
     u32 add_curve(const char* id, const char* label);
     u32 add_gradient(const char* id, const char* label);
     u32 add_layer_ref(const char* id, const char* label);
+    /// `accept` = kParamRef* (0 = qualquer camada).
+    u32 add_layer_ref(const char* id, const char* label, u16 accept);
     u32 add_texture_ref(const char* id, const char* label);
 
     /// Alarga a faixa DIGITADA do parâmetro `index` (o slider não muda). Serve

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.1: importar do After Effects também pelo menu da camada e pela Edição; sem camada, o preset cria uma. -->
+<resources>
+    <string name="ae_import_layer_detail">إعداد مسبق: تأثيرات وإطارات مفتاحية ومحرّكات نص على هذه الطبقة. سكربت: يستلم هذه الطبقة على أنها المحدّدة.</string>
+    <string name="ae_import_new_layer_detail">إعداد مسبق: يوضع على طبقة جديدة (نص، أو طبقة صلبة بحجم التركيب)، كما في After Effects. سكربت: ينشئ الطبقات ويحرّكها.</string>
+    <string name="ae_partial_title">استيراد جزئي</string>
+    <string name="ae_too_big">الملف أكبر من أن يُستورد (الحد الأقصى 64 ميغابايت).</string>
+</resources>

@@ -15,6 +15,7 @@
     <string name="plug_by">%1$s · वर्ज़न %2$s</string>
     <string name="plug_kind_shader">GPU शेडर</string>
     <string name="plug_kind_stack">इफ़ेक्ट का संयोजन</string>
+    <string name="plug_kind_shader3d">3D शेडर (कैमरा और नल)</string>
     <string name="plug_error">इस डिवाइस पर काम नहीं करता: %1$s</string>
     <string name="plug_hint">प्लगइन दूसरे एडिटर्स के बनाए इफ़ेक्ट हैं: .aureaplugin फ़ाइलें या ISF शेडर (.fs)। इंस्टॉल होने पर वे इफ़ेक्ट ब्राउज़र की प्लगइन कैटेगरी में मिलते हैं।</string>
     <string name="plug_safety">प्लगइन सिर्फ़ GPU पर चलते हैं, आपकी फ़ाइलों तक पहुँच के बिना। Aurea हर एक को इंस्टॉल करने से पहले इस डिवाइस पर कंपाइल और टेस्ट करता है।</string>

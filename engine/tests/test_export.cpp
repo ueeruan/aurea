@@ -35,6 +35,7 @@ namespace aurea { namespace vk = gles; }
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/ExportRecovery.hpp"
 #include "aurea/export/FFmpegExportSink.hpp"
+#include "aurea/export/OfflineFrameRenderer.hpp"
 #include "NativeExportVerifier.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "aurea/audio/AudioEffects.hpp"
@@ -320,6 +321,8 @@ ProcMem proc_mem() {
 // -----------------------------------------------------------------------------
 /// ExportDirectSurface.inl: EngineConfig::enableDirectSurfaceExport dos próximos Rig.
 bool gRigDirectSurface = false;
+/// EngineConfig::exportApproximateFrameMs dos próximos Rig (0 = o padrão do motor).
+u32 gRigApproximateMs = 0;
 
 struct Rig {
     SyntheticFactory factory;
@@ -355,6 +358,7 @@ struct Rig {
         ec.exportPipelineDepth = depth;
         ec.exportExecutionProfile = profile;
         ec.enableDirectSurfaceExport = gRigDirectSurface;
+        ec.exportApproximateFrameMs = gRigApproximateMs;
         ec.disableAutosave = true;
         ec.workerCount = 2;
         // Tabela de codecs como a de um aparelho com decode/encode 4K de
@@ -1627,6 +1631,109 @@ AUREA_TEST(Export, DecoderStallFailsBeforeAnyApproximatePictureIsEncoded) {
     AUREA_CHECK(!r.cap.finished && r.cap.aborted);
     AUREA_CHECK(r.cap.frames.size() <= 5);
     AUREA_CHECK_EQ(o.p.flags & Engine::kExportFrameFallback, 0u);
+}
+
+namespace {
+/// Never delivers source frame `hole` (the field reports: a phone decoder that
+/// always stops at the same point of a clip); every other frame decodes.
+class HoleDecoder final : public VideoDecoderBackend {
+public:
+    HoleDecoder(const SyntheticConfig& cfg, u32 hole) : decoder_(cfg), holeUs_(decoder_.pts_of(hole)) {}
+    const VideoStreamInfo& info() const noexcept override { return decoder_.info(); }
+    Status seek_to_keyframe(i64 us) noexcept override { return decoder_.seek_to_keyframe(us); }
+    Status next_frame(i64 from, FrameRef& out, i64& pts, bool& eos) noexcept override {
+        for (;;) {
+            FrameRef frame;
+            const Status s = decoder_.next_frame(from, frame, pts, eos);
+            if (s.ok() && frame && frame->ptsUs == holeUs_ && !eos) continue;
+            out = std::move(frame);
+            return s;
+        }
+    }
+    u32 max_live_frames() const noexcept override { return 12; }
+    i64 keyframe_interval_us() const noexcept override { return decoder_.keyframe_interval_us(); }
+private:
+    SyntheticDecoder decoder_;
+    i64 holeUs_;
+};
+class HoleFactory final : public VideoSourceFactory {
+public:
+    HoleFactory(const SyntheticConfig& cfg, u32 hole) : cfg_(cfg), hole_(hole) {}
+    bool probe(const char* path, MediaProbe& out) override { return SyntheticFactory(cfg_).probe(path, out); }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override {
+        ++opened;
+        return std::make_unique<HoleDecoder>(cfg_, hole_);
+    }
+    std::atomic<u32> opened{0};
+private:
+    SyntheticConfig cfg_;
+    u32 hole_;
+};
+struct ApproximateWait {
+    explicit ApproximateWait(u32 ms) { gRigApproximateMs = ms; }
+    ~ApproximateWait() { gRigApproximateMs = 0; }
+};
+} // namespace
+
+/// 0.3.0 ("trava sempre no quadro 302"): one source frame that never arrives
+/// used to stop the export at the same frame on EVERY ladder rung. Now the
+/// source is reopened, the nearest frame of the same clip stands in for that
+/// one frame, the export finishes and the screens are told (frame fallback).
+AUREA_TEST(Export, UndecodableFramePointUsesNearestFrameAndFinishes) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 64; cfg.height = 36;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    cfg.gop = 30;
+    HoleFactory factory(cfg, 12);
+    ApproximateWait wait(400);
+    Rig r(cfg, 30.0, 24, 3, &factory, nullptr, 0, false, "sintetico",
+        ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 20000);
+    AUREA_CHECK(r.ok);
+    if (!r.ok) return;
+    r.cap.keepFrames = true;
+    const auto t0 = std::chrono::steady_clock::now();
+    const Outcome o = run_export(r, 36, 30, false, 60);
+    const f64 secs = std::chrono::duration<f64>(std::chrono::steady_clock::now() - t0).count();
+    AUREA_CHECK(o.finished);
+    AUREA_CHECK_EQ(o.p.result, Errc::Ok);
+    AUREA_CHECK(r.cap.finished && !r.cap.aborted);
+    AUREA_CHECK_EQ(r.cap.hashes.size(), static_cast<usize>(24));
+    AUREA_CHECK(r.cap.ptsMonotonic);
+    AUREA_CHECK(o.p.flags & Engine::kExportFrameFallback);
+    // O quadro 12 saiu com um vizinho do mesmo trecho (o 11 ou o 13). Fica a
+    // menos de meio segundo da entrada do clipe — o caso de logo depois de
+    // um corte, em que o aproximado à frente também precisa valer.
+    if (r.cap.hashes.size() == 24) {
+        AUREA_CHECK(r.cap.hashes[12] == r.cap.hashes[11] || r.cap.hashes[12] == r.cap.hashes[13]);
+        AUREA_CHECK(r.cap.hashes[11] != r.cap.hashes[13]);
+    }
+    AUREA_CHECK(factory.opened.load() >= 2);   // a fonte foi reaberta
+    std::printf("quadro aproximado em %.1f s ", secs);
+    AUREA_CHECK(secs < 15.0);
+}
+
+/// The approximation is for isolated points only: a source that stopped for
+/// good still fails (no frozen tail in the file), after at most a few frames.
+AUREA_TEST(Export, DeadDecoderStillFailsAfterAFewApproximateFrames) {
+    if (!gpu_ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    SyntheticConfig cfg;
+    cfg.width = 64; cfg.height = 36;
+    cfg.pattern = SyntheticPattern::FrameGray;
+    cfg.gop = 30;
+    const i64 stallUs = static_cast<i64>(std::llround(5 * 1e6 / 30.0));   // frames 0..4 decode
+    StallingFactory factory(cfg, stallUs);
+    ApproximateWait wait(200);
+    Rig r(cfg, 30.0, 30, 3, &factory, nullptr, 0, false, "sintetico",
+        ExportExecutionProfile::Balanced, false, nullptr, nullptr, false, 0, true, 3000);
+    AUREA_CHECK(r.ok);
+    if (!r.ok) return;
+    r.cap.keepFrames = true;
+    const Outcome o = run_export(r, 36, 30, false, 60);
+    AUREA_CHECK(o.finished);
+    AUREA_CHECK_EQ(o.p.result, Errc::DecodeFailed);
+    AUREA_CHECK(!r.cap.finished && r.cap.aborted);
+    AUREA_CHECK(r.cap.frames.size() <= 5 + OfflineFrameRenderer::kMaxApproximateRun);
 }
 
 /// Many clips in sequence, device with just one decoder instance. The preview used to

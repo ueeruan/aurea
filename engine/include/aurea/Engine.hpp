@@ -249,6 +249,10 @@ struct EngineConfig {
     bool enableDirectSurfaceExport = false;
     /// Deadline for a submitted export/startup GPU fence. Zero = 120 seconds.
     u32 exportGpuTimeoutMs = 0;
+    /// Quanto o export espera, sem avanço do decoder, o quadro EXATO da fonte
+    /// antes de usar o mais próximo do mesmo trecho (OfflineFrameRenderer::
+    /// ExactFrameDeadlines; a fonte é reaberta na metade). Zero = 16 s.
+    u32 exportApproximateFrameMs = 0;
 
     /// Saída de som da plataforma (AAudio no Android). NÃO é assumida a posse.
     /// Nula = preview mudo; o relógio do sistema conduz o playback e o export
@@ -2443,6 +2447,11 @@ private:
     /// Export em andamento: o render do preview não toca na GPU nem nos
     /// decoders (que o export usa em sequência).
     std::atomic<bool> exportActive_{false};
+    /// Aviso de memória do sistema durante o export (0.3.0): o estágio pedido
+    /// (TrimStage). O renderizador do export é outro objeto e trim_memory não
+    /// pode mexer nele no meio de um quadro; a thread do export o atende entre
+    /// dois quadros (export_thread_main). 0 = nada pendente.
+    std::atomic<u8> exportTrimRequest_{0};
     /// O decoder entregou quadro: acorda o export que espera o quadro exato
     /// (sem dormir 5 ms às cegas por tentativa).
     std::mutex exportWakeMutex_;

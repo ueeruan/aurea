@@ -45,6 +45,9 @@ inline const char* not_for_adjustment(const Effect& fx) {
     // Prende a camada a outra (pai): a camada de ajuste não tem pixels próprios
     // para levar junto — os efeitos dela já valem para o quadro inteiro.
     if (t == effect_type_id(effect_keys::kParentingHelper)) return "vinculo de camada";
+    // Copiar fundo divide a pilha de uma camada 2D comum em janela e fundo; a
+    // camada de ajuste já é o fundo inteiro (CopyBackgroundGpu.inl).
+    if (t == effect_type_id(effect_keys::kCopyBackground)) return "janela de camada comum";
     return nullptr;
 }
 

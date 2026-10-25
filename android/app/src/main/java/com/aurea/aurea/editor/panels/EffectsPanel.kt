@@ -49,6 +49,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -470,8 +471,19 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
             store.primaryKeys().filter { it.property == TrackProperty.MESH_WARP && it.effectIndex == mesh }.sortedBy { it.time }
         else railKey?.let { k -> store.primaryKeys().effectTrack(k.effectId, k.param, k.component) } ?: emptyList()
     }
+    // 0.3.1 ("marco o keyframe e o gráfico não aparece"): a lambda acima vê o
+    // `railKey` do momento em que foi criada. Lida direto no derivedStateOf,
+    // ficava presa ao parâmetro de quando o painel abriu (nenhum) e o botão da
+    // curva nunca ligava em efeito nenhum. Pelo estado atualizado, segue a escolha.
+    val latestCurveTrack by rememberUpdatedState(curveTrack)
     val curveTrackReady by remember(store, puppetKey, meshSelected, openId) {
-        derivedStateOf { curveTrack().size >= 2 }
+        derivedStateOf { latestCurveTrack().size >= 2 }
+    }
+    // O trecho que a curva abre: o do cabeçote; fora dos keyframes, o primeiro
+    // ou o último (como no iOS) — antes o botão desligava fora deles.
+    val curveKey: () -> com.aurea.aurea.engine.KeyframeRow? = {
+        val track = curveTrack()
+        store.curveStart(track) ?: store.detail?.localFrame(store.playhead)?.let { track.segmentStart(it) }
     }
 
     val byId = effects.associateBy { it.effectId }
@@ -511,12 +523,12 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
                     null
                 },
                 curveAnimated = railLook != KeyframeLook.None,
-                onCurve = if (curveTrackReady && store.curveStart(curveTrack()) != null) {
+                onCurve = if (curveTrackReady && curveKey() != null) {
                     {
                         val layer = store.primary
                         val t = store.detail?.localFrame(store.playhead)
                         if (layer != null && t != null) {
-                            store.curveStart(curveTrack())?.let { key ->
+                            curveKey()?.let { key ->
                                 store.selectKeyframe(layer, key)
                                 env.onOpenPanel(EditorPanel.Curve)
                             }

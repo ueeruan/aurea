@@ -76,9 +76,11 @@ struct ImportReport {
 
 /// JSON para as pontes (contrato com Android e iOS):
 /// {"ok":bool,"kind":"ffx|jsx","effects":n,"keyframes":n,"layers":n,
-///  "expressions":n,"animators":n,
+///  "expressions":n,"animators":n,"changes":n,
 ///  "skipped":[{"kind","name","reason","line"}],
 ///  "notes":[{"kind","name","reason","line"}],"message":"…"}
+/// Os textos saem sempre em UTF-8 válido. `ok` falso com `changes` > 0 = o
+/// script parou com erro depois de mudar o projeto (o que entrou fica).
 [[nodiscard]] std::string report_json(const ImportReport& r);
 
 /// Monta `r.message` a partir das contagens (chamado no fim da importação).
@@ -215,6 +217,8 @@ public:
 /// Aplica o preset na camada `target`. Os keyframes começam no cabeçote (ou
 /// no início da camada, se o cabeçote estiver fora dela), como o AE faz com o
 /// indicador de tempo atual. Falso = nada pôde ser aplicado (`report` diz).
+/// Sem camada escolhida, o Engine cria uma antes (como o AE: texto para preset
+/// de texto, sólido do tamanho da composição para o resto).
 bool apply_ffx(const FfxDocument& doc, Host& host, LayerId target, ImportReport& report);
 
 /// Limites do sandbox do .jsx.
@@ -231,7 +235,8 @@ struct ScriptLimits {
 bool run_jsx(std::string_view source, Host& host, LayerId target, const ScriptLimits& limits,
              ImportReport& report);
 
-/// Detecta o tipo pelo conteúdo (RIFX/FaFX) e pela extensão. "" = nenhum.
+/// Detecta o tipo pelo conteúdo (RIFX/FaFX; "@JSXBIN@" nos primeiros 64 KB,
+/// mesmo dentro de eval("…"), = "jsxbin") e pela extensão. "" = nenhum.
 [[nodiscard]] const char* detect_kind(std::string_view data, std::string_view fileName) noexcept;
 
 // -----------------------------------------------------------------------------

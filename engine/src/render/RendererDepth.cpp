@@ -95,7 +95,9 @@ DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
     }
     // CAMADA DE AJUSTE: a profundidade da foto/vídeo que ela ajusta, levada
     // ao quadro (Renderer.cpp, depth_map_below).
-    if (request.host && request.host->adjustment && !request.foreground) return depth_map_below(request);
+    // O mesmo no fundo do Copiar fundo (os efeitos depois dele).
+    if (request.host && (request.host->adjustment || request.host == compSpaceHost_) && !request.foreground)
+        return depth_map_below(request);
     auto& service = request.foreground ? foreground_ : depth_;
     const u32 mapSize = request.foreground ? ai::ForegroundEstimator::kSize : ai::DepthEstimator::kSize;
     if (!backend_) return none;

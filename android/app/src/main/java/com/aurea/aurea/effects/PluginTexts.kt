@@ -27,6 +27,8 @@ object PluginTexts {
         val error: String,
         val testRenderMs: Double,
         val params: List<Param>,
+        /** 0.3.1: "kind": "shader3d" (câmera da cena e camadas ligadas). */
+        val scene3d: Boolean = false,
     )
 
     @Volatile var plugins: List<Plugin> = emptyList()
@@ -97,6 +99,7 @@ object PluginTexts {
                 val opts = q.optJSONArray("options") ?: JSONArray()
                 Param(q.optString("id"), texts(q.optJSONObject("label")), List(opts.length()) { texts(opts.optJSONObject(it)) })
             },
+            scene3d = o.optBoolean("scene3d"),
         )
     }
 }

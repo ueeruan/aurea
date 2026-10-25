@@ -705,6 +705,56 @@ AUREA_TEST(ImageSequence, ExportSnapshotAndProjectPackageCarryEveryFrame) {
     e.shutdown();
 }
 
+// 0.3.0, app com.aurea.aurea: a cópia congelada do export grava a PASTA dos
+// quadros com o caminho absoluto do app (/data/user/0/com.aurea.aurea/files/
+// projetos/…). O resolvedor de caminhos antigos só aceitava arquivo regular e
+// devolvia "" para a pasta: o decoder da sequência nunca abria e o export
+// parava no 1o quadro dela, igual em todo degrau da escada.
+AUREA_TEST(ImageSequence, AndroidReleaseAbsoluteFolderResolves) {
+    test::SyntheticConfig cfg;
+    test::SyntheticFactory factory(cfg);
+    const std::string root = fresh_dir("pacote-android");
+    const std::string docs = join(root, "files/projetos");
+    const std::string frames = join(docs, "Media/sequences/seq-1");
+    fs::create_directories(fs::u8path(frames));
+    const auto files = write_sequence(frames, {1, 2, 3}, false);
+    Engine e;
+    EngineConfig ec;
+    ec.mediaFactory = &factory;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    ec.documentsDirectory = docs;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(kW, kH, 30.0, "android").ok());
+    ImageSequenceImport req;
+    req.paths = files;
+    const auto layer = e.import_image_sequence(req);
+    AUREA_CHECK(layer.ok());
+    if (!layer.ok()) return;
+    const Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    const Layer* l = comp->layer(LayerId::unpack(*layer));
+    Asset* a = l ? e.project()->asset(l->source) : nullptr;
+    AUREA_CHECK(a != nullptr);
+    if (!a) return;
+    ImageSequenceSpec spec;
+    AUREA_CHECK(decode_image_sequence(a->sourcePath, spec));
+    const std::string want = u8s(fs::weakly_canonical(fs::u8path(frames)) / fs::u8path(spec.file_name(spec.first)));
+    for (const char* legacy : {"/data/user/0/com.aurea.aurea/files/projetos/Media/sequences/seq-1",
+                               "/data/data/com.aurea.aurea/files/projetos/Media/sequences/seq-1"}) {
+        spec.directory = legacy;   // o que capture_snapshot grava no app de produção
+        a->sourcePath = encode_image_sequence(spec);
+        const std::string got = e.layer_source_path(*layer);
+        AUREA_CHECK_MSG(!got.empty(), legacy);
+        std::error_code err;
+        AUREA_CHECK_MSG(fs::equivalent(fs::u8path(got), fs::u8path(want), err), legacy);
+    }
+    // Pasta que não existe continua ausente.
+    spec.directory = "/data/user/0/com.aurea.aurea/files/projetos/Media/sequences/outra";
+    a->sourcePath = encode_image_sequence(spec);
+    AUREA_CHECK(e.layer_source_path(*layer).empty());
+    e.shutdown();
+}
+
 // =============================================================================
 // Na GPU: import, mapeamento de tempo, alfa, reabrir, .zip
 // =============================================================================

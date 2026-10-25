@@ -882,6 +882,10 @@ private struct ShellMenuRow: View {
                     act { model.mutate { $0.setVectorBlur(forLayer: row.id, amount: timeFlags & 32 == 0 ? 1 : 0) }; model.refreshModel(force: true) }
                 }
             }
+            // 0.3.1 (Menus.kt): preset .ffx nesta camada / script .jsx com ela em comp.selectedLayers.
+            ShellMenuRow(CupertinoGlyph.SquareStack3dUp, "ae_import_menu", enabled: !row.locked, detail: "ae_import_layer_detail") {
+                act { openAeImport() }
+            }.accessibilityIdentifier("layer.aeImport")
             if row.kind == 1 || row.kind == 3 {
                 ShellMenuSection("editor_tempo")
                 ShellMenuRow(CupertinoGlyph.Scissors, "i18n_clip_modes") { act { model.openPanel(.clipEdit) } }
@@ -942,13 +946,11 @@ private struct ShellMenuRow: View {
         ShellMenuRow(CupertinoGlyph.RectangleStack, "ui_mode_switch_to_edit", detail: "ui_mode_edit_hint") { act { model.setUiMode(AureaUiMode.edit) } }
         ShellMenuRow(CupertinoGlyph.Gear, "editor_ajustes_projeto") { act { pause(); model.showProjectSettings = true } }
         // 0.3.0 (Menus.kt): preset .ffx / script .jsx do After Effects; o seletor abre pela raiz
-        // (AddLayerPickers) depois que a folha fecha.
-        ShellMenuRow(CupertinoGlyph.SquareStack3dUp, "ae_import_menu", detail: "ae_import_menu_detail") {
-            act {
-                pause()
-                let shell = shell
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { shell.addPicker = .aeImport }
-            }
+        // (AddLayerPickers) depois que a folha fecha. 0.3.1: sem camada escolhida, o preset
+        // entra numa camada nova (texto ou sólido do tamanho da composição), como no AE.
+        ShellMenuRow(CupertinoGlyph.SquareStack3dUp, "ae_import_menu",
+                     detail: model.primarySelection != nil ? "ae_import_layer_detail" : "ae_import_new_layer_detail") {
+            act { openAeImport() }
         }.accessibilityIdentifier("menu.ae_import")
         ShellMenuRow(CupertinoGlyph.Search, "edt_cmd_search_desc") { act { pause(); shell.commandSearch = true } }
             .accessibilityIdentifier("commandSearchOpen")
@@ -958,6 +960,12 @@ private struct ShellMenuRow: View {
         ShellMenuRow(ShellGlyph.ScissorsAlt, "editor_aparar_projeto_cabecote", enabled: model.status.playhead > 0) { act { model.trimProjectAtPlayhead() } }
     }
     private func pause() { if model.status.playing != 0 { model.playPause() } }
+    /// O seletor do AE abre pela raiz (AddLayerPickers) depois que a folha fecha.
+    private func openAeImport() {
+        pause()
+        let shell = shell
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { shell.addPicker = .aeImport }
+    }
     /// SELECIONAR UMA CAMADA (Menus.kt SearchLayersSheet): todas as camadas
     /// (miniatura ou selo do tipo + nome); tocar escolhe SÓ ela e fecha. A busca
     /// só aparece com muitas camadas e o teclado não abre sozinho.

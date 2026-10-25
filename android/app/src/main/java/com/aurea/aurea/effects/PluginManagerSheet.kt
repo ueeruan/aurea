@@ -104,7 +104,11 @@ private fun PluginRow(p: PluginTexts.Plugin, tag: String, onRemove: () -> Unit) 
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(PluginTexts.pick(p.names, tag) ?: p.id, style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600)))
             Text(stringResource(R.string.plug_by, p.author.ifEmpty { p.id }, p.version) + " · " +
-                stringResource(if (p.kind == "stack") R.string.plug_kind_stack else R.string.plug_kind_shader),
+                stringResource(when {
+                    p.kind == "stack" -> R.string.plug_kind_stack
+                    p.scene3d -> R.string.plug_kind_shader3d
+                    else -> R.string.plug_kind_shader
+                }),
                 style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
             PluginTexts.pick(p.descriptions, tag)?.takeIf { it.isNotBlank() }?.let {
                 Text(it, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))

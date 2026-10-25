@@ -106,6 +106,8 @@ void register_drawing_progress_effect(EffectRegistry& r);
 void register_constellation_effect(EffectRegistry& r);
 /// Aprimorar (EnhanceEffect.cpp) — 0.3.0. No fim.
 void register_enhance_effect(EffectRegistry& r);
+/// Copiar fundo (CopyBackgroundEffect.cpp) — 0.3.0. No fim.
+void register_copy_background_effect(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

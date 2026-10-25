@@ -109,7 +109,7 @@ Texto em UTF-8. Exemplo completo (o do `rgb-wave`):
 | `name` | texto ou idiomas | sim | Nome no catálogo (até 64). |
 | `description` | texto ou idiomas | não | Descrição (até 512). |
 | `category` | texto | não | Subcategoria mostrada dentro de **Plugins** (até 32). |
-| `kind` | `"shader"` ou `"stack"` | sim | O tipo (seção 1). |
+| `kind` | `"shader"`, `"shader3d"` ou `"stack"` | sim | O tipo (seção 1). `shader3d` (0.3.1) é um `shader` que também recebe a câmera da cena e as camadas ligadas (seção 4, "Plugins 3D"). |
 | `params` | lista | não | Até **16** parâmetros (abaixo). |
 | `passes` | lista | shader | 1 a **8** passes (abaixo). |
 | `margin` | número | não | Quantos **px da camada** o efeito lê/desenha além da caixa da camada (0..1024). Ex.: um brilho de raio 50 declara `50`. Sem margem, o resultado é recortado à caixa. |
@@ -135,12 +135,13 @@ da pessoa, vale `en`, depois `pt-BR`, depois o primeiro declarado. O nome em
 | Campo | Descrição |
 | --- | --- |
 | `id` | Nome do parâmetro: letras, dígitos e `_`, até 32, começando por letra ou `_`. É também o **nome no shader** (macro) e nas expressões. Não pode ser palavra reservada do GLSL nem função nativa (`mix`, `texture`, `float`...), nem começar com `gl_`, `aurea`, `isf_`, `IMG_`, `vv_`, nem conter `__`. |
-| `type` | `float`, `int`, `bool`, `enum`, `color`, `point`, `angle`. |
+| `type` | `float`, `int`, `bool`, `enum`, `color`, `point`, `angle`, `layer` (só `shader3d`). |
 | `label` | Texto ou idiomas (até 48). Padrão: o `id`. |
 | `default` | Valor inicial (por tipo, abaixo). |
 | `min`, `max` | Faixa do controle (números). |
 | `options` | Só `enum`: lista de 1 a 32 textos (ou objetos de idioma). |
 | `animatable` | `true` (padrão) ou `false`: aceita keyframes/expressões. |
+| `accept` | Só `layer`: lista com `"camera"`, `"null"`, `"light"` ou `"any"` (padrão: qualquer camada). A tela só oferece essas camadas. |
 
 | Tipo | `default` | `min`/`max` padrão | No shader |
 | --- | --- | --- | --- |
@@ -151,6 +152,7 @@ da pessoa, vale `en`, depois `pt-BR`, depois o primeiro declarado. O nome em
 | `color` | `"#RRGGBB"`, `"#RRGGBBAA"` ou `[r, g, b(, a)]` 0..1 **em sRGB** (como um seletor de cor) | — | `vec4` RGBA **linear**, alfa reto (no `colorSpace: srgb`, RGBA sRGB) |
 | `point` | `[x, y]` relativo à camada (0..1 = largura/altura; `[0.5, 0.5]` = centro) | -1..2 | `vec2` **no espaço `uv`** do passe (já convertido pelo motor) |
 | `angle` | graus | -360..360 | `float` em **radianos** |
+| `layer` | — (nenhuma camada) | — | um **inteiro** (a posição da camada entre os parâmetros `layer`), para usar nas funções `aurea_layer_*` (até **4** por plugin; nunca animável) |
 
 ### Passes (`passes`)
 
@@ -257,6 +259,60 @@ Cada passe é um shader com o próprio `aurea_main`. O passe N lê
 `aurea_source` e as entradas nomeadas (`inputs`) que apontam para `target`s de
 passes anteriores. O último passe é a saída. `aurea.resolution` e
 `aurea.layer.zw` refletem o `scale` de cada passe.
+
+### Plugins 3D (`"kind": "shader3d"`, 0.3.1)
+
+Um plugin 3D é um `shader` que também enxerga a **câmera da cena** (a câmera
+ativa da composição, ou a padrão quando não há câmera) e o **mundo** de até 4
+camadas ligadas por parâmetros `layer` — um **nulo 3D** como alvo ou pivô, uma
+**câmera**, uma **luz**. O efeito continua sendo desenhado na camada que o
+recebe; o 3D é o que o shader calcula (raios, projeções, distâncias).
+
+```json
+{
+  "aureaPlugin": 1, "id": "com.estudio.mira", "version": "1.0.0",
+  "name": { "pt-BR": "Mira 3D", "en": "3D Target" }, "kind": "shader3d",
+  "params": [
+    { "id": "alvo", "type": "layer", "accept": ["null"], "label": { "pt-BR": "Alvo", "en": "Target" } },
+    { "id": "raio", "type": "float", "default": 40, "min": 1, "max": 400 }
+  ],
+  "passes": [ { "shader": "mira.frag" } ]
+}
+```
+
+O bloco `aurea` ganha, **depois** de `params[16]` (nada antes muda):
+
+| Símbolo | Tipo | Conteúdo |
+| --- | --- | --- |
+| `aurea.view` | `mat4` | vista ← mundo (x direita, y para baixo, z para a frente) |
+| `aurea.compFromWorld` | `mat4` | px da composição (homogêneo) ← mundo |
+| `aurea.compFromLayer` | `mat4` | px da composição (homogêneo) ← px da camada |
+| `aurea.camera` | `vec4` | `xyz` posição da câmera no mundo; `w` = 1 câmera de camada, 0 padrão |
+| `aurea.lens` | `vec4` | `x` campo de visão vertical (rad), `y` plano próximo, `z` aspecto, `w` focal em px |
+| `aurea.comp` | `vec4` | `xy` tamanho da composição (px), `zw` = 1/xy |
+| `aurea.layerWorld[4]` | `mat4` | mundo ← px de cada camada ligada |
+| `aurea.layerPos[4]` | `vec4` | `xyz` ponto de âncora no mundo; `w` = 1 ligada e visível |
+| `aurea.layerInfo[4]` | `vec4` | `x` tipo (6 nulo, 8 câmera, 9 luz), `y` campo de visão (câmera), `z` 1 = camada 3D |
+
+Funções (só em `shader3d`; `#define AUREA_SCENE3D 1`):
+
+| Função | O que faz |
+| --- | --- |
+| `bool aurea_layer_valid(int i)` | a camada ligada existe, está visível e no tempo |
+| `vec3 aurea_layer_position(int i)` | posição (âncora) no mundo |
+| `mat4 aurea_layer_matrix(int i)` | mundo ← camada (com pais) |
+| `vec3 aurea_layer_axis(int i, int a)` | eixo `a` (0 x, 1 y, 2 z) da camada no mundo |
+| `int aurea_layer_kind(int i)` / `float aurea_layer_fov(int i)` | tipo / campo de visão da câmera ligada |
+| `vec3 aurea_camera_position()`, `aurea_camera_right()`, `aurea_camera_down()`, `aurea_camera_forward()` | a câmera da cena |
+| `vec2 aurea_comp_px(vec2 uv)` | o `uv` do passe em px da composição |
+| `void aurea_ray(vec2 uv, out vec3 ro, out vec3 rd)` | o raio da câmera que passa por este pixel (origem e direção no mundo) |
+| `vec3 aurea_world_to_comp(vec3 p)` | ponto do mundo → px da composição (`z` = profundidade homogênea; ≤ 0 = atrás da câmera) |
+| `vec3 aurea_world_to_view(vec3 p)` | ponto do mundo → espaço da câmera |
+
+Unidades: o mundo do AUREA é em **px da composição** (o plano z = 0 com a
+câmera padrão é a composição 1:1). O nome de um parâmetro `layer` vira a
+posição dele entre os `layer` (`alvo` = 0 acima): `aurea_layer_position(alvo)`.
+Exemplo completo: `examples/target-3d`.
 
 ## 5. Plugins de pilha e expressões
 

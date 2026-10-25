@@ -100,6 +100,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineColor.cpp
     src/effects/builtin/ConstellationEffect.cpp
     src/effects/builtin/EnhanceEffect.cpp
+    src/effects/builtin/CopyBackgroundEffect.cpp
     src/project/ProjectPackage.cpp
     src/export/ImageEncode.cpp
     src/export/ExportRecovery.cpp

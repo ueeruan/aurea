@@ -942,6 +942,16 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             10: FxParamHuman(decimals: 0),
             12: FxParamHuman(suffix: "%", decimals: 0),
         ])),
+    // Copiar fundo (0.3.0): a camada vira uma janela; os efeitos DEPOIS dele
+    // agem nas camadas abaixo, só dentro dela. Par do EffectsHuman.kt.
+    ("aurea.utility.copy_background", FxEffectHuman(
+        name: "fx030k_name",
+        keywords: "copiar fundo copy background janela window ajustar parte do video forma shape mascara recorte camada de ajuste adjustment layer alight motion backdrop",
+        principal: [0, 1],
+        params: [
+            0: FxParamHuman(label: "fx030k_window"),
+            1: FxParamHuman(label: "fx030k_layer_mix", suffix: "%", decimals: 0),
+        ])),
     ("aurea.time.flow_motion_blur", FxEffectHuman(
         keywords: "rsmb reelsmart motion blur desfoque de movimento borrao vetores optical flow obturador shutter",
         principal: [0, 1, 2])),
@@ -1999,6 +2009,9 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.generate.aurora", "fx030_desc_aurora", FxAllTargets, "aurora boreal northern lights ceu estrelas reflexo polar 3d camera")
     put("aurea.generate.constellation", "fx030c_desc", FxAllTargets, "constelacao plexus rede pontos linhas triangulos conexoes 3d camera")
     put("aurea.enhance.video", "fx030e_desc", [.video, .preComposicao, .ajuste, .imagem], "aprimorar topaz restaurar ruido compressao nitidez grao")
+    // Copiar fundo (0.3.0): camada 2D comum vira janela. Na camada de ajuste e no 3D ele é neutro.
+    put("aurea.utility.copy_background", "fx030k_desc", [.forma, .vetor, .imagem, .video, .texto, .preComposicao],
+        "copiar fundo janela ajustar parte do video forma mascara camada de ajuste")
     put("aurea.time.motion_detect", "fx_desc_time_motion_detect", [.video], "detectar movimento diferenca quadro anterior")
     put("aurea.stylize.crt_emulator", "fx_desc_stylize_crt_emulator", FxAllTargets, "crt tv tubo retro varredura fosforo")
     put("aurea.glitch.dissolve_shake", "fx_desc_glitch_dissolve_shake", FxAllTargets, "tremor dissolver fragmentos quebrar")
@@ -2339,6 +2352,8 @@ struct FxPluginInfo: Identifiable {
     let error: String
     let testRenderMs: Double
     let params: [FxPluginParam]
+    /// 0.3.1: "kind": "shader3d" (câmera da cena e camadas ligadas).
+    var scene3d: Bool = false
 }
 
 enum FxPluginTexts {
@@ -2359,7 +2374,8 @@ enum FxPluginTexts {
                 params: (o["params"] as? [[String: Any]] ?? []).map { q in
                     FxPluginParam(id: q["id"] as? String ?? "", labels: texts(q["label"]),
                                   options: (q["options"] as? [Any] ?? []).map { texts($0) })
-                })
+                },
+                scene3d: (o["scene3d"] as? NSNumber)?.boolValue ?? false)
         }
         byType = Dictionary(plugins.map { ($0.effectTypeId, $0) }, uniquingKeysWith: { _, last in last })
     }

@@ -27,7 +27,7 @@ MAX_STACK = 16
 MAX_SHADER_BYTES = 64 * 1024
 MAX_MANIFEST_BYTES = 256 * 1024
 MAX_PACKAGE_BYTES = 16 * 1024 * 1024
-PARAM_TYPES = {"float", "int", "bool", "enum", "color", "point", "angle"}
+PARAM_TYPES = {"float", "int", "bool", "enum", "color", "point", "angle", "layer"}
 ID_RE = re.compile(r"^[a-z0-9._-]{3,64}$")
 VERSION_RE = re.compile(r"^\d{1,5}\.\d{1,5}\.\d{1,5}$")
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,31}$")
@@ -88,6 +88,12 @@ def check_param(p, index):
     if kind not in PARAM_TYPES:
         raise Invalid(f'parametro "{pid}": tipo desconhecido "{kind}" (use {", ".join(sorted(PARAM_TYPES))})')
     check_text(p.get("label"), "label", required=False)
+    if kind == "layer":
+        # 0.3.1: camada ligada (só "shader3d"); "accept" filtra o tipo.
+        for a in p.get("accept", []):
+            if a not in ("camera", "null", "light", "any"):
+                raise Invalid(f'parametro "{pid}": "accept" desconhecido "{a}" (camera, null, light ou any)')
+        return pid
     if kind == "enum":
         options = p.get("options")
         if not isinstance(options, list) or not options or len(options) > 32:
@@ -141,18 +147,23 @@ def check(folder):
     check_text(m.get("name"), "name")
     check_text(m.get("description"), "description", required=False)
     kind = m.get("kind")
-    if kind not in ("shader", "stack"):
-        raise Invalid('"kind" deve ser "shader" ou "stack"')
+    if kind not in ("shader", "shader3d", "stack"):
+        raise Invalid('"kind" deve ser "shader", "shader3d" ou "stack"')
     params = m.get("params", [])
     if not isinstance(params, list):
         raise Invalid('"params" deve ser uma lista')
     if len(params) > MAX_PARAMS:
         raise Invalid(f"{len(params)} parametros (limite {MAX_PARAMS})")
     ids = [check_param(p, i) for i, p in enumerate(params)]
+    layers = sum(1 for p in params if isinstance(p, dict) and p.get("type") == "layer")
+    if layers and kind != "shader3d":
+        raise Invalid('parametro "layer" so em plugin "kind": "shader3d"')
+    if layers > 4:
+        raise Invalid(f'{layers} parametros "layer" (limite 4)')
     if len(set(ids)) != len(ids):
         raise Invalid("parametro repetido")
     files = ["plugin.json"]
-    if kind == "shader":
+    if kind in ("shader", "shader3d"):
         passes = m.get("passes")
         if not isinstance(passes, list) or not passes:
             raise Invalid('plugin "shader" precisa de "passes" (1 a 8)')

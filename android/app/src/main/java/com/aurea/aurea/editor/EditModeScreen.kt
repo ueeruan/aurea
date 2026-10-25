@@ -237,6 +237,13 @@ private fun EditTopBar(store: EditorStore, ui: EditorUi) {
                     text = { Text(stringResource(R.string.editor_plano_fundo)) },
                     onClick = { menu = false; openSheet(store, ui, ShellSheet.ProjectSettings) },
                 )
+                // 0.3.1: o mesmo "Importar do After Effects" da Composição (o seletor mora
+                // no AureaApp); vale a camada escolhida, ou o preset cria uma.
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.ae_import_menu)) },
+                    onClick = { menu = false; store.requestAeImport() },
+                    modifier = Modifier.testTag("edit.aeImport"),
+                )
             }
         }
         Spacer(Modifier.width(4.dp))

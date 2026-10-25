@@ -320,6 +320,10 @@ namespace effect_keys {
     /// serrilhado, grão), com estimativa automática na GPU e vizinhos no
     /// tempo compensados por optical flow (EnhanceEffect.cpp).
     inline constexpr const char* kEnhance              = "aurea.enhance.video";
+    /// Copiar fundo (Utilitário): a camada vira uma janela; os efeitos depois
+    /// dele agem nas camadas abaixo, só dentro dela (CopyBackgroundEffect.cpp,
+    /// a divisão da pilha em Renderer::prepare).
+    inline constexpr const char* kCopyBackground       = "aurea.utility.copy_background";
 }
 
 /// Teto do atraso do Detectar movimento (quadros). O renderer decodifica a

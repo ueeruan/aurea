@@ -105,6 +105,12 @@ struct EditModeView: View {
                 Button(AureaText.t("ui_mode_switch_to_composition")) { model.setUiMode(AureaUiMode.composition) }
                 Button(AureaText.t(model.editMode ? "edit_magnet_on" : "edit_magnet_off")) { model.toggleEditMode() }
                 Button(AureaText.t("editor_plano_fundo")) { model.showProjectSettings = true }
+                // 0.3.1 (EditModeScreen.kt): o mesmo "Importar do After Effects" da Composição
+                // (seletor da raiz); vale a camada escolhida, ou o preset cria uma.
+                Button(AureaText.t("ae_import_menu")) {
+                    if model.status.playing != 0 { model.pause() }
+                    shell.addPicker = .aeImport
+                }.accessibilityIdentifier("edit.aeImport")
             } label: {
                 CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 20).frame(width: 44, height: 44).contentShape(Rectangle())
             }.accessibilityLabel(AureaText.t("edit_more")).accessibilityIdentifier("edit.more")
@@ -1039,7 +1045,10 @@ struct EditFiltersView: View {
         .padding(.top, 8)
         .onAppear { effect = model.colorGrade(role: 1); loadThumbs() }
         .onChange(of: model.primarySelection) { _ in effect = model.colorGrade(role: 1); loadThumbs() }
-        .onChange(of: model.status.playhead / 15) { _ in loadThumbs() }
+        // Só com o play PARADO (0.3.0): cada captura espera os quadros exatos
+        // com a GPU presa e a prévia congelava/ficava preta tocando.
+        .onChange(of: model.status.playhead / 15) { _ in if model.status.playing == 0 { loadThumbs() } }
+        .onChange(of: model.status.playing) { playing in if playing == 0 { loadThumbs() } }
     }
     private func loadThumbs() {
         // O motor fora da thread principal (o modelo é @MainActor); as imagens
@@ -1125,7 +1134,7 @@ struct EditAdjustView: View {
         .padding(.top, 6)
         .onAppear { effect = model.colorGrade(role: 2) }
         .onChange(of: model.primarySelection) { _ in effect = model.colorGrade(role: 2) }
-        .onChange(of: model.status.modelRevision) { _ in if scopes { loadScopes() } }
+        .onChange(of: model.status.modelRevision) { _ in if scopes && model.status.playing == 0 { loadScopes() } }
 
     }
     @ViewBuilder private func basicTab(_ effect: UInt32) -> some View {

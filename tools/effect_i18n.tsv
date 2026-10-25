@@ -2828,3 +2828,10 @@ aurea.enhance.video	12	mix	-1	fxl_mix
 aurea.enhance.video	1	adjust	-3	fxs_adjustments
 aurea.enhance.video	2	grain	-3	fxs_grain_and_original_detail
 aurea.enhance.video	3	time	-3	fxs_time_and_quality
+aurea.utility.copy_background	0	window	-1	fx030k_window
+aurea.utility.copy_background	0	window	0	fxo_layer_alpha
+aurea.utility.copy_background	0	window	1	fxo_inverted_alpha
+aurea.utility.copy_background	0	window	2	fxo_layer_luma
+aurea.utility.copy_background	0	window	3	fxo_inverted_luma
+aurea.utility.copy_background	0	window	-2	fxt_effects_after_this_one_act_on_the_layers
+aurea.utility.copy_background	1	layer_mix	-1	fx030k_layer_mix

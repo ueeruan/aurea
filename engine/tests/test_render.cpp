@@ -1936,6 +1936,21 @@ AUREA_TEST(SceneCuts, EndedOuterCameraReleasesThePrecompositionCamera) {
     AUREA_CHECK_NEAR(reset.position.x, scene3d::default_camera(1920, 1080).position.x, .001f);
 }
 
+// 0.3.0 (N_E_X_O, bankboi): duas câmeras ligadas — vale a visível mais de
+// CIMA, como no AE; ocultar a de cima devolve a de baixo.
+AUREA_TEST(SceneCuts, TopmostVisibleCameraWins) {
+    RenderFixture f;
+    const auto lower = f.comp->add_layer(LayerKind::Camera, "camera de baixo");
+    f.comp->layer(lower)->camera.active = true;
+    f.comp->layer(lower)->transform.position = Vec3{700, 540, -1000};
+    const auto upper = f.comp->add_layer(LayerKind::Camera, "camera de cima");
+    f.comp->layer(upper)->camera.active = true;
+    f.comp->layer(upper)->transform.position = Vec3{1200, 540, -1000};
+    AUREA_CHECK_NEAR(comp_camera(*f.comp, FrameIndex{5}, 1920, 1080).position.x, 1200.f, .001f);
+    f.comp->layer(upper)->visible = false;
+    AUREA_CHECK_NEAR(comp_camera(*f.comp, FrameIndex{5}, 1920, 1080).position.x, 700.f, .001f);
+}
+
 AUREA_TEST(SceneCuts, PanoramaRespectsItsOwnHalfOpenIntervalWithoutRequiringACamera) {
     RenderFixture f;
     auto& env = f.comp->environment();

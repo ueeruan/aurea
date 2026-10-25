@@ -568,6 +568,30 @@ AUREA_TEST(Clipboard, PasteLayersKeepsSpacingParentAndUndo) {
     AUREA_CHECK_EQ(r.comp()->layers().count(), before);
 }
 
+// 0.3.0 (yrz): grupo copiado e colado continuava ligado ao original — as duas
+// camadas apontavam para a MESMA composição. Como no Duplicar, a colada ganha a
+// própria; duas instâncias coladas juntas do mesmo grupo dividem a cópia nova.
+AUREA_TEST(Clipboard, PastedGroupGetsItsOwnComposition) {
+    EditRig r;
+    const u64 shape = *r.e.add_shape(0);
+    const auto group = r.e.precompose(&shape, 1, "Grupo");
+    AUREA_CHECK(group.ok()); if (!group.ok()) return;
+    const CompositionId original = r.L(*group)->nested.composition;
+    AUREA_CHECK(original.valid());
+    AUREA_CHECK_EQ(r.e.copy_layers(&*group, 1), 1u);
+    AUREA_CHECK_EQ(r.e.paste_layers(0), 1u);
+    u64 pasted = 0;
+    r.e.get_selection(&pasted, 1);
+    const Layer* copy = r.L(pasted);
+    AUREA_CHECK(copy && copy->kind == LayerKind::Composition);
+    if (!copy) return;
+    AUREA_CHECK(copy->nested.composition.valid() && copy->nested.composition != original);
+    const Composition* a = r.e.project()->timeline().composition(original);
+    const Composition* b = r.e.project()->timeline().composition(copy->nested.composition);
+    AUREA_CHECK(a && b && a != b);
+    if (a && b) AUREA_CHECK_EQ(a->layers().count(), b->layers().count());
+}
+
 AUREA_TEST(Clipboard, PasteIntoAnotherProjectWorksForLayersWithoutMedia) {
     EditRig r;
     const u64 shape = *r.e.add_shape(0);

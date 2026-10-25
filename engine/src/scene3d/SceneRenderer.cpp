@@ -1492,10 +1492,25 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         twoSidedCopies.emplace(source, &mat);
         return &mat;
     };
+    // Recorte (SceneInstance::holdout): uma cópia por material de origem.
+    SceneLookup<const GpuMaterial*, const GpuMaterial*> holdoutCopies, holdoutTwoSidedCopies;
+    auto holdout_of = [&](const GpuMaterial* source, bool twoSided) -> const GpuMaterial* {
+        auto& cache = twoSided ? holdoutTwoSidedCopies : holdoutCopies;
+        if (auto found = cache.find(source)) return *found;
+        auto& mat = copy_material(source);
+        mat.factors.holdout = true;
+        mat.factors.unlit = true;
+        mat.factors.doubleSided = mat.factors.doubleSided || twoSided;
+        // Transparente não recorta nada: vira opaco. MASK mantém o corte (folhas).
+        if (mat.factors.alphaMode == AlphaMode::Blend) mat.factors.alphaMode = AlphaMode::Opaque;
+        cache.emplace(source, &mat);
+        return &mat;
+    };
     SceneLookup<std::pair<const SceneInstance*, i32>, const GpuMaterial*, ScenePairHash> materialCopies;
     SceneLookup<MaterialOverrideKey, const GpuMaterial*, MaterialOverrideKeyHash> identicalMaterialCopies;
     auto material_for = [&](const SceneInstance& inst, const GpuModel& model, i32 index) -> const GpuMaterial* {
         const GpuMaterial* source = index >= 0 && index < static_cast<i32>(model.materials.size()) ? &model.materials[index] : &model.defaultMaterial;
+        if (inst.holdout) return holdout_of(source, inst.doubleSided);
         // The common unedited model needs neither a copy nor a per-node lookup.
         if (inst.pose().materials.empty() && !inst.doubleSided) return source;
         const auto cacheKey = std::make_pair(&inst, index);
@@ -1610,7 +1625,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         // MASK com MSAA vira o modo 3 (recorte por cobertura, ver pbr.frag).
         const f32 alphaMode = m.alphaMode == AlphaMode::Mask && passA2C_ ? 3.0f
                             : static_cast<f32>(static_cast<u8>(m.alphaMode));
-        b->alpha = Vec4{m.alphaCutoff, alphaMode, m.unlit ? 1.0f : 0.0f,
+        b->alpha = Vec4{m.alphaCutoff, alphaMode, m.holdout ? 2.0f : m.unlit ? 1.0f : 0.0f,
                         m.doubleSided ? 1.0f : 0.0f};
         // Verniz (pintura de carro), IOR/specular (F0 do dielétrico) e
         // transmissão (vidro fino) — lidos do glTF e antes ignorados.

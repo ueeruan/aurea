@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Copiar fundo (a camada vira uma janela; os efeitos depois dele agem nas camadas abaixo). -->
+<resources>
+    <string name="fx030k_name">Copiar fundo</string>
+    <string name="fx030k_desc">Transforma a camada numa janela para as camadas abaixo: os efeitos colocados depois dele agem só ali dentro. Use uma forma para ajustar uma parte do vídeo; os efeitos antes dele (desfoque, máscara) moldam a borda.</string>
+    <string name="fx030k_window">Janela</string>
+    <string name="fx030k_layer_mix">Misturar com a camada</string>
+    <string name="fxo_layer_alpha">Alfa da camada</string>
+    <string name="fxo_inverted_alpha">Alfa invertido</string>
+    <string name="fxo_layer_luma">Luma da camada</string>
+    <string name="fxo_inverted_luma">Luma invertida</string>
+    <string name="fxt_effects_after_this_one_act_on_the_layers">Os efeitos depois deste agem nas camadas abaixo, só dentro da forma desta camada. Os de antes (desfoque, máscara) moldam a janela.</string>
+</resources>

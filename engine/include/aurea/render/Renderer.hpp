@@ -350,6 +350,18 @@ struct RenderLayer {
     i32  matteIndex = -1;
     /// Usada como matte por outra camada: não desenha por conta própria.
     bool matteOnly = false;
+    /// COPIAR FUNDO: a metade "janela" da camada (fonte, máscaras, track matte
+    /// e os efeitos antes do Copiar fundo). Não desenha: vira o alfa/luma que
+    /// recorta a metade "fundo" (`windowIndex` aponta para ela daqui).
+    bool windowOnly = false;
+    /// COPIAR FUNDO: na metade "fundo" (uma camada de ajuste de tudo abaixo com
+    /// os efeitos depois do Copiar fundo), o índice da janela neste snapshot
+    /// (−1 = camada de ajuste comum), o modo do mask/track_matte.frag (1 alfa,
+    /// 2 alfa invertido, 3 luma, 4 luma invertida) e quanto da cor da própria
+    /// camada volta por cima do resultado (0..1).
+    i32  windowIndex = -1;
+    u8   windowMode = 1;
+    f32  windowLayerMix = 0.0f;
     /// MÁSCARA DE RECORTE neste instante: id (com sal) da base que recorta
     /// esta camada (0 = não recortada). A base é a camada de baixo na pilha
     /// das que existem no instante (ver `Layer::clipToBelow`).
@@ -505,6 +517,11 @@ struct RenderSettings {
     /// Export: amostras de desfoque de movimento da qualidade final
     /// (`MotionBlurSettings::samples`); a prévia também, reduzida pela folga do aparelho.
     bool finalQuality = false;
+    /// Export (0.3.0, OfflineFrameRenderer): o prazo do quadro exato passou.
+    /// Logo depois da entrada de um clipe o aproximado À FRENTE do alvo também
+    /// vale (ainda só do mesmo trecho): sem isso o quadro preso logo depois de
+    /// um corte não tinha candidato e o export parava ali.
+    bool approximateAhead = false;
     /// Exact captures can finish pure, unblurred groups before their 2D graph.
     /// Their immutable scene state, shadow resolution and post quality stay exact.
     bool stageUnblurredScenes = false;
@@ -780,8 +797,13 @@ public:
     /// Teto das amostras de cena 3D no export: cada amostra é a cena inteira
     /// (sombra, MSAA), então o custo cresce sem limite com o rastro (0.2.7).
     void set_export_scene_blur_cap(u32 cap) noexcept { exportSceneBlurCap_ = cap; }
+    /// Piso do teto adaptativo (0.3.0): abaixo disso o rastro vira cópias
+    /// separadas da camada (o "fantasma" do export); o próximo passo é o
+    /// degrau de custo 3D (sombra/MSAA), e a escada (ExportAttempts) ainda
+    /// pode tirar mais amostras se a GPU estourar o prazo.
+    static constexpr u32 kMinAdaptiveExportBlur = 8;
     u32 lower_export_blur_cap() noexcept {
-        exportBlurCap_ = exportBlurCap_ ? std::max(2u, exportBlurCap_ / 2) : 64u;
+        exportBlurCap_ = exportBlurCap_ ? std::max(kMinAdaptiveExportBlur, exportBlurCap_ / 2) : 64u;
         return exportBlurCap_;
     }
     [[nodiscard]] const char* incomplete_file() const noexcept { return incompleteFile_; }
@@ -828,6 +850,7 @@ public:
     /// blocos próprio) e guarda a textura por (asset, amostra, faixas).
     [[nodiscard]] TextureHandle audio_spectrum(const AudioSpectrumRequest& request) noexcept override;
     [[nodiscard]] std::vector<Vec4> repeat_path(const Layer* host, u32 count, f32 phase, u64 guide = 0) noexcept override;
+    [[nodiscard]] bool layer_world(const Layer* host, u64 ref, f64 compTime, LayerWorldInfo& out) noexcept override;
     /// Mapa de profundidade da fonte da camada no instante do `prepare` em
     /// curso (render/RendererDepth.cpp). Imagem: síncrono, uma vez. Vídeo: o
     /// export espera o quadro; o preview agenda e mostra o último pronto.
@@ -904,6 +927,11 @@ private:
         u32       adjustPlan = kInvalidIndex;
         /// Id (com sal) da camada que gerou o desenho (ajuste de escopo 2).
         u64       layer = 0;
+        /// Copiar fundo: a janela (a camada no tamanho da composição) que
+        /// recorta o resultado da camada de ajuste, e o modo do
+        /// mask/track_matte.frag (1 alfa, 2 alfa invertido, 3 luma, 4 luma inv.).
+        FGTexture windowMatte{};
+        u8        windowMode = 0;   ///< 0 = sem janela
         /// Recortada (máscara de recorte): entra no grupo da base como
         /// SOURCE-ATOP — fonte·α_destino + destino·(1 − α_fonte), com a
         /// mistura dela; o alfa do grupo continua o da base.
@@ -1339,6 +1367,10 @@ private:
     const Project* planProject_ = nullptr;
     MediaManager* planMedia_ = nullptr;
     FrameIndex planTime_{0};
+    /// Copiar fundo: a camada cujo plano do FUNDO (os efeitos depois do Copiar
+    /// fundo) está sendo planejado agora. Como numa camada de ajuste, o plano
+    /// é o da composição (Repetição no caminho, mapa de profundidade...).
+    const Layer* compSpaceHost_ = nullptr;
     std::vector<PendingUpload> uploads_;
     std::unordered_map<u64, u64> textKeys_;   ///< chave sintética da camada de texto → chave dos pixels
     bool incomplete_ = false;   ///< o último quadro deixou camada de fora (recurso pendente)

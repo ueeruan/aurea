@@ -7,7 +7,7 @@ import com.aurea.aurea.R
 internal object EffectI18nTable {
     /** (typeId << 16 | índice do parâmetro) → [rótulo, opção 0, opção 1, ...] (recursos). */
     val entries: Map<Long, IntArray> by lazy {
-        HashMap<Long, IntArray>(4180).apply {
+        HashMap<Long, IntArray>(4184).apply {
             part0(this)
             part1(this)
             part2(this)
@@ -2171,6 +2171,8 @@ internal object EffectI18nTable {
         m.put("aurea.enhance.video", 10, /* temporal_frames */ intArrayOf(R.string.fxl_neighbouring_frames))
         m.put("aurea.enhance.video", 11, /* quality */ intArrayOf(R.string.fxl_quality, R.string.fxo_fast, R.string.fxo_normal, R.string.fxo_high))
         m.put("aurea.enhance.video", 12, /* mix */ intArrayOf(R.string.fxl_mix))
+        m.put("aurea.utility.copy_background", 0, /* window */ intArrayOf(R.string.fx030k_window, R.string.fxo_layer_alpha, R.string.fxo_inverted_alpha, R.string.fxo_layer_luma, R.string.fxo_inverted_luma))
+        m.put("aurea.utility.copy_background", 1, /* layer_mix */ intArrayOf(R.string.fx030k_layer_mix))
     }
 
     /** (typeId << 16 | índice do parâmetro) → dica (recurso). */
@@ -2185,6 +2187,7 @@ internal object EffectI18nTable {
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.light.saber"), 22), R.string.fxt_applies_to_the_layer_masks_core) // mask_evolution
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.enhance.video"), 0), R.string.fxt_automatic_estimates_compression_noise_an) // model
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.enhance.video"), 10), R.string.fxt_frames_on_each_side_used_by_noise_reduct) // temporal_frames
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.utility.copy_background"), 0), R.string.fxt_effects_after_this_one_act_on_the_layers) // window
         }
     }
 

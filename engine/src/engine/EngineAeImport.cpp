@@ -38,6 +38,99 @@ std::string unique_name(const Composition& comp, const std::string& base) {
         if (!used || n > 9999) return candidate;
     }
 }
+
+void append_utf8(std::string& o, u32 cp) {
+    if (cp < 0x80) {
+        o.push_back(static_cast<char>(cp));
+    } else if (cp < 0x800) {
+        o.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+        o.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else if (cp < 0x10000) {
+        o.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+        o.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        o.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else {
+        o.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+        o.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+        o.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        o.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    }
+}
+
+bool valid_utf8(const u8* p, usize n) noexcept {
+    usize i = 0;
+    while (i < n) {
+        const u8 c = p[i];
+        if (c < 0x80) { ++i; continue; }
+        const usize len = (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
+        if (len == 0 || i + len > n || (len == 2 && c < 0xC2)) return false;
+        for (usize k = 1; k < len; ++k) if ((p[i + k] & 0xC0) != 0x80) return false;
+        i += len;
+    }
+    return true;
+}
+
+/// Texto do .jsx em UTF-8 (o léxico só lê UTF-8). Converte UTF-16 (BOM FF FE /
+/// FE FF, ou sem BOM com o zero a cada dois bytes do ASCII) e o Latin-1 /
+/// Windows-1252 dos scripts antigos do Windows (UTF-8 inválido). Falso = já era
+/// UTF-8 (ou ASCII): usa o original sem cópia.
+bool text_to_utf8(const std::string& d, std::string& out) {
+    const auto* p = reinterpret_cast<const u8*>(d.data());
+    const usize n = d.size();
+    int utf16 = 0;   // 1 = little-endian, 2 = big-endian
+    usize start = 0;
+    if (n >= 2 && p[0] == 0xFF && p[1] == 0xFE) { utf16 = 1; start = 2; }
+    else if (n >= 2 && p[0] == 0xFE && p[1] == 0xFF) { utf16 = 2; start = 2; }
+    else if (n >= 4) {
+        const usize m = std::min<usize>(n & ~static_cast<usize>(1), 1024);
+        usize evenZero = 0, oddZero = 0;
+        for (usize i = 0; i + 1 < m; i += 2) { evenZero += p[i] == 0 ? 1u : 0u; oddZero += p[i + 1] == 0 ? 1u : 0u; }
+        const usize pairs = m / 2;
+        if (oddZero * 10 >= pairs * 6 && evenZero * 10 <= pairs) utf16 = 1;
+        else if (evenZero * 10 >= pairs * 6 && oddZero * 10 <= pairs) utf16 = 2;
+    }
+    if (utf16) {
+        out.clear();
+        out.reserve(n);
+        auto unit = [&](usize i) -> u32 {
+            return utf16 == 1 ? static_cast<u32>(p[i] | (p[i + 1] << 8)) : static_cast<u32>((p[i] << 8) | p[i + 1]);
+        };
+        for (usize i = start; i + 1 < n; i += 2) {
+            u32 cp = unit(i);
+            if (cp >= 0xD800 && cp <= 0xDBFF && i + 3 < n) {
+                const u32 lo = unit(i + 2);
+                if (lo >= 0xDC00 && lo <= 0xDFFF) { cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00); i += 2; }
+                else cp = 0xFFFD;
+            } else if (cp >= 0xD800 && cp <= 0xDFFF) {
+                cp = 0xFFFD;
+            }
+            append_utf8(out, cp);
+        }
+        return true;
+    }
+    if (valid_utf8(p, n)) return false;
+    // Windows-1252 (o Latin-1 com aspas, travessões e € nos 0x80–0x9F).
+    static constexpr u16 k1252[32] = {0x20AC, 0xFFFD, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+                                      0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0xFFFD, 0x017D, 0xFFFD,
+                                      0xFFFD, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+                                      0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0xFFFD, 0x017E, 0x0178};
+    out.clear();
+    out.reserve(n + n / 8);
+    for (usize i = 0; i < n; ++i) {
+        const u8 c = p[i];
+        append_utf8(out, c >= 0x80 && c < 0xA0 ? k1252[c - 0x80] : c);
+    }
+    return true;
+}
+
+/// "pasta/Desfoque leve.ffx" → "Desfoque leve".
+std::string file_stem(const std::string& path) {
+    const usize slash = path.find_last_of("/\\");
+    std::string s = slash == std::string::npos ? path : path.substr(slash + 1);
+    const usize dot = s.find_last_of('.');
+    if (dot != std::string::npos && dot > 0) s.resize(dot);
+    return s;
+}
 } // namespace
 
 ae::ImportReport Engine::import_ae_file(const char* path, u64 targetLayer) noexcept {
@@ -67,8 +160,13 @@ ae::ImportReport Engine::import_ae_file(const char* path, u64 targetLayer) noexc
     return import_ae_data(data, path, targetLayer);
 }
 
-ae::ImportReport Engine::import_ae_data(const std::string& data, const std::string& fileName, u64 targetLayer) noexcept {
+ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::string& fileName, u64 targetLayer) noexcept {
     ae::ImportReport report;
+    // Script salvo em UTF-16 ou Latin-1 vira UTF-8 antes de tudo (o .ffx é
+    // binário RIFX e passa direto).
+    std::string converted;
+    const bool rifx = raw.size() >= 4 && raw.compare(0, 4, "RIFX") == 0;
+    const std::string& data = !rifx && text_to_utf8(raw, converted) ? converted : raw;
     const std::string kind = ae::detect_kind(data, fileName);
     report.kind = kind;
     if (kind == "jsxbin") {
@@ -158,18 +256,15 @@ ae::ImportReport Engine::import_ae_data(const std::string& data, const std::stri
                     if (!l) return LayerId{};
                     const auto fallback = scene3d::default_camera(comp_->width(), comp_->height());
                     l->threeD = true;
-                    l->camera.affectsLayersBelow = true;
+                    l->camera.affectsLayersBelow = false;   // no AE a câmera só vê camadas 3D
                     l->transform.position = fallback.position;
                     l->transform.anchor = Vec3{0, 0, 0};
                     l->camera.fov = fallback.fovY / kDeg2Rad;
                     l->camera.focalLength = camera_focal_from_fov(l->camera.fov);
                     l->camera.focusDistance = std::max(1.0f, -fallback.position.z);
                     l->camera.nearPlane = fallback.nearZ;
+                    // Como no AE: vale a câmera visível mais de cima (0.3.0).
                     l->camera.active = true;
-                    for (u32 i = 0; i < comp_->order().size(); ++i) {
-                        Layer* other = comp_->layer(comp_->order().at(i));
-                        if (other && other != l && other->kind == LayerKind::Camera) other->camera.active = false;
-                    }
                     break;
                 }
                 case ae::NewLayer::Light: {
@@ -246,9 +341,46 @@ ae::ImportReport Engine::import_ae_data(const std::string& data, const std::stri
     };
 
     EngineHost host(*this, comp);
-    const LayerId target = targetLayer ? LayerId::unpack(targetLayer) : LayerId{};
+    LayerId target = targetLayer ? LayerId::unpack(targetLayer) : LayerId{};
     if (kind == "ffx") {
+        // Sem camada escolhida (ou ela não existe mais): como o AE, o preset
+        // entra numa camada NOVA — de texto se ele mexe em texto, senão um
+        // sólido do tamanho da composição com o nome do preset.
+        LayerId created{};
+        bool textLayer = false;
+        if (!comp->layer(target)) {
+            for (const ae::Entry& e : doc.entries)
+                textLayer = textLayer || (!e.path.empty() && e.path[0].match == "ADBE Text Properties");
+            ae::NewLayerSpec spec;
+            if (textLayer) {
+                spec.text = "Texto";
+            } else {
+                const std::string stem = file_stem(fileName);
+                if (!stem.empty()) spec.name = unique_name(*comp, stem);
+            }
+            created = host.create_layer(textLayer ? ae::NewLayer::Text : ae::NewLayer::Solid, spec);
+            if (!created.valid()) {
+                report.message = textLayer ? "Não foi possível criar a camada de texto para o preset do After Effects."
+                                           : "Não foi possível criar a camada para o preset do After Effects.";
+                ae::finish_report(report);
+                return report;
+            }
+            target = created;
+        }
         (void)ae::apply_ffx(doc, host, target, report);
+        if (created.valid()) {
+            if (!report.ok) {
+                // Nada do preset entrou: a camada nova sai e o projeto fica
+                // como estava (sem passo de desfazer vazio). Tudo o que o preset
+                // fez foi nessa camada.
+                (void)comp->remove_layer(created);
+                host.mutations = 0;
+                report.changes = 0;
+            } else {
+                ++report.layers;
+                ++report.changes;
+            }
+        }
     } else {
         ae::ScriptLimits limits;
         (void)ae::run_jsx(data, host, target, limits, report);

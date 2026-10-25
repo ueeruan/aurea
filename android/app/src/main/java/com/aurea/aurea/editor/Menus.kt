@@ -297,6 +297,14 @@ internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> U
                 detail = stringResource(R.string.editor_borra_mexe_dentro_video_pelos_vetores),
             )
         }
+        // 0.3.1: preset .ffx nesta camada / script .jsx com ela em comp.selectedLayers.
+        MenuItemRow(
+            CupertinoGlyph.SquareStack3dUp,
+            stringResource(R.string.ae_import_menu),
+            if (row.locked) null else act { store.requestAeImport() },
+            detail = stringResource(R.string.ae_import_layer_detail),
+            tag = "layer.aeImport",
+        )
 
         if (type == LayerType.Video || type == LayerType.Audio) {
             MenuSection(stringResource(R.string.editor_tempo))
@@ -460,12 +468,6 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
         onDismiss()
         block()
     }
-    // 0.3.0: preset .ffx / script .jsx do After Effects. O seletor abre SEM fechar a
-    // folha (o retorno precisa deste lançador vivo); o retorno importa e fecha.
-    val aePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) store.importAeFile(uri)
-        onDismiss()
-    }
     ShellMenuSheet(onDismiss, maxHeightFraction = 0.78f) {
         // Redesenho 2026-09-29: a engrenagem do topo abre este menu, e o que
         // morava no topo e no transporte antigos (ajustes, busca, copiar e
@@ -481,11 +483,14 @@ internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -
             detail = stringResource(R.string.ui_mode_edit_hint),
         )
         MenuItemRow(CupertinoGlyph.GearAltFill, stringResource(R.string.editor_ajustes_projeto), act { ui.sheet = ShellSheet.ProjectSettings })
+        // 0.3.0: preset .ffx / script .jsx do After Effects. 0.3.1: o seletor mora no
+        // AureaApp (o menu fecha já); sem camada escolhida o preset cria uma, como no AE.
         MenuItemRow(
             CupertinoGlyph.SquareStack3dUp,
             stringResource(R.string.ae_import_menu),
-            { if (store.playing) store.pause(); aePicker.launch(arrayOf("*/*")) },
-            detail = stringResource(R.string.ae_import_menu_detail),
+            act { store.requestAeImport() },
+            detail = stringResource(if (store.primary != null) R.string.ae_import_layer_detail else R.string.ae_import_new_layer_detail),
+            tag = "menu.aeImport",
         )
         MenuItemRow(CupertinoGlyph.Search, stringResource(R.string.edt_cmd_search_desc), act { ui.sheet = ShellSheet.CommandSearch })
         MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_copiar_colar), act { ui.sheet = ShellSheet.CopyPaste })

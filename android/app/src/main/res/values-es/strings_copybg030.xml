@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Copiar fundo (a camada vira uma janela; os efeitos depois dele agem nas camadas abaixo). -->
+<resources>
+    <string name="fx030k_name">Copiar fondo</string>
+    <string name="fx030k_desc">Convierte la capa en una ventana a las capas de abajo: los efectos colocados después de este actúan solo dentro de ella. Usa una forma para ajustar una parte del video; los efectos anteriores (desenfoque, máscara) moldean el borde.</string>
+    <string name="fx030k_window">Ventana</string>
+    <string name="fx030k_layer_mix">Mezclar con la capa</string>
+    <string name="fxo_layer_alpha">Alfa de la capa</string>
+    <string name="fxo_inverted_alpha">Alfa invertido</string>
+    <string name="fxo_layer_luma">Luma de la capa</string>
+    <string name="fxo_inverted_luma">Luma invertida</string>
+    <string name="fxt_effects_after_this_one_act_on_the_layers">Los efectos después de este actúan en las capas de abajo, solo dentro de la forma de esta capa. Los anteriores (desenfoque, máscara) moldean la ventana.</string>
+</resources>

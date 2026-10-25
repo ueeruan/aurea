@@ -80,4 +80,19 @@ class ExitDiagnosticsTest {
         }
         assertArrayEquals(binary, ExitDiagnostics.readBounded(input, binary.size))
     }
+
+    /** 0.3.0: o app morto pelo sistema no meio do export faz o próximo começar mais leve. */
+    @Test fun onlyDeathsInTheMiddleOfAVideoExportCount() {
+        val signaled = 2; val lowMemory = 3; val java = 4; val native = 5; val anr = 6; val userRequested = 10
+        val exporting = ExitDiagnostics.marker(ExitDiagnostics.Phase.PROJECT_EXPORT_VIDEO, 2196, 5_000, "f=52/300").toString(Charsets.UTF_8)
+        for (reason in listOf(signaled, lowMemory, java, native)) assertTrue(ExitDiagnostics.diedDuringExport(reason, exporting))
+        // O usuário fechando, ANR ou outra etapa não contam.
+        assertFalse(ExitDiagnostics.diedDuringExport(userRequested, exporting))
+        assertFalse(ExitDiagnostics.diedDuringExport(anr, exporting))
+        val editing = ExitDiagnostics.marker(ExitDiagnostics.Phase.ENGINE_READY, 2196, 5_000).toString(Charsets.UTF_8)
+        assertFalse(ExitDiagnostics.diedDuringExport(lowMemory, editing))
+        val file = ExitDiagnostics.marker(ExitDiagnostics.Phase.PROJECT_EXPORT_FILE, 2196, 5_000).toString(Charsets.UTF_8)
+        assertFalse(ExitDiagnostics.diedDuringExport(lowMemory, file))
+        assertFalse(ExitDiagnostics.diedDuringExport(lowMemory, null))
+    }
 }

@@ -300,9 +300,25 @@ struct ExportView: View {
                     label("exp2_codec")
                     chips(["H.264", "HEVC"], selected: codec, disabled: hevcAvailable ? [] : ["HEVC"]) {
                         model.exportOptions.codec = $0 == "HEVC" ? .hevc : .h264
+                        // HEVC só no Automático: Compatível e Software são H.264 (ExportAttempts.hpp).
+                        if $0 == "HEVC" { model.exportOptions.encoder = 0 }
                     }
                     Text(hevcAvailable ? AureaText.t(model.exportOptions.codec == .hevc ? "editor_hevc_arquivo_menor_mesma_qualidade_alguns" : "editor_h_264_abre_qualquer_aparelho_rede")
                          : AureaText.t("ios_export_hevc_unavailable"))
+                        .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
+
+                    // 0.3.0: o erro do codificador do aparelho não tinha saída na
+                    // tela. Aqui a pessoa escolhe em que degrau o export começa.
+                    label("export_encoder")
+                    let encoders = [AureaText.t("export_encoder_auto"), AureaText.t("export_encoder_compatible"),
+                                    AureaText.t("export_encoder_software")]
+                    chips(encoders, selected: encoders[Int(min(model.exportOptions.encoder, 2))]) { picked in
+                        let chosen = UInt32(encoders.firstIndex(of: picked) ?? 0)
+                        model.exportOptions.encoder = chosen
+                        if chosen != 0 { model.exportOptions.codec = .h264 }
+                    }
+                    Text(AureaText.t(model.exportOptions.encoder == 1 ? "export_encoder_compatible_note"
+                                     : model.exportOptions.encoder == 2 ? "export_encoder_software_note" : "export_encoder_auto_note"))
                         .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
 
                     label("exp2_bitrate")
@@ -511,6 +527,7 @@ struct ExportView: View {
         if model.exportPreparing { return "" }
         let flags = (model.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
         var notices: [String] = []
+        if model.exportLighterAfterClose { notices.append(AureaText.t("export_after_system_close")) }
         switch (flags >> 8) & 15 {
         case 4: notices.append(AureaText.t("export_v2_finalizing"))
         case 5: notices.append(AureaText.t("export_v2_validating"))

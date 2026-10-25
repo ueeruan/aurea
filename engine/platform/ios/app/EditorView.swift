@@ -2156,28 +2156,10 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                         }.padding(.horizontal, 12)
                     }.padding(.bottom, 8)
                 }
-                HStack(spacing: 8) {
-                    Menu {
-                        Button(AureaText.t("sh_add_text_3d")) { model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25) }
-                        Button(AureaText.t("panel_camera_3d")) { model.addCamera() }
-                        Button(AureaText.t("real_camera_title")) { model.startRealCamera() }
-                        Button(AureaText.t("sh_add_null_3d")) { model.addNull(threeD: true) }
-                        Button(AureaText.t("scene_light_directional")) { model.addLight(0) }
-                        Button(AureaText.t("scene_light_point")) { model.addLight(1) }
-                        Button(AureaText.t("scene_light_spot")) { model.addLight(2) }
-                        Button(AureaText.t("sh_add_model_3d") + "…") { model.showAddLayer = true }
-                    } label: { pill(CupertinoGlyph.Plus, String(AureaText.t("panel_adicionar").drop(while: { $0 == "+" || $0 == " " }))) }
-                    if let layer = model.selectedLayer, layer.kind == 8 || layer.kind == 10 || (layer.kind == 4 && layer.threeD) {
-                        Button { model.panel = .layer3D; materials = true } label: { pill(CupertinoGlyph.CubeFill, AureaText.t(layer.kind == 8 ? "environment_texture" : "scene_material")) }.buttonStyle(.plain)
-                    }
-                    if model.selectedLayer?.kind == 9 {
-                        Button { lights = true } label: { pill(CupertinoGlyph.Lightbulb, AureaText.t("pn_t3d_lighting")) }.buttonStyle(.plain)
-                    }
-                    // Modelo com rig: posar os ossos e marcar keyframes (como no Blender).
-                    if model.selectedLayer?.kind == 10 && !model.poseBones.isEmpty && !model.rigPoseMode {
-                        Button { model.setRigPose(true) } label: { pill(CupertinoGlyph.PersonCropCircle, AureaText.t("rig_pose")) }.buttonStyle(.plain)
-                    }
-                    Button { model.resetSceneView() } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("scene_recenter")) }.buttonStyle(.plain)
+                // A fileira rola na horizontal (tela estreita / textos longos); cabendo, fica centrada.
+                ViewThatFits(in: .horizontal) {
+                    pillRow.padding(.horizontal, 12)
+                    ScrollView(.horizontal, showsIndicators: false) { pillRow.padding(.horizontal, 12) }
                 }.padding(.bottom, model.rigPoseMode ? 8 : 12)
                 if model.rigPoseMode && !model.poseBones.isEmpty { rigPoseBar }
             }
@@ -2185,9 +2167,45 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
         .frame(height: height)
         .task { try? await Task.sleep(nanoseconds: 7_000_000_000); withAnimation { hint = false } }
         .sheet(isPresented: $model.showAddLayer) { AddLayerSheet(tab: 5, inSheet: true).environmentObject(model).environmentObject(shell) }
-        .sheet(isPresented: $lights) { SceneLightControls().environmentObject(model) }
-        .sheet(isPresented: $materials) { Panel3DView().environmentObject(model) }
+        // Material e luz em folha de meia altura (0.3.1): a cena fica à vista em cima.
+        .sheet(isPresented: $lights) {
+            SceneLightControls { lights = false }.environmentObject(model)
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $materials) {
+            // O cabeçalho do Panel3DView já tem título e ‹ (fecha: panel = .none).
+            Panel3DView().environmentObject(model)
+                .presentationDetents([.medium, .large])
+        }
         .onChange(of: model.panel) { panel in if panel == .none { materials = false } }
+    }
+    /// Os botões de baixo: adicionar, material/luz do escolhido, pose e recentrar.
+    private var pillRow: some View {
+        HStack(spacing: 8) {
+            Menu {
+                Button(AureaText.t("sh_add_text_3d")) { model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25) }
+                Button(AureaText.t("panel_camera_3d")) { model.addCamera() }
+                Button(AureaText.t("real_camera_title")) { model.startRealCamera() }
+                Button(AureaText.t("sh_add_null_3d")) { model.addNull(threeD: true) }
+                Button(AureaText.t("scene_light_directional")) { model.addLight(0) }
+                Button(AureaText.t("scene_light_point")) { model.addLight(1) }
+                Button(AureaText.t("scene_light_spot")) { model.addLight(2) }
+                // O mesmo Flare 3D do Adicionar › 3D (AddLayerSheet).
+                Button(AureaText.t("scene_flare3d")) { model.addLight(3) }
+                Button(AureaText.t("sh_add_model_3d") + "…") { model.showAddLayer = true }
+            } label: { pill(CupertinoGlyph.Plus, String(AureaText.t("panel_adicionar").drop(while: { $0 == "+" || $0 == " " }))) }
+            if let layer = model.selectedLayer, layer.kind == 8 || layer.kind == 10 || (layer.kind == 4 && layer.threeD) {
+                Button { model.panel = .layer3D; materials = true } label: { pill(CupertinoGlyph.CubeFill, AureaText.t(layer.kind == 8 ? "environment_texture" : "scene_material")) }.buttonStyle(.plain)
+            }
+            if model.selectedLayer?.kind == 9 {
+                Button { lights = true } label: { pill(CupertinoGlyph.Lightbulb, AureaText.t("pn_t3d_lighting")) }.buttonStyle(.plain)
+            }
+            // Modelo com rig: posar os ossos e marcar keyframes (como no Blender).
+            if model.selectedLayer?.kind == 10 && !model.poseBones.isEmpty && !model.rigPoseMode {
+                Button { model.setRigPose(true) } label: { pill(CupertinoGlyph.PersonCropCircle, AureaText.t("rig_pose")) }.buttonStyle(.plain)
+            }
+            Button { model.resetSceneView() } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("scene_recenter")) }.buttonStyle(.plain)
+        }
     }
     /// Barra do modo de pose (RigPoseBar do SceneLayoutWorkspace.kt).
     private var rigPoseBar: some View {
@@ -2225,9 +2243,28 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
 
 @MainActor private struct SceneLightControls: View {
     @EnvironmentObject private var model: AureaModel
+    /// Fecha a folha (o ✕ do cabeçalho; par do `SceneSheetHeader` do Android).
+    let onClose: () -> Void
     var body: some View {
         let _ = model.status.modelRevision
         let _ = model.localPlayhead
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Text(AureaText.t("pn_t3d_lighting")).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.text)
+                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
+                Button(action: onClose) {
+                    CupertinoGlyph.text(CupertinoGlyph.Xmark, size: 16, color: AureaColors.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityLabel(AureaText.t("common_close"))
+                .accessibilityIdentifier("scene.light.close")
+            }.padding(.leading, 16).padding(.trailing, 4).padding(.top, 8)
+            controls
+        }.background(AureaColors.background)
+    }
+    private var controls: some View {
         ScrollView { VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 addLight("scene_light_directional", kind: 0)
@@ -2514,6 +2551,7 @@ struct AeImportSheet: View {
     @EnvironmentObject private var model: AureaModel
     let result: AureaModel.AeImportResult
     @State private var showNotes = false
+    private var partial: Bool { !result.ok && (result.hasCounts || result.changes > 0) }
     private func kindLabel(_ kind: String) -> String {
         switch kind {
         case "efeito": return AureaText.t("ae_kind_effect")
@@ -2540,9 +2578,12 @@ struct AeImportSheet: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                Text(AureaText.t(result.ok ? "ae_done_title" : "ae_failed_title")).font(.aurea(size: 17, weight: .semibold))
+                // 0.3.1 (AeImportSheet.kt): script que parou com erro DEPOIS de mudar o projeto =
+                // "importado em parte" (contagens + o erro); rodou sem mudar nada = "nada foi importado".
+                Text(AureaText.t(result.ok ? "ae_done_title" : partial ? "ae_partial_title" : "ae_failed_title"))
+                    .font(.aurea(size: 17, weight: .semibold)).accessibilityAddTraits(.isHeader)
                 Text(result.fileName).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
-                if result.ok {
+                if result.ok || result.hasCounts {
                     Text(AureaText.t("ae_counts", result.effects, result.keyframes, result.layers, result.expressions, result.animators))
                         .font(.aurea(size: 14)).accessibilityIdentifier("ae.counts")
                 }
@@ -2558,7 +2599,9 @@ struct AeImportSheet: View {
                     }.buttonStyle(.plain).padding(.top, 8).accessibilityIdentifier("ae.notes")
                     if showNotes { ForEach(result.notes.prefix(60)) { row($0) } }
                 }
-                Text(AureaText.t("ae_undo_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
+                if result.ok || partial {
+                    Text(AureaText.t("ae_undo_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
+                }
                 Button { model.aeImportResult = nil } label: {
                     Text(AureaText.t("common_ok")).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.onAccent)
                         .frame(maxWidth: .infinity, minHeight: 46).background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 12))

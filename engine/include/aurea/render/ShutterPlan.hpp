@@ -11,6 +11,8 @@ namespace aurea {
 // No heap allocations; the caller admits the state needed by each sample.
 struct ShutterPlan {
     static constexpr u32 kHardLimit = 256;
+    /// Trajeto que não se mede (canto atrás da câmera ou no plano dela).
+    static constexpr f64 kUnmeasuredPath = 1e6;
     f64 begin = 0.0;
     f64 duration = 0.0;
     u32 count = 1;
@@ -50,7 +52,12 @@ inline u32 shutter_sample_count(const MotionBlurSettings& settings, bool finalQu
     // Preview changes the spacing in output pixels, not the exposure interval.
     // Final integration stays deterministic regardless of playback/thermal state.
     const f64 spacing = finalQuality ? .5 : .75 / quality;
-    const f64 wanted = std::isfinite(pathPixels) ? std::ceil(std::max(0.0, pathPixels) / spacing) + 1.0 : limit;
+    // Trajeto que não se mede (canto atrás da câmera: shutter_projected_path
+    // devolve kUnmeasuredPath): as amostras da pessoa, não o teto. Pedir o teto
+    // (até 128 cenas 3D inteiras num quadro) no instante em que um objeto
+    // atravessa a câmera estourava a GPU/memória do celular (0.3.0).
+    const bool unmeasured = !std::isfinite(pathPixels) || pathPixels >= ShutterPlan::kUnmeasuredPath;
+    const f64 wanted = unmeasured ? static_cast<f64>(minimum) : std::ceil(std::max(0.0, pathPixels) / spacing) + 1.0;
     // Prévia (beta 2026-10-07, "o motion blur trava"): as amostras da pessoa
     // são o PISO só enquanto ainda separam o rastro em passos visíveis. Num
     // rastro curto, a partir de 0,75 px entre amostras (na resolução da
@@ -83,7 +90,9 @@ f64 shutter_projected_path(const ShutterPlan& window, f32 width, f32 height, Mat
         const Mat4 center = matrixAt(0.0);
         for (usize p = 0; p < points.size(); ++p) {
             const Vec4 q = center * points[p];
-            if (!std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.w) || std::fabs(q.w) < 1e-5f) return 1e6;
+            // w ≤ 0: o canto está atrás da câmera (w = −z da vista); projetar
+            // espelharia o ponto e o "trajeto" explodiria.
+            if (!std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.w) || q.w < 1e-5f) return ShutterPlan::kUnmeasuredPath;
             previous[p] = Vec2{q.x / q.w,q.y / q.w};
         }
     }
@@ -95,8 +104,8 @@ f64 shutter_projected_path(const ShutterPlan& window, f32 width, f32 height, Mat
         const Mat4 matrix = matrixAt(window.begin + window.duration * unit);
         for (usize p = 0; p < points.size(); ++p) {
             const Vec4 q = matrix * points[p];
-            if (!std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.w) || std::fabs(q.w) < 1e-5f)
-                return 1e6;
+            if (!std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.w) || q.w < 1e-5f)
+                return ShutterPlan::kUnmeasuredPath;
             const Vec2 current{q.x / q.w, q.y / q.w};
             if (i || excludesCenter) {
                 const f64 x = static_cast<f64>(current.x) - previous[p].x;

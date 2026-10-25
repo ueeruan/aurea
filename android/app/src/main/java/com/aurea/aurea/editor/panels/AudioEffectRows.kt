@@ -90,7 +90,7 @@ internal fun EffectLayerRow(env: PanelEnv, effectId: Int, s: ParamSlot, label: S
             title = label,
             actions = buildList {
                 add(SheetAction(none) { write(env, effectId, s.index, -1) })
-                layers.filter { it.id != self }.forEach { l ->
+                layers.filter { it.id != self && acceptsLayer(s.flags, it.kind) }.forEach { l ->
                     add(SheetAction(l.name.ifEmpty { "#${layerIndexOf(l.id)}" }) { write(env, effectId, s.index, layerIndexOf(l.id)) })
                 }
             },
@@ -98,6 +98,22 @@ internal fun EffectLayerRow(env: PanelEnv, effectId: Int, s: ParamSlot, label: S
         )
     }
 }
+
+/**
+ * 0.3.1 (plugins 3D): a referência que só aceita câmera / nulo / luz
+ * (kParamRefCamera/Null/Light, bits 8..10 das flags do parâmetro). Nenhum bit =
+ * qualquer camada. O motor recusa o resto do mesmo jeito.
+ */
+internal fun acceptsLayer(flags: Int, kind: Int): Boolean {
+    val accept = (flags shr 8) and 0x7
+    if (accept == 0) return true
+    return (accept and 1 != 0 && kind == LAYER_KIND_CAMERA) || (accept and 2 != 0 && kind == LAYER_KIND_NULL) ||
+        (accept and 4 != 0 && kind == LAYER_KIND_LIGHT)
+}
+
+private const val LAYER_KIND_NULL = 6
+private const val LAYER_KIND_CAMERA = 8
+private const val LAYER_KIND_LIGHT = 9
 
 private fun write(env: PanelEnv, effectId: Int, index: Int, layerIndex: Int) {
     val p = env.store.paramOf(effectId, index) ?: return

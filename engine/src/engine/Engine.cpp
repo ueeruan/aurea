@@ -304,6 +304,7 @@ struct Engine::ExportContext {
         u32 frame = 0;                 ///< índice de saída
         u64 gpuFrame = 0;              ///< frame do backend que escreveu o slot
         u64 submitNs = 0;              ///< início do render deste quadro (teto adaptativo do motion blur)
+        u64 renderCpuNs = 0;           ///< CPU do render DESTE quadro (teto adaptativo do motion blur)
         TextureHandle rgb{};           ///< surface-direct: R'G'B' em AHardwareBuffer (vazio = desligado)
         void* rgbBuffer = nullptr;     ///< o AHardwareBuffer de `rgb` (a textura é a dona)
     };
@@ -360,6 +361,7 @@ struct Engine::ExportContext {
     // volta. Preso DENTRO da plataforma (HAL travado), não bate: o produtor
     // desiste dele em vez de esperar para sempre e o contexto vaza de propósito.
     std::atomic<u64> encoderBeatNs{0};
+    std::atomic<u64> validatedFrames{0}; ///< quadros já conferidos na validação (export_progress)
     std::atomic<bool> encoderBusy{false};      ///< fora da fila (sink, mix, IA)
     /// surface-direct confirmado pelo sink (1o pacote conferido): o produtor
     /// para de gerar o NV12 e o readback. Só o worker do encoder escreve.
@@ -1115,6 +1117,14 @@ MemoryManager::TrimReport Engine::trim_memory(i32 osLevel) noexcept {
     // próprio lock. O projeto (Persistent) não é registrável.
     (void)memory_.trim(upTo);
     const u8 st = static_cast<u8>(upTo);
+    // Export em andamento: o renderizador DO EXPORT (pool, Roto, redes, cache
+    // de imagens) também solta, entre dois quadros (export_thread_main). Antes
+    // só o da prévia ouvia o aviso, e o iPhone 11/XR e os celulares de até 4 GB
+    // fechavam no meio do export com Roto Brush, BCC Glitch ou Ball Action.
+    if (exportActive_.load(std::memory_order_acquire) && st >= static_cast<u8>(TrimStage::OldRenderCache)) {
+        u8 pending = exportTrimRequest_.load(std::memory_order_relaxed);
+        while (pending < st && !exportTrimRequest_.compare_exchange_weak(pending, st, std::memory_order_acq_rel)) {}
+    }
     // Estágio 3 (RUNNING_LOW, UI_HIDDEN): só a prévia guardada da GPU; o resto
     // do cache de render fica para o estágio 4. wait_idle roda as destruições
     // adiadas e devolve ao driver (vkFreeMemory) os blocos que ficaram vazios —
@@ -2839,7 +2849,11 @@ Result<u64> Engine::add_camera() noexcept {
     if (!camera) return Status{Errc::OutOfMemory, "camada nao criada"};
     const auto fallback = scene3d::default_camera(comp->width(), comp->height());
     camera->threeD = true;
-    camera->camera.affectsLayersBelow = true;
+    // 0.3.1: como no After Effects, a câmera nova só vê as camadas 3D ("Afetar
+    // camadas abaixo" segue opcional na lente). Ligado por padrão, toda camada
+    // abaixo já virava 3D e o botão 3D da camada parecia não responder (Kram).
+    // Projetos salvos guardam o valor de cada câmera: nada muda neles.
+    camera->camera.affectsLayersBelow = false;
     camera->start = FrameIndex{0};
     camera->end = comp->duration();
     camera->transform.position = fallback.position;
@@ -2849,11 +2863,12 @@ Result<u64> Engine::add_camera() noexcept {
     camera->camera.focalLength = camera_focal_from_fov(camera->camera.fov);
     camera->camera.focusDistance = std::max(1.0f, -fallback.position.z);
     camera->camera.nearPlane = fallback.nearZ;
+    // 0.3.0: as outras câmeras NÃO são desligadas. Como no After Effects, vale
+    // a câmera visível mais de CIMA no instante (a nova nasce no topo); ocultar
+    // ou aparar a de cima devolve a de baixo. Antes a anterior ficava com
+    // active=false para sempre (nada na interface religava): "só uma câmera
+    // funciona; criar a segunda com o nulo desliga a primeira".
     camera->camera.active = true;
-    for (u32 i = 0; i < comp->order().size(); ++i) {
-        Layer* other = comp->layer(comp->order().at(i));
-        if (other && other != camera && other->kind == LayerKind::Camera) other->camera.active = false;
-    }
     bump_model_revision_locked();
     project_->mark_dirty();
     request_render();
@@ -4153,11 +4168,8 @@ Result<u64> Engine::apply_camera_track(i64 selectionFrame, Vec4 selectionRect, u
     }
     auto baseComp = [&](Vec3 X) { return Vec3{X.x * scale + C0.x, X.y * scale + C0.y, X.z * scale + C0.z}; };
     auto toComp = [&](Vec3 X) { auto p=baseComp(X);const auto q=res->sceneCalibration*Vec4{p.x,p.y,p.z,1};return Vec3{q.x,q.y,q.z}; };
-    // Outras câmeras ativas saem (a rastreada manda).
-    for (u32 i = 0; i < comp->order().size(); ++i) {
-        Layer* x = comp->layer(comp->order().at(i));
-        if (x && x->kind == LayerKind::Camera) x->camera.active = false;
-    }
+    // As outras câmeras ficam ligadas (0.3.0): a rastreada nasce no topo e
+    // manda no trecho do vídeo; fora dele, ou oculta, volta a de baixo.
     LayerId cid{};
     comp->layers().for_each([&](LayerId id, const Layer& layer) {
         if (layer.kind == LayerKind::Camera && layer.cameraTrackSource == LayerId::unpack(job->layerId)) cid = id;
@@ -7203,6 +7215,26 @@ u32 Engine::paste_layers(i64 frame) noexcept {
     std::vector<Layer> copied;
     for (const auto id : retimedIds) copied.push_back(*retimed.layer(id));
     restore_clipboard_media_locked(clipboard_.layerMedia, copied);
+    // 0.3.0: grupo colado no MESMO projeto ganha a própria composição, como no
+    // Duplicar. Antes a camada colada apontava para a composição do original
+    // (mesmo nome, mesmo conteúdo): mexer numa mexia na outra. Dois grupos
+    // iguais colados juntos viram a MESMA cópia nova (o mapa abaixo).
+    if (!crossProject) {
+        std::vector<std::pair<u64, CompositionId>> groupCopies;
+        for (Layer& layer : copied) {
+            if (layer.kind != LayerKind::Composition || !layer.nested.composition.valid()) continue;
+            CompositionId fresh{};
+            for (const auto& [was, now] : groupCopies) if (was == layer.nested.composition.pack()) fresh = now;
+            if (!fresh.valid()) {
+                if (!project_->timeline().composition(layer.nested.composition)) continue;
+                const auto copy = project_->timeline().duplicate_composition_tree(layer.nested.composition);
+                if (!copy.ok()) continue;   // teto de composições: fica ligado, como antes
+                fresh = *copy;
+                groupCopies.emplace_back(layer.nested.composition.pack(), fresh);
+            }
+            layer.nested.composition = fresh;
+        }
+    }
     // Importing nested compositions may relocate the destination pool.
     comp = current_composition();
     ClipChainEdit clipChains(comp);   // recortada colada sem a base perde o recorte
@@ -8973,7 +9005,15 @@ std::string document_asset_path(const std::string& docs, const std::string& rela
     const fs::path candidate = fs::weakly_canonical(base / fs::u8path(relative), error);
     if (error || candidate.empty()) return {};
     if (safe_asset_relative(asset_path_utf8(candidate.lexically_relative(base))).empty()) return {};
-    if (mustExist && (!fs::is_regular_file(candidate, error) || error)) return {};
+    // A pasta também vale: a receita de uma sequência de imagens (aurea-seq:)
+    // guarda a PASTA dos quadros, e a cópia congelada do export a grava como o
+    // caminho absoluto do app. Exigir arquivo regular devolvia "" para ela no
+    // app com.aurea.aurea, o decoder da sequência nunca abria e todo degrau da
+    // escada falhava igual ("a fonte nao entregou o quadro exato").
+    if (mustExist) {
+        const auto status = fs::status(candidate, error);
+        if (error || (!fs::is_regular_file(status) && !fs::is_directory(status))) return {};
+    }
     return asset_path_utf8(candidate);
 }
 
@@ -13156,6 +13196,7 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
             effect_type_id(effect_keys::kBurnFilm), effect_type_id(effect_keys::kJaws),
             effect_type_id(effect_keys::kSaber), effect_type_id(effect_keys::kLumaDissolve),
             effect_type_id(effect_keys::kDrawingProgress), effect_type_id(effect_keys::kEnhance),
+            effect_type_id(effect_keys::kCopyBackground),
         };
         row.reserved = std::find(std::begin(newlyAdded), std::end(newlyAdded), e.type_id()) != std::end(newlyAdded) ? 1u : 0u;
         (void)put_string(blob, blobCapacity, cursor, e.info().name, row.nameOffset, row.nameLength);
@@ -13193,10 +13234,15 @@ u32 Engine::query_layer_effects(u64 layerId, bridge::LayerEffectRow* out, u32 ca
 }
 
 namespace {
-CurveData* editable_tone_curve(Composition* comp, u64 layer, u32 effect, u32 param) {
+CurveData* editable_tone_curve(Composition* comp, const EffectRegistry& registry, u64 layer, u32 effect, u32 param) {
     Layer* l = comp ? comp->layer(LayerId::unpack(layer)) : nullptr;
     EffectInstance* inst = l ? l->find_effect(EffectId{effect, 0}) : nullptr;
-    if (!inst || inst->type != effect_type_id(effect_keys::kCurves) || param >= inst->params.size()) return nullptr;
+    if (!inst || param >= inst->params.size()) return nullptr;
+    // 0.3.1: qualquer parâmetro do tipo curva (Curvas, e as curvas RGB e de matiz
+    // da Correção de cor). Antes só o efeito Curvas: o editor da Correção de cor
+    // lia 0 pontos e toda edição voltava −1.
+    const ParameterRegistry* specs = registry.params(inst->type);
+    if (!specs || param >= specs->count() || specs->at(param).type != ParamType::Curve) return nullptr;
     const u64 ref = inst->params[param].constant.ref;
     return ref < inst->curves.size() ? &inst->curves[static_cast<size_t>(ref)] : nullptr;
 }
@@ -13207,7 +13253,7 @@ u32 Engine::query_effect_curve(u64 layer, u32 effect, u32 param, u32 channel,
     if (channel > 3 || !out || capacity < 2) return 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
-    CurveData* curve = editable_tone_curve(project_ ? current_composition() : nullptr, layer, effect, param);
+    CurveData* curve = editable_tone_curve(project_ ? current_composition() : nullptr, effectRegistry_, layer, effect, param);
     if (!curve) return 0;
     if (samples) {
         const u32 count = std::min(capacity, 256u);
@@ -13226,7 +13272,7 @@ i32 Engine::edit_effect_curve(u64 layer, u32 effect, u32 param, u32 channel,
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
-    CurveData* curve = editable_tone_curve(comp, layer, effect, param);
+    CurveData* curve = editable_tone_curve(comp, effectRegistry_, layer, effect, param);
     if (!curve) return -1;
     auto next = curve->channel[channel];
     constexpr f32 gap = 1.0f / 4096.0f;
@@ -14362,6 +14408,23 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
             &memory_, renderBudget, static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull); !initialized.ok())
         return initialized;
     auto& offlineRenderer = ctx.offline->compositor();
+    // 0.3.0: o renderizador do export é outro objeto e nascia com a regra de
+    // aparelho grande — Roto Brush com 48+64 MB de cache e refino em 1920 px,
+    // pool sem teto. Num aparelho de até ~4 GB (iPhone 11/XR, Poco M) o sistema
+    // matava o app no meio do export. Agora segue a mesma classe de memória da
+    // prévia, e um quadro que passaria do orçamento falha com falta de memória
+    // (a escada tenta com menos pixels) em vez de o app ser fechado.
+    exportTrimRequest_.store(0, std::memory_order_release);
+    if (const u64 wait = static_cast<u64>(config_.exportApproximateFrameMs) * 1'000'000ull) {
+        OfflineFrameRenderer::ExactFrameDeadlines d;
+        d.reopenNs = wait / 2; d.approximateNs = wait; d.approximateTotalNs = wait * 3;
+        d.reopenAfterNs = wait / 4; d.approximateAfterNs = wait / 2; d.approximateTotalAfterNs = wait;
+        ctx.offline->set_exact_frame_deadlines(d);
+    }
+    if (low_memory_device()) {
+        offlineRenderer.set_low_memory_device(true);
+        offlineRenderer.set_transient_allocation_limit(std::max<u64>(192ull << 20, process_budget_bytes()));
+    }
     offlineRenderer.set_model_lookup([](void* p, AssetId id) -> std::shared_ptr<const scene3d::SceneAsset> {
         const auto& c = *static_cast<ExportContext*>(p);
         if (const auto it = c.frozenModels.find(id.pack()); it != c.frozenModels.end()) return it->second;
@@ -14508,6 +14571,12 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
         }, &c, settings, gpuFrame, c.preRenderMode ? &renderMutex_ : nullptr,
         c.preRenderMode ? &preRenderCancel_ : nullptr);
     c.renderNs.fetch_add(monotonic_ns() - begin, std::memory_order_relaxed);
+    // Quadro com o vídeo mais próximo do trecho (a fonte não entregou o exato
+    // nem depois de reaberta): o export segue e as telas avisam.
+    if (result.ok() && c.offline->take_approximate()) {
+        std::lock_guard<std::mutex> pl(c.mutex);
+        c.progress.flags |= kExportFrameFallback;
+    }
     return c.frozenAssetStatus.ok() ? result : c.frozenAssetStatus;
 }
 
@@ -14591,8 +14660,11 @@ void Engine::export_thread_main() noexcept {
     // quadro passar de 1,5 s — e nunca abaixo das amostras escolhidas
     // (Renderer::capped_shutter_samples).
     constexpr u32 kMobileBlurCap = 0;
-    constexpr u64 kHeavyFrameNs = 1'500'000'000ull, kLightFrameNs = 250'000'000ull;
-    constexpr u32 kLightFramesToRaise = 30;
+    // 0.3.0: o teto volta com 8 quadros abaixo de 0,5 s (antes 30 abaixo de
+    // 0,25 s: um export 3D com desfoque num celular nunca chegava lá e ficava
+    // com o teto mais baixo até o fim).
+    constexpr u64 kHeavyFrameNs = 1'500'000'000ull, kLightFrameNs = 500'000'000ull;
+    constexpr u32 kLightFramesToRaise = 8;
     u32 lightFrames = 0;
     if (ctx.offline && !ctx.preRenderMode) {
         Renderer& compositor = ctx.offline->compositor();
@@ -14628,15 +14700,22 @@ void Engine::export_thread_main() noexcept {
             slot.yPtr = static_cast<const u8*>(py);
             slot.uvPtr = static_cast<const u8*>(pu);
         }
-        ctx.readNs.fetch_add(monotonic_ns() - r0, std::memory_order_relaxed);
+        const u64 gpuWaitNs = monotonic_ns() - r0;
+        ctx.readNs.fetch_add(gpuWaitNs, std::memory_order_relaxed);
         if (ctx.diagnostics) ctx.diagnostics->event(ExportDiagnostics::Counter::Rendered);
         if (slot.submitNs && ctx.offline) {
-            const u64 took = monotonic_ns() - slot.submitNs;
+            // 0.3.0: o custo DESTE quadro (CPU dele + o que ainda faltava de GPU).
+            // Medir do início do render até a entrega somava o quadro seguinte
+            // (pipeline com 2 em voo) e a espera do encoder: projeto pesado
+            // passava de 1,5 s sem a GPU estar no limite, o teto descia até 2
+            // amostras de cena e o arquivo saía com cópias da camada (fantasma)
+            // enquanto a prévia continuava lisa.
+            const u64 took = slot.renderCpuNs + gpuWaitNs;
             Renderer& compositor = ctx.offline->compositor();
             const u32 cap = compositor.export_blur_cap();
             if (took > kHeavyFrameNs) {
                 lightFrames = 0;
-                if (cap == 0 || cap > 2) {
+                if (cap == 0 || cap > Renderer::kMinAdaptiveExportBlur) {
                     const u32 lowered = compositor.lower_export_blur_cap();
                     AUREA_LOG_WARN("export: quadro %u levou %llu ms; motion blur limitado a %u amostras",
                                    slot.frame, static_cast<unsigned long long>(took / 1'000'000ull), lowered);
@@ -14663,6 +14742,25 @@ void Engine::export_thread_main() noexcept {
     u32 previousAdmission = ctx.depth;
     for (u32 i = 0; i < ctx.frames && result.ok(); ++i) {
         if (cancelled()) { result = Errc::Cancelled; break; }
+        // Aviso de memória do sistema (trim_memory): com os quadros em voo já
+        // entregues ao encoder, nada do renderizador do export está em uso — o
+        // pool, as texturas de imagem, os recortes do Roto e as redes saem e
+        // renascem sob demanda no próximo quadro. Pixels iguais.
+        if (const u8 trim = exportTrimRequest_.exchange(0, std::memory_order_acq_rel);
+            trim && ctx.offline && !ctx.preRenderMode) {
+            while (!inflight.empty() && result.ok()) result = deliver_oldest();
+            if (!result.ok()) break;
+            std::lock_guard<std::mutex> rl(renderMutex_);
+            if (gpu_) {
+                gpu_->wait_idle();
+                const u64 before = gpu_->memory_stats().usedBytes;
+                const u32 textures = ctx.offline->compositor().trim_memory(trim, ~0ull);
+                gpu_->wait_idle();
+                const u64 after = gpu_->memory_stats().usedBytes;
+                AUREA_LOG_INFO("export: aviso de memoria no quadro %u; renderizador do export soltou %u texturas (%llu KB)",
+                               i, textures, static_cast<unsigned long long>((before > after ? before - after : 0) / 1024));
+            }
+        }
         // Calor (§37): um quadro em voo só — menos CPU e GPU ao mesmo tempo.
         // Resolução, fps, efeitos e amostras NÃO mudam.
         const bool hot = thermalDegrade_.load(std::memory_order_acquire);
@@ -14730,6 +14828,7 @@ void Engine::export_thread_main() noexcept {
             static_cast<unsigned long long>(monotonic_ns() - renderStarted), result.raw());
         if (!result.ok()) break;
         slot.submitNs = renderStarted;
+        slot.renderCpuNs = monotonic_ns() - renderStarted;
         inflight.push_back(si);
     }
     // Fim da timeline: entrega o que ainda está na GPU.
@@ -14920,8 +15019,10 @@ void Engine::export_encoder_main() noexcept {
                     if (fin.ok() && c.queue) {
                         fin = c.queue->begin_validating();
                         c.publish_export_phase("validando");
-                        if (fin.ok()) fin = c.sink->validate_output({c.outputWidth, c.outputHeight,
-                            c.frames, c.fps, c.withAudio});
+                        ExportOutputValidation expected{c.outputWidth, c.outputHeight, c.frames, c.fps, c.withAudio};
+                        c.validatedFrames.store(0, std::memory_order_relaxed);
+                        expected.validatedFrames = &c.validatedFrames;
+                        if (fin.ok()) fin = c.sink->validate_output(expected);
                         if (c.abandoned_worker()) { retiredExit(); return; }
                         c.queue->validated(fin);
                         c.publish_export_phase(fin.ok() ? "concluido" : "falha na validacao");
@@ -15165,7 +15266,15 @@ Engine::ExportProgress Engine::export_progress() const noexcept {
     std::lock_guard<std::mutex> context(exportContextMutex_);
     if (!exportCtx_ || exportCtx_->preRenderMode) return ExportProgress{};
     std::lock_guard<std::mutex> pl(exportCtx_->mutex);
-    return exportCtx_->progress;
+    ExportProgress p = exportCtx_->progress;
+    // Validando: a mensagem anda com os quadros conferidos. As telas só veem
+    // quadros e mensagem; parada em "validando" por minutos (export longo ou a
+    // 200 qps) virava "travou" e a escada refazia um vídeo que estava pronto.
+    if (p.running && ((p.flags & kExportPhaseMask) >> kExportPhaseShift) == static_cast<u32>(ExportPhase::Validating)) {
+        if (const u64 n = exportCtx_->validatedFrames.load(std::memory_order_relaxed))
+            std::snprintf(p.message, sizeof(p.message), "validando %llu/%u", static_cast<unsigned long long>(n), p.framesTotal);
+    }
+    return p;
 }
 
 std::string Engine::export_diagnostics() const noexcept {
@@ -17041,6 +17150,14 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                     for (u32 k = 0; k < order.size(); ++k) {
                         if (order.at(k).index == index) { ref = order.at(k).pack(); break; }
                     }
+                }
+                // 0.3.1: referência que só aceita câmera / nulo / luz (plugins 3D).
+                if (const u16 accept = specs->at(p).flags & kParamRefKindMask; ref && accept) {
+                    const Layer* target = comp ? comp->layer(LayerId::unpack(ref)) : nullptr;
+                    const bool ok = target && (((accept & kParamRefCamera) && target->kind == LayerKind::Camera)
+                                            || ((accept & kParamRefNull) && target->kind == LayerKind::Null)
+                                            || ((accept & kParamRefLight) && target->kind == LayerKind::Light));
+                    if (!ok) ref = 0;
                 }
                 e->params[p].constant.ref = ref;
                 e->params[p].constant.v[0] = ref ? static_cast<f32>(LayerId::unpack(ref).index) : -1.0f;

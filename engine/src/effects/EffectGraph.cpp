@@ -230,13 +230,16 @@ void EffectPlan::clear() noexcept {
 // =============================================================================
 void EffectGraph::plan(const Layer& layer, const EffectRegistry& registry, FrameIndex localTime,
                        f32 texelScale, const LayerPlacement& placement,
-                       EffectResources* resources, EffectPlan& out, f64 framesPerSecond, const Composition* composition) {
-    plan_f(layer, registry, static_cast<f64>(localTime.value), texelScale, placement, resources, out, framesPerSecond, composition);
+                       EffectResources* resources, EffectPlan& out, f64 framesPerSecond, const Composition* composition,
+                       u32 firstEffect, u32 endEffect) {
+    plan_f(layer, registry, static_cast<f64>(localTime.value), texelScale, placement, resources, out, framesPerSecond,
+           composition, firstEffect, endEffect);
 }
 
 void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64 localTime,
                          f32 texelScale, const LayerPlacement& placement,
-                         EffectResources* resources, EffectPlan& out, f64 framesPerSecond, const Composition* composition) {
+                         EffectResources* resources, EffectPlan& out, f64 framesPerSecond, const Composition* composition,
+                         u32 firstEffect, u32 endEffect) {
     out.clear();
     out.placement = placement;
 
@@ -259,7 +262,9 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
     sources.clear();
     expanded.clear();
     evalSource.clear();
-    for (u32 k = 0; k < static_cast<u32>(layer.effects.size()); ++k) {
+    // Copiar fundo: só a faixa pedida da pilha (o índice continua o da camada).
+    const u32 effectEnd = std::min(endEffect, static_cast<u32>(layer.effects.size()));
+    for (u32 k = firstEffect; k < effectEnd; ++k) {
         const EffectInstance& effect = layer.effects[k];
         const Effect* fx = effect.enabled ? registry.find(effect.type) : nullptr;
         const ParameterRegistry* fxParams = fx && fx->expands_stack() ? registry.params(effect.type) : nullptr;
@@ -292,7 +297,7 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
     const FrameIndex global{static_cast<i64>(std::floor(globalTime))};
     // A null has no pixels. Its Motion Tile controls the raster of each child;
     // sample the null's animation clock, not the child's trimmed/remapped clock.
-    const Layer* parent = composition ? composition->layer(layer.parent) : nullptr;
+    const Layer* parent = composition && firstEffect == 0 ? composition->layer(layer.parent) : nullptr;
     u32 parentSources = 0;
     for (u32 depth = 0; parent && parent != &layer && depth < 16; ++depth) {
         if (parent->kind == LayerKind::Null && parent->contains_time(global))

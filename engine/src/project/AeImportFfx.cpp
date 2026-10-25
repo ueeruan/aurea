@@ -487,6 +487,10 @@ bool parse_ffx(std::string_view bytes, FfxDocument& out, std::string& error) {
 const char* detect_kind(std::string_view data, std::string_view fileName) noexcept {
     if (data.size() >= 12 && std::memcmp(data.data(), "RIFX", 4) == 0 && std::memcmp(data.data() + 8, "FaFX", 4) == 0)
         return "ffx";
+    // ExtendScript compilado: o .jsxbin puro começa com "@JSXBIN@ES@2.0@" e os
+    // .jsx "protegidos" guardam o mesmo texto dentro de eval("@JSXBIN@...").
+    // Vale antes da extensão (o arquivo costuma vir renomeado para .jsx).
+    if (data.substr(0, 64u << 10).find("@JSXBIN@") != std::string_view::npos) return "jsxbin";
     auto ends = [&](std::string_view ext) {
         if (fileName.size() < ext.size()) return false;
         for (usize i = 0; i < ext.size(); ++i) {

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Cena 3D 0.3.1: fonte de luz única, chão em 3 modos e o "Avançado" do Ambiente (Element3DPanel.kt). -->
+    <string name="scene031_light_neutral">Netral</string>
+    <string name="scene031_light_hdr">Gambar HDR…</string>
+    <string name="scene031_light_hdr_hint">Ketuk lagi untuk mengganti gambar</string>
+    <string name="scene031_floor_off">Tanpa lantai</string>
+    <string name="scene031_floor_visible">Lantai terlihat</string>
+    <string name="scene031_floor_shadow">Hanya bayangan</string>
+    <string name="scene031_tonemap_neutral">PBR Netral</string>
+    <string name="scene031_tonemap_agx">AgX</string>
+    <string name="scene031_tonemap_agx_punchy">AgX Tajam</string>
+    <string name="scene031_tonemap_agx_golden">AgX Emas</string>
+    <string name="scene031_tonemap_uchimura">Uchimura</string>
+    <string name="scene031_tonemap_aces">ACES</string>
+    <string name="scene031_bloom_threshold">Ambang cahaya</string>
+</resources>

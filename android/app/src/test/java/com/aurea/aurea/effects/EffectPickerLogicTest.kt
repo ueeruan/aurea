@@ -271,6 +271,23 @@ class EffectPickerLogicTest {
     }
 
     @Test
+    fun groupRowKeysNeverCollideWithTheFixedHomeKeys() {
+        // Regressão 0.3.0: com um plugin instalado, a linha que começava no grupo
+        // "plugins" usava a chave "plugins", a mesma da porta, e o app fechava.
+        val fixed = setOf("destaques", "rapidos", "titulo-categorias", PLUGIN_DOOR_KEY)
+        val rows = EffectGroup.entries.chunked(2) + EffectGroup.entries.chunked(1) +
+            EffectGroup.entries.drop(1).chunked(2)
+        val keys = rows.map(::groupRowKey)
+        keys.forEach { assertFalse("chave $it colide com uma chave fixa", it in fixed) }
+        assertTrue(EffectGroup.entries.none { it.id == PLUGIN_DOOR_KEY })
+        // Cada arranjo de linhas tem chaves únicas entre si.
+        listOf(EffectGroup.entries.chunked(2), EffectGroup.entries.drop(1).chunked(2)).forEach { layout ->
+            val k = layout.map(::groupRowKey)
+            assertEquals(k.size, k.toSet().size)
+        }
+    }
+
+    @Test
     fun effectOnlyCropTakesTheRightHalfAndFillsTheTile() {
         // Prévia 320×200: metade "depois" começa em 161; quadrado = 159×159 centrado.
         val square = effectOnlyCrop(320, 200, 1f)

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Copiar fundo (a camada vira uma janela; os efeitos depois dele agem nas camadas abaixo). -->
+<resources>
+    <string name="fx030k_name">Copy background</string>
+    <string name="fx030k_desc">Turns the layer into a window onto the layers below: effects placed after it act only inside it. Use a shape to adjust part of the video; effects before it (blur, mask) shape the edge.</string>
+    <string name="fx030k_window">Window</string>
+    <string name="fx030k_layer_mix">Blend with layer</string>
+    <string name="fxo_layer_alpha">Layer alpha</string>
+    <string name="fxo_inverted_alpha">Inverted alpha</string>
+    <string name="fxo_layer_luma">Layer luma</string>
+    <string name="fxo_inverted_luma">Inverted luma</string>
+    <string name="fxt_effects_after_this_one_act_on_the_layers">Effects after this one act on the layers below, only inside this layer\'s shape. Effects before it (blur, mask) shape the window.</string>
+</resources>

@@ -1,5 +1,6 @@
 #include "aurea/export/OfflineFrameRenderer.hpp"
 #include "aurea/project/Project.hpp"
+#include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include <chrono>
 
@@ -66,7 +67,7 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
     };
     const u64 start = monotonic_ns();
     u64 lastProgress = start, lastWork = media_.decode_work(), lastGeneration = generation_.load();
-    bool reclaimed = false;
+    bool reclaimed = false, reopened = false;
     for (;;) {
         if (cancelled()) return Errc::Cancelled;
         // Opt-in PreRender ownership: GPU recording stays serialized, but
@@ -75,6 +76,14 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
         if (pollingMutex) gpuLock = std::unique_lock<std::mutex>(*pollingMutex);
         if (cancelled()) return Errc::Cancelled;
         const u64 observed = generation_.load(std::memory_order_acquire);
+        // O prazo do quadro exato já passou (ver abaixo): a fonte pode
+        // oferecer o quadro do mesmo trecho que estiver mais perto.
+        const bool afterFirst = approximateFrames_ > 0;
+        const u64 checkNs = monotonic_ns();
+        const bool late = approximateRun_ < kMaxApproximateRun
+            && (checkNs - lastProgress >= (afterFirst ? deadlines_.approximateAfterNs : deadlines_.approximateNs)
+                || checkNs - start >= (afterFirst ? deadlines_.approximateTotalAfterNs : deadlines_.approximateTotalNs));
+        settings.approximateAhead = late;
         (void)renderer_.take_incomplete();
         renderer_.prepare(*comp, project, time, &media_, images, imageContext,
                           settings, ++sequence_, 1, DecodeMode::Playback, 1.0f, snapshot_);
@@ -83,7 +92,15 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
         });
         media_.collect(sequence_, 2);
         const bool exact = !snapshot_.missingVideoFrames && !snapshot_.staleVideoFrames;
-        if (exact) {
+        // 0.3.0: o quadro exato que NUNCA chega (decoder do aparelho preso num
+        // ponto do clipe: "trava sempre no quadro 302", 1080p60 de celular)
+        // parava o export e todo degrau da escada parava igual, porque trocar
+        // encoder ou resolução não muda o decoder. Depois de reabrir a fonte e
+        // esperar, sai o quadro mais próximo que a fonte tem — só do MESMO
+        // trecho do clipe (Renderer: video_fallback_allowed descarta o do outro
+        // lado do corte) — e as telas avisam (kExportFrameFallback).
+        const bool approximate = late && !exact && !snapshot_.missingVideoFrames && snapshot_.staleVideoFrames;
+        if (exact || approximate) {
             FrameStats stats;
             RenderTimings timings;
             const Status rendered = renderer_.render(snapshot_, settings, &target, stats, timings);
@@ -98,7 +115,17 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
                 continue;
             }
             if (!rendered.ok()) return rendered;
-            if (!renderer_.take_incomplete()) return OkStatus;
+            if (approximate) {
+                (void)renderer_.take_incomplete();
+                approximate_ = true;
+                ++approximateFrames_;
+                ++approximateRun_;
+                AUREA_LOG_WARN("export: quadro %lld sem o quadro exato da fonte em %llu ms; usado o mais proximo do trecho (%u na sessao)",
+                               static_cast<long long>(time.value), static_cast<unsigned long long>((checkNs - start) / 1'000'000ull),
+                               approximateFrames_);
+                return OkStatus;
+            }
+            if (!renderer_.take_incomplete()) { approximateRun_ = 0; return OkStatus; }
         }
         snapshot_.release_video_frames();
         const u64 pending = gpu_->last_submitted_frame();
@@ -111,6 +138,25 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
             + (renderer_.environment_pending() ? 1ull << 63 : 0ull);
         if (work != lastWork || resources != lastGeneration) {
             lastProgress = now; lastWork = work; lastGeneration = resources;
+        }
+        // Decoder parado sem entregar o quadro: reabre a fonte de quem espera
+        // (uma vez por quadro). Um codec do aparelho preso depois de um seek
+        // volta a andar com outro codec; reabrir também refaz o seek.
+        if (!exact && !reopened
+            && now - lastProgress >= (approximateFrames_ ? deadlines_.reopenAfterNs : deadlines_.reopenNs)) {
+            reopened = true;
+            u32 closed = 0;
+            for (const FrameSnapshot::VideoSourceWait& w : snapshot_.videoSourceWaits) {
+                if (w.opening || (!w.missing && !w.stale)) continue;
+                media_.close_layer(w.layer);
+                ++closed;
+            }
+            if (closed) {
+                AUREA_LOG_WARN("export: quadro %lld sem o quadro exato ha %llu ms; %u fonte(s) de video reaberta(s)",
+                               static_cast<long long>(time.value),
+                               static_cast<unsigned long long>((now - lastProgress) / 1'000'000ull), closed);
+                lastProgress = now;
+            }
         }
         if (now - start > fenceTimeoutNs_ || now - lastProgress > 30'000'000'000ull)
             return Status{exact ? Errc::Timeout : Errc::DecodeFailed,

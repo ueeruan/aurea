@@ -161,8 +161,10 @@ internal fun FiltersPanel(env: PanelEnv) {
     val effectId = rememberGradeEffect(env, Grade.ROLE_FILTER) ?: return
     val params = store.effectParams[effectId].orEmpty()
     val look = params.at(Grade.LOOK)?.value?.getOrNull(0)?.roundToInt() ?: -1
-    // Miniaturas do quadro do cabeçote; refeitas quando ele anda meio segundo.
-    val bucket = (store.playhead / 15)
+    // Miniaturas do quadro do cabeçote; refeitas quando ele anda meio segundo
+    // PARADO. Tocando, nada de captura (0.3.0: cada uma espera os quadros
+    // exatos com a GPU presa e a prévia congelava/ficava preta no play).
+    val bucket = pausedPlayheadBucket(store, 15)
     val thumbs by produceState<List<ImageBitmap>?>(null, store.primary, bucket, store.projectGeneration) {
         var got: List<ImageBitmap>? = null
         for (attempt in 0 until 6) {
@@ -468,12 +470,25 @@ private fun MoreTab(env: PanelEnv, effectId: Int, params: List<EffectParam>) {
     }
 }
 
+/**
+ * O trecho do cabeçote (playhead / [frames]) que só anda com o play PARADO:
+ * tocando, fica o último — as miniaturas e os scopes não pedem captura (que
+ * segura a GPU esperando quadros exatos) enquanto o vídeo roda.
+ */
+@Composable
+private fun pausedPlayheadBucket(store: com.aurea.aurea.state.EditorStore, frames: Int): Long {
+    val current = (store.playhead / frames).toLong()
+    val paused = remember { mutableStateOf(current) }
+    LaunchedEffect(store.playing, current) { if (!store.playing) paused.value = current }
+    return paused.value
+}
+
 /** Histograma, forma de onda, parade e vetorscópio do quadro do cabeçote (EngineColor.cpp). */
 @Composable
 private fun ScopesView(env: PanelEnv) {
     val store = env.store
     var kind by rememberSaveable { mutableIntStateOf(0) }
-    val data by produceState<com.aurea.aurea.state.EditorStore.Scopes?>(null, store.curveRevision, store.playhead / 5, store.primary) {
+    val data by produceState<com.aurea.aurea.state.EditorStore.Scopes?>(null, store.curveRevision, pausedPlayheadBucket(store, 5), store.primary) {
         delay(120)
         value = withContext(Dispatchers.Default) { store.colorScopes(192) }
     }

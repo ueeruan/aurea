@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Cena 3D 0.3.1: fonte de luz única, chão em 3 modos e o "Avançado" do Ambiente (Element3DPanel.kt). -->
+    <string name="scene031_light_neutral">न्यूट्रल</string>
+    <string name="scene031_light_hdr">HDR इमेज…</string>
+    <string name="scene031_light_hdr_hint">इमेज बदलने के लिए फिर से टैप करें</string>
+    <string name="scene031_floor_off">फ़र्श नहीं</string>
+    <string name="scene031_floor_visible">दिखने वाला फ़र्श</string>
+    <string name="scene031_floor_shadow">केवल छाया</string>
+    <string name="scene031_tonemap_neutral">PBR न्यूट्रल</string>
+    <string name="scene031_tonemap_agx">AgX</string>
+    <string name="scene031_tonemap_agx_punchy">AgX पंची</string>
+    <string name="scene031_tonemap_agx_golden">AgX गोल्डन</string>
+    <string name="scene031_tonemap_uchimura">Uchimura</string>
+    <string name="scene031_tonemap_aces">ACES</string>
+    <string name="scene031_bloom_threshold">चमक की सीमा</string>
+</resources>

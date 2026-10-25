@@ -19,9 +19,14 @@
 //  ease em velocidade/influência) e a trilha do Aurea é reescrita a cada
 //  mudança — a mesma conversão para bézier do .ffx.
 //
-//  SANDBOX: File, Folder, Socket, system, Window, $.evalFile, app.open,
+//  SANDBOX: File, Folder, Socket, system, $.evalFile, app.open,
 //  app.executeCommand, app.project.save/importFile... viram objetos
 //  "bloqueados": a chamada é relatada com a linha e nunca executada.
+//
+//  ScriptUI (Window, Panel, Group, Button...): o Aurea não abre janelas de
+//  script. As classes existem para `thisObj instanceof Panel` dar falso e
+//  `new Window(...)` montar um painel MUDO: qualquer atributo, add(), show()
+//  e layout funcionam sem efeito, e os onClick dos botões nunca rodam.
 // =============================================================================
 #include "AeImportBind.hpp"
 #include "AeScript.hpp"
@@ -48,8 +53,19 @@ namespace {
 
 // --- tipos de objeto host --------------------------------------------------------
 enum HK : u32 {
-    HApp = 1, HProject, HItems, HComp, HLayers, HLayer, HProp, HBlocked, HDollar, HTextDoc,
+    HApp = 1, HProject, HItems, HComp, HLayers, HLayer, HProp, HBlocked, HDollar, HTextDoc, HUi,
 };
+
+/// Classes do ScriptUI (janelas e controles dos painéis de script).
+constexpr const char* kUiClasses[] = {"Window", "Panel", "Group", "Button", "IconButton", "StaticText", "EditText",
+                                      "Checkbox", "RadioButton", "Slider", "Scrollbar", "Progressbar", "DropDownList",
+                                      "ListBox", "ListItem", "TreeView", "TabbedPanel", "Tab", "Image", "FlashPlayer"};
+constexpr u32 kUiNativeBase = 500;   ///< ids das classes do ScriptUI: kDomNative + 500 + i
+
+bool is_ui_class(const std::string& cls) noexcept {
+    for (const char* c : kUiClasses) if (cls == c) return true;
+    return false;
+}
 
 constexpr i32 kInterpLinear = 6612, kInterpBezier = 6613, kInterpHold = 6614;
 
@@ -280,10 +296,24 @@ public:
         u32 k = 0;
         for (const char* c : kClasses) in.define_global(c, in.native_fn(Interp::kDomNative + k++, c));
         // Bloqueados pelo sandbox.
-        for (const char* b : {"File", "Folder", "Socket", "system", "Window", "BridgeTalk", "XMLHttpRequest", "ExternalObject",
-                              "ImportOptions", "ScriptUI", "XML", "RenderQueue"}) {
+        for (const char* b : {"File", "Folder", "Socket", "system", "BridgeTalk", "XMLHttpRequest", "ExternalObject",
+                              "ImportOptions", "XML", "RenderQueue"}) {
             in.define_global(b, blocked(in, b));
         }
+        // ScriptUI: classes mudas (ver o cabeçalho). Window.alert/confirm/prompt
+        // são os mesmos do global (viram nota no relatório).
+        u32 u = 0;
+        for (const char* c : kUiClasses) in.define_global(c, in.native_fn(Interp::kDomNative + kUiNativeBase + u++, c));
+        {
+            bool f = false;
+            const Value win = in.own(in.global_object().r, "Window", &f);
+            for (const char* m : {"alert", "confirm", "prompt"}) {
+                bool g = false;
+                const Value fn = in.own(in.global_object().r, m, &g);
+                if (f && g) in.own_set(win.r, m, fn);
+            }
+        }
+        in.define_global("ScriptUI", host(in, HUi, "ScriptUI"));
         auto consts = [&](const char* name, std::initializer_list<std::pair<const char*, f64>> v) {
             const Value o = in.plain(name);
             for (const auto& x : v) in.own_set(o.r, x.first, Value::num(x.second));
@@ -1039,6 +1069,7 @@ public:
                 if (name == "resetCharStyle" || name == "resetParagraphStyle") return method(in, obj, name);
                 return Value::undef();
             }
+            case HUi: return ui_get(in, obj, name);
             default: handled = false; return Value::undef();
         }
     }
@@ -1393,6 +1424,7 @@ public:
 
     Value construct(Interp& in, const std::string& cls, const std::vector<Value>& a, bool& handled) override {
         handled = true;
+        if (is_ui_class(cls)) return ui_obj(in, cls);   // new Window("palette"): painel mudo
         if (cls == "KeyframeEase") {
             const Value e = in.plain("KeyframeEase");
             in.own_set(e.r, "speed", Value::num(a.empty() ? 0.0 : in.to_num(a[0])));
@@ -1478,9 +1510,56 @@ public:
                 if (m == "resetCharStyle" || m == "resetParagraphStyle") return Value::undef();
                 handled = false;
                 return Value::undef();
+            case HUi: return ui_call(in, m, a);
             default: handled = false; return Value::undef();
         }
     }
+
+    // =========================================================================
+    // ScriptUI mudo: nenhuma janela abre e nenhum onClick roda
+    // =========================================================================
+    Value ui_obj(Interp& in, const std::string& cls) {
+        if (!usedUi_) {
+            usedUi_ = true;
+            in.report().note("script", "ScriptUI",
+                             "o script monta uma janela ou painel com botões: o Aurea não abre janelas de script, então os botões dele não rodam");
+        }
+        return host(in, HUi, cls.c_str());
+    }
+
+    Value ui_get(Interp& in, u32 obj, const std::string& name) {
+        bool found = false;
+        const Value v = in.own(obj, name, &found);
+        if (found) return v;
+        if (name == "children") return in.array({});
+        if (name == "length") return Value::num(0);
+        // ScriptUI.environment.keyboardState: nenhuma tecla apertada.
+        if (name == "shiftKey" || name == "altKey" || name == "ctrlKey" || name == "metaKey" || name == "capsLock" ||
+            name == "numLock")
+            return Value::boolean(false);
+        static const char* const kMethods[] = {"add", "remove", "removeAll", "show", "hide", "close", "center", "notify",
+                                               "addEventListener", "removeEventListener", "dispatchEvent", "update",
+                                               "find", "revealItem", "newFont", "newImage", "newPen", "newBrush"};
+        for (const char* m : kMethods) if (name == m) return method(in, obj, name);
+        // Qualquer outro atributo (layout, graphics, grupos do recurso...) vira
+        // outro objeto mudo, guardado para `w.grp.btn.onClick = f` funcionar.
+        const Value child = host(in, HUi, "ScriptUI");
+        in.own_set(obj, name, child);
+        return child;
+    }
+
+    Value ui_call(Interp& in, const std::string& m, const std::vector<Value>& a) {
+        (void)a;
+        if (m == "add") return ui_obj(in, "ScriptUI");
+        if (m == "show") return Value::num(2);   // como se a janela fosse fechada (Cancelar)
+        if (m == "find") return Value::null();
+        if (m == "remove" || m == "removeAll" || m == "hide" || m == "close" || m == "center" || m == "notify" ||
+            m == "addEventListener" || m == "removeEventListener" || m == "dispatchEvent" || m == "update" || m == "revealItem")
+            return Value::undef();
+        return host(in, HUi, "ScriptUI");   // layout.layout(true), graphics.newPen(...)...
+    }
+
+    [[nodiscard]] bool used_ui() const noexcept { return usedUi_; }
 
     Value comp_call(Interp& in, const std::string& m, const std::vector<Value>& a) {
         if (m == "layer") {
@@ -1824,6 +1903,7 @@ private:
     std::vector<SelEntry> sels_;
     u32 compObj_ = 0;
     std::vector<std::pair<u64, u32>> layerObjs_;
+    bool usedUi_ = false;   ///< o script montou janela/painel do ScriptUI
 };
 
 } // namespace
@@ -1837,8 +1917,16 @@ bool run_jsx(std::string_view source, Host& host, LayerId target, const ScriptLi
     AeDom dom(host, target);
     script::Interp in(host, report, limits);
     const bool ran = in.run(source, dom);
-    report.ok = ran;
-    if (ran && report.changes == 0 && report.message.empty()) report.message = "O script rodou, mas não mudou nada no projeto.";
+    // Rodou sem mudar nada: não é "importado" (o relatório não mostra zeros
+    // como sucesso). Painel de script: o trabalho dele fica nos botões.
+    report.ok = ran && report.changes > 0;
+    if (ran && report.changes == 0) {
+        report.message = dom.used_ui()
+            ? "Script de painel com botões: o Aurea não abre janelas de script, então os botões dele não rodam e nada mudou."
+            : report.message.empty() ? "O script rodou, mas não mudou nada no projeto." : report.message;
+    } else if (!ran && report.changes == 0 && dom.used_ui() && report.message.empty()) {
+        report.message = "Script de painel com botões: o Aurea não abre janelas de script.";
+    }
     return ran;
 }
 

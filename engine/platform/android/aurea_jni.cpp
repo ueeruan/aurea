@@ -4544,15 +4544,33 @@ AUREA_JNI jboolean AUREA_FN(nativeSetSceneSetting)(JNIEnv*, jclass, jlong handle
     e.query_scene3d_post(post); e.query_scene_floor(floor);
     switch (parameter) {
     case 0: {
-        if (!e.set_studio_environment(static_cast<aurea::u32>(value)).ok()) return false;
-        return e.set_scene_floor(value > 0 ? 1 : 0, .18f, .18f, .18f, .2f, .5f);
+        // Fonte de luz (0.3.1): só a luz. Antes este caso regravava o chão com
+        // um cinza fixo (.18, rugosidade .2) e o 0 apagava o chão — a cor, o
+        // reflexo, a sombra e o "Só sombra" do usuário se perdiam a cada toque.
+        // Agora o chão não é tocado: ele tem os próprios chips (caso 1), e
+        // acendê-lo aqui seria uma 2ª mutação = um 2º passo de desfazer (a ponte
+        // não abre grupo; o grupo do gesto só vale pela fila de comandos).
+        // Estúdio > 0: o motor já tira o HDRI importado. Neutro (0): o HDRI sai
+        // aqui (o HDRI vence o estúdio no render). Mutação sem efeito fica fora.
+        const auto preset = static_cast<aurea::u32>(std::max(0.f, value));
+        if (preset > 0) return e.set_studio_environment(preset).ok();
+        float environment[3]{};
+        const bool hdri = e.query_environment(environment) && environment[0] > .5f;
+        bool ok = true;
+        if (e.studio_environment() != 0) ok = e.set_studio_environment(0).ok();
+        if (hdri) ok = e.clear_hdri() && ok;
+        return ok;
     }
-    case 1: return e.set_scene_floor(value > 0 ? 1 : 0, floor[1], floor[2], floor[3], floor[4], floor[5] > 0 ? floor[5] : .5f, floor[6], floor[7]);
+    // Chão: 0 sem chão, 1 chão visível, 2 só sombra (shadow catcher).
+    case 1: return e.set_scene_floor(value >= 1.5f ? 2u : value > 0 ? 1u : 0u, floor[1], floor[2], floor[3], floor[4],
+                                     floor[5] > 0 ? floor[5] : .5f, floor[6], floor[7]);
     case 2: return e.set_scene3d_quality(static_cast<aurea::u32>(value));
     case 3: return e.set_scene3d_tonemap(static_cast<aurea::u32>(value), post[2]);
     case 4: return e.set_scene3d_tonemap(static_cast<aurea::u32>(post[1]), value);
     case 5: return e.set_scene3d_bloom(value > 0, post[4], post[5]);
     case 6: return e.set_scene3d_bloom(post[3] > 0, value, post[5]);
+    // Limiar do bloom (mantém ligado/força atuais).
+    case 7: return e.set_scene3d_bloom(post[3] > 0, post[4], value);
     default: return false;
     }
 }

@@ -339,13 +339,34 @@ bool ThumbnailService::image(u64 assetKey, const u8* rgba, u32 width, u32 height
     img.height = thumbHeight;
     img.width = std::max<u32>(1, static_cast<u32>(std::lround(static_cast<f64>(thumbHeight) * width / height)));
     img.rgba.resize(static_cast<usize>(img.width) * img.height * 4);
+    // 0.3.0 (PNG transparente do Ibis Paint "com linhas"): média da ÁREA de
+    // cada pixel da miniatura ponderada pelo alfa, sobre o xadrez (como a do
+    // vídeo/sequência). Antes era um ponto por pixel e o alfa ia fora: a cor
+    // guardada nos pixels transparentes (traço apagado num app de desenho)
+    // aparecia, e o traço fino virava riscos soltos.
     for (u32 y = 0; y < img.height; ++y) {
-        const u32 sy = std::min(height - 1, static_cast<u32>((y + 0.5) * height / img.height));
+        const u32 y0 = std::min(height - 1, static_cast<u32>(static_cast<u64>(y) * height / img.height));
+        const u32 y1 = std::max(y0 + 1, std::min(height, static_cast<u32>(static_cast<u64>(y + 1) * height / img.height)));
         for (u32 x = 0; x < img.width; ++x) {
-            const u32 sx = std::min(width - 1, static_cast<u32>((x + 0.5) * width / img.width));
-            const u8* s = rgba + (static_cast<usize>(sy) * width + sx) * 4;
+            const u32 x0 = std::min(width - 1, static_cast<u32>(static_cast<u64>(x) * width / img.width));
+            const u32 x1 = std::max(x0 + 1, std::min(width, static_cast<u32>(static_cast<u64>(x + 1) * width / img.width)));
+            u64 sum[3] = {0, 0, 0}, alpha = 0, n = 0;
+            for (u32 sy = y0; sy < y1; ++sy) {
+                const u8* row = rgba + (static_cast<usize>(sy) * width + x0) * 4;
+                for (u32 sx = x0; sx < x1; ++sx, row += 4) {
+                    for (u32 i = 0; i < 3; ++i) sum[i] += static_cast<u64>(row[i]) * row[3];
+                    alpha += row[3];
+                    ++n;
+                }
+            }
+            const f32 a = n ? static_cast<f32>(alpha) / (255.0f * static_cast<f32>(n)) : 1.0f;
+            const f32 checker = ((x / 6u + y / 6u) & 1u) ? 107.0f : 71.0f;   // 0,42 e 0,28 do vídeo
             u8* d = img.rgba.data() + (static_cast<usize>(y) * img.width + x) * 4;
-            d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = 255;
+            for (u32 i = 0; i < 3; ++i) {
+                const f32 c = alpha ? static_cast<f32>(sum[i]) / static_cast<f32>(alpha) : 0.0f;
+                d[i] = static_cast<u8>(std::clamp(c * a + checker * (1.0f - a) + 0.5f, 0.0f, 255.0f));
+            }
+            d[3] = 255;
         }
     }
     insert_locked(k, img);

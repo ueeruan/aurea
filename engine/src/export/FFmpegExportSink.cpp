@@ -2299,6 +2299,7 @@ Status FFmpegSink::decode_validate(const ExportOutputValidation& expected) noexc
             // fim é haver quadros decodificados.
             if (code < 0) return soft(Errc::DecodeFailed, "decodificar arquivo exportado FFmpeg", code);
             progressAt = monotonic_ns(); ++obtained;
+            if (video && expected.validatedFrames) expected.validatedFrames->fetch_add(1, std::memory_order_relaxed);
             const AVFrame* frame = decoded.frame;
             const AVStream* stream = decoded.format->streams[index];
             Status checked = OkStatus;

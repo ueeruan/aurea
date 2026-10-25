@@ -11612,7 +11612,9 @@ AUREA_TEST(Gpu, CreatedCameraAndNullDepthTracksRenderAndReload) {
     auto secondCamera = rig.e.add_camera();
     AUREA_CHECK(secondCamera.ok());
     if (!secondCamera.ok()) return;
-    AUREA_CHECK(!layer(*camera)->camera.active);
+    // 0.3.0: a primeira continua ativa (vale a visível mais de cima, como no
+    // AE); antes ela era desligada para sempre ao criar a segunda.
+    AUREA_CHECK(layer(*camera)->camera.active);
     AUREA_CHECK(layer(*secondCamera)->camera.active);
     auto parent = rig.e.add_null(true);
     AUREA_CHECK(parent.ok());
@@ -14510,6 +14512,9 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "RasterExtrudeGpu.inl"
 #include "PreRenderIntegration.inl"
 #include "AdjustmentEffectsGpu.inl"
+// Copiar fundo (0.3.0): a camada vira janela para as camadas abaixo.
+#include "CopyBackgroundGpu.inl"
+#include "Effects3DSheetGpu.inl"
 #include "MotionTileWallGpu.inl"
 #include "ClipMaskGpu.inl"
 #include "Scene3DImageBlurGpu.inl"

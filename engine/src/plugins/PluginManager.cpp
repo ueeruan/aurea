@@ -121,6 +121,7 @@ PluginInfo info_of(const Manifest& m, const fs::path& dir) {
     i.version = m.version;
     i.author = m.author;
     i.kind = m.kind;
+    i.scene3d = m.scene3d;
     i.category = m.category;
     i.names = m.name;
     i.descriptions = m.description;

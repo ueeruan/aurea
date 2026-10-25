@@ -207,6 +207,9 @@ struct Material {
     f32  alphaCutoff = 0.5f;
     bool doubleSided = false;
     bool unlit = false;                ///< KHR_materials_unlit
+    /// 0.3.1: recorte (SceneInstance::holdout) — grava a profundidade e deixa a
+    /// cor transparente. Só nas cópias do render; nunca vem do arquivo.
+    bool holdout = false;
 
     // Extensões lidas e guardadas. As que o shader ainda não usa ficam em
     // `ignoredExtensions` — o import não finge suporte.

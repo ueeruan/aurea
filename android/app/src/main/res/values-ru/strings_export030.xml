@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: escolha do codificador de vídeo no Avançado da tela Exportar. -->
+<resources>
+    <string name="export_encoder">Кодировщик</string>
+    <string name="export_encoder_auto">Автоматически</string>
+    <string name="export_encoder_compatible">Совместимый</string>
+    <string name="export_encoder_software">Программный</string>
+    <string name="export_encoder_auto_note">Видеокодировщик телефона. Если он даст сбой, приложение само переключится на более совместимый.</string>
+    <string name="export_encoder_compatible_note">Базовый H.264 на кодировщике телефона. Выберите, если в автоматическом режиме ошибка кодировщика.</string>
+    <string name="export_encoder_software_note">H.264 на процессоре, без кодировщика телефона. Медленнее, но работает, когда кодировщик телефона даёт сбой.</string>
+    <string name="export_after_system_close">Приложение закрылось посреди прошлого экспорта. На этот раз видео экспортируется в облегчённом режиме.</string>
+</resources>

@@ -1176,7 +1176,11 @@ void read_layer(ByteReader& r, Layer& l) {
     l.camera.farPlane = r.f32v();
     l.camera.focusDistance = r.f32v();
     l.camera.aperture = r.f32v();
-    l.camera.active = r.boolv();
+    // 0.3.0: "ativa" era desligada nas outras câmeras ao criar uma nova, e
+    // nada na interface religava: a câmera antiga morria no projeto salvo.
+    // Agora vale a visível mais de cima (Renderer), então todas voltam ativas.
+    (void)r.boolv();
+    l.camera.active = true;
 
     l.light.kind = checked_enum(r.u8v(), LightKind::Ambient, LightKind::Directional);
     l.light.color = r.vec4();

@@ -66,16 +66,22 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
     if (ui.adding) Dialog(onDismissRequest = { ui.adding = false }) {
         Surface { Box(Modifier.fillMaxWidth().fillMaxHeight(.8f)) { AddLayerPanel(store, ui) } }
     }
-    if (materials) Dialog(onDismissRequest = { materials = false }) {
-        Surface { PanelContent(store = store, panel = materialPanel, onClose = { materials = false }, onOpenPanel = { materialPanel = it }, onOpenEffectsBrowser = { ui.effectsBrowser = true }, modifier = Modifier.fillMaxWidth().fillMaxHeight(.85f)) }
+    // Material e luz em folha de baixo (0.3.1), não num diálogo no meio: a
+    // metade de cima mostra a cena viva enquanto se mexe (véu leve).
+    if (materials) SceneSheet(onDismiss = { materials = false }) {
+        PanelContent(store = store, panel = materialPanel, onClose = { materials = false }, onOpenPanel = { materialPanel = it }, onOpenEffectsBrowser = { ui.effectsBrowser = true }, modifier = Modifier.fillMaxWidth().fillMaxHeight(.55f),
+            alwaysHeader = true)
     }
-    if (lights) Dialog(onDismissRequest = { lights = false }) {
-        Surface { Column(Modifier.fillMaxWidth().heightIn(max = 600.dp).verticalScroll(rememberScrollState()).padding(12.dp)) {
-            val light = remember(store.primary, store.curveRevision, store.detail, store.sceneSettingsRevision, store.playhead) { store.lightInfo() }
-            light?.let { values -> AureaPropertyPanel(store, "light", values, onOpenCurve = {
-                lights = false; materialPanel = EditorPanel.Curve; materials = true
-            }) }
-        } }
+    if (lights) SceneSheet(onDismiss = { lights = false }) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(.55f)) {
+            SceneSheetHeader(stringResource(R.string.pn_t3d_lighting)) { lights = false }
+            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+                val light = remember(store.primary, store.curveRevision, store.detail, store.sceneSettingsRevision, store.playhead) { store.lightInfo() }
+                light?.let { values -> AureaPropertyPanel(store, "light", values, onOpenCurve = {
+                    lights = false; materialPanel = EditorPanel.Curve; materials = true
+                }) }
+            }
+        }
     }
     val selected = store.layers.firstOrNull { it.id == store.primary }
     Box(Modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
@@ -113,7 +119,9 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // A fileira rola na horizontal (tela estreita / textos longos); cabendo, fica centrada.
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     ScenePillButton(CupertinoGlyph.Plus, stringResource(R.string.panel_adicionar).removePrefix("+ ")) { addMenu = true }
                     if (addMenu) ShellPopupMenu(listOf(
@@ -124,6 +132,8 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
                         PopupItem(stringResource(R.string.scene_light_directional), false) { addMenu = false; store.addLight(0) },
                         PopupItem(stringResource(R.string.scene_light_point), false) { addMenu = false; store.addLight(1) },
                         PopupItem(stringResource(R.string.scene_light_spot), false) { addMenu = false; store.addLight(2) },
+                        // O mesmo Flare 3D do Adicionar › 3D (AddLayerPanel.kt).
+                        PopupItem(stringResource(R.string.scene_flare3d), false) { addMenu = false; store.addLight(3) },
                         PopupItem(stringResource(R.string.sh_add_model_3d) + "…", false) { addMenu = false; ui.addTab = AddTab.Model3D; ui.adding = true },
                     ), onDismiss = { addMenu = false }, width = 220.dp)
                 }
@@ -161,6 +171,43 @@ private fun RigPoseBar(store: EditorStore) {
         if (chosen) ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.rig_reset_bone)) { store.resetPose(false) }
         ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.rig_reset_all)) { store.resetPose(true) }
         ScenePillButton(CupertinoGlyph.CheckmarkAlt, stringResource(R.string.rig_done)) { store.setRigPose(false) }
+    }
+}
+
+/**
+ * Folha de baixo da Cena 3D (material e luz): sobe até ~55 % da tela e deixa a
+ * cena à vista em cima, com véu leve (o [com.aurea.aurea.ui.ds.AureaModalSheet]
+ * escurece demais para ver o material mudar). Par do iOS: `.sheet` com
+ * `.presentationDetents([.medium, .large])` no SceneLayoutWorkspace.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SceneSheet(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = AureaColors.EditorPanel,
+        contentColor = AureaColors.Text,
+        scrimColor = Color(0x33000000),
+        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
+        dragHandle = {
+            Box(Modifier.padding(top = 10.dp, bottom = 6.dp).size(width = 36.dp, height = 5.dp)
+                .clip(RoundedCornerShape(3.dp)).background(Color(0x2EFFFFFF)))
+        },
+    ) {
+        Column(Modifier.navigationBarsPadding()) { content() }
+    }
+}
+
+/** Título da folha + Fechar (48 dp). */
+@Composable
+private fun SceneSheetHeader(title: String, onClose: () -> Unit) {
+    val close = stringResource(R.string.common_close)
+    Row(Modifier.fillMaxWidth().height(48.dp).padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, color = AureaColors.Text, fontSize = 15.sp, fontWeight = FontWeight.W600, maxLines = 1, modifier = Modifier.weight(1f))
+        Box(Modifier.size(48.dp).semantics { contentDescription = close }.tocavel(onClick = onClose), contentAlignment = Alignment.Center) {
+            CupertinoIcon(CupertinoGlyph.Xmark, 16.dp, AureaColors.Muted)
+        }
     }
 }
 

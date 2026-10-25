@@ -131,6 +131,11 @@ AUREA_TEST(Scene3DLens, Timeline47CameraLayeringQueryCapacityUndoAndLayerOrder) 
     const auto shapeId = comp->add_layer(LayerKind::Shape, "2D below camera");
     const auto audioId = comp->add_layer(LayerKind::Audio, "audio stays 2D");
     AUREA_CHECK(comp->reorder_layer(LayerId::unpack(rig.cam), comp->order().size() - 1));
+    // 0.3.1: câmera nova no padrão do AE (só vê camadas 3D); a opção liga na lente.
+    AUREA_CHECK(!rig.camera()->camera.affectsLayersBelow);
+    AUREA_CHECK(!wants_layer_3d(*comp, *comp->layer(shapeId), FrameIndex{0}));
+    AUREA_CHECK(lens(rig.e, rig.cam, 7, 1.f).ok());
+    comp = comp_of(rig.e);
     AUREA_CHECK(rig.camera()->camera.affectsLayersBelow);
     AUREA_CHECK(wants_layer_3d(*comp, *comp->layer(shapeId), FrameIndex{0}));
     AUREA_CHECK(!wants_layer_3d(*comp, *comp->layer(audioId), FrameIndex{0}));
@@ -370,12 +375,18 @@ AUREA_TEST(CameraLens, NewCameraAffects2DLayersBelowIt) {
     const Layer* lb = comp->layer(LayerId::unpack(*below));
     const Layer* la = comp->layer(LayerId::unpack(*above));
     AUREA_CHECK(lb && la && !lb->threeD && !la->threeD);
-    AUREA_CHECK(comp->layer(LayerId::unpack(*cam))->camera.affectsLayersBelow);
-    AUREA_CHECK(wants_layer_3d(*comp, *lb, FrameIndex{0}));
-    AUREA_CHECK(!wants_layer_3d(*comp, *la, FrameIndex{0}));
+    // 0.3.1: nasce no padrão do AE; o botão 3D da camada manda até a lente ligar a opção.
+    AUREA_CHECK(!comp->layer(LayerId::unpack(*cam))->camera.affectsLayersBelow);
+    AUREA_CHECK(!wants_layer_3d(*comp, *lb, FrameIndex{0}));
     std::vector<f32> v(10, 0.0f);
     AUREA_CHECK(e.query_camera_lens(*cam, v.data(), static_cast<u32>(v.size())));
-    AUREA_CHECK_EQ(v[9], 1.0f);
+    AUREA_CHECK_EQ(v[9], 0.0f);
+    AUREA_CHECK(lens(e, *cam, 7, 1.0f).ok());
+    comp = comp_of(e);
+    lb = comp->layer(LayerId::unpack(*below));
+    la = comp->layer(LayerId::unpack(*above));
+    AUREA_CHECK(wants_layer_3d(*comp, *lb, FrameIndex{0}));
+    AUREA_CHECK(!wants_layer_3d(*comp, *la, FrameIndex{0}));
     AUREA_CHECK(lens(e, *cam, 7, 0.0f).ok());
     AUREA_CHECK(!wants_layer_3d(*comp, *lb, FrameIndex{0}));
     AUREA_CHECK(lens(e, *cam, 7, 1.0f).ok());

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.1: importar do After Effects também pelo menu da camada e pela Edição; sem camada, o preset cria uma. -->
+<resources>
+    <string name="ae_import_layer_detail">प्रीसेट: इस लेयर पर इफ़ेक्ट, कीफ़्रेम और टेक्स्ट एनिमेटर। स्क्रिप्ट: इस लेयर को चुनी हुई लेयर के रूप में पाती है।</string>
+    <string name="ae_import_new_layer_detail">प्रीसेट: After Effects की तरह एक नई लेयर पर लगता है (टेक्स्ट, या कंपोज़िशन के आकार का सॉलिड)। स्क्रिप्ट: लेयर बनाती और एनिमेट करती है।</string>
+    <string name="ae_partial_title">आंशिक रूप से इम्पोर्ट हुआ</string>
+    <string name="ae_too_big">फ़ाइल इम्पोर्ट के लिए बहुत बड़ी है (अधिकतम 64 MB)।</string>
+</resources>

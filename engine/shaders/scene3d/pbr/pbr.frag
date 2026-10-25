@@ -179,6 +179,15 @@ void main() {
     } else if (mode == 1 && base.a < u.alpha.x) discard;
     float alpha = mode == 2 ? base.a : 1.0;
 
+    // --- Recorte (0.3.1, SceneInstance::holdout) ----------------------------------
+    // Objeto de outro grupo 3D: só a profundidade. A cor e o alfa saem 0, e o
+    // que estiver atrás dele neste grupo some (o outro grupo desenha a frente).
+    if (u.alpha.z > 1.5) {
+        o_color = vec4(0.0);
+        o_scene = vec4(0.0);
+        return;
+    }
+
     // --- Sem iluminação (KHR_materials_unlit) ------------------------------------
     if (u.alpha.z > 0.5) {
         // Unlit é cor de EXIBIÇÃO (texto, logotipo): vai no alvo 2D, fora do

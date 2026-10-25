@@ -334,7 +334,7 @@ struct Applier {
     // --- texto ----------------------------------------------------------------
     bool text_ok() {
         if (w.layer && w.layer->kind == LayerKind::Text) return true;
-        if (!textSkipped) rep.skip("texto", "Text Animator", "a camada de destino não é de texto");
+        if (!textSkipped) rep.skip("texto", "Text Animator", "a camada escolhida não é de texto: escolha uma camada de texto");
         textSkipped = true;
         return false;
     }
@@ -753,6 +753,8 @@ bool apply_ffx(const FfxDocument& doc, Host& host, LayerId target, ImportReport&
     a.finish();
     report.ok = a.applied > 0;
     report.changes += a.applied + a.w.writes;
+    if (!report.ok && report.message.empty() && a.textSkipped)
+        report.message = "Este preset anima texto: escolha uma camada de texto (ou nenhuma camada, para o Aurea criar uma).";
     if (!report.ok && report.message.empty())
         report.message = report.skipped.empty() ? "O preset não tem nada que o Aurea aplique."
                                                 : "Nada do preset tem equivalente no Aurea.";

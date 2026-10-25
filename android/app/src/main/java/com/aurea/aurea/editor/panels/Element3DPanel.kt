@@ -64,8 +64,8 @@ import com.aurea.aurea.ui.theme.tocavel
  * PAINEL 3D (texto 3D, forma 3D, modelo importado e câmera), em poucas ABAS:
  *
  *  - Ambiente (a 1ª nos objetos; retorno de beta 12/10/2026: "só o básico"):
- *    LUZ (estúdio, imagem de ambiente, intensidade, giro e sombras), FUNDO e
- *    CHÃO. Nada além disso.
+ *    LUZ (uma fonte: estúdio ou imagem HDR; intensidade, giro e sombras),
+ *    FUNDO e CHÃO; qualidade, tone map, exposição e bloom em "Avançado", fechado.
  *  - Material: materiais prontos (amostras), cor, metálico e rugosidade; a
  *    superfície e o resto ficam em "Avançado", fechado. Forma 3D: cor por
  *    parte. Modelo: os materiais do arquivo.
@@ -478,12 +478,27 @@ private fun ImportedMaterialSection(env: PanelEnv) {
 
 // --- Luz e cena -----------------------------------------------------------------
 
+/** Estúdios da fonte de luz, na ordem dos ids do motor (StudioEnvironment.hpp: 0 neutro … 4 cromado). */
+private val StudioLights = listOf(
+    R.string.scene031_light_neutral, R.string.scene_dark, R.string.scene_product, R.string.scene_sky, R.string.scene_chrome,
+)
+
+/** Operadores de tone map do 3D, na ordem do motor (0 PBR Neutral … 5 ACES). */
+private val ToneMaps = listOf(
+    R.string.scene031_tonemap_neutral, R.string.scene031_tonemap_agx, R.string.scene031_tonemap_agx_punchy,
+    R.string.scene031_tonemap_agx_golden, R.string.scene031_tonemap_uchimura, R.string.scene031_tonemap_aces,
+)
+
 /**
- * AMBIENTE (retorno de beta 12/10/2026: "só o básico"): LUZ (estúdio, imagem
- * de ambiente, intensidade, giro e as sombras do objeto), FUNDO e CHÃO. O que
- * era avançado (qualidade, tom, exposição, brilho, ambiente próprio do
- * objeto, trecho do fundo) saiu daqui; o projeto guarda os valores.
- * [objectSettings] = falso na câmera (sem sombras de objeto).
+ * AMBIENTE (retorno de beta 12/10/2026: "só o básico"): LUZ, FUNDO e CHÃO; o
+ * resto (qualidade, tone map, exposição e bloom) fica em "Avançado", fechado.
+ *
+ * LUZ (0.3.1): UMA fileira de fontes exclusivas — Neutro, Escuro, Produto,
+ * Céu, Cromado e Imagem HDR… — e só uma acesa: a HDR quando há HDRI (ela vence
+ * o estúdio no render), senão o estúdio. Escolher um estúdio tira o HDRI (a
+ * ponte faz isso numa mutação só: um toque = um passo de desfazer). CHÃO: três
+ * chips (sem chão, visível, só sombra). [objectSettings] = falso na câmera
+ * (sem sombras de objeto). Par do iOS (Panel3DView.swift `lightSceneTab`).
  */
 @Composable
 private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
@@ -494,20 +509,22 @@ private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
     }
     val revision = store.sceneSettingsRevision
     var settings by remember(revision) { mutableStateOf(store.sceneSettings()) }
+    var advanced by rememberSaveable { mutableStateOf(false) }
     fun change(index: Int, value: Float) { store.setSceneSetting(index, value); settings = store.sceneSettings() }
+    val hdr = e[0] >= 0.5f
 
-    // --- Luz ---
+    // --- Luz: uma fonte só ---
     KitTitle(stringResource(R.string.cat_light))
-    if (settings.size >= 8) {
-        ChipRow {
-            listOf(R.string.scene_none, R.string.scene_dark, R.string.scene_product, R.string.scene_sky, R.string.scene_chrome).forEachIndexed { i, label ->
-                KitChip(stringResource(label), on = settings[0].toInt() == i) { change(0, i.toFloat()) }
+    ChipRow {
+        if (settings.size >= 8) {
+            StudioLights.forEachIndexed { i, label ->
+                val on = !hdr && settings[0].toInt() == i
+                // Tocar no estúdio já aceso não gera passo de desfazer vazio.
+                KitChip(stringResource(label), on = on, modifier = Modifier.testTag("panel3d.light.$i")) { if (!on) change(0, i.toFloat()) }
             }
         }
-    }
-    ChipRow {
-        KitChip(stringResource(R.string.panel_estudio_neutro), on = e[0] < 0.5f) { store.clearHdri() }
-        KitChip(if (e[0] >= 0.5f) stringResource(R.string.panel_imagem_ambiente) else stringResource(R.string.panel_usar_imagem_ambiente_hdr), on = e[0] >= 0.5f) {
+        // Acesa, toca de novo para trocar a imagem.
+        KitChip(stringResource(R.string.scene031_light_hdr), on = hdr, modifier = Modifier.testTag("panel3d.light.hdr")) {
             pick.launch(arrayOf("image/vnd.radiance", "image/x-exr", "application/zip", "application/octet-stream", "*/*"))
         }
     }
@@ -527,10 +544,48 @@ private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
     // --- Fundo ---
     KitTitle(stringResource(R.string.fx3d_env_background))
     ToggleLine(stringResource(R.string.environment_background), (e.getOrNull(3) ?: 0f) > .5f, store::setEnvironmentBackground)
-    // --- Chão ---
     if (settings.size >= 8) {
+        // --- Chão: 0 sem chão, 1 visível, 2 só sombra (compõe sobre o 2D) ---
         KitTitle(stringResource(R.string.fx3d_env_floor))
-        ToggleLine(stringResource(R.string.scene_floor), settings[1] > 0) { change(1, if (it) 1f else 0f) }
+        val floor = settings[1].toInt()
+        ChipRow {
+            listOf(R.string.scene031_floor_off, R.string.scene031_floor_visible, R.string.scene031_floor_shadow).forEachIndexed { i, label ->
+                KitChip(stringResource(label), on = floor == i, modifier = Modifier.testTag("panel3d.floor.$i")) {
+                    if (floor != i) change(1, i.toFloat())
+                }
+            }
+        }
+        // --- Avançado (fechado): qualidade, tone map, exposição e bloom ---
+        Spacer(Modifier.height(4.dp))
+        AdvancedSection(advanced, { advanced = !advanced }) {
+            KitTitle(stringResource(R.string.scene_quality))
+            ChipRow {
+                listOf(R.string.scene_auto, R.string.scene_low, R.string.scene_medium, R.string.scene_high, R.string.scene_ultra).forEachIndexed { i, label ->
+                    val on = settings[2].toInt() == i
+                    KitChip(stringResource(label), on = on) { if (!on) change(2, i.toFloat()) }
+                }
+            }
+            KitTitle(stringResource(R.string.scene_tonemap))
+            ChipRow {
+                ToneMaps.forEachIndexed { i, label ->
+                    val on = settings[3].toInt() == i
+                    KitChip(stringResource(label), on = on) { if (!on) change(3, i.toFloat()) }
+                }
+            }
+            // Exposição: multiplicador linear (1 = 100 %).
+            SceneRow(env, stringResource(R.string.scene_exposure), settings[4] * 100f, 1f, 1f, 400f, "%", 100f, "exposicao 3D") {
+                change(4, it / 100f)
+            }
+            ToggleLine(stringResource(R.string.scene_bloom), settings[5] > 0.5f) { change(5, if (it) 1f else 0f) }
+            if (settings[5] > 0.5f) {
+                SceneRow(env, stringResource(R.string.ui3d_bloom_strength), settings[6] * 100f, 1f, 0f, 400f, "%", 60f, "bloom 3D") {
+                    change(6, it / 100f)
+                }
+                SceneRow(env, stringResource(R.string.scene031_bloom_threshold), settings[7], .05f, 0f, 8f, "", 1.25f, "bloom 3D", decimals = 2) {
+                    change(7, it)
+                }
+            }
+        }
     }
     Spacer(Modifier.height(8.dp))
 }
@@ -547,11 +602,12 @@ private fun SceneRow(
     unit: String,
     default: Float,
     gesture: String?,
+    decimals: Int = 0,
     onValue: (Float) -> Unit,
 ) {
     val store = env.store
     HumanRow(
-        env, label, value, step, min, max, unit, 0, default,
+        env, label, value, step, min, max, unit, decimals, default,
         onStart = { if (gesture != null) store.beginGesture(gesture) },
         onValue = onValue,
         onEnd = { if (gesture != null) store.endGesture() },

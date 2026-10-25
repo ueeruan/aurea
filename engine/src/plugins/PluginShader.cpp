@@ -68,6 +68,36 @@ vec2 aurea_uv_from_layer(vec2 layerUv) { return (layerUv * aurea.layer.xy - aure
 vec4 aurea_main(vec2 uv);
 )GLSL";
 
+// 0.3.1, plugins "shader3d": a câmera da cena e as camadas ligadas (nulo,
+// câmera, luz). Só entram no cabeçalho dos plugins 3D: o dos outros não muda.
+constexpr const char* kHelpers3D = R"GLSL(
+bool aurea_layer_valid(int i) { return aurea.layerPos[i].w > 0.5; }
+mat4 aurea_layer_matrix(int i) { return aurea.layerWorld[i]; }
+vec3 aurea_layer_position(int i) { return aurea.layerPos[i].xyz; }
+vec3 aurea_layer_axis(int i, int a) { return normalize(aurea.layerWorld[i][a].xyz); }
+int aurea_layer_kind(int i) { return int(aurea.layerInfo[i].x + 0.5); }
+float aurea_layer_fov(int i) { return aurea.layerInfo[i].y; }
+vec3 aurea_camera_position() { return aurea.camera.xyz; }
+vec3 aurea_camera_right() { return vec3(aurea.view[0].x, aurea.view[1].x, aurea.view[2].x); }
+vec3 aurea_camera_down() { return vec3(aurea.view[0].y, aurea.view[1].y, aurea.view[2].y); }
+vec3 aurea_camera_forward() { return vec3(aurea.view[0].z, aurea.view[1].z, aurea.view[2].z); }
+vec2 aurea_comp_px(vec2 uv) {
+    vec4 q = aurea.compFromLayer * vec4(aurea.region.xy + uv * aurea.region.zw, 0.0, 1.0);
+    return q.xy / (abs(q.w) > 1e-6 ? q.w : 1.0);
+}
+void aurea_ray(vec2 uv, out vec3 ro, out vec3 rd) {
+    vec2 n = aurea_comp_px(uv) * 2.0 * aurea.comp.zw - 1.0;
+    float t = tan(aurea.lens.x * 0.5);
+    ro = aurea.camera.xyz;
+    rd = normalize(aurea_camera_right() * (n.x * aurea.lens.z * t) + aurea_camera_down() * (n.y * t) + aurea_camera_forward());
+}
+vec3 aurea_world_to_comp(vec3 p) {
+    vec4 q = aurea.compFromWorld * vec4(p, 1.0);
+    return vec3(q.xy / (abs(q.w) > 1e-6 ? q.w : 1e-6), q.w);
+}
+vec3 aurea_world_to_view(vec3 p) { return (aurea.view * vec4(p, 1.0)).xyz; }
+)GLSL";
+
 std::string param_macro(const ParamDecl& p, u32 slot) {
     const std::string ref = "aurea.params[" + std::to_string(slot) + "]";
     switch (p.kind) {
@@ -101,11 +131,28 @@ std::string shader_header(const Manifest& m, u32 pass) {
          "    vec4 time;         // x = segundos, y = quadro, z = fps\n"
          "    vec4 layer;        // xy = tamanho da camada (px), zw = texels por px da camada neste passe\n"
          "    vec4 region;       // xy = origem da regiao (px da camada), zw = tamanho (px da camada)\n"
-         "    vec4 params[16];   // um vec4 por parametro, na ordem de plugin.json\n"
-         "} aurea;\n";
-    for (u32 i = 0; i < m.params.size(); ++i)
-        h += "#define " + m.params[i].id + " " + param_macro(m.params[i], i) + "\n";
+         "    vec4 params[16];   // um vec4 por parametro, na ordem de plugin.json\n";
+    if (m.scene3d) {
+        h += "    mat4 view;          // vista <- mundo (x direita, y baixo, z frente)\n"
+             "    mat4 compFromWorld; // px da composicao (homogeneo) <- mundo\n"
+             "    mat4 compFromLayer; // px da composicao (homogeneo) <- px da camada\n"
+             "    vec4 camera;        // xyz posicao no mundo, w = 1 camera de camada\n"
+             "    vec4 lens;          // x fovY (rad), y plano proximo, z aspecto, w focal (px)\n"
+             "    vec4 comp;          // xy tamanho da composicao (px), zw = 1/xy\n"
+             "    mat4 layerWorld[4]; // mundo <- px de cada camada ligada\n"
+             "    vec4 layerPos[4];   // xyz ancora no mundo, w = 1 ligada\n"
+             "    vec4 layerInfo[4];  // x tipo (6 nulo, 8 camera, 9 luz), y fovY, z 3D\n";
+    }
+    h += "} aurea;\n";
+    u32 layerSlot = 0;
+    for (u32 i = 0; i < m.params.size(); ++i) {
+        // "layer": o nome vira a POSIÇÃO da camada ligada (aurea_layer_*(nome)).
+        if (m.params[i].kind == ParamKind::Layer) h += "#define " + m.params[i].id + " " + std::to_string(layerSlot++) + "\n";
+        else h += "#define " + m.params[i].id + " " + param_macro(m.params[i], i) + "\n";
+    }
+    if (m.scene3d) h += "#define AUREA_SCENE3D 1\n";
     h += kHelpers;
+    if (m.scene3d) h += kHelpers3D;
     return h;
 }
 

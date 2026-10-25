@@ -1015,6 +1015,16 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             10 to ParamHuman(decimals = 0),
             12 to ParamHuman(suffix = "%", decimals = 0),
         )))
+    // Copiar fundo (0.3.0): a camada vira uma janela; os efeitos DEPOIS dele
+    // agem nas camadas abaixo, só dentro dela (como uma camada de ajuste recortada).
+    put("aurea.utility.copy_background", EffectHuman(
+        name = R.string.fx030k_name,
+        keywords = "copiar fundo copy background janela window ajustar parte do video forma shape mascara recorte camada de ajuste adjustment layer alight motion backdrop",
+        principal = listOf(0, 1),
+        params = mapOf(
+            0 to ParamHuman(label = R.string.fx030k_window),
+            1 to ParamHuman(label = R.string.fx030k_layer_mix, suffix = "%", decimals = 0),
+        )))
     put("aurea.time.flow_motion_blur", EffectHuman(
         keywords = "rsmb reelsmart motion blur desfoque de movimento borrao vetores optical flow obturador shutter",
         principal = listOf(0, 1, 2)))

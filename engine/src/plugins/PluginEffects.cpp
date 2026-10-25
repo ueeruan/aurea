@@ -19,6 +19,7 @@
 #include "PluginInternal.hpp"
 #include "aurea/effects/Puppet.hpp"
 #include "aurea/text/TextAnimator.hpp"
+#include "aurea/timeline/Layer.hpp"
 #include "effects/builtin/BuiltinEffects.hpp"
 
 #include <algorithm>
@@ -48,6 +49,26 @@ struct PluginUniforms {
 };
 static_assert(sizeof(PluginUniforms) == 320, "layout std140 do bloco aurea dos plugins");
 static_assert(sizeof(PluginUniforms) <= binding::kMaxUniformBytes);
+
+/// 0.3.1, plugins "shader3d": o mesmo bloco com a cena acrescentada no FIM
+/// (os plugins "shader" seguem recebendo só os 320 bytes de antes). Mat4 é
+/// coluna a coluna, como o mat4 do std140. Ver PluginShader.cpp.
+struct PluginUniforms3D {
+    PluginUniforms base;
+    Mat4 view;            ///< vista <- mundo (x direita, y baixo, z frente)
+    Mat4 compFromWorld;   ///< px da composição (homogêneo) <- mundo
+    Mat4 compFromLayer;   ///< px da composição (homogêneo) <- px da camada
+    Vec4 camera;          ///< xyz posição no mundo, w = 1 câmera de camada / 0 padrão
+    Vec4 lens;            ///< x fovY (rad), y plano próximo, z aspecto, w focal em px
+    Vec4 comp;            ///< xy tamanho da composição (px), zw = 1/xy
+    Mat4 layerWorld[kMaxLayerParams];  ///< mundo <- px de cada camada ligada
+    Vec4 layerPos[kMaxLayerParams];    ///< xyz âncora no mundo, w = 1 ligada e visível
+    Vec4 layerInfo[kMaxLayerParams];   ///< x tipo (6 nulo, 8 câmera, 9 luz), y fovY (câmera), z 3D
+};
+static_assert(sizeof(PluginUniforms3D) == 944, "layout std140 do bloco aurea dos plugins 3D");
+static_assert(sizeof(PluginUniforms3D) <= binding::kMaxUniformBytes);
+/// Vec4 por camada ligada em EffectEval::pathSamples: 4 colunas, posição, info.
+constexpr u32 kLayerWorldStride = 6;
 
 /// O bloco do color_stack.frag (o mesmo do EffectGraph) para UM embutido por pixel.
 struct ColorStackUniforms {
@@ -98,6 +119,16 @@ void declare_from_manifest(const Manifest& m, const std::vector<ParamStrings>& s
                 spec.defaultValue = ParamValue::scalar(d.def[0]);
                 spec.unit = "°";
                 break;
+            case ParamKind::Layer:
+                // A mesma referência de camada dos embutidos (reabrir, presets,
+                // copiar e colar já a remapeiam); as telas filtram pelo tipo.
+                spec.type = ParamType::LayerReference;
+                spec.flags = static_cast<u16>(((d.accept & kAcceptCamera) ? kParamRefCamera : 0)
+                                            | ((d.accept & kAcceptNull) ? kParamRefNull : 0)
+                                            | ((d.accept & kAcceptLight) ? kParamRefLight : 0));
+                spec.defaultValue = ParamValue::scalar(-1.0f);
+                spec.minValue = -1.0f; spec.maxValue = 1.0e6f;
+                break;
         }
         (void)p.add(spec);
     }
@@ -136,6 +167,25 @@ public:
     }
     f32 input_margin(const EffectEval&) const noexcept override { return manifest_.margin; }
 
+    /// "shader3d": o mundo de cada camada ligada, lido sob o lock do modelo e
+    /// levado até a montagem em `pathSamples` (kLayerWorldStride por camada).
+    void resolve_resources(EffectEval& e) const noexcept override {
+        if (!manifest_.scene3d || !e.resources || !e.layer) return;
+        auto data = std::make_shared<std::vector<Vec4>>();
+        data->reserve(kMaxLayerParams * kLayerWorldStride);
+        const f64 compTime = e.time_frames() + static_cast<f64>(e.layer->start.value) - static_cast<f64>(e.layer->offset.value);
+        for (u32 i = 0; i < manifest_.params.size() && i < e.count; ++i) {
+            if (manifest_.params[i].kind != ParamKind::Layer) continue;
+            if (data->size() >= kMaxLayerParams * kLayerWorldStride) break;
+            LayerWorldInfo w;
+            const bool ok = e.resources->layer_world(e.layer, e.values[i].ref, compTime, w);
+            for (u32 c = 0; c < 4; ++c) data->push_back(ok ? w.worldFromLayer.col[c] : Mat4::identity().col[c]);
+            data->push_back(Vec4{w.position.x, w.position.y, w.position.z, ok ? 1.0f : 0.0f});
+            data->push_back(Vec4{static_cast<f32>(w.kind), w.fovY, w.threeD ? 1.0f : 0.0f, 0.0f});
+        }
+        e.pathSamples = std::move(data);
+    }
+
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
                  LayerImage& out) const override {
         if (!input.valid() || shaders_.size() != manifest_.passes.size()) return Errc::InvalidArgument;
@@ -162,7 +212,9 @@ public:
             }
         }
 
-        PluginUniforms u{};
+        PluginUniforms3D u3{};
+        PluginUniforms& u = u3.base;
+        const usize uniformBytes = manifest_.scene3d ? sizeof(PluginUniforms3D) : sizeof(PluginUniforms);
         const f64 fps = e.framesPerSecond > 0.0 ? e.framesPerSecond : 30.0;
         const f64 frame = e.time_frames();
         u.time = Vec4{static_cast<f32>(frame / fps), static_cast<f32>(frame), static_cast<f32>(fps), 0.0f};
@@ -186,9 +238,11 @@ public:
                                 region.h > 0 ? (py - region.y) / region.h : 0.5f, 0, 0};
                     break;
                 }
+                case ParamKind::Layer: break;   // abaixo (mundo da camada)
                 default: slot = Vec4{v.v[0], 0, 0, 0}; break;
             }
         }
+        if (manifest_.scene3d) fill_scene(e, u3);
 
         FGTexture targets[kMaxPasses]{};
         u32 lastW = w, lastH = h;
@@ -216,10 +270,10 @@ public:
             }
             u32 added = kInvalidIndex;
             switch (n) {
-                case 1: added = ctx.fullscreen_pass(kPassNames[p], PassStage::Effects, dst, shaders_[p], {t[0]}, &u, sizeof(u)); break;
-                case 2: added = ctx.fullscreen_pass(kPassNames[p], PassStage::Effects, dst, shaders_[p], {t[0], t[1]}, &u, sizeof(u)); break;
-                case 3: added = ctx.fullscreen_pass(kPassNames[p], PassStage::Effects, dst, shaders_[p], {t[0], t[1], t[2]}, &u, sizeof(u)); break;
-                default: added = ctx.fullscreen_pass(kPassNames[p], PassStage::Effects, dst, shaders_[p], {t[0], t[1], t[2], t[3]}, &u, sizeof(u)); break;
+                case 1: added = ctx.fullscreen_pass(kPassNames[p], PassStage::Effects, dst, shaders_[p], {t[0]}, &u3, uniformBytes); break;
+                case 2: added = ctx.fullscreen_pass(kPassNames[p], PassStage::Effects, dst, shaders_[p], {t[0], t[1]}, &u3, uniformBytes); break;
+                case 3: added = ctx.fullscreen_pass(kPassNames[p], PassStage::Effects, dst, shaders_[p], {t[0], t[1], t[2]}, &u3, uniformBytes); break;
+                default: added = ctx.fullscreen_pass(kPassNames[p], PassStage::Effects, dst, shaders_[p], {t[0], t[1], t[2], t[3]}, &u3, uniformBytes); break;
             }
             if (added == kInvalidIndex) return Errc::PipelineCompileFailed;
             targets[p] = dst;
@@ -237,6 +291,48 @@ public:
     }
 
 private:
+    /// A câmera da cena e as camadas ligadas no bloco 3D (sem câmera preenchida,
+    /// a padrão da composição: no centro, a 0,5·h/tan(fov/2), olhando para +z).
+    void fill_scene(const EffectEval& e, PluginUniforms3D& u) const noexcept {
+        const LayerPlacement* pl = e.placement;
+        const f32 cw = pl && pl->compWidth ? static_cast<f32>(pl->compWidth) : u.base.layer.x;
+        const f32 ch = pl && pl->compHeight ? static_cast<f32>(pl->compHeight) : u.base.layer.y;
+        u.comp = Vec4{cw, ch, 1.0f / std::max(1.0f, cw), 1.0f / std::max(1.0f, ch)};
+        f32 fov = 40.0f * kDegToRad, nearZ = 1.0f;
+        if (pl && pl->sceneCameraValid) {
+            u.view = pl->sceneView;
+            u.compFromWorld = pl->sceneCompFromWorld;
+            u.camera = Vec4{pl->sceneCameraPosition.x, pl->sceneCameraPosition.y, pl->sceneCameraPosition.z,
+                            pl->cameraActive ? 1.0f : 0.0f};
+            fov = pl->sceneFovY > 0.0f ? pl->sceneFovY : fov;
+            nearZ = pl->sceneNearZ;
+        } else {
+            // Sem a cena (prévia do catálogo, quadro de teste): câmera padrão.
+            const f32 dist = 0.5f * ch / std::tan(0.5f * fov);
+            u.view = Mat4::identity();
+            u.view.col[3] = Vec4{-0.5f * cw, -0.5f * ch, dist, 1.0f};
+            u.camera = Vec4{0.5f * cw, 0.5f * ch, -dist, 0.0f};
+        }
+        u.lens = Vec4{fov, nearZ, cw / std::max(1.0f, ch), 0.5f * ch / std::tan(0.5f * fov)};
+        u.compFromLayer = pl ? pl->compFromLayer : Mat4::identity();
+        for (u32 k = 0; k < kMaxLayerParams; ++k) u.layerWorld[k] = Mat4::identity();
+        const std::vector<Vec4>* data = e.pathSamples.get();
+        u32 slot = 0;
+        for (u32 i = 0; i < manifest_.params.size() && i < e.count; ++i) {
+            if (manifest_.params[i].kind != ParamKind::Layer) continue;
+            if (slot >= kMaxLayerParams) break;
+            const usize at = static_cast<usize>(slot) * kLayerWorldStride;
+            if (data && data->size() >= at + kLayerWorldStride) {
+                for (u32 c = 0; c < 4; ++c) u.layerWorld[slot].col[c] = (*data)[at + c];
+                u.layerPos[slot] = (*data)[at + 4];
+                u.layerInfo[slot] = (*data)[at + 5];
+            }
+            // params[i] da camada: (ligada, tipo, posição entre as camadas, 0).
+            u.base.params[i] = Vec4{u.layerPos[slot].w, u.layerInfo[slot].x, static_cast<f32>(slot), 0.0f};
+            ++slot;
+        }
+    }
+
     Manifest manifest_;
     std::vector<ShaderId> shaders_;
     std::string key_, name_;
@@ -399,7 +495,8 @@ bool stackable(std::string_view key) noexcept {
                                "aurea.text", "aurea.shape3d.", "plugin."})
         if (key.starts_with(prefix)) return false;
     for (const char* exact : {kMeshWarpKey, puppet::kPuppetKey, "aurea.transform.parenting_helper",
-                              "aurea.generate.particular", "aurea.key.rotobrush", text::kAnimatorEffect})
+                              "aurea.generate.particular", "aurea.key.rotobrush", text::kAnimatorEffect,
+                              "aurea.utility.copy_background"})
         if (key == exact) return false;
     return true;
 }

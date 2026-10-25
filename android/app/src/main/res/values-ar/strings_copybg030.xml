@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Copiar fundo (a camada vira uma janela; os efeitos depois dele agem nas camadas abaixo). -->
+<resources>
+    <string name="fx030k_name">نسخ الخلفية</string>
+    <string name="fx030k_desc">يحوّل الطبقة إلى نافذة على الطبقات التي تحتها: التأثيرات المضافة بعده تعمل داخلها فقط. استخدم شكلًا لضبط جزء من الفيديو؛ والتأثيرات التي قبله (التمويه، القناع) تشكّل الحافة.</string>
+    <string name="fx030k_window">النافذة</string>
+    <string name="fx030k_layer_mix">المزج مع الطبقة</string>
+    <string name="fxo_layer_alpha">ألفا الطبقة</string>
+    <string name="fxo_inverted_alpha">ألفا معكوسة</string>
+    <string name="fxo_layer_luma">سطوع الطبقة</string>
+    <string name="fxo_inverted_luma">سطوع معكوس</string>
+    <string name="fxt_effects_after_this_one_act_on_the_layers">التأثيرات بعد هذا تعمل على الطبقات التي تحتها، داخل شكل هذه الطبقة فقط. والتي قبله (التمويه، القناع) تشكّل النافذة.</string>
+</resources>

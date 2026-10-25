@@ -170,6 +170,11 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.enhance.video", EffectMeta(R.string.fx030e_desc,
         listOf(EffectTarget.Video, EffectTarget.PreComposicao, EffectTarget.Ajuste, EffectTarget.Imagem),
         "aprimorar topaz restaurar ruido compressao nitidez grao"))
+    // Copiar fundo (0.3.0): camada 2D comum vira janela. Na camada de ajuste e no 3D ele é neutro.
+    put("aurea.utility.copy_background", EffectMeta(R.string.fx030k_desc,
+        listOf(EffectTarget.Forma, EffectTarget.Vetor, EffectTarget.Imagem, EffectTarget.Video,
+               EffectTarget.Texto, EffectTarget.PreComposicao),
+        "copiar fundo janela ajustar parte do video forma mascara camada de ajuste"))
     put("aurea.time.flow_motion_blur", EffectMeta(
         R.string.fx_desc_time_flow_motion_blur,
         listOf(EffectTarget.Video),

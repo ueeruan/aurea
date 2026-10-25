@@ -249,7 +249,9 @@ private fun BrowserHome(
         item(key = "titulo-categorias") {
             Spacer(Modifier.height(0.dp).semantics { contentDescription = categoriesLabel; heading() })
         }
-        items(groups.chunked(2), key = { row -> row.first().first.id }) { row ->
+        // A chave da linha leva prefixo: com um plugin instalado o grupo "plugins" pode abrir
+        // uma linha e colidir com a porta fixa abaixo ("Key was already used" fechava o app).
+        items(groups.chunked(2), key = { row -> groupRowKey(row.map { it.first }) }) { row ->
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 row.forEach { (g, entries) ->
                     GroupTile(g, entries, store.effectPreviews, Modifier.weight(1f)) { onGroup(g) }
@@ -258,7 +260,7 @@ private fun BrowserHome(
             }
         }
         // 0.3.0: a porta dos plugins fica sempre à vista (a categoria só aparece com um instalado).
-        item(key = "plugins") {
+        item(key = PLUGIN_DOOR_KEY) {
             Row(
                 Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(AureaColors.Chip)
                     .testTag("effects.plugins").tocavel(onClick = onPlugins).padding(horizontal = 14.dp, vertical = 12.dp),

@@ -524,8 +524,11 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
 private fun onKeyframeTapped(store: EditorStore, ui: EditorUi, layer: Long, key: KeyframeRow) {
     if (store.primary != layer || store.selection.size != 1) store.select(layer)
     val current = ui.panel
-    if (current != null && current != EditorPanel.Curve) return
-    openPanel(store, ui, if (key.property == TrackProperty.EFFECT_PARAM || key.property == TrackProperty.MESH_WARP) EditorPanel.Effects else EditorPanel.Curve)
+    // 0.3.1: keyframe de parâmetro de efeito abre o editor de curva (valor e
+    // velocidade), como no iOS; só a malha (Mesh Warp) vai para Efeitos. Com o
+    // painel de Efeitos aberto o toque também abre a curva (antes não fazia nada).
+    if (current != null && current != EditorPanel.Curve && current != EditorPanel.Effects) return
+    openPanel(store, ui, if (key.property == TrackProperty.MESH_WARP) EditorPanel.Effects else EditorPanel.Curve)
 }
 
 /**

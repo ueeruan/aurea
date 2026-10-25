@@ -45,6 +45,8 @@ inline constexpr u64 kMaxPackageBytes = 16ull << 20;
 inline constexpr f32 kMaxMargin = 1024.0f;           ///< px da camada
 inline constexpr u32 kTestRenderSize = 256;          ///< prévia de teste na instalação
 inline constexpr f32 kTestRenderBudgetMs = 250.0f;   ///< teto do quadro de teste
+/// 0.3.1: parâmetros "layer" (câmera/nulo/luz ligados ao plugin 3D).
+inline constexpr u32 kMaxLayerParams = 4;
 
 /// Prefixo da chave do efeito: "plugin." + id.
 inline constexpr std::string_view kEffectKeyPrefix = "plugin.";
@@ -61,7 +63,13 @@ using LocalizedText = std::vector<std::pair<std::string, std::string>>;
 
 enum class Kind : u8 { Shader = 0, Stack };
 enum class ColorSpace : u8 { Linear = 0, Srgb };
-enum class ParamKind : u8 { Float = 0, Int, Bool, Enum, Color, Point, Angle };
+enum class ParamKind : u8 { Float = 0, Int, Bool, Enum, Color, Point, Angle, Layer };
+
+/// Que camadas um parâmetro "layer" aceita (bits; 0 = qualquer uma). Os mesmos
+/// bits viram as flags kParamRef* da declaração do efeito (Parameter.hpp).
+inline constexpr u16 kAcceptCamera = 1u << 0;
+inline constexpr u16 kAcceptNull = 1u << 1;
+inline constexpr u16 kAcceptLight = 1u << 2;
 
 [[nodiscard]] const char* kind_name(Kind k) noexcept;
 [[nodiscard]] const char* param_kind_name(ParamKind k) noexcept;
@@ -79,6 +87,8 @@ struct ParamDecl {
     f32 max = 1.0f;
     std::vector<LocalizedText> options;   ///< enum
     bool animatable = true;
+    /// "layer": tipos aceitos (kAccept*; 0 = qualquer camada).
+    u16 accept = 0;
 };
 
 /// Um passe de um plugin "shader".
@@ -112,6 +122,9 @@ struct Manifest {
     LocalizedText description;
     std::string category;
     Kind kind = Kind::Shader;
+    /// 0.3.1, "kind": "shader3d": o shader recebe a câmera da cena e o mundo das
+    /// camadas ligadas pelos parâmetros "layer" (docs/plugins/README.md §5).
+    bool scene3d = false;
     std::vector<ParamDecl> params;
     std::vector<PassDecl> passes;
     f32 margin = 0.0f;
@@ -125,6 +138,7 @@ struct PluginInfo {
     std::string version;
     std::string author;
     Kind kind = Kind::Shader;
+    bool scene3d = false;           ///< "shader3d" (câmera e camadas ligadas)
     std::string category;
     LocalizedText names;
     LocalizedText descriptions;

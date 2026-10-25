@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Copiar fundo (a camada vira uma janela; os efeitos depois dele agem nas camadas abaixo). -->
+<resources>
+    <string name="fx030k_name">Salin latar</string>
+    <string name="fx030k_desc">Mengubah layer menjadi jendela ke layer di bawahnya: efek yang ditaruh setelahnya hanya bekerja di dalamnya. Gunakan bentuk untuk menyesuaikan sebagian video; efek sebelumnya (blur, mask) membentuk tepinya.</string>
+    <string name="fx030k_window">Jendela</string>
+    <string name="fx030k_layer_mix">Campur dengan layer</string>
+    <string name="fxo_layer_alpha">Alfa layer</string>
+    <string name="fxo_inverted_alpha">Alfa terbalik</string>
+    <string name="fxo_layer_luma">Luma layer</string>
+    <string name="fxo_inverted_luma">Luma terbalik</string>
+    <string name="fxt_effects_after_this_one_act_on_the_layers">Efek setelah ini bekerja pada layer di bawahnya, hanya di dalam bentuk layer ini. Efek sebelumnya (blur, mask) membentuk jendela.</string>
+</resources>

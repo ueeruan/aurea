@@ -614,7 +614,7 @@ struct EffectsView: View {
                 HStack { Spacer(minLength: 0)
                     Menu {
                         Button(AureaText.t("afx_layer_none")) { writeLayerRef(param.index, effect: effect, layerIndex: -1) }
-                        ForEach(model.layers.filter { $0.id != model.primarySelection }) { layer in
+                        ForEach(model.layers.filter { $0.id != model.primarySelection && fxAcceptsLayer(param.flags, kind: $0.kind) }) { layer in
                             Button(layer.name.isEmpty ? "#\(fxLayerIndex(layer.id))" : layer.name) {
                                 writeLayerRef(param.index, effect: effect, layerIndex: fxLayerIndex(layer.id))
                             }
@@ -1311,6 +1311,15 @@ private struct EffectPropertyLabel: View {
 
 /// Índice de camada (parte baixa do id empacotado) — o que a "Camada de áudio" guarda.
 func fxLayerIndex(_ id: Int64) -> Int { Int(truncatingIfNeeded: id & 0xFFFF_FFFF) }
+
+/// 0.3.1 (plugins 3D): a referência que só aceita câmera / nulo / luz
+/// (kParamRefCamera/Null/Light, bits 8..10 das flags). Nenhum bit = qualquer
+/// camada; o motor recusa o resto do mesmo jeito (Android: acceptsLayer).
+func fxAcceptsLayer(_ flags: UInt32, kind: UInt32) -> Bool {
+    let accept = (flags >> 8) & 0x7
+    if accept == 0 { return true }
+    return (accept & 1 != 0 && kind == 8) || (accept & 2 != 0 && kind == 6) || (accept & 4 != 0 && kind == 9)
+}
 
 /// O gráfico da resposta do EQ paramétrico: dB (±24) × frequência (20 Hz–20 kHz,
 /// log), com a MESMA conta do filtro que toca (`fxEqResponseDb`).

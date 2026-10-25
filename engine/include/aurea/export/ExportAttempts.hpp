@@ -8,12 +8,16 @@
 //  do teto) ou quando a escada acabou.
 //
 //    0  o pedido
-//    1  H.264 Baseline no encoder do aparelho (HEVC vira H.264)
-//    2  H.264 no encoder de software
+//    1  H.264 Baseline no encoder do aparelho (HEVC vira H.264), até 60 qps
+//    2  H.264 no encoder de software, até 60 qps
 //    3  H.264 Baseline no aparelho, lado menor até 720, até 30 qps, sem upscale
 //    4  o mesmo no encoder de software
 //    5  software, lado menor até 480, até 30 qps, sem upscale
 //    6  o mesmo, sem motion blur (0.2.7)
+//
+//  0.3.0: os degraus 1 e 2 também limitam a 60 qps (só muda o pedido acima
+//  disso). A 200 qps nenhum encoder de hardware se anuncia e o pedido ia para o
+//  software; o primeiro degrau que baixava a taxa era o 3, junto com 720p.
 //
 //  0.2.7: cada degrau também tem um TETO DE AMOSTRAS de motion blur (1: 32,
 //  2 e 3: 16, 4: 8, 5: 4, 6: nenhuma). No 3D cada amostra é uma cena inteira
@@ -58,8 +62,8 @@ struct ExportAttemptPlan {
 [[nodiscard]] constexpr ExportAttemptPlan export_attempt_plan(u32 attempt) noexcept {
     switch (attempt) {
         case 0: return {0, false, 0, 0.0, false, 0};
-        case 1: return {1, true, 0, 0.0, false, 32};
-        case 2: return {2, true, 0, 0.0, false, 16};
+        case 1: return {1, true, 0, 60.0, false, 32};
+        case 2: return {2, true, 0, 60.0, false, 16};
         case 3: return {1, true, 720, 30.0, true, 16};
         case 4: return {2, true, 720, 30.0, true, 8};
         case 5: return {2, true, 480, 30.0, true, 4};

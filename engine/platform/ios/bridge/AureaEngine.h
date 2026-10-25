@@ -1183,6 +1183,8 @@ NS_SWIFT_NAME(AureaEngine)
                        upscale:(BOOL)upscale NS_SWIFT_NAME(exportNextAttempt(_:code:failure:stalled:tooLong:shortSide:fps:hevc:upscale:));
 /// O lado menor que o degrau exporta (`requested` 0 = o da composição).
 + (uint32_t)exportAttemptShortSide:(uint32_t)attempt requested:(uint32_t)requested NS_SWIFT_NAME(exportAttemptShortSide(_:requested:));
+/// O teto de fps do degrau (0 = a taxa pedida).
++ (double)exportAttemptFpsCap:(uint32_t)attempt NS_SWIFT_NAME(exportAttemptFpsCap(_:));
 - (void)cancelExport;
 /// Explicitly restores the checked export snapshot, then restarts from zero.
 - (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath;

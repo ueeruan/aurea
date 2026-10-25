@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: escolha do codificador de vídeo no Avançado da tela Exportar. -->
+<resources>
+    <string name="export_encoder">Codificador</string>
+    <string name="export_encoder_auto">Automático</string>
+    <string name="export_encoder_compatible">Compatible</string>
+    <string name="export_encoder_software">Software</string>
+    <string name="export_encoder_auto_note">El codificador de video del teléfono. Si falla, la app cambia sola a uno más compatible.</string>
+    <string name="export_encoder_compatible_note">H.264 básico en el codificador del teléfono. Úsalo cuando el automático dé error de codificador.</string>
+    <string name="export_encoder_software_note">H.264 en el procesador, sin el codificador del teléfono. Más lento, pero funciona cuando el del teléfono falla.</string>
+    <string name="export_after_system_close">La app se cerró en medio de la última exportación. Esta vez el video se exporta en un modo más ligero.</string>
+</resources>

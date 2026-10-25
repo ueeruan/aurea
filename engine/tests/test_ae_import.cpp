@@ -1065,3 +1065,328 @@ fx.property("Distance").setValueAtTime(1, 40);
     }
     std::remove(path.c_str());
 }
+
+// =============================================================================
+// 0.3.1: sem camada escolhida, scripts reais (ScriptUI, polyfills, JSXBIN),
+// codificações e o relatório
+// =============================================================================
+
+namespace {
+/// UTF-8 estrito (o que JNI e NSString aceitam).
+bool is_valid_utf8(const std::string& s) {
+    usize i = 0;
+    while (i < s.size()) {
+        const u8 c = static_cast<u8>(s[i]);
+        if (c < 0x80) { ++i; continue; }
+        const usize len = (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
+        if (len == 0 || i + len > s.size() || (len == 2 && c < 0xC2)) return false;
+        for (usize k = 1; k < len; ++k) if ((static_cast<u8>(s[i + k]) & 0xC0) != 0x80) return false;
+        i += len;
+    }
+    return true;
+}
+
+/// UTF-8 (só BMP) → UTF-16, com ou sem BOM.
+std::string utf16(const std::string& u8s, bool littleEndian, bool bom) {
+    std::string o;
+    auto put = [&](u32 cu) {
+        const char lo = static_cast<char>(cu & 0xFF), hi = static_cast<char>(cu >> 8);
+        if (littleEndian) { o.push_back(lo); o.push_back(hi); } else { o.push_back(hi); o.push_back(lo); }
+    };
+    if (bom) put(0xFEFF);
+    for (usize i = 0; i < u8s.size();) {
+        const u8 c = static_cast<u8>(u8s[i]);
+        u32 cp = c;
+        usize n = 1;
+        if (c >= 0xE0) { cp = c & 0x0F; n = 3; }
+        else if (c >= 0xC0) { cp = c & 0x1F; n = 2; }
+        for (usize k = 1; k < n; ++k) cp = (cp << 6) | (static_cast<u8>(u8s[i + k]) & 0x3F);
+        put(cp);
+        i += n;
+    }
+    return o;
+}
+
+std::string blur_ffx() {
+    const u32 ts = 24000;
+    const std::string blur = effect("ADBE Gaussian Blur 2", "Blur", {{"Blurriness", 10}},
+        {{1, prop_keys("", 1, {FKey{0, {0.0}}, FKey{24000, {12.0}}}, ts)}});
+    return ffx(ts, {{{{"ADBE Effect Parade", -1}, {"ADBE Gaussian Blur 2", 0}}, "Blur"}}, {blur});
+}
+
+std::string text_opacity_ffx() {
+    const u32 ts = 24000;
+    const std::string range = list("tdgp", tdsb(1) + tdsn("Range Selector 1") +
+        tdmn("ADBE Text Percent Start") + prop_keys("", 1, {FKey{0, {0.0}}, FKey{24000, {100.0}}}, ts) + tdmn("ADBE Group End"));
+    const std::string selectors = list("tdgp", tdsb(1) + tdsn("") + tdmn("ADBE Text Selector") + range + tdmn("ADBE Group End"));
+    const std::string props = list("tdgp", tdsb(1) + tdsn("") + tdmn("ADBE Text Opacity") + prop("", 1, {0.0}, ts) + tdmn("ADBE Group End"));
+    const std::string animator = list("tdgp", tdsb(1) + tdsn("Surgir") + tdmn("ADBE Text Selectors") + selectors +
+                                      tdmn("ADBE Text Animator Properties") + props + tdmn("ADBE Group End"));
+    return ffx(ts, {{{{"ADBE Text Properties", -1}, {"ADBE Text Animators", -1}, {"ADBE Text Animator", 0}}, "Surgir"}}, {animator});
+}
+} // namespace
+
+AUREA_TEST(AeImport, FfxWithoutLayerCreatesOneLikeAe) {
+    {
+        // Preset de efeito sem camada: sólido do tamanho da composição, com o nome do preset.
+        AeRig rig;
+        const u32 before = count_layers(rig);
+        const u32 depth = rig.e.history().depth();
+        const ae::ImportReport r = rig.e.import_ae_data(blur_ffx(), "Desfoque leve.ffx", 0);
+        if (!r.ok) dump(r);
+        AUREA_CHECK(r.ok);
+        AUREA_CHECK_EQ(r.layers, 1u);
+        AUREA_CHECK_EQ(r.effects, 1u);
+        AUREA_CHECK_EQ(count_layers(rig), before + 1);
+        AUREA_CHECK_EQ(rig.e.history().depth(), depth + 1);
+        AUREA_CHECK(r.message.find("1 camada criada") != std::string::npos);
+        Layer* l = layer_named(rig, "Desfoque leve");
+        AUREA_CHECK(l != nullptr);
+        if (l) {
+            AUREA_CHECK(l->kind == LayerKind::Shape);
+            AUREA_CHECK_NEAR(l->shape.bounds.w, 1920.0, 1e-3);
+            AUREA_CHECK_NEAR(l->shape.bounds.h, 1080.0, 1e-3);
+            AUREA_CHECK_EQ(l->effects.size(), 1u);
+            AUREA_CHECK(l->effects.size() == 1 && l->effects[0].type == effect_type_id("aurea.blur.gaussian"));
+        }
+        AUREA_CHECK(rig.undo());   // um passo desfaz a camada e o preset
+        AUREA_CHECK_EQ(count_layers(rig), before);
+    }
+    {
+        // Preset de texto sem camada: camada de texto nova com o animador.
+        AeRig rig;
+        const u32 before = count_layers(rig);
+        const ae::ImportReport r = rig.e.import_ae_data(text_opacity_ffx(), "surgir.ffx", 0);
+        if (!r.ok) dump(r);
+        AUREA_CHECK(r.ok);
+        AUREA_CHECK_EQ(r.layers, 1u);
+        AUREA_CHECK_EQ(r.animators, 1u);
+        AUREA_CHECK_EQ(count_layers(rig), before + 1);
+        Composition* c = rig.comp();
+        Layer* t = c->order().size() ? c->layer(c->order().at(c->order().size() - 1)) : nullptr;
+        AUREA_CHECK(t && t->kind == LayerKind::Text);
+        if (t && t->kind == LayerKind::Text) {
+            AUREA_CHECK_EQ(t->text.animators.size(), 1u);
+            AUREA_CHECK(!t->text.content.empty() && t->text.content != " ");
+        }
+    }
+    {
+        // Nada aplicável: a camada criada sai e não fica passo de desfazer.
+        AeRig rig;
+        const u32 before = count_layers(rig);
+        const u32 depth = rig.e.history().depth();
+        const std::string none = ffx(24000, {{{{"ADBE Effect Parade", -1}, {"ADBE Calculations", 0}}, "Calc"}},
+                                     {effect("ADBE Calculations", "Calc", {}, {})});
+        const ae::ImportReport r = rig.e.import_ae_data(none, "nada.ffx", 0);
+        AUREA_CHECK(!r.ok);
+        AUREA_CHECK_EQ(r.layers, 0u);
+        AUREA_CHECK_EQ(count_layers(rig), before);
+        AUREA_CHECK_EQ(rig.e.history().depth(), depth);
+    }
+    {
+        // Preset de texto numa camada que não é de texto: pede uma camada de texto.
+        AeRig rig;
+        const u64 shape = rig.shape();
+        const ae::ImportReport r = rig.e.import_ae_data(text_opacity_ffx(), "surgir.ffx", shape);
+        AUREA_CHECK(!r.ok);
+        AUREA_CHECK(r.message.find("camada de texto") != std::string::npos);
+    }
+}
+
+AUREA_TEST(AeImport, JsxScriptUiPanelIsMuteAndReported) {
+    const char* panel = R"JS(function buildUI(thisObj) {
+    var w = (thisObj instanceof Panel) ? thisObj : new Window("palette", "Meu script", undefined, {resizeable: true});
+    var g = w.add("group");
+    g.orientation = "row";
+    var b = g.add("button", undefined, "Criar");
+    b.onClick = function () { app.project.activeItem.layers.addNull(); };
+    w.grp.btn.text = "x";
+    w.layout.layout(true);
+    w.onResizing = w.onResize = function () { this.layout.resize(); };
+    if (w instanceof Window) { w.center(); w.show(); }
+    return w;
+}
+var ui = buildUI(this);
+)JS";
+    {
+        AeRig rig;
+        const u32 before = count_layers(rig);
+        const u32 depth = rig.e.history().depth();
+        const ae::ImportReport r = rig.e.import_ae_data(panel, "painel.jsx", 0);
+        AUREA_CHECK(!r.ok);   // rodou sem mudar nada: não é "importado"
+        AUREA_CHECK(r.skipped.empty());
+        AUREA_CHECK(r.message.find("painel com botões") != std::string::npos);
+        AUREA_CHECK(has_item(r.notes, "janelas de script"));
+        AUREA_CHECK_EQ(count_layers(rig), before);   // o onClick nunca roda
+        AUREA_CHECK_EQ(rig.e.history().depth(), depth);
+    }
+    {
+        // Painel que também faz o trabalho direto: a camada entra.
+        const std::string src = std::string(panel) +
+            "Window.alert(\"pronto\");\n"
+            "app.project.activeItem.layers.addSolid([1, 0, 0], \"Vermelho\", 100, 100, 1);\n";
+        AeRig rig;
+        const ae::ImportReport r = rig.e.import_ae_data(src, "painel2.jsx", 0);
+        if (!r.ok) dump(r);
+        AUREA_CHECK(r.ok);
+        AUREA_CHECK_EQ(r.layers, 1u);
+        AUREA_CHECK(layer_named(rig, "Vermelho") != nullptr);
+        AUREA_CHECK(has_item(r.notes, "pronto"));
+    }
+}
+
+AUREA_TEST(AeImport, JsxPolyfillsPrototypesAndJson) {
+    const char* src = R"JS(if (!Array.prototype.indexOf) {
+    Array.prototype.indexOf = function (x) { for (var i = 0; i < this.length; i++) if (this[i] === x) return i; return -1; };
+}
+if (!Array.prototype.forEach) {
+    Array.prototype.forEach = function (fn) { for (var i = 0; i < this.length; i++) fn(this[i], i); };
+}
+if (!String.prototype.trim) { String.prototype.trim = function () { return this.replace(/^\s+|\s+$/g, ""); }; }
+String.prototype.repete = function (n) { var o = ""; for (var i = 0; i < n; i++) o += this; return o; };
+if (typeof Date.prototype.toJSON !== "function") {
+    Date.prototype.toJSON = function () { return "data"; };
+    String.prototype.toJSON = Number.prototype.toJSON = Boolean.prototype.toJSON = function () { return this.valueOf(); };
+}
+var rx_one = /^[\],:{}\s]*$/;
+var rx_two = /\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4})/g;
+if (typeof JSON !== "object") { JSON = {}; }
+var total = 0;
+[1, 2, 3].forEach(function (v) { total += v; });
+var s = JSON.stringify({a: [1, "b", true, null], c: {d: 2.5}, f: function () {}, u: undefined});
+var back = JSON.parse(s);
+var hasOwn = Object.prototype.hasOwnProperty.call(back, "c") ? 1 : 0;
+var isArr = Object.prototype.toString.call(back.a) === "[object Array]" ? 1 : 0;
+var sliced = Array.prototype.slice.call([5, 6, 7], 1).length;
+var ok = s === '{"a":[1,"b",true,null],"c":{"d":2.5}}' ? 100 : 0;
+var pretty = JSON.stringify([1, {x: "é\n"}], null, 2) === '[\n  1,\n  {\n    "x": "é\\n"\n  }\n]' ? 10000 : 0;
+var rep = "ab".repete(3) === "ababab" ? 20000 : 0;
+var v = total + ok + back.c.d * 2 + hasOwn + isArr + sliced + [4, 5].indexOf(5) * 1000 + pretty + rep;
+app.project.activeItem.selectedLayers[0].Effects.addProperty("ADBE Slider Control").property(1).setValue(v);
+)JS";
+    // 6 + 100 + 5 + 1 + 1 + 2 + 1000 + 10000 + 20000 = 31115
+    AeRig rig;
+    const u64 layer = rig.shape();
+    const ae::ImportReport r = rig.e.import_ae_data(src, "polyfill.jsx", layer);
+    if (!r.ok || !r.skipped.empty()) dump(r);
+    AUREA_CHECK(r.ok);
+    AUREA_CHECK(r.skipped.empty());   // expressões regulares só declaradas não entram no relatório
+    Layer* l = rig.L(layer);
+    AUREA_CHECK(l && l->effects.size() == 1);
+    if (l && !l->effects.empty()) AUREA_CHECK_NEAR(l->effects[0].params[0].constant.v[0], 31115.0, 1e-6);
+    {
+        // JSON.parse inválido é um erro que o try/catch do script pega.
+        AeRig r2;
+        const u64 l2 = r2.shape();
+        const ae::ImportReport x = r2.e.import_ae_data(
+            "var c = 0;\ntry { JSON.parse('{\"a\":'); } catch (e) { c = 7; }\n"
+            "app.project.activeItem.selectedLayers[0].Effects.addProperty('ADBE Slider Control').property(1).setValue(c);\n",
+            "parse.jsx", l2);
+        AUREA_CHECK(x.ok);
+        Layer* ll = r2.L(l2);
+        AUREA_CHECK(ll && !ll->effects.empty() && std::fabs(ll->effects[0].params[0].constant.v[0] - 7.0f) < 1e-6f);
+    }
+}
+
+AUREA_TEST(AeImport, JsxbinIsDetectedByContent) {
+    AeRig rig;
+    const ae::ImportReport a = rig.e.import_ae_data("@JSXBIN@ES@2.0@MyBbyBn0ABJAnASzBjBBBneBhBffABB0EzACByB", "protegido.jsx", 0);
+    AUREA_CHECK_EQ(a.kind, std::string("jsxbin"));
+    AUREA_CHECK(!a.ok);
+    AUREA_CHECK(a.message.find(".jsxbin") != std::string::npos);
+    const ae::ImportReport b = rig.e.import_ae_data(
+        "// ferramenta\r\neval(\"@JSXBIN@ES@2.0@MyBbyBn0ABJAnASzBjBBBneBhBffABB0EzACByB\");\r\n", "ferramenta.jsx", 0);
+    AUREA_CHECK_EQ(b.kind, std::string("jsxbin"));
+    AUREA_CHECK(b.message.find(".jsxbin") != std::string::npos);
+}
+
+AUREA_TEST(AeImport, JsxUtf16AndLatin1Sources) {
+    const std::string script = "var c = app.project.activeItem;\n"
+                               "var t = c.layers.addText(\"Ol\xC3\xA1 a\xC3\xA7\xC3\xA3o\");\n"
+                               "t.name = \"T\xC3\xADtulo\";\n";
+    for (int mode = 0; mode < 3; ++mode) {
+        const std::string data = mode == 0 ? utf16(script, true, true) : mode == 1 ? utf16(script, false, true)
+                                                                                  : utf16(script, true, false);
+        AeRig rig;
+        const ae::ImportReport r = rig.e.import_ae_data(data, "utf16.jsx", 0);
+        if (!r.ok) dump(r);
+        AUREA_CHECK(r.ok);
+        Layer* l = layer_named(rig, "T\xC3\xADtulo");
+        AUREA_CHECK(l != nullptr);
+        if (l) AUREA_CHECK_EQ(l->text.content, std::string("Ol\xC3\xA1 a\xC3\xA7\xC3\xA3o"));
+    }
+    {
+        // Latin-1 / Windows-1252 (UTF-8 inválido): acentos e aspas tipográficas.
+        const std::string latin = "var t = app.project.activeItem.layers.addText(\"\x93" "a\xE7\xE3o\x94\");\n"
+                                  "t.name = \"T\xEDtulo\";\n";
+        AeRig rig;
+        const ae::ImportReport r = rig.e.import_ae_data(latin, "latin1.jsx", 0);
+        if (!r.ok) dump(r);
+        AUREA_CHECK(r.ok);
+        Layer* l = layer_named(rig, "T\xC3\xADtulo");
+        AUREA_CHECK(l != nullptr);
+        if (l) AUREA_CHECK_EQ(l->text.content, std::string("\xE2\x80\x9C" "a\xC3\xA7\xC3\xA3o\xE2\x80\x9D"));
+    }
+    {
+        // Continuação de linha com CRLF dentro do texto.
+        AeRig rig;
+        const u64 layer = rig.shape();
+        const ae::ImportReport r = rig.e.import_ae_data(
+            "var s = \"abc\\\r\ndef\";\r\napp.project.activeItem.selectedLayers[0].Effects.addProperty('ADBE Slider Control').property(1).setValue(s.length);\r\n",
+            "crlf.jsx", layer);
+        if (!r.ok) dump(r);
+        AUREA_CHECK(r.ok);
+        Layer* l = rig.L(layer);
+        AUREA_CHECK(l && !l->effects.empty() && std::fabs(l->effects[0].params[0].constant.v[0] - 6.0f) < 1e-6f);
+    }
+}
+
+AUREA_TEST(AeImport, ReportJsonIsValidUtf8AndScriptErrorsKeepCounts) {
+    {
+        ae::ImportReport r;
+        r.kind = "jsx";
+        r.message = "quebrado \xC3";
+        r.skip("chamada", "\xFF\xFEnome", "ok \xE2\x82");
+        const std::string json = ae::report_json(r);
+        AUREA_CHECK(is_valid_utf8(json));
+        AUREA_CHECK(json.find("\"changes\":0") != std::string::npos);
+    }
+    {
+        // alert longo com acentos: o corte em 200 bytes não parte um caractere.
+        std::string longText;
+        for (int i = 0; i < 150; ++i) longText += "\xC3\xA9";
+        AeRig rig;
+        const ae::ImportReport r = rig.e.import_ae_data("alert(\"x" + longText + "\");\napp.project.activeItem.layers.addNull();\n", "alert.jsx", 0);
+        AUREA_CHECK(r.ok);
+        AUREA_CHECK(!r.notes.empty());
+        for (const ae::SkipItem& n : r.notes) AUREA_CHECK(is_valid_utf8(n.reason));
+        AUREA_CHECK(is_valid_utf8(ae::report_json(r)));
+    }
+    {
+        // Erro DEPOIS de mudar o projeto: o que entrou fica, com as contagens e o erro.
+        AeRig rig;
+        const u32 before = count_layers(rig);
+        const u32 depth = rig.e.history().depth();
+        const ae::ImportReport r = rig.e.import_ae_data(
+            "var n = app.project.activeItem.selectedLayers.length;\n"
+            "app.project.activeItem.layers.addNull().name = \"sel\" + n;\n"
+            "naoExiste();\n", "erro.jsx", 0);
+        AUREA_CHECK(!r.ok);
+        AUREA_CHECK_EQ(r.layers, 1u);
+        AUREA_CHECK(r.changes > 0);
+        AUREA_CHECK(r.message.find("linha 3") != std::string::npos);
+        AUREA_CHECK(r.message.find("1 camada criada") != std::string::npos);
+        AUREA_CHECK(layer_named(rig, "sel0") != nullptr);   // sem camada escolhida: selectedLayers = []
+        AUREA_CHECK_EQ(count_layers(rig), before + 1);
+        AUREA_CHECK_EQ(rig.e.history().depth(), depth + 1);
+        const std::string json = ae::report_json(r);
+        AUREA_CHECK(json.find("\"ok\":false") != std::string::npos && json.find("\"layers\":1") != std::string::npos);
+    }
+    {
+        // Rodou sem mudar nada: não sai como "importado".
+        AeRig rig;
+        const ae::ImportReport r = rig.e.import_ae_data("var x = 1 + 1;\n", "nada.jsx", 0);
+        AUREA_CHECK(!r.ok);
+        AUREA_CHECK(r.message.find("não mudou nada") != std::string::npos);
+    }
+}

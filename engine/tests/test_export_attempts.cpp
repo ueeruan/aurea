@@ -131,6 +131,25 @@ AUREA_TEST(ExportAttempts, GpuTimeoutsDropMotionBlurSamplesBeforePixels) {
     AUREA_CHECK_EQ(export_next_attempt(6, ExportRetryKind::GpuTime, r), 0u);
 }
 
+// 0.3.0: a 200 qps nenhum encoder de hardware se anuncia; o 1o degrau que
+// baixava a taxa era o 3 (junto com 720p). Agora 1 e 2 já ficam em 60 qps,
+// sem mexer no tamanho, e pedidos até 60 seguem iguais.
+AUREA_TEST(ExportAttempts, HighFrameRatesDropTo60BeforeAnyPixel) {
+    const ExportRequestShape r = shape(1080, 200.0);
+    AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Encoder, r), 1u);
+    AUREA_CHECK_NEAR(export_attempt_effect(1, r).fps, 60.0, 1e-9);
+    AUREA_CHECK_EQ(export_attempt_effect(1, r).shortSide, 1080u);
+    AUREA_CHECK_NEAR(export_attempt_effect(2, r).fps, 60.0, 1e-9);
+    AUREA_CHECK_NEAR(export_attempt_effect(3, r).fps, 30.0, 1e-9);
+    // Travou a 200 (software lento): software a 60, ainda em 1080.
+    AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Stall, r), 2u);
+    // Até 60 qps nada muda nos degraus 1 e 2.
+    AUREA_CHECK_NEAR(export_attempt_effect(1, shape(1080, 60.0)).fps, 60.0, 1e-9);
+    AUREA_CHECK_NEAR(export_attempt_effect(2, shape(1080, 30.0)).fps, 30.0, 1e-9);
+    AUREA_CHECK_NEAR(export_attempt_plan(1).fpsCap, 60.0, 1e-9);
+    AUREA_CHECK_NEAR(export_attempt_plan(0).fpsCap, 0.0, 1e-9);
+}
+
 AUREA_TEST(ExportAttempts, BusyRepeatsTheSameRungAndNothingRepeatsAnIdenticalOne) {
     const ExportRequestShape r = shape(720, 30.0);
     AUREA_CHECK_EQ(export_next_attempt(0, ExportRetryKind::Busy, r), 0u | kExportAttemptWait);

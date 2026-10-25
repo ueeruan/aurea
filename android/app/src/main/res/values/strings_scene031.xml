@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Cena 3D 0.3.1: fonte de luz única, chão em 3 modos e o "Avançado" do Ambiente (Element3DPanel.kt). -->
+    <string name="scene031_light_neutral">Neutro</string>
+    <string name="scene031_light_hdr">Imagem HDR…</string>
+    <string name="scene031_light_hdr_hint">Toque de novo para trocar a imagem</string>
+    <string name="scene031_floor_off">Sem chão</string>
+    <string name="scene031_floor_visible">Chão visível</string>
+    <string name="scene031_floor_shadow">Só sombra</string>
+    <string name="scene031_tonemap_neutral">PBR Neutro</string>
+    <string name="scene031_tonemap_agx">AgX</string>
+    <string name="scene031_tonemap_agx_punchy">AgX Intenso</string>
+    <string name="scene031_tonemap_agx_golden">AgX Dourado</string>
+    <string name="scene031_tonemap_uchimura">Uchimura</string>
+    <string name="scene031_tonemap_aces">ACES</string>
+    <string name="scene031_bloom_threshold">Limiar do brilho</string>
+</resources>

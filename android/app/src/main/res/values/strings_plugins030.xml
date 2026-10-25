@@ -15,6 +15,7 @@
     <string name="plug_by">%1$s · versão %2$s</string>
     <string name="plug_kind_shader">Shader na GPU</string>
     <string name="plug_kind_stack">Combinação de efeitos</string>
+    <string name="plug_kind_shader3d">Shader 3D (câmera e nulos)</string>
     <string name="plug_error">Não funciona neste aparelho: %1$s</string>
     <string name="plug_hint">Plugins são efeitos feitos por outros editores: arquivos .aureaplugin ou shaders ISF (.fs). Depois de instalados, ficam na categoria Plugins do navegador de efeitos.</string>
     <string name="plug_safety">Plugins rodam só na GPU, sem acesso aos seus arquivos. O Aurea compila e testa cada um neste aparelho antes de instalar.</string>

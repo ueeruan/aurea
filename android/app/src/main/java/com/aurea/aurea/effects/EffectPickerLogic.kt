@@ -191,6 +191,16 @@ fun groupEntries(sorted: List<EffectCatalogEntry>): List<Pair<EffectGroup, List<
     return EffectGroup.entries.mapNotNull { g -> byGroup[g]?.takeIf { it.isNotEmpty() }?.let { g to it } }
 }
 
+/** Chave fixa da porta "Gerenciar plugins" no fim da tela inicial do navegador. */
+const val PLUGIN_DOOR_KEY = "porta-plugins"
+
+/**
+ * Chave de uma linha de ladrilhos na tela inicial. Prefixada para nunca colidir
+ * com as chaves fixas da lista (destaques, rápidos, porta dos plugins): o id cru
+ * do grupo "plugins" batia com a chave da porta e o Compose derrubava o app.
+ */
+fun groupRowKey(row: List<EffectGroup>): String = "linha-grupos:" + row.joinToString(",") { it.id }
+
 /** O efeito cuja prévia (escurecida) vira o fundo do ladrilho do grupo. */
 private val GroupBannerKeys: Map<EffectGroup, String> = mapOf(
     EffectGroup.ColorLight to "aurea.color.colorama",

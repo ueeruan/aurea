@@ -178,6 +178,11 @@ struct SceneInstance {
     /// instância (não na pose): vale também com a pose compartilhada.
     std::vector<SceneNodeTexture> nodeTextures;
     bool castShadows = true;
+    /// 0.3.1 (eixo Z do modelo 3D com efeito): cópia de RECORTE de um objeto de
+    /// outro grupo 3D — grava só a profundidade (cor e alfa 0), sem sombra. O
+    /// grupo próprio do modelo com efeitos e os grupos vizinhos se recortam e o
+    /// que está mais perto da câmera aparece, em qualquer ordem de camadas.
+    bool holdout = false;
     /// MOSTRAR INTERIOR (Model3DData::interior): todo material deste objeto
     /// vira dupla face — sem recorte da face de trás, normal invertida no
     /// shader (pbr.frag), a mesma textura. Copiado nos sub-quadros do desfoque.

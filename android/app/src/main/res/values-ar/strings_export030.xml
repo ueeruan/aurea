@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: escolha do codificador de vídeo no Avançado da tela Exportar. -->
+<resources>
+    <string name="export_encoder">المرمِّز</string>
+    <string name="export_encoder_auto">تلقائي</string>
+    <string name="export_encoder_compatible">متوافق</string>
+    <string name="export_encoder_software">برمجي</string>
+    <string name="export_encoder_auto_note">مرمِّز الفيديو في الهاتف. إذا فشل، ينتقل التطبيق تلقائيًا إلى مرمِّز أكثر توافقًا.</string>
+    <string name="export_encoder_compatible_note">H.264 الأساسي على مرمِّز الهاتف. استخدمه عندما يظهر خطأ في المرمِّز في الوضع التلقائي.</string>
+    <string name="export_encoder_software_note">H.264 على المعالج، دون مرمِّز الهاتف. أبطأ، لكنه يعمل عندما يفشل مرمِّز الهاتف.</string>
+    <string name="export_after_system_close">أُغلق التطبيق في منتصف آخر تصدير. هذه المرة يُصدَّر الفيديو بوضع أخف.</string>
+</resources>

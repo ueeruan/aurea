@@ -1397,7 +1397,7 @@ struct PluginManagerView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(FxPluginTexts.pick(p.names, tag) ?? p.id).font(.aurea(size: 14, weight: .semibold))
                 Text(AureaText.t("plug_by", p.author.isEmpty ? p.id : p.author, p.version) + " · "
-                     + AureaText.t(p.kind == "stack" ? "plug_kind_stack" : "plug_kind_shader"))
+                     + AureaText.t(p.kind == "stack" ? "plug_kind_stack" : (p.scene3d ? "plug_kind_shader3d" : "plug_kind_shader")))
                     .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                 if let d = FxPluginTexts.pick(p.descriptions, tag), !d.isEmpty { Text(d).font(.aurea(size: 12)) }
                 if !p.ok {

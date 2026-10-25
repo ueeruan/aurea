@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Copiar fundo (a camada vira uma janela; os efeitos depois dele agem nas camadas abaixo). -->
+<resources>
+    <string name="fx030k_name">Копировать фон</string>
+    <string name="fx030k_desc">Превращает слой в окно на слои ниже: эффекты, добавленные после него, действуют только внутри. Используйте фигуру, чтобы настроить часть видео; эффекты до него (размытие, маска) формируют край.</string>
+    <string name="fx030k_window">Окно</string>
+    <string name="fx030k_layer_mix">Смешать со слоем</string>
+    <string name="fxo_layer_alpha">Альфа слоя</string>
+    <string name="fxo_inverted_alpha">Инвертированная альфа</string>
+    <string name="fxo_layer_luma">Яркость слоя</string>
+    <string name="fxo_inverted_luma">Инвертированная яркость</string>
+    <string name="fxt_effects_after_this_one_act_on_the_layers">Эффекты после этого действуют на слои ниже, только внутри формы этого слоя. Эффекты до него (размытие, маска) формируют окно.</string>
+</resources>

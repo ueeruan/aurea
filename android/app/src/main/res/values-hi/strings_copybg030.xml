@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: Copiar fundo (a camada vira uma janela; os efeitos depois dele agem nas camadas abaixo). -->
+<resources>
+    <string name="fx030k_name">बैकग्राउंड कॉपी करें</string>
+    <string name="fx030k_desc">लेयर को नीचे की लेयरों के लिए एक खिड़की बना देता है: इसके बाद लगाए गए इफ़ेक्ट सिर्फ़ उसके अंदर काम करते हैं। वीडियो के किसी हिस्से को एडजस्ट करने के लिए शेप इस्तेमाल करें; इससे पहले के इफ़ेक्ट (ब्लर, मास्क) किनारा बनाते हैं।</string>
+    <string name="fx030k_window">विंडो</string>
+    <string name="fx030k_layer_mix">लेयर के साथ मिलाएँ</string>
+    <string name="fxo_layer_alpha">लेयर अल्फ़ा</string>
+    <string name="fxo_inverted_alpha">उल्टा अल्फ़ा</string>
+    <string name="fxo_layer_luma">लेयर ल्यूमा</string>
+    <string name="fxo_inverted_luma">उल्टा ल्यूमा</string>
+    <string name="fxt_effects_after_this_one_act_on_the_layers">इसके बाद वाले इफ़ेक्ट नीचे की लेयरों पर, सिर्फ़ इस लेयर के आकार के अंदर काम करते हैं। इससे पहले वाले (ब्लर, मास्क) विंडो को आकार देते हैं।</string>
+</resources>

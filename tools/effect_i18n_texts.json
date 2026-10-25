@@ -5823,5 +5823,13 @@
   "hi": "डिस्टॉर्शन लगाएँ",
   "id": "Terapkan distorsi",
   "ar": "تطبيق التشوّه"
+ },
+ "Os efeitos depois deste agem nas camadas abaixo, só dentro da forma desta camada. Os de antes (desfoque, máscara) moldam a janela.": {
+  "en": "Effects after this one act on the layers below, only inside this layer's shape. Effects before it (blur, mask) shape the window.",
+  "es": "Los efectos después de este actúan en las capas de abajo, solo dentro de la forma de esta capa. Los anteriores (desenfoque, máscara) moldean la ventana.",
+  "ru": "Эффекты после этого действуют на слои ниже, только внутри формы этого слоя. Эффекты до него (размытие, маска) формируют окно.",
+  "hi": "इसके बाद वाले इफ़ेक्ट नीचे की लेयरों पर, सिर्फ़ इस लेयर के आकार के अंदर काम करते हैं। इससे पहले वाले (ब्लर, मास्क) विंडो को आकार देते हैं।",
+  "id": "Efek setelah ini bekerja pada layer di bawahnya, hanya di dalam bentuk layer ini. Efek sebelumnya (blur, mask) membentuk jendela.",
+  "ar": "التأثيرات بعد هذا تعمل على الطبقات التي تحتها، داخل شكل هذه الطبقة فقط. والتي قبله (التمويه، القناع) تشكّل النافذة."
  }
 }

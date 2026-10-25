@@ -15,6 +15,7 @@
     <string name="plug_by">%1$s · версия %2$s</string>
     <string name="plug_kind_shader">Шейдер на GPU</string>
     <string name="plug_kind_stack">Комбинация эффектов</string>
+    <string name="plug_kind_shader3d">3D-шейдер (камера и нули)</string>
     <string name="plug_error">Не работает на этом устройстве: %1$s</string>
     <string name="plug_hint">Плагины — это эффекты от других монтажёров: файлы .aureaplugin или шейдеры ISF (.fs). После установки они в категории «Плагины» браузера эффектов.</string>
     <string name="plug_safety">Плагины работают только на GPU, без доступа к вашим файлам. Aurea компилирует и проверяет каждый на этом устройстве перед установкой.</string>

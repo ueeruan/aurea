@@ -141,6 +141,27 @@ struct LayerPlacement {
     bool cameraActive = false;
     Mat4 cameraView = Mat4::identity();
     f32 cameraFovY = 0.0f;   ///< radianos
+    /// 0.3.1 (plugins "shader3d"): a câmera da cena SEMPRE — a ativa ou a
+    /// padrão — com `sceneCompFromWorld` = px da composição (homogêneo) ← mundo,
+    /// a posição e o plano próximo. `sceneCameraValid` falso = não preenchida
+    /// (os efeitos que precisam caem na câmera padrão da composição).
+    bool sceneCameraValid = false;
+    Mat4 sceneView = Mat4::identity();
+    Mat4 sceneCompFromWorld = Mat4::identity();
+    Vec3 sceneCameraPosition{};
+    f32 sceneFovY = 0.0f;    ///< radianos
+    f32 sceneNearZ = 1.0f;
+};
+
+/// O mundo de uma camada referenciada por um parâmetro (câmera, nulo, luz),
+/// no instante do planejamento (EffectResources::layer_world).
+struct LayerWorldInfo {
+    bool valid = false;
+    u16 kind = 0;              ///< LayerKind
+    bool threeD = false;
+    Mat4 worldFromLayer = Mat4::identity();
+    Vec3 position{};           ///< o ponto de âncora no mundo
+    f32 fovY = 0.0f;           ///< câmera: campo de visão vertical (radianos)
 };
 
 /// Retângulo, em pixels da layer, que o quadro inteiro da composição cobre
@@ -309,6 +330,13 @@ public:
     virtual ~EffectResources() = default;
     // Equal-distance positions (xy) and tangent (z, radians), in host-layer pixels.
     [[nodiscard]] virtual std::vector<Vec4> repeat_path(const Layer*, u32, f32, u64 guide = 0) noexcept { (void)guide; return {}; }
+    /// 0.3.1: o mundo da camada `ref` (câmera, nulo, luz...) da composição de
+    /// `host` no instante `compTime` (quadros da composição). Falso = não existe,
+    /// oculta ou fora do tempo.
+    [[nodiscard]] virtual bool layer_world(const Layer* host, u64 ref, f64 compTime, LayerWorldInfo& out) noexcept {
+        (void)host; (void)ref; (void)compTime; out = LayerWorldInfo{};
+        return false;
+    }
     /// LUT 256x1 da curva, criada/atualizada só quando a curva muda.
     [[nodiscard]] virtual TextureHandle curve_lut(const CurveData& curve) noexcept = 0;
     [[nodiscard]] virtual TextureHandle cube_lut(AssetId) noexcept { return {}; }

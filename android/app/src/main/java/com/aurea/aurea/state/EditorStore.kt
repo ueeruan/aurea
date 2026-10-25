@@ -2332,25 +2332,46 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val ok: Boolean, val fileName: String, val kind: String, val message: String,
         val effects: Int, val keyframes: Int, val layers: Int, val expressions: Int, val animators: Int,
         val skipped: List<AeImportItem>, val notes: List<AeImportItem>,
-    )
+        /** Escritas no projeto: com `ok` falso e > 0, o script parou com erro depois de mudar algo. */
+        val changes: Int = 0,
+    ) {
+        val hasCounts: Boolean get() = effects + keyframes + layers + expressions + animators > 0
+    }
     var aeImportResult by mutableStateOf<AeImportResult?>(null)
         private set
     fun dismissAeImport() { aeImportResult = null }
 
+    /**
+     * 0.3.1: pedido de abrir o seletor do AE. O lançador mora no AureaApp (fora
+     * de qualquer folha): o menu fecha na hora e o retorno do seletor ainda acha
+     * quem importar. Sem camada escolhida, o motor cria uma (como o AE).
+     */
+    var aePickRequested by mutableStateOf(false)
+        private set
+    fun requestAeImport() {
+        if (playing) pause()
+        aePickRequested = true
+    }
+    fun consumeAePickRequest() { aePickRequested = false }
+
     fun importAeFile(uri: Uri) {
-        if (!acceptsImport() || busyMessage != null) return
+        if (!acceptsImport()) return
+        // Outra importação em curso: diz o porquê em vez de calar.
+        if (busyMessage != null) { showToast(appText(R.string.ios_importing_media)); return }
         val app = getApplication<Application>()
         val target = primary ?: 0L
         busyMessage = appText(R.string.ae_importing)
         launchImport launch@{
             val name = displayName(uri) ?: uri.lastPathSegment.orEmpty()
+            var tooBig = false
             val json = withContext(Dispatchers.IO) {
                 val bytes = app.contentResolver.openInputStream(uri)?.use { input ->
                     val out = java.io.ByteArrayOutputStream()
                     val buf = ByteArray(65536); var total = 0
                     while (true) {
                         val n = input.read(buf); if (n < 0) break
-                        total += n; if (total > 16 * 1024 * 1024) return@withContext null
+                        // O mesmo teto do motor (kMaxAeFile, 64 MB).
+                        total += n; if (total > 64 * 1024 * 1024) { tooBig = true; return@withContext null }
                         out.write(buf, 0, n)
                     }
                     out.toByteArray()
@@ -2358,7 +2379,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 engine.importAeData(bytes, name, target)
             }
             busyMessage = null
-            if (json == null) { errorMessage = appText(R.string.ae_failed_read); return@launch }
+            if (json == null) { errorMessage = appText(if (tooBig) R.string.ae_too_big else R.string.ae_failed_read); return@launch }
             val o = runCatching { org.json.JSONObject(json) }.getOrNull()
             if (o == null) { errorMessage = appText(R.string.ae_failed_read); return@launch }
             fun items(key: String) = o.optJSONArray(key)?.let { a ->
@@ -2366,7 +2387,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }.orEmpty()
             aeImportResult = AeImportResult(o.optBoolean("ok"), name, o.optString("kind"), o.optString("message"),
                 o.optInt("effects"), o.optInt("keyframes"), o.optInt("layers"), o.optInt("expressions"), o.optInt("animators"),
-                items("skipped"), items("notes"))
+                items("skipped"), items("notes"), o.optInt("changes"))
             refreshNow(); refreshDetail()
         }
     }
@@ -4826,12 +4847,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun openPrecomp(layer: Long) {
         if (!engine.openPrecomp(layer)) return
         selection = LinkedHashSet()
+        // 0.3.0: os ids de camada se repetem entre grupos (cada composição tem a
+        // sua tabela) e as miniaturas da timeline são guardadas pelo id: sem
+        // limpar, a imagem de um grupo "pulava" para a camada de outro.
+        thumbnails.clear()
         refreshNow()
     }
 
     fun closePrecomp() {
         if (!engine.closePrecomp()) return
         selection = LinkedHashSet()
+        thumbnails.clear()   // ver openPrecomp
         refreshNow()
     }
 

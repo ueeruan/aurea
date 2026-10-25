@@ -2107,6 +2107,8 @@ enum EffectI18nTable {
     aurea.enhance.video|10|temporal_frames|fxl_neighbouring_frames|
     aurea.enhance.video|11|quality|fxl_quality|fxo_fast,fxo_normal,fxo_high
     aurea.enhance.video|12|mix|fxl_mix|
+    aurea.utility.copy_background|0|window|fx030k_window|fxo_layer_alpha,fxo_inverted_alpha,fxo_layer_luma,fxo_inverted_luma
+    aurea.utility.copy_background|1|layer_mix|fx030k_layer_mix|
     """
 
     /// "typeId#índice" → dica do parâmetro.
@@ -2130,6 +2132,7 @@ enum EffectI18nTable {
     aurea.light.saber|22|mask_evolution|fxt_applies_to_the_layer_masks_core
     aurea.enhance.video|0|model|fxt_automatic_estimates_compression_noise_an
     aurea.enhance.video|10|temporal_frames|fxt_frames_on_each_side_used_by_noise_reduct
+    aurea.utility.copy_background|0|window|fxt_effects_after_this_one_act_on_the_layers
     """
 
     /// "typeId#índice" → título da seção (índice = ordinal).

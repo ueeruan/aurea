@@ -15,6 +15,7 @@
     <string name="plug_by">%1$s · versi %2$s</string>
     <string name="plug_kind_shader">Shader GPU</string>
     <string name="plug_kind_stack">Kombinasi efek</string>
+    <string name="plug_kind_shader3d">Shader 3D (kamera dan null)</string>
     <string name="plug_error">Tidak berfungsi di perangkat ini: %1$s</string>
     <string name="plug_hint">Plugin adalah efek buatan editor lain: file .aureaplugin atau shader ISF (.fs). Setelah dipasang, ada di kategori Plugin pada penjelajah efek.</string>
     <string name="plug_safety">Plugin hanya berjalan di GPU, tanpa akses ke file Anda. Aurea mengompilasi dan menguji setiap plugin di perangkat ini sebelum memasangnya.</string>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.0: escolha do codificador de vídeo no Avançado da tela Exportar. -->
+<resources>
+    <string name="export_encoder">Encoder</string>
+    <string name="export_encoder_auto">Otomatis</string>
+    <string name="export_encoder_compatible">Kompatibel</string>
+    <string name="export_encoder_software">Software</string>
+    <string name="export_encoder_auto_note">Encoder video ponsel. Jika gagal, aplikasi otomatis beralih ke yang lebih kompatibel.</string>
+    <string name="export_encoder_compatible_note">H.264 dasar di encoder ponsel. Pakai saat Otomatis menampilkan error encoder.</string>
+    <string name="export_encoder_software_note">H.264 di prosesor, tanpa encoder ponsel. Lebih lambat, tapi tetap berjalan saat encoder ponsel gagal.</string>
+    <string name="export_after_system_close">Aplikasi tertutup di tengah ekspor terakhir. Kali ini video diekspor dalam mode yang lebih ringan.</string>
+</resources>

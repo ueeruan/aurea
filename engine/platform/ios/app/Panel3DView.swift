@@ -271,27 +271,38 @@ struct Panel3DView: View {
         model.refreshModel(force: true)
     }
 
-    /// AMBIENTE (retorno de beta 12/10/2026: "só o básico"): LUZ (estúdio,
-    /// imagem de ambiente, intensidade, giro e sombras do objeto), FUNDO e
-    /// CHÃO. O avançado (qualidade, tom, exposição, brilho, ambiente próprio
-    /// do objeto, trecho do fundo) saiu daqui; o projeto guarda os valores.
+    /// Estúdios da fonte de luz, na ordem dos ids do motor (StudioEnvironment.hpp: 0 neutro … 4 cromado).
+    private let studioLightKeys = ["scene031_light_neutral", "scene_dark", "scene_product", "scene_sky", "scene_chrome"]
+    /// Operadores de tone map do 3D, na ordem do motor (0 PBR Neutral … 5 ACES).
+    private let toneMapKeys = ["scene031_tonemap_neutral", "scene031_tonemap_agx", "scene031_tonemap_agx_punchy",
+                               "scene031_tonemap_agx_golden", "scene031_tonemap_uchimura", "scene031_tonemap_aces"]
+
+    /// AMBIENTE (retorno de beta 12/10/2026: "só o básico"): LUZ, FUNDO e
+    /// CHÃO; o resto (qualidade, tone map, exposição e bloom) fica em
+    /// "Avançado", fechado.
+    ///
+    /// LUZ (0.3.1): UMA fileira de fontes exclusivas — Neutro, Escuro,
+    /// Produto, Céu, Cromado e Imagem HDR… — e só uma acesa: a HDR quando há
+    /// HDRI (ela vence o estúdio no render), senão o estúdio. Escolher um
+    /// estúdio tira o HDRI (a ponte faz isso numa mutação só: um toque = um
+    /// passo de desfazer). CHÃO: três chips (sem chão, visível, só sombra).
     /// Par do Android (Element3DPanel.kt `LightSceneTab`).
     private var lightSceneTab: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let hdr = environment[0] >= 0.5
+        return VStack(alignment: .leading, spacing: 0) {
             section("cat_light")
-            if sceneSettings.count >= 8 {
-                horizontal {
-                    ForEach(Array(["scene_none", "scene_dark", "scene_product", "scene_sky", "scene_chrome"].enumerated()), id: \.offset) { i, key in
-                        T3DChip(label: AureaText.t(key), on: Int(sceneSettings[0]) == i) { setScene(0, Float(i)) }
+            horizontal {
+                if sceneSettings.count >= 8 {
+                    ForEach(Array(studioLightKeys.enumerated()), id: \.offset) { i, key in
+                        let on = !hdr && Int(sceneSettings[0]) == i
+                        // Tocar no estúdio já aceso não gera passo de desfazer vazio.
+                        T3DChip(label: AureaText.t(key), on: on) { if !on { finishEditing(); setScene(0, Float(i)) } }
+                            .accessibilityIdentifier("panel3d.light.\(i)")
                     }
                 }
-            }
-            horizontal {
-                chip("panel_estudio_neutro", on: environment[0] < 0.5) {
-                    finishEditing(); model.engine.clearHdri(); refresh()
-                }
-                chip(environment[0] >= 0.5 ? "panel_imagem_ambiente" : "panel_usar_imagem_ambiente_hdr",
-                     on: environment[0] >= 0.5) { pickHdri(object: false) }
+                // Acesa, toca de novo para trocar a imagem.
+                chip("scene031_light_hdr", on: hdr) { pickHdri(object: false) }
+                    .accessibilityIdentifier("panel3d.light.hdr")
             }
             sceneRow("panel_intensidade", value: environment[1] * 100, range: 0...2000, unit: "%", reset: 100, gesture: "ambiente") { value in
                 _ = model.engine.setEnvironmentIntensity(value / 100, rotation: environment[2]); refresh()
@@ -316,10 +327,53 @@ struct Panel3DView: View {
                 _ = model.engine.setEnvironmentBackground($0); refresh()
             }
             if sceneSettings.count >= 8 {
+                // --- Chão: 0 sem chão, 1 visível, 2 só sombra (compõe sobre o 2D) ---
                 section("fx3d_env_floor")
-                toggleRow("scene_floor", on: sceneSettings[1] > 0) { setScene(1, $0 ? 1 : 0) }
+                let floor = Int(sceneSettings[1])
+                horizontal {
+                    ForEach(Array(["scene031_floor_off", "scene031_floor_visible", "scene031_floor_shadow"].enumerated()), id: \.offset) { i, key in
+                        T3DChip(label: AureaText.t(key), on: floor == i) { if floor != i { finishEditing(); setScene(1, Float(i)) } }
+                            .accessibilityIdentifier("panel3d.floor.\(i)")
+                    }
+                }
+                // --- Avançado (fechado): qualidade, tone map, exposição e bloom ---
+                gap(4)
+                advancedHeader(open: sceneAdvanced) { sceneAdvanced.toggle() }
+                if sceneAdvanced { sceneAdvancedSection }
             }
             gap(8)
+        }
+    }
+
+    /// O "Avançado" do Ambiente (par do Android: `AdvancedSection` do `LightSceneTab`).
+    @ViewBuilder private var sceneAdvancedSection: some View {
+        section("scene_quality")
+        horizontal {
+            ForEach(Array(["scene_auto", "scene_low", "scene_medium", "scene_high", "scene_ultra"].enumerated()), id: \.offset) { i, key in
+                let on = Int(sceneSettings[2]) == i
+                T3DChip(label: AureaText.t(key), on: on) { if !on { finishEditing(); setScene(2, Float(i)) } }
+            }
+        }
+        section("scene_tonemap")
+        horizontal {
+            ForEach(Array(toneMapKeys.enumerated()), id: \.offset) { i, key in
+                let on = Int(sceneSettings[3]) == i
+                T3DChip(label: AureaText.t(key), on: on) { if !on { finishEditing(); setScene(3, Float(i)) } }
+            }
+        }
+        // Exposição: multiplicador linear (1 = 100 %).
+        sceneRow("scene_exposure", value: sceneSettings[4] * 100, range: 1...400, unit: "%", reset: 100, gesture: "exposicao 3D") { value in
+            setScene(4, value / 100)
+        }
+        toggleRow("scene_bloom", on: sceneSettings[5] > 0.5) { value in finishEditing(); setScene(5, value ? 1 : 0) }
+        if sceneSettings[5] > 0.5 {
+            sceneRow("ui3d_bloom_strength", value: sceneSettings[6] * 100, range: 0...400, unit: "%", reset: 60, gesture: "bloom 3D") { value in
+                setScene(6, value / 100)
+            }
+            sceneRow("scene031_bloom_threshold", value: sceneSettings[7], range: 0...8, unit: "", reset: 1.25, gesture: "bloom 3D",
+                     step: 0.05, decimals: 2) { value in
+                setScene(7, value)
+            }
         }
     }
 
@@ -375,8 +429,9 @@ struct Panel3DView: View {
 
     /// Linha de valor da cena/ambiente: um passo de desfazer por arrasto (quando há `gesture`).
     private func sceneRow(_ key: String, value: Float, range: ClosedRange<Float>, unit: String, reset: Float,
-                          gesture: String?, onValue: @escaping (Float) -> Void) -> some View {
-        T3DRow(label: AureaText.t(key), value: value, step: 1, range: range, unit: unit, decimals: 0, reset: reset,
+                          gesture: String?, step: Float = 1, decimals: Int = 0,
+                          onValue: @escaping (Float) -> Void) -> some View {
+        T3DRow(label: AureaText.t(key), value: value, step: step, range: range, unit: unit, decimals: decimals, reset: reset,
                selected: selectedScalar == key, onSelect: { selectedScalar = key },
                onStart: { if let gesture { beginContinuous(gesture) } }, onValue: onValue,
                onEnd: { if gesture != nil { finishEditing() } },
@@ -779,6 +834,8 @@ private struct T3DChip: View {
                 .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
                 .contentShape(Rectangle())
         }.buttonStyle(AureaPressStyle())
+        // VoiceOver: "selecionado" no chip aceso (par do `selected` do KitChip).
+        .accessibilityAddTraits(on ? [.isSelected] : [])
     }
 }
 

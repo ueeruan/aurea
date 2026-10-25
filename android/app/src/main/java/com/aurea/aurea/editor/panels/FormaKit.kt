@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -35,7 +36,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -235,19 +238,30 @@ internal fun ScrollTabs(labels: List<String>, selected: Int, onSelect: (Int) -> 
     }
 }
 
-/** Chip de escolha solto (fileira que rola). */
+/**
+ * Chip de escolha solto (fileira que rola). O desenho continua com 36 dp; o
+ * alvo de toque tem 48 dp (a faixa de cima e de baixo também toca). Leitor de
+ * tela: botão, "selecionado" quando aceso.
+ */
 @Composable
-internal fun KitChip(label: String, on: Boolean, onClick: () -> Unit) {
+internal fun KitChip(label: String, on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(
-        Modifier
-            .height(36.dp)
-            .clip(RoundedCornerShape(9.dp))
-            .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-            .tocavel(shrink = 1f, onClick = onClick)
-            .padding(horizontal = 12.dp),
+        modifier
+            .heightIn(min = 48.dp)
+            .semantics(mergeDescendants = true) { selected = on }
+            .tocavel(shrink = 1f, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+        Box(
+            Modifier
+                .height(36.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+        }
     }
 }
 

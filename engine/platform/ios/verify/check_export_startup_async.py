@@ -191,6 +191,10 @@ final class Native: @unchecked Sendable {
                           fps: Double, trimToContent: Bool) -> Int32 {
         begin(kind: format, safeMode: 0, fps: fps, height: shortSide)
     }
+    // 0.3.2: o job do AureaHyper sai pelo mesmo arranque assíncrono do export.
+    func startHyperJob(_ source: String, recipe: [NSNumber], output: String) -> Int32 {
+        begin(kind: nil, safeMode: 0, fps: 0, height: 0)
+    }
     func cancelExport() {
         lock.lock(); cancellations += 1
         // Even a native success racing cancel must not publish to Photos.

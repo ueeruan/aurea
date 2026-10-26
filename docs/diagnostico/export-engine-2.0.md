@@ -198,7 +198,7 @@ transparente, recorte entre grupos, chão com câmera andando, trajeto curvo
 - **Não testados**: ARM 32 bits físico, vivo, Oppo, MediaTek, PowerVR, iPhone
   real. Compilação não prova funcionamento em aparelho.
 
-## 5. O que foi feito na 0.3.2 (estado em 25/10/2026)
+## 5. O que foi feito na 0.3.2 (estado em 26/10/2026)
 
 | Etapa | Situação | Validação |
 | --- | --- | --- |
@@ -234,5 +234,9 @@ transparente, recorte entre grupos, chão com câmera andando, trajeto curvo
   resumeInterruptedExport}` testam o pacote de recuperação antigo
   (`enableExportRecovery`, desligado) e falham por isso; a retomada nova tem o
   próprio teste.
-- **Nada validado em aparelho físico** (ARM 32/64, vivo, Oppo, MediaTek,
-  PowerVR, iPhone). O código do iOS ainda não foi compilado nesta versão.
+- Aparelho físico (26/10/2026): Moto g52 (Snapdragon 680, Adreno 610,
+  Android 13, processo de 64 bits). `ExportV2DeviceTest` 7/10 (as 3 falhas são
+  as do pacote de recuperação antigo, acima), `ExportCheckpointDeviceTest`,
+  `HomeNavigationTest`, `HyperScreenDeviceTest` 5/5 e `HyperJobDeviceTest` 3/3
+  passaram. Causa nova encontrada lá: 1.11. Não testados: 32 bits, vivo, Oppo,
+  MediaTek, PowerVR, iPhone (o iOS compila no CI).

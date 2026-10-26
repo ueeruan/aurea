@@ -1179,7 +1179,7 @@ private struct CopyPasteButton: View {
             // telefone em pé a folha de lote da 0.3.2 saiu e a barra de baixo não tem esta.
             out.append(.item(AureaText.t("editor_escada_comeca_quando_cima_termina"), glyph: CupertinoGlyph.ArrowRightToLine,
                              tag: "copyPaste.more.stairs") { model.arrangeLayerTimes(1) })
-            let groups =model.layers.filter { model.selection.contains($0.id) && $0.kind == 12 }.map(\.id)
+            let groups = model.layers.filter { model.selection.contains($0.id) && $0.kind == 12 }.map(\.id)
             if !groups.isEmpty {
                 out.append(.item(AureaText.t("editor_desagrupar"), glyph: ShellGlyph.SquareSplit2x2, tag: "copyPaste.more.ungroup") {
                     for group in groups { model.ungroup(group) }

@@ -26,11 +26,8 @@ struct ExportView: View {
     private static let frameRates: [Double] = [24, 25, 30, 50, 60, 120]
     /// Mbps manuais do Avançado (0 = automático pela qualidade).
     private static let customBitrates: [UInt32] = [5, 10, 15, 25, 40, 60]
-    private var resolutions: [UInt32] {
-        let standard = Self.standardResolutions.map(\.0)
-        let neural = min(model.compositionWidth, model.compositionHeight) * model.exportOptions.aiUpscale
-        return neural > 0 ? Array(Set(standard + [neural])).sorted() : standard
-    }
+    /// 0.3.2: o upscale por IA saiu do Exportar (é o AureaHyper da Home): só as resoluções de sempre.
+    private var resolutions: [UInt32] { Self.standardResolutions.map(\.0) }
     private var seconds: Double { Double(model.engine.exportDuration(model.exportOptions.trimToContent)) / max(1, model.compositionFps) }
     private var fps: Double { model.exportOptions.fps > 0 ? model.exportOptions.fps : model.compositionFps }
     private var codec: String { model.exportOptions.codec == .hevc ? "HEVC" : "H.264" }
@@ -334,30 +331,13 @@ struct ExportView: View {
                         model.exportOptions.trimToContent = $0 == AureaText.t("export_range_content")
                     }
 
-                    // Upscale com IA saiu daqui: é a ferramenta própria da Home (UpscaleView.swift).
+                    // Upscale com IA saiu daqui: é o AureaHyper da Home (HyperView.swift).
                     exportSummary
                 }.padding(.horizontal, 14).padding(.bottom, 14)
             }
         }
         .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 14))
         .padding(.top, 16)
-    }
-    private var upscaleOptions: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            label("ai_upscale_title")
-            let off = AureaText.t("common_off")
-            chips([off, "2×", "4×"], selected: model.exportOptions.aiUpscale == 0 ? off : "\(model.exportOptions.aiUpscale)×") { label in
-                let factor: UInt32 = label == "2×" ? 2 : label == "4×" ? 4 : 0
-                model.exportOptions.aiUpscale = factor
-                let short = min(model.compositionWidth, model.compositionHeight)
-                model.exportOptions.shortSide = factor > 0 ? short * factor : min(1080, max(720, short))
-            }
-            if model.exportOptions.aiUpscale > 0 {
-                Text(AureaText.t("ai_upscale_note")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 8)
-                Text(upscaleDimensionsDescription)
-                    .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
-            }
-        }
     }
     private var exportSummary: some View {
         VStack(spacing: 0) {
@@ -373,15 +353,6 @@ struct ExportView: View {
             summary("editor_tamanho_estimado", estimatedSize)
             summary("editor_cor", AureaText.t("editor_sdr_bt_709"))
         }.padding(.top, 12)
-    }
-    private var upscaleDimensionsDescription: String {
-        let scale: UInt32 = model.exportOptions.aiUpscale
-        guard scale > 0 else { return "" }
-        let divisor: UInt32 = scale * 2
-        let size: (UInt32, UInt32) = outputSize
-        let inputWidth: UInt32 = ((size.0 + divisor - 1) / divisor) * 2
-        let inputHeight: UInt32 = ((size.1 + divisor - 1) / divisor) * 2
-        return AureaText.t("ai_upscale_dimensions", Int(scale), Int(inputWidth), Int(inputHeight), Int(size.0), Int(size.1))
     }
     /// Um grupo de escolhas: título pequeno e o conteúdo num cartão.
     private func group<Content: View>(_ key: String, @ViewBuilder content: () -> Content) -> some View {
@@ -488,8 +459,7 @@ struct ExportView: View {
     }
     private func resolutionLabel(_ side: UInt32) -> String {
         if let standard = Self.standardResolutions.first(where: { $0.0 == side }) { return standard.1 }
-        let scale = model.exportOptions.aiUpscale
-        return scale > 0 ? "\(side)p (\(scale)×)" : "\(side)p"
+        return "\(side)p"
     }
     private var exportLimitReason: String? {
         let h = model.deviceReport["maxExportHeight"]?.intValue ?? 0

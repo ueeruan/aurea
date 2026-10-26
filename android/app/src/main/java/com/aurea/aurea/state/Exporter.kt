@@ -233,8 +233,57 @@ class Exporter internal constructor(
     /** Duração pedida (s), só para explicar a recusa acima de 3 h. 0 = desconhecida. */
     var plannedSeconds: Double = 0.0
 
+    /**
+     * AureaHyper (0.3.2): o job da Home roda PELO MESMO caminho do export — o
+     * serviço em primeiro plano, o ProjectGuard, o vigia de travamento, o
+     * progresso e o cancelamento do motor. Muda só o começo (start_hyper_job)
+     * e o fim: o arquivo NÃO vai para a galeria; fica em [hyperOutput] para
+     * virar projeto (hyper/HyperFlow.kt).
+     */
+    var hyperSteps by mutableStateOf(IntArray(0))
+        private set
+    /** O arquivo pronto do último job Hyper (null = nenhum ou não terminou). */
+    var hyperOutput: File? = null
+        private set
+    private var hyperJob = false
+
+    fun startHyper(sourcePath: String, recipe: com.aurea.aurea.hyper.HyperRecipe, output: File) {
+        if (busy) return
+        hyperJob = true
+        hyperOutput = null
+        hyperSteps = IntArray(0)
+        val options = ExportOptions(shortSide = 0, aiUpscale = if (recipe.upscale > 1) recipe.upscale else 0, trimToContent = false)
+        state = ExportUiState(ExportPhase.Running, outputLabel = output.nameWithoutExtension,
+            notice = text(R.string.msg_preparando), preparing = true)
+        sessionActive = true
+        cancelPending = false
+        poll?.cancel()
+        releaseUiCaches()
+        poll = scope.launch {
+            guardedExport(null) {
+                diagnosticTicket = withContext(Dispatchers.IO) { ExportDiagnosticReport.begin(app, engine.exportDiagnostics()) }
+                lighterAfterClose = false
+                exportedReducedSide = 0; exportedFpsCap = 0; exportedBlurCap = 0; exportedQualityFlags = 0
+                val dir = output.parentFile ?: File(app.filesDir, "hyper")
+                while (true) {
+                    val again = runEngineJob(dir, output, options) {
+                        engine.startHyperJob(sourcePath, recipe, output.absolutePath)
+                    }
+                    // Checkpoint do motor (o encoder caiu no meio): o MESMO job continua de lá.
+                    if (again == RETRY_SAME_ATTEMPT && !cancelPending) {
+                        state = state.copy(phase = ExportPhase.Running, framesDone = 0, fps = 0f, etaSeconds = 0, message = "",
+                            notice = text(R.string.app_export_resumed), preparing = true)
+                        continue
+                    }
+                    break
+                }
+            }
+        }
+    }
+
     fun start(title: String, compWidth: Int, compHeight: Int, compFps: Double, options: ExportOptions) {
         if (busy) return
+        hyperJob = false
         val dir = File(app.cacheDir, "export")
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.ROOT).format(Date())
         val base = title.ifBlank { "Aurea" }.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().ifBlank { "Aurea" }
@@ -269,6 +318,7 @@ class Exporter internal constructor(
 
     /** PNG, sequência .zip ou GIF: o motor renderiza e codifica; aqui, só publicar. */
     private fun startImage(dir: File, file: File, options: ExportOptions) {
+        hyperJob = false
         state = ExportUiState(ExportPhase.Running, outputLabel = file.nameWithoutExtension, format = options.format,
             notice = text(R.string.msg_preparando), preparing = true)
         sessionActive = true
@@ -497,7 +547,7 @@ class Exporter internal constructor(
                         freshFailure = ExportStartupFailure.isFresh(previousProgress, progress, code,
                             previousToken, diagnosticSessionToken(engine.exportDiagnostics()))
                     }
-                    val retry = AureaEngine.nativeExportNextAttempt(safeMode, code, if (freshFailure) progress.failure else 0, false,
+                    val retry = if (hyperJob) 0 else AureaEngine.nativeExportNextAttempt(safeMode, code, if (freshFailure) progress.failure else 0, false,
                         code == NOT_SUPPORTED && plannedSeconds > com.aurea.aurea.editor.EXPORT_MAX_SECONDS,
                         options.shortSide, options.fps, options.hevc, options.aiUpscale > 0)
                     if (retry != 0) return retry
@@ -529,7 +579,7 @@ class Exporter internal constructor(
                         }
                         ExportStallWatchdog.Verdict.GiveUp -> {
                             android.util.Log.e("AureaExport", "Export engine did not conclude after the stall cancel; releasing the screen")
-                            if (options.format == ExportFormat.Video && !cancelPending) {
+                            if (options.format == ExportFormat.Video && !cancelPending && !hyperJob) {
                                 val retry = AureaEngine.nativeExportNextAttempt(safeMode, CANCELLED, 0, true, false,
                                     options.shortSide, options.fps, options.hevc, options.aiUpscale > 0)
                                 if (retry != 0) {
@@ -556,6 +606,7 @@ class Exporter internal constructor(
                     resumedFromPercent = if (progress.framesTotal > 0)
                         (progress.framesDone.toLong() * 100 / progress.framesTotal).toInt().coerceIn(0, 99) else 0
                 ExportForegroundService.update(app, progress.framesDone, progress.framesTotal)
+                if (hyperJob) hyperSteps = withContext(Dispatchers.IO) { engine.hyperJobSteps() }
                 state = state.copy(
                     framesDone = progress.framesDone,
                     framesTotal = progress.framesTotal,
@@ -575,7 +626,7 @@ class Exporter internal constructor(
                 }
                 // O encoder travou/recusou e o motor sugere o modo de segurança:
                 // nada de "falhou" na tela — o vídeo é refeito (runExport).
-                val retry = if (options.format == ExportFormat.Video && progress.result != 0 && !cancelPending)
+                val retry = if (options.format == ExportFormat.Video && progress.result != 0 && !cancelPending && !hyperJob)
                     AureaEngine.nativeExportNextAttempt(safeMode, progress.result, progress.failure, watchdog.cancelled, false,
                         options.shortSide, options.fps, options.hevc, options.aiUpscale > 0) else 0
                 if (retry != 0) {
@@ -585,7 +636,7 @@ class Exporter internal constructor(
                     return retry
                 }
                 when (progress.result) {
-                    0 -> publish(file, options.format)
+                    0 -> if (hyperJob) finishHyper(file) else publish(file, options.format)
                     // Cancelado pela própria tela (sem progresso por minutos), não
                     // pelo usuário: é falha, com o motivo.
                     CANCELLED -> state = if (watchdog.cancelled && !cancelPending) {
@@ -626,6 +677,18 @@ class Exporter internal constructor(
         }
     }
 
+    /** O job Hyper terminou: o arquivo fica no app (vira projeto), sem galeria. */
+    private suspend fun finishHyper(file: File) {
+        val ok = withContext(Dispatchers.IO) { file.isFile && file.length() > 0L }
+        if (!ok) {
+            state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_interrupted))
+            return
+        }
+        hyperSteps = withContext(Dispatchers.IO) { engine.hyperJobSteps() }
+        hyperOutput = file
+        state = state.copy(phase = ExportPhase.Done, outputUri = Uri.fromFile(file), message = "")
+    }
+
     fun cancel() {
         if (state.phase != ExportPhase.Running) return
         cancelPending = true   // ainda abrindo: cancela assim que o motor começar
@@ -636,6 +699,8 @@ class Exporter internal constructor(
     fun reset() {
         if (busy) return
         state = ExportUiState()
+        hyperOutput = null
+        hyperSteps = IntArray(0)
         // Momento ocioso (fora do render): prepara o anúncio da próxima exportação.
         com.aurea.aurea.ads.AureaAdsManager.preloadExportInterstitial()
     }

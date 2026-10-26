@@ -1,0 +1,61 @@
+{
+  "name": "RIFE v4.6 flownet",
+  "version": "rife-ncnn-vulkan 20221029 models/rife-v4.6",
+  "license": "MIT",
+  "sourceUrl": [
+    "https://raw.githubusercontent.com/nihui/rife-ncnn-vulkan/20221029/models/rife-v4.6/flownet.param",
+    "https://raw.githubusercontent.com/nihui/rife-ncnn-vulkan/20221029/models/rife-v4.6/flownet.bin"
+  ],
+  "sourceSha256": [
+    "724569596bcd1e7b9fa50455c604777ebed99746d2ef40aa86e31b5725f1053c",
+    "f334ed2260149ce0188a6dcf049844e8b0cdd912e01cbcfb63553157d2508958"
+  ],
+  "conversion": "nenhuma: param/bin oficiais (pesos fp16). A camada rife.Warp é implementada pelo Aurea (src/hyper/neural/MotionRife.cpp)",
+  "blobs": {
+    "inputs": [
+      "in0",
+      "in1",
+      "in2 (timestep)"
+    ],
+    "flow": "327 (4 canais: fluxo para in0 e para in1)",
+    "mask": "332 (sigmoid)",
+    "output": "out0"
+  },
+  "layers": [
+    "BinaryOp",
+    "Concat",
+    "Convolution",
+    "Crop",
+    "Deconvolution",
+    "Eltwise",
+    "Input",
+    "Interp",
+    "PixelShuffle",
+    "ReLU",
+    "Sigmoid",
+    "Split",
+    "rife.Warp"
+  ],
+  "delivery": "bundled",
+  "files": [
+    {
+      "file": "flownet.param",
+      "role": "param",
+      "bytes": 16532,
+      "sha256": "724569596bcd1e7b9fa50455c604777ebed99746d2ef40aa86e31b5725f1053c"
+    },
+    {
+      "file": "flownet.bin",
+      "role": "weights-fp16",
+      "bytes": 10614320,
+      "sha256": "f334ed2260149ce0188a6dcf049844e8b0cdd912e01cbcfb63553157d2508958"
+    },
+    {
+      "file": "LICENSE",
+      "role": "license",
+      "bytes": 2296,
+      "sha256": "a3469170caffd4b4f45f747298402bf5ae0583241082457b40749c4550c0851b"
+    }
+  ],
+  "totalBytes": 10633148
+}

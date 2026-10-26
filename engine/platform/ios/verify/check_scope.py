@@ -26,6 +26,8 @@ APPLE_IMPORTS = {
     "SwiftUI", "PhotosUI", "Photos", "AVKit", "QuickLook", "Foundation", "UIKit", "Metal", "MetalKit", "QuartzCore", "CoreGraphics", "CoreText",
     "CoreVideo", "CoreMedia", "CoreImage", "VideoToolbox", "AVFoundation", "AudioToolbox", "CoreAudio",
     "ARKit", "CoreMotion",
+    # AureaHyper (0.3.2, HyperModel.swift): rostos pelo Vision e a consulta da Neural Engine (Core ML).
+    "Vision", "CoreML",
     "ImageIO", "UniformTypeIdentifiers", "simd", "Combine", "Dispatch", "os", "Swift",
     "Accelerate", "CoreFoundation", "CoreTransferable", "IOSurface", "AVFAudio", "os.log", "CryptoKit", "Security", "Darwin", "MetricKit",
 }

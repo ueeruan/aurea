@@ -6,29 +6,65 @@ Auditoria, arquitetura e resultados: `docs/diagnostico/export-engine-2.0.md`.
 
 ```
 Novidades da 0.3.2:
+• AureaHyper (grátis por enquanto): upscale, 60 fps, câmera lenta, limpeza e estabilização
 • Exportação continua com o app em segundo plano (Android)
 • Export interrompido continua de onde parou
 • Motion blur 3D até 24× mais rápido (modo vetores)
-• O vídeo sai igual em qualquer aparelho ocupado ou não
+• Marcadores com nome na timeline
 • Aviso quando o aparelho precisou reduzir algo
-• FFmpeg 9: codificação mais nova e estável
-• Menos falsos "travou" em vídeos longos e efeitos de IA
+• FFmpeg 9 e menos falsos "travou"
 ```
 
 ## Google Play (en-US)
 
 ```
 New in 0.3.2:
+• AureaHyper (free for now): upscale, 60 fps, slow motion, cleanup and stabilization
 • Exports keep running with the app in the background (Android)
 • An interrupted export continues where it stopped
 • 3D motion blur up to 24× faster (vector mode)
-• The video comes out the same whether the device is busy or not
+• Named markers on the timeline
 • A notice when the device had to reduce something
-• FFmpeg 9: newer, more stable encoding
-• Fewer false "stuck" errors on long videos and AI effects
+• FFmpeg 9 and fewer false "stuck" errors
 ```
 
 ## Versão completa
+
+### AureaHyper (novo — grátis por enquanto)
+- Substitui o "Upscale com IA" no menu Aurea da Home. Em quatro passos:
+  escolher o vídeo (galeria ou gravar agora), escolher o que fazer, ver a
+  prévia antes/depois com o tempo estimado, e acompanhar o trabalho. O
+  resultado vira um projeto.
+- Receitas prontas: Restaurar vídeo antigo, Mais nítido 2× / 4×, 60 fps,
+  Câmera lenta 2× / 4× / 8×, Anime e Estabilizar. Em "Ajustar": força da
+  limpeza, blocos de compressão, entrelaçado, rostos, fps, câmera lenta e
+  estabilização (inclusive gravar como keyframes).
+- Três caminhos, escolhidos pelo aparelho (dá para trocar): **Turbo** (na GPU,
+  qualquer aparelho, inclusive 32 bits), **Lite** (redes pequenas) e **Max** (a
+  rede completa, para aparelho bom ou para deixar processando). Na primeira vez
+  o app mede o aparelho por cerca de 10 s.
+- No editor: efeitos de camada Hyper Upscale, Hyper Motion e Hyper Clean (a
+  prévia na timeline usa sempre o Turbo).
+- Dá para sair do app enquanto trabalha (Android continua em segundo plano;
+  iPhone pausa e continua ao voltar).
+- Câmera lenta sai sem som (o app avisa).
+- Grátis nesta versão. Mais para a frente vira recurso pago (compra única,
+  `aureahyper_lifetime`); nada é cobrado agora.
+- O acesso vem de uma configuração remota assinada (`/api/app-config`, ECDSA
+  P-256): o servidor pode deixar o Hyper livre (`free`), só para contas
+  liberadas (`entitled`) ou desligado (`off`), e pode exigir uma versão mínima
+  do app (tela "Atualização obrigatória"). O modo `free` só vale com uma
+  configuração emitida há no máximo 7 dias: ficar offline não mantém o Hyper
+  liberado, e a versão mínima bloqueia quem ficar na 0.3.2 depois que o Hyper
+  passar a ser pago. Como usar: `docs/play-store/APP_CONFIG.md`.
+- Nova tela "Licenças de código aberto" (Home e Ajustes) com tudo o que o
+  AureaHyper usa.
+- O Upscale saiu da tela de Exportar: agora ele está no AureaHyper e no efeito
+  Hyper Upscale.
+
+### Marcadores com nome
+- O nome do marcador aparece na régua da timeline, ao lado dele.
+- Tocar no marcador abre o editor, com o campo "Nome do marcador".
 
 ### Exportação em segundo plano e retomada
 - **Android**: ir para outro app ou apagar a tela não cancela mais a exportação.
@@ -66,6 +102,14 @@ Ao terminar, a exportação diz quando precisou:
 
 ### Mais estável
 - **FFmpeg 9.0.2** nas três versões do Android (64 bits, 32 bits e emulador).
+- **Celulares Qualcomm** (Moto g52 e outros com encoder `OMX.qcom`): no modo de
+  taxa variável o encoder do aparelho descartava quadros e a exportação parava
+  no meio (fila cheia). Agora esses encoders usam taxa constante na mesma taxa
+  alvo; se o aparelho recusar, abre no modo de antes.
+- Se a Surface do encoder parar no meio do vídeo, a próxima tentativa usa a
+  entrada por buffer do mesmo encoder, sem baixar resolução.
+- Uma retomada cujo trecho salvo foi gravado por outro caminho do encoder
+  recomeça do zero, em vez de terminar em "encoder indisponível".
 - Um quadro com Roto Brush ou IA demorado não é mais tratado como travado.
 - A gravação final de vídeos grandes não é mais confundida com o encoder parado.
 - Cancelar durante a conferência final não publica mais o vídeo.
@@ -73,6 +117,9 @@ Ao terminar, a exportação diz quando precisou:
 - iPhone: o aviso de aparelho quente volta a funcionar.
 
 ### Observações
+- AureaHyper: o motor (Turbo e as redes Lite/Max) ainda está em finalização e
+  teste nesta versão; o modelo de rostos (GFPGAN) é baixado sob demanda e ainda
+  não está hospedado, então "Rostos" não faz nada até ele estar disponível.
 - Nada desta versão foi testado ainda em aparelho físico (ARM 32/64, vivo, Oppo,
   MediaTek, PowerVR, iPhone).
 - A troca de encoder no meio do vídeo recomeça do início (fluxos de encoders

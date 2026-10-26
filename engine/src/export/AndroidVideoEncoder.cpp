@@ -815,37 +815,56 @@ struct Encoder::Impl {
         else std::snprintf(description, sizeof(description), "buffer:%s:0x%x", info.name, static_cast<unsigned>(colorFormat));
         codec = AMediaCodec_createCodecByName(info.name);
         if (!codec) return fail(Errc::EncoderUnavailable, "MediaCodec nao criou %s", info.name);
-        AMediaFormat* format = AMediaFormat_new();
-        if (!format) return fail(Errc::OutOfMemory, "MediaFormat do encoder");
-        AMediaFormat_setString(format, "mime", r.hevc ? "video/hevc" : "video/avc");
-        AMediaFormat_setInt32(format, "width", static_cast<i32>(r.width));
-        AMediaFormat_setInt32(format, "height", static_cast<i32>(r.height));
-        AMediaFormat_setInt32(format, "color-format", colorFormat);
-        AMediaFormat_setInt32(format, "bitrate", static_cast<i32>(std::min<u32>(r.bitrateBps ? r.bitrateBps : 12'000'000u, 0x7fffffffu)));
         // Modo de taxa só quando anunciado; senão o padrão do encoder.
         i32 mode = -1;
         if (r.rateMode == 0) mode = info.cbr ? kBitrateCbr : info.vbr ? kBitrateVbr : -1;
         else mode = info.vbr ? kBitrateVbr : info.cbr ? kBitrateCbr : -1;
-        if (mode >= 0) AMediaFormat_setInt32(format, "bitrate-mode", mode);
-        const f64 roundedFps = std::round(r.fps);
-        if (std::abs(r.fps - roundedFps) < 1e-6) AMediaFormat_setInt32(format, "frame-rate", static_cast<i32>(roundedFps));
-        else AMediaFormat_setFloat(format, "frame-rate", static_cast<float>(r.fps));
-        const f64 gopSeconds = r.keyframeFrames ? static_cast<f64>(r.keyframeFrames) / r.fps : 2.0;
-        const f64 roundedGop = std::round(gopSeconds);
-        if (roundedGop >= 1.0 && std::abs(gopSeconds - roundedGop) < 1e-6)
-            AMediaFormat_setInt32(format, "i-frame-interval", static_cast<i32>(roundedGop));
-        else AMediaFormat_setFloat(format, "i-frame-interval", static_cast<float>(std::max(gopSeconds, 0.001)));
-        if (r.baseline && !r.hevc && info.baselineProfile) {
-            AMediaFormat_setInt32(format, "profile", info.baselineProfile);
-            if (info.baselineLevel) AMediaFormat_setInt32(format, "level", info.baselineLevel);
+        const bool forcedCbr = android_codec::device_rate_mode(info.name, r.rateMode) != r.rateMode;
+        const auto configure = [&](i32 rate) noexcept -> media_status_t {
+            AMediaFormat* format = AMediaFormat_new();
+            if (!format) return AMEDIA_ERROR_UNKNOWN;
+            AMediaFormat_setString(format, "mime", r.hevc ? "video/hevc" : "video/avc");
+            AMediaFormat_setInt32(format, "width", static_cast<i32>(r.width));
+            AMediaFormat_setInt32(format, "height", static_cast<i32>(r.height));
+            AMediaFormat_setInt32(format, "color-format", colorFormat);
+            AMediaFormat_setInt32(format, "bitrate", static_cast<i32>(std::min<u32>(r.bitrateBps ? r.bitrateBps : 12'000'000u, 0x7fffffffu)));
+            if (rate >= 0) AMediaFormat_setInt32(format, "bitrate-mode", rate);
+            const f64 roundedFps = std::round(r.fps);
+            if (std::abs(r.fps - roundedFps) < 1e-6) AMediaFormat_setInt32(format, "frame-rate", static_cast<i32>(roundedFps));
+            else AMediaFormat_setFloat(format, "frame-rate", static_cast<float>(r.fps));
+            const f64 gopSeconds = r.keyframeFrames ? static_cast<f64>(r.keyframeFrames) / r.fps : 2.0;
+            const f64 roundedGop = std::round(gopSeconds);
+            if (roundedGop >= 1.0 && std::abs(gopSeconds - roundedGop) < 1e-6)
+                AMediaFormat_setInt32(format, "i-frame-interval", static_cast<i32>(roundedGop));
+            else AMediaFormat_setFloat(format, "i-frame-interval", static_cast<float>(std::max(gopSeconds, 0.001)));
+            if (r.baseline && !r.hevc && info.baselineProfile) {
+                AMediaFormat_setInt32(format, "profile", info.baselineProfile);
+                if (info.baselineLevel) AMediaFormat_setInt32(format, "level", info.baselineLevel);
+            }
+            if (const i32 standard = color_standard(r.color.matrix)) AMediaFormat_setInt32(format, "color-standard", standard);
+            AMediaFormat_setInt32(format, "color-range", r.color.fullRange ? 1 : 2);
+            if (const i32 transfer = color_transfer(r.color.transfer)) AMediaFormat_setInt32(format, "color-transfer", transfer);
+            // Sem quadros B: o sink exige um pacote por quadro, na ordem.
+            AMediaFormat_setInt32(format, "max-bframes", 0);
+            const media_status_t done = AMediaCodec_configure(codec, format, nullptr, nullptr, AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
+            AMediaFormat_delete(format);
+            return done;
+        };
+        media_status_t configured = AMEDIA_ERROR_UNKNOWN;
+        if (forcedCbr) {
+            // android_codec::vbr_drops_frames: o VBR deste encoder descarta quadros.
+            AUREA_LOG_INFO("export: %s descarta quadros em VBR; usando CBR na mesma taxa", info.name);
+            configured = configure(kBitrateCbr);
+            if (configured != AMEDIA_OK) {
+                AUREA_LOG_WARN("export: %s recusou CBR (%d); abre no modo pedido", info.name, static_cast<int>(configured));
+                (void)AMediaCodec_delete(codec);
+                codec = AMediaCodec_createCodecByName(info.name);
+                if (!codec) return fail(Errc::EncoderUnavailable, "MediaCodec nao criou %s", info.name);
+                configured = configure(mode);
+            }
+        } else {
+            configured = configure(mode);
         }
-        if (const i32 standard = color_standard(r.color.matrix)) AMediaFormat_setInt32(format, "color-standard", standard);
-        AMediaFormat_setInt32(format, "color-range", r.color.fullRange ? 1 : 2);
-        if (const i32 transfer = color_transfer(r.color.transfer)) AMediaFormat_setInt32(format, "color-transfer", transfer);
-        // Sem quadros B: o sink exige um pacote por quadro, na ordem.
-        AMediaFormat_setInt32(format, "max-bframes", 0);
-        const media_status_t configured = AMediaCodec_configure(codec, format, nullptr, nullptr, AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
-        AMediaFormat_delete(format);
         if (configured != AMEDIA_OK)
             return fail(Errc::EncoderUnavailable, "MediaCodec configure recusou %s (%d)", description, static_cast<int>(configured));
         if (const Status s = surfaceInput ? open_surface() : read_buffer_layout(); !s.ok()) return s;

@@ -18,6 +18,9 @@
 //    KV (AUREA_KV)  sess:<sha256(token)>  a sessão (TTL 30 dias). O token em si
 //                   NUNCA é gravado: só o hash dele. Vazou o KV, não vazou sessão.
 //                   rl:<escopo>:<sha256(id)>:<janela>  contadores de limite (TTL).
+//    D1 (AUREA_DB)  entitlements(user_id, product, ...) — direitos pagos, lidos e
+//                   concedidos em entitlements.js (/api/entitlements). Apagados
+//                   junto com a conta em `excluirConta`.
 //
 //  Senha: PBKDF2-SHA256 pelo WebCrypto, sal aleatório de 16 bytes por usuário,
 //  100 000 iterações (o teto do Workers). Guardada como
@@ -341,8 +344,9 @@ async function apagarSessao(env, s) {
 //    1. os arquivos da comunidade no R2 (avatar, presets, projetos publicados);
 //    2. numa transação do D1: verificações, curtidas, comentários (os dela e os
 //       feitos nas publicações dela), publicações, seguidores, arquivos,
-//       perfil, papéis, TODAS as sessões, relatos de problema com o e-mail da
-//       conta e, por fim, o usuário — e desconta 1 do contador de cadastrados.
+//       perfil, papéis, direitos pagos (entitlements), TODAS as sessões,
+//       relatos de problema com o e-mail da conta e, por fim, o usuário — e
+//       desconta 1 do contador de cadastrados.
 //  Os relatórios de crash no KV não são indexados por conta e expiram sozinhos
 //  em CRASH_TTL_DAYS (30 dias). O que já foi enviado por e-mail ao dono não
 //  volta — a política de privacidade precisa dizer isso.
@@ -381,6 +385,16 @@ async function excluirConta(req, env) {
     // Tabelas de moderação ausentes.
   }
 
+  // Direitos pagos (migração 0007). Sondado antes, como os arquivos acima: um
+  // banco sem a tabela não pode derrubar a transação principal.
+  let temDireitos = true;
+  try {
+    await q("SELECT 1 FROM entitlements LIMIT 1").first();
+  } catch {
+    temDireitos = false;
+  }
+  const direitos = temDireitos ? [q("DELETE FROM entitlements WHERE user_id = ?", s.uid)] : [];
+
   const minhasPublicacoes = "SELECT id FROM community_posts WHERE uid = ?";
   const comunidade = [
     q("DELETE FROM community_verifications WHERE uid = ? OR admin = ?", s.uid, s.uid),
@@ -395,6 +409,7 @@ async function excluirConta(req, env) {
   ];
   const conta = [
     q("DELETE FROM account_roles WHERE uid = ?", s.uid),
+    ...direitos,
     q("DELETE FROM sessions WHERE uid = ?", s.uid),
     q("DELETE FROM user_reports WHERE email = ? OR email LIKE ?", s.email, `${s.email} (%`),
     q("DELETE FROM users WHERE id = ?", s.uid),
@@ -406,6 +421,7 @@ async function excluirConta(req, env) {
     // Sem as tabelas da comunidade/papéis (migrações antigas): só a conta.
     try {
       await db.batch([
+        ...direitos,
         q("DELETE FROM sessions WHERE uid = ?", s.uid),
         q("DELETE FROM users WHERE id = ?", s.uid),
         q("UPDATE counters SET value = MAX(value - 1, 0) WHERE name = 'users'"),

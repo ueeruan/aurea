@@ -29,7 +29,7 @@ import com.aurea.aurea.R
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.editor.EditorScreen
 import com.aurea.aurea.home.HomeScreen
-import com.aurea.aurea.upscale.UpscaleScreen
+import com.aurea.aurea.hyper.HyperScreen
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.Screen
 import com.aurea.aurea.ui.ds.AureaAlert
@@ -43,6 +43,13 @@ import com.aurea.aurea.ui.theme.AureaTheme
 @Composable
 fun AureaApp(store: EditorStore) {
     AureaTheme {
+        // 0.3.2: versão abaixo da mínima da config remota assinada = só a tela de atualizar.
+        val forced = com.aurea.aurea.config.AppConfigStore.config
+            ?.takeIf { com.aurea.aurea.config.AppConfigStore.updateRequired }
+        if (forced != null) {
+            com.aurea.aurea.config.ForcedUpdateScreen(forced)
+            return@AureaTheme
+        }
         Box(Modifier.fillMaxSize().background(AureaColors.Background)) {
             // A página nova entra pelo lado do fim da leitura: direita em LTR,
             // esquerda em árabe (slideInHorizontally usa x absoluto).
@@ -62,7 +69,7 @@ fun AureaApp(store: EditorStore) {
                 when (screen) {
                     Screen.Home -> HomeScreen(store)
                     Screen.Editor -> EditorScreen(store)
-                    Screen.Upscale -> UpscaleScreen(store)
+                    Screen.Hyper -> HyperScreen(store)
                 }
             }
             store.toast?.let { msg ->

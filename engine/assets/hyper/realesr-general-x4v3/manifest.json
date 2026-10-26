@@ -1,0 +1,65 @@
+{
+  "name": "realesr-general-x4v3 + realesr-general-wdn-x4v3",
+  "version": "Real-ESRGAN v0.2.5.0",
+  "license": "BSD-3-Clause",
+  "sourceUrl": [
+    "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth",
+    "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-wdn-x4v3.pth"
+  ],
+  "sourceSha256": [
+    "8dc7edb9ac80ccdc30c3a5dca6616509367f05fbc184ad95b731f05bece96292",
+    "1641f8c4464b9f097c9fdda5589273713f67cf59f3d909e0bd688f0cee269dca"
+  ],
+  "architecture": "SRVGGNetCompact num_feat=64 num_conv=32 upscale=4 PReLU",
+  "conversion": "torch.jit.trace -> pnnx 20250430 fp16=0 -> ncnnoptimize(fp32) -> .bin16 (cada palavra do .bin fp32 em meia precisão)",
+  "runtime": "o motor decodifica os dois .bin16, mistura w=denoise (x4v3) e 1-w (wdn) palavra a palavra (a interpolação de pesos do inference_realesrgan.py -dn) e carrega o .bin fp32",
+  "layers": [
+    "BinaryOp",
+    "Convolution",
+    "Input",
+    "Interp",
+    "PReLU",
+    "PixelShuffle",
+    "Split"
+  ],
+  "delivery": "bundled",
+  "reference": {
+    "file": "reference-dn50-32-x4.rgb",
+    "input": "reference_pattern 32x32",
+    "denoise": 0.5,
+    "output": "128x128 RGB8"
+  },
+  "files": [
+    {
+      "file": "srvgg-x4.param",
+      "role": "param",
+      "bytes": 5375,
+      "sha256": "051650e01698c8fd188d6b84bff5a58c3c81612789852d76ec9d463be79ad2a3"
+    },
+    {
+      "file": "x4v3.bin16",
+      "role": "weights-x4v3",
+      "bytes": 2426660,
+      "sha256": "f8d6314e88f7a5b04cdea0d39473b6cfd1fed01da57c0fe58e59195806ebcd03"
+    },
+    {
+      "file": "wdn-x4v3.bin16",
+      "role": "weights-wdn",
+      "bytes": 2426660,
+      "sha256": "1ffe94f2b55e253b01686af1f30152765c1c2fc693597caf19ecc3e3e3ae20a1"
+    },
+    {
+      "file": "reference-dn50-32-x4.rgb",
+      "role": "meter-reference",
+      "bytes": 49152,
+      "sha256": "f189ec8de21c5a3677db66c905122f078944125df652f7ddc74dcf381cdc9867"
+    },
+    {
+      "file": "LICENSE",
+      "role": "license",
+      "bytes": 1519,
+      "sha256": "4a699ec4863d96a91fc265948a0c90033f7e8735d515524dcf3444736406e0c2"
+    }
+  ],
+  "totalBytes": 4909366
+}

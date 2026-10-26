@@ -649,6 +649,8 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_enhance_effect(registry);
     // Copiar fundo (Utilitário) — 0.3.0. No fim.
     builtin::register_copy_background_effect(registry);
+    // AureaHyper: Hyper Upscale, Hyper Clean e Hyper Motion — 0.3.2. No fim.
+    builtin::register_hyper_effects(registry);
 }
 
 } // namespace aurea

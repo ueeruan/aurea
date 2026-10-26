@@ -902,23 +902,6 @@ untuk mengedit kurvanya.</string>
     <string name="donation_copy_paypal">Salin tautan PayPal</string>
     <string name="donation_export_note">Ekspor tetap berjalan. Gunakan kode atau tautan setelah selesai.</string>
     <string name="donation_copied">Disalin ke papan klip.</string>
-    <string name="ai_upscale_title">Peningkat Resolusi Video AI</string>
-    <string name="upscale_title">Upscale dengan AI</string>
-    <string name="upscale_hint">Pilih video dari galeri dan faktornya. Jaringan saraf membangun ulang setiap bingkai di perangkat dan video resolusi tinggi tersimpan di Movies/Aurea. Video juga menjadi proyek untuk diedit nanti.</string>
-    <string name="upscale_pick">Pilih video</string>
-    <string name="upscale_factor">Faktor</string>
-    <string name="upscale_result">Masukan %1$d × %2$d → keluaran %3$d × %4$d</string>
-    <string name="upscale_start">Tingkatkan resolusi</string>
-    <string name="upscale_preparing">Menyiapkan video…</string>
-    <string name="upscale_processing">Meningkatkan resolusi</string>
-    <string name="upscale_time_note">Butuh beberapa menit: setiap bingkai melewati jaringan saraf di perangkat. Biarkan Aurea terbuka.</string>
-    <string name="upscale_done">Video siap</string>
-    <string name="upscale_open">Buka</string>
-    <string name="upscale_share">Bagikan</string>
-    <string name="upscale_again">Video lain</string>
-    <string name="ai_upscale_note">Model untuk anime dan ilustrasi. Memproses per bagian tanpa membekukan antarmuka. Resolusi di bawah adalah kualitas keluaran akhir.</string>
-    <string name="ai_upscale_dimensions">AI %1$dx · masukan %2$d × %3$d → keluaran %4$d × %5$d</string>
-    <string name="licenses_title">Lisensi · AI</string>
     <string name="scene_workspace">Adegan 3D</string>
     <string name="scene_orbit_x">Orbit X</string>
     <string name="scene_orbit_y">Orbit Y</string>
@@ -1153,7 +1136,7 @@ untuk mengedit kurvanya.</string>
     <string name="consent_title">Persetujuan dan Tanggung Jawab</string>
     <string name="consent_accept">Setuju dan lanjutkan</string>
     <string name="consent_body">Aurea adalah alat profesional untuk mengedit, membuat, dan memproduksi konten digital. Dengan menggunakan aplikasi ini, pengguna mengakui bahwa mereka bertanggung jawab penuh atas konten yang mereka buat, edit, impor, ekspor, publikasikan, atau bagikan melalui platform.\n\nAurea tidak mengendalikan, mendorong, mendukung, atau mengizinkan penggunaan alat ini untuk kegiatan ilegal, abusif, curang, merugikan, atau yang melanggar hak pihak ketiga.\n\nPengguna bertanggung jawab memastikan bahwa mereka memiliki izin, lisensi, dan hak yang diperlukan atas materi yang digunakan, termasuk gambar, video, musik, merek, model, berkas, dan konten terlindungi lainnya.\n\nKebebasan kreatif yang ditawarkan Aurea tidak berarti persetujuan, keterlibatan, atau tanggung jawab aplikasi atas apa yang dipilih setiap pengguna untuk dibuat atau dilakukan dengan alat ini.\n\nPengguna setuju untuk menggunakan Aurea sesuai hukum yang berlaku dan bertanggung jawab atas tindakan mereka sendiri serta konten yang diproduksi atau didistribusikan melalui aplikasi.\n\nSejauh diizinkan oleh hukum yang berlaku, Aurea dan pihak yang bertanggung jawab atasnya tidak bertanggung jawab atas tindakan yang dilakukan semata-mata oleh pengguna, penyalahgunaan alat, atau akibat dari konten yang dibuat, dipublikasikan, atau dibagikan oleh pengguna sendiri.\n\nAurea menyediakan alatnya. Pengguna bertanggung jawab atas cara mereka memilih untuk menggunakannya.\n\nDengan melanjutkan, pengguna menyatakan bahwa mereka telah membaca, memahami, dan menyetujui ketentuan ini.</string>
-    <string name="release_notes_body">Aurea 0.2.6 (2194) • 19/10/2026\n\n• Proyek: semua proyek bisa dibuka lagi, termasuk yang disimpan di 0.2.4 dan di versi pertama Aurea. Versi 0.2.5 dirilis tanpa perubahan 0.2.0 sampai 0.2.4 dan menolak file tersebut.\n• Semua dari 0.2.0 sampai 0.2.4 yang hilang di 0.2.5 sudah kembali: perbaikan ekspor, pratinjau efek animasi, opsi mematikan pratinjau, clipping mask, TimeSlice, dan perbaikan Puppet.\n• Ekspor: tidak lagi berakhir dengan error jika masih ada cara lain untuk mengekspor. Jika perangkat gagal, aplikasi mengulang sendiri dalam mode yang lebih kompatibel (H.264, encoder perangkat lunak, 720p, 480p) dan memberi tahu ukuran video yang dihasilkan.\n• Ekspor di atas kemampuan perangkat keluar dalam ukuran terbesar yang memungkinkan, bukan error. Perangkat 32-bit dan bermemori kecil memakai lebih sedikit memori saat ekspor, dan Android 8 dan 9 kembali memakai encoder perangkat.\n• Antarmuka Edit: klip video menampilkan gelombang audio di bawah thumbnail, dan klip audio menampilkan gelombang penuh.\n• Efek: kartu kembali menampilkan pratinjau sebelum | sesudah, dengan \"Sebelum\" dan \"Sesudah\", seperti di 0.2.4.\n• Dua antarmuka: saat membuat proyek, pilih Komposisi (utama, default) atau Edit. Ganti kapan saja di pengaturan proyek.\n• Antarmuka Edit: trek utama dengan potongan berurutan, playhead di tengah, transisi antar potongan, dan menu bawah bertingkat.\n• Browser efek baru: unggulan, terbaru dan favorit, serta kategori dengan pratinjau asli.\n• Efek baru Drawing Progress: menggambar vektor goresan demi goresan; pada gambar, menampilkan dengan sapuan.\n• Video 4K dan berat: aplikasi membuat salinan ringan agar edit tetap lancar; ekspor memakai file asli.\n• Teks otomatis lebih baik: melewati hening, menjaga konteks, memotong kalimat lebih baik, plus lebih banyak bahasa dan mode Akurat.</string>
+    <string name="release_notes_body">Aurea Beta 0.3.2 (2198) • 26/10/2026\n\n• AureaHyper (baru, gratis untuk sementara): menggantikan Upscale AI di Beranda. Pilih video dan apa yang ingin dilakukan — lebih tajam 2× atau 4×, 60 fps, gerak lambat, pulihkan video lama, anime atau stabilkan —, lihat pratinjau sebelum/sesudah dengan perkiraan waktu dan pantau prosesnya. Tiga jalur: Turbo, Lite dan Max.\n• Di editor: efek lapisan Hyper Upscale, Hyper Motion dan Hyper Clean.\n• Penanda bernama: nama tampil di penggaris timeline.\n• Android: ekspor tetap berjalan saat aplikasi di latar belakang atau layar mati.\n• Ekspor yang terhenti dilanjutkan dari titik berhenti, bukan mulai dari awal.\n• Motion blur 3D cepat (vektor), hingga 24× lebih cepat: Motion blur → Lanjutan.\n• Kualitas video ditentukan sebelum ekspor dimulai dan tidak lagi berubah di tengah karena perangkat sibuk. Jika ada yang harus dikurangi, ekspor akan memberi tahu.\n• FFmpeg 9 dan lebih sedikit error \"macet\" palsu saat ekspor.\n• Ponsel Qualcomm (seperti Moto g52): ekspor tidak lagi berhenti di tengah video.\n• Upscale keluar dari layar Ekspor: sekarang ada di AureaHyper dan efek Hyper Upscale.\n• Layar baru Lisensi sumber terbuka.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Isi</string>
@@ -4473,4 +4456,26 @@ untuk mengedit kurvanya.</string>
     <string name="fxl_radial_distortion_k2">Distorsi radial K2</string>
     <string name="fxo_remove_distortion">Hapus distorsi</string>
     <string name="fxo_apply_distortion">Terapkan distorsi</string>
+    <string name="fxo_2">2×</string>
+    <string name="fxo_4">4×</string>
+    <string name="fxt_upscales_the_layer_when_it_appears_large">Memperbesar layer saat tampil lebih besar dari sumbernya (skala layer di komposisi). Tanpa pembesaran di layar, hanya ketajaman yang bekerja.</string>
+    <string name="fxl_content">Konten</string>
+    <string name="fxo_general">Umum</string>
+    <string name="fxo_anime">Anime</string>
+    <string name="fxo_turbo_preview">Turbo (pratinjau)</string>
+    <string name="fxo_lite">Lite</string>
+    <string name="fxo_max">Max</string>
+    <string name="fxt_the_preview_always_uses_turbo_lite_and_m">Pratinjau selalu memakai Turbo. Lite dan Max (jaringan) berlaku di job Hyper pada Beranda; ekspor editor memakai Turbo.</string>
+    <string name="fxl_remove_compression_blocks">Hapus blok kompresi</string>
+    <string name="fxl_deinterlace">Deinterlace</string>
+    <string name="fxo_always">Selalu</string>
+    <string name="fxt_automatic_acts_only_when_the_frame_shows">Otomatis hanya bekerja saat frame menunjukkan pola sisir video interlaced.</string>
+    <string name="fxt_frames_on_each_side_aligned_by_motion_1">Frame di tiap sisi yang diselaraskan oleh gerakan (1 = 3 frame, 2 = 5 frame).</string>
+    <string name="fxt_the_preview_always_uses_turbo_lite_and_m_2">Pratinjau selalu memakai Turbo. Lite dan Max (jaringan) berlaku di job Hyper pada Beranda.</string>
+    <string name="fxl_slow_motion">Gerak lambat</string>
+    <string name="fxo_1_extra_frames_only">1× (hanya frame tambahan)</string>
+    <string name="fxo_8">8×</string>
+    <string name="fxt_new_frames_between_the_source_frames_bui">Frame baru di antara frame sumber berdasarkan gerakan (vektor blok dua arah). 1×: layer mengikuti fps komposisi (mis. video 30 di komposisi 60). Gerak lambat berjalan di dalam layer; suara layer tidak berubah.</string>
+    <string name="fxl_detect_repeated_frames">Deteksi frame berulang</string>
+    <string name="fxt_the_preview_always_uses_turbo">Pratinjau selalu memakai Turbo.</string>
 </resources>

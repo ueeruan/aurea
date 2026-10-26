@@ -268,8 +268,24 @@ set(AUREA_CORE_SOURCES
     src/tracking/RealCameraCapture.cpp
     src/engine/EngineMotion.cpp
     src/engine/EngineMotion.cpp
+    # AureaHyper (0.3.2): grafo, registro das etapas, plano/estimativa,
+    # estabilização, detecção de entrelaçado, efeitos de camada e a API.
+    src/hyper/Hyper.cpp
+    src/hyper/HyperRegistry.cpp
+    src/hyper/HyperGraph.cpp
+    src/hyper/HyperPlan.cpp
+    src/hyper/HyperAnalysis.cpp
+    src/hyper/HyperStabilize.cpp
+    src/hyper/HyperTurbo.cpp
+    src/effects/builtin/HyperEffects.cpp
+    src/engine/EngineHyper.cpp
     ${AUREA_SHADER_SOURCES}
 )
+# As redes do Hyper (outro dono: src/hyper/neural/**). Entram sozinhas; com
+# NeuralStages.cpp presente ele define register_neural_stages (senão o padrão
+# vazio de HyperRegistry.cpp).
+file(GLOB_RECURSE AUREA_HYPER_NEURAL_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/hyper/neural/*.cpp)
+list(APPEND AUREA_CORE_SOURCES ${AUREA_HYPER_NEURAL_SOURCES})
 
 # -----------------------------------------------------------------------------
 # Terceiros (third_party/README.md). Compilados à parte, com os avisos deles:
@@ -324,6 +340,9 @@ target_include_directories(aurea_core
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/hyper/neural/NeuralStages.cpp)
+    set_source_files_properties(src/hyper/HyperRegistry.cpp src/engine/EngineHyper.cpp PROPERTIES COMPILE_DEFINITIONS AUREA_HYPER_HAS_NEURAL=1)
+endif()
 target_compile_definitions(aurea_core
     PUBLIC
         AUREA_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
@@ -385,6 +404,11 @@ set(AUREA_IMPORT_BOUNDARIES
 list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportCheckpoint.cpp src/export/ExportSinkStartup.cpp
     src/export/FFmpegExportSink.cpp src/export/AndroidVideoEncoder.cpp
     src/export/OfflineAudioSnapshot.cpp src/export/OfflineAudioBlockSource.cpp)
+# AureaHyper: a fronteira das etapas (alocação de quadros, registro de redes,
+# JSON do medidor, job) traduz exceção em Status.
+list(APPEND AUREA_IMPORT_BOUNDARIES src/hyper/Hyper.cpp src/hyper/HyperRegistry.cpp src/hyper/HyperGraph.cpp
+    src/hyper/HyperPlan.cpp src/hyper/HyperAnalysis.cpp src/hyper/HyperStabilize.cpp src/engine/EngineHyper.cpp
+    ${AUREA_HYPER_NEURAL_SOURCES})
 if(MSVC)
     set_source_files_properties(${AUREA_IMPORT_BOUNDARIES} PROPERTIES COMPILE_OPTIONS /EHsc)
 else()

@@ -109,15 +109,7 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
     var languageSheet by remember { mutableStateOf(false) }
     var stressSheet by remember { mutableStateOf(false) }
     var licenses by remember { mutableStateOf(false) }
-    if (licenses) androidx.compose.material3.AlertDialog(
-        onDismissRequest = { licenses = false },
-        title = { Text(stringResource(R.string.licenses_title)) },
-        text = { Text(stringResource(R.string.licenses_ai_body),
-            modifier = Modifier.height(420.dp).verticalScroll(rememberScrollState())) },
-        confirmButton = { androidx.compose.material3.TextButton(onClick = { licenses = false }) {
-            Text(stringResource(R.string.editor_fechar))
-        } },
-    )
+    if (licenses) LicensesScreen { licenses = false }
     val context = LocalContext.current
     val version = remember { readVersion(context) }
     var taps by remember { mutableIntStateOf(0) }
@@ -251,7 +243,7 @@ internal fun SettingsTab(store: EditorStore, vm: HomeViewModel, listState: LazyL
                     subtitle = stringResource(R.string.home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo),
                 )
                 GroupDivider()
-                TapRow(stringResource(R.string.licenses_title), "MiDaS · U2-Net · Tencent/ncnn") { licenses = true }
+                TapRow(stringResource(R.string.licenses_oss_title), "AureaHyper · FFmpeg · ncnn · MiDaS · U2-Net") { licenses = true }
                 GroupDivider()
                 // Google Play: a política publicada também fica acessível dentro do app.
                 TapRow(stringResource(R.string.settings_privacy_policy), stringResource(R.string.settings_privacy_policy_note)) {

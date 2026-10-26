@@ -407,6 +407,7 @@ private:
     i64 spilledSamples_ = 0;
     bool spillAudio_ = false;
     bool wantsAudio_ = false;
+    bool resumeMismatch_ = false;            ///< o registro não continua com este encoder (start_log)
     bool logStarted_ = false;                ///< o registro abre no 1o pacote (com os parâmetros do encoder que deu certo)
     export_log::ScanResult resumeScan_{};    ///< varredura da retomada, feita antes de qualquer degrau mexer no registro
 
@@ -508,7 +509,9 @@ private:
     void close_video() noexcept;
     void reset_video_clock() noexcept;
     void describe_rung(const RungEntry& rung, char* out, usize capacity) const noexcept;
-    void note_failure(const char* why) noexcept;
+    /// `remember = false`: o degrau não falhou (o registro da retomada é que
+    /// não continua com ele) — o processo não passa a pulá-lo.
+    void note_failure(const char* why, bool remember = true) noexcept;
     void publish_path(const char* state) const noexcept;
     bool fallback_allowed(Status status) const noexcept;
     Status fallback(Status reason) noexcept;
@@ -524,6 +527,16 @@ private:
     void fill_native_parameters(AVCodecParameters* par) const noexcept;
     void fill_log_info(export_log::StreamInfo& info) const noexcept;
     u64 stall_ns() const noexcept { return probation_ ? startupStallNs : codecStallNs; }
+    /// O degrau atual é a Surface de um encoder de hardware e a escada desta
+    /// sessão tem a entrada por buffer do MESMO encoder logo depois.
+    bool surface_rung_with_buffer_fallback() const noexcept {
+        if (rung_ >= rungs_.size()) return false;
+        const RungEntry& now = rungs_[rung_];
+        if (now.kind != Rung::Surface && now.kind != Rung::SurfaceDirect) return false;
+        for (usize i = rung_ + 1; i < rungs_.size(); ++i)
+            if (rungs_[i].kind == Rung::Buffer && rungs_[i].hardware && std::strcmp(rungs_[i].codec, now.codec) == 0) return true;
+        return false;
+    }
     Status mux(AVPacket*, AVRational from, AVStream*) noexcept;
     Status append_audio(const i16* pcm, int samples) noexcept;
     Status write_audio_direct(const i16* pcm, u32 frames) noexcept;
@@ -764,8 +777,11 @@ Status FFmpegSink::try_video(const char* name, bool hardware, const char* native
         av_dict_set(&options, "ndk_codec", "1", 0);
         // Modo de taxa só quando o encoder o anuncia (consultado na escada).
         const bool known = nativeName && std::strcmp(nativeName, deviceCodec_.name) == 0;
-        if (!known || (video_.rateMode == 0 ? deviceCodec_.cbr : deviceCodec_.vbr))
-            av_dict_set(&options, "bitrate_mode", video_.rateMode == 0 ? "cbr" : "vbr", 0);
+        // O mesmo componente do aparelho: no OMX da Qualcomm, CBR no lugar do
+        // VBR que descarta quadros (android_codec::vbr_drops_frames).
+        const unsigned rateMode = android_codec::device_rate_mode(nativeName, video_.rateMode);
+        if (!known || rateMode != video_.rateMode || (rateMode == 0 ? deviceCodec_.cbr : deviceCodec_.vbr))
+            av_dict_set(&options, "bitrate_mode", rateMode == 0 ? "cbr" : "vbr", 0);
     } else if (std::strcmp(name, "libx264") == 0) {
         av_dict_set(&options, "preset", "veryfast", 0);
         av_dict_set(&options, "tune", "zerolatency", 0);
@@ -1062,6 +1078,7 @@ Status FFmpegSink::open_video(usize firstRung) noexcept {
     for (usize i = firstRung; i < rungs_.size(); ++i) {
         if (cancelled()) break;
         rung_ = i;
+        bool resumeMismatch = false;
         last = open_rung(rungs_[i]);
         if (last.ok() && logMode_ && video_.resumeFrame && !extradata_.empty()) {
             // Retomada: outro SPS/PPS não continua o registro. Encoder do
@@ -1072,6 +1089,7 @@ Status FFmpegSink::open_video(usize firstRung) noexcept {
             if (!resumeScan_.info.same_stream(candidate)) {
                 close_video();
                 last = Status{Errc::UnsupportedFormat, "o encoder desta sessao difere do registro"};
+                resumeMismatch = true;
             }
         }
         if (last.ok()) {
@@ -1084,7 +1102,7 @@ Status FFmpegSink::open_video(usize firstRung) noexcept {
         const auto text = last.detail().empty() ? last.message() : last.detail();
         char why[160];
         std::snprintf(why, sizeof(why), "%.*s", static_cast<int>(text.size()), text.data());
-        note_failure(why);
+        note_failure(why, !resumeMismatch);
         if (last.code() == Errc::OutOfMemory) sawOutOfMemory = true;
     }
     rung_ = rungs_.size();
@@ -1093,13 +1111,13 @@ Status FFmpegSink::open_video(usize firstRung) noexcept {
         "FFmpeg nao abriu encoder solicitado nem fallback por software");
 }
 
-void FFmpegSink::note_failure(const char* why) noexcept {
+void FFmpegSink::note_failure(const char* why, bool remember) noexcept {
     AUREA_LOG_WARN("export: degrau %s falhou: %s", rungName_, why);
     const usize used = std::strlen(attempts_);
     if (used + 8 < sizeof(attempts_))
         std::snprintf(attempts_ + used, sizeof(attempts_) - used, "%s%s=%.60s", used ? "; " : "", rungName_, why);
-    if (rung_ < rungs_.size() && (rungs_[rung_].kind == Rung::SurfaceDirect || rungs_[rung_].kind == Rung::Surface ||
-                                  rungs_[rung_].kind == Rung::Buffer) && !cancelled()) {
+    if (remember && rung_ < rungs_.size() && (rungs_[rung_].kind == Rung::SurfaceDirect || rungs_[rung_].kind == Rung::Surface ||
+                                              rungs_[rung_].kind == Rung::Buffer) && !cancelled()) {
         char key[192];
         describe_rung(rungs_[rung_], key, sizeof(key));
         remember_failed_rung(key);
@@ -1152,7 +1170,7 @@ Status FFmpegSink::fallback(Status reason) noexcept {
         char why[160];
         std::snprintf(why, sizeof(why), "%.*s", static_cast<int>(text.size()), text.data());
         if (!fallback_allowed(reason)) {
-            if (probation_ && !cancelled() && reason.code() != Errc::Cancelled) note_failure(why);
+            if (probation_ && !cancelled() && reason.code() != Errc::Cancelled) note_failure(why, !resumeMismatch_);
             return reason;
         }
         note_failure(why);
@@ -1426,6 +1444,15 @@ Status FFmpegSink::start_log() noexcept {
         char why[200];
         const auto text = opened.detail().empty() ? std::string_view{"abrir registro de pacotes"} : opened.detail();
         std::snprintf(why, sizeof(why), "%.*s", static_cast<int>(text.size()), text.data());
+        // 0.3.2 (Moto g52): o registro da retomada foi gravado por outro
+        // caminho do encoder (Surface -> buffer). O degrau funciona; descer a
+        // escada marcaria todos como falhos e terminaria em "encoder
+        // indisponivel". Refaz igual (Busy): o motor descarta o checkpoint
+        // (continuacao sem gravar nada) e a tentativa recomeca do zero.
+        if (video_.resumeFrame && opened.code() == Errc::UnsupportedFormat) {
+            resumeMismatch_ = true;
+            return error(Errc::Busy, why);
+        }
         return error(opened.code(), why);
     }
     logStarted_ = true;
@@ -1448,9 +1475,20 @@ Status FFmpegSink::send_native(const u8* y, u32 ys, const u8* uv, u32 uvs, i64 u
         unsigned produced = 0;
         if (const Status status = drain_native(false, produced); !status.ok()) return status;
         if (produced) { waited = monotonic_ns(); continue; }
-        if (monotonic_ns() - waited > stall_ns())
+        if (monotonic_ns() - waited > stall_ns()) {
+            // 0.3.2 (Moto g52, OMX.qcom.video.encoder.avc): a entrada por
+            // SURFACE do encoder de hardware parou no meio do vídeo, mas a
+            // entrada por BUFFER do mesmo encoder funciona. Em vez de a escada
+            // descer para software e menos pixels, o degrau é refeito igual
+            // (Busy): este processo já lembra a Surface como falha e a próxima
+            // tentativa abre direto pelo buffer, no mesmo hardware e qualidade.
+            if (!probation_ && surface_rung_with_buffer_fallback()) {
+                note_failure("Surface parou de devolver quadros no meio do video");
+                return error(Errc::Busy, "o encoder do aparelho parou pela Surface; a proxima tentativa usa a entrada por buffer");
+            }
             return error(Errc::Timeout, probation_ ? "o encoder nao entregou o primeiro pacote (partida travada)"
                                                    : "o encoder do aparelho parou de devolver quadros");
+        }
         beat();
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }

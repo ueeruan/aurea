@@ -14525,5 +14525,7 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "ConstellationTests.inl"
 // Aprimorar e o "Substituir quadros duplicados" do Flow Retime (0.3.0).
 #include "EnhanceTests.inl"
+// AureaHyper: os caminhos Turbo (0.3.2).
+#include "HyperGpu.inl"
 // Custo de GPU/CPU de cada efeito do catálogo em 1080p (só imprime).
 #include "EffectPerfGpu.inl"

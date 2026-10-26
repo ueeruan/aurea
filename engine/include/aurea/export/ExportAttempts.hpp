@@ -106,6 +106,11 @@ enum class ExportRetryKind : u32 {
     // inteiras por quadro): o que ajuda é menos amostras, não outro encoder.
     if (static_cast<ExportFailure>(failure) == ExportFailure::Render && code == static_cast<i32>(Errc::Timeout))
         return ExportRetryKind::GpuTime;
+    // 0.3.2: o encoder pediu para refazer igual (Busy): a Surface do hardware
+    // parou e o processo já pula esse caminho — o mesmo degrau, pelo buffer.
+    if (code == static_cast<i32>(Errc::Busy) && (static_cast<ExportFailure>(failure) == ExportFailure::Encoder ||
+                                                 static_cast<ExportFailure>(failure) == ExportFailure::EncoderStalled))
+        return ExportRetryKind::Busy;
     switch (static_cast<ExportFailure>(failure)) {
         case ExportFailure::Encoder: return ExportRetryKind::Encoder;
         case ExportFailure::EncoderStalled: return ExportRetryKind::Stall;

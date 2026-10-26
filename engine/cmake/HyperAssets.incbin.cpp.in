@@ -1,0 +1,42 @@
+// Gerado pelo CMake a partir de engine/cmake/HyperAssets.incbin.cpp.in.
+//
+// Modelos do AureaHyper embutidos (engine/assets/hyper; receita, licenças e
+// hashes em tools/hyper_models.py e nos manifest.json). Os bytes entram no
+// objeto COMO ESTÃO, pelo `.incbin` do montador (Clang/GCC: Android e iOS),
+// cada um seguido de um NUL (os .param são texto). O MSVC (host de testes)
+// usa cmake/EmbedHyperAssets.cmake.
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+
+#if defined(__APPLE__)
+#define AUREA_HYPER_SECTION ".section __TEXT,__const\n"
+#define AUREA_HYPER_SYM(name) "_" name
+#define AUREA_HYPER_LOCAL(name) ".private_extern _" name "\n"
+#else
+#define AUREA_HYPER_SECTION ".section .rodata.aurea_hyper,\"a\"\n"
+#define AUREA_HYPER_SYM(name) name
+#define AUREA_HYPER_LOCAL(name) ".hidden " name "\n"
+#endif
+#define AUREA_HYPER_LABEL(name) ".globl " AUREA_HYPER_SYM(name) "\n" AUREA_HYPER_LOCAL(name) AUREA_HYPER_SYM(name) ":\n"
+
+__asm__(
+    AUREA_HYPER_SECTION
+@AUREA_HYPER_ASM@    ".text\n");
+
+@AUREA_HYPER_DECL@
+namespace {
+struct Entry { const char* id; const unsigned char* begin; const unsigned char* end; };
+const Entry kEntries[] = {
+@AUREA_HYPER_TABLE@};
+}
+
+bool aurea_hyper_embedded_lookup(const char* id, const unsigned char** data, std::size_t* size) {
+    for (const Entry& e : kEntries) {
+        if (std::strcmp(e.id, id) != 0) continue;
+        *data = e.begin;
+        *size = static_cast<std::size_t>(reinterpret_cast<std::uintptr_t>(e.end) - reinterpret_cast<std::uintptr_t>(e.begin));
+        return true;
+    }
+    return false;
+}

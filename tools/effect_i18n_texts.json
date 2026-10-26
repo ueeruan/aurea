@@ -5831,5 +5831,181 @@
   "hi": "इसके बाद वाले इफ़ेक्ट नीचे की लेयरों पर, सिर्फ़ इस लेयर के आकार के अंदर काम करते हैं। इससे पहले वाले (ब्लर, मास्क) विंडो को आकार देते हैं।",
   "id": "Efek setelah ini bekerja pada layer di bawahnya, hanya di dalam bentuk layer ini. Efek sebelumnya (blur, mask) membentuk jendela.",
   "ar": "التأثيرات بعد هذا تعمل على الطبقات التي تحتها، داخل شكل هذه الطبقة فقط. والتي قبله (التمويه، القناع) تشكّل النافذة."
+ },
+ "1× (só quadros a mais)": {
+  "ar": "1× (إطارات إضافية فقط)",
+  "en": "1× (extra frames only)",
+  "es": "1× (solo cuadros extra)",
+  "hi": "1× (सिर्फ़ अतिरिक्त फ़्रेम)",
+  "id": "1× (hanya frame tambahan)",
+  "ru": "1× (только доп. кадры)"
+ },
+ "2×": {
+  "ar": "2×",
+  "en": "2×",
+  "es": "2×",
+  "hi": "2×",
+  "id": "2×",
+  "ru": "2×"
+ },
+ "4×": {
+  "ar": "4×",
+  "en": "4×",
+  "es": "4×",
+  "hi": "4×",
+  "id": "4×",
+  "ru": "4×"
+ },
+ "8×": {
+  "ar": "8×",
+  "en": "8×",
+  "es": "8×",
+  "hi": "8×",
+  "id": "8×",
+  "ru": "8×"
+ },
+ "A prévia usa sempre o Turbo.": {
+  "ar": "المعاينة تستخدم Turbo دائمًا.",
+  "en": "The preview always uses Turbo.",
+  "es": "La vista previa siempre usa Turbo.",
+  "hi": "प्रीव्यू हमेशा Turbo इस्तेमाल करता है।",
+  "id": "Pratinjau selalu memakai Turbo.",
+  "ru": "Превью всегда использует Turbo."
+ },
+ "A prévia usa sempre o Turbo. Lite e Max (redes) valem no job Hyper da Home.": {
+  "ar": "المعاينة تستخدم Turbo دائمًا. Lite وMax (الشبكات) تعمل في مهمة Hyper في الشاشة الرئيسية.",
+  "en": "The preview always uses Turbo. Lite and Max (networks) apply in the Hyper job on Home.",
+  "es": "La vista previa siempre usa Turbo. Lite y Max (redes) valen en el trabajo Hyper del Inicio.",
+  "hi": "प्रीव्यू हमेशा Turbo इस्तेमाल करता है। Lite और Max (नेटवर्क) होम के Hyper जॉब में लागू होते हैं।",
+  "id": "Pratinjau selalu memakai Turbo. Lite dan Max (jaringan) berlaku di job Hyper pada Beranda.",
+  "ru": "Превью всегда использует Turbo. Lite и Max (нейросети) работают в задаче Hyper на главном экране."
+ },
+ "A prévia usa sempre o Turbo. Lite e Max (redes) valem no job Hyper da Home; no export do editor o Turbo é usado.": {
+  "ar": "المعاينة تستخدم Turbo دائمًا. Lite وMax (الشبكات) تعمل في مهمة Hyper في الشاشة الرئيسية؛ تصدير المحرر يستخدم Turbo.",
+  "en": "The preview always uses Turbo. Lite and Max (networks) apply in the Hyper job on Home; the editor export uses Turbo.",
+  "es": "La vista previa siempre usa Turbo. Lite y Max (redes) valen en el trabajo Hyper del Inicio; la exportación del editor usa Turbo.",
+  "hi": "प्रीव्यू हमेशा Turbo इस्तेमाल करता है। Lite और Max (नेटवर्क) होम के Hyper जॉब में लागू होते हैं; एडिटर के एक्सपोर्ट में Turbo इस्तेमाल होता है।",
+  "id": "Pratinjau selalu memakai Turbo. Lite dan Max (jaringan) berlaku di job Hyper pada Beranda; ekspor editor memakai Turbo.",
+  "ru": "Превью всегда использует Turbo. Lite и Max (нейросети) работают в задаче Hyper на главном экране; экспорт редактора использует Turbo."
+ },
+ "Amplia a camada quando ela aparece maior que a fonte (a escala da camada na composição). Sem ampliação na tela, só a nitidez age.": {
+  "ar": "يكبّر الطبقة عندما تظهر أكبر من مصدرها (مقياس الطبقة في التركيب). بدون تكبير على الشاشة، تعمل الحدة فقط.",
+  "en": "Upscales the layer when it appears larger than its source (the layer's scale in the composition). With no enlargement on screen, only sharpening applies.",
+  "es": "Amplía la capa cuando aparece más grande que la fuente (la escala de la capa en la composición). Sin ampliación en pantalla, solo actúa la nitidez.",
+  "hi": "लेयर जब सोर्स से बड़ी दिखती है (कम्पोज़िशन में लेयर का स्केल), तब उसे बड़ा करता है। स्क्रीन पर बड़ा न हो तो सिर्फ़ शार्पनेस काम करती है।",
+  "id": "Memperbesar layer saat tampil lebih besar dari sumbernya (skala layer di komposisi). Tanpa pembesaran di layar, hanya ketajaman yang bekerja.",
+  "ru": "Увеличивает слой, когда он показан крупнее исходника (масштаб слоя в композиции). Без увеличения на экране действует только резкость."
+ },
+ "Anime": {
+  "ar": "أنمي",
+  "en": "Anime",
+  "es": "Anime",
+  "hi": "एनिमे",
+  "id": "Anime",
+  "ru": "Аниме"
+ },
+ "Automático só age quando o quadro tem o pente do vídeo entrelaçado.": {
+  "ar": "الوضع التلقائي يعمل فقط عندما يظهر في الإطار نمط المشط الخاص بالفيديو المتشابك.",
+  "en": "Automatic acts only when the frame shows the comb pattern of interlaced video.",
+  "es": "Automático solo actúa cuando el cuadro tiene el peine del video entrelazado.",
+  "hi": "ऑटोमैटिक तभी काम करता है जब फ़्रेम में इंटरलेस्ड वीडियो की कंघी जैसी लाइनें हों।",
+  "id": "Otomatis hanya bekerja saat frame menunjukkan pola sisir video interlaced.",
+  "ru": "«Авто» срабатывает, только когда в кадре видна «гребёнка» чересстрочного видео."
+ },
+ "Conteúdo": {
+  "ar": "المحتوى",
+  "en": "Content",
+  "es": "Contenido",
+  "hi": "कंटेंट",
+  "id": "Konten",
+  "ru": "Содержимое"
+ },
+ "Câmera lenta": {
+  "ar": "حركة بطيئة",
+  "en": "Slow motion",
+  "es": "Cámara lenta",
+  "hi": "स्लो मोशन",
+  "id": "Gerak lambat",
+  "ru": "Замедление"
+ },
+ "Desentrelaçar": {
+  "ar": "إلغاء التشابك",
+  "en": "Deinterlace",
+  "es": "Desentrelazar",
+  "hi": "डीइंटरलेस",
+  "id": "Deinterlace",
+  "ru": "Деинтерлейсинг"
+ },
+ "Detectar quadros repetidos": {
+  "ar": "اكتشاف الإطارات المكررة",
+  "en": "Detect repeated frames",
+  "es": "Detectar cuadros repetidos",
+  "hi": "दोहराए गए फ़्रेम पहचानें",
+  "id": "Deteksi frame berulang",
+  "ru": "Находить повторяющиеся кадры"
+ },
+ "Geral": {
+  "ar": "عام",
+  "en": "General",
+  "es": "General",
+  "hi": "सामान्य",
+  "id": "Umum",
+  "ru": "Общее"
+ },
+ "Lite": {
+  "ar": "Lite",
+  "en": "Lite",
+  "es": "Lite",
+  "hi": "Lite",
+  "id": "Lite",
+  "ru": "Lite"
+ },
+ "Max": {
+  "ar": "Max",
+  "en": "Max",
+  "es": "Max",
+  "hi": "Max",
+  "id": "Max",
+  "ru": "Max"
+ },
+ "Quadros de cada lado alinhados pelo movimento (1 = 3 quadros, 2 = 5 quadros).": {
+  "ar": "إطارات من كل جانب تتم محاذاتها حسب الحركة (1 = 3 إطارات، 2 = 5 إطارات).",
+  "en": "Frames on each side aligned by motion (1 = 3 frames, 2 = 5 frames).",
+  "es": "Cuadros de cada lado alineados por el movimiento (1 = 3 cuadros, 2 = 5 cuadros).",
+  "hi": "हर तरफ़ के फ़्रेम, मोशन के हिसाब से मिलाए गए (1 = 3 फ़्रेम, 2 = 5 फ़्रेम)।",
+  "id": "Frame di tiap sisi yang diselaraskan oleh gerakan (1 = 3 frame, 2 = 5 frame).",
+  "ru": "Кадры с каждой стороны, выровненные по движению (1 = 3 кадра, 2 = 5 кадров)."
+ },
+ "Quadros novos entre os da fonte pelo movimento (vetores de bloco nos dois sentidos). 1×: a camada fica com o fps da composição (ex.: vídeo 30 numa composição 60). A câmera lenta anda dentro da camada; o som da camada não muda.": {
+  "ar": "إطارات جديدة بين إطارات المصدر حسب الحركة (متجهات كتل في الاتجاهين). 1×: تأخذ الطبقة معدل إطارات التركيب (مثل فيديو 30 في تركيب 60). الحركة البطيئة تحدث داخل الطبقة؛ صوت الطبقة لا يتغير.",
+  "en": "New frames between the source frames, built from motion (block vectors in both directions). 1×: the layer gets the composition fps (e.g. a 30 fps video in a 60 fps composition). Slow motion plays inside the layer; the layer's sound does not change.",
+  "es": "Cuadros nuevos entre los de la fuente según el movimiento (vectores de bloque en ambos sentidos). 1×: la capa queda con los fps de la composición (ej.: video de 30 en una composición de 60). La cámara lenta ocurre dentro de la capa; el sonido de la capa no cambia.",
+  "hi": "मोशन से सोर्स के फ़्रेमों के बीच नए फ़्रेम (दोनों दिशाओं में ब्लॉक वेक्टर)। 1×: लेयर को कम्पोज़िशन का fps मिलता है (जैसे 60 की कम्पोज़िशन में 30 का वीडियो)। स्लो मोशन लेयर के अंदर चलता है; लेयर की आवाज़ नहीं बदलती।",
+  "id": "Frame baru di antara frame sumber berdasarkan gerakan (vektor blok dua arah). 1×: layer mengikuti fps komposisi (mis. video 30 di komposisi 60). Gerak lambat berjalan di dalam layer; suara layer tidak berubah.",
+  "ru": "Новые кадры между кадрами исходника по движению (векторы блоков в обе стороны). 1×: слой получает fps композиции (напр., видео 30 в композиции 60). Замедление идёт внутри слоя; звук слоя не меняется."
+ },
+ "Sempre": {
+  "ar": "دائمًا",
+  "en": "Always",
+  "es": "Siempre",
+  "hi": "हमेशा",
+  "id": "Selalu",
+  "ru": "Всегда"
+ },
+ "Tirar blocos de compressão": {
+  "ar": "إزالة كتل الضغط",
+  "en": "Remove compression blocks",
+  "es": "Quitar bloques de compresión",
+  "hi": "कम्प्रेशन ब्लॉक हटाएँ",
+  "id": "Hapus blok kompresi",
+  "ru": "Убрать блоки сжатия"
+ },
+ "Turbo (prévia)": {
+  "ar": "Turbo (معاينة)",
+  "en": "Turbo (preview)",
+  "es": "Turbo (vista previa)",
+  "hi": "Turbo (प्रीव्यू)",
+  "id": "Turbo (pratinjau)",
+  "ru": "Turbo (превью)"
  }
 }

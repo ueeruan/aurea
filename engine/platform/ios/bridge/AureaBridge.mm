@@ -17,6 +17,9 @@
 #include "aurea/core/Version.hpp"
 #include "aurea/export/FFmpegExportSink.hpp"
 
+/// AureaEngine.mm (+setHyperNpuAvailable:).
+bool aurea_ios_hyper_npu_available() noexcept;
+
 #include <os/log.h>
 
 #include <cstring>
@@ -198,6 +201,8 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
     ios_install_text_fallback();
     config.imageLoader = &ios_load_image;
     config.enableTelemetry = true;
+    // AureaHyper: o medidor conta com a Neural Engine quando há (HyperPlatform.swift avisa).
+    config.hyperNpuAvailable = aurea_ios_hyper_npu_available();
 
     if (const Status s = engine_->initialize(config); !s.ok()) {
         lastError_ = s.message();

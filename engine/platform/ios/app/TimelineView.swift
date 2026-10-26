@@ -29,7 +29,7 @@ struct MarkerEditorSheet: View {
     var body: some View {
         NavigationView {
             Form {
-                TextField(AureaText.t("new_project_name"), text: $name)
+                TextField(AureaText.t("marker_name"), text: $name, prompt: Text(AureaText.t("marker_name_hint")))
                     .onChange(of: name) { value in if value.count > 200 { name = String(value.prefix(200)) } }
                 TextField(AureaText.t("marker_frame"), text: $frameText).keyboardType(.numberPad)
                 Text(Timecode.format(Int32(clamping: max(0, Int64(frameText) ?? 0)), Float(model.compositionFps)))
@@ -137,7 +137,8 @@ struct TimelineView: View {
     private let pulse = Timer.publish(every: 1.0 / 60, on: .main, in: .common).autoconnect()
 
     private struct MediaTile { var localFrame: Double; var width: CGFloat; var image: UIImage }
-    private struct Marker { var frame: Int32; var packedColor: UInt32; var kind: UInt32 }
+    /// 0.3.2: `label` = o nome da marca ("" = sem nome), desenhado na régua.
+    private struct Marker { var frame: Int32; var packedColor: UInt32; var kind: UInt32; var label: String = "" }
     /// `.keys`: arrasto de um losango ESCOLHIDO — a seleção de keyframes inteira anda junta.
     /// `.step`: fileira compacta — o arrasto vertical passa pelas camadas (roda).
     /// `.box`: modo "Selecionar" — arrastar no vazio desenha o retângulo de seleção dos losangos.
@@ -496,8 +497,22 @@ struct TimelineView: View {
         }
         context.stroke(minor, with: .color(AureaTimeline.rulerMinor), lineWidth: m.tickMinorWidth)
         context.stroke(major, with: .color(AureaTimeline.rulerMajor), lineWidth: m.tickMajorWidth)
-        for marker in markers {
+        for (index, marker) in markers.enumerated() {
             let px = x(Double(marker.frame), width: size.width), half = m.tickBottom * 0.28
+            // 0.3.2: o nome da marca à direita do triângulo, cortado antes da
+            // próxima marca (ou da borda) — o mesmo desenho do Android.
+            if !marker.label.isEmpty {
+                let nextX = index + 1 < markers.count ? x(Double(markers[index + 1].frame), width: size.width) : size.width
+                let left = px + half + 3, avail = min(nextX - half, size.width) - left - 2
+                if avail >= 18 && left < size.width {
+                    let name = context.resolve(Text(marker.label).font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.85)))
+                    context.drawLayer { layer in
+                        layer.clip(to: Path(CGRect(x: left, y: 0, width: avail, height: m.tickBottom)))
+                        layer.draw(name, at: CGPoint(x: left, y: 1), anchor: .topLeading)
+                    }
+                }
+            }
             guard px >= -half && px <= size.width + half else { continue }
             let s = max(marker.kind == 1 ? half * 0.7 : half, 3.5)
             let color = Color(.sRGB, red: Double(marker.packedColor & 255) / 255,
@@ -1167,7 +1182,12 @@ struct TimelineView: View {
         if markerKey.0 != markersRevision || markerKey.1 != markersFrames {
             markersRevision = markerKey.0; markersFrames = markerKey.1
             let values = model.engine.markers()
-            markers = stride(from: 0, to: values.count - values.count % 3, by: 3).map { Marker(frame: values[$0].int32Value, packedColor: values[$0 + 1].uint32Value, kind: values[$0 + 2].uint32Value) }
+            markers = stride(from: 0, to: values.count - values.count % 3, by: 3).map {
+                let frame = values[$0].int32Value, kind = values[$0 + 2].uint32Value
+                // Batidas (kind 1) não têm nome próprio na régua: só as marcas da pessoa.
+                return Marker(frame: frame, packedColor: values[$0 + 1].uint32Value, kind: kind,
+                              label: kind == 1 ? "" : model.engine.markerLabel(Int64(frame)))
+            }
         }
     }
 

@@ -7,7 +7,7 @@ import com.aurea.aurea.R
 internal object EffectI18nTable {
     /** (typeId << 16 | índice do parâmetro) → [rótulo, opção 0, opção 1, ...] (recursos). */
     val entries: Map<Long, IntArray> by lazy {
-        HashMap<Long, IntArray>(4184).apply {
+        HashMap<Long, IntArray>(4208).apply {
             part0(this)
             part1(this)
             part2(this)
@@ -2173,6 +2173,18 @@ internal object EffectI18nTable {
         m.put("aurea.enhance.video", 12, /* mix */ intArrayOf(R.string.fxl_mix))
         m.put("aurea.utility.copy_background", 0, /* window */ intArrayOf(R.string.fx030k_window, R.string.fxo_layer_alpha, R.string.fxo_inverted_alpha, R.string.fxo_layer_luma, R.string.fxo_inverted_luma))
         m.put("aurea.utility.copy_background", 1, /* layer_mix */ intArrayOf(R.string.fx030k_layer_mix))
+        m.put("aurea.hyper.upscale", 0, /* scale */ intArrayOf(R.string.fxl_scale, R.string.fxo_2, R.string.fxo_4))
+        m.put("aurea.hyper.upscale", 1, /* mode */ intArrayOf(R.string.fxl_content, R.string.fxo_general, R.string.fxo_anime))
+        m.put("aurea.hyper.upscale", 2, /* sharpness */ intArrayOf(R.string.fx_name_sharpen))
+        m.put("aurea.hyper.upscale", 3, /* path */ intArrayOf(R.string.fxo_path, R.string.fxo_turbo_preview, R.string.fxo_lite, R.string.fxo_max))
+        m.put("aurea.hyper.clean", 0, /* denoise */ intArrayOf(R.string.fxl_reduce_noise))
+        m.put("aurea.hyper.clean", 1, /* deblock */ intArrayOf(R.string.fxl_remove_compression_blocks))
+        m.put("aurea.hyper.clean", 2, /* deinterlace */ intArrayOf(R.string.fxl_deinterlace, R.string.fx3o_desligado, R.string.fxo_automatic, R.string.fxo_always))
+        m.put("aurea.hyper.clean", 3, /* frames */ intArrayOf(R.string.fxl_neighbouring_frames))
+        m.put("aurea.hyper.clean", 4, /* path */ intArrayOf(R.string.fxo_path, R.string.fxo_turbo_preview, R.string.fxo_lite, R.string.fxo_max))
+        m.put("aurea.hyper.motion", 0, /* slow_motion */ intArrayOf(R.string.fxl_slow_motion, R.string.fxo_1_extra_frames_only, R.string.fxo_2, R.string.fxo_4, R.string.fxo_8))
+        m.put("aurea.hyper.motion", 1, /* duplicates */ intArrayOf(R.string.fxl_detect_repeated_frames))
+        m.put("aurea.hyper.motion", 2, /* path */ intArrayOf(R.string.fxo_path, R.string.fxo_turbo_preview, R.string.fxo_lite, R.string.fxo_max))
     }
 
     /** (typeId << 16 | índice do parâmetro) → dica (recurso). */
@@ -2188,6 +2200,13 @@ internal object EffectI18nTable {
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.enhance.video"), 0), R.string.fxt_automatic_estimates_compression_noise_an) // model
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.enhance.video"), 10), R.string.fxt_frames_on_each_side_used_by_noise_reduct) // temporal_frames
             put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.utility.copy_background"), 0), R.string.fxt_effects_after_this_one_act_on_the_layers) // window
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.hyper.upscale"), 0), R.string.fxt_upscales_the_layer_when_it_appears_large) // scale
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.hyper.upscale"), 3), R.string.fxt_the_preview_always_uses_turbo_lite_and_m) // path
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.hyper.clean"), 2), R.string.fxt_automatic_acts_only_when_the_frame_shows) // deinterlace
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.hyper.clean"), 3), R.string.fxt_frames_on_each_side_aligned_by_motion_1) // frames
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.hyper.clean"), 4), R.string.fxt_the_preview_always_uses_turbo_lite_and_m_2) // path
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.hyper.motion"), 0), R.string.fxt_new_frames_between_the_source_frames_bui) // slow_motion
+            put(slot(com.aurea.aurea.editor.panels.effectTypeId("aurea.hyper.motion"), 2), R.string.fxt_the_preview_always_uses_turbo) // path
         }
     }
 

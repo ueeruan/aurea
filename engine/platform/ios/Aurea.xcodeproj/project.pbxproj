@@ -39,7 +39,10 @@
 		AE0000000000000000000041 /* TransformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000009 /* TransformView.swift */; };
 		AE0000000000000000000042 /* Panel3DView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000000A /* Panel3DView.swift */; };
 		AE0000000000000000000043 /* ExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE000000000000000000000B /* ExportView.swift */; };
-		AE00000000000000000000F2 /* UpscaleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000F1 /* UpscaleView.swift */; };
+		AE00000000000000000000F2 /* HyperView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000F1 /* HyperView.swift */; };
+		B4A30000000000000000000B /* HyperModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A30000000000000000000F /* HyperModel.swift */; };
+		B4A30000000000000000000C /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A300000000000000000010 /* LicensesView.swift */; };
+		B4A30000000000000000000D /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A300000000000000000011 /* AppConfig.swift */; };
 		AE00000000000000000029D1 /* ProxyOptimizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000029D0 /* ProxyOptimizer.swift */; };
 		AE00000000000000000000F4 /* RealCameraStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000F3 /* RealCameraStage.swift */; };
 		AE0000000000000000000E02 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000E01 /* VoiceRecorder.swift */; };
@@ -151,7 +154,10 @@
 		AE0000000000000000000009 /* TransformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformView.swift; sourceTree = "<group>"; };
 		AE000000000000000000000A /* Panel3DView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panel3DView.swift; sourceTree = "<group>"; };
 		AE000000000000000000000B /* ExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportView.swift; sourceTree = "<group>"; };
-		AE00000000000000000000F1 /* UpscaleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpscaleView.swift; sourceTree = "<group>"; };
+		AE00000000000000000000F1 /* HyperView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HyperView.swift; sourceTree = "<group>"; };
+		B4A30000000000000000000F /* HyperModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HyperModel.swift; sourceTree = "<group>"; };
+		B4A300000000000000000010 /* LicensesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LicensesView.swift; sourceTree = "<group>"; };
+		B4A300000000000000000011 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		AE00000000000000000029D0 /* ProxyOptimizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyOptimizer.swift; sourceTree = "<group>"; };
 		AE00000000000000000000F3 /* RealCameraStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealCameraStage.swift; sourceTree = "<group>"; };
 		AE0000000000000000000E01 /* VoiceRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecorder.swift; sourceTree = "<group>"; };
@@ -308,7 +314,10 @@
 				AE0000000000000000000084 /* ParticleControls.swift */,
 				AE000000000000000000000A /* Panel3DView.swift */,
 				AE000000000000000000000B /* ExportView.swift */,
-				AE00000000000000000000F1 /* UpscaleView.swift */,
+				AE00000000000000000000F1 /* HyperView.swift */,
+				B4A30000000000000000000F /* HyperModel.swift */,
+				B4A300000000000000000010 /* LicensesView.swift */,
+				B4A300000000000000000011 /* AppConfig.swift */,
 				AE00000000000000000029D0 /* ProxyOptimizer.swift */,
 				AE00000000000000000000F3 /* RealCameraStage.swift */,
 				AE0000000000000000000E01 /* VoiceRecorder.swift */,
@@ -413,6 +422,7 @@
 				AE000000000000000000002F /* Sources */,
 				AE0000000000000000000030 /* Frameworks */,
 				AE0000000000000000000031 /* Resources */,
+				B4A300000000000000000020 /* Stage open-source licenses */,
 			);
 			buildRules = (
 			);
@@ -533,6 +543,21 @@
 			shellPath = /bin/sh;
 			shellScript = "set -e\n# O nucleo C++ e os terceiros sao compilados pelo CMake, com os MESMOS alvos do\n# Android (aurea_core, aurea_thirdparty) mais a ponte iOS (aurea_ios) e o backend\n# Metal (aurea_metal). E o unico passo que o Xcode nao sabe fazer sozinho.\nBUILD_DIR=\"${SRCROOT}/build/core\"\nFFMPEG_PLATFORM=ios\nFFMPEG_ARCH=arm64\nif [ \"${PLATFORM_NAME}\" = \"iphonesimulator\" ]; then\n  FFMPEG_PLATFORM=ios-simulator\n  FFMPEG_ARCH=\"${NATIVE_ARCH_ACTUAL}\"\nfi\nFFMPEG_FAMILY=ffmpeg\nFFMPEG_EXTRA_ARGS=\"\"\nif [ \"${AUREA_FFMPEG_WITH_X265}\" = \"YES\" ]; then\n  FFMPEG_FAMILY=ffmpeg-gpl\n  FFMPEG_EXTRA_ARGS=--with-x265\nfi\nFFMPEG_PREFIX=\"${SRCROOT}/../../../build/${FFMPEG_FAMILY}/${FFMPEG_PLATFORM}/${FFMPEG_ARCH}\"\n\"${AUREA_PYTHON:-python3}\" \"${SRCROOT}/../../../tools/build_ffmpeg.py\" --platform \"${FFMPEG_PLATFORM}\" --arch \"${FFMPEG_ARCH}\" --prefix \"${FFMPEG_PREFIX}\" --jobs 3 ${FFMPEG_EXTRA_ARGS}\nEXPORT_LICENSES=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/licenses/native-export\"\nmkdir -p \"${EXPORT_LICENSES}\"\nfor LICENSE in FFmpeg-LGPL-2.1.txt FFmpeg-GPL-2.0.txt OpenH264-BSD-2-Clause.txt Kvazaar-BSD-3-Clause.txt x265-GPL-2.0.txt NativeExport-DEPENDENCIES.txt; do\n  rm -f \"${EXPORT_LICENSES}/${LICENSE}\"\ndone\ncp \"${FFMPEG_PREFIX}/licenses/\"*.txt \"${EXPORT_LICENSES}/\"\nEXTRA=\"\"\nif [ \"${PLATFORM_NAME}\" = \"iphonesimulator\" ]; then\n  EXTRA=\"-DAUREA_IOS_SIMULATOR=ON -DCMAKE_OSX_ARCHITECTURES=${NATIVE_ARCH_ACTUAL}\"\nfi\ncmake -S \"${SRCROOT}\" -B \"${BUILD_DIR}\" \\\n      -DCMAKE_TOOLCHAIN_FILE=\"${SRCROOT}/ios_toolchain.cmake\" \\\n      -DCMAKE_BUILD_TYPE=\"${CONFIGURATION}\" \\\n      -DAUREA_FFMPEG_ROOT=\"${FFMPEG_PREFIX}\" -DAUREA_BUILD_TESTS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache ${EXTRA}\ncmake --build \"${BUILD_DIR}\" --parallel 3\n";
 		};
+		B4A300000000000000000020 /* Stage open-source licenses */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Stage open-source licenses";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\n# 0.3.2: \"Licencas de codigo aberto\" (LicensesView.swift) mostra o texto DOS\n# ARQUIVOS. So os avisos entram no bundle: os pesos dos modelos ja vem no motor.\n# O mesmo conjunto do Android (gradle: stageOssLicenses).\nOUT=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/licenses/oss\"\nASSETS=\"${SRCROOT}/../../assets\"\nrm -rf \"${OUT}\"\nmkdir -p \"${OUT}\"\nif [ -d \"${ASSETS}/licenses\" ]; then cp -R \"${ASSETS}/licenses/.\" \"${OUT}/\"; fi\nfor SUB in ai rotobrush; do\n  if [ -d \"${ASSETS}/${SUB}\" ]; then\n    mkdir -p \"${OUT}/${SUB}\"\n    find \"${ASSETS}/${SUB}\" -maxdepth 1 -type f \\( -name 'LICENSE*' -o -name 'NOTICE*' \\) -exec cp {} \"${OUT}/${SUB}/\" \\;\n  fi\ndone\nif [ -d \"${ASSETS}/hyper\" ]; then\n  ( cd \"${ASSETS}/hyper\" && find . -type f \\( -name 'LICENSE*' -o -name 'NOTICE*' -o -name 'manifest*.json' -o -name '*.md' \\) ) | while read -r F; do\n    mkdir -p \"${OUT}/hyper/$(dirname \"${F}\")\"\n    cp \"${ASSETS}/hyper/${F}\" \"${OUT}/hyper/${F}\"\n  done\nfi\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -586,7 +611,10 @@
 				AE0000000000000000000085 /* ParticleControls.swift in Sources */,
 				AE0000000000000000000042 /* Panel3DView.swift in Sources */,
 				AE0000000000000000000043 /* ExportView.swift in Sources */,
-				AE00000000000000000000F2 /* UpscaleView.swift in Sources */,
+				AE00000000000000000000F2 /* HyperView.swift in Sources */,
+				B4A30000000000000000000B /* HyperModel.swift in Sources */,
+				B4A30000000000000000000C /* LicensesView.swift in Sources */,
+				B4A30000000000000000000D /* AppConfig.swift in Sources */,
 				AE00000000000000000029D1 /* ProxyOptimizer.swift in Sources */,
 				AE00000000000000000000F4 /* RealCameraStage.swift in Sources */,
 				AE0000000000000000000E02 /* VoiceRecorder.swift in Sources */,

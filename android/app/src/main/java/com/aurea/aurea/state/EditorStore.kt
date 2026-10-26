@@ -75,7 +75,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** Destino da tela. É estado, não pilha: o Aurea edita UM projeto por vez. */
-enum class Screen { Home, Editor, Upscale }
+enum class Screen { Home, Editor, Hyper }
 
 /** Um projeto na Home (lido do sidecar `.meta.json`, sem abrir o projeto). */
 data class ProjectEntry(
@@ -364,118 +364,51 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
 
     // =========================================================================
-    // Upscale com IA (upscale/UpscaleScreen.kt): ferramenta própria, fora do
-    // editor e da aba Exportar. O vídeo vira um projeto do tamanho dele (fica
-    // na lista, dá para editar depois) e sai pelo Exporter com a rede neural.
+    // AureaHyper (hyper/HyperScreen.kt, 0.3.2): substitui o "Upscale com IA".
+    // O fluxo vive em HyperFlow; daqui saem só o motor, o Exporter (o job usa
+    // o caminho do export: serviço em primeiro plano, vigia, cancelamento) e
+    // o projeto que o resultado vira.
     // =========================================================================
-    enum class UpscaleStage { Idle, Preparing, Failed }
-    var upscaleStage by mutableStateOf(UpscaleStage.Idle)
-        private set
-    var upscaleSourceName by mutableStateOf<String?>(null)
-        private set
-    /** Largura × altura do vídeo escolhido (após a rotação), para a prévia do tamanho. */
-    var upscaleSourceSize by mutableStateOf<Pair<Int, Int>?>(null)
-        private set
-
-    fun openUpscale() {
-        if (screen != Screen.Home || exporter.busy) return
-        exporter.reset()
-        upscaleReset()
-        screen = Screen.Upscale
+    val hyper: com.aurea.aurea.hyper.HyperFlow by lazy {
+        com.aurea.aurea.hyper.HyperFlow(getApplication(), engine, exporter, viewModelScope, HyperHost())
     }
 
-    fun closeUpscale() {
-        if (screen != Screen.Upscale || exporter.busy || upscaleStage == UpscaleStage.Preparing) return
-        exporter.reset()
+    private inner class HyperHost : com.aurea.aurea.hyper.HyperFlow.Host {
+        override suspend fun createProjectFromVideo(video: File, title: String, width: Int, height: Int, fps: Float): String? {
+            if (!acceptsProjectChange()) return null
+            val created = withContext(Dispatchers.Default) { newProjectHeadless(width, height, fps, title) }
+            if (!created) return null
+            withTimeoutOrNull(5_000) { snapshotFlow { project.title }.first { it == title } }
+            errorMessage = null
+            importVideo(Uri.fromFile(video))   // seta busyMessage já; some quando a importação acaba
+            withTimeoutOrNull(300_000) { snapshotFlow { busyMessage }.first { it == null } }
+            if (errorMessage != null || busyMessage != null) return null
+            val path = project.path ?: return null
+            withContext(Dispatchers.IO) { engine.saveProject(path) }
+            return path
+        }
+        override fun openProject(path: String) {
+            screen = Screen.Home
+            this@EditorStore.openProject(path)
+        }
+        override fun close() = closeHyper()
+        override fun toast(message: String) = showToast(message)
+        override fun text(id: Int, vararg args: Any): String = appText(id, *args)
+    }
+
+    fun openHyper() {
+        if (screen != Screen.Home || exporter.busy) return
+        hyper.reset()
+        screen = Screen.Hyper
+    }
+
+    fun closeHyper() {
+        if (screen != Screen.Hyper || hyper.busy) return
+        hyper.reset()
         screen = Screen.Home
         refreshProjects()
     }
 
-    fun upscaleReset() {
-        if (upscaleStage != UpscaleStage.Preparing) upscaleStage = UpscaleStage.Idle
-    }
-
-    private class UpscaleMedia(val name: String, val width: Int, val height: Int, val fps: Float)
-
-    private fun probeUpscaleVideo(uri: Uri): UpscaleMedia? = try {
-        val app = getApplication<Application>()
-        val display = app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-        val name = display?.substringBeforeLast('.')?.takeIf { it.isNotBlank() } ?: appText(R.string.app_imported_media)
-        val r = MediaMetadataRetriever()
-        try {
-            r.setDataSource(app, uri)
-            val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-            val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-            val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-            val fps = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toFloatOrNull()
-                ?.takeIf { it in 1f..240f } ?: 30f
-            if (w <= 0 || h <= 0) null
-            else if (rot == 90 || rot == 270) UpscaleMedia(name, h, w, fps) else UpscaleMedia(name, w, h, fps)
-        } finally {
-            r.release()
-        }
-    } catch (_: Exception) {
-        null
-    }
-
-    /**
-     * Escolheu o vídeo e o fator: cria o projeto com o tamanho do vídeo (sem
-     * ir para o editor), importa, salva e manda ao Exporter com `aiUpscale`.
-     * O progresso e o resultado são os do [exporter] (a tela observa).
-     */
-    fun upscaleVideo(uri: Uri, factor: Int) {
-        if (upscaleStage == UpscaleStage.Preparing || exporter.busy) return
-        if (factor != 2 && factor != 4) return
-        if (!acceptsProjectChange()) return
-        upscaleStage = UpscaleStage.Preparing
-        viewModelScope.launch {
-            try {
-                val media = withContext(Dispatchers.IO) { probeUpscaleVideo(uri) }
-                if (media == null) {
-                    upscaleStage = UpscaleStage.Failed
-                    showToast(appText(R.string.import_failed))
-                    return@launch
-                }
-                upscaleSourceName = media.name
-                // Encoders pedem medidas pares; o lado menor × fator é a saída.
-                val w = media.width and 1.inv()
-                val h = media.height and 1.inv()
-                upscaleSourceSize = w to h
-                val title = "${media.name} · Upscale ${factor}×"
-                val created = withContext(Dispatchers.Default) { newProjectHeadless(w, h, media.fps, title) }
-                if (!created) {
-                    upscaleStage = UpscaleStage.Failed
-                    showToast(appText(R.string.msg_nao_foi_possivel_criar_o_projeto))
-                    return@launch
-                }
-                withTimeoutOrNull(5_000) { snapshotFlow { project.title }.first { it == title } }
-                errorMessage = null
-                importVideo(uri)   // seta busyMessage já; some quando a importação acaba
-                withTimeoutOrNull(300_000) { snapshotFlow { busyMessage }.first { it == null } }
-                if (errorMessage != null || busyMessage != null) {
-                    upscaleStage = UpscaleStage.Failed
-                    return@launch
-                }
-                // O projeto fica na lista (reabrir, editar), e o ProjectGuard
-                // do export tem um arquivo de verdade para marcar.
-                project.path?.let { path -> withContext(Dispatchers.IO) { engine.saveProject(path) } }
-                upscaleStage = UpscaleStage.Idle
-                exporter.start(title, w, h, media.fps.toDouble(),
-                    // Encoder de celular vai até 4K: 4x de um 1080p (8K) sai em 2x (4K).
-                    run {
-                        val short = kotlin.math.min(w, h)
-                        val f = if (factor == 4 && short * 4 > 2160) 2 else factor
-                        ExportOptions(shortSide = short * f, aiUpscale = f, trimToContent = true)
-                    })
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                Log.w(TAG, "upscale interrompido: ${failure.javaClass.simpleName}")
-                upscaleStage = UpscaleStage.Failed
-            }
-        }
-    }
     var engineReady by mutableStateOf(false)
         private set
     var errorMessage by mutableStateOf<String?>(null)
@@ -3837,6 +3770,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Adiciona o efeito em TODAS as camadas escolhidas. */
     fun addEffect(typeId: Int, ids: Collection<Long> = selection) {
         if (ids.isEmpty()) return
+        // 0.3.2: efeito Hyper só com o acesso (a folha de efeitos já abre a tela bloqueada).
+        if (com.aurea.aurea.effects.HyperEffectGate.locked(typeId)) { showToast(appText(R.string.hyper_effect_locked)); return }
         if (typeId == com.aurea.aurea.editor.panels.effectTypeId("aurea.key.rotobrush")) {
             if (busyMessage != null) return
             val targets = ids.toList()
@@ -6750,7 +6685,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     // --- Marcas e batidas ----------------------------------------------------------
     /** Marcas da composição, em ordem de frame. */
-    class Markers(val frames: IntArray, val kinds: IntArray, val colors: IntArray) {
+    class Markers(val frames: IntArray, val kinds: IntArray, val colors: IntArray,
+                  /** 0.3.2: o nome de cada marca ("" = sem nome), desenhado na régua. */
+                  val labels: Array<String> = Array(frames.size) { "" }) {
         val size: Int get() = frames.size
     }
     var markers by mutableStateOf(Markers(IntArray(0), IntArray(0), IntArray(0)))
@@ -6800,9 +6737,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val f = IntArray(n) { markerBuf[it * 3].toInt() }
         val k = IntArray(n) { markerBuf[it * 3 + 2].toInt() }
         val c = IntArray(n) { markerBuf[it * 3 + 1].toInt() }
+        // Batidas (kind 1) não têm nome próprio na régua: só as marcas da pessoa.
+        val l = Array(n) { if (k[it] == 1) "" else engine.markerLabel(f[it].toLong()) }
         val cur = markers
-        if (f.contentEquals(cur.frames) && k.contentEquals(cur.kinds) && c.contentEquals(cur.colors)) return
-        markers = Markers(f, k, c)
+        if (f.contentEquals(cur.frames) && k.contentEquals(cur.kinds) && c.contentEquals(cur.colors) &&
+            l.contentEquals(cur.labels)) return
+        markers = Markers(f, k, c, l)
     }
 
     fun markerLabel(frame: Int): String = engine.markerLabel(frame.toLong())

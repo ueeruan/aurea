@@ -33,6 +33,7 @@ add_executable(aurea_tests
     test_media.cpp
     test_proxy.cpp
     test_ai.cpp
+    test_hyper_neural.cpp
     test_upscale_color.cpp
     test_yuv_layout.cpp
     test_p010_upload.cpp
@@ -114,11 +115,13 @@ add_executable(aurea_tests
     test_shape3d.cpp
     test_shape3d_split.cpp
     test_plugins.cpp
+    test_hyper.cpp
 )
 
 target_include_directories(aurea_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}          # TestFramework.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src   # test_hyper.cpp: cabeçalhos privados do Hyper (grafo, plano, análise)
 )
 
 target_link_libraries(aurea_tests PRIVATE aurea_core)

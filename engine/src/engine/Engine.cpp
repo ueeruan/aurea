@@ -30,6 +30,8 @@
 #include "aurea/project/Serialization.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "aurea/ai/Upscaler.hpp"
+#include "hyper/HyperExport.hpp"
+#include "hyper/HyperGraph.hpp"
 #include "aurea/ai/TemporalStabilizer.hpp"
 #include "aurea/export/UpscaleColor.hpp"
 #include "aurea/export/BitratePolicy.hpp"
@@ -259,6 +261,11 @@ struct Engine::ExportContext {
     ExportProgress progress{};
     ExportSettings settings{};
     std::string    outputPath;
+    /// AureaHyper: o projeto temporário e as etapas do grafo (job da Home).
+    std::shared_ptr<const HyperExportOverride> hyper;
+    /// O grafo Hyper roda entre readback e encoder (aiUpscale ou etapas do job).
+    bool graphWanted = false;
+    bool graphResumable = true;
     std::atomic<bool> cancelRequested{false};
     std::thread    thread;             ///< produtor (GPU)
     std::thread    encoder;            ///< consumidor (sink)
@@ -984,6 +991,8 @@ void Engine::shutdown() noexcept {
     // Startup holds the lifecycle lock while its bounded gate waits. Signal
     // its independently protected flag before waiting for that lock.
     (void)cancel_export();
+    // O job Hyper chama start_export (que pega o lifecycle): sai antes.
+    hyper_shutdown();
     std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
     if (state_ == EngineState::Uninitialized || state_ == EngineState::ShuttingDown) return;
     state_ = EngineState::ShuttingDown;
@@ -13677,6 +13686,8 @@ i64 Engine::query_export_duration(bool trimToContent) noexcept {
 }
 
 Status Engine::start_export(const ExportSettings& settings, const char* outputPath) noexcept {
+    // Export do editor: o progresso volta a ser só o dele (não o do último job Hyper).
+    hyper_forget_job();
     const Status result = start_export_checked(settings, outputPath, nullptr);
     if (!result.ok()) AUREA_LOG_ERROR("export start failed code=%d detail=%.*s", result.raw(),
         static_cast<int>(result.detail().size()), result.detail().empty() ? "" : result.detail().data());
@@ -13684,7 +13695,7 @@ Status Engine::start_export(const ExportSettings& settings, const char* outputPa
 }
 
 Status Engine::start_export_checked(const ExportSettings& requested, const char* outputPath,
-                                  const ExportRestartGuard* restartGuard) noexcept {
+                                  const ExportRestartGuard* restartGuard, const HyperExportOverride* hyper) noexcept {
     std::lock_guard<std::mutex> lifecycle(exportLifecycleMutex_);
     // 0.2.6: `safeMode` traz o DEGRAU da escada de tentativas
     // (export/ExportAttempts.hpp). O encoder (0..2), o codec e o upscale saem
@@ -13704,7 +13715,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         exportSuspendCancel_.store(false, std::memory_order_release);
     const Status result = [&]() noexcept -> Status {
     if (state_ != EngineState::Ready && state_ != EngineState::Rendering) return Errc::InvalidState;
-    if (!project_) return Errc::InvalidState;
+    if (!project_ && !hyper) return Errc::InvalidState;
     if (!std::isfinite(settings.fps) || settings.fps < 0.0 ||
         static_cast<u32>(settings.videoCodec) > static_cast<u32>(ExportCodec::HEVC))
         return Status{Errc::InvalidArgument, "configuracao de video invalida"};
@@ -13784,6 +13795,20 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     ctx->settings = settings;
     ctx->outputPath = outputPath;
     ctx->dither = settings.dither;
+    if (hyper) {
+        try { ctx->hyper = std::make_shared<const HyperExportOverride>(*hyper); }
+        catch (...) { return Errc::OutOfMemory; }
+    }
+    ctx->graphWanted = settings.aiUpscale != 0 || (hyper && !hyper->graph.empty());
+    if (ctx->graphWanted) {
+        // Etapa com estado ou vizinhos: a passagem não retoma no meio (o
+        // upscale de IA embutido suaviza no tempo — o "off_temporal" de antes).
+        ctx->graphResumable = settings.aiUpscale == 0;
+        if (hyper) for (const hyper::StageDescriptor* d : hyper->graph) {
+            auto probe = d && d->create ? d->create() : nullptr;
+            if (!probe || probe->stateful() || probe->temporal_radius() > 0) ctx->graphResumable = false;
+        }
+    }
     // Modo de segurança (ExportWatchdog.hpp): só o nível que o motor sugeriu
     // depois de o encoder travar; acima do máximo vale o máximo.
     ctx->safeMode = std::min(settings.safeMode, kExportSafeModeMax);
@@ -13799,7 +13824,17 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     if (const Status prepared = prepare_export_resources(*ctx); !prepared.ok()) return prepared;
     std::vector<u8> frozenBytes;
     CompositionId frozenComposition;
-    {
+    if (hyper) {
+        // Job Hyper: o projeto temporário (o aberto no editor não muda).
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        ctx->compFps = hyper->compFps;
+        ctx->attemptBlurCap = attemptPlan.blurCap;
+        ctx->attemptGpuStep = attemptPlan.gpuStep;
+        ctx->frozenAssetBudget = source_asset_room_locked();
+        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Snapshot);
+        try { frozenBytes = hyper->projectBytes; } catch (...) { return Errc::OutOfMemory; }
+        frozenComposition = hyper->composition;
+    } else {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
         if (restartGuard && !export_restart_matches_locked(*restartGuard))
@@ -13828,7 +13863,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     // configurações pedidas, sem o degrau da escada). É a mesma conta de
     // export_resume_candidate, feita sobre os mesmos bytes, fora do lock.
     u64 requestKey = 0;
-    if (config_.enableResumableExport && !settings.aiUpscale) {
+    if (config_.enableResumableExport && ctx->graphResumable) {
         ExportSettings asked = requested;
         asked.safeMode = 0;
         requestKey = export_checkpoint::request_key(export_checkpoint::project_key(frozenBytes), frozenComposition, asked);
@@ -13954,7 +13989,18 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     }
     ctx->outputWidth = ctx->width;
     ctx->outputHeight = ctx->height;
-    if (settings.aiUpscale) {
+    if (hyper && !hyper->graph.empty()) {
+        // Grafo Hyper do job: a composição já tem o tamanho do render; a saída
+        // é a do grafo (o plano já a limitou ao aparelho).
+        if (hyper->outputWidth && hyper->outputHeight) {
+            ctx->outputWidth = hyper->outputWidth;
+            ctx->outputHeight = hyper->outputHeight;
+        }
+        const u64 working = static_cast<u64>(ctx->outputWidth) * ctx->outputHeight * 3 / 2 * 10 + (160ull << 20);
+        if (working > std::max<u64>(64ull << 20, caps_.memory_budget_bytes()))
+            return Status{Errc::OutOfMemory, "memoria insuficiente para o Hyper nesta resolucao"};
+        ctx->dither = false; // A rede não recebe o ruído da quantização.
+    } else if (settings.aiUpscale) {
         // Keep the entire composition and the selected output exactly. Round the
         // inference input to even dimensions, then shrink the full neural image.
         const u32 scale = settings.aiUpscale;
@@ -13974,7 +14020,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     // constante por arquivo, não cresce com a mídia do projeto.
     bool checkpointWanted = requestKey != 0;
     const char* checkpointState = !config_.enableResumableExport ? "off"
-                                : settings.aiUpscale ? "off_temporal" : requestKey ? "on" : "off_project";
+                                : !ctx->graphResumable ? "off_temporal" : requestKey ? "on" : "off_project";
     struct Preparing {
         Engine& e;
         Preparing(Engine& engine, u64 total) : e(engine) {
@@ -14060,7 +14106,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     // padrão; no Android também por debug.aurea.enc.direct=1 (CI/aparelho).
     ctx->directSurface = vc.directSurface = (config_.enableDirectSurfaceExport ||
             android_video::debug_flag("debug.aurea.enc.direct", nullptr)) &&
-        !settings.aiUpscale && gpu_ && gpu_->capabilities().externalMemoryHardwareBuffer;
+        !ctx->graphWanted && gpu_ && gpu_->capabilities().externalMemoryHardwareBuffer;
     if (ctx->diagnostics) ctx->diagnostics->format({vc.width, vc.height, vc.bitrateBps,
         vc.profile, ctx->safeMode, vc.fps});
     // Com som na timeline, o arquivo leva AAC; sem, só vídeo (uma trilha de
@@ -15273,6 +15319,196 @@ void Engine::export_thread_main() noexcept {
     request_render();
 }
 
+// AureaHyper: o worker do encoder com o grafo (hyper/HyperGraph.hpp). O slot
+// lido é copiado para o grafo e solto na hora (a GPU continua renderizando);
+// o que sai do grafo, EM ORDEM, vai para o sink com o áudio até o fim do
+// quadro. Toda chamada ao sink continua nesta thread. O progresso conta os
+// quadros ESCRITOS no sink (o grafo segura no máximo alguns quadros).
+void Engine::export_encoder_hyper_loop(ExportContext& ctx) noexcept {
+    auto failWith = [&](Status st) {
+        ctx.queue->fail(st);
+        { std::lock_guard<std::mutex> ql(ctx.qMutex);
+          ctx.set_encoder_status(st); ctx.encoderFailed = true; ctx.stop = true; }
+        ctx.qCv.notify_all();
+    };
+    std::vector<const hyper::StageDescriptor*> stages;
+    hyper::Recipe recipe;
+    hyper::DeviceProfile profile = ctx.hyper ? ctx.hyper->profile : hyper_cached_profile();
+    if (ctx.hyper && !ctx.hyper->graph.empty()) {
+        stages = ctx.hyper->graph;
+        recipe = ctx.hyper->graphRecipe;
+    } else {
+        // ExportSettings::aiUpscale: Hyper Upscale Anime no caminho Max (o
+        // Real-ESRGAN da 0.1.4, tile 128 — o mesmo do export de antes).
+        recipe.upscale = ctx.settings.aiUpscale == 4 ? 4u : 2u;
+        recipe.upscaleMode = hyper::UpscaleMode::Anime;
+        recipe.path = hyper::Path::Max;
+        const auto& reg = hyper::stage_registry();
+        const hyper::StageDescriptor* d = reg.find(hyper::StageKind::Upscale, hyper::Path::Max,
+                                                   static_cast<i32>(hyper::UpscaleMode::Anime), profile);
+        if (!d) d = reg.find(hyper::StageKind::Upscale, hyper::Path::Lite, static_cast<i32>(hyper::UpscaleMode::Anime), profile);
+        if (!d) { failWith(Status{Errc::NotSupported, "upscale de IA indisponivel neste aparelho"}); return; }
+        stages.push_back(d);
+    }
+    hyper::HyperGraph graph;
+    ctx.enter(ExportWorkerPhase::Upscale);
+    // Pesos e preparo das etapas também ficam neste worker.
+    const hyper::StageFormat in{ctx.width, ctx.height, ctx.fps};
+    const Status started = graph.start(profile, recipe, stages, in, ctx.outputWidth, ctx.outputHeight, &ctx.cancelRequested,
+        [](void* p) noexcept { static_cast<ExportContext*>(p)->beat(); }, &ctx);
+    if (!started.ok()) { ctx.leave(); failWith(started); return; }
+    if (graph.output_format().width != ctx.outputWidth || graph.output_format().height != ctx.outputHeight) {
+        ctx.leave();
+        failWith(Status{Errc::InvalidState, "o grafo Hyper saiu com outro tamanho"});
+        return;
+    }
+    ExportSink::Acceleration lastAcceleration = ExportSink::Acceleration::Unknown;
+    u32 written = ctx.startFrame;
+    const u32 sessionStart = ctx.startFrame;
+    // Um quadro do grafo para o sink (+ o áudio até o fim dele + progresso).
+    auto emit = [&](const hyper::FrameBuffer& f) -> Status {
+        const u32 j = written;
+        const u64 w0 = monotonic_ns();
+        if (j == ctx.startFrame) ctx.first_frame_stage("primeiro quadro: aguardando o encoder");
+        ctx.enter(ExportWorkerPhase::Video);
+        Status s = ctx.sink->write_video(f.nv12.data(), f.width, f.nv12.data() + static_cast<usize>(f.width) * f.height,
+                                         f.width, f.ptsUs);
+        ctx.beat();
+        const u64 w1 = monotonic_ns();
+        ctx.writeNs.fetch_add(w1 - w0, std::memory_order_relaxed);
+        if (ctx.abandoned_worker()) return Status{Errc::Cancelled};
+        if (s.ok() && ctx.audioSnap && (ctx.packetLogPath.empty() || ctx.startFrame == 0)) {
+            if (j == ctx.startFrame) ctx.first_frame_stage("primeiro quadro: mixando o audio");
+            s = write_export_audio(ctx, audio::frame_to_sample(static_cast<i64>(j) + 1, ctx.fps));
+            ctx.audioNs.fetch_add(monotonic_ns() - w1, std::memory_order_relaxed);
+        }
+        ctx.leave();
+        if (!s.ok()) return s;
+        const ExportSink::EncoderInfo enc = ctx.sink->encoder_info();
+        if (j == ctx.startFrame || enc.acceleration != lastAcceleration) {
+            lastAcceleration = enc.acceleration;
+            if (enc.acceleration == ExportSink::Acceleration::Software) {
+                std::lock_guard<std::mutex> pl(ctx.mutex);
+                ctx.progress.flags = (ctx.progress.flags & ~kExportHardwareEncoder) | kExportSoftwareEncoder;
+            }
+        }
+        written = j + 1;
+        const u32 doneHere = written - sessionStart;
+        if (!ctx.outputDir.empty() && (doneHere % 300 == 0 || written == ctx.frames)) {
+            std::error_code ec;
+            const std::filesystem::space_info sp = std::filesystem::space(ctx.outputDir, ec);
+            if (!ec && sp.available != static_cast<std::uintmax_t>(-1) && sp.available < (16ull << 20))
+                return Status{Errc::StorageFull, "armazenamento cheio durante a exportacao"};
+        }
+        const f64 k = 1e-6 / static_cast<f64>(std::max(1u, doneHere));
+        const f64 elapsed = static_cast<f64>(monotonic_ns() - ctx.startNs) / 1e9;
+        std::lock_guard<std::mutex> pl(ctx.mutex);
+        if (std::strncmp(ctx.progress.message, "primeiro quadro", 15) == 0) ctx.set_message("exportando");
+        ctx.progress.framesDone = written;
+        if (ctx.queue) ctx.progress.flags = (ctx.progress.flags & ~kExportPhaseMask)
+            | (static_cast<u32>(ctx.queue->phase()) << kExportPhaseShift);
+        ctx.progress.decodeWaitMs = static_cast<f32>(ctx.decodeNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.renderMs = static_cast<f32>(ctx.renderNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.readbackMs = static_cast<f32>(ctx.readNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.encodeMs = static_cast<f32>(ctx.writeNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.audioMs = static_cast<f32>(ctx.audioNs.load(std::memory_order_relaxed) * k);
+        ctx.progress.fps = elapsed > 0.0 ? static_cast<f32>(doneHere / elapsed) : 0.0f;
+        ctx.progress.etaSeconds = ctx.progress.fps > 0.0f ? static_cast<u32>((ctx.frames - written) / ctx.progress.fps) : 0;
+        return OkStatus;
+    };
+    // A mensagem da IA ("IA: quadro/total · %", lida pelas telas) enquanto o
+    // grafo trabalha no quadro.
+    auto ai_message = [&] {
+        std::lock_guard<std::mutex> pl(ctx.mutex);
+        std::snprintf(ctx.progress.message, sizeof(ctx.progress.message), "IA: %u/%u · %u%%", written + 1, ctx.frames,
+                      static_cast<u32>(graph.frame_progress() * 100.0f));
+    };
+    // Puxa do grafo: `block` = espera um quadro (ou o fim). NotFound = acabou.
+    auto drain = [&](bool block) -> Status {
+        for (;;) {
+            const hyper::FrameBuffer* f = nullptr;
+            ctx.enter(ExportWorkerPhase::Upscale);
+            auto got = graph.pop(f, block ? 100'000'000ull : 0ull);
+            ctx.leave();
+            if (!got.ok()) return got.status();
+            if (!*got) {
+                if (!block) return OkStatus;
+                if (ctx.cancelRequested.load(std::memory_order_acquire)) return Status{Errc::Cancelled};
+                ctx.beat();
+                ai_message();
+                continue;
+            }
+            if (const Status s = emit(*f); !s.ok()) return s;
+            if (written < ctx.frames) ai_message();
+            if (block) return OkStatus;
+        }
+    };
+    for (;;) {
+        u32 si = 0;
+        bool ended = false;
+        for (;;) {
+            const auto taken = ctx.queue->take();
+            if (taken.ok()) { si = *taken; break; }
+            if (taken.code() != Errc::Timeout) { ended = true; break; }
+            std::lock_guard<std::mutex> ql(ctx.qMutex);
+            if (ctx.stop) { graph.shutdown(); return; }
+        }
+        if (ended) break;
+        const ExportContext::Slot& slot = ctx.slots[si];
+        const u32 i = slot.frame;
+        const auto plan = ctx.scheduler.frame(i);
+        if (!plan.ok()) { failWith(plan.status()); graph.shutdown(); return; }
+        hyper::FrameView view;
+        view.y = slot.yPtr;
+        view.uv = slot.uvPtr;
+        view.width = ctx.width;
+        view.height = ctx.height;
+        view.yStride = view.uvStride = ctx.width;
+        view.ptsUs = plan->ptsUs;
+        view.index = i;
+        // Motion Lite/Max no grafo: onde este quadro de saída cai na fonte (a
+        // mesma conta do render, que repete o quadro floor() dela).
+        if (ctx.hyper && ctx.hyper->motionSourceFps > 0.0 && ctx.fps > 0.0)
+            view.sourcePosition = static_cast<f64>(i) * ctx.hyper->motionSourceFps
+                                / (static_cast<f64>(std::max(1u, ctx.hyper->motionSlow)) * ctx.fps);
+        Status s = OkStatus;
+        for (;;) {
+            auto pushed = graph.try_push(view);
+            if (!pushed.ok()) { s = pushed.status(); break; }
+            if (*pushed) break;
+            s = drain(true);   // entrada cheia: um quadro sai antes
+            if (!s.ok()) break;
+        }
+        // O slot volta para a GPU: os pixels já estão no grafo.
+        if (s.ok()) s = ctx.queue->encoded(si, i);
+        if (s.ok()) s = drain(false);
+        if (!s.ok()) {
+            if (ctx.abandoned_worker()) return;
+            failWith(s);
+            graph.shutdown();
+            return;
+        }
+    }
+    // Fim da entrada: o que falta sai do grafo (a borda repete nos vizinhos).
+    {
+        std::lock_guard<std::mutex> ql(ctx.qMutex);
+        if (ctx.stop) { graph.shutdown(); return; }
+    }
+    graph.end_input();
+    for (;;) {
+        const Status s = drain(true);
+        if (s.code() == Errc::NotFound) break;
+        if (!s.ok()) {
+            if (ctx.abandoned_worker()) return;
+            failWith(s);
+            graph.shutdown();
+            return;
+        }
+    }
+    graph.shutdown();
+    if (written != ctx.frames) failWith(Status{Errc::InvalidState, "o grafo Hyper entregou menos quadros que o pedido"});
+}
+
 void Engine::export_encoder_main() noexcept {
     set_current_thread_name("aurea-export-enc");
     ExportContext& ctx = *exportCtx_;
@@ -15378,28 +15614,11 @@ void Engine::export_encoder_main() noexcept {
             }
         }
     } workerExit{*this, ctx};
-    std::unique_ptr<ai::Upscaler> upscaler;
-    ai::TemporalStabilizer temporalUpscale;
-    std::unique_ptr<u8[]> neuralInput, neuralOutput;
-    if (ctx.settings.aiUpscale) {
-        // Loading weights and all inference stay on the encoder worker.
-        Status loaded = Errc::OutOfMemory;
-        upscaler.reset(new (std::nothrow) ai::Upscaler());
-        neuralInput.reset(new (std::nothrow) u8[static_cast<usize>(ctx.width) * ctx.height * 3]);
-        neuralOutput.reset(new (std::nothrow) u8[static_cast<usize>(ctx.width * ctx.settings.aiUpscale) *
-                                               (ctx.height * ctx.settings.aiUpscale) * 3 / 2]);
-        if (upscaler && neuralInput && neuralOutput) {
-            // Tile 128: o halo de 20 px e computado por tile; em 64 ele custava
-            // 2,6x a area util, em 128 custa 1,7x (o maximo que o modelo aceita).
-            loaded = upscaler->load(ctx.settings.aiUpscale, 2, 128);
-        }
-        if (!loaded.ok()) {
-            ctx.queue->fail(loaded);
-            { std::lock_guard<std::mutex> ql(ctx.qMutex);
-              ctx.set_encoder_status(loaded); ctx.encoderFailed = true; ctx.stop = true; }
-            ctx.qCv.notify_all();
-            return;
-        }
+    // AureaHyper: upscale de IA (aiUpscale) e as etapas Lite/Max do job — o
+    // grafo (hyper/HyperGraph.hpp) entre o readback e o sink, nesta thread.
+    if (ctx.graphWanted) {
+        export_encoder_hyper_loop(ctx);
+        return;
     }
     u32 sinceLog = 0;
     u64 logWrite = 0, logRead = 0, logRender = 0, logDecode = 0;
@@ -15430,39 +15649,8 @@ void Engine::export_encoder_main() noexcept {
         const u64 w0 = monotonic_ns();
         Status s;
         if (i == ctx.startFrame) ctx.first_frame_stage("primeiro quadro: aguardando o encoder");
-        ctx.enter(upscaler ? ExportWorkerPhase::Upscale : ExportWorkerPhase::Video);
-        if (upscaler) {
-            ai::nv12_to_rgb709(slot.yPtr, slot.uvPtr, ctx.width, ctx.height, neuralInput.get());
-            struct Destination { ExportContext* exportContext; u8* pixels; u32 frame; } destination{&ctx, neuralOutput.get(), i};
-            s = upscaler->run(neuralInput.get(), ctx.width, ctx.height, ctx.width * 3, ctx.cancelRequested,
-                [](void* opaque, const ai::Upscaler::Tile& tile) {
-                    auto& d = *static_cast<Destination*>(opaque);
-                    auto& c = *d.exportContext;
-                    c.beat();   // a IA anda: um bloco por batida
-                    if (!ai::rgb_tile_to_nv12_709(tile.rgb, tile.stride, tile.x, tile.y,
-                        tile.width, tile.height, c.width * c.settings.aiUpscale,
-                        c.height * c.settings.aiUpscale, d.pixels)) return false;
-                    { std::lock_guard<std::mutex> lock(c.mutex);
-                      std::snprintf(c.progress.message, sizeof(c.progress.message), "IA: %u/%u · %u%%", d.frame + 1,
-                                    c.frames, static_cast<u32>(tile.progress * 100)); }
-                    return !c.cancelRequested.load();
-                }, &destination);
-            if (s.ok() && !ai::resize_nv12_709(neuralOutput.get(), ctx.width * ctx.settings.aiUpscale,
-                    ctx.height * ctx.settings.aiUpscale, neuralOutput.get(), ctx.outputWidth, ctx.outputHeight))
-                s = Status{Errc::InvalidState, "dimensoes invalidas no upscale"};
-            if (s.ok()) {
-                const Status temporal = temporalUpscale.process(neuralInput.get(), ctx.width, ctx.height,
-                    neuralOutput.get(), ctx.outputWidth, ctx.outputHeight, i);
-                if (!temporal.ok()) {
-                    s = Status{temporal.code(), "memoria insuficiente para preservar estabilizacao temporal da IA"};
-                }
-            }
-            if (s.ok()) {
-                ctx.enter(ExportWorkerPhase::Video);
-                s = ctx.sink->write_video(neuralOutput.get(), ctx.outputWidth,
-                    neuralOutput.get() + static_cast<usize>(ctx.outputWidth) * ctx.outputHeight, ctx.outputWidth, pts);
-            }
-        } else {
+        ctx.enter(ExportWorkerPhase::Video);
+        {
             // surface-direct: o R'G'B' do mesmo quadro (o fence já foi esperado).
             ctx.sink->set_direct_surface_frame(slot.rgbBuffer);
             s = ctx.sink->write_video(slot.yPtr, ctx.width, slot.uvPtr, ctx.width, pts);
@@ -15607,6 +15795,8 @@ Status Engine::pause_export() noexcept {
 }
 
 Status Engine::cancel_export() noexcept {
+    // Job Hyper: para o job (a passagem atual é cancelada logo abaixo).
+    const bool hyperJob = hyper_cancel_job();
     std::lock_guard<std::mutex> context(exportContextMutex_);
     if (exportStartupCancel_) {
         exportStartupCancel_->store(true, std::memory_order_release);
@@ -15614,7 +15804,7 @@ Status Engine::cancel_export() noexcept {
         // published queues/progress yet, and remains alive until scope exit.
         if (!exportCtx_) return OkStatus;
     }
-    if (!exportCtx_) return Errc::InvalidState;
+    if (!exportCtx_) return hyperJob ? OkStatus : Status{Errc::InvalidState};
     exportCtx_->cancelRequested.store(true, std::memory_order_release);
     // Acorda quem estiver esperando (slot livre, fila do encoder, decoder):
     // o cancelamento responde no próximo passo, não no fim de uma espera.
@@ -15630,6 +15820,7 @@ Status Engine::cancel_export() noexcept {
 }
 
 Engine::ExportProgress Engine::export_progress() const noexcept {
+    ExportProgress progress = [&]() noexcept -> ExportProgress {
     std::lock_guard<std::mutex> context(exportContextMutex_);
     if (!exportCtx_ || exportCtx_->preRenderMode) {
         ExportProgress idle{};
@@ -15662,6 +15853,11 @@ Engine::ExportProgress Engine::export_progress() const noexcept {
             std::snprintf(p.message, sizeof(p.message), "validando %llu/%u", static_cast<unsigned long long>(n), p.framesTotal);
     }
     return p;
+    }();
+    // Job Hyper: entre passagens (e na análise do Stable) o export "não
+    // terminou" para as telas; o resultado final é o do job.
+    hyper_overlay_progress(progress);
+    return progress;
 }
 
 std::string Engine::export_diagnostics() const noexcept {

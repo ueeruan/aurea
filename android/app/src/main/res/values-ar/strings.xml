@@ -925,23 +925,6 @@
     <string name="donation_copy_paypal">نسخ رابط PayPal</string>
     <string name="donation_export_note">يستمر التصدير. استخدم الرمز أو الرابط بعد انتهائه.</string>
     <string name="donation_copied">تم النسخ إلى الحافظة.</string>
-    <string name="ai_upscale_title">تكبير الفيديو بالذكاء الاصطناعي</string>
-    <string name="upscale_title">رفع الدقة بالذكاء الاصطناعي</string>
-    <string name="upscale_hint">اختر فيديو من المعرض والمُعامل. تعيد الشبكة العصبية بناء كل إطار على الجهاز ويُحفظ الفيديو عالي الدقة في Movies/Aurea. يتحول الفيديو أيضًا إلى مشروع يمكن تعديله لاحقًا.</string>
-    <string name="upscale_pick">اختيار فيديو</string>
-    <string name="upscale_factor">المُعامل</string>
-    <string name="upscale_result">المدخل %1$d × %2$d ← المخرج %3$d × %4$d</string>
-    <string name="upscale_start">رفع الدقة</string>
-    <string name="upscale_preparing">جارٍ تجهيز الفيديو…</string>
-    <string name="upscale_processing">جارٍ رفع الدقة</string>
-    <string name="upscale_time_note">يستغرق بضع دقائق: يمر كل إطار عبر الشبكة العصبية على الجهاز. أبقِ Aurea مفتوحًا.</string>
-    <string name="upscale_done">الفيديو جاهز</string>
-    <string name="upscale_open">فتح</string>
-    <string name="upscale_share">مشاركة</string>
-    <string name="upscale_again">فيديو آخر</string>
-    <string name="ai_upscale_note">نموذج للأنمي والرسوم. يعالج أجزاء الصورة دون تجميد الواجهة. الدقة المختارة أدناه هي جودة الإخراج النهائية.</string>
-    <string name="ai_upscale_dimensions">الذكاء الاصطناعي ⁨%1$dx⁩ · الإدخال ⁨%2$d × %3$d⁩ ← الإخراج ⁨%4$d × %5$d⁩</string>
-    <string name="licenses_title">التراخيص · الذكاء الاصطناعي</string>
     <string name="scene_workspace">مشهد ثلاثي الأبعاد</string>
     <string name="scene_orbit_x">مدار X</string>
     <string name="scene_orbit_y">مدار Y</string>
@@ -1181,7 +1164,7 @@
     <string name="consent_title">الموافقة والمسؤولية</string>
     <string name="consent_accept">موافقة ومتابعة</string>
     <string name="consent_body">Aurea أداة احترافية لتحرير المحتوى الرقمي وإنشائه وإنتاجه. باستخدام التطبيق، يقر المستخدم بأنه يتحمل المسؤولية الكاملة عن المحتوى الذي ينشئه أو يحرره أو يستورده أو يصدره أو ينشره أو يشاركه عبر المنصة.\n\nلا يتحكم Aurea في استخدام الأداة لأنشطة غير قانونية أو مسيئة أو احتيالية أو ضارة أو تنتهك حقوق الآخرين، ولا يشجع هذا الاستخدام أو يدعمه أو يصرح به.\n\nيتحمل المستخدم مسؤولية التأكد من امتلاكه التصاريح والتراخيص والحقوق اللازمة للمواد المستخدمة، بما فيها الصور ومقاطع الفيديو والموسيقى والعلامات التجارية والنماذج والملفات وغيرها من المحتويات المحمية.\n\nلا تعني الحرية الإبداعية التي يوفرها Aurea موافقة التطبيق أو مشاركته أو مسؤوليته عما يقرر كل مستخدم إنتاجه أو فعله باستخدام الأداة.\n\nيوافق المستخدم على استخدام Aurea وفقاً للقانون المعمول به ويتحمل مسؤولية أفعاله والمحتوى المنتج أو الموزع عبر التطبيق.\n\nإلى أقصى حد يسمح به القانون المعمول به، لا يتحمل Aurea والمسؤولون عنه المسؤولية عن الأفعال التي يقوم بها المستخدم وحده، أو إساءة استخدام الأداة، أو العواقب الناجمة عن المحتوى الذي ينشئه المستخدم نفسه أو ينشره أو يشاركه.\n\nيوفر Aurea الأداة. ويتحمل المستخدم مسؤولية الطريقة التي يختار استخدامها بها.\n\nبالمتابعة، يقر المستخدم بأنه قرأ هذه الشروط وفهمها ووافق عليها.</string>
-    <string name="release_notes_body">Aurea 0.2.6 (2194) • 19/10/2026\n\n• المشاريع: تُفتح كل المشاريع من جديد، ومنها المحفوظة في 0.2.4 وفي أول إصدارات Aurea. صدر 0.2.5 بدون تغييرات 0.2.0 إلى 0.2.4 وكان يرفض هذه الملفات.\n• عاد كل ما كان ناقصًا في 0.2.5 من 0.2.0 إلى 0.2.4: إصلاحات التصدير، والمعاينات المتحركة للتأثيرات، وخيار إيقاف المعاينات، وقناع القص، وTimeSlice، وإصلاحات Puppet.\n• التصدير: لم يعد ينتهي بخطأ عندما توجد طريقة أخرى للتصدير. إذا فشل الجهاز، يعيد التطبيق المحاولة تلقائيًا في وضع أكثر توافقًا (H.264، مُرمِّز برمجي، 720p، 480p) ويخبرك بالحجم الذي خرج به الفيديو.\n• التصدير بدقة أعلى مما يدعمه الجهاز يخرج بأكبر حجم ممكن بدلًا من الخطأ. الأجهزة بنظام 32 بت وذات الذاكرة القليلة تستهلك ذاكرة أقل أثناء التصدير، ويعود Android 8 و9 لاستخدام مُرمِّز الجهاز.\n• واجهة التحرير: تعرض مقاطع الفيديو موجة الصوت أسفل الصور المصغرة، وتعرض المقاطع الصوتية الموجة كاملة.\n• التأثيرات: تعود البطاقات لعرض المعاينة قبل | بعد، مع «قبل» و«بعد»، كما في 0.2.4.\n• واجهتان: عند إنشاء المشروع اختر التركيب (الرئيسية، الافتراضية) أو التحرير. غيّرها متى شئت من إعدادات المشروع.\n• واجهة التحرير: مسار رئيسي بالمقاطع متتالية، ومؤشر التشغيل في المنتصف، وانتقالات بين المقاطع، وقائمة سفلية بمستويات.\n• متصفح تأثيرات جديد: المميزة والأخيرة والمفضلة، وفئات بمعاينة حقيقية.\n• تأثير جديد «تقدم الرسم»: يرسم المتجهات خطًا بخط، ويكشف الصور بمسح.\n• فيديوهات 4K والثقيلة: ينشئ التطبيق نسخة خفيفة للتحرير بسلاسة، والتصدير يستخدم الأصل.\n• ترجمة تلقائية أفضل: تتجاهل الصمت، وتحافظ على السياق، وتقسّم الجمل أفضل، مع لغات أكثر ووضع دقيق.</string>
+    <string name="release_notes_body">Aurea Beta 0.3.2 (2198) • 26/10/2026\n\n• AureaHyper (جديد، مجاني حاليًا): يحل محل التكبير بالذكاء الاصطناعي في الشاشة الرئيسية. اختر الفيديو وما تريد — أوضح 2× أو 4×، 60 إطارًا في الثانية، حركة بطيئة، ترميم فيديو قديم، أنمي أو تثبيت —، وشاهد المعاينة قبل/بعد مع الوقت المتوقع وتابع المهمة. ثلاثة مسارات: Turbo وLite وMax.\n• في المحرر: تأثيرات الطبقة Hyper Upscale وHyper Motion وHyper Clean.\n• علامات بأسماء: يظهر الاسم على مسطرة الخط الزمني.\n• Android: يستمر التصدير والتطبيق في الخلفية أو الشاشة مطفأة.\n• التصدير المتوقف يكمل من حيث توقف بدل أن يبدأ من جديد.\n• ضبابية حركة ثلاثية الأبعاد سريعة (متجهات)، أسرع حتى 24×: Motion blur ← متقدم.\n• تُحدَّد جودة الفيديو قبل بدء التصدير ولم تعد تتغير في المنتصف بسبب انشغال الجهاز. إذا لزم تقليل شيء، يخبرك التصدير.\n• FFmpeg 9 وأخطاء \"متوقف\" زائفة أقل أثناء التصدير.\n• هواتف Qualcomm (مثل Moto g52): لم يعد التصدير يتوقف في منتصف الفيديو.\n• خرج التكبير من شاشة التصدير: أصبح الآن في AureaHyper وفي تأثير Hyper Upscale.\n• شاشة جديدة لتراخيص المصادر المفتوحة.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">تعبئة</string>
@@ -4521,4 +4504,26 @@
     <string name="fxl_radial_distortion_k2">التشوّه الشعاعي K2</string>
     <string name="fxo_remove_distortion">إزالة التشوّه</string>
     <string name="fxo_apply_distortion">تطبيق التشوّه</string>
+    <string name="fxo_2">2×</string>
+    <string name="fxo_4">4×</string>
+    <string name="fxt_upscales_the_layer_when_it_appears_large">يكبّر الطبقة عندما تظهر أكبر من مصدرها (مقياس الطبقة في التركيب). بدون تكبير على الشاشة، تعمل الحدة فقط.</string>
+    <string name="fxl_content">المحتوى</string>
+    <string name="fxo_general">عام</string>
+    <string name="fxo_anime">أنمي</string>
+    <string name="fxo_turbo_preview">Turbo (معاينة)</string>
+    <string name="fxo_lite">Lite</string>
+    <string name="fxo_max">Max</string>
+    <string name="fxt_the_preview_always_uses_turbo_lite_and_m">المعاينة تستخدم Turbo دائمًا. Lite وMax (الشبكات) تعمل في مهمة Hyper في الشاشة الرئيسية؛ تصدير المحرر يستخدم Turbo.</string>
+    <string name="fxl_remove_compression_blocks">إزالة كتل الضغط</string>
+    <string name="fxl_deinterlace">إلغاء التشابك</string>
+    <string name="fxo_always">دائمًا</string>
+    <string name="fxt_automatic_acts_only_when_the_frame_shows">الوضع التلقائي يعمل فقط عندما يظهر في الإطار نمط المشط الخاص بالفيديو المتشابك.</string>
+    <string name="fxt_frames_on_each_side_aligned_by_motion_1">إطارات من كل جانب تتم محاذاتها حسب الحركة (1 = 3 إطارات، 2 = 5 إطارات).</string>
+    <string name="fxt_the_preview_always_uses_turbo_lite_and_m_2">المعاينة تستخدم Turbo دائمًا. Lite وMax (الشبكات) تعمل في مهمة Hyper في الشاشة الرئيسية.</string>
+    <string name="fxl_slow_motion">حركة بطيئة</string>
+    <string name="fxo_1_extra_frames_only">1× (إطارات إضافية فقط)</string>
+    <string name="fxo_8">8×</string>
+    <string name="fxt_new_frames_between_the_source_frames_bui">إطارات جديدة بين إطارات المصدر حسب الحركة (متجهات كتل في الاتجاهين). 1×: تأخذ الطبقة معدل إطارات التركيب (مثل فيديو 30 في تركيب 60). الحركة البطيئة تحدث داخل الطبقة؛ صوت الطبقة لا يتغير.</string>
+    <string name="fxl_detect_repeated_frames">اكتشاف الإطارات المكررة</string>
+    <string name="fxt_the_preview_always_uses_turbo">المعاينة تستخدم Turbo دائمًا.</string>
 </resources>

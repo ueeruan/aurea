@@ -42,7 +42,8 @@ internal fun MarkerEditor(store: EditorStore) {
             title = { Text(stringResource(R.string.marker_edit)) },
             text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { if (it.length <= 200) name = it }, singleLine = true,
-                    label = { Text(stringResource(R.string.new_project_name)) })
+                    label = { Text(stringResource(R.string.marker_name)) },
+                    placeholder = { Text(stringResource(R.string.marker_name_hint)) })
                 OutlinedTextField(frame, { frame = it }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     label = { Text(stringResource(R.string.marker_frame)) })

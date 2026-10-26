@@ -230,6 +230,9 @@ struct ExportOptions: Equatable {
     /// no encoder do aparelho), 2 Software. É o degrau da escada
     /// (ExportAttempts.hpp) em que o export COMEÇA; se falhar, segue dali.
     var encoder: UInt32 = 0
+    /// AureaHyper (0.3.2): o job da Home passa pelo MESMO export (preparação fora
+    /// da main, polling, vigia, pausa no segundo plano e retomada pelo checkpoint).
+    var hyperJob: HyperJobRequest? = nil
 }
 
 /// Cancel may arrive while the serial media queue is busy or inside native
@@ -379,82 +382,47 @@ final class AureaModel: ObservableObject {
     @Published var screen: Screen = .home
 
     // =========================================================================
-    // Upscale com IA (UpscaleView.swift): ferramenta própria, fora do editor e
-    // da aba Exportar. O vídeo vira um projeto do tamanho dele e sai pelo
-    // export normal com `aiUpscale`. Par do Android: EditorStore.upscaleVideo.
+    // AureaHyper (HyperView.swift, 0.3.2): substitui o "Upscale com IA". O
+    // fluxo vive em HyperFlow (HyperModel.swift); o job roda pelo export daqui
+    // (startHyperExport) e o resultado vira projeto. Par do Android:
+    // EditorStore.hyper / Exporter.startHyper.
     // =========================================================================
-    enum UpscaleStage { case idle, preparing, done, failed }
-    @Published var upscaleStage: UpscaleStage = .idle
-    @Published var upscaleSourceName: String?
-    @Published var upscaleSourceSize: CGSize?
-    private var upscaleRequest: UUID?
+    lazy var hyper: HyperFlow = HyperFlow(model: self)
 
-    func openUpscale() {
+    func openHyper() {
         guard screen == .home, !exporting else { return }
-        upscaleStage = .idle
-        screen = .upscale
+        hyper.reset()
+        screen = .hyper
     }
 
-    func closeUpscale() {
-        guard screen == .upscale, !exporting, upscaleStage != .preparing else { return }
-        upscaleRequest = nil
+    func closeHyper() {
+        guard screen == .hyper, !hyper.busy else { return }
+        hyper.reset()
         screen = .home
         refreshProjectList()
     }
 
-    func upscaleReset() {
-        if upscaleStage != .preparing { upscaleStage = .idle }
-    }
-
-    func upscaleVideo(url: URL, factor: UInt32) {
-        guard upscaleStage != .preparing, !exporting, factor == 2 || factor == 4, canChangeProject() else { return }
-        upscaleStage = .preparing
-        let request = UUID()
-        upscaleRequest = request
-        Task { @MainActor in
-            let asset = AVURLAsset(url: url)
-            var width: CGFloat = 0, height: CGFloat = 0, fps: Double = 30
-            if let track = try? await asset.loadTracks(withMediaType: .video).first {
-                if let size = try? await track.load(.naturalSize), let transform = try? await track.load(.preferredTransform) {
-                    let oriented = size.applying(transform)
-                    width = abs(oriented.width); height = abs(oriented.height)
-                }
-                if let rate = try? await track.load(.nominalFrameRate), rate >= 1, rate <= 240 { fps = Double(rate) }
-            }
-            guard upscaleRequest == request else { return }
-            guard width.isFinite, height.isFinite, width >= 2, height >= 2 else {
-                upscaleStage = .failed; toast = AureaText.t("import_failed"); return
-            }
-            let w = UInt32(width.rounded()) & ~UInt32(1), h = UInt32(height.rounded()) & ~UInt32(1)
-            let name = url.deletingPathExtension().lastPathComponent
-            upscaleSourceName = name
-            upscaleSourceSize = CGSize(width: CGFloat(w), height: CGFloat(h))
-            let title = "\(name) · Upscale \(factor)×"
-            guard newProject(width: w, height: h, fps: fps, title: title) else { upscaleStage = .failed; return }
-            importMedia(url: url, kind: .video)
-            // A importação é assíncrona (`importingMedia`); espera terminar.
-            let deadline = Date().addingTimeInterval(300)
-            while importingMedia, Date() < deadline, upscaleRequest == request {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-            guard upscaleRequest == request else { return }
-            guard !importingMedia, layers.contains(where: { $0.kind == 1 }) || !layers.isEmpty else {
-                upscaleStage = .failed; return
-            }
-            _ = saveProject(writeThumbnail: false)
-            upscaleStage = .idle
-            exportOptions = ExportOptions()
-            // Encoder de celular vai até 4K: 4x de um 1080p (8K) sai em 2x (4K).
-            let effective = factor == 4 && min(w, h) * 4 > 2160 ? 2 : factor
-            exportOptions.aiUpscale = UInt32(effective)
-            exportOptions.shortSide = min(w, h) * UInt32(effective)
-            exportOptions.trimToContent = true
-            startExport()
-            // O fim do export vira "pronto" para a tela (ela observa exportedURL).
-            while exporting, upscaleRequest == request { try? await Task.sleep(nanoseconds: 250_000_000) }
-            guard upscaleRequest == request else { return }
-            upscaleStage = exportedURL != nil ? .done : .failed
-        }
+    /// O job Hyper pelo caminho do export (sem a escada de tentativas: o motor
+    /// escolhe Turbo/Lite/Max por etapa). O arquivo fica em `exportedURL`, sem
+    /// ir para Fotos: o HyperFlow o transforma em projeto.
+    func startHyperExport(_ job: HyperJobRequest) {
+        guard started, !stopping, !exporting else { return }
+        exportedURL = nil
+        exportProgress = [:]; exportMessage = nil; exportCancelled = false; exportSavedToPhotos = false
+        exportStalled = false
+        exportWatch = ExportStallWatch()
+        exportLighterAfterClose = false
+        exportPausedForBackground = false
+        var options = ExportOptions()
+        options.kind = .video
+        options.hyperJob = job
+        exportSafeMode = 0
+        ProblemReport.beginExportDiagnostics(previous: engine.exportDiagnostics())
+        startExportDiagnosticsTimer()
+        exportedKind = .video
+        pendingExportURL = job.output
+        pendingExportOptions = options
+        prepareExport(job.output, options: options, safeMode: 0)
     }
     @Published var fullscreen = false
     @Published var panel: PanelKind = .none
@@ -854,7 +822,7 @@ final class AureaModel: ObservableObject {
         themeId = palette.id
     }
 
-    enum Screen { case home, editor, upscale }
+    enum Screen { case home, editor, hyper }
     /// `filters`/`adjust` (0.3.0): as telas próprias do modo de edição (EditModeView.swift).
     enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, clipEdit, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo, filters, adjust }
     @Published var curveProperty: UInt32 = 0
@@ -911,6 +879,7 @@ final class AureaModel: ObservableObject {
             language = parsed
             AureaText.language = parsed
         }
+        HyperPlatform.install()
         engine = AureaEngine(cacheDirectory: AureaPaths.caches.path,
                              documentsDirectory: AureaPaths.documents.path)
         device = MTLCreateSystemDefaultDevice()
@@ -2107,6 +2076,8 @@ final class AureaModel: ObservableObject {
         return effects.last { $0.typeId == request.type && !request.previous.contains($0.effectId) }?.effectId
     }
     func addEffectAndFocus(_ type: UInt32, layer: Int64) {
+        // 0.3.2: efeito Hyper só com o acesso (a folha de efeitos já abre a tela bloqueada).
+        if HyperEffectGate.locked(typeId: type) { toast = AureaText.t("hyper_effect_locked"); return }
         let previous = Set(effects.map(\.effectId))
         pendingEffectFocus = EffectFocusRequest(layer: layer, type: type, previous: previous)
         seenEffectIds[layer] = previous
@@ -3953,6 +3924,7 @@ final class AureaModel: ObservableObject {
 
     func addCatalogEffect(_ type: UInt32, layers ids: [Int64]) {
         guard !ids.isEmpty else { return }
+        if HyperEffectGate.locked(typeId: type) { toast = AureaText.t("hyper_effect_locked"); return }
         func add() {
             mutate { native in
                 native.beginUndoGroup()
@@ -4461,7 +4433,14 @@ final class AureaModel: ObservableObject {
                     self.exportMessage = AureaText.t("app_export_resumed")
                 }
             }
-            if options.kind == .video {
+            if let job = options.hyperJob {
+                // AureaHyper: o job da Home (mesma fonte, receita e saída retomam do checkpoint).
+                if !request.isCancelled {
+                    let code = native.startHyperJob(job.source, recipe: job.recipe.map { NSNumber(value: $0) }, output: url.path)
+                    ok = code == 0
+                    if !ok { progress = ["result": NSNumber(value: code)] }
+                }
+            } else if options.kind == .video {
                 while !request.isCancelled {
                     let previous = native.exportProgress()
                     let previousDiagnostics = native.exportDiagnostics()
@@ -4850,7 +4829,7 @@ final class AureaModel: ObservableObject {
                         self.exportTimer?.invalidate()
                         self.exportTimer = nil
                         if self.exportedKind == .video, !self.exportCancelled,
-                           let url = self.pendingExportURL, let options = self.pendingExportOptions {
+                           let url = self.pendingExportURL, let options = self.pendingExportOptions, options.hyperJob == nil {
                             let next = Self.nextExportAttempt(self.exportSafeMode, code: 25, failure: 0, stalled: true,
                                                               tooLong: false, options: options)
                             if next != 0 {
@@ -4895,7 +4874,7 @@ final class AureaModel: ObservableObject {
                     // segurança: refaz o vídeo do começo, com o aviso (nada de
                     // "falhou" na tela).
                     if result != 0, self.exportedKind == .video, !self.exportCancelled,
-                       let url = self.pendingExportURL, let options = self.pendingExportOptions {
+                       let url = self.pendingExportURL, let options = self.pendingExportOptions, options.hyperJob == nil {
                         let failure = (self.exportProgress[AureaExportFailure] as? NSNumber)?.uint32Value ?? 0
                         let next = Self.nextExportAttempt(self.exportSafeMode, code: Int32(result), failure: failure,
                                                           stalled: self.exportWatch.cancelled, tooLong: false, options: options)
@@ -4907,11 +4886,13 @@ final class AureaModel: ObservableObject {
                         }
                     }
                     self.exportedURL = result == 0 && !self.exportCancelled ? self.pendingExportURL : nil
+                    let hyperJob = self.pendingExportOptions?.hyperJob != nil
                     self.pendingExportURL = nil
                     self.pendingExportOptions = nil
                     if let url = self.exportedURL {
                         self.exportCancelled = false
-                        self.publishExportToPhotos(url)
+                        // AureaHyper: o arquivo vira projeto (HyperFlow.finishIfDone), não vai para Fotos.
+                        if hyperJob { self.exporting = false } else { self.publishExportToPhotos(url) }
                     } else {
                         self.exporting = false
                         if !self.exportCancelled {

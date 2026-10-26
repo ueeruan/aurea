@@ -344,9 +344,25 @@ val stageNativeExportLicenses = tasks.register<Sync>("stageNativeExportLicenses"
     into(nativeExportAssets.map { it.dir("licenses/native-export") })
 }
 android.sourceSets.getByName("main").assets.srcDir(nativeExportAssets.get().asFile)
+// 0.3.2: "Licenças de código aberto" mostra os textos DOS ARQUIVOS (nada
+// redigitado). Só os avisos entram no APK — os pesos dos modelos já vêm
+// embutidos no motor e não são copiados de novo aqui.
+val ossLicenseAssets = layout.buildDirectory.dir("generated/assets/oss-licenses")
+val stageOssLicenses = tasks.register<Sync>("stageOssLicenses") {
+    val engineAssets = rootProject.file("../engine/assets")
+    into(ossLicenseAssets.map { it.dir("licenses/oss") })
+    from(File(engineAssets, "licenses"))
+    from(File(engineAssets, "ai")) { include("LICENSE*", "NOTICE*"); into("ai") }
+    from(File(engineAssets, "rotobrush")) { include("LICENSE*", "NOTICE*"); into("rotobrush") }
+    from(File(engineAssets, "hyper")) {
+        include("**/LICENSE*", "**/NOTICE*", "**/manifest*.json", "**/*.md")
+        into("hyper")
+    }
+}
+android.sourceSets.getByName("main").assets.srcDir(ossLicenseAssets.get().asFile)
 tasks.configureEach {
     if (name.startsWith("configureCMake") || name.startsWith("buildCMake")) dependsOn(ffmpegPrepareTasks)
-    if (name.startsWith("merge") && name.endsWith("Assets")) dependsOn(stageNativeExportLicenses)
+    if (name.startsWith("merge") && name.endsWith("Assets")) dependsOn(stageNativeExportLicenses, stageOssLicenses)
 }
 
 dependencies {

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.2: marcadores com nome. -->
+<resources>
+    <string name="marker_name">Nama penanda</string>
+    <string name="marker_name_hint">Mis.: Reff</string>
+</resources>

@@ -92,6 +92,14 @@ new_sqlite_classes = ["CaptionCommunity"]
 #   npx wrangler d1 create aurea-contas          # cole o database_id abaixo
 #   npx wrangler d1 migrations apply aurea-contas --remote
 # Sem o id verdadeiro o `wrangler deploy` recusa — de propósito.
+#
+# Direitos pagos — /api/entitlements e /api/admin/entitlements (entitlements.js),
+# tabela da migração 0007. Secret (NUNCA aqui; `npx wrangler secret put`):
+#   AUREA_ADMIN_SECRET   segredo do admin (≥ 16 caracteres; sem ele, a rota de
+#                        admin responde 503 e nunca fica aberta)
+#   AUREA_CONFIG_SIGNING_KEY  chave PRIVADA ECDSA P-256 (PKCS8 base64) que assina
+#                        /api/app-config (scripts/gen-config-key.mjs; sem ela a
+#                        rota responde 503 e os apps seguem com a última config)
 # -----------------------------------------------------------------------------
 [[d1_databases]]
 binding = "AUREA_DB"

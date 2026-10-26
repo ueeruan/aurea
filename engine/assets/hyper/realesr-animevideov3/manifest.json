@@ -1,0 +1,53 @@
+{
+  "name": "realesr-animevideov3 x4 int8",
+  "version": "Real-ESRGAN v0.2.5.0 (ncnn oficial já embutido em engine/assets/ai)",
+  "license": "BSD-3-Clause",
+  "sourceUrl": "engine/assets/ai/realesr-animevideov3.bin (realesrgan-ncnn-vulkan-20220424)",
+  "sourceSha256": "548a36f9c3f4ab8da56cd3b13badf23968bee207b396dad14d04b830e5f2ab2d",
+  "conversion": "ncnnoptimize fp32 -> ncnn2table kl (48 imagens sintéticas) -> ncnn2int8 só nas convoluções de int8Layers (precisão mista)",
+  "int8Layers": [
+    "Conv_4",
+    "Conv_6",
+    "Conv_8",
+    "Conv_16",
+    "Conv_18",
+    "Conv_20",
+    "Conv_24",
+    "Conv_26",
+    "Conv_28",
+    "Conv_30",
+    "Conv_32"
+  ],
+  "int8PsnrVsFp32Db": 35.5,
+  "layers": [
+    "BinaryOp",
+    "Convolution",
+    "Input",
+    "Interp",
+    "PReLU",
+    "PixelShuffle",
+    "Split"
+  ],
+  "delivery": "bundled",
+  "files": [
+    {
+      "file": "animevideov3-x4-int8.param",
+      "role": "param-int8",
+      "bytes": 3121,
+      "sha256": "6609341ea1531b59be41d42b74b24e7b65dbec40eed2cb889328a7f0d3525478"
+    },
+    {
+      "file": "animevideov3-x4-int8.bin",
+      "role": "weights-int8",
+      "bytes": 844724,
+      "sha256": "0f9d85f3a474b66aecb256932349cdd5c477e82b29949a0f0c8001e3fbed721c"
+    },
+    {
+      "file": "LICENSE",
+      "role": "license",
+      "bytes": 1519,
+      "sha256": "4a699ec4863d96a91fc265948a0c90033f7e8735d515524dcf3444736406e0c2"
+    }
+  ],
+  "totalBytes": 849364
+}

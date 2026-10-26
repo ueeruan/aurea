@@ -254,15 +254,13 @@ private fun Options(
     onChange: (ExportOptions) -> Unit,
 ) {
     val comp = store.composition
-    val short = max(1, min(compW, compH))
     // A regra do motor (ExportRules.hpp): lado maior em múltiplo de 16.
     fun sizeFor(side: Int): Pair<Int, Int> = VideoExportRules.frameSize(compW, compH, side)
     // Tudo aparece (§109): o que o aparelho não exporta fica marcado e
     // desligado, com a frase do porquê embaixo — o motor recusaria, e o
     // usuário não descobre só depois de tocar.
-    val neuralSide = short * options.aiUpscale
-    val resolutions = if (options.aiUpscale > 0 && Resolutions.none { it.first == neuralSide })
-        (Resolutions + (neuralSide to "${neuralSide}p (${options.aiUpscale}×)")).sortedBy { it.first } else Resolutions
+    // 0.3.2: o upscale por IA saiu do Exportar (é o AureaHyper da Home): só as resoluções de sempre.
+    val resolutions = Resolutions
     val available = resolutions.filter { (side, _) -> val (w, h) = sizeFor(side); comp?.fits(w, h) ?: true }
     val blocked = resolutions.filter { it !in available }.map { it.second }.toSet()
     val device = store.deviceReport
@@ -391,8 +389,7 @@ private fun Options(
             onChange(options.copy(trimToContent = it == contentRange))
         }
 
-        // Upscale com IA saiu daqui: é a ferramenta própria da Home
-        // (upscale/UpscaleScreen.kt), onde a pessoa escolhe o vídeo e o fator.
+        // Upscale com IA saiu daqui: é o AureaHyper da Home (hyper/HyperScreen.kt).
 
         Spacer(Modifier.height(12.dp))
         SummaryRow(stringResource(R.string.editor_video), listOf("$w × $h", "${fmt(fps)} fps", codecName).joinToString(" · ") { ltrPlain(it) })

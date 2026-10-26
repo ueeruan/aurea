@@ -1228,6 +1228,50 @@ NS_SWIFT_NAME(AureaEngine)
                                                         maxWidth:(uint32_t)maxWidth fps:(double)fps
                                                    trimToContent:(BOOL)trimToContent;
 /// Thumbnail quadrado do frame do playhead não é export: use `captureFrame`.
+
+// ---- AureaHyper (0.3.2; aurea/hyper/Hyper.hpp) -------------------------------
+// A receita vai como NSArray de 13 números, na MESMA ordem do Android
+// (HyperRecipe.pack(): upscale, modo, ruído, blocos, entrelaçado, rosto, força
+// do rosto, fps alvo, câmera lenta, estabilizar, força, keyframes, caminho).
+// Nenhuma destas pode ser chamada da thread de render do motor.
+
+/// hyper_device_profile: "measured", "abi64", "freeRamBytes", "vulkan",
+/// "vulkanFp16", "gles3", "npu", "turboMsPerFrame", "liteMsPerTile",
+/// "thermalAfter", "defaultPath", "tile", "tileMargin", "backendNote".
+/// BLOQUEIA ~1–10 s quando mede (primeira vez ou `remeasure`).
+- (NSDictionary<NSString*, id>*)hyperDeviceProfile:(BOOL)remeasure NS_SWIFT_NAME(hyperDeviceProfile(remeasure:));
+/// hyper_estimate: [s0, s1, s2, s3 (índice = caminho; < 0 indisponível), peakBytes, largura, altura, fps].
+- (nullable NSArray<NSNumber*>*)hyperEstimate:(NSArray<NSNumber*>*)recipe source:(NSString*)sourcePath
+    NS_SWIFT_NAME(hyperEstimate(_:source:));
+/// hyper_preview_frame: "status" (Errc), "width", "height", "before" e "after"
+/// (RGBA8, stride 4·largura). Sem "before"/"after" = falhou. BLOQUEIA.
+- (NSDictionary<NSString*, id>*)hyperPreviewFrame:(NSArray<NSNumber*>*)recipe source:(NSString*)sourcePath
+                                           seconds:(double)seconds path:(int32_t)path
+    NS_SWIFT_NAME(hyperPreviewFrame(_:source:seconds:path:));
+/// start_hyper_job: o job da Home pelo export do motor (progresso/cancelamento/
+/// pausa = os do export). 0 = começou.
+- (int32_t)startHyperJob:(NSString*)sourcePath recipe:(NSArray<NSNumber*>*)recipe output:(NSString*)outputPath
+    NS_SWIFT_NAME(startHyperJob(_:recipe:output:));
+/// hyper_job_steps: [estado por passo ×8 (0 na fila, 1 rodando, 2 feito, 3 não
+/// existe), ativo, rodando, terminou, resultado, passagem, passagens, som mudo,
+/// progresso ×1000, caminho por passo ×8, largura, altura, quadros] — o mesmo do Android.
+- (NSArray<NSNumber*>*)hyperJobSteps;
+/// A pasta dos modelos sob demanda (GFPGAN; hyper/HyperNeural.hpp).
++ (void)hyperSetModelDirectory:(NSString*)path NS_SWIFT_NAME(hyperSetModelDirectory(_:));
+/// [detector de rostos registrado, modelo de rostos (gfpgan-v1.4) presente e conferido].
++ (NSArray<NSNumber*>*)hyperFaceStatus;
+/// O detector de rostos da plataforma (Vision, HyperPlatform.swift) para a
+/// etapa Face. O bloco roda na thread do grafo com um quadro R'G'B' 8 bits
+/// (`rgb` vale só durante a chamada) e devolve 17 números por rosto: x, y,
+/// largura, altura (pixels, origem no topo), confiança, yaw (graus), tem
+/// pontos (0/1) e 5 pontos (x, y): olho esquerdo, olho direito, nariz, canto
+/// esquerdo e direito da boca — esquerdo/direito NA IMAGEM. Nulo remove.
++ (void)setHyperFaceDetector:(nullable NSArray<NSNumber*>* _Nullable (^)(NSData* rgb, uint32_t width, uint32_t height,
+                                                                          uint32_t stride, uint32_t maxBoxes))detector
+    NS_SWIFT_NAME(setHyperFaceDetector(_:));
+/// O aparelho tem Neural Engine usável pelo Core ML (informa o medidor;
+/// EngineConfig::hyperNpuAvailable). Vale para motores criados DEPOIS.
++ (void)setHyperNpuAvailable:(BOOL)available NS_SWIFT_NAME(setHyperNpuAvailable(_:));
 @end
 
 // =============================================================================

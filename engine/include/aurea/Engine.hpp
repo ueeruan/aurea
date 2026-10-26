@@ -63,6 +63,7 @@
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/PreRender.hpp"
 #include "aurea/render/PreRenderCache.hpp"
+#include "aurea/hyper/Hyper.hpp"
 
 #include <array>
 #include <atomic>
@@ -77,6 +78,8 @@ namespace aurea { class OfflineFrameRenderer; }
 namespace aurea::export_checkpoint { struct SourceIdentity; }
 namespace aurea {
 class PreRenderCache;
+/// Job Hyper: o projeto temporário e o grafo de um export (src/hyper/HyperExport.hpp).
+struct HyperExportOverride;
 
 /// Stable bridge values. Timing arrangements move whole layers without trimming.
 enum class LayerTimeArrangement : u32 {
@@ -282,6 +285,10 @@ struct EngineConfig {
     /// num valor otimista inventado.
     PlatformInfo platformInfo{};
     bool hasPlatformInfo = false;
+    /// AureaHyper: a plataforma tem acelerador neural utilizável (Android:
+    /// NNAPI com dispositivo acelerador; iOS: Core ML com Neural Engine). Só
+    /// informa o medidor (hyper::DeviceProfile::npu); o motor não o usa sozinho.
+    bool hyperNpuAvailable = false;
     /// Fonte padrão do texto (arquivo TTF/OTF); vazio = procurar a do sistema.
     std::string defaultFontPath;
     std::string cacheDirectory;
@@ -2097,6 +2104,78 @@ public:
     [[nodiscard]] PreRenderProgress query_prerender_progress() noexcept;
 
     // =========================================================================
+    // AureaHyper (0.3.2) — aurea/hyper/Hyper.hpp e aurea/hyper/HyperStage.hpp.
+    //
+    // Unidades: tempo em segundos (f64), tamanhos em pixels, fps em quadros
+    // por segundo. Imagens RGBA8 sRGB com alfa reto, linha a linha, sem folga
+    // (stride = 4·largura). Nenhuma destas funções pode ser chamada da thread
+    // de render do motor; todas aceitam qualquer outra thread (UI incluída nas
+    // que dizem "não bloqueia").
+    // =========================================================================
+
+    /// O MEDIDOR do aparelho. Sem medição guardada (ou com `remeasure`, ou com
+    /// o build do motor / a GPU / o driver diferentes do que está no arquivo)
+    /// MEDE: um quadro de FSR 1 480p→1080p na GPU, um tile da rede Lite no
+    /// Vulkan (fp16) e na CPU com a conferência do tile contra a referência
+    /// (driver que erra cai para o próximo caminho), RAM livre, ABI, GLES3,
+    /// NPU (`EngineConfig::hyperNpuAvailable`) e o térmico depois do teste.
+    /// O resultado vai para `cacheDirectory/hyper/device-profile.json` e fica
+    /// em memória. BLOQUEIA: ~1–10 s quando mede; microssegundos depois.
+    /// Thread-safe (serializada por dentro). Durante um export ou um job Hyper
+    /// não mede: devolve o guardado, ou um perfil conservador com
+    /// `measured == false` (Turbo) se nunca mediu. Nunca falha.
+    [[nodiscard]] hyper::DeviceProfile hyper_device_profile(bool remeasure = false) noexcept;
+
+    /// Estimativa do vídeo `sourcePath` (caminho ou "fd:<n>") com `recipe`:
+    /// segundos por caminho (índice = hyper::Path; Auto = o escolhido; < 0 =
+    /// indisponível neste aparelho), tamanho e fps de saída JÁ limitados pelo
+    /// encoder do aparelho (a mesma regra do export) e a memória máxima do
+    /// caminho escolhido. Usa o perfil guardado (não mede; sem perfil, conta
+    /// com o conservador). Bloqueia só o tempo de abrir o arquivo (sonda do
+    /// container, alguns ms). Fonte ilegível = Estimate com seconds todos < 0
+    /// e outputWidth 0.
+    [[nodiscard]] hyper::Estimate hyper_estimate(const hyper::Recipe& recipe, const char* sourcePath) noexcept;
+
+    /// UM quadro para o deslizador antes/depois: o quadro do vídeo no instante
+    /// `seconds` da FONTE (antes = a fonte ampliada por bilinear para o tamanho
+    /// de saída; depois = a receita no caminho `path`; Auto = o do perfil).
+    /// Motion não muda um quadro parado (o "depois" mostra as outras etapas).
+    /// Saída: RGBA8 sRGB `width`×`height` (o tamanho de saída limitado a 1920
+    /// no lado maior para caber na tela). BLOQUEIA: decodifica e renderiza
+    /// (Turbo ~50–300 ms; Lite/Max até alguns segundos). Recusa (Busy) durante
+    /// um export ou job Hyper. Cancelar: não há; é um quadro.
+    [[nodiscard]] Status hyper_preview_frame(const hyper::Recipe& recipe, const char* sourcePath, f64 seconds,
+                                             hyper::Path path, std::vector<u8>& beforeRgba,
+                                             std::vector<u8>& afterRgba, u32& width, u32& height) noexcept;
+
+    /// O JOB DA HOME: um projeto temporário (fora do projeto aberto, que não
+    /// muda) com o vídeo `sourcePath` e os efeitos Hyper da receita, passado
+    /// pelo export do motor — herda checkpoint/retomada, export em segundo
+    /// plano, validação, publicação atômica e progresso honesto. Com etapas
+    /// Lite/Max, o grafo Hyper (HyperStage.hpp) roda entre o readback e o
+    /// encoder; se uma etapa Turbo vier depois de uma rede (o Motion, por
+    /// exemplo, interpola DEPOIS do upscale), o job faz uma segunda passagem
+    /// pelo export a partir de um intermediário (apagado no fim).
+    ///
+    /// Tempo exato: 60 fps (targetFps) mantém a duração e o som; câmera lenta
+    /// ×N multiplica a duração por N exatamente e sai SEM som (não esticamos o
+    /// áudio; `JobSteps::audioMuted`). Saída limitada pelo encoder do aparelho.
+    ///
+    /// Não bloqueia: valida, sonda a fonte e devolve; o trabalho corre numa
+    /// thread própria. Progresso: `export_progress()` (quadros, ETA, fase; não
+    /// cai para "terminado" entre passagens) + `hyper_job_steps()`. Cancelar:
+    /// `cancel_export()` (para na hora). Chamar de novo com a MESMA fonte,
+    /// receita e saída depois de o app morrer continua do que já estava pronto
+    /// (passagens validadas e o checkpoint do export). InvalidState se já há
+    /// um export/job rodando.
+    [[nodiscard]] Status start_hyper_job(const char* sourcePath, const hyper::Recipe& recipe,
+                                         const char* outputPath) noexcept;
+
+    /// Os passos do job (quais existem, quais terminaram, o atual). Não
+    /// bloqueia (cópia sob uma trava curta). Sem job: `active == false`.
+    [[nodiscard]] hyper::JobSteps hyper_job_steps() const noexcept;
+
+    // =========================================================================
     // Acesso de baixo nível (testes e painel de debug)
     // =========================================================================
     [[nodiscard]] const DeviceCapabilities& caps() const noexcept { return caps_; }
@@ -2205,8 +2284,11 @@ private:
     };
     [[nodiscard]] bool export_restart_matches_locked(const ExportRestartGuard& guard) const noexcept;
     [[nodiscard]] Status load_project_checked(const char* path, ExportRestartGuard* guard) noexcept;
+    /// `hyper` (job Hyper, src/hyper/HyperExport.hpp): exporta o projeto que
+    /// vem nele em vez do aberto, com o grafo Hyper entre readback e encoder.
     [[nodiscard]] Status start_export_checked(const ExportSettings& settings, const char* outputPath,
-                                              const ExportRestartGuard* guard) noexcept;
+                                              const ExportRestartGuard* guard,
+                                              const HyperExportOverride* hyper = nullptr) noexcept;
     [[nodiscard]] Status save_project_impl(const char* path, bool idleOnly = false, bool dirtyOnly = false,
                                            bool* saved = nullptr) noexcept;
     mutable std::mutex saveStatsMutex_;
@@ -2571,6 +2653,27 @@ private:
     void log_export_profile() noexcept;
     /// Âncora da camada de texto no centro da caixa atual (depois de editar).
     void recenter_text(Layer& l) noexcept;
+
+    // --- AureaHyper (src/engine/EngineHyper.cpp) -----------------------------
+    struct HyperState;
+    struct HyperStateDeleter { void operator()(HyperState* s) const noexcept; };
+    std::unique_ptr<HyperState, HyperStateDeleter> hyper_;
+    [[nodiscard]] HyperState& hyper_state() noexcept;
+    /// cancel_export: o job para na hora (a passagem atual e as próximas).
+    bool hyper_cancel_job() noexcept;   ///< true = havia job
+    /// shutdown: cancela e espera a thread do job.
+    void hyper_shutdown() noexcept;
+    /// export_progress durante um job: não "termina" entre passagens.
+    void hyper_overlay_progress(ExportProgress& p) const noexcept;
+    /// Um export comum começou: o progresso dele não é mais o do último job.
+    void hyper_forget_job() noexcept;
+    void hyper_job_main() noexcept;
+    /// O perfil guardado (memória/disco), sem medir. Nunca bloqueia na GPU.
+    [[nodiscard]] hyper::DeviceProfile hyper_cached_profile() noexcept;
+    /// Worker do encoder com o grafo Hyper (Engine.cpp): o quadro lido vai
+    /// para o grafo e o slot é solto; o que sai do grafo, em ordem, vai para o
+    /// sink com o áudio até o fim dele.
+    void export_encoder_hyper_loop(ExportContext& ctx) noexcept;
 };
 
 } // namespace aurea

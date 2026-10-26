@@ -14,6 +14,7 @@
 //  DamagedHelmet.glb e Fox.glb) ou de tests/data/gltf.
 // =============================================================================
 #include "TestFramework.hpp"
+#include <functional>
 
 #if defined(AUREA_TEST_VULKAN) || defined(AUREA_TEST_METAL)
 
@@ -326,6 +327,8 @@ u32 gRigApproximateMs = 0;
 /// ExportCheckpoint.inl: export retomável e a pasta dos checkpoints dos próximos Rig.
 bool gRigResumable = false;
 std::string gRigCheckpointDir;
+/// HyperExport.inl: EngineConfig::cacheDirectory dos próximos Rig (o medidor grava lá).
+std::string gRigCacheDirectory;
 /// EngineConfig::exportSourceIdentity dos próximos Rig (fontes por URI).
 Status (*gRigSourceIdentity)(const std::string&, export_checkpoint::SourceIdentity&, const std::atomic<bool>*) noexcept = nullptr;
 
@@ -366,6 +369,7 @@ struct Rig {
         ec.exportApproximateFrameMs = gRigApproximateMs;
         ec.enableResumableExport = gRigResumable;
         ec.exportTemporaryDirectory = gRigCheckpointDir;
+        ec.cacheDirectory = gRigCacheDirectory;
         ec.exportSourceIdentity = gRigSourceIdentity;
         ec.disableAutosave = true;
         ec.workerCount = 2;
@@ -2857,6 +2861,8 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
 #include "OriginalModelExport.inl"
 #include "ExportSwapTexture.inl"
 #include "ExportCheckpoint.inl"
+// AureaHyper (0.3.2): o job da Home e o medidor.
+#include "HyperExport.inl"
 
 #endif // AUREA_TEST_VULKAN
 

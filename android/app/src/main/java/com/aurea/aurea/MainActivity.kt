@@ -92,6 +92,10 @@ class MainActivity : ComponentActivity() {
         )
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         com.aurea.aurea.home.HomeViewModel.loadTheme(this)
+        // 0.3.2: config remota assinada (atualização obrigatória, política do AureaHyper, aviso).
+        com.aurea.aurea.config.AppConfigStore.init(this)
+        com.aurea.aurea.hyper.HyperEntitlements.init(this)
+        if (savedInstanceState == null) com.aurea.aurea.config.AppConfigStore.refresh(force = true)
         setContent { KeepAppLanguage { LanguageWelcome { CreatorWelcome { AureaApp(store) } } } }
 
         if (savedInstanceState == null) {
@@ -197,6 +201,9 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         CrashReporter.primeiroPlano(this, true)
         conta.revalidarSeVencido()
+        // No máximo a cada 30 min (AppConfigStore.MIN_INTERVAL_MS); o prazo do Hyper "free" é recalculado.
+        com.aurea.aurea.config.AppConfigStore.refresh()
+        com.aurea.aurea.hyper.HyperEntitlements.recheck()
         store.onEnterForeground()
         AureaAdsManager.onForeground(this, trabalhando())
     }

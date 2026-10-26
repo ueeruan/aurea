@@ -67,6 +67,7 @@ fun HomeScreen(store: EditorStore) {
     BackHandler(vm.tab != HomeViewModel.PROJECTS_TAB) { vm.selectTab(HomeViewModel.PROJECTS_TAB) }
     Column(Modifier.fillMaxSize().background(AureaColors.Background).safeDrawingPadding()) {
         LiveNoticeBanners(vm.notices)
+        com.aurea.aurea.config.AppConfigBanner()
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             AureaLogo(28.dp)
             Text("AUREA", modifier = Modifier.weight(1f).padding(start = 8.dp, top = 12.dp, bottom = 12.dp),
@@ -106,11 +107,11 @@ fun HomeScreen(store: EditorStore) {
         onDismiss = { menu = false }, actions = listOf(
         SheetAction(stringResource(R.string.home_tab_settings)) { vm.selectTab(HomeViewModel.SETTINGS_TAB) },
         SheetAction(stringResource(R.string.home_import_media)) { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
-        SheetAction(stringResource(R.string.upscale_title)) { store.openUpscale() },
+        SheetAction(stringResource(R.string.hyper_title)) { store.openHyper() },
         SheetAction(stringResource(R.string.project_file_import)) { projectFilePicker.launch(arrayOf("*/*")) },
         SheetAction(stringResource(R.string.report_title)) { reportProblem = true },
         SheetAction(stringResource(R.string.settings_group_about)) { about = true },
-        SheetAction(stringResource(R.string.licenses_title)) { licenses = true },
+        SheetAction(stringResource(R.string.licenses_oss_title)) { licenses = true },
     ) + if (signedIn == null) listOf(
         SheetAction(stringResource(R.string.conta_entrar)) { conta.entrando = true; showAccount = true },
     ) else listOf(
@@ -143,9 +144,10 @@ fun HomeScreen(store: EditorStore) {
             onDismiss = { confirmDelete = false },
         )
     }
-    if (about || licenses) AlertDialog(onDismissRequest = { about = false; licenses = false },
-        title = { Text(stringResource(if (licenses) R.string.licenses_title else R.string.settings_group_about)) },
-        text = { Text(if (licenses) stringResource(R.string.licenses_ai_body) else
+    if (licenses) LicensesScreen { licenses = false }
+    if (about) AlertDialog(onDismissRequest = { about = false },
+        title = { Text(stringResource(R.string.settings_group_about)) },
+        text = { Text(
             "Aurea Beta ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n\n" + stringResource(R.string.settings_technology_value) + "\n\n" + stringResource(R.string.settings_made_by),
             modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) },
         confirmButton = { TextButton(onClick = { about = false; licenses = false }) { Text(stringResource(R.string.editor_fechar)) } })

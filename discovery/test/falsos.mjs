@@ -45,6 +45,7 @@ export function d1Falso() {
   db.exec(readFileSync(new URL("../migrations/0004_comunidade.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../migrations/0005_security.sql", import.meta.url), "utf8"));
   db.exec(readFileSync(new URL("../migrations/0006_moderacao.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../migrations/0007_entitlements.sql", import.meta.url), "utf8"));
   const limpar = (r) => (r === undefined ? null : { ...r });
   const declaracao = (sql, params = []) => ({
     bind: (...p) => declaracao(sql, p),

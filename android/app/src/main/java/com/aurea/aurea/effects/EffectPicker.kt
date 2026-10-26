@@ -181,10 +181,16 @@ private fun EffectAddSheetBody(
     val favorites = remember(prefs.favorites, sorted) { favoriteEffects(prefs.favorites, sorted) }
     val featured = remember(sorted) { featuredEntries(sorted) }
     val onFavorite = rememberFavoriteToggle(store)
+    // 0.3.2: efeito Hyper sem o acesso abre a tela bloqueada (HyperEffectGate).
+    var hyperLocked by remember { mutableStateOf(false) }
     val pick: (EffectCatalogEntry) -> Unit = { e ->
-        prefs.addRecent(e.typeId)
-        val tool = effectToolOf(e.typeId)
-        if (tool != null) onTool(tool) else onPick(e)
+        if (HyperEffectGate.locked(e.typeId)) {
+            hyperLocked = true
+        } else {
+            prefs.addRecent(e.typeId)
+            val tool = effectToolOf(e.typeId)
+            if (tool != null) onTool(tool) else onPick(e)
+        }
     }
     Column(Modifier.fillMaxSize().background(AureaColors.EditorPanel).windowInsetsPadding(WindowInsets.safeDrawing)) {
         SheetTopBar(
@@ -202,6 +208,7 @@ private fun EffectAddSheetBody(
         }
     }
     if (searching) EffectSearchSheet(store, sorted, prefs.favorites, { searching = false; pick(it) }, onFavorite, { searching = false })
+    if (hyperLocked) com.aurea.aurea.hyper.HyperLockedDialog { hyperLocked = false }
     // 0.3.0: plugins de efeito (instalar, ver, remover); o catálogo relido entra nos grupos acima.
     if (managingPlugins) PluginManagerSheet(store) { managingPlugins = false }
 }
@@ -394,6 +401,7 @@ private fun QuickTile(
         Box(Modifier.size(size).clip(RoundedCornerShape(12.dp)).background(AureaColors.EditorPanelHigh)) {
             EffectThumb(entry, previews, PREVIEW_W, PREVIEW_H)
             if (effectCost(entry.effectClass) >= 3) HeavyBadge(Modifier.align(Alignment.TopEnd).padding(4.dp))
+            if (HyperEffectGate.locked(entry.typeId)) HyperLockBadge(Modifier.align(Alignment.TopStart).padding(4.dp))
         }
         Text(name, style = AureaType.of(11.5f), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
@@ -505,6 +513,7 @@ private fun BoxScope.EffectBadges(entry: EffectCatalogEntry, favorite: Boolean) 
                 .padding(horizontal = 6.dp, vertical = 2.dp))
     }
     Row(Modifier.align(Alignment.TopEnd).padding(5.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (HyperEffectGate.locked(entry.typeId)) HyperLockBadge()
         if (effectCost(entry.effectClass) >= 3) HeavyBadge()
         if (favorite) {
             Box(Modifier.size(20.dp).clip(AureaShape.Circle).background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
@@ -773,6 +782,7 @@ private fun EffectPickCard(
                     CupertinoIcon(CupertinoGlyph.StarFill, AureaDims.IconXs, AureaColors.Accent)
                 }
             }
+            if (HyperEffectGate.locked(entry.typeId)) HyperLockBadge(Modifier.align(Alignment.TopEnd).padding(top = if (favorite) 30.dp else AureaDims.S1, end = AureaDims.S1))
         }
         Spacer(Modifier.height(AureaDims.S1))
         Text(

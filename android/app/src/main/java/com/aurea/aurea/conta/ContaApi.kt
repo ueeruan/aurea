@@ -40,6 +40,13 @@ object ContaApi {
 
     fun usuarios(): Resposta = chamar("GET", "/api/stats/users", null, null)
 
+    /** A configuração remota assinada (discovery/appconfig.js): `{payload, signature}`. */
+    fun appConfig(platform: String, versionCode: Long): Resposta =
+        chamar("GET", "/api/app-config?platform=$platform&version=$versionCode", null, null)
+
+    /** O que esta conta comprou (discovery/entitlements.js): `{products: [...], checkedAt}`. */
+    fun entitlements(token: String): Resposta = chamar("GET", "/api/entitlements", null, token)
+
     /** "Relatar um problema" (discovery/relato.js). Sessão opcional: dá o e-mail da conta ao relato. */
     fun relatar(corpo: JSONObject, token: String?): Resposta = chamar("POST", "/api/report", corpo, token)
 

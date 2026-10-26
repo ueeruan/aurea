@@ -11,6 +11,13 @@
 //
 //  O segredo NUNCA vai para o APK nem para o IPA: ele vive só no Colab (como
 //  variável de ambiente) e aqui (como secret do Worker).
+//
+//  As demais rotas moram nos módulos importados abaixo; cada um lista as suas
+//  no cabeçalho. Direitos pagos (entitlements.js):
+//    GET  /api/entitlements        Bearer <sessão>             → {products, checkedAt}
+//    POST /api/admin/entitlements  Bearer <AUREA_ADMIN_SECRET> → concede/revoga por e-mail
+//    GET  /api/app-config?platform= android|ios                → {payload, signature} (assinada, appconfig.js)
+//    POST /api/admin/app-config    Bearer <AUREA_ADMIN_SECRET> → versão mínima, modo do Hyper, aviso
 // =============================================================================
 
 import { rotaDeVideo } from "./ai_video.js";
@@ -19,6 +26,9 @@ export { CaptionCommunity } from "./caption_community.js";
 // Contas obrigatórias (/api/auth/*, /api/stats/users) e crash (/api/crash).
 import { rotaDeContas, lerJson } from "./contas.js";
 import { rotaDeCrash } from "./crash.js";
+// Direitos pagos por conta (/api/entitlements, /api/admin/entitlements).
+import { rotaDeEntitlements } from "./entitlements.js";
+import { rotaDeAppConfig } from "./appconfig.js";
 // "Relatar um problema" (/api/report): o texto que a pessoa escreve no app.
 import { rotaDeRelato } from "./relato.js";
 import { communityRoute } from "./community.js";
@@ -80,6 +90,10 @@ async function handle(req, env, ctx, url) {
     if (captions) return captions;
     const contas = await rotaDeContas(req, env, ctx, url);
     if (contas) return contas;
+    const entitlements = await rotaDeEntitlements(req, env, ctx, url);
+    if (entitlements) return entitlements;
+    const appConfig = await rotaDeAppConfig(req, env, ctx, url);
+    if (appConfig) return appConfig;
     const community = await communityRoute(req, env, ctx, url);
     if (community) return community;
     const crash = await rotaDeCrash(req, env, ctx, url);

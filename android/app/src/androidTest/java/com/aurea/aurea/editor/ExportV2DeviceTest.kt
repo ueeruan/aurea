@@ -63,7 +63,18 @@ class ExportV2DeviceTest {
     private fun export(name: String, height: Int, fps: Double, frames: Int): File {
         val output = File(context.filesDir, "v2-$name.mp4")
         assertEquals(0, store.engineForStress.startExport(output.absolutePath, height, fps, 0, 8))
-        val progress = waitResult()
+        var progress = waitResult()
+        // 0.3.2: como a tela (Exporter): "refazer igual" (32, Busy) depois de a
+        // Surface do encoder de hardware parar — o processo já pula a Surface e
+        // a nova tentativa vai pela entrada por buffer do mesmo encoder.
+        // Até 2 vezes, como a tela (EXPORT_ATTEMPT_BUSY_RETRIES): a 2a cobre o
+        // checkpoint gravado pela Surface que não continua pelo buffer.
+        var busyLeft = 2
+        while (progress.result == 32 && busyLeft-- > 0) {
+            android.util.Log.w("ExportV2DeviceTest", "$name: refazendo igual (${progress.message})")
+            assertEquals(0, store.engineForStress.startExport(output.absolutePath, height, fps, 0, 8))
+            progress = waitResult()
+        }
         File(context.filesDir, "v2-$name-progress.txt").writeText(
             "result=${progress.result} frames=${progress.framesDone}/${progress.framesTotal} flags=${progress.flags} ${progress.message}")
         assertEquals(progress.message, 0, progress.result)

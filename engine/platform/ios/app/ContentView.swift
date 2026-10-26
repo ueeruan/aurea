@@ -10,6 +10,8 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: AureaModel
+    /// 0.3.2: config remota assinada (AppConfig.swift): abaixo da versão mínima, só a tela de atualizar.
+    @ObservedObject private var appConfig = AppConfigStore.shared
     @State private var pageWidth = UIScreen.main.bounds.width
 
     var body: some View {
@@ -17,12 +19,15 @@ struct ContentView: View {
             AureaColors.background.ignoresSafeArea()
 
             // Projetos e editor estão disponíveis mesmo sem sessão de conta.
+            if appConfig.updateRequired, let forced = appConfig.config {
+                ForcedUpdateView(config: forced).zIndex(10)
+            } else {
             switch model.screen {
             case .home:
                 HomeView()
                     .transition(.offset(x: -pageWidth / 3)).zIndex(0)
-            case .upscale:
-                UpscaleView()
+            case .hyper:
+                HyperView()
                     .transition(.offset(x: pageWidth)).zIndex(1)
             case .editor:
                 EditorView()
@@ -33,6 +38,7 @@ struct ContentView: View {
                     // direita no LTR e a esquerda em árabe, sem depender de o
                     // `offset(x:)` ser espelhado ou não pelo RTL.
                     .transition(.move(edge: .trailing)).zIndex(1)
+            }
             }
 
             if model.importingMedia {

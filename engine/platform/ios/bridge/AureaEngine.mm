@@ -38,6 +38,10 @@
 #include "aurea/vector/Vector.hpp"
 #include "aurea/ui/BuiltinPropertySchema.hpp"
 #include "aurea/tracking/CameraTrackData.hpp"
+#include "aurea/hyper/Hyper.hpp"
+#include "aurea/hyper/HyperNeural.hpp"
+#include <atomic>
+#include <mutex>
 
 #include <algorithm>
 #include <cmath>
@@ -339,6 +343,90 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
 } // namespace
 
 // =============================================================================
+// =============================================================================
+// AureaHyper (0.3.2) — aurea/hyper/Hyper.hpp. A receita: NSArray de 13 números
+// na ordem do Android (HyperRecipe.pack(); aurea_jni.cpp hyper_recipe_from).
+// =============================================================================
+namespace {
+bool hyper_recipe_from(NSArray<NSNumber*>* packed, aurea::hyper::Recipe& r) {
+    if (![packed isKindOfClass:NSArray.class] || packed.count < 13) return false;
+    double v[13]{};
+    for (NSUInteger i = 0; i < 13; ++i) {
+        id n = packed[i];
+        const double x = [n isKindOfClass:NSNumber.class] ? [(NSNumber*)n doubleValue] : 0.0;
+        v[i] = std::isfinite(x) ? x : 0.0;
+    }
+    auto on = [](double x) { return x >= 0.5; };
+    r = aurea::hyper::Recipe{};
+    r.upscale = static_cast<uint32_t>(std::clamp(v[0], 1.0, 8.0));
+    r.upscaleMode = on(v[1]) ? aurea::hyper::UpscaleMode::Anime : aurea::hyper::UpscaleMode::General;
+    r.denoise = static_cast<float>(std::clamp(v[2], 0.0, 1.0));
+    r.deblock = on(v[3]);
+    r.deinterlace = static_cast<uint8_t>(std::clamp(v[4], 0.0, 2.0));
+    r.face = on(v[5]);
+    r.faceStrength = static_cast<float>(std::clamp(v[6], 0.0, 1.0));
+    r.targetFps = std::clamp(v[7], 0.0, 240.0);
+    r.slowMotion = static_cast<uint32_t>(std::clamp(v[8], 1.0, 8.0));
+    r.stabilize = on(v[9]);
+    r.stabilizeStrength = static_cast<float>(std::clamp(v[10], 0.0, 1.0));
+    r.stabilizeToKeyframes = on(v[11]);
+    r.path = static_cast<aurea::hyper::Path>(std::clamp(static_cast<int>(v[12]), 0, 3));
+    r = aurea::hyper::sanitize(r);   // a faixa válida é do motor
+    return true;
+}
+
+typedef NSArray<NSNumber*>* _Nullable (^AureaHyperFaceBlock)(NSData* rgb, uint32_t width, uint32_t height,
+                                                              uint32_t stride, uint32_t maxBoxes);
+std::mutex g_hyperFaceMutex;
+AureaHyperFaceBlock g_hyperFaceBlock = nil;
+
+/// A etapa Face chama na thread do grafo; o bloco (Vision, HyperPlatform.swift)
+/// devolve 17 números por rosto. Nada de exceção atravessando o noexcept.
+uint32_t ios_hyper_face_detector(void*, const uint8_t* rgb, uint32_t width, uint32_t height, uint32_t stride,
+                                 aurea::hyper::FaceBox* boxes, uint32_t maxBoxes) noexcept {
+    if (!rgb || !boxes || maxBoxes == 0 || width < 16 || height < 16 || stride < width * 3) return 0;
+    AureaHyperFaceBlock block = nil;
+    {
+        std::lock_guard<std::mutex> lock(g_hyperFaceMutex);
+        block = g_hyperFaceBlock;
+    }
+    if (!block) return 0;
+    uint32_t found = 0;
+    // Sem @try: o alvo compila com -fno-exceptions (ver AureaJSON.mm). O bloco
+    // valida tudo o que lê; nada aqui lança.
+    @autoreleasepool {
+        NSData* data = [NSData dataWithBytesNoCopy:const_cast<uint8_t*>(rgb) length:static_cast<NSUInteger>(stride) * height
+                                      freeWhenDone:NO];
+        NSArray<NSNumber*>* values = block(data, width, height, stride, maxBoxes);
+        const NSUInteger n = [values isKindOfClass:NSArray.class] ? values.count / 17 : 0;
+        for (NSUInteger i = 0; i < n && found < maxBoxes; ++i) {
+            float f[17];
+            bool ok = true;
+            for (NSUInteger k = 0; k < 17; ++k) {
+                id x = values[i * 17 + k];
+                f[k] = [x isKindOfClass:NSNumber.class] ? [(NSNumber*)x floatValue] : NAN;
+                if (!std::isfinite(f[k])) ok = false;
+            }
+            if (!ok || f[2] <= 0.0f || f[3] <= 0.0f) continue;
+            aurea::hyper::FaceBox& b = boxes[found++];
+            b = aurea::hyper::FaceBox{};
+            b.x = f[0]; b.y = f[1]; b.width = f[2]; b.height = f[3];
+            b.confidence = std::clamp(f[4], 0.0f, 1.0f);
+            b.yawDegrees = f[5];
+            b.hasLandmarks = f[6] >= 0.5f;
+            for (int k = 0; k < 10; ++k) b.landmarks[k] = f[7 + k];
+        }
+    }
+    return found;
+}
+
+std::atomic<bool> g_hyperNpuAvailable{false};
+} // namespace
+
+/// AureaBridge.mm lê ao montar o EngineConfig (hyperNpuAvailable).
+bool aurea_ios_hyper_npu_available() noexcept { return g_hyperNpuAvailable.load(std::memory_order_acquire); }
+
+
 @implementation AureaEngine {
     CAMetalLayer* _surfaceLayer;
     std::unique_ptr<aurea::ios::Host> _host;
@@ -4479,6 +4567,108 @@ static aurea::ImageExportSettings AureaImageSettings(uint32_t format, uint32_t s
         @"bytes": @(aurea::estimate_image_export_bytes(s.format, plan.width, plan.height, plan.frames, plan.alpha)),
         @"fps": @(plan.fps),
     };
+}
+
+// ---- AureaHyper ----------------------------------------------------------
+- (NSDictionary<NSString*, id>*)hyperDeviceProfile:(BOOL)remeasure {
+    auto* e = self.engine;
+    if (!e) return @{};
+    const aurea::hyper::DeviceProfile p = e->hyper_device_profile(remeasure == YES);
+    auto finite = [](float x) { return std::isfinite(x) ? static_cast<double>(x) : 0.0; };
+    return @{
+        @"measured": @(p.measured), @"abi64": @(p.abi64), @"freeRamBytes": @(p.freeRamBytes), @"vulkan": @(p.vulkan),
+        @"vulkanFp16": @(p.vulkanFp16), @"gles3": @(p.gles3), @"npu": @(p.npu),
+        @"turboMsPerFrame": @(finite(p.turboMsPerFrame)), @"liteMsPerTile": @(finite(p.liteMsPerTile)),
+        @"thermalAfter": @(finite(p.thermalAfter)), @"defaultPath": @(static_cast<int>(p.defaultPath)),
+        @"tile": @(p.tile), @"tileMargin": @(p.tileMargin),
+        @"backendNote": [NSString stringWithUTF8String:p.backendNote.c_str()] ?: @"",
+    };
+}
+
+- (nullable NSArray<NSNumber*>*)hyperEstimate:(NSArray<NSNumber*>*)recipe source:(NSString*)sourcePath {
+    auto* e = self.engine;
+    aurea::hyper::Recipe r;
+    if (!e || !hyper_recipe_from(recipe, r)) return nil;
+    const std::string source = to_std(sourcePath);
+    const aurea::hyper::Estimate est = e->hyper_estimate(r, source.c_str());
+    return @[@(est.seconds[0]), @(est.seconds[1]), @(est.seconds[2]), @(est.seconds[3]), @(est.peakBytes),
+             @(est.outputWidth), @(est.outputHeight), @(est.outputFps)];
+}
+
+- (NSDictionary<NSString*, id>*)hyperPreviewFrame:(NSArray<NSNumber*>*)recipe source:(NSString*)sourcePath
+                                           seconds:(double)seconds path:(int32_t)path {
+    auto* e = self.engine;
+    aurea::hyper::Recipe r;
+    if (!e || !hyper_recipe_from(recipe, r)) return @{@"status": @(static_cast<int32_t>(aurea::Errc::InvalidState))};
+    const std::string source = to_std(sourcePath);
+    std::vector<uint8_t> before, after;
+    uint32_t w = 0, h = 0;
+    const aurea::Status s = e->hyper_preview_frame(r, source.c_str(), std::isfinite(seconds) ? std::max(0.0, seconds) : 0.0,
+                                                   static_cast<aurea::hyper::Path>(std::clamp<int32_t>(path, 0, 3)),
+                                                   before, after, w, h);
+    const size_t bytes = static_cast<size_t>(w) * h * 4;
+    if (!s.ok() || w == 0 || h == 0 || before.size() < bytes || after.size() < bytes)
+        return @{@"status": @(s.ok() ? static_cast<int32_t>(aurea::Errc::DecodeFailed) : s.raw())};
+    return @{
+        @"status": @0, @"width": @(w), @"height": @(h),
+        @"before": [NSData dataWithBytes:before.data() length:bytes],
+        @"after": [NSData dataWithBytes:after.data() length:bytes],
+    };
+}
+
+- (int32_t)startHyperJob:(NSString*)sourcePath recipe:(NSArray<NSNumber*>*)recipe output:(NSString*)outputPath {
+    auto* e = self.engine;
+    if (!e) return static_cast<int32_t>(aurea::Errc::InvalidState);
+    aurea::hyper::Recipe r;
+    if (!hyper_recipe_from(recipe, r)) return static_cast<int32_t>(aurea::Errc::InvalidArgument);
+    const std::string source = to_std(sourcePath), output = to_std(outputPath);
+    return e->start_hyper_job(source.c_str(), r, output.c_str()).raw();
+}
+
+- (NSArray<NSNumber*>*)hyperJobSteps {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const aurea::hyper::JobSteps j = e->hyper_job_steps();
+    constexpr uint32_t k = aurea::hyper::kStepCount;
+    int32_t v[k * 2 + 11]{};
+    for (uint32_t i = 0; i < k; ++i) {
+        v[i] = !j.present[i] ? 3 : j.done[i] ? 2 : (j.running && static_cast<uint32_t>(j.current) == i ? 1 : 0);
+        v[k + 8 + i] = static_cast<int32_t>(j.paths[i]);
+    }
+    v[k + 0] = j.active ? 1 : 0;
+    v[k + 1] = j.running ? 1 : 0;
+    v[k + 2] = j.finished ? 1 : 0;
+    v[k + 3] = static_cast<int32_t>(j.result);
+    v[k + 4] = static_cast<int32_t>(j.pass);
+    v[k + 5] = static_cast<int32_t>(j.passCount);
+    v[k + 6] = j.audioMuted ? 1 : 0;
+    v[k + 7] = static_cast<int32_t>(std::lround(std::clamp(std::isfinite(j.progress) ? j.progress : 0.0f, 0.0f, 1.0f) * 1000.0f));
+    v[2 * k + 8] = static_cast<int32_t>(j.outputWidth);
+    v[2 * k + 9] = static_cast<int32_t>(j.outputHeight);
+    v[2 * k + 10] = static_cast<int32_t>(j.outputFrames);
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:k * 2 + 11];
+    for (int32_t x : v) [out addObject:@(x)];
+    return out;
+}
+
++ (void)hyperSetModelDirectory:(NSString*)path {
+    aurea::hyper::set_model_directory(to_std(path));
+}
+
++ (NSArray<NSNumber*>*)hyperFaceStatus {
+    return @[@(aurea::hyper::face_detector_available()), @(aurea::hyper::ondemand_model_ready("gfpgan-v1.4"))];
+}
+
++ (void)setHyperFaceDetector:(nullable NSArray<NSNumber*>* _Nullable (^)(NSData*, uint32_t, uint32_t, uint32_t, uint32_t))detector {
+    {
+        std::lock_guard<std::mutex> lock(g_hyperFaceMutex);
+        g_hyperFaceBlock = [detector copy];
+    }
+    aurea::hyper::set_face_detector(detector ? &ios_hyper_face_detector : nullptr, nullptr);
+}
+
++ (void)setHyperNpuAvailable:(BOOL)available {
+    g_hyperNpuAvailable.store(available == YES, std::memory_order_release);
 }
 
 @end

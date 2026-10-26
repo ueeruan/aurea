@@ -8,7 +8,8 @@ endif()
 option(AUREA_AI_VULKAN "Enable ncnn Vulkan inference with CPU fallback" ${ai_vulkan_default})
 set(NCNN_VULKAN ${AUREA_AI_VULKAN} CACHE BOOL "" FORCE)
 set(NCNN_OPENMP OFF CACHE BOOL "" FORCE)
-set(NCNN_INT8 OFF CACHE BOOL "" FORCE)
+# AureaHyper Lite: SPAN e animevideov3 quantizados em int8 na CPU (NEON).
+set(NCNN_INT8 ON CACHE BOOL "" FORCE)
 set(NCNN_DISABLE_EXCEPTION OFF CACHE BOOL "" FORCE)
 # ncnn publishes -fno-rtti to its consumers when enabled. That would silently
 # remove RTTI from aurea_core while ObjC++/other bridge targets still require
@@ -49,7 +50,10 @@ if(NOT aurea_ncnn_POPULATED)
     # normalization constants (MemoryData) and the final Squeeze.
     set(ai_layers input split convolution prelu pixelshuffle interp binaryop
         packing cast padding crop flatten reshape innerproduct gemm scale bias
-        relu clip sigmoid mish hardswish tanh convolutiondepthwise memorydata squeeze pooling concat)
+        relu clip sigmoid mish hardswish tanh convolutiondepthwise memorydata squeeze pooling concat
+        # AureaHyper (src/hyper/neural): SPAN (Swish), RIFE v4.6 (Deconvolution,
+        # Eltwise), GFPGAN (Slice, UnaryOp) e o int8 da CPU.
+        swish deconvolution eltwise slice unaryop quantize dequantize requantize)
     file(STRINGS "${aurea_ncnn_SOURCE_DIR}/src/CMakeLists.txt" ai_layer_lines REGEX "^ncnn_add_layer\\(")
     foreach(line IN LISTS ai_layer_lines)
         string(REGEX REPLACE "^ncnn_add_layer\\(([A-Za-z0-9_]+).*" "\\1" name "${line}")
@@ -136,6 +140,7 @@ endif()
 target_sources(aurea_core PRIVATE src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp
                "${ai_model_cpp}" "${ai_depth_cpp}" "${ai_foreground_cpp}")
 target_link_libraries(aurea_core PRIVATE ncnn)
+include(${CMAKE_CURRENT_LIST_DIR}/AureaHyperNeural.cmake)
 # Model/vector allocation failures are translated to Status at this boundary.
 # The rest of the shared core retains its existing no-exceptions contract.
 if(MSVC)

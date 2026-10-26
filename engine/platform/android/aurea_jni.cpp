@@ -41,7 +41,12 @@ extern "C" {
 #include "aurea/export/ExportAttempts.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/ExportCheckpoint.hpp"
+#include "aurea/hyper/Hyper.hpp"
+#include "aurea/hyper/HyperNeural.hpp"
 #include <unistd.h>
+#include <dlfcn.h>
+#include <cmath>
+#include <vector>
 #include "aurea/ui/BuiltinPropertySchema.hpp"
 #include "aurea/tracking/CameraTrackData.hpp"
 
@@ -66,6 +71,8 @@ JavaVM* g_vm = nullptr;
 jclass g_engineClass = nullptr;          // referência global: FindClass numa thread
 jmethodID g_openContentFd = nullptr;     // nativa usaria o class loader do sistema
 jmethodID g_decodeImage = nullptr;       // AureaEngine.decodeImage(String): ByteArray?
+jclass g_faceClass = nullptr;            // hyper/HyperFaceDetector (AureaHyper, etapa Face)
+jmethodID g_faceDetect = nullptr;        // detect(ShortArray, Int, Int, Int): FloatArray?
 
 void android_log_sink(LogLevel level, const char* message, void*) {
     int prio = ANDROID_LOG_INFO;
@@ -305,6 +312,103 @@ AUREA_JNI jfloat AUREA_FN(clampPinchFactor3D)(JNIEnv*, jclass, jint kind, jfloat
     return aurea::clamp_pinch_factor_3d(factor, aurea::Vec3{x, y, z}, aurea::scale_z_follows_x(static_cast<aurea::LayerKind>(kind)));
 }
 
+namespace {
+/// AureaHyper, etapa Face: o quadro R'G'B' vira um RGB565 de até 640 px (o
+/// android.media.FaceDetector pede RGB_565 e largura par), o Kotlin acha os
+/// rostos (hyper/HyperFaceDetector.kt) e as caixas voltam na escala do quadro.
+/// Roda na thread do grafo: prende e solta a JVM como o open_content_fd.
+u32 android_face_detector(void*, const u8* rgb, u32 width, u32 height, u32 stride,
+                          hyper::FaceBox* boxes, u32 maxBoxes) noexcept {
+    if (!g_vm || !g_faceClass || !g_faceDetect || !rgb || width < 16 || height < 16 || !boxes || maxBoxes == 0) return 0;
+    const f32 scale = std::min(1.0f, 640.0f / static_cast<f32>(std::max(width, height)));
+    const u32 w = std::max<u32>(16, static_cast<u32>(static_cast<f32>(width) * scale)) & ~1u;
+    const u32 h = std::max<u32>(16, static_cast<u32>(static_cast<f32>(height) * scale));
+    // w, h <= 640: no maximo 640x640 RGB565 (800 KB). O motor compila sem excecoes.
+    std::vector<jshort> pixels(static_cast<size_t>(w) * h);
+    for (u32 y = 0; y < h; ++y) {
+        const u32 sy = std::min(height - 1, static_cast<u32>((static_cast<f32>(y) + 0.5f) / scale));
+        const u8* row = rgb + static_cast<size_t>(sy) * stride;
+        for (u32 x = 0; x < w; ++x) {
+            const u32 sx = std::min(width - 1, static_cast<u32>((static_cast<f32>(x) + 0.5f) / scale));
+            const u8* p = row + static_cast<size_t>(sx) * 3;
+            pixels[static_cast<size_t>(y) * w + x] = static_cast<jshort>(((p[0] >> 3) << 11) | ((p[1] >> 2) << 5) | (p[2] >> 3));
+        }
+    }
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (g_vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return 0;
+        attached = true;
+    }
+    u32 found = 0;
+    if (jshortArray array = env->NewShortArray(static_cast<jsize>(pixels.size()))) {
+        env->SetShortArrayRegion(array, 0, static_cast<jsize>(pixels.size()), pixels.data());
+        auto* result = static_cast<jfloatArray>(env->CallStaticObjectMethod(g_faceClass, g_faceDetect, array,
+            static_cast<jint>(w), static_cast<jint>(h), static_cast<jint>(std::min<u32>(maxBoxes, 16))));
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            AUREA_LOG_WARN("hyper: detector de rostos lancou excecao (quadro sem rostos)");
+            result = nullptr;
+        }
+        if (result) {
+            // [x, y, largura, altura, confiança, yaw] por rosto, em pixels do quadro reduzido.
+            const jsize n = env->GetArrayLength(result) / 6;
+            std::vector<jfloat> v(static_cast<size_t>(std::max<jsize>(0, n)) * 6);
+            if (n > 0) env->GetFloatArrayRegion(result, 0, n * 6, v.data());
+            const f32 back = 1.0f / scale;
+            for (jsize i = 0; i < n && found < maxBoxes; ++i) {
+                const jfloat* f = v.data() + static_cast<size_t>(i) * 6;
+                if (!(std::isfinite(f[0]) && std::isfinite(f[1]) && std::isfinite(f[2]) && std::isfinite(f[3])) ||
+                    f[2] <= 0.0f || f[3] <= 0.0f) continue;
+                hyper::FaceBox& b = boxes[found++];
+                b = hyper::FaceBox{};
+                b.x = f[0] * back;
+                b.y = f[1] * back;
+                b.width = f[2] * back;
+                b.height = f[3] * back;
+                b.confidence = std::isfinite(f[4]) ? std::clamp(f[4], 0.0f, 1.0f) : 0.0f;
+                b.yawDegrees = std::isfinite(f[5]) ? f[5] : 0.0f;
+            }
+            env->DeleteLocalRef(result);
+        }
+        env->DeleteLocalRef(array);
+    } else if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+    if (attached) g_vm->DetachCurrentThread();
+    return found;
+}
+
+/// NNAPI com um dispositivo ACELERADOR (NPU/DSP): só informa o medidor do
+/// Hyper (EngineConfig::hyperNpuAvailable). dlopen: o app não passa a
+/// depender da biblioteca (Android < 10 não tem a enumeração).
+bool android_nnapi_accelerator() noexcept {
+    void* lib = dlopen("libneuralnetworks.so", RTLD_NOW | RTLD_LOCAL);
+    if (!lib) return false;
+    using CountFn = int (*)(uint32_t*);
+    using DeviceFn = int (*)(uint32_t, void**);
+    using TypeFn = int (*)(const void*, int32_t*);
+    auto count = reinterpret_cast<CountFn>(dlsym(lib, "ANeuralNetworks_getDeviceCount"));
+    auto device = reinterpret_cast<DeviceFn>(dlsym(lib, "ANeuralNetworks_getDevice"));
+    auto type = reinterpret_cast<TypeFn>(dlsym(lib, "ANeuralNetworksDevice_getType"));
+    bool accelerator = false;
+    uint32_t n = 0;
+    if (count && device && type && count(&n) == 0) {
+        for (uint32_t i = 0; i < n && !accelerator; ++i) {
+            void* d = nullptr;
+            int32_t t = 0;
+            // ANEURALNETWORKS_DEVICE_ACCELERATOR = 4 (NeuralNetworksTypes.h).
+            if (device(i, &d) == 0 && d && type(d, &t) == 0 && t == 4) accelerator = true;
+        }
+    }
+    // NÃO dlclose: a NNAPI registra destrutores de TLS nas threads de binder;
+    // descarregar a biblioteca deixa esses destrutores apontando para memória
+    // desmapeada e o processo cai (SIGSEGV em pthread_key_clean_all) quando uma
+    // thread de binder termina — visto no emulador API 35. Fica carregada.
+    return accelerator;
+}
+} // namespace
+
 AUREA_JNI jint JNI_OnLoad(JavaVM* vm, void*) {
     g_vm = vm;
     if (av_jni_set_java_vm(vm, nullptr) < 0) return JNI_ERR;
@@ -324,6 +428,17 @@ AUREA_JNI jint JNI_OnLoad(JavaVM* vm, void*) {
             env->ExceptionClear();
             g_decodeImage = nullptr;
         }
+    }
+    // AureaHyper: o detector de rostos da plataforma (android.media.FaceDetector,
+    // hyper/HyperFaceDetector.kt) para a etapa Face (aurea/hyper/HyperNeural.hpp).
+    if (jclass local = env->FindClass("com/aurea/aurea/hyper/HyperFaceDetector")) {
+        g_faceClass = static_cast<jclass>(env->NewGlobalRef(local));
+        env->DeleteLocalRef(local);
+        g_faceDetect = env->GetStaticMethodID(g_faceClass, "detect", "([SIII)[F");
+        if (env->ExceptionCheck()) { env->ExceptionClear(); g_faceDetect = nullptr; }
+        if (g_faceDetect) hyper::set_face_detector(&android_face_detector, nullptr);
+    } else if (env->ExceptionCheck()) {
+        env->ExceptionClear();
     }
     return JNI_VERSION_1_6;
 }
@@ -506,6 +621,8 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     // exactly as on iOS; it does not depend on the device's system font inventory.
     config.imageLoader = &load_image;
     config.enableTelemetry = true;
+    // AureaHyper: o medidor do aparelho conta com a NPU quando há (DeviceProfile::npu).
+    config.hyperNpuAvailable = android_nnapi_accelerator();
 
     g_copyExportSources.store(config.enableExportRecovery, std::memory_order_release);
     // Sem recuperação, as cópias antigas não servem; com ela, teto de 2 GB.
@@ -4335,6 +4452,180 @@ AUREA_JNI jint AUREA_FN(nativeCancelExport)(JNIEnv*, jclass, jlong handle) {
     NativeContext* c = ctx_of(handle);
     if (!c) return static_cast<jint>(Errc::InvalidState);
     return static_cast<jint>(c->engine.cancel_export().raw());
+}
+
+// =============================================================================
+// AureaHyper (0.3.2) — aurea/hyper/Hyper.hpp. A receita vem empacotada num
+// double[13] na ordem de HyperRecipe.pack() (Kotlin; o iOS usa a mesma ordem).
+// =============================================================================
+namespace {
+constexpr jsize kHyperRecipeSlots = 13;
+
+bool hyper_recipe_from(JNIEnv* env, jdoubleArray packed, hyper::Recipe& r) {
+    if (!packed || env->GetArrayLength(packed) < kHyperRecipeSlots) return false;
+    jdouble v[kHyperRecipeSlots]{};
+    env->GetDoubleArrayRegion(packed, 0, kHyperRecipeSlots, v);
+    for (jdouble& x : v) if (!std::isfinite(x)) x = 0.0;
+    auto on = [](jdouble x) { return x >= 0.5; };
+    r = hyper::Recipe{};
+    r.upscale = static_cast<u32>(std::clamp(v[0], 1.0, 8.0));
+    r.upscaleMode = on(v[1]) ? hyper::UpscaleMode::Anime : hyper::UpscaleMode::General;
+    r.denoise = static_cast<f32>(std::clamp(v[2], 0.0, 1.0));
+    r.deblock = on(v[3]);
+    r.deinterlace = static_cast<u8>(std::clamp(v[4], 0.0, 2.0));
+    r.face = on(v[5]);
+    r.faceStrength = static_cast<f32>(std::clamp(v[6], 0.0, 1.0));
+    r.targetFps = std::clamp(v[7], 0.0, 240.0);
+    r.slowMotion = static_cast<u32>(std::clamp(v[8], 1.0, 8.0));
+    r.stabilize = on(v[9]);
+    r.stabilizeStrength = static_cast<f32>(std::clamp(v[10], 0.0, 1.0));
+    r.stabilizeToKeyframes = on(v[11]);
+    r.path = static_cast<hyper::Path>(std::clamp(static_cast<int>(v[12]), 0, 3));
+    r = hyper::sanitize(r);   // a faixa válida é do motor
+    return true;
+}
+
+void hyper_json_escape(std::string& out, const std::string& in) {
+    for (const char raw : in) {
+        const auto ch = static_cast<unsigned char>(raw);
+        if (ch == '"' || ch == '\\') { out += '\\'; out += static_cast<char>(ch); }
+        else if (ch == '\n') out += "\\n";
+        else if (ch < 0x20) out += ' ';
+        else if (ch >= 0x80) out += '?';   // NewStringUTF pede UTF-8 modificado: só ASCII
+        else out += static_cast<char>(ch);
+    }
+}
+} // namespace
+
+/// hyper_device_profile como JSON (os campos de hyper::DeviceProfile). BLOQUEIA ~1–10 s quando mede.
+AUREA_JNI jstring AUREA_FN(nativeHyperDeviceProfile)(JNIEnv* env, jclass, jlong handle, jboolean remeasure) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    const hyper::DeviceProfile p = c->engine.hyper_device_profile(remeasure == JNI_TRUE);
+    auto finite = [](f32 x) { return std::isfinite(x) ? static_cast<double>(x) : 0.0; };
+    char head[640];
+    std::snprintf(head, sizeof(head),
+        "{\"measured\":%s,\"abi64\":%s,\"freeRamBytes\":%llu,\"vulkan\":%s,\"vulkanFp16\":%s,\"gles3\":%s,"
+        "\"npu\":%s,\"turboMsPerFrame\":%.3f,\"liteMsPerTile\":%.3f,\"thermalAfter\":%.3f,\"defaultPath\":%d,"
+        "\"tile\":%u,\"tileMargin\":%u,\"backendNote\":\"",
+        p.measured ? "true" : "false", p.abi64 ? "true" : "false", static_cast<unsigned long long>(p.freeRamBytes),
+        p.vulkan ? "true" : "false", p.vulkanFp16 ? "true" : "false", p.gles3 ? "true" : "false", p.npu ? "true" : "false",
+        finite(p.turboMsPerFrame), finite(p.liteMsPerTile), finite(p.thermalAfter), static_cast<int>(p.defaultPath),
+        static_cast<unsigned>(p.tile), static_cast<unsigned>(p.tileMargin));
+    std::string json = head;
+    hyper_json_escape(json, p.backendNote);
+    json += "\"}";
+    return env->NewStringUTF(json.c_str());
+}
+
+/// hyper_estimate: [s0, s1, s2, s3 (índice = Path), peakBytes, outW, outH, outFps]. Nulo sem motor.
+AUREA_JNI jdoubleArray AUREA_FN(nativeHyperEstimate)(JNIEnv* env, jclass, jlong handle, jdoubleArray packed, jstring sourcePath) {
+    NativeContext* c = ctx_of(handle);
+    hyper::Recipe recipe;
+    if (!c || !hyper_recipe_from(env, packed, recipe)) return nullptr;
+    const std::string source = to_string(env, sourcePath);
+    const hyper::Estimate e = c->engine.hyper_estimate(recipe, source.c_str());
+    const jdouble v[8]{e.seconds[0], e.seconds[1], e.seconds[2], e.seconds[3], static_cast<jdouble>(e.peakBytes),
+                       static_cast<jdouble>(e.outputWidth), static_cast<jdouble>(e.outputHeight), e.outputFps};
+    jdoubleArray out = env->NewDoubleArray(8);
+    if (out) env->SetDoubleArrayRegion(out, 0, 8, v);
+    return out;
+}
+
+/// hyper_preview_frame: [antes RGBA, depois RGBA]; `size` = [status (Errc), largura, altura]. Nulo = falhou.
+AUREA_JNI jobjectArray AUREA_FN(nativeHyperPreviewFrame)(JNIEnv* env, jclass, jlong handle, jdoubleArray packed, jstring sourcePath,
+                                                       jdouble seconds, jint path, jintArray size) {
+    NativeContext* c = ctx_of(handle);
+    hyper::Recipe recipe;
+    jint info[3]{static_cast<jint>(Errc::InvalidState), 0, 0};
+    jobjectArray out = nullptr;
+    if (c && hyper_recipe_from(env, packed, recipe)) {
+        const std::string source = to_string(env, sourcePath);
+        std::vector<u8> before, after;
+        u32 w = 0, h = 0;
+        const Status s = c->engine.hyper_preview_frame(recipe, source.c_str(), std::isfinite(seconds) ? std::max(0.0, seconds) : 0.0,
+                                                       static_cast<hyper::Path>(std::clamp<jint>(path, 0, 3)), before, after, w, h);
+        info[0] = static_cast<jint>(s.raw());
+        const size_t bytes = static_cast<size_t>(w) * h * 4;
+        if (s.ok() && w > 0 && h > 0 && before.size() >= bytes && after.size() >= bytes) {
+            jclass byteArray = env->FindClass("[B");
+            out = byteArray ? env->NewObjectArray(2, byteArray, nullptr) : nullptr;
+            jbyteArray a = out ? env->NewByteArray(static_cast<jsize>(bytes)) : nullptr;
+            jbyteArray b = a ? env->NewByteArray(static_cast<jsize>(bytes)) : nullptr;
+            if (a && b) {
+                env->SetByteArrayRegion(a, 0, static_cast<jsize>(bytes), reinterpret_cast<const jbyte*>(before.data()));
+                env->SetByteArrayRegion(b, 0, static_cast<jsize>(bytes), reinterpret_cast<const jbyte*>(after.data()));
+                env->SetObjectArrayElement(out, 0, a);
+                env->SetObjectArrayElement(out, 1, b);
+                info[1] = static_cast<jint>(w);
+                info[2] = static_cast<jint>(h);
+            } else {
+                if (env->ExceptionCheck()) env->ExceptionClear();   // OutOfMemoryError: a prévia some, o app não
+                out = nullptr;
+                info[0] = static_cast<jint>(Errc::OutOfMemory);
+            }
+            if (a) env->DeleteLocalRef(a);
+            if (b) env->DeleteLocalRef(b);
+            if (byteArray) env->DeleteLocalRef(byteArray);
+        }
+    }
+    if (size && env->GetArrayLength(size) >= 3) env->SetIntArrayRegion(size, 0, 3, info);
+    return out;
+}
+
+/// start_hyper_job: o job da Home pelo export do motor (progresso e cancelamento do export).
+AUREA_JNI jint AUREA_FN(nativeStartHyperJob)(JNIEnv* env, jclass, jlong handle, jstring sourcePath, jdoubleArray packed,
+                                             jstring outputPath) {
+    NativeContext* c = ctx_of(handle);
+    hyper::Recipe recipe;
+    if (!c) return static_cast<jint>(Errc::InvalidState);
+    if (!hyper_recipe_from(env, packed, recipe)) return static_cast<jint>(Errc::InvalidArgument);
+    const std::string source = to_string(env, sourcePath), output = to_string(env, outputPath);
+    return static_cast<jint>(c->engine.start_hyper_job(source.c_str(), recipe, output.c_str()).raw());
+}
+
+/// hyper_job_steps: [estado por Step (0 na fila, 1 rodando, 2 feito, 3 não existe) ×8, ativo, rodando,
+/// terminou, resultado (Errc), passagem, passagens, som mudo, progresso ×1000, caminho por Step ×8,
+/// largura, altura, quadros de saída]. A leitura: HyperJobInfo.decode (Kotlin) / hyperJobSteps (iOS).
+AUREA_JNI jintArray AUREA_FN(nativeHyperJobSteps)(JNIEnv* env, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    const hyper::JobSteps j = c->engine.hyper_job_steps();
+    constexpr u32 k = hyper::kStepCount;
+    constexpr jsize kSlots = static_cast<jsize>(k * 2 + 11);
+    jint v[kSlots]{};
+    for (u32 i = 0; i < k; ++i) {
+        v[i] = !j.present[i] ? 3 : j.done[i] ? 2 : (j.running && static_cast<u32>(j.current) == i ? 1 : 0);
+        v[k + 8 + i] = static_cast<jint>(j.paths[i]);
+    }
+    v[k + 0] = j.active ? 1 : 0;
+    v[k + 1] = j.running ? 1 : 0;
+    v[k + 2] = j.finished ? 1 : 0;
+    v[k + 3] = static_cast<jint>(j.result);
+    v[k + 4] = static_cast<jint>(j.pass);
+    v[k + 5] = static_cast<jint>(j.passCount);
+    v[k + 6] = j.audioMuted ? 1 : 0;
+    v[k + 7] = static_cast<jint>(std::lround(std::clamp(std::isfinite(j.progress) ? j.progress : 0.0f, 0.0f, 1.0f) * 1000.0f));
+    v[2 * k + 8] = static_cast<jint>(j.outputWidth);
+    v[2 * k + 9] = static_cast<jint>(j.outputHeight);
+    v[2 * k + 10] = static_cast<jint>(j.outputFrames);
+    jintArray out = env->NewIntArray(kSlots);
+    if (out) env->SetIntArrayRegion(out, 0, kSlots, v);
+    return out;
+}
+
+/// A pasta dos modelos sob demanda (GFPGAN; hyper/HyperNeural.hpp).
+AUREA_JNI void AUREA_FN(nativeHyperSetModelDirectory)(JNIEnv* env, jclass, jstring path) {
+    hyper::set_model_directory(to_string(env, path));
+}
+
+/// [detector de rostos registrado, modelo de rostos (gfpgan-v1.4) presente e conferido].
+AUREA_JNI jbooleanArray AUREA_FN(nativeHyperFaceStatus)(JNIEnv* env, jclass) {
+    const jboolean v[2]{static_cast<jboolean>(hyper::face_detector_available() ? JNI_TRUE : JNI_FALSE),
+                        static_cast<jboolean>(hyper::ondemand_model_ready("gfpgan-v1.4") ? JNI_TRUE : JNI_FALSE)};
+    jbooleanArray out = env->NewBooleanArray(2);
+    if (out) env->SetBooleanArrayRegion(out, 0, 2, v);
+    return out;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeExportProgress)(JNIEnv* env, jclass, jlong handle, jobject out) {

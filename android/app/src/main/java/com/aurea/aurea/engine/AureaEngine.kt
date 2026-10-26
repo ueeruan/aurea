@@ -69,8 +69,16 @@ class AureaEngine private constructor() {
 
         fun create(context: Context): AureaEngine {
             appContext = context.applicationContext
-            return AureaEngine()
+            val engine = AureaEngine()
+            // AureaHyper: modelos sob demanda (GFPGAN) ficam em files/hyper-models.
+            runCatching { nativeHyperSetModelDirectory(java.io.File(context.filesDir, "hyper-models").apply { mkdirs() }.absolutePath) }
+            return engine
         }
+
+        /** AureaHyper: o modelo sob demanda que cada pasta guarda (hyper/HyperNeural.hpp). */
+        @JvmStatic external fun nativeHyperSetModelDirectory(path: String)
+        /** [detector de rostos registrado, modelo de rostos (gfpgan-v1.4) presente]. */
+        @JvmStatic external fun nativeHyperFaceStatus(): BooleanArray?
 
         /**
          * Chamado pelo motor (threads nativas) para abrir uma URI `content://`
@@ -1328,6 +1336,41 @@ class AureaEngine private constructor() {
     /** Explicit recovery restores the frozen project and restarts at frame zero. */
     fun restartExport(recoveryPath: String, outputPath: String): Int =
         nativeWork.run(5) { nativeRestartExport(nativeHandle, recoveryPath, outputPath) }
+
+    // -------------------------------------------------------------------------
+    // AureaHyper (0.3.2; engine/include/aurea/hyper/Hyper.hpp). A receita vai
+    // empacotada em HyperRecipe.pack() (a ordem que aurea_jni.cpp lê).
+    // -------------------------------------------------------------------------
+
+    /** hyper_device_profile: o medidor (~10 s na primeira vez; `remeasure` refaz). Bloqueia. */
+    fun hyperDeviceProfile(remeasure: Boolean): com.aurea.aurea.hyper.HyperDeviceProfile? =
+        com.aurea.aurea.hyper.HyperDeviceProfile.parse(nativeWork.run<String?>(null) { nativeHyperDeviceProfile(nativeHandle, remeasure) })
+
+    /** hyper_estimate para o vídeo inteiro, por caminho. Nulo = motor fora do ar. */
+    fun hyperEstimate(recipe: com.aurea.aurea.hyper.HyperRecipe, sourcePath: String): com.aurea.aurea.hyper.HyperEstimate? =
+        com.aurea.aurea.hyper.HyperEstimate.decode(nativeWork.run<DoubleArray?>(null) { nativeHyperEstimate(nativeHandle, recipe.pack(), sourcePath) })
+
+    /**
+     * hyper_preview_frame: o quadro em `seconds`, antes e depois, em RGBA 8 bits.
+     * `size` recebe [status, largura, altura]. Nulo = falhou (status em size[0]).
+     */
+    fun hyperPreviewFrame(recipe: com.aurea.aurea.hyper.HyperRecipe, sourcePath: String, seconds: Double, path: Int,
+                          size: IntArray): Array<ByteArray>? =
+        nativeWork.run<Array<ByteArray>?>(null) { nativeHyperPreviewFrame(nativeHandle, recipe.pack(), sourcePath, seconds, path, size) }
+
+    /** start_hyper_job: o job da Home. Progresso e cancelamento = os do export. 0 = começou. */
+    fun startHyperJob(sourcePath: String, recipe: com.aurea.aurea.hyper.HyperRecipe, outputPath: String): Int =
+        nativeWork.run(5) { nativeStartHyperJob(nativeHandle, sourcePath, recipe.pack(), outputPath) }
+
+    /** hyper_job_steps: um estado por hyper::Step (0 esperando, 1 rodando, 2 feito, 3 pulado). */
+    fun hyperJobSteps(): IntArray = nativeWork.run(IntArray(0)) { nativeHyperJobSteps(nativeHandle) ?: IntArray(0) }
+
+    private external fun nativeHyperDeviceProfile(handle: Long, remeasure: Boolean): String?
+    private external fun nativeHyperEstimate(handle: Long, recipe: DoubleArray, sourcePath: String): DoubleArray?
+    private external fun nativeHyperPreviewFrame(handle: Long, recipe: DoubleArray, sourcePath: String, seconds: Double, path: Int,
+                                                 size: IntArray): Array<ByteArray>?
+    private external fun nativeStartHyperJob(handle: Long, sourcePath: String, recipe: DoubleArray, outputPath: String): Int
+    private external fun nativeHyperJobSteps(handle: Long): IntArray?
 
 
     /**

@@ -30,6 +30,8 @@
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/project/Project.hpp"
+#include "aurea/hyper/Hyper.hpp"
+#include "effects/builtin/HyperFx.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1771,9 +1773,17 @@ f32 flow_fx_param(const Layer& l, const EffectInstance& e, u32 i, f64 local, f32
 
 /// Flow Retime: o instante da timeline cuja FONTE toca em `timelineTime`. A
 /// velocidade (%) anda dentro da camada desde a entrada: ∫ velocidade dτ.
+/// Hyper Motion (0.3.2): a câmera lenta xN anda dentro da camada (1, 2, 4, 8).
+f64 hyper_motion_slow(const Layer& l, const EffectInstance& e, f64 local) noexcept {
+    static constexpr f64 kSlow[4] = {1.0, 2.0, 4.0, 8.0};
+    return kSlow[std::clamp(static_cast<i32>(std::lround(flow_fx_param(l, e, 0, local, 0.0f, true))), 0, 3)];
+}
+
 f64 flow_retime_timeline(const Layer& l, const EffectInstance& e, f64 timelineTime) noexcept {
     const f64 elapsed = std::max(0.0, timelineTime - static_cast<f64>(l.start.value));
     const f64 l0 = static_cast<f64>(l.offset.value);
+    if (e.type == effect_type_id(hyper::effect_keys::kHyperMotion))
+        return static_cast<f64>(l.start.value) + elapsed / hyper_motion_slow(l, e, l0);
     auto speed = [&](f64 local) {
         return std::clamp(static_cast<f64>(flow_fx_param(l, e, 0, local, 50.0f, false)), 1.0, 1000.0) / 100.0;
     };
@@ -1811,10 +1821,23 @@ VideoFlowFx video_flow_fx(const Layer& l, f64 timelineTime, f64 compShutter) noe
     fx.shutter = compShutter;
     const EffectTypeId retimeType = effect_type_id(effect_keys::kFlowRetime);
     const EffectTypeId blurType = effect_type_id(effect_keys::kFlowMotionBlur);
+    const EffectTypeId hyperType = effect_type_id(hyper::effect_keys::kHyperMotion);
     static constexpr f32 kBase[3] = {256.0f, 384.0f, 576.0f};
     const f64 local = timelineTime - static_cast<f64>(l.start.value) + static_cast<f64>(l.offset.value);
     for (const EffectInstance& e : l.effects) {
         if (!e.enabled) continue;
+        if (e.type == hyperType && !fx.retime) {
+            // Hyper Motion: o mesmo caminho do Flow Retime (instante da fonte,
+            // quadros duplicados, direção do decoder), com os vetores de bloco
+            // do Hyper no lugar do optical flow (frameBlend 3).
+            fx.retime = &e;
+            fx.srcTimeline = flow_retime_timeline(l, e, timelineTime);
+            fx.rate = 1.0 / hyper_motion_slow(l, e, local);
+            fx.frameBlend = 3;
+            fx.replaceDuplicates = flow_fx_param(l, e, 1, local, 1.0f, true) >= 0.5f;
+            fx.duplicateSensitivity = 10.0f;
+            continue;
+        }
         if (e.type == retimeType && !fx.retime) {
             fx.retime = &e;
             fx.srcTimeline = flow_retime_timeline(l, e, timelineTime);
@@ -1964,8 +1987,9 @@ AdjustTimeAsk adjust_time_ask(const Layer& l, const EffectRegistry& registry, co
         && std::any_of(effects.begin(), effects.end(), [&](const EffectInstance& e) { return e.enabled && e.type == remapType; });
     const EffectTypeId retimeType = effect_type_id(effect_keys::kFlowRetime);
     const EffectTypeId flowBlurType = effect_type_id(effect_keys::kFlowMotionBlur);
+    const EffectTypeId hyperMotionType = effect_type_id(hyper::effect_keys::kHyperMotion);
     const bool flowFx = std::any_of(effects.begin(), effects.end(), [&](const EffectInstance& e) {
-        return e.enabled && (e.type == retimeType || e.type == flowBlurType);
+        return e.enabled && (e.type == retimeType || e.type == flowBlurType || e.type == hyperMotionType);
     });
     const VideoFlowFx flow = flowFx ? video_flow_fx(l, ask.shown, compShutter) : VideoFlowFx{};
     auto shown_at = [&](f64 timeline) {
@@ -4254,7 +4278,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         if (t > 1e-3) {
                             nextUs = usOf(next);
                             blendT = static_cast<f32>(std::clamp(t, 0.0, 1.0));
-                            frameBlend = frameBlend == 1 ? u8{1} : u8{2};   // a mistura, se pedida; senão o movimento
+                            frameBlend = frameBlend == 1 ? u8{1} : (frameBlend == 3 ? u8{3} : u8{2});   // a mistura, se pedida; senão o movimento
                         } else {
                             nextUs = -1;
                             blendT = 0.0f;
@@ -4343,6 +4367,20 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                         rl.source.vectorBlur = wantVector && pairUs > 0 && fps > 0.0
                             ? static_cast<f32>(std::clamp(flowFx.vectorAmount, 0.0f, 4.0f) * shutterTravel * 1e6 / (fps * pairUs))
                             : 0.0f;
+                        // Hyper Motion: tela parada (os dois quadros iguais pela
+                        // assinatura de luma) = cópia, sem estimar movimento.
+                        if (rl.source.blendMode == 3 && flowFx.replaceDuplicates && rl.source.vectorBlur <= 0.0f) {
+                            const u64 assetKey = l->source.pack();
+                            const FrameSignature* sa = find_signature(assetKey, rl.source.frame->ptsUs);
+                            if (!sa) sa = frame_signature(assetKey, rl.source.frame->ptsUs, rl.source.frame.get());
+                            const FrameSignature* sb = find_signature(assetKey, rl.source.frameB->ptsUs);
+                            if (!sb) sb = frame_signature(assetKey, rl.source.frameB->ptsUs, rl.source.frameB.get());
+                            if (sa && sb && signatures_match(*sa, *sb, 2.0f)) {
+                                rl.source.frameB.reset();
+                                rl.source.blendT = 0.0f;
+                                rl.source.blendMode = 0;
+                            }
+                        }
                     } else {
                         exact = false;   // falta um dos dois: o export espera; o preview mostra o que tem
                     }
@@ -6155,6 +6193,69 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
                 }
                 if (layer.source.frameB->hardwareBuffer) framesUsed.push_back(layer.source.frameB);
                 EffectBuildContext ctx(graph_, shaders_, arena_, *this, kWorkFormat, maxTex);
+                // HYPER MOTION (0.3.2): vetores de bloco 16x16 nos dois sentidos,
+                // em cache por par de quadros (a câmera lenta x8 usa o mesmo par
+                // em 8 quadros seguidos), e o quadro do meio com oclusão.
+                if (layer.source.blendMode == 3 && layer.source.blendT > 0.0f && layer.source.vectorBlur <= 0.0f) {
+                    u32 fw = 0, fh = 0;
+                    hyper::fx::field_size(w, h, fw, fh);
+                    TextureDesc fd;
+                    fd.width = fw;
+                    fd.height = fh;
+                    fd.format = kWorkFormat;
+                    fd.sampled = true;
+                    fd.renderTarget = true;
+                    fd.debugName = "hyper-campo-cache";
+                    u64 pair = (static_cast<u64>(layer.source.frame->ptsUs) * 1000003ull) ^ static_cast<u64>(layer.source.frameB->ptsUs)
+                             ^ (static_cast<u64>(w) << 40) ^ (static_cast<u64>(h) << 52) ^ 0x48595045524d4f54ull;
+                    for (const DecodedFrame* source : {layer.source.frame.get(), layer.source.frameB.get()})
+                        pair ^= source->content_id() + 0x9e3779b97f4a7c15ull + (pair << 6) + (pair >> 2);
+                    const u64 cacheLayer = layer.id.pack() ^ 0x4859504552000000ull;
+                    FlowCache& fc = flowCache_[cacheLayer];
+                    fc.lastFrame = frameNumber;
+                    if (fc.width != fw || fc.height != fh) {
+                        for (TextureHandle& t : fc.tex) {
+                            if (!t.valid()) continue;
+                            backend_->destroy_texture(t);
+                            heavyStats_.flowCacheBytes -= std::min<u64>(heavyStats_.flowCacheBytes, static_cast<u64>(fc.width) * fc.height * 8);
+                        }
+                        fc = FlowCache{};
+                        fc.width = fw;
+                        fc.height = fh;
+                        fc.lastFrame = frameNumber;
+                    }
+                    FGTexture field{};
+                    for (u32 i = 0; i < 2 && flowCacheEnabled_; ++i)
+                        if (fc.tex[i].valid() && fc.key[i] == pair) field = graph_.import_texture("hyper-campo-cache", fc.tex[i], fd);
+                    if (!field.valid()) {
+                        const u32 slot = fc.next;
+                        fc.next ^= 1u;
+                        if (!fc.tex[slot].valid()) {
+                            trim_flow_cache(cacheLayer, static_cast<u64>(fw) * fh * 8);
+                            if (auto t = backend_->create_texture(fd); t.ok()) {
+                                fc.tex[slot] = *t;
+                                heavyStats_.flowCacheBytes += static_cast<u64>(fw) * fh * 8;
+                            }
+                        }
+                        fc.key[slot] = 0;
+                        if (fc.tex[slot].valid()) {
+                            const FGTexture target = graph_.import_texture("hyper-campo-cache", fc.tex[slot], fd);
+                            if (hyper::fx::bidirectional_field(ctx, out.texture, b, w, h, target, PassStage::Decode)) {
+                                fc.key[slot] = pair;
+                                field = target;
+                            }
+                        }
+                    }
+                    const FGTexture moved = field.valid()
+                        ? hyper::fx::interpolate(ctx, out.texture, b, field, FGTexture{}, w, h, layer.source.blendT, PassStage::Decode)
+                        : FGTexture{};
+                    if (moved.valid()) {
+                        out.texture = moved;
+                        return true;
+                    }
+                    // Sem campo (passe não compilou, textura não criou): a mistura.
+                    mark_incomplete(__FILE__, __LINE__);
+                }
                 const bool needFlow = (layer.source.blendMode == 2 && layer.source.blendT > 0.0f) || layer.source.vectorBlur > 0.0f;
                 FGTexture flow{};
                 u32 baseW = 0, baseH = 0;

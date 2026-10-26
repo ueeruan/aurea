@@ -263,6 +263,7 @@ struct HomeView: View {
     @State private var tab: HomeTabKind = .projects
     @State private var homeMenu = false
     @State private var homeInfo: String?
+    @State private var showLicenses = false
     @State private var importing = false
     /// "Importar arquivo do projeto" e "Relatar um problema" (ProjectTransfer.swift).
     @State private var importingProjectFile = false
@@ -289,6 +290,7 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             LiveNoticeBanners()
+            AppConfigBanner()
             HStack {
                 HomeBrandLogo().frame(width: 28, height: 28)
                 Text("AUREA").font(.aurea(size: 22, weight: .semibold)).tracking(1).padding(.vertical, 12)
@@ -329,11 +331,11 @@ struct HomeView: View {
         .confirmationDialog("Aurea", isPresented: $homeMenu, titleVisibility: .visible) {
             Button(AureaText.t("home_tab_settings")) { select(.settings) }
             Button(AureaText.t("home_import_media")) { importing = true }
-            Button(AureaText.t("upscale_title")) { model.openUpscale() }
+            Button(AureaText.t("hyper_title")) { model.openHyper() }
             Button(AureaText.t("project_file_import")) { importingProjectFile = true }
             Button(AureaText.t("report_title")) { reportingProblem = true }
             Button(AureaText.t("settings_group_about")) { homeInfo = "settings_group_about" }
-            Button(AureaText.t("licenses_title")) { homeInfo = "licenses_title" }
+            Button(AureaText.t("licenses_oss_title")) { showLicenses = true }
             if conta.logado {
                 Button(AureaText.t("conta_sair"), role: .destructive) { confirmLogout = true }
                 Button(AureaText.t("conta_excluir"), role: .destructive) { confirmDelete = true }
@@ -366,11 +368,11 @@ struct HomeView: View {
         } message: {
             Text(AureaText.t("conta_excluir_mensagem"))
         }
+        .fullScreenCover(isPresented: $showLicenses) { LicensesView { showLicenses = false } }
         .sheet(isPresented: Binding(get: { homeInfo != nil }, set: { if !$0 { homeInfo = nil } })) {
             NavigationStack {
                 ScrollView {
-                    Text(homeInfo == "licenses_title" ? AureaText.t("licenses_ai_body") :
-                         "Aurea Beta \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")\n\n" +
+                    Text("Aurea Beta \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")\n\n" +
                          AureaText.t("settings_technology_ios_value") + "\n\n" + AureaText.t("settings_made_by"))
                         .font(.body).textSelection(.enabled).padding(20)
                 }.background(AureaColors.background).foregroundStyle(AureaColors.text)
@@ -1170,7 +1172,7 @@ struct HomeSettingsTab: View {
                     tileRow(CupertinoGlyph.PersonCropCircle, title: "settings_creator",
                             subtitle: AureaText.t("home_ruanzitwo_ofruanzitwo_tiktok_ruanzitwo"))
                     groupDivider
-                    tapRow("licenses_title", subtitle: "MiDaS · U2-Net · Tencent/ncnn") { licenses = true }
+                    tapRow("licenses_oss_title", subtitle: "AureaHyper · FFmpeg · ncnn · MiDaS · U2-Net") { licenses = true }
                 }
                 betaBanner.padding(.top, HomeDims.s4)
                 if developerTools {
@@ -1195,15 +1197,7 @@ struct HomeSettingsTab: View {
         }
         .onAppear { hasGroqKey = !CaptionKeychain.read().isEmpty }
         .sheet(isPresented: $performanceTest) { PerformanceTestPanel() }
-        .sheet(isPresented: $licenses) {
-            NavigationStack {
-                ScrollView { Text(AureaText.t("licenses_ai_body")).font(.system(size: 13)).textSelection(.enabled).padding(20) }
-                    .navigationTitle(AureaText.t("licenses_title")).navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .confirmationAction) {
-                        Button(AureaText.t("editor_fechar")) { licenses = false }
-                    } }
-            }.preferredColorScheme(.dark)
-        }
+        .fullScreenCover(isPresented: $licenses) { LicensesView { licenses = false } }
         .onChange(of: languageSheet) { _ in modalActive = languageSheet || keyDialog }
         .onChange(of: keyDialog) { _ in modalActive = languageSheet || keyDialog }
     }

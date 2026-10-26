@@ -216,6 +216,7 @@ final class ContaModel: ObservableObject {
         if !padroes.bool(forKey: ContaModel.chaveInstalada) {
             ContaKeychain.apagar("token")
             ContaKeychain.apagar("email")
+            ContaKeychain.apagar("hyper_entitlements")
             padroes.set(true, forKey: ContaModel.chaveInstalada)
         }
         let guardada: ContaSessao? = ContaModel.lerSessao()
@@ -234,6 +235,13 @@ final class ContaModel: ObservableObject {
     func aoAbrir() {
         Task { await atualizarUsuarios() }
         revalidarSeVencido()
+        atualizarAcessos()
+    }
+
+    /// O portão dos recursos pagos (AureaHyper, HyperModel.swift) acompanha a sessão guardada.
+    func atualizarAcessos() {
+        let guardada: ContaSessao? = sessao()
+        HyperEntitlements.shared.refresh(token: guardada?.token, email: guardada?.email)
     }
 
     func atualizarUsuarios() async {
@@ -258,6 +266,7 @@ final class ContaModel: ObservableObject {
             guard sessao()?.token == guardada.token else { return }
             if r.status == 401 {
                 apagarSessao()
+                HyperEntitlements.shared.clear()
                 email = nil
                 entrando = true
                 erro = .expirada
@@ -296,6 +305,7 @@ final class ContaModel: ObservableObject {
             if let n: Int = (r.corpo["users"] as? NSNumber)?.intValue, n >= 0 { guardarUsuarios(n) }
             ultimaRevalidacao = Date()
             self.email = confirmado
+            atualizarAcessos()
         }
     }
 
@@ -308,6 +318,7 @@ final class ContaModel: ObservableObject {
             ContaKeychain.gravar("revogar", fila.sorted().joined(separator: "\n"))
         }
         apagarSessao()
+        HyperEntitlements.shared.clear()
         email = nil
         entrando = true
         erro = nil
@@ -328,6 +339,7 @@ final class ContaModel: ObservableObject {
             excluindo = false
             guard r.ok else { terminou(false); return }
             apagarSessao()
+            HyperEntitlements.shared.clear()
             ContaKeychain.apagar("revogar")
             email = nil
             // Conta nova: a tela abre no cadastro, não no "entrar".

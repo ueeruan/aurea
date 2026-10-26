@@ -26,6 +26,7 @@
 //  compara com o passado pela cadeia de efeitos (Detectar movimento, Datamosh,
 //  Video Glitch) roda o efeito real com o quadro passado como histórico.
 // =============================================================================
+#include "aurea/hyper/Hyper.hpp"
 #include "aurea/effects/RandomEdits.hpp"
 #include "aurea/render/Renderer.hpp"
 #include "aurea/core/Log.hpp"
@@ -216,7 +217,7 @@ void scene_at(const EffectPreviewSequence& s, f64 t, std::vector<u8>& out) noexc
     }
 }
 
-enum class TemporalKind : u8 { None, Echo, RgbTime, Posterize, Slice, Remap, Retime, FlowBlur, RandomEdits, WideTime };
+enum class TemporalKind : u8 { None, Echo, RgbTime, Posterize, Slice, Remap, Retime, FlowBlur, RandomEdits, WideTime, HyperMotion };
 
 TemporalKind temporal_kind(std::string_view key) noexcept {
     if (key == effect_keys::kEchoTrail) return TemporalKind::Echo;
@@ -228,6 +229,7 @@ TemporalKind temporal_kind(std::string_view key) noexcept {
     if (key == effect_keys::kFlowMotionBlur) return TemporalKind::FlowBlur;
     if (key == effect_keys::kRandomEdits) return TemporalKind::RandomEdits;
     if (key == effect_keys::kWideTime) return TemporalKind::WideTime;
+    if (key == hyper::effect_keys::kHyperMotion) return TemporalKind::HyperMotion;
     return TemporalKind::None;
 }
 
@@ -380,6 +382,13 @@ bool compose_temporal(TemporalKind kind, const std::vector<ParamValue>& v, Scene
         case TemporalKind::Retime: {
             const f64 speed = std::clamp(static_cast<f64>(val(v, 0, 50.0f)) / 100.0, 0.05, 4.0);
             add(scene.at(static_cast<f64>(kSequenceStartFrame) + (t - kSequenceStartFrame) * speed), 1.0f, 1, 1, 1);
+            break;
+        }
+        case TemporalKind::HyperMotion: {
+            // Hyper Motion: câmera lenta xN dentro da camada (1, 2, 4, 8).
+            static constexpr f64 kSlow[4] = {1.0, 2.0, 4.0, 8.0};
+            const f64 slow = kSlow[std::clamp(v.empty() ? 0 : static_cast<i32>(v[0].as_enum()), 0, 3)];
+            add(scene.at(static_cast<f64>(kSequenceStartFrame) + (t - kSequenceStartFrame) / slow), 1.0f, 1, 1, 1);
             break;
         }
         case TemporalKind::FlowBlur: {

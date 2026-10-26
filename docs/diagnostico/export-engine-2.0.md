@@ -133,6 +133,33 @@ transparente, recorte entre grupos, chão com câmera andando, trajeto curvo
   `libaurea.so`). Fica a configuração padrão.
 - Licença continua LGPL-2.1+ com as nossas flags.
 
+### 1.11 Qualcomm OMX descarta quadros em VBR [medido no Moto g52]
+- Aparelho: Moto g52 (Snapdragon 680, Adreno 610, Android 13),
+  `OMX.qcom.video.encoder.avc`. Teste `ExportV2DeviceTest.sixtySecondsThreeVideoClipsWithTimeRemap`
+  (3 clipes com remapeamento de tempo, 1800 quadros, 480×320, 8 Mbps).
+- Sintoma: o encoder confirma o 1º pacote e, 1–3 s depois, para de devolver
+  pacotes. O log do driver mostra `avg. fps 50–77, bitrate 0`: ele continua
+  recebendo quadros e não gera bytes. A Surface trava no quadro ~123 (limite de
+  quadros em voo) e o buffer em ~316 (fila de 256 cheia), 30 s depois `Timeout`.
+- Experimento no aparelho com o mesmo teste (propriedade de debug, já removida):
+  VBR (padrão) trava; sem `bitrate-mode` trava; VBR + `priority=1` +
+  `operating-rate` trava; CQ o configure recusa (-10000); **CBR passa** (1800
+  quadros, Surface do hardware, 1ª tentativa). Nenhum buffer vazio chegou ao app:
+  o MediaCodec não repassa saídas de 0 bytes, então o quadro descartado só some.
+- Inferido (não comprovado no código do fabricante): o HAL OMX da Qualcomm
+  mapeia `BITRATE_MODE_VBR` para VBR com quadros variáveis (VBR_VFR), que
+  descarta quadros quando a entrada chega mais rápido que o tempo real.
+- O g52 aceita CBR **sem anunciá-lo** (`isBitrateModeSupported(CBR)` falso).
+- Correção: `android_codec::vbr_drops_frames` — encoders `OMX.qcom.*` recebem
+  CBR na mesma taxa alvo (nativo e FFmpeg+MediaCodec); se o configure recusar,
+  o encoder abre de novo no modo pedido. Codec2 (`c2.qti.*`) e outros
+  fabricantes não mudam (não testados).
+- Duas correções de apoio vistas no mesmo teste: (1) a Surface parada no meio
+  refaz igual pelo buffer do mesmo encoder (Busy) em vez de descer para
+  software e menos pixels; (2) o checkpoint gravado por outro caminho do encoder
+  não marca mais todos os degraus como falhos (terminava em "encoder
+  indisponível", erro 31): refaz igual e recomeça do zero.
+
 ## 2. Arquitetura resultante (o que evolui, sem duplicar)
 
 | Componente da missão | Já existe | Evolução |

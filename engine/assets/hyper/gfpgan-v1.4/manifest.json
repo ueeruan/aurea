@@ -1,0 +1,55 @@
+{
+  "name": "GFPGAN v1.4 (GFPGANv1Clean 512)",
+  "version": "GFPGAN release v1.3.4, GFPGANv1.4.pth",
+  "license": "Apache-2.0",
+  "licenseNotes": "O LICENSE do GFPGAN lista componentes de terceiros: basicsr (Apache-2.0), stylegan2-pytorch (MIT), StyleGAN2 da NVIDIA (licença NVIDIA, só nos kernels CUDA da versão NÃO clean — não usados) e DFDNet (CC BY-NC-SA 4.0, código não usado aqui). Os pesos foram treinados no FFHQ (imagens sob CC BY-NC-SA 4.0): risco jurídico a avaliar antes de vender.",
+  "sourceUrl": "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.4/GFPGANv1.4.pth",
+  "sourceSha256": "e2cd4703ab14f4d01fd1383a8a8b266f9a5833dacee8e6a79d3bf21a1b6be5ad",
+  "stateDictKey": "params_ema",
+  "architecture": "GFPGANv1Clean out_size=512 channel_multiplier=2 different_w sft_half input_is_latent; conv modulada reescrita sem pesos dinâmicos (forma não fundida do StyleGAN2); ruído = buffers fixos",
+  "conversion": "torch.jit.trace -> pnnx 20250430 -> ncnnoptimize fp16 (flag 65536)",
+  "io": "entrada in0 [3,512,512] RGB em [-1,1] (rosto alinhado ao gabarito FFHQ); saída out0 [3,512,512] em [-1,1]",
+  "layers": [
+    "BinaryOp",
+    "Concat",
+    "Convolution",
+    "InnerProduct",
+    "Input",
+    "Interp",
+    "MemoryData",
+    "ReLU",
+    "Reshape",
+    "Slice",
+    "Split",
+    "UnaryOp"
+  ],
+  "delivery": "on-demand (fora do APK)",
+  "referenceMaxErrorVsOriginalFormulation": 1.4662742614746094e-05,
+  "files": [
+    {
+      "file": "gfpgan-v1.4-fp16.param",
+      "role": "param",
+      "bytes": 39898,
+      "sha256": "3797bdf5d0411dece5bc5fba4173ae5e4477d521a4db0cdb27d704d04affe0a2"
+    },
+    {
+      "file": "gfpgan-v1.4-fp16.bin",
+      "role": "weights-fp16",
+      "bytes": 176792952,
+      "sha256": "ffb8d2705724d98b296ebd188c6e22ba3c3959157b6470e2663ad023d999ba49"
+    },
+    {
+      "file": "reference-512.rgb",
+      "role": "meter-reference",
+      "bytes": 786432,
+      "sha256": "3fbb7465f24b2a87db7d02299aaab57ef964b7379fcb8f36c9a1e0d9b4101e81"
+    },
+    {
+      "file": "LICENSE",
+      "role": "license",
+      "bytes": 22990,
+      "sha256": "b916d19bf894eb43409866adf17c9f71cbb17aefd9cd105117c4a32598ef6a46"
+    }
+  ],
+  "totalBytes": 177642272
+}

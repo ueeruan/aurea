@@ -39,6 +39,8 @@ struct AureaApp: App {
                 .preferredColorScheme(.dark)   // o Aurea é escuro em todas as telas
                 .onAppear {
                     model.start()
+                    // 0.3.2: config remota assinada (atualização obrigatória, política do AureaHyper, aviso).
+                    AppConfigStore.shared.refresh(force: true)
                     // Número de cadastrados + revalidação (com rede; offline, segue dentro).
                     conta.aoAbrir()
                     // Relatórios de crash só saem com conta: o cadastro avisa do envio antes.
@@ -62,6 +64,9 @@ struct AureaApp: App {
                 // "Na frente": se o app morrer sem ir ao segundo plano, a próxima abertura sabe.
                 CrashReporter.shared.primeiroPlano(true, etapa: "screen=\(model.screen)")
                 conta.revalidarSeVencido()
+                // No máximo a cada 30 min; o prazo do Hyper "free" é recalculado.
+                AppConfigStore.shared.refresh()
+                HyperEntitlements.shared.recheck()
             case .background:
                 model.enterBackground()
                 CrashReporter.shared.primeiroPlano(false, etapa: "")

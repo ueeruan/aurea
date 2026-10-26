@@ -47,6 +47,17 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
 
     val logado: Boolean get() = estado is ContaEstado.Dentro
 
+    init {
+        // O portão do AureaHyper confere por conta (hyper/Entitlements.kt).
+        com.aurea.aurea.hyper.HyperEntitlements.init(app)
+    }
+
+    /** O portão dos recursos pagos acompanha a sessão guardada. */
+    fun atualizarAcessos() {
+        val s = sessao()
+        com.aurea.aurea.hyper.HyperEntitlements.refresh(s?.token, s?.email)
+    }
+
     /** A sessão guardada, ou null. Lê o cofre (rápido; o Keystore já está de pé). */
     fun sessao(): SessaoGuardada? {
         val token = cofre.get(KEY_TOKEN) ?: return null
@@ -58,6 +69,7 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
     fun aoAbrir() {
         atualizarUsuarios()
         revalidarSeVencido()
+        atualizarAcessos()
     }
 
     fun atualizarUsuarios() {
@@ -90,6 +102,7 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
             val novo = ContaLogica.aposRevalidar(estado, resultado)
             if (novo is ContaEstado.Fora && estado is ContaEstado.Dentro) {
                 withContext(Dispatchers.IO) { apagarSessao() }
+                com.aurea.aurea.hyper.HyperEntitlements.clear()
                 entrando = true
                 erro = ErroConta.EXPIRADA
             }
@@ -127,6 +140,7 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
             r.corpo.optInt("users", -1).takeIf { it >= 0 }?.let { guardarUsuarios(it) }
             ultimaRevalidacao = SystemClock.elapsedRealtime()
             estado = ContaEstado.Dentro(confirmado)
+            atualizarAcessos()
         }
     }
 
@@ -140,6 +154,7 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         apagarSessao()
+        com.aurea.aurea.hyper.HyperEntitlements.clear()
         estado = ContaEstado.Fora
         entrando = true
         erro = null
@@ -165,6 +180,7 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
             excluindo = false
             if (!r.ok) { aoTerminar(false); return@launch }
             apagarSessao()
+            com.aurea.aurea.hyper.HyperEntitlements.clear()
             runCatching { cofre.remove(KEY_REVOGAR) }
             estado = ContaEstado.Fora
             // Conta nova: a tela abre no cadastro, não no "entrar".

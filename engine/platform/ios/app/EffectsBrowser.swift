@@ -478,6 +478,9 @@ struct EffectAddSheet: View {
     @State private var searching: Bool
     /// 0.3.0: plugins de efeito (instalar, ver, remover) — PluginManagerSheet.kt.
     @State private var managingPlugins = false
+    /// 0.3.2: efeito Hyper sem o acesso abre a tela bloqueada (HyperEffectGate).
+    @State private var hyperLocked = false
+    @ObservedObject private var entitlements = HyperEntitlements.shared
 
     init(request: EffectSearchRequest, close: @escaping () -> Void) {
         _prefs = ObservedObject(wrappedValue: request.prefs)
@@ -487,16 +490,20 @@ struct EffectAddSheet: View {
     }
 
     var body: some View {
-        if searching {
-            EffectPickerSearch(prefs: prefs, sorted: request.sorted, onPick: pick, onFavorite: toggleFavorite,
-                               onDismiss: { if request.browse { searching = false } else { close() } })
-        } else {
-            browser
+        Group {
+            if searching {
+                EffectPickerSearch(prefs: prefs, sorted: request.sorted, onPick: pick, onFavorite: toggleFavorite,
+                                   onDismiss: { if request.browse { searching = false } else { close() } })
+            } else {
+                browser
+            }
         }
+        .sheet(isPresented: $hyperLocked) { HyperLockedSheet { hyperLocked = false } }
     }
 
     /// UM toque: grava nos recentes, fecha e adiciona (ou abre a ferramenta).
     private func pick(_ entry: EffectCatalogItem) {
+        if HyperEffectGate.locked(typeId: entry.typeId) { hyperLocked = true; return }
         prefs.addRecent(entry.typeId)
         close()
         if let tool = fxEffectToolOf(entry.typeId) { request.onTool?(tool) } else { request.onPick(entry) }
@@ -816,6 +823,16 @@ private struct FxEffectTile: View {
     }
 }
 
+/// O cadeado de um efeito Hyper bloqueado (recurso pago; HyperEffectGate).
+private struct FxHyperLockBadge: View {
+    var body: some View {
+        Image(systemName: "lock.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(AureaColors.accent)
+            .frame(width: 20, height: 20).background(.black.opacity(0.6), in: Circle())
+            .accessibilityLabel(AureaText.t("hyper_effect_locked"))
+            .accessibilityIdentifier("effects.hyper.cadeado")
+    }
+}
+
 /// Selos: "Novo" em cima à esquerda; o "!" do efeito pesado e a estrela à direita.
 private struct FxEffectBadges: View {
     let entry: EffectCatalogItem
@@ -830,6 +847,7 @@ private struct FxEffectBadges: View {
                     .background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 6)).padding(6)
             }
             HStack(spacing: 4) {
+                if HyperEffectGate.locked(typeId: entry.typeId) { FxHyperLockBadge() }
                 if fxEffectCost(entry.effectClass) >= 3 {
                     Text("!").font(.aurea(size: 13, weight: .black)).foregroundStyle(.black)
                         .frame(width: 20, height: 20).background(.white, in: Circle())
@@ -1034,11 +1052,14 @@ private struct EffectPickerCard: View {
                 }
             }
                 .overlay(alignment: .topTrailing) {
-                    if favorite {
-                        CupertinoGlyph.text(CupertinoGlyph.StarFill, size: AureaDims.iconXs, color: AureaColors.accent)
-                            .frame(width: EffectPickerLayout.favoriteBadge, height: EffectPickerLayout.favoriteBadge)
-                            .background(.black.opacity(0.45), in: Circle()).padding(AureaDims.s1)
-                    }
+                    HStack(spacing: 4) {
+                        if HyperEffectGate.locked(typeId: entry.typeId) { FxHyperLockBadge() }
+                        if favorite {
+                            CupertinoGlyph.text(CupertinoGlyph.StarFill, size: AureaDims.iconXs, color: AureaColors.accent)
+                                .frame(width: EffectPickerLayout.favoriteBadge, height: EffectPickerLayout.favoriteBadge)
+                                .background(.black.opacity(0.45), in: Circle())
+                        }
+                    }.padding(AureaDims.s1)
                 }
                 .overlay(alignment: .topLeading) {
                     if entry.isNew {

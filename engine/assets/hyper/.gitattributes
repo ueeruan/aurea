@@ -1,0 +1,4 @@
+# Pesos e imagens de referencia das redes: bytes exatos, nunca normalizar fim de linha.
+*.bin binary
+*.bin16 binary
+*.rgb binary

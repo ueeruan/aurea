@@ -2109,6 +2109,18 @@ enum EffectI18nTable {
     aurea.enhance.video|12|mix|fxl_mix|
     aurea.utility.copy_background|0|window|fx030k_window|fxo_layer_alpha,fxo_inverted_alpha,fxo_layer_luma,fxo_inverted_luma
     aurea.utility.copy_background|1|layer_mix|fx030k_layer_mix|
+    aurea.hyper.upscale|0|scale|fxl_scale|fxo_2,fxo_4
+    aurea.hyper.upscale|1|mode|fxl_content|fxo_general,fxo_anime
+    aurea.hyper.upscale|2|sharpness|fx_name_sharpen|
+    aurea.hyper.upscale|3|path|fxo_path|fxo_turbo_preview,fxo_lite,fxo_max
+    aurea.hyper.clean|0|denoise|fxl_reduce_noise|
+    aurea.hyper.clean|1|deblock|fxl_remove_compression_blocks|
+    aurea.hyper.clean|2|deinterlace|fxl_deinterlace|fx3o_desligado,fxo_automatic,fxo_always
+    aurea.hyper.clean|3|frames|fxl_neighbouring_frames|
+    aurea.hyper.clean|4|path|fxo_path|fxo_turbo_preview,fxo_lite,fxo_max
+    aurea.hyper.motion|0|slow_motion|fxl_slow_motion|fxo_1_extra_frames_only,fxo_2,fxo_4,fxo_8
+    aurea.hyper.motion|1|duplicates|fxl_detect_repeated_frames|
+    aurea.hyper.motion|2|path|fxo_path|fxo_turbo_preview,fxo_lite,fxo_max
     """
 
     /// "typeId#índice" → dica do parâmetro.
@@ -2133,6 +2145,13 @@ enum EffectI18nTable {
     aurea.enhance.video|0|model|fxt_automatic_estimates_compression_noise_an
     aurea.enhance.video|10|temporal_frames|fxt_frames_on_each_side_used_by_noise_reduct
     aurea.utility.copy_background|0|window|fxt_effects_after_this_one_act_on_the_layers
+    aurea.hyper.upscale|0|scale|fxt_upscales_the_layer_when_it_appears_large
+    aurea.hyper.upscale|3|path|fxt_the_preview_always_uses_turbo_lite_and_m
+    aurea.hyper.clean|2|deinterlace|fxt_automatic_acts_only_when_the_frame_shows
+    aurea.hyper.clean|3|frames|fxt_frames_on_each_side_aligned_by_motion_1
+    aurea.hyper.clean|4|path|fxt_the_preview_always_uses_turbo_lite_and_m_2
+    aurea.hyper.motion|0|slow_motion|fxt_new_frames_between_the_source_frames_bui
+    aurea.hyper.motion|2|path|fxt_the_preview_always_uses_turbo
     """
 
     /// "typeId#índice" → título da seção (índice = ordinal).

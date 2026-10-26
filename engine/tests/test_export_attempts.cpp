@@ -78,6 +78,12 @@ AUREA_TEST(ExportAttempts, WhatCanHelpIsDecidedByCodeReasonAndStall) {
     AUREA_CHECK(export_retry_kind(code(Errc::Cancelled), 0, true, false) == ExportRetryKind::Stall);
     // Quadro que passou do prazo da GPU (motion blur 3D): menos amostras.
     AUREA_CHECK(export_retry_kind(code(Errc::Timeout), why(ExportFailure::Render), false, false) == ExportRetryKind::GpuTime);
+    // 0.3.2: a Surface do encoder de hardware parou e há a entrada por buffer
+    // do mesmo encoder: refazer o MESMO degrau (Busy), não descer a escada.
+    AUREA_CHECK(export_retry_kind(code(Errc::Busy), why(ExportFailure::Encoder), false, false) == ExportRetryKind::Busy);
+    AUREA_CHECK(export_retry_kind(code(Errc::Busy), why(ExportFailure::EncoderStalled), false, false) == ExportRetryKind::Busy);
+    // A tela que desistiu continua indo para o software.
+    AUREA_CHECK(export_retry_kind(code(Errc::Busy), why(ExportFailure::Encoder), true, false) == ExportRetryKind::Stall);
 }
 
 AUREA_TEST(ExportAttempts, EncoderFailuresClimbEveryRungThenStop) {
@@ -194,6 +200,21 @@ AUREA_TEST(ExportAttempts, NarrowAddressSpaceKeepsTheExportSmall) {
     // 64 bits: como sempre.
     AUREA_CHECK_EQ(address_space::export_readback_slots(4, 64), 4u);
     AUREA_CHECK_EQ(address_space::export_render_budget(512ull << 20, 64), 512ull << 20);
+}
+
+AUREA_TEST(ExportAttempts, QualcommOmxEncodersGetCbrInsteadOfFrameDroppingVbr) {
+    using android_codec::device_rate_mode;
+    // Moto g52: OMX.qcom em VBR descarta quadros e o export trava; CBR não.
+    // (o g52 não anuncia CBR e o aceita: o encoder tenta CBR e, se o
+    // configure recusar, abre de novo no modo pedido).
+    AUREA_CHECK(device_rate_mode("OMX.qcom.video.encoder.avc", 1) == 0u);
+    AUREA_CHECK(device_rate_mode("OMX.qcom.video.encoder.hevc", 1) == 0u);
+    AUREA_CHECK(device_rate_mode("OMX.qcom.video.encoder.avc", 0) == 0u);
+    // Codec2 da Qualcomm, outros fabricantes e software: o VBR pedido fica.
+    for (const char* name : {"c2.qti.avc.encoder", "OMX.MTK.VIDEO.ENCODER.AVC", "c2.exynos.h264.encoder",
+                             "c2.android.avc.encoder", "OMX.google.h264.encoder", ""})
+        AUREA_CHECK(device_rate_mode(name, 1) == 1u);
+    AUREA_CHECK(device_rate_mode(nullptr, 1) == 1u);
 }
 
 AUREA_TEST(ExportAttempts, AndroidCodecNamesTellSoftwareFromHardware) {

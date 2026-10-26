@@ -1,0 +1,70 @@
+{
+  "name": "SPAN x2 ch48",
+  "version": "SPAN (CVPR-W NTIRE 2024), checkpoint spanx2_ch48.pth",
+  "license": "Apache-2.0 (repositório oficial; os pesos são publicados pelos autores no README, sem licença própria)",
+  "sourceUrl": "https://drive.usercontent.google.com/download?id=1iYUA2TzKuxI0vzmA-UXr_nB43XgPOXUg&export=download&confirm=t",
+  "sourceSha256": "675b653c5e730e149bb75864e04e4f3440fe8eb46e1c6f44d21b973fb5f747dc",
+  "sourceMember": "spanx2_ch48.pth",
+  "sourceMemberSha256": "561fd5cf419a23d4de1231ce258180f61aee4aa8caa1aaaa783769c7301847bc",
+  "stateDictKey": "params",
+  "architecture": "SPAN feature_channels=48, Conv3XC re-parametrizadas em 3x3 (álgebra de Conv3XC.update_params)",
+  "flatFieldCorrection": {
+    "gain": [
+      0.998964,
+      0.99879,
+      0.998544
+    ],
+    "offset": [
+      0.033888,
+      0.029069,
+      0.042444
+    ],
+    "note": "out' = (out - offset)/gain dobrado na última conv; ver calibrate_span_flat_field"
+  },
+  "conversion": "torch.jit.trace -> pnnx 20250430 -> correção de campo plano -> ncnnoptimize fp16 (flag 65536)",
+  "int8": "recusado: int8 em todas as conv explode (conv_2); misto (5/22 ×2, 8/22 ×4) = 40,4/39,6 dB do fp32 e só ~6% mais rápido no host",
+  "layers": [
+    "BinaryOp",
+    "Concat",
+    "Convolution",
+    "Input",
+    "MemoryData",
+    "PixelShuffle",
+    "Sigmoid",
+    "Split",
+    "Swish"
+  ],
+  "delivery": "bundled",
+  "reference": {
+    "file": "reference-32-x2.rgb",
+    "input": "reference_pattern 32x32",
+    "output": "64x64 RGB8"
+  },
+  "files": [
+    {
+      "file": "span-x2-fp16.param",
+      "role": "param-fp16",
+      "bytes": 5455,
+      "sha256": "6287057699eeeee19bc4fd5121b3197988d2f6f7a11b343328aa8aac250e21a3"
+    },
+    {
+      "file": "span-x2-fp16.bin",
+      "role": "weights-fp16",
+      "bytes": 823540,
+      "sha256": "3c5a91d45f49781d0317d449dbe22b3d9bcecf4f108aef1946e96278ae7a4d00"
+    },
+    {
+      "file": "reference-32-x2.rgb",
+      "role": "meter-reference",
+      "bytes": 12288,
+      "sha256": "a5d39c74566837f20a37476209da7680989efad73fa929c082e0c4a11cfe4cec"
+    },
+    {
+      "file": "LICENSE",
+      "role": "license",
+      "bytes": 11350,
+      "sha256": "5447872f21ddc29dc0dc060d5c885513c01c904e9da9931bba69898a6fb4d415"
+    }
+  ],
+  "totalBytes": 852633
+}

@@ -1111,6 +1111,16 @@ internal class TimelinePainter(
         val half = m.tickBottom * 0.28f
         for (i in 0 until mk.size) {
             val x = TimeAxis.xOf(mk.frames[i].toDouble(), view, ppf, cx)
+            // 0.3.2: o nome da marca à direita do triângulo, cortado antes da
+            // próxima marca (ou da borda). Desenha mesmo com a marca à esquerda
+            // da tela, se o nome ainda aparece.
+            val label = mk.labels.getOrNull(i).orEmpty()
+            if (label.isNotEmpty()) {
+                val nextX = if (i + 1 < mk.size) TimeAxis.xOf(mk.frames[i + 1].toDouble(), view, ppf, cx) else w
+                val left = x + half + 3f * m.density
+                val avail = min(nextX - half, w) - left - 2f * m.density
+                if (avail >= MARKER_NAME_MIN_DP * m.density && left < w) drawMarkerName(label, left, avail)
+            }
             if (x < -half || x > w + half) continue
             val beat = mk.kinds[i] == 1
             val c = mk.colors[i]
@@ -1126,6 +1136,29 @@ internal class TimelinePainter(
         }
     }
     private val markerPath = androidx.compose.ui.graphics.Path()
+    private val markerNameStyle = TextStyle(
+        color = Color.White,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.W600,
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
+    )
+    /** Layouts dos nomes por (texto, largura em degraus): a régua redesenha a cada quadro. */
+    private val markerNames = HashMap<Pair<String, Int>, androidx.compose.ui.text.TextLayoutResult>()
+
+    private fun DrawScope.drawMarkerName(label: String, left: Float, avail: Float) {
+        val step = NAME_STEP_DP * m.density
+        val bucket = max(1, (avail / step).toInt())
+        val key = label to bucket
+        val layout = markerNames[key] ?: measurer.measure(
+            text = label,
+            style = markerNameStyle,
+            overflow = TextOverflow.Ellipsis,
+            softWrap = false,
+            maxLines = 1,
+            constraints = Constraints(maxWidth = max(1, (bucket * step).toInt())),
+        ).also { if (markerNames.size > 256) markerNames.clear(); markerNames[key] = it }
+        drawText(layout, alpha = 0.85f, topLeft = Offset(left, 1f * m.density))
+    }
 
     private fun DrawScope.drawRulerLabel(seconds: Int, x: Float, cx: Float) {
         var layout = labels.get(seconds)
@@ -1246,6 +1279,7 @@ internal class TimelinePainter(
         const val THUMB_QUERIES_PER_FRAME = 6
         const val NAME_STEP_DP = 12f
         const val NAME_MIN_DP = 8f
+        const val MARKER_NAME_MIN_DP = 18f
         const val NAME_CACHE = 256
         const val LABEL_CACHE = 96
         /** Diagonal do quadrado girado (√2). */

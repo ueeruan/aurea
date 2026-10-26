@@ -491,11 +491,16 @@ class ExportProgress {
     val modelFallback: Boolean get() = flags and FLAG_MODEL_FALLBACK != 0
     /** Este export roda no modo de segurança (refeito depois de o encoder travar). */
     val safeMode: Boolean get() = flags and FLAG_SAFE_MODE != 0
-    /** Este export continuou um interrompido, do último trecho salvo. */
+    /**
+     * 0.3.2 (Engine::kExportResumed): este export continuou um interrompido do
+     * último GOP íntegro do checkpoint; `framesDone` começa nesse quadro.
+     */
     val resumed: Boolean get() = flags and FLAG_RESUMED != 0
     /**
-     * Parou (app em segundo plano, falha recuperável) com quadros salvos: o
-     * MESMO export (mesma saída e opções) continua dali em vez do zero.
+     * 0.3.2 (Engine::kExportResumable): terminou sem arquivo, mas a MESMA
+     * tentativa (mesmas opções e o mesmo degrau da escada) continua do
+     * checkpoint em vez de descer a escada. O motor limita quantas vezes; nunca
+     * depois de o usuário cancelar.
      */
     val resumable: Boolean get() = flags and FLAG_RESUMABLE != 0
     /**

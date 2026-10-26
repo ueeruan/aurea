@@ -371,7 +371,13 @@ def main() -> None:
               f"CFLAGS={flags} -DANDROID_NDK -MMD -MP -fstack-protector-all"]
         if windows:
             make = q(ndk / "prebuilt/windows-x86_64/bin/make.exe")
+            # 9.0: o arm64 compila e LINKA uma ferramenta no host
+            # (libswscale/aarch64/ops_asmgen). Sem o alvo MSVC no link, o clang
+            # do NDK linkava contra a MinGW (-lmingw32 ... inexistentes); com o
+            # alvo, ele chama lld-link, que o NDK não traz. -fuse-ld=link usa o
+            # link.exe do Visual Studio (o mesmo ambiente do --host-cc).
             common += [f"--host-cc={cc}", "--host-cflags=--target=x86_64-pc-windows-msvc",
+                       "--host-ldflags=--target=x86_64-pc-windows-msvc -fuse-ld=link",
                        "--disable-hardcoded-tables"]
     elif args.platform.startswith("ios"):
         if platform.system() != "Darwin":

@@ -1685,6 +1685,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             motionBlurSamples = settings.samples
             motionBlurAdaptiveLimit = settings.adaptiveLimit
             motionBlurPreviewSamples = settings.previewSamples
+            motionBlurVector = settings.vectorBlur
         }
         selectCreatedAfter?.let { before ->
             val created = layers.map { it.id }.filter { it !in before }
@@ -5450,6 +5451,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         private set
     var motionBlurPreviewSamples by mutableStateOf(16)
         private set
+    /** 0.3.2: motion blur 3D rápido (vetores) da composição. */
+    var motionBlurVector by mutableStateOf(false)
+        private set
 
     fun setLayerMotionBlur(layer: Long, on: Boolean) {
         if (!ready) return
@@ -6500,6 +6504,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun centerMotionBlurExposure() = updateMotionBlurSettings { it.copy(phase = -it.angle / 2f) }
     fun changeMotionBlurSamples(samples: Int) = updateMotionBlurSettings { it.copy(samples = samples) }
     fun changeMotionBlurAdaptiveLimit(limit: Int) = updateMotionBlurSettings { it.copy(adaptiveLimit = limit) }
+    /** Motion blur 3D: rápido (vetores) ou alta qualidade (amostras); o motor decide grupo a grupo. */
+    fun changeMotionBlurVector(on: Boolean) {
+        if (!ready) return
+        val current = engine.queryMotionBlurSettings() ?: return
+        if (current.vectorBlur != on && engine.setMotionBlurVector(on)) refreshNow()
+    }
 
     private fun updateMotionBlurSettings(change: (com.aurea.aurea.engine.MotionBlurSettings) -> com.aurea.aurea.engine.MotionBlurSettings) {
         if (!ready) return

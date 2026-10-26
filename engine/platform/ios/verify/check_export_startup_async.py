@@ -81,6 +81,21 @@ background = block("private func suspendPreparingExport()")
 assert "if exportPreparing" in block("func enterBackground()")
 assert background.index("cancelExport()") < background.index("lifecycleQueue.async")
 assert background.index("captures.sync { save ? native.saveProjectIfDirty()") < background.index("native.suspend()")
+# 0.3.2 (CheckpointManager): segundo plano no "Preparando" PAUSA o export de
+# vídeo (o motor guarda o checkpoint), sem o cancelamento do usuário; ao voltar,
+# o mesmo export é refeito. Falha com checkpoint repete a MESMA tentativa.
+assert "request.pause()" in background and "engine.pauseExport()" in background
+assert background.index("engine.pauseExport()") < background.index("lifecycleQueue.async")
+assert "self?.resumePausedExport()" in block("func enterForeground()")
+assert "exportPausedForBackground = true" in block("func enterBackground()")
+assert "exportPausedForBackground = false" in cancel
+assert "if request.isPaused && !succeeded {" in prepare
+assert "native.exportResumeCandidate(" in prepare and "level = checkpointLevel" in prepare
+assert "progressFlags & Self.exportFlagResumable != 0" in poll
+assert "self.prepareExport(url, options: options, safeMode: self.exportSafeMode)" in poll
+assert "if result == 25, self.exportPausedForBackground { self.resumePausedExport(); return }" in poll
+assert "- (void)pauseExport;" in header and "e->pause_export()" in bridge
+assert "exportResumeCandidateCodec:" in header and "e->export_resume_candidate(settings)" in bridge
 assert "!exportBackgroundSavePending" in block("private func refreshStatus()")
 assert "!exportBackgroundSavePending" in block("private func playheadTick()")
 assert "- (int32_t)startExportCheckedTo:" in header
@@ -149,6 +164,10 @@ final class Native: @unchecked Sendable {
     func setProgress(_ value: [String: Any]) { lock.lock(); progress = value; lock.unlock() }
     func exportProgress() -> [String: Any] { lock.lock(); defer { lock.unlock() }; return progress }
     func exportDiagnostics() -> String { "{}" }
+    // 0.3.2: nenhum checkpoint guardado neste harness (o motor responde nil).
+    func exportResumeCandidate(codec: AureaExportCodec, height: UInt32, fps: Double, bitrateMbps: UInt32,
+                               audioBitrateKbps: UInt32, aiUpscale: UInt32, trimToContent: Bool,
+                               quality: UInt32) -> [String: NSNumber]? { nil }
     func exportDuration(_ trimToContent: Bool) -> Int64 { 300 }
     func begin(kind: UInt32?, safeMode: UInt32, fps: Double, height: UInt32) -> Int32 {
         lock.lock()
@@ -194,6 +213,12 @@ final class Native: @unchecked Sendable {
     var exportReducedFps = 0
     // 0.3.1: export que morreu no processo anterior (a marca em UserDefaults).
     var exportLighterAfterClose = false, exportDeathChecked = false
+    // 0.3.2 (CheckpointManager): pausa no segundo plano e "continuando de N%".
+    var exportPausedForBackground = false, exportPausedInStartup = false, appInBackground = false
+    var exportResumedFromPercent = -1, resumedPausedExports = 0
+    nonisolated static let exportFlagResumed: UInt32 = 1 << 5
+    nonisolated static let exportFlagResumable: UInt32 = 1 << 6
+    func resumePausedExport() { resumedPausedExports += 1 }
     nonisolated static let exportInFlightKey = "aurea.export.inFlight.harness"
     static let previousExportDied = false
     var exportTimer: Timer?
@@ -309,6 +334,25 @@ final class Native: @unchecked Sendable {
         await wait { !stale.exporting }
         precondition(stale.engine.calls.count == 1 && stale.exportProgress["flags"] == nil)
         precondition((stale.exportProgress["result"] as? NSNumber)?.intValue == 28)
+
+        // 0.3.2: o motor parou com checkpoint (kExportResumable): a MESMA
+        // tentativa é refeita (mesmo degrau), sem descer a escada.
+        let resumable = Subject()
+        resumable.startExport()
+        await wait { resumable.engine.calls.count == 1 }
+        resumable.engine.release.signal()
+        await wait { !resumable.exportPreparing }
+        precondition(resumable.exporting && resumable.exportSafeMode == 0)
+        resumable.engine.setProgress(["running": false, "finished": true, "result": 15,
+                                      "flags": Int(Subject.exportFlagResumable), "framesDone": 60, "framesTotal": 120])
+        resumable.tick()
+        await wait { resumable.engine.calls.count == 2 }
+        precondition(resumable.engine.calls[1].safeMode == 0 && resumable.exportPreparing)
+        resumable.engine.release.signal()
+        await wait { !resumable.exportPreparing }
+        resumable.cancelExport(); resumable.tick()
+        await wait { !resumable.exporting }
+        precondition(resumable.published == 0 && resumable.resumedPausedExports == 0)
 
         let closed = Subject()
         closed.startExport()

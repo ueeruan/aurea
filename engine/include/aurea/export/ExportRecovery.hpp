@@ -16,7 +16,9 @@ enum class State : u32 { Prepared = 0, Failed = 1, Complete = 2 };
 struct Dependency {
     std::string path;
     u64 bytes = 0;
-    u64 contentHash = 0; // FNV-1a over every byte, for accidental-change detection.
+    /// Hash of every byte (four interleaved FNV-1a lanes over 64-bit words plus
+    /// the tail), for accidental-change detection; ~8x faster than byte FNV.
+    u64 contentHash = 0;
 };
 struct Package {
     ExportSettings settings{};
@@ -26,6 +28,11 @@ struct Package {
     u32 acceptedFrames = 0; // Diagnostic only; NOT a resume boundary.
     std::string outputPath;
     std::vector<Dependency> dependencies;
+    /// Fontes que a plataforma abre por URI (content:// do Android), sem
+    /// recuperação: não viram dependência verificada aqui. O checkpoint do
+    /// export (export/ExportCheckpoint.hpp) as identifica pela plataforma ou
+    /// não retoma. Não é gravado no pacote.
+    std::vector<std::string> uriSources;
     std::vector<u8> projectBytes;
 };
 using PathResolver = std::function<std::string(const std::string&)>;
@@ -51,9 +58,23 @@ inline constexpr usize kMaxPackageBytes = kMaxProjectBytes + (4ull << 20);
                              std::unique_ptr<Project>& frozen, Package& package,
                              bool requirePersistentSources = true,
                              const std::vector<u64>* retainedImages = nullptr) noexcept;
+/// Progresso do hash das fontes (o "Preparando" do export). `bytesTotal` é a
+/// soma dos tamanhos, conhecida antes do primeiro byte lido; `bytesDone` anda a
+/// cada bloco de 64 KiB e `heartbeatNs` recebe o relógio monotônico no mesmo
+/// passo, para quem vigia a preparação distinguir "lendo um vídeo grande" de
+/// "travado". Todos opcionais.
+struct FingerprintProgress {
+    std::atomic<u64>* bytesDone = nullptr;
+    std::atomic<u64>* bytesTotal = nullptr;
+    std::atomic<u64>* heartbeatNs = nullptr;
+};
 // Expensive source hashing runs outside the model lock, with a fixed 64 KiB
-// buffer. Missing, unsupported URI or concurrently changing sources fail.
-[[nodiscard]] Status fingerprint_sources(Package& package) noexcept;
+// buffer (memory never grows with the source size or the video duration).
+// Missing, unsupported URI or concurrently changing sources fail. `cancel`
+// is polled between blocks: cancelling returns Errc::Cancelled within one
+// 64 KiB read and leaves `package` unchanged.
+[[nodiscard]] Status fingerprint_sources(Package& package, const std::atomic<bool>* cancel = nullptr,
+                                         const FingerprintProgress* progress = nullptr) noexcept;
 [[nodiscard]] Status validate_sources(const Package& package) noexcept;
 [[nodiscard]] Status write(const std::string& path, const Package& package) noexcept;
 // Rejects unknown versions, checksum/truncation, partial projects and changed

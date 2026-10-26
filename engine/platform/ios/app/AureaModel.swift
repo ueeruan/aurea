@@ -35,6 +35,8 @@ struct MotionBlurControls: Equatable {
     var samples: UInt32 = 16
     var adaptiveLimit: UInt32 = 128
     var previewSamples: UInt32 = 16
+    /// 0.3.2: motion blur 3D rápido (vetores) em vez das amostras.
+    var vectorBlur = false
 
     init() {}
     init(_ snapshot: [NSNumber]) {
@@ -48,6 +50,7 @@ struct MotionBlurControls: Equatable {
         enabled = values[0] != 0
         angle = values[1]; phase = values[2]
         samples = UInt32(values[3]); adaptiveLimit = UInt32(values[4]); previewSamples = UInt32(values[5])
+        vectorBlur = values.count >= 7 && values[6] != 0
     }
 }
 
@@ -234,6 +237,7 @@ struct ExportOptions: Equatable {
 private final class ExportStartupRequest: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
+    private var paused = false
     var isCancelled: Bool {
         lock.lock(); defer { lock.unlock() }
         return cancelled
@@ -241,6 +245,16 @@ private final class ExportStartupRequest: @unchecked Sendable {
     func cancel() {
         lock.lock(); defer { lock.unlock() }
         cancelled = true
+    }
+    /// 0.3.2: o app foi para segundo plano no "Preparando". Não é o usuário
+    /// cancelando: o motor guarda o checkpoint e o export é refeito ao voltar.
+    var isPaused: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return paused
+    }
+    func pause() {
+        lock.lock(); defer { lock.unlock() }
+        paused = true
     }
 }
 
@@ -753,6 +767,21 @@ final class AureaModel: ObservableObject {
     }
     /// Este export começou mais leve porque o app fechou no meio do anterior.
     @Published private(set) var exportLighterAfterClose = false
+    /// 0.3.2 (CheckpointManager do motor): o iOS não deixa a GPU trabalhar em
+    /// segundo plano, então sair do app PAUSA o export de vídeo — a suspensão
+    /// do motor guarda o checkpoint (não é um cancelamento) — e, ao voltar, o
+    /// MESMO export (mesma saída, opções e degrau) é refeito e continua dali.
+    private var exportPausedForBackground = false
+    /// A pausa pegou a partida (o "Preparando"): não há sessão do motor a conferir.
+    private var exportPausedInStartup = false
+    /// O app está em segundo plano (a partida pausada só recomeça na frente).
+    private var appInBackground = false
+    /// Esta tentativa continuou um checkpoint a partir deste percentual (-1 =
+    /// começou do zero); a tela mostra "Continuando de onde parou (N%)".
+    @Published private(set) var exportResumedFromPercent = -1
+    /// Engine::kExportResumed / kExportResumable (AureaExportFlags).
+    nonisolated static let exportFlagResumed: UInt32 = AureaExportFlag.resumed.rawValue
+    nonisolated static let exportFlagResumable: UInt32 = AureaExportFlag.resumable.rawValue
     private var exportDeathChecked = false
     nonisolated static let exportInFlightKey = "aurea.export.inFlight"
     /// 0.3.0: o processo anterior morreu no meio de um export de vídeo (iPhone
@@ -1511,6 +1540,7 @@ final class AureaModel: ObservableObject {
 
     func enterBackground() {
         guard started else { return }
+        appInBackground = true
         // O play não segue soando em segundo plano (o `suspend` abaixo também
         // cala a saída; este pedido vai antes da gravação, que drena a fila).
         stopPlayback()
@@ -1532,6 +1562,11 @@ final class AureaModel: ObservableObject {
             }
             saveOnLeave(forceThumbnail: false)
             if task != .invalid { app.endBackgroundTask(task); task = .invalid }
+        }
+        // 0.3.2: a suspensão PAUSA o export de vídeo em andamento (o motor
+        // guarda o checkpoint); ao voltar, enterForeground o refaz e ele continua.
+        if exporting && !exportCancelled && !exportPublishing && exportedKind == .video && pendingExportURL != nil {
+            exportPausedForBackground = true
         }
         // Suspending cancels and drains any export before releasing decoders.
         // A codec may take time to return its last frame; never block UIKit's
@@ -1594,6 +1629,7 @@ final class AureaModel: ObservableObject {
 
     func enterForeground() {
         guard started else { return }
+        appInBackground = false
         checkMemoryPressure(force: true)
         let lifecycleEngine = engine
         lifecycleQueue.async { [weak self] in
@@ -1601,8 +1637,39 @@ final class AureaModel: ObservableObject {
             lifecycleEngine.invalidate()
             DispatchQueue.main.async {
                 self?.refreshModel(force: true)
+                // Depois do resume do motor: o export pausado continua.
+                self?.resumePausedExport()
             }
         }
+    }
+
+    /// 0.3.2: refaz o export que a ida ao segundo plano pausou — a MESMA saída,
+    /// as mesmas opções e o mesmo degrau; o motor continua do último GOP
+    /// íntegro do checkpoint (ou do zero, se nenhum GOP tinha fechado).
+    private func resumePausedExport() {
+        guard exportPausedForBackground, !exportPreparing, !appInBackground else { return }
+        exportPausedForBackground = false
+        let pausedInStartup = exportPausedInStartup
+        exportPausedInStartup = false
+        guard started, exporting, !exportCancelled, exportedKind == .video,
+              let url = pendingExportURL, let options = pendingExportOptions else { return }
+        if !pausedInStartup {
+            // Só refaz o que a suspensão parou: um export que terminou antes
+            // dela (pronto ou com falha) segue pelo polling, como sempre.
+            let progress = engine.exportProgress()
+            let finished = (progress["finished"] as? NSNumber)?.boolValue ?? false
+            let result = (progress["result"] as? NSNumber)?.intValue ?? 0
+            if !finished || result != 25 {
+                if exportTimer == nil { startExportPolling() }
+                return
+            }
+        }
+        exportTimer?.invalidate(); exportTimer = nil
+        exportStalled = false
+        exportWatch = ExportStallWatch()
+        NSLog("AureaExport: app returned to the foreground; continuing the paused export (attempt %u)", exportSafeMode)
+        try? FileManager.default.removeItem(at: url)
+        prepareExport(url, options: options, safeMode: exportSafeMode)
     }
 
     /// Aviso de memória do sistema — o equivalente do `onTrimMemory` do
@@ -4319,8 +4386,14 @@ final class AureaModel: ObservableObject {
         // degrau que a escada usaria para falta de memória, e a tela diz por quê.
         var startAttempt = min(options.encoder, 2)
         exportLighterAfterClose = false
+        exportPausedForBackground = false
+        // 0.3.2: depois de o processo morrer no meio, a partida pergunta antes
+        // ao motor por um checkpoint deste pedido (prepareExport, fora da main):
+        // havendo, continua dele, no degrau que o gravou.
+        var probeCheckpoint = false
         if !exportDeathChecked {
             exportDeathChecked = true
+            probeCheckpoint = Self.previousExportDied && startAttempt == 0 && options.kind == .video
             if Self.previousExportDied && startAttempt == 0 && options.kind == .video {
                 let lighter = Self.nextExportAttempt(0, code: 8, failure: 0, stalled: false, tooLong: false, options: options)
                 if lighter > 0 && lighter <= 6 {
@@ -4344,16 +4417,17 @@ final class AureaModel: ObservableObject {
         }
         pendingExportURL = url
         pendingExportOptions = options
-        prepareExport(url, options: options, safeMode: startAttempt)
+        prepareExport(url, options: options, safeMode: startAttempt, probeCheckpoint: probeCheckpoint)
     }
 
     /// Cleanup, snapshot and codec startup can wait. Publish busy/preparing
     /// first, then use the same queue that stop drains before bridge teardown.
     /// Safe-mode restarts also enter this path with the original frozen options.
-    private func prepareExport(_ url: URL, options: ExportOptions, safeMode: UInt32) {
+    private func prepareExport(_ url: URL, options: ExportOptions, safeMode: UInt32, probeCheckpoint: Bool = false) {
         exportTimer?.invalidate(); exportTimer = nil
         let request = ExportStartupRequest()
         exportStartup = request
+        exportResumedFromPercent = -1
         exportPreparing = true; exporting = true
         exportMessage = AureaText.t("msg_preparando")
         exportProgress = [:]
@@ -4371,6 +4445,22 @@ final class AureaModel: ObservableObject {
             var busyLeft = Self.exportBusyRetries
             var imageCode: Int32 = 0
             var progress: [String: Any] = [:]
+            if options.kind == .video && probeCheckpoint && !request.isCancelled,
+               let checkpoint = native.exportResumeCandidate(codec: options.codec, height: options.shortSide, fps: options.fps,
+                   bitrateMbps: options.bitrateMbps, audioBitrateKbps: options.audioBitrateKbps, aiUpscale: options.aiUpscale,
+                   trimToContent: options.trimToContent, quality: options.quality),
+               let checkpointLevel = checkpoint["safeMode"]?.uint32Value {
+                // O motor guardou um checkpoint deste pedido: continua dele, no
+                // degrau que o gravou, em vez de começar num mais leve.
+                NSLog("AureaExport: previous process died while exporting; continuing attempt %u from frame %u",
+                      checkpointLevel, checkpoint["resumeFrame"]?.uint32Value ?? 0)
+                level = checkpointLevel
+                DispatchQueue.main.async {
+                    guard let self, self.exportStartup === request else { return }
+                    self.exportLighterAfterClose = false
+                    self.exportMessage = AureaText.t("app_export_resumed")
+                }
+            }
             if options.kind == .video {
                 while !request.isCancelled {
                     let previous = native.exportProgress()
@@ -4426,6 +4516,14 @@ final class AureaModel: ObservableObject {
                 self.exportPreparing = false
                 self.stopPreparingWatch()
                 self.exportSafeMode = usedSafeMode
+                if request.isPaused && !succeeded {
+                    // Pausado no "Preparando" (segundo plano): saída, opções e
+                    // degrau ficam; ao voltar, o mesmo export é refeito.
+                    self.exportMessage = nil
+                    self.exportPausedInStartup = true
+                    if !self.appInBackground { self.resumePausedExport() }
+                    return
+                }
                 self.exportReducedSide = options.kind == .video ? Self.exportReducedShortSide(usedSafeMode, options: options) : 0
                 self.exportReducedFps = options.kind == .video ? Self.exportAttemptReducedFps(usedSafeMode, requestedFps: requestedFps) : 0
                 self.exportMessage = nil
@@ -4500,6 +4598,7 @@ final class AureaModel: ObservableObject {
         // preparação não volta (chamada nativa presa) libera a tela, como o
         // Android faz depois do watchdog.
         if exportCancelled && exportPreparing { abandonPreparingExport(AureaText.t("app_export_cancelled")); return }
+        exportPausedForBackground = false
         exportCancelled = true
         exportStartup?.cancel()
         engine.cancelExport()
@@ -4603,7 +4702,16 @@ final class AureaModel: ObservableObject {
     /// it after the cancelled startup, then suspend on the ordered lifecycle
     /// queue so a quick foreground resume cannot overtake this operation.
     private func suspendPreparingExport() {
-        cancelExport()
+        if exportedKind == .video, let request = exportStartup, !exportCancelled {
+            // 0.3.2: pausa, não cancela — o motor para a partida (a GPU não pode
+            // ser usada em segundo plano) e guarda o checkpoint; ao voltar, o
+            // mesmo export é refeito (resumePausedExport).
+            request.pause()
+            exportPausedForBackground = true
+            engine.pauseExport()
+        } else {
+            cancelExport()
+        }
         exportBackgroundSavePending = true
         homeCardStale = true
         let native = engine, captures = mediaQueue, project = projectGeneration
@@ -4722,6 +4830,13 @@ final class AureaModel: ObservableObject {
                 self.exportProgress = self.engine.exportProgress()
                 let running = (self.exportProgress["running"] as? NSNumber)?.boolValue ?? false
                 let finished = (self.exportProgress["finished"] as? NSNumber)?.boolValue ?? false
+                let progressFlags = (self.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
+                // 0.3.2: continuou de um checkpoint — framesDone começa no quadro de onde continua.
+                if progressFlags & Self.exportFlagResumed != 0 && self.exportResumedFromPercent < 0 {
+                    let done = (self.exportProgress["framesDone"] as? NSNumber)?.intValue ?? 0
+                    let total = (self.exportProgress["framesTotal"] as? NSNumber)?.intValue ?? 0
+                    self.exportResumedFromPercent = total > 0 ? min(99, max(0, done * 100 / total)) : 0
+                }
                 if !finished {
                     // A última rede (ExportStallWatch): nada muda há minutos →
                     // cancela; nem assim conclui → a tela desiste e se libera.
@@ -4761,6 +4876,21 @@ final class AureaModel: ObservableObject {
                     self.exportTimer?.invalidate()
                     self.exportTimer = nil
                     let result = (self.exportProgress["result"] as? NSNumber)?.intValue ?? 0
+                    // Pausado pela ida ao segundo plano (a suspensão parou o
+                    // motor): não é falha — o export continua ao voltar.
+                    if result == 25, self.exportPausedForBackground { self.resumePausedExport(); return }
+                    // O motor guardou um checkpoint desta tentativa (o encoder
+                    // caiu no meio): a MESMA tentativa continua de lá, sem descer
+                    // a escada. O motor limita as repetições e exige progresso.
+                    if result != 0, self.exportedKind == .video, !self.exportCancelled, !self.exportWatch.cancelled,
+                       progressFlags & Self.exportFlagResumable != 0,
+                       let url = self.pendingExportURL, let options = self.pendingExportOptions {
+                        NSLog("AureaExport: export stopped with a checkpoint (code %ld); continuing attempt %u", result, self.exportSafeMode)
+                        self.exportStalled = false
+                        try? FileManager.default.removeItem(at: url)
+                        self.prepareExport(url, options: options, safeMode: self.exportSafeMode)
+                        return
+                    }
                     // O encoder travou/recusou e o motor sugere o modo de
                     // segurança: refaz o vídeo do começo, com o aviso (nada de
                     // "falhou" na tela).
@@ -5115,6 +5245,12 @@ final class AureaModel: ObservableObject {
         var settings = motionBlurControls
         settings.adaptiveLimit = UInt32(min(256, max(Float(settings.samples), value.rounded())))
         writeMotionBlur(settings)
+    }
+
+    /// Motion blur 3D: rápido (vetores) ou alta qualidade (amostras); o motor decide grupo a grupo.
+    func setMotionBlurVector(_ on: Bool) {
+        guard motionBlurControls.vectorBlur != on, engine.setMotionBlurVector(on) else { return }
+        refreshModel(force: true)
     }
 
     // --- Interface do projeto (0.2.5) ---------------------------------------

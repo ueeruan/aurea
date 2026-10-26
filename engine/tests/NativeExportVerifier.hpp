@@ -27,9 +27,19 @@ struct NativeExportVerification {
     std::int64_t firstPtsUs = -1, lastPtsUs = -1;
 };
 
+/// Opcional: o que o export retomável compara com o export sem interrupção
+/// (cada quadro decodificado em cinza, a lista de PTS, a duração declarada da
+/// faixa de vídeo e as amostras lógicas de áudio).
+struct NativeExportDetail {
+    std::vector<std::vector<std::uint8_t>> grayFrames;
+    std::vector<std::int64_t> ptsUs;
+    std::int64_t videoDurationUs = -1;
+    std::uint64_t audioSamples = 0;
+};
+
 inline NativeExportVerification verify_native_export(const std::string& path,
     std::uint32_t expectedFrames, std::uint32_t width, std::uint32_t height,
-    double fps, bool expectAudio) {
+    double fps, bool expectAudio, NativeExportDetail* detail = nullptr) {
     NativeExportVerification result;
     AVFormatContext* format = nullptr;
     AVCodecContext* video = nullptr; AVCodecContext* audio = nullptr;
@@ -100,6 +110,7 @@ inline NativeExportVerification verify_native_export(const std::string& path,
                     if (high - low >= 24) ++result.contrastingFrames;
                     if (!result.pictures || hash != previousHash) ++result.distinctFrameHashes;
                     previousHash = hash;
+                    if (detail) { detail->grayFrames.push_back(gray); detail->ptsUs.push_back(ptsUs); }
                     if (!result.pictures) result.firstPtsUs = ptsUs;
                     result.lastPtsUs = ptsUs;
                     ++result.pictures;
@@ -158,6 +169,12 @@ inline NativeExportVerification verify_native_export(const std::string& path,
             error("file ended without clean decoder drain"); break;
         }
         if (result.pictures != expectedFrames) { error("not every requested video frame decoded"); break; }
+        if (detail) {
+            const AVStream* stream = format->streams[vi];
+            detail->videoDurationUs = stream->duration == AV_NOPTS_VALUE ? -1
+                : av_rescale_q(stream->duration, stream->time_base, AVRational{1, 1'000'000});
+            detail->audioSamples = result.samples;
+        }
         if (audio) {
             const auto expectedSamples = std::llround(expectedFrames * static_cast<double>(result.sampleRate) / fps);
             if (std::llabs(static_cast<std::int64_t>(result.samples) - expectedSamples) > 2) {

@@ -9,4 +9,6 @@
     <string name="mb_quality_hint">A prévia pode usar menos amostras para responder melhor. A exportação usa a qualidade definida. Valores altos levam mais tempo.</string>
     <string name="mb_advanced">Avançado</string>
     <string name="mb_comp_settings_hint">Configurações da composição: afetam todas as camadas com desfoque ligado.</string>
+    <string name="mb_vector_3d">Motion blur 3D rápido (vetores)</string>
+    <string name="mb_vector_3d_hint">Ligado: o 3D é desenhado uma vez e borrado pelos vetores de movimento, bem mais rápido. Desligado: alta qualidade por amostras. Objetos que deformam, transparentes ou com giro rápido continuam nas amostras.</string>
 </resources>

@@ -528,6 +528,11 @@ struct ExportView: View {
         let flags = (model.exportProgress["flags"] as? NSNumber)?.uint32Value ?? 0
         var notices: [String] = []
         if model.exportLighterAfterClose { notices.append(AureaText.t("export_after_system_close")) }
+        // 0.3.2 (CheckpointManager): continuou de um checkpoint (o app voltou do
+        // segundo plano, o processo morreu ou o encoder caiu no meio).
+        if flags & AureaExportFlag.resumed.rawValue != 0 && model.exportResumedFromPercent >= 0 {
+            notices.append(AureaText.t("export_resumed_from", model.exportResumedFromPercent))
+        }
         switch (flags >> 8) & 15 {
         case 4: notices.append(AureaText.t("export_v2_finalizing"))
         case 5: notices.append(AureaText.t("export_v2_validating"))

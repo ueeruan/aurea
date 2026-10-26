@@ -9,4 +9,5 @@
     <string name="export_encoder_compatible_note">Базовый H.264 на кодировщике телефона. Выберите, если в автоматическом режиме ошибка кодировщика.</string>
     <string name="export_encoder_software_note">H.264 на процессоре, без кодировщика телефона. Медленнее, но работает, когда кодировщик телефона даёт сбой.</string>
     <string name="export_after_system_close">Приложение закрылось посреди прошлого экспорта. На этот раз видео экспортируется в облегчённом режиме.</string>
+    <string name="export_resumed_from">Продолжаем экспорт с места остановки (%1$d%%).</string>
 </resources>

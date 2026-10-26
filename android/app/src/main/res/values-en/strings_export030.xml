@@ -9,4 +9,5 @@
     <string name="export_encoder_compatible_note">Basic H.264 on the phone\'s encoder. Use it when Automatic gives an encoder error.</string>
     <string name="export_encoder_software_note">H.264 on the processor, without the phone\'s encoder. Slower, but it works when the phone\'s encoder fails.</string>
     <string name="export_after_system_close">The app closed in the middle of the last export. This time the video is exported in a lighter mode.</string>
+    <string name="export_resumed_from">Continuing the export from where it stopped (%1$d%%).</string>
 </resources>

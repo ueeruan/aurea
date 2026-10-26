@@ -208,6 +208,12 @@ typedef NS_OPTIONS(uint32_t, AureaExportFlag) {
     AureaExportFlagFrameFallback   = 1u << 3,
     /// Export refeito no modo de segurança depois de o encoder travar.
     AureaExportFlagSafeMode        = 1u << 4,
+    /// 0.3.2 (CheckpointManager, Engine::kExportResumed): esta sessão continuou
+    /// um export interrompido do último GOP íntegro; `framesDone` começa nele.
+    AureaExportFlagResumed         = 1u << 5,
+    /// 0.3.2 (Engine::kExportResumable): terminou sem arquivo, mas a MESMA
+    /// tentativa (mesmo degrau) continua do checkpoint em vez de descer a escada.
+    AureaExportFlagResumable       = 1u << 6,
     /// 0.3.2: reduções que a tela avisa (antes só iam para o log).
     AureaExportFlagBlurReduced     = 1u << 13,
     AureaExportFlagResolutionCapped = 1u << 14,
@@ -1026,8 +1032,10 @@ NS_SWIFT_NAME(AureaEngine)
 - (uint32_t)queryClipTimeActions:(long long)layerId frame:(int64_t)frame;
 - (BOOL)trimComposition:(int64_t)frame;
 - (long long)detectBeatsForLayer:(long long)layerId bpm:(double*)bpm NS_SWIFT_NAME(detectBeats(forLayer:bpm:));
-/// [enabled, shutterAngle, shutterPhase, samples, adaptiveLimit, previewSamples].
+/// [enabled, shutterAngle, shutterPhase, samples, adaptiveLimit, previewSamples, vectorBlur].
 - (NSArray<NSNumber*>*)motionBlurSettings;
+/// 0.3.2 motion blur 3D: YES = rápido (vetores de movimento), NO = alta qualidade (amostras). Desfazível.
+- (BOOL)setMotionBlurVector:(BOOL)on NS_SWIFT_NAME(setMotionBlurVector(_:));
 - (void)setMotionBlurSettings:(BOOL)enabled shutter:(float)shutter;
 - (BOOL)setMotionBlurSettings:(BOOL)enabled shutter:(float)shutter phase:(float)phase
                       samples:(uint32_t)samples adaptiveLimit:(uint32_t)adaptiveLimit;
@@ -1155,6 +1163,16 @@ NS_SWIFT_NAME(AureaEngine)
                      aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
                        quality:(uint32_t)quality safeMode:(uint32_t)safeMode
     NS_SWIFT_NAME(startExportChecked(to:codec:height:fps:bitrateMbps:audioBitrateKbps:aiUpscale:trimToContent:quality:safeMode:));
+/// 0.3.2 (CheckpointManager): um export interrompido deste projeto com estas
+/// opções (o processo morreu no meio) que vale continuar. Chaves "resumeFrame",
+/// "totalFrames" e "safeMode" (o degrau que gravou: é nele que continua). nil =
+/// nada a continuar. Os argumentos são os do startExportChecked, sem o degrau.
+- (nullable NSDictionary<NSString*, NSNumber*>*)exportResumeCandidateCodec:(AureaExportCodec)codec
+                        height:(uint32_t)height fps:(double)fps
+                   bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+                     aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+                       quality:(uint32_t)quality
+    NS_SWIFT_NAME(exportResumeCandidate(codec:height:fps:bitrateMbps:audioBitrateKbps:aiUpscale:trimToContent:quality:));
 /// A taxa de vídeo (bps) que o export usaria — a mesma regra do encoder, para a
 /// tela mostrar o tamanho estimado sem conta própria.
 - (uint32_t)exportBitrateBps:(uint32_t)width height:(uint32_t)height fps:(double)fps
@@ -1191,6 +1209,10 @@ NS_SWIFT_NAME(AureaEngine)
 /// O teto de fps do degrau (0 = a taxa pedida).
 + (double)exportAttemptFpsCap:(uint32_t)attempt NS_SWIFT_NAME(exportAttemptFpsCap(_:));
 - (void)cancelExport;
+/// 0.3.2 (CheckpointManager): pausa o export como a suspensão do app (o
+/// checkpoint fica para o mesmo export continuar). Ir para segundo plano ainda
+/// no "Preparando"; o Cancelar do usuário continua sendo cancelExport.
+- (void)pauseExport;
 /// Explicitly restores the checked export snapshot, then restarts from zero.
 - (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath;
 /// Export como imagem (motor: export/ImageEncode.hpp). `format` 0 = quadro do

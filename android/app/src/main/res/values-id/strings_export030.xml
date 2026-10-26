@@ -9,4 +9,5 @@
     <string name="export_encoder_compatible_note">H.264 dasar di encoder ponsel. Pakai saat Otomatis menampilkan error encoder.</string>
     <string name="export_encoder_software_note">H.264 di prosesor, tanpa encoder ponsel. Lebih lambat, tapi tetap berjalan saat encoder ponsel gagal.</string>
     <string name="export_after_system_close">Aplikasi tertutup di tengah ekspor terakhir. Kali ini video diekspor dalam mode yang lebih ringan.</string>
+    <string name="export_resumed_from">Melanjutkan ekspor dari titik terakhir (%1$d%%).</string>
 </resources>

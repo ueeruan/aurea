@@ -1985,6 +1985,31 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (shadowsOn) stats_.shadowMapSize = std::max(stats_.shadowMapSize, mapSize);
     }
 
+    // --- Motion blur 3D por vetores (0.3.2, SceneFrame::velocity) -------------
+    // Um desenho por primitiva OPACA/MASK, antes do instancing: cada instância
+    // tem as próprias pontas do obturador. Transparente não entra (o Renderer
+    // não liga o caminho com transparente na cena).
+    struct VelocityBlock { Mat4 clipFromLocal; Vec4 baseColor; Vec4 alpha; Vec4 uvXform; Vec4 uvRot; Vec4 limits; };
+    static_assert(sizeof(VelocityBlock) == 144, "espelho de shaders/scene3d/motion/vectors_block.glsl");
+    struct VelocityPush { Mat4 begin, end; };
+    static_assert(sizeof(VelocityPush) == binding::kPushConstantBytes, "duas mat4: o mínimo garantido do Vulkan");
+    struct VelocityDraw {
+        const GpuModel* model;
+        const GpuPrimitive* prim;
+        VelocityPush push;
+        const VelocityBlock* block;
+        PipelineHandle pipeline;
+        TextureHandle base;
+        SamplerHandle sampler;
+        bool skinned, morph;
+        usize morphPos, morphShade;
+        u32 firstIndex, indexCount;
+    };
+    const bool velocityOn = frame.velocity.enabled && passMrt_ && !skyOnly;
+    std::vector<VelocityDraw> velocityDraws;
+    const f32 velocityLimit = velocity_max_length(width, height);
+    const SamplerHandle velocitySampler = shaders_->sampler(CommonSampler::LinearRepeat);
+
 
     for (usize instIndex = 0; instIndex < frame.instances.size(); ++instIndex) {
         const SceneInstance& inst = frame.instances[instIndex];
@@ -2084,6 +2109,42 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 }
                 d.viewDepth = viewFromLocal.transform_point(p.bounds.center()).z;
                 d.materialIndex = materialIndex;
+                if (velocityOn && drawMode != AlphaMode::Blend) {
+                    PipelineKey vkey = velocity_key(skinDraw, mat->factors.doubleSided, key.frontFaceCCW);
+                    auto vpipe = shaders_->pipeline(vkey);
+                    auto* vb = arena.alloc_array<VelocityBlock>(1);
+                    if (!vpipe.ok() || !vb) mark_incomplete(__FILE__, __LINE__);
+                    else {
+                        // Clip ← cena do modelo; o nó entra à direita (a skin
+                        // já está no espaço da cena do modelo).
+                        const Mat4 nodeLocal = skinnedNode ? Mat4::identity()
+                            : (n < inst.pose().nodeWorld.size() ? inst.pose().nodeWorld[n] : Mat4::identity());
+                        const Material& m = mat->factors;
+                        const bool cut = m.alphaMode == AlphaMode::Mask;
+                        *vb = VelocityBlock{clipFromLocal, m.baseColor,
+                            Vec4{m.alphaCutoff, cut ? 1.0f : 0.0f, d.push.normalCol[0].w, m.baseColorTex.texCoord == 1 ? 1.0f : 0.0f},
+                            Vec4{m.baseColorTex.offset.x, m.baseColorTex.offset.y, m.baseColorTex.scale.x, m.baseColorTex.scale.y},
+                            Vec4{m.baseColorTex.rotation, cut && mat->tex[0].valid() ? 1.0f : 0.0f,
+                                 static_cast<f32>(width) * 0.5f, static_cast<f32>(height) * 0.5f},
+                            Vec4{velocityLimit, 0, 0, 0}};
+                        VelocityDraw v{};
+                        v.model = gm;
+                        v.prim = &p;
+                        v.push.begin = inst.velocity ? inst.velocityBegin * nodeLocal : clipFromLocal;
+                        v.push.end = inst.velocity ? inst.velocityEnd * nodeLocal : clipFromLocal;
+                        v.block = vb;
+                        v.pipeline = *vpipe;
+                        v.base = mat->tex[0].valid() ? mat->tex[0] : white_;
+                        v.sampler = mat->tex[0].valid() && mat->samp[0].valid() ? mat->samp[0] : velocitySampler;
+                        v.skinned = skinDraw;
+                        v.morph = d.morph;
+                        v.morphPos = d.morph ? d.morphPos : 0;
+                        v.morphShade = d.morph ? d.morphShade : 0;
+                        v.firstIndex = d.firstIndex;
+                        v.indexCount = d.indexCount;
+                        velocityDraws.push_back(v);
+                    }
+                }
                 (drawMode == AlphaMode::Blend ? blended : opaque).push_back(d);
                 ++stats_.visiblePrimitives;
                 stats_.triangles += d.indexCount / 3;
@@ -2588,6 +2649,77 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     // partículas): o alvo de exibição já é a saída, como sempre foi.
     FGTexture display = color, scene = sceneHdr;
     if (dofOn && depth1x.valid() && !build_dof(graph, frame, width, height, display, scene, depth1x)) mark_incomplete(__FILE__, __LINE__);
+    // Motion blur 3D por vetores: a velocidade da superfície visível num passe
+    // só de geometria (1 amostra, profundidade própria — a do passe PBR é
+    // multiamostrada e transitória), depois a reconstrução sobre a imagem já
+    // resolvida, antes do bloom/tone map (luz linear, como a acumulação).
+    if (velocityOn && (!velocityDraws.empty() || skyPipe.valid())) {
+        TextureDesc vd = cd;
+        const FGTexture velocity = graph.create_texture("3d-velocidade", vd);
+        TextureDesc vdd = cd;
+        vdd.format = SurfaceFormat::Depth32F;
+        vdd.sampled = false;
+        vdd.transient = true;
+        const FGTexture velocityDepth = graph.create_texture("3d-velocidade-prof", vdd);
+        const u32 vn = static_cast<u32>(velocityDraws.size());
+        VelocityDraw* vlist = vn ? arena.alloc_array<VelocityDraw>(vn) : nullptr;
+        if (vn && !vlist) return false;
+        if (vn) std::copy(velocityDraws.begin(), velocityDraws.end(), vlist);
+        stats_.velocityDraws += vn;
+        // Fundo visível: a velocidade da rotação da câmera (ponto no infinito).
+        struct SkyVelocity { Mat4 begin, end; Vec4 target; } skyVelocity{};
+        PipelineHandle skyVelocityPipe{};
+        if (skyPipe.valid()) {
+            const bool ok = velocity_sky_reprojection(frame.velocity.viewProjCenter, frame.velocity.viewProjBegin, skyVelocity.begin)
+                         && velocity_sky_reprojection(frame.velocity.viewProjCenter, frame.velocity.viewProjEnd, skyVelocity.end);
+            skyVelocity.target = Vec4{static_cast<f32>(width) * 0.5f, static_cast<f32>(height) * 0.5f, velocityLimit, 0};
+            auto key = PipelineKey::fullscreen(ShaderId::scene3d_motion_vectors_sky_frag, SurfaceFormat::RGBA16F);
+            key.hasDepth = true;
+            key.depthFormat = SurfaceFormat::Depth32F;
+            auto pipe = shaders_->pipeline(key);
+            if (ok && pipe.ok()) skyVelocityPipe = *pipe;
+            else mark_incomplete(__FILE__, __LINE__);
+        }
+        struct VCap {
+            VelocityDraw* draws;
+            u32 count;
+            BufferHandle joints, morph;
+            PipelineHandle sky;
+            SkyVelocity skyU;
+        } vcap{vlist, vn, joints, morphBuf, skyVelocityPipe, skyVelocity};
+        graph.add_raster_pass_depth("3d-velocidade", PassStage::Scene3D, velocity, LoadOp::Clear, Vec4{0, 0, 0, 0},
+                                    velocityDepth, LoadOp::Clear, false, 0.0f, [vcap](PassContext& pc) {
+            CommandList& c = pc.cmds;
+            if (vcap.sky.valid()) {
+                c.bind_pipeline(vcap.sky);
+                c.set_uniforms(&vcap.skyU, sizeof(vcap.skyU));
+                c.draw(3);
+            }
+            PipelineHandle bound{};
+            for (u32 i = 0; i < vcap.count; ++i) {
+                const VelocityDraw& d = vcap.draws[i];
+                if (!(d.pipeline == bound)) { c.bind_pipeline(d.pipeline); bound = d.pipeline; }
+                c.bind_texture(0, d.base, d.sampler);
+                if (d.skinned) c.bind_storage_buffer(vcap.joints);
+                if (d.morph) {
+                    c.bind_vertex_buffer(0, vcap.morph, d.morphPos);
+                    c.bind_vertex_buffer(1, vcap.morph, d.morphShade);
+                    if (d.model->skin.valid())
+                        c.bind_vertex_buffer(2, d.model->skin, static_cast<u64>(d.prim->vertexOffset) * sizeof(SkinVertex));
+                } else {
+                    c.bind_vertex_buffer(0, d.model->positions, 0);
+                    c.bind_vertex_buffer(1, d.model->shading, 0);
+                    if (d.model->skin.valid()) c.bind_vertex_buffer(2, d.model->skin, 0);
+                }
+                c.bind_index_buffer(d.model->indices, 0, d.model->indexType);
+                c.set_uniforms(d.block, sizeof(VelocityBlock));
+                c.push_constants(&d.push, sizeof(VelocityPush));
+                c.draw_indexed(d.indexCount, 1, d.firstIndex, d.morph ? 0 : d.prim->vertexOffset, 0);
+            }
+        });
+        if (build_velocity_reconstruct(graph, width, height, display, scene, velocity)) ++stats_.velocityGroups;
+        else mark_incomplete(__FILE__, __LINE__);
+    }
     if (outExposureHdr) {
         *outExposureHdr = scene;
         outColor = display;
@@ -2785,6 +2917,123 @@ bool SceneRenderer::build_dof(FrameGraph& graph, const SceneFrame& frame, u32 wi
     graph.read(pass, scene);
     graph.read(pass, display);
     graph.read(pass, coc);
+    display = outDisplay;
+    scene = outScene;
+    return true;
+}
+
+bool velocity_sky_reprojection(const Mat4& center, const Mat4& to, Mat4& out) noexcept {
+    // A (3×3, linhas x, y, w; colunas 0..2): (x·w, y·w, w) = A·d para a
+    // direção d de um ponto no infinito (w = 0 apaga a translação).
+    auto part = [](const Mat4& m, int row, int col) {
+        const Vec4& c = m.col[col];
+        return row == 0 ? c.x : row == 1 ? c.y : c.w;
+    };
+    f64 a[3][3], b[3][3];
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c) { a[r][c] = part(center, r, c); b[r][c] = part(to, r, c); }
+    const f64 det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
+                  - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+                  + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+    if (!std::isfinite(det) || std::fabs(det) < 1e-30) return false;
+    f64 inv[3][3];
+    inv[0][0] = (a[1][1] * a[2][2] - a[1][2] * a[2][1]) / det;
+    inv[0][1] = (a[0][2] * a[2][1] - a[0][1] * a[2][2]) / det;
+    inv[0][2] = (a[0][1] * a[1][2] - a[0][2] * a[1][1]) / det;
+    inv[1][0] = (a[1][2] * a[2][0] - a[1][0] * a[2][2]) / det;
+    inv[1][1] = (a[0][0] * a[2][2] - a[0][2] * a[2][0]) / det;
+    inv[1][2] = (a[0][2] * a[1][0] - a[0][0] * a[1][2]) / det;
+    inv[2][0] = (a[1][0] * a[2][1] - a[1][1] * a[2][0]) / det;
+    inv[2][1] = (a[0][1] * a[2][0] - a[0][0] * a[2][1]) / det;
+    inv[2][2] = (a[0][0] * a[1][1] - a[0][1] * a[1][0]) / det;
+    out = Mat4::identity();
+    for (int c = 0; c < 3; ++c) {
+        f32 v[3];
+        for (int r = 0; r < 3; ++r) v[r] = static_cast<f32>(b[r][0] * inv[0][c] + b[r][1] * inv[1][c] + b[r][2] * inv[2][c]);
+        out.col[c] = Vec4{v[0], v[1], v[2], 0.0f};
+    }
+    out.col[3] = Vec4{0, 0, 0, 1};
+    return std::isfinite(out.col[0].x) && std::isfinite(out.col[1].y) && std::isfinite(out.col[2].z);
+}
+
+PipelineKey SceneRenderer::velocity_key(bool skinned, bool doubleSided, bool frontFaceCCW) const noexcept {
+    PipelineKey k = PipelineKey::graphics(skinned ? ShaderId::scene3d_motion_vectors_skinned_vert : ShaderId::scene3d_motion_vectors_vert,
+                                          ShaderId::scene3d_motion_vectors_frag, SurfaceFormat::RGBA16F);
+    k.mesh = skinned ? MeshLayout::Skinned : MeshLayout::Static;
+    k.hasDepth = true;
+    k.depthTest = true;
+    k.depthWrite = true;
+    k.depthCompare = CompareOp::GreaterOrEqual;   // Z reverso, como o passe PBR
+    k.depthFormat = SurfaceFormat::Depth32F;
+    k.cull = doubleSided ? CullMode::None : CullMode::Back;
+    k.frontFaceCCW = frontFaceCCW;
+    return k;
+}
+
+bool SceneRenderer::build_velocity_reconstruct(FrameGraph& graph, u32 width, u32 height, FGTexture& display,
+                                               FGTexture& scene, FGTexture velocity) noexcept {
+    if (!display.valid() || !scene.valid() || !velocity.valid()) return false;
+    auto tilePipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_motion_tile_max_frag, SurfaceFormat::RGBA16F));
+    auto neighborPipe = shaders_->pipeline(PipelineKey::fullscreen(ShaderId::scene3d_motion_neighbor_max_frag, SurfaceFormat::RGBA16F));
+    PipelineKey rkey = PipelineKey::fullscreen(ShaderId::scene3d_motion_reconstruct_frag, SurfaceFormat::RGBA16F);
+    rkey.hasColor1 = true;
+    auto reconstructPipe = shaders_->pipeline(rkey);
+    if (!tilePipe.ok() || !neighborPipe.ok() || !reconstructPipe.ok()) return false;
+    const u32 k = velocity_tile_size(width, height);
+    const u32 tw = (width + k - 1) / k, th = (height + k - 1) / k;
+    TextureDesc d;
+    d.format = SurfaceFormat::RGBA16F;
+    d.sampled = true;
+    d.renderTarget = true;
+    d.width = tw; d.height = height;
+    const FGTexture rows = graph.create_texture("3d-vel-bloco-h", d);
+    d.height = th;
+    const FGTexture tiles = graph.create_texture("3d-vel-bloco", d);
+    const FGTexture neighbors = graph.create_texture("3d-vel-vizinhos", d);
+    d.width = width; d.height = height;
+    const FGTexture outDisplay = graph.create_texture("3d-vel-2d", d);
+    const FGTexture outScene = graph.create_texture("3d-vel-hdr", d);
+    const u64 nearest = shaders_->sampler(CommonSampler::NearestClamp).id;
+    struct Cap { PipelineHandle p; FGTexture src; u64 sampler; Vec4 u; };
+    auto reduce = [&](const char* name, PipelineHandle pipe, FGTexture target, FGTexture src, Vec4 u) {
+        const Cap cap{pipe, src, nearest, u};
+        const u32 pass = graph.add_raster_pass(name, PassStage::PostProcess, target, LoadOp::DontCare, Vec4{0, 0, 0, 0},
+                                               [cap](PassContext& pc) {
+            pc.cmds.bind_pipeline(cap.p);
+            pc.cmds.bind_texture(0, pc.texture(cap.src), SamplerHandle{cap.sampler});
+            pc.cmds.set_uniforms(&cap.u, sizeof(cap.u));
+            pc.cmds.draw(3);
+        });
+        graph.read(pass, src);
+    };
+    const f32 kf = static_cast<f32>(k);
+    reduce("3d-vel-bloco-h", *tilePipe, rows, velocity, Vec4{kf, 0, static_cast<f32>(width), static_cast<f32>(height)});
+    reduce("3d-vel-bloco-v", *tilePipe, tiles, rows, Vec4{kf, 1, static_cast<f32>(tw), static_cast<f32>(height)});
+    reduce("3d-vel-vizinhos", *neighborPipe, neighbors, tiles, Vec4{static_cast<f32>(tw), static_cast<f32>(th), 0, 0});
+    // Teto de amostras por pixel: o mesmo no preview e no export (o custo é
+    // um passe de tela cheia; a escala do preview já reduz os pixels).
+    constexpr f32 kMaxTaps = 32.0f;
+    constexpr f32 kSoftDepth = 0.02f;     // 2% da distância: a mesma superfície
+    constexpr f32 kTapsPerPixel = 0.5f;   // uma amostra a cada 2 px de rastro
+    struct Params { Vec4 cfg; Vec4 shape; };
+    struct RCap { PipelineHandle p; FGTexture scene, display, velocity, neighbors; u64 sampler; Params u; } cap{
+        *reconstructPipe, scene, display, velocity, neighbors, nearest,
+        Params{Vec4{kf, kMaxTaps, static_cast<f32>(width), static_cast<f32>(height)}, Vec4{kSoftDepth, kTapsPerPixel, 0, 0}}};
+    const u32 pass = graph.add_raster_pass("3d-vel-reconstrucao", PassStage::PostProcess, outDisplay, LoadOp::DontCare,
+                                           Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
+        pc.cmds.bind_pipeline(cap.p);
+        pc.cmds.bind_texture(0, pc.texture(cap.scene), SamplerHandle{cap.sampler});
+        pc.cmds.bind_texture(1, pc.texture(cap.display), SamplerHandle{cap.sampler});
+        pc.cmds.bind_texture(2, pc.texture(cap.velocity), SamplerHandle{cap.sampler});
+        pc.cmds.bind_texture(3, pc.texture(cap.neighbors), SamplerHandle{cap.sampler});
+        pc.cmds.set_uniforms(&cap.u, sizeof(cap.u));
+        pc.cmds.draw(3);
+    });
+    graph.set_color1(pass, outScene);
+    graph.read(pass, scene);
+    graph.read(pass, display);
+    graph.read(pass, velocity);
+    graph.read(pass, neighbors);
     display = outDisplay;
     scene = outScene;
     return true;

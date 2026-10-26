@@ -195,7 +195,50 @@ struct SceneInstance {
     /// upload só.
     bool ownEnvironment = false;
     SceneEnvironment environment;
+    /// 0.3.2 motion blur 3D por vetores (SceneFrame::velocity): clip ← cena do
+    /// modelo no COMEÇO e no FIM do obturador desta instância (câmera e mundo
+    /// no instante de cada ponta, com o "quanto" da camada). Falso = parada em
+    /// relação à câmera dela (velocidade zero, mas ainda tapa o que está atrás).
+    bool velocity = false;
+    Mat4 velocityBegin = Mat4::identity();
+    Mat4 velocityEnd = Mat4::identity();
 };
+
+/// 0.3.2 Motion blur 3D RÁPIDO (MotionBlurSettings::vectorBlur): o grupo é
+/// desenhado UMA vez no centro do obturador; um passe só de geometria grava a
+/// velocidade de tela de cada superfície visível (das duas posições de clip
+/// por vértice, começo e fim), e a reconstrução espalha a cor ao longo dela
+/// com pesos de profundidade (o objeto que anda borra sobre o fundo; o fundo
+/// não vaza sobre um objeto parado na frente). O Renderer só liga quando a
+/// velocidade representa o movimento (corpo rígido, trajeto quase reto, sem
+/// transparente/plano/partícula/recorte); senão o grupo fica na acumulação.
+struct SceneVelocity {
+    bool enabled = false;
+    /// Câmera do grupo no centro, no começo e no fim do obturador (clip ←
+    /// mundo, a mesma conta das pontas das instâncias): o fundo (céu) recebe a
+    /// velocidade só da rotação dela (ponto no infinito). O centro vem daqui,
+    /// não da matriz do alvo, para a câmera parada dar velocidade ZERO exata.
+    Mat4 viewProjCenter = Mat4::identity();
+    Mat4 viewProjBegin = Mat4::identity();
+    Mat4 viewProjEnd = Mat4::identity();
+};
+
+/// Lado do bloco (px) da reconstrução por vetores: a metade do rastro é
+/// limitada a ele, então o rastro inteiro vai até 2× o bloco. Proporcional à
+/// imagem — o preview em resolução menor dá o mesmo resultado em escala.
+[[nodiscard]] inline u32 velocity_tile_size(u32 width, u32 height) noexcept {
+    const u32 side = std::max(width, height);
+    return std::clamp((side + 23u) / 24u, 4u, 96u);
+}
+/// Maior rastro (px, na resolução do alvo) que o caminho rápido representa.
+[[nodiscard]] inline f32 velocity_max_length(u32 width, u32 height) noexcept {
+    return 2.0f * static_cast<f32>(velocity_tile_size(width, height));
+}
+/// Reprojeção de um ponto no INFINITO (o céu): NDC no centro → (x·w, y·w, w)
+/// no instante `to`. Só a parte 3×3 (linhas x, y, w; colunas 0..2) das duas
+/// matrizes clip ← mundo entra; a translação da câmera não move o infinito.
+/// Colunas 0..2 de `out` = a matriz 3×3. Falso = não invertível.
+[[nodiscard]] bool velocity_sky_reprojection(const Mat4& center, const Mat4& to, Mat4& out) noexcept;
 
 struct SceneCamera {
     Mat4 imageTransform = Mat4::identity(); ///< clip-to-clip framing of a tracked source
@@ -310,6 +353,9 @@ struct SceneFrame {
     /// modelos e pose da animação). Vazio = sem desfoque; o render acumula a
     /// média dos K quadros.
     std::vector<SceneFrame> blurFrames;
+    /// Desfoque pelo caminho rápido (vetores). Ligado = `blurFrames` vazio e o
+    /// grupo já posado no centro do obturador.
+    SceneVelocity velocity;
     /// Índices (no snapshot) das camadas 2D que vivem nesta cena.
     std::vector<u32> planeLayers;
     /// Índices (no snapshot) das camadas de partículas desenhadas DENTRO desta
@@ -361,6 +407,8 @@ struct SceneStats {
     u32 morphUploads = 0;       ///< unique deformed primitive streams built this frame
     u64 morphVertices = 0;      ///< vertices actually deformed, shared copies counted once
     u64 morphUploadBytes = 0;   ///< aligned deformed vertex buffers, all scene/blur builds
+    u32 velocityGroups = 0;     ///< groups blurred by the vector (velocity buffer) path
+    u32 velocityDraws = 0;      ///< draws of the velocity pass
 };
 
 /// Matriz clip ← vista, perspectiva com Z REVERSO e far infinito: perto → 1,
@@ -562,6 +610,13 @@ private:
     [[nodiscard]] FGTexture build_post(FrameGraph& graph, const SceneFrame& frame, u32 width, u32 height,
                                        FGTexture display, FGTexture scene, bool bloomHasRadiance) noexcept;
     [[nodiscard]] FGTexture build_fxaa(FrameGraph& graph, u32 width, u32 height, FGTexture src) noexcept;
+    /// Motion blur por vetores, ANTES do bloom e do tone map (luz HDR linear,
+    /// como a média das amostras da acumulação): bloco com a maior velocidade
+    /// (duas passadas separáveis), vizinhança 3×3 e a reconstrução ao longo
+    /// dela, com os mesmos pesos na cena e no 2D de exibição (MRT).
+    [[nodiscard]] bool build_velocity_reconstruct(FrameGraph& graph, u32 width, u32 height, FGTexture& display,
+                                                  FGTexture& scene, FGTexture velocity) noexcept;
+    [[nodiscard]] PipelineKey velocity_key(bool skinned, bool doubleSided, bool frontFaceCCW) const noexcept;
     /// Profundidade de campo ANTES do bloom e do tone map (luz HDR linear: o
     /// realce vira bokeh). Dois passes: raio do círculo de confusão por pixel
     /// (da profundidade de 1 amostra) e o gather no disco, que devolve cena e

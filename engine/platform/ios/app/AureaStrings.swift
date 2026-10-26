@@ -3863,6 +3863,8 @@ enum AureaText {
         "mb_samples_per_frame": "Amostras por quadro",
         "mb_shutter_angle": "Ângulo do obturador",
         "mb_shutter_phase": "Fase do obturador",
+        "mb_vector_3d": "Motion blur 3D rápido (vetores)",
+        "mb_vector_3d_hint": "Ligado: o 3D é desenhado uma vez e borrado pelos vetores de movimento, bem mais rápido. Desligado: alta qualidade por amostras. Objetos que deformam, transparentes ou com giro rápido continuam nas amostras.",
         "media_info_audio_codec": "Codec de áudio",
         "media_info_duration": "Duração",
         "media_info_file": "Arquivo",
@@ -5652,6 +5654,7 @@ enum AureaText {
         "world_resistance": "Resistência do ar",
         "world_snow": "Neve 3D",
         "world_vortex": "Vórtice",
+        "export_resumed_from": "Continuando a exportação de onde parou (%1$ld%%).",
     ]
     private static let en: [String: String] = [
         "ae_counts": "%1$ld effects · %2$ld keyframes · %3$ld layers · %4$ld expressions · %5$ld text animators",
@@ -9438,6 +9441,8 @@ enum AureaText {
         "mb_samples_per_frame": "Samples per frame",
         "mb_shutter_angle": "Shutter angle",
         "mb_shutter_phase": "Shutter phase",
+        "mb_vector_3d": "Fast 3D motion blur (vectors)",
+        "mb_vector_3d_hint": "On: 3D is drawn once and blurred along motion vectors, much faster. Off: high quality from samples. Deforming, transparent or fast-spinning objects still use samples.",
         "media_info_audio_codec": "Audio codec",
         "media_info_duration": "Duration",
         "media_info_file": "File",
@@ -11227,6 +11232,7 @@ enum AureaText {
         "world_resistance": "Air resistance",
         "world_snow": "3D snow",
         "world_vortex": "Vortex",
+        "export_resumed_from": "Continuing the export from where it stopped (%1$ld%%).",
     ]
     private static let es: [String: String] = [
         "ae_counts": "%1$ld efectos · %2$ld keyframes · %3$ld capas · %4$ld expresiones · %5$ld animadores de texto",
@@ -15013,6 +15019,8 @@ enum AureaText {
         "mb_samples_per_frame": "Muestras por fotograma",
         "mb_shutter_angle": "Ángulo de obturación",
         "mb_shutter_phase": "Fase de obturación",
+        "mb_vector_3d": "Motion blur 3D rápido (vectores)",
+        "mb_vector_3d_hint": "Activado: el 3D se dibuja una vez y se desenfoca con vectores de movimiento, mucho más rápido. Desactivado: alta calidad por muestras. Los objetos que se deforman, transparentes o que giran rápido siguen usando muestras.",
         "media_info_audio_codec": "Códec de audio",
         "media_info_duration": "Duración",
         "media_info_file": "Archivo",
@@ -16802,6 +16810,7 @@ enum AureaText {
         "world_resistance": "Resistencia del aire",
         "world_snow": "Nieve 3D",
         "world_vortex": "Vórtice",
+        "export_resumed_from": "Continuando la exportación desde donde se detuvo (%1$ld%%).",
     ]
     private static let ru: [String: String] = [
         "ae_counts": "Эффектов: %1$ld · ключей: %2$ld · слоёв: %3$ld · выражений: %4$ld · аниматоров текста: %5$ld",
@@ -20588,6 +20597,8 @@ enum AureaText {
         "mb_samples_per_frame": "Выборок на кадр",
         "mb_shutter_angle": "Угол затвора",
         "mb_shutter_phase": "Фаза затвора",
+        "mb_vector_3d": "Быстрое размытие движения 3D (векторы)",
+        "mb_vector_3d_hint": "Вкл.: 3D рисуется один раз и размывается по векторам движения, намного быстрее. Выкл.: высокое качество по выборкам. Деформирующиеся, прозрачные и быстро вращающиеся объекты по-прежнему используют выборки.",
         "media_info_audio_codec": "Аудиокодек",
         "media_info_duration": "Длительность",
         "media_info_file": "Файл",
@@ -22377,6 +22388,7 @@ enum AureaText {
         "world_resistance": "Сопротивление воздуха",
         "world_snow": "3D-снег",
         "world_vortex": "Вихрь",
+        "export_resumed_from": "Продолжаем экспорт с места остановки (%1$ld%%).",
     ]
     private static let hi: [String: String] = [
         "ae_counts": "%1$ld इफ़ेक्ट · %2$ld कीफ़्रेम · %3$ld लेयर · %4$ld एक्सप्रेशन · %5$ld टेक्स्ट एनिमेटर",
@@ -26163,6 +26175,8 @@ enum AureaText {
         "mb_samples_per_frame": "प्रति फ़्रेम सैंपल",
         "mb_shutter_angle": "शटर कोण",
         "mb_shutter_phase": "शटर फ़ेज़",
+        "mb_vector_3d": "तेज़ 3D मोशन ब्लर (वेक्टर)",
+        "mb_vector_3d_hint": "चालू: 3D एक बार बनता है और मोशन वेक्टर के साथ धुंधला होता है, काफ़ी तेज़। बंद: सैंपल से उच्च गुणवत्ता। आकार बदलने वाले, पारदर्शी या तेज़ घूमने वाले ऑब्जेक्ट सैंपल ही इस्तेमाल करते हैं।",
         "media_info_audio_codec": "ऑडियो कोडेक",
         "media_info_duration": "अवधि",
         "media_info_file": "फ़ाइल",
@@ -27952,6 +27966,7 @@ enum AureaText {
         "world_resistance": "हवा का प्रतिरोध",
         "world_snow": "3D बर्फ़",
         "world_vortex": "भंवर",
+        "export_resumed_from": "एक्सपोर्ट वहीं से जारी है जहाँ वह रुका था (%1$ld%%)।",
     ]
     private static let ar: [String: String] = [
         "ae_counts": "%1$ld تأثيرات · %2$ld إطارات مفتاحية · %3$ld طبقات · %4$ld تعبيرات · %5$ld محرّكات نص",
@@ -31738,6 +31753,8 @@ enum AureaText {
         "mb_samples_per_frame": "العينات لكل إطار",
         "mb_shutter_angle": "زاوية الغالق",
         "mb_shutter_phase": "طور الغالق",
+        "mb_vector_3d": "ضبابية حركة ثلاثية الأبعاد سريعة (متجهات)",
+        "mb_vector_3d_hint": "تشغيل: يُرسم المشهد ثلاثي الأبعاد مرة واحدة ويُموَّه على امتداد متجهات الحركة، أسرع بكثير. إيقاف: جودة عالية بالعينات. الأجسام المتشوهة أو الشفافة أو سريعة الدوران تستمر باستخدام العينات.",
         "media_info_audio_codec": "ترميز الصوت",
         "media_info_duration": "المدة",
         "media_info_file": "الملف",
@@ -33527,6 +33544,7 @@ enum AureaText {
         "world_resistance": "مقاومة الهواء",
         "world_snow": "ثلج ثلاثي الأبعاد",
         "world_vortex": "دوّامة",
+        "export_resumed_from": "متابعة التصدير من حيث توقف (%1$ld%%).",
     ]
     private static let id: [String: String] = [
         "ae_counts": "%1$ld efek · %2$ld keyframe · %3$ld lapisan · %4$ld ekspresi · %5$ld animator teks",
@@ -37313,6 +37331,8 @@ enum AureaText {
         "mb_samples_per_frame": "Sampel per bingkai",
         "mb_shutter_angle": "Sudut rana",
         "mb_shutter_phase": "Fase rana",
+        "mb_vector_3d": "Motion blur 3D cepat (vektor)",
+        "mb_vector_3d_hint": "Aktif: 3D digambar sekali lalu diburamkan mengikuti vektor gerak, jauh lebih cepat. Nonaktif: kualitas tinggi dengan sampel. Objek yang berubah bentuk, transparan, atau berputar cepat tetap memakai sampel.",
         "media_info_audio_codec": "Codec audio",
         "media_info_duration": "Durasi",
         "media_info_file": "Berkas",
@@ -39102,6 +39122,7 @@ enum AureaText {
         "world_resistance": "Hambatan udara",
         "world_snow": "Salju 3D",
         "world_vortex": "Pusaran",
+        "export_resumed_from": "Melanjutkan ekspor dari titik terakhir (%1$ld%%).",
     ]
     private static let plurals: [String: [String: [String: String]]] = [
         "pt-BR": [

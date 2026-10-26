@@ -9,4 +9,6 @@
     <string name="mb_quality_hint">Preview may use fewer samples to stay responsive. Export uses the selected quality. Higher values take longer.</string>
     <string name="mb_advanced">Advanced</string>
     <string name="mb_comp_settings_hint">Composition settings: affect every layer with motion blur enabled.</string>
+    <string name="mb_vector_3d">Fast 3D motion blur (vectors)</string>
+    <string name="mb_vector_3d_hint">On: 3D is drawn once and blurred along motion vectors, much faster. Off: high quality from samples. Deforming, transparent or fast-spinning objects still use samples.</string>
 </resources>

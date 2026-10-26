@@ -22,6 +22,7 @@ import com.aurea.aurea.diagnostics.ExportDiagnosticReport
 import com.aurea.aurea.diagnostics.ProjectGuard
 import com.aurea.aurea.engine.AureaEngine
 import com.aurea.aurea.engine.ExportProgress
+import com.aurea.aurea.engine.ExportResumeCandidate
 import com.aurea.aurea.engine.directBuffer
 import com.aurea.aurea.ui.i18n.AppText
 import com.aurea.aurea.ui.i18n.EngineText
@@ -331,9 +332,19 @@ class Exporter internal constructor(
         var attempt = options.encoder.coerceIn(0, ENCODER_SOFTWARE)
         lighterAfterClose = false
         // O sistema fechou o app no meio do export anterior (falta de memória,
-        // crash): a escada nunca soube. No Automático, este começa no degrau
-        // que a escada usaria para falta de memória, e a tela diz por quê.
-        if (attempt == 0 && withContext(Dispatchers.IO) { ExitDiagnostics.consumeExportDeath(app) }) {
+        // crash): a escada nunca soube. 0.3.2: se o motor guardou um checkpoint
+        // deste projeto com estas opções (e ainda houve progresso entre as
+        // continuações), o export CONTINUA de onde parou, no mesmo degrau que o
+        // gravou. Sem checkpoint, no Automático, começa no degrau que a escada
+        // usaria para falta de memória, e a tela diz por quê.
+        val died = attempt == 0 && withContext(Dispatchers.IO) { ExitDiagnostics.consumeExportDeath(app) }
+        val checkpoint = if (died) withContext(Dispatchers.IO) { resumeCandidate(options, mbps) } else null
+        if (checkpoint != null) {
+            android.util.Log.w("AureaExport", "Previous process died while exporting; continuing attempt ${checkpoint.safeMode} " +
+                "from frame ${checkpoint.resumeFrame}/${checkpoint.totalFrames}")
+            attempt = checkpoint.safeMode.coerceIn(0, AureaEngine.EXPORT_ATTEMPT_MAX)
+            state = state.copy(notice = text(R.string.app_export_resumed))
+        } else if (died) {
             val lighter = AureaEngine.nativeExportNextAttempt(0, OUT_OF_MEMORY, 0, false, false, options.shortSide, options.fps,
                 options.hevc, options.aiUpscale > 0)
             if (lighter in 1..AureaEngine.EXPORT_ATTEMPT_MAX) {
@@ -357,6 +368,15 @@ class Exporter internal constructor(
                     options.trimToContent, options.quality.coerceIn(0, 2), rateModeFor(options.hevc && level == 0), level)
             }
             if (suggested == 0) return
+            if (suggested == RETRY_SAME_ATTEMPT) {
+                // O motor guardou um checkpoint desta tentativa (o encoder caiu
+                // no meio, sessão retomável): a MESMA tentativa continua de lá.
+                // O motor limita as repetições; sem progresso, ele não pede mais.
+                android.util.Log.w("AureaExport", "Export attempt $level stopped with a checkpoint; continuing the same attempt")
+                state = state.copy(phase = ExportPhase.Running, framesDone = 0, fps = 0f, etaSeconds = 0, message = "",
+                    notice = text(R.string.app_export_resumed), preparing = true)
+                continue
+            }
             var next = suggested
             if (next and AureaEngine.EXPORT_ATTEMPT_WAIT != 0) {
                 // O motor ainda solta o export anterior / a GPU estava ocupada:
@@ -402,6 +422,25 @@ class Exporter internal constructor(
     private var exportedBlurCap = 0
     /** 0.3.2: as reduções que o motor avisou nesta tentativa (ExportProgress.QUALITY_NOTICE_FLAGS). */
     private var exportedQualityFlags = 0
+    /** 0.3.2: esta tentativa continuou um checkpoint a partir deste percentual (−1 = começou do zero). */
+    private var resumedFromPercent = -1
+
+    /**
+     * O checkpoint que o motor guardou para este pedido (o processo morreu no
+     * meio do export anterior). A taxa (CBR/VBR) faz parte do pedido e depende
+     * do degrau (VBR no HEVC só no degrau 0, [rateModeFor]): a consulta vale
+     * para os dois e aceita só o que bate com o degrau que gravou.
+     */
+    private fun resumeCandidate(options: ExportOptions, mbps: Int): ExportResumeCandidate? = runCatching {
+        val codec = if (options.hevc) 1 else 0
+        val quality = options.quality.coerceIn(0, 2)
+        fun probe(rateMode: Int) = engine.exportResumeCandidate(options.shortSide, options.fps, codec, mbps, options.aiUpscale,
+            options.trimToContent, quality, rateMode)
+        val first = probe(rateModeFor(options.hevc))
+        if (first != null && (first.safeMode == 0 || !options.hevc)) return@runCatching first
+        if (!options.hevc) return@runCatching null
+        probe(rateModeFor(false))?.takeIf { it.safeMode > 0 }
+    }.getOrNull()
 
     /** O teto de fps do degrau, quando fica abaixo do pedido (0 = não limita). */
     private fun attemptFpsCap(attempt: Int, requested: Double): Int {
@@ -418,6 +457,7 @@ class Exporter internal constructor(
     private suspend fun runEngineJob(dir: File, file: File, options: ExportOptions, safeMode: Int = 0,
                                      startJob: () -> Int): Int {
         val ticket = diagnosticTicket
+        resumedFromPercent = -1
         val diagnostic = if (options.format == ExportFormat.Video) scope.launch(Dispatchers.IO) {
             while (isActive) {
                 ExportDiagnosticReport.record(app, ticket, engine.exportDiagnostics())
@@ -510,6 +550,11 @@ class Exporter internal constructor(
                     ExitDiagnostics.mark(app, ExitDiagnostics.Phase.PROJECT_EXPORT_VIDEO, "f=${progress.framesDone}/${progress.framesTotal}")
                 }
                 exportedQualityFlags = progress.flags and ExportProgress.QUALITY_NOTICE_FLAGS
+                // 0.3.2: continuou de um checkpoint — o ponto de partida vem no
+                // primeiro progresso (framesDone começa no quadro de onde continua).
+                if (progress.resumed && resumedFromPercent < 0)
+                    resumedFromPercent = if (progress.framesTotal > 0)
+                        (progress.framesDone.toLong() * 100 / progress.framesTotal).toInt().coerceIn(0, 99) else 0
                 ExportForegroundService.update(app, progress.framesDone, progress.framesTotal)
                 state = state.copy(
                     framesDone = progress.framesDone,
@@ -519,6 +564,15 @@ class Exporter internal constructor(
                     notice = if (options.aiUpscale > 0 && progress.message.startsWith("IA:")) EngineText.aiProgress(app, progress.message) else noticeFor(progress, options),
                 )
                 if (!progress.finished) continue
+                // 0.3.2: parou com checkpoint (o encoder caiu no meio): a MESMA
+                // tentativa continua do último GOP íntegro, sem descer a escada.
+                if (options.format == ExportFormat.Video && progress.result != 0 && !cancelPending &&
+                    !watchdog.cancelled && progress.resumable) {
+                    android.util.Log.w("AureaExport", "Export stopped (reason ${progress.failure}, ${progress.message}) " +
+                        "at frame ${progress.framesDone}/${progress.framesTotal}; the engine kept a checkpoint")
+                    withContext(Dispatchers.IO) { file.delete() }
+                    return RETRY_SAME_ATTEMPT
+                }
                 // O encoder travou/recusou e o motor sugere o modo de segurança:
                 // nada de "falhou" na tela — o vídeo é refeito (runExport).
                 val retry = if (options.format == ExportFormat.Video && progress.result != 0 && !cancelPending)
@@ -755,6 +809,7 @@ class Exporter internal constructor(
     private fun noticeFor(p: ExportProgress, options: ExportOptions): String {
         val lines = ArrayList<String>(4)
         if (lighterAfterClose) lines += text(R.string.export_after_system_close)
+        if (p.resumed && resumedFromPercent >= 0) lines += text(R.string.export_resumed_from, resumedFromPercent)
         when ((p.flags ushr 8) and 15) {
             4 -> lines += text(R.string.export_v2_finalizing)
             5 -> lines += text(R.string.export_v2_validating)
@@ -832,6 +887,12 @@ class Exporter internal constructor(
         /** Último codificador escolhível (ExportOptions.encoder): o degrau 2, software. */
         const val ENCODER_SOFTWARE = 2
         const val STORAGE_FULL = 28
+        /**
+         * runEngineJob: o motor guardou um checkpoint desta tentativa
+         * (ExportProgress.resumable) — repetir o MESMO degrau, que continua de lá.
+         * Fora da faixa dos degraus e do bit de espera (kExportAttemptWait).
+         */
+        const val RETRY_SAME_ATTEMPT = 1 shl 20
         /** Espera antes de refazer quando o motor ainda estava ocupado (kExportAttemptWait). */
         const val BUSY_WAIT_MS = 1500L
         /** AAC do export (kExportAudioKbps no motor). */

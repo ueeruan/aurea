@@ -1118,8 +1118,12 @@ class AureaEngine private constructor() {
     /** > 0 = ligado; |valor| − 1 = obturador em graus; 0 = sem projeto. */
     fun motionBlurState(): Float = nativeMotionBlurState(nativeHandle)
     fun queryMotionBlurSettings(): MotionBlurSettings? = nativeWork.run<MotionBlurSettings?>(null) {
-        val values = FloatArray(6)
+        val values = FloatArray(7)
         if (nativeQueryMotionBlurSettings(nativeHandle, values)) MotionBlurSettings.fromNative(values) else null
+    }
+    /** Motion blur 3D: true = rápido (vetores), false = alta qualidade (amostras). Desfazível. */
+    fun setMotionBlurVector(on: Boolean): Boolean = nativeWork.run(false) {
+        nativeSetMotionBlurVector(nativeHandle, on)
     }
     fun setMotionBlurSettings(settings: MotionBlurSettings): Boolean = nativeWork.run(false) {
         nativeSetMotionBlurSettings(nativeHandle, settings.enabled, settings.angle, settings.phase,
@@ -1279,6 +1283,21 @@ class AureaEngine private constructor() {
     fun startExport(outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int = 0, trimToContent: Boolean = false,
                     quality: Int = 1, rateMode: Int = 1, safeMode: Int = 0): Int =
         nativeWork.run(5) { nativeStartExport(nativeHandle, outputPath, shortSide, fps, codec, bitrateMbps, aiUpscale, trimToContent, quality, rateMode, safeMode) }
+
+    /**
+     * 0.3.2 (CheckpointManager do motor): um export interrompido deste projeto
+     * com estas opções (o processo morreu no meio) que vale continuar, ou nulo.
+     * Os argumentos são os do [startExport] (sem o degrau: o checkpoint diz em
+     * qual degrau foi gravado e é nele que continua).
+     */
+    fun exportResumeCandidate(shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int,
+                              trimToContent: Boolean, quality: Int, rateMode: Int): ExportResumeCandidate? {
+        val values = nativeWork.run(intArrayOf()) {
+            nativeExportResumeCandidate(nativeHandle, shortSide, fps, codec, bitrateMbps, aiUpscale, trimToContent, quality, rateMode)
+        }
+        if (values.size < 4 || values[0] == 0) return null
+        return ExportResumeCandidate(values[1], values[2], values[3])
+    }
 
     fun exportDuration(trimToContent: Boolean = true): Long = nativeExportDuration(nativeHandle, trimToContent)
     fun exportUsesMotionBlur(): Boolean = nativeExportUsesMotionBlur(nativeHandle)
@@ -1685,6 +1704,7 @@ class AureaEngine private constructor() {
     private external fun nativeQueryMotionBlurSettings(handle: Long, out: FloatArray): Boolean
     private external fun nativeSetMotionBlurSettings(handle: Long, enabled: Boolean, angle: Float,
         phase: Float, samples: Int, adaptiveLimit: Int): Boolean
+    private external fun nativeSetMotionBlurVector(handle: Long, on: Boolean): Boolean
     private external fun nativeCopyLayers(handle: Long, ids: LongArray): Int
     private external fun nativePasteLayers(handle: Long, frame: Long): Int
     private external fun nativeCopyStyle(handle: Long, layer: Long): Boolean
@@ -1732,6 +1752,8 @@ class AureaEngine private constructor() {
     private external fun nativeDiscardRecovery(handle: Long): Int
     private external fun nativeRecoverSession(handle: Long): Int
     private external fun nativeStartExport(handle: Long, outputPath: String, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int, aiUpscale: Int, trimToContent: Boolean, quality: Int, rateMode: Int, safeMode: Int): Int
+    private external fun nativeExportResumeCandidate(handle: Long, shortSide: Int, fps: Double, codec: Int, bitrateMbps: Int,
+        aiUpscale: Int, trimToContent: Boolean, quality: Int, rateMode: Int): IntArray
     private external fun nativeExportDuration(handle: Long, trimToContent: Boolean): Long
     private external fun nativeExportUsesMotionBlur(handle: Long): Boolean
     private external fun nativeStartPreRender(handle: Long, direction: Int): Int
@@ -1854,4 +1876,9 @@ data class PreRenderProgress(
                 if (values[6] < 0) -1 else 1, values[7].toInt(), values[8].coerceAtLeast(0), values[9].coerceAtLeast(0))
         }
     }
+}
+
+/** Checkpoint de export que o motor continua: do quadro [resumeFrame] de [totalFrames], no degrau [safeMode]. */
+data class ExportResumeCandidate(val resumeFrame: Int, val totalFrames: Int, val safeMode: Int) {
+    val percent: Int get() = if (totalFrames > 0) (resumeFrame.toLong() * 100 / totalFrames).toInt().coerceIn(0, 99) else 0
 }

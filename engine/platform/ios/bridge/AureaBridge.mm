@@ -170,8 +170,13 @@ Status Host::initialize(const std::string& cacheDirectory, const std::string& do
 
     config.mediaFactory = media_.get();
     config.exportSinkFactory = &make_ffmpeg_export_sink;
-    // Export retomável (ExportPacketLog): o iOS suspende o app em segundo
-    // plano e o export continua do último GOP salvo quando ele volta.
+    // 0.3.2 (CheckpointManager, export/ExportCheckpoint.hpp): o vídeo vai para
+    // um registro de pacotes com checksum (em <Caches>/export-checkpoints) e o
+    // MP4 é montado, validado e publicado no fim. O iOS não deixa usar a GPU em
+    // segundo plano: a suspensão PAUSA o export (o checkpoint fica) e o
+    // AureaModel refaz o mesmo export ao voltar, que continua do último GOP
+    // íntegro. O processo morrer (jetsam) também continua dali. Sem espaço para
+    // o registro, o motor exporta direto (sem retomada).
     config.enableResumableExport = true;
     // Teto do orçamento (0.1.8, igual ao Android fora da Xiaomi): ¼ da RAM
     // livre passava de 1 GB num iPhone de 6–8 GB e o jetsam encerra o app

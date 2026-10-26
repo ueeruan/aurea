@@ -5,11 +5,12 @@
 namespace aurea {
 bool OfflineFrameQueue::cancelled() const noexcept { return cancel_ && cancel_->load(std::memory_order_acquire); }
 Status OfflineFrameQueue::prepare(u32 slots, u32 frames, u64 bytes, u64 limit,
-    const std::atomic<bool>* cancel) noexcept {
+    const std::atomic<bool>* cancel, u32 firstFrame) noexcept {
     std::lock_guard lock(mutex_);
-    if (capacity_ || !slots || slots > entries_.size() || !frames || !bytes) return Errc::InvalidArgument;
+    if (capacity_ || !slots || slots > entries_.size() || !frames || !bytes || firstFrame >= frames) return Errc::InvalidArgument;
     if (bytes > limit / slots) return Errc::BudgetExceeded;
     capacity_ = slots; total_ = frames; reservedBytes_ = bytes * slots; cancel_ = cancel;
+    nextPublish_ = nextEncode_ = firstFrame;
     phase_.store(ExportPhase::Rendering);
     return OkStatus;
 }

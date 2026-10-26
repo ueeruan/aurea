@@ -1,6 +1,7 @@
 package com.aurea.aurea.editor.panels
 
 import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.selection.toggleable
 
 import androidx.annotation.StringRes
 import com.aurea.aurea.engine.TrackKey
@@ -473,6 +474,24 @@ private fun androidx.compose.foundation.layout.ColumnScope.MotionBlurFace(env: P
                     store.changeMotionBlurAdaptiveLimit(it.roundToInt())
                 }
                 Text(stringResource(R.string.mb_quality_hint), style = AureaType.BodySmall, color = AureaColors.Muted)
+                // 0.3.2: motion blur 3D rápido (vetores) × alta qualidade (amostras).
+                val vectorLabel = stringResource(R.string.mb_vector_3d)
+                val vectorHint = stringResource(R.string.mb_vector_3d_hint)
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 6.dp).padding(start = 4.dp)
+                        .testTag("motionblur.vector3d")
+                        .toggleable(value = store.motionBlurVector, role = androidx.compose.ui.semantics.Role.Switch,
+                            onValueChange = store::changeMotionBlurVector)
+                        .semantics(mergeDescendants = true) { contentDescription = "$vectorLabel. $vectorHint" },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(vectorLabel, style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)))
+                        Text(vectorHint, style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)))
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    com.aurea.aurea.ui.ds.AureaToggle(checked = store.motionBlurVector, onCheckedChange = store::changeMotionBlurVector)
+                }
             }
         }
         if (d.kind == LayerType.Video.kind) {

@@ -9,4 +9,5 @@
     <string name="export_encoder_compatible_note">H.264 básico no codificador do aparelho. Use quando o automático der erro no codificador.</string>
     <string name="export_encoder_software_note">H.264 pelo processador, sem o codificador do aparelho. Mais lento, mas funciona quando o do aparelho falha.</string>
     <string name="export_after_system_close">O app fechou no meio da última exportação. Desta vez o vídeo sai num modo mais leve.</string>
+    <string name="export_resumed_from">Continuando a exportação de onde parou (%1$d%%).</string>
 </resources>

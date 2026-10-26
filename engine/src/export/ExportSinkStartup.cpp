@@ -164,6 +164,34 @@ public:
         published_ = true;
         return OkStatus;
     }
+    // Export retomável (registro de pacotes): as etapas da montagem passam pelo
+    // mesmo vínculo de cancelamento/batida que o resto das chamadas.
+    Status end_video() noexcept override {
+        if (retirementRequested_) return Errc::InvalidState;
+        Binding binding(*this);
+        return state_->sink->end_video();
+    }
+    Status begin_assembly(const AudioStreamConfig* audio) noexcept override {
+        if (retirementRequested_) return Errc::InvalidState;
+        Binding binding(*this);
+        return state_->sink->begin_assembly(audio);
+    }
+    Status replay_spilled_audio() noexcept override {
+        if (retirementRequested_) return Errc::InvalidState;
+        Binding binding(*this);
+        return state_->sink->replay_spilled_audio();
+    }
+    void set_assembly_counter(std::atomic<u64>* frames) noexcept override {
+        if (!retirementRequested_) state_->sink->set_assembly_counter(frames);
+    }
+    u32 checkpoint_frame() const noexcept override {
+        return retirementRequested_ ? 0u : state_->sink->checkpoint_frame();
+    }
+    void close_checkpoint() noexcept override {
+        if (retirementRequested_) return;
+        Binding binding(*this);
+        state_->sink->close_checkpoint();
+    }
     Status validate_output(const ExportOutputValidation& expected) noexcept override {
         if (retirementRequested_) return Errc::InvalidState;
         Binding binding(*this);

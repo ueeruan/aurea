@@ -1777,7 +1777,11 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     aurea::MotionBlurSettings settings;
     if (!e || !e->query_motion_blur_settings(settings)) return @[];
     return @[@(settings.enabled), @(settings.shutterAngle), @(settings.shutterPhase),
-             @(settings.samples), @(settings.adaptiveLimit), @(settings.previewSamples)];
+             @(settings.samples), @(settings.adaptiveLimit), @(settings.previewSamples), @(settings.vectorBlur)];
+}
+- (BOOL)setMotionBlurVector:(BOOL)on {
+    auto* e = self.engine;
+    return e && e->set_motion_blur_vector(on);
 }
 - (void)setMotionBlurSettings:(BOOL)enabled shutter:(float)shutter {
     auto* e = self.engine;
@@ -4381,13 +4385,11 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
                            quality:quality safeMode:safeMode] == 0;
 }
 
-- (int32_t)startExportCheckedTo:(NSString*)path codec:(AureaExportCodec)codec
-                        height:(uint32_t)height fps:(double)fps
-                   bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
-                     aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
-                       quality:(uint32_t)quality safeMode:(uint32_t)safeMode {
-    auto* e = self.engine;
-    if (!e) return static_cast<int32_t>(aurea::Errc::InvalidState);
+/// As configurações do export de vídeo pedidas pela tela: a mesma montagem
+/// para começar e para perguntar por um checkpoint (a chave tem de bater).
+static aurea::ExportSettings video_export_settings(AureaExportCodec codec, uint32_t height, double fps,
+                                                   uint32_t bitrateMbps, uint32_t audioBitrateKbps, uint32_t aiUpscale,
+                                                   BOOL trimToContent, uint32_t quality, uint32_t safeMode) {
     aurea::ExportSettings settings;
     // `height` é o LADO MENOR pedido; a largura vem da proporção (o motor
     // calcula, e nunca estica).
@@ -4402,12 +4404,42 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     // O degrau da escada de tentativas (export/ExportAttempts.hpp); 0..2 = o encoder de antes.
     settings.safeMode = std::min<uint32_t>(safeMode, aurea::kExportAttemptMax);
     settings.container = 0;   // MP4, o mesmo do Android
+    return settings;
+}
+
+- (int32_t)startExportCheckedTo:(NSString*)path codec:(AureaExportCodec)codec
+                        height:(uint32_t)height fps:(double)fps
+                   bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+                     aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+                       quality:(uint32_t)quality safeMode:(uint32_t)safeMode {
+    auto* e = self.engine;
+    if (!e) return static_cast<int32_t>(aurea::Errc::InvalidState);
+    const aurea::ExportSettings settings = video_export_settings(codec, height, fps, bitrateMbps, audioBitrateKbps,
+                                                                 aiUpscale, trimToContent, quality, safeMode);
     const std::string out = to_std(path);
     return e->start_export(settings, out.c_str()).raw();
 }
 
+- (nullable NSDictionary<NSString*, NSNumber*>*)exportResumeCandidateCodec:(AureaExportCodec)codec
+                        height:(uint32_t)height fps:(double)fps
+                   bitrateMbps:(uint32_t)bitrateMbps audioBitrateKbps:(uint32_t)audioBitrateKbps
+                     aiUpscale:(uint32_t)aiUpscale trimToContent:(BOOL)trimToContent
+                       quality:(uint32_t)quality {
+    auto* e = self.engine;
+    if (!e) return nil;
+    const aurea::ExportSettings settings = video_export_settings(codec, height, fps, bitrateMbps, audioBitrateKbps,
+                                                                 aiUpscale, trimToContent, quality, 0);
+    const auto found = e->export_resume_candidate(settings);
+    if (!found.valid) return nil;
+    return @{@"resumeFrame": @(found.resumeFrame), @"totalFrames": @(found.totalFrames), @"safeMode": @(found.safeMode)};
+}
+
 - (void)cancelExport {
     if (auto* e = self.engine) (void)e->cancel_export();
+}
+
+- (void)pauseExport {
+    if (auto* e = self.engine) (void)e->pause_export();
 }
 
 - (int32_t)restartExportRecovery:(NSString*)recoveryPath outputPath:(NSString*)outputPath {

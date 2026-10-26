@@ -40,6 +40,8 @@ extern "C" {
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportAttempts.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
+#include "aurea/export/ExportCheckpoint.hpp"
+#include <unistd.h>
 #include "aurea/ui/BuiltinPropertySchema.hpp"
 #include "aurea/tracking/CameraTrackData.hpp"
 
@@ -105,6 +107,23 @@ int open_content_fd(const char* uri, void*) {
     // A thread nativa precisa se soltar antes de terminar, ou a ART aborta.
     if (attached) g_vm->DetachCurrentThread();
     return fd;
+}
+
+/// 0.3.2 (CheckpointManager): identidade LIMITADA de uma fonte content:// para
+/// a chave do checkpoint, pelo MESMO caminho que o export usa para abri-la (o
+/// fd do ContentResolver). fstat dá tamanho e data quando o provedor entrega
+/// um arquivo regular (MediaStore, pasta local) e os blocos amostrados saem por
+/// leitura posicional. Pipe/provedor virtual (nuvem) não tem isso: NotSupported
+/// e o motor exporta sem retomar (recomeça do zero na próxima vez).
+Status content_source_identity(const std::string& uri, export_checkpoint::SourceIdentity& out,
+                               const std::atomic<bool>* cancel) noexcept {
+    if (uri.rfind("content:", 0) != 0) return Status{Errc::NotSupported, "fonte por URI nao content://"};
+    if (cancel && cancel->load(std::memory_order_acquire)) return Errc::Cancelled;
+    const int fd = open_content_fd(uri.c_str(), nullptr);
+    if (fd < 0) return Errc::MediaSourceMissing;
+    const Status s = export_checkpoint::fd_identity(fd, out, cancel, nullptr);
+    ::close(fd);
+    return s;
 }
 
 /// Pede à plataforma os pixels de uma imagem do projeto (reabrir projeto).
@@ -474,6 +493,13 @@ AUREA_JNI jboolean AUREA_FN(nativeInitialize)(JNIEnv* env, jclass, jlong handle,
     config.mediaFactory = &c->media;
     config.exportSinkFactory = &make_ffmpeg_export_sink;
     config.exportAssetPathResolver = &preserve_export_asset;
+    // 0.3.2 (CheckpointManager, export/ExportCheckpoint.hpp): o vídeo vai para
+    // um registro de pacotes com checksum e o MP4 é montado e validado no fim.
+    // O processo morrer (LMK, crash) ou o encoder falhar no meio não joga fora
+    // o que já foi codificado: o mesmo export continua do último GOP íntegro.
+    // Sem espaço para o registro, o motor exporta direto (sem retomada).
+    config.enableResumableExport = true;
+    config.exportSourceIdentity = &content_source_identity;
     config.audioOutput = &c->audioOut;
     config.defaultFontPath = config.cacheDirectory + "/Roboto-Regular.ttf";
     // The shared text engine finds the bundled Japanese fallback beside Roboto,
@@ -3547,11 +3573,18 @@ AUREA_JNI jboolean AUREA_FN(nativeQueryMotionBlurSettings)(JNIEnv* env, jclass, 
     MotionBlurSettings settings;
     if (!c || !output || env->GetArrayLength(output) < 6 ||
         !c->engine.query_motion_blur_settings(settings)) return JNI_FALSE;
+    // 0.3.2: [6] = motion blur 3D rápido (vetores) — só quando o array tem 7.
     const jfloat values[] = {settings.enabled ? 1.0f : 0.0f, settings.shutterAngle,
         settings.shutterPhase, static_cast<jfloat>(settings.samples),
-        static_cast<jfloat>(settings.adaptiveLimit), static_cast<jfloat>(settings.previewSamples)};
-    env->SetFloatArrayRegion(output, 0, 6, values);
+        static_cast<jfloat>(settings.adaptiveLimit), static_cast<jfloat>(settings.previewSamples),
+        settings.vectorBlur ? 1.0f : 0.0f};
+    env->SetFloatArrayRegion(output, 0, env->GetArrayLength(output) >= 7 ? 7 : 6, values);
     return env->ExceptionCheck() ? JNI_FALSE : JNI_TRUE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetMotionBlurVector)(JNIEnv*, jclass, jlong handle, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_motion_blur_vector(on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeSetMotionBlurSettings)(JNIEnv*, jclass, jlong handle,
@@ -4116,12 +4149,10 @@ AUREA_JNI jint AUREA_FN(nativeRecoverSession)(JNIEnv*, jclass, jlong handle) {
 /// `quality` 0 Baixa / 1 Normal / 2 Alta; `rateMode` 0 CBR / 1 VBR;
 /// `safeMode` 0..2 = o modo de segurança que o motor sugeriu depois de o
 /// encoder travar (export/ExportWatchdog.hpp).
-AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, jstring outputPath, jint shortSide,
-                                           jdouble fps, jint codec, jint bitrateMbps, jint aiUpscale, jboolean trimToContent,
-                                           jint quality, jint rateMode, jint safeMode) {
-    NativeContext* c = ctx_of(handle);
-    if (!c) return static_cast<jint>(Errc::InvalidState);
-    const std::string p = to_string(env, outputPath);
+/// As configurações do export de vídeo pedidas pela tela (a mesma montagem
+/// para começar e para perguntar por um checkpoint: a chave tem de bater).
+static ExportSettings video_export_settings(jint shortSide, jdouble fps, jint codec, jint bitrateMbps, jint aiUpscale,
+                                            jboolean trimToContent, jint quality, jint rateMode, jint safeMode) {
     ExportSettings settings;
     settings.width = 0;
     settings.height = shortSide > 0 ? static_cast<u32>(shortSide) : 0;
@@ -4135,7 +4166,36 @@ AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, js
     // O degrau da escada de tentativas (export/ExportAttempts.hpp); 0..2 = o encoder de antes.
     settings.safeMode = static_cast<u32>(std::clamp<jint>(safeMode, 0, static_cast<jint>(kExportAttemptMax)));
     settings.audioBitrateKbps = kExportAudioKbps;
+    return settings;
+}
+
+AUREA_JNI jint AUREA_FN(nativeStartExport)(JNIEnv* env, jclass, jlong handle, jstring outputPath, jint shortSide,
+                                           jdouble fps, jint codec, jint bitrateMbps, jint aiUpscale, jboolean trimToContent,
+                                           jint quality, jint rateMode, jint safeMode) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return static_cast<jint>(Errc::InvalidState);
+    const std::string p = to_string(env, outputPath);
+    const ExportSettings settings = video_export_settings(shortSide, fps, codec, bitrateMbps, aiUpscale, trimToContent,
+                                                          quality, rateMode, safeMode);
     return static_cast<jint>(c->engine.start_export(settings, p.c_str()).raw());
+}
+
+/// Checkpoint de export que vale continuar para este pedido (o processo morreu
+/// no meio do export anterior): [válido, quadro de onde continua, total de
+/// quadros, degrau da escada que o gravou]. [0, 0, 0, 0] = nada a continuar.
+AUREA_JNI jintArray AUREA_FN(nativeExportResumeCandidate)(JNIEnv* env, jclass, jlong handle, jint shortSide, jdouble fps,
+                                                          jint codec, jint bitrateMbps, jint aiUpscale, jboolean trimToContent,
+                                                          jint quality, jint rateMode) {
+    jintArray out = env->NewIntArray(4);
+    NativeContext* c = ctx_of(handle);
+    if (!out || !c) return out;
+    const ExportSettings settings = video_export_settings(shortSide, fps, codec, bitrateMbps, aiUpscale, trimToContent,
+                                                          quality, rateMode, 0);
+    const auto found = c->engine.export_resume_candidate(settings);
+    const jint values[4]{found.valid ? 1 : 0, static_cast<jint>(found.resumeFrame), static_cast<jint>(found.totalFrames),
+                         static_cast<jint>(found.safeMode)};
+    env->SetIntArrayRegion(out, 0, 4, values);
+    return out;
 }
 
 AUREA_JNI jint AUREA_FN(nativeRestartExport)(JNIEnv* env, jclass, jlong handle, jstring recoveryPath, jstring outputPath) {

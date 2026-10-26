@@ -75,6 +75,16 @@ public:
         }
         state_.path[n] = '\0';
     }
+    /// CheckpointManager (export/ExportCheckpoint.hpp): "on", "resumed",
+    /// "on_restarted" (o encoder não continuou o registro), "off",
+    /// "off_low_storage", "off_sources", "off_temporal", "off_project",
+    /// "off_directory". `resumeFrame`: de onde esta sessão continuou.
+    void checkpoint(const char* state, u32 resumeFrame) noexcept {
+        std::lock_guard lock(mutex_);
+        if (state_.ended) return;
+        copy_token(state_.checkpoint, state);
+        state_.resumeFrame = resumeFrame;
+    }
     [[nodiscard]] std::string json() const noexcept {
 #if defined(__cpp_exceptions) || defined(_CPPUNWIND)
         try {
@@ -96,7 +106,8 @@ public:
                 "\"width\":%u,\"height\":%u,\"fpsNumerator\":%llu,\"fpsDenominator\":1000000,\"bitrate\":%u,\"requestedProfile\":%u,\"safeMode\":%u,"
                 "\"rendered\":%llu,\"submitted\":%llu,\"videoPackets\":%llu,\"audioPackets\":%llu,"
                 "\"inputAgain\":%llu,\"outputAgain\":%llu,\"firstInputMs\":%lld,\"firstPacketMs\":%lld,"
-                "\"hasResult\":%s,\"result\":%d,\"negotiatedColor\":null,\"encoderPath\":\"%s\"}",
+                "\"hasResult\":%s,\"result\":%d,\"negotiatedColor\":null,\"encoderPath\":\"%s\","
+                "\"checkpoint\":\"%s\",\"resumeFrame\":%u}",
                 static_cast<unsigned long long>(start_), ms(now, start_), name(snapshot.lanes[0].stage), ms(now, snapshot.lanes[0].since),
                 name(snapshot.lanes[1].stage), ms(now, snapshot.lanes[1].since),
                 name(snapshot.lanes[2].stage), ms(now, snapshot.lanes[2].since),
@@ -110,7 +121,8 @@ public:
                 static_cast<unsigned long long>(counts[4]), static_cast<unsigned long long>(counts[5]),
                 input ? static_cast<long long>(ms(input, start_)) : -1ll,
                 packet ? static_cast<long long>(ms(packet, start_)) : -1ll,
-                snapshot.hasResult ? "true" : "false", snapshot.result, snapshot.path);
+                snapshot.hasResult ? "true" : "false", snapshot.result, snapshot.path,
+                snapshot.checkpoint[0] ? snapshot.checkpoint : "off", snapshot.resumeFrame);
             return written > 0 && written < static_cast<int>(sizeof(buffer)) ? std::string(buffer, written) : "{}";
 #if defined(__cpp_exceptions) || defined(_CPPUNWIND)
         } catch (...) { return "{}"; }
@@ -123,6 +135,8 @@ private:
         Format format{};
         char codec[96]{}, backend[48]{};
         char path[320]{};   ///< encoderPath: degrau da escada em uso + falhas
+        char checkpoint[24]{};   ///< estado do checkpoint (ver checkpoint())
+        u32 resumeFrame = 0;
         u32 candidates = 0;
         u32 codedWidth = 0, codedHeight = 0;
         i32 result = 0;

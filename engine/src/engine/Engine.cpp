@@ -38,6 +38,8 @@
 #include "aurea/platform/AddressSpace.hpp"
 #include "aurea/export/ExportWatchdog.hpp"
 #include "aurea/export/ExportRecovery.hpp"
+#include "aurea/export/ExportCheckpoint.hpp"
+#include "aurea/export/ExportPacketLog.hpp"
 #include "aurea/export/ExportPacketLog.hpp"
 #include "aurea/export/AndroidVideoEncoder.hpp"
 #include "aurea/export/ExportSinkStartup.hpp"
@@ -322,6 +324,17 @@ struct Engine::ExportContext {
     u64 resourceGpuGeneration = 0; // mapped readbacks belong only to this device generation
     u64 queueByteLimit = 0;
     bool withAudio = false;
+    // --- CheckpointManager (export/ExportCheckpoint.hpp) ---------------------
+    // Vídeo no registro de pacotes; o MP4 é montado, validado e publicado no
+    // fim. `startFrame` > 0: esta sessão continua um checkpoint desse quadro.
+    std::string packetLogPath;           ///< vazio = MP4 direto (sem retomada)
+    u32 startFrame = 0;
+    AudioStreamConfig audioConfig{};
+    export_checkpoint::Manifest checkpoint{};
+    std::atomic<u64> assembledFrames{0}; ///< montagem: quadros já copiados para o MP4
+    /// Último keyframe que a sessão gravou no registro (ExportSink::checkpoint_frame),
+    /// lido pelo worker antes de abortar o sink: o fim da sessão não varre o registro.
+    std::atomic<u32> checkpointFrame{0};
     void publish_export_phase(const char* message) noexcept {
         if (!queue) return;
         std::lock_guard lock(mutex);
@@ -961,6 +974,13 @@ void Engine::apply_memory_budgets() noexcept {
 }
 
 void Engine::shutdown() noexcept {
+    // Fechar o motor (o sistema encerrando o app) não é o usuário cancelando:
+    // o checkpoint de um export em andamento fica (CheckpointManager).
+    exportSuspendCancel_.store(true, std::memory_order_release);
+    struct ShutdownMark {
+        std::atomic<bool>& mark;
+        ~ShutdownMark() { mark.store(false, std::memory_order_release); }
+    } shutdownMark{exportSuspendCancel_};
     // Startup holds the lifecycle lock while its bounded gate waits. Signal
     // its independently protected flag before waiting for that lock.
     (void)cancel_export();
@@ -1044,6 +1064,15 @@ void Engine::shutdown() noexcept {
 EngineState Engine::state() const noexcept { return state_; }
 
 Status Engine::suspend() noexcept {
+    // 0.3.2 (CheckpointManager): a suspensão interrompe o export, mas não é o
+    // usuário desistindo — o checkpoint fica para o mesmo export continuar
+    // quando o app voltar. A marca vale até o export (ou a partida) terminar:
+    // suspend espera os dois abaixo, com o lock do ciclo de vida.
+    exportSuspendCancel_.store(true, std::memory_order_release);
+    struct SuspendMark {
+        std::atomic<bool>& mark;
+        ~SuspendMark() { mark.store(false, std::memory_order_release); }
+    } suspendMark{exportSuspendCancel_};
     // Background suspension must interrupt codec startup before waiting for
     // start_export to release lifecycle ownership; teardown remains locked.
     (void)cancel_export();
@@ -1059,6 +1088,8 @@ Status Engine::suspend() noexcept {
     state_ = EngineState::Suspended;
     offscreenCancelled_.store(true, std::memory_order_release);
     if (exportCtx_ && exportCtx_->thread.joinable()) {
+        // Uma partida que entrou antes deste lock limpou a marca: de novo.
+        exportSuspendCancel_.store(true, std::memory_order_release);
         (void)cancel_export();
         exportCtx_->thread.join();
     }
@@ -1073,7 +1104,13 @@ Status Engine::suspend() noexcept {
     }
     {
         std::lock_guard<std::mutex> rl(renderMutex_);
-        if (const Status ready = poll_export_gpu_locked(); !ready.ok()) {
+        // 0.3.2: espera a FENCE dos quadros do export que acabou de parar (com
+        // teto), em vez de devolver "tente de novo" na hora. As telas ignoravam
+        // esse retorno e o app ia para o segundo plano sem suspender — no iOS,
+        // GPU em segundo plano faz o sistema encerrar o app. 5 s cabem na janela
+        // de background task do iOS (~30 s) e no onStop do Android.
+        constexpr u64 kSuspendGpuWaitNs = 5'000'000'000ull;
+        if (const Status ready = poll_export_gpu_locked(kSuspendGpuWaitNs); !ready.ok()) {
             state_ = s; // Native resources were not suspended; allow retry.
             offscreenCancelled_.store(false, std::memory_order_release);
             return ready;
@@ -6016,11 +6053,20 @@ bool Engine::set_motion_blur_settings(bool enabled, f32 angle, f32 phase,
     return apply_motion_blur_settings_locked(*comp, settings);
 }
 
+bool Engine::set_motion_blur_vector(bool on) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    auto* comp = project_ ? current_composition() : nullptr;
+    if (!comp) return false;
+    auto settings = comp->motion_blur();
+    settings.vectorBlur = on;
+    return apply_motion_blur_settings_locked(*comp, settings);
+}
+
 bool Engine::apply_motion_blur_settings_locked(Composition& comp, const MotionBlurSettings& settings) noexcept {
     const auto& previous = comp.motion_blur();
     if (previous.enabled == settings.enabled && previous.shutterAngle == settings.shutterAngle
         && previous.shutterPhase == settings.shutterPhase && previous.samples == settings.samples
-        && previous.adaptiveLimit == settings.adaptiveLimit) return true;
+        && previous.adaptiveLimit == settings.adaptiveLimit && previous.vectorBlur == settings.vectorBlur) return true;
     try {
         history_.before_mutation(comp, project_->timeline().current(), "desfoque de movimento");
     } catch (const std::bad_alloc&) {
@@ -10619,8 +10665,10 @@ Status Engine::poll_export_gpu_locked(u64 timeoutNs) noexcept {
 void Engine::retain_failed_export_gpu_locked() noexcept {
     if (!gpu_) return;
     const u64 frame = gpu_->last_submitted_frame();
+    // Nada enviado ainda (cancelado esperando o decoder): não há fence a esperar.
+    if (!frame) return;
     const Status ready = gpu_->wait_frame(frame, 0);
-    if (frame && ready.code() == Errc::Timeout) {
+    if (ready.code() == Errc::Timeout) {
         pendingExportGpuFrame_ = frame;
         pendingExportGpuGeneration_ = gpuGeneration_;
     }
@@ -13649,6 +13697,11 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     // Only this caller's admitted session may receive its startup result.
     // Keep finalization under the same lifecycle lock, including recovery.
     std::shared_ptr<ExportDiagnostics> ownedDiagnostics;
+    std::string startupCheckpoint;   ///< o registro desta partida (vazio = sem checkpoint)
+    // Uma pausa (pause_export) antiga não vale para este export: só a suspensão
+    // ou uma pausa pedidas DURANTE ele guardam o checkpoint em vez de apagá-lo.
+    if (state_ == EngineState::Ready || state_ == EngineState::Rendering)
+        exportSuspendCancel_.store(false, std::memory_order_release);
     const Status result = [&]() noexcept -> Status {
     if (state_ != EngineState::Ready && state_ != EngineState::Rendering) return Errc::InvalidState;
     if (!project_) return Errc::InvalidState;
@@ -13770,6 +13823,15 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         // Imported image pixels are immutable and retained by shared ownership.
         // Freezing their map does not allocate a second full image copy.
         ctx->frozenAssetBudget = room;
+    }
+    // CheckpointManager: identidade do PEDIDO (projeto do editor normalizado +
+    // configurações pedidas, sem o degrau da escada). É a mesma conta de
+    // export_resume_candidate, feita sobre os mesmos bytes, fora do lock.
+    u64 requestKey = 0;
+    if (config_.enableResumableExport && !settings.aiUpscale) {
+        ExportSettings asked = requested;
+        asked.safeMode = 0;
+        requestKey = export_checkpoint::request_key(export_checkpoint::project_key(frozenBytes), frozenComposition, asked);
     }
     // The immutable bytes and retained originals are the entire export input.
     // Provider/codec/font I/O must not block read_status or the editor's model.
@@ -13905,8 +13967,70 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         ctx->dither = false; // Do not feed quantization noise to the neural network.
     }
 
+    // "Preparando" das fontes. Cancelável a cada bloco; a mensagem anda com os
+    // bytes lidos (export_progress). O pacote de recuperação (desligado nos
+    // apps) guarda o hash de CADA byte; a chave do checkpoint usa a identidade
+    // LIMITADA de cada fonte (tamanho, data e ~3 MiB amostrados): o custo é
+    // constante por arquivo, não cresce com a mídia do projeto.
+    bool checkpointWanted = requestKey != 0;
+    const char* checkpointState = !config_.enableResumableExport ? "off"
+                                : settings.aiUpscale ? "off_temporal" : requestKey ? "on" : "off_project";
+    struct Preparing {
+        Engine& e;
+        Preparing(Engine& engine, u64 total) : e(engine) {
+            e.exportPrepareDone_.store(0, std::memory_order_relaxed);
+            e.exportPrepareTotal_.store(total, std::memory_order_relaxed);
+            e.exportPreparing_.store(true, std::memory_order_release);
+        }
+        ~Preparing() { e.exportPreparing_.store(false, std::memory_order_release); }
+    };
     if (!ctx->recoveryPath.empty()) {
-        if (const Status s = export_recovery::fingerprint_sources(ctx->recovery); !s.ok()) return s;
+        Preparing preparing{*this, 0};
+        export_recovery::FingerprintProgress hashing{&exportPrepareDone_, &exportPrepareTotal_, &exportPrepareBeatNs_};
+        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Sources);
+        const Status printed = export_recovery::fingerprint_sources(ctx->recovery, &ctx->cancelRequested, &hashing);
+        if (printed.code() == Errc::Cancelled || ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+        if (!printed.ok()) return printed;   // a recuperação recusa fonte ilegível (como antes)
+    }
+    std::vector<export_checkpoint::SourceIdentity> fileIdentities, uriIdentities;
+    if (checkpointWanted) {
+        u64 planned = 0;
+        for (const auto& dependency : ctx->recovery.dependencies) {
+            std::error_code ec;
+            const auto bytes = std::filesystem::file_size(std::filesystem::u8path(dependency.path), ec);
+            if (!ec) planned += export_checkpoint::sampled_bytes(static_cast<u64>(bytes));
+        }
+        Preparing preparing{*this, planned};
+        ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Sources);
+        fileIdentities.resize(ctx->recovery.dependencies.size());
+        for (usize i = 0; i < ctx->recovery.dependencies.size() && checkpointWanted; ++i) {
+            const Status s = export_checkpoint::file_identity(ctx->recovery.dependencies[i].path, fileIdentities[i],
+                                                             &ctx->cancelRequested, &exportPrepareDone_);
+            if (s.code() == Errc::Cancelled || ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+            if (!s.ok()) {
+                // Fonte ilegível: o export segue no MP4 direto, sem retomada.
+                AUREA_LOG_WARN("export: fonte sem identidade (%d); export sem checkpoint", s.raw());
+                checkpointWanted = false;
+                checkpointState = "off_sources";
+            }
+        }
+        // Fontes por URI (content:// do Android): pela plataforma, pelo mesmo
+        // caminho que o export usa para abri-las. Sem identidade verificável,
+        // o projeto não retoma — nunca se continua com fonte não conferida.
+        uriIdentities.resize(ctx->recovery.uriSources.size());
+        for (usize i = 0; i < ctx->recovery.uriSources.size() && checkpointWanted; ++i) {
+            const Status s = config_.exportSourceIdentity
+                ? config_.exportSourceIdentity(ctx->recovery.uriSources[i], uriIdentities[i], &ctx->cancelRequested)
+                : Status{Errc::NotSupported, "plataforma sem identidade de fonte por URI"};
+            if (s.code() == Errc::Cancelled || ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
+            if (!s.ok()) {
+                AUREA_LOG_WARN("export: fonte por URI nao verificavel (%d); export sem checkpoint", s.raw());
+                checkpointWanted = false;
+                checkpointState = "off_unverifiable_source";
+            }
+        }
+    }
+    if (!ctx->recoveryPath.empty()) {
         if (const Status s = export_recovery::write(ctx->recoveryPath, ctx->recovery); !s.ok()) return s;
     }
 
@@ -13947,6 +14071,76 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     ac.bitrateBps = std::clamp<u32>(settings.audioBitrateKbps, 64, 320) * 1000u;
     const bool withAudio = ctx->audioSnap && ctx->audioSnap->audible();
     if (!withAudio) ctx->audioSnap.reset();
+    ctx->audioConfig = ac;
+    // --- CheckpointManager (export/ExportCheckpoint.hpp) ---------------------
+    // Identidade da SESSÃO: o pedido + o que o motor decidiu (tamanho, fps,
+    // codec, taxa, perfil, degrau, áudio...) + a impressão de cada fonte + a
+    // versão do motor. O registro com a mesma chave continua do último GOP
+    // íntegro; os de outra chave saem (um checkpoint por vez no disco).
+    u64 loggedBytes = 0;
+    export_checkpoint::Manifest priorCheckpoint{};
+    bool havePriorCheckpoint = false;
+    if (checkpointWanted) {
+        namespace ckpt = export_checkpoint;
+        u64 key = ckpt::mix(ckpt::build_identity(), requestKey);
+        const u64 effective[] = {
+            settings.safeMode, static_cast<u64>(vc.codec), vc.width, vc.height, std::bit_cast<u64>(vc.fps),
+            vc.bitrateBps, vc.profile, vc.preferSoftware ? 1u : 0u, vc.rateMode, vc.keyframeIntervalFrames,
+            vc.directSurface ? 1u : 0u, ctx->width, ctx->height, ctx->frames, std::bit_cast<u64>(ctx->compFps),
+            withAudio ? 1u : 0u, ac.sampleRate, ac.channels, ac.bitrateBps, ctx->dither ? 1u : 0u,
+            ctx->attemptBlurCap, ctx->attemptGpuStep, ctx->recovery.dependencies.size(), ctx->recovery.uriSources.size(),
+        };
+        key = ckpt::mix_bytes(key, effective, sizeof(effective));
+        for (usize i = 0; i < ctx->recovery.dependencies.size(); ++i) {
+            const std::string& path = ctx->recovery.dependencies[i].path;
+            key = ckpt::mix_identity(ckpt::mix_bytes(key, path.data(), path.size()), fileIdentities[i]);
+        }
+        for (usize i = 0; i < ctx->recovery.uriSources.size(); ++i) {
+            const std::string& uri = ctx->recovery.uriSources[i];
+            key = ckpt::mix_identity(ckpt::mix_bytes(key, uri.data(), uri.size()), uriIdentities[i]);
+        }
+        // Imagens com os pixels já retidos (o render não reabre o arquivo):
+        // os mesmos blocos amostrados, dos pixels, na ordem dos ids.
+        std::vector<u64> images;
+        for (const auto& [id, pixels] : ctx->frozenImages) if (pixels) images.push_back(id);
+        std::sort(images.begin(), images.end());
+        for (const u64 id : images) {
+            const ImagePixels& px = *ctx->frozenImages.at(id);
+            key = ckpt::mix(ckpt::mix(ckpt::mix(key, id), (static_cast<u64>(px.width) << 32) | px.height),
+                            ckpt::memory_sample_hash(px.rgba.data(), px.rgba.size()));
+        }
+        if (!key) key = 1;
+        const std::string dir = ckpt::directory(config_.exportTemporaryDirectory, config_.cacheDirectory, outputPath);
+        if (dir.empty()) {
+            checkpointState = "off_directory";
+        } else {
+            ctx->packetLogPath = ckpt::log_path(dir, key);
+            if (const u32 removed = ckpt::remove_others(dir, ctx->packetLogPath))
+                AUREA_LOG_INFO("export: %u checkpoint(s) de outro export apagado(s)", removed);
+            ctx->checkpoint.sessionKey = key;
+            ctx->checkpoint.requestKey = requestKey;
+            ctx->checkpoint.safeMode = settings.safeMode;
+            ctx->checkpoint.totalFrames = ctx->frames;
+            // Só continua com o manifesto da própria sessão (gravado logo depois
+            // de o encoder abrir; o cancelamento do usuário o apaga primeiro):
+            // um registro sem ele é sobra e sai.
+            export_log::ScanResult scanned;
+            havePriorCheckpoint = ckpt::read_manifest(ctx->packetLogPath, priorCheckpoint) &&
+                                  priorCheckpoint.sessionKey == key;
+            if (havePriorCheckpoint && export_log::scan(ctx->packetLogPath, scanned).ok() && scanned.info.sessionKey == key &&
+                scanned.info.totalFrames == ctx->frames && scanned.info.width == vc.width &&
+                scanned.info.height == vc.height && scanned.resumeFrame > 0 && scanned.resumeFrame < ctx->frames) {
+                ctx->startFrame = scanned.resumeFrame;
+                loggedBytes = scanned.resumeOffset;
+                checkpointState = "resumed";
+                AUREA_LOG_INFO("export: continua o checkpoint no quadro %u de %u (%u quadros integros no registro)",
+                               ctx->startFrame, ctx->frames, scanned.validFrames);
+            } else {
+                havePriorCheckpoint = false;
+                ckpt::remove(ctx->packetLogPath);   // de outra versão, corrompido, sem manifesto ou sem GOP completo
+            }
+        }
+    }
     // Espaço em disco ANTES de abrir encoder e GPU: um export de horas que
     // enche o aparelho no meio perde o tempo todo. A estimativa é o bitrate
     // PEDIDO (o encoder real costuma ficar abaixo, sobretudo em resolução
@@ -13961,6 +14155,26 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         if (dir.empty()) dir = std::filesystem::current_path(ec);
         const std::filesystem::space_info sp = std::filesystem::space(dir, ec);
         ctx->estimatedBytes = estimate;
+        // Com checkpoint, o disco guarda o registro (≈ o vídeo), o PCM do render
+        // e o MP4 montado no fim, ao mesmo tempo. Sem espaço para isso (e com
+        // espaço para o MP4 direto), o export segue SEM checkpoint: o vídeo é o
+        // mesmo, só não retoma — e o diagnóstico diz.
+        const u64 testAvailable = export_checkpoint::available_bytes_for_tests();
+        if (!ctx->packetLogPath.empty() && ((!ec && sp.available != static_cast<std::uintmax_t>(-1)) || testAvailable)) {
+            const u64 available = testAvailable ? testAvailable : static_cast<u64>(sp.available);
+            const u64 pcm = withAudio && ctx->startFrame == 0
+                ? static_cast<u64>(seconds * ac.sampleRate) * ac.channels * sizeof(i16) : 0;
+            if (!export_checkpoint::log_fits(available, estimate, pcm, loggedBytes)) {
+                AUREA_LOG_WARN("export: pouco espaco para o checkpoint (%llu MB livres); export sem retomada",
+                               static_cast<unsigned long long>(available >> 20));
+                export_checkpoint::remove(ctx->packetLogPath);
+                ctx->packetLogPath.clear();
+                ctx->startFrame = 0;
+                loggedBytes = 0;
+                havePriorCheckpoint = false;
+                checkpointState = "off_low_storage";
+            }
+        }
         if (!ec && sp.available != static_cast<std::uintmax_t>(-1) && sp.available < estimate / 2 + (32ull << 20)) {
             static thread_local char detail[160];   // Status guarda o ponteiro
             std::snprintf(detail, sizeof(detail), "espaco livre insuficiente: o video precisa de ~%llu MB e ha %llu MB livres",
@@ -13971,6 +14185,14 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         }
         ctx->outputDir = dir;
     }
+    if (!ctx->packetLogPath.empty()) {
+        vc.packetLogPath = ctx->packetLogPath.c_str();
+        vc.resumeFrame = ctx->startFrame;
+        vc.sessionKey = ctx->checkpoint.sessionKey;
+        vc.totalFrames = ctx->frames;
+    }
+    // Cancelado pelo usuário daqui em diante: o checkpoint deste export sai.
+    startupCheckpoint = ctx->packetLogPath;
     if (ctx->cancelRequested.load(std::memory_order_acquire)) return Errc::Cancelled;
     struct OfflineStartupCleanup {
         Engine& engine;
@@ -14016,6 +14238,30 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         &ctx->cancelRequested, &ctx->encoderBeatNs, limits);
     ctx->sink = std::move(startupResult.sink);
     openStatus = startupResult.status();
+    if (!openStatus.ok() && ctx->startFrame > 0 && openStatus.code() != Errc::Cancelled &&
+        !ctx->cancelRequested.load(std::memory_order_acquire)) {
+        // O encoder desta sessão não continua o registro (SPS/PPS diferentes,
+        // outro degrau...): o checkpoint sai e a MESMA tentativa recomeça do
+        // quadro 0 — fluxos de encoders diferentes não se emendam num MP4.
+        AUREA_LOG_WARN("export: o checkpoint (quadro %u) nao continua com este encoder: %.*s; recomeca do zero",
+                       ctx->startFrame, static_cast<int>(openStatus.detail().size()), openStatus.detail().data());
+        export_checkpoint::remove(ctx->packetLogPath);
+        ctx->startFrame = 0;
+        vc.resumeFrame = 0;
+        havePriorCheckpoint = false;
+        checkpointState = "on_restarted";
+        ctx->sink = config_.exportSinkFactory(config_.exportSinkContext);
+        if (ctx->sink) {
+            ctx->sink->set_cancel_flag(&ctx->cancelRequested);
+            ctx->sink->set_heartbeat(&ctx->encoderBeatNs);
+            ctx->sink->set_diagnostics(ctx->diagnostics);
+            startupResult = open_export_sink_startup(std::move(ctx->sink), outputPath, vc, withAudio ? &ac : nullptr,
+                &ctx->cancelRequested, &ctx->encoderBeatNs, limits);
+            ctx->sink = std::move(startupResult.sink);
+            openStatus = startupResult.status();
+        }
+    }
+    if (ctx->diagnostics) ctx->diagnostics->checkpoint(checkpointState, ctx->startFrame);
     if (const Status s = openStatus; !s.ok()) {
         // Status borrows its diagnostic. Platform sinks keep it in their own
         // storage, which is destroyed with this local context on return.
@@ -14042,6 +14288,21 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         return Status{code, detail};
     }
 
+    if (!ctx->packetLogPath.empty()) {
+        // Manifesto do checkpoint (o app que reabrir depois de o processo
+        // morrer pergunta por ele). "Rodando" até a sessão dizer como acabou:
+        // uma continuação de sessão que morreu conta como falha.
+        export_checkpoint::Manifest& m = ctx->checkpoint;
+        if (ctx->startFrame && havePriorCheckpoint) {
+            m.failureResumes = priorCheckpoint.failureResumes +
+                (priorCheckpoint.state == export_checkpoint::SessionState::Running ? 1u : 0u);
+        }
+        m.lastResumeFrame = ctx->startFrame;
+        m.state = export_checkpoint::SessionState::Running;
+        if (const Status written = export_checkpoint::write_manifest(ctx->packetLogPath, m); !written.ok())
+            AUREA_LOG_WARN("export: manifesto do checkpoint nao gravado (%d)", written.raw());
+        ctx->sink->set_assembly_counter(&ctx->assembledFrames);
+    }
     // Report only acceleration verified by the opened encoder, not a codec
     // capability table that may describe a different device/session.
     {
@@ -14197,7 +14458,8 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         (void)ctx->scheduler.configure(ctx->frames, ctx->fps, ctx->compFps, ctx->depth,
                                        config_.exportExecutionProfile);
         if (ctx->queue) {
-            if (const Status prepared = ctx->queue->prepare(ctx->depth, ctx->frames, slotBytes, ctx->queueByteLimit, &ctx->cancelRequested); !prepared.ok())
+            if (const Status prepared = ctx->queue->prepare(ctx->depth, ctx->frames, slotBytes, ctx->queueByteLimit,
+                    &ctx->cancelRequested, ctx->startFrame); !prepared.ok())
                 return prepared;
         }
         // The cancellation pointer stays bound through post-open allocation,
@@ -14213,6 +14475,9 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     ctx->diagnostic_stage(ExportDiagnostics::Lane::Session, ExportDiagnostics::Stage::Render);
     ctx->progress.running = true;
     ctx->progress.framesTotal = ctx->frames;
+    // Checkpoint: o progresso começa no quadro de onde continua.
+    ctx->progress.framesDone = ctx->startFrame;
+    if (ctx->startFrame) ctx->progress.flags |= kExportResumed;
     ctx->progress.pipelineDepth = ctx->depth;
     ctx->set_message("exportando");
     ctx->publish_export_phase("exportando");
@@ -14233,6 +14498,11 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     exportCtx_->thread = std::thread([this] { export_thread_main(); });
     return OkStatus;
     }();
+    // O usuário cancelou a partida: o checkpoint deste export sai. A suspensão
+    // do app (ou o shutdown) também cancela, e aí ele fica para continuar.
+    if (result.code() == Errc::Cancelled && !startupCheckpoint.empty() &&
+        !exportSuspendCancel_.load(std::memory_order_acquire))
+        export_checkpoint::remove(startupCheckpoint);
     if (ownedDiagnostics && !result.ok()) {
         ownedDiagnostics->result(result.raw());
         ownedDiagnostics->stage(ExportDiagnostics::Lane::Session, result.code() == Errc::Cancelled
@@ -14721,7 +14991,9 @@ void Engine::export_thread_main() noexcept {
     Status result = OkStatus;
     bool abandonedWorker = false;   ///< o worker do encoder travou na plataforma (ExportWatchdog.hpp)
     u32 previousAdmission = ctx.depth;
-    for (u32 i = 0; i < ctx.frames && result.ok(); ++i) {
+    // Checkpoint: os quadros antes de `startFrame` já estão no registro em GOPs
+    // íntegros; o render (determinístico por tentativa) segue do seguinte.
+    for (u32 i = ctx.startFrame; i < ctx.frames && result.ok(); ++i) {
         if (cancelled()) { result = Errc::Cancelled; break; }
         // Aviso de memória do sistema (trim_memory): com os quadros em voo já
         // entregues ao encoder, nada do renderizador do export está em uso — o
@@ -14801,9 +15073,9 @@ void Engine::export_thread_main() noexcept {
         const auto plan = ctx.scheduler.frame(i);
         if (!plan.ok()) { result = plan.status(); break; }
         const u64 renderStarted = monotonic_ns();
-        if (i == 0) ctx.first_frame_stage("primeiro quadro: decodificando fontes e preparando shaders");
+        if (i == ctx.startFrame) ctx.first_frame_stage("primeiro quadro: decodificando fontes e preparando shaders");
         result = render_export_frame(plan->compositionFrame, target, slot.gpuFrame);
-        if (ctx.queue && (i == 0 || i + 1 == ctx.frames || (i + 1) % 300 == 0 || !result.ok()))
+        if (ctx.queue && (i == ctx.startFrame || i + 1 == ctx.frames || (i + 1) % 300 == 0 || !result.ok()))
             AUREA_LOG_INFO("export-ffmpeg frame=%u pts_us=%lld phase=render timestamp_ns=%llu duration_ns=%llu result=%d",
             i, static_cast<long long>(plan->ptsUs), static_cast<unsigned long long>(monotonic_ns()),
             static_cast<unsigned long long>(monotonic_ns() - renderStarted), result.raw());
@@ -14904,7 +15176,54 @@ void Engine::export_thread_main() noexcept {
             stage = ExportStage::Render;
         }
     }
-    if (!ctx.recoveryPath.empty()) {
+    // --- CheckpointManager: o que fica do registro -----------------------------
+    // Pronto ou cancelado pelo usuário: nada fica. Suspensão do app: fica
+    // (pausa). Falha: fica e o MESMO export continua se esta sessão fechou ao
+    // menos um GOP novo (até kMaxFailureResumes vezes); uma sessão retomada
+    // que falhou no encoder sem gravar nada (o encoder pode não reproduzir o
+    // fluxo do registro) descarta o checkpoint e refaz a tentativa do zero.
+    const bool suspendedExport = result.code() == Errc::Cancelled && exportSuspendCancel_.load(std::memory_order_acquire);
+    const bool userCancelled = result.code() == Errc::Cancelled && !suspendedExport;
+    bool resumable = false;
+    if (!ctx.packetLogPath.empty() && !abandonedWorker) {
+        namespace ckpt = export_checkpoint;
+        (void)fileio::remove_file(ckpt::spill_path(ctx.packetLogPath));   // o PCM do render nunca é retomado
+        if (result.ok() || userCancelled) {
+            ckpt::remove(ctx.packetLogPath);
+        } else {
+            // O ponto que o sink gravou (sem varrer gigabytes no fim da sessão:
+            // a suspensão do iOS tem segundos). A próxima partida confere tudo.
+            const u32 at = fileio::exists(ctx.packetLogPath) ? ctx.checkpointFrame.load(std::memory_order_acquire) : 0;
+            ckpt::Manifest m = ctx.checkpoint;
+            if (suspendedExport) {
+                m.state = ckpt::SessionState::Paused;
+                resumable = at > 0;
+            } else if (at > ctx.startFrame && m.failureResumes < ckpt::kMaxFailureResumes) {
+                m.state = ckpt::SessionState::Failed;
+                ++m.failureResumes;
+                resumable = true;
+            } else if (ctx.startFrame > 0 && at <= ctx.startFrame && stage == ExportStage::Encode) {
+                AUREA_LOG_WARN("export: o encoder falhou na continuacao do quadro %u sem gravar; checkpoint descartado",
+                               ctx.startFrame);
+                ckpt::remove(ctx.packetLogPath);
+                resumable = true;   // a mesma tentativa, do zero (startFrame 0 não volta aqui)
+            } else {
+                m.state = ckpt::SessionState::Failed;
+            }
+            if (at > 0 && fileio::exists(ctx.packetLogPath)) {
+                if (const Status w = ckpt::write_manifest(ctx.packetLogPath, m); !w.ok())
+                    AUREA_LOG_WARN("export: manifesto do checkpoint nao atualizado (%d)", w.raw());
+                AUREA_LOG_INFO("export: checkpoint guardado no quadro %u de %u (%s)", at, ctx.frames,
+                               suspendedExport ? "pausa" : resumable ? "continua" : "sem nova continuacao");
+            } else if (!resumable) {
+                ckpt::remove(ctx.packetLogPath);   // sem GOP completo: nada a continuar
+            }
+        }
+    }
+    if (!ctx.recoveryPath.empty() && userCancelled) {
+        // Cancelar não é pausa: o pacote de recuperação sai com o registro.
+        (void)fileio::remove_file(ctx.recoveryPath);
+    } else if (!ctx.recoveryPath.empty()) {
         ctx.recovery.state = result.ok() ? export_recovery::State::Complete : export_recovery::State::Failed;
         ctx.recovery.result = result.code();
         { std::lock_guard<std::mutex> pl(ctx.mutex); ctx.recovery.acceptedFrames = ctx.progress.framesDone; }
@@ -14937,7 +15256,9 @@ void Engine::export_thread_main() noexcept {
         const u32 retry = result.ok() ? 0u : export_retry_safe_mode(failure, ctx.safeMode);
         ctx.progress.flags = (ctx.progress.flags & ~kExportRetryMask) | (retry << kExportRetryShift);
         if (retry) AUREA_LOG_WARN("export: refazer no modo de seguranca %u e sugerido a tela", retry);
+        if (resumable) ctx.progress.flags |= kExportResumable;
         if (result.ok()) ctx.set_message("concluido");
+        else if (suspendedExport) ctx.set_message("pausado");
         else if (result.code() == Errc::Cancelled) ctx.set_message("cancelado");
         else ctx.set_message(result.detail().empty() ? result.message().data() : result.detail().data());
     }
@@ -14962,6 +15283,7 @@ void Engine::export_encoder_main() noexcept {
     // plataforma e já dado como travado), cancela/fecha o próprio sink quando
     // voltar, sem publicar arquivo. A quarentena aguarda essa saída final.
     struct WorkerExit {
+        Engine& e;
         ExportContext& c;
         ~WorkerExit() {
             bool finishFile = false, abandoned = false;
@@ -14992,6 +15314,29 @@ void Engine::export_encoder_main() noexcept {
                         fin = c.queue->begin_finalizing();
                         c.publish_export_phase("finalizando");
                     }
+                    if (fin.ok() && !c.packetLogPath.empty()) {
+                        // Export retomável: fecha o vídeo do registro e monta o
+                        // MP4 temporário com os pacotes registrados + o áudio
+                        // INTEIRO codificado do começo (o PCM mixado durante o
+                        // render numa sessão do zero; numa continuação, mixado
+                        // de novo agora). A/V, duração e amostras saem exatos;
+                        // depois vem a validação independente e o commit atômico.
+                        c.publish_export_phase("montando");
+                        fin = c.sink->end_video();
+                        if (fin.ok()) fin = c.sink->begin_assembly(c.withAudio ? &c.audioConfig : nullptr);
+                        if (fin.ok() && c.withAudio && c.audioSnap) {
+                            const Status replay = c.startFrame == 0 ? c.sink->replay_spilled_audio()
+                                                                    : Status{Errc::NotFound, "sessao retomada mixa de novo"};
+                            if (replay.code() == Errc::NotFound || replay.code() == Errc::NotSupported) {
+                                c.audioWritten = 0;
+                                c.audioFx.clear();
+                                fin = e.write_export_audio(c, audio::frame_to_sample(static_cast<i64>(c.frames), c.fps));
+                            } else {
+                                fin = replay;
+                            }
+                            c.enter(ExportWorkerPhase::Finish);
+                        }
+                    }
                     if (fin.ok()) fin = c.sink->finish();
                     // finish/validation can return after the watchdog retired
                     // this session. No late validation/publication is allowed;
@@ -15011,10 +15356,14 @@ void Engine::export_encoder_main() noexcept {
                     if (!fin.ok()) {
                         fin = ExportContext::own_status(fin, c.finishDetail);
                         if (c.queue) c.queue->fail(fin);
+                        c.checkpointFrame.store(c.sink->checkpoint_frame(), std::memory_order_release);
+                        c.sink->close_checkpoint();
                         c.sink->abort();
                     }
                 } else {
                     c.enter(ExportWorkerPhase::Abort);
+                    c.checkpointFrame.store(c.sink->checkpoint_frame(), std::memory_order_release);
+                    c.sink->close_checkpoint();
                     c.sink->abort();
                 }
                 c.leave();
@@ -15028,7 +15377,7 @@ void Engine::export_encoder_main() noexcept {
                 c.encoderExited = true; // final access, including condition-variable notification
             }
         }
-    } workerExit{ctx};
+    } workerExit{*this, ctx};
     std::unique_ptr<ai::Upscaler> upscaler;
     ai::TemporalStabilizer temporalUpscale;
     std::unique_ptr<u8[]> neuralInput, neuralOutput;
@@ -15080,7 +15429,7 @@ void Engine::export_encoder_main() noexcept {
         // Direto do buffer de leitura para o sink: nenhuma cópia intermediária.
         const u64 w0 = monotonic_ns();
         Status s;
-        if (i == 0) ctx.first_frame_stage("primeiro quadro: aguardando o encoder");
+        if (i == ctx.startFrame) ctx.first_frame_stage("primeiro quadro: aguardando o encoder");
         ctx.enter(upscaler ? ExportWorkerPhase::Upscale : ExportWorkerPhase::Video);
         if (upscaler) {
             ai::nv12_to_rgb709(slot.yPtr, slot.uvPtr, ctx.width, ctx.height, neuralInput.get());
@@ -15130,8 +15479,11 @@ void Engine::export_encoder_main() noexcept {
         // O som até o fim DESTE quadro (em amostras inteiras: nenhuma deriva
         // acumulada, nem em 29,97). Mesma thread do vídeo: o sink não é
         // chamado de duas threads.
-        if (s.ok() && ctx.audioSnap) {
-            if (i == 0) ctx.first_frame_stage("primeiro quadro: mixando o audio");
+        // Áudio do quadro, em paralelo ao render: direto no MP4 ou, com
+        // checkpoint, no PCM do registro. Uma sessão retomada mixa tudo de
+        // novo do começo na montagem (o PCM das sessões antigas não volta).
+        if (s.ok() && ctx.audioSnap && (ctx.packetLogPath.empty() || ctx.startFrame == 0)) {
+            if (i == ctx.startFrame) ctx.first_frame_stage("primeiro quadro: mixando o audio");
             s = write_export_audio(ctx, audio::frame_to_sample(static_cast<i64>(i) + 1, ctx.fps));
             ctx.audioNs.fetch_add(monotonic_ns() - w1, std::memory_order_relaxed);
         }
@@ -15139,7 +15491,7 @@ void Engine::export_encoder_main() noexcept {
         if (ctx.queue) {
             if (s.ok()) s = ctx.queue->encoded(si, i);
             else ctx.queue->fail(s);
-            if (i == 0 || i + 1 == ctx.frames || (i + 1) % 300 == 0 || !s.ok())
+            if (i == ctx.startFrame || i + 1 == ctx.frames || (i + 1) % 300 == 0 || !s.ok())
                 AUREA_LOG_INFO("export-ffmpeg frame=%u pts_us=%lld phase=encode_audio timestamp_ns=%llu duration_ns=%llu result=%d",
                 i, static_cast<long long>(pts), static_cast<unsigned long long>(monotonic_ns()),
                 static_cast<unsigned long long>(monotonic_ns() - w0), s.raw());
@@ -15161,7 +15513,7 @@ void Engine::export_encoder_main() noexcept {
             // ou 1º quadro reprovado), alguns quadros depois do início. O aviso
             // de software acompanha o degrau que ficou (0.1.8 BETA 2, 0a4b94e9).
             const ExportSink::EncoderInfo enc = ctx.sink->encoder_info();
-            if (i == 0 || enc.acceleration != lastAcceleration) {
+            if (i == ctx.startFrame || enc.acceleration != lastAcceleration) {
                 lastAcceleration = enc.acceleration;
                 if (enc.acceleration == ExportSink::Acceleration::Software) {
                     std::lock_guard<std::mutex> pl(ctx.mutex);
@@ -15171,7 +15523,8 @@ void Engine::export_encoder_main() noexcept {
         }
 
         const u32 done = i + 1;
-        const f64 k = 1e-6 / static_cast<f64>(done);
+        const u32 doneHere = done - ctx.startFrame;   // quadros desta sessão (a retomada conta do checkpoint)
+        const f64 k = 1e-6 / static_cast<f64>(doneHere);
         // Diagnóstico a cada 300 quadros: onde o tempo do export está indo.
         if (++sinceLog == 300 || done == ctx.frames) {
             // Disco quase cheio: para com uma mensagem clara em vez de o
@@ -15204,7 +15557,7 @@ void Engine::export_encoder_main() noexcept {
         }
         const f64 elapsed = static_cast<f64>(monotonic_ns() - ctx.startNs) / 1e9;
         std::lock_guard<std::mutex> pl(ctx.mutex);
-        if (ctx.progress.framesDone == 0 && done > 0 && std::strncmp(ctx.progress.message, "primeiro quadro", 15) == 0)
+        if (done == ctx.startFrame + 1 && std::strncmp(ctx.progress.message, "primeiro quadro", 15) == 0)
             ctx.set_message("exportando");
         ctx.progress.framesDone = done;
         if (ctx.queue) ctx.progress.flags = (ctx.progress.flags & ~kExportPhaseMask)
@@ -15214,10 +15567,43 @@ void Engine::export_encoder_main() noexcept {
         ctx.progress.readbackMs = static_cast<f32>(ctx.readNs.load(std::memory_order_relaxed) * k);
         ctx.progress.encodeMs = static_cast<f32>(ctx.writeNs.load(std::memory_order_relaxed) * k);
         ctx.progress.audioMs = static_cast<f32>(ctx.audioNs.load(std::memory_order_relaxed) * k);
-        ctx.progress.fps = elapsed > 0.0 ? static_cast<f32>(done / elapsed) : 0.0f;
+        ctx.progress.fps = elapsed > 0.0 ? static_cast<f32>(doneHere / elapsed) : 0.0f;
         ctx.progress.etaSeconds = ctx.progress.fps > 0.0f
                                 ? static_cast<u32>((ctx.frames - done) / ctx.progress.fps) : 0;
     }
+}
+
+Engine::ExportResumeCandidate Engine::export_resume_candidate(const ExportSettings& requested) noexcept {
+    ExportResumeCandidate out;
+    if (!config_.enableResumableExport || requested.aiUpscale) return out;
+    std::vector<u8> bytes;
+    CompositionId composition{};
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        if (!project_) return out;
+        drain_commands_locked();
+        SaveOptions save; save.writeThumbnail = false;
+        if (!ProjectSerializer::encode(*project_, save, bytes).ok()) return out;
+        composition = project_->timeline().current();
+    }
+    // A mesma conta da partida (start_export_checked), fora do lock do modelo.
+    ExportSettings asked = requested;
+    asked.safeMode = 0;
+    const u64 requestKey = export_checkpoint::request_key(export_checkpoint::project_key(bytes), composition, asked);
+    const std::string dir = export_checkpoint::directory(config_.exportTemporaryDirectory, config_.cacheDirectory, {});
+    const export_checkpoint::Candidate found = export_checkpoint::find_candidate(dir, requestKey);
+    if (!found.valid) return out;
+    out.valid = true;
+    out.resumeFrame = found.resumeFrame;
+    out.totalFrames = found.totalFrames;
+    out.safeMode = found.safeMode;
+    return out;
+}
+
+Status Engine::pause_export() noexcept {
+    // A marca vale até a próxima partida (start_export_checked a limpa).
+    exportSuspendCancel_.store(true, std::memory_order_release);
+    return cancel_export();
 }
 
 Status Engine::cancel_export() noexcept {
@@ -15245,9 +15631,29 @@ Status Engine::cancel_export() noexcept {
 
 Engine::ExportProgress Engine::export_progress() const noexcept {
     std::lock_guard<std::mutex> context(exportContextMutex_);
-    if (!exportCtx_ || exportCtx_->preRenderMode) return ExportProgress{};
+    if (!exportCtx_ || exportCtx_->preRenderMode) {
+        ExportProgress idle{};
+        // 0.3.2: a partida ainda confere as fontes do checkpoint (hash de cada
+        // byte, export/ExportCheckpoint.hpp). A mensagem anda com os bytes
+        // lidos: o vigia do "Preparando" das telas não toma um vídeo grande
+        // sendo lido por travamento, e o Cancelar continua valendo.
+        if (exportPreparing_.load(std::memory_order_acquire)) {
+            const u64 done = exportPrepareDone_.load(std::memory_order_relaxed);
+            const u64 total = exportPrepareTotal_.load(std::memory_order_relaxed);
+            const u32 percent = total ? static_cast<u32>(std::min<u64>(100, done * 100 / total)) : 0;
+            std::snprintf(idle.message, sizeof(idle.message), "preparando fontes %u%% (%llu MB)", percent,
+                          static_cast<unsigned long long>(done >> 20));
+        }
+        return idle;
+    }
     std::lock_guard<std::mutex> pl(exportCtx_->mutex);
     ExportProgress p = exportCtx_->progress;
+    // Export retomável: a montagem do MP4 a partir do registro (pacotes de
+    // vídeo + áudio do começo) anda quadro a quadro; mesma regra do "validando".
+    if (p.running && ((p.flags & kExportPhaseMask) >> kExportPhaseShift) == static_cast<u32>(ExportPhase::Finalizing)) {
+        if (const u64 n = exportCtx_->assembledFrames.load(std::memory_order_relaxed))
+            std::snprintf(p.message, sizeof(p.message), "montando %llu/%u", static_cast<unsigned long long>(n), p.framesTotal);
+    }
     // Validando: a mensagem anda com os quadros conferidos. As telas só veem
     // quadros e mensagem; parada em "validando" por minutos (export longo ou a
     // 200 qps) virava "travou" e a escada refazia um vídeo que estava pronto.

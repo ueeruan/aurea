@@ -2,6 +2,7 @@
 #include "aurea/project/FileIO.hpp"
 #include "aurea/project/Serialization.hpp"
 #include "aurea/core/Log.hpp"
+#include "aurea/core/Time.hpp"
 #include "aurea/media/ImageSequence.hpp"
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/Text3D.hpp"
@@ -57,7 +58,12 @@ Status add_path(Package& package, std::string& path, const PathResolver& resolve
     std::string real = resolve ? resolve(path) : path;
     // Sem recuperação (0.2.4, C3): a plataforma valida a URI e a devolve como
     // está; o decoder a abre pelo fd. Não vira dependência verificada.
-    if (allowUri && !real.empty() && real.rfind("file://", 0) != 0 && unsupported_uri(real)) { path = std::move(real); return OkStatus; }
+    if (allowUri && !real.empty() && real.rfind("file://", 0) != 0 && unsupported_uri(real)) {
+        if (std::find(package.uriSources.begin(), package.uriSources.end(), real) == package.uriSources.end())
+            package.uriSources.push_back(real);
+        path = std::move(real);
+        return OkStatus;
+    }
     if (real.rfind("file://", 0) == 0) {
         real.erase(0, 7);
         if (real.rfind("localhost/", 0) == 0) real.erase(0, 9);
@@ -97,7 +103,33 @@ Status add_path(Package& package, std::string& path, const PathResolver& resolve
         package.dependencies.push_back({path, 0, 0});
     return OkStatus;
 }
-Status fingerprint(const std::string& path, Dependency& out) {
+/// Hash do conteúdo inteiro, em fluxo: quatro faixas FNV-1a independentes
+/// sobre palavras de 64 bits (o multiplicador de uma não espera o da outra) e
+/// a cauda byte a byte. Detecta mudança acidental como o FNV por byte, ~8x
+/// mais rápido — o export de um vídeo de 4 GB não fica minutos em "Preparando".
+struct ContentHash {
+    std::array<u64, 4> lane{1469598103934665603ull, 0x84222325cbf29ce4ull, 0x9e3779b97f4a7c15ull, 0xc2b2ae3d27d4eb4full};
+    u64 tail = 1469598103934665603ull;
+    void add(const u8* p, usize n) noexcept {
+        constexpr u64 prime = 1099511628211ull;
+        usize i = 0;
+        for (; i + 32 <= n; i += 32) {
+            for (usize k = 0; k < 4; ++k) {
+                u64 word;
+                std::memcpy(&word, p + i + 8 * k, 8);
+                lane[k] = (lane[k] ^ word) * prime;
+            }
+        }
+        tail = hash_bytes(p + i, n - i, tail);
+    }
+    [[nodiscard]] u64 value(u64 total) const noexcept {
+        u64 h = hash_bytes(reinterpret_cast<const u8*>(lane.data()), sizeof(lane), tail);
+        return hash_bytes(reinterpret_cast<const u8*>(&total), sizeof(total), h);
+    }
+};
+
+Status fingerprint(const std::string& path, Dependency& out, const std::atomic<bool>* cancel = nullptr,
+                   const FingerprintProgress* progress = nullptr) {
     std::error_code ec;
     const auto file = std::filesystem::u8path(path);
     if (!std::filesystem::is_regular_file(file, ec)) return Errc::MediaSourceMissing;
@@ -107,16 +139,31 @@ Status fingerprint(const std::string& path, Dependency& out) {
     if (ec) return Errc::IoError;
     std::unique_ptr<std::FILE, decltype(&std::fclose)> f(fileio::open_file(path, "rb"), &std::fclose);
     if (!f) return Errc::MediaSourceMissing;
+    // 64 KiB fixos, na pilha da chamada: a memória não cresce com a fonte.
+    // Só o tamanho do bloco é múltiplo de 32: a divisão em faixas não depende
+    // de onde cada fread parou (a cauda só existe no último bloco).
     std::array<u8, 65536> bytes{};
-    u64 total = 0, h = 1469598103934665603ull;
+    u64 total = 0;
+    ContentHash hash;
     for (;;) {
-        const usize n = std::fread(bytes.data(), 1, bytes.size(), f.get());
-        total += n; h = hash_bytes(bytes.data(), n, h);
+        if (cancel && cancel->load(std::memory_order_acquire)) return Errc::Cancelled;
+        usize n = 0;
+        while (n < bytes.size()) {
+            const usize got = std::fread(bytes.data() + n, 1, bytes.size() - n, f.get());
+            if (!got) break;
+            n += got;
+        }
+        total += n; hash.add(bytes.data(), n);
+        if (progress) {
+            if (progress->bytesDone) progress->bytesDone->fetch_add(n, std::memory_order_relaxed);
+            if (progress->heartbeatNs) progress->heartbeatNs->store(monotonic_ns(), std::memory_order_release);
+        }
         if (n != bytes.size()) {
             if (std::ferror(f.get())) return Errc::IoError;
             break;
         }
     }
+    const u64 h = hash.value(total);
     if (total != size || std::filesystem::file_size(file, ec) != size || ec ||
         std::filesystem::last_write_time(file, ec) != time || ec)
         return Status{Errc::InvalidState, "fonte alterada durante a verificacao da recuperacao"};
@@ -338,10 +385,24 @@ Status capture_snapshot(std::vector<u8> initial, CompositionId composition, cons
     } catch (const std::bad_alloc&) { return Errc::OutOfMemory; }
       catch (...) { return Errc::IoError; }
 }
-Status fingerprint_sources(Package& package) noexcept {
+Status fingerprint_sources(Package& package, const std::atomic<bool>* cancel,
+                           const FingerprintProgress* progress) noexcept {
     try {
         auto dependencies = package.dependencies;
-        for (auto& d : dependencies) if (const Status s = fingerprint(d.path, d); !s.ok()) return s;
+        if (progress && progress->bytesTotal) {
+            // O total vem antes do primeiro byte: a tela mostra a fração desde já.
+            u64 total = 0;
+            for (const auto& d : dependencies) {
+                std::error_code ec;
+                const auto bytes = std::filesystem::file_size(std::filesystem::u8path(d.path), ec);
+                if (!ec) total += static_cast<u64>(bytes);
+            }
+            progress->bytesTotal->store(total, std::memory_order_relaxed);
+        }
+        for (auto& d : dependencies) {
+            if (cancel && cancel->load(std::memory_order_acquire)) return Errc::Cancelled;
+            if (const Status s = fingerprint(d.path, d, cancel, progress); !s.ok()) return s;
+        }
         package.dependencies = std::move(dependencies); return OkStatus;
     } catch (const std::bad_alloc&) { return Errc::OutOfMemory; } catch (...) { return Errc::IoError; }
 }

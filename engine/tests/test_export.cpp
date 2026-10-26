@@ -323,6 +323,11 @@ ProcMem proc_mem() {
 bool gRigDirectSurface = false;
 /// EngineConfig::exportApproximateFrameMs dos próximos Rig (0 = o padrão do motor).
 u32 gRigApproximateMs = 0;
+/// ExportCheckpoint.inl: export retomável e a pasta dos checkpoints dos próximos Rig.
+bool gRigResumable = false;
+std::string gRigCheckpointDir;
+/// EngineConfig::exportSourceIdentity dos próximos Rig (fontes por URI).
+Status (*gRigSourceIdentity)(const std::string&, export_checkpoint::SourceIdentity&, const std::atomic<bool>*) noexcept = nullptr;
 
 struct Rig {
     SyntheticFactory factory;
@@ -359,6 +364,9 @@ struct Rig {
         ec.exportExecutionProfile = profile;
         ec.enableDirectSurfaceExport = gRigDirectSurface;
         ec.exportApproximateFrameMs = gRigApproximateMs;
+        ec.enableResumableExport = gRigResumable;
+        ec.exportTemporaryDirectory = gRigCheckpointDir;
+        ec.exportSourceIdentity = gRigSourceIdentity;
         ec.disableAutosave = true;
         ec.workerCount = 2;
         // Tabela de codecs como a de um aparelho com decode/encode 4K de
@@ -2848,6 +2856,7 @@ AUREA_TEST(Regression2135Gpu, SharedTextTransformAndPresetReach3DExportAndSurviv
 #include "ExportSourceStartup.inl"
 #include "OriginalModelExport.inl"
 #include "ExportSwapTexture.inl"
+#include "ExportCheckpoint.inl"
 
 #endif // AUREA_TEST_VULKAN
 

@@ -9,4 +9,6 @@
     <string name="mb_quality_hint">La vista previa puede usar menos muestras para responder mejor. La exportación usa la calidad elegida. Los valores altos tardan más.</string>
     <string name="mb_advanced">Avanzado</string>
     <string name="mb_comp_settings_hint">Ajustes de la composición: afectan a todas las capas con desenfoque activado.</string>
+    <string name="mb_vector_3d">Motion blur 3D rápido (vectores)</string>
+    <string name="mb_vector_3d_hint">Activado: el 3D se dibuja una vez y se desenfoca con vectores de movimiento, mucho más rápido. Desactivado: alta calidad por muestras. Los objetos que se deforman, transparentes o que giran rápido siguen usando muestras.</string>
 </resources>

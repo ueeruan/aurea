@@ -101,6 +101,23 @@ fracionário, então o "antes" e o "depois" saem sem histórico. O caminho em
 lotes com fence (`render_bounded_scene_exposures`) está pronto e desligado
 (`Engine.hpp:206`).
 
+**Caminho rápido (0.3.2, `MotionBlurSettings::vectorBlur`).** Com a opção
+"Motion blur 3D rápido (vetores)" ligada, o grupo 3D é desenhado UMA vez no
+centro do obturador; um passe só de geometria (`shaders/scene3d/motion/
+vectors.*`, push de 2 mat4 = 128 B com as posições de clip do começo e do fim,
+bloco de uniform com a matriz do centro, profundidade própria de 1 amostra)
+grava a velocidade em px; bloco com a maior velocidade (2 passadas
+separáveis), vizinhança 3×3 e a reconstrução (`reconstruct.frag`, pesos de
+profundidade: o que anda borra sobre o fundo, o fundo não vaza sobre o objeto
+parado na frente) rodam antes do bloom/tone map. Mesmas amostras (≤ 32) no
+preview e no export. O grupo volta à acumulação (qualidade maior, sem aviso de
+redução) com deformação (animação, skin/morph animados, material animado,
+texto/forma animados, efeito de partes), partículas, planos 2D na cena,
+transparente, recorte entre grupos, chão com câmera andando, trajeto curvo
+(trajeto > 1,15 × a reta + 1 px) ou rastro maior que 2× o bloco
+(`velocity_max_length`). Projetos antigos: o campo sempre foi gravado e sempre
+`false` (não havia controle) — continuam na acumulação, sem mudar o visual.
+
 ### 1.10 FFmpeg 9.0.2 [verificado]
 - `ffmpeg-9.0.2.tar.xz`: SHA-256
   `8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`, assinatura
@@ -153,3 +170,42 @@ lotes com fence (`render_bounded_scene_exposures`) está pronto e desligado
   (compilação e checagens) e o simulador do CI.
 - **Não testados**: ARM 32 bits físico, vivo, Oppo, MediaTek, PowerVR, iPhone
   real. Compilação não prova funcionamento em aparelho.
+
+## 5. O que foi feito na 0.3.2 (estado em 25/10/2026)
+
+| Etapa | Situação | Validação |
+| --- | --- | --- |
+| 1. FFmpeg 9.0.2 | feito (Android 3 ABIs; iOS pelo CI) | host + emulador x86_64; ARM físico não |
+| 2. Export determinístico e honesto | feito | host (MotionBlur, ExportAttempts) |
+| 3. Lento × falha | feito: espera ociosa no quadro, heartbeat no trailer | host |
+| 4. Segundo plano | Android: serviço em primeiro plano; iOS: tela acesa, temperatura, `suspend` espera a fence | Kotlin compila; iOS só estático |
+| 5. Checkpoints | feito (ExportCheckpoint, retomada por GOP, impressão limitada a 3 MiB por arquivo) | host + `ExportCheckpointDeviceTest` no emulador |
+| 6. Encoders | ByteBuffer com tamanho preenchido; cancelar na validação; espera em fence inexistente | host |
+| 7. Cópias e memória | **não feito**: IOSurface/CVPixelBufferPool no iOS, texturas por slot | — |
+| 8. Motion blur 3D por vetores | feito (opção por composição; projetos antigos seguem em amostras) | host (7 testes GPU) |
+
+### Números medidos (host, RTX 3050)
+- Motion blur 3D 1080p, 6 cubos + chão, 32 amostras: acumulação 114 ms de GPU,
+  vetores 4,8 ms (≈24×). Erro médio por pixel contra a acumulação de 64
+  amostras ≈ 0,01 (sem desfoque: 0,05).
+- Impressão das fontes para o checkpoint: arquivo de 512 MB em 4,1–4,5 ms
+  (lê no máximo 3 MiB por arquivo; antes a recuperação lia o arquivo inteiro).
+- Suíte completa do host: 121 → 79 falhas em relação à rodada da 0.3.1, nenhuma
+  falha nova (as restantes já falhavam no código anterior; lista em
+  `full033.log` da sessão).
+
+### Ainda pendente / limites conhecidos
+- Etapa 7 inteira (cópias por quadro no iOS, pipeline real com texturas por slot).
+- Caminho legado `h264_mediacodec` ainda supõe stride alinhado a 16 (patch);
+  primeiro quadro não é conferido no VideoToolbox; degraus que falharam não são
+  lembrados no iOS.
+- Troca de encoder no meio do vídeo recomeça do quadro 0 (fluxos de encoders
+  diferentes não emendam numa trilha MP4).
+- Motion blur por vetores: sombra/reflexo do objeto em movimento ficam nítidos;
+  rastros acima de ~160 px em 1080p e trajetos curvos voltam para amostras.
+- Testes `ExportV2DeviceTest.{galleryContentUri…, prepareInterruptedExport,
+  resumeInterruptedExport}` testam o pacote de recuperação antigo
+  (`enableExportRecovery`, desligado) e falham por isso; a retomada nova tem o
+  próprio teste.
+- **Nada validado em aparelho físico** (ARM 32/64, vivo, Oppo, MediaTek,
+  PowerVR, iPhone). O código do iOS ainda não foi compilado nesta versão.

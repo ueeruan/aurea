@@ -9,4 +9,6 @@
     <string name="mb_quality_hint">Pratinjau dapat memakai lebih sedikit sampel agar tetap responsif. Ekspor memakai kualitas yang dipilih. Nilai lebih tinggi membutuhkan waktu lebih lama.</string>
     <string name="mb_advanced">Lanjutan</string>
     <string name="mb_comp_settings_hint">Pengaturan komposisi memengaruhi semua lapisan dengan buram gerakan aktif.</string>
+    <string name="mb_vector_3d">Motion blur 3D cepat (vektor)</string>
+    <string name="mb_vector_3d_hint">Aktif: 3D digambar sekali lalu diburamkan mengikuti vektor gerak, jauh lebih cepat. Nonaktif: kualitas tinggi dengan sampel. Objek yang berubah bentuk, transparan, atau berputar cepat tetap memakai sampel.</string>
 </resources>

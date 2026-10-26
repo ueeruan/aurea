@@ -105,6 +105,7 @@ set(AUREA_CORE_SOURCES
     src/export/ImageEncode.cpp
     src/export/ExportRecovery.cpp
     src/export/ExportPacketLog.cpp
+    src/export/ExportCheckpoint.cpp
     src/export/ExportSinkStartup.cpp
     src/export/OfflineFrameQueue.cpp
     src/export/OfflineFrameRenderer.cpp
@@ -381,7 +382,7 @@ set(AUREA_IMPORT_BOUNDARIES
     src/timeline/Timeline.cpp
     src/scene3d/EnvironmentJob.cpp
 )
-list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportSinkStartup.cpp
+list(APPEND AUREA_IMPORT_BOUNDARIES src/export/ExportRecovery.cpp src/export/ExportCheckpoint.cpp src/export/ExportSinkStartup.cpp
     src/export/FFmpegExportSink.cpp src/export/AndroidVideoEncoder.cpp
     src/export/OfflineAudioSnapshot.cpp src/export/OfflineAudioBlockSource.cpp)
 if(MSVC)

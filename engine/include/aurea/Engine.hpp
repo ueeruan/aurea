@@ -74,6 +74,7 @@
 #include <vector>
 
 namespace aurea { class OfflineFrameRenderer; }
+namespace aurea::export_checkpoint { struct SourceIdentity; }
 namespace aurea {
 class PreRenderCache;
 
@@ -192,6 +193,13 @@ struct EngineConfig {
     void* exportSinkContext = nullptr;
     /// Persist platform locators (e.g. Android gallery URI) for a frozen export.
     /// iOS/local files already resolve to persistent paths and need no adapter.
+    /// 0.3.2 (CheckpointManager): identidade LIMITADA (tamanho, data, blocos
+    /// amostrados — export_checkpoint::fd_identity) de uma fonte que a
+    /// plataforma abre por URI (Android content://), pelo mesmo caminho que o
+    /// export usa para abri-la. Sem isto, ou com erro, um projeto com essa fonte
+    /// nunca retoma (recomeça do zero): não se continua com fonte não verificável.
+    Status (*exportSourceIdentity)(const std::string& uri, export_checkpoint::SourceIdentity& out,
+        const std::atomic<bool>* cancel) noexcept = nullptr;
     Result<std::string> (*exportAssetPathResolver)(const std::string&, const std::string&,
         const std::atomic<bool>*) noexcept = nullptr;
     /// Quadros de export em voo (GPU renderizando um enquanto o encoder recebe
@@ -231,11 +239,15 @@ struct EngineConfig {
     /// Opt-in integrity recovery. A checked, frozen export snapshot is
     /// persisted before codec open; version 1 restarts from frame zero.
     bool enableExportRecovery = false;
-    /// Export retomável (export/ExportPacketLog.hpp): os pacotes de vídeo vão
-    /// para `<saída>.aurea-pkt` e o MP4 é montado no fim. Um start_export com
-    /// a MESMA saída, o mesmo projeto e as mesmas configurações continua do
-    /// último GOP íntegro (o app fechou, a GPU caiu, o iOS suspendeu). Qualquer
-    /// diferença recomeça do zero. Desligado = MP4 direto (caminho antigo).
+    /// Export retomável (CheckpointManager, export/ExportCheckpoint.hpp): os
+    /// pacotes de vídeo vão para um registro com checksum (ExportPacketLog) e o
+    /// MP4 é montado, validado e publicado atomicamente no fim. Um start_export
+    /// com o MESMO projeto, as mesmas configurações, as mesmas fontes e o mesmo
+    /// encoder continua do último GOP íntegro (o app fechou, o processo morreu,
+    /// o encoder falhou no meio, o iOS suspendeu); qualquer diferença recomeça
+    /// do zero. Sem espaço para o registro, o export sai pelo MP4 direto (sem
+    /// retomada; o diagnóstico diz). Upscale de IA (estado entre quadros) não
+    /// usa registro. Desligado = MP4 direto sempre.
     bool enableResumableExport = false;
     /// NV12 do export com 4 bytes por fragmento (yuv_encode_packed.frag), 1/4
     /// dos fragmentos. Sem dither, os mesmos bytes; com dither, raros pixels
@@ -1172,6 +1184,10 @@ public:
     /// One undoable composition edit. Rejects nonfinite values and invalid sample counts.
     bool set_motion_blur_settings(bool enabled, f32 angle, f32 phase,
                                   u32 samples, u32 adaptiveLimit) noexcept;
+    /// 0.3.2: motion blur 3D da composição — true = rápido (vetores de
+    /// movimento, uma cena por quadro), false = alta qualidade (amostras).
+    /// Grupo que os vetores não representam fica nas amostras. Desfazível.
+    bool set_motion_blur_vector(bool on) noexcept;
 
     // --- Rastreio de câmera 3D -----------------------------------------------------
     /// Estado da análise: 0 parado, 1 analisando, 2 pronto, 3 falhou, 4 cancelado.
@@ -1991,6 +2007,24 @@ public:
     /// video is reused. The caller supplies a fresh output destination.
     [[nodiscard]] Status restart_export(const char* recoveryPath, const char* outputPath) noexcept;
     [[nodiscard]] Status cancel_export() noexcept;
+    /// 0.3.2 (CheckpointManager): PAUSA — interrompe o export (ou a partida dele)
+    /// como a suspensão do app faz: o checkpoint fica para o mesmo start_export
+    /// continuar. O iOS chama ao ir para segundo plano ainda no "Preparando"
+    /// (a GPU não pode ser usada lá). O cancelamento do usuário é cancel_export.
+    [[nodiscard]] Status pause_export() noexcept;
+
+    /// Export retomável: um checkpoint do projeto aberto com estas configurações
+    /// PEDIDAS (o degrau `safeMode` não conta) que vale a pena continuar — o app
+    /// pergunta depois de o processo morrer no meio de um export, e continua no
+    /// degrau que o gravou em vez de começar num mais leve. `valid` falso =
+    /// nada a continuar (ou já sem progresso entre continuações).
+    struct ExportResumeCandidate {
+        bool valid = false;
+        u32 resumeFrame = 0;
+        u32 totalFrames = 0;
+        u32 safeMode = 0;
+    };
+    [[nodiscard]] ExportResumeCandidate export_resume_candidate(const ExportSettings& requested) noexcept;
 
     struct ExportProgress {
         bool  running = false;
@@ -2023,7 +2057,15 @@ public:
         kExportThermalReduced  = 1u << 2,   ///< calor: menos quadros em voo (qualidade igual)
         kExportFrameFallback   = 1u << 3,   ///< algum quadro de vídeo saiu com o decodificado mais próximo
         kExportSafeMode        = 1u << 4,   ///< export no modo de segurança (refeito depois de o encoder travar)
-        // Bits 5..7 e 12: reservados (o Android ainda lê flags antigas neles).
+        /// 0.3.2 (CheckpointManager): esta sessão continuou um export interrompido
+        /// do último GOP íntegro; `framesDone` começa no quadro de onde continuou.
+        kExportResumed         = 1u << 5,
+        /// Terminou sem arquivo, mas o MESMO start_export (mesmas configurações e
+        /// degrau) continua de um checkpoint — ou, se o encoder recusou o
+        /// checkpoint, refaz esta tentativa do zero uma vez — em vez de descer a
+        /// escada. Nunca depois de o usuário cancelar.
+        kExportResumable       = 1u << 6,
+        // Bits 7 e 12: reservados (o Android ainda lê flags antigas neles).
         // Bits 8..11: fase (kExportPhaseShift, export/OfflineFrameQueue.hpp).
         // 0.3.2: reduções que antes só iam para o log (docs/diagnostico/export-engine-2.0.md, 1.3).
         kExportBlurReduced     = 1u << 13,  ///< algum quadro saiu com menos amostras de motion blur que o pedido
@@ -2452,6 +2494,13 @@ private:
     // public cancellation from racing its scoped removal/context destruction.
     std::atomic<bool>* exportStartupCancel_ = nullptr;
     std::atomic<bool>* preRenderStartupCancel_ = nullptr; // same short context lock
+    /// O cancelamento em curso vem da suspensão do app (ou do shutdown), não
+    /// do usuário: o checkpoint do export fica para continuar. Limpo no resume.
+    std::atomic<bool> exportSuspendCancel_{false};
+    /// "Preparando" (hash das fontes do checkpoint): bytes lidos/total, para
+    /// export_progress mostrar a preparação andando antes de haver contexto.
+    std::atomic<bool> exportPreparing_{false};
+    std::atomic<u64> exportPrepareDone_{0}, exportPrepareTotal_{0}, exportPrepareBeatNs_{0};
     /// Export em andamento: o render do preview não toca na GPU nem nos
     /// decoders (que o export usa em sequência).
     std::atomic<bool> exportActive_{false};

@@ -9,4 +9,5 @@
     <string name="export_encoder_compatible_note">फ़ोन के एनकोडर पर बेसिक H.264। जब स्वचालित में एनकोडर की गड़बड़ी आए, तब इसे चुनें।</string>
     <string name="export_encoder_software_note">प्रोसेसर पर H.264, फ़ोन के एनकोडर के बिना। धीमा है, पर फ़ोन का एनकोडर विफल होने पर भी काम करता है।</string>
     <string name="export_after_system_close">पिछले एक्सपोर्ट के बीच में ऐप बंद हो गया था। इस बार वीडियो हल्के मोड में एक्सपोर्ट होगा।</string>
+    <string name="export_resumed_from">एक्सपोर्ट वहीं से जारी है जहाँ वह रुका था (%1$d%%)।</string>
 </resources>

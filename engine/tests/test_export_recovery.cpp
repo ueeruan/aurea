@@ -7,6 +7,9 @@
 #include <filesystem>
 #include <algorithm>
 #include <limits>
+#include <atomic>
+#include <cstdio>
+#include <thread>
 #if defined(_WIN32)
 #include <process.h>
 #else
@@ -360,4 +363,62 @@ AUREA_TEST(ExportPreparation, OnlyOwnedOrphanOutputsAreRemovedAndRecoveryRemains
         AUREA_CHECK(fs::exists(file("original.jpg")));
         AUREA_CHECK(fs::is_symlink(root / "alias.mp4"));
     }
+}
+
+// 0.3.2 (CheckpointManager): o hash das fontes do "Preparando" é cancelável a
+// cada bloco de 64 KiB, mostra progresso e batida, e a memória não cresce com
+// o tamanho da fonte (buffer fixo). Cancelado, o pacote fica como estava.
+AUREA_TEST(ExportRecovery, SourceFingerprintIsCancellableWithProgressAndHeartbeat) {
+    Files files; const auto source = files.add("big-source.bin");
+    {
+        std::vector<u8> block(1u << 20);
+        for (usize i = 0; i < block.size(); ++i) block[i] = static_cast<u8>(i * 31u + 7u);
+        std::FILE* f = fileio::open_file(source, "wb");
+        AUREA_CHECK(f != nullptr); if (!f) return;
+        for (int i = 0; i < 64; ++i) AUREA_CHECK_EQ(std::fwrite(block.data(), 1, block.size(), f), block.size());
+        std::fclose(f);
+    }
+    auto p = project(); Asset a; a.kind = AssetKind::Video; a.sourcePath = source; (void)use(p, p.add_asset(a));
+    recovery::Package package; std::unique_ptr<Project> frozen;
+    AUREA_CHECK(recovery::capture(p, p.timeline().root(), ExportSettings{}, {}, frozen, package).ok());
+    AUREA_CHECK_EQ(package.dependencies.size(), usize{1});
+    std::atomic<u64> done{0}, total{0}, beat{0};
+    const recovery::FingerprintProgress progress{&done, &total, &beat};
+    // Já cancelado: nada é lido.
+    std::atomic<bool> cancel{true};
+    AUREA_CHECK_EQ(recovery::fingerprint_sources(package, &cancel, &progress).code(), Errc::Cancelled);
+    AUREA_CHECK_EQ(done.load(), u64{0});
+    AUREA_CHECK_EQ(total.load(), u64{64} << 20);
+    AUREA_CHECK_EQ(package.dependencies[0].contentHash, u64{0});
+    // Cancelado no meio: volta dentro de um bloco depois do pedido.
+    cancel = false; done = 0;
+    std::thread canceller([&] {
+        while (done.load() < (1u << 20)) std::this_thread::yield();
+        cancel = true;
+    });
+    const Status interrupted = recovery::fingerprint_sources(package, &cancel, &progress);
+    canceller.join();
+    AUREA_CHECK_EQ(interrupted.code(), Errc::Cancelled);
+    AUREA_CHECK(done.load() >= (1u << 20) && done.load() < (u64{64} << 20));
+    AUREA_CHECK(beat.load() != 0);
+    AUREA_CHECK_EQ(package.dependencies[0].contentHash, u64{0});
+    AUREA_CHECK_EQ(package.dependencies[0].bytes, u64{0});
+    // Inteiro: o mesmo conteúdo dá o mesmo hash; um byte diferente, outro.
+    cancel = false; done = 0;
+    AUREA_CHECK(recovery::fingerprint_sources(package, &cancel, &progress).ok());
+    AUREA_CHECK_EQ(done.load(), u64{64} << 20);
+    const u64 first = package.dependencies[0].contentHash;
+    AUREA_CHECK(first != 0);
+    AUREA_CHECK_EQ(package.dependencies[0].bytes, u64{64} << 20);
+    AUREA_CHECK(recovery::fingerprint_sources(package).ok());
+    AUREA_CHECK_EQ(package.dependencies[0].contentHash, first);
+    {
+        std::FILE* f = fileio::open_file(source, "rb+");
+        AUREA_CHECK(f != nullptr); if (!f) return;
+        std::fseek(f, (33 << 20) + 5, SEEK_SET);
+        std::fputc(0xA5, f);
+        std::fclose(f);
+    }
+    AUREA_CHECK(recovery::fingerprint_sources(package).ok());
+    AUREA_CHECK(package.dependencies[0].contentHash != first);
 }

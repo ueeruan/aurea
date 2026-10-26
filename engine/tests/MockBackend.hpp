@@ -321,7 +321,10 @@ public:
             const Status status = beforeExportWorkPoll();
             if (!status.ok()) return status;
         }
-        return wait_frame(last_submitted_frame(), 0);
+        // Sem quadro enviado não há fence: o mock não pode "esperar o quadro 0"
+        // (os testes contam essas esperas como erro do motor).
+        const u64 last = last_submitted_frame();
+        return last ? wait_frame(last, 0) : OkStatus;
     }
     u64 last_submitted_frame() const noexcept override { return framesSubmitted ? frame_ : 0; }
     Status wait_frame(u64 frame, u64 timeout) noexcept override {

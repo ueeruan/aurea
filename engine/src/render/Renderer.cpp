@@ -4811,10 +4811,99 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             return camera.imageTransform * scene3d::reverse_z_perspective(camera.fovY,
                 static_cast<f32>(out.compWidth) / std::max(1u, out.compHeight), camera.nearZ) * camera.view;
         };
+        // 0.3.2 MOTION BLUR 3D RÁPIDO (MotionBlurSettings::vectorBlur): o grupo
+        // sai de UMA cena no centro do obturador + o passe de velocidade e a
+        // reconstrução (SceneRenderer). Vale igual no preview e no export. Só
+        // quando a velocidade representa o movimento; senão (falso) o grupo
+        // segue na acumulação — que só sobe a qualidade:
+        //   • deformação (animação/skin/morph/material animado/texto ou forma
+        //     animados/efeito de partes) e partículas com desfoque: `changing`;
+        //   • trajeto curvo (giro rápido, ida e volta): `vectorFits`;
+        //   • planos 2D na cena (blurMatrices próprios, tapam modelos) e
+        //     partículas na cena: o passe de velocidade não os desenha;
+        //   • transparente (vidro, fade de letra, opacidade editada): a
+        //     velocidade é de UMA superfície por pixel;
+        //   • recorte entre grupos (holdout): o objeto recortado borra no
+        //     grupo dele, com outras amostras;
+        //   • chão com a câmera andando: o chão não entra no passe de
+        //     velocidade (com a câmera parada ele é fundo parado, certo);
+        //   • rastro maior que 2× o bloco da reconstrução (objeto ou céu).
+        const u32 targetW = std::max(1u, static_cast<u32>(std::lround(out.compWidth * previewFactor)));
+        const u32 targetH = std::max(1u, static_cast<u32>(std::lround(out.compHeight * previewFactor)));
+        const f64 vectorLimit = scene3d::velocity_max_length(targetW, targetH) * .95;
+        auto mayBlend = [](const scene3d::SceneInstance& in) {
+            const auto& p = in.pose();
+            // SceneRenderer: nó com opacidade < 255/255 mistura (e ≤ 0,004 nem desenha).
+            for (f32 a : p.nodeOpacity) if (a > .004f && a < 254.5f / 255.f) return true;
+            for (const auto& o : p.materials) if ((o.mask & 8) && o.baseColor.w < 1.f) return true;
+            if (in.asset) for (const auto& m : in.asset->materials)
+                if (m.alphaMode == scene3d::AlphaMode::Blend || m.transmission > 0.f) return true;
+            return false;
+        };
+        auto tryVector = [&](scene3d::SceneFrame& f, f64 travel) -> bool {
+            if (travel > vectorLimit || !f.planeLayers.empty() || !f.particleLayers.empty()) return false;
+            for (const auto& in : f.instances) if (in.holdout || mayBlend(in)) return false;
+            const ShutterPlan window = shutter_window(mb);
+            if (window.duration <= 0.0) return false;
+            const f64 begin = window.begin, end = window.begin + window.duration, mid = begin + window.duration * .5;
+            const Mat4 cameraBegin = projection(cameraAt(begin)), cameraEnd = projection(cameraAt(end));
+            bool cameraMoves = false;
+            for (int c = 0; c < 4; ++c) {
+                const Vec4 a = cameraBegin.col[c], b = cameraEnd.col[c];
+                cameraMoves |= a.x != b.x || a.y != b.y || a.z != b.z || a.w != b.w;
+            }
+            if (cameraMoves && f.floor.mode != 0) return false;
+            if (cameraMoves && f.environment.showBackground) {
+                // Céu: o mesmo rastro em px que o passe vai gravar, nos cantos e no centro.
+                const Mat4 center = projection(cameraAt(mid));
+                Mat4 hb, he;
+                if (!scene3d::velocity_sky_reprojection(center, cameraBegin, hb)
+                    || !scene3d::velocity_sky_reprojection(center, cameraEnd, he)) return false;
+                for (const Vec2 p : {Vec2{-1, -1}, Vec2{1, -1}, Vec2{-1, 1}, Vec2{1, 1}, Vec2{0, 0}}) {
+                    const Vec4 qb = hb * Vec4{p.x, p.y, 1, 0}, qe = he * Vec4{p.x, p.y, 1, 0};
+                    if (!(qb.z > 1e-6f) || !(qe.z > 1e-6f)) return false;
+                    const f64 dx = (qe.x / qe.z - qb.x / qb.z) * .5 * targetW, dy = (qe.y / qe.z - qb.y / qb.z) * .5 * targetH;
+                    if (!(std::sqrt(dx * dx + dy * dy) <= vectorLimit)) return false;
+                }
+            }
+            f.blurFrames.clear();
+            f.velocity.enabled = true;
+            f.velocity.viewProjCenter = projection(cameraAt(mid));
+            f.velocity.viewProjBegin = cameraBegin;
+            f.velocity.viewProjEnd = cameraEnd;
+            // Obturador fora do centro do quadro (fase ≠ −ângulo/2): a cena vai
+            // para o centro do obturador, como a média das amostras faria.
+            if (mid != 0.0) f.camera = cameraAt(mid);
+            for (auto& in : f.instances) {
+                const Layer* layer = sourceLayer(in.layerKey);
+                const f32 amount = layer && in.motionBlur ? motion_blur_amount(layer->transform.motionBlurAmount) : 0.f;
+                const bool moves = layer && in.asset && amount > 0.f;
+                if (mid != 0.0) {
+                    if (moves) in.world = world_3d_frac(comp, *layer, time.value + mid * amount) * layer_from_model(layer->model);
+                    // Sem desfoque (ou "quanto" ≠ 1): a câmera do próprio
+                    // instante, como nas amostras da acumulação.
+                    const auto camera = cameraAt(mid * amount);
+                    in.cameraOverride = amount != 1.f;
+                    in.sampleViewProj = projection(camera); in.sampleView = camera.view;
+                    in.sampleCameraPosition = camera.position;
+                }
+                in.velocity = moves;
+                if (!moves) continue;
+                const f64 b = begin * amount, e = end * amount;
+                in.velocityBegin = projection(cameraAt(b)) * world_3d_frac(comp, *layer, time.value + b) * layer_from_model(layer->model);
+                in.velocityEnd = projection(cameraAt(e)) * world_3d_frac(comp, *layer, time.value + e) * layer_from_model(layer->model);
+            }
+            return true;
+        };
         for (scene3d::SceneFrame& f : out.scenes) {
             f.blurFrames.clear();
+            f.velocity = scene3d::SceneVelocity{};
             ShutterPlan shutter = shutter_window(mb);
             bool changing = false;
+            // 0.3.2: o caminho rápido (vetores) vale para este grupo? Começa no
+            // pedido da composição; cada caso que a velocidade não representa
+            // devolve o grupo à acumulação (a qualidade só sobe).
+            bool vectorFits = mb.vectorBlur;
             f64 travel = 0;
             u32 minimum = 1;
             u64 bytesPerSample = sizeof(scene3d::SceneFrame) + f.instances.size() * sizeof(scene3d::SceneInstance)
@@ -4881,18 +4970,38 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (!bounds.valid()) { changing = true; continue; }
                 for (f32 z : {bounds.min.z, bounds.max.z}) {
                     const Mat4 origin = Mat4::translation(Vec3{bounds.min.x, bounds.min.y, z});
-                    travel = std::max(travel, shutter_projected_path(own, bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y,
-                        [&](f64 offset) {
-                            const Mat4 camera = settings.sceneEditor.enabled && !settings.finalQuality
-                                ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor)
-                                : comp_view_projection_frac(comp, time.value + offset, out.compWidth, out.compHeight);
-                            return camera * world_3d_frac(comp, *layer, time.value + offset) * layer_from_model(layer->model) * origin;
-                        }, previewFactor));
+                    const auto matrixAt = [&](f64 offset) {
+                        const Mat4 camera = settings.sceneEditor.enabled && !settings.finalQuality
+                            ? scene_editor_projection(out.compWidth, out.compHeight, settings.sceneEditor)
+                            : comp_view_projection_frac(comp, time.value + offset, out.compWidth, out.compHeight);
+                        return camera * world_3d_frac(comp, *layer, time.value + offset) * layer_from_model(layer->model) * origin;
+                    };
+                    const f32 bw = bounds.max.x - bounds.min.x, bh = bounds.max.y - bounds.min.y;
+                    const f64 path = shutter_projected_path(own, bw, bh, matrixAt, previewFactor);
+                    travel = std::max(travel, path);
+                    // Caminho rápido (vetores): o rastro é a RETA entre as
+                    // pontas do obturador. Trajeto bem mais longo que a reta
+                    // (giro rápido, ida e volta) não cabe nela.
+                    if (mb.vectorBlur && own.duration > 0.0 && path >= .01) {
+                        const Mat4 b = matrixAt(own.begin), e = matrixAt(own.begin + own.duration);
+                        f64 chord = 0.0;
+                        for (const Vec4 point : {Vec4{0, 0, 0, 1}, Vec4{bw, 0, 0, 1}, Vec4{0, bh, 0, 1},
+                                                 Vec4{bw, bh, 0, 1}, Vec4{bw * .5f, bh * .5f, 0, 1}}) {
+                            const Vec4 qb = b * point, qe = e * point;
+                            if (!(qb.w > 1e-5f) || !(qe.w > 1e-5f)) { chord = -1.0; break; }
+                            const f64 dx = static_cast<f64>(qe.x) / qe.w - static_cast<f64>(qb.x) / qb.w;
+                            const f64 dy = static_cast<f64>(qe.y) / qe.w - static_cast<f64>(qb.y) / qb.w;
+                            chord = std::max(chord, std::sqrt(dx * dx + dy * dy) * std::max(.001f, previewFactor));
+                        }
+                        if (chord < 0.0 || !std::isfinite(path) || path > chord * 1.15 + 1.0) vectorFits = false;
+                    }
                 }
             }
             for (u32 pi : f.particleLayers) if (pi < out.layers.size() && out.layers[pi].particle.blur) changing = true;
             for (u32 pi : f.planeLayers) if (pi < out.layers.size())
                 minimum = std::max(minimum, static_cast<u32>(out.layers[pi].blurMatrices.size()));
+            if (vectorFits && !changing && travel >= .01 && tryVector(f, travel))
+                continue;
             const bool batchEligible = settings.boundedSceneExposure && settings.finalQuality
                 && prepareDepth_ == 0 && out.nested.empty() && f.planeLayers.empty() && f.particleLayers.empty();
             const u32 desired = capped_shutter_samples(mb, settings.finalQuality,

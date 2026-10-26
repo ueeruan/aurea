@@ -605,6 +605,16 @@ struct TransformView: View {
             motionBlurRow("mb_adaptive_limit", value: Float(settings.adaptiveLimit), lower: Float(settings.samples),
                           upper: 256, identifier: "motionblur.adaptive", onValue: model.changeMotionBlurAdaptiveLimit)
             Text(AureaText.t("mb_quality_hint")).font(.caption).foregroundStyle(AureaColors.muted)
+            // 0.3.2: motion blur 3D rápido (vetores) × alta qualidade (amostras).
+            blurToggle("mb_vector_3d", hint: "mb_vector_3d_hint", checked: settings.vectorBlur) { model.setMotionBlurVector($0) }
+                .frame(minHeight: 48)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(AureaText.t("mb_vector_3d"))
+                .accessibilityHint(AureaText.t("mb_vector_3d_hint"))
+                .accessibilityValue(AureaText.t(settings.vectorBlur ? "common_on" : "common_off"))
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { model.setMotionBlurVector(!settings.vectorBlur) }
+                .accessibilityIdentifier("motionblur.vector3d")
         }.padding(.vertical, 4)
     }
 

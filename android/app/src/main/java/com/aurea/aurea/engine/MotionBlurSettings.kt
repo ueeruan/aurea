@@ -8,12 +8,15 @@ data class MotionBlurSettings(
     val samples: Int,
     val adaptiveLimit: Int,
     val previewSamples: Int,
+    /** 0.3.2: motion blur 3D rápido (vetores de movimento) em vez das amostras. */
+    val vectorBlur: Boolean = false,
 ) {
     companion object {
         internal fun fromNative(values: FloatArray): MotionBlurSettings? {
             if (values.size < 6 || (0..5).any { !values[it].isFinite() }) return null
             return MotionBlurSettings(values[0] != 0f, values[1], values[2],
-                values[3].toInt(), values[4].toInt(), values[5].toInt())
+                values[3].toInt(), values[4].toInt(), values[5].toInt(),
+                values.size >= 7 && values[6].isFinite() && values[6] != 0f)
         }
     }
 }

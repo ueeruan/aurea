@@ -341,6 +341,13 @@ public:
     Status end_video() noexcept override;
     Status begin_assembly(const AudioStreamConfig* audio) noexcept override;
     Status replay_spilled_audio() noexcept override;
+    void set_assembly_counter(std::atomic<u64>* frames) noexcept override { assemblyCounter_ = frames; }
+    u32 checkpoint_frame() const noexcept override { return logMode_ ? lastLoggedKey_ : 0u; }
+    void close_checkpoint() noexcept override {
+        logReader_.close();
+        (void)log_.close();
+        if (spill_) { std::fclose(spill_); spill_ = nullptr; }
+    }
     Status validate_output(const ExportOutputValidation& expected) noexcept override;
     const char* validation_warnings() const noexcept override { return warningText_; }
     void abort() noexcept override;
@@ -389,6 +396,8 @@ private:
     export_log::StreamInfo logInfo_{};
     AVCodecParameters* videoParams_ = nullptr;   ///< parâmetros do encoder liberado (end_video)
     u64 assembledVideo_ = 0;
+    std::atomic<u64>* assemblyCounter_ = nullptr;   ///< quadros montados (o motor mostra "montando n/N")
+    u32 lastLoggedKey_ = 0;                         ///< último keyframe gravado no registro (checkpoint_frame)
     export_log::Packet logged_;
     // PCM do render guardado ao lado do registro (`<registro>.pcm`, s16
     // intercalado): o áudio é mixado em paralelo aos quadros e só codificado
@@ -600,6 +609,7 @@ Status FFmpegSink::open(const char* output, const VideoStreamConfig& video,
     try { logPath_ = video.packetLogPath ? video.packetLogPath : ""; }
     catch (...) { return error(Errc::OutOfMemory, "caminho do registro de pacotes"); }
     logMode_ = !logPath_.empty(); assembling_ = false; assembledVideo_ = 0;
+    lastLoggedKey_ = video.resumeFrame;
     if (!logMode_ && video.resumeFrame)
         return Status{Errc::InvalidArgument, "retomada de exportacao exige registro de pacotes"};
     video_ = video; video_.packetLogPath = nullptr;
@@ -1639,10 +1649,12 @@ Status FFmpegSink::video_packet(AVRational from) noexcept {
         const u64 frame = videoPackets_ - 1;
         if (packet_->pts != frame_pts(frame) || packet_->size <= 0)
             return error(Errc::EncodeFailed, "pacote do encoder fora do relogio do registro");
+        const bool key = (packet_->flags & AV_PKT_FLAG_KEY) != 0;
         const Status logged = log_.append(static_cast<u32>(frame), packet_->data,
-            static_cast<usize>(packet_->size), (packet_->flags & AV_PKT_FLAG_KEY) != 0);
+            static_cast<usize>(packet_->size), key);
         beat();
         if (!logged.ok()) return error(logged.code(), logged.detail().empty() ? "registro de pacotes" : logged.detail().data());
+        if (key) lastLoggedKey_ = static_cast<u32>(frame);
     } else if (const Status status = mux(packet_, from, videoStream_); !status.ok()) return status;
     if (videoCrop_) {
         const int extra = av_bsf_receive_packet(videoCrop_, packet_);
@@ -2163,6 +2175,7 @@ Status FFmpegSink::mux_logged_video(u64 untilFrame) noexcept {
         if (logged_.key) packet_->flags |= AV_PKT_FLAG_KEY;
         if (const Status status = mux(packet_, videoTimebase_, videoStream_); !status.ok()) return status;
         ++assembledVideo_;
+        if (assemblyCounter_) assemblyCounter_->store(assembledVideo_, std::memory_order_relaxed);
     }
     return OkStatus;
 }

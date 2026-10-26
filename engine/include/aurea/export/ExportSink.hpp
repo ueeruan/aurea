@@ -62,7 +62,8 @@ struct VideoStreamConfig {
     /// ou tolerante (ExportOutputValidation::strict).
     bool strictValidation = true;
     /// Registro de pacotes (export/ExportPacketLog.hpp) dentro do sink. Nulo =
-    /// MP4 direto, o caminho da 1.2.0 (o motor ainda não liga este modo).
+    /// MP4 direto. O motor liga com EngineConfig::enableResumableExport
+    /// (export/ExportCheckpoint.hpp decide o caminho e a retomada).
     const char* packetLogPath = nullptr;
     /// Retomada pelo registro do sink: quadros 0..resumeFrame−1 já gravados.
     u32 resumeFrame = 0;
@@ -138,6 +139,19 @@ public:
     [[nodiscard]] virtual Status replay_spilled_audio() noexcept {
         return Status{Errc::NotSupported, "sink sem registro de pacotes"};
     }
+    /// Montagem do MP4 a partir do registro: quadros já copiados para o
+    /// arquivo final (o motor mostra "montando n/N"; a tela não confunde a
+    /// montagem de um vídeo longo com travamento). Vive até o sink ser destruído.
+    virtual void set_assembly_counter(std::atomic<u64>* frames) noexcept { (void)frames; }
+    /// Registro de pacotes: o último keyframe que esta sessão gravou no
+    /// registro — de onde a próxima sessão continua (o GOP que ele abre pode
+    /// estar incompleto e é renderizado de novo). Sem registro, 0. O motor lê
+    /// no fim da sessão, antes de abortar, sem varrer o arquivo inteiro.
+    [[nodiscard]] virtual u32 checkpoint_frame() const noexcept { return 0; }
+    /// Fecha (fsync) o registro e o PCM do render AGORA, na thread do worker,
+    /// antes do abort: o motor decide em seguida apagar ou guardar o checkpoint
+    /// e o arquivo não pode continuar aberto por um encerramento nativo tardio.
+    virtual void close_checkpoint() noexcept {}
 
     [[nodiscard]] virtual Status validate_output(const ExportOutputValidation&) noexcept {
         return Status{Errc::NotSupported, "plataforma sem validacao independente de exportacao"};

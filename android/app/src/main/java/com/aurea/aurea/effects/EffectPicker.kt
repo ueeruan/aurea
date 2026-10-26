@@ -812,7 +812,7 @@ private fun HeavyBadge(modifier: Modifier = Modifier) {
 private fun NewBadge(modifier: Modifier = Modifier) {
     Text(
         stringResource(R.string.fx_browser_badge),
-        style = AureaType.of(9f, FontWeight.W700, color = AureaColors.OnAction),
+        style = AureaType.of(9f, FontWeight.W700, color = AureaColors.OnAccent),
         maxLines = 1,
         modifier = modifier.clip(RoundedCornerShape(4.dp)).background(AureaColors.Accent).padding(horizontal = 4.dp, vertical = 1.dp),
     )

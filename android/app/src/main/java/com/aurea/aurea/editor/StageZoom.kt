@@ -432,6 +432,18 @@ internal fun ViewModeColumn(store: EditorStore, width: Dp, modifier: Modifier) {
             tag = "viewmode.solo",
             modifier = Modifier.weight(1f),
         ) { ViewModes.cycleSolo() }
+        // 0.3.3 recursos: esconder/mostrar a caixa da seleção no palco (a 0.3.2 tinha
+        // o botão na barra da camada; ela tampa o que está por baixo). Guardado no aparelho.
+        ViewModeCell(
+            glyph = if (StagePrefs.hideSelectionBox) CupertinoGlyph.EyeSlash else CupertinoGlyph.Square,
+            description = stringResource(
+                if (StagePrefs.hideSelectionBox) R.string.editor_mostrar_caixa_selecao else R.string.editor_esconder_caixa_selecao,
+            ),
+            state = if (StagePrefs.hideSelectionBox) offLabel else onLabel,
+            on = StagePrefs.hideSelectionBox,
+            tag = "stage.selectionBox",
+            modifier = Modifier.weight(1f),
+        ) { StagePrefs.toggleSelectionBox() }
         // Visão pela câmera ativa (D5): existe na coluna, desligada. A prévia do
         // AUREA ainda olha sempre pela câmera ativa; desligar essa visão no motor
         // sem desalinhar as alças do palco fica para a próxima onda.

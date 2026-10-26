@@ -27,12 +27,12 @@ import UIKit
     }
 
     // Omega chrome (área 02, P0-5): a barra de reprodução da referência tem 7
-    // células — ↶ ↷ ⇤ ▶ ⇥ · Copiar e colar · painel. Marcar foi para o relógio
-    // da timeline (área 03); grade, prévia rápida e camadas saíram da barra.
+    // células — ↶ ↷ ⇤ ▶ ⇥ · Copiar e colar · painel; grade, prévia rápida e
+    // camadas saíram da barra. 0.3.3 recursos: o marcador da 0.3.2 voltou (8 células).
     func testTransportHasTheSevenReferenceCells() throws {
         _ = try launch("timeline-markers")
         let ids = ["transport.undo", "transport.redo", "transport.previous", "transport.play",
-                   "transport.next", "transport.copyPaste", "transport.viewModes"]
+                   "transport.next", "transport.marker", "transport.copyPaste", "transport.viewModes"]
         var frames: [CGRect] = []
         for id in ids {
             let button = app.buttons[id].firstMatch
@@ -42,7 +42,7 @@ import UIKit
         for index in 1..<frames.count {
             XCTAssertLessThanOrEqual(frames[index - 1].maxX, frames[index].minX + 1, ids[index])
         }
-        for gone in ["transport.marker", "transport.grid", "transport.fastPreview", "transport.layers"] {
+        for gone in ["transport.grid", "transport.fastPreview", "transport.layers"] {
             XCTAssertFalse(app.buttons[gone].firstMatch.exists, gone)
         }
         // O último botão abre a coluna de modos à direita da prévia.
@@ -1257,12 +1257,47 @@ import UIKit
         attach("After undo added shape", stage.value as? String ?? "missing")
     }
 
+    /// 0.3.3 barra: a pílula de 5 categorias; o "+" abre a grade 4 × 2 com as 8
+    /// categorias e vira o "X", que fecha; cada ladrilho abre o seu destino.
+    func testAddBarPlusOpensTheGridAndTheXClosesIt() throws {
+        _ = try launch("layer-dock")
+        app.buttons["Back (clear the selection)"].firstMatch.tap()
+        for name in ["Shape", "Media", "Audio", "Text", "Element"] {
+            XCTAssertTrue(app.buttons["addBar.\(name)"].firstMatch.waitForExistence(timeout: 5), "pill \(name)")
+        }
+        for name in ["TextPresets", "Model3D", "Draw", "Vector"] {
+            XCTAssertFalse(app.buttons["addBar.\(name)"].firstMatch.exists, "\(name) is only in the grid")
+        }
+        let more = app.buttons["addBar.more"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
+        for name in ["Shape", "Media", "Audio", "Text", "TextPresets", "Element", "Model3D", "Draw"] {
+            XCTAssertTrue(app.buttons["addBar.grid.\(name)"].firstMatch.waitForExistence(timeout: 5), "grid \(name)")
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Add bar grid"; shot.lifetime = .keepAlways; self.add(shot)
+        let close = app.buttons["addBar.close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 5) && close.isHittable); close.tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
+                                             object: app.buttons["addBar.grid.Shape"].firstMatch)
+        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 5), .completed)
+        // 3D pela grade abre a grade de objetos 3D.
+        XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
+        let model3D = app.buttons["addBar.grid.Model3D"].firstMatch
+        XCTAssertTrue(model3D.waitForExistence(timeout: 5)); model3D.tap()
+        XCTAssertTrue(app.buttons["add.model3d.shapes"].firstMatch.waitForExistence(timeout: 5))
+        let opened = XCTAttachment(screenshot: app.screenshot())
+        opened.name = "Add bar with 3D open"; opened.lifetime = .keepAlways; self.add(opened)
+    }
+
     /// Presets de texto de volta (2026-10-03): a categoria ao lado do Texto
     /// abre a grade e o toque num cartão cria UM texto já animado.
     func testTextPresetFromTheAddBarAddsOneAnimatedText() throws {
         let before = try launch("layer-dock")
         app.buttons["Back (clear the selection)"].firstMatch.tap()
-        let category = app.buttons["addBar.TextPresets"].firstMatch
+        // 0.3.3 barra: os Presets vêm pela grade do "+".
+        let more = app.buttons["addBar.more"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
+        let category = app.buttons["addBar.grid.TextPresets"].firstMatch
         XCTAssertTrue(category.waitForExistence(timeout: 5)); category.tap()
         let card = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Add text with")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 5)); card.tap()

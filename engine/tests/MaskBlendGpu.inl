@@ -1,7 +1,7 @@
 // =============================================================================
 //  Aurea / tests / MaskBlendGpu.inl  (incluído no fim de test_gpu.cpp)
 //
-//  Máscara do Alight Motion em "Mesclagem e opacidade": BlendMode::Mask
+//  Máscara da referência em "Mesclagem e opacidade": BlendMode::Mask
 //  (destino-dentro) e BlendMode::Exclude (destino-fora). A camada não aparece;
 //  recorta o que já está composto abaixo dela no MESMO grupo/pré-comp. A cor
 //  de fundo da composição não é recortada (entra por baixo no fim).

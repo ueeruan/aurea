@@ -1771,8 +1771,8 @@ to edit the curve.</string>
     <string name="dock_short_sound">Sound</string>
     <string name="fx_save_as_preset">Save as preset</string>
     <string name="fx_my_presets">My effect presets</string>
-    <string name="am_import_action">Import from Alight Motion…</string>
-    <string name="am_import_done">%1$d Alight Motion effect(s) imported into “%2$s”</string>
+    <string name="am_import_action">Import effects from a project (.xml, .amproj)…</string>
+    <string name="am_import_done">%1$d effect(s) imported into “%2$s”</string>
     <string name="am_import_done_skipped">%1$d effect(s) imported, %2$d without an equivalent were left out (“%3$s”)</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
@@ -3762,7 +3762,7 @@ to edit the curve.</string>
     <string name="edt_cmdx_undo_d">Reverts the last edit</string>
     <string name="edt_cmdx_redo">Redo</string>
     <string name="edt_cmdx_redo_d">Reapplies the undone edit</string>
-    <string name="am_import_hint">Select an Aurea layer, then choose an XML, .amproj or ZIP exported by Alight Motion. Import converts compatible effects from the first layer with effects; it does not import the whole project or its media. Files with unsupported items are rejected to avoid losing settings.</string>
+    <string name="am_import_hint">Select an Aurea layer, then choose an XML, .amproj or ZIP file with an effects project. Import converts compatible effects from the first layer with effects; it does not import the whole project or its media. Files with unsupported items are rejected to avoid losing settings.</string>
     <string name="beta_select_media">Select multiple</string>
     <string name="beta_add_media">Add (%1$d)</string>
     <string name="beta_extend_clip">Extend to source end</string>

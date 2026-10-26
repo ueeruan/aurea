@@ -599,11 +599,11 @@ final class AureaModel: ObservableObject {
 
     /// Grava um preset de efeitos do usuário (mesma pasta/formato do PresetsPanel).
     @discardableResult
-    func storeEffectPreset(name: String, json: String) -> String? {
+    func storeEffectPreset(name: String, json: String, uniqueName: Bool = false) -> String? {
         let dir = PanelPresetKind.effects.directory
         let fm = FileManager.default
         var finalName = String(name.prefix(60)), n = 2
-        while fm.fileExists(atPath: dir.appendingPathComponent(PanelPresetKind.fileName(finalName)).path) && finalName.hasPrefix("AM · ") {
+        while fm.fileExists(atPath: dir.appendingPathComponent(PanelPresetKind.fileName(finalName)).path) && uniqueName {
             let suffix = " \(n)"
             finalName = String(name.prefix(60 - suffix.count)) + suffix; n += 1
         }
@@ -625,7 +625,7 @@ final class AureaModel: ObservableObject {
         else { toast = AureaText.t("msg_nao_foi_possivel_salvar_o_preset") }
     }
 
-    /// Importa efeitos do Alight Motion (.xml/.amproj/.zip): só o que tem
+    /// Importa efeitos de um projeto da referência (.xml/.amproj/.zip): só o que tem
     /// equivalente vira preset (o resto é aviso); com camada escolhida, aplica.
     func importAlightMotion(_ data: Data) {
         let raw = engine.importAlightMotion(data)
@@ -641,8 +641,8 @@ final class AureaModel: ObservableObject {
         guard skipped == 0 && warnings == 0 else {
             toast = AureaText.t("am_import_lossless_required"); return
         }
-        let base = (envelope?["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Alight Motion"
-        guard let saved = storeEffectPreset(name: "AM · \(base)", json: preset) else {
+        let base = (envelope?["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? AureaText.t("l33_import_preset_default")
+        guard let saved = storeEffectPreset(name: AureaText.t("l33_import_preset_name", base), json: preset, uniqueName: true) else {
             toast = AureaText.t("msg_nao_foi_possivel_salvar_o_preset"); return
         }
         if let layer = primarySelection {
@@ -5766,7 +5766,7 @@ final class AureaModel: ObservableObject {
         return ok
     }
 
-    /// Arrasto vertical de UM trecho na timeline (como no Alight Motion: só ele
+    /// Arrasto vertical de UM trecho na timeline (como na referência: só ele
     /// anda, nunca a linha inteira). mode 0 = fileira própria logo acima da
     /// fileira de `anchor` (0 = no fundo); 1 = entrar na linha de `anchor` se
     /// couber. Um passo de desfazer; false = o motor recusou (nada mudou).

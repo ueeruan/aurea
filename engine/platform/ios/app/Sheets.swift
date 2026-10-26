@@ -758,7 +758,7 @@ struct NumericKeypadSheet: View {
                 else if let value { request.onValue(value); onDismiss() }
             } label: {
                 Text("OK").fontWeight(.bold).frame(maxWidth: .infinity, minHeight: 48)
-                    .foregroundStyle(ok ? AureaColors.onAction : AureaColors.disabled)
+                    .foregroundStyle(ok ? AureaColors.onAccent : AureaColors.disabled)
                     .background(ok ? AureaColors.accent : AureaColors.chipHigh, in: RoundedRectangle(cornerRadius: 8))
             }.disabled(!ok).accessibilityIdentifier("numeric.keypad.confirm")
         }.font(.aurea(size: 15)).buttonStyle(.plain)

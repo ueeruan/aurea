@@ -19,7 +19,8 @@ class ImportedPresetNameTest {
 
     @Test
     fun shortNamesKeepTheirTitle() {
-        assertEquals("AM · Football", importedPresetName("Football") { false })
-        assertEquals("AM · Football 2", importedPresetName("Football") { it == "AM · Football" })
+        assertEquals("Importado · Football", importedPresetName("Football") { false })
+        assertEquals("Importado · Football 2", importedPresetName("Football") { it == "Importado · Football" })
+        assertEquals("Imported · Football", importedPresetName("Football", { "Imported · $it" }) { false })
     }
 }

@@ -914,7 +914,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString*)savePreset:(long long)layerId kind:(uint32_t)kind name:(NSString*)name parts:(uint32_t)parts NS_SWIFT_NAME(savePreset(_:kind:name:parts:));
 /// Preset de efeitos com SÓ o efeito `effectId` (id da instância) e os keyframes dele. "" = não existe.
 - (NSString*)saveEffectPreset:(long long)layerId effect:(uint32_t)effectId name:(NSString*)name NS_SWIFT_NAME(saveEffectPreset(_:effect:name:));
-/// XML do Alight Motion (ou os bytes do pacote .zip/.amproj) → envelope JSON
+/// XML de projeto da referência (ou os bytes do pacote .zip/.amproj) → envelope JSON
 /// {"preset", "name", "layer", "mapped", "skipped", "warnings", "error"}; "preset" vai para applyPreset.
 - (NSString*)importAlightMotion:(NSData*)data NS_SWIFT_NAME(importAlightMotion(_:));
 /// Preset (.ffx) ou script (.jsx) do After Effects (Engine::import_ae_file) na camada `layer`

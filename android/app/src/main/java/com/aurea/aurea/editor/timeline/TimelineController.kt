@@ -334,11 +334,9 @@ internal class TimelineController(
     private fun hitAt(p: Offset): Hit {
         val hit = Hit()
         val m = metrics
-        // Omega (P1-3): a zona do tempo atual fica por cima da régua.
-        if (omega && omegaCurrentTimeHit(m, p.x, p.y, centerX())) {
-            hit.kind = HitKind.CURRENT_TIME
-            return hit
-        }
+        // 0.3.3 recursos: o marcador antigo voltou — o relógio é parte da régua
+        // (tocar não marca, segurar não abre menu); marca-se pelo botão do
+        // transporte, pela âncora do palco ou pelo menu (como na 0.3.2).
         if (p.y < m.rowsTop) {
             hit.kind = HitKind.RULER
             return hit
@@ -877,7 +875,10 @@ internal class TimelineController(
                 return
             }
             HitKind.RULER -> {
-                omegaRulerTap(p.x)
+                // 0.3.3 recursos: a régua da 0.3.2 — leva o cabeçote ao instante do
+                // dedo; em cima de uma marca (12 dp) vai até ela e abre o editor
+                // (nome, quadro e cor).
+                rulerTap(p.x)
                 return
             }
             HitKind.HEADER_EYE -> if (r != null) {
@@ -1117,7 +1118,7 @@ internal class TimelineController(
                     else scroll(down.id, ch.position, tracker)
                 HitKind.HEADER -> if (!time && !state.compact) reorderDrag(hit.lane ?: r, hit.rowIndex, down, grabbed = null) else consumeUntilUp()
                 // Segurar de propósito levanta o TRECHO: claramente na pilha ele sobe
-                // ou desce SOZINHO (como no Alight Motion — a linha não vai junto;
+                // ou desce SOZINHO (como na referência — a linha não vai junto;
                 // a linha inteira anda pela pílula), claramente no tempo move o
                 // trecho; o resto rola.
                 else -> when {

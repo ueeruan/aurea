@@ -28,8 +28,72 @@ class EditorLayoutTest {
             val previews = allContents.map { EditorLayout.solve(h, it, false, 375f, 9f / 16f).preview }
             // P0-1 da área 02: prévia = H − 368 em todos os estados do retrato.
             for (p in previews) assertEquals("preview at $h", h - 368f, p, 0.01f)
-            // O aspecto do projeto e a altura arrastada antiga não mexem mais na prévia (D2).
-            assertEquals(h - 368f, EditorLayout.solve(h, SheetContent.None, false, 375f, 16f / 9f, preferred = 300f).preview, 0.01f)
+            // O aspecto do projeto não mexe na prévia.
+            assertEquals(h - 368f, EditorLayout.solve(h, SheetContent.None, false, 375f, 16f / 9f).preview, 0.01f)
+        }
+    }
+
+    // 0.3.3 recursos: a divisa palco/timeline voltou (arrastar o transporte).
+    @Test fun dividerRaisesTheTimelineAndThePanelKeepsItsHeight() {
+        for (h in phones) {
+            val p = h - 368f - 100f   // a timeline subiu 100
+            val bar = EditorLayout.solve(h, SheetContent.AddBar, false, preferred = p)
+            assertEquals(p, bar.preview, 0.01f)
+            assertEquals(380f, bar.zone, 0.01f)
+            assertEquals(310f, bar.timeline, 0.01f)
+            assertEquals(EditorLayout.ADD_BAR, bar.sheet, 0.01f)
+            assertEquals(h, bar.total, 0.01f)
+            for (content in listOf(SheetContent.Dock, SheetContent.Panel, SheetContent.Curve)) {
+                val m = EditorLayout.solve(h, content, false, preferred = p)
+                // Prévia menor que a automática: fica onde a pessoa deixou; o painel tem 200 por cima.
+                assertEquals("$content preview", p, m.preview, 0.01f)
+                assertTrue(m.overlay)
+                assertEquals("$content sheet", 200f, m.sheet, 0.01f)
+                assertEquals("$content visible", 180f, m.visibleTimeline, 0.01f)
+                assertEquals(h, m.total, 0.01f)
+            }
+        }
+    }
+
+    @Test fun dividerLowersTheTimelineButPanelsGetTheWholeZone() {
+        for (h in phones) {
+            val p = h - 368f + 60f   // a timeline desceu 60
+            val bar = EditorLayout.solve(h, SheetContent.AddBar, false, preferred = p)
+            assertEquals(p, bar.preview, 0.01f)
+            assertEquals(220f, bar.zone, 0.01f)
+            assertEquals(150f, bar.timeline, 0.01f)
+            assertEquals(EditorLayout.ADD_BAR, bar.sheet, 0.01f)
+            assertEquals(h, bar.total, 0.01f)
+            // Painel e adicionar abertos precisam da zona inteira (como na 0.3.2): a prévia
+            // devolve o espaço enquanto estão abertos; o painel continua 200 + 80.
+            for (content in listOf(SheetContent.Dock, SheetContent.Panel, SheetContent.Curve, SheetContent.Adding)) {
+                val m = EditorLayout.solve(h, content, false, preferred = p)
+                assertEquals("$content preview", h - 368f, m.preview, 0.01f)
+                assertEquals("$content zone", 280f, m.zone, 0.01f)
+                assertEquals(h, m.total, 0.01f)
+            }
+            assertEquals(200f, EditorLayout.solve(h, SheetContent.Panel, false, preferred = p).sheet, 0.01f)
+        }
+    }
+
+    @Test fun dividerIsClampedBetweenTheFloorsAndZeroMeansAutomatic() {
+        for (h in phones) {
+            val ws = h - EditorLayout.TOP_BAR - EditorLayout.TRANSPORT
+            assertEquals(ws - EditorLayout.ZONE_MIN, EditorLayout.maxPreview(h), 0.01f)
+            val tall = EditorLayout.solve(h, SheetContent.AddBar, false, preferred = 10_000f)
+            assertEquals(EditorLayout.maxPreview(h), tall.preview, 0.01f)
+            assertEquals(EditorLayout.TIMELINE_MIN, tall.timeline, 0.01f)
+            val short = EditorLayout.solve(h, SheetContent.None, false, preferred = 1f)
+            assertEquals(EditorLayout.PREVIEW_MIN, short.preview, 0.01f)
+            assertEquals(h, short.total, 0.01f)
+            assertEquals(h - 368f, EditorLayout.solve(h, SheetContent.AddBar, false, preferred = 0f).preview, 0.01f)
+        }
+        // Telas curtas com a divisa: as zonas continuam dentro da janela.
+        for (height in listOf(240f, 320f, 480f, 568f)) for (content in allContents) for (pref in listOf(1f, 200f, 10_000f)) {
+            val m = EditorLayout.solve(height, content, false, preferred = pref)
+            assertTrue(m.preview > 0f && m.timeline >= 0f && m.sheet >= 0f)
+            assertEquals(height, m.total, .01f)
+            if (m.overlay) assertTrue(m.sheet <= m.timeline)
         }
     }
 

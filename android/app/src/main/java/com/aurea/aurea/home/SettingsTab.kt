@@ -511,7 +511,6 @@ private fun themeName(id: String): String = stringResource(when (id) {
     "emerald" -> R.string.theme_emerald
     "amethyst" -> R.string.theme_amethyst
     "sunset" -> R.string.theme_sunset
-    "omega" -> R.string.theme_omega
     else -> R.string.theme_aurea
 })
 

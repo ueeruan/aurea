@@ -68,6 +68,18 @@ class TimelineOmegaTest {
         assertEquals(1, MarkerColors.appearance(0xFF4DB7FF.toInt(), roles))
     }
 
+    // 0.3.3 recursos: o marcador antigo (seis cores) voltou, com a correção acima.
+    @Test fun `marcador antigo - seis cores gravadas certas e as da 032 mostradas como pretendiam`() {
+        assertEquals(0xFFF7C34F.toInt(), MarkerColors.display(MarkerColors.ENGINE_DEFAULT))
+        for ((i, argb) in MarkerColors.LEGACY.withIndex()) {
+            assertEquals(argb, MarkerColors.display(MarkerColors.pack(argb)))
+            assertEquals(argb, MarkerColors.display(argb))   // literal ARGB cru gravado pela 0.3.2
+            assertEquals(i, MarkerColors.legacyIndex(MarkerColors.pack(argb)))
+        }
+        assertEquals(0xFFFF00FF.toInt(), MarkerColors.display(0xFFFF00FF.toInt()))
+        assertEquals(-1, MarkerColors.legacyIndex(0xFF123456.toInt()))
+    }
+
     @Test fun `P0-5 passo dos tiques em potencia de 2`() {
         assertEquals(1, OmegaRuler.frameStep(100f, 30f))
         assertEquals(16, OmegaRuler.frameStep(10f, 30f))

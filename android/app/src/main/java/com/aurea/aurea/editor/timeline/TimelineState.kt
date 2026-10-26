@@ -42,7 +42,7 @@ internal class TimelineState {
     /** Floating layer top in viewport pixels; independent of vertical auto-scroll. */
     var reorderTop by mutableFloatStateOf(0f)
     /**
-     * Arrasto vertical de UM trecho (Alight Motion): o trecho no ar (0 = nenhum),
+     * Arrasto vertical de UM trecho (como na referência): o trecho no ar (0 = nenhum),
      * o topo dele na janela (px, segue o dedo), e onde ele cai — [RowDrop] kind,
      * y do traço de inserção (conteúdo) ou a fileira acesa ao entrar numa linha.
      */

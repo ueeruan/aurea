@@ -370,7 +370,7 @@ internal object RowOrder {
 }
 
 /**
- * Arrasto VERTICAL de UM trecho (como no Alight Motion: só ele anda, nunca a
+ * Arrasto VERTICAL de UM trecho (como na referência: só ele anda, nunca a
  * linha inteira). Diz onde o trecho cai com o dedo em [y] (conteúdo: a partir
  * do topo da 1ª fileira, com a rolagem): ENTRE duas fileiras (fileira própria
  * ali — o traço de inserção) ou DENTRO de uma linha magnética/compartilhada

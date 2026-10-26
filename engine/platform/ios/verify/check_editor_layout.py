@@ -59,6 +59,9 @@ check(EditorLayout.dockQuick >= 44 && EditorLayout.dockTile >= 44, "doca preserv
 // Omega fundação (F6): topo 42, transporte 46, zona fixa de 280 e a prévia igual em todos os estados.
 check(near(EditorLayout.topBar, 42) && near(EditorLayout.transport, 46), "barras da referência")
 check(near(EditorLayout.bottomZone(), 280) && near(EditorLayout.layerPanel(), 200), "zona de 280 com painel de 200")
+// 0.3.3 barra: o bloco da grade do "+" (174) cabe na zona mínima da divisa (110 + 70).
+check(near(EditorLayout.addBarGridHeight, 174) && EditorLayout.addBarGridHeight <= EditorLayout.zoneMin,
+      "grade do + de \(EditorLayout.addBarGridHeight) cabe na zona mínima \(EditorLayout.zoneMin)")
 let contents: [SheetContent] = [.none, .addBar, .dock, .panel, .curve, .batch, .adding, .hint]
 for h in [CGFloat(640), 700, 760, 780, 844, 900, 960] {
     for content in contents {
@@ -80,6 +83,43 @@ for h in [CGFloat(640), 700, 760, 780, 844, 900, 960] {
     }
     let batch = EditorLayout.solve(total: h, content: .batch, fullscreen: false)
     check(near(batch.sheet, 132) && near(batch.timeline, 148), "seleção múltipla empilhada dentro da zona")
+}
+// 0.3.3 recursos: a divisa palco/timeline voltou (par do EditorLayoutTest.kt).
+for h in [CGFloat(640), 700, 760, 780, 844, 900, 960] {
+    let ws = h - EditorLayout.topBar - EditorLayout.transport
+    check(near(EditorLayout.maxPreview(h), ws - EditorLayout.zoneMin), "\(h): maxPreview com zona mínima de 180")
+    let up = h - 368 - 100   // a timeline subiu 100
+    let upBar = EditorLayout.solve(total: h, content: .addBar, fullscreen: false, preferred: up)
+    check(near(upBar.preview, up) && near(upBar.zone, 380) && near(upBar.timeline, 310) && near(upBar.sheet, 70) && near(upBar.total, h),
+          "\(h) divisa subindo: timeline 310 + barra 70")
+    for content in [SheetContent.dock, .panel, .curve] {
+        let m = EditorLayout.solve(total: h, content: content, fullscreen: false, preferred: up)
+        check(m.overlay && near(m.preview, up) && near(m.sheet, 200) && near(m.visibleTimeline, 180) && near(m.total, h),
+              "\(h) \(content) divisa subindo: painel de 200 e 180 de timeline à vista")
+    }
+    let down = h - 368 + 60  // a timeline desceu 60
+    let downBar = EditorLayout.solve(total: h, content: .addBar, fullscreen: false, preferred: down)
+    check(near(downBar.preview, down) && near(downBar.zone, 220) && near(downBar.timeline, 150) && near(downBar.total, h),
+          "\(h) divisa descendo: timeline 150 + barra 70")
+    for content in [SheetContent.dock, .panel, .curve, .adding] {
+        let m = EditorLayout.solve(total: h, content: content, fullscreen: false, preferred: down)
+        check(near(m.preview, h - 368) && near(m.zone, 280) && near(m.total, h),
+              "\(h) \(content) divisa descendo: painel aberto recebe a zona inteira")
+    }
+    let tall = EditorLayout.solve(total: h, content: .addBar, fullscreen: false, preferred: 10_000)
+    check(near(tall.preview, EditorLayout.maxPreview(h)) && near(tall.timeline, EditorLayout.timelineMin), "\(h): divisa presa no topo")
+    let short = EditorLayout.solve(total: h, content: .none, fullscreen: false, preferred: 1)
+    check(near(short.preview, EditorLayout.previewMin) && near(short.total, h), "\(h): divisa presa no piso")
+    check(near(EditorLayout.solve(total: h, content: .addBar, fullscreen: false, preferred: 0).preview, h - 368), "\(h): 0 = automática")
+}
+for height in [CGFloat(240), 320, 480, 568] {
+    for content in contents {
+        for pref in [CGFloat(1), 200, 10_000] {
+            let m = EditorLayout.solve(total: height, content: content, fullscreen: false, preferred: pref)
+            check(near(m.total, height) && m.preview > 0 && m.timeline >= 0 && m.sheet >= 0, "tela curta \(height) com divisa \(pref)")
+            if m.overlay { check(m.sheet <= m.timeline, "painel maior que a zona em \(height) com divisa") }
+        }
+    }
 }
 let bigFont = EditorLayout.solve(total: 900, content: .panel, fullscreen: false, fontScale: 1.5)
 check(near(bigFont.sheet, 220) && near(bigFont.timeline, 300) && near(bigFont.preview, 900 - 388), "fonte 150 %: painel 220, zona 300")

@@ -1435,7 +1435,7 @@ AUREA_TEST(MagneticTrack, TheFlagSurvivesSaveAndLoad) {
 
 // =============================================================================
 //  Arrasto VERTICAL de um trecho só (beta: "os textos andam todos juntos").
-//  Como no Alight Motion, cada trecho sobe/desce sozinho; a linha não vai junto.
+//  Como na referência, cada trecho sobe/desce sozinho; a linha não vai junto.
 // =============================================================================
 namespace {
 struct RowRig {

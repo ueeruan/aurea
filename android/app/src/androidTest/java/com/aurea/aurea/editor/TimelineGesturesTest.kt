@@ -522,7 +522,7 @@ class TimelineGesturesTest {
      * fica (o cabeçote da origem não puxa de volta). Um desfazer devolve.
      */
     /**
-     * Pedido do dono (12/10/2026), como no Alight Motion: o losango de uma camada
+     * Pedido do dono (12/10/2026), como na referência: o losango de uma camada
      * NÃO selecionada é só referência — o arrasto que passa por ele rola/faz
      * scrub e não move o keyframe. Tocar na camada a seleciona e o mesmo arrasto
      * passa a mover o losango.

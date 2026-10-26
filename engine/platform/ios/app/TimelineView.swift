@@ -4,9 +4,12 @@ import SwiftUI
 import UIKit
 import Combine
 
+/// 0.3.3 recursos: a cor de uma marca com a correção da área 03 (`MarkerColors.display`:
+/// R no byte baixo; as marcas gravadas pela 0.3.2 com literais ARGB crus aparecem certas).
 private func markerTint(_ packed: UInt32) -> Color {
-    Color(.sRGB, red: Double(packed & 255) / 255, green: Double((packed >> 8) & 255) / 255,
-          blue: Double((packed >> 16) & 255) / 255, opacity: 1)
+    let argb = MarkerColors.display(packed)
+    return Color(.sRGB, red: Double((argb >> 16) & 255) / 255, green: Double((argb >> 8) & 255) / 255,
+                 blue: Double(argb & 255) / 255, opacity: 1)
 }
 
 struct MarkerEditorSheet: View {
@@ -18,17 +21,17 @@ struct MarkerEditorSheet: View {
     @State private var frameText: String
     @State private var color: UInt32
     @State private var failure = false
-    // Omega timeline (área 03, P1-3): as quatro aparências da régua. O motor guarda
-    // RGBA com o R no byte BAIXO (Marker::color); `MarkerColors` faz a conta nos dois
-    // sentidos — a paleta antiga de 6 cores era escrita como ARGB e lida como RGBA.
-    private let palette: [UInt32] = MarkerColors.roles.map { MarkerColors.pack($0) }
+    // 0.3.3 recursos: o marcador antigo (a paleta de seis cores da 0.3.2) volta, com a
+    // correção da área 03: o motor guarda RGBA com o R no byte BAIXO (Marker::color) e
+    // `MarkerColors.pack` grava a cor certa; as marcas da 0.3.2 aparecem certas (`display`).
+    private let palette: [UInt32] = MarkerColors.legacy.map { MarkerColors.pack($0) }
     init(frame: Int64, color: UInt32, label: String, isNew: Bool = false) {
         original = frame
         self.isNew = isNew
         _name = State(initialValue: label)
         _frameText = State(initialValue: String(frame))
-        // Marca nova: a primeira aparência da Omega (par do Android).
-        _color = State(initialValue: isNew ? MarkerColors.pack(MarkerColors.roles[0]) : color)
+        // Marca nova: a cor padrão do motor (o amarelo da 0.3.2; par do Android).
+        _color = State(initialValue: isNew ? MarkerColors.engineDefault : color)
     }
     var body: some View {
         NavigationView {
@@ -38,12 +41,12 @@ struct MarkerEditorSheet: View {
                 TextField(AureaText.t("marker_frame"), text: $frameText).keyboardType(.numberPad)
                 Text(Timecode.format(Int32(clamping: max(0, Int64(frameText) ?? 0)), Float(model.compositionFps)))
                 Button(AureaText.t("marker_at_playhead")) { frameText = String(model.status.playhead) }
-                HStack {
-                    let chosen = MarkerColors.appearance(color)
+                HStack(spacing: 0) {
+                    let chosen = MarkerColors.legacyIndex(color)
                     ForEach(Array(palette.enumerated()), id: \.offset) { index, packed in
                         Button { color = packed } label: {
                             Circle().fill(markerTint(packed)).frame(width: chosen == index ? 32 : 22, height: chosen == index ? 32 : 22)
-                                .frame(width: 44, height: 44)
+                                .frame(maxWidth: .infinity).frame(height: 44)
                         }.buttonStyle(.borderless).accessibilityLabel(AureaText.t("marker_color", index + 1))
                             .accessibilityIdentifier("marker.color.\(index)")
                     }
@@ -97,7 +100,7 @@ struct TimelineView: View {
     @State private var reorderTarget = -1
     @State private var reorderTop: CGFloat = 0
     @State private var reorderGrabOffset: CGFloat = 0
-    /// Arrasto vertical de UM trecho (Alight Motion): o trecho no ar (0 = nenhum),
+    /// Arrasto vertical de UM trecho (como na referência): o trecho no ar (0 = nenhum),
     /// o topo dele na janela (segue o dedo), a fileira de onde saiu e onde cai.
     @State private var liftId: Int64 = 0
     @State private var liftTop: CGFloat = 0
@@ -322,8 +325,10 @@ struct TimelineView: View {
             }
             // Por cima da superfície de gestos: o toque num botão não chega à timeline.
             .overlay(alignment: keyBarAlignment) { keyActionBar }
-            // Omega (P2-5): a barra de cima da seleção (batchBar) já tem o Concluir.
-            .overlay(alignment: .bottom) { if !EditorTimelineRefresh.enabled { layerPickBar } }
+            // 0.3.3 recursos: a barra do "Selecionar várias" da 0.3.2 volta (contador ·
+            // Todas · Limpar · Concluir). Na Omega fica logo acima da barra flutuante da
+            // seleção múltipla (42 + 6), que mora na base da zona. Par do Android.
+            .overlay(alignment: .bottom) { layerPickBar.padding(.bottom, EditorTimelineRefresh.enabled ? 48 : 0) }
             // Omega (P1-5/P1-7): barra de info do gesto (início, deslocamento, corte).
             .overlay(alignment: .top) { if let info = model.timelineInfo { omegaInfoBar(info) } }
             // Omega (P1-3): a âncora do menu do tempo atual (a zona de 100 × 38 da aba, sem toque próprio).
@@ -334,8 +339,11 @@ struct TimelineView: View {
                 }
             }
             .overlay(alignment: .topLeading) {
-                // Omega (P2-5): o botão "Todas/Seleção" sai (a referência não tem).
-                if !EditorTimelineRefresh.enabled && !model.selection.isEmpty && (compactDock || model.sheetContent == .panel || model.sheetContent == .curve) {
+                // 0.3.3 recursos: o botão "Todas/Seleção" da 0.3.2 volta: com camada escolhida
+                // (foco de uma linha), mostra todas as camadas e volta só à escolhida.
+                if !model.selection.isEmpty && (EditorTimelineRefresh.enabled
+                    ? (model.sheetContent == .dock || model.sheetContent == .panel || model.sheetContent == .curve)
+                    : (compactDock || model.sheetContent == .panel || model.sheetContent == .curve)) {
                     Button { showAllLayers.toggle() } label: {
                         Text(AureaText.t(showAllLayers ? "timeline_selection_short" : "timeline_all_short"))
                             .font(.aurea(size: 12)).lineLimit(1).frame(width: 84, height: 44)
@@ -361,7 +369,7 @@ struct TimelineView: View {
                 refreshMedia(size: size)
                 noteLayers(model.layers.map(\.id))
                 if compact { focusedLayer = model.primarySelection }
-                omegaMarkerHint()
+                // 0.3.3 recursos: sem a dica "toque no relógio" (o marcador antigo voltou).
             }
             .onChange(of: guide) { snap in if snap != Snap.none { haptics.snap() } }
             .onChange(of: pps) { value in TimelineViewMemory.state[memoryKey] = (value, rememberedScroll) }
@@ -579,6 +587,14 @@ struct TimelineView: View {
         }
         context.stroke(minor, with: .color(AureaTimeline.rulerMinor), lineWidth: m.tickMinorWidth)
         context.stroke(major, with: .color(AureaTimeline.rulerMajor), lineWidth: m.tickMajorWidth)
+        drawLegacyMarkers(&context, size: size)
+        drawTimecode(&context, size: size)
+    }
+
+    /// O marcador da 0.3.2 na régua (também na Omega desde a 0.3.3): triângulo na
+    /// cor da marca, fio até os tiques e o nome à direita, cortado antes da
+    /// próxima marca (ou da borda) — o mesmo desenho do Android (`drawMarkers`).
+    private func drawLegacyMarkers(_ context: inout GraphicsContext, size: CGSize) {
         for (index, marker) in markers.enumerated() {
             let px = x(Double(marker.frame), width: size.width), half = m.tickBottom * 0.28
             // 0.3.2: o nome da marca à direita do triângulo, cortado antes da
@@ -597,16 +613,14 @@ struct TimelineView: View {
             }
             guard px >= -half && px <= size.width + half else { continue }
             let s = max(marker.kind == 1 ? half * 0.7 : half, 3.5)
-            let color = Color(.sRGB, red: Double(marker.packedColor & 255) / 255,
-                              green: Double((marker.packedColor >> 8) & 255) / 255,
-                              blue: Double((marker.packedColor >> 16) & 255) / 255, opacity: 1)
+            // 0.3.3 recursos: a cor com a correção da área 03 (`MarkerColors.display`).
+            let color = markerTint(marker.packedColor)
             var path = Path(); path.move(to: CGPoint(x: px - s, y: 0)); path.addLine(to: CGPoint(x: px + s, y: 0))
             path.addLine(to: CGPoint(x: px, y: s * 1.4)); path.closeSubpath()
             context.fill(path, with: .color(color))
             var line = Path(); line.move(to: CGPoint(x: px, y: s * 1.4)); line.addLine(to: CGPoint(x: px, y: m.tickBottom))
             context.stroke(line, with: .color(color), lineWidth: marker.kind == 1 ? 1 : 1.5)
         }
-        drawTimecode(&context, size: size)
     }
 
 
@@ -1193,7 +1207,26 @@ struct TimelineView: View {
     }
 
     private func glyph(_ context: inout GraphicsContext, _ glyph: Character, size: CGFloat, tint: Color, x: CGFloat, y: CGFloat) {
-        context.draw(Text(String(glyph)).font(CupertinoFont.font(size)).foregroundColor(tint), at: CGPoint(x: x, y: y))
+        // 0.3.3 limpeza: o mesmo peso bold do `CupertinoGlyph.text` (`AureaBoldIcon`):
+        // o glifo e oito cópias deslocadas meio traço em volta. Par do `drawGlyph` do
+        // TimelinePainter.kt. Tinta translúcida: tudo opaco numa camada com o alfa,
+        // senão a sobreposição das cópias deixaria a borda mais forte.
+        let alpha = tint.aureaAlpha
+        guard alpha > 0 else { return }
+        let ink = alpha < 0.999 ? tint.aureaOpaque : tint
+        let text = context.resolve(Text(String(glyph)).font(CupertinoFont.font(size)).foregroundColor(ink))
+        let r = size * AureaIconWeight.glyphStroke / 2
+        var outer = context
+        if alpha < 0.999 { outer.opacity *= alpha }
+        outer.drawLayer { layer in
+            if r > 0 {
+                for i in 0..<8 {
+                    let angle = Double(i) * Double.pi / 4
+                    layer.draw(text, at: CGPoint(x: x + r * CGFloat(cos(angle)), y: y + r * CGFloat(sin(angle))))
+                }
+            }
+            layer.draw(text, at: CGPoint(x: x, y: y))
+        }
     }
     private func fittedName(_ name: String, width: CGFloat, size: CGFloat = 11, weight: UIFont.Weight = .medium) -> String {
         let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: size, weight: weight), .kern: size == 11 ? -0.1 : 0]
@@ -1325,11 +1358,9 @@ struct TimelineView: View {
     /// O que o dedo pegou: o TRECHO (na pílula de uma fileira compartilhada, a
     /// fileira); `index` do resultado é a fileira inteira sob o dedo.
     private func hit(_ point: CGPoint, width: CGFloat) -> (TimelineRow?, TimelineHit) {
-        // Omega (P1-3): a zona do tempo atual fica por cima da régua.
-        if EditorTimelineRefresh.enabled && point.y >= m.omegaTimeTouchTop && point.y <= m.omegaTimeTouchBottom
-            && abs(point.x - width / 2) <= m.omegaTimeTouchHalf {
-            return (nil, TimelineHit(kind: .currentTime))
-        }
+        // 0.3.3 recursos: o marcador antigo voltou — o relógio é parte da régua
+        // (tocar não marca, segurar não abre menu); marca-se pelo botão do
+        // transporte, pela âncora do palco ou pelo menu (como na 0.3.2).
         if point.y < m.rowsTop { return (nil, TimelineHit(kind: .ruler)) }
         let index = rowIndex(point.y - m.rowsTop + (compact ? 0 : scrollY))
         let current = rows
@@ -1759,7 +1790,7 @@ struct TimelineView: View {
                 else if g.hit.kind == .key { mode = time ? .key : (compact ? .step : .scroll) }
                 else if g.hit.kind == .header { mode = !time && !compact ? .reorder : .blocked }
                 else if time || compact { mode = .move }
-                // Na pilha, o TRECHO sobe/desce sozinho (como no Alight Motion);
+                // Na pilha, o TRECHO sobe/desce sozinho (como na referência);
                 // a linha inteira anda pela pílula.
                 else { mode = stack ? .lift : .scroll }
                 if mode == .move, let row = g.row, !model.selection.contains(row.id) {
@@ -2483,7 +2514,13 @@ extension TimelineView {
             model.toggleMarkerAt(model.status.playhead)
             return
         case .ruler:
-            omegaRulerTap(point.x, width: width)
+            // 0.3.3 recursos: a régua da 0.3.2 — leva o cabeçote ao instante do dedo;
+            // em cima de uma marca (12 pt) vai até ela e abre o editor (nome, quadro, cor).
+            let target = Int64(max(0, timelineFrame(frame(point.x, width: width))))
+            let marker = model.markerNear(target, tolerance: Int64(12 / max(0.0001, ppf)))
+            model.seek(toFrame: marker ?? target)
+            if let marker { model.openMarkerEditor(marker) }
+            UISelectionFeedbackGenerator().selectionChanged()
             return
         case .eye:
             guard let row else { return }
@@ -2602,7 +2639,7 @@ extension TimelineView {
                 // Alças do foco (P1-7); com o painel Velocidade, as de velocidade (P1-8).
                 haptics.light()
                 let edge: Mode = touched.kind == .trimStart ? .trimStart : .trimEnd
-                let mode: Mode = model.panel == .speed ? .stretch : edge
+                let mode: Mode = model.speedHandlesActive ? .stretch : edge
                 begin(mode, start: start, width: size.width)
             } else if touched.kind == .key {
                 haptics.light()
@@ -2822,7 +2859,7 @@ extension TimelineView {
         // Alças do foco (P1-7/P1-8): aparar (ou esticar a velocidade) um quadro por vez.
         if compact, model.selection.count == 1, let id = model.primarySelection,
            let layer = model.layers.first(where: { $0.id == id }), !layer.locked {
-            let speed = model.panel == .speed
+            let speed = model.speedHandlesActive
             Text(AureaText.t(speed ? "om_tl_speed_handle_a11y" : "om_tl_trim_start_a11y", layer.name))
                 .accessibilityAction(named: Text(AureaText.t("om_tl_frame_earlier"))) { omegaNudge(layer, start: true, by: -1, speed: speed) }
                 .accessibilityAction(named: Text(AureaText.t("om_tl_frame_later"))) { omegaNudge(layer, start: true, by: 1, speed: speed) }
@@ -2861,11 +2898,13 @@ extension TimelineView {
                               width: span.upperBound - span.lowerBound, height: TimelinePreviewBuffer.height)
             context.fill(Path(rect), with: .color(AureaTimeline.previewBuffer))
         }
-        let marked: Int? = omegaMarkers(&context, size: size)
-        omegaTimeTab(&context, size: size, marked: marked != nil)
-        // Cursor de 1,5, interrompido na aba; na cor do marcador do quadro; a 50 % movendo.
-        var tint: Color = AureaColors.playhead
-        if let marked { tint = AureaTimeline.bookmarks[MarkerColors.appearance(markers[marked].packedColor) % AureaTimeline.bookmarks.count] }
+        // 0.3.3 recursos: o marcador antigo da 0.3.2 na régua — triângulo na cor da
+        // marca, fio até os tiques e o NOME à direita. A bandeirola, o contorno da
+        // aba e o cursor na cor da marca saíram (par do Android).
+        drawLegacyMarkers(&context, size: size)
+        omegaTimeTab(&context, size: size, marked: false)
+        // Cursor de 1,5, interrompido na aba; a 50 % movendo.
+        let tint: Color = AureaColors.playhead
         let px = x(Double(clock.frame), width: size.width)
         var line = context
         if moveOrig != nil { line.opacity = 0.5 }
@@ -3321,7 +3360,7 @@ extension TimelineView {
         guard alpha > 0 else { return }
         var clipped = context
         clipped.clip(to: Path(CGRect(x: m.headerColumn, y: top - 2, width: max(0, width - m.headerColumn), height: m.bar + 4)))
-        let speed = model.panel == .speed
+        let speed = model.speedHandlesActive
         omegaHandle(&clipped, left: x0 - m.omegaHandle, top: top, start: true, alpha: alpha, speed: speed)
         omegaHandle(&clipped, left: x1, top: top, start: false, alpha: alpha, speed: speed)
     }

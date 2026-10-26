@@ -609,8 +609,10 @@ struct TimeGlyphView: View {
     var body: some View {
         Canvas { context, size in
             let u = size.width / 24
-            let stroke = StrokeStyle(lineWidth: 1.8 * u, lineCap: .round, lineJoin: .round)
-            let dashed = StrokeStyle(lineWidth: 1.8 * u, lineCap: .round, lineJoin: .round, dash: [2.2 * u, 2.0 * u])
+            // 0.3.3: traço 1,8 + o extra dos glifos bold (AureaIconWeight.glyphStroke).
+            let sw = (1.8 + 24 * AureaIconWeight.glyphStroke) * u
+            let stroke = StrokeStyle(lineWidth: sw, lineCap: .round, lineJoin: .round)
+            let dashed = StrokeStyle(lineWidth: sw, lineCap: .round, lineJoin: .round, dash: [2.2 * u, 2.0 * u])
             func line(_ a: CGPoint, _ b: CGPoint, _ style: StrokeStyle) {
                 var p = Path(); p.move(to: a); p.addLine(to: b); context.stroke(p, with: .color(color), style: style)
             }
@@ -878,7 +880,9 @@ private struct RetimeGlyphView: View {
     var body: some View {
         Canvas { context, size in
             let u = size.width / 24
-            let style = StrokeStyle(lineWidth: 1.6 * u, lineCap: .round)
+            // 0.3.3: + o traço extra dos glifos bold (AureaIconWeight.glyphStroke).
+            let bold = 24 * AureaIconWeight.glyphStroke * u
+            let style = StrokeStyle(lineWidth: 1.6 * u + bold, lineCap: .round)
             let start = edge <= 1
             let l: CGFloat = start ? 9 : 3
             let r: CGFloat = start ? 21 : 15
@@ -887,7 +891,7 @@ private struct RetimeGlyphView: View {
             for i in 1...3 {
                 let x = l + (r - l) * CGFloat(i) / 4
                 var p = Path(); p.move(to: CGPoint(x: x * u, y: 9.5 * u)); p.addLine(to: CGPoint(x: x * u, y: 14.5 * u))
-                context.stroke(p, with: .color(color.opacity(0.55)), lineWidth: u)
+                context.stroke(p, with: .color(color.opacity(0.55)), lineWidth: u + bold)
             }
             let (from, to): (CGFloat, CGFloat) = edge == 0 ? (8, 2) : edge == 1 ? (2, 8) : edge == 2 ? (22, 16) : (16, 22)
             var a = Path(); a.move(to: CGPoint(x: from * u, y: 12 * u)); a.addLine(to: CGPoint(x: to * u, y: 12 * u))
@@ -906,7 +910,7 @@ func snapLinearSpeed(_ v: Float) -> Float {
     return ((v / 0.05).rounded() * 0.05).clamped(to: 0.05...4)
 }
 
-/// A RÉGUA DA VELOCIDADE (`AlightSlider` da referência; par do `SpeedSlider`):
+/// A RÉGUA DA VELOCIDADE (o slider da referência; par do `SpeedSlider`):
 /// linear de 0,05 a 4×, origem em 1×, tartaruga e lebre a 50 % nas pontas.
 struct SpeedSlider: View {
     let value: Float

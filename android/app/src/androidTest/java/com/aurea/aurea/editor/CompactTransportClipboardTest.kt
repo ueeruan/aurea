@@ -22,8 +22,8 @@ class CompactTransportClipboardTest {
     private lateinit var store: EditorStore
 
     // Omega chrome (área 02, P0-5): o transporte da referência tem 7 células de
-    // peso igual — ↶ ↷ ⇤ ▶ ⇥ · Copiar e colar · painel. Marcar o instante foi
-    // para o relógio da timeline (área 03); grade, resolução e camadas saíram.
+    // peso igual — ↶ ↷ ⇤ ▶ ⇥ · Copiar e colar · painel; grade, resolução e
+    // camadas saíram. 0.3.3 recursos: o marcador da 0.3.2 voltou (8 células).
     @Test fun sevenCellTransportOnTinyPhone() = checkTransport(320)
     @Test fun sevenCellTransportOnCompactPhone() = checkTransport(360)
 
@@ -41,13 +41,14 @@ class CompactTransportClipboardTest {
         compose.waitUntil(10000) { store.layers.size == 1 && store.playhead == 12 }
         compose.runOnIdle { store.toggleMarker() }
         compose.waitUntil(5000) { 12 in store.markers.frames }
+        // 0.3.3 recursos: o marcador da 0.3.2 voltou ao transporte, depois do ⇥.
         val tags = listOf(
             "transport.undo", "transport.redo", "transport.previous", "transport.play",
-            "transport.next", "transport.copyPaste", "transport.viewModes",
+            "transport.next", "transport.marker", "transport.copyPaste", "transport.viewModes",
         )
         val bounds = tags.map { compose.onNodeWithTag(it).assertIsDisplayed().fetchSemanticsNode().boundsInRoot }
         for (i in 1 until bounds.size) assertTrue(tags[i], bounds[i - 1].right <= bounds[i].left + 1)
-        for (gone in listOf("transport.grid", "transport.resolution", "transport.layers", "transport.marker")) {
+        for (gone in listOf("transport.grid", "transport.resolution", "transport.layers")) {
             compose.onNodeWithTag(gone).assertDoesNotExist()
         }
         // ⇤ / ⇥: o começo, os marcadores e o último quadro (sem toque longo).

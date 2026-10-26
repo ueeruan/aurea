@@ -58,6 +58,8 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
+// Omega tema (0.3.3): vetores do Material com o mesmo peso dos glifos.
+import com.aurea.aurea.ui.theme.aureaBold
 import com.aurea.aurea.ui.theme.tocavel
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
@@ -142,7 +144,7 @@ internal fun PanelHeader(title: String, onBack: () -> Unit) {
                     .tocavel(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(26.dp).mirrorInRtl())
+                Icon(Icons.Filled.ChevronLeft.aureaBold(), contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(26.dp).mirrorInRtl())
             }
             Text(
                 title,
@@ -189,7 +191,7 @@ internal fun LeftRail(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         RailCell(onBack, stringResource(R.string.panel_voltar_ferramentas)) {
-            Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(24.dp).mirrorInRtl())
+            Icon(Icons.Rounded.ChevronLeft.aureaBold(), contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(24.dp).mirrorInRtl())
         }
         RailCell(onKeyframe, if (keyframeLook == KeyframeLook.KeyHere) stringResource(R.string.panel_tirar_keyframe_daqui) else stringResource(R.string.panel_marcar_keyframe_aqui)) {
             KeyframeDiamondIcon(keyframeLook, enabled = onKeyframe != null, modifier = Modifier.size(24.dp))
@@ -284,7 +286,7 @@ internal fun RightRail(modes: List<RailMode>, selected: Int, onSelect: (Int) -> 
                         .tocavel(shrink = 1f) { onSelect(i) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(m.icon, contentDescription = null, tint = if (on) AureaColors.Accent else AureaColors.Muted, modifier = Modifier.size(min(20.dp, cell * 0.6f)))
+                    Icon(m.icon.aureaBold(), contentDescription = null, tint = if (on) AureaColors.Accent else AureaColors.Muted, modifier = Modifier.size(min(20.dp, cell * 0.6f)))
                 }
             }
         }
@@ -652,7 +654,7 @@ private fun FrameRightRail(tabs: List<PanelTab>, selectedId: String?, onTab: (St
                 val icon = shown.icon
                 when {
                     glyph != null -> CupertinoIcon(glyph, 22.dp, tint)
-                    icon != null -> Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                    icon != null -> Icon(icon.aureaBold(), contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
                 }
             }
         }

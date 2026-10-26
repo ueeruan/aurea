@@ -1517,7 +1517,7 @@ private struct FxEffectBadge: View {
 /// O selo "Novo" do AUREA (efeito marcado como novo pelo motor).
 private struct FxNewBadge: View {
     var body: some View {
-        Text(AureaText.t("fx_browser_badge")).font(.aurea(size: 9, weight: .bold)).foregroundStyle(AureaColors.onAction)
+        Text(AureaText.t("fx_browser_badge")).font(.aurea(size: 9, weight: .bold)).foregroundStyle(AureaColors.onAccent)
             .lineLimit(1).padding(.horizontal, 4).padding(.vertical, 1)
             .background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 4))
     }
@@ -2204,9 +2204,9 @@ struct FxPreviewScenePicker: View {
             ForEach(FxPreviewScene.allCases) { scene in
                 let on = scene == selection
                 Button { selection = scene } label: {
-                    // Omega: conteúdo sobre o destaque (menta) é o «sobre ação», nunca o texto claro.
+                    // 0.3.3 tema: conteúdo sobre o destaque (accent) é o onAccent.
                     Text(AureaText.t(scene.labelKey)).font(.aurea(size: 12, weight: .semibold))
-                        .foregroundStyle(on ? AureaColors.onAction : AureaColors.text)
+                        .foregroundStyle(on ? AureaColors.onAccent : AureaColors.text)
                         .multilineTextAlignment(.center).lineLimit(2)
                         .frame(maxWidth: .infinity, minHeight: AureaDims.minTap)
                         .background(on ? AureaColors.accent : AureaColors.chip,

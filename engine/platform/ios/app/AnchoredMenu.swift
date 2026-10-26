@@ -1,7 +1,7 @@
 // =============================================================================
 //  Aurea / platform / ios / app / AnchoredMenu.swift
 //
-//  Omega fundação · F2: MENU POPUP ANCORADO (`alight_popup_menu*` da referência).
+//  Omega fundação · F2: MENU POPUP ANCORADO (o menu popup da referência).
 //  Par do `ui/ds/AnchoredMenu.kt`: mesmos tipos de linha, medidas, cores e ids.
 //
 //  Todo menu da tela abre preso ao botão que o abriu: 250 pt (ou a largura da

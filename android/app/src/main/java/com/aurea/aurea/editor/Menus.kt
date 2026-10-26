@@ -115,6 +115,20 @@ private fun layerMenuEntries(
             openPanel(store, ui, EditorPanel.Speed)
         }
     }
+    // 0.3.3 recursos: entradas da doca da 0.3.2 que ficaram sem lugar no painel da camada.
+    // Opções de texto (espaçamentos, caixa, fundo, caminho, sombra e trechos ricos).
+    if (type == LayerType.Text) {
+        out += MenuEntry.Item(stringResource(R.string.text_options), glyph = ShellGlyph.SliderHorizontalBelowRectangle,
+            tag = "layer.menu.textOptions") { openPanel(store, ui, EditorPanel.Text) }
+    }
+    // Fantoche (o "Rig" da doca da imagem): o cartão do efeito já no modo de pinos.
+    if (type == LayerType.Image) {
+        out += MenuEntry.Item(stringResource(R.string.fx_name_puppet), glyph = CupertinoGlyph.PersonCropCircle,
+            enabled = !row.locked, tag = "layer.menu.puppet") {
+            store.select(id)
+            openPuppetTool(store, ui)
+        }
+    }
     // Alternâncias: o rótulo troca na hora (o menu fica aberto).
     out += MenuEntry.Item(
         stringResource(if (row.locked) R.string.editor_desbloquear_camada else R.string.editor_bloquear_camada),

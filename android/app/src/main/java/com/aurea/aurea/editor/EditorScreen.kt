@@ -304,8 +304,11 @@ fun EditorScreen(store: EditorStore) {
         movableContentOf { modifier: Modifier -> PreviewStage(store, ui, modifier) }
     }
 
-    // Omega fundação (F6): sem a divisa arrastável no retrato (D2) — a prévia é
-    // fixa e a zona inferior tem 280 dp (EditorLayout.solve).
+    // 0.3.3 recursos: a divisa palco/timeline volta. A altura do palco que a
+    // pessoa escolheu arrastando o transporte (0 = automática: zona de 280),
+    // guardada no aparelho como na 0.3.2.
+    val previewPrefs = androidx.compose.ui.platform.LocalContext.current.let { context -> remember { context.getSharedPreferences(PREVIEW_PREFS, android.content.Context.MODE_PRIVATE) } }
+    val previewPreference = remember { mutableFloatStateOf(previewPrefs.getFloat(PREVIEW_HEIGHT_KEY, 0f)) }
     Box(Modifier.fillMaxSize().background(AureaColors.EditorCanvas)) {
         Column(Modifier.fillMaxSize()) {
             // As barras do sistema são tratadas UMA vez, aqui: a de status no
@@ -326,6 +329,7 @@ fun EditorScreen(store: EditorStore) {
                 // Omega chrome (área 02, P0-4): com a seleção múltipla a timeline fica com a
                 // zona inteira e a barra inferior flutua por cima dela (sem painel de lote).
                 val m = EditorLayout.solve(h, if (content == SheetContent.Batch) SheetContent.None else content, ui.fullscreen, w, aspect,
+                    preferred = previewPreference.floatValue,  // 0.3.3 recursos: a divisa
                     dockRows = if (content == SheetContent.Dock) dockTileRowCount(store) else 2,
                     fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale)
                 if (store.sceneEditor) {
@@ -336,7 +340,14 @@ fun EditorScreen(store: EditorStore) {
                 } else if (wide) {
                     WideEditor(store, ui, content, h, sheetWidth, stage)
                 } else {
-                    NarrowEditor(store, ui, content, m, stage)
+                    // 0.3.3 recursos: a divisa (arrastar o transporte; toque duplo = automática).
+                    NarrowEditor(store, ui, content, m, stage, EditorLayout.maxPreview(h),
+                        onPreviewResize = { previewPreference.floatValue = it },
+                        onPreviewCommit = { previewPrefs.edit().putFloat(PREVIEW_HEIGHT_KEY, previewPreference.floatValue).apply() },
+                        onPreviewReset = {
+                            previewPreference.floatValue = 0f
+                            previewPrefs.edit().remove(PREVIEW_HEIGHT_KEY).apply()
+                        })
                 }
 
                 // Omega adicionar (área 08, P0-1): o adicionar é embutido acima da barra
@@ -400,6 +411,11 @@ private fun NarrowEditor(
     content: SheetContent,
     m: EditorMetrics,
     stage: @Composable (Modifier) -> Unit,
+    // 0.3.3 recursos: a divisa palco/timeline.
+    maxPreview: Float = EditorLayout.PREVIEW_MIN,
+    onPreviewResize: (Float) -> Unit = {},
+    onPreviewCommit: () -> Unit = {},
+    onPreviewReset: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().background(AureaColors.EditorCanvas)) {
         // Omega conteúdo (área 06): os popups da barra de estilo descem por cima do palco.
@@ -423,8 +439,36 @@ private fun NarrowEditor(
             // do transporte até o fim (a faixa de entrada no topo dele).
             TextEditPanel(store, Modifier.fillMaxWidth().height((m.strip + m.transport + m.zone).dp))
         } else {
-            // Omega fundação (F6): sem divisa arrastável no retrato (D2).
-            TransportBar(store, ui)
+            // 0.3.3 recursos: a divisa palco/timeline volta, como na 0.3.2 — arrastar
+            // na vertical no transporte (fora dos botões) troca palco por timeline
+            // (sobe ou desce a timeline); toque duplo volta à altura automática. A
+            // zona de baixo continua a da Omega: o painel de 200 fica por cima da
+            // timeline e, aberto, recebe a zona inteira (EditorLayout.solve).
+            val preview by rememberUpdatedState(m.preview)
+            val max by rememberUpdatedState(maxPreview)
+            val resize by rememberUpdatedState(onPreviewResize)
+            val commit by rememberUpdatedState(onPreviewCommit)
+            val reset by rememberUpdatedState(onPreviewReset)
+            Column(
+                Modifier.fillMaxWidth().testTag("editor.previewDivider")
+                    .pointerInput(Unit) {
+                        var start = 0f
+                        var travel = 0f
+                        detectVerticalDragGestures(
+                            onDragStart = { start = preview; travel = 0f },
+                            onDragEnd = { commit() },
+                            onDragCancel = { commit() },
+                            onVerticalDrag = { change, dy ->
+                                change.consume()
+                                travel += dy / density
+                                resize((start + travel).coerceIn(EditorLayout.PREVIEW_MIN, max))
+                            },
+                        )
+                    }
+                    .pointerInput(Unit) { detectTapGestures(onDoubleTap = { reset() }) },
+            ) {
+                TransportBar(store, ui)
+            }
         }
         if (!ui.fullscreen && store.textEditLayer == null) {
             // Camada escolhida (doca aberta): a timeline vira a fileira única dela,
@@ -472,6 +516,8 @@ private fun NarrowEditor(
                             .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } },
                     )
                 }
+                // 0.3.3 barra: a grade do "+" sobe por cima da timeline e da barra.
+                if (content == SheetContent.AddBar || content == SheetContent.Adding) AddBarMore(store, ui, Modifier.fillMaxSize())
             }
         }
     }
@@ -490,7 +536,8 @@ private fun WideEditor(
         // Omega conteúdo (área 06): os popups da barra de estilo descem por cima do palco.
         Box(Modifier.fillMaxWidth().zIndex(if (store.textEditLayer != null) 2f else 0f)) { TopBarHost(store, ui) }
         Row(Modifier.weight(1f).fillMaxWidth()) {
-            Column(Modifier.weight(1f).fillMaxHeight()) {
+            // 0.3.3 barra: a Box deixa a grade do "+" subir por cima da coluna.
+            Box(Modifier.weight(1f).fillMaxHeight()) { Column(Modifier.fillMaxSize()) {
                 // Palco e timeline em LTR mesmo em árabe (ver `KeepLtr`).
                 KeepLtr {
                     stage(Modifier.fillMaxWidth().weight(1f).padding(horizontal = ShellDims.PreviewMargin))
@@ -501,6 +548,8 @@ private fun WideEditor(
                 // Omega adicionar (área 08): também com o adicionar aberto.
                 if (content == SheetContent.AddBar || content == SheetContent.Adding) AddBar(store, ui, Modifier.fillMaxWidth().height(ShellDims.AddBar))
             }
+            // 0.3.3 barra: a grade do "+" por cima do palco e da timeline, encostada embaixo.
+            if (content == SheetContent.AddBar || content == SheetContent.Adding) AddBarMore(store, ui, Modifier.fillMaxSize()) }
             // No largo a folha fica sempre à direita; sem nada escolhido ela
             // mostra a dica do palco.
             if (store.textEditLayer != null) {
@@ -545,6 +594,10 @@ private fun TopBarHost(store: EditorStore, ui: EditorUi) {
     }
 }
 
+
+// 0.3.3 recursos: a altura escolhida na divisa (as mesmas chaves da 0.3.2).
+private const val PREVIEW_PREFS = "aurea.editor.layout"
+private const val PREVIEW_HEIGHT_KEY = "preview_height_dp"
 
 @Composable
 private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, compactDock: Boolean = false) {

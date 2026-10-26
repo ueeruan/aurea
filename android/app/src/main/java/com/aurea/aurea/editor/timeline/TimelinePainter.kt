@@ -36,6 +36,7 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaTimeline
 import com.aurea.aurea.ui.theme.ClipTone
 import com.aurea.aurea.ui.theme.CupertinoGlyph
+import com.aurea.aurea.ui.theme.CupertinoIconBoldStroke
 import com.aurea.aurea.ui.theme.CupertinoIconsFont
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.aureaTracking
@@ -1133,8 +1134,9 @@ internal class TimelinePainter(
             }
             if (x < -half || x > w + half) continue
             val beat = mk.kinds[i] == 1
-            val c = mk.colors[i]
-            val color = Color(red = (c and 0xFF) / 255f, green = ((c shr 8) and 0xFF) / 255f, blue = ((c shr 16) and 0xFF) / 255f)
+            // 0.3.3 recursos: a cor com a correção da área 03 (R no byte baixo; as
+            // marcas gravadas pela 0.3.2 com literais ARGB crus aparecem certas).
+            val color = Color(MarkerColors.display(mk.colors[i]))
             val s = max(if (beat) half * 0.7f else half, 3.5f * m.density)
             markerPath.reset()
             markerPath.moveTo(x - s, 0f)
@@ -1278,8 +1280,35 @@ internal class TimelinePainter(
             )
             glyphs.put(key, layout)
         }
-        drawText(layout, color = tint, topLeft = Offset(cx - layout.size.width / 2f, cy - layout.size.height / 2f))
+        val topLeft = Offset(cx - layout.size.width / 2f, cy - layout.size.height / 2f)
+        // 0.3.3 limpeza: o mesmo peso bold do `CupertinoIcon` (glifo cheio + contorno de
+        // CupertinoIconBoldStroke do tamanho, junção redonda). Tinta translúcida: os dois
+        // saem opacos numa camada com o alfa, senão a sobreposição deixaria a borda mais forte.
+        val strokePx = sizeDp * m.density * CupertinoIconBoldStroke
+        if (strokePx <= 0f) {
+            drawText(layout, color = tint, topLeft = topLeft)
+            return
+        }
+        if (tint.alpha <= 0f) return
+        val translucent = tint.alpha < 1f
+        val ink = if (translucent) tint.copy(alpha = 1f) else tint
+        if (translucent) {
+            glyphLayerPaint.alpha = tint.alpha
+            drawContext.canvas.saveLayer(
+                androidx.compose.ui.geometry.Rect(
+                    topLeft.x - strokePx, topLeft.y - strokePx,
+                    topLeft.x + layout.size.width + strokePx, topLeft.y + layout.size.height + strokePx,
+                ),
+                glyphLayerPaint,
+            )
+        }
+        drawText(layout, color = ink, topLeft = topLeft)
+        drawText(layout, color = ink, topLeft = topLeft, drawStyle = Stroke(width = strokePx, join = StrokeJoin.Round))
+        if (translucent) drawContext.canvas.restore()
     }
+
+    /** Camada do glifo translúcido em [drawGlyph] (só o alfa muda). */
+    private val glyphLayerPaint = androidx.compose.ui.graphics.Paint()
 
     // =================================================================================
     // Omega 0.3.2 (área 03): a timeline da referência, com o desenho do AUREA.
@@ -1355,15 +1384,18 @@ internal class TimelinePainter(
             if (right > left) drawRect(PREVIEW_BUFFER, Offset(left, m.rowsTop - buffer), Size(right - left, buffer))
         }
         val mk = store.markers
-        val marked = omegaMarkers(mk, w, view, ppf, cx)
-        omegaTimeTab(cx, store.playhead, fps, marked >= 0)
+        // 0.3.3 recursos: o marcador antigo da 0.3.2 na régua — triângulo na cor da
+        // marca, fio até os tiques e o NOME à direita (cortado antes da próxima). A
+        // bandeirola, o contorno da aba e o cursor na cor da marca saíram.
+        drawMarkers(mk, w, view, ppf, cx)
+        omegaTimeTab(cx, store.playhead, fps, false)
         if (thumbs.starved) c.requestRedraw()
         c.settleFades(frameNanos)
         // Pulso de 130 ms do clipe levantado: mais quadros enquanto ele dura.
         if (st.movingIds.isNotEmpty() && (frameNanos - st.liftStartNanos) / 1_000_000L < LiftPulse.DURATION_MS) c.requestRedraw()
-        // Cursor de 1,5 dp, interrompido na aba; na cor do marcador do quadro; a 50 % movendo.
+        // Cursor de 1,5 dp, interrompido na aba; a 50 % movendo.
         val playheadX = TimeAxis.xOf(store.playhead.toDouble(), view, ppf, cx)
-        var color = if (marked >= 0) markerColor(mk.colors[marked]) else AureaColors.Playhead
+        var color = AureaColors.Playhead
         if (st.moveOrigStart != Snap.NONE) color = color.copy(alpha = color.alpha * 0.5f)
         val half = m.playhead / 2f
         drawRect(color, Offset(playheadX - half, 0f), Size(m.playhead, m.omegaTabTop + m.density))

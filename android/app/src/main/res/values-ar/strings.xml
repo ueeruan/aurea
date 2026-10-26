@@ -954,8 +954,8 @@
     <string name="dock_short_sound">الصوت</string>
     <string name="fx_save_as_preset">حفظ كإعداد مسبق</string>
     <string name="fx_my_presets">إعداداتي المسبقة للتأثيرات</string>
-    <string name="am_import_action">استيراد من Alight Motion…</string>
-    <string name="am_import_done">تم استيراد %1$d من تأثيرات Alight Motion إلى «⁨%2$s⁩»</string>
+    <string name="am_import_action">استيراد التأثيرات من مشروع (.xml، .amproj)…</string>
+    <string name="am_import_done">تم استيراد %1$d من التأثيرات إلى «⁨%2$s⁩»</string>
     <string name="am_import_done_skipped">تم استيراد %1$d من التأثيرات، واستُبعد %2$d لا مقابل لها («⁨%3$s⁩»)</string>
     <string name="am_import_failed">تعذّر الاستيراد: %1$s</string>
     <string name="am_import_nothing">لا يوجد تأثير له مقابل في Aurea</string>
@@ -3759,7 +3759,7 @@
     <string name="edt_cmdx_undo_d">يلغي آخر تعديل</string>
     <string name="edt_cmdx_redo">إعادة</string>
     <string name="edt_cmdx_redo_d">يعيد تطبيق التعديل الملغى</string>
-    <string name="am_import_hint">حدد طبقة في Aurea، ثم اختر ملف XML أو .amproj أو ZIP تم تصديره من Alight Motion. يحوّل الاستيراد التأثيرات المتوافقة من أول طبقة تحتوي على تأثيرات، ولا يستورد المشروع بأكمله أو وسائطه. تُرفض الملفات التي تحتوي على عناصر غير مدعومة لتجنب فقدان الإعدادات.</string>
+    <string name="am_import_hint">حدد طبقة في Aurea، ثم اختر ملف XML أو .amproj أو ZIP يحتوي على مشروع تأثيرات. يحوّل الاستيراد التأثيرات المتوافقة من أول طبقة تحتوي على تأثيرات، ولا يستورد المشروع بأكمله أو وسائطه. تُرفض الملفات التي تحتوي على عناصر غير مدعومة لتجنب فقدان الإعدادات.</string>
     <string name="beta_select_media">تحديد عدة ملفات</string>
     <string name="beta_add_media">إضافة (%1$d)</string>
     <string name="beta_extend_clip">تمديد حتى نهاية المصدر</string>

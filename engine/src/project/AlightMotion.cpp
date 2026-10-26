@@ -1,19 +1,19 @@
 // =============================================================================
 //  Aurea / project / AlightMotion.cpp
 //
-//  Efeitos do Alight Motion → preset "effects" do Aurea (regras em
+//  Efeitos de projeto da referência → preset "effects" do Aurea (regras em
 //  AlightMotion.hpp). Três peças:
 //
 //   1. o pacote: zip mínimo (diretório central, entradas stored/deflate; o
 //      inflate estrito do ufbx, já usado na importação de modelos);
-//   2. a TABELA: efeito do AM (nome curto) → chave do Aurea, parâmetro a
+//   2. a TABELA: efeito da referência (nome curto) → chave do Aurea, parâmetro a
 //      parâmetro, com a conversão de unidade. Só entra efeito que o Aurea tem
 //      DE VERDADE — um "parecido" daria um visual que o arquivo não pediu;
 //   3. a montagem: um `Preset` comum, escrito pelo `presets::write` e relido
 //      pelo `presets::parse` antes de sair (o que sai daqui sempre aplica).
 //
-//  As faixas do AM não vêm no arquivo. A conversão "Auto" lê o número como
-//  FRAÇÃO (0..1, o jeito do AM guardar a maioria dos controles) quando toda a
+//  As faixas da referência não vêm no arquivo. A conversão "Auto" lê o número como
+//  FRAÇÃO (0..1, o jeito da referência guardar a maioria dos controles) quando toda a
 //  trilha cabe em |v| ≤ 1, e como já na unidade do Aurea quando não cabe; o
 //  resultado sempre passa pela faixa do parâmetro.
 // =============================================================================
@@ -56,8 +56,8 @@ std::string lower_alnum(std::string_view s) {
     return o;
 }
 
-/// "com.alightcreative.effects.gaussianblur2" → "gaussianblur": o último
-/// pedaço, minúsculo, sem separador e sem o número de versão do AM.
+/// "<pacote>.effects.gaussianblur2" → "gaussianblur": o último
+/// pedaço, minúsculo, sem separador e sem o número de versão do id.
 std::string short_name(std::string_view id) {
     const usize dot = id.rfind('.');
     std::string s = lower_alnum(dot == std::string_view::npos ? id : id.substr(dot + 1));
@@ -187,12 +187,12 @@ bool unzip_scene(std::string_view zip, std::string& xmlOut, std::vector<std::str
         if (text.find("<scene") == std::string::npos) continue;
         if (!found || text.size() > xmlOut.size()) { xmlOut = std::move(text); found = true; }
     }
-    if (!found) { err = "o pacote nao tem uma cena do Alight Motion em XML"; return false; }
+    if (!found) { err = "o pacote nao tem uma cena de efeitos em XML"; return false; }
     return true;
 }
 
 // =============================================================================
-// Valores do AM
+// Valores do arquivo
 // =============================================================================
 
 /// Número, vetor ("x,y"), booleano ou cor ("#aarrggbb", sRGB → RGBA linear,
@@ -291,12 +291,12 @@ enum class Conv : u8 {
 };
 
 struct ParamRule {
-    const char* am;       ///< nomes do AM, '|' (minúsculas, sem '_'/'-'/espaço)
+    const char* am;       ///< nomes da referência, '|' (minúsculas, sem '_'/'-'/espaço)
     const char* id;       ///< id do parâmetro no Aurea
     Conv        conv = Conv::Same;
     f64         k = 1.0;
     f64         kBig = 1.0;
-    u32         comp = 0; ///< componente do valor do AM (vec2 → dois parâmetros)
+    u32         comp = 0; ///< componente do valor original (vec2 → dois parâmetros)
 };
 
 struct FixedValue {
@@ -305,11 +305,11 @@ struct FixedValue {
 };
 
 struct EffectRule {
-    const char* names;    ///< nomes curtos do AM, '|'; '~' = contém
+    const char* names;    ///< nomes curtos da referência, '|'; '~' = contém
     const char* key;      ///< chave do Aurea
     std::span<const ParamRule> params;
     std::span<const FixedValue> fixed = {};
-    const char* ignore = "";   ///< parâmetros do AM sem efeito visual aqui (sem aviso)
+    const char* ignore = "";   ///< parâmetros da referência sem efeito visual aqui (sem aviso)
 };
 
 // --- parâmetros por efeito (ids conferidos em effects/builtin/*.cpp) ---------
@@ -551,7 +551,7 @@ struct LayerOut {
     }
 };
 
-/// A curva `e` do AM (chegada no próximo keyframe) no keyframe que COMEÇA o
+/// A curva `e` do arquivo (chegada no próximo keyframe) no keyframe que COMEÇA o
 /// trecho. Falso = curva desconhecida (fica linear).
 bool set_easing(std::string_view e, Keyframe& k) {
     e = trim(e);
@@ -594,14 +594,14 @@ void param_range(const ParamSpec& s, f64& lo, f64& hi) {
         case ParamType::Bool: lo = 0.0; hi = 1.0; break;
         case ParamType::Enum: lo = 0.0; hi = s.enumCount > 0 ? static_cast<f64>(s.enumCount - 1) : 0.0; break;
         // A faixa DIGITADA (a que o efeito aceita), não a do slider: um valor
-        // extremo do AM que o Aurea sabe renderizar chega inteiro.
+        // extremo do arquivo que o Aurea sabe renderizar chega inteiro.
         default: lo = s.typed_min(); hi = s.typed_max(); break;
     }
 }
 
 f64 component(const AmValue& v, u32 c) { return c < v.n ? v.v[c] : v.v[0]; }
 
-/// Um parâmetro do AM → um parâmetro (todos os componentes) do Aurea.
+/// Um parâmetro do arquivo → um parâmetro (todos os componentes) do Aurea.
 void apply_param(const ParamRule& r, const AmProp& prop, const ParameterRegistry& specs, u32 pos, f64 durSec,
                  const Ctx& ctx, std::string_view fxName, EffectInstance& e, LayerOut& out) {
     const u32 idx = specs.find(r.id);
@@ -720,7 +720,11 @@ void convert_fade(const xml::Node& fx, f64 durSec, const Ctx& ctx, LayerOut& out
     const EffectTypeId type = effect_type_id(effect_keys::kTransform);
     const ParameterRegistry* specs = ctx.reg->params(type);
     const u32 idx = specs ? specs->find("opacity") : kInvalidIndex;
-    if (idx == kInvalidIndex) { out.skipped.emplace_back("com.alightcreative.effects.fade"); return; }
+    if (idx == kInvalidIndex) {
+        const std::string* fid = fx.attr_nocase("id");
+        out.skipped.emplace_back(fid ? *fid : std::string("fade"));
+        return;
+    }
     const f64 durF = durSec * ctx.fps;
     std::vector<Keyframe> keys;
     auto key = [&](f64 frame, f32 v) {
@@ -771,7 +775,7 @@ void convert_layer(const xml::Node& layer, f64 durSec, const Ctx& ctx, LayerOut&
         const std::string sn = short_name(id);
         if (sn.rfind("motionblur", 0) == 0) {
             out.skipped.push_back(id);
-            out.warn("desfoque de movimento do AM e da camada, nao um efeito: ligue o motion blur da camada no Aurea");
+            out.warn("no arquivo, o desfoque de movimento e da camada, nao um efeito: ligue o motion blur da camada no Aurea");
             continue;
         }
         if (sn == "fade") { convert_fade(fx, durSec, ctx, out); continue; }
@@ -905,8 +909,8 @@ std::string import_alight_motion(std::string_view data, const EffectRegistry* re
     if (has_effect_child(doc)) cands.push_back(Candidate{&doc, 0.0, {}});
     collect(doc, 0.0, cands);
     if (cands.empty()) {
-        report.error = scene ? "a cena do Alight Motion nao tem efeitos"
-                             : "isso nao parece um XML do Alight Motion: nao achei <scene> nem <effect>";
+        report.error = scene ? "a cena importada nao tem efeitos"
+                             : "isso nao parece um XML de projeto de efeitos: nao achei <scene> nem <effect>";
         return {};
     }
 
@@ -932,13 +936,13 @@ std::string import_alight_motion(std::string_view data, const EffectRegistry* re
     if (!have) {
         report.skipped = std::move(allSkipped);
         append(report.warnings, allWarnings);
-        report.error = "nenhum efeito do Alight Motion tem equivalente no Aurea";
+        report.error = "nenhum efeito do arquivo tem equivalente no Aurea";
         return {};
     }
 
     Preset p;
     p.kind = PresetKind::Effects;
-    p.name = !title.empty() ? title : (!report.layer.empty() ? report.layer : std::string("Alight Motion"));
+    p.name = !title.empty() ? title : report.layer;
     p.fps = ctx.fps;
     p.effects = std::move(chosen.effects);
     p.effectTracks = std::move(chosen.tracks);

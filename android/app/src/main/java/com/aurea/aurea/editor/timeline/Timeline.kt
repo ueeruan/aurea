@@ -139,8 +139,8 @@ fun Timeline(
         snapshotFlow { state.compact to store.primary }
             .collect { (isCompact, primary) -> controller.noteCompact(isCompact, primary, System.nanoTime()) }
     }
-    // Omega (P1-3): a dica do marcador, uma vez, quando a timeline abre sem marcadores.
-    if (referenceTrial) OmegaMarkerHint(store)
+    // 0.3.3 recursos: sem a dica "toque no relógio" — o marcador antigo voltou
+    // (botão do transporte, âncora do palco e régua, como na 0.3.2).
     // Saiu da tela no meio de um gesto: scrub e passo de desfazer fecham em par.
     DisposableEffect(controller) { onDispose { controller.dispose() } }
     LaunchedEffect(controller) {
@@ -196,12 +196,15 @@ fun Timeline(
         // Irmã (não filha) da superfície de gestos: o toque num botão da barra
         // não chega à timeline embaixo dele.
         KeyActionBar(store, shownCompact, Modifier.align(if (shownCompact) Alignment.TopEnd else Alignment.BottomCenter))
-        // Omega (P2-5): a barra de cima da seleção (BatchTopBar) já tem o Concluir.
-        if (!referenceTrial) LayerPickBar(store, Modifier.align(Alignment.BottomCenter))
+        // 0.3.3 recursos: a barra do "Selecionar várias" da 0.3.2 volta (contador ·
+        // Todas · Limpar · Concluir). Na Omega fica logo acima da barra flutuante da
+        // seleção múltipla (42 + 6 dp), que mora na base da zona.
+        LayerPickBar(store, Modifier.align(Alignment.BottomCenter).padding(bottom = if (referenceTrial) 48.dp else 0.dp))
         // Omega (P1-5/P1-7): barra de info do gesto (início, deslocamento, corte).
         store.timelineInfo?.let { info -> OmegaInfoBar(info, Modifier.align(Alignment.TopCenter)) }
-        // Omega (P2-5): o botão "Todas/Seleção" sai (a referência não tem; o foco mostra só a camada).
-        if (!referenceTrial && store.selection.isNotEmpty() && (compact || compactDock)) {
+        // 0.3.3 recursos: o botão "Todas/Seleção" da 0.3.2 volta: com camada escolhida
+        // (foco de uma linha), mostra todas as camadas e volta só à escolhida.
+        if (store.selection.isNotEmpty() && (compact || compactDock)) {
             val filterDescription = stringResource(if (showAllLayers) R.string.timeline_selected_only else R.string.timeline_show_all)
             androidx.compose.material3.TextButton(onClick = { showAllLayers = !showAllLayers },
                 modifier = Modifier.align(Alignment.TopStart).width(84.dp).height(44.dp)

@@ -7,6 +7,8 @@
 //  AudioBrowserView.swift), Elemento em grade (com Grupo vazio e
 //  Elemento/Projeto), Presets como faixa de modelos, Vetor e 3D em grade de
 //  objetos. Par de editor/AddLayerPanel.kt (Android): ids iguais.
+//  0.3.3 barra: a barra de adicionar nova (AddBarView, a grade do "+" em
+//  AddBarMoreOverlay) também mora aqui, no fim do arquivo.
 // =============================================================================
 import SwiftUI
 import UIKit
@@ -378,6 +380,7 @@ extension BrowserTopBar where Trailing == EmptyView {
 /// os extras do AUREA. Elemento/Projeto troca o conteúdo pela faixa de projetos.
 private struct ElementGridView: View {
     @EnvironmentObject private var model: AureaModel
+    @EnvironmentObject private var shell: ShellPresentation
     let close: () -> Void
     @State private var projects = false
 
@@ -403,6 +406,10 @@ private struct ElementGridView: View {
                 ObjectCell(label: AureaText.t("sh_add_group_selection"), tag: "add.element.group", glyph: CupertinoGlyph.FolderFill) {
                     if model.selection.isEmpty { model.toast = AureaText.t("sh_add_pick_layers_to_group") }
                     else { close(); model.groupSelection() }
+                },
+                // 0.3.3 barra: o Vetor (pontos, SVG, PSD) não tem vaga na barra nova; mora aqui.
+                ObjectCell(label: AureaText.t("sh_add_tab_vector"), tag: "add.element.vector", glyph: CupertinoGlyph.PencilOutline) {
+                    shell.addCategory = 7
                 },
             ])
         }
@@ -686,5 +693,379 @@ struct PresetsBrowserView: View {
         .preferredColorScheme(.dark)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("presets.browser")
+    }
+}
+
+// MARK: - 0.3.3 barra: a nova barra de adicionar (desenho do dono)
+
+/// As categorias da barra (índices das `ShellAddCategories`). Par de
+/// `ADD_BAR_PILL`/`ADD_BAR_GRID`/`addBarSlot` do Android (AddLayerPanel.kt).
+enum AddBarCatalog {
+    /// As 5 da pílula: Forma, Mídia, Áudio, Texto, Elemento. Ids `addBar.<AddTab>`.
+    static let pill = [0, 1, 2, 3, 4]
+    /// A grade 4 × 2 do "+": Forma, Mídia, Áudio, Texto / Presets, Elemento, 3D, Desenho.
+    /// Ids `addBar.grid.<AddTab>`.
+    static let grid = [0, 1, 2, 3, ShellAddCategories.textPresets, 4, 5, 6]
+    /// A vaga da pílula que acende para o conteúdo aberto (Presets no Texto; 3D e
+    /// Vetor no Elemento), mostrando o ícone e o nome do que está aberto.
+    static func slot(_ index: Int) -> Int {
+        switch index {
+        case ShellAddCategories.textPresets: return 3
+        case 5, 7: return 4
+        case 6: return 0
+        default: return index
+        }
+    }
+    /// Altura nominal do bloco da grade (par de `ADD_BAR_GRID_HEIGHT`).
+    static let gridHeight: CGFloat = EditorLayout.addBarGridHeight
+}
+
+/// Estado só da barra (não é do projeto): a grade do "+" aberta.
+@MainActor final class AddBarState: ObservableObject {
+    static let shared = AddBarState()
+    @Published var more = false
+
+    /// Mola suave de ~200 ms; nada com "reduzir movimento".
+    static func animation(_ reduce: Bool) -> Animation? { reduce ? nil : .spring(response: 0.24, dampingFraction: 0.86) }
+
+    /// O "+" abre a grade (pausa e fecha o conteúdo aberto); o "X" fecha.
+    static func toggle(_ model: AureaModel, reduce: Bool) {
+        let open = !shared.more
+        if open {
+            model.openAddLayer()   // pausa e fecha o painel aberto
+            model.showAddLayer = false
+        }
+        withAnimation(animation(reduce)) { shared.more = open }
+    }
+
+    static func close(reduce: Bool) {
+        guard shared.more else { return }
+        withAnimation(animation(reduce)) { shared.more = false }
+    }
+
+    /// Abre um destino pela pílula ou pela grade (a grade fecha antes). Texto cria
+    /// o texto na hora e Desenho entra no desenho livre, como antes.
+    static func open(_ index: Int, model: AureaModel, shell: ShellPresentation, reduce: Bool) {
+        close(reduce: reduce)
+        if index == 3 {
+            model.openAddLayer()
+            model.showAddLayer = false
+            _ = model.addText()
+            return
+        }
+        if index == 6 {
+            model.openAddLayer()
+            model.showAddLayer = false
+            model.addVector(0, freehand: true)
+            return
+        }
+        if model.showAddLayer && shell.addCategory == index {
+            model.showAddLayer = false
+            return
+        }
+        shell.addCategory = index
+        model.openAddLayer()
+    }
+}
+
+/// Cores da barra: só papéis da paleta AUREA.
+private enum AddBarColors {
+    /// O bloco flutuante: o tom mais fundo do tema.
+    static var block: Color { AureaColors.background }
+    /// A pílula, os botões redondos e o cartão da grade.
+    static var pill: Color { AureaColors.chip }
+    /// Os ladrilhos da grade e o fio fino em volta da pílula, dos botões e do cartão.
+    static var raised: Color { AureaColors.chipHigh }
+    /// A pílula interna acesa: o destaque da marca a 30 % (sobre a pílula).
+    static var active: Color { AureaColors.accent.opacity(0.3) }
+}
+
+/// Ícones da barra e da grade: os do AUREA (fonte CupertinoIcons) e, onde a fonte
+/// não tem o desenho, três desenhados (Forma: quadrado com nós; Elemento: flor;
+/// Desenho: imagem com lápis), com a geometria do Android (caixa de 24, traço 2 + bold).
+struct AddBarIcon: View {
+    let category: Int
+    let size: CGFloat
+    var color: Color = AureaColors.text
+
+    var body: some View {
+        switch category {
+        case 0, 4, 6:
+            Canvas { context, box in AddBarDrawing.draw(category, context, box, color) }
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
+        case 1:
+            CupertinoGlyph.text(CupertinoGlyph.Photo, size: size, color: color).frame(width: size, height: size)
+        default:
+            CupertinoGlyph.text(ShellAddCategories.all[category].1, size: size, color: color).frame(width: size, height: size)
+        }
+    }
+}
+
+private enum AddBarDrawing {
+    /// 2 mais o traço extra dos glifos bold (0.3.3, `AureaIconWeight.glyphStroke` × 24),
+    /// no mesmo peso dos ícones da fonte ao lado. Par do `ADD_BAR_STROKE` do Android.
+    static let stroke: CGFloat = 2 + 24 * AureaIconWeight.glyphStroke
+
+    static func draw(_ category: Int, _ context: GraphicsContext, _ box: CGSize, _ color: Color) {
+        let u = min(box.width, box.height) / 24
+        let o = CGPoint(x: (box.width - 24 * u) / 2, y: (box.height - 24 * u) / 2)
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: o.x + x * u, y: o.y + y * u) }
+        let style = StrokeStyle(lineWidth: stroke * u, lineCap: .round, lineJoin: .round)
+        var path = Path()
+        switch category {
+        case 0:
+            // Forma: quadrado com um nó em cada canto.
+            let lo: CGFloat = 5, hi: CGFloat = 19, r: CGFloat = 2.3
+            for corner in [p(lo, lo), p(hi, lo), p(hi, hi), p(lo, hi)] {
+                path.addEllipse(in: CGRect(x: corner.x - r * u, y: corner.y - r * u, width: 2 * r * u, height: 2 * r * u))
+            }
+            path.move(to: p(lo + r, lo)); path.addLine(to: p(hi - r, lo))
+            path.move(to: p(hi, lo + r)); path.addLine(to: p(hi, hi - r))
+            path.move(to: p(lo + r, hi)); path.addLine(to: p(hi - r, hi))
+            path.move(to: p(lo, lo + r)); path.addLine(to: p(lo, hi - r))
+            context.stroke(path, with: .color(color), lineWidth: stroke * u)
+        case 4:
+            // Elemento: flor de 8 pétalas (só o arco de fora de cada uma) e o miolo.
+            let center = p(12, 12)
+            let ring: CGFloat = 5.4 * u
+            let petal: CGFloat = 3.1 * u
+            let half: CGFloat = 64.3 * CGFloat.pi / 180
+            for k in 0..<8 {
+                let a = CGFloat(k) * CGFloat.pi / 4
+                let px = center.x + ring * cos(a)
+                let py = center.y + ring * sin(a)
+                for t in 0...16 {
+                    let b = a - half + 2 * half * CGFloat(t) / 16
+                    let q = CGPoint(x: px + petal * cos(b), y: py + petal * sin(b))
+                    if t == 0 { path.move(to: q) } else { path.addLine(to: q) }
+                }
+            }
+            context.stroke(path, with: .color(color), style: style)
+            let core: CGFloat = 2.1 * u
+            context.stroke(Path(ellipseIn: CGRect(x: center.x - core, y: center.y - core, width: 2 * core, height: 2 * core)),
+                           with: .color(color), lineWidth: stroke * u)
+        default:
+            // Desenho: moldura de imagem aberta no canto, montanha, sol e um lápis na diagonal.
+            path.move(to: p(18, 10)); path.addLine(to: p(18, 6)); path.addQuadCurve(to: p(15, 3), control: p(18, 3))
+            path.addLine(to: p(6, 3)); path.addQuadCurve(to: p(3, 6), control: p(3, 3))
+            path.addLine(to: p(3, 15)); path.addQuadCurve(to: p(6, 18), control: p(3, 18)); path.addLine(to: p(10, 18))
+            path.move(to: p(3.5, 15)); path.addLine(to: p(8, 10.5)); path.addLine(to: p(11.5, 14))
+            path.move(to: p(11.2, 20.8)); path.addLine(to: p(14.45, 20.09)); path.addLine(to: p(21.87, 12.67))
+            path.addLine(to: p(19.33, 10.13)); path.addLine(to: p(11.91, 17.55)); path.closeSubpath()
+            context.stroke(path, with: .color(color), style: style)
+            let sun: CGFloat = 1.5 * u
+            let sunCenter = p(13, 7.5)
+            context.stroke(Path(ellipseIn: CGRect(x: sunCenter.x - sun, y: sunCenter.y - sun, width: 2 * sun, height: 2 * sun)),
+                           with: .color(color), lineWidth: stroke * u)
+        }
+    }
+}
+
+/// O "+" redondo (e o "X", que é o mesmo "+" girado 45°). Alvo de 48.
+@MainActor private struct AddBarRoundButton: View {
+    let label: String
+    let id: String
+    var rotation: Double = 0
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            CupertinoGlyph.text(CupertinoGlyph.Plus, size: 22, color: AureaColors.text)
+                .rotationEffect(.degrees(rotation))
+                .frame(width: 48, height: 48)
+                .background(AddBarColors.pill, in: Circle())
+                .overlay(Circle().stroke(AddBarColors.raised, lineWidth: 0.7))
+                .contentShape(Circle())
+        }
+        .buttonStyle(AureaPressStyle())
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(id)
+    }
+}
+
+/// A barra de adicionar (par do `AddBar` do Android): um bloco flutuante com a
+/// pílula das 5 categorias e o "+" redondo à direita. Sem nada aberto, cada
+/// categoria tem ícone e nome; com uma aberta, a pílula mostra só os ícones e a
+/// aberta vira a pílula interna acesa (ícone e nome lado a lado), que desliza e
+/// cresce até ela. Tocar na acesa fecha. O "+" abre a grade (`AddBarMoreOverlay`).
+@MainActor struct AddBarView: View {
+    @EnvironmentObject private var model: AureaModel
+    @EnvironmentObject private var shell: ShellPresentation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var glow
+
+    private enum Look { case stacked, iconOnly, inline }
+
+    var body: some View {
+        let open: Int? = model.showAddLayer ? shell.addCategory : nil
+        let slot: Int? = open.map { AddBarCatalog.slot($0) }.flatMap { AddBarCatalog.pill.contains($0) ? $0 : nil }
+        HStack(spacing: 8) {
+            pill(open: open, slot: slot)
+            AddBarRoundButton(label: AureaText.t("bar33_more"), id: "addBar.more") {
+                AddBarState.toggle(model, reduce: reduceMotion)
+            }
+        }
+        .padding(7)
+        .frame(maxHeight: .infinity)
+        .background(AddBarColors.block, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AureaColors.editorBar.ignoresSafeArea(edges: .bottom))
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.84), value: slot)
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.84), value: open)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("editor.addBar")
+        // A barra saiu (camada escolhida, outra interface): a grade do "+" fecha junto.
+        .onDisappear { AddBarState.shared.more = false }
+    }
+
+    private func pill(open: Int?, slot: Int?) -> some View {
+        GeometryReader { geometry in
+            let weights: [CGFloat] = AddBarCatalog.pill.map { slot == $0 ? 2 : 1 }
+            let total = weights.reduce(0, +)
+            HStack(spacing: 0) {
+                ForEach(Array(AddBarCatalog.pill.enumerated()), id: \.element) { k, index in
+                    let on = slot == index
+                    let look: Look = slot == nil ? .stacked : (on ? .inline : .iconOnly)
+                    item(index, shown: on ? (open ?? index) : index, look: look, on: on)
+                        .frame(width: geometry.size.width * weights[k] / total, height: geometry.size.height)
+                }
+            }
+        }
+        .background(AddBarColors.pill, in: Capsule())
+        .overlay(Capsule().stroke(AddBarColors.raised, lineWidth: 0.7))
+        .clipShape(Capsule())
+    }
+
+    private func item(_ index: Int, shown: Int, look: Look, on: Bool) -> some View {
+        let name = AureaText.t(ShellAddCategories.all[shown].0)
+        return Button {
+            if on { model.showAddLayer = false } else { AddBarState.open(index, model: model, shell: shell, reduce: reduceMotion) }
+        } label: {
+            ZStack {
+                if on {
+                    Capsule().fill(AddBarColors.active)
+                        .matchedGeometryEffect(id: "addBar.glow", in: glow)
+                        .padding(4)
+                        .transition(.opacity)
+                }
+                switch look {
+                case .stacked:
+                    VStack(spacing: 3) {
+                        AddBarIcon(category: shown, size: 21)
+                        Text(name).font(.aurea(size: 11, weight: .medium)).foregroundStyle(AureaColors.text)
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                    }
+                    .transition(.opacity)
+                case .iconOnly:
+                    AddBarIcon(category: shown, size: 21).transition(.opacity)
+                case .inline:
+                    HStack(spacing: 6) {
+                        AddBarIcon(category: shown, size: 21)
+                        Text(name).font(.aurea(size: 13, weight: .medium)).foregroundStyle(AureaColors.text)
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                    }
+                    .padding(.horizontal, 10)
+                    .transition(.opacity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(name)
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityIdentifier("addBar.\(ShellAddCategories.name(index))")
+    }
+}
+
+/// A grade do "+": o bloco cresce para cima, por cima da timeline e da própria
+/// barra, com o cartão 4 × 2 das categorias e o "X" redondo no lugar do "+".
+/// Ocupa a área que recebe (o véu transparente: tocar fora do cartão fecha e nada
+/// passa para a timeline). Mola suave de ~200 ms; nada com "reduzir movimento".
+@MainActor struct AddBarMoreOverlay: View {
+    @EnvironmentObject private var model: AureaModel
+    @EnvironmentObject private var shell: ShellPresentation
+    @ObservedObject private var state = AddBarState.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.layoutDirection) private var layoutDirection
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            if state.more {
+                Color.clear.contentShape(Rectangle())
+                    .onTapGesture { AddBarState.close(reduce: reduceMotion) }
+                    .accessibilityHidden(true)
+                AddBarGridBlock(reduce: reduceMotion) { index in
+                    AddBarState.open(index, model: model, shell: shell, reduce: reduceMotion)
+                }
+                .transition(gridTransition)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+
+    private var gridTransition: AnyTransition {
+        if reduceMotion { return .identity }
+        let anchor: UnitPoint = layoutDirection == .rightToLeft ? .bottomLeading : .bottomTrailing
+        return AnyTransition.scale(scale: 0.86, anchor: anchor).combined(with: .opacity)
+    }
+}
+
+@MainActor private struct AddBarGridBlock: View {
+    let reduce: Bool
+    let open: (Int) -> Void
+    @State private var turned = false
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            VStack(spacing: 6) {
+                ForEach(0..<2, id: \.self) { row in
+                    HStack(spacing: 6) {
+                        ForEach(Array(AddBarCatalog.grid[(row * 4)..<(row * 4 + 4)]), id: \.self) { index in
+                            tile(index)
+                        }
+                    }
+                }
+            }
+            .padding(8)
+            .background(AddBarColors.pill, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(AddBarColors.raised, lineWidth: 0.7))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(AureaText.t("bar33_grid"))
+            .accessibilityIdentifier("addBar.grid")
+            AddBarRoundButton(label: AureaText.t("bar33_close"), id: "addBar.close", rotation: turned ? 45 : 0) {
+                AddBarState.close(reduce: reduce)
+            }
+        }
+        .padding(7)
+        .background(AddBarColors.block, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        // O fundo do bloco segura o toque: não fecha nem passa para a timeline.
+        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .onTapGesture { }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .onAppear {
+            if reduce { turned = true } else { withAnimation(.spring(response: 0.26, dampingFraction: 0.8)) { turned = true } }
+        }
+    }
+
+    private func tile(_ index: Int) -> some View {
+        let name = AureaText.t(ShellAddCategories.all[index].0)
+        return Button { open(index) } label: {
+            VStack(spacing: 4) {
+                AddBarIcon(category: index, size: 22)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(AddBarColors.raised, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                Text(name).font(.aurea(size: 12, weight: .medium)).foregroundStyle(AureaColors.text)
+                    .lineLimit(1).minimumScaleFactor(0.75)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle())
+        .accessibilityLabel(name)
+        .accessibilityIdentifier("addBar.grid.\(ShellAddCategories.name(index))")
     }
 }

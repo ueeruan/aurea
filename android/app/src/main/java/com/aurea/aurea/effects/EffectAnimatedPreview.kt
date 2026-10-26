@@ -285,8 +285,8 @@ fun EffectPreviewScenePicker(selected: Int, onSelect: (Int) -> Unit, modifier: M
             ) {
                 Text(
                     stringResource(scene.label),
-                    // Omega: conteúdo sobre o destaque (menta) é o «sobre ação», nunca o texto claro.
-                    style = AureaType.of(12f, FontWeight.W600, color = if (on) AureaColors.OnAction else AureaColors.Text),
+                    // 0.3.3 tema: conteúdo sobre o destaque (Accent) é o OnAccent.
+                    style = AureaType.of(12f, FontWeight.W600, color = if (on) AureaColors.OnAccent else AureaColors.Text),
                     textAlign = TextAlign.Center,
                     maxLines = 2,
                 )

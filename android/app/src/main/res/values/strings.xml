@@ -1803,8 +1803,8 @@
     <string name="dock_short_sound">Som</string>
     <string name="fx_save_as_preset">Salvar como preset</string>
     <string name="fx_my_presets">Meus presets de efeito</string>
-    <string name="am_import_action">Importar do Alight Motion…</string>
-    <string name="am_import_done">%1$d efeito(s) do Alight Motion importados em “%2$s”</string>
+    <string name="am_import_action">Importar efeitos de projeto (.xml, .amproj)…</string>
+    <string name="am_import_done">%1$d efeito(s) importado(s) em “%2$s”</string>
     <string name="am_import_done_skipped">%1$d efeito(s) importados, %2$d sem equivalente ficaram de fora (“%3$s”)</string>
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
@@ -3794,7 +3794,7 @@
     <string name="edt_cmdx_undo_d">Reverte a última edição</string>
     <string name="edt_cmdx_redo">Refazer</string>
     <string name="edt_cmdx_redo_d">Reaplica a edição desfeita</string>
-    <string name="am_import_hint">Selecione uma camada no Aurea e escolha um XML, .amproj ou ZIP exportado pelo Alight Motion. A importação converte os efeitos compatíveis da primeira camada que tiver efeitos; não importa o projeto inteiro nem a mídia. Se houver itens sem equivalente, o arquivo é recusado para evitar perda de ajustes.</string>
+    <string name="am_import_hint">Selecione uma camada no Aurea e escolha um arquivo XML, .amproj ou ZIP com um projeto de efeitos. A importação converte os efeitos compatíveis da primeira camada que tiver efeitos; não importa o projeto inteiro nem a mídia. Se houver itens sem equivalente, o arquivo é recusado para evitar perda de ajustes.</string>
     <string name="beta_select_media">Selecionar várias</string>
     <string name="beta_add_media">Adicionar (%1$d)</string>
     <string name="beta_extend_clip">Estender até o fim da fonte</string>

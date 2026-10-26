@@ -94,7 +94,7 @@ class TimelineRowDropTest {
         val t2 = clip(2, 2, 40, 90)
         val rows = listOf(t1, t2)
         val drop = RowDrop.target(rows, tops(2), 60f, t1, 0)
-        assertEquals(RowDrop.INSERT, drop.kind)    // fileira de uma camada só: Alight Motion
+        assertEquals(RowDrop.INSERT, drop.kind)    // fileira de uma camada só: como na referência
         assertEquals(0L, drop.anchor)
     }
 

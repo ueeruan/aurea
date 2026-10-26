@@ -143,7 +143,7 @@ struct CommandSearchView: View {
                 }.padding(.vertical, 10).frame(maxWidth: .infinity, minHeight: 64, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(.plain).disabled(reason != nil).accessibilityIdentifier("command:\(hit.id)")
             Button { toggleFavorite(hit) } label: {
-                Image(systemName: favorite(hit) ? "star.fill" : "star").foregroundStyle(AureaColors.accent).frame(width: 48, height: 48)
+                Image(systemName: favorite(hit) ? "star.fill" : "star").fontWeight(AureaIconWeight.symbol).foregroundStyle(AureaColors.accent).frame(width: 48, height: 48)
             }.buttonStyle(.plain).accessibilityLabel(AureaText.t(favorite(hit) ? "edt_cmd_fav_remove" : "edt_cmd_fav_add", hit.title))
                 .accessibilityIdentifier("commandSearch.favorite:\(hit.id)")
                 .accessibilityAddTraits(favorite(hit) ? .isSelected : [])

@@ -25,7 +25,7 @@ enum EditorTimelineRefresh {
 enum StageInk {
     /// `ShellColors.White40`: o tempo da barra do projeto.
     static let white40        = Color(hex: 0x66FFFFFF)
-    static let dockRow        = Color(hex: 0xFF272D40)   // cor do AM
+    static let dockRow        = Color(hex: 0xFF272D40)   // cor da referência
     static let dockTile       = Color(hex: 0xFF272D40)
     static let dockTileContent = Color(hex: 0xFFB7BDCC)   // rótulos compactos com contraste
     static let dockTileIcon   = Color(hex: 0xFFE6E9F0)
@@ -508,9 +508,11 @@ struct ShellNullGlyph: View {
         Canvas { context, size in
             let k = min(size.width, size.height) / 30
             let r = CGRect(x: size.width / 2 - 13 * k, y: size.height / 2 - 13 * k, width: 26 * k, height: 26 * k)
-            context.stroke(Path(roundedRect: r, cornerRadius: 4 * k), with: .color(StageInk.dockTileContent), lineWidth: 1.8 * k)
+            // 0.3.3: + o traço extra dos glifos bold (AureaIconWeight.glyphStroke × 30).
+            let w = (1.8 + 30 * AureaIconWeight.glyphStroke) * k
+            context.stroke(Path(roundedRect: r, cornerRadius: 4 * k), with: .color(StageInk.dockTileContent), lineWidth: w)
             var line = Path(); line.move(to: CGPoint(x: r.minX + 3 * k, y: r.maxY - 3 * k)); line.addLine(to: CGPoint(x: r.maxX - 3 * k, y: r.minY + 3 * k))
-            context.stroke(line, with: .color(StageInk.dockTileContent), lineWidth: 1.8 * k)
+            context.stroke(line, with: .color(StageInk.dockTileContent), lineWidth: w)
         }
     }
 }

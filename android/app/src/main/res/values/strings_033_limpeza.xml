@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.3 limpeza: nome do preset criado pela importação de efeitos de projeto. -->
+    <string name="l33_import_preset_name">Importado · %1$s</string>
+    <string name="l33_import_preset_default">Efeitos importados</string>
+</resources>

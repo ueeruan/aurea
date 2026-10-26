@@ -7964,7 +7964,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
         else mark_incomplete(__FILE__, __LINE__);   // pipeline compilando: este quadro cai no Normal, o próximo tenta de novo
     }
     const bool readsBackdrop = lastRead != kInvalidIndex && copyP.valid() && blendP.valid();
-    // Máscara/Excluir (AM) recortam as CAMADAS abaixo, não a cor de fundo da
+    // Máscara/Excluir (referência) recortam as CAMADAS abaixo, não a cor de fundo da
     // composição: a pilha monta sobre transparente e o fundo entra por baixo
     // num último passe (fundo + resultado "sobre" ele).
     const bool bgUnder = !isolated && readsBackdrop && pNormal.ok() && firstDraw == 0 && snap.background.w > 0.0f
@@ -8136,7 +8136,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
             rc->compFromLayer = d.compFromLayer;
             rc->srcSampler = d.sampler;
             rc->mode = static_cast<f32>(static_cast<u16>(d.blend));
-            // Máscara (AM): só sobra o fundo sob o alfa da camada — o que
+            // Máscara (referência): só sobra o fundo sob o alfa da camada — o que
             // está fora do quad dela some, então o fundo não é copiado.
             rc->copyBackdrop = d.blend != BlendMode::Mask;
             rc->atop = d.clipAtop ? 1.0f : 0.0f;

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Miniatura dos modos de máscara da mescla (Alight Motion) — espelho de
+/// Miniatura dos modos de máscara da mescla (referência) — espelho de
 /// BlendCutThumb.kt. Máscara (BlendMode 22): a IMAGEM só dentro do disco, o
 /// xadrez da transparência fora. Excluir (23): a imagem com o disco furado.
 struct BlendCutThumb: View {

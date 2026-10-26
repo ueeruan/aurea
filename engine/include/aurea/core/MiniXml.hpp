@@ -1,8 +1,8 @@
 // =============================================================================
 //  Aurea / core / MiniXml.hpp
 //
-//  XML PEQUENO E PERMISSIVO. O motor lê dois XML de fora — SVG e a cena do
-//  Alight Motion — e nenhum dos dois precisa de validação, namespace ou DTD:
+//  XML PEQUENO E PERMISSIVO. O motor lê dois XML de fora — SVG e a cena de
+//  projeto da referência — e nenhum dos dois precisa de validação, namespace ou DTD:
 //  precisa de tag, atributos e filhos, sem cair com arquivo estranho.
 //
 //  O que o leitor faz: elementos, atributos entre aspas simples ou duplas

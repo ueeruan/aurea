@@ -70,7 +70,7 @@ import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.max
 
 // =============================================================================
-// Omega fundação · F2: MENU POPUP ANCORADO (`alight_popup_menu*` da referência)
+// Omega fundação · F2: MENU POPUP ANCORADO (o menu popup da referência)
 //
 // Todo menu da tela abre preso ao botão que o abriu: 250 dp (ou a largura da
 // âncora), raio 8, linhas de 40 dp, no máximo 8 linhas visíveis (o resto rola,

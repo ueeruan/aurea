@@ -19,16 +19,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
-import com.aurea.aurea.ui.theme.AureaTimeline
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.testTag
 
-// Omega timeline (área 03, P1-3): as quatro aparências da régua. O motor guarda
-// RGBA com o R no byte BAIXO (Marker::color); `MarkerColors` faz a conta nos dois
-// sentidos — a paleta antiga de 6 cores era escrita como ARGB e lida como RGBA.
-private val markerRoles: IntArray get() = IntArray(AureaTimeline.Bookmarks.size) { AureaTimeline.Bookmarks[it].toArgb() }
-private fun markerPacked(index: Int): Int = MarkerColors.pack(AureaTimeline.Bookmarks[index].toArgb())
-private fun markerAppearance(packed: Int): Int = MarkerColors.appearance(packed, markerRoles)
+// 0.3.3 recursos: o marcador antigo (a paleta de seis cores da 0.3.2) volta, com
+// a correção da área 03: o motor guarda RGBA com o R no byte BAIXO
+// (Marker::color), e `MarkerColors.pack` grava a cor certa; as marcas gravadas
+// pela 0.3.2 (literais ARGB crus) aparecem na cor que pretendiam (`display`).
+private fun markerPacked(index: Int): Int = MarkerColors.pack(MarkerColors.LEGACY[index])
 
 /** Opened by holding the preview anchor or tapping a marker on the ruler; a new marker only exists after Save. */
 @Composable
@@ -42,7 +39,7 @@ internal fun MarkerEditor(store: EditorStore) {
         if (index < 0 && !isNew) { LaunchedEffect(original) { store.closeMarkerEditor() }; return@let }
         var name by remember(original, isNew) { mutableStateOf(if (isNew) "" else store.markerLabel(original)) }
         var frame by remember(original, isNew) { mutableStateOf(original.toString()) }
-        var color by remember(original, isNew) { mutableStateOf(if (index >= 0) markers.colors[index] else markerPacked(0)) }
+        var color by remember(original, isNew) { mutableStateOf(if (index >= 0) markers.colors[index] else MarkerColors.ENGINE_DEFAULT) }
         // Aberto de dentro do palco (LTR): o diálogo volta à direção do idioma.
         LocaleDirection { AlertDialog(onDismissRequest = { store.closeMarkerEditor(); failure = false },
             title = { Text(stringResource(R.string.marker_edit)) },
@@ -55,13 +52,13 @@ internal fun MarkerEditor(store: EditorStore) {
                     label = { Text(stringResource(R.string.marker_frame)) })
                 Text(frame.toIntOrNull()?.let { Timecode.format(it.coerceAtLeast(0), store.project.fps) } ?: "—")
                 TextButton(onClick = { frame = store.playhead.toString() }) { Text(stringResource(R.string.marker_at_playhead)) }
-                Row {
-                    val chosen = markerAppearance(color)
-                    AureaTimeline.Bookmarks.forEachIndexed { i, swatch ->
+                Row(Modifier.fillMaxWidth()) {
+                    val chosen = MarkerColors.legacyIndex(color)
+                    MarkerColors.LEGACY.forEachIndexed { i, argb ->
                         val description = stringResource(R.string.marker_color, i + 1)
-                        Box(Modifier.size(44.dp).clickable { color = markerPacked(i) }.semantics { contentDescription = description }
+                        Box(Modifier.weight(1f).height(44.dp).clickable { color = markerPacked(i) }.semantics { contentDescription = description }
                             .testTag("marker.color.$i"), contentAlignment = Alignment.Center) {
-                            Box(Modifier.size(if (chosen == i) 32.dp else 22.dp).background(swatch, CircleShape))
+                            Box(Modifier.size(if (chosen == i) 32.dp else 22.dp).background(Color(argb), CircleShape))
                         }
                     }
                 }

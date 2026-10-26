@@ -1019,7 +1019,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     // agem nas camadas abaixo, só dentro dela (como uma camada de ajuste recortada).
     put("aurea.utility.copy_background", EffectHuman(
         name = R.string.fx030k_name,
-        keywords = "copiar fundo copy background janela window ajustar parte do video forma shape mascara recorte camada de ajuste adjustment layer alight motion backdrop",
+        keywords = "copiar fundo copy background janela window ajustar parte do video forma shape mascara recorte camada de ajuste adjustment layer backdrop",
         principal = listOf(0, 1),
         params = mapOf(
             0 to ParamHuman(label = R.string.fx030k_window),
@@ -1752,7 +1752,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         keywords = "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh cc rainfall snowfall particle world",
         principal = listOf(0, 9, 13, 15, 22, 24, 27, 32, 33, 35, 38),
     ))
-    // Sinônimos de busca (nomes do After Effects / Alight Motion) dos efeitos sem ficha.
+    // Sinônimos de busca (nomes do After Effects e da referência) dos efeitos sem ficha.
     put("aurea.blur.box", EffectHuman(keywords = "fast box blur"))
     put("aurea.blur.directional", EffectHuman(keywords = "motion blur"))
     put("aurea.light.lens_flare", EffectHuman(keywords = "optical flares"))

@@ -1,5 +1,5 @@
 // =============================================================================
-//  Importação de efeitos do Alight Motion (project/AlightMotion.hpp): XML de
+//  Importação de efeitos de projeto da referência (project/AlightMotion.hpp): XML de
 //  cena no formato real (a mesma forma da cena de teste do importador antigo),
 //  tabela de conversão, keyframes normalizados, faixas, pacote zip e o preset
 //  resultante aplicado de verdade pelo motor.
@@ -24,7 +24,7 @@ namespace {
 /// um efeito sem equivalente (mosaico), brilho com keyframes e motion blur;
 /// a segunda (Titulo) tem tremor — fica de fora (vale a primeira camada).
 const char* const kCena = R"(<?xml version='1.0' encoding='UTF-8' ?>
-<scene title="Brilho AM" width="1920" height="1080" bgcolor="#ff101418" totalTime="4000" fps="30">
+<scene title="Brilho importado" width="1920" height="1080" bgcolor="#ff101418" totalTime="4000" fps="30">
   <media uri="content://fotos/1" filename="foto.png" type="image/png" />
   <shape id="1" label="Fundo" startTime="0" endTime="2000" fillType="color" s=".rect">
     <transform>
@@ -33,14 +33,14 @@ const char* const kCena = R"(<?xml version='1.0' encoding='UTF-8' ?>
     </transform>
     <fillColor value="#ff2a2a2a" />
     <property name="size" type="vec2" value="800.000000,600.000000" />
-    <effect id="com.alightcreative.effects.gaussianblur2" locallyApplied="true">
+    <effect id="com.referencia.effects.gaussianblur2" locallyApplied="true">
       <property name="strength" type="float" value="0.250000" />
       <property name="quality" type="int" value="2" />
     </effect>
-    <effect id="com.alightcreative.effects.mosaic" locallyApplied="true">
+    <effect id="com.referencia.effects.mosaic" locallyApplied="true">
       <property name="size" type="float" value="12.000000" />
     </effect>
-    <effect id="com.alightcreative.effects.glow2" locallyApplied="true">
+    <effect id="com.referencia.effects.glow2" locallyApplied="true">
       <property name="radius" type="float" value="40.000000" />
       <property name="intensity" type="float">
         <kf t="0.000000" v="0.000000" />
@@ -51,12 +51,12 @@ const char* const kCena = R"(<?xml version='1.0' encoding='UTF-8' ?>
       <property name="color" type="color" value="#ffff8800" />
       <property name="sparkle" type="float" value="0.300000" />
     </effect>
-    <effect id="com.alightcreative.effects.motionblur4" locallyApplied="true" />
+    <effect id="com.referencia.effects.motionblur4" locallyApplied="true" />
   </shape>
   <text id="2" label="Titulo" startTime="500" endTime="2500" fillType="color" size="48.000000">
     <transform><location value="100.000000,200.000000,0.000000" /></transform>
     <content>Ola &amp; bem-vindo</content>
-    <effect id="com.alightcreative.effects.shake" locallyApplied="true">
+    <effect id="com.referencia.effects.shake" locallyApplied="true">
       <property name="strength" type="float" value="0.200000" />
     </effect>
   </text>
@@ -161,9 +161,9 @@ AUREA_TEST(AlightMotion, SceneEffectsBecomeAnEffectsPreset) {
     AUREA_CHECK(rep.error.empty());
     AUREA_CHECK_EQ(rep.mapped, 2u);
     AUREA_CHECK(rep.layer == "Fundo");
-    AUREA_CHECK(rep.name == "Brilho AM");
-    AUREA_CHECK(has(rep.skipped, "com.alightcreative.effects.mosaic"));
-    AUREA_CHECK(has(rep.skipped, "com.alightcreative.effects.motionblur4"));
+    AUREA_CHECK(rep.name == "Brilho importado");
+    AUREA_CHECK(has(rep.skipped, "com.referencia.effects.mosaic"));
+    AUREA_CHECK(has(rep.skipped, "com.referencia.effects.motionblur4"));
     AUREA_CHECK_EQ(rep.skipped.size(), usize{2});
     AUREA_CHECK(has(rep.warnings, "sparkle"));          // parâmetro sem equivalente: aviso, não erro
     AUREA_CHECK(has(rep.warnings, "Fundo"));            // a outra camada com efeito ficou de fora
@@ -172,7 +172,7 @@ AUREA_TEST(AlightMotion, SceneEffectsBecomeAnEffectsPreset) {
     presets::Preset p;
     std::string err;
     AUREA_CHECK_MSG(presets::parse(js, p, &reg, &err), err.c_str());
-    AUREA_CHECK(p.kind == presets::PresetKind::Effects && p.name == "Brilho AM");
+    AUREA_CHECK(p.kind == presets::PresetKind::Effects && p.name == "Brilho importado");
     AUREA_CHECK_NEAR(static_cast<f32>(p.fps), 30.0f, 1e-6f);
     AUREA_CHECK_EQ(p.effects.size(), usize{2});
     if (p.effects.size() != 2) return;
@@ -206,7 +206,7 @@ AUREA_TEST(AlightMotion, SceneEffectsBecomeAnEffectsPreset) {
     AUREA_CHECK_NEAR(t->keys[0].value, 0.0f, 1e-6f);
     AUREA_CHECK_NEAR(t->keys[1].value, 1.5f, 1e-6f);
     AUREA_CHECK_NEAR(t->keys[2].value, 0.5f, 1e-6f);
-    // A curva do AM é a CHEGADA: a do segundo keyframe sai do primeiro.
+    // A curva do arquivo é a CHEGADA: a do segundo keyframe sai do primeiro.
     AUREA_CHECK(t->keys[0].interp == Interpolation::Bezier);
     AUREA_CHECK_NEAR(t->keys[0].bx1, 0.25f, 1e-6f);
     AUREA_CHECK_NEAR(t->keys[0].by1, 0.1f, 1e-6f);
@@ -259,10 +259,10 @@ AUREA_TEST(AlightMotion, OutOfRangeIsClampedAndUntimedKeysBecomeStatic) {
     // Sem startTime/endTime nem totalTime: a duração da camada é desconhecida.
     const char* xml = R"(<scene width="1080" height="1080" fps="60">
   <shape id="1" label="Sem tempo" s=".rect">
-    <effect id="com.alightcreative.effects.gaussianblur">
+    <effect id="com.referencia.effects.gaussianblur">
       <property name="radius" type="float" value="900" />
     </effect>
-    <effect id="com.alightcreative.effects.glow">
+    <effect id="com.referencia.effects.glow">
       <property name="threshold" type="float" value="-0.5" />
       <property name="intensity" type="float">
         <kf t="0.0" v="0.25" />
@@ -295,7 +295,7 @@ AUREA_TEST(AlightMotion, OutOfRangeIsClampedAndUntimedKeysBecomeStatic) {
 AUREA_TEST(AlightMotion, FadeBecomesTransformOpacityKeys) {
     const char* xml = R"(<scene width="1920" height="1080" fps="30" totalTime="2000">
   <text id="7" label="Titulo" startTime="0" endTime="2000">
-    <effect id="com.alightcreative.effects.fade" locallyApplied="true">
+    <effect id="com.referencia.effects.fade" locallyApplied="true">
       <property name="inTime" type="float" value="0.500000" />
       <property name="outTime" type="float" value="0.500000" />
     </effect>
@@ -350,7 +350,7 @@ AUREA_TEST(AlightMotion, MalformedOrUselessInputFailsCleanly) {
     // Só efeitos sem equivalente: erro, com a lista do que ficou de fora.
     AlightImportReport rep;
     const std::string none = presets::import_alight_motion(
-        R"(<scene fps="30"><shape label="v"><effect id="com.alightcreative.effects.vignette"/><effect id="com.alightcreative.effects.curves"/></shape></scene>)",
+        R"(<scene fps="30"><shape label="v"><effect id="com.referencia.effects.vignette"/><effect id="com.referencia.effects.curves"/></shape></scene>)",
         &reg, rep);
     AUREA_CHECK(none.empty() && !rep.error.empty());
     AUREA_CHECK(has(rep.skipped, "vignette") && has(rep.skipped, "curves"));
@@ -362,7 +362,7 @@ AUREA_TEST(AlightMotion, MalformedOrUselessInputFailsCleanly) {
 AUREA_TEST(AlightMotion, ZipPackageUsesTheLargestScene) {
     EffectRegistry reg;
     register_builtin_effects(reg);
-    const std::string thumb = R"(<scene title="miniatura"><shape label="m"><effect id="com.alightcreative.effects.sharpen"/></shape></scene>)";
+    const std::string thumb = R"(<scene title="miniatura"><shape label="m"><effect id="com.referencia.effects.sharpen"/></shape></scene>)";
     for (const bool deflate : {false, true}) {
         const std::string zip = make_zip({
             ZipEntry{"thumbs/elemento.xml", thumb, deflate},
@@ -372,7 +372,7 @@ AUREA_TEST(AlightMotion, ZipPackageUsesTheLargestScene) {
         AlightImportReport rep;
         const std::string js = presets::import_alight_motion(zip, &reg, rep);
         AUREA_CHECK_MSG(!js.empty(), rep.error.c_str());
-        AUREA_CHECK(rep.name == "Brilho AM" && rep.mapped == 2);
+        AUREA_CHECK(rep.name == "Brilho importado" && rep.mapped == 2);
         presets::Preset p;
         AUREA_CHECK(presets::parse(js, p, &reg) && p.effects.size() == 2);
     }

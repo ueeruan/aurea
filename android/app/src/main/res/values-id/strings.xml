@@ -931,8 +931,8 @@ untuk mengedit kurvanya.</string>
     <string name="dock_short_sound">Suara</string>
     <string name="fx_save_as_preset">Simpan sebagai preset</string>
     <string name="fx_my_presets">Preset efek saya</string>
-    <string name="am_import_action">Impor dari Alight Motion…</string>
-    <string name="am_import_done">%1$d efek Alight Motion diimpor ke “%2$s”</string>
+    <string name="am_import_action">Impor efek dari proyek (.xml, .amproj)…</string>
+    <string name="am_import_done">%1$d efek diimpor ke “%2$s”</string>
     <string name="am_import_done_skipped">%1$d efek diimpor, %2$d tanpa padanan dilewati (“%3$s”)</string>
     <string name="am_import_failed">Gagal mengimpor: %1$s</string>
     <string name="am_import_nothing">tidak ada efek yang punya padanan di Aurea</string>
@@ -3711,7 +3711,7 @@ untuk mengedit kurvanya.</string>
     <string name="edt_cmdx_undo_d">Membatalkan suntingan terakhir</string>
     <string name="edt_cmdx_redo">Ulangi</string>
     <string name="edt_cmdx_redo_d">Menerapkan lagi suntingan yang dibatalkan</string>
-    <string name="am_import_hint">Pilih layer di Aurea, lalu pilih XML, .amproj atau ZIP yang diekspor dari Alight Motion. Impor mengonversi efek yang kompatibel dari layer pertama yang memiliki efek; bukan seluruh proyek atau medianya. File dengan item yang tidak didukung ditolak agar pengaturan tidak hilang.</string>
+    <string name="am_import_hint">Pilih layer di Aurea, lalu pilih file XML, .amproj atau ZIP yang berisi proyek efek. Impor mengonversi efek yang kompatibel dari layer pertama yang memiliki efek; bukan seluruh proyek atau medianya. File dengan item yang tidak didukung ditolak agar pengaturan tidak hilang.</string>
     <string name="beta_select_media">Pilih beberapa</string>
     <string name="beta_add_media">Tambahkan (%1$d)</string>
     <string name="beta_extend_clip">Perpanjang hingga akhir sumber</string>

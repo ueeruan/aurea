@@ -274,8 +274,9 @@ internal fun HomeShimmer(modifier: Modifier = Modifier) {
 }
 
 /**
- * Ícones da barra de status escuros enquanto a Home clara está na tela (Omega);
- * claros de novo ao sair (o editor é escuro).
+ * Cor dos ícones da barra de status e de navegação enquanto a Home está na tela
+ * ([light] = ícones escuros, para fundo claro); volta ao estado anterior ao
+ * sair. 0.3.3: a Home usa os tons escuros da paleta, então passa `false`.
  */
 @Composable
 internal fun LightSystemBars(light: Boolean) {
@@ -309,33 +310,12 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
 
 /**
  * Os componentes do Material (campo, chip, botão de texto, barra de progresso)
- * nos papéis claros: dentro da Home clara o tema escuro do app os deixaria com
- * texto branco sobre branco. Nos temas escuros nada muda.
+ * dentro da Home: o esquema escuro do app com o texto e o conteúdo nos papéis
+ * da Home. 0.3.3: a Home é escura (paleta AUREA), sem esquema claro.
  */
 @Composable
 internal fun HomeMaterial(content: @Composable () -> Unit) {
-    val base = androidx.compose.material3.MaterialTheme.colorScheme
-    val scheme = if (!AureaColors.LightIsLight) base else androidx.compose.material3.lightColorScheme(
-        primary = AureaColors.LightAccentInk,
-        onPrimary = AureaColors.LightSurface,
-        secondary = AureaColors.LightInk,
-        onSecondary = AureaColors.LightOnInk,
-        secondaryContainer = AureaColors.LightSurfaceAlt,
-        onSecondaryContainer = AureaColors.LightText,
-        background = AureaColors.LightBackground,
-        onBackground = AureaColors.LightText,
-        surface = AureaColors.LightSurface,
-        onSurface = AureaColors.LightText,
-        surfaceVariant = AureaColors.LightSurfaceAlt,
-        onSurfaceVariant = AureaColors.LightTextMuted,
-        surfaceContainer = AureaColors.LightSurface,
-        surfaceContainerLow = AureaColors.LightBackground,
-        surfaceContainerHigh = AureaColors.LightSurface,
-        surfaceContainerHighest = AureaColors.LightSurfaceAlt,
-        outline = AureaColors.LightDivider,
-        outlineVariant = AureaColors.LightDivider,
-        error = AureaColors.LightDanger,
-    )
+    val scheme = androidx.compose.material3.MaterialTheme.colorScheme
     androidx.compose.material3.MaterialTheme(colorScheme = scheme) {
         androidx.compose.runtime.CompositionLocalProvider(
             androidx.compose.material3.LocalTextStyle provides AureaType.Base.copy(color = AureaColors.LightText),

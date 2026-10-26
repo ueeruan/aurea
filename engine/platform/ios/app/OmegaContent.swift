@@ -23,7 +23,8 @@ struct ContentIcon: View {
     var body: some View {
         Canvas { context, dims in
             let u = min(dims.width, dims.height) / 24
-            let style = StrokeStyle(lineWidth: 1.8 * u, lineCap: .round, lineJoin: .round)
+            // 0.3.3: traço 1,8 + o extra dos glifos bold (AureaIconWeight.glyphStroke), como o desfoque de movimento.
+            let style = StrokeStyle(lineWidth: (1.8 + 24 * AureaIconWeight.glyphStroke) * u, lineCap: .round, lineJoin: .round)
             func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * u, y: y * u) }
             func line(_ x0: CGFloat, _ y0: CGFloat, _ x1: CGFloat, _ y1: CGFloat) {
                 var path = Path()
@@ -72,7 +73,7 @@ struct ContentIcon: View {
                 context.fill(Path(roundedRect: CGRect(x: 8.5 * u, y: 4.5 * u, width: 7 * u, height: 5.5 * u), cornerRadius: u), with: .color(tint))
                 var arc = Path()
                 arc.move(to: p(10, 4.5)); arc.addCurve(to: p(14, 4.5), control1: p(10, 1.5), control2: p(14, 1.5))
-                context.stroke(arc, with: .color(tint), lineWidth: 1.4 * u)
+                context.stroke(arc, with: .color(tint), lineWidth: (1.4 + 24 * AureaIconWeight.glyphStroke) * u)
             case .lengthLock:
                 // Comprimento igual: a régua com as duas pontas.
                 line(4, 12, 20, 12); line(4, 8, 4, 16); line(20, 8, 20, 16)

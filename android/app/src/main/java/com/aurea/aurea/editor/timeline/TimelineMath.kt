@@ -669,6 +669,31 @@ internal object MarkerColors {
     /** ARGB → RGBA do motor (R baixo), opaco. */
     fun pack(argb: Int): Int = unpack(argb)
 
+    // 0.3.3 recursos: o marcador antigo (seis cores) volta, com a correção de cor.
+    /**
+     * A paleta de seis cores do marcador da 0.3.2, em ARGB (amarelo, azul, verde,
+     * laranja, lilás, branco). O amarelo é a cor padrão do motor ([ENGINE_DEFAULT]).
+     */
+    val LEGACY: IntArray = intArrayOf(
+        0xFFF7C34F.toInt(), 0xFF4D6EFF.toInt(), 0xFF70D56B.toInt(),
+        0xFFFFB75B.toInt(), 0xFFD67BDB.toInt(), 0xFFFFFFFF.toInt(),
+    )
+
+    /**
+     * A cor (ARGB) com que a marca aparece. A 0.3.2 gravava os literais ARGB da
+     * paleta sem converter (e o motor nasce com [ENGINE_DEFAULT]): esses valores
+     * crus são reconhecidos e mostrados na cor que pretendiam. O resto (o que o
+     * editor grava agora, com [pack]) é desempacotado normalmente.
+     */
+    fun display(packed: Int): Int {
+        val opaque = packed or (0xFF shl 24)
+        for (c in LEGACY) if (c == opaque) return c
+        return unpack(packed)
+    }
+
+    /** Índice da cor da paleta antiga (0..5) com que a marca aparece; −1 = outra cor. */
+    fun legacyIndex(packed: Int): Int = LEGACY.indexOf(display(packed))
+
     /**
      * Aparência (0..3) de uma marca: a cor exata de um papel, a cor padrão do
      * motor (= 0) ou o papel mais perto (marcas antigas com a paleta de 6 cores).

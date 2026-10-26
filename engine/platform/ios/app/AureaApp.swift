@@ -36,9 +36,9 @@ struct AureaApp: App {
                 // por `keepLtr()` (timeline, palco, transporte, curvas).
                 .environment(\.layoutDirection, model.language.layoutDirection)
                 .environment(\.locale, model.language.uiLocale)
-                // O editor é escuro; a Home do Omega é clara (D6): barra de status
-                // escura e controles do sistema claros só enquanto ela está na tela.
-                .preferredColorScheme(model.screen == .home && AureaColors.lightIsLight ? .light : .dark)
+                // 0.3.3 tema: o app inteiro (Home e editor) é escuro na paleta
+                // AUREA: barra de status e controles do sistema no modo escuro.
+                .preferredColorScheme(.dark)
                 .onAppear {
                     model.start()
                     // 0.3.2: config remota assinada (atualização obrigatória, política do AureaHyper, aviso).

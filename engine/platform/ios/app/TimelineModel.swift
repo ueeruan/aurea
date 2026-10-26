@@ -1199,7 +1199,7 @@ enum KeyframeVisibility {
     static func visible(showAll: Bool, isPropertyLane: Bool, selected: Bool) -> Bool {
         return showAll || isPropertyLane || selected
     }
-    /// Como no Alight Motion: só a camada SELECIONADA edita os losangos (tocar,
+    /// Como na referência: só a camada SELECIONADA edita os losangos (tocar,
     /// arrastar); das outras eles aparecem esmaecidos, só de referência, e o
     /// toque cai na camada. Pedidos explícitos continuam alcançando: o modo
     /// "escolher keyframes" e as trilhas de propriedade que o usuário abriu.

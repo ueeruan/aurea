@@ -392,7 +392,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
                     Text(
                         "OK",
                         style = AureaType.Base.merge(
-                            TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W700, color = if (ok) AureaColors.OnAction else AureaColors.Disabled),
+                            TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W700, color = if (ok) AureaColors.OnAccent else AureaColors.Disabled),
                         ),
                     )
                 }

@@ -76,7 +76,7 @@ class EditorUiCaptureTest {
         compose.onNodeWithTag("timeline.add").assertDoesNotExist()
         compose.onNodeWithTag("editor.addBar").assertIsDisplayed()
         capture("timeline-reference")
-        compose.onNodeWithTag("addBar.Media").performScrollTo().performClick()
+        compose.onNodeWithTag("addBar.Media").performClick()
         compose.onNodeWithContentDescription(context.getString(R.string.editor_fechar_adicionar)).assertIsDisplayed()
         back()
         compose.onNodeWithTag("editor.addBar").assertIsDisplayed()

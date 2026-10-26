@@ -77,11 +77,11 @@ struct AureaPalette: Identifiable {
     var editorRowPillOverride: Color? = nil
     /// Quadradinho de 22 pt do glifo dentro da pílula.
     var editorGlyphBoxOverride: Color? = nil
-    /// Ícone e texto sobre a cor de marca (`brand`/`action`): branco nos temas
-    /// escuros, escuro no Omega, cujo destaque é claro.
+    /// Ícone e texto sobre a cor de marca (`brand`/`action`). Nil = branco #F7F9FB
+    /// (todas as paletas escuras).
     var onBrandOverride: Color? = nil
-    // Omega fundação: papéis das telas claras. Nil = derivados dos tons escuros
-    // deste tema (`AureaLightRoles.mapped(from:)`); só o Omega é claro.
+    // Omega fundação: papéis das telas fora do editor. Nil = derivados dos tons
+    // deste tema (`AureaLightRoles.mapped(from:)`); nenhuma paleta passa outro.
     var lightRolesOverride: AureaLightRoles? = nil
     // Omega timeline (área 03): cabeçalho da linha, aba do tempo atual e fundo da
     // linha arrastada. Nil = derivados dos tons deste tema (par do Android).
@@ -92,18 +92,18 @@ struct AureaPalette: Identifiable {
     var timelineTimeTab: Color { timelineTimeTabOverride ?? editorRowPill }
     var timelineDragRow: Color { timelineDragRowOverride ?? chipHigh }
     // Omega painel: (área 04) fundo do gráfico do editor de curva (P10 da
-    // referência; par do `curveGraph` do Android). Os outros temas derivam do
-    // campo alto que já têm. Pelo id, para não mexer no init da paleta.
-    var curveGraph: Color { id == "omega" ? Color(hex: 0xFF474D70) : chipHigh }
+    // referência; par do `curveGraph` do Android). Todo tema deriva do campo
+    // alto que já tem.
+    var curveGraph: Color { chipHigh }
     /// Os papéis claros em uso (ver `AureaLightRoles`).
     var light: AureaLightRoles { lightRolesOverride ?? .mapped(from: self) }
-    /// Omega efeitos (área 07): papéis do painel de efeitos (ver `AureaFxRoles`).
-    /// Pelo id, para não mexer no init da paleta (par do `fx` do Android).
-    var fx: AureaFxRoles { id == "omega" ? .omega : .mapped(from: self) }
+    /// Omega efeitos (área 07): papéis do painel de efeitos (ver `AureaFxRoles`;
+    /// par do `fx` do Android), derivados dos tons do tema.
+    var fx: AureaFxRoles { .mapped(from: self) }
     /// Omega conteúdo (área 06): papéis dos editores de conteúdo (ver `AureaContentRoles`).
-    var content: AureaContentRoles { id == "omega" ? .omega : .mapped(from: self) }
+    var content: AureaContentRoles { .mapped(from: self) }
     /// Omega home (área 01): papéis só da Home (ver `AureaHomeRoles`; par do `home` do Android).
-    var home: AureaHomeRoles { id == "omega" ? .omega : .mapped(from: self) }
+    var home: AureaHomeRoles { .mapped(from: self) }
     var editorCanvas: Color { editorCanvasOverride ?? editorPanelHigh }
     var editorBar: Color { editorBarOverride ?? surfaceHigh }
     var editorBarLine: Color { editorBarLineOverride ?? border }
@@ -112,14 +112,6 @@ struct AureaPalette: Identifiable {
     /// Omega fundação: faltava (o `AureaColors.onAction` já lia `palette.onBrand`).
     /// Mesmo padrão do Android: branco #F7F9FB nos temas escuros.
     var onBrand: Color { onBrandOverride ?? Color(hex: 0xFFF7F9FB) }
-    /// Omega (versão de teste 0.3.2): a tela de edição segue a referência de mercado
-    /// estudada em `build/reference/am-omega-20261026/` — fundos azul-marinho em
-    /// camadas e um único destaque verde-menta. Mesmos valores do Android.
-    static let omega = AureaPalette(id: "omega", brandDeep: Color(hex: 0xFF0F5042), brand: Color(hex: 0xFF00FFA8), accent: Color(hex: 0xFF00FFA8), keyframe: Color(hex: 0xFF00FFA8), background: Color(hex: 0xFF141620), surface: Color(hex: 0xFF191B27), surfaceHigh: Color(hex: 0xFF202332), chip: Color(hex: 0xFF2B2E3C), chipHigh: Color(hex: 0xFF333750), border: Color(hex: 0xFF292D40), muted: Color(hex: 0xFFA3A5B0), subtle: Color(hex: 0xFF767A88), onAccent: Color(hex: 0xFF131313), accentDim: Color(hex: 0xFF0F5042), keyframeDim: Color(hex: 0xFF0F5042), stage: Color(hex: 0xFF0C0D13), hairline: Color(hex: 0xB8292D40), editorTopBar: Color(hex: 0xFF141620), editorPanel: Color(hex: 0xFF202332), editorPanelHigh: Color(hex: 0xFF2B2E3C), pill: Color(hex: 0xFF202332), actionDim: Color(hex: 0xFF0F5042), statusBarVeil: Color(hex: 0xFF0C0D13), systemBarVeil: Color(hex: 0xFF0C0D13), tickWeak: Color(hex: 0xFF494C5A), tickStrong: Color(hex: 0xFF818390), railModeFill: Color(hex: 0xFF2B2E3C), fieldFilled: Color(hex: 0xFF2A2F36),
-                                    editorCanvasOverride: Color(hex: 0xFF141620), editorBarOverride: Color(hex: 0xFF202332), editorBarLineOverride: Color(hex: 0xFF292D40),
-                                    editorRowPillOverride: Color(hex: 0xFF262A3C), editorGlyphBoxOverride: Color(hex: 0xFF333750), onBrandOverride: Color(hex: 0xFF131313),
-                                    lightRolesOverride: .omega,
-                                    timelineHeaderOverride: Color(hex: 0xFF2C313F), timelineTimeTabOverride: Color(hex: 0xFF282C3F), timelineDragRowOverride: Color(hex: 0xFF484B5B))
     static let aurea = AureaPalette(id: "aurea", brandDeep: Color(hex: 0xFF123A63), brand: Color(hex: 0xFF245D8C), accent: Color(hex: 0xFF6FAED9), keyframe: Color(hex: 0xFFA9D3EC), background: Color(hex: 0xFF0F141A), surface: Color(hex: 0xFF151C24), surfaceHigh: Color(hex: 0xFF1B2530), chip: Color(hex: 0xFF212D3A), chipHigh: Color(hex: 0xFF323D49), border: Color(hex: 0xFF273442), muted: Color(hex: 0xFFAAB6C3), subtle: Color(hex: 0xFF7C8A99), onAccent: Color(hex: 0xFF0B1117), accentDim: Color(hex: 0xFF1D3A55), keyframeDim: Color(hex: 0xFF22405A), stage: Color(hex: 0xFF0A0E13), hairline: Color(hex: 0xB8273442), editorTopBar: Color(hex: 0xFF0F141A), editorPanel: Color(hex: 0xFF0F141A), editorPanelHigh: Color(hex: 0xFF151C24), pill: Color(hex: 0xFF1B2530), actionDim: Color(hex: 0xFF16304A), statusBarVeil: Color(hex: 0xFF070A0E), systemBarVeil: Color(hex: 0xFF0B0F13), tickWeak: Color(hex: 0xFF43516A), tickStrong: Color(hex: 0xFF7485A3), railModeFill: Color(hex: 0xFF1E222D), fieldFilled: Color(hex: 0xFF272B33),
                                     editorCanvasOverride: Color(hex: 0xFF161C2A), editorBarOverride: Color(hex: 0xFF1B2330), editorBarLineOverride: Color(hex: 0xFF2A3444),
                                     editorRowPillOverride: Color(hex: 0xFF222B3B), editorGlyphBoxOverride: Color(hex: 0xFF2E3B4E))
@@ -128,8 +120,9 @@ struct AureaPalette: Identifiable {
     static let emerald = AureaPalette(id: "emerald", brandDeep: Color(hex: 0xFF0F4A3A), brand: Color(hex: 0xFF1C7A5E), accent: Color(hex: 0xFF5BD6A8), keyframe: Color(hex: 0xFFA6ECD2), background: Color(hex: 0xFF0B1411), surface: Color(hex: 0xFF111D19), surfaceHigh: Color(hex: 0xFF172722), chip: Color(hex: 0xFF1D302A), chipHigh: Color(hex: 0xFF2C403A), border: Color(hex: 0xFF223A33), muted: Color(hex: 0xFFA6BDB5), subtle: Color(hex: 0xFF789088), onAccent: Color(hex: 0xFF06110D), accentDim: Color(hex: 0xFF163A30), keyframeDim: Color(hex: 0xFF1D4539), stage: Color(hex: 0xFF080F0C), hairline: Color(hex: 0xB8223A33), editorTopBar: Color(hex: 0xFF0B1411), editorPanel: Color(hex: 0xFF0B1411), editorPanelHigh: Color(hex: 0xFF111D19), pill: Color(hex: 0xFF172722), actionDim: Color(hex: 0xFF123326), statusBarVeil: Color(hex: 0xFF060B09), systemBarVeil: Color(hex: 0xFF09100D), tickWeak: Color(hex: 0xFF3B5249), tickStrong: Color(hex: 0xFF6C8C80), railModeFill: Color(hex: 0xFF18251F), fieldFilled: Color(hex: 0xFF1F2B27))
     static let amethyst = AureaPalette(id: "amethyst", brandDeep: Color(hex: 0xFF3A2470), brand: Color(hex: 0xFF6246B8), accent: Color(hex: 0xFFB9A2FF), keyframe: Color(hex: 0xFFDCCFFF), background: Color(hex: 0xFF110E19), surface: Color(hex: 0xFF181423), surfaceHigh: Color(hex: 0xFF201B2E), chip: Color(hex: 0xFF282238), chipHigh: Color(hex: 0xFF383049), border: Color(hex: 0xFF2F2842), muted: Color(hex: 0xFFB5ADC6), subtle: Color(hex: 0xFF877E99), onAccent: Color(hex: 0xFF0D0A14), accentDim: Color(hex: 0xFF2C2248), keyframeDim: Color(hex: 0xFF362B55), stage: Color(hex: 0xFF0C0A12), hairline: Color(hex: 0xB82F2842), editorTopBar: Color(hex: 0xFF110E19), editorPanel: Color(hex: 0xFF110E19), editorPanelHigh: Color(hex: 0xFF181423), pill: Color(hex: 0xFF201B2E), actionDim: Color(hex: 0xFF261E42), statusBarVeil: Color(hex: 0xFF08070C), systemBarVeil: Color(hex: 0xFF0D0B13), tickWeak: Color(hex: 0xFF4A4260), tickStrong: Color(hex: 0xFF7D7399), railModeFill: Color(hex: 0xFF211C2D), fieldFilled: Color(hex: 0xFF272233))
     static let sunset = AureaPalette(id: "sunset", brandDeep: Color(hex: 0xFF6A3212), brand: Color(hex: 0xFFB45A1E), accent: Color(hex: 0xFFFFB060), keyframe: Color(hex: 0xFFFFD6A8), background: Color(hex: 0xFF15100C), surface: Color(hex: 0xFF1E1712), surfaceHigh: Color(hex: 0xFF281F18), chip: Color(hex: 0xFF30251D), chipHigh: Color(hex: 0xFF40342B), border: Color(hex: 0xFF3A2C22), muted: Color(hex: 0xFFC4B4A6), subtle: Color(hex: 0xFF96867A), onAccent: Color(hex: 0xFF140C06), accentDim: Color(hex: 0xFF45280F), keyframeDim: Color(hex: 0xFF4E3218), stage: Color(hex: 0xFF100C09), hairline: Color(hex: 0xB83A2C22), editorTopBar: Color(hex: 0xFF15100C), editorPanel: Color(hex: 0xFF15100C), editorPanelHigh: Color(hex: 0xFF1E1712), pill: Color(hex: 0xFF281F18), actionDim: Color(hex: 0xFF3E230D), statusBarVeil: Color(hex: 0xFF0B0806), systemBarVeil: Color(hex: 0xFF110D0A), tickWeak: Color(hex: 0xFF5A4838), tickStrong: Color(hex: 0xFF907A66), railModeFill: Color(hex: 0xFF271E17), fieldFilled: Color(hex: 0xFF2E251E))
-    static let all: [AureaPalette] = [omega, aurea, midnight, graphite, emerald, amethyst, sunset]
-    static func of(_ id: String?) -> AureaPalette { all.first { $0.id == id } ?? omega }
+    static let all: [AureaPalette] = [aurea, midnight, graphite, emerald, amethyst, sunset]
+    /// Id desconhecido (inclusive o "omega" salvo pela 0.3.2) cai na AUREA.
+    static func of(_ id: String?) -> AureaPalette { all.first { $0.id == id } ?? aurea }
 }
 
 /// O tema em uso. Trocar exige reconstruir as telas (o modelo muda `themeId`,
@@ -139,16 +132,16 @@ enum AureaTheme {
 }
 
 // =============================================================================
-// Omega fundação: PAPÉIS CLAROS (telas fora do editor)
+// Omega fundação: PAPÉIS DAS TELAS FORA DO EDITOR (o nome "light" ficou da 0.3.2)
 //
-// A referência é clara fora do editor: Home, gaveta, folha "Novo projeto",
-// página de exportação, diálogos e menus popup. Essas telas pintam SÓ com estes
-// papéis (`AureaColors.light*`). No Omega os valores são claros; nos outros seis
-// temas cada papel cai no tom escuro que o tema já tem (texto claro). Par exato
-// de `AureaLightRoles` do AureaTokens.kt (mesmos nomes e valores).
+// Home, gaveta, folha "Novo projeto", página de exportação, diálogos e menus
+// popup pintam SÓ com estes papéis (`AureaColors.light*`). 0.3.3: a paleta clara
+// da Omega saiu; em todo tema cada papel cai no tom escuro que o tema já tem
+// (texto claro, destaque do tema). Par exato de `AureaLightRoles` do
+// AureaTokens.kt (mesmos nomes e valores).
 // =============================================================================
 struct AureaLightRoles {
-    /// Verdadeiro só quando os papéis são claros (barra de status escura).
+    /// Verdadeiro só se os papéis forem claros. Nenhuma paleta é clara desde a 0.3.3.
     let isLight: Bool
     /// Fundo da página: abas da Home, gaveta, cabeçalhos.
     let background: Color
@@ -172,24 +165,14 @@ struct AureaLightRoles {
     let ink: Color
     /// Texto e ícone sobre `ink`.
     let onInk: Color
-    /// Destaque legível sobre as superfícies claras: botão positivo, ✓, barra da linha escolhida.
+    /// Destaque legível sobre estas superfícies: botão positivo, ✓, barra da linha escolhida.
     let accentInk: Color
-    /// Ação destrutiva sobre as superfícies claras.
+    /// Ação destrutiva sobre estas superfícies.
     let danger: Color
     /// Sombra de cartões e menus.
     let shadow: Color
 
-    /// Omega: os valores da referência. `accentInk` é um verde escuro (4,9:1
-    /// sobre o diálogo) em vez do menta puro, ilegível sobre branco (1,3:1).
-    static let omega = AureaLightRoles(
-        isLight: true,
-        background: Color(hex: 0xFFF6F6F6), sheet: Color(hex: 0xFFEDEEF0), surface: Color(hex: 0xFFFFFFFF),
-        dialog: Color(hex: 0xFFF5F5F8), surfaceAlt: Color(hex: 0xFFEAEAEC),
-        text: Color(hex: 0xFF1E2239), textMuted: Color(hex: 0xFF8C8E93), textFaint: Color(hex: 0xFFA9ABB4),
-        divider: Color(hex: 0xFFD8D8D8), ink: Color(hex: 0xFF1E2239), onInk: Color(hex: 0xFF00FFA8),
-        accentInk: Color(hex: 0xFF007A50), danger: Color(hex: 0xFFC62828), shadow: Color(hex: 0x261E2239))
-
-    /// Temas escuros: cada papel no tom escuro que o tema já tem.
+    /// Cada papel no tom escuro que o tema já tem.
     static func mapped(from p: AureaPalette) -> AureaLightRoles {
         AureaLightRoles(
             isLight: false,
@@ -202,11 +185,11 @@ struct AureaLightRoles {
 }
 
 // =============================================================================
-// Omega home: PAPÉIS SÓ DA HOME (área 01). O que a Home da referência pinta e os
-// papéis claros comuns não cobrem: gaveta, miniatura, barra de seleção, véu do
-// menu rápido, cobertura, avatar sem login, pílulas das subabas (cores lidas pelo
-// REA), sombras de 5 % e 20 % e o selo de duração. Claros no Omega; nos outros
-// temas, os tons escuros do tema. Par exato de `AureaHomeRoles` do AureaTokens.kt.
+// Omega home: PAPÉIS SÓ DA HOME (área 01). O que a Home pinta e os papéis comuns
+// (AureaLightRoles) não cobrem: gaveta, miniatura, barra de seleção, véu do menu
+// rápido, cobertura, avatar sem login, pílulas das subabas, sombras e o selo de
+// duração. 0.3.3: em todo tema, os tons escuros do tema. Par exato de
+// `AureaHomeRoles` do AureaTokens.kt.
 // =============================================================================
 struct AureaHomeRoles {
     let drawer: Color
@@ -228,18 +211,6 @@ struct AureaHomeRoles {
     let badge: Color
     let onBadge: Color
 
-    /// Omega: os valores da referência (cores das pílulas lidas pelo REA).
-    static let omega = AureaHomeRoles(
-        drawer: Color(hex: 0xFFFAFAFA), thumb: Color(hex: 0xFFD5D5D5),
-        selectionBar: Color(hex: 0xFF43486B), onSelectionBar: Color(hex: 0xFFFFFFFF),
-        menuScrim: Color(hex: 0xCCEDEDED), cover: Color(hex: 0xB3000000),
-        avatar: Color(hex: 0xFF626575), onAvatar: Color(hex: 0xFFFFFFFF),
-        pillSelected: Color(hex: 0xFF1F2238), onPillSelected: Color(hex: 0xFFFFFFFF),
-        pillUnselected: Color(hex: 0xFFFFFFFF), onPillUnselected: Color(hex: 0xFF8D8D8D),
-        pillPressed: Color(hex: 0xFFE9ECFF), onPillPressed: Color(hex: 0xFF1F2238),
-        shadowSoft: Color(hex: 0x0C1F2238), shadowStrong: Color(hex: 0x331F2238),
-        badge: Color(hex: 0xFF1E2239), onBadge: Color(hex: 0xFFFFFFFF))
-
     /// Temas escuros: cada papel no tom escuro que o tema já tem.
     static func mapped(from p: AureaPalette) -> AureaHomeRoles {
         AureaHomeRoles(
@@ -257,8 +228,8 @@ struct AureaHomeRoles {
 
 // =============================================================================
 // Omega efeitos (área 07): PAPÉIS do painel de efeitos, das linhas de parâmetro
-// e do navegador de efeitos. No Omega valem os tons da referência; nos outros
-// seis temas cada papel cai no tom que o tema já tem. Par exato de
+// e do navegador de efeitos. Cada papel cai no tom que o tema já tem (0.3.3: sem
+// valores próprios da Omega). Par exato de
 // `AureaFxRoles` do AureaTokens.kt (mesmos nomes e valores).
 // =============================================================================
 struct AureaFxRoles {
@@ -300,22 +271,11 @@ struct AureaFxRoles {
     /// Véu da folha de detalhe (preto 30 %).
     let scrim: Color
 
-    /// Omega: os valores da referência (colors-default.tsv).
-    static let omega = AureaFxRoles(
-        panel: Color(hex: 0xFF202332), listSurface: Color(hex: 0xFF333750), lowSurface: Color(hex: 0xFF262A3C),
-        sunken: Color(hex: 0xFF141620), darkest: Color(hex: 0xFF0C0D13), search: Color(hex: 0xFF292D40),
-        field: Color(hex: 0xFF3B3F54), segment: Color(hex: 0xFF3D4260), segmentOn: Color(hex: 0xFF474D70),
-        label: Color(hex: 0x4D3D4260), valueVeil: Color(hex: 0x33000000),
-        axisX: Color(hex: 0xFF69FC97), axisZ: Color(hex: 0xFF48C3F5), needle: Color(hex: 0xFF69FC97),
-        tick: Color(hex: 0xFFBDBDBD), track: Color(hex: 0xFFA9ABB4), trackDisabled: Color(hex: 0xFF4F5264),
-        tipText: Color(hex: 0xFF767A88), disabledText: Color(hex: 0xFF818390), colorText: Color(hex: 0xFF9D9FA5),
-        axisLabel: Color(hex: 0xFFA9ABB4), listIcon: Color(hex: 0xFFEAEBED), textSecondary: Color(hex: 0xFF8C8E93),
-        scrim: Color(hex: 0x4D000000))
-
     /// Temas escuros: cada papel no tom que o tema já tem.
     static func mapped(from p: AureaPalette) -> AureaFxRoles {
         AureaFxRoles(
-            panel: p.editorPanel, listSurface: p.chipHigh, lowSurface: p.editorRowPill,
+            // 0.3.3 tema: o tom da moldura dos painéis (acima do `sunken`).
+            panel: p.editorBar, listSurface: p.chipHigh, lowSurface: p.editorRowPill,
             sunken: p.background, darkest: p.stage, search: p.border,
             field: p.chip, segment: p.chip, segmentOn: p.chipHigh,
             label: p.chip, valueVeil: Color(hex: 0x33000000),
@@ -329,8 +289,8 @@ struct AureaFxRoles {
 
 // =============================================================================
 // Omega conteúdo (área 06): PAPÉIS dos editores de conteúdo (modo de texto,
-// navegador de fontes, desenho e Editar pontos). No Omega valem os tons da
-// referência; nos outros seis temas cada papel cai no tom que o tema já tem.
+// navegador de fontes, desenho e Editar pontos). Cada papel cai no tom que o
+// tema já tem (0.3.3: sem valores próprios da Omega).
 // Par exato de `AureaContentRoles` do AureaTokens.kt (mesmos nomes e valores).
 // =============================================================================
 struct AureaContentRoles {
@@ -360,13 +320,6 @@ struct AureaContentRoles {
     let hint: Color
     /// Pílula do valor (espessura do desenho).
     let valuePill: Color
-
-    static let omega = AureaContentRoles(
-        styleBar: Color(hex: 0xFF0F1418), styleButton: Color(hex: 0xFF2A2F36), inputStrip: Color(hex: 0xFF191C25),
-        editPanel: Color(hex: 0xFF242636), browser: Color(hex: 0xFF262A3C), browserLine: Color(hex: 0x1AFFFFFF),
-        drawer: Color(hex: 0xFF202332), drawerHeader: Color(hex: 0xFF1E2239), trackpad: Color(hex: 0xFF262A3C),
-        guide: Color(hex: 0xFF9D9FA5), strongLine: Color(hex: 0xFF141620), pointMarker: Color(hex: 0xFF767A88),
-        hint: Color(hex: 0x30FFFFFF), valuePill: Color(hex: 0xFF262A3C))
 
     /// Temas escuros: cada papel no tom que o tema já tem.
     static func mapped(from p: AureaPalette) -> AureaContentRoles {
@@ -497,9 +450,11 @@ enum AureaColors {
     static let blendThumbBottom    = Color(hex: 0xFF8A3D)
     static let blendThumbTop       = Color(hex: 0x3D9BFF)
 
-    // --- Omega fundação: papéis claros (fora do editor; ver AureaLightRoles) ----
-    // Claros no Omega, escuros nos outros temas. Home, gaveta, Novo projeto,
+    // --- Omega fundação: papéis das telas fora do editor (ver AureaLightRoles) ----
+    // 0.3.3 tema: em todos os temas resolvem para os tons escuros da paleta
+    // (fundo, superfície, texto claro, destaque). Home, gaveta, Novo projeto,
     // exportação, diálogos e menus popup pintam só com estes.
+    /// Sempre falso desde a 0.3.3 (nenhuma paleta é clara); fica para quem ainda lê.
     static var lightIsLight: Bool { AureaTheme.palette.light.isLight }
     static var lightBackground: Color { AureaTheme.palette.light.background }
     static var lightSheet: Color { AureaTheme.palette.light.sheet }
@@ -552,8 +507,10 @@ enum AureaColors {
     static var homeOnBadge: Color { AureaTheme.palette.home.onBadge }
 
     // --- Omega fundação: moldura dos painéis de propriedade (F5, PanelFrame) ----
-    /// Fundo da moldura e das colunas (A9 da referência).
-    static var panelFrameBackground: Color { AureaTheme.palette.editorPanel }
+    /// Fundo da moldura e das colunas (A9 da referência). 0.3.3 tema: o tom da
+    /// barra do editor, um degrau acima do fundo; no AUREA o `editorPanel` é
+    /// igual ao `background`, e as divisórias e a aba ativa sumiriam.
+    static var panelFrameBackground: Color { AureaTheme.palette.editorBar }
     /// Véu do conteúdo central: branco 10 % sobre a moldura.
     static let panelFrameContent = Color(hex: 0x1AFFFFFF)
     /// Divisórias de 0,7 e fundo da aba ativa (A11).
@@ -566,8 +523,8 @@ enum AureaColors {
     static var PanelBar: Color { panelBar }
 
     // Omega painel: (área 04) papéis do painel da camada da referência (par do Android).
-    /// Fundo do painel da camada (A9).
-    static var layerPanel: Color { AureaTheme.palette.editorPanel }
+    /// Fundo do painel da camada (A9). 0.3.3 tema: o mesmo tom da moldura (ver `panelFrameBackground`).
+    static var layerPanel: Color { AureaTheme.palette.editorBar }
     /// Pílula do trio de tempo e cartão do painel embutido (S8).
     static var layerPanelButton: Color { AureaTheme.palette.border }
     /// Botão pressionado (A11).
@@ -1464,7 +1421,8 @@ struct EditorMetrics {
 /// telefone em retrato o topo tem 42, o transporte 46 e embaixo fica uma ZONA
 /// FIXA de 280 (timeline + barra de adicionar, ou a timeline com o painel da
 /// camada de 200 por cima). A prévia é o resto e NUNCA muda de altura ao abrir
-/// ou fechar painel. Sem a divisa arrastável no retrato (D2). O largo fica.
+/// ou fechar painel. 0.3.3: a divisa arrastável volta (`preferred`, ver `solve`).
+/// O largo fica.
 enum EditorLayout {
     /// Barra superior da referência (botões de 40 com alvo de 44+).
     static let topBar: CGFloat = 42
@@ -1487,6 +1445,9 @@ enum EditorLayout {
     static let addContentHeight: CGFloat = 193
     /// Altura do conteúdo do adicionar nesta geometria (nunca maior que a timeline à vista).
     static func addContent(_ m: EditorMetrics) -> CGFloat { min(addContentHeight, m.timeline) }
+    // 0.3.3 barra: altura nominal do bloco da grade do "+" (par de `ADD_BAR_GRID_HEIGHT`):
+    // margem 4 + bloco 7 + cartão 8 + 2 fileiras de (ladrilho 46 + 4 + nome 15) + 6 + 8 + 7 + 4.
+    static let addBarGridHeight: CGFloat = 4 + 7 + 8 + 2 * (46 + 4 + 15) + 6 + 8 + 7 + 4
     /// Doca da camada, compacta (EditorLayout.kt `DOCK`): fileira rápida de
     /// ícones e fichas baixas; a altura é a do conteúdo.
     static let dockQuick: CGFloat = 48
@@ -1519,8 +1480,11 @@ enum EditorLayout {
         max(0, totalHeight - topBar - transport - strip)
     }
 
-    /// O palco mais alto possível: a timeline nunca fica abaixo do piso.
-    static func maxPreview(_ total: CGFloat) -> CGFloat { max(previewMin, workspace(total) - timelineMin) }
+    // 0.3.3 recursos: a divisa palco/timeline volta (arrastar o transporte na vertical).
+    /// A menor zona inferior que a divisa deixa: timeline mínima (110) + barra de adicionar (70).
+    static let zoneMin: CGFloat = timelineMin + addBar
+    /// O palco mais alto possível arrastando a divisa: a zona nunca fica abaixo de `zoneMin`.
+    static func maxPreview(_ total: CGFloat) -> CGFloat { max(previewMin, workspace(total) - zoneMin) }
 
     /// O retrato do telefone (e do tablet em pé): prévia = área − 42 − 46 − zona,
     /// igual em todos os `SheetContent`. Dentro da zona: `.addBar` = timeline (210)
@@ -1528,8 +1492,13 @@ enum EditorLayout {
     /// e a folha (200) POR CIMA (`overlay`; ficam 80 de timeline); `.none` = só a
     /// timeline; `.hint`, `.batch`, `.adding` = empilhados embaixo dela. Tela baixa
     /// demais: a prévia fica no piso e a zona encolhe (a soma é sempre a altura).
-    /// `width`, `aspect` e `preferred` ficam para quem já chamava; o retrato da
-    /// Omega não os usa (prévia fixa, sem divisa: D2). Par do `EditorLayout.solve`.
+    /// 0.3.3 recursos: `preferred` > 0 é a altura da prévia escolhida arrastando a
+    /// divisa (guardada no aparelho), de `previewMin` até `maxPreview`: a zona cresce
+    /// (mais timeline) ou encolhe até `zoneMin`. O painel da camada (`.dock`,
+    /// `.panel`, `.curve`) e o adicionar aberto precisam da zona inteira: com a prévia
+    /// maior que a automática, ela devolve o espaço enquanto eles estão abertos (como
+    /// na 0.3.2). Sem preferência, a prévia é a automática (área − 42 − 46 − 280).
+    /// `width` e `aspect` ficam para quem já chamava. Par do `EditorLayout.solve`.
     static func solve(total: CGFloat, content: SheetContent, fullscreen: Bool,
                       width: CGFloat = 0, aspect: CGFloat = 0, preferred: CGFloat = 0, dockRows: Int = 2, fontScale: CGFloat = 1) -> EditorMetrics {
         if fullscreen {
@@ -1539,7 +1508,13 @@ enum EditorLayout {
         let ws = workspace(total)
         let panel = layerPanel(fontScale: fontScale)
         let previewFloor = min(previewMin, ws * 0.25)
-        let preview = min(max(previewFloor, ws - bottomZone(fontScale: fontScale)), ws)
+        let automatic = min(max(previewFloor, ws - bottomZone(fontScale: fontScale)), ws)
+        // 0.3.3 recursos: a altura arrastada na divisa (0 = automática).
+        let chosen: CGFloat = preferred > 0 && preferred.isFinite
+            ? min(min(max(preferred, previewFloor), max(previewFloor, ws - zoneMin)), ws)
+            : automatic
+        let needsWholeZone = content == .dock || content == .panel || content == .curve || content == .adding
+        let preview = needsWholeZone ? min(chosen, automatic) : chosen
         let zone = ws - preview
 
         func stacked(_ body: CGFloat) -> EditorMetrics {
@@ -1641,6 +1616,58 @@ enum CupertinoFont {
     static func font(_ size: CGFloat) -> Font {
         register()
         return .custom(family, fixedSize: size)
+    }
+}
+
+// =============================================================================
+// 0.3.3: ícones mais bold no app inteiro (par do `CupertinoIconBoldStroke` do
+// Android, mesmo valor). A fonte CupertinoIcons só tem o peso normal e o SwiftUI
+// não contorna texto, então `AureaBoldIcon` desenha o glifo e, atrás dele, oito
+// cópias deslocadas meio traço em volta (0°, 45°…315°): o contorno de junção
+// redonda que o Android faz com `Stroke`. Todo `CupertinoGlyph.text` e todo
+// `MaterialGlyph` passam por aqui; os SF Symbols dos componentes usam `symbol`.
+// =============================================================================
+enum AureaIconWeight {
+    /// Traço extra em volta do glifo, em fração do tamanho do ícone
+    /// (24 pt → ~1,1 pt de traço, ~0,54 pt a mais de cada lado). 0 desliga.
+    static let glyphStroke: CGFloat = 0.045
+    /// Peso dos SF Symbols desenhados pelos componentes do sistema de design.
+    static let symbol: Font.Weight = .semibold
+}
+
+extension Color {
+    /// Alfa da cor (0…1).
+    var aureaAlpha: Double { Double(UIColor(self).cgColor.alpha) }
+    /// A mesma cor, opaca.
+    var aureaOpaque: Color { Color(uiColor: UIColor(self).withAlphaComponent(1)) }
+}
+
+/// O ícone com o contorno extra de `AureaIconWeight.glyphStroke`. `content`
+/// desenha o ícone numa cor OPACA; `alpha` é aplicado ao conjunto (assim a
+/// sobreposição das cópias não deixa a borda mais forte numa cor translúcida).
+struct AureaBoldIcon<Content: View>: View {
+    let size: CGFloat
+    var alpha: Double = 1
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        let r = size * AureaIconWeight.glyphStroke / 2
+        let outlined = content().background(
+            ZStack {
+                if r > 0 {
+                    ForEach(0..<8, id: \.self) { i in
+                        let angle = Double(i) * Double.pi / 4
+                        content().offset(x: r * CGFloat(cos(angle)), y: r * CGFloat(sin(angle)))
+                    }
+                }
+            }
+            .accessibilityHidden(true)
+        )
+        if alpha < 0.999 {
+            outlined.compositingGroup().opacity(alpha)
+        } else {
+            outlined
+        }
     }
 }
 
@@ -1841,21 +1868,28 @@ enum CupertinoGlyph {
         if codepoint == MotionBlur {
             Canvas { context, dimensions in
                 let unit = min(dimensions.width, dimensions.height) / 24
+                // 0.3.3: o mesmo traço extra dos glifos (AureaIconWeight.glyphStroke).
+                let line = (1.8 + 24 * AureaIconWeight.glyphStroke) * unit
                 context.stroke(Path(ellipseIn: CGRect(x: 11.6 * unit, y: 6.6 * unit,
-                    width: 10.8 * unit, height: 10.8 * unit)), with: .color(color), lineWidth: 1.8 * unit)
+                    width: 10.8 * unit, height: 10.8 * unit)), with: .color(color), lineWidth: line)
                 let trails: [(CGFloat, CGFloat, Double)] = [(2, 7, 0.55), (1, 12, 0.85), (3, 17, 0.55)]
                 for (x, y, alpha) in trails {
                     var path = Path()
                     path.move(to: CGPoint(x: x * unit, y: y * unit))
                     path.addLine(to: CGPoint(x: 9 * unit, y: y * unit))
                     context.stroke(path, with: .color(color.opacity(alpha)),
-                        style: StrokeStyle(lineWidth: 1.8 * unit, lineCap: .round))
+                        style: StrokeStyle(lineWidth: line, lineCap: .round))
                 }
             }.frame(width: size, height: size)
         } else {
-            Text(String(codepoint))
-                .font(CupertinoFont.font(size))
-                .foregroundColor(color)
+            // 0.3.3: o glifo com o contorno extra (AureaIconWeight.glyphStroke).
+            let alpha = color.aureaAlpha
+            let ink = alpha < 0.999 ? color.aureaOpaque : color
+            AureaBoldIcon(size: size, alpha: alpha) {
+                Text(String(codepoint))
+                    .font(CupertinoFont.font(size))
+                    .foregroundColor(ink)
+            }
         }
     }
 }
@@ -1924,7 +1958,7 @@ struct AureaIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.aurea(size: size, weight: .medium))
+                .font(.aurea(size: size, weight: AureaIconWeight.symbol))
                 .foregroundStyle(enabled ? (active ? AureaColors.accent : AureaColors.text) : AureaColors.disabled)
                 .frame(width: AureaDims.chromeButtonW, height: AureaDims.chromeButtonW)
                 .contentShape(Rectangle())
@@ -1997,7 +2031,7 @@ struct AureaKeyframeDiamond: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: on ? "diamond.fill" : "diamond")
-                .font(.aurea(size: 12, weight: .semibold))
+                .font(.aurea(size: 12, weight: AureaIconWeight.symbol))
                 .foregroundStyle(on ? AureaColors.keyframeOn : AureaColors.subtle)
                 .frame(width: AureaDims.colorWell, height: AureaDims.colorWell)
                 .contentShape(Rectangle())
@@ -2015,9 +2049,14 @@ struct MaterialGlyph: View {
         self.name = name; self.size = size; self.color = color
     }
     var body: some View {
-        Image("Material-" + name.replacingOccurrences(of: ".", with: "-"))
-            .resizable().renderingMode(.template).scaledToFit()
-            .frame(width: size, height: size).foregroundStyle(color)
+        // 0.3.3: o mesmo contorno extra dos glifos (AureaBoldIcon; par do `aureaBold()` do Android).
+        let alpha = color.aureaAlpha
+        let ink = alpha < 0.999 ? color.aureaOpaque : color
+        AureaBoldIcon(size: size, alpha: alpha) {
+            Image("Material-" + name.replacingOccurrences(of: ".", with: "-"))
+                .resizable().renderingMode(.template).scaledToFit()
+                .frame(width: size, height: size).foregroundStyle(ink)
+        }
             // Os `automirrored` do Compose viram sozinhos em RTL; aqui é explícito.
             // O chevron de voltar dos painéis também espelha (aponta para "trás").
             .flipsForRightToLeftLayoutDirection(name.hasPrefix("automirrored.") || name.hasSuffix(".ChevronLeft"))

@@ -3290,7 +3290,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Arrasto vertical de UM trecho na timeline (como no Alight Motion: só ele
+     * Arrasto vertical de UM trecho na timeline (como na referência: só ele
      * anda, nunca a linha inteira). [mode] 0 = fileira própria logo acima da
      * fileira de [anchor] (0 = no fundo); 1 = entrar na linha de [anchor] se
      * couber. Um passo de desfazer; false = o motor recusou (nada mudou).
@@ -6057,7 +6057,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Importa efeitos de um projeto/elemento do Alight Motion (.xml, .amproj,
+     * Importa efeitos de um projeto/elemento da referência (.xml, .amproj,
      * .zip): o motor converte só o que tem equivalente no Aurea (o resto vira
      * aviso, nunca erro), o resultado entra na biblioteca como preset de
      * efeitos e, com uma camada escolhida, já é aplicado nela.
@@ -6077,8 +6077,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             showToast(appText(R.string.am_import_lossless_required))
             return
         }
-        val base = envelope.optString("name").ifBlank { "Alight Motion" }
-        val name = com.aurea.aurea.presets.importedPresetName(base) {
+        val base = envelope.optString("name").ifBlank { appText(R.string.l33_import_preset_default) }
+        val name = com.aurea.aurea.presets.importedPresetName(base, { appText(R.string.l33_import_preset_name, it) }) {
             presets.exists(com.aurea.aurea.presets.PresetKind.Effects, it)
         }
         val entry = presets.save(com.aurea.aurea.presets.PresetKind.Effects, name, preset)

@@ -191,7 +191,7 @@ struct PerformanceTestPanel: View {
                 Section(AureaText.t("perf_section_report")) {
                     if !test.summary.isEmpty { Text(test.summary) }
                     if let report = test.report, !test.running {
-                        ShareLink(item:report) { Label(AureaText.t("perf_share_last"),systemImage:"square.and.arrow.up") }
+                        ShareLink(item:report) { Label { Text(AureaText.t("perf_share_last")) } icon: { Image(systemName: "square.and.arrow.up").fontWeight(AureaIconWeight.symbol) } }
                         Text(AureaText.t("perf_crash_note")).font(.footnote)
                     }
                 }

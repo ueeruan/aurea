@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.3 barra: a nova barra de adicionar do editor (o "+" abre a grade das categorias). -->
+    <string name="bar33_more">जोड़ने के और विकल्प</string>
+    <string name="bar33_close">श्रेणियाँ बंद करें</string>
+    <string name="bar33_grid">सभी श्रेणियाँ</string>
+</resources>

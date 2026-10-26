@@ -153,7 +153,7 @@ enum class BlendMode : u16 {
     Hue, Saturation, Color, Luminosity,
     // Bloco do editor antigo (2026-09-27): os quatro que faltavam da lista dele.
     Divide, VividLight, LinearDodge, LinearBurn,
-    // Máscara do Alight Motion (2026-10-07): a camada não aparece; recorta o
+    // Máscara da referência (2026-10-07): a camada não aparece; recorta o
     // que já foi composto ABAIXO dela no mesmo grupo/pré-comp. Mask = Porter-
     // Duff destino-dentro (só fica o que está sob a forma/alfa dela); Exclude
     // = destino-fora (a forma vira um furo no que está embaixo).

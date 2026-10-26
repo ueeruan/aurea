@@ -69,7 +69,7 @@ struct LicensesView: View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
                 Button { if open != nil { open = nil } else { onDismiss() } } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold)).foregroundStyle(AureaColors.text)
+                    Image(systemName: "chevron.left").font(.system(size: 18, weight: AureaIconWeight.symbol)).foregroundStyle(AureaColors.text)
                         .frame(width: 40, height: 40)
                 }
                 .buttonStyle(.plain)

@@ -35,7 +35,7 @@ import UniformTypeIdentifiers
         VStack(spacing: 0) {
             HStack(spacing: 4) {
                 Button { flow.back() } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold))
+                    Image(systemName: "chevron.left").font(.system(size: 18, weight: AureaIconWeight.symbol))
                         .foregroundStyle(navigable ? AureaColors.text : AureaColors.disabled)
                         .frame(width: 40, height: 40)
                 }
@@ -96,7 +96,7 @@ struct HyperLockedPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer().frame(height: 20)
             HStack(spacing: 12) {
-                Image(systemName: "lock.fill").font(.system(size: 20)).foregroundStyle(AureaColors.accent)
+                Image(systemName: "lock.fill").font(.system(size: 20, weight: AureaIconWeight.symbol)).foregroundStyle(AureaColors.accent)
                     .frame(width: 44, height: 44).background(RoundedRectangle(cornerRadius: 12).fill(AureaColors.accent.opacity(0.18)))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
@@ -255,7 +255,7 @@ struct HyperLockedSheet: View {
     private func tile(_ symbol: String, _ title: String, _ id: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 8) {
-                Image(systemName: symbol).font(.system(size: 28)).foregroundStyle(flow.busy ? AureaColors.disabled : AureaColors.accent)
+                Image(systemName: symbol).font(.system(size: 28, weight: AureaIconWeight.symbol)).foregroundStyle(flow.busy ? AureaColors.disabled : AureaColors.accent)
                 Text(title).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.text).multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity, minHeight: 104).padding(18)
@@ -288,10 +288,10 @@ struct HyperLockedSheet: View {
             }
             Button { flow.advanced.toggle() } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: "slider.horizontal.3").font(.system(size: 16))
+                    Image(systemName: "slider.horizontal.3").font(.system(size: 16, weight: AureaIconWeight.symbol))
                     Text(AureaText.t("hyper_adjust")).font(.aurea(size: 15, weight: .semibold))
                     Spacer()
-                    Image(systemName: flow.advanced ? "chevron.up" : "chevron.down").font(.system(size: 13)).foregroundStyle(AureaColors.muted)
+                    Image(systemName: flow.advanced ? "chevron.up" : "chevron.down").font(.system(size: 13, weight: AureaIconWeight.symbol)).foregroundStyle(AureaColors.muted)
                 }
                 .padding(.horizontal, 14).frame(minHeight: 48)
                 .background(RoundedRectangle(cornerRadius: 12).fill(AureaColors.surface))
@@ -313,11 +313,11 @@ struct HyperLockedSheet: View {
         let selected = flow.preset == p
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: p.symbol).font(.system(size: 18)).foregroundStyle(selected ? AureaColors.accent : AureaColors.text)
+                Image(systemName: p.symbol).font(.system(size: 18, weight: AureaIconWeight.symbol)).foregroundStyle(selected ? AureaColors.accent : AureaColors.text)
                     .accessibilityHidden(true)
                 Text(AureaText.t(p.titleKey)).font(.aurea(size: 15, weight: .semibold))
                 Spacer()
-                if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(AureaColors.accent).accessibilityHidden(true) }
+                if selected { Image(systemName: "checkmark.circle.fill").fontWeight(AureaIconWeight.symbol).foregroundStyle(AureaColors.accent).accessibilityHidden(true) }
             }
             Spacer().frame(height: 4)
             Text(AureaText.t(p.bodyKey)).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
@@ -558,7 +558,7 @@ struct HyperLockedSheet: View {
                     Text(detail).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(available ? AureaColors.text : AureaColors.warning)
                 }
                 Spacer()
-                Image(systemName: on ? "checkmark.circle.fill" : "circle").foregroundStyle(on ? AureaColors.accent : AureaColors.muted)
+                Image(systemName: on ? "checkmark.circle.fill" : "circle").fontWeight(AureaIconWeight.symbol).foregroundStyle(on ? AureaColors.accent : AureaColors.muted)
             }
             .padding(14)
             .background(RoundedRectangle(cornerRadius: 12).fill(on ? AureaColors.accent.opacity(0.16) : AureaColors.surface))
@@ -711,10 +711,10 @@ private struct HyperMeterPanel: View {
         return HStack(spacing: 12) {
             Group {
                 switch state {
-                case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(AureaColors.success)
+                case .done: Image(systemName: "checkmark.circle.fill").fontWeight(AureaIconWeight.symbol).foregroundStyle(AureaColors.success)
                 case .running: ProgressView().controlSize(.small).tint(AureaColors.accent)
-                case .skipped: Image(systemName: "minus").foregroundStyle(AureaColors.muted)
-                case .waiting: Image(systemName: "circle").foregroundStyle(AureaColors.muted)
+                case .skipped: Image(systemName: "minus").fontWeight(AureaIconWeight.symbol).foregroundStyle(AureaColors.muted)
+                case .waiting: Image(systemName: "circle").fontWeight(AureaIconWeight.symbol).foregroundStyle(AureaColors.muted)
                 }
             }.frame(width: 22, height: 22)
             Text(AureaText.t(step.nameKey)).font(.aurea(size: 15, weight: state == .running ? .semibold : .regular))

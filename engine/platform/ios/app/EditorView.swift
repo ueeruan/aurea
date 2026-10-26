@@ -23,6 +23,11 @@ struct EditorView: View {
     @StateObject private var shell = ShellPresentation()
     // Omega conteúdo (área 06): o navegador de fontes das Opções de texto e da UI Edição.
     @ObservedObject private var fontBrowser = FontBrowserRequest.shared
+    // 0.3.3 recursos: a divisa palco/timeline volta. A altura do palco escolhida
+    // arrastando o transporte (0 = automática: zona de 280), guardada no aparelho
+    // com a mesma chave da 0.3.2.
+    @AppStorage("editor.previewHeight") private var previewPreference: Double = 0
+    @State private var dividerStart: CGFloat?
     var body: some View {
         GeometryReader { geometry in
             let wide = !model.fullscreen && model.panel != .curve && EditorLayout.isWide(geometry.size.width, geometry.size.height)
@@ -30,11 +35,12 @@ struct EditorView: View {
             let aspect: CGFloat = model.compositionHeight > 0 ? CGFloat(model.compositionWidth) / CGFloat(model.compositionHeight) : 0
             // Fora da tela cheia o palco tem 8 pt de margem de cada lado.
             let sideMargin: CGFloat = model.fullscreen ? 0 : EditorLayout.previewSideMargin
-            // Omega fundação (F6): prévia fixa e zona inferior de 280; sem divisa no retrato (D2).
+            // Omega fundação (F6): prévia fixa e zona inferior de 280 (0.3.3: a divisa voltou, `preferred`).
             // Omega chrome (área 02, P0-4): com a seleção múltipla a timeline fica com a zona
             // inteira e a barra inferior flutua por cima dela (sem o painel de lote).
             let metrics = EditorLayout.solve(total: geometry.size.height, content: model.sheetContent == .batch ? .none : model.sheetContent, fullscreen: model.fullscreen,
                                              width: max(0, geometry.size.width - sideMargin * 2), aspect: aspect,
+                                             preferred: CGFloat(previewPreference),  // 0.3.3 recursos: a divisa
                                              dockRows: 2,  // Omega painel: (área 04) a zona da camada tem a altura do painel (200)
                                              fontScale: UIFont.preferredFont(forTextStyle: .body).pointSize / 17)
             Group {
@@ -58,6 +64,8 @@ struct EditorView: View {
                                 // Omega adicionar (área 08): também com o adicionar aberto.
                                 if model.sheetContent == .addBar || model.sheetContent == .adding { ShellAddBar().frame(height: StageDim.addBar) }
                             }.frame(maxWidth: .infinity)
+                            // 0.3.3 barra: a grade do "+" por cima do palco e da timeline, encostada embaixo.
+                            .overlay(alignment: .bottom) { if model.sheetContent == .addBar || model.sheetContent == .adding { AddBarMoreOverlay() } }
                             // Omega conteúdo (área 06, P0-1): no modo de texto, o painel grande com a faixa de entrada.
                             if model.textModeActive { TextEditPanel().frame(width: sideWidth, height: max(1, geometry.size.height - EditorLayout.topBar)) }
                             else { ContextSheet(metrics: metrics).frame(width: sideWidth, height: max(1, geometry.size.height - EditorLayout.topBar)) }
@@ -78,7 +86,29 @@ struct EditorView: View {
                             // entrada de 60) ocupa o transporte e a zona inferior; a prévia não muda.
                             TextEditPanel().frame(height: metrics.transport + metrics.zone)
                         } else {
+                            // 0.3.3 recursos: a divisa palco/timeline volta, como na 0.3.2 —
+                            // arrastar na vertical no transporte (fora dos botões) troca palco
+                            // por timeline (sobe ou desce a timeline); toque duplo volta à
+                            // altura automática. A zona de baixo continua a da Omega: o painel
+                            // de 200 fica por cima da timeline e, aberto, recebe a zona inteira.
                             TransportView().frame(height: metrics.transport)
+                                .contentShape(Rectangle())
+                                // `.contain` antes do identificador: sem ele o id da divisa
+                                // sobrescreveria o dos botões do transporte.
+                                .accessibilityElement(children: .contain)
+                                .accessibilityIdentifier("editor.previewDivider")
+                                .simultaneousGesture(DragGesture(minimumDistance: 8, coordinateSpace: .global)
+                                    .onChanged { value in
+                                        if dividerStart == nil {
+                                            guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                                            dividerStart = metrics.preview
+                                        }
+                                        guard let start = dividerStart else { return }
+                                        let top = EditorLayout.maxPreview(geometry.size.height)
+                                        previewPreference = Double(min(max(start + value.translation.height, EditorLayout.previewMin), top))
+                                    }
+                                    .onEnded { _ in dividerStart = nil })
+                                .simultaneousGesture(TapGesture(count: 2).onEnded { previewPreference = 0 })
                             // Omega fundação (F6): a zona inferior fixa (280). Sem camada, a
                             // timeline (210) e a barra de adicionar (70) empilhadas; com camada,
                             // a timeline ocupa a zona e o painel de 200 fica POR CIMA dela
@@ -104,6 +134,8 @@ struct EditorView: View {
                                 }
                                 // Omega chrome (área 02, P0-4): a barra inferior flutuante da seleção múltipla.
                                 if model.sheetContent == .batch && !RealCameraState.shared.painting(model) { MultiSelectBottomBar().keepLtr() }
+                                // 0.3.3 barra: a grade do "+" sobe por cima da timeline e da barra.
+                                if model.sheetContent == .addBar || model.sheetContent == .adding { AddBarMoreOverlay() }
                             }
                             .frame(height: metrics.zone)
                         }
@@ -1186,7 +1218,7 @@ enum FontImportPicker {
 }
 
 /// Seletor de ARQUIVOS do app inteiro (modelo 3D, texturas/.mtl, áudio, SVG,
-/// PSD, HDRI, LUT, legenda, Alight Motion): o `UIDocumentPickerViewController`
+/// PSD, HDRI, LUT, legenda, projeto de efeitos): o `UIDocumentPickerViewController`
 /// apresentado pelo UIKit a partir do controlador do topo — nunca um
 /// `.fileImporter` aninhado (o SwiftUI só atende UM por hierarquia; os de
 /// baixo ficavam mudos) nem um seletor embutido num `fullScreenCover` (no
@@ -2016,75 +2048,10 @@ enum ShellAddCategories {
     ]
 }
 
-/// A barra fixa de adicionar, na base do editor, no lugar do "+" (par do
-/// `AddBar` do Android): sempre à vista sem camada escolhida; tocar abre o
-/// painel da categoria. A aberta ganha a pílula de destaque. Itens de 64 × 64
-/// (ícone 23, 4 de vão, nome 11): espalhados quando todos cabem; senão a barra
-/// rola de lado. O fundo desce pela área segura de baixo.
+/// 0.3.3 barra: a barra de adicionar nova (pílula de 5 categorias + o "+" que abre
+/// a grade 4 × 2) mora em AddPanelView.swift (`AddBarView`, par do `AddBar` do Android).
 @MainActor private struct ShellAddBar: View {
-    @EnvironmentObject private var model: AureaModel
-    @EnvironmentObject private var shell: ShellPresentation
-    var body: some View {
-        GeometryReader { geometry in
-            let count = CGFloat(ShellAddCategories.all.count)
-            // Omega adicionar (área 08, P0-12): o mesmo limiar do Android, (largura − 8)/9 ≥ 56.
-            let fits = (geometry.size.width - 8) / count >= 56
-            let slot = fits ? geometry.size.width / count : StageDim.addBarItem
-            let side = min(StageDim.addBarItem, geometry.size.height)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(ShellAddCategories.order, id: \.self) { index in
-                        item(index, slot: slot, side: side, height: geometry.size.height)
-                    }
-                }.padding(.horizontal, fits ? 0 : StageDim.addBarItemInset)
-            }.scrollDisabled(fits)
-        }
-        .background(AureaColors.editorBar.ignoresSafeArea(edges: .bottom))
-        .overlay(alignment: .top) { Rectangle().fill(AureaColors.editorBarLine).frame(height: StageDim.hairline) }
-        .accessibilityIdentifier("editor.addBar")
-    }
-    private func item(_ index: Int, slot: CGFloat, side: CGFloat, height: CGFloat) -> some View {
-        let on = model.showAddLayer && shell.addCategory == index
-        let tint = on ? AureaColors.accent : AureaColors.text
-        return Button { open(index) } label: {
-            VStack(spacing: StageDim.addBarItemInset) {
-                CupertinoGlyph.text(ShellAddCategories.all[index].1, size: StageDim.addBarIcon, color: tint)
-                Text(AureaText.t(ShellAddCategories.all[index].0)).font(.aurea(size: 11, weight: .medium))
-                    .foregroundStyle(tint).lineLimit(1).minimumScaleFactor(0.8)
-            }
-            .frame(width: side, height: side)
-            .background(on ? AureaColors.chip : Color.clear, in: RoundedRectangle(cornerRadius: AureaDims.radiusCard))
-            .frame(width: slot, height: height)
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain)
-            .accessibilityLabel(AureaText.t(ShellAddCategories.all[index].0))
-            .accessibilityAddTraits(on ? .isSelected : [])
-            // Omega adicionar (área 08, P0-12): o mesmo id do Android (`addBar.<AddTab>`).
-            .accessibilityIdentifier("addBar.\(ShellAddCategories.name(index))")
-    }
-    private func open(_ index: Int) {
-        // Texto tem uma peça só (legendas viraram efeito): o toque já cria o texto.
-        if index == 3 {
-            model.openAddLayer()   // pausa e fecha o painel aberto, como as outras categorias
-            model.showAddLayer = false
-            model.addText()
-            return
-        }
-        // Omega adicionar (área 08, P0-7): Desenho age na hora (o desenho livre).
-        if index == 6 {
-            model.openAddLayer()
-            model.showAddLayer = false
-            model.addVector(0, freehand: true)
-            return
-        }
-        // Omega adicionar (P0-1): tocar no botão aceso fecha o painel.
-        if model.showAddLayer && shell.addCategory == index {
-            model.showAddLayer = false
-            return
-        }
-        shell.addCategory = index
-        model.openAddLayer()
-    }
+    var body: some View { AddBarView() }
 }
 
 /// O painel da categoria escolhida na barra: o mesmo `AddLayerSheet` de antes,

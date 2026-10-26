@@ -932,8 +932,8 @@
     <string name="dock_short_sound">आवाज़</string>
     <string name="fx_save_as_preset">प्रीसेट के रूप में सहेजें</string>
     <string name="fx_my_presets">मेरे इफ़ेक्ट प्रीसेट</string>
-    <string name="am_import_action">Alight Motion से इम्पोर्ट करें…</string>
-    <string name="am_import_done">Alight Motion के %1$d इफ़ेक्ट “%2$s” में इम्पोर्ट हुए</string>
+    <string name="am_import_action">प्रोजेक्ट से इफ़ेक्ट इम्पोर्ट करें (.xml, .amproj)…</string>
+    <string name="am_import_done">%1$d इफ़ेक्ट “%2$s” में इम्पोर्ट हुए</string>
     <string name="am_import_done_skipped">%1$d इफ़ेक्ट इम्पोर्ट हुए, बिना बराबरी वाले %2$d छोड़े गए (“%3$s”)</string>
     <string name="am_import_failed">इम्पोर्ट नहीं हो सका: %1$s</string>
     <string name="am_import_nothing">Aurea में बराबरी वाला कोई इफ़ेक्ट नहीं</string>
@@ -3717,7 +3717,7 @@
     <string name="edt_cmdx_undo_d">अंतिम संपादन वापस लेता है</string>
     <string name="edt_cmdx_redo">फिर से करें</string>
     <string name="edt_cmdx_redo_d">पूर्ववत किया गया संपादन फिर लागू करता है</string>
-    <string name="am_import_hint">Aurea में एक लेयर चुनें, फिर Alight Motion से एक्सपोर्ट की गई XML, .amproj या ZIP फ़ाइल चुनें। पहली प्रभाव वाली लेयर के संगत प्रभाव बदले जाते हैं; पूरा प्रोजेक्ट या उसका मीडिया आयात नहीं होता। सेटिंग खोने से बचाने के लिए असंगत आइटम वाली फ़ाइलें अस्वीकार की जाती हैं।</string>
+    <string name="am_import_hint">Aurea में एक लेयर चुनें, फिर इफ़ेक्ट प्रोजेक्ट वाली XML, .amproj या ZIP फ़ाइल चुनें। पहली प्रभाव वाली लेयर के संगत प्रभाव बदले जाते हैं; पूरा प्रोजेक्ट या उसका मीडिया आयात नहीं होता। सेटिंग खोने से बचाने के लिए असंगत आइटम वाली फ़ाइलें अस्वीकार की जाती हैं।</string>
     <string name="beta_select_media">कई चुनें</string>
     <string name="beta_add_media">जोड़ें (%1$d)</string>
     <string name="beta_extend_clip">स्रोत के अंत तक बढ़ाएँ</string>

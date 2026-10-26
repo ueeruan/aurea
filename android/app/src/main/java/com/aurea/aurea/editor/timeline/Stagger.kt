@@ -42,7 +42,7 @@ object KeyframeVisibility {
         showAll || isPropertyLane || selected
 
     /**
-     * Como no Alight Motion: só a camada SELECIONADA edita os losangos (tocar,
+     * Como na referência: só a camada SELECIONADA edita os losangos (tocar,
      * arrastar). Das outras eles aparecem esmaecidos, só de referência, e o
      * toque cai na camada (que se seleciona). Antes, rolar a timeline arrastava
      * keyframe de camada que nem estava escolhida. Pedidos explícitos continuam

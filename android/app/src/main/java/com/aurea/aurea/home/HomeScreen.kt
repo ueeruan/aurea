@@ -97,7 +97,8 @@ fun HomeScreen(store: EditorStore) {
     val closeDrawer: () -> Unit = { scope.launch { drawer.close() } }
     BackHandler(drawer.isOpen) { closeDrawer() }
     BackHandler(!drawer.isOpen && selecting) { vm.clearSelection() }
-    LightSystemBars(AureaColors.LightIsLight)
+    // 0.3.3 tema: a Home é escura na paleta AUREA; ícones do sistema claros.
+    LightSystemBars(false)
 
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
     ModalNavigationDrawer(

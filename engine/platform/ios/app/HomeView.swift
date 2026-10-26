@@ -48,7 +48,7 @@ struct DonationCard: View {
                     Text(AureaText.t("donation_title")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.lightText)
                     Text(AureaText.t("donation_note")).font(.aurea(size: 11)).foregroundStyle(AureaColors.lightTextMuted)
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "heart").font(.system(size: 24)).foregroundStyle(AureaColors.lightAccentInk)
+                Image(systemName: "heart").font(.system(size: 24, weight: AureaIconWeight.symbol)).foregroundStyle(AureaColors.lightAccentInk)
             }.padding(.horizontal, 15).padding(.vertical, 12)
                 .background(AureaColors.lightSurfaceAlt, in: RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain)
@@ -81,7 +81,7 @@ struct DonationCard: View {
                         .toolbar { ToolbarItem(placement: .confirmationAction) {
                             Button(AureaText.t("editor_fechar")) { showing = false }
                         } }
-                }.preferredColorScheme(AureaColors.lightIsLight ? .light : .dark)
+                }.preferredColorScheme(.dark)
             }
     }
     private func copy(_ value: String) { UIPasteboard.general.string = value; copied = true }

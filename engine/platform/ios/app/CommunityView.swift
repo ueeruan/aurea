@@ -221,7 +221,7 @@ struct CommunityView: View {
         VStack(spacing: 0) {
             HStack {
                 if state.profile != nil && (!profileMode || state.profile?.id != state.me?.id) {
-                    Button { state.run { state.profile = profileMode ? state.me : nil; try await state.loadFeed() } } label: { Image(systemName: "chevron.left").mirrorsInRtl().frame(width: 44, height: 44) }.accessibilityLabel(AureaText.t("common_back"))
+                    Button { state.run { state.profile = profileMode ? state.me : nil; try await state.loadFeed() } } label: { Image(systemName: "chevron.left").fontWeight(AureaIconWeight.symbol).mirrorsInRtl().frame(width: 44, height: 44) }.accessibilityLabel(AureaText.t("common_back"))
                 }
                 Text(AureaText.t(state.profile == nil ? "social_community" : "social_profile")).font(.aurea(size: 21, weight: .bold))
                     .foregroundStyle(AureaColors.lightText)
@@ -337,14 +337,14 @@ struct CommunityView: View {
             if !post.body.isEmpty { Text(post.body).textSelection(.enabled) }
             if let a = post.asset {
                 Button { download(a) } label: {
-                    HStack { Image(systemName: a.kind == "project" ? "square.stack" : "sparkles"); VStack(alignment: .leading) { Text(a.name).lineLimit(2); Text("\(a.bytes / 1024) KB").font(.caption) }; Spacer(); Text(AureaText.t("social_download")) }.frame(minHeight: 48)
+                    HStack { Image(systemName: a.kind == "project" ? "square.stack" : "sparkles").fontWeight(AureaIconWeight.symbol); VStack(alignment: .leading) { Text(a.name).lineLimit(2); Text("\(a.bytes / 1024) KB").font(.caption) }; Spacer(); Text(AureaText.t("social_download")) }.frame(minHeight: 48)
                 }.buttonStyle(.bordered)
             }
             HStack(spacing: 12) {
-                Button { state.run { try await state.like(post) } } label: { Label("\(post.likes)", systemImage: post.liked ? "heart.fill" : "heart") }.accessibilityLabel("\(post.likes) \(AureaText.t("social_likes"))").accessibilityIdentifier("social.like.\(post.id)")
-                Button { comments = post } label: { Label("\(post.comments) \(AureaText.t("social_comments"))", systemImage: "bubble") }
+                Button { state.run { try await state.like(post) } } label: { Label { Text("\(post.likes)") } icon: { Image(systemName: post.liked ? "heart.fill" : "heart").fontWeight(AureaIconWeight.symbol) } }.accessibilityLabel("\(post.likes) \(AureaText.t("social_likes"))").accessibilityIdentifier("social.like.\(post.id)")
+                Button { comments = post } label: { Label { Text("\(post.comments) \(AureaText.t("social_comments"))") } icon: { Image(systemName: "bubble").fontWeight(AureaIconWeight.symbol) } }
                 Spacer(minLength: 0)
-                if state.me?.id == post.author.id { Button { deleting = post } label: { Image(systemName: "trash").frame(width: 44, height: 44) }.accessibilityLabel(AureaText.t("social_delete_post")) }
+                if state.me?.id == post.author.id { Button { deleting = post } label: { Image(systemName: "trash").fontWeight(AureaIconWeight.symbol).frame(width: 44, height: 44) }.accessibilityLabel(AureaText.t("social_delete_post")) }
             }.frame(minHeight: 44)
         }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 22)).disabled(state.busy)
     }

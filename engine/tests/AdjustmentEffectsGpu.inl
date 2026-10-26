@@ -1,7 +1,7 @@
 // =============================================================================
 //  CAMADA DE AJUSTE (beta 0.1.8 BETA 2): todo efeito do catálogo age sobre a
 //  composição das camadas abaixo, no escopo da camada de ajuste — como no After
-//  Effects e no Alight Motion. Pedido dos testers: "a lot of effects don't work
+//  Effects e na referência. Pedido dos testers: "a lot of effects don't work
 //  with adjustment layer like certain shakes and motion detect effects".
 //
 //  A foto de baixo SE MOVE (posição animada): os efeitos de tempo (Detectar

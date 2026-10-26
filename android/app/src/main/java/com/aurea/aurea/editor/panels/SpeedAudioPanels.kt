@@ -62,6 +62,7 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
+import com.aurea.aurea.ui.theme.CupertinoIconBoldStroke
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.abs
@@ -394,7 +395,9 @@ private fun RowScope.RetimeButton(
         val color = AureaColors.Text
         Canvas(Modifier.size(22.dp)) {
             val u = size.width / 24f
-            val stroke = 1.6f * u
+            // 0.3.3: + o traço extra dos glifos bold (CupertinoIconBoldStroke).
+            val bold = 24f * CupertinoIconBoldStroke * u
+            val stroke = 1.6f * u + bold
             val start = glyph == RetimeGlyph.ExtendStart || glyph == RetimeGlyph.ShortenStart
             // O clipe com os "quadros" dentro (retempo muda a velocidade, não só a borda).
             val l = if (start) 9f else 3f
@@ -403,7 +406,7 @@ private fun RowScope.RetimeButton(
                 cornerRadius = CornerRadius(1.5f * u), style = Stroke(stroke))
             for (i in 1..3) {
                 val x = l + (r - l) * i / 4f
-                drawLine(color.copy(alpha = 0.55f), Offset(x * u, 9.5f * u), Offset(x * u, 14.5f * u), 1f * u)
+                drawLine(color.copy(alpha = 0.55f), Offset(x * u, 9.5f * u), Offset(x * u, 14.5f * u), 1f * u + bold)
             }
             fun arrow(from: Float, to: Float) {
                 drawLine(color, Offset(from * u, 12f * u), Offset(to * u, 12f * u), stroke, StrokeCap.Round)
@@ -431,7 +434,7 @@ internal fun snapLinearSpeed(v: Float): Float {
 }
 
 /**
- * A RÉGUA DA VELOCIDADE (`AlightSlider` da referência): linear de 0,05 a 4×,
+ * A RÉGUA DA VELOCIDADE (o slider da referência): linear de 0,05 a 4×,
  * origem em 1×, marcas em 0,5 · 1 · 2 · 3 · 4, tartaruga e lebre a 50 % nas
  * pontas. Um arrasto = um gesto ([onStart]/[onEnd]). LTR em qualquer idioma.
  */

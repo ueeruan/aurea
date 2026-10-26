@@ -147,7 +147,7 @@ private val BlendCategories = listOf(
             BlendChoice(R.string.pn_blend_luminosity, 17, BlendMode.Luminosity),
         ),
     ),
-    // Máscara do Alight Motion: a camada recorta as de baixo (22) ou fura (23).
+    // Máscara da referência: a camada recorta as de baixo (22) ou fura (23).
     BlendCategory(
         "mask", R.string.pn_blend_cat_mask,
         listOf(

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.3 recursos: recursos do AUREA que voltaram depois da Omega. -->
+    <string name="r33_tr_previous_hold">الانتقال إلى الحدث السابق · اضغط مطولًا: البداية</string>
+    <string name="r33_tr_next_hold">الانتقال إلى الحدث التالي · اضغط مطولًا: النهاية</string>
+</resources>

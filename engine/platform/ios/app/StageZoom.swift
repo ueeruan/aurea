@@ -251,7 +251,8 @@ struct ViewModeColumn: View {
 
     private var column: some View {
         GeometryReader { geometry in
-            let unit = geometry.size.height / 5.8
+            // 0.3.3 recursos: + a célula da caixa da seleção (6 células + zoom de 1,8).
+            let unit = geometry.size.height / 6.8
             let hasSelection = !model.selection.isEmpty
             let hasCamera = model.layers.contains { $0.kind == 8 }
             VStack(spacing: 0) {
@@ -272,6 +273,13 @@ struct ViewModeColumn: View {
                 cell(modes.solo == 1 ? OmegaGlyph.soloOn : modes.solo == 2 ? CupertinoGlyph.CircleLefthalfFill : OmegaGlyph.soloOff,
                      "om_vm_solo", state: modes.solo == 1 ? "om_vm_solo_only" : modes.solo == 2 ? "om_vm_solo_dim" : "om_vm_solo_off",
                      on: modes.solo != 0, enabled: hasSelection, tag: "viewmode.solo") { modes.cycleSolo() }
+                    .frame(height: unit)
+                // 0.3.3 recursos: esconder/mostrar a caixa da seleção no palco (a 0.3.2 tinha o
+                // botão na barra da camada; ela tampa o que está por baixo). Guardado no aparelho.
+                cell(model.hideSelectionBox ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Square,
+                     model.hideSelectionBox ? "editor_mostrar_caixa_selecao" : "editor_esconder_caixa_selecao",
+                     state: model.hideSelectionBox ? "common_off" : "common_on", on: model.hideSelectionBox,
+                     tag: "stage.selectionBox") { model.hideSelectionBox.toggle() }
                     .frame(height: unit)
                 // Visão pela câmera ativa (D5): existe na coluna, desligada. A prévia
                 // do AUREA ainda olha sempre pela câmera ativa; desligar essa visão no

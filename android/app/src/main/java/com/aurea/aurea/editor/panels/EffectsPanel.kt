@@ -323,7 +323,7 @@ private fun effectPresetLabel(id: String): Int? = when (id) {
  *   configurações (mesmo tipo) e, em "Mais do AUREA", Expressão · Salvar preset
  *   do efeito · Turbulência dinâmica. ⋯ da lista (inativo com controles abertos):
  *   Copiar efeitos · Colar efeito(s) · Ligar/Desligar todos · Criar efeito ·
- *   Meus efeitos · Importar do Alight Motion.
+ *   Meus efeitos · Importar efeitos de projeto.
  *
  * [focusedType] (letras do texto 3D, Particular) mostra só aquele efeito, aberto.
  * Par do iOS: `EffectsView.swift` (mesmos ids e regras).
@@ -563,7 +563,7 @@ internal fun EffectsPanel(env: PanelEnv, focusedType: Int? = null) {
         derivedStateOf { railKey?.let { k -> store.paramOf(k.effectId, k.param)?.let { store.expressionLook(paramKeys(k.effectId, ParamSlot.of(it))) } } ?: com.aurea.aurea.engine.ExpressionLook.None }
     }
 
-    // Alight Motion: qualquer arquivo (o .amproj/.xml não tem MIME padrão).
+    // Projeto de efeitos: qualquer arquivo (o .amproj/.xml não tem MIME padrão).
     val amPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
     ) { uri ->

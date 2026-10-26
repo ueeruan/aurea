@@ -25,7 +25,7 @@ namespace aurea::vector {
 namespace {
 
 // Árvore XML mínima (tags, atributos; texto ignorado): o leitor comum do
-// motor (core/MiniXml), o mesmo que a importação do Alight Motion usa.
+// motor (core/MiniXml), o mesmo que a importação de projetos da referência usa.
 using XNode = xml::Node;
 
 bool parse_xml(const std::string& s, XNode& root) { return xml::parse(s, root); }

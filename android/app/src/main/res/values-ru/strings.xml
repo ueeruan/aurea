@@ -934,8 +934,8 @@
     <string name="dock_short_sound">Звук</string>
     <string name="fx_save_as_preset">Сохранить как пресет</string>
     <string name="fx_my_presets">Мои пресеты эффектов</string>
-    <string name="am_import_action">Импорт из Alight Motion…</string>
-    <string name="am_import_done">Импортировано эффектов Alight Motion: %1$d («%2$s»)</string>
+    <string name="am_import_action">Импорт эффектов из проекта (.xml, .amproj)…</string>
+    <string name="am_import_done">Импортировано эффектов: %1$d («%2$s»)</string>
     <string name="am_import_done_skipped">Импортировано: %1$d, без аналога пропущено: %2$d («%3$s»)</string>
     <string name="am_import_failed">Не удалось импортировать: %1$s</string>
     <string name="am_import_nothing">нет эффектов с аналогом в Aurea</string>
@@ -3729,7 +3729,7 @@
     <string name="edt_cmdx_undo_d">Отменяет последнюю правку</string>
     <string name="edt_cmdx_redo">Повторить</string>
     <string name="edt_cmdx_redo_d">Возвращает отменённую правку</string>
-    <string name="am_import_hint">Выберите слой в Aurea, затем XML, .amproj или ZIP, экспортированный из Alight Motion. Импорт преобразует совместимые эффекты первого слоя с эффектами, а не весь проект или его медиафайлы. Файлы с неподдерживаемыми элементами отклоняются, чтобы не потерять настройки.</string>
+    <string name="am_import_hint">Выберите слой в Aurea, затем файл XML, .amproj или ZIP с проектом эффектов. Импорт преобразует совместимые эффекты первого слоя с эффектами, а не весь проект или его медиафайлы. Файлы с неподдерживаемыми элементами отклоняются, чтобы не потерять настройки.</string>
     <string name="beta_select_media">Выбрать несколько</string>
     <string name="beta_add_media">Добавить (%1$d)</string>
     <string name="beta_extend_clip">Продлить до конца исходника</string>

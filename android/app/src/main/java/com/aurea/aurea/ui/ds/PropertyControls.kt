@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
+import com.aurea.aurea.ui.theme.CupertinoIconBoldStroke
 import com.aurea.aurea.ui.theme.tocavel
 import java.util.Locale
 import kotlin.math.abs
@@ -879,9 +880,11 @@ fun KeyframeDiamondIcon(look: KeyframeLook, enabled: Boolean, modifier: Modifier
             lineTo(inset, c.y)
             close()
         }
-        drawPath(p, color, style = Stroke(1.6.dp.toPx()))
+        // 0.3.3: + o traço extra dos glifos bold (CupertinoIconBoldStroke do tamanho).
+        val bold = size.minDimension * CupertinoIconBoldStroke
+        drawPath(p, color, style = Stroke(1.6.dp.toPx() + bold))
         val arm = 3.5.dp.toPx()
-        val w = 1.5.dp.toPx()
+        val w = 1.5.dp.toPx() + bold
         drawLine(color, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), w)
         if (look != KeyframeLook.KeyHere) drawLine(color, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), w)
     }
@@ -900,12 +903,14 @@ fun CurveRailIcon(enabled: Boolean, animated: Boolean, modifier: Modifier = Modi
             else -> AureaColors.Muted
         }
         val one = 1.dp.toPx()
+        // 0.3.3: + o traço extra dos glifos bold (CupertinoIconBoldStroke do tamanho).
+        val bold = size.minDimension * CupertinoIconBoldStroke
         drawRoundRect(
             color = color.copy(alpha = 0.5f),
             topLeft = Offset(one, one),
             size = Size(size.width - 2 * one, size.height - 2 * one),
             cornerRadius = CornerRadius(4.dp.toPx()),
-            style = Stroke(1.3.dp.toPx()),
+            style = Stroke(1.3.dp.toPx() + bold),
         )
         val p = Path().apply {
             moveTo(4.dp.toPx(), size.height - 5.dp.toPx())
@@ -915,6 +920,6 @@ fun CurveRailIcon(enabled: Boolean, animated: Boolean, modifier: Modifier = Modi
                 size.width - 4.dp.toPx(), 5.dp.toPx(),
             )
         }
-        drawPath(p, color, style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round))
+        drawPath(p, color, style = Stroke(1.5.dp.toPx() + bold, cap = StrokeCap.Round))
     }
 }

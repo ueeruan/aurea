@@ -33,7 +33,7 @@ struct EffectsView: View {
     @State private var cameraTracked = false
     @State private var about: EffectCatalogItem?
     @State private var pendingPick: UInt32?
-    /// Arquivo do Alight Motion escolhido (DocumentImportPicker; o `.fileImporter`
+    /// Arquivo de projeto de efeitos escolhido (DocumentImportPicker; o `.fileImporter`
     /// daqui ficava sob o da raiz do editor e não abria).
     @State private var amPick: URL?
     @State private var importTask: Task<Void, Never>?
@@ -205,7 +205,7 @@ struct EffectsView: View {
         }
         .onChange(of: model.status.modelRevision) { _ in refreshExpressions(); refreshTools(); updateTimelineFocus() }
         .onChange(of: model.status.playhead) { _ in refreshExpressions() }
-        // Alight Motion: .xml/.amproj/.zip não têm tipo padrão; o motor reconhece pelo conteúdo.
+        // Projeto de efeitos: .xml/.amproj/.zip não têm tipo padrão; o motor reconhece pelo conteúdo.
         .onChange(of: amPick) { picked in
             guard let url = picked else { return }
             amPick = nil
@@ -1553,7 +1553,7 @@ struct EffectsView: View {
 
     /// O ⋯ da lista (coluna esquerda, inativo com os controles abertos): Copiar
     /// efeitos · Colar efeito(s) — desabilitados sem conteúdo — · Ligar/Desligar
-    /// todos · Criar efeito… · Meus efeitos · Importar do Alight Motion….
+    /// todos · Criar efeito… · Meus efeitos · Importar efeitos de projeto….
     private func listMenuEntries() -> [MenuEntry] {
         let effects = shown
         let anyOn = effects.contains(where: \.enabled)

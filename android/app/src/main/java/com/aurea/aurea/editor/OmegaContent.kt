@@ -44,6 +44,7 @@ import com.aurea.aurea.ui.i18n.AppText
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
+import com.aurea.aurea.ui.theme.CupertinoIconBoldStroke
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 
@@ -61,9 +62,11 @@ internal enum class ContentIconKind { AlignLeft, AlignCenter, AlignRight, Eraser
 internal fun ContentIcon(kind: ContentIconKind, size: Dp, tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier.size(size)) {
         val u = this.size.minDimension / 24f
-        val stroke = Stroke(width = 1.8f * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        // 0.3.3: traço 1,8 + o extra dos glifos bold (CupertinoIconBoldStroke), como o desfoque de movimento.
+        val sw = (1.8f + 24f * CupertinoIconBoldStroke) * u
+        val stroke = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
         fun line(x0: Float, y0: Float, x1: Float, y1: Float) =
-            drawLine(tint, Offset(x0 * u, y0 * u), Offset(x1 * u, y1 * u), strokeWidth = 1.8f * u, cap = StrokeCap.Round)
+            drawLine(tint, Offset(x0 * u, y0 * u), Offset(x1 * u, y1 * u), strokeWidth = sw, cap = StrokeCap.Round)
         when (kind) {
             ContentIconKind.AlignLeft, ContentIconKind.AlignCenter, ContentIconKind.AlignRight -> {
                 // Quatro linhas: longa, curta, longa, curta — encostadas pelo lado do alinhamento.
@@ -83,7 +86,7 @@ internal fun ContentIcon(kind: ContentIconKind, size: Dp, tint: Color, modifier:
                 // A borracha inclinada: o corpo e a ponta, e a linha do chão.
                 rotate(-40f, Offset(12f * u, 12f * u)) {
                     drawRoundRect(tint, Offset(5f * u, 8f * u), Size(14f * u, 8f * u), CornerRadius(1.6f * u), style = stroke)
-                    drawLine(tint, Offset(10f * u, 8f * u), Offset(10f * u, 16f * u), strokeWidth = 1.8f * u)
+                    drawLine(tint, Offset(10f * u, 8f * u), Offset(10f * u, 16f * u), strokeWidth = sw)
                 }
                 line(4f, 20.5f, 20f, 20.5f)
             }
@@ -108,7 +111,7 @@ internal fun ContentIcon(kind: ContentIconKind, size: Dp, tint: Color, modifier:
                 drawCircle(tint, 1.8f * u, Offset(12f * u, 15f * u))
                 drawRoundRect(tint, Offset(8.5f * u, 4.5f * u), Size(7f * u, 5.5f * u), CornerRadius(1f * u))
                 val arc = Path().apply { moveTo(10f * u, 4.5f * u); cubicTo(10f * u, 1.5f * u, 14f * u, 1.5f * u, 14f * u, 4.5f * u) }
-                drawPath(arc, tint, style = Stroke(1.4f * u))
+                drawPath(arc, tint, style = Stroke((1.4f + 24f * CupertinoIconBoldStroke) * u))
             }
             ContentIconKind.LengthLock -> {
                 // Comprimento igual: a régua com as duas pontas.

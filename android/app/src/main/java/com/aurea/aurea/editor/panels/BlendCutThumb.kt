@@ -18,7 +18,7 @@ import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
 
 /**
- * Miniatura dos modos de máscara da mescla (Alight Motion): Máscara mostra a
+ * Miniatura dos modos de máscara da mescla (referência): Máscara mostra a
  * IMAGEM só dentro do disco (fora, o xadrez da transparência); Excluir mostra
  * a imagem com o disco virado furo (o xadrez aparece dentro dele).
  * `exclude` = false → Máscara (BlendMode::Mask 22), true → Excluir (23).

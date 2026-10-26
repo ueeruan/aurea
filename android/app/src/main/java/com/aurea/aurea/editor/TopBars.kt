@@ -68,6 +68,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -124,7 +125,8 @@ private fun parentOf(rows: List<LayerRow>, row: LayerRow): Long = rows.getOrNull
  * Fundo da barra da camada (A9). ‹ desseleciona; o nome edita ali mesmo (com ✕
  * de apagar); o vínculo de pai some em camada de áudio; a lixeira apaga sem
  * perguntar (um desfazer); o ⋮ abre o menu da camada ancorado nele. 3D e
- * desfoque de movimento passaram ao ⋮; duplicar, ao Copiar e colar.
+ * desfoque de movimento ficam na barra (0.3.3) e também no ⋮; duplicar, no
+ * Copiar e colar.
  */
 @Composable
 internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
@@ -163,6 +165,31 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
                 maxLength = Int.MAX_VALUE,
                 enabled = !h.locked,
                 onRename = { store.renameLayer(h.id, it) },
+            )
+        }
+        // 0.3.3 recursos: 3D e desfoque de movimento voltam à barra da camada
+        // (como na 0.3.2: aceso em destaque quando ligado, apagado se travada).
+        // Continuam também no ⋮.
+        if (h.kind != LayerType.Audio.kind) {
+            val row = store.layers.firstOrNull { it.id == h.id }
+            val intrinsic = h.kind in 8..10
+            val threeD = row?.isThreeD == true || intrinsic
+            val motionBlur = store.detail?.takeIf { it.id == h.id }?.motionBlur == true
+            val onLabel = stringResource(R.string.common_on)
+            val offLabel = stringResource(R.string.common_off)
+            ChromeButton(
+                CupertinoGlyph.Cube, stringResource(R.string.sh_add_tab_3d),
+                onClick = if (!h.locked && !intrinsic) ({ store.changeLayer3D(!threeD) }) else null,
+                modifier = Modifier.testTag("trial.layer.3d").semantics { stateDescription = if (threeD) onLabel else offLabel },
+                size = 20.dp, height = ShellDims.TopBar,
+                tint = if (threeD) AureaColors.Accent else if (h.locked) AureaColors.Disabled else AureaColors.Text,
+            )
+            ChromeButton(
+                CupertinoGlyph.MotionBlur, stringResource(R.string.editor_desfoque_movimento),
+                onClick = if (!h.locked) ({ store.setLayerMotionBlur(h.id, !motionBlur) }) else null,
+                modifier = Modifier.testTag("trial.layer.motionBlur").semantics { stateDescription = if (motionBlur) onLabel else offLabel },
+                size = 20.dp, height = ShellDims.TopBar,
+                tint = if (motionBlur) AureaColors.Accent else if (h.locked) AureaColors.Disabled else AureaColors.Text,
             )
         }
         // Vínculo de pai: nunca em camada de áudio (a referência o esconde).

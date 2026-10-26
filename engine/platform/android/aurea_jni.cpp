@@ -3231,7 +3231,7 @@ AUREA_JNI jbyteArray AUREA_FN(nativeSaveEffectPreset)(JNIEnv* env, jclass, jlong
     return js.empty() ? nullptr : bytes_of(env, js);
 }
 
-/// XML do Alight Motion (ou o pacote .zip/.amproj, em bytes) → envelope JSON
+/// XML de projeto da referência (ou o pacote .zip/.amproj, em bytes) → envelope JSON
 /// {"preset", "name", "layer", "mapped", "skipped", "warnings", "error"}.
 /// "preset" vazio = nada aproveitável ("error" diz o porquê). Não mexe no projeto.
 AUREA_JNI jbyteArray AUREA_FN(nativeImportAlightMotion)(JNIEnv* env, jclass, jlong handle, jbyteArray data) {

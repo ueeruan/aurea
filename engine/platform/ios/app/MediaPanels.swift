@@ -144,7 +144,7 @@ struct TrackingPanel: View {
                         Button(AureaText.t(title)) { objectKind = UInt32(index + 1) }
                     }
                 } label: {
-                    HStack { Text(AureaText.t(objectTitles[Int(objectKind) - 1])); Image(systemName: "chevron.down") }
+                    HStack { Text(AureaText.t(objectTitles[Int(objectKind) - 1])); Image(systemName: "chevron.down").fontWeight(AureaIconWeight.symbol) }
                         .font(.aurea(size: 14)).frame(minHeight: 44)
                 }
                 action("cam_place_selected", "cam_place_on_points", enabled: model.cameraSelectedCount > 0) { model.createTrackedObject(objectKind); reload() }

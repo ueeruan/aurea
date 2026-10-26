@@ -100,8 +100,8 @@ import kotlin.math.roundToInt
  * As setas vão ao evento estrito mais próximo: o começo, o último quadro, os
  * marcadores e, com camada escolhida, o início, o fim e os keyframes dela (sem
  * toque longo). A grade foi para a coluna; a resolução da prévia, para os
- * Ajustes (seção "Prévia"); marcar o instante, para o relógio da timeline;
- * "Selecionar uma camada", para o Copiar e colar. Enquanto um dedo manipula
+ * Ajustes (seção "Prévia"); "Selecionar uma camada", para o Copiar e colar.
+ * 0.3.3 recursos: o marcador da 0.3.2 voltou, depois do ⇥ (8 células). Enquanto um dedo manipula
  * algo no palco, a barra vira a de informações.
  */
 @Composable
@@ -140,15 +140,28 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
             tint = if (canRedo) AureaColors.Text else AureaColors.EditorIconDisabled,
         )
         ChromeButton(
-            CupertinoGlyph.BackwardEnd, stringResource(R.string.om_tr_previous),
-            onClick = { store.stepTransportEdges(-1) },
+            // 0.3.3 recursos: segurar vai ao início (como na 0.3.2).
+            CupertinoGlyph.BackwardEnd, stringResource(R.string.r33_tr_previous_hold),
+            onClick = { store.stepTransportEdges(-1) }, onLongClick = { store.seek(0) },
             modifier = Modifier.weight(1f).testTag("transport.previous"), size = 20.dp, height = h,
         )
         PlayButton(store, Modifier.weight(1f))
         ChromeButton(
-            CupertinoGlyph.ForwardEnd, stringResource(R.string.om_tr_next),
-            onClick = { store.stepTransportEdges(1) },
+            // 0.3.3 recursos: segurar vai ao fim (como na 0.3.2).
+            CupertinoGlyph.ForwardEnd, stringResource(R.string.r33_tr_next_hold),
+            onClick = { store.stepTransportEdges(1) }, onLongClick = { store.seek(store.project.durationFrames) },
             modifier = Modifier.weight(1f).testTag("transport.next"), size = 20.dp, height = h,
+        )
+        // 0.3.3 recursos: o marcador da 0.3.2 volta ao transporte — tocar marca ou
+        // desmarca o instante (aceso num marcador); segurar abre o editor dele
+        // (nome, quadro e cor).
+        val marked = store.playhead in store.markers.frames
+        ChromeButton(
+            if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
+            stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
+            onClick = { store.toggleMarker() }, onLongClick = { store.editMarkerAtPlayhead() },
+            modifier = Modifier.weight(1f).testTag("transport.marker"), size = 18.dp, height = h,
+            tint = if (marked) AureaColors.Accent else AureaColors.Text,
         )
         CopyPasteButton(store, ui, Modifier.weight(1f).height(h))
         val open = ViewModes.columnOpen
@@ -563,6 +576,12 @@ private fun copyPasteEntries(
         out += MenuEntry.Item(
             stringResource(R.string.editor_preencher_tela), glyph = CupertinoGlyph.Fullscreen, tag = "copyPaste.more.fill",
         ) { LayerOps.fitToCanvas(store, store.selection, fill = true) }
+        // 0.3.3 recursos: "Em escada" (cada uma começa quando a de cima termina) — no
+        // telefone em pé a folha de lote da 0.3.2 saiu e a barra de baixo não tem esta.
+        out += MenuEntry.Item(
+            stringResource(R.string.editor_escada_comeca_quando_cima_termina), glyph = CupertinoGlyph.ArrowRightToLine,
+            tag = "copyPaste.more.stairs",
+        ) { store.arrangeLayerTimes(1) }
         val groups = store.layers.filter { it.id in selection && it.kind == LayerType.Group.kind }.map { it.id }
         if (groups.isNotEmpty()) {
             out += MenuEntry.Item(stringResource(R.string.editor_desagrupar), glyph = ShellGlyph.SquareSplit2x2, tag = "copyPaste.more.ungroup") {

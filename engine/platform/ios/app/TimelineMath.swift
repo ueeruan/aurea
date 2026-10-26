@@ -410,7 +410,7 @@ enum WaveGrid {
     }
 }
 
-/// Arrasto VERTICAL de UM trecho (como no Alight Motion: só ele anda, nunca a
+/// Arrasto VERTICAL de UM trecho (como na referência: só ele anda, nunca a
 /// linha inteira) — porte de `RowDrop` (TimelineModel.kt). Diz onde o trecho
 /// cai com o dedo em `y` (conteúdo: do topo da 1ª fileira, com a rolagem):
 /// ENTRE fileiras (fileira própria ali — o traço de inserção) ou DENTRO de uma
@@ -711,6 +711,24 @@ enum MarkerColors {
     }
     /// ARGB → RGBA do motor (R baixo), opaco.
     static func pack(_ argb: UInt32) -> UInt32 { unpack(argb) }
+
+    // 0.3.3 recursos: o marcador antigo (seis cores) volta, com a correção de cor.
+    /// A paleta de seis cores do marcador da 0.3.2, em ARGB (amarelo, azul, verde,
+    /// laranja, lilás, branco). O amarelo é a cor padrão do motor (`engineDefault`).
+    static let legacy: [UInt32] = [0xFFF7C34F, 0xFF4D6EFF, 0xFF70D56B, 0xFFFFB75B, 0xFFD67BDB, 0xFFFFFFFF]
+
+    /// A cor (ARGB) com que a marca aparece. A 0.3.2 gravava os literais ARGB da
+    /// paleta sem converter (e o motor nasce com `engineDefault`): esses valores
+    /// crus são reconhecidos e mostrados na cor que pretendiam. O resto (o que o
+    /// editor grava agora, com `pack`) é desempacotado normalmente. Par do Android.
+    static func display(_ packed: UInt32) -> UInt32 {
+        let opaque = packed | 0xFF00_0000
+        if legacy.contains(opaque) { return opaque }
+        return unpack(packed)
+    }
+
+    /// Índice da cor da paleta antiga (0..5) com que a marca aparece; −1 = outra cor.
+    static func legacyIndex(_ packed: UInt32) -> Int { legacy.firstIndex(of: display(packed)) ?? -1 }
 
     /// Aparência (0..3): a cor exata de um papel, a cor padrão do motor (= 0) ou o
     /// papel mais perto (marcas antigas com a paleta de 6 cores).

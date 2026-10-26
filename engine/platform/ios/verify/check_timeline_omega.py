@@ -51,6 +51,14 @@ for (i, role) in MarkerColors.roles.enumerated() {
 }
 check(MarkerColors.appearance(MarkerColors.engineDefault) == 0, "marca nova = rosa")
 check(MarkerColors.appearance(0xFF4DB7FF) == 1, "batida laranja = pêssego")
+// 0.3.3 recursos: a paleta de seis cores da 0.3.2 com a correção (par do TimelineOmegaTest).
+check(MarkerColors.display(MarkerColors.engineDefault) == 0xFFF7C34F, "padrão do motor aparece amarelo")
+for (i, argb) in MarkerColors.legacy.enumerated() {
+    check(MarkerColors.display(MarkerColors.pack(argb)) == argb, "seis cores: gravada certa \(i)")
+    check(MarkerColors.display(argb) == argb, "seis cores: literal cru da 0.3.2 \(i)")
+    check(MarkerColors.legacyIndex(MarkerColors.pack(argb)) == i, "seis cores: índice \(i)")
+}
+check(MarkerColors.display(0xFFFF00FF) == 0xFFFF00FF && MarkerColors.legacyIndex(0xFF123456) == -1, "outra cor")
 // P0-5: passo dos tiques.
 check(OmegaRuler.frameStep(pps: 100, fps: 30) == 1, "100 pt/s = passo 1")
 check(OmegaRuler.frameStep(pps: 10, fps: 30) == 16, "10 pt/s = passo 16")
@@ -109,8 +117,13 @@ def main() -> int:
         "P0-3 cabeçalho de 62": "static let omegaHeaderColumn: CGFloat = 62" in theme,
         "P0-4 degradê por id": "ClipColors.vary(pair.0, pair.1, id: row.id)" in view,
         "P0-5 passo em potência de 2": "OmegaRuler.frameStep(pps: pps, fps: fps)" in view,
-        "P1-3 zona do tempo atual": "TimelineHit(kind: .currentTime)" in view,
-        "P1-3 cor do marcador pelos papéis": "MarkerColors.appearance(marker.packedColor)" in view,
+        # 0.3.3 recursos: o marcador antigo (0.3.2) voltou — triângulo + nome na régua,
+        # sem a zona de toque do relógio, cor pela correção da área 03 (`display`).
+        "0.3.3 marcador antigo na régua da Omega": "drawLegacyMarkers(&context, size: size)" in view
+            and view.count("drawLegacyMarkers(&context, size: size)") >= 2,
+        "0.3.3 relógio sem marcar no toque": "TimelineHit(kind: .currentTime)" not in view,
+        "0.3.3 cor do marcador com a correção": "MarkerColors.display(packed)" in view
+            and "static func display(_ packed: UInt32) -> UInt32" in math,
         "P1-4 inércia do scrub": "scrubFlinging = true" in view,
         "P1-7 prazo por alvo": "holdDuration: { point in omegaHoldDuration(point, width: size.width) }" in view,
         "P1-8 alça de velocidade": "model.stretchLayerSpan(s.id, start: Int64(s.start), end: Int64(s.end))" in view,

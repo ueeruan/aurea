@@ -12,7 +12,8 @@ import kotlin.math.min
  * A prévia é o que sobra e NUNCA muda de altura ao abrir ou fechar painel,
  * adicionar ou escolher camada — o que também mantém a SurfaceView do motor
  * parada (a superfície só muda na tela cheia ou ao girar o aparelho). Sem a
- * divisa arrastável no retrato (decisão D2). O layout largo continua o do AUREA.
+ * divisa arrastável no retrato (decisão D2). 0.3.3 recursos: a divisa volta
+ * (`preferred` em [EditorLayout.solve]). O layout largo continua o do AUREA.
  */
 internal data class EditorMetrics(
     val topBar: Float,
@@ -100,8 +101,12 @@ internal object EditorLayout {
 
     fun workspace(totalHeight: Float) = max(0f, totalHeight - TOP_BAR - TRANSPORT - STRIP)
 
-    /** O palco mais alto possível: a timeline nunca fica abaixo do piso. */
-    fun maxPreview(totalHeight: Float) = max(PREVIEW_MIN, workspace(totalHeight) - TIMELINE_MIN)
+    // 0.3.3 recursos: a divisa palco/timeline volta (arrastar o transporte na vertical).
+    /** A menor zona inferior que a divisa deixa: timeline mínima (110) + barra de adicionar (70). */
+    const val ZONE_MIN = TIMELINE_MIN + ADD_BAR
+
+    /** O palco mais alto possível arrastando a divisa: a zona nunca fica abaixo de [ZONE_MIN]. */
+    fun maxPreview(totalHeight: Float) = max(PREVIEW_MIN, workspace(totalHeight) - ZONE_MIN)
 
     /**
      * O retrato do telefone (e do tablet em pé): prévia = área − 42 − 46 − zona,
@@ -112,8 +117,14 @@ internal object EditorLayout {
      * - [SheetContent.None]: só a timeline; Hint, Batch e Adding: empilhados embaixo dela.
      * Tela baixa demais: a prévia fica no piso e a zona encolhe (a soma é sempre a altura).
      *
-     * [width], [aspect] e [preferred] ficam na assinatura para quem já chamava;
-     * o retrato da Omega não os usa (prévia fixa, sem divisa: decisão D2).
+     * 0.3.3 recursos: [preferred] > 0 é a altura da prévia que a pessoa escolheu
+     * arrastando a divisa (guardada no aparelho), de [PREVIEW_MIN] até
+     * [maxPreview]: a zona cresce (mais timeline) ou encolhe até [ZONE_MIN]. O painel
+     * da camada (Dock/Panel/Curve) e o adicionar aberto precisam da zona inteira:
+     * com a prévia maior que a automática, ela devolve o espaço enquanto eles estão
+     * abertos (como na 0.3.2), e o painel continua com 200 + 80 de timeline.
+     * Sem preferência, a prévia é a automática (área − 42 − 46 − 280).
+     * [width] e [aspect] ficam na assinatura para quem já chamava.
      */
     @Suppress("UNUSED_PARAMETER")
     fun solve(
@@ -132,7 +143,14 @@ internal object EditorLayout {
         val ws = workspace(totalHeight)
         val panel = layerPanel(fontScale)
         val previewFloor = min(PREVIEW_MIN, ws * 0.25f)
-        val preview = max(previewFloor, ws - bottomZone(fontScale)).coerceAtMost(ws)
+        val automatic = max(previewFloor, ws - bottomZone(fontScale)).coerceAtMost(ws)
+        // 0.3.3 recursos: a altura arrastada na divisa (0 = automática).
+        val chosen = if (preferred > 0f && preferred.isFinite()) {
+            preferred.coerceIn(previewFloor, max(previewFloor, ws - ZONE_MIN)).coerceAtMost(ws)
+        } else automatic
+        val needsWholeZone = content == SheetContent.Dock || content == SheetContent.Panel ||
+            content == SheetContent.Curve || content == SheetContent.Adding
+        val preview = if (needsWholeZone) min(chosen, automatic) else chosen
         val zone = ws - preview
 
         fun stacked(body: Float): EditorMetrics {

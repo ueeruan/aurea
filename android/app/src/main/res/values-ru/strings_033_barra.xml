@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.3 barra: a nova barra de adicionar do editor (o "+" abre a grade das categorias). -->
+    <string name="bar33_more">Ещё варианты добавления</string>
+    <string name="bar33_close">Закрыть категории</string>
+    <string name="bar33_grid">Все категории</string>
+</resources>

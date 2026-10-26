@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
@@ -69,9 +70,11 @@ class OmegaAddExportTest {
         compose.onNodeWithTag("add.element.camera").assertIsDisplayed()
         compose.onNodeWithTag("add.element.emptyGroup").assertIsDisplayed()
         capture("element")
-        compose.onNodeWithTag("addBar.Vector").performClick()
+        // 0.3.3 barra: o Vetor abre pelo Elemento; a vaga do Elemento continua acesa
+        // (com o nome do Vetor) e tocar nela fecha.
+        compose.onNodeWithTag("add.element.vector").performScrollTo().performClick()
         compose.onNodeWithTag("add.vector.points").assertIsDisplayed()
-        compose.onNodeWithTag("addBar.Vector").performClick()
+        compose.onNodeWithTag("addBar.Element").performClick()
         compose.waitUntil(3000) { compose.onAllNodesWithTag("add.panel").fetchSemanticsNodes().isEmpty() }
 
         // Grupo vazio: uma camada de grupo (kind 7 = composição) no cabeçote.
@@ -85,7 +88,12 @@ class OmegaAddExportTest {
         compose.onNodeWithTag("add.audio.viewAll").assertIsDisplayed()
         compose.onNodeWithTag("add.voice").assertIsDisplayed()
         capture("audio")
-        compose.onNodeWithTag("addBar.TextPresets").performClick()
+        // 0.3.3 barra: os Presets vêm pela grade do "+" (que fecha o conteúdo aberto).
+        compose.onNodeWithTag("addBar.more").performClick()
+        compose.onNodeWithTag("addBar.grid").assertIsDisplayed()
+        compose.onAllNodesWithTag("add.panel").fetchSemanticsNodes().let { assertTrue("the grid closes the open content", it.isEmpty()) }
+        compose.onNodeWithTag("addBar.grid.TextPresets").performClick()
+        compose.waitUntil(3000) { compose.onAllNodesWithTag("addBar.grid").fetchSemanticsNodes().isEmpty() }
         compose.onNodeWithTag("add.presets.viewAll").assertIsDisplayed()
         compose.onNodeWithTag("add.presets.discover").assertIsDisplayed()
         capture("presets")
@@ -93,9 +101,44 @@ class OmegaAddExportTest {
         compose.waitUntil(3000) { compose.onAllNodesWithTag("add.panel").fetchSemanticsNodes().isEmpty() }
 
         // Desenho age na hora: nenhum painel abre.
-        compose.onNodeWithTag("addBar.Draw").performClick()
+        compose.onNodeWithTag("addBar.more").performClick()
+        compose.onNodeWithTag("addBar.grid.Draw").performClick()
         compose.waitForIdle()
         assertEquals(0, compose.onAllNodesWithTag("add.panel").fetchSemanticsNodes().size)
+    }
+
+    /** 0.3.3 barra: a pílula de 5, o "+" que abre a grade 4 × 2 e o "X" que fecha. */
+    @Test fun addBarPillAndPlusGridOpenEachDestination() {
+        launch("AUREA · 0.3.3 barra")
+        for (tab in listOf("Shape", "Media", "Audio", "Text", "Element")) compose.onNodeWithTag("addBar.$tab").assertIsDisplayed()
+        for (tab in listOf("TextPresets", "Model3D", "Draw", "Vector")) {
+            assertEquals("$tab is only in the grid", 0, compose.onAllNodesWithTag("addBar.$tab").fetchSemanticsNodes().size)
+        }
+        // Categoria escolhida: a pílula acesa mostra o conteúdo dela acima da barra.
+        compose.onNodeWithTag("addBar.Media").performClick()
+        compose.onNodeWithTag("add.panel").assertIsDisplayed()
+        capture("bar-media")
+        // O "+" fecha o conteúdo e abre a grade; o "X" fecha.
+        compose.onNodeWithTag("addBar.more").performClick()
+        compose.onNodeWithTag("addBar.grid").assertIsDisplayed()
+        for (tab in listOf("Shape", "Media", "Audio", "Text", "TextPresets", "Element", "Model3D", "Draw")) {
+            compose.onNodeWithTag("addBar.grid.$tab").assertIsDisplayed()
+        }
+        compose.onNodeWithTag("addBar.close").assertIsDisplayed()
+        capture("bar-grid")
+        compose.onNodeWithTag("addBar.close").performClick()
+        compose.waitUntil(3000) { compose.onAllNodesWithTag("addBar.grid").fetchSemanticsNodes().isEmpty() }
+        // 3D pela grade: abre a grade de objetos 3D.
+        compose.onNodeWithTag("addBar.more").performClick()
+        compose.onNodeWithTag("addBar.grid.Model3D").performClick()
+        compose.onNodeWithTag("add.model3d.shapes").assertIsDisplayed()
+        compose.onNodeWithTag("add.close").performClick()
+        compose.waitUntil(3000) { compose.onAllNodesWithTag("add.panel").fetchSemanticsNodes().isEmpty() }
+        // Forma pela grade adiciona como pela pílula.
+        compose.onNodeWithTag("addBar.more").performClick()
+        compose.onNodeWithTag("addBar.grid.Shape").performClick()
+        compose.onNodeWithTag("add.shape.0").performClick()
+        compose.waitUntil(5000) { store.layers.size == 1 }
     }
 
     @Test fun exportPageListsTheOptionsAndSlidesToTheSettings() {

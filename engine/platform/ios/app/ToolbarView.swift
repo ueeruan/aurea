@@ -218,7 +218,7 @@ struct TopBarView: View {
     /// título À ESQUERDA; as áreas põem ações à direita (`trailing`). O `‹`
     /// fecha a seção e volta às ferramentas da camada.
     private func sectionBar(_ title: String) -> some View {
-        PanelBar(title: title, onBack: { model.panel = .none }, tag: "editor.sectionBar") {
+        PanelBar(title: title, onBack: { model.panel = .none }, tag: "editor.sectionBar", moreEntries: model.panelBarMore) {
             // Omega conteúdo (área 06, P0-6): o segmento do Editar pontos e as chaves do Editar forma.
             ContentSectionTrailing(panel: model.panel)
         }
@@ -228,7 +228,7 @@ struct TopBarView: View {
         Button {
             if model.status.playing != 0 { model.playPause() }
             shell.commandSearch = true
-        } label: { Image(systemName: "magnifyingglass").foregroundStyle(tint).frame(width: 44, height: 44).contentShape(Rectangle()) }
+        } label: { Image(systemName: "magnifyingglass").fontWeight(AureaIconWeight.symbol).foregroundStyle(tint).frame(width: 44, height: 44).contentShape(Rectangle()) }
             .buttonStyle(.plain).accessibilityLabel(AureaText.t("edt_cmd_search_desc")).accessibilityIdentifier("commandSearchOpen")
     }
 
@@ -318,7 +318,8 @@ struct TopBarView: View {
     /// Barra da CAMADA (`fragment_element_actionbar`), fundo A9: ‹ · nome · vínculo ·
     /// 🗑 · ⋮. O vínculo some em camada de áudio; a lixeira apaga sem perguntar (um
     /// desfazer); o ⋮ abre o menu da camada ancorado nele. 3D e desfoque de
-    /// movimento passaram ao ⋮; duplicar, ao Copiar e colar; a lupa, aos Ajustes.
+    /// movimento ficam na barra (0.3.3) e também no ⋮; duplicar, no Copiar e
+    /// colar; a lupa, nos Ajustes.
     private func layerBar(_ row: LayerItem) -> some View {
         HStack(spacing: 0) {
             ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("editor_voltar_tirar_selecao"), size: 20, width: 40, height: EditorLayout.topBar) { model.editorBack() }
@@ -328,6 +329,27 @@ struct TopBarView: View {
             }
             .id(row.id)
             .accessibilityIdentifier("layer.name")
+            // 0.3.3 recursos: 3D e desfoque de movimento voltam à barra da camada
+            // (como na 0.3.2: aceso em destaque quando ligado, apagado se travada).
+            // Continuam também no ⋮.
+            if row.kind != 3 {
+                let intrinsic = [8, 9, 10].contains(row.kind)
+                let threeD = row.threeD || intrinsic
+                let motion = ((model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0) & 2 != 0
+                ShellBarButton(glyph: CupertinoGlyph.Cube, description: AureaText.t("sh_add_tab_3d"), size: 20, width: 40, height: EditorLayout.topBar,
+                               tint: threeD ? AureaColors.accent : AureaColors.text, enabled: !row.locked && !intrinsic,
+                               disabledTint: threeD ? AureaColors.accent : nil) {
+                    _ = model.engine.setLayer3D(!threeD, forLayer: row.id); model.refreshModel(force: true)
+                }
+                .accessibilityValue(AureaText.t(threeD ? "common_on" : "common_off"))
+                .accessibilityIdentifier("trial.layer.3d")
+                ShellBarButton(glyph: CupertinoGlyph.MotionBlur, description: AureaText.t("editor_desfoque_movimento"), size: 20, width: 40, height: EditorLayout.topBar,
+                               tint: motion ? AureaColors.accent : AureaColors.text, enabled: !row.locked) {
+                    model.mutate { $0.setMotionBlur(!motion, forLayer: row.id) }; model.refreshModel(force: true)
+                }
+                .accessibilityValue(AureaText.t(motion ? "common_on" : "common_off"))
+                .accessibilityIdentifier("trial.layer.motionBlur")
+            }
             if row.kind != 3 {
                 linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 40)
             }
@@ -364,6 +386,17 @@ struct TopBarView: View {
         var out: [MenuEntry] = [.header(AureaText.t("editor_camada"))]
         if row.kind == 1 || row.kind == 3 {
             out.append(.item(AureaText.t("editor_velocidade"), glyph: CupertinoGlyph.Speedometer) { model.openPanel(.speed) })
+        }
+        // 0.3.3 recursos: entradas da doca da 0.3.2 que ficaram sem lugar no painel da camada.
+        // Opções de texto (espaçamentos, caixa, fundo, caminho, sombra e trechos ricos).
+        if row.kind == 4 {
+            out.append(.item(AureaText.t("text_options"), glyph: ShellGlyph.SliderHorizontalBelowRectangle,
+                             tag: "layer.menu.textOptions") { model.openPanel(.text) })
+        }
+        // Fantoche (o "Rig" da doca da imagem): o cartão do efeito já no modo de pinos.
+        if row.kind == 2 {
+            out.append(.item(AureaText.t("fx_name_puppet"), glyph: CupertinoGlyph.PersonCropCircle, enabled: !row.locked,
+                             tag: "layer.menu.puppet") { model.openPuppetTool() })
         }
         out.append(.item(AureaText.t(row.locked ? "editor_desbloquear_camada" : "editor_bloquear_camada"),
                          glyph: row.locked ? ShellGlyph.LockOpenFill : CupertinoGlyph.LockFill,
@@ -849,7 +882,8 @@ struct TransportView: View {
 
     private var buttons: some View {
         GeometryReader { geometry in
-            let side = max(1, geometry.size.width / 7)
+            // 0.3.3 recursos: 8 células (o marcador da 0.3.2 voltou, depois do ⇥).
+            let side = max(1, geometry.size.width / 8)
             let h = EditorLayout.transport
             HStack(spacing: 0) {
                 ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), size: 20, width: side, height: h,
@@ -858,13 +892,25 @@ struct TransportView: View {
                 ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), size: 20, width: side, height: h,
                                enabled: model.status.canRedo != 0, disabledTint: AureaColors.transportDisabled) { model.redo() }
                     .accessibilityIdentifier("transport.redo")
-                ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t("om_tr_previous"), size: 20, width: side, height: h) {
+                // 0.3.3 recursos: segurar ⇤ vai ao início e ⇥ ao fim (como na 0.3.2).
+                ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t("r33_tr_previous_hold"), size: 20, width: side, height: h,
+                               onLongPress: { model.seek(toFrame: 0) }) {
                     model.stepTransportEdges(-1)
                 }.accessibilityIdentifier("transport.previous")
                 PreRenderPlayControl(side: side)
-                ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t("om_tr_next"), size: 20, width: side, height: h) {
+                ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t("r33_tr_next_hold"), size: 20, width: side, height: h,
+                               onLongPress: { model.seek(toFrame: Int64(model.compositionDuration)) }) {
                     model.stepTransportEdges(1)
                 }.accessibilityIdentifier("transport.next")
+                // 0.3.3 recursos: o marcador da 0.3.2 volta ao transporte — tocar marca ou
+                // desmarca o instante (aceso num marcador); segurar abre o editor dele
+                // (nome, quadro e cor). Par do Android.
+                let marked = model.markerFrames.contains(model.status.playhead)
+                ShellBarButton(glyph: marked ? ShellGlyph.BookmarkSolid : CupertinoGlyph.Bookmark,
+                               description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"), size: 18, width: side, height: h,
+                               tint: marked ? AureaColors.accent : AureaColors.text,
+                               onLongPress: { model.editMarkerAtPlayhead() }, action: { model.toggleMarkerAt(model.status.playhead) })
+                    .accessibilityIdentifier("transport.marker")
                 CopyPasteButton(side: side)
                 ShellBarButton(glyph: modes.camera ? CupertinoGlyph.CameraViewfinder : OmegaGlyph.sidebarRight, description: AureaText.t("om_tr_view_modes"),
                                size: 20, width: side, height: h, tint: modes.columnOpen ? AureaColors.accent : AureaColors.text) {
@@ -1129,7 +1175,11 @@ private struct CopyPasteButton: View {
             out.append(.item(AureaText.t("editor_preencher_tela"), glyph: CupertinoGlyph.Fullscreen, tag: "copyPaste.more.fill") {
                 if model.status.playing != 0 { model.playPause() }; model.fitToCanvas(chosen, fill: true)
             })
-            let groups = model.layers.filter { model.selection.contains($0.id) && $0.kind == 12 }.map(\.id)
+            // 0.3.3 recursos: "Em escada" (cada uma começa quando a de cima termina) — no
+            // telefone em pé a folha de lote da 0.3.2 saiu e a barra de baixo não tem esta.
+            out.append(.item(AureaText.t("editor_escada_comeca_quando_cima_termina"), glyph: CupertinoGlyph.ArrowRightToLine,
+                             tag: "copyPaste.more.stairs") { model.arrangeLayerTimes(1) })
+            let groups =model.layers.filter { model.selection.contains($0.id) && $0.kind == 12 }.map(\.id)
             if !groups.isEmpty {
                 out.append(.item(AureaText.t("editor_desagrupar"), glyph: ShellGlyph.SquareSplit2x2, tag: "copyPaste.more.ungroup") {
                     for group in groups { model.ungroup(group) }
@@ -1480,7 +1530,7 @@ private struct ShellMenuRow: View {
         Button(action: action) {
             HStack(spacing: 14) {
                 if let symbol {
-                    Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(color).frame(width: 20, height: 20)
+                    Image(systemName: symbol).font(.system(size: 17, weight: AureaIconWeight.symbol)).foregroundStyle(color).frame(width: 20, height: 20)
                 } else {
                     CupertinoGlyph.text(glyph, size: 20, color: color).mirrorsInRtl(CupertinoGlyph.mirrorsInRtl(glyph)).frame(width: 20, height: 20)
                 }

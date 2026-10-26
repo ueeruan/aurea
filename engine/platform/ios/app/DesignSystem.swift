@@ -993,17 +993,19 @@ struct KeyframeDiamondIcon: View {
             diamond.addLine(to: CGPoint(x: c.x, y: size.height - inset))
             diamond.addLine(to: CGPoint(x: inset, y: c.y))
             diamond.closeSubpath()
-            ctx.stroke(diamond, with: .color(color), lineWidth: 1.6)
+            // 0.3.3: + o traço extra dos glifos bold (AureaIconWeight.glyphStroke do tamanho).
+            let bold = min(size.width, size.height) * AureaIconWeight.glyphStroke
+            ctx.stroke(diamond, with: .color(color), lineWidth: 1.6 + bold)
             let arm: CGFloat = 3.5
             var bar = Path()
             bar.move(to: CGPoint(x: c.x - arm, y: c.y))
             bar.addLine(to: CGPoint(x: c.x + arm, y: c.y))
-            ctx.stroke(bar, with: .color(color), lineWidth: 1.5)
+            ctx.stroke(bar, with: .color(color), lineWidth: 1.5 + bold)
             if look != .keyHere {
                 var stem = Path()
                 stem.move(to: CGPoint(x: c.x, y: c.y - arm))
                 stem.addLine(to: CGPoint(x: c.x, y: c.y + arm))
-                ctx.stroke(stem, with: .color(color), lineWidth: 1.5)
+                ctx.stroke(stem, with: .color(color), lineWidth: 1.5 + bold)
             }
         }
         .frame(width: AureaDims.diamondIcon, height: AureaDims.diamondIcon)
@@ -1028,15 +1030,17 @@ struct CurveRailIcon: View {
             else if animated { color = AureaColors.accent }
             else { color = AureaColors.muted }
             let box = CGRect(x: 1, y: 1, width: size.width - 2, height: size.height - 2)
+            // 0.3.3: + o traço extra dos glifos bold (AureaIconWeight.glyphStroke do tamanho).
+            let bold = min(size.width, size.height) * AureaIconWeight.glyphStroke
             ctx.stroke(Path(roundedRect: box, cornerRadius: 4),
-                       with: .color(color.opacity(0.5)), lineWidth: 1.3)
+                       with: .color(color.opacity(0.5)), lineWidth: 1.3 + bold)
             var curve = Path()
             curve.move(to: CGPoint(x: 4, y: size.height - 5))
             curve.addCurve(to: CGPoint(x: size.width - 4, y: 5),
                            control1: CGPoint(x: size.width * 0.45, y: size.height - 5),
                            control2: CGPoint(x: size.width * 0.55, y: 5))
             ctx.stroke(curve, with: .color(color),
-                       style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                       style: StrokeStyle(lineWidth: 1.5 + bold, lineCap: .round))
         }
         .frame(width: AureaDims.curveIcon, height: AureaDims.curveIcon)
     }
@@ -1265,7 +1269,7 @@ struct RightRail: View {
             CupertinoGlyph.text(glyph, size: side, color: tint)
         } else {
             Image(systemName: mode)
-                .font(.aurea(size: side, weight: .medium))
+                .font(.aurea(size: side, weight: AureaIconWeight.symbol))
                 .foregroundStyle(tint)
         }
     }
@@ -1796,7 +1800,7 @@ struct PanelFrame<Content: View>: View {
         } else if let icon = tab.icon, icon.hasPrefix("material:") {
             MaterialGlyph(String(icon.dropFirst(9)), size: 22, color: tint)
         } else if let icon = tab.icon {
-            Image(systemName: icon).font(.aurea(size: 20, weight: .medium)).foregroundStyle(tint)
+            Image(systemName: icon).font(.aurea(size: 20, weight: AureaIconWeight.symbol)).foregroundStyle(tint)
         }
     }
 
@@ -1879,7 +1883,7 @@ extension PanelBar where Trailing == EmptyView {
 
 // =============================================================================
 // Omega efeitos (área 07): CONTROLES DE PARÂMETRO da referência
-// (`effect_setting_*`, `AlightSlider`, `ValueSpinner`) — par dos `FxParamLabel`,
+// (linha de ajuste, slider e caixa de valor) — par dos `FxParamLabel`,
 // `FxValueBox`, `AureaSlider`, `FxRuler` e `FxSegmented` do PropertyControls.kt.
 // Só o painel de efeitos usa; `PropertyRow`/`TickRuler`/`ParamRowLabel` ficam
 // como estão para os outros painéis. A CONTA mora em `FxParamMath`
@@ -2001,7 +2005,7 @@ struct FxValueBox: View {
     }
 }
 
-/// O SLIDER da referência (`AlightSlider`): trilho de 2,5 com ponta redonda em
+/// O SLIDER da referência: trilho de 2,5 com ponta redonda em
 /// `fxTrack`; preenchimento `accent` da ORIGEM até o polegar (bipolar quando a
 /// origem está no meio; `fxTrackDisabled` desabilitado); polegar de 18 em `text`;
 /// 10 pt de pista parada em cada valor de encaixe (o padrão). O toque parado não

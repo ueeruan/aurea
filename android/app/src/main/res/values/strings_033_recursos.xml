@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.3 recursos: recursos do AUREA que voltaram depois da Omega. -->
+    <string name="r33_tr_previous_hold">Ir ao evento anterior · segure: início</string>
+    <string name="r33_tr_next_hold">Ir ao próximo evento · segure: fim</string>
+</resources>

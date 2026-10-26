@@ -946,7 +946,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     // agem nas camadas abaixo, só dentro dela. Par do EffectsHuman.kt.
     ("aurea.utility.copy_background", FxEffectHuman(
         name: "fx030k_name",
-        keywords: "copiar fundo copy background janela window ajustar parte do video forma shape mascara recorte camada de ajuste adjustment layer alight motion backdrop",
+        keywords: "copiar fundo copy background janela window ajustar parte do video forma shape mascara recorte camada de ajuste adjustment layer backdrop",
         principal: [0, 1],
         params: [
             0: FxParamHuman(label: "fx030k_window"),
@@ -1530,7 +1530,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         name: "afx_name_particular",
         keywords: "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh cc rainfall snowfall particle world",
         principal: [0, 9, 13, 15, 22, 24, 27, 32, 33, 35, 38])),
-    // Sinônimos de busca (nomes do After Effects / Alight Motion) dos efeitos sem ficha.
+    // Sinônimos de busca (nomes do After Effects e da referência) dos efeitos sem ficha.
     ("aurea.blur.box", FxEffectHuman(keywords: "fast box blur")),
     ("aurea.blur.directional", FxEffectHuman(keywords: "motion blur")),
     ("aurea.light.lens_flare", FxEffectHuman(keywords: "optical flares")),

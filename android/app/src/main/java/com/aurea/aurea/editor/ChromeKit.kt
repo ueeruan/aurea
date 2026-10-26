@@ -76,6 +76,7 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
+import com.aurea.aurea.ui.theme.aureaBold
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.roundToInt
 
@@ -131,7 +132,7 @@ internal fun ChromeVectorButton(
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            icon,
+            icon.aureaBold(),
             contentDescription = null,
             tint = tint,
             modifier = Modifier.size(size).then(if (mirror) Modifier.mirrorX() else Modifier),
@@ -232,7 +233,7 @@ internal fun MenuItemRow(
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (icon != null) Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
+        if (icon != null) Icon(icon.aureaBold(), null, tint = color, modifier = Modifier.size(20.dp))
         else CupertinoIcon(glyph, 20.dp, color)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {

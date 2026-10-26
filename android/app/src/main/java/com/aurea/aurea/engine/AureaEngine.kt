@@ -1037,7 +1037,7 @@ class AureaEngine private constructor() {
     fun saveEffectPreset(layer: Long, effectId: Int, name: String): String? =
         nativeSaveEffectPreset(nativeHandle, layer, effectId, name.toByteArray(Charsets.UTF_8))?.toString(Charsets.UTF_8)
     /**
-     * XML do Alight Motion (ou os bytes do pacote .zip/.amproj) → envelope JSON
+     * XML de projeto da referência (ou os bytes do pacote .zip/.amproj) → envelope JSON
      * {"preset", "name", "layer", "mapped", "skipped", "warnings", "error"}.
      * "preset" é o JSON de efeitos para [applyPreset]; vazio = nada aproveitável.
      */

@@ -63,6 +63,7 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
+import com.aurea.aurea.ui.theme.aureaBold
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 
@@ -212,5 +213,5 @@ private fun RowScope.BatchTool(icon: ImageVector, description: String, onClick: 
         Modifier.weight(1f).fillMaxHeight().semantics { contentDescription = description }
             .tocavel(haptic = true, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(22.dp)) }
+    ) { Icon(icon.aureaBold(), contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(22.dp)) }
 }

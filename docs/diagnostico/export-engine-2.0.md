@@ -238,5 +238,6 @@ transparente, recorte entre grupos, chão com câmera andando, trajeto curvo
   Android 13, processo de 64 bits). `ExportV2DeviceTest` 7/10 (as 3 falhas são
   as do pacote de recuperação antigo, acima), `ExportCheckpointDeviceTest`,
   `HomeNavigationTest`, `HyperScreenDeviceTest` 5/5 e `HyperJobDeviceTest` 3/3
-  passaram. Causa nova encontrada lá: 1.11. Não testados: 32 bits, vivo, Oppo,
-  MediaTek, PowerVR, iPhone (o iOS compila no CI).
+  passaram; o build de 32 bits (armeabi-v7a no mesmo aparelho) passou nas
+  mesmas classes de export e Hyper Turbo. Causa nova encontrada lá: 1.11. Não
+  testados: aparelho só de 32 bits, vivo, Oppo, MediaTek, PowerVR, iPhone.

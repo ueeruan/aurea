@@ -54,6 +54,8 @@
 #include "aurea/platform/DeviceCapabilities.hpp"
 #include "aurea/playback/Playback.hpp"
 #include "aurea/plugins/PluginManager.hpp"
+// 0.3.3 plugins: runtime de script dos plugins (painéis, API de objetos).
+#include "aurea/plugins/PluginRuntime.hpp"
 #include "aurea/tracking/RealCameraCapture.hpp"
 #include "aurea/project/Project.hpp"
 #include "aurea/render/GPUBackend.hpp"
@@ -1603,7 +1605,7 @@ public:
     /// Preset de efeitos com SÓ o efeito `effectId` (id estável da instância
     /// na camada) e os keyframes dele. Vazio = camada ou efeito não existe.
     [[nodiscard]] std::string save_effect_preset(u64 layerId, u32 effectId, const std::string& name) noexcept;
-    /// Converte um XML do Alight Motion (projeto, elemento ou preset
+    /// Converte um XML de projeto da referência (projeto, elemento ou preset
     /// compartilhado; também o pacote .zip/.amproj) num preset de EFEITOS do
     /// Aurea (formato de project/Presets.hpp, pronto para `apply_preset`).
     /// Vazio = nada aproveitável (`report.error` diz o porquê); o que ficou de
@@ -1675,7 +1677,7 @@ public:
     /// abrindo espaço e a fita fechando em seguida — reordenar os cortes
     /// arrastando. Só vale em linha magnética, em trecho com fonte e destravado.
     bool reorder_clip(u64 layerId, i64 targetFrame) noexcept;
-    /// Arrasto VERTICAL de UM trecho (como no Alight Motion: cada fileira é
+    /// Arrasto VERTICAL de UM trecho (como na referência: cada fileira é
     /// uma camada) — só ele anda, nunca a linha inteira. Um passo de desfazer.
     /// `mode` 0 = fileira própria logo ACIMA da fileira de `anchorId` (acima do
     /// trecho mais alto da linha dele); `anchorId` 0 = no fundo da pilha.
@@ -2108,6 +2110,38 @@ public:
     /// chama depois de subir o motor). Vazio = sem plugins.
     void set_plugin_directory(const char* path) noexcept;
     [[nodiscard]] std::string plugin_directory() const;
+
+    // 0.3.3 plugins: interface, scripts e APIs (src/engine/EnginePluginsV2.cpp) --
+    // Plugins do formato 2 trazem painéis/ações declarados e um script
+    // (AureaScript) com a API de objetos do AUREA no estilo do After Effects.
+    // As chamadas BLOQUEIAM (o script roda na thread de quem chama): a
+    // interface chama de uma thread de trabalho com pilha grande. Toda
+    // resposta é JSON (docs/plugins/README.md, "API do motor").
+    /// Lê um pacote sem instalar (a folha de consentimento mostra o que ele pede).
+    [[nodiscard]] std::string inspect_plugin(const char* path) noexcept;
+    /// Liga/desliga a interface e o script do plugin (o efeito, se houver, fica).
+    bool set_plugin_enabled(const char* id, bool on) noexcept;
+    /// Permissões concedidas pela pessoa (plugins::kPerm*).
+    bool set_plugin_permissions(const char* id, u32 granted) noexcept;
+    /// Chama a função `function` do script com `argsJson` (lista JSON). Uma ação
+    /// de desfazer por chamada. `locale` = idioma do app ("pt-BR", "en"...).
+    [[nodiscard]] std::string plugin_call(const char* id, const char* function, const char* argsJson, const char* locale) noexcept;
+    /// A pessoa mexeu num controle (`kind` = "click" | "change" | "select").
+    [[nodiscard]] std::string plugin_event(const char* id, const char* control, const char* kind, const char* valueJson,
+                                           const char* locale) noexcept;
+    /// O painel abriu (chama o onOpen dele).
+    [[nodiscard]] std::string plugin_open_panel(const char* id, const char* panel, const char* locale) noexcept;
+    /// Estado dos controles (vale durante uma chamada: progresso).
+    [[nodiscard]] std::string plugin_state(const char* id) noexcept;
+    [[nodiscard]] std::string plugin_console(const char* id) noexcept;
+    void plugin_clear_console(const char* id) noexcept;
+    /// Para a chamada em andamento do plugin (qualquer thread).
+    void plugin_cancel(const char* id) noexcept;
+    /// Recarrega o script (depois de um erro na carga).
+    void plugin_reload(const char* id) noexcept;
+    /// Rede, área de transferência e seletor de arquivos da plataforma. O motor
+    /// confere a permissão e o domínio antes de chamar.
+    void set_plugin_host_io(plugins::HostIO io) noexcept;
 
     /// A PRÉVIA DE UM EFEITO (Fase 7.3): o efeito, com os valores padrão, sobre
     /// a cartela de demonstração. RGBA8 sRGB de alfa reto. Não depende de
@@ -2581,6 +2615,14 @@ private:
     /// pipelines prontos. Toma o renderMutex_ (espera o preview soltar a GPU).
     [[nodiscard]] bool plugin_test_render(const EffectRegistry& registry, EffectTypeId typeId, f32& ms,
                                           std::string& error) noexcept;
+    // 0.3.3 plugins: runtimes de script (EnginePluginsV2.cpp). shared_ptr: o
+    // tipo só é completo lá (o destrutor do Engine não precisa conhecê-lo).
+    struct PluginScriptState;
+    std::shared_ptr<PluginScriptState> pluginScripts_;
+    [[nodiscard]] std::shared_ptr<plugins::PluginRuntime> plugin_runtime_for(const char* id, std::string& error) noexcept;
+    [[nodiscard]] std::string plugin_run(const char* id, const std::function<std::string(plugins::PluginRuntime&,
+                                         const plugins::PluginRuntime::ApiInstaller&, const plugins::CallHooks&)>& body) noexcept;
+    void install_plugin_api(plugins::script::Context& ctx, plugins::PluginRuntime& runtime);
     AdaptiveResolutionController* adaptive_ = nullptr;
 
     std::unique_ptr<GPUBackend> gpu_;

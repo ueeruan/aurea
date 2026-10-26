@@ -1,0 +1,185 @@
+{
+  "aureaPlugin": 2,
+  "id": "com.aurea.examples.animatedtext",
+  "version": "1.0.0",
+  "author": "AUREA",
+  "name": {
+    "pt-BR": "Gerador de texto animado",
+    "en": "Animated text generator",
+    "es": "Generador de texto animado",
+    "hi": "एनिमेटेड टेक्स्ट जनरेटर",
+    "id": "Pembuat teks animasi",
+    "ru": "Генератор анимированного текста",
+    "ar": "مولّد النص المتحرك"
+  },
+  "description": {
+    "pt-BR": "Cria camadas de texto já animadas (uma por palavra, se quiser) e anima a camada escolhida com um toque.",
+    "en": "Creates text layers that are already animated (one per word, if you want) and animates the selected layer with one tap.",
+    "es": "Crea capas de texto ya animadas (una por palabra, si quieres) y anima la capa elegida con un toque.",
+    "hi": "पहले से एनिमेटेड टेक्स्ट परतें बनाता है (चाहें तो हर शब्द की अलग) और चुनी हुई परत को एक टैप में एनिमेट करता है।",
+    "id": "Membuat lapisan teks yang sudah teranimasi (satu per kata, jika mau) dan menganimasikan lapisan terpilih dengan satu ketukan.",
+    "ru": "Создаёт уже анимированные текстовые слои (по слою на слово, если нужно) и анимирует выбранный слой одним касанием.",
+    "ar": "ينشئ طبقات نص متحركة جاهزة (طبقة لكل كلمة إن أردت) ويحرّك الطبقة المحددة بلمسة واحدة."
+  },
+  "kind": "panel",
+  "script": "main.js",
+  "ui": {
+    "panels": [
+      {
+        "id": "main",
+        "icon": "sparkles",
+        "placement": ["editor.panel", "home.tab"],
+        "title": {
+          "pt-BR": "Texto animado", "en": "Animated text", "es": "Texto animado", "hi": "एनिमेटेड टेक्स्ट",
+          "id": "Teks animasi", "ru": "Анимированный текст", "ar": "نص متحرك"
+        },
+        "onOpen": "abriu",
+        "controls": [
+          {
+            "id": "texto", "type": "text", "default": "AUREA", "maxLength": 200,
+            "label": { "pt-BR": "Texto", "en": "Text", "es": "Texto", "hi": "टेक्स्ट", "id": "Teks", "ru": "Текст", "ar": "النص" },
+            "placeholder": { "pt-BR": "Escreva aqui", "en": "Type here", "es": "Escribe aquí", "hi": "यहाँ लिखें", "id": "Tulis di sini", "ru": "Введите текст", "ar": "اكتب هنا" }
+          },
+          {
+            "id": "estilo", "type": "choice", "default": 0, "onChange": "mudouEstilo",
+            "label": { "pt-BR": "Animação", "en": "Animation", "es": "Animación", "hi": "एनिमेशन", "id": "Animasi", "ru": "Анимация", "ar": "الحركة" },
+            "options": [
+              { "pt-BR": "Subir e aparecer", "en": "Rise and fade in", "es": "Subir y aparecer", "hi": "ऊपर उठें और दिखें", "id": "Naik dan muncul", "ru": "Подъём с появлением", "ar": "صعود وظهور" },
+              { "pt-BR": "Crescer", "en": "Grow", "es": "Crecer", "hi": "बड़ा होना", "id": "Membesar", "ru": "Рост", "ar": "تكبير" },
+              { "pt-BR": "Deslizar da esquerda", "en": "Slide from the left", "es": "Deslizar desde la izquierda", "hi": "बाएँ से खिसकना", "id": "Geser dari kiri", "ru": "Сдвиг слева", "ar": "انزلاق من اليسار" },
+              { "pt-BR": "Girar", "en": "Spin", "es": "Girar", "hi": "घूमना", "id": "Putar", "ru": "Поворот", "ar": "دوران" }
+            ]
+          },
+          {
+            "id": "duracao", "type": "slider", "min": 0.2, "max": 3, "step": 0.1, "default": 0.8, "unit": "s",
+            "label": { "pt-BR": "Duração", "en": "Duration", "es": "Duración", "hi": "अवधि", "id": "Durasi", "ru": "Длительность", "ar": "المدة" }
+          },
+          {
+            "id": "porPalavra", "type": "toggle", "default": false,
+            "label": { "pt-BR": "Uma camada por palavra", "en": "One layer per word", "es": "Una capa por palabra", "hi": "हर शब्द की अलग परत", "id": "Satu lapisan per kata", "ru": "Слой на каждое слово", "ar": "طبقة لكل كلمة" }
+          },
+          {
+            "id": "atraso", "type": "ruler", "min": 0, "max": 5, "step": 0.05, "default": 0.15, "unit": "s",
+            "label": { "pt-BR": "Atraso entre palavras", "en": "Delay between words", "es": "Retraso entre palabras", "hi": "शब्दों के बीच देरी", "id": "Jeda antar kata", "ru": "Задержка между словами", "ar": "التأخير بين الكلمات" }
+          },
+          {
+            "id": "tamanho", "type": "slider", "min": 20, "max": 400, "step": 1, "default": 120, "unit": "px",
+            "label": { "pt-BR": "Tamanho", "en": "Size", "es": "Tamaño", "hi": "आकार", "id": "Ukuran", "ru": "Размер", "ar": "الحجم" }
+          },
+          {
+            "id": "cor", "type": "color", "default": "#FFFFFF",
+            "label": { "pt-BR": "Cor", "en": "Color", "es": "Color", "hi": "रंग", "id": "Warna", "ru": "Цвет", "ar": "اللون" }
+          },
+          {
+            "id": "gerar", "type": "button", "style": "primary", "onClick": "gerar",
+            "label": { "pt-BR": "Gerar", "en": "Generate", "es": "Generar", "hi": "बनाएँ", "id": "Buat", "ru": "Создать", "ar": "إنشاء" }
+          },
+          {
+            "id": "info", "type": "label",
+            "text": {
+              "pt-BR": "Escreva o texto e toque em Gerar.", "en": "Type the text and tap Generate.", "es": "Escribe el texto y toca Generar.",
+              "hi": "टेक्स्ट लिखें और बनाएँ पर टैप करें।", "id": "Tulis teks lalu ketuk Buat.", "ru": "Введите текст и нажмите «Создать».",
+              "ar": "اكتب النص ثم اضغط إنشاء."
+            }
+          }
+        ]
+      }
+    ],
+    "actions": [
+      {
+        "id": "animarCamada", "icon": "sparkles", "placement": "layer.toolbar", "call": "animarSelecionadas",
+        "title": { "pt-BR": "Animar camada", "en": "Animate layer", "es": "Animar capa", "hi": "परत एनिमेट करें", "id": "Animasikan lapisan", "ru": "Анимировать слой", "ar": "تحريك الطبقة" }
+      },
+      {
+        "id": "abrir", "icon": "sparkles", "placement": "editor.menu", "panel": "main",
+        "title": { "pt-BR": "Texto animado", "en": "Animated text", "es": "Texto animado", "hi": "एनिमेटेड टेक्स्ट", "id": "Teks animasi", "ru": "Анимированный текст", "ar": "نص متحرك" }
+      }
+    ]
+  },
+  "strings": {
+    "pt-BR": {
+      "semProjeto": "Abra um projeto para criar o texto.",
+      "vazio": "Escreva algum texto primeiro.",
+      "acao": "Texto animado",
+      "pronto": "{0} camada(s) de texto criada(s).",
+      "semSelecao": "Escolha uma camada na timeline.",
+      "animadas": "{0} camada(s) animada(s).",
+      "estilo0": "Sobe {0} px enquanto aparece.",
+      "estilo1": "Cresce do zero até o tamanho normal.",
+      "estilo2": "Entra deslizando pela esquerda.",
+      "estilo3": "Gira um quarto de volta enquanto aparece."
+    },
+    "en": {
+      "semProjeto": "Open a project to create the text.",
+      "vazio": "Type some text first.",
+      "acao": "Animated text",
+      "pronto": "{0} text layer(s) created.",
+      "semSelecao": "Pick a layer on the timeline.",
+      "animadas": "{0} layer(s) animated.",
+      "estilo0": "Rises {0} px while fading in.",
+      "estilo1": "Grows from zero to its normal size.",
+      "estilo2": "Slides in from the left.",
+      "estilo3": "Turns a quarter while fading in."
+    },
+    "es": {
+      "semProjeto": "Abre un proyecto para crear el texto.",
+      "vazio": "Escribe algún texto primero.",
+      "acao": "Texto animado",
+      "pronto": "{0} capa(s) de texto creada(s).",
+      "semSelecao": "Elige una capa en la línea de tiempo.",
+      "animadas": "{0} capa(s) animada(s).",
+      "estilo0": "Sube {0} px mientras aparece.",
+      "estilo1": "Crece desde cero hasta su tamaño normal.",
+      "estilo2": "Entra deslizándose desde la izquierda.",
+      "estilo3": "Gira un cuarto de vuelta mientras aparece."
+    },
+    "hi": {
+      "semProjeto": "टेक्स्ट बनाने के लिए कोई प्रोजेक्ट खोलें।",
+      "vazio": "पहले कुछ टेक्स्ट लिखें।",
+      "acao": "एनिमेटेड टेक्स्ट",
+      "pronto": "{0} टेक्स्ट परत बनाई गई।",
+      "semSelecao": "टाइमलाइन में कोई परत चुनें।",
+      "animadas": "{0} परत एनिमेट की गई।",
+      "estilo0": "दिखते हुए {0} px ऊपर उठता है।",
+      "estilo1": "शून्य से सामान्य आकार तक बढ़ता है।",
+      "estilo2": "बाईं ओर से खिसककर आता है।",
+      "estilo3": "दिखते हुए चौथाई चक्कर घूमता है।"
+    },
+    "id": {
+      "semProjeto": "Buka proyek untuk membuat teks.",
+      "vazio": "Tulis teks terlebih dahulu.",
+      "acao": "Teks animasi",
+      "pronto": "{0} lapisan teks dibuat.",
+      "semSelecao": "Pilih lapisan di linimasa.",
+      "animadas": "{0} lapisan dianimasikan.",
+      "estilo0": "Naik {0} px sambil muncul.",
+      "estilo1": "Membesar dari nol ke ukuran normal.",
+      "estilo2": "Masuk bergeser dari kiri.",
+      "estilo3": "Berputar seperempat sambil muncul."
+    },
+    "ru": {
+      "semProjeto": "Откройте проект, чтобы создать текст.",
+      "vazio": "Сначала введите текст.",
+      "acao": "Анимированный текст",
+      "pronto": "Создано текстовых слоёв: {0}.",
+      "semSelecao": "Выберите слой на таймлайне.",
+      "animadas": "Анимировано слоёв: {0}.",
+      "estilo0": "Поднимается на {0} px, появляясь.",
+      "estilo1": "Вырастает с нуля до обычного размера.",
+      "estilo2": "Въезжает слева.",
+      "estilo3": "Поворачивается на четверть оборота, появляясь."
+    },
+    "ar": {
+      "semProjeto": "افتح مشروعًا لإنشاء النص.",
+      "vazio": "اكتب نصًا أولًا.",
+      "acao": "نص متحرك",
+      "pronto": "تم إنشاء {0} طبقة نص.",
+      "semSelecao": "اختر طبقة في المخطط الزمني.",
+      "animadas": "تم تحريك {0} طبقة.",
+      "estilo0": "يصعد {0} بكسل أثناء الظهور.",
+      "estilo1": "يكبر من الصفر إلى حجمه الطبيعي.",
+      "estilo2": "يدخل منزلقًا من اليسار.",
+      "estilo3": "يدور ربع دورة أثناء الظهور."
+    }
+  }
+}

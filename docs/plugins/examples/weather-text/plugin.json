@@ -1,0 +1,116 @@
+{
+  "aureaPlugin": 2,
+  "id": "com.aurea.examples.weathertext",
+  "version": "1.0.0",
+  "author": "AUREA",
+  "name": {
+    "pt-BR": "Clima na tela",
+    "en": "Weather on screen",
+    "es": "El clima en pantalla",
+    "hi": "स्क्रीन पर मौसम",
+    "id": "Cuaca di layar",
+    "ru": "Погода на экране",
+    "ar": "الطقس على الشاشة"
+  },
+  "description": {
+    "pt-BR": "Busca a temperatura agora de uma cidade na API pública Open-Meteo e cria uma camada de texto com ela. Exemplo de fetch com domínio declarado.",
+    "en": "Fetches the current temperature of a city from the public Open-Meteo API and creates a text layer with it. A fetch example with a declared domain.",
+    "es": "Busca la temperatura actual de una ciudad en la API pública Open-Meteo y crea una capa de texto con ella. Ejemplo de fetch con dominio declarado.",
+    "hi": "सार्वजनिक Open-Meteo API से किसी शहर का अभी का तापमान लाता है और उससे टेक्स्ट परत बनाता है। घोषित डोमेन के साथ fetch का उदाहरण।",
+    "id": "Mengambil suhu saat ini sebuah kota dari API publik Open-Meteo dan membuat lapisan teks darinya. Contoh fetch dengan domain yang dideklarasikan.",
+    "ru": "Получает текущую температуру города из открытого API Open-Meteo и создаёт с ней текстовый слой. Пример fetch с объявленным доменом.",
+    "ar": "يجلب درجة الحرارة الحالية لمدينة من واجهة Open-Meteo العامة وينشئ بها طبقة نص. مثال على fetch مع نطاق مُعلن."
+  },
+  "kind": "panel",
+  "script": "main.js",
+  "permissions": { "network": ["open-meteo.com"] },
+  "ui": {
+    "panels": [
+      {
+        "id": "main",
+        "icon": "cloud",
+        "placement": ["editor.panel"],
+        "onOpen": "abriu",
+        "title": { "pt-BR": "Clima na tela", "en": "Weather on screen", "es": "El clima en pantalla", "hi": "स्क्रीन पर मौसम", "id": "Cuaca di layar", "ru": "Погода на экране", "ar": "الطقس على الشاشة" },
+        "controls": [
+          {
+            "id": "cidade", "type": "text", "default": "São Paulo", "maxLength": 80,
+            "label": { "pt-BR": "Cidade", "en": "City", "es": "Ciudad", "hi": "शहर", "id": "Kota", "ru": "Город", "ar": "المدينة" },
+            "placeholder": { "pt-BR": "Ex.: Lisboa", "en": "E.g. London", "es": "Ej.: Madrid", "hi": "जैसे: दिल्ली", "id": "Mis.: Jakarta", "ru": "Напр.: Москва", "ar": "مثال: القاهرة" }
+          },
+          {
+            "id": "unidade", "type": "choice", "default": 0,
+            "label": { "pt-BR": "Unidade", "en": "Unit", "es": "Unidad", "hi": "इकाई", "id": "Satuan", "ru": "Единицы", "ar": "الوحدة" },
+            "options": ["°C", "°F"]
+          },
+          {
+            "id": "buscar", "type": "button", "style": "secondary", "onClick": "buscar",
+            "label": { "pt-BR": "Buscar", "en": "Search", "es": "Buscar", "hi": "खोजें", "id": "Cari", "ru": "Найти", "ar": "بحث" }
+          },
+          {
+            "id": "lugares", "type": "list", "onSelect": "escolheu",
+            "label": { "pt-BR": "Resultados", "en": "Results", "es": "Resultados", "hi": "परिणाम", "id": "Hasil", "ru": "Результаты", "ar": "النتائج" }
+          },
+          {
+            "id": "resultado", "type": "label",
+            "text": { "pt-BR": "Busque uma cidade.", "en": "Search for a city.", "es": "Busca una ciudad.", "hi": "कोई शहर खोजें।", "id": "Cari sebuah kota.", "ru": "Найдите город.", "ar": "ابحث عن مدينة." }
+          },
+          {
+            "id": "criar", "type": "button", "style": "primary", "onClick": "criar",
+            "label": { "pt-BR": "Criar texto", "en": "Create text", "es": "Crear texto", "hi": "टेक्स्ट बनाएँ", "id": "Buat teks", "ru": "Создать текст", "ar": "إنشاء نص" }
+          }
+        ]
+      }
+    ],
+    "actions": [
+      {
+        "id": "abrir", "icon": "cloud", "placement": "editor.menu", "panel": "main",
+        "title": { "pt-BR": "Clima na tela", "en": "Weather on screen", "es": "El clima en pantalla", "hi": "स्क्रीन पर मौसम", "id": "Cuaca di layar", "ru": "Погода на экране", "ar": "الطقس على الشاشة" }
+      }
+    ]
+  },
+  "strings": {
+    "pt-BR": {
+      "buscando": "Buscando...", "nada": "Nenhuma cidade com esse nome.", "semRede": "Sem conexão com o serviço de clima.",
+      "agora": "{0}: {1}, {2}", "escolha": "Escolha uma cidade na lista.", "semProjeto": "Abra um projeto para criar o texto.",
+      "criado": "Texto criado.", "acao": "Clima na tela",
+      "c0": "céu limpo", "c1": "poucas nuvens", "c45": "neblina", "c51": "garoa", "c61": "chuva", "c71": "neve", "c80": "pancadas de chuva", "c95": "tempestade"
+    },
+    "en": {
+      "buscando": "Searching...", "nada": "No city with that name.", "semRede": "Can't reach the weather service.",
+      "agora": "{0}: {1}, {2}", "escolha": "Pick a city from the list.", "semProjeto": "Open a project to create the text.",
+      "criado": "Text created.", "acao": "Weather on screen",
+      "c0": "clear sky", "c1": "partly cloudy", "c45": "fog", "c51": "drizzle", "c61": "rain", "c71": "snow", "c80": "rain showers", "c95": "thunderstorm"
+    },
+    "es": {
+      "buscando": "Buscando...", "nada": "Ninguna ciudad con ese nombre.", "semRede": "Sin conexión con el servicio del clima.",
+      "agora": "{0}: {1}, {2}", "escolha": "Elige una ciudad de la lista.", "semProjeto": "Abre un proyecto para crear el texto.",
+      "criado": "Texto creado.", "acao": "El clima en pantalla",
+      "c0": "cielo despejado", "c1": "algo nublado", "c45": "niebla", "c51": "llovizna", "c61": "lluvia", "c71": "nieve", "c80": "chubascos", "c95": "tormenta"
+    },
+    "hi": {
+      "buscando": "खोज रहे हैं...", "nada": "इस नाम का कोई शहर नहीं मिला।", "semRede": "मौसम सेवा से कनेक्शन नहीं हो पाया।",
+      "agora": "{0}: {1}, {2}", "escolha": "सूची से कोई शहर चुनें।", "semProjeto": "टेक्स्ट बनाने के लिए कोई प्रोजेक्ट खोलें।",
+      "criado": "टेक्स्ट बन गया।", "acao": "स्क्रीन पर मौसम",
+      "c0": "साफ़ आसमान", "c1": "आंशिक बादल", "c45": "कोहरा", "c51": "बूंदाबांदी", "c61": "बारिश", "c71": "बर्फ़", "c80": "बौछारें", "c95": "आंधी-तूफ़ान"
+    },
+    "id": {
+      "buscando": "Mencari...", "nada": "Tidak ada kota dengan nama itu.", "semRede": "Tidak dapat terhubung ke layanan cuaca.",
+      "agora": "{0}: {1}, {2}", "escolha": "Pilih kota dari daftar.", "semProjeto": "Buka proyek untuk membuat teks.",
+      "criado": "Teks dibuat.", "acao": "Cuaca di layar",
+      "c0": "cerah", "c1": "berawan sebagian", "c45": "kabut", "c51": "gerimis", "c61": "hujan", "c71": "salju", "c80": "hujan lokal", "c95": "badai petir"
+    },
+    "ru": {
+      "buscando": "Поиск...", "nada": "Город с таким названием не найден.", "semRede": "Нет связи с сервисом погоды.",
+      "agora": "{0}: {1}, {2}", "escolha": "Выберите город из списка.", "semProjeto": "Откройте проект, чтобы создать текст.",
+      "criado": "Текст создан.", "acao": "Погода на экране",
+      "c0": "ясно", "c1": "переменная облачность", "c45": "туман", "c51": "морось", "c61": "дождь", "c71": "снег", "c80": "ливни", "c95": "гроза"
+    },
+    "ar": {
+      "buscando": "جارٍ البحث...", "nada": "لا توجد مدينة بهذا الاسم.", "semRede": "تعذّر الاتصال بخدمة الطقس.",
+      "agora": "{0}: {1}، {2}", "escolha": "اختر مدينة من القائمة.", "semProjeto": "افتح مشروعًا لإنشاء النص.",
+      "criado": "تم إنشاء النص.", "acao": "الطقس على الشاشة",
+      "c0": "سماء صافية", "c1": "غائم جزئيًا", "c45": "ضباب", "c51": "رذاذ", "c61": "مطر", "c71": "ثلج", "c80": "زخات مطر", "c95": "عاصفة رعدية"
+    }
+  }
+}

@@ -234,13 +234,17 @@ fun rememberAnimatedEffectPreview(
     return state.value
 }
 
-/** Toca os quadros em laço (~15 qps) enquanto [playing]; parado, o primeiro. */
+/**
+ * Toca os quadros em laço (~15 qps) enquanto [playing]; parado, o primeiro.
+ * [afterOnly] (Omega, detalhe do navegador): só a metade "depois" da comparação.
+ */
 @Composable
 fun AnimatedPreviewFrames(
     frames: List<ImageBitmap>,
     playing: Boolean,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
+    afterOnly: Boolean = false,
 ) {
     var index by remember(frames) { mutableIntStateOf(0) }
     if (playing && frames.size > 1) {
@@ -252,7 +256,8 @@ fun AnimatedPreviewFrames(
         }
     }
     val frame = frames.getOrNull(if (playing) index else 0) ?: return
-    Image(frame, null, modifier.fillMaxSize(), contentScale = contentScale, filterQuality = FilterQuality.Low)
+    if (afterOnly) AfterOnlyImage(frame, modifier)
+    else Image(frame, null, modifier.fillMaxSize(), contentScale = contentScale, filterQuality = FilterQuality.Low)
 }
 
 /** Seletor de cena da ficha: grupo de opções (um toque escolhe), com estado lido pelo leitor de tela. */
@@ -280,7 +285,8 @@ fun EffectPreviewScenePicker(selected: Int, onSelect: (Int) -> Unit, modifier: M
             ) {
                 Text(
                     stringResource(scene.label),
-                    style = AureaType.of(12f, FontWeight.W600, color = if (on) AureaColors.EditorPanel else AureaColors.Text),
+                    // Omega: conteúdo sobre o destaque (menta) é o «sobre ação», nunca o texto claro.
+                    style = AureaType.of(12f, FontWeight.W600, color = if (on) AureaColors.OnAction else AureaColors.Text),
                     textAlign = TextAlign.Center,
                     maxLines = 2,
                 )

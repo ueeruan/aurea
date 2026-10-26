@@ -88,6 +88,21 @@
 		AE00000000000000000000A7 /* PanelParticles.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000A6 /* PanelParticles.swift */; };
 		AE00000000000000000000A9 /* ProjectCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000A8 /* ProjectCards.swift */; };
 		AE00000000000000000000AB /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000AA /* Sheets.swift */; };
+		0E0A00000000000000000F02 /* AnchoredMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E0A00000000000000000F01 /* AnchoredMenu.swift */; };
+		0E04000000000000000000B2 /* LayerPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E04000000000000000000B1 /* LayerPanelView.swift */; };
+		0E06000000000000000006A2 /* OmegaContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E06000000000000000006A1 /* OmegaContent.swift */; };
+		0E06000000000000000006A4 /* FontBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E06000000000000000006A3 /* FontBrowserView.swift */; };
+		0E06000000000000000006A6 /* TextEditModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E06000000000000000006A5 /* TextEditModeView.swift */; };
+		0E06000000000000000006A8 /* DrawingEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E06000000000000000006A7 /* DrawingEditorView.swift */; };
+		0E06000000000000000006AA /* EditPointsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E06000000000000000006A9 /* EditPointsView.swift */; };
+		0E05000000000000000000A2 /* AppearanceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E05000000000000000000A1 /* AppearanceModel.swift */; };
+		0E08000000000000000008A2 /* AddPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E08000000000000000008A1 /* AddPanelView.swift */; };
+		0E08000000000000000008B2 /* MediaBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E08000000000000000008B1 /* MediaBrowserView.swift */; };
+		0E08000000000000000008C2 /* AudioBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E08000000000000000008C1 /* AudioBrowserView.swift */; };
+		0E05000000000000000000A4 /* ColorPickerKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E05000000000000000000A3 /* ColorPickerKit.swift */; };
+		0E05000000000000000000A6 /* BorderShadowPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E05000000000000000000A5 /* BorderShadowPanel.swift */; };
+		0E05000000000000000000A8 /* CameraOptionsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E05000000000000000000A7 /* CameraOptionsPanel.swift */; };
+		0E05000000000000000000AA /* ColorFillPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E05000000000000000000A9 /* ColorFillPanel.swift */; };
 		AE00000000000000000000AD /* TimelineMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000AC /* TimelineMath.swift */; };
 		AE00000000000000000000AF /* TimelineModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000AE /* TimelineModel.swift */; };
 		AE00000000000000000000C1 /* EffectsBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000000C0 /* EffectsBrowser.swift */; };
@@ -208,6 +223,21 @@
 		AE00000000000000000000A6 /* PanelParticles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelParticles.swift; sourceTree = "<group>"; };
 		AE00000000000000000000A8 /* ProjectCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectCards.swift; sourceTree = "<group>"; };
 		AE00000000000000000000AA /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
+		0E0A00000000000000000F01 /* AnchoredMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchoredMenu.swift; sourceTree = "<group>"; };
+		0E04000000000000000000B1 /* LayerPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayerPanelView.swift; sourceTree = "<group>"; };
+		0E06000000000000000006A1 /* OmegaContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmegaContent.swift; sourceTree = "<group>"; };
+		0E06000000000000000006A3 /* FontBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontBrowserView.swift; sourceTree = "<group>"; };
+		0E06000000000000000006A5 /* TextEditModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextEditModeView.swift; sourceTree = "<group>"; };
+		0E06000000000000000006A7 /* DrawingEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingEditorView.swift; sourceTree = "<group>"; };
+		0E06000000000000000006A9 /* EditPointsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditPointsView.swift; sourceTree = "<group>"; };
+		0E05000000000000000000A1 /* AppearanceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceModel.swift; sourceTree = "<group>"; };
+		0E08000000000000000008A1 /* AddPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddPanelView.swift; sourceTree = "<group>"; };
+		0E08000000000000000008B1 /* MediaBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaBrowserView.swift; sourceTree = "<group>"; };
+		0E08000000000000000008C1 /* AudioBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioBrowserView.swift; sourceTree = "<group>"; };
+		0E05000000000000000000A3 /* ColorPickerKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorPickerKit.swift; sourceTree = "<group>"; };
+		0E05000000000000000000A5 /* BorderShadowPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BorderShadowPanel.swift; sourceTree = "<group>"; };
+		0E05000000000000000000A7 /* CameraOptionsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraOptionsPanel.swift; sourceTree = "<group>"; };
+		0E05000000000000000000A9 /* ColorFillPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorFillPanel.swift; sourceTree = "<group>"; };
 		AE00000000000000000000AC /* TimelineMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineMath.swift; sourceTree = "<group>"; };
 		AE00000000000000000000AE /* TimelineModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineModel.swift; sourceTree = "<group>"; };
 		AE00000000000000000000C0 /* EffectsBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EffectsBrowser.swift; sourceTree = "<group>"; };
@@ -342,6 +372,21 @@
 				AE00000000000000000000A6 /* PanelParticles.swift */,
 				AE00000000000000000000A8 /* ProjectCards.swift */,
 				AE00000000000000000000AA /* Sheets.swift */,
+				0E0A00000000000000000F01 /* AnchoredMenu.swift */,
+				0E04000000000000000000B1 /* LayerPanelView.swift */,
+				0E06000000000000000006A1 /* OmegaContent.swift */,
+				0E06000000000000000006A3 /* FontBrowserView.swift */,
+				0E06000000000000000006A5 /* TextEditModeView.swift */,
+				0E06000000000000000006A7 /* DrawingEditorView.swift */,
+				0E06000000000000000006A9 /* EditPointsView.swift */,
+				0E05000000000000000000A1 /* AppearanceModel.swift */,
+				0E08000000000000000008A1 /* AddPanelView.swift */,
+				0E08000000000000000008B1 /* MediaBrowserView.swift */,
+				0E08000000000000000008C1 /* AudioBrowserView.swift */,
+				0E05000000000000000000A3 /* ColorPickerKit.swift */,
+				0E05000000000000000000A5 /* BorderShadowPanel.swift */,
+				0E05000000000000000000A7 /* CameraOptionsPanel.swift */,
+				0E05000000000000000000A9 /* ColorFillPanel.swift */,
 				AE00000000000000000000AC /* TimelineMath.swift */,
 				AE00000000000000000000AE /* TimelineModel.swift */,
 				AE00000000000000000000C0 /* EffectsBrowser.swift */,
@@ -636,6 +681,21 @@
 				AE00000000000000000000A7 /* PanelParticles.swift in Sources */,
 				AE00000000000000000000A9 /* ProjectCards.swift in Sources */,
 				AE00000000000000000000AB /* Sheets.swift in Sources */,
+				0E0A00000000000000000F02 /* AnchoredMenu.swift in Sources */,
+				0E04000000000000000000B2 /* LayerPanelView.swift in Sources */,
+				0E06000000000000000006A2 /* OmegaContent.swift in Sources */,
+				0E06000000000000000006A4 /* FontBrowserView.swift in Sources */,
+				0E06000000000000000006A6 /* TextEditModeView.swift in Sources */,
+				0E06000000000000000006A8 /* DrawingEditorView.swift in Sources */,
+				0E06000000000000000006AA /* EditPointsView.swift in Sources */,
+				0E05000000000000000000A2 /* AppearanceModel.swift in Sources */,
+				0E08000000000000000008A2 /* AddPanelView.swift in Sources */,
+				0E08000000000000000008B2 /* MediaBrowserView.swift in Sources */,
+				0E08000000000000000008C2 /* AudioBrowserView.swift in Sources */,
+				0E05000000000000000000A4 /* ColorPickerKit.swift in Sources */,
+				0E05000000000000000000A6 /* BorderShadowPanel.swift in Sources */,
+				0E05000000000000000000A8 /* CameraOptionsPanel.swift in Sources */,
+				0E05000000000000000000AA /* ColorFillPanel.swift in Sources */,
 				AE00000000000000000000AD /* TimelineMath.swift in Sources */,
 				AE00000000000000000000AF /* TimelineModel.swift in Sources */,
 				AE00000000000000000000C1 /* EffectsBrowser.swift in Sources */,

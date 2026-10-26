@@ -64,6 +64,13 @@ add_executable(aurea_tests
     test_captions.cpp
     test_captions_quality.cpp
     test_cliptime.cpp
+    test_omega_timeline.cpp
+    test_omega_content.cpp
+    test_omega_appearance.cpp
+    test_omega_chrome.cpp
+    test_omega_layer.cpp
+    test_omega_effects.cpp
+    test_omega_add.cpp
     test_beats.cpp
     test_edit.cpp
     test_ui_mode.cpp

@@ -18,13 +18,17 @@ struct MarkerEditorSheet: View {
     @State private var frameText: String
     @State private var color: UInt32
     @State private var failure = false
-    private let palette: [UInt32] = [0xFFF7C34F, 0xFF4D6EFF, 0xFF70D56B, 0xFFFFB75B, 0xFFD67BDB, 0xFFFFFFFF]
+    // Omega timeline (área 03, P1-3): as quatro aparências da régua. O motor guarda
+    // RGBA com o R no byte BAIXO (Marker::color); `MarkerColors` faz a conta nos dois
+    // sentidos — a paleta antiga de 6 cores era escrita como ARGB e lida como RGBA.
+    private let palette: [UInt32] = MarkerColors.roles.map { MarkerColors.pack($0) }
     init(frame: Int64, color: UInt32, label: String, isNew: Bool = false) {
         original = frame
         self.isNew = isNew
         _name = State(initialValue: label)
         _frameText = State(initialValue: String(frame))
-        _color = State(initialValue: color)
+        // Marca nova: a primeira aparência da Omega (par do Android).
+        _color = State(initialValue: isNew ? MarkerColors.pack(MarkerColors.roles[0]) : color)
     }
     var body: some View {
         NavigationView {
@@ -35,11 +39,13 @@ struct MarkerEditorSheet: View {
                 Text(Timecode.format(Int32(clamping: max(0, Int64(frameText) ?? 0)), Float(model.compositionFps)))
                 Button(AureaText.t("marker_at_playhead")) { frameText = String(model.status.playhead) }
                 HStack {
+                    let chosen = MarkerColors.appearance(color)
                     ForEach(Array(palette.enumerated()), id: \.offset) { index, packed in
                         Button { color = packed } label: {
-                            Circle().fill(markerTint(packed)).frame(width: color == packed ? 32 : 22, height: color == packed ? 32 : 22)
-                                .frame(width: 40, height: 44)
+                            Circle().fill(markerTint(packed)).frame(width: chosen == index ? 32 : 22, height: chosen == index ? 32 : 22)
+                                .frame(width: 44, height: 44)
                         }.buttonStyle(.borderless).accessibilityLabel(AureaText.t("marker_color", index + 1))
+                            .accessibilityIdentifier("marker.color.\(index)")
                     }
                 }
                 Text(AureaText.t(failure ? "marker_error" : "marker_hint")).font(.footnote)
@@ -111,7 +117,11 @@ struct TimelineView: View {
     @State private var markersRevision: UInt32 = .max
     @State private var markersFrames: [Int64] = []
     /// Camadas com as trilhas abertas: VÁRIAS de uma vez, cada uma com o seu ▸/▾.
-    @State private var expandedLayers: Set<Int64> = []
+    /// Omega (área 03, D-1): moram no modelo — o ⋮ da camada abre e fecha.
+    private var expandedLayers: Set<Int64> {
+        get { model.timelineExpandedLayers }
+        nonmutating set { model.timelineExpandedLayers = newValue }
+    }
     /// Trilhas de grupo (Posição, Escala...) abertas nos eixos.
     @State private var openGroups: Set<TimelineLaneGroupKey> = []
     /// Retângulo da seleção de losangos (cantos no CONTEÚDO: frame e y com a rolagem).
@@ -143,9 +153,37 @@ struct TimelineView: View {
     /// `.step`: fileira compacta — o arrasto vertical passa pelas camadas (roda).
     /// `.box`: modo "Selecionar" — arrastar no vazio desenha o retângulo de seleção dos losangos.
     /// `.lift`: toque longo + vertical num trecho — só ELE sobe/desce (a linha não vai junto).
-    private enum Mode { case scrub, scroll, step, move, trimStart, trimEnd, key, keys, reorder, hold, blocked, box, lift, sweep }
+    /// `.stretch`: Omega (P1-8) — a alça de velocidade do foco (prévia; o motor estica ao soltar).
+    private enum Mode { case scrub, scroll, step, move, trimStart, trimEnd, key, keys, reorder, hold, blocked, box, lift, sweep, stretch }
     /// Varredura do modo de escolher várias camadas: as que o dedo já somou.
     @State private var sweepSeen = Set<Int64>()
+    // --- Omega 0.3.2 (área 03) ------------------------------------------------------
+    /// Clipes levantados no mover (pulso e sombra forte) e o começo do pulso.
+    @State private var movingIds = Set<Int64>()
+    @State private var liftStart: TimeInterval = 0
+    /// Relógio do pulso de 130 ms: muda a cada tique enquanto ele dura (redesenha).
+    @State private var pulseClock: TimeInterval = 0
+    /// Régua em realce no mover: início/fim originais e os novos.
+    @State private var moveOrig: (start: Int32, end: Int32)?
+    @State private var moveNew: (start: Int32, end: Int32)?
+    /// Alças do foco: 0 em repouso, 1 tocada, 2 arrastando, 3 escondidas (o clipe anda).
+    @State private var handleState = 0
+    /// Prévia da alça de velocidade: a camada e o início/fim novos.
+    @State private var stretch: (id: Int64, start: Int32, end: Int32)?
+    /// Inércia do scrub (P1-4): pt/s no eixo do tempo; o scrub do motor fica aberto até parar.
+    @State private var scrubVelocity: CGFloat = 0
+    @State private var scrubFlinging = false
+    /// Depois do olho, um toque nestes 200 ms não sai do foco.
+    @State private var eyeToggledAt: TimeInterval = 0
+    /// A camada que estava no foco (o fade de 600 ms ao voltar à visão geral).
+    @State private var focusedLayer: Int64?
+    /// Clipe levantado pelo toque longo e ainda parado: o arrasto (só no tempo) o move;
+    /// soltar sem mover não faz nada e a pinça não escolhe nada (par do Android).
+    @State private var pendingLift: Int64?
+    /// Menu ancorado na aba do tempo atual (P1-3, segurar o relógio).
+    @State private var timeMenuOpen = false
+    /// Layouts dos rótulos (reticências no meio), por camada e largura em degraus.
+    @State private var omegaText = TimelineOmegaTextCache()
     private struct Interaction {
         var mode: Mode
         var start: CGPoint
@@ -171,6 +209,8 @@ struct TimelineView: View {
         /// Teto da auto-rolagem deste gesto (`GestureLimit`), congelado no começo:
         /// o `navigationEnd` vivo cresce com o próprio clipe arrastado e virava catraca.
         var limit: Int64 = GestureLimit.none
+        /// Omega: a duração da camada no começo do aparar/esticar (a "Mudança" da barra de info).
+        var originalDuration: Int32 = 0
     }
     /// Painel aberto: sempre a fileira única. Doca aberta: a fileira única SÓ
     /// sem trilhas de propriedade abertas e fora do modo de escolher keyframes —
@@ -202,9 +242,13 @@ struct TimelineView: View {
         // Uma fileira por LINHA. No compacto, a linha inteira da escolhida: depois
         // de um split os dois pedaços continuam à vista (só o trecho escolhido
         // fazia a metade nova sumir, e o corte parecia não ter funcionado).
-        let shared = rowCache.shared(all, focus: model.primarySelection, tracks: focusTracks)
+        // Omega (P0-1): uma camada por linha, sem mudar o motor (o `trackId` fica).
+        let shared = EditorTimelineRefresh.enabled ? timelineLayerRows(all, perLayer: true)
+            : rowCache.shared(all, focus: model.primarySelection, tracks: focusTracks)
         if compact {
             guard let primary = model.primarySelection else { return [] }
+            // Omega (P1-7): o foco mostra SÓ a linha da camada escolhida.
+            if EditorTimelineRefresh.enabled { return shared.filter { $0.track == nil && $0.id == primary } }
             return shared.filter { $0.segment(primary) != nil }
         }
         return rowCache.expanded(shared, ids: expandedLayers, groups: openGroups, revision: model.status.modelRevision, keys: model.keyframes, effects: { id in
@@ -232,14 +276,21 @@ struct TimelineView: View {
         GeometryReader { geometry in
             let size = geometry.size
             let fadeNow = fadeClock
+            let pulseNow = pulseClock
             Canvas { context, canvasSize in
-                drawRows(&context, size: canvasSize, now: fadeNow)
-                drawRuler(&context, size: canvasSize)
-                drawPreviewBuffer(&context, size: canvasSize)
-                drawPlayhead(&context, size: canvasSize)
+                // Omega 0.3.2 (área 03): a timeline da referência tem o pintor dela.
+                if EditorTimelineRefresh.enabled {
+                    drawOmega(&context, size: canvasSize, now: fadeNow, pulse: pulseNow)
+                } else {
+                    drawRows(&context, size: canvasSize, now: fadeNow)
+                    drawRuler(&context, size: canvasSize)
+                    drawPreviewBuffer(&context, size: canvasSize)
+                    drawPlayhead(&context, size: canvasSize)
+                }
             }
             .accessibilityChildren {
-                ForEach(model.layers) { layer in
+                if EditorTimelineRefresh.enabled { omegaAccessibility }
+                else { ForEach(model.layers) { layer in
                     Button(layer.name) { model.select(layerId: layer.id, additive: false) }
                         .accessibilityValue(AureaText.t(layer.visible ? "common_on" : "common_off"))
                         .accessibilityAddTraits(model.selection.contains(layer.id) ? .isSelected : [])
@@ -252,7 +303,7 @@ struct TimelineView: View {
                         Text(layer.name + ": " + AureaText.t("editor_recortada_camada_abaixo"))
                             .accessibilityIdentifier("timeline.layer.\(layer.id).clip")
                     }
-                }
+                } }
                 if !model.previewBufferRanges.isEmpty {
                     Text(AureaText.t("preview_buffer_timeline", model.previewTimelineCachedFrames))
                         .accessibilityIdentifier("timeline.preview.buffer")
@@ -264,14 +315,27 @@ struct TimelineView: View {
                     tap: { point, origin in tap(point, width: size.width, origin: origin) },
                     pan: { state, start, point, velocity in pan(state, start: start, point: point, velocity: velocity, size: size) },
                     hold: { state, start, point in hold(state, start: start, point: point, size: size) },
-                    pinch: { state, scale, focus in pinch(state, scale: scale, focus: focus, width: size.width) }
+                    pinch: { state, scale, focus in pinch(state, scale: scale, focus: focus, width: size.width) },
+                    // Omega (P1-1/P1-7): o prazo do toque longo depende do alvo.
+                    holdDuration: { point in omegaHoldDuration(point, width: size.width) }
                 )
             }
             // Por cima da superfície de gestos: o toque num botão não chega à timeline.
             .overlay(alignment: keyBarAlignment) { keyActionBar }
-            .overlay(alignment: .bottom) { layerPickBar }
+            // Omega (P2-5): a barra de cima da seleção (batchBar) já tem o Concluir.
+            .overlay(alignment: .bottom) { if !EditorTimelineRefresh.enabled { layerPickBar } }
+            // Omega (P1-5/P1-7): barra de info do gesto (início, deslocamento, corte).
+            .overlay(alignment: .top) { if let info = model.timelineInfo { omegaInfoBar(info) } }
+            // Omega (P1-3): a âncora do menu do tempo atual (a zona de 100 × 38 da aba, sem toque próprio).
+            .overlay(alignment: .top) {
+                if EditorTimelineRefresh.enabled {
+                    Color.clear.frame(width: 100, height: 38).padding(.top, 5).allowsHitTesting(false)
+                        .aureaAnchoredMenu(isPresented: $timeMenuOpen, tag: "timeline.currentTime.menu") { omegaTimeMenuEntries() }
+                }
+            }
             .overlay(alignment: .topLeading) {
-                if !model.selection.isEmpty && (compactDock || model.sheetContent == .panel || model.sheetContent == .curve) {
+                // Omega (P2-5): o botão "Todas/Seleção" sai (a referência não tem).
+                if !EditorTimelineRefresh.enabled && !model.selection.isEmpty && (compactDock || model.sheetContent == .panel || model.sheetContent == .curve) {
                     Button { showAllLayers.toggle() } label: {
                         Text(AureaText.t(showAllLayers ? "timeline_selection_short" : "timeline_all_short"))
                             .font(.aurea(size: 12)).lineLimit(1).frame(width: 84, height: 44)
@@ -296,6 +360,8 @@ struct TimelineView: View {
                 refreshMarkers()
                 refreshMedia(size: size)
                 noteLayers(model.layers.map(\.id))
+                if compact { focusedLayer = model.primarySelection }
+                omegaMarkerHint()
             }
             .onChange(of: guide) { snap in if snap != Snap.none { haptics.snap() } }
             .onChange(of: pps) { value in TimelineViewMemory.state[memoryKey] = (value, rememberedScroll) }
@@ -336,6 +402,22 @@ struct TimelineView: View {
                 compactSavedScroll = next.saved
                 scrollY = next.scroll
                 mediaNeedsRefresh = true
+                // Omega (P1-9): ao voltar do foco, a linha da camada que estava nele surge
+                // com o fade de 600 ms (exceto vídeo, como na referência).
+                if EditorTimelineRefresh.enabled {
+                    if entering { focusedLayer = model.primarySelection }
+                    else if let id = focusedLayer {
+                        focusedLayer = nil
+                        if let layer = model.layers.first(where: { $0.id == id }), TimelineLayerType.of(layer.kind) != .video {
+                            let now = ProcessInfo.processInfo.systemUptime
+                            rowBorn[id] = now
+                            fadeClock = now
+                        }
+                    }
+                }
+            }
+            .onChange(of: model.primarySelection) { primary in
+                if let primary, compact && EditorTimelineRefresh.enabled { focusedLayer = primary }
             }
             .onReceive(pulse) { _ in tick(size: size) }
             .onDisappear { finish(cancelled: true); finishPinch() }
@@ -1219,9 +1301,10 @@ struct TimelineView: View {
         for row in rows { if let segment = row.segment(id) { return segment } }
         return nil
     }
-    /// Alças de aparar: só no trecho que é a ÚNICA escolha.
+    /// Alças de aparar: só no trecho que é a ÚNICA escolha (Omega: só no foco, P1-7).
     private func handlesOn(_ row: TimelineRow) -> Bool {
         row.track == nil && model.selection.count == 1 && model.selection.contains(row.id) && !row.locked
+            && (!EditorTimelineRefresh.enabled || compact)
     }
     /// Hit-test de UM trecho na fileira (a mesma geometria do pintor).
     private func hitSegment(_ row: TimelineRow, x px: CGFloat, y: CGFloat, width: CGFloat) -> TimelineHit {
@@ -1242,6 +1325,11 @@ struct TimelineView: View {
     /// O que o dedo pegou: o TRECHO (na pílula de uma fileira compartilhada, a
     /// fileira); `index` do resultado é a fileira inteira sob o dedo.
     private func hit(_ point: CGPoint, width: CGFloat) -> (TimelineRow?, TimelineHit) {
+        // Omega (P1-3): a zona do tempo atual fica por cima da régua.
+        if EditorTimelineRefresh.enabled && point.y >= m.omegaTimeTouchTop && point.y <= m.omegaTimeTouchBottom
+            && abs(point.x - width / 2) <= m.omegaTimeTouchHalf {
+            return (nil, TimelineHit(kind: .currentTime))
+        }
         if point.y < m.rowsTop { return (nil, TimelineHit(kind: .ruler)) }
         let index = rowIndex(point.y - m.rowsTop + (compact ? 0 : scrollY))
         let current = rows
@@ -1306,6 +1394,8 @@ struct TimelineView: View {
     }
     /// `origin`: onde o dedo pousou (nil = o próprio ponto, toque sintetizado).
     private func tap(_ point: CGPoint, width: CGFloat, origin: CGPoint? = nil) {
+        // Omega 0.3.2 (área 03): os toques da referência (P1-1, P1-2, P1-3).
+        if EditorTimelineRefresh.enabled { omegaTap(point, width: width); return }
         // Toque que só PAROU a rolagem inércia não é toque (igual ao Android).
         let stoppedFling = abs(scrollVelocity) > 1
         scrollVelocity = 0
@@ -1356,37 +1446,7 @@ struct TimelineView: View {
                 UISelectionFeedbackGenerator().selectionChanged()
                 return
             }
-            pause()
-            let key = row.keysAt[touched.key][0]
-            let track = TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)
-            if model.timelineKeySelectMode {
-                // Modo "Selecionar": soma/tira (trilha: 1 keyframe; resumo: o instante
-                // inteiro), sem buscar (a vista É o cabeçote) e sem abrir a curva.
-                model.toggleTimelineKeys(row.id, row.keysAt[touched.key])
-                if model.timelineKeySelection?.contains(key) == true {
-                    selectedKey = (row.id, row.instants[touched.key], track)
-                } else if let current = selectedKey, !primaryInKeySelection(current) {
-                    // O principal saiu da seleção: fica sem principal (nenhum losango âmbar).
-                    selectedKey = nil
-                }
-                UISelectionFeedbackGenerator().selectionChanged()
-                return
-            }
-            model.select(layerId: row.id, additive: false)
-            selectedKey = (row.id, row.instants[touched.key], track)
-            model.seek(toFrame: Int64(row.instants[touched.key]))
-            model.tapTimelineKey(row.id, key)
-            if row.track?.group == true {
-                // Trilha de grupo: todos os eixos daquele instante ficam escolhidos.
-                model.timelineKeySelection = TimelineKeySelection(layer: row.id, keys: Set(row.keysAt[touched.key].map { TimelineKeyRef($0) }))
-            }
-            let navigation = model.engine.keyframeNavigation(row.id, property: key.property, effect: key.effectIndex,
-                param: key.paramIndex, compositionFrame: Int64(row.instants[touched.key]))
-            if let flags = navigation?["flags"]?.uint32Value, flags & 8 != 0,
-               let start = navigation?["segmentStart"]?.int64Value {
-                model.openCurve(property: key.property, effect: key.effectIndex, param: key.paramIndex,
-                                time: Int32(clamping: start))
-            }
+            keyTap(row, index: touched.key)
         default:
             guard let row else { return }
             // Escolhendo keyframes, o corpo da camada da seleção (barra ou trilha) não
@@ -1402,25 +1462,7 @@ struct TimelineView: View {
                 return
             }
             if let track = row.track {
-                model.select(layerId: row.id, additive: false)
-                switch track.property {
-                case 30: model.openPanel(.effects)
-                case 31, 44:
-                    model.openPanel(.effects)
-                    model.loadParams(layerId: row.id, effectId: track.effect)
-                case 32: model.openPanel(.audio)
-                case 33: model.openPanel(.textAnimation)
-                case 34: model.openPanel(.vector)
-                case 43:
-                    model.openPanel(.mask)
-                    model.selectedMask = track.effect; model.maskDrawing = false; model.selectedMaskPoint = nil
-                    model.timelineFocus = [track]
-                case 35: model.openPanel(.shape)
-                case 36: model.openPanel(.particles)
-                case 37: model.openPanel(.layer3D)
-                case 39: model.openPanel(.speed)
-                default: model.openPanel(.transform)
-                }
+                trackTap(row, track)
                 return
             }
             if touched.kind == .header {
@@ -1448,6 +1490,66 @@ struct TimelineView: View {
             // Tocar de novo na escolhida a solta (a doca fecha: volta a barra de adicionar).
             case .deselect: selectedKey = nil; model.clearSelection()
             }
+        }
+    }
+
+    /// Losango tocado: escolhe a camada, leva o cabeçote ao instante e abre a
+    /// curva; no modo "Selecionar" soma/tira sem buscar (o mesmo de antes).
+    private func keyTap(_ row: TimelineRow, index: Int) {
+        guard row.keysAt.indices.contains(index) else { return }
+        pause()
+        let key = row.keysAt[index][0]
+        let track = TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)
+        if model.timelineKeySelectMode {
+            // Modo "Selecionar": soma/tira (trilha: 1 keyframe; resumo: o instante
+            // inteiro), sem buscar (a vista É o cabeçote) e sem abrir a curva.
+            model.toggleTimelineKeys(row.id, row.keysAt[index])
+            if model.timelineKeySelection?.contains(key) == true {
+                selectedKey = (row.id, row.instants[index], track)
+            } else if let current = selectedKey, !primaryInKeySelection(current) {
+                // O principal saiu da seleção: fica sem principal (nenhum losango âmbar).
+                selectedKey = nil
+            }
+            UISelectionFeedbackGenerator().selectionChanged()
+            return
+        }
+        model.select(layerId: row.id, additive: false)
+        selectedKey = (row.id, row.instants[index], track)
+        model.seek(toFrame: Int64(row.instants[index]))
+        model.tapTimelineKey(row.id, key)
+        if row.track?.group == true {
+            // Trilha de grupo: todos os eixos daquele instante ficam escolhidos.
+            model.timelineKeySelection = TimelineKeySelection(layer: row.id, keys: Set(row.keysAt[index].map { TimelineKeyRef($0) }))
+        }
+        let navigation = model.engine.keyframeNavigation(row.id, property: key.property, effect: key.effectIndex,
+            param: key.paramIndex, compositionFrame: Int64(row.instants[index]))
+        if let flags = navigation?["flags"]?.uint32Value, flags & 8 != 0,
+           let start = navigation?["segmentStart"]?.int64Value {
+            model.openCurve(property: key.property, effect: key.effectIndex, param: key.paramIndex,
+                            time: Int32(clamping: start))
+        }
+    }
+
+    /// Fundo de uma trilha de propriedade: abre o painel dela (o mesmo de antes).
+    private func trackTap(_ row: TimelineRow, _ track: TimelineTrack) {
+        model.select(layerId: row.id, additive: false)
+        switch track.property {
+        case 30: model.openPanel(.effects)
+        case 31, 44:
+            model.openPanel(.effects)
+            model.loadParams(layerId: row.id, effectId: track.effect)
+        case 32: model.openPanel(.audio)
+        case 33: model.openPanel(.textAnimation)
+        case 34: model.openPanel(.vector)
+        case 43:
+            model.openPanel(.mask)
+            model.selectedMask = track.effect; model.maskDrawing = false; model.selectedMaskPoint = nil
+            model.timelineFocus = [track]
+        case 35: model.openPanel(.shape)
+        case 36: model.openPanel(.particles)
+        case 37: model.openPanel(.layer3D)
+        case 39: model.openPanel(.speed)
+        default: model.openPanel(.transform)
         }
     }
 
@@ -1480,7 +1582,7 @@ struct TimelineView: View {
         if mode == .move, let row, !selected.contains(where: { $0.id == row.id }), let item = model.layers.first(where: { $0.id == row.id }) { selected = [item] }
         var next = Interaction(mode: mode, start: start, view: viewFrame, scroll: scrollY, row: row, hit: touched, selection: selected, snapTargets: [])
         if mode == .step { next.scroll = 0 }
-        if mode == .move || mode == .key || mode == .keys || mode == .trimStart || mode == .trimEnd || mode == .box {
+        if mode == .move || mode == .key || mode == .keys || mode == .trimStart || mode == .trimEnd || mode == .box || mode == .stretch {
             let nav = model.navigationEnd
             // Sem a leitura do motor (navigationEnd = Int64.max), usa o fim das camadas.
             let navEnd = nav == Int64.max ? Int64(rows.map(\.end).max() ?? 0) : nav
@@ -1492,7 +1594,7 @@ struct TimelineView: View {
         // todos os trechos): basta um trecho travado para recusar.
         let lane: TimelineRow? = rows.indices.contains(touched.index) ? rows[touched.index] : row
         let laneLocked = lane?.segments.contains(where: \.locked) ?? false
-        if mode == .move && selected.contains(where: \.locked) || (mode == .key || mode == .trimStart || mode == .trimEnd || mode == .lift) && row?.locked == true || mode == .reorder && laneLocked {
+        if mode == .move && selected.contains(where: \.locked) || (mode == .key || mode == .trimStart || mode == .trimEnd || mode == .lift || mode == .stretch) && row?.locked == true || mode == .reorder && laneLocked {
             next.mode = .blocked
             haptics.warning()
         }
@@ -1537,7 +1639,9 @@ struct TimelineView: View {
             reorderTarget = reorderSource
             reorderTop = m.rowsTop + rowTop(max(0, reorderSource)) - scrollY
             reorderGrabOffset = start.y - reorderTop
-            if touched.kind == .header, let lane {
+            if EditorTimelineRefresh.enabled {
+                // Omega (P1-6): reordenar pelo fundo da linha ou pela alça ≡ não mexe na seleção.
+            } else if touched.kind == .header, let lane {
                 // Pela pílula: escolhe o primeiro trecho só se nenhum da fileira está escolhido.
                 if !lane.segments.contains(where: { model.selection.contains($0.id) }) {
                     model.select(layerId: lane.segments[0].id, additive: false, openOptions: false)
@@ -1565,6 +1669,13 @@ struct TimelineView: View {
         if next.mode == .scrub {
             heldView = next.view; model.engine.run { $0.scrubBegin() }
         }
+        // Omega (P1-7/P1-8): a alça arrastada a 50 % e a duração de partida (a "Mudança").
+        if next.mode == .trimStart || next.mode == .trimEnd || next.mode == .stretch, let row {
+            next.originalDuration = row.end - row.start
+            handleState = 2
+            if next.mode == .stretch { stretch = (id: row.id, start: row.start, end: row.end); omegaSpeedInfo(old: next.originalDuration, new: next.originalDuration) }
+            else if EditorTimelineRefresh.enabled { omegaTrimInfo(row.id, originalDuration: next.originalDuration) }
+        }
         if next.mode == .box {
             next.boxBase = model.timelineKeySelection
             let f0 = frame(start.x, width: width), y0 = start.y - m.rowsTop + scrollY
@@ -1576,7 +1687,21 @@ struct TimelineView: View {
 
     private func pan(_ state: UIGestureRecognizer.State, start: CGPoint, point: CGPoint, velocity: CGPoint, size: CGSize) {
         guard !pinching else { return }
-        if state == .began {
+        if state == .began && EditorTimelineRefresh.enabled {
+            // Omega (P1-4): eixo a 45°, o tempo com inércia; editar pede o toque longo.
+            endScrubFling()
+            let (row, touched) = hit(start, width: size.width)
+            let dx = point.x - start.x, dy = point.y - start.y
+            let horizontal = TimelinePress.horizontal(dx, dy)
+            let mode: Mode
+            if model.timelineLayerSelectMode && touched.kind == .header && row?.track == nil && !compact && !horizontal { mode = .sweep }
+            // Trilha de propriedade aberta (só do AUREA): o losango anda direto, como antes.
+            else if row?.track != nil && touched.kind == .key && TimelinePress.timeEdit(dx, dy) { mode = .key }
+            else if boxStarts(row, touched) { mode = .box }
+            else { mode = horizontal ? .scrub : (compact ? .blocked : .scroll) }
+            begin(mode, start: start, width: size.width)
+            if mode == .sweep { sweepSeen = []; sweep(at: start, start: start, width: size.width) }
+        } else if state == .began {
             let (row, touched) = hit(start, width: size.width)
             let dx = point.x - start.x, dy = point.y - start.y
             // Lista inteira: a rolagem vertical ganha já em ~31° (scrollWins);
@@ -1602,6 +1727,11 @@ struct TimelineView: View {
         if state == .ended {
             update(point, size: size)
             let wasScroll = gesture?.mode == .scroll
+            // Omega (P1-4): o scrub solto com velocidade continua (o scrub do motor fica aberto).
+            if EditorTimelineRefresh.enabled && gesture?.mode == .scrub && abs(velocity.x) >= m.flingMin {
+                scrubFlinging = true
+                scrubVelocity = -velocity.x
+            }
             finish(cancelled: false)
             if wasScroll && abs(velocity.y) >= m.flingMin { scrollVelocity = -velocity.y }
         } else if state == .cancelled || state == .failed { finish(cancelled: true) }
@@ -1609,6 +1739,8 @@ struct TimelineView: View {
 
     private func hold(_ state: UIGestureRecognizer.State, start: CGPoint, point: CGPoint, size: CGSize) {
         guard !pinching else { return }
+        // Omega 0.3.2 (área 03): o toque longo da referência (P1-1, P1-5, P1-6, P1-7).
+        if EditorTimelineRefresh.enabled { omegaHold(state, start: start, point: point, size: size); return }
         if state == .began {
             begin(.hold, start: start, width: size.width)
             // Só quando o dedo está sobre algo que o toque longo pega (clipe,
@@ -1745,6 +1877,11 @@ struct TimelineView: View {
                     model.engine.setLayer(item.id, startFrame: item.startFrame + change, endFrame: item.endFrame + change, offsetFrames: item.offsetFrames, setOffset: false)
                 }
                 g.sentDelta = change; model.refreshModel(force: true)
+                // Omega (P1-5): a régua realça os tiques novos e a barra de info segue o dedo.
+                if EditorTimelineRefresh.enabled {
+                    moveNew = (start: Int32(clamping: Int64(row.start) + Int64(change)), end: Int32(clamping: Int64(row.end) + Int64(change)))
+                    omegaMoveInfo(start: Int32(clamping: Int64(earliest) + Int64(change)), delta: change)
+                }
             }
         case .trimStart, .trimEnd:
             guard let row = g.row else { return }
@@ -1764,8 +1901,18 @@ struct TimelineView: View {
                     } else { model.trimStart(row.id, at: Int64(target)) }
                 } else { model.trimEnd(row.id, at: Int64(target)) }
                 if g.mode != .trimStart || !(model.editMode || row.magnetic) { g.sentDelta = change }
+                // Omega (P1-7): a barra de info com os seis campos do corte.
+                if EditorTimelineRefresh.enabled { omegaTrimInfo(row.id, originalDuration: g.originalDuration) }
             }
             guide = snapped
+        case .stretch:
+            // Omega (P1-8): só a prévia da largura; o motor estica ao soltar (finish).
+            guard let row = g.row, let current = stretch else { return }
+            let left = g.hit.kind == .trimStart
+            let origin = left ? row.start : row.end
+            let edge = GestureLimit.clampFrame(max(0, timelineFrame(Double(origin) + delta)), limit: g.limit)
+            stretch = left ? (id: current.id, start: min(edge, row.end - 1), end: current.end) : (id: current.id, start: current.start, end: max(edge, row.start + 1))
+            if let s = stretch { omegaSpeedInfo(old: g.originalDuration, new: s.end - s.start) }
         case .key:
             guard let row = g.row, row.instants.indices.contains(g.keyIndex) else { return }
             let origin = row.instants[g.keyIndex]
@@ -1795,6 +1942,8 @@ struct TimelineView: View {
                 }
                 model.curveSelectedTime = destination
                 model.refreshModel(force: true)
+                // Omega (P1-7): `mm:ss:ff (xx,x %)` e o deslocamento na barra de info.
+                if EditorTimelineRefresh.enabled { omegaKeyInfo(row, frame: target, origin: origin) }
             }
             guide = snapped == target ? snapped : Snap.none
         case .keys:
@@ -1875,7 +2024,13 @@ struct TimelineView: View {
                 UIAccessibility.post(notification: .announcement, argument: Timecode.format(g.keyFrame, Float(model.compositionFps)))
             }
         }
-        if g.mode == .scrub { model.engine.run { $0.scrubEnd() } }
+        // Omega (P1-8): soltar a alça de velocidade estica a camada no motor (um passo).
+        if g.mode == .stretch && !cancelled, let s = stretch, let row = g.row, s.start != row.start || s.end != row.end {
+            if model.stretchLayerSpan(s.id, start: Int64(s.start), end: Int64(s.end)) { haptics.light() }
+        }
+        // Omega (P1-4): com a inércia do scrub, o scrub do motor fica aberto até ela parar.
+        let flinging = g.mode == .scrub && scrubFlinging && !cancelled
+        if g.mode == .scrub && !flinging { model.engine.run { $0.scrubEnd() } }
         if autoScrubbing {
             model.engine.run { $0.scrubEnd() }
             if let held = heldView { model.optimisticPlayhead(Int64(timelineFrame(held))) }
@@ -1883,8 +2038,23 @@ struct TimelineView: View {
         }
         if g.undoOpen { model.engine.run { $0.endUndoGroup() } }
         model.timelineKeyDragActive = false
-        gesture = nil; heldView = nil; guide = Snap.none; reorderSource = -1; reorderTarget = -1; boxRect = nil
+        gesture = nil; guide = Snap.none; reorderSource = -1; reorderTarget = -1; boxRect = nil
+        if !flinging { heldView = nil; scrubFlinging = false; scrubVelocity = 0 }
         liftId = 0; liftSource = -1; liftDrop = .none
+        // Omega (área 03): o clipe desce, a régua sai do realce, a barra de info some.
+        movingIds = []; moveOrig = nil; moveNew = nil; handleState = 0; stretch = nil; pendingLift = nil
+        if model.timelineInfo != nil { model.timelineInfo = nil }
+    }
+
+    /// Omega (P1-4): para a inércia do scrub e fecha o scrub do motor (um toque só para).
+    @discardableResult private func endScrubFling() -> Bool {
+        guard scrubFlinging else { return false }
+        scrubFlinging = false
+        scrubVelocity = 0
+        model.engine.run { $0.scrubEnd() }
+        if let held = heldView { model.optimisticPlayhead(Int64(timelineFrame(held))) }
+        heldView = nil
+        return true
     }
 
     /// Solta a fileira `source` sobre a fileira `target` (o mesmo do Android):
@@ -1893,7 +2063,8 @@ struct TimelineView: View {
     /// MESMO comando de sempre.
     private func commitReorder(source: Int, target: Int) {
         let list = rows
-        let keys = timelineGroupKeys(list)
+        // Omega (P0-1/P1-6): uma camada por linha; cada fileira anda sozinha.
+        let keys = timelineGroupKeys(list, byLine: !EditorTimelineRefresh.enabled)
         guard keys.indices.contains(source), keys.indices.contains(target), keys[source] != keys[target] else { return }
         var block = Set<Int64>(), anchors = Set<Int64>()
         for (i, row) in list.enumerated() where row.track == nil {
@@ -1921,7 +2092,7 @@ struct TimelineView: View {
     /// republicar o status a cada passo; só no fim).
     private func pinch(_ state: UIGestureRecognizer.State, scale: CGFloat, focus: CGPoint, width: CGFloat) {
         if state == .began {
-            finish(cancelled: true); scrollVelocity = 0; pinching = true
+            finish(cancelled: true); endScrubFling(); scrollVelocity = 0; pinching = true
             pinchPlaying = model.status.playing != 0
             pinchPPS = pps; pinchFrame = frame(focus.x, width: width)
             if !pinchPlaying { model.engine.run { $0.scrubBegin() } }
@@ -1962,13 +2133,29 @@ struct TimelineView: View {
             pendingPointer = false
             update(lastPointer, size: size)
         }
+        // Omega (P1-5): o pulso de 130 ms do clipe levantado redesenha enquanto dura.
+        if !movingIds.isEmpty && now - liftStart < LiftPulse.duration + 1.0 / 60 { pulseClock = now }
+        // Omega (P1-4): inércia do scrub, com a desaceleração da rolagem vertical.
+        if gesture == nil && scrubFlinging {
+            let desired = viewFrame + Double(scrubVelocity * dt / max(0.0001, ppf))
+            let clamped = min(TimeAxis.clampView(desired, durationFrames: Int32(clamping: model.compositionDuration)), Double(model.navigationEnd))
+            let advanced = abs(clamped - viewFrame) > 1e-6
+            holdView(desired)
+            scrubVelocity *= CGFloat(pow(0.998, Double(dt) * 1000))
+            // Bateu no começo da composição (ou no fim da navegação), ou parou: fecha o scrub.
+            if abs(scrubVelocity) < 12 || !advanced { endScrubFling() }
+        }
         if let g = gesture {
             // Auto-rolagem em RAMPA (par do Android): faixa min(48, 1/3 da janela),
             // velocidade cresce com o quanto o dedo entrou nela, até 360 pt/s.
             var moved = false
-            if g.mode == .move || g.mode == .key || g.mode == .keys || g.mode == .trimStart || g.mode == .trimEnd || g.mode == .box {
+            if g.mode == .move || g.mode == .key || g.mode == .keys || g.mode == .trimStart || g.mode == .trimEnd || g.mode == .box || g.mode == .stretch {
                 let zone = AutoScroll.zone(maxZone: m.autoEdge, viewport: size.width - m.headerColumn)
-                let factor = AutoScroll.speed(pos: lastPointer.x, from: g.start.x, start: m.headerColumn, end: size.width, zone: zone, intent: m.autoIntent)
+                // Omega (P1-5): 38 das bordas, 1× ao entrar e até 5× na borda (120 pt/s × fator).
+                let factor = EditorTimelineRefresh.enabled
+                    ? OmegaScroll.edgeFactor(pos: lastPointer.x, from: g.start.x, start: 0, end: size.width,
+                                             zone: AutoScroll.zone(maxZone: m.autoEdge, viewport: size.width), intent: m.autoIntent)
+                    : AutoScroll.speed(pos: lastPointer.x, from: g.start.x, start: m.headerColumn, end: size.width, zone: zone, intent: m.autoIntent)
                 if factor != 0 {
                     // Auto-scroll moves the presentation window; the editing gesture
                     // reapplies its absolute target and the core remains authoritative.
@@ -1984,7 +2171,10 @@ struct TimelineView: View {
             }
             if (g.mode == .reorder || g.mode == .box || g.mode == .lift) && !compact {
                 let zone = AutoScroll.zone(maxZone: m.autoEdge, viewport: size.height - m.rowsTop)
-                let factor = AutoScroll.speed(pos: lastPointer.y, from: g.start.y, start: m.rowsTop, end: size.height, zone: zone, intent: m.autoIntent)
+                // Omega (P1-6): faixas próprias do reordenar (em cima até rowsTop + 19).
+                let factor = EditorTimelineRefresh.enabled && g.mode == .reorder
+                    ? OmegaScroll.reorderFactor(y: lastPointer.y, height: size.height, rowsTop: m.rowsTop, zone: m.autoEdge)
+                    : AutoScroll.speed(pos: lastPointer.y, from: g.start.y, start: m.rowsTop, end: size.height, zone: zone, intent: m.autoIntent)
                 if factor != 0 {
                     scrollY = min(maxScroll(size.height), max(0, scrollY + AutoScroll.step(factor: factor, maxSpeed: m.autoSpeed, dt: dt)))
                     moved = true
@@ -2024,6 +2214,8 @@ struct TimelineView: View {
         let previous: [Int64]? = fadeProject == memoryKey ? fadeKnown : nil
         fadeProject = memoryKey
         fadeKnown = ids
+        // Omega (P1-9): o fade é da linha que SAI do foco, não da camada nova.
+        if EditorTimelineRefresh.enabled { return }
         let born = TimelineRowFade.born(previous: previous, current: ids)
         guard !born.isEmpty else { return }
         let now = ProcessInfo.processInfo.systemUptime
@@ -2055,7 +2247,8 @@ struct TimelineView: View {
 /// The same priority and geometry as Android RowHit; drawing and hit testing
 /// share TimelineMetrics so a handle cannot be grabbed beneath the header.
 private struct TimelineHit {
-    enum Kind { case none, ruler, eye, header, key, trimStart, trimEnd, previous, next, back, body }
+    /// `currentTime`: Omega (área 03, P1-3) — a zona de 100 × 38 do tempo atual, por cima da régua.
+    enum Kind { case none, ruler, eye, header, key, trimStart, trimEnd, previous, next, back, body, currentTime }
     var kind: Kind
     var key = -1
     /// A fileira sob o dedo (numa fileira compartilhada, a linha inteira); −1 = nenhuma.
@@ -2153,6 +2346,8 @@ private struct TimelineGestureSurface: UIViewRepresentable {
     var pan: (UIGestureRecognizer.State, CGPoint, CGPoint, CGPoint) -> Void
     var hold: (UIGestureRecognizer.State, CGPoint, CGPoint) -> Void
     var pinch: (UIGestureRecognizer.State, CGFloat, CGPoint) -> Void
+    /// Omega (área 03): o prazo do toque longo pelo alvo sob o dedo (nil = 0,5 s de sempre).
+    var holdDuration: ((CGPoint) -> TimeInterval)? = nil
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> UIView {
         let view = UIView(); view.backgroundColor = .clear; view.isMultipleTouchEnabled = true
@@ -2190,7 +2385,12 @@ private struct TimelineGestureSurface: UIViewRepresentable {
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
             if gestureRecognizer is UITapGestureRecognizer { tapStart = touch.location(in: gestureRecognizer.view) }
             if gestureRecognizer is UIPanGestureRecognizer { panStart = touch.location(in: gestureRecognizer.view) }
-            if gestureRecognizer is UILongPressGestureRecognizer { holdStart = touch.location(in: gestureRecognizer.view) }
+            if let press = gestureRecognizer as? UILongPressGestureRecognizer {
+                holdStart = touch.location(in: gestureRecognizer.view)
+                // Omega (P1-1/P1-7): 95 % do toque longo no cabeçalho e no clipe, 25 %
+                // nas alças e no corpo do foco, 90 % no losango do foco.
+                if let duration = parent.holdDuration?(holdStart) { press.minimumPressDuration = max(0.05, duration) }
+            }
             return true
         }
         @objc func tapped(_ sender: UITapGestureRecognizer) {
@@ -2205,5 +2405,1043 @@ private struct TimelineGestureSurface: UIViewRepresentable {
             parent.hold(sender.state, holdStart, point)
         }
         @objc func pinched(_ sender: UIPinchGestureRecognizer) { parent.pinch(sender.state, sender.scale, sender.location(in: sender.view)) }
+    }
+}
+
+// =============================================================================
+// Omega 0.3.2 (área 03): a timeline da referência — par do TimelinePainter.kt e
+// do TimelineController.kt. Ordem de pintura (P0-2): linhas → cabeçalhos e
+// alças ≡ → régua opaca → tiques, marcadores, aba do tempo e cursor.
+// =============================================================================
+
+/// Rótulos dos clipes com reticências no meio, por camada e largura em degraus
+/// (medir texto a cada quadro custaria caro; só muda com o zoom).
+@MainActor final class TimelineOmegaTextCache {
+    private var names: [Int64: (bucket: Int, name: String, fitted: String)] = [:]
+    func fitted(_ id: Int64, name: String, bucket: Int, width: CGFloat) -> String {
+        if let hit = names[id], hit.bucket == bucket, hit.name == name { return hit.fitted }
+        let font = UIFont.systemFont(ofSize: 11, weight: .medium)
+        let result = MiddleEllipsis.fit(name) { (($0 as NSString).size(withAttributes: [.font: font]).width) <= width }
+        if names.count > 256 { names.removeAll() }
+        names[id] = (bucket, name, result)
+        return result
+    }
+}
+
+/// ARGB → Color (sRGB), para os pares do degradê (`ClipColors`).
+private func omegaColor(_ argb: UInt32) -> Color {
+    Color(.sRGB, red: Double((argb >> 16) & 0xFF) / 255, green: Double((argb >> 8) & 0xFF) / 255,
+          blue: Double(argb & 0xFF) / 255, opacity: Double((argb >> 24) & 0xFF) / 255)
+}
+
+/// Losango arredondado (proporção 2:3) de altura `h`, centrado na origem.
+private func omegaDiamondPath(_ h: CGFloat) -> Path {
+    let hh = h / 2, hw = h / 3, k: CGFloat = 0.22
+    let px: [CGFloat] = [0, hw, 0, -hw], py: [CGFloat] = [-hh, 0, hh, 0]
+    var path = Path()
+    for i in 0..<4 {
+        let p = (i + 3) % 4, q = (i + 1) % 4
+        let inPoint = CGPoint(x: px[i] + (px[p] - px[i]) * k, y: py[i] + (py[p] - py[i]) * k)
+        let outPoint = CGPoint(x: px[i] + (px[q] - px[i]) * k, y: py[i] + (py[q] - py[i]) * k)
+        if i == 0 { path.move(to: inPoint) } else { path.addLine(to: inPoint) }
+        path.addQuadCurve(to: outPoint, control: CGPoint(x: px[i], y: py[i]))
+    }
+    path.closeSubpath()
+    return path
+}
+
+extension TimelineView {
+    // MARK: Omega · gestos
+
+    /// "Seleção múltipla" da referência: o modo de escolher várias, ou 2+ escolhidas.
+    private var omegaMulti: Bool { omegaMultiSelection(layerSelectMode: model.timelineLayerSelectMode, selected: model.selection.count) }
+
+    /// Prazo do toque longo pelo alvo sob o dedo (base 0,4 s, a do Android 12+).
+    func omegaHoldDuration(_ point: CGPoint, width: CGFloat) -> TimeInterval {
+        let (row, touched) = hit(point, width: width)
+        let target: OmegaHold.Target
+        switch touched.kind {
+        case .trimStart, .trimEnd: target = .trim
+        case .body: target = .body
+        case .key: target = .key
+        case .header: target = row?.track == nil ? .header : .other
+        default: target = .other
+        }
+        return OmegaHold.base * OmegaHold.fraction(target, compact: compact)
+    }
+
+    /// Toques curtos (P1-1, P1-2, P1-3). No foco, qualquer toque fora do olho, de
+    /// um losango e do tempo atual sai do foco.
+    private func omegaTap(_ point: CGPoint, width: CGFloat) {
+        // Toque que só PAROU uma inércia não é toque (igual ao Android).
+        let stoppedScroll = abs(scrollVelocity) > 1
+        scrollVelocity = 0
+        if endScrubFling() || stoppedScroll { return }
+        let (row, touched) = hit(point, width: width)
+        switch touched.kind {
+        case .currentTime:
+            model.toggleMarkerAt(model.status.playhead)
+            return
+        case .ruler:
+            omegaRulerTap(point.x, width: width)
+            return
+        case .eye:
+            guard let row else { return }
+            haptics.light()
+            // Com a seleção múltipla o olho some: o toque ali soma/tira a camada.
+            if !compact && row.track == nil && omegaMulti && !model.selection.isEmpty {
+                model.toggleTimelineLayerPick(row.id)
+            } else {
+                model.engine.setLayer(row.id, visible: !row.visible)
+                model.refreshModel(force: true)
+                eyeToggledAt = ProcessInfo.processInfo.systemUptime
+            }
+            return
+        case .key:
+            guard let row, row.keysAt.indices.contains(touched.key) else { return }
+            // No modo de escolher camadas o losango do resumo é parte do clipe.
+            if model.timelineLayerSelectMode && row.track == nil && !model.timelineKeySelectMode {
+                model.toggleTimelineLayerPick(row.id)
+                UISelectionFeedbackGenerator().selectionChanged()
+                return
+            }
+            keyTap(row, index: touched.key)
+            return
+        default:
+            break
+        }
+        if compact {
+            // Referência: no foco o toque curto sai dele (exceto logo depois do olho).
+            if ProcessInfo.processInfo.systemUptime - eyeToggledAt < 0.2 { return }
+            selectedKey = nil
+            model.editorBackFromTimeline()
+            return
+        }
+        switch touched.kind {
+        case .header:
+            guard let row else { return }
+            if let track = row.track {
+                // ▸/▾ da trilha de GRUPO: mostra/esconde as trilhas por eixo.
+                if track.group {
+                    let key = TimelineLaneGroupKey(layer: row.id, track: track)
+                    if openGroups.contains(key) { openGroups.remove(key) } else { openGroups.insert(key) }
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
+                return
+            }
+            UISelectionFeedbackGenerator().selectionChanged()
+            // Com seleção múltipla: põe ou tira; sem ela: escolhe a camada, que entra em foco.
+            if omegaMulti { model.toggleTimelineLayerPick(row.id) }
+            else { pause(); selectedKey = nil; model.select(layerId: row.id, additive: false) }
+        case .body, .trimStart, .trimEnd:
+            guard let row else { return }
+            if model.timelineKeySelectMode && model.timelineKeySelection?.layer == row.id { return }
+            if let track = row.track { trackTap(row, track); return }
+            let timelineOnly: Bool = !model.selection.isEmpty && model.selection == model.timelineOnlySelection
+            switch timelineLayerTap(picking: model.timelineLayerSelectMode, compact: false, selected: model.selection.count,
+                                    tappedSelected: model.selection.contains(row.id), timelineOnly: timelineOnly) {
+            case .leaveCompact: selectedKey = nil; model.editorBackFromTimeline()
+            case .toggle:
+                selectedKey = nil
+                if model.timelineLayerSelectMode { model.toggleTimelineLayerPick(row.id) }
+                else { model.select(layerId: row.id, additive: true) }
+                UISelectionFeedbackGenerator().selectionChanged()
+            case .replace: pause(); selectedKey = nil; model.select(layerId: row.id, additive: false)
+            case .deselect: selectedKey = nil; model.clearSelection()
+            }
+        case .none:
+            selectedKey = nil
+            model.clearTimelineKeySelection()
+            // Com a seleção múltipla, o vazio a limpa; sem ela, a casca decide.
+            if model.timelineLayerSelectMode {
+                model.clearSelection()
+                model.changeTimelineLayerSelectMode(false)
+            } else {
+                model.editorBackFromTimeline()
+            }
+        default:
+            break
+        }
+    }
+
+    /// Régua (P1-2): perto de um marcador (21 pt) vai até ele; senão, metade
+    /// direita = o próximo, esquerda = o anterior. Não busca o quadro tocado.
+    private func omegaRulerTap(_ px: CGFloat, width: CGFloat) {
+        let frames = markers.map { Int64($0.frame) }
+        if let target = MarkerNav.target(frames, x: px, width: width, playhead: model.status.playhead, near: m.omegaMarkerNear,
+                                         xOf: { x(Double($0), width: width) }) {
+            pause()
+            model.seek(toFrame: target)
+            UISelectionFeedbackGenerator().selectionChanged()
+        }
+        if model.timelineLayerSelectMode { return }
+        model.editorBackFromTimeline()
+    }
+
+    /// O toque longo começa uma linha a reordenar? (fundo da linha ou alça ≡, na visão geral).
+    private func omegaReorders(_ touched: TimelineHit, point: CGPoint, width: CGFloat) -> Bool {
+        guard !compact, !omegaMulti, rows.indices.contains(touched.index), rows[touched.index].track == nil else { return false }
+        return touched.kind == .none || point.x >= width - m.omegaGripZone
+    }
+
+    /// Toque longo da Omega: o que a referência faz em cada lugar.
+    private func omegaHold(_ state: UIGestureRecognizer.State, start: CGPoint, point: CGPoint, size: CGSize) {
+        if state == .began {
+            endScrubFling()
+            let (row, touched) = hit(start, width: size.width)
+            if touched.kind == .currentTime {
+                // P1-3: o menu ancorado na aba do tempo (editar ou excluir o marcador do quadro).
+                haptics.heavy()
+                pause()
+                timeMenuOpen = true
+                return
+            }
+            if omegaReorders(touched, point: start, width: size.width) {
+                begin(.reorder, start: start, width: size.width)
+            } else if let row, compact && row.track == nil && (touched.kind == .trimStart || touched.kind == .trimEnd) {
+                // Alças do foco (P1-7); com o painel Velocidade, as de velocidade (P1-8).
+                haptics.light()
+                let edge: Mode = touched.kind == .trimStart ? .trimStart : .trimEnd
+                let mode: Mode = model.panel == .speed ? .stretch : edge
+                begin(mode, start: start, width: size.width)
+            } else if touched.kind == .key {
+                haptics.light()
+                begin(.key, start: start, width: size.width)
+            } else if let row, row.track == nil && touched.kind == .body {
+                // Levantar (P1-5): o clipe sobe na hora; o arrasto o leva (com a seleção
+                // múltipla, todas as escolhidas). Nada é escolhido antes de o dedo andar.
+                haptics.heavy()
+                let now = ProcessInfo.processInfo.systemUptime
+                movingIds = model.selection.contains(row.id) && model.selection.count >= 2 ? model.selection : [row.id]
+                liftStart = now
+                pulseClock = now
+                begin(.hold, start: start, width: size.width)
+                pendingLift = row.id
+            } else if let row, !compact && row.track == nil && touched.kind == .header {
+                // Segurar o cabeçalho (P1-1; A.01 cede à referência): seleção múltipla e varredura.
+                haptics.heavy()
+                pause()
+                if !model.timelineLayerSelectMode {
+                    if !(model.selection.count == 1 && model.selection.contains(row.id)) {
+                        model.select(layerId: row.id, additive: false, openOptions: false)
+                    }
+                    model.changeTimelineLayerSelectMode(true)
+                } else {
+                    model.toggleTimelineLayerPick(row.id)
+                }
+                begin(.sweep, start: start, width: size.width)
+                sweepSeen = [row.id]
+            } else {
+                begin(.hold, start: start, width: size.width)
+            }
+        }
+        if state == .changed, gesture?.mode == .hold, let lifted = pendingLift {
+            let dx = point.x - start.x, dy = point.y - start.y
+            if hypot(dx, dy) >= m.axisSlop {
+                pendingLift = nil
+                pause()
+                if !model.selection.contains(lifted) { model.select(layerId: lifted, additive: omegaMulti, openOptions: false) }
+                begin(.move, start: start, width: size.width)
+                omegaLift()
+            }
+        } else if state == .changed, let g = gesture, g.mode == .hold {
+            let dx = point.x - start.x, dy = point.y - start.y
+            if hypot(dx, dy) >= m.axisSlop {
+                let horizontal = TimelinePress.horizontal(dx, dy)
+                let vertical: Mode = compact ? .blocked : .scroll
+                let mode: Mode = horizontal ? .scrub : vertical
+                begin(mode, start: start, width: size.width)
+            }
+        }
+        if state == .began || state == .changed { lastPointer = point; pendingPointer = true }
+        if state == .ended {
+            update(point, size: size)
+            finish(cancelled: false)
+        } else if state == .cancelled || state == .failed { finish(cancelled: true) }
+    }
+
+    /// Menu do tempo atual (P1-3): editar o marcador do quadro (ou criar um com nome)
+    /// e excluí-lo, se houver. Introdução/final da referência não se aplicam; o
+    /// quadro de capa (P2-6) ainda não existe no motor.
+    func omegaTimeMenuEntries() -> [MenuEntry] {
+        let frame = model.status.playhead
+        var entries: [MenuEntry] = [
+            .item(AureaText.t("marker_edit"), glyph: CupertinoGlyph.Bookmark, tag: "timeline.currentTime.menu.edit") {
+                model.openMarkerEditor(frame)
+            },
+        ]
+        if model.markerFrames.contains(frame) {
+            entries.append(.item(AureaText.t("common_delete"), glyph: CupertinoGlyph.Trash, destructive: true,
+                                 tag: "timeline.currentTime.menu.delete") { model.deleteMarker(frame) })
+        }
+        return entries
+    }
+
+    /// O clipe sobe: pulso de 130 ms, sombra forte, régua em realce e a barra de info.
+    private func omegaLift() {
+        guard let g = gesture, g.mode == .move, let row = g.row else { return }
+        // O pulso começou no toque longo; só recomeça se não houve.
+        if movingIds.isEmpty {
+            let now = ProcessInfo.processInfo.systemUptime
+            liftStart = now
+            pulseClock = now
+        }
+        movingIds = Set(g.selection.map(\.id))
+        handleState = 3
+        moveOrig = (start: row.start, end: row.end)
+        moveNew = (start: row.start, end: row.end)
+        omegaMoveInfo(start: g.selection.map(\.startFrame).min() ?? row.start, delta: 0)
+    }
+
+    // MARK: Omega · barra de info (P1-5 / P1-7 / P1-8)
+    private func signedTime(_ delta: Int32) -> String {
+        (delta < 0 ? "\u{2212}" : "+") + Timecode.format(Int32(clamping: abs(Int64(delta))), fps)
+    }
+
+    func omegaMoveInfo(start: Int32, delta: Int32) {
+        model.timelineInfo = [
+            TimelineInfoItem(label: AureaText.t("om_tl_info_start"), value: Timecode.format(start, fps)),
+            TimelineInfoItem(label: AureaText.t("om_tl_info_offset"), value: signedTime(delta)),
+        ]
+    }
+
+    func omegaTrimInfo(_ id: Int64, originalDuration: Int32) {
+        guard let layer = model.layers.first(where: { $0.id == id }) else { return }
+        let duration: Int32 = layer.endFrame - layer.startFrame
+        model.timelineInfo = [
+            TimelineInfoItem(label: AureaText.t("om_tl_info_start"), value: Timecode.format(layer.startFrame, fps)),
+            TimelineInfoItem(label: AureaText.t("om_tl_info_in"), value: Timecode.format(layer.offsetFrames, fps)),
+            TimelineInfoItem(label: AureaText.t("om_tl_info_end"), value: Timecode.format(layer.endFrame, fps)),
+            TimelineInfoItem(label: AureaText.t("om_tl_info_out"), value: Timecode.format(layer.offsetFrames &+ duration, fps)),
+            TimelineInfoItem(label: AureaText.t("om_tl_info_duration"), value: Timecode.format(duration, fps)),
+            TimelineInfoItem(label: AureaText.t("om_tl_info_change"), value: signedTime(duration &- originalDuration)),
+        ]
+    }
+
+    func omegaSpeedInfo(old: Int32, new: Int32) {
+        model.timelineInfo = [
+            TimelineInfoItem(label: AureaText.t("om_tl_info_duration"), value: Timecode.format(new, fps)),
+            TimelineInfoItem(label: AureaText.t("om_tl_info_change"), value: signedTime(new &- old)),
+        ]
+    }
+
+    func omegaKeyInfo(_ row: TimelineRow, frame: Int32, origin: Int32) {
+        let span = Double(max(1, row.end - row.start))
+        let percent = min(100, max(0, Double(frame - row.start) / span * 100))
+        let formatter = NumberFormatter()
+        formatter.minimumFractionDigits = 1
+        formatter.maximumFractionDigits = 1
+        let text = formatter.string(from: NSNumber(value: percent)) ?? String(format: "%.1f", percent)
+        model.timelineInfo = [
+            TimelineInfoItem(label: AureaText.t("om_tl_info_key"), value: Timecode.format(frame, fps) + " (" + text + " %)"),
+            TimelineInfoItem(label: AureaText.t("om_tl_info_offset"), value: signedTime(frame &- origin)),
+        ]
+    }
+
+    /// Barra de info por cima da régua enquanto o dedo arrasta (a barra de reprodução pode ler o mesmo estado).
+    func omegaInfoBar(_ info: [TimelineInfoItem]) -> some View {
+        HStack(spacing: 4) {
+            ForEach(Array(info.enumerated()), id: \.offset) { index, item in
+                if index > 0 { Spacer().frame(width: 6) }
+                Text(item.label).font(.aurea(size: 11)).foregroundColor(AureaColors.muted).lineLimit(1)
+                Text(item.value).font(.aurea(size: 12)).monospacedDigit().foregroundColor(AureaColors.text).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 8).fill(AureaColors.editorPanel))
+        .padding(.top, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("timeline.info")
+        .allowsHitTesting(false)
+    }
+
+    /// A dica do marcador (P1-3), uma vez por aparelho, quando a timeline abre sem marcadores.
+    func omegaMarkerHint() {
+        guard EditorTimelineRefresh.enabled, !UserDefaults.standard.bool(forKey: "aurea.timeline.omegaMarkerHint") else { return }
+        let model = self.model
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            guard model.markerFrames.isEmpty, !UserDefaults.standard.bool(forKey: "aurea.timeline.omegaMarkerHint") else { return }
+            model.toast = AureaText.t("om_tl_marker_hint")
+            UserDefaults.standard.set(true, forKey: "aurea.timeline.omegaMarkerHint")
+        }
+    }
+
+    // MARK: Omega · leitor de tela (P0-3, P2-4)
+    /// Cada cabeçalho é um elemento (mesmo id do Android): nome, visível/oculta,
+    /// escolhida, e as ações mostrar/ocultar, pôr na seleção e mover para cima/baixo.
+    @ViewBuilder var omegaAccessibility: some View {
+        let layers = model.layers
+        let count = layers.count
+        ForEach(Array(layers.enumerated()), id: \.element.id) { index, layer in
+            Button(layer.name) { model.select(layerId: layer.id, additive: false) }
+                .accessibilityValue(AureaText.t(layer.visible ? "om_tl_visible" : "om_tl_hidden"))
+                .accessibilityAddTraits(model.selection.contains(layer.id) ? .isSelected : [])
+                .accessibilityAction(named: Text(AureaText.t(layer.visible ? "editor_ocultar_camada" : "editor_mostrar_camada"))) {
+                    model.engine.setLayer(layer.id, visible: !layer.visible); model.refreshModel(force: true)
+                }
+                .accessibilityAction(named: Text(AureaText.t("om_tl_toggle_selection"))) {
+                    if !model.timelineLayerSelectMode {
+                        model.select(layerId: layer.id, additive: false, openOptions: false)
+                        model.changeTimelineLayerSelectMode(true)
+                    } else {
+                        model.toggleTimelineLayerPick(layer.id)
+                    }
+                }
+                .accessibilityAction(named: Text(AureaText.t("om_tl_move_up"))) {
+                    guard index > 0 else { return }
+                    model.engine.run { $0.setLayerOrder(layer.id, newIndex: UInt32(count - index)) }
+                    model.refreshModel(force: true)
+                }
+                .accessibilityAction(named: Text(AureaText.t("om_tl_move_down"))) {
+                    guard index < count - 1 else { return }
+                    model.engine.run { $0.setLayerOrder(layer.id, newIndex: UInt32(count - index - 2)) }
+                    model.refreshModel(force: true)
+                }
+                .accessibilityIdentifier("timeline.layer.\(layer.id)")
+            Button(AureaText.t(layer.visible ? "editor_ocultar_camada" : "editor_mostrar_camada") + ": " + layer.name) {
+                model.engine.setLayer(layer.id, visible: !layer.visible); model.refreshModel(force: true)
+            }
+            .accessibilityIdentifier("timeline.layer.\(layer.id).eye")
+            if layer.clipToBelow {
+                // Mesmo id do Android: o leitor de tela ouve a máscara de recorte.
+                Text(layer.name + ": " + AureaText.t("editor_recortada_camada_abaixo"))
+                    .accessibilityIdentifier("timeline.layer.\(layer.id).clip")
+            }
+        }
+        Text(AureaText.t("om_tl_ruler"))
+            .accessibilityAction(named: Text(AureaText.t("om_tl_prev_marker"))) { model.seekToPreviousMarker() }
+            .accessibilityAction(named: Text(AureaText.t("om_tl_next_marker"))) { model.seekToFollowingMarker() }
+            .accessibilityIdentifier("timeline.ruler")
+        Button(AureaText.t("om_tl_current_time")) { model.toggleMarkerAt(model.status.playhead) }
+            .accessibilityValue(Timecode.format(Int32(clamping: model.status.playhead), fps))
+            .accessibilityHint(AureaText.t("editor_marcar_ou_desmarcar_este_instante"))
+            .accessibilityAction(named: Text(AureaText.t("om_tl_time_options"))) { model.openMarkerEditor(model.status.playhead) }
+            .accessibilityIdentifier("timeline.currentTime")
+        // Alças do foco (P1-7/P1-8): aparar (ou esticar a velocidade) um quadro por vez.
+        if compact, model.selection.count == 1, let id = model.primarySelection,
+           let layer = model.layers.first(where: { $0.id == id }), !layer.locked {
+            let speed = model.panel == .speed
+            Text(AureaText.t(speed ? "om_tl_speed_handle_a11y" : "om_tl_trim_start_a11y", layer.name))
+                .accessibilityAction(named: Text(AureaText.t("om_tl_frame_earlier"))) { omegaNudge(layer, start: true, by: -1, speed: speed) }
+                .accessibilityAction(named: Text(AureaText.t("om_tl_frame_later"))) { omegaNudge(layer, start: true, by: 1, speed: speed) }
+                .accessibilityIdentifier("timeline.clip.\(id).trimStart")
+            Text(AureaText.t(speed ? "om_tl_speed_handle_a11y" : "om_tl_trim_end_a11y", layer.name))
+                .accessibilityAction(named: Text(AureaText.t("om_tl_frame_earlier"))) { omegaNudge(layer, start: false, by: -1, speed: speed) }
+                .accessibilityAction(named: Text(AureaText.t("om_tl_frame_later"))) { omegaNudge(layer, start: false, by: 1, speed: speed) }
+                .accessibilityIdentifier("timeline.clip.\(id).trimEnd")
+        }
+    }
+
+    /// Um quadro na borda do foco, pelo leitor de tela: aparar ou esticar a velocidade.
+    private func omegaNudge(_ layer: LayerItem, start: Bool, by delta: Int64, speed: Bool) {
+        let s = Int64(layer.startFrame), e = Int64(layer.endFrame)
+        if start {
+            let frame = s + delta
+            guard frame >= 0, frame < e else { return }
+            if speed { model.stretchLayerSpan(layer.id, start: frame, end: e) } else { model.trimStart(layer.id, at: frame) }
+        } else {
+            let frame = e + delta
+            guard frame > s else { return }
+            if speed { model.stretchLayerSpan(layer.id, start: s, end: frame) } else { model.trimEnd(layer.id, at: frame) }
+        }
+    }
+
+    // MARK: Omega · pintura
+    func drawOmega(_ context: inout GraphicsContext, size: CGSize, now: TimeInterval, pulse: TimeInterval) {
+        _ = pulse   // lido: o pulso do clipe levantado redesenha a cada tique
+        omegaRows(&context, size: size, now: now)
+        // A régua é opaca: cobre os clipes que rolam para cima dela.
+        context.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: m.rowsTop)), with: .color(AureaColors.editorCanvas))
+        omegaRuler(&context, size: size)
+        for range in model.previewBufferRanges {
+            guard let span = TimelinePreviewBuffer.span(range, view: viewFrame, pxPerFrame: ppf, width: size.width) else { continue }
+            let rect = CGRect(x: span.lowerBound, y: m.rowsTop - TimelinePreviewBuffer.height,
+                              width: span.upperBound - span.lowerBound, height: TimelinePreviewBuffer.height)
+            context.fill(Path(rect), with: .color(AureaTimeline.previewBuffer))
+        }
+        let marked: Int? = omegaMarkers(&context, size: size)
+        omegaTimeTab(&context, size: size, marked: marked != nil)
+        // Cursor de 1,5, interrompido na aba; na cor do marcador do quadro; a 50 % movendo.
+        var tint: Color = AureaColors.playhead
+        if let marked { tint = AureaTimeline.bookmarks[MarkerColors.appearance(markers[marked].packedColor) % AureaTimeline.bookmarks.count] }
+        let px = x(Double(clock.frame), width: size.width)
+        var line = context
+        if moveOrig != nil { line.opacity = 0.5 }
+        line.fill(Path(CGRect(x: px - m.playhead / 2, y: 0, width: m.playhead, height: m.omegaTabTop + 1)), with: .color(tint))
+        let resume = m.omegaTabTop + m.omegaTabHeight - 1
+        line.fill(Path(CGRect(x: px - m.playhead / 2, y: resume, width: m.playhead, height: max(0, size.height - resume))), with: .color(tint))
+    }
+
+    /// A câmera principal: a 1ª câmera visível de cima para baixo (P2-2; o AUREA não expõe outra).
+    private func omegaMainCamera(_ list: [TimelineRow]) -> Int64? {
+        list.first { $0.track == nil && $0.type == .camera && $0.visible }?.id
+    }
+
+    private func omegaRows(_ context: inout GraphicsContext, size: CGSize, now: TimeInterval) {
+        let visibleRows = rows
+        guard !visibleRows.isEmpty else { return }
+        var tops: [CGFloat] = []
+        tops.reserveCapacity(visibleRows.count + 1)
+        var acc: CGFloat = 0
+        for row in visibleRows { tops.append(acc); acc += rowHeight(row) }
+        tops.append(acc)
+        let scroll: CGFloat = compact ? 0 : scrollY
+        let preview: Reorder.Preview? = reorderSource >= 0 && !compact
+            ? Reorder.preview(tops: tops, ids: timelineGroupKeys(visibleRows, byLine: false), source: reorderSource, target: reorderTarget, dragTop: reorderTop - m.rowsTop + scroll)
+            : nil
+        var order = Array(visibleRows.indices)
+        var lifted = Set<Int>()
+        if let preview, preview.sourceStart >= 0 {
+            order.removeSubrange(preview.sourceStart..<preview.sourceEnd)
+            order.append(contentsOf: preview.sourceStart..<preview.sourceEnd)
+            lifted = Set(preview.sourceStart..<preview.sourceEnd)
+        }
+        let multi = omegaMulti
+        let hideEyes = multi && !model.selection.isEmpty && !compact
+        let camera: Int64? = compact ? nil : omegaMainCamera(visibleRows)
+        func topOf(_ i: Int) -> CGFloat { m.rowsTop + tops[i] - scroll + (preview?.offsets[i] ?? 0) }
+        // 1) Fundo da linha da câmera principal (vermelho 10 %).
+        if let camera {
+            for i in order where visibleRows[i].track == nil && visibleRows[i].id == camera {
+                let top = topOf(i), h = rowHeight(visibleRows[i])
+                if top + h < m.rowsTop || top > size.height { continue }
+                context.fill(Path(CGRect(x: 0, y: top, width: size.width, height: h)), with: .color(AureaTimeline.mainCameraRow))
+            }
+        }
+        // 2) Os clipes; a linha arrastada (reordenar) por último, sobre o fundo dela.
+        for i in order {
+            let row = visibleRows[i]
+            let top = topOf(i), h = rowHeight(row)
+            if top + h < m.rowsTop || top > size.height { continue }
+            if lifted.contains(i) { context.fill(Path(CGRect(x: 0, y: top, width: size.width, height: h)), with: .color(AureaTimeline.omegaDragRow)) }
+            faded(&context, alpha: rowAlpha(row, now: now)) { rc in
+                if row.track != nil { omegaLane(&rc, row: row, rowTop: top, width: size.width) }
+                else { for segment in row.segments { omegaClip(&rc, row: segment, rowTop: top, width: size.width) } }
+            }
+        }
+        // 3) Cabeçalhos e alças ≡ por cima: as barras passam por baixo deles.
+        for i in order {
+            let row = visibleRows[i]
+            let top = topOf(i), h = rowHeight(row)
+            if top + h < m.rowsTop || top > size.height { continue }
+            faded(&context, alpha: rowAlpha(row, now: now)) { pc in
+                if let track = row.track {
+                    // Trilha de GRUPO: ▸/▾ (tocar abre/fecha os eixos); eixo de grupo aberto sem glifo.
+                    let cy = top + timelineLaneHeight / 2
+                    if track.group {
+                        let open = openGroups.contains(TimelineLaneGroupKey(layer: row.id, track: track))
+                        glyph(&pc, open ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronRight, size: 10, tint: AureaColors.text, x: m.laneChevronCx, y: cy)
+                    } else if let group = timelineTrackGroup(track), openGroups.contains(TimelineLaneGroupKey(layer: row.id, track: group)) {
+                        // eixo de um grupo aberto
+                    } else {
+                        glyph(&pc, CupertinoGlyph.ChevronRight, size: 10, tint: AureaTimeline.gutterEye, x: m.laneChevronCx, y: cy)
+                    }
+                } else {
+                    let activated = !compact && multi && model.selection.contains(row.id)
+                    omegaHeader(&pc, row: row, rowTop: top, height: h, activated: activated, hideEye: hideEyes)
+                    if !compact { omegaGrip(&pc, rowTop: top, height: h, width: size.width) }
+                }
+            }
+        }
+        // 4) Retângulo da seleção de losangos (do AUREA) e fio do ímã.
+        if let box = boxRect {
+            let xa = x(box.f0, width: size.width), xb = x(box.f1, width: size.width)
+            let ya = m.rowsTop + box.y0 - scrollY, yb = m.rowsTop + box.y1 - scrollY
+            let rect = CGRect(x: min(xa, xb), y: min(ya, yb), width: abs(xb - xa), height: abs(yb - ya))
+            context.fill(Path(rect), with: .color(AureaColors.accent.opacity(0.14)))
+            context.stroke(Path(rect), with: .color(AureaColors.accent), lineWidth: m.guide)
+        }
+        if guide != Snap.none {
+            let gx = x(Double(guide), width: size.width)
+            if gx >= m.headerColumn && gx <= size.width {
+                context.fill(Path(CGRect(x: gx - m.guide / 2, y: m.rowsTop, width: m.guide, height: size.height - m.rowsTop)), with: .color(AureaColors.accent))
+            }
+        }
+    }
+
+    /// Trilha de propriedade aberta (só do AUREA, D-1): nome e losangos editáveis.
+    private func omegaLane(_ context: inout GraphicsContext, row: TimelineRow, rowTop: CGFloat, width: CGFloat) {
+        let cy = rowTop + timelineLaneHeight / 2
+        var line = Path()
+        line.move(to: CGPoint(x: m.laneLabelX, y: rowTop + timelineLaneHeight))
+        line.addLine(to: CGPoint(x: width, y: rowTop + timelineLaneHeight))
+        context.stroke(line, with: .color(AureaTimeline.omegaHeaderBorder), lineWidth: 1)
+        let label = context.resolve(Text(row.name).font(.aurea(size: 11)).foregroundColor(row.track?.group == true ? AureaColors.text : AureaColors.muted))
+        var title = context
+        title.clip(to: Path(CGRect(x: m.laneLabelX, y: rowTop, width: max(0, width - m.laneLabelX - 4), height: timelineLaneHeight)))
+        title.draw(label, at: CGPoint(x: m.laneLabelX, y: cy), anchor: .leading)
+        omegaKeys(&context, row: row, cy: cy, width: width, editing: true, editH: m.omegaKeyAlt * 1.2, altH: m.omegaKeyAlt)
+    }
+
+    /// Cartão do clipe (P0-4): degradê por tipo e id, zebra, tira, onda, etiqueta e rótulo.
+    private func omegaClip(_ context: inout GraphicsContext, row: TimelineRow, rowTop: CGFloat, width: CGFloat) {
+        // Legenda (só do AUREA): os blocos dela, como antes.
+        if model.captionTracks.contains(where: { $0.layer == row.id }) {
+            drawRow(&context, row: row, top: rowTop, width: width, arrows: false)
+            return
+        }
+        let top = rowTop + m.barTop
+        let selected = model.selection.contains(row.id)
+        // Prévia da alça de velocidade: a largura nova enquanto o dedo arrasta.
+        let preview = stretch?.id == row.id ? stretch : nil
+        let startF: Int32 = preview?.start ?? row.start
+        let endF: Int32 = preview?.end ?? row.end
+        let x0 = x(Double(startF), width: width), x1 = x(Double(endF), width: width)
+        let pad = m.barRadius * 2
+        if x1 >= -pad && x0 <= width + pad {
+            let left = max(x0, -pad), right = min(x1, width + pad)
+            let rect = CGRect(x: left, y: top, width: right - left, height: m.bar)
+            let radius = ClipGeometry.cornerRadius(width: rect.width, height: rect.height, requested: m.barRadius)
+            let shape = Path(roundedRect: rect, cornerRadius: radius)
+            let moving = movingIds.contains(row.id)
+            // Sombra: leve sempre; mais forte e espalhada com o clipe levantado.
+            if moving {
+                var shadow = context
+                shadow.addFilter(.shadow(color: AureaTimeline.clipLiftShadow, radius: m.omegaLiftShadow / 2, x: 0, y: m.omegaShadow * 2))
+                shadow.fill(shape, with: .color(AureaTimeline.clipLiftShadow))
+            } else {
+                context.fill(Path(roundedRect: rect.offsetBy(dx: 0, dy: m.omegaShadow), cornerRadius: radius), with: .color(AureaTimeline.clipShadow))
+            }
+            var bar = context
+            if moving {
+                let k = LiftPulse.scale(ProcessInfo.processInfo.systemUptime - liftStart)
+                bar.translateBy(x: rect.midX, y: rect.midY)
+                bar.scaleBy(x: k, y: k)
+                bar.translateBy(x: -rect.midX, y: -rect.midY)
+            }
+            bar.clip(to: shape)
+            // 1. Degradê do retângulo INTEIRO do clipe (não anda com a rolagem).
+            let pair = AureaTimeline.clipGradient(row.type)
+            let grad = ClipColors.vary(pair.0, pair.1, id: row.id)
+            bar.fill(Path(rect), with: .linearGradient(Gradient(colors: [omegaColor(grad.0), omegaColor(grad.1)]),
+                                                       startPoint: CGPoint(x: x0, y: top), endPoint: CGPoint(x: max(x1, x0 + 1), y: top)))
+            // 2. Zebra de quadros.
+            omegaZebra(&bar, startFrame: startF, top: top, left: left, right: right, width: width)
+            // 3. Tira de miniaturas, sem véu nem divisórias.
+            if let tiles = thumbnails[row.id] {
+                for tile in tiles {
+                    let px = x(Double(row.start) - Double(row.offset) + tile.localFrame, width: width)
+                    bar.draw(Image(uiImage: tile.image), in: CGRect(x: px, y: top, width: tile.width, height: m.bar))
+                }
+            }
+            // 4. Onda de 1 pt.
+            omegaWave(&bar, row: row, top: top, x0: x0, x1: x1, width: width)
+            // 5. Triângulo da etiqueta no canto de cima à esquerda (catetos de meia barra).
+            if row.label > 0 && Int(row.label) <= AureaColors.labelPalette.count {
+                var tri = Path()
+                tri.move(to: CGPoint(x: x0, y: top))
+                tri.addLine(to: CGPoint(x: x0 + m.bar / 2, y: top))
+                tri.addLine(to: CGPoint(x: x0, y: top + m.bar / 2))
+                tri.closeSubpath()
+                bar.fill(tri, with: .color(AureaColors.labelPalette[Int(row.label) - 1]))
+            }
+            // 6. Rótulo de 11 pt na borda do clipe (14 para dentro), reticências no meio (D-3).
+            omegaLabel(&bar, row: row, top: top, x0: x0, x1: x1)
+            // Escolhida na visão geral: o contorno branco de 2 do AUREA.
+            if selected && !compact {
+                var outline = context
+                outline.clip(to: Path(rect))
+                let stroke = ClipGeometry.strokeWidth(width: rect.width, height: rect.height, requested: m.selStroke)
+                if rect.width <= stroke {
+                    outline.fill(Path(rect), with: .color(AureaTimeline.clipSelected))
+                } else {
+                    let inner = rect.insetBy(dx: stroke / 2, dy: stroke / 2)
+                    let innerRadius = ClipGeometry.cornerRadius(width: inner.width, height: inner.height, requested: m.barRadius - stroke / 2)
+                    outline.stroke(Path(roundedRect: inner, cornerRadius: innerRadius), with: .color(AureaTimeline.clipSelected), lineWidth: stroke)
+                }
+            }
+            // Alças do foco (P1-7; com o painel Velocidade, as de velocidade, P1-8).
+            if compact && selected && model.selection.count == 1 && !row.locked {
+                omegaHandles(&context, x0: x0, x1: x1, top: top, width: width)
+            }
+        }
+        // Losangos (P0-6): em edição na camada escolhida; os outros, pequenos e a 160/255.
+        if KeyframeVisibility.visible(showAll: model.showAllKeyframes, isPropertyLane: false, selected: selected) {
+            let editing = KeyframeVisibility.editable(selected: selected, keySelectMode: model.timelineKeySelectMode) && model.selection.count < 2
+            omegaKeys(&context, row: row, cy: top + m.bar / 2, width: width, editing: editing, editH: m.omegaKeyEdit, altH: m.omegaKeyAlt)
+        }
+    }
+
+    /// Zebra de quadros: faixas brancas de meio quadro, uma sim e uma não (dobra até ter 4 pt).
+    private func omegaZebra(_ context: inout GraphicsContext, startFrame: Int32, top: CGFloat, left: CGFloat, right: CGFloat, width: CGFloat) {
+        guard ppf > 0 else { return }
+        var band = 0.5
+        while CGFloat(band) * ppf < m.omegaZebraMin && band < 1e7 { band *= 2 }
+        let bandPx = CGFloat(band) * ppf
+        let from = max(0, Int((frame(left, width: width) - Double(startFrame)) / band))
+        let to = Int(((frame(right, width: width) - Double(startFrame)) / band).rounded(.up))
+        var k = from + (from & 1)
+        var stripes = Path()
+        var count = 0
+        while k <= to && count < 4096 {
+            let xa = x(Double(startFrame) + Double(k) * band, width: width)
+            stripes.addRect(CGRect(x: xa, y: top, width: bandPx, height: m.bar))
+            k += 2
+            count += 1
+        }
+        context.fill(stripes, with: .color(AureaTimeline.clipZebra))
+    }
+
+    /// Onda (P0-4): barras de 1 pt centradas; no áudio a barra toda, no vídeo a faixa de baixo.
+    private func omegaWave(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, x0: CGFloat, x1: CGFloat, width: CGFloat) {
+        guard row.type == .audio || row.type == .video, let wave = waves[row.id] else { return }
+        let left = max(x0, 0), right = min(x1, width)
+        guard right > left else { return }
+        let audio = row.type == .audio
+        let areaTop: CGFloat = audio ? top : top + m.bar * 0.6
+        let bottom: CGFloat = top + m.bar
+        let mid = (areaTop + bottom) / 2, half = (bottom - areaTop) / 2
+        let first = WaveGrid.bucketAt(frame(left, width: width), wave.fpb), last = WaveGrid.bucketAt(frame(right, width: width), wave.fpb)
+        var path = Path()
+        if last >= first {
+            for bucket in first...last {
+                let amplitude = CGFloat(wave.at(bucket)) / 256 * half
+                let px = x((Double(bucket) + 0.5) * wave.fpb, width: width)
+                guard amplitude >= 0.5 && px >= left && px <= right else { continue }
+                path.move(to: CGPoint(x: px, y: mid - amplitude))
+                path.addLine(to: CGPoint(x: px, y: mid + amplitude))
+            }
+        }
+        context.stroke(path, with: .color(AureaTimeline.clipWave), lineWidth: m.omegaWave)
+    }
+
+    /// Rótulo do clipe (D-3): na borda do clipe, não acompanha a rolagem; preto (branco no áudio).
+    private func omegaLabel(_ context: inout GraphicsContext, row: TimelineRow, top: CGFloat, x0: CGFloat, x1: CGFloat) {
+        guard !row.name.isEmpty else { return }
+        let avail = (x1 - x0) - 2 * m.omegaLabelInset
+        guard avail >= 8 else { return }
+        let bucket = Int(avail / 12)
+        guard bucket > 0 else { return }
+        let fitted = omegaText.fitted(row.id, name: row.name, bucket: bucket, width: CGFloat(bucket) * 12)
+        guard !fitted.isEmpty else { return }
+        let color: Color = row.type == .audio ? AureaTimeline.clipLabelOnAudio : AureaTimeline.clipLabel
+        let text = context.resolve(Text(fitted).font(.aurea(size: 11, weight: .medium)).foregroundColor(color))
+        context.draw(text, at: CGPoint(x: x0 + m.omegaLabelInset, y: top + m.bar / 2), anchor: .leading)
+    }
+
+    /// Losango dos outros parâmetros (e de toda camada fora de edição): branco a 160/255, traço de 0,5.
+    private func omegaAltKey(_ context: inout GraphicsContext, x px: CGFloat, cy: CGFloat, h: CGFloat) {
+        let path = omegaDiamondPath(h).offsetBy(dx: px, dy: cy)
+        context.fill(path, with: .color(AureaTimeline.keyAlt))
+        context.stroke(path, with: .color(AureaTimeline.keyAltStroke), lineWidth: m.omegaKeyAltStroke)
+    }
+
+    /// Losango em edição: branco com traço preto. Realçado: 85 % com o contorno em
+    /// destaque por trás; empilhado: dois a ±20 % (o de baixo cinza no parcial);
+    /// no arrasto, só o contorno.
+    private func omegaEditKey(_ context: inout GraphicsContext, x px: CGFloat, cy: CGFloat, h: CGFloat,
+                              highlighted: Bool, dragging: Bool, stacked: Bool, partial: Bool) {
+        if dragging {
+            context.stroke(omegaDiamondPath(h).offsetBy(dx: px, dy: cy), with: .color(AureaTimeline.keyFill), lineWidth: m.omegaKeyAltStroke)
+            return
+        }
+        if highlighted {
+            context.stroke(omegaDiamondPath(h).offsetBy(dx: px, dy: cy), with: .color(AureaColors.accent),
+                           style: StrokeStyle(lineWidth: m.omegaKeyRing, lineJoin: .round))
+        }
+        let s: CGFloat = highlighted ? 0.85 : 1
+        if stacked {
+            let small = omegaDiamondPath(h * 0.75 * s), dy = h * 0.2
+            let lower = small.offsetBy(dx: px, dy: cy + dy), upper = small.offsetBy(dx: px, dy: cy - dy)
+            context.fill(lower, with: .color(partial ? AureaTimeline.keyPartial : AureaTimeline.keyFill))
+            context.stroke(lower, with: .color(AureaTimeline.keyStroke), lineWidth: m.omegaKeyStroke)
+            context.fill(upper, with: .color(AureaTimeline.keyFill))
+            context.stroke(upper, with: .color(AureaTimeline.keyStroke), lineWidth: m.omegaKeyStroke)
+        } else {
+            let path = omegaDiamondPath(h * s).offsetBy(dx: px, dy: cy)
+            context.fill(path, with: .color(AureaTimeline.keyFill))
+            context.stroke(path, with: .color(AureaTimeline.keyStroke), lineWidth: m.omegaKeyStroke)
+        }
+    }
+
+    /// Instantes densos (a menos de 4 pt) viram uma pílula no estilo da linha (do AUREA).
+    private func omegaKeyPill(_ context: inout GraphicsContext, xa: CGFloat, xb: CGFloat, cy: CGFloat, h: CGFloat, editing: Bool) {
+        let ph = h * 2 / 3
+        let pillWidth = max(xb - xa, ph)
+        let rect = CGRect(x: (xa + xb) / 2 - pillWidth / 2, y: cy - ph / 2, width: pillWidth, height: ph)
+        let path = Path(roundedRect: rect, cornerRadius: ph / 2)
+        context.fill(path, with: .color(editing ? AureaTimeline.keyFill : AureaTimeline.keyAlt))
+        context.stroke(path, with: .color(editing ? AureaTimeline.keyStroke : AureaTimeline.keyAltStroke),
+                       lineWidth: editing ? m.omegaKeyStroke : m.omegaKeyAltStroke)
+    }
+
+    /// Os losangos de uma linha (P0-6), centrados em `cy`.
+    private func omegaKeys(_ context: inout GraphicsContext, row: TimelineRow, cy: CGFloat, width: CGFloat, editing: Bool, editH: CGFloat, altH: CGFloat) {
+        // Os dos outros parâmetros (sem toque) primeiro, sempre pequenos.
+        if !row.dimInstants.isEmpty {
+            var dimGroups = [Int32](repeating: 0, count: 2 * Int((width + 2 * m.keyTouchHalf) / m.keyMergeGap) + 8)
+            let count = Keyframes.visibleGroups(row.dimInstants, view: viewFrame, pxPerFrame: ppf, centerX: width / 2, width: width,
+                                                margin: m.keyTouchHalf, mergeGap: m.keyMergeGap, out: &dimGroups)
+            for group in 0..<count {
+                let i = Int(dimGroups[group * 2]), j = Int(dimGroups[group * 2 + 1])
+                let xa = x(Double(row.dimInstants[i]), width: width)
+                if i == j { omegaAltKey(&context, x: xa, cy: cy, h: altH) }
+                else { omegaKeyPill(&context, xa: xa, xb: x(Double(row.dimInstants[j]), width: width), cy: cy, h: altH, editing: false) }
+            }
+        }
+        guard !row.instants.isEmpty else { return }
+        var groups = [Int32](repeating: 0, count: 2 * Int((width + 2 * m.keyTouchHalf) / m.keyMergeGap) + 8)
+        let count = Keyframes.visibleGroups(row.instants, view: viewFrame, pxPerFrame: ppf, centerX: width / 2, width: width,
+                                            margin: m.keyTouchHalf, mergeGap: m.keyMergeGap, out: &groups)
+        let playhead = timelineFrame(Double(clock.frame))
+        let selectedIndex = lowerBound(row.instants, selectedKey?.frame ?? Snap.none)
+        let selectedTrackMatches = selectedIndex < row.instants.count && row.instants[selectedIndex] == selectedKey?.frame && row.keysAt[selectedIndex].contains { key in
+            selectedKey?.track == TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)
+        }
+        let chosen: Int32 = editing && selectedKey?.layer == row.id && selectedTrackMatches ? selectedKey?.frame ?? Snap.none : Snap.none
+        let picked: [Bool]? = editing ? pickedInstants(row) : nil
+        let dragMode: Bool = gesture?.mode == .key || gesture?.mode == .keys
+        let dragTrackMatches = row.track == nil || gesture?.row?.track == nil || gesture?.row?.track == row.track
+        let dragFrame: Int32 = dragMode && gesture?.row?.id == row.id && dragTrackMatches ? gesture?.keyFrame ?? Snap.none : Snap.none
+        let focusCount: Int = editing && row.track == nil && row.id == model.primarySelection ? (focusTracks?.count ?? 0) : 0
+        var dragX: CGFloat?
+        for group in 0..<count {
+            let i = Int(groups[group * 2]), j = Int(groups[group * 2 + 1])
+            let xa = x(Double(row.instants[i]), width: width)
+            if i == j {
+                let f = row.instants[i]
+                guard editing else { omegaAltKey(&context, x: xa, cy: cy, h: altH); continue }
+                let dragging = f == dragFrame
+                if dragging { dragX = xa }
+                let highlighted = f == chosen || picked?[i] == true || f == playhead
+                var distinct = 1
+                if focusCount >= 2 {
+                    var seen = Set<TimelineTrack>()
+                    for key in row.keysAt[i] { seen.insert(TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)) }
+                    distinct = seen.count
+                }
+                let stacked = focusCount >= 2 && (distinct >= 2 || distinct < focusCount)
+                omegaEditKey(&context, x: xa, cy: cy, h: editH, highlighted: highlighted, dragging: dragging, stacked: stacked, partial: stacked && distinct < focusCount)
+            } else {
+                omegaKeyPill(&context, xa: xa, xb: x(Double(row.instants[j]), width: width), cy: cy, h: editing ? editH : altH, editing: editing)
+                guard editing else { continue }
+                // A pílula resume as chaves densas; as em foco ficam no tempo delas, por cima.
+                for f in [chosen, dragFrame, playhead] where Keyframes.groupHas(row.instants, i, j, f) {
+                    let fx = x(Double(f), width: width)
+                    if f == dragFrame { dragX = fx }
+                    omegaEditKey(&context, x: fx, cy: cy, h: editH, highlighted: f != dragFrame, dragging: f == dragFrame, stacked: false, partial: false)
+                }
+            }
+        }
+        if let dragX {
+            // Balão de tempo do losango na mão (do AUREA): a mesma informação da barra de info.
+            let text = context.resolve(Text(Timecode.format(dragFrame, fps)).font(.aurea(size: 10, weight: .bold)).monospacedDigit().foregroundColor(.white))
+            let measured = text.measure(in: CGSize(width: 180, height: 20))
+            let rect = CGRect(x: dragX - measured.width / 2 - m.balloonPadH, y: cy - editH / 2 - m.balloonGap - measured.height - m.balloonPadV * 2,
+                              width: measured.width + m.balloonPadH * 2, height: measured.height + m.balloonPadV * 2)
+            context.fill(Path(roundedRect: rect, cornerRadius: m.balloonRadius), with: .color(.black.opacity(0.82)))
+            context.draw(text, at: CGPoint(x: rect.midX, y: rect.midY))
+        }
+    }
+
+    /// Cabeçalho da linha (P0-3): pílula de x −8 a 62 (destaque na seleção
+    /// múltipla), faixa da etiqueta, olho em x 17 (✓ nas escolhidas; some em todas
+    /// enquanto há seleção múltipla), miniatura 20 × 23 em x 34..54, recorte e cadeado.
+    private func omegaHeader(_ context: inout GraphicsContext, row: TimelineRow, rowTop: CGFloat, height: CGFloat, activated: Bool, hideEye: Bool) {
+        let pillTop = rowTop + m.omegaPillTop
+        let pillRect = CGRect(x: m.omegaPillLeft, y: pillTop, width: m.headerColumn - m.omegaPillLeft, height: m.pillHeight)
+        let pill = Path(UIBezierPath(roundedRect: pillRect, byRoundingCorners: [.topRight, .bottomRight],
+                                     cornerRadii: CGSize(width: m.pillHeight / 2, height: m.pillHeight / 2)).cgPath)
+        context.fill(pill, with: .color(activated ? AureaColors.accent : AureaTimeline.omegaHeader))
+        context.stroke(pill, with: .color(AureaTimeline.omegaHeaderBorder), lineWidth: m.omegaPillBorder)
+        let cy = pillTop + m.pillHeight / 2
+        if !activated && row.label > 0 && Int(row.label) <= AureaColors.labelPalette.count {
+            context.fill(Path(CGRect(x: 0, y: rowTop + m.omegaTagTop, width: m.omegaTagWidth, height: max(0, height - m.omegaTagTop - m.omegaTagBottomGap))),
+                         with: .color(AureaColors.labelPalette[Int(row.label) - 1]))
+        }
+        if activated {
+            glyph(&context, CupertinoGlyph.CheckmarkCircleFill, size: m.omegaCheckGlyph, tint: AureaColors.onAccent.opacity(0.8), x: m.eyeCx, y: cy)
+        } else if !hideEye {
+            glyph(&context, row.visible ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: m.omegaEyeGlyph,
+                  tint: AureaColors.text.opacity(row.visible ? 0.9 : 0.5), x: m.eyeCx, y: cy)
+        }
+        let ink: Color = activated ? AureaColors.onAccent : AureaColors.text
+        let alpha: Double = row.visible ? 1 : 0.6
+        let scale: CGFloat = row.clipToBelow ? m.omegaClipScale : 1
+        let bw = m.omegaThumbWidth * scale, bh = m.omegaThumbHeight * scale
+        let bcx = m.omegaThumbLeft + m.omegaThumbWidth / 2 - (row.clipToBelow ? m.omegaClipShift : 0)
+        var thumb = context
+        thumb.opacity = alpha
+        let center = CGPoint(x: bcx, y: cy)
+        switch row.type {
+        case .video, .image:
+            if let image = pillThumbs[row.id], image.size.width > 0, image.size.height > 0 {
+                let s = min(bw / image.size.width, bh / image.size.height)
+                let w = image.size.width * s, h = image.size.height * s
+                thumb.draw(Image(uiImage: image), in: CGRect(x: center.x - w / 2, y: center.y - h / 2, width: w, height: h))
+            } else {
+                glyph(&thumb, row.type.glyph, size: m.glyphIcon, tint: ink, x: center.x, y: center.y)
+            }
+        case .audio:
+            glyph(&thumb, CupertinoGlyph.MusicNote, size: 10, tint: ink.opacity(0.8), x: center.x, y: center.y)
+        case .text:
+            thumb.draw(Text("T").font(.aurea(size: m.glyphText, weight: .bold)).foregroundColor(ink), at: center)
+        case .shape:
+            let r: CGFloat = m.shapeDot / 2 * scale
+            thumb.fill(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)), with: .color(ink))
+        default:
+            glyph(&thumb, row.type.glyph, size: m.glyphIcon, tint: ink, x: center.x, y: center.y)
+        }
+        if row.clipToBelow {
+            var indicator = context
+            indicator.opacity = row.visible ? 1 : 0.5
+            indicator.draw(Text("\u{21B3}").font(.aurea(size: 11, weight: .bold)).foregroundColor(ink),
+                           at: CGPoint(x: m.omegaClipIndicatorCx, y: rowTop + m.omegaClipIndicatorCy))
+        }
+        if row.locked {
+            glyph(&context, CupertinoGlyph.LockFill, size: 9, tint: AureaColors.muted, x: m.omegaLockCx, y: rowTop + m.omegaLockCy)
+        }
+    }
+
+    /// Alça ≡ da linha: três barrinhas de 8 a 5 da borda direita (o toque longo reordena).
+    private func omegaGrip(_ context: inout GraphicsContext, rowTop: CGFloat, height: CGFloat, width: CGFloat) {
+        let cy = rowTop + height / 2
+        let right = width - m.omegaGripRight, left = right - m.omegaGripWidth
+        var shadows = Path(), bars = Path()
+        for k in -1...1 {
+            let y = cy + CGFloat(k) * 3 - 0.5
+            shadows.addRect(CGRect(x: left, y: y + 1, width: m.omegaGripWidth, height: 1))
+            bars.addRect(CGRect(x: left, y: y, width: m.omegaGripWidth, height: 1))
+        }
+        context.fill(shadows, with: .color(AureaTimeline.omegaGripShadow))
+        context.fill(bars, with: .color(AureaTimeline.omegaGrip))
+    }
+
+    /// Alças do foco (P1-7): pílulas brancas por fora das bordas, alfa pelo estado do gesto.
+    private func omegaHandles(_ context: inout GraphicsContext, x0: CGFloat, x1: CGFloat, top: CGFloat, width: CGFloat) {
+        let alpha: Double
+        switch handleState {
+        case 1: alpha = 0.3
+        case 2: alpha = 0.5
+        case 3: alpha = 0
+        default: alpha = 0.2
+        }
+        guard alpha > 0 else { return }
+        var clipped = context
+        clipped.clip(to: Path(CGRect(x: m.headerColumn, y: top - 2, width: max(0, width - m.headerColumn), height: m.bar + 4)))
+        let speed = model.panel == .speed
+        omegaHandle(&clipped, left: x0 - m.omegaHandle, top: top, start: true, alpha: alpha, speed: speed)
+        omegaHandle(&clipped, left: x1, top: top, start: false, alpha: alpha, speed: speed)
+    }
+
+    /// Uma alça: a ponta de fora redonda e o chevron vazado (‹ ou ›; ≪ ≫ na velocidade).
+    private func omegaHandle(_ context: inout GraphicsContext, left: CGFloat, top: CGFloat, start: Bool, alpha: Double, speed: Bool) {
+        let rect = CGRect(x: left, y: top, width: m.omegaHandle, height: m.bar)
+        let corners: UIRectCorner = start ? [.topLeft, .bottomLeft] : [.topRight, .bottomRight]
+        let pill = Path(UIBezierPath(roundedRect: rect, byRoundingCorners: corners, cornerRadii: CGSize(width: m.bar / 2, height: m.bar / 2)).cgPath)
+        let s = m.omegaHandleChevron
+        let dir: CGFloat = start ? 1 : -1
+        var chevron = Path()
+        for offset in (speed ? [-s * 0.55, s * 0.55] : [CGFloat(0)]) {
+            chevron.move(to: CGPoint(x: rect.midX + offset + dir * s / 2, y: rect.midY - s))
+            chevron.addLine(to: CGPoint(x: rect.midX + offset - dir * s / 2, y: rect.midY))
+            chevron.addLine(to: CGPoint(x: rect.midX + offset + dir * s / 2, y: rect.midY + s))
+        }
+        var outer = context
+        outer.opacity = alpha
+        outer.drawLayer { layer in
+            layer.fill(pill, with: .color(AureaTimeline.trimGrip))
+            layer.blendMode = .clear
+            layer.stroke(chevron, with: .color(AureaTimeline.keyStroke),
+                         style: StrokeStyle(lineWidth: m.omegaHandleStroke, lineCap: .round, lineJoin: .round))
+        }
+    }
+
+    /// Régua (P0-5): tiques de 1 pendurados do alto — segundo 18, meio 12, quadro 5 —, sem rótulos.
+    private func omegaRuler(_ context: inout GraphicsContext, size: CGSize) {
+        let t0 = frame(0, width: size.width), t1 = frame(size.width, width: size.width)
+        guard t1 >= 0 else { return }
+        let fFirst = max(0, Int64(t0.rounded(.down))), fLast = Int64(t1.rounded(.up))
+        let step = Int64(OmegaRuler.frameStep(pps: pps, fps: fps))
+        let secStep = Int64(OmegaRuler.secondStep(pps: pps))
+        let f = Double(fps)
+        let sec0 = max(0, Int64((Double(fFirst) / f).rounded(.down))), sec1 = Int64((Double(fLast) / f).rounded(.up))
+        var seconds = Path(), halves = Path(), frames = Path()
+        func tick(_ path: inout Path, _ frameIndex: Int64, _ height: CGFloat) {
+            let px = x(Double(frameIndex), width: size.width)
+            guard px >= -1 && px <= size.width + 1 else { return }
+            path.move(to: CGPoint(x: px, y: 0))
+            path.addLine(to: CGPoint(x: px, y: height))
+        }
+        var s = (sec0 / secStep) * secStep
+        while s <= sec1 {
+            tick(&seconds, OmegaRuler.frameOf(Double(s), fps: fps), OmegaRuler.height(OmegaRuler.secondTick))
+            s += secStep
+        }
+        if secStep == 1 && pps / 2 >= OmegaRuler.minTickDp && sec1 >= sec0 {
+            for k in sec0...sec1 { tick(&halves, OmegaRuler.frameOf(Double(k) + 0.5, fps: fps), OmegaRuler.height(OmegaRuler.halfTick)) }
+        }
+        if secStep == 1 && Double(step) < f / 2 {
+            var frameIndex = (fFirst / step) * step
+            while frameIndex <= fLast {
+                if OmegaRuler.tickClass(frameIndex, fps: fps) == OmegaRuler.frameTick {
+                    tick(&frames, frameIndex, OmegaRuler.height(OmegaRuler.frameTick))
+                }
+                frameIndex += step
+            }
+        }
+        context.stroke(frames, with: .color(AureaTimeline.omegaTick), lineWidth: m.omegaTick)
+        context.stroke(halves, with: .color(AureaTimeline.omegaTick), lineWidth: m.omegaTick)
+        context.stroke(seconds, with: .color(AureaTimeline.omegaTick), lineWidth: m.omegaTick)
+        // Mover (P1-5): os tiques do início e do fim originais em branco, os novos em destaque.
+        if let moveOrig, let moveNew {
+            for (frameIndex, tint) in [(moveOrig.start, AureaColors.playhead), (moveOrig.end, AureaColors.playhead),
+                                       (moveNew.start, AureaColors.accent), (moveNew.end, AureaColors.accent)] {
+                let px = x(Double(frameIndex), width: size.width)
+                let height = OmegaRuler.height(OmegaRuler.tickClass(Int64(frameIndex), fps: fps))
+                context.fill(Path(CGRect(x: px - m.omegaTick / 2, y: 0, width: m.omegaTick, height: height)), with: .color(tint))
+            }
+        }
+    }
+
+    /// Marcadores (P1-3): fio de 1 pela régua (≈ 59 %) e a bandeirola cheia. Devolve o do quadro atual.
+    private func omegaMarkers(_ context: inout GraphicsContext, size: CGSize) -> Int? {
+        var atPlayhead: Int?
+        let playhead = Int32(clamping: clock.frame)
+        for (index, marker) in markers.enumerated() {
+            if marker.frame == playhead { atPlayhead = index }
+            let px = x(Double(marker.frame), width: size.width)
+            guard px >= -m.omegaMarkerFlagLarge && px <= size.width + m.omegaTick else { continue }
+            let tint = AureaTimeline.bookmarks[MarkerColors.appearance(marker.packedColor) % AureaTimeline.bookmarks.count]
+            context.fill(Path(CGRect(x: px - m.omegaTick / 2, y: 0, width: m.omegaTick, height: m.rowsTop)), with: .color(tint.opacity(150.0 / 255.0)))
+            let d = marker.frame == playhead ? m.omegaMarkerFlagLarge : m.omegaMarkerFlagSmall
+            var flag = Path()
+            flag.move(to: CGPoint(x: px, y: 0))
+            flag.addLine(to: CGPoint(x: px, y: m.omegaMarkerFlag))
+            flag.addLine(to: CGPoint(x: px - d, y: m.omegaMarkerFlag))
+            flag.addLine(to: CGPoint(x: px, y: m.omegaMarkerFlagTip))
+            flag.closeSubpath()
+            context.fill(flag, with: .color(tint))
+        }
+        return atPlayhead
+    }
+
+    /// Aba do tempo atual (P0-5): 70 × 18 centrada no cursor, cantos de 2 e o de
+    /// cima à esquerda chanfrado; `MM:SS:FF` branco tabular. Num marcador, o
+    /// contorno de 1 na cor do primeiro papel.
+    private func omegaTimeTab(_ context: inout GraphicsContext, size: CGSize, marked: Bool) {
+        let cx = size.width / 2
+        let text = context.resolve(Text(Timecode.format(Int32(clamping: clock.frame), fps))
+            .font(.aurea(size: m.timecodeFont, weight: .bold)).monospacedDigit().foregroundColor(.white))
+        let measured = text.measure(in: CGSize(width: size.width, height: m.omegaTabHeight * 2))
+        let tabWidth = max(m.omegaTabMinWidth, measured.width + 2 * m.omegaTabPad)
+        let left = cx - tabWidth / 2, right = cx + tabWidth / 2
+        let top = m.omegaTabTop, bottom = top + m.omegaTabHeight
+        let r = m.omegaTabRadius, ch = m.omegaTabChamfer
+        var tab = Path()
+        tab.move(to: CGPoint(x: left + ch, y: top))
+        tab.addLine(to: CGPoint(x: right - r, y: top))
+        tab.addQuadCurve(to: CGPoint(x: right, y: top + r), control: CGPoint(x: right, y: top))
+        tab.addLine(to: CGPoint(x: right, y: bottom - r))
+        tab.addQuadCurve(to: CGPoint(x: right - r, y: bottom), control: CGPoint(x: right, y: bottom))
+        tab.addLine(to: CGPoint(x: left + r, y: bottom))
+        tab.addQuadCurve(to: CGPoint(x: left, y: bottom - r), control: CGPoint(x: left, y: bottom))
+        tab.addLine(to: CGPoint(x: left, y: top + ch))
+        tab.closeSubpath()
+        context.fill(tab, with: .color(AureaTimeline.omegaTimeTab))
+        if marked { context.stroke(tab, with: .color(AureaTimeline.bookmarks[0]), lineWidth: m.omegaTabStroke) }
+        context.draw(text, at: CGPoint(x: cx, y: (top + bottom) / 2), anchor: .center)
     }
 }

@@ -2,65 +2,49 @@ package com.aurea.aurea.home
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.state.ProjectEntry
-import com.aurea.aurea.ui.ds.AureaActionSheet
 import com.aurea.aurea.ui.ds.AureaAlert
-import com.aurea.aurea.ui.ds.SheetAction
-import com.aurea.aurea.ui.theme.AureaColors
-import com.aurea.aurea.ui.theme.AureaDims
-import com.aurea.aurea.ui.theme.AureaType
+import com.aurea.aurea.ui.ds.AureaDialog
+import com.aurea.aurea.ui.ds.DialogAction
+import com.aurea.aurea.ui.ds.DialogRole
 
 /**
- * Os menus e diálogos de um projeto: um por vez, encadeados (menu → renomear,
- * menu → excluir). Vive fora das abas porque Início e Projetos usam os MESMOS —
- * o cartão do hero, um cartão da grade e a barra de lote abrem todos aqui.
+ * Os diálogos de um projeto (Omega home): um por vez, encadeados a partir do
+ * menu rápido (P1-2) e da barra de seleção (P0-6). Todos claros (fundação F4).
+ * O menu em si é o [ProjectQuickMenu]; a ordenação é um menu ancorado na aba.
  */
 internal sealed interface ProjectDialog {
-    data class Menu(val entry: ProjectEntry) : ProjectDialog
     data class ConfirmDelete(val entry: ProjectEntry) : ProjectDialog
     data class Rename(val entry: ProjectEntry) : ProjectDialog
     /** "Exportar arquivo do projeto": com ou sem a mídia. */
     data class ExportFile(val entry: ProjectEntry) : ProjectDialog
-    data object DeleteAll : ProjectDialog
     data class BatchDelete(val paths: Set<String>) : ProjectDialog
-    data object Sort : ProjectDialog
 }
 
-/** Quem está aberto agora. Um por aba, para as duas não brigarem pelo mesmo menu. */
+/** Quem está aberto agora (um só para a Home inteira). */
 internal class ProjectDialogState {
     var current by mutableStateOf<ProjectDialog?>(null)
 }
 
 /**
- * Desenha o diálogo aberto e age. [all] é a lista inteira (o "apagar todos" e a
- * poda da seleção olham para ela, não para o que está filtrado na tela).
+ * Desenha o diálogo aberto e age. [all] é a lista inteira (a poda da seleção
+ * olha para ela, não para o que está filtrado na tela).
  */
 @Composable
 internal fun ProjectDialogs(
@@ -68,86 +52,61 @@ internal fun ProjectDialogs(
     vm: HomeViewModel,
     all: List<ProjectEntry>,
     state: ProjectDialogState,
-    onOpen: (ProjectEntry) -> Unit,
+    @Suppress("UNUSED_PARAMETER") onOpen: (ProjectEntry) -> Unit,
 ) {
     val close = { state.current = null }
     // Destino do arquivo do projeto: o documento que a pessoa escolhe (o
-    // lançador vive aqui, fora da folha, para o retorno achar quem pediu).
+    // lançador vive aqui, fora do diálogo, para o retorno achar quem pediu).
     var pendingExport by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     val exportTarget = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         val p = pendingExport
         pendingExport = null
         if (uri != null && p != null) store.exportProjectFile(p.first, p.second, uri)
     }
+    LaunchedEffect(all) { vm.pruneSelection(all) }
     when (val d = state.current) {
         null -> Unit
-        is ProjectDialog.Menu -> AureaActionSheet(
+        is ProjectDialog.ConfirmDelete -> AureaAlert(
             title = d.entry.title,
-            message = projectSpec(d.entry),
-            actions = listOf(
-                SheetAction(stringResource(R.string.common_open)) { onOpen(d.entry) },
-                // Começa a seleção de vários com este projeto marcado (spec am-ui P2-8).
-                SheetAction(stringResource(R.string.home_select), tag = "home.project.select") { vm.startSelection(d.entry.path) },
-                SheetAction(stringResource(R.string.common_duplicate)) { store.duplicateProject(d.entry.path) },
-                SheetAction(stringResource(R.string.common_rename)) { state.current = ProjectDialog.Rename(d.entry) },
-                SheetAction(stringResource(R.string.project_file_export)) { state.current = ProjectDialog.ExportFile(d.entry) },
-                SheetAction(stringResource(R.string.project_delete), destructive = true) { state.current = ProjectDialog.ConfirmDelete(d.entry) },
-                SheetAction(stringResource(R.string.project_delete_all), destructive = true) { if (all.isNotEmpty()) state.current = ProjectDialog.DeleteAll },
-            ),
+            message = stringResource(R.string.common_irreversible),
+            confirmLabel = stringResource(R.string.project_delete),
+            destructive = true,
+            onConfirm = { store.deleteProjects(listOf(d.entry.path)) },
             onDismiss = close,
         )
-        // "Apagar todos" fica só no menu: ao lado da exclusão unitária o risco
-        // de apagar tudo por engano não se paga.
-        is ProjectDialog.ConfirmDelete -> AureaActionSheet(
-            title = d.entry.title,
-            actions = listOf(SheetAction(stringResource(R.string.project_delete), destructive = true) { store.deleteProjects(listOf(d.entry.path)) }),
-            onDismiss = close,
-        )
-        is ProjectDialog.ExportFile -> AureaActionSheet(
+        is ProjectDialog.ExportFile -> AureaDialog(
             title = stringResource(R.string.project_file_export),
             message = stringResource(R.string.project_file_export_message),
-            actions = listOf(
-                SheetAction(stringResource(R.string.project_file_include_media)) {
-                    pendingExport = d.entry.path to true
-                    exportTarget.launch(store.projectFileName(d.entry.path))
-                },
-                SheetAction(stringResource(R.string.project_file_without_media)) {
-                    pendingExport = d.entry.path to false
-                    exportTarget.launch(store.projectFileName(d.entry.path))
-                },
-            ),
             onDismiss = close,
+            tag = "home.exportFile",
+            actions = listOf(
+                DialogAction(stringResource(R.string.project_file_include_media), DialogRole.Positive, tag = "home.exportFile.withMedia") {
+                    pendingExport = d.entry.path to true
+                    vm.clearSelection()
+                    exportTarget.launch(store.projectFileName(d.entry.path))
+                },
+                DialogAction(stringResource(R.string.project_file_without_media), DialogRole.Neutral, tag = "home.exportFile.withoutMedia") {
+                    pendingExport = d.entry.path to false
+                    vm.clearSelection()
+                    exportTarget.launch(store.projectFileName(d.entry.path))
+                },
+                DialogAction(stringResource(R.string.common_cancel), DialogRole.Negative),
+            ),
         )
         is ProjectDialog.Rename -> RenameProjectDialog(
             initial = d.entry.title,
             onSave = { t -> if (t != d.entry.title) store.renameProjectFile(d.entry.path, t) },
             onDismiss = close,
         )
-        ProjectDialog.DeleteAll -> AureaAlert(
-            title = stringResource(R.string.project_delete_all_title),
-            message = stringResource(R.string.project_delete_all_message, all.size),
-            confirmLabel = stringResource(R.string.project_delete_all_confirm),
-            destructive = true,
-            onConfirm = {
-                store.deleteProjects(all.map { it.path })
-                vm.clearSelection()
-            },
-            onDismiss = close,
-        )
-        is ProjectDialog.BatchDelete -> AureaActionSheet(
+        is ProjectDialog.BatchDelete -> AureaAlert(
             title = stringResource(R.string.project_delete_many_title, d.paths.size),
             message = stringResource(R.string.common_irreversible),
-            actions = listOf(
-                SheetAction(stringResource(R.string.common_delete), destructive = true) {
-                    store.deleteProjects(d.paths)
-                    vm.clearSelection()
-                },
-            ),
-            onDismiss = close,
-        )
-        ProjectDialog.Sort -> AureaActionSheet(
-            title = stringResource(R.string.home_sort_title),
-            actions = ProjectSort.entries.map { s -> SheetAction(stringResource(s.label)) { vm.changeSort(s) } },
+            confirmLabel = stringResource(R.string.common_delete),
+            destructive = true,
+            onConfirm = {
+                store.deleteProjects(d.paths)
+                vm.clearSelection()
+            },
             onDismiss = close,
         )
     }
@@ -172,42 +131,66 @@ private fun RenameProjectDialog(initial: String, onSave: (String) -> Unit, onDis
         onConfirm = save,
         onDismiss = onDismiss,
         extra = {
-            BasicTextField(
+            // Omega fundação: o campo do diálogo claro (F4), com ✕ de limpar.
+            com.aurea.aurea.ui.ds.AureaDialogField(
                 value = value,
                 onValueChange = { value = it },
-                singleLine = true,
-                textStyle = AureaType.DialogField,
-                cursorBrush = SolidColor(AureaColors.Accent),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = {
                     onDismiss()
                     save()
                 }),
-                modifier = Modifier
-                    .padding(top = AureaDims.S3)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(AureaColors.FieldDialog)
-                    .padding(horizontal = AureaDims.S2, vertical = 7.dp)
-                    .focusRequester(focus),
+                tag = "dialog.field",
+                focusRequester = focus,
             )
         },
     )
 }
 
-/** A folha "Novo projeto", com os padrões dos Ajustes já preenchidos. */
+/**
+ * Nome sugerido da folha: o primeiro "Projeto N" ainda não usado (a
+ * referência procura o primeiro livre; antes era total + 1).
+ */
+internal fun suggestedProjectName(titles: Collection<String>, nameFor: (Int) -> String): String {
+    val used = titles.mapTo(HashSet()) { it.trim().lowercase() }
+    var n = 1
+    while (n < 10_000 && nameFor(n).lowercase() in used) n++
+    return nameFor(n)
+}
+
+/** A folha "Novo projeto", com o que ela lembra (ou os padrões dos Ajustes). */
 @Composable
 internal fun NewProjectSheetFor(store: EditorStore, vm: HomeViewModel, all: List<ProjectEntry>, onDismiss: () -> Unit) {
+    val template = stringResource(R.string.project_new, 0)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val suggested = remember(all, template) {
+        suggestedProjectName(all.map { it.title }) { n -> context.getString(R.string.project_new, n) }
+    }
     NewProjectSheet(
-        suggestedName = stringResource(R.string.project_new, all.size + 1),
-        defaultAspectKey = vm.defaultAspectKey,
-        defaultResolution = vm.defaultResolution,
-        defaultFps = vm.defaultFps,
+        suggestedName = suggested,
+        defaults = NewProjectDefaults(
+            aspectKey = vm.defaultAspectKey,
+            resolution = vm.defaultResolution,
+            fps = (vm.lastFps ?: vm.defaultFps.toFloat()).toDouble(),
+            free = vm.lastFree,
+            freeWidth = vm.lastFreeWidth,
+            freeHeight = vm.lastFreeHeight,
+            keepRatio = vm.lastKeepRatio,
+            background = vm.lastBackground,
+        ),
         onCreate = { spec ->
+            vm.rememberNewProject(
+                aspectKey = spec.aspectKey, resolution = spec.resolution, free = spec.free,
+                freeWidth = spec.width, freeHeight = spec.height, keepRatio = spec.keepRatio,
+                fps = spec.fps, background = spec.background, transparent = spec.transparent,
+            )
             // fps livre e fundo escolhidos na folha vão direto para o motor (fora do histórico).
             // Alfa 0 = "Transparente" (o motor decide: Composition::set_background_choice).
             val background = floatArrayOf(spec.background[0], spec.background[1], spec.background[2], if (spec.transparent) 0f else 1f)
-            vm.afterEngine(store) { store.newProject(spec.width, spec.height, spec.fps, spec.title, background, spec.uiMode) }
+            vm.afterEngine(store) {
+                store.newProject(spec.width, spec.height, spec.fps, spec.title, background, spec.uiMode)
+                if (vm.lightPreview) store.setPreviewScale(false, 1, 2)
+            }
         },
         onDismiss = onDismiss,
         device = store.deviceReport,

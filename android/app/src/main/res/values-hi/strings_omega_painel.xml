@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega painel (área 04): painel da camada, velocidade, volume, curva e presets. -->
+    <string name="om_lp_border_shadow">बॉर्डर और छाया</string>
+    <string name="om_lp_move_transform">मूव और ट्रांसफ़ॉर्म</string>
+    <string name="om_lp_edit_points">पॉइंट संपादित करें</string>
+    <string name="om_lp_edit_drawing">ड्रॉइंग संपादित करें</string>
+    <string name="om_lp_edit_group">समूह संपादित करें</string>
+    <string name="om_lp_camera_options">कैमरा विकल्प</string>
+    <string name="om_lp_light_options">लाइट विकल्प</string>
+    <string name="om_lp_edit_particles">पार्टिकल संपादित करें</string>
+    <string name="om_lp_audio">वॉल्यूम और ऑडियो</string>
+    <string name="om_lp_opens_panel">पैनल खोलता है</string>
+    <string name="om_lp_move_start_to_playhead">लेयर को प्लेहेड से शुरू होने के लिए खिसकाएँ</string>
+    <string name="om_lp_move_end_to_playhead">लेयर को प्लेहेड पर खत्म होने के लिए खिसकाएँ</string>
+    <string name="om_lp_retime_extend_start">शुरुआत को प्लेहेड तक खींचें (गति बदलती है)</string>
+    <string name="om_lp_retime_shorten_start">शुरुआत को प्लेहेड तक छोटा करें (गति बदलती है)</string>
+    <string name="om_lp_retime_shorten_end">अंत को प्लेहेड तक छोटा करें (गति बदलती है)</string>
+    <string name="om_lp_retime_extend_end">अंत को प्लेहेड तक खींचें (गति बदलती है)</string>
+    <string name="om_lp_speed_slower">धीमा</string>
+    <string name="om_lp_speed_faster">तेज़</string>
+    <string name="om_lp_speed_close">गति बंद करें</string>
+    <string name="om_lp_speed_tab_curve">समय वक्र</string>
+    <string name="om_lp_speed_tab_options">विकल्प</string>
+    <string name="om_lp_speed_constant_hint">लेयर का एनिमेशन गति के साथ चलता है और अवधि भी साथ बदलती है।</string>
+    <string name="om_lp_speed_keyed">इस लेयर में एनिमेटेड गति या समय वक्र है।</string>
+    <string name="om_lp_speed_remap_on">टाइम रीमैपिंग चालू है: समय वक्र टैब में बदलें।</string>
+    <string name="om_lp_volume_close">वॉल्यूम बंद करें</string>
+    <string name="om_lp_volume_tab_fades">फ़ेड</string>
+    <string name="om_lp_missing_media_title">मीडिया नहीं मिला</string>
+    <string name="om_lp_missing_media">इस लेयर का मूल मीडिया गायब है या उसकी जगह बदल गई है।</string>
+    <string name="om_presets_empty_title">अभी कोई प्रीसेट नहीं</string>
+    <string name="om_presets_empty_body">किसी लेयर की प्रॉपर्टी और कीफ़्रेम को प्रीसेट के रूप में सेव करें ताकि फिर से इस्तेमाल कर सकें।</string>
+    <string name="om_presets_empty_browse">प्रीसेट देखें</string>
+    <string name="om_curve_cat_curves">वक्र</string>
+    <string name="om_curve_cat_bounces">उछाल और लहरें</string>
+    <string name="om_curve_cat_steps">चरण</string>
+    <string name="om_curve_reverse">वक्र उलटें</string>
+    <string name="om_curve_paste_all">वक्र को सभी कीफ़्रेम पर पेस्ट करें</string>
+    <string name="om_curve_overshoot_on">ओवरशूट की अनुमति दें</string>
+    <string name="om_curve_overshoot_off">ओवरशूट बंद करें</string>
+    <string name="om_curve_prev">पिछला खंड</string>
+    <string name="om_curve_next">अगला खंड</string>
+    <string name="om_curve_no_segment">प्लेहेड को दो कीफ़्रेम के बीच ले जाएँ</string>
+    <string name="om_curve_saved">सेव किए गए वक्र</string>
+</resources>

@@ -126,8 +126,12 @@ data class ExportOptions(
     /** 0 = o fps da composição. */
     val fps: Double = 0.0,
     val hevc: Boolean = false,
-    /** 0 Baixa, 1 Normal, 2 Alta — multiplica a taxa automática do motor (BitratePolicy). */
-    val quality: Int = 1,
+    /**
+     * Omega adicionar (área 08, P1-9): qualidade em PORCENTAGEM, 20..100 (o
+     * controle deslizante da página); 0, 1, 2 = as fichas antigas (Baixa,
+     * Normal, Alta). O motor converte em fator (BitratePolicy.hpp).
+     */
+    val quality: Int = QUALITY_DEFAULT,
     /** Mbps escolhido à mão (Avançado). 0 = automático pela qualidade. */
     val customMbps: Int = 0,
     val aiUpscale: Int = 0,
@@ -162,8 +166,45 @@ data class ExportUiState(
     val notice: String = "",
     val format: ExportFormat = ExportFormat.Video,
     val preparing: Boolean = false,
+    /**
+     * Omega adicionar (área 08, P0-11): o arquivo pronto foi para a galeria
+     * (Filmes/Imagens/Download › Aurea). Falso = a galeria recusou e ele ficou
+     * na pasta do app (o botão "Salvar" tenta de novo).
+     */
+    val savedToGallery: Boolean = true,
 ) {
     val fraction: Float get() = if (framesTotal > 0) (framesDone.toFloat() / framesTotal).coerceIn(0f, 1f) else 0f
+}
+
+/** Omega adicionar (área 08, P1-9): a faixa e o padrão do controle de qualidade. */
+const val QUALITY_MIN = 20
+const val QUALITY_MAX = 100
+const val QUALITY_DEFAULT = 60
+
+/** O fator da qualidade (espelho de export_quality_factor_code; só sem a biblioteca nativa). */
+fun exportQualityFactor(code: Int): Double = when {
+    code <= 0 -> 0.6
+    code == 1 -> 1.0
+    code == 2 -> 1.5
+    else -> {
+        val q = code.coerceIn(QUALITY_MIN, QUALITY_MAX).toDouble()
+        if (q <= 60.0) 0.6 + (q - 20.0) * (0.4 / 40.0) else 1.0 + (q - 60.0) * (0.5 / 40.0)
+    }
+}
+
+/**
+ * Omega adicionar (área 08, P1-8): fps da exportação Baixo (0) | Reduzido (1) |
+ * Cheio (2), em CENTÉSIMOS de fps — a regra do motor (export_fps_option); o
+ * espelho daqui só vale sem a biblioteca nativa (testes JVM).
+ */
+fun exportFpsOption(fps100: Int, option: Int): Int = runCatching { AureaEngine.nativeExportFpsOption(fps100, option) }.getOrElse {
+    val v = fps100.toFloat()
+    val slow = fps100 <= 1500
+    when (option) {
+        2 -> fps100
+        1 -> if (slow) ((v / 3f) * 2f).toInt() else (v / 2f).toInt()
+        else -> if (slow) (v / 3f).toInt() else (v / 4f).toInt()
+    }
 }
 
 /**
@@ -205,7 +246,7 @@ class Exporter internal constructor(
             if (options.customMbps > 0) options.customMbps.toDouble().coerceAtMost(100.0)
             else (8.0 * (width.toDouble() * height / (1920.0 * 1080.0)) *
                 Math.pow((if (fps > 0.0) fps else 30.0).coerceIn(1.0, 240.0) / 30.0, 0.6) *
-                when (options.quality) { 0 -> 0.6; 2 -> 1.5; else -> 1.0 } *
+                exportQualityFactor(options.quality) *
                 if (options.hevc) 0.65 else 1.0).coerceIn(0.5, 60.0)
         }
 
@@ -415,7 +456,7 @@ class Exporter internal constructor(
             exportedQualityFlags = 0
             val suggested = runEngineJob(dir, file, options, level) {
                 engine.startExport(file.absolutePath, options.shortSide, options.fps, if (options.hevc) 1 else 0, mbps, options.aiUpscale,
-                    options.trimToContent, options.quality.coerceIn(0, 2), rateModeFor(options.hevc && level == 0), level)
+                    options.trimToContent, options.quality.coerceIn(0, QUALITY_MAX), rateModeFor(options.hevc && level == 0), level)
             }
             if (suggested == 0) return
             if (suggested == RETRY_SAME_ATTEMPT) {
@@ -483,7 +524,7 @@ class Exporter internal constructor(
      */
     private fun resumeCandidate(options: ExportOptions, mbps: Int): ExportResumeCandidate? = runCatching {
         val codec = if (options.hevc) 1 else 0
-        val quality = options.quality.coerceIn(0, 2)
+        val quality = options.quality.coerceIn(0, QUALITY_MAX)
         fun probe(rateMode: Int) = engine.exportResumeCandidate(options.shortSide, options.fps, codec, mbps, options.aiUpscale,
             options.trimToContent, quality, rateMode)
         val first = probe(rateModeFor(options.hevc))
@@ -731,6 +772,9 @@ class Exporter internal constructor(
         val result = withContext(NonCancellable + Dispatchers.IO) {
             runCatching { if (format == ExportFormat.Video) copyToGallery(file) else copyImageOut(file, format) }
         }
+        // Omega adicionar (área 08, P0-11): a galeria recusou — guarda uma cópia na
+        // pasta do app antes de apagar o temporário (o resultado continua abrível).
+        fallbackCopy = if (result.isFailure) withContext(NonCancellable + Dispatchers.IO) { keepInAppFolder(file, format) } else null
         withContext(NonCancellable + Dispatchers.IO) { file.delete() }
         result.fold(
             onSuccess = { (uri, label) ->
@@ -754,10 +798,66 @@ class Exporter internal constructor(
                 android.util.Log.e("AureaExport", "Gallery publish failed", it)
                 com.aurea.aurea.diagnostics.ProblemReport.noteExport(app,
                     "Android ${Build.VERSION.SDK_INT}: galeria falhou formato=$format ${it.javaClass.simpleName}: ${it.message}")
-                state = state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_gallery_failed))
+                // Omega adicionar (área 08, P0-11): o arquivo fica na pasta do app
+                // (compartilhável); o "Salvar" do resultado tenta a galeria de novo.
+                val kept = fallbackCopy
+                state = if (kept != null) state.copy(phase = ExportPhase.Done, outputUri = kept.second,
+                        message = text(R.string.app_saved_to_path, kept.first.absolutePath), savedToGallery = false)
+                    else state.copy(phase = ExportPhase.Failed, message = text(R.string.app_export_gallery_failed))
             },
         )
     }
+
+    // --- Omega adicionar (área 08, P0-11): "Salvar" e "Salvar em…" do resultado ---
+    /** A cópia na pasta do app quando a galeria recusou (arquivo, uri compartilhável). */
+    private var fallbackCopy: Pair<File, Uri>? = null
+
+    /** Copia o arquivo pronto para o documento escolhido ("Salvar em…"). true = gravou. */
+    suspend fun saveCopy(target: Uri): Boolean = withContext(Dispatchers.IO) {
+        val source = state.outputUri ?: return@withContext false
+        runCatching {
+            val resolver = app.contentResolver
+            checkNotNull(resolver.openInputStream(source)) { "export output unavailable" }.use { input ->
+                checkNotNull(resolver.openOutputStream(target, "wt")) { "target unavailable" }.use { out -> input.copyTo(out, 1 shl 20) }
+            }
+        }.isSuccess
+    }
+
+    /** A galeria tinha recusado: tenta publicar de novo a cópia da pasta do app. */
+    fun retryGallery() {
+        val kept = fallbackCopy ?: return
+        if (busy || state.phase != ExportPhase.Done || state.savedToGallery) return
+        val format = state.format
+        scope.launch {
+            state = state.copy(phase = ExportPhase.Publishing)
+            val result = withContext(NonCancellable + Dispatchers.IO) {
+                runCatching { if (format == ExportFormat.Video) copyToGallery(kept.first) else copyImageOut(kept.first, format) }
+            }
+            state = result.fold(
+                onSuccess = { (uri, label) ->
+                    fallbackCopy = null
+                    state.copy(phase = ExportPhase.Done, outputUri = uri, message = label, savedToGallery = true)
+                },
+                onFailure = { state.copy(phase = ExportPhase.Done) },
+            )
+        }
+    }
+
+    /** Nome sugerido para o "Salvar em…" (o do arquivo publicado). */
+    fun suggestedName(): String = state.outputLabel.ifBlank { "Aurea" } + "." + state.format.extension
+
+    /** Omega adicionar: a cópia na pasta do app (Filmes/Imagens/Download › Aurea do app), compartilhável. */
+    private fun keepInAppFolder(file: File, format: ExportFormat): Pair<File, Uri>? = runCatching {
+        val folder = when (format) {
+            ExportFormat.Video -> Environment.DIRECTORY_MOVIES
+            ExportFormat.Sequence -> Environment.DIRECTORY_DOWNLOADS
+            else -> Environment.DIRECTORY_PICTURES
+        }
+        val dir = File(app.getExternalFilesDir(folder), "Aurea").apply { mkdirs() }
+        val dst = File(dir, file.name)
+        file.copyTo(dst, overwrite = true)
+        dst to FileProvider.getUriForFile(app, "${app.packageName}.exports", dst)
+    }.getOrNull()
 
     /** Copia para Filmes/Aurea. Devolve a Uri e o texto de onde ficou. */
     private fun copyToGallery(file: File): Pair<Uri, String> {

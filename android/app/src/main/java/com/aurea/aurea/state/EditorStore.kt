@@ -87,6 +87,8 @@ data class ProjectEntry(
     val fps: Float,
     val durationFrames: Int,
     val thumbnailPath: String?,
+    // Omega home: tamanho do arquivo `.aurea` em bytes (ficha da linha da Home).
+    val sizeBytes: Long = 0L,
 )
 
 /** Estado da composição aberta (espelho do status do motor). */
@@ -524,6 +526,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
     /** Efeitos da camada principal, na ordem da pilha. */
     var effects by mutableStateOf<List<LayerEffect>>(emptyList())
+        private set
+    /** Omega aparência: decorações de Borda e sombra da camada principal (bordas na ordem, depois a sombra). */
+    var decorations by mutableStateOf<List<LayerEffect>>(emptyList())
         private set
     data class EffectFocusRequest(val layer: Long, val type: Int, val previous: Set<Int>)
     var pendingEffectFocus by mutableStateOf<EffectFocusRequest?>(null)
@@ -1781,6 +1786,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             layerAcceptsLights = -1
         }
         shapeParams = same(shapeParams, if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Shape.kind && !isVectorLayer) engine.queryShapeParams(id) else null)
+        // Omega aparência: o preenchimento (cor animável/degradê) no cabeçote.
+        shapeFill = same(shapeFill, if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Shape.kind && !isVectorLayer) engine.queryShapeFill(id) else null)
         textDetail = if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind) {
             engine.queryText(id, textFloats)?.let { com.aurea.aurea.engine.TextDetail.of(it, textFloats) }
         } else {
@@ -1878,12 +1885,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         vectorPath = 0
         vectorPoint = -1
         select(id)
-        if (preset == 0) vectorTool = 1
+        // Omega conteúdo (área 06, P0-7): vetor sem pontos abre o Editar pontos.
+        if (preset == 0) contentEditorRequest = ContentEditorRequest.EditPoints
         return id
     }
 
     fun chooseVectorTool(tool: Int) {
-        if (tool == 2 && vectorTool != 2) freehandLayer = 0L
+        // Omega conteúdo (área 06): "Mão livre" cria a camada de desenho e abre o
+        // editor de desenho (caneta, pincel, preencher, borracha).
+        if (tool == 2) { startDrawing(); return }
         vectorTool = if (tool == 1 && !isVectorLayer) 0 else tool
         vectorPoint = -1
     }
@@ -1942,7 +1952,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             vectorGroup = g
             vectorPath = 0
             vectorPoint = -1
-            if (kind == 0) vectorTool = 1
+            if (kind == 0) contentEditorRequest = ContentEditorRequest.EditPoints   // Omega conteúdo
         }
         refreshNow()
     }
@@ -1959,7 +1969,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (p >= 0) {
             vectorPath = p
             vectorPoint = -1
-            if (kind == 0) vectorTool = 1
+            if (kind == 0) contentEditorRequest = ContentEditorRequest.EditPoints   // Omega conteúdo
         }
         refreshNow()
     }
@@ -2848,7 +2858,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         refreshNow()
         select(id)
-        if (openEditor) openTextContentEditor(selectAll = true)
+        if (openEditor) openTextEdit(selectAll = true)   // Omega conteúdo: o modo de texto
         return id
     }
 
@@ -3040,14 +3050,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             return
         }
         val n = engine.queryLayerEffects(id, rowBuffer, 64, textBlob)
-        effects = List(max(0, n)) { LayerEffect.read(rowBuffer, it, textBlob) }
+        // Omega aparência: as decorações de Borda e sombra (role ≠ 0) não entram
+        // na lista de Efeitos; o painel Borda e sombra lê `decorations`.
+        val all = List(max(0, n)) { LayerEffect.read(rowBuffer, it, textBlob) }
+        effects = all.filter { !it.isDecoration }
+        decorations = all.filter { it.isDecoration }
         refreshEffectParams()
     }
 
     private fun refreshEffectParams() {
         val id = primary ?: return
         val res = getApplication<Application>().resources
-        effectParams = effects.associate { e ->
+        effectParams = (effects + decorations).associate { e ->
             val n = engine.queryEffectParams(id, e.effectId, rowBuffer, MAX_EFFECT_PARAM_ROWS, textBlob)
             e.effectId to localizeEffectParams(res, e.typeId, List(max(0, n)) { EffectParam.read(rowBuffer, it, textBlob) })
         }
@@ -3438,6 +3452,68 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun clipTimeActions(layer: Long): Int = engine.queryClipTimeActions(layer, playhead.toLong())
+
+    // Omega painel: (área 04) painel da camada — as regras moram no motor
+    // (EngineOmegaLayer.cpp); aqui só chama e relê.
+    /** Bits do painel da camada com o cabeçote atual (`LayerPanelBits`). */
+    fun layerPanelBits(layer: Long): Int = engine.queryLayerPanel(layer, playhead.toLong())
+
+    /** Move a camada inteira para começar (ou, com [alignEnd], terminar) no cabeçote. */
+    fun moveLayerToPlayhead(layer: Long, alignEnd: Boolean): Boolean {
+        val changed = engine.moveLayerToPlayhead(layer, playhead.toLong(), alignEnd)
+        refreshNow()
+        return changed
+    }
+
+    /** Retempo: 0 esticar início, 1 encurtar início, 2 encurtar fim, 3 esticar fim (muda a velocidade). */
+    fun retimeLayerToPlayhead(layer: Long, edge: Int): Boolean {
+        val changed = engine.retimeLayerToPlayhead(layer, edge, playhead.toLong())
+        if (changed) thumbnails.unalias(layer)
+        refreshNow()
+        return changed
+    }
+
+    /**
+     * Velocidade constante nas camadas sem fonte (forma, texto, nulo, câmera…):
+     * a duração acompanha e a animação da camada é reescalada no motor. Os passos
+     * de um arrasto partem da mesma camada de partida (sem acumular arredondamento).
+     */
+    fun setLayerSpeedBaked(speed: Float): Boolean {
+        val id = primary ?: return false
+        val changed = engine.setLayerSpeedBaked(id, speed.coerceIn(0.05f, 16f))
+        refreshNow()
+        return changed
+    }
+
+    /**
+     * ◆± do editor de curva (P1-11): marca a chave da trilha [track] no cabeçote
+     * com [value] (o valor que a curva dá ali) ou, se já há chave ali, tira.
+     */
+    fun toggleTrackKeyAtPlayhead(layer: Long, track: com.aurea.aurea.engine.TrackKey, value: Float) {
+        val d = detail?.takeIf { it.id == layer } ?: return
+        val t = d.localFrame(playhead)
+        val here = keyframes[layer].orEmpty().any {
+            it.property == track.property && it.effectIndex == track.effectIndex && it.paramIndex == track.paramIndex && it.time == t
+        }
+        if (here) send { deleteKeyframe(layer, track.property, track.effectIndex, track.paramIndex, t) }
+        else send { insertKeyframe(layer, track.property, track.effectIndex, track.paramIndex, t, value) }
+        refreshNow()
+    }
+
+    /** ◆ segurado (P1-9): apaga TODAS as chaves das trilhas, num passo de desfazer. */
+    fun deleteAllKeyframes(layer: Long, tracks: List<com.aurea.aurea.engine.TrackKey>) {
+        val keys = keyframes[layer].orEmpty().filter { k ->
+            // Trilha da camada (sem efeito): basta a propriedade; de efeito/animador, o TrackRef inteiro.
+            tracks.any {
+                it.property == k.property && if (it.effectIndex < 0) k.effectIndex < 0
+                else it.effectIndex == k.effectIndex && it.paramIndex == k.paramIndex
+            }
+        }
+        if (keys.isEmpty()) return
+        beginGesture("apagar keyframes")
+        send { keys.forEach { deleteKeyframe(layer, it.property, it.effectIndex, it.paramIndex, it.time) } }
+        endGesture()
+    }
 
     fun extendToPlayhead(layer: Long, start: Boolean): Boolean {
         val changed = engine.editClipTime(layer, if (start) 8 else 9, playhead.toLong())
@@ -4217,6 +4293,149 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // =========================================================================
+    // Omega adicionar (área 08): navegador de mídia (lote com duração e corte),
+    // áudio da biblioteca do app, grupo vazio e projeto como camada. As regras
+    // são do motor (EngineOmegaAdd.cpp); aqui só a cópia e a decodificação.
+    // =========================================================================
+    /** Uma mídia escolhida no navegador, com a duração (imagem) ou o corte (vídeo). */
+    data class OmegaMediaPick(
+        val uri: Uri,
+        val video: Boolean,
+        val durationFrames: Long = 0,
+        val trimInUs: Long = 0,
+        val trimOutUs: Long = 0,
+    )
+
+    /**
+     * O "Adicionar" do navegador de mídia (P1-2): uma mídia por vez (memória
+     * limitada) dentro de UM lote do motor — duração, corte e arranjo
+     * (`placement` 0 = mesmo início, 1 = em sequência, na ordem de [picks])
+     * num passo de desfazer só.
+     */
+    fun importMediaPicks(picks: List<OmegaMediaPick>, placement: Int) {
+        if (picks.isEmpty() || !acceptsImport()) return
+        val app = getApplication<Application>()
+        val imported = mutableListOf<Long>()
+        busyMessage = appText(R.string.ios_importing_media)
+        pause()
+        launchImport {
+            withContext(Dispatchers.IO) { engine.beginImportBatch() }
+            try {
+                for ((index, pick) in picks.withIndex()) {
+                    if (picks.size > 1) busyMessage = "${appText(R.string.ios_importing_media)} ${index + 1}/${picks.size}"
+                    try {
+                        val id = withContext(Dispatchers.IO) {
+                            val uri = pick.uri
+                            val source = durableSource(uri)
+                            val display = displayName(uri) ?: uri.lastPathSegment.orEmpty()
+                            val name = display.ifEmpty { appText(if (pick.video) R.string.target_video else R.string.target_image) }
+                            val ext = display.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
+                            val mime = app.contentResolver.getType(uri)
+                            val layered = !pick.video && (mime == "image/gif" || ext == "gif" || ext == "psd" || mime == "image/vnd.adobe.photoshop")
+                            val created = when {
+                                layered -> importLayeredNow(uri, mime == "image/gif" || ext == "gif")
+                                pick.video -> engine.importVideo(source, name)
+                                else -> {
+                                    val orientation = AureaEngine.exifOrientation(app, uri)
+                                    val bmp = AureaEngine.decodeBitmapRgba(app, uri) ?: return@withContext -1L
+                                    try {
+                                        val buf = directBuffer(bmp.width * bmp.height * 4)
+                                        bmp.copyPixelsToBuffer(buf); buf.rewind()
+                                        engine.importImage(buf, bmp.width, bmp.height, name, source, orientation)
+                                    } finally { bmp.recycle() }
+                                }
+                            }
+                            // Duração e corte entram no MESMO passo (o lote está aberto).
+                            if (created >= 0 && !layered && (pick.durationFrames > 0 || pick.trimOutUs > pick.trimInUs))
+                                engine.applyImportTiming(created, if (pick.video) 0 else pick.durationFrames,
+                                    if (pick.video) pick.trimInUs else 0, if (pick.video) pick.trimOutUs else 0)
+                            created
+                        }
+                        if (id >= 0) imported.add(id) else errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        Log.w(TAG, "omega media item failed", failure)
+                        errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                    }
+                }
+            } finally {
+                // Fecha o passo de desfazer mesmo se algo falhou no meio.
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                    engine.endImportBatch(imported.toLongArray(), placement)
+                }
+                busyMessage = null
+            }
+            refreshNow()
+            if (imported.isNotEmpty()) {
+                selection = imported.toCollection(LinkedHashSet())
+                engine.setSelection(imported.toLongArray())
+                refreshNow()
+            }
+        }
+    }
+
+    /**
+     * Áudio da biblioteca do app (navegador de áudio, faixa rápida): URI com
+     * permissão vai pelo [importAudio] de sempre; arquivo já no app (voz
+     * gravada, cópia importada) vai direto pelo caminho, como a voz.
+     */
+    fun importAudioSource(source: String, name: String) {
+        if (source.startsWith("content:")) { importAudio(Uri.parse(source)); return }
+        if (!acceptsImport()) return
+        if (!File(source).isFile) { errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo); return }
+        busyMessage = appText(R.string.app_importing_audio)
+        launchImport launch@{
+            val id = withContext(Dispatchers.IO) { engine.importAudio(source, name) }
+            busyMessage = null
+            if (id < 0) {
+                errorMessage = if (-id == ERRC_UNSUPPORTED_FORMAT) appText(R.string.app_audio_unreadable)
+                    else appText(R.string.app_audio_import_failed, humanError((-id).toInt()))
+                return@launch
+            }
+            refreshNow()
+            select(id)
+        }
+    }
+
+    /**
+     * As mídias de um `.aurea` (4 textos por mídia: gravado, legível agora, nome,
+     * AssetKind). É a base da estimativa "Tamanho do pacote" (P1-10). Ler fora
+     * da thread principal.
+     */
+    internal fun projectMediaRefs(path: String): Array<String>? = engine.projectFileMedia(path)
+
+    /** "Grupo vazio" (P1-5): uma composição vazia como camada, no cabeçote. Id ou −Errc. */
+    fun addEmptyGroup(name: String): Long {
+        if (playing) pause()
+        val id = engine.addEmptyGroup(name)
+        if (id < 0) {
+            errorMessage = humanError((-id).toInt())
+            return id
+        }
+        refreshNow()
+        select(id)
+        return id
+    }
+
+    /** "Elemento/Projeto" (P1-6): outro projeto como camada de grupo, no cabeçote. */
+    fun insertProjectAsLayer(path: String, title: String) {
+        if (project.path == path) { showToast(appText(R.string.om_add_project_self)); return }
+        if (!acceptsImport()) return
+        busyMessage = appText(R.string.ios_importing_media)
+        pause()
+        launchImport launch@{
+            val id = withContext(Dispatchers.IO) { engine.insertProjectAsLayer(path, title) }
+            busyMessage = null
+            if (id < 0) {
+                errorMessage = appText(R.string.om_add_project_failed, humanError((-id).toInt()))
+                return@launch
+            }
+            refreshNow()
+            select(id)
+        }
+    }
+
     /** Vídeo do seletor do sistema. O motor guarda a URI e abre descritores por ela. */
     fun importVideo(uri: Uri) {
         if (!acceptsImport()) return
@@ -4359,7 +4578,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         }
         refreshNow()
         select(id)
-        if (openEditor) openTextContentEditor(selectAll = true)
+        if (openEditor) openTextEdit(selectAll = true)   // Omega conteúdo: o modo de texto
         return id
     }
 
@@ -4379,40 +4598,69 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return id
     }
 
+    // Omega conteúdo (área 06, P0-1): o diálogo "Editar texto" virou o MODO DE
+    // TEXTO (faixa de entrada no painel grande + barra de estilo no topo; cada
+    // letra vai na hora, uma rajada de 1 s por passo de desfazer). Os nomes
+    // antigos continuam como atalhos do modo.
     data class TextContentRequest(val layerId: Long, val content: String, val is3D: Boolean, val selectAll: Boolean, val alignment: Int = 0)
-    var textContentRequest by mutableStateOf<TextContentRequest?>(null)
+
+    /** Camada no modo de texto (nulo = fora do modo). */
+    var textEditLayer by mutableStateOf<Long?>(null)
+        private set
+    /** O modo abriu com o texto todo escolhido (texto recém-criado). */
+    var textEditSelectAll by mutableStateOf(false)
         private set
 
-    fun openTextContentEditor(selectAll: Boolean = false) {
-        val id = primary ?: return
-        if (detail?.locked == true) { showToast(appText(R.string.editor_camada_bloqueada)); return }
+    /** O modo visto como o pedido antigo do diálogo (compatibilidade). */
+    val textContentRequest: TextContentRequest?
+        get() {
+            val id = textEditLayer ?: return null
+            val t3 = text3d
+            val content = t3?.content ?: textDetail?.content ?: return null
+            return TextContentRequest(id, content, t3 != null, textEditSelectAll, t3?.alignment ?: textDetail?.alignment ?: 0)
+        }
+
+    fun openTextContentEditor(selectAll: Boolean = false) { openTextEdit(selectAll) }
+
+    fun dismissTextContentEditor() = closeTextEdit()
+
+    /** Entra no modo de texto na camada escolhida (texto 2D ou 3D). */
+    fun openTextEdit(selectAll: Boolean = false): Boolean {
+        val id = primary ?: return false
+        if (detail?.locked == true) { showToast(appText(R.string.editor_camada_bloqueada)); return false }
+        if (text3d == null && detail?.kind != com.aurea.aurea.ui.theme.LayerType.Text.kind) return false
         if (playing) pause()
         typingHandler.removeCallbacks(applyText3d)
         if (text3dPending) text3d?.let { pushText3D(id, it) }
         typingHandler.removeCallbacks(closeTyping)
         closeTyping.run()
-        val content = text3d?.content ?: textDetail?.content ?: return
-        textContentRequest = TextContentRequest(id, content, text3d != null, selectAll, textDetail?.alignment ?: 0)
+        textEditSelectAll = selectAll
+        textEditLayer = id
+        return true
     }
 
-    fun dismissTextContentEditor() { textContentRequest = null }
+    /** Sai do modo de texto: a rajada de digitação fecha (o texto já está no motor). */
+    fun closeTextEdit() {
+        if (textEditLayer == null) return
+        flushText3D()
+        typingHandler.removeCallbacks(closeTyping)
+        closeTyping.run()
+        textEditLayer = null
+        textEditSelectAll = false
+        refreshNow()
+    }
 
-    /** Commit only the words, against the original layer and its CURRENT style. */
-    fun commitTextContent(request: TextContentRequest, content: String): Boolean {
-        if (request.is3D && content.isBlank()) return false
-        val ok = if (content == request.content) true else if (request.is3D) {
-            val fields = FloatArray(Text3DInfo.FIELDS)
-            val existing = engine.queryText3d(request.layerId, fields) ?: return false
-            val current = Text3DInfo.of(existing, fields, engine.queryText3dFont(request.layerId))
-            engine.setText3d(request.layerId, content, current.toFields(), current.fontPath)
+    /** Uma letra a mais (ou a menos) no modo de texto: vai direto para a camada. */
+    fun typeText(content: String) {
+        val id = textEditLayer ?: return
+        if (primary != id) return
+        val t3 = text3d
+        if (t3 != null) {
+            // Texto 3D vazio continua proibido: o último conteúdo válido fica.
+            if (content.isNotBlank()) setText3D(t3.copy(content = content), typing = true)
         } else {
-            engine.beginCommandBatch()
-            batch.setTextContent(request.layerId, content)
-            (engine.submitCommands() == 1).also { wakeStatusLoop() }
+            setTextContent(content)
         }
-        if (ok) { textContentRequest = null; refreshNow() }
-        else errorMessage = appText(R.string.text_content_save_failed)
-        return ok
     }
 
     /**
@@ -5673,7 +5921,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     // --- Fontes ---------------------------------------------------------------------------
     /** Uma fonte (arquivo) do aparelho ou importada. */
-    data class FontItem(val family: String, val style: String, val weight: Int, val italic: Boolean, val path: String, val imported: Boolean)
+    data class FontItem(val family: String, val style: String, val weight: Int, val italic: Boolean, val path: String, val imported: Boolean,
+                        /** Omega conteúdo (área 06): categoria (0 sem serifa … 4 mono) e escritas (bits do motor). */
+                        val category: Int = 0, val scripts: Int = 1)
 
     var fonts by mutableStateOf<List<FontItem>>(emptyList())
         private set
@@ -5684,7 +5934,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun parseFont(line: String): FontItem? {
         val p = line.split('\t')
         if (p.size < 6) return null
-        return FontItem(p[0], p[1], p[2].toIntOrNull() ?: 400, p[3] == "1", p[4], p[5] == "1")
+        return FontItem(p[0], p[1], p[2].toIntOrNull() ?: 400, p[3] == "1", p[4], p[5] == "1",
+            p.getOrNull(6)?.toIntOrNull() ?: 0, p.getOrNull(7)?.toIntOrNull() ?: 1)
     }
 
     /** Lista as fontes (a varredura lê só os cabeçalhos; fora da thread de UI). */
@@ -6063,6 +6314,53 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshNow()
             refreshDetail()
         }
+    }
+
+    // Omega efeitos (navegador): adicionar o efeito JÁ com uma variação. Par do
+    // AureaModel.swift (`addEffectWithPreset`).
+    /**
+     * Adiciona o efeito [typeId] às camadas escolhidas (destravadas) e aplica a
+     * variação [preset] (índice em [effectPresets]) no efeito NOVO de cada uma,
+     * tudo num passo de desfazer. [preset] < 0 = só o efeito ([addEffect]).
+     *
+     * O motor aplica o "adicionar" no próximo quadro dele; o grupo de desfazer
+     * fica aberto até o efeito novo aparecer (≤ ~1 s) e o preset entrar.
+     */
+    fun addEffectWithPreset(typeId: Int, preset: Int) {
+        val ids = selection.filter { id -> layers.firstOrNull { it.id == id }?.locked != true }
+        if (preset < 0 || ids.isEmpty() || com.aurea.aurea.effects.HyperEffectGate.locked(typeId)) {
+            addEffect(typeId, ids.ifEmpty { selection })
+            return
+        }
+        if (destroyed || !ready) return
+        val before = ids.associateWith { omegaEffectIdsOfType(it, typeId) }
+        val waitMs = 16L
+        val maxTries = 60
+        beginGesture("adicionar efeito")
+        addEffect(typeId, ids)
+        var tries = 0
+        lateinit var poll: Runnable
+        poll = Runnable {
+            if (destroyed) return@Runnable
+            val fresh = ids.mapNotNull { layer ->
+                (omegaEffectIdsOfType(layer, typeId) - before[layer].orEmpty()).lastOrNull()?.let { layer to it }
+            }
+            if (fresh.size < ids.size && tries++ < maxTries) {
+                main.postDelayed(poll, waitMs)
+                return@Runnable
+            }
+            fresh.forEach { (layer, effectId) -> engine.applyEffectPreset(layer, effectId, preset) }
+            endGesture()
+            refreshDetail()
+        }
+        main.postDelayed(poll, waitMs)
+    }
+
+    /** Os efeitos do tipo [typeId] na camada [layer], na ordem da pilha (leitura direta do motor). */
+    private fun omegaEffectIdsOfType(layer: Long, typeId: Int): Set<Int> {
+        val n = engine.queryLayerEffects(layer, rowBuffer, 64, textBlob)
+        return (0 until max(0, n)).map { LayerEffect.read(rowBuffer, it, textBlob) }
+            .filter { it.typeId == typeId }.mapTo(LinkedHashSet()) { it.effectId }
     }
 
     // --- Correção de cor no modo de edição (0.3.0, engine/src/engine/EngineColor.cpp) ---
@@ -6522,6 +6820,31 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (n > 0) showToast(appText(R.string.msg_efeitos_colados))
     }
 
+    // Omega efeitos (área 07, P0-5): menu ⋮ do efeito. Par do AureaModel.swift.
+    /** Duplica o efeito no FIM da pilha (um desfazer); devolve o id novo ou null. */
+    fun duplicateEffect(effectId: Int): Int? {
+        val id = primary ?: return null
+        if (detail?.locked == true) return null
+        val made = engine.duplicateEffect(id, effectId)
+        refreshNow()
+        if (made < 0) return null
+        showToast(appText(R.string.om_fx_effect_duplicated))
+        return made
+    }
+
+    /** Cola as configurações do efeito copiado (mesmo tipo) neste efeito; um desfazer. */
+    fun pasteEffectSettings(effectId: Int): Boolean {
+        val id = primary ?: return false
+        if (detail?.locked == true) return false
+        val ok = engine.pasteEffectSettings(id, effectId)
+        refreshNow()
+        if (ok) showToast(appText(R.string.om_fx_settings_pasted))
+        return ok
+    }
+
+    /** Tipo do efeito na área de transferência quando ela guarda UM só (0 = vazia ou vários). */
+    fun clipboardEffectType(): Int = engine.clipboardEffectType()
+
     fun copyKeyframes() {
         val id = primary ?: return
         val n = engine.copyKeyframes(id, playhead.toLong())
@@ -6601,6 +6924,57 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val moved = engine.arrangeLayerTimes(ids, mode, playhead.toLong())
         if (moved < 0) showToast(appText(R.string.timeline_arrange_failed))
         else refreshNow()
+    }
+
+    // --- Omega chrome (área 02): moldura do editor (EngineOmegaChrome.cpp) -------------
+    /** Trilha de grupos: os nomes das composições abertas, da principal até a atual. */
+    fun compositionTrail(): List<String> = if (ready) engine.compositionTrail() else emptyList()
+
+    /** Setas do transporte (referência): começo, último quadro, marcadores e as pontas e keyframes da camada. */
+    fun stepTransportEdges(direction: Int) {
+        if (!ready) return
+        val target = engine.queryTransportNavigation(primary, playhead, direction) ?: return
+        if (engine.seekTimelineEvent(target)) holdPlayhead(target)
+    }
+
+    /** Barra inferior da seleção múltipla: 0 cortes, 1 todas depois do cabeçote, 2 todas antes. */
+    fun multiTimeVariant(): Int =
+        if (!ready || selection.isEmpty()) 0 else engine.queryMultiTimeActions(selection.toLongArray(), playhead)
+
+    /** Estende o início (ou o fim) das escolhidas destravadas até o cabeçote, num passo de desfazer. */
+    fun extendSelectionToPlayhead(start: Boolean) {
+        val targets = layers.filter { it.id in selection && !it.locked }.map { it.id }
+        if (targets.isEmpty() || !ready) return
+        if (playing) pause()
+        beginGesture(if (start) "estender inicio" else "estender fim")
+        targets.forEach { engine.editClipTime(it, if (start) 8 else 9, playhead.toLong()) }
+        endGesture()
+    }
+
+    /** "Copiar camada (com estilo)": com UMA escolhida, o estilo dela também vai para colar estilo. */
+    fun copyLayersWithStyle() {
+        val ids = selection.toList()
+        if (ids.isEmpty() || !ready) return
+        if (ids.size == 1) engine.copyStyle(ids[0])
+        copyLayers(ids)
+    }
+
+    /** As partes do estilo copiado (bits de `Engine::Style*`; 0 = nada). */
+    fun copiedStyleParts(): Int = if (ready) engine.copiedStyleParts() else 0
+
+    /** Cola só as partes pedidas do estilo copiado (um passo de desfazer). */
+    fun pasteStyleParts(parts: Int, ids: Collection<Long> = selection) {
+        if (ids.isEmpty() || parts == 0 || !ready) return
+        if (playing) pause()
+        val n = engine.pasteStyleParts(ids.toLongArray(), parts)
+        refreshNow()
+        if (n > 0) showToast(appText(R.string.msg_estilo_colado))
+    }
+
+    /** Modos de visão da prévia: 0 normal, 1 só as escolhidas, 2 escolhidas a 50 %; pixels reais. Nunca no export. */
+    fun setPreviewView(mode: Int, pixel: Boolean) {
+        if (!ready) return
+        engine.setPreviewView(mode, if (mode != 0) selection.toLongArray() else LongArray(0), pixel)
     }
 
     var editMode by mutableStateOf(false)
@@ -6764,6 +7138,49 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (f.isEmpty()) return
         val next = f.firstOrNull { it > playhead } ?: f.first()
         seek(next)
+    }
+
+    // Omega timeline (área 03) -----------------------------------------------------
+    /** Marcador anterior ao cabeçote (sem dar a volta); false = não há. Régua e TalkBack. */
+    fun seekToPreviousMarker(): Boolean {
+        val target = markers.frames.lastOrNull { it < playhead } ?: return false
+        seek(target)
+        return true
+    }
+
+    /** Marcador seguinte ao cabeçote (sem dar a volta); false = não há. */
+    fun seekToFollowingMarker(): Boolean {
+        val target = markers.frames.firstOrNull { it > playhead } ?: return false
+        seek(target)
+        return true
+    }
+
+    /**
+     * Camadas com as trilhas de keyframes abertas na timeline. Na Omega a pílula
+     * seleciona a camada; as trilhas abrem pelo ⋮ da camada (decisão D-1).
+     */
+    var timelineExpandedLayers by mutableStateOf<Set<Long>>(emptySet())
+
+    fun toggleTimelineTracks(layer: Long) {
+        val open = timelineExpandedLayers
+        timelineExpandedLayers = if (layer in open) open - layer else open + layer
+    }
+
+    /**
+     * Barra de informação do gesto da timeline (mover, aparar, arrastar
+     * keyframe): pares rótulo–valor na ordem; null = sem barra. A timeline
+     * escreve; quem mostra é a timeline (e, quando ligada, a barra de reprodução).
+     */
+    var timelineInfo by mutableStateOf<List<Pair<String, String>>?>(null)
+
+    /**
+     * Alça de velocidade do foco (P1-8): estica a camada para [start, end)
+     * mantendo o trecho da fonte (a velocidade muda), num passo de desfazer.
+     */
+    fun stretchLayerSpan(layer: Long, start: Int, end: Int): Boolean {
+        val ok = engine.stretchLayerSpan(layer, start.toLong(), end.toLong())
+        if (ok) refreshNow()
+        return ok
     }
 
     /** "Marcas": marca (ou desmarca) o frame do cabeçote. */
@@ -7175,6 +7592,92 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Valores da forma no cabeçote + bits de animado + bits de keyframe aqui. */
     var shapeParams by mutableStateOf<FloatArray?>(null)
         private set
+
+    // --- Omega aparência (área 05): Cor e preenchimento, Borda e sombra, ímã ---------
+    /**
+     * Preenchimento da forma no cabeçote (`Engine::query_shape_fill`, 24 valores):
+     * [0] tipo 0 cor/1 degradê, [1] degradê 0 linear/1 radial/2 angular, [2] preenchido,
+     * [3..6] cor, [7..10] início, [11..14] fim, [15..18] pontas, [19] animados, [20] keyframe aqui,
+     * [21] 1 = forma aceita, [22..23] caixa. Nulo fora de forma SDF.
+     */
+    var shapeFill by mutableStateOf<FloatArray?>(null)
+        private set
+
+    /** 0 nenhum, 1 cor sólida, 2 degradê (um passo de desfazer). */
+    fun setShapeFillMode(mode: Int) {
+        val id = primary ?: return
+        if (detail?.locked == true) { showToast(appText(R.string.editor_camada_bloqueada)); return }
+        if (engine.setShapeFillMode(id, mode)) refreshNow()
+    }
+
+    /** 0 linear, 1 radial, 2 angular. */
+    fun setShapeGradientType(type: Int) {
+        val id = primary ?: return
+        if (engine.setShapeGradientType(id, type)) refreshNow()
+    }
+
+    /**
+     * Grupo do preenchimento: 0 cor, 1 cor do início, 2 cor do fim (RGBA sRGB 0..1),
+     * 3 ponta inicial, 4 ponta final (x, y relativos à caixa). Com keyframe no grupo,
+     * grava no cabeçote. Arrasto: abra [beginGesture] antes (um passo de desfazer).
+     */
+    fun setShapeFillValue(group: Int, values: FloatArray) {
+        val id = primary ?: return
+        if (values.any { !it.isFinite() }) return
+        if (engine.setShapeFillValue(id, group, values)) refreshDetail()
+    }
+
+    /** ◆ do grupo do preenchimento (keyframe no cabeçote ↔ tira). */
+    fun toggleShapeFillKey(group: Int) {
+        val id = primary ?: return
+        if (engine.toggleShapeFillKey(id, group)) refreshNow()
+    }
+
+    /** Borda e sombra: põe uma borda (Dentro, branca, 6 px) ou liga a sombra. Devolve o id do efeito. */
+    fun addDecoration(role: Int): Int {
+        val id = primary ?: return -1
+        if (detail?.locked == true) { showToast(appText(R.string.editor_camada_bloqueada)); return -1 }
+        val effect = engine.decorationAdd(id, role)
+        if (effect >= 0) refreshNow()
+        return effect
+    }
+
+    /** Reordena a borda dentro das bordas ([slot] 0 = a primeira). */
+    fun moveDecoration(effectId: Int, slot: Int) {
+        val id = primary ?: return
+        if (engine.decorationMove(id, effectId, slot)) refreshNow()
+    }
+
+    /** Deslocamento X/Y (px) da sombra (vira direção/distância no motor). */
+    fun setShadowOffset(effectId: Int, dx: Float, dy: Float) {
+        val id = primary ?: return
+        if (!dx.isFinite() || !dy.isFinite()) return
+        if (engine.decorationSetShadowOffset(id, effectId, dx, dy)) refreshNow()
+    }
+
+    /** [dx, dy] da sombra no cabeçote. */
+    fun shadowOffset(effectId: Int): FloatArray? = primary?.let { engine.decorationShadowOffset(it, effectId) }
+
+    /**
+     * Alvos do ímã da camada principal no cabeçote: pares (valor, guia) — [axis] 0/1 posição
+     * X/Y (guia em px da composição), 2/3 larguras/alturas das outras camadas.
+     */
+    fun snapTargets(axis: Int, layer: Long? = primary): List<Pair<Float, Float>> {
+        val id = layer ?: return emptyList()
+        val raw = engine.querySnapTargets(id, axis) ?: return emptyList()
+        return List(raw.size / 2) { raw[it * 2] to raw[it * 2 + 1] }
+    }
+
+    /** Linhas-guia do ímã no palco (px da composição): X verticais, Y horizontais. Vazias = nada. */
+    var snapGuideX by mutableStateOf<Float?>(null)
+    var snapGuideY by mutableStateOf<Float?>(null)
+
+    /** Conta-gotas ao vivo no palco (P1-1): ligado pelo seletor de cor; `onPick` recebe RGBA sRGB. */
+    class EyedropperRequest(val onSample: (FloatArray) -> Unit, val onCommit: (FloatArray) -> Unit, val onCancel: () -> Unit)
+    var eyedropper by mutableStateOf<EyedropperRequest?>(null)
+
+    /** Trajetória (P1-3): o painel Mover pede a linha da posição no palco. */
+    var showMotionPath by mutableStateOf(false)
 
     // --- Tempo do clipe --------------------------------------------------------
     fun setLayerSpeed(speed: Float) {
@@ -8015,7 +8518,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Sai do editor: salva (se mudou) e volta à Home. */
     fun closeProject() {
         if (!acceptsProjectChange()) return
-        textContentRequest = null
+        textEditLayer = null   // Omega conteúdo: o modo de texto fecha com o projeto
         if (exporter.busy) {
             showToast(appText(R.string.msg_aguarde_a_exportacao_terminar))
             return
@@ -8302,6 +8805,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             null
         }
         val entry = ProjectMeta.entry(file.absolutePath, file.nameWithoutExtension, file.lastModified(), json) { File(it).exists() }
+            // Omega home: o tamanho do arquivo vai na ficha da linha.
+            .copy(sizeBytes = file.length())
         // Em quarentena (o app morreu com o motor nele): nem a capa é decodificada.
         return if (entry.path in quarantinedPaths) entry.copy(thumbnailPath = null) else entry
     }
@@ -8356,6 +8861,107 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun dismissError() {
         errorMessage = null
+    }
+
+    // =============================================================================
+    // Omega conteúdo (área 06): editores de conteúdo — desenho, Editar pontos,
+    // alças de texto e de forma, fontes. As regras moram no motor
+    // (EngineOmegaContent.cpp); aqui só a ponte e o estado da casca.
+    // =============================================================================
+    /** Editor que a casca deve abrir (depois de criar a camada; ver EditorScreen). */
+    enum class ContentEditorRequest { Drawing, EditPoints }
+    var contentEditorRequest by mutableStateOf<ContentEditorRequest?>(null)
+
+    /** A camada vetorial escolhida é de desenho (o editor de desenho abre nela). */
+    val isDrawingLayer: Boolean get() = isVectorLayer && vectorDoc?.drawing == true
+
+    /** "Mão livre": camada de desenho nova, escolhida, e o editor de desenho. */
+    fun startDrawing() {
+        if (playing) pause()
+        vectorTool = 0
+        val id = engine.addDrawingLayer()
+        if (id < 0) {
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_o_desenho, -id)
+            return
+        }
+        refreshNow()
+        vectorGroup = 0
+        vectorPath = 0
+        vectorPoint = -1
+        select(id)
+        contentEditorRequest = ContentEditorRequest.Drawing
+    }
+
+    /**
+     * Um traço do editor de desenho ([tool] 0 caneta, 1 pincel, 2 preencher,
+     * 3 borracha; [xyp] x, y em px da composição + pressão). Um passo de desfazer.
+     */
+    fun commitDrawingStroke(tool: Int, rgba: FloatArray, width: Float, xyp: FloatArray): Boolean {
+        val id = primary ?: return false
+        if (xyp.size < 3) return false
+        val r = engine.addDrawingStroke(id, tool, rgba, width, xyp)
+        if (r < 0) return false
+        vectorGroup = max(0, (vectorDoc?.groups?.size ?: 0))
+        refreshNow()
+        return true
+    }
+
+    /** Operação de ponto do Editar pontos (ver `Engine::PathOp`). Índice escolhido ou −1. */
+    fun editVectorPath(op: Int, args: FloatArray, continuing: Boolean): Int {
+        val id = primary ?: return -1
+        if (playing) pause()
+        val r = engine.editVectorPath(id, vectorGroup, vectorPath, op, args, continuing)
+        refreshVector()
+        if (!continuing) refreshNow()
+        return r
+    }
+
+    /** Escolhe o contorno (caminho) do grupo atual sem soltar o ponto da faixa. */
+    fun chooseContour(path: Int) {
+        vectorPath = max(0, path)
+        vectorPoint = -1
+        refreshVector()
+    }
+
+    /** Alça de largura da caixa de texto no palco (dx, dy em px da composição). */
+    fun dragTextBoxWidth(dx: Float, dy: Float, continuing: Boolean) {
+        val id = primary ?: return
+        if (playing) pause()
+        if (engine.dragTextBoxWidth(id, dx, dy, continuing)) refreshDetail()
+    }
+
+    /** Alça de tamanho da forma: du/dv = passo em px da forma desde o último envio. */
+    fun resizeShapeHandle(handle: Int, du: Float, dv: Float, keepRatio: Boolean, fromCenter: Boolean, continuing: Boolean) {
+        val id = primary ?: return
+        if (playing) pause()
+        if (engine.resizeShapeHandle(id, handle, du, dv, keepRatio, fromCenter, continuing)) refreshDetail()
+    }
+
+    /** Apaga uma fonte importada; os textos que a usavam voltam à fonte padrão. */
+    fun removeImportedFont(item: FontItem): Boolean {
+        if (!item.imported) return false
+        val ok = engine.removeImportedFont(item.path)
+        if (ok) {
+            fonts = fonts.filterNot { it.path == item.path }
+            refreshTextFont()
+            refreshNow()
+        }
+        return ok
+    }
+
+    /** Fonte escolhida no modo de texto (2D: a família; 3D: o arquivo). */
+    fun applyFontAnywhere(item: FontItem?) {
+        val t3 = text3d
+        if (t3 != null) setText3D(t3.copy(fontPath = item?.path.orEmpty()))
+        else applyTextFont(item)
+    }
+
+    /** Alinhamento seguinte do ciclo E → C → D (barra de estilo do modo de texto). */
+    fun cycleTextAlignment() {
+        val t3 = text3d
+        if (t3 != null) { setText3D(t3.copy(alignment = (t3.alignment + 1).mod(3))); return }
+        val a = textDetail?.alignment ?: 0
+        setTextAlignment((a + 1).mod(3))
     }
 
     companion object {

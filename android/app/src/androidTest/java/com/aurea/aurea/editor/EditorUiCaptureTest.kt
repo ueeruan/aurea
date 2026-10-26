@@ -97,7 +97,9 @@ class EditorUiCaptureTest {
         compose.runOnIdle { store.setTextSize(100f); store.addEffect(effectTypeId("aurea.motion.oscillate.cycles")) }
         compose.waitUntil(5000) { store.effects.size == 1 }
         val effect = store.effects.single().effectId
-        compose.onNodeWithTag("dock.tool.Effects").performScrollTo().performClick()
+        compose.onNodeWithTag("layer.panel.effects").performClick()
+        // Omega (área 07): a lista nasce fechada; a linha abre os controles do efeito.
+        compose.onNodeWithTag("effects.expand.${com.aurea.aurea.effects.effectCardId(effectTypeId("aurea.motion.oscillate.cycles"))}").performClick()
         compose.waitUntil(5000) { store.paramOf(effect,2) != null }
         capture("oscillate")
         compose.onNodeWithText(context.getString(R.string.fx_frequencia),useUnmergedTree=true).performScrollTo().performClick()
@@ -107,12 +109,12 @@ class EditorUiCaptureTest {
         compose.runOnIdle { store.setEffectParam(effect,store.paramOf(effect,2)!!,4f) }
         compose.waitUntil(5000) { store.primaryKeys().count { it.property == 31 && it.effectIndex == effect && it.paramIndex == 8 } == 2 }
         compose.onNodeWithContentDescription(context.getString(R.string.panel_editar_curva_propriedade)).performClick()
-        compose.onNodeWithTag("curve.preset.bounce").performClick()
+        compose.onNodeWithTag("curve.category.bounces").performClick()
         compose.onNodeWithTag("curve.bounce.count").performClick()
         compose.onNodeWithTag("curve.bounce.strength").performTouchInput {
             down(center); moveTo(androidx.compose.ui.geometry.Offset(width*.65f,center.y)); up()
         }
-        compose.onNodeWithTag("curve.power").assertTextEquals(context.getString(R.string.pn_textpreset_bounce))
+        compose.onNodeWithTag("curve.power").assertTextEquals(context.getString(R.string.pn_textpreset_bounce).uppercase())
         capture("bounce")
     }
 
@@ -145,7 +147,7 @@ class EditorUiCaptureTest {
         compose.runOnIdle { store.setTextAnimParam(0, 6, 0.8f); store.setMaskParam(mask, 0, 40f); store.setMaskParam(mask, 2, 0.6f) }
         seek(0)
         capture("editor")
-        compose.onNodeWithTag("dock.tool.TextOptions").performScrollTo().performClick()
+        compose.onNodeWithTag("layer.panel.colorFill").performClick()
         settle()
         compose.onNodeWithTag("text.transform.add").performScrollTo().performClick()
         capture("text-stack")
@@ -160,7 +162,8 @@ class EditorUiCaptureTest {
             store.setLayerRanges(ids, intArrayOf(0, 35, 60), intArrayOf(90, 60, 90))
             store.selectAll(); store.seek(10)
         }
-        compose.onNodeWithTag("timeline.batch.tools").assertIsDisplayed()
+        // Omega chrome (área 02, P0-4): a barra inferior flutuante da seleção múltipla.
+        compose.onNodeWithTag("batch.bottom").assertIsDisplayed()
         capture("layers")
     }
 }

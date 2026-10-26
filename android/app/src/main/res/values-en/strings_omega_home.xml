@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega home (área 01): barra superior, dock, gaveta, aba Projetos, Presets, folha Novo projeto e Sobre. -->
+    <string name="om_home_account">Account</string>
+    <string name="om_home_action_export">Export</string>
+    <string name="om_home_empty_body">Tap %1$s to create your first project.</string>
+    <string name="om_home_my_projects">My projects</string>
+    <string name="om_home_sort_current">Sort: %1$s</string>
+    <string name="om_home_my_presets">My presets</string>
+    <string name="om_home_presets_empty">You haven\'t saved any presets yet. In the editor, save one from the layer\'s presets panel.</string>
+    <string name="om_home_preset_builtin">Built into AUREA</string>
+    <string name="om_home_preset_menu">Preset menu</string>
+    <string name="om_home_preset_delete_q">Delete the preset “%1$s”?</string>
+    <string name="om_home_preset_name_taken">A preset with that name already exists.</string>
+    <string name="om_drawer_support">Support</string>
+    <string name="om_drawer_light_preview">Lighter preview</string>
+    <string name="om_drawer_light_preview_note">The editor opens with the preview at 1/2: smoother editing; export keeps full quality.</string>
+    <string name="om_new_frame_size">Frame size</string>
+    <string name="om_new_keep_ratio">Keep aspect ratio</string>
+    <string name="om_new_clear_name">Clear name</string>
+    <string name="om_new_bg_light_grey">Light gray</string>
+    <string name="om_new_bg_green">Green</string>
+    <string name="om_new_bg_blue">Blue</string>
+    <string name="om_new_over_limit">(over the limit)</string>
+    <string name="om_about_version">Version</string>
+    <string name="om_about_build">Build</string>
+    <string name="om_about_device">Device</string>
+    <string name="om_about_chipset">Processor</string>
+    <string name="om_about_system">System</string>
+    <string name="om_about_memory">Memory</string>
+    <string name="om_about_storage">Storage</string>
+    <string name="om_about_storage_value">%1$s free of %2$s</string>
+    <string name="om_about_export_max">Max export</string>
+    <string name="om_about_languages">Languages</string>
+    <string name="om_about_copied">Info copied</string>
+    <string name="om_about_copy_hint">Tap the table to copy it (handy when reporting a problem).</string>
+    <string name="om_about_cores">%1$d cores</string>
+</resources>

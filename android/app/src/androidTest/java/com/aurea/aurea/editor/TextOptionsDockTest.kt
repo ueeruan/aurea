@@ -58,8 +58,9 @@ class TextOptionsDockTest {
         compose.waitUntil(5000) { store.primary == null }
         compose.onNodeWithTag("editor.stage").performTouchInput { click(center) }
         compose.waitUntil(10000) { store.primary == id }
-        compose.onNodeWithTag("dock.tool.TextOptions").assertIsDisplayed().performClick()
-        compose.onNodeWithTag("dock.tool.TextOptions").assertDoesNotExist()
+        // Omega painel: "Cor e preenchimento" do texto abre as opções do texto.
+        compose.onNodeWithTag("layer.panel.colorFill").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("layer.panel.colorFill").assertDoesNotExist()
         compose.runOnIdle { assertEquals(id, store.primary) }
     }
 }

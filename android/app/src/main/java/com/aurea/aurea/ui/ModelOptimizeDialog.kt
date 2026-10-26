@@ -92,7 +92,8 @@ private fun QualityRow(label: String, hint: String, recommended: Boolean, select
             .fillMaxWidth()
             .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(9.dp))
-            .background(if (selected) Color(0xFF3A3A3C) else Color(0xFF1C1C1E))
+            // Omega fundação: opções sobre o diálogo claro (papéis Light*).
+            .background(if (selected) AureaColors.LightSurfaceAlt else AureaColors.LightSurface)
             // Leitor de tela: "Equilibrado, recomendado, …, selecionado" (papel de botão de opção).
             .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
             .padding(horizontal = 10.dp, vertical = 7.dp),
@@ -102,17 +103,17 @@ private fun QualityRow(label: String, hint: String, recommended: Boolean, select
             Modifier
                 .size(18.dp)
                 .clip(CircleShape)
-                .border(1.5.dp, if (selected) AureaColors.Accent else Color(0xFF8E8E93), CircleShape),
+                .border(1.5.dp, if (selected) AureaColors.LightAccentInk else AureaColors.LightTextFaint, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            if (selected) Box(Modifier.size(9.dp).clip(CircleShape).background(AureaColors.Accent))
+            if (selected) Box(Modifier.size(9.dp).clip(CircleShape).background(AureaColors.LightAccentInk))
         }
         Column(Modifier.padding(start = 10.dp).weight(1f)) {
             Text(
                 if (recommended) "$label · $badge" else label,
-                style = AureaType.Base.merge(TextStyle(fontSize = 14.sp)),
+                style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.LightText)),
             )
-            Text(hint, style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = Color(0xFF8E8E93))))
+            Text(hint, style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.LightTextMuted)))
         }
     }
 }

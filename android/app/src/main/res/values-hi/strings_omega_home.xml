@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega home (área 01): barra superior, dock, gaveta, aba Projetos, Presets, folha Novo projeto e Sobre. -->
+    <string name="om_home_account">खाता</string>
+    <string name="om_home_action_export">एक्सपोर्ट</string>
+    <string name="om_home_empty_body">अपना पहला प्रोजेक्ट बनाने के लिए %1$s पर टैप करें।</string>
+    <string name="om_home_my_projects">मेरे प्रोजेक्ट</string>
+    <string name="om_home_sort_current">क्रम: %1$s</string>
+    <string name="om_home_my_presets">मेरे प्रीसेट</string>
+    <string name="om_home_presets_empty">आपने अभी तक कोई प्रीसेट सेव नहीं किया है। एडिटर में लेयर के प्रीसेट पैनल से एक सेव करें।</string>
+    <string name="om_home_preset_builtin">AUREA में शामिल</string>
+    <string name="om_home_preset_menu">प्रीसेट मेनू</string>
+    <string name="om_home_preset_delete_q">प्रीसेट “%1$s” हटाएँ?</string>
+    <string name="om_home_preset_name_taken">इस नाम का प्रीसेट पहले से मौजूद है।</string>
+    <string name="om_drawer_support">सहायता</string>
+    <string name="om_drawer_light_preview">हल्का प्रीव्यू</string>
+    <string name="om_drawer_light_preview_note">एडिटर 1/2 प्रीव्यू के साथ खुलता है: एडिटिंग ज़्यादा स्मूद; एक्सपोर्ट पूरी क्वालिटी में ही रहता है।</string>
+    <string name="om_new_frame_size">फ़्रेम का आकार</string>
+    <string name="om_new_keep_ratio">अनुपात बनाए रखें</string>
+    <string name="om_new_clear_name">नाम मिटाएँ</string>
+    <string name="om_new_bg_light_grey">हल्का ग्रे</string>
+    <string name="om_new_bg_green">हरा</string>
+    <string name="om_new_bg_blue">नीला</string>
+    <string name="om_new_over_limit">(सीमा से ऊपर)</string>
+    <string name="om_about_version">संस्करण</string>
+    <string name="om_about_build">बिल्ड</string>
+    <string name="om_about_device">डिवाइस</string>
+    <string name="om_about_chipset">प्रोसेसर</string>
+    <string name="om_about_system">सिस्टम</string>
+    <string name="om_about_memory">मेमोरी</string>
+    <string name="om_about_storage">स्टोरेज</string>
+    <string name="om_about_storage_value">%2$s में से %1$s खाली</string>
+    <string name="om_about_export_max">अधिकतम एक्सपोर्ट</string>
+    <string name="om_about_languages">भाषाएँ</string>
+    <string name="om_about_copied">जानकारी कॉपी हुई</string>
+    <string name="om_about_copy_hint">कॉपी करने के लिए तालिका पर टैप करें (समस्या रिपोर्ट करने में काम आता है)।</string>
+    <string name="om_about_cores">%1$d कोर</string>
+</resources>

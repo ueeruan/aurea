@@ -70,6 +70,31 @@ internal class TimelineState {
     var fittedPath: String? = null
     /** Lido no desenho: mudar pede mais um quadro (miniaturas que ficaram para depois). */
     var redrawTick by mutableIntStateOf(0)
+
+    // --- Omega 0.3.2 (área 03) ------------------------------------------------------
+    /** Clipes levantados no arrasto (sombra forte e pulso); vazio fora do gesto. */
+    var movingIds by mutableStateOf(LongArray(0))
+    /** Começo do pulso de 130 ms ao levantar (System.nanoTime). */
+    var liftStartNanos by mutableLongStateOf(0L)
+    /** Régua em realce durante o mover: tiques do início/fim originais e novos ([Snap.NONE] = sem). */
+    var moveOrigStart by mutableIntStateOf(Snap.NONE)
+    var moveOrigEnd by mutableIntStateOf(Snap.NONE)
+    var moveNewStart by mutableIntStateOf(Snap.NONE)
+    var moveNewEnd by mutableIntStateOf(Snap.NONE)
+    /** Alças do foco: 0 em repouso, 1 tocada, 2 arrastando, 3 escondidas (o clipe anda). */
+    var handleState by mutableIntStateOf(0)
+    /** Painel de velocidade aberto: as alças do foco esticam a velocidade (P1-8). */
+    var speedHandles by mutableStateOf(false)
+    /** Prévia da alça de velocidade: início e fim novos durante o arrasto ([Snap.NONE] = sem). */
+    var stretchId by mutableLongStateOf(0L)
+    var stretchStart by mutableIntStateOf(Snap.NONE)
+    var stretchEnd by mutableIntStateOf(Snap.NONE)
+
+    fun isMoving(id: Long): Boolean {
+        val ids = movingIds
+        for (i in ids.indices) if (ids[i] == id) return true
+        return false
+    }
 }
 
 /**

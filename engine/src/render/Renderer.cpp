@@ -1,4 +1,7 @@
 #include "aurea/render/Renderer.hpp"
+// Omega aparência: inclinação da camada (P0-6) e preenchimento em degradê (P1-4).
+#include "aurea/core/LayerSkew.hpp"
+#include "aurea/timeline/ShapeFill.hpp"
 #include "aurea/effects/RandomEdits.hpp"
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/render/ShutterPlan.hpp"
@@ -192,6 +195,11 @@ Mat4 layer_matrix(const Layer& l, FrameIndex local) noexcept {
     const f32 rot = s(TrackProperty::RotationZ, l.transform.rotation.z) * kDeg2Rad;
     const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x),
                       s(TrackProperty::AnchorY, l.transform.anchor.y), 0.0f};
+    // Omega aparência (P0-6): inclinação entre a escala e a âncora (LayerSkew.hpp).
+    const f32 kx = s(TrackProperty::SkewX, l.transform.skewX), ky = s(TrackProperty::SkewY, l.transform.skewY);
+    if (has_skew(kx, ky))
+        return Mat4::translation(pos) * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, rot))
+             * Mat4::scale(scale) * skew_matrix(kx, ky) * Mat4::translation(-anchor);
     return Mat4::translation(pos) * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, rot))
          * Mat4::scale(scale) * Mat4::translation(-anchor);
 }
@@ -218,6 +226,11 @@ Mat4 layer_matrix_frac(const Layer& l, f64 local, f64 fps) noexcept {
     const f32 rot = (s(TrackProperty::RotationZ, l.transform.rotation.z) + an.rotation.z) * kDeg2Rad;
     const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x),
                       s(TrackProperty::AnchorY, l.transform.anchor.y), 0.0f};
+    // Omega aparência (P0-6): inclinação entre a escala e a âncora (LayerSkew.hpp).
+    const f32 kx = s(TrackProperty::SkewX, l.transform.skewX), ky = s(TrackProperty::SkewY, l.transform.skewY);
+    if (has_skew(kx, ky))
+        return Mat4::translation(pos) * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, rot))
+             * Mat4::scale(scale) * skew_matrix(kx, ky) * Mat4::translation(-anchor);
     return Mat4::translation(pos) * Mat4::from_quat(Quat::from_axis_angle(Vec3{0, 0, 1}, rot))
          * Mat4::scale(scale) * Mat4::translation(-anchor);
 }
@@ -246,6 +259,11 @@ Mat4 layer_matrix_3d_frac(const Layer& l, f64 local, f64 fps) noexcept {
                    (s(TrackProperty::RotationZ, l.transform.rotation.z) + an.rotation.z) * kDeg2Rad};
     const Vec3 anchor{s(TrackProperty::AnchorX, l.transform.anchor.x), s(TrackProperty::AnchorY, l.transform.anchor.y),
                       s(TrackProperty::AnchorZ, l.transform.anchor.z)};
+    // Omega aparência (P0-6): a mesma inclinação no 3D (no plano XY da camada).
+    const f32 kx = s(TrackProperty::SkewX, l.transform.skewX), ky = s(TrackProperty::SkewY, l.transform.skewY);
+    if (has_skew(kx, ky))
+        return Mat4::translation(pos) * Mat4::from_quat(Quat::from_euler_zyx(rot.x, rot.y, rot.z)) * Mat4::scale(scale)
+             * skew_matrix(kx, ky) * Mat4::translation(-anchor);
     return Mat4::translation(pos) * Mat4::from_quat(Quat::from_euler_zyx(rot.x, rot.y, rot.z)) * Mat4::scale(scale)
          * Mat4::translation(-anchor);
 }
@@ -2377,6 +2395,13 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // Guia: referência de trabalho no editor, nunca no arquivo final.
         if (l->guide && settings.finalQuality) continue;
         if (anySolo && !l->solo && !isMatte && !isInput) continue;
+        // Omega chrome (área 02): "só as escolhidas" da coluna de modos (prévia,
+        // raiz): as outras que desenham ficam de fora; câmera e luz ficam.
+        const bool omegaChosen = settings.viewSelection != 0 && !settings.finalQuality && prepareDepth_ == 0
+            && std::find(settings.viewSelectionIds, settings.viewSelectionIds + std::min<u32>(settings.viewSelectionCount, 64u),
+                         id.pack()) != settings.viewSelectionIds + std::min<u32>(settings.viewSelectionCount, 64u);
+        if (settings.viewSelection == 1 && !settings.finalQuality && prepareDepth_ == 0 && settings.viewSelectionCount > 0
+            && !omegaChosen && !isMatte && !isInput && l->kind != LayerKind::Camera && l->kind != LayerKind::Light) continue;
         const bool inputOnly = isInput && (!l->visible || (anySolo && !l->solo) || outsideStack);
         if (clipHidden && !isMatte && !isInput) continue;   // recortada sem base: nada aparece
         // POSTERIZAR TEMPO (Fase 7.3 §26): o tempo da camada é travado numa
@@ -2501,6 +2526,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         rl.id = rid;
         rl.blend = l->blendMode;
         rl.opacity = layer_opacity(*l, local, fps);
+        // Omega chrome (área 02): "camada escolhida a 50 %" (prévia): 0,5 fixo.
+        if (settings.viewSelection == 2 && omegaChosen) rl.opacity = 0.5f;
         rl.opacity *= grid::evaluate(comp,*l,static_cast<f64>(time.value)).opacity;
         rl.opacity *= copyBgOwnOnly;   // Copiar fundo sem efeito depois: só a mistura com a camada
         if (rl.opacity <= 0.0f) continue;   // invisível: nenhum passe, nenhum decode
@@ -2875,7 +2902,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     out.vec.insert(out.vec.end(), ce.paints.begin(), ce.paints.end());
                     break;
                 }
-                const bool fill = sh.filled && sh.fillColor.w > 0.0f;
+                // Omega aparência (P1-4): o preenchimento no instante — cor
+                // animável (trilhas ShapeParam 32..35) ou degradê.
+                const shape_fill::Eval fillEval = shape_fill::evaluate(*l, static_cast<f64>(local.value));
+                const bool gradient = fillEval.kind == 1;
+                const bool fill = shape_fill::paints(fillEval);
                 const bool stroke = sh.strokeWidth > 0.0f && sh.strokeColor.w > 0.0f;
                 if (!fill && !stroke) continue;   // nada a desenhar
                 auto premul = [](Vec4 c) {
@@ -2883,15 +2914,21 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 };
                 rl.source.width = static_cast<u32>(std::max(1.0f, sh.bounds.w));
                 rl.source.height = static_cast<u32>(std::max(1.0f, sh.bounds.h));
-                if (sh.shapeType == 0 && sh.cornerRadius <= 0.0f && !stroke) {
+                if (sh.shapeType == 0 && sh.cornerRadius <= 0.0f && !stroke && !gradient) {
                     // Retângulo reto sem contorno: um clear basta (o caminho mais barato).
                     rl.source.kind = LayerSource::Kind::Solid;
-                    rl.source.solid = premul(sh.fillColor);
+                    rl.source.solid = premul(fillEval.color);
                     break;
                 }
                 rl.source.kind = LayerSource::Kind::Shape;
                 rl.source.shapeType = sh.shapeType;
-                rl.source.shapeFill = premul(sh.fillColor);
+                rl.source.shapeFill = premul(fillEval.color);
+                // Degradê: as duas cores (lineares, pré-multiplicadas), as pontas
+                // (relativas à caixa) e o tipo + 1 (0 = sem degradê) no shape.frag.
+                rl.source.shapeGrad0 = premul(fillEval.color0);
+                rl.source.shapeGrad1 = premul(fillEval.color1);
+                rl.source.shapeGradPoints = Vec4{fillEval.start.x, fillEval.start.y, fillEval.end.x, fillEval.end.y};
+                rl.source.shapeGradInfo = Vec4{gradient ? static_cast<f32>(fillEval.type) + 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
                 rl.source.shapeStroke = premul(sh.strokeColor);
                 rl.source.shapeStrokeWidth = stroke ? sh.strokeWidth : 0.0f;
                 {
@@ -6559,6 +6596,8 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             // Mesma ordem do bloco `Params` de shaders/shape/shape.frag.
             struct ShapeBlock {
                 Vec4 size, shape, fill, stroke, extra, more, blob;
+                // Omega aparência (P1-4): degradê do preenchimento.
+                Vec4 grad0, grad1, gradPoints, gradInfo;
             } block{};
             const f32 lw = static_cast<f32>(layer.source.width), lh = static_cast<f32>(layer.source.height);
             block.size = Vec4{lw, lh, lw / static_cast<f32>(w), static_cast<f32>(layer.source.shapeType)};
@@ -6568,6 +6607,10 @@ bool Renderer::build_source(const RenderLayer& layer, u32 layerIndex, bool hasEf
             block.extra = Vec4{layer.source.shapeStrokeWidth, layer.source.shapeExtra.y, layer.source.shapeExtra.z, layer.source.shapeExtra.w};
             block.more = layer.source.shapeMore;
             block.blob = layer.source.shapeBlob;
+            block.grad0 = layer.source.shapeGrad0;
+            block.grad1 = layer.source.shapeGrad1;
+            block.gradPoints = layer.source.shapeGradPoints;
+            block.gradInfo = layer.source.shapeGradInfo;
             return ctx.fullscreen_pass("forma", PassStage::Decode, out.texture, ShaderId::shape_shape_frag, {},
                                        &block, sizeof(block)) != kInvalidIndex;
         }
@@ -8622,7 +8665,10 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
         const f32 checker = snap.background.w < 0.5f
             ? std::max(6.0f, std::round(std::min(dispW, dispH) / 40.0f)) : 0.0f;
         struct Cap { PipelineHandle p; FGTexture comp; u64 sampler; Mat4 clip; f32 w, h; f32 dither; void* ubo; f32 dispW; f32 checker; }
-            cap{pOut.ok() ? *pOut : PipelineHandle{}, comp, shaders_.sampler(CommonSampler::LinearClamp).id,
+            // Omega chrome (área 02): pixels reais = vizinho mais próximo na saída.
+            cap{pOut.ok() ? *pOut : PipelineHandle{}, comp,
+                shaders_.sampler(settings.pixelPreview && !settings.finalQuality ? CommonSampler::NearestClamp
+                                                                                : CommonSampler::LinearClamp).id,
                 clip, compW, compH, settings.dither ? 1.0f : 0.0f, ubo, compW * fit, checker};
         const Vec4 clear = settings.pasteboard;
         const u32 pass = graph_.add_raster_pass("saida", PassStage::Output, bb, LoadOp::Clear, clear,

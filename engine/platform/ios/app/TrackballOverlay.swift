@@ -131,3 +131,99 @@ import UIKit
 
     func end() { TrackballOverlay.activePart = -1 }
 }
+
+// =============================================================================
+// Omega aparência (área 05, P1-2 e P1-3): o que o painel Transformar desenha no
+// palco — as GUIAS do ímã do trackpad (`model.snapGuideX/Y`, px da composição,
+// só durante o arrasto) e a TRAJETÓRIA da posição com a aba Mover aberta
+// (`model.showMotionPath`). Chamado pelo `StageInteractionOverlay`
+// (PreviewMetalView.swift). Par do desenho do palco no Android (Stage.kt).
+// =============================================================================
+@MainActor enum OmegaTransformStage {
+    /// Trajetória em cache (espaço do PAI): só muda quando o modelo muda.
+    private static var pathKey = ""
+    private static var pathPoints: [SIMD2<Float>] = []
+    private static var keyPoints: [SIMD2<Float>] = []
+
+    static func draw(_ context: inout GraphicsContext, model: AureaModel, width: Float, height: Float,
+                     screen: (Float, Float) -> CGPoint) {
+        drawMotionPath(&context, model: model, screen: screen)
+        // Guias do ímã: linhas finas no destaque, de borda a borda da composição.
+        if let x = model.snapGuideX, x.isFinite {
+            var line = Path(); line.move(to: screen(x, 0)); line.addLine(to: screen(x, height))
+            context.stroke(line, with: .color(StageInk.outlineUnder), lineWidth: 2.5)
+            context.stroke(line, with: .color(AureaColors.accent), lineWidth: 1)
+        }
+        if let y = model.snapGuideY, y.isFinite {
+            var line = Path(); line.move(to: screen(0, y)); line.addLine(to: screen(width, y))
+            context.stroke(line, with: .color(StageInk.outlineUnder), lineWidth: 2.5)
+            context.stroke(line, with: .color(AureaColors.accent), lineWidth: 1)
+        }
+    }
+
+    /// A linha pelos keyframes de posição (X/Y amostrados pelo motor com a
+    /// mesma conta da prévia, `trackCurve`), levada do pai para a composição
+    /// pelo `parentAffine` do detalhe; cor `texto` a 60 %.
+    private static func drawMotionPath(_ context: inout GraphicsContext, model: AureaModel,
+                                       screen: (Float, Float) -> CGPoint) {
+        guard model.showMotionPath, model.panel == .transform, model.selection.count == 1,
+              let id = model.primarySelection, let row = model.selectedLayer, row.id == id,
+              !row.threeD, ![UInt32(8), 9, 10].contains(row.kind) else { return }
+        let points = motionPath(model: model, layer: id)
+        guard points.count >= 2 else { return }
+        let affine = StageGeom.floats(model.detail["parentAffine"])
+        func place(_ p: SIMD2<Float>) -> CGPoint {
+            let c = StageGeom.applyAffine(affine, p.x, p.y)
+            return screen(c.0, c.1)
+        }
+        var path = Path()
+        path.move(to: place(points[0]))
+        for p in points.dropFirst() { path.addLine(to: place(p)) }
+        context.stroke(path, with: .color(StageInk.outlineUnder), style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+        context.stroke(path, with: .color(AureaColors.text.opacity(0.6)), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+        for key in keyPoints {
+            let c = place(key)
+            let dot = Path(ellipseIn: CGRect(x: c.x - 3, y: c.y - 3, width: 6, height: 6))
+            context.fill(dot, with: .color(StageInk.outlineUnder))
+            context.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(AureaColors.text.opacity(0.85)))
+        }
+    }
+
+    /// Amostras da posição (espaço do pai) entre o primeiro e o último keyframe
+    /// de X/Y. Um eixo sem trilha fica no valor parado do detalhe.
+    private static func motionPath(model: AureaModel, layer: Int64) -> [SIMD2<Float>] {
+        let keys = (model.keyframes[layer] ?? []).filter { ($0.property == 0 || $0.property == 1) && $0.effectIndex == UInt32.max }
+        guard keys.count >= 2, let from = keys.map(\.time).min(), let to = keys.map(\.time).max(), to > from else {
+            pathKey = ""; pathPoints = []; keyPoints = []
+            return []
+        }
+        let key = "\(layer):\(model.status.modelRevision):\(from):\(to):\(keys.count)"
+        if key == pathKey { return pathPoints }
+        let xs = model.engine.trackCurve(layer, property: 0, effect: UInt32.max, param: 0, from: from, to: to).map(\.floatValue)
+        let ys = model.engine.trackCurve(layer, property: 1, effect: UInt32.max, param: 0, from: from, to: to).map(\.floatValue)
+        let position = StageGeom.floats(model.detail["position"])
+        let restX = position.count > 0 ? position[0] : 0, restY = position.count > 1 ? position[1] : 0
+        let count = max(xs.count, ys.count)
+        var out: [SIMD2<Float>] = []
+        if count >= 2 {
+            out.reserveCapacity(count)
+            for i in 0..<count {
+                let x = xs.count == count ? xs[i] : restX
+                let y = ys.count == count ? ys[i] : restY
+                if x.isFinite && y.isFinite { out.append(SIMD2(x, y)) }
+            }
+        }
+        // Os pontos dos keyframes: a amostra mais perto de cada tempo de chave.
+        var marks: [SIMD2<Float>] = []
+        if out.count >= 2 {
+            let times = Set(keys.map(\.time)).sorted()
+            for time in times {
+                let t = Double(time - from) / Double(to - from)
+                let index = min(out.count - 1, max(0, Int((t * Double(out.count - 1)).rounded())))
+                marks.append(out[index])
+            }
+        }
+        pathKey = key; pathPoints = out; keyPoints = marks
+        return out
+    }
+}

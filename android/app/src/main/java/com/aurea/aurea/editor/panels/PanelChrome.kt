@@ -59,6 +59,23 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import com.aurea.aurea.editor.ShellDims
+import com.aurea.aurea.ui.ds.AnchoredMenu
+import com.aurea.aurea.ui.ds.AureaAlert
+import com.aurea.aurea.ui.ds.MenuEntry
 
 /**
  * Pedido do seletor de cor: cor de partida (RGBA 0..1), mudança viva e fim.
@@ -69,6 +86,11 @@ internal class ColorRequest(
     val initial: FloatArray,
     val onChange: (r: Float, g: Float, b: Float, a: Float) -> Unit,
     private val onDone: () -> Unit,
+    /** Omega aparência (P0-5): retângulo da amostra tocada (px da janela). Com ele a cor abre no
+     *  balão ancorado (seletor embutido); sem ele, no seletor em tela cheia. */
+    val anchor: androidx.compose.ui.geometry.Rect? = null,
+    /** Omega aparência: o campo aceita alfa (amostra com alfa num campo sem alfa fica indisponível). */
+    val withAlpha: Boolean = true,
 ) {
     private var finished = false
 
@@ -327,4 +349,383 @@ internal fun ParamTabs(
 @Composable
 internal fun PanelNotice(text: String, modifier: Modifier = Modifier) {
     Text(text, modifier = modifier.padding(vertical = 10.dp), style = AureaType.Property)
+}
+
+// =============================================================================
+// Omega fundação · F5: MOLDURA COMUM DOS PAINÉIS DE PROPRIEDADE
+// (`fragment_settings_base` + `fragment_setting_actionbar` da referência)
+//
+//   ┌60──┬────────── conteúdo (rola por dentro) ──────────┬60──┐  200 dp
+//   │ ‹  │                                                │ ab1│  as células de
+//   │ ◆± │                                                │ ab2│  cada coluna
+//   │ ∿  │                                                │ ab3│  repartem a
+//   │ ⋯  │                                                │ ab4│  altura
+//   └────┴0,7─────────────────────────────────────────0,7┴────┘
+//
+// Coluna esquerda: ‹ Voltar · ◆± keyframe · Curva · (= expressão, extra do
+// AUREA) · ⋯. Segurar ◆ com keyframe no quadro pede "apagar todos os keyframes"
+// (confirmação); Curva com menos de 2 keyframes mostra o aviso. Coluna direita:
+// até 4 abas de ícone (só com 2 ou mais; a aba com `alt` troca para a irmã no
+// segundo toque). Em RTL a coluna esquerda vai para a direita (a Row espelha).
+// Par de `PanelFrame`/`PanelBar` do DesignSystem.swift (mesmos ids).
+//
+//   PanelFrame(
+//       rail = PanelRail(
+//           onBack = env.onClose,
+//           keyframeLook = look,
+//           onKeyframe = { store.toggleTransformKeyframe(keys) },
+//           onDeleteAllKeyframes = { /* um passo de desfazer */ },
+//           onCurve = { env.onOpenPanel(EditorPanel.Curve) },
+//           curveReady = curveReady,
+//       ),
+//       tabs = listOf(
+//           PanelTab("move", label, glyph = CupertinoGlyph.Move, alt = PanelTab("pivot", label2, glyph = …)),
+//           PanelTab("scale", label3, glyph = …),
+//       ),
+//       selectedTab = tab, onTab = { tab = it },
+//   ) { /* conteúdo da aba */ }
+// =============================================================================
+
+/** Medidas da moldura (as da referência). */
+internal object PanelFrameDefaults {
+    val Height = 200.dp
+    val RailWidth = 60.dp
+    val Divider = 0.7.dp
+    val TabInset = 4.dp
+    val TabRadius = 5.dp
+    const val DISABLED_ALPHA = 0.15f
+    const val MAX_TABS = 4
+}
+
+/**
+ * Uma aba de ícone da coluna direita. [id] é o que [PanelFrame] devolve em
+ * `onTab`. [alt]: a aba irmã — tocar de novo na aba ativa troca para ela (outro
+ * id e ícone) e o toque seguinte volta. Ícone: [glyph] (CupertinoGlyph) ou [icon].
+ */
+@Immutable
+internal class PanelTab(
+    val id: String,
+    val label: String,
+    val glyph: Char? = null,
+    val icon: ImageVector? = null,
+    val alt: PanelTab? = null,
+)
+
+/**
+ * O que a coluna esquerda faz.
+ * - [onKeyframe] nulo = o painel não tem parâmetro com keyframe: ◆ e Curva ficam a 15 %, sem toque.
+ * - [onDeleteAllKeyframes]: segurar ◆ com keyframe no quadro ([keyframeLook] = KeyHere) pede
+ *   confirmação e chama isto (o painel apaga as marcas da aba num passo de desfazer).
+ * - [onCurve] + [curveReady]: com menos de 2 keyframes ([curveReady] falso) o toque mostra o aviso.
+ * - [onExpression]: a célula "=" (extra do AUREA), só quando não nulo.
+ * - [moreEntries] (menu ancorado) ou [onMore]: o ⋯; os dois nulos = sem ⋯.
+ * - [supportsAnimation] falso: painel sem animação — só o ‹.
+ */
+@Immutable
+internal class PanelRail(
+    val onBack: () -> Unit,
+    val keyframeLook: KeyframeLook = KeyframeLook.None,
+    val onKeyframe: (() -> Unit)? = null,
+    val onDeleteAllKeyframes: (() -> Unit)? = null,
+    val onCurve: (() -> Unit)? = null,
+    val curveReady: Boolean = false,
+    val expression: ExpressionLook = ExpressionLook.None,
+    val onExpression: (() -> Unit)? = null,
+    val moreEntries: List<MenuEntry>? = null,
+    val onMore: (() -> Unit)? = null,
+    val moreActive: Boolean = false,
+    val supportsAnimation: Boolean = true,
+    // Omega efeitos (área 07): o ⋯ a 15 % e sem toque (o ⋯ da lista de efeitos
+    // fica inativo com os controles de um efeito abertos, como na referência).
+    val moreEnabled: Boolean = true,
+)
+
+/**
+ * A moldura comum dos painéis de propriedade (200 dp; quem hospeda dá a altura).
+ *
+ * @param rail a coluna esquerda ([PanelRail]).
+ * @param tabs as abas de ícone (no máximo 4); com 0 ou 1 a coluna direita não existe.
+ * @param selectedTab o [PanelTab.id] ativo (ou o id da `alt` dele).
+ * @param onTab troca de aba (já resolve o segundo toque para a `alt`).
+ * @param scrollContent o conteúdo rola por dentro (padrão). Falso para quem tem lista preguiçosa.
+ */
+@Composable
+internal fun PanelFrame(
+    rail: PanelRail,
+    modifier: Modifier = Modifier,
+    tabs: List<PanelTab> = emptyList(),
+    selectedTab: String? = null,
+    onTab: (String) -> Unit = {},
+    scrollContent: Boolean = true,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var askDeleteAll by remember { mutableStateOf(false) }
+    var curveWarning by remember { mutableStateOf(false) }
+    Row(
+        modifier
+            .fillMaxSize()
+            .background(AureaColors.PanelFrameBackground)
+            .testTag("panel.frame"),
+    ) {
+        FrameLeftRail(rail, onAskDeleteAll = { askDeleteAll = true }, onCurveWarning = { curveWarning = true })
+        FrameDivider()
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(AureaColors.PanelFrameContent)
+                .testTag("panel.content")
+                .then(if (scrollContent) Modifier.verticalScroll(rememberScrollState()) else Modifier),
+            content = content,
+        )
+        if (tabs.size >= 2) {
+            FrameDivider()
+            FrameRightRail(tabs.take(PanelFrameDefaults.MAX_TABS), selectedTab, onTab)
+        }
+    }
+    if (askDeleteAll) {
+        AureaAlert(
+            title = stringResource(R.string.om_panel_delete_all_keyframes_q),
+            confirmLabel = stringResource(R.string.panel_apagar),
+            destructive = true,
+            onConfirm = { rail.onDeleteAllKeyframes?.invoke() },
+            onDismiss = { askDeleteAll = false },
+        )
+    }
+    if (curveWarning) {
+        AureaAlert(
+            title = stringResource(R.string.om_panel_keyframes_needed),
+            message = stringResource(R.string.pn_curve_need_two_keys),
+            showCancel = false,
+            onConfirm = {},
+            onDismiss = { curveWarning = false },
+        )
+    }
+}
+
+@Composable
+private fun FrameDivider() {
+    Box(Modifier.width(PanelFrameDefaults.Divider).fillMaxHeight().background(AureaColors.PanelFrameDivider))
+}
+
+@Composable
+private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWarning: () -> Unit) {
+    var moreOpen by remember { mutableStateOf(false) }
+    Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight()) {
+        FrameCell("panel.rail.back", stringResource(R.string.panel_voltar_ferramentas), enabled = true, onClick = rail.onBack) {
+            CupertinoIcon(CupertinoGlyph.ChevronLeft, 22.dp, AureaColors.Text)
+        }
+        if (!rail.supportsAnimation) {
+            Spacer(Modifier.weight(3f))
+            return@Column
+        }
+        FrameCell(
+            "panel.rail.keyframe",
+            stringResource(if (rail.keyframeLook == KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui),
+            enabled = rail.onKeyframe != null,
+            onClick = rail.onKeyframe,
+            onLongClick = if (rail.keyframeLook == KeyframeLook.KeyHere && rail.onDeleteAllKeyframes != null) onAskDeleteAll else null,
+        ) {
+            KeyframeDiamondIcon(rail.keyframeLook, enabled = true, modifier = Modifier.size(24.dp))
+        }
+        val curve = rail.onCurve
+        FrameCell(
+            "panel.rail.curve",
+            stringResource(R.string.panel_editar_curva_propriedade),
+            enabled = curve != null,
+            onClick = if (curve != null) ({ if (rail.curveReady) curve() else onCurveWarning() }) else null,
+        ) {
+            CurveRailIcon(enabled = true, animated = rail.keyframeLook != KeyframeLook.None, modifier = Modifier.size(22.dp))
+        }
+        val onExpression = rail.onExpression
+        if (onExpression != null) {
+            FrameCell(
+                "panel.rail.expression",
+                stringResource(if (rail.expression == ExpressionLook.None) R.string.panel_adicionar_expressao else R.string.panel_editar_expressao),
+                enabled = true,
+                onClick = onExpression,
+            ) {
+                Text(
+                    "=",
+                    style = AureaType.Base.merge(
+                        TextStyle(
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.W700,
+                            color = if (rail.expression == ExpressionLook.None) AureaColors.Text else expressionColor(rail.expression),
+                        ),
+                    ),
+                )
+            }
+        }
+        val entries = rail.moreEntries
+        val onMore = rail.onMore
+        if (entries != null || onMore != null) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                FrameCellBody(
+                    "panel.rail.more",
+                    stringResource(R.string.editor_mais),
+                    enabled = rail.moreEnabled,   // Omega efeitos (área 07)
+                    onClick = { if (entries != null) moreOpen = true else onMore?.invoke() },
+                ) {
+                    CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, if (rail.moreActive) AureaColors.Accent else AureaColors.Text)
+                }
+                if (entries != null) {
+                    AnchoredMenu(
+                        expanded = moreOpen,
+                        onDismiss = { moreOpen = false },
+                        entries = entries,
+                        tag = "panel.rail.more.menu",
+                    )
+                }
+            }
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
+    }
+}
+
+/** Uma célula da coluna esquerda: reparte a altura com as outras. */
+@Composable
+private fun ColumnScope.FrameCell(
+    tag: String,
+    label: String,
+    enabled: Boolean,
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    Box(Modifier.weight(1f).fillMaxWidth()) {
+        FrameCellBody(tag, label, enabled, onClick, onLongClick, content)
+    }
+}
+
+@Composable
+private fun FrameCellBody(
+    tag: String,
+    label: String,
+    enabled: Boolean,
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .testTag(tag)
+            .semantics {
+                contentDescription = label
+                if (!enabled) disabled()
+            }
+            .then(if (enabled && onClick != null) Modifier.tocavel(shrink = 1f, onLongClick = onLongClick, onClick = onClick) else Modifier)
+            .alpha(if (enabled) 1f else PanelFrameDefaults.DISABLED_ALPHA),
+        contentAlignment = Alignment.Center,
+    ) { content() }
+}
+
+@Composable
+private fun FrameRightRail(tabs: List<PanelTab>, selectedId: String?, onTab: (String) -> Unit) {
+    Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight()) {
+        tabs.forEachIndexed { i, tab ->
+            val alt = tab.alt
+            val altOn = alt != null && selectedId == alt.id
+            val on = selectedId == tab.id || altOn
+            val shown = if (altOn && alt != null) alt else tab
+            val tint = if (on) AureaColors.Accent else AureaColors.Text
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .testTag("panel.tab.$i")
+                    .semantics {
+                        contentDescription = shown.label
+                        selected = on
+                    }
+                    .tocavel(shrink = 1f) {
+                        if (alt != null && selectedId == tab.id) onTab(alt.id) else onTab(tab.id)
+                    }
+                    .padding(PanelFrameDefaults.TabInset)
+                    .clip(RoundedCornerShape(PanelFrameDefaults.TabRadius))
+                    .background(if (on) AureaColors.PanelFrameDivider else Color.Transparent),
+                contentAlignment = Alignment.Center,
+            ) {
+                val glyph = shown.glyph
+                val icon = shown.icon
+                when {
+                    glyph != null -> CupertinoIcon(glyph, 22.dp, tint)
+                    icon != null -> Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A BARRA DO PAINEL DE PROPRIEDADE (P0-6 da área 04 / P0-6 da área 06): fundo
+ * `PanelBar`, ‹ de 44 dp e o título À ESQUERDA logo depois, com reticências;
+ * [trailing] à direita (ex.: o segmento ◆/• de Editar pontos) e um ⋮ opcional
+ * ([moreEntries], menu ancorado). Altura = a da barra superior (42 dp).
+ * Ids: `panel.bar.back`, `panel.bar.title`, `panel.bar.more` (+ o [tag] da barra).
+ */
+@Composable
+internal fun PanelBar(
+    title: String,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    tag: String? = null,
+    moreEntries: List<MenuEntry>? = null,
+    trailing: @Composable RowScope.() -> Unit = {},
+) {
+    val back = stringResource(R.string.pn_back_to_layer_tools)
+    var moreOpen by remember { mutableStateOf(false) }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(ShellDims.TopBar)
+            .background(AureaColors.PanelBar)
+            .then(tag?.let { Modifier.testTag(it) } ?: Modifier),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(44.dp)
+                .testTag("panel.bar.back")
+                .semantics { contentDescription = back }
+                .tocavel(onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
+            CupertinoIcon(CupertinoGlyph.ChevronLeft, 22.dp, AureaColors.Text)
+        }
+        Text(
+            title,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).testTag("panel.bar.title").semantics { heading() },
+            style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)),
+        )
+        trailing()
+        if (moreEntries != null) {
+            val more = stringResource(R.string.editor_mais)
+            Box {
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .testTag("panel.bar.more")
+                        .semantics { contentDescription = more }
+                        .tocavel { moreOpen = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CupertinoIcon(CupertinoGlyph.Ellipsis, 22.dp, AureaColors.Text)
+                }
+                AnchoredMenu(
+                    expanded = moreOpen,
+                    onDismiss = { moreOpen = false },
+                    entries = moreEntries,
+                    alignEnd = true,
+                    tag = "panel.bar.more.menu",
+                )
+            }
+        } else {
+            Spacer(Modifier.width(6.dp))
+        }
+    }
 }

@@ -111,6 +111,9 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
                 .pointerInput(store) { stageGestures(store, ui, mapper, haptic) }
                 .drawBehind { drawStageOverlay(store, ui, mapper, insetPx) },
         )
+        // Omega aparência (P1-1, P1-4): conta-gotas ao vivo e pontas do degradê, por
+        // cima dos gestos do palco (ColorStage.kt); sem pedido, não põe nada.
+        if (!store.rawPlayback) com.aurea.aurea.editor.panels.ColorStageOverlay(store, mapper)
         if (showCamera && store.cameraFeatures != null && store.pointPick == null) {
             Spacer(Modifier.fillMaxSize().pointerInput(store, showTrack) {
                 detectTapGestures(
@@ -165,9 +168,10 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         VectorToolBanner(store, Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp, start = 8.dp, end = 8.dp))
         RigModeBar(store, Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 8.dp, end = 8.dp))
         PreviewBufferBadge(store, Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 8.dp))
-        StageZoomChip(store, Modifier.align(Alignment.BottomEnd).padding(8.dp))
-        // Lupa da prévia no canto sup-esq (redesenho 2026-09-29), nos dois estados.
-        if (!store.rawPlayback) StageZoomButton(Modifier.align(Alignment.TopStart))
+        // Omega chrome (área 02, P1-2): o botão de modo zoom do canvas e o
+        // rótulo "NN%" no canto sup-esq (o chip "250 %" saiu: o 100 % mora no
+        // número da coluna de modos).
+        if (!store.rawPlayback && !ui.fullscreen) CanvasZoomMode(store, Modifier.align(Alignment.TopStart))
         if (store.selection.size == 1 && !store.rawPlayback) {
             Row(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
                 if (store.gizmoAxes) {
@@ -214,6 +218,17 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         PerfHud(store, Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 6.dp))
         // A alça do ponto de efeito para o leitor de tela (o desenho é do Canvas).
         EffectPointA11y(store, mapper)
+        // Omega efeitos (área 07, P1-2): o guia "deslize para ajustar" no centro do preview.
+        EffectParamGuide()
+        // Omega chrome (área 02, P0-5): a coluna de modos de visão, presa à
+        // direita da prévia (abre pelo último botão do transporte).
+        if (!store.rawPlayback && !ui.fullscreen) {
+            ViewModeColumn(
+                store,
+                viewModeColumnWidth(androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp),
+                Modifier.align(Alignment.TopEnd),
+            )
+        }
     }
 }
 
@@ -451,21 +466,38 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     m.handlesValid = false
     m.markerAnchorValid = false
     if (!m.valid) return
-    // Grade de terços + cruz do centro, ligada pela barra do player.
-    if (ui.showGrid) {
-        val gridInk = Color.White.copy(alpha = .35f)
+    // Omega chrome (área 02, P1-2): grade de ESPAÇAMENTO (px da composição, a
+    // partir do centro) + cruz do centro, ligada pela coluna de modos. O
+    // tamanho da composição em 1× vai para os degraus de zoom da coluna.
+    StageView.noteExtent(m.compW * m.baseFit, m.compH * m.baseFit)
+    if (ViewModes.grid) {
+        val gridInk = AureaColors.Text.copy(alpha = .35f)
         val gridStroke = 1.dp.toPx()
-        for (k in 1..2) {
-            val gx = m.sx(m.compW * k / 3f)
-            val gy = m.sy(m.compH * k / 3f)
-            drawLine(gridInk, Offset(gx, m.sy(0f)), Offset(gx, m.sy(m.compH)), gridStroke)
-            drawLine(gridInk, Offset(m.sx(0f), gy), Offset(m.sx(m.compW), gy), gridStroke)
+        val step = ViewModes.gridSpacing.toFloat().coerceAtLeast(1f)
+        val halfW = m.compW / 2f
+        val halfH = m.compH / 2f
+        // Linhas a menos de 4 px na tela viram borrão: só a cruz do centro.
+        if (step * m.fit >= 4f) {
+            var d = step
+            while (d <= halfW) {
+                for (gx in floatArrayOf(m.sx(halfW - d), m.sx(halfW + d))) {
+                    drawLine(gridInk, Offset(gx, m.sy(0f)), Offset(gx, m.sy(m.compH)), gridStroke)
+                }
+                d += step
+            }
+            d = step
+            while (d <= halfH) {
+                for (gy in floatArrayOf(m.sy(halfH - d), m.sy(halfH + d))) {
+                    drawLine(gridInk, Offset(m.sx(0f), gy), Offset(m.sx(m.compW), gy), gridStroke)
+                }
+                d += step
+            }
         }
-        val cx = m.sx(m.compW / 2f)
-        val cy = m.sy(m.compH / 2f)
+        val cx = m.sx(halfW)
+        val cy = m.sy(halfH)
         val arm = 10.dp.toPx()
-        drawLine(gridInk, Offset(cx - arm, cy), Offset(cx + arm, cy), gridStroke)
-        drawLine(gridInk, Offset(cx, cy - arm), Offset(cx, cy + arm), gridStroke)
+        drawLine(AureaColors.Text.copy(alpha = .6f), Offset(cx - arm, cy), Offset(cx + arm, cy), gridStroke * 1.5f)
+        drawLine(AureaColors.Text.copy(alpha = .6f), Offset(cx, cy - arm), Offset(cx, cy + arm), gridStroke * 1.5f)
     }
     // Borda do quadro: dá para ver onde a composição termina mesmo com o fundo
     // do projeto da cor da área de trabalho (só na prévia, nunca no export).
@@ -512,6 +544,9 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         drawRotoOverlay(m)
         return
     }
+    // Omega conteúdo (área 06): desenho e Editar pontos tomam o palco; no modo de
+    // texto, a alça de largura da caixa (ContentStage.kt).
+    if (drawOmegaContentOverlay(store, ui, m)) return
     // Modo vetorial (pontos / mão livre): o palco é do caminho, sem alças da camada.
     if (store.vectorTool != 0) {
         drawVectorOverlay(store, m)
@@ -524,6 +559,9 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     if (!snapX.isNaN()) drawLine(ShellColors.SnapLine, Offset(m.sx(snapX), m.oy), Offset(m.sx(snapX), m.sy(m.compH)), snapStroke)
     val snapY = ui.snapY
     if (!snapY.isNaN()) drawLine(ShellColors.SnapLine, Offset(m.ox, m.sy(snapY)), Offset(m.sx(m.compW), m.sy(snapY)), snapStroke)
+    // Omega aparência: guias do ímã do trackpad (painel Mover) e a trajetória da
+    // posição (P1-2 / P1-3; desenho em editor/panels/TransformStage.kt).
+    com.aurea.aurea.editor.panels.drawTransformStageGuides(this, store, m)
 
     // Rastreio de câmera: os pontos seguidos neste quadro (amarelo = entrou no
     // solve, vermelho = rejeitado), como no AE.
@@ -1172,9 +1210,19 @@ private suspend fun PointerInputScope.stageGestures(
             rotoGesture(store, m, down)
             return@awaitEachGesture
         }
+        // Omega conteúdo (área 06): traço do desenho, pontos do contorno e a alça
+        // de largura da caixa de texto (ContentStage.kt).
+        if (omegaContentGesture(store, ui, m, down)) return@awaitEachGesture
         // Modo vetorial: pontos do caminho ou traço da mão livre.
         if (store.vectorTool != 0) {
             vectorGesture(store, m, down)
+            return@awaitEachGesture
+        }
+        // Omega efeitos (área 07, P1-2): parâmetro de ponto/orientação ATIVO no
+        // painel de efeitos — arrastar em qualquer lugar do preview ajusta o valor
+        // de forma RELATIVA (a alça, acima, continua absoluta); tocar sai do modo.
+        if (m.valid && effectParamDragActive(store)) {
+            effectParamRelativeGesture(store, m, down, slop)
             return@awaitEachGesture
         }
 
@@ -1492,7 +1540,10 @@ private suspend fun PointerInputScope.stageGestures(
                 store.changeLayerSelectMode(true)
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             } else if (hit != null) {
-                if (store.primary != hit || store.selection.size != 1) store.select(hit)
+                // Omega conteúdo (área 06, P0-7): o segundo toque na mesma camada abre o editor do tipo.
+                if (!omegaContentDoubleTap(store, ui, hit, down.uptimeMillis, viewConfiguration.doubleTapTimeoutMillis)) {
+                    if (store.primary != hit || store.selection.size != 1) store.select(hit)
+                }
             } else if (!held) {
                 store.clearSelection()
             }

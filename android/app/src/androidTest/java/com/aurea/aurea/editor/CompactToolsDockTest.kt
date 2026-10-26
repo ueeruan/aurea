@@ -24,7 +24,7 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 
-/** Exercise actual scroll gestures and panel routing, including large system fonts. */
+/** Omega painel (área 04): o painel da camada de 200 dp, o roteamento dos botões e a fonte grande. */
 class CompactToolsDockTest {
     @get:Rule val compose = createComposeRule()
     private lateinit var store: EditorStore
@@ -39,8 +39,8 @@ class CompactToolsDockTest {
             val density = LocalDensity.current.density
             CompositionLocalProvider(LocalDensity provides Density(density, fontScale)) {
                 AureaTheme {
-                    Box(Modifier.width(320.dp).height(EditorLayout.dock(1, fontScale).dp)) {
-                        store.primary?.let { LayerToolsDock(store, ui, it) }
+                    Box(Modifier.width(320.dp).height(EditorLayout.layerPanel(fontScale).dp)) {
+                        store.primary?.let { LayerPanel(store, ui, it) }
                     }
                 }
             }
@@ -50,24 +50,26 @@ class CompactToolsDockTest {
         compose.waitUntil(10000) { store.project.title == "Compact tools" }
         compose.runOnIdle { store.addShape(0) }
         compose.waitUntil(10000) { store.layers.size == 1 && store.primary != null }
-        compose.onNodeWithTag("dock.tool.EditShape").assertIsDisplayed()
-        // Shape geometry and colour must both be visible before the generic tools.
-        compose.onNodeWithTag("dock.tool.ColorFill").assertIsDisplayed()
-        compose.onNodeWithTag("dock.tool.ColorFill").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("layer.panel").assertIsDisplayed()
+        compose.onNodeWithTag("layer.panel.edit").assertIsDisplayed()
+        // A grade fixa: as 3 vagas da fileira 2 e as 4 da fileira 3 da forma.
+        compose.onNodeWithTag("layer.panel.borderShadow").assertIsDisplayed()
+        compose.onNodeWithTag("layer.panel.blendOpacity").assertIsDisplayed()
+        compose.onNodeWithTag("layer.panel.colorFill").assertIsDisplayed().performClick()
         compose.runOnIdle {
             assertEquals(EditorPanel.Shape, ui.panel)
             fontScale = 2f
             store.addText(openEditor = false)
         }
         compose.waitUntil(10000) { store.layers.size == 2 }
-        // A new layer must start at its own first tool, even after the previous swipe.
-        compose.onNodeWithTag("dock.tool.EditText").assertIsDisplayed()
-        compose.onNodeWithTag("dock.tool.Presets").performScrollTo().assertIsDisplayed().performClick()
+        // O texto tem a vaga "Editar texto" e os presets (de texto) na fileira 3.
+        compose.onNodeWithTag("layer.panel.edit").assertIsDisplayed()
+        compose.onNodeWithTag("layer.panel.presets").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(EditorPanel.Presets, ui.panel) }
-        val last = compose.onNodeWithTag("dock.tool.Presets").getUnclippedBoundsInRoot()
-        compose.onNodeWithTag("dock.tool.Move").performScrollTo().assertIsDisplayed().performClick()
-        val first = compose.onNodeWithTag("dock.tool.Move").getUnclippedBoundsInRoot()
-        assertEquals("All tools stay on one row", first.top.value, last.top.value, 1f)
+        val last = compose.onNodeWithTag("layer.panel.presets").getUnclippedBoundsInRoot()
+        compose.onNodeWithTag("layer.panel.moveTransform").assertIsDisplayed().performClick()
+        val first = compose.onNodeWithTag("layer.panel.moveTransform").getUnclippedBoundsInRoot()
+        assertEquals("Row 3 keeps one line", first.top.value, last.top.value, 1f)
         assertTrue("Large-font touch height", (first.bottom - first.top).value >= 48f)
         compose.runOnIdle { assertEquals(EditorPanel.Transform, ui.panel) }
     }

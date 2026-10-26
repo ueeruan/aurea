@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Omega 0.3.2, área 02 (moldura do editor). Textos próprios do AUREA. -->
+    <string name="om_tb_exit">Kembali ke proyek</string>
+    <string name="om_tb_share">Bagikan dan ekspor</string>
+    <string name="om_tb_group_settings">Pengaturan grup</string>
+    <string name="om_tb_trail_item">Buka %1$s</string>
+    <string name="om_sel_align">Ratakan di layar</string>
+    <string name="om_sel_need_three">Pilih 3 lapisan atau lebih untuk mendistribusikan</string>
+    <string name="om_sel_extend_start">Perpanjang awal ke playhead</string>
+    <string name="om_sel_move_start">Pindahkan awal ke playhead</string>
+    <string name="om_sel_extend_end">Perpanjang akhir ke playhead</string>
+    <string name="om_sel_move_end">Pindahkan akhir ke playhead</string>
+    <string name="om_sel_distribute_time">Distribusikan dalam waktu</string>
+    <string name="om_tr_previous">Ke peristiwa sebelumnya</string>
+    <string name="om_tr_next">Ke peristiwa berikutnya</string>
+    <string name="om_tr_copy_paste">Salin dan tempel</string>
+    <string name="om_tr_view_modes">Mode tampilan</string>
+    <string name="om_vm_pixel">Piksel asli</string>
+    <string name="om_vm_grid">Kisi</string>
+    <string name="om_vm_grid_spacing">Jarak kisi</string>
+    <string name="om_vm_solo">Fokus lapisan terpilih</string>
+    <string name="om_vm_solo_off">Normal</string>
+    <string name="om_vm_solo_only">Hanya lapisan terpilih</string>
+    <string name="om_vm_solo_dim" formatted="false">Lapisan terpilih 50%</string>
+    <string name="om_vm_camera">Lihat melalui kamera aktif</string>
+    <string name="om_vm_camera_unavailable">Belum tersedia di versi uji ini</string>
+    <string name="om_vm_zoom_in">Perbesar</string>
+    <string name="om_vm_zoom_out">Perkecil</string>
+    <string name="om_cp_save_preset">Simpan preset</string>
+    <string name="om_cp_with_style">(dengan gaya)</string>
+    <string name="om_cp_paste_style_more">Tempel gaya</string>
+    <string name="om_cp_link_selected">Tautkan yang terpilih…</string>
+    <string name="om_ps_color_fill">Tempel warna &amp; isian</string>
+    <string name="om_ps_border_shadow">Tempel tepi &amp; bayangan</string>
+    <string name="om_ps_blend">Tempel campuran &amp; opasitas</string>
+    <string name="om_ps_transform">Tempel posisi &amp; transformasi</string>
+    <string name="om_ps_text">Tempel gaya teks</string>
+    <string name="om_ps_volume">Tempel volume</string>
+    <string name="om_ps_effects">Tempel efek</string>
+    <string name="om_ps_speed">Tempel kecepatan</string>
+    <string name="om_ps_paste">Tempel</string>
+    <string name="om_settings_more">Lainnya di AUREA</string>
+    <string name="om_settings_preview">Pratinjau</string>
+    <string name="om_settings_editing">Penyuntingan</string>
+    <string name="om_settings_import">Impor</string>
+    <string name="om_settings_preview_quality">Kualitas pratinjau</string>
+    <string name="om_gs_size">Lebar, tinggi grup</string>
+    <string name="om_mi_name">Nama</string>
+    <string name="om_mi_dimensions">Dimensi (L × T)</string>
+    <string name="om_mi_format">Format</string>
+    <plurals name="om_layers_selected">
+        <item quantity="other">%d lapisan dipilih</item>
+    </plurals>
+    <plurals name="om_cp_duplicate">
+        <item quantity="other">Duplikat %d lapisan</item>
+    </plurals>
+    <plurals name="om_cp_copy">
+        <item quantity="other">Salin %d lapisan</item>
+    </plurals>
+    <plurals name="om_cp_paste">
+        <item quantity="other">Tempel lapisan</item>
+    </plurals>
+</resources>

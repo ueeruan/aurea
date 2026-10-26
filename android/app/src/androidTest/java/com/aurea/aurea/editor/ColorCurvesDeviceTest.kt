@@ -47,7 +47,9 @@ class ColorCurvesDeviceTest {
         compose.runOnIdle { store.addEffect(effectTypeId("aurea.color.curves")) }
         compose.waitUntil(10000) { store.effects.size == 1 }
         val effect = store.effects.single().effectId
-        compose.onNodeWithTag("dock.tool.Effects").performScrollTo().performClick()
+        compose.onNodeWithTag("layer.panel.effects").performClick()
+        // Omega (área 07): a lista nasce fechada; a linha abre os controles do efeito.
+        compose.onNodeWithTag("effects.expand.${com.aurea.aurea.effects.effectCardId(effectTypeId("aurea.color.curves"))}").performClick()
         val graph = compose.onNodeWithTag("fx.curve.graph")
         graph.performScrollTo().assertIsDisplayed()
         graph.performTouchInput { click(Offset(width / 2f, height * .25f)) }

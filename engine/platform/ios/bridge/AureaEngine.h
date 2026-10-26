@@ -163,6 +163,8 @@ extern NSString* const AureaEffectCategory;
 extern NSString* const AureaEffectEnabled;
 extern NSString* const AureaEffectParamCount;
 extern NSString* const AureaEffectKnown;
+/// Omega aparência: 0 efeito comum; 2 borda, 3 sombra (decorações de Borda e sombra).
+extern NSString* const AureaEffectRole;
 
 /// Chaves de parâmetro de efeito (`-effectParamsForLayer:effectId:`).
 extern NSString* const AureaParamIndex;
@@ -186,6 +188,17 @@ extern NSString* const AureaParamSectionLabel;
 extern NSString* const AureaParamSectionToggle;
 extern NSString* const AureaParamSectionOpen;
 extern NSString* const AureaParamTip;
+/// Omega efeitos (área 07, P0-1): apresentação resolvida pelo motor
+/// (EffectParamRow +136..+159). `control` = ParamControl (0 = sem controle
+/// numérico; 1 slider, 2 régua, 3 ponto, 4 XYZ, 5 orientação, 6 disco de matiz);
+/// `step` = valor por risco da régua (0 = sem régua); `origin` = origem do
+/// slider; `enumStyle` = 1 segmentado, 2 suspenso (0 = não é escolha);
+/// `rowFlags` = bit 0 habilitado, bit 1 disco de matiz.
+extern NSString* const AureaParamControl;
+extern NSString* const AureaParamStep;
+extern NSString* const AureaParamOrigin;
+extern NSString* const AureaParamEnumStyle;
+extern NSString* const AureaParamRowFlags;
 
 /// Progresso do export (`-exportProgress`).
 extern NSString* const AureaExportRunning;
@@ -527,6 +540,15 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)copyEffects:(long long)layerId;
 - (void)copyEffect:(unsigned int)effectId fromLayer:(long long)layerId;
 - (void)pasteEffects:(NSArray<NSNumber*>*)layerIds;
+/// Omega efeitos (P0-1): duplica o efeito no FIM da pilha (um desfazer).
+/// Devolve o id novo, ou -1 (camada travada, efeito inexistente, tipo único).
+- (int64_t)duplicateEffect:(uint32_t)effectId inLayer:(long long)layerId;
+/// Omega efeitos (P0-1): cola as configurações do efeito copiado (mesmo tipo,
+/// um só na área de transferência) no efeito `effectId`. Um desfazer.
+- (BOOL)pasteEffectSettings:(uint32_t)effectId inLayer:(long long)layerId;
+/// Omega efeitos (P0-1): tipo do efeito na área de transferência quando ela
+/// guarda exatamente UM; 0 = vazia ou vários (Engine::clipboard_effect_type).
+@property (nonatomic, readonly) uint32_t clipboardEffectType;
 - (void)copyStyle:(long long)layerId;
 - (void)pasteStyle:(NSArray<NSNumber*>*)layerIds;
 - (BOOL)copyTransform:(long long)layerId;
@@ -790,6 +812,40 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSArray<NSDictionary<NSString*, id>*>*)allKeyframes;
 - (nullable NSDictionary<NSString*, id>*)layerDetail:(long long)layerId;
 - (NSArray<NSNumber*>*)shapeParams:(long long)layerId;
+// --- Omega aparência (área 05) — EngineOmegaAppearance.cpp, core/SnapMath.hpp, core/ColorCode.hpp ---
+/// Borda e sombra: põe uma decoração (role 2 borda, 3 sombra). Id do efeito ou −1. Um passo de desfazer.
+- (int)decorationAdd:(long long)layerId role:(int)role NS_SWIFT_NAME(decorationAdd(_:role:));
+/// Reordena a decoração dentro do grupo do papel dela (slot 0 = a primeira).
+- (BOOL)decorationMove:(long long)layerId effect:(uint32_t)effectId slot:(uint32_t)slot NS_SWIFT_NAME(decorationMove(_:effect:slot:));
+/// Deslocamento X/Y (px) da sombra → direção/distância do efeito.
+- (BOOL)decorationSetShadowOffset:(long long)layerId effect:(uint32_t)effectId dx:(float)dx dy:(float)dy NS_SWIFT_NAME(decorationSetShadowOffset(_:effect:dx:dy:));
+/// [dx, dy] da sombra no cabeçote (vazio = não é sombra).
+- (NSArray<NSNumber*>*)decorationShadowOffset:(long long)layerId effect:(uint32_t)effectId NS_SWIFT_NAME(decorationShadowOffset(_:effect:));
+/// Preenchimento da forma no cabeçote (24 valores; Engine::query_shape_fill). Vazio fora de forma.
+- (NSArray<NSNumber*>*)shapeFill:(long long)layerId NS_SWIFT_NAME(shapeFill(_:));
+/// 0 nenhum, 1 cor, 2 degradê.
+- (BOOL)setShapeFillMode:(long long)layerId mode:(int)mode NS_SWIFT_NAME(setShapeFillMode(_:mode:));
+/// 0 linear, 1 radial, 2 angular.
+- (BOOL)setShapeGradientType:(long long)layerId type:(int)type NS_SWIFT_NAME(setShapeGradientType(_:type:));
+/// Grupo 0 cor, 1 início, 2 fim (4 valores RGBA); 3/4 pontas (2 valores).
+- (BOOL)setShapeFillValue:(long long)layerId group:(int)group values:(NSArray<NSNumber*>*)values NS_SWIFT_NAME(setShapeFillValue(_:group:values:));
+- (BOOL)toggleShapeFillKey:(long long)layerId group:(int)group NS_SWIFT_NAME(toggleShapeFillKey(_:group:));
+/// Alvos do ímã intercalados [valor, guia, …]: axis 0/1 posição X/Y, 2/3 largura/altura.
+- (NSArray<NSNumber*>*)snapTargets:(long long)layerId axis:(int)axis NS_SWIFT_NAME(snapTargets(_:axis:));
+/// Ímã grudento: [valor, índice do alvo em que parou ou −1].
+- (NSArray<NSNumber*>*)snapValueFromFinger:(NSArray<NSNumber*>*)targets plateau:(float)plateau finger:(float)finger NS_SWIFT_NAME(snapValueFromFinger(_:plateau:finger:));
+- (float)snapFingerFromValue:(NSArray<NSNumber*>*)targets plateau:(float)plateau value:(float)value NS_SWIFT_NAME(snapFingerFromValue(_:plateau:value:));
+/// Roda: [ângulo com ímã de 45°, 1 se grudou]. Matiz: [matiz com ímã de 60°, 1 se grudou].
+- (NSArray<NSNumber*>*)dialSnap:(float)accumDeg NS_SWIFT_NAME(dialSnap(_:));
+- (NSArray<NSNumber*>*)hueSnap:(float)hueDeg NS_SWIFT_NAME(hueSnap(_:));
+- (float)hueTouchStart:(float)currentDeg touch:(float)touchDeg NS_SWIFT_NAME(hueTouchStart(_:touch:));
+- (float)padAcceleration:(float)smoothedSpeed NS_SWIFT_NAME(padAcceleration(_:));
+/// 0 nada, 1 esquerda, 2 cima, 3 direita, 4 baixo.
+- (int)nudgeSide:(float)x y:(float)y width:(float)width height:(float)height NS_SWIFT_NAME(nudgeSide(_:y:width:height:));
+/// Código colado → [r, g, b, a] 0..1; vazio = não é cor.
+- (NSArray<NSNumber*>*)parseColorCode:(NSString*)text NS_SWIFT_NAME(parseColorCode(_:));
+- (NSString*)formatColorCode:(float)r g:(float)g b:(float)b a:(float)a withAlpha:(BOOL)withAlpha NS_SWIFT_NAME(formatColorCode(_:g:b:a:withAlpha:));
+- (BOOL)colorWantsDarkText:(float)r g:(float)g b:(float)b a:(float)a NS_SWIFT_NAME(colorWantsDarkText(_:g:b:a:));
 - (NSArray<NSNumber*>*)keyframeEasing:(long long)layerId property:(uint32_t)property frame:(int32_t)frame;
 - (BOOL)editShape:(long long)layerId param:(uint32_t)param value:(float)value continuing:(BOOL)continuing;
 - (BOOL)keyShape:(long long)layerId param:(uint32_t)param;
@@ -991,6 +1047,27 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)keyVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param;
 - (BOOL)toggleVectorParamKey:(long long)layerId group:(uint32_t)group param:(uint32_t)param NS_SWIFT_NAME(toggleVectorParamKey(_:group:param:));
 - (long long)addFreehand:(long long)layerId points:(NSArray<NSNumber*>*)points error:(float)error;
+// --- Omega conteúdo (área 06; Engine::add_drawing_* e companhia) ---------------
+/// Camada de desenho vazia. Id ou −código.
+- (long long)addDrawingLayer NS_SWIFT_NAME(addDrawingLayer());
+/// Traço do editor de desenho (tool: 0 caneta, 1 pincel, 2 preencher, 3 borracha);
+/// `points` = x, y (px da composição) e pressão intercalados; `layerId` 0 cria a camada.
+- (long long)addDrawingStroke:(long long)layerId tool:(uint32_t)tool color:(NSArray<NSNumber*>*)rgba width:(float)width
+                       points:(NSArray<NSNumber*>*)points NS_SWIFT_NAME(addDrawingStroke(_:tool:color:width:points:));
+/// Bits: 1 vetorial, 2 desenho.
+- (uint32_t)vectorLayerFlags:(long long)layerId NS_SWIFT_NAME(vectorLayerFlags(_:));
+/// Operação de ponto (Engine::PathOp) no espaço do grupo. Índice escolhido ou −1.
+- (int32_t)editVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path op:(uint32_t)op
+                     args:(NSArray<NSNumber*>*)args continuing:(BOOL)continuing NS_SWIFT_NAME(editVectorPath(_:group:path:op:args:continuing:));
+/// Alça de largura da caixa de texto (dx, dy em px da composição).
+- (BOOL)dragTextBoxWidth:(long long)layerId dx:(float)dx dy:(float)dy continuing:(BOOL)continuing NS_SWIFT_NAME(dragTextBoxWidth(_:dx:dy:continuing:));
+/// Alça de tamanho da forma (0..7): du/dv = passo em px da forma.
+- (BOOL)resizeShapeHandle:(long long)layerId handle:(uint32_t)handle du:(float)du dv:(float)dv keepRatio:(BOOL)keepRatio
+               fromCenter:(BOOL)fromCenter continuing:(BOOL)continuing NS_SWIFT_NAME(resizeShapeHandle(_:handle:du:dv:keepRatio:fromCenter:continuing:));
+/// Apaga uma fonte importada (arquivo + lista); os textos voltam à fonte padrão.
+- (BOOL)removeImportedFont:(NSString*)path NS_SWIFT_NAME(removeImportedFont(_:));
+/// Apaga todos os keyframes de forma do contorno; a forma do cabeçote fica parada (um passo de desfazer).
+- (BOOL)clearVectorPathKeys:(long long)layerId group:(uint32_t)group path:(uint32_t)path NS_SWIFT_NAME(clearVectorPathKeys(_:group:path:));
 - (long long)importSVG:(NSString*)text name:(NSString*)name;
 - (long long)importPSD:(NSString*)path name:(NSString*)name;
 /// GIF animado (0.2.7, AureaEngine.kt `importGif`): os quadros numa pré-composição em loop. Id ou −código.
@@ -1030,6 +1107,16 @@ NS_SWIFT_NAME(AureaEngine)
 /// 0/1 trim absoluto, 2 slip, 3/4 roll, 5 slide; 6 move ao quadro absoluto.
 - (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next;
 - (uint32_t)queryClipTimeActions:(long long)layerId frame:(int64_t)frame;
+/// Omega timeline (área 03, P1-8): alça de velocidade — estica a camada para
+/// [start, end) mantendo o trecho da fonte (Engine::stretch_layer_span).
+- (BOOL)stretchLayerSpan:(long long)layerId start:(int64_t)start end:(int64_t)end NS_SWIFT_NAME(stretchLayerSpan(_:start:end:));
+/// Omega painel: (área 04) painel da camada — Engine::query_layer_panel (bits
+/// iguais aos do Android: `LayerPanelBits`), mover/retempo no cabeçote e a
+/// velocidade constante em qualquer tipo (reescala a animação da camada).
+- (uint32_t)queryLayerPanel:(long long)layerId frame:(int64_t)frame NS_SWIFT_NAME(queryLayerPanel(_:frame:));
+- (BOOL)moveLayerToPlayhead:(long long)layerId frame:(int64_t)frame alignEnd:(BOOL)alignEnd NS_SWIFT_NAME(moveLayerToPlayhead(_:frame:alignEnd:));
+- (BOOL)retimeLayerToPlayhead:(long long)layerId edge:(uint32_t)edge frame:(int64_t)frame NS_SWIFT_NAME(retimeLayerToPlayhead(_:edge:frame:));
+- (BOOL)setLayerSpeedBaked:(long long)layerId speed:(float)speed NS_SWIFT_NAME(setLayerSpeedBaked(_:speed:));
 - (BOOL)trimComposition:(int64_t)frame;
 - (long long)detectBeatsForLayer:(long long)layerId bpm:(double*)bpm NS_SWIFT_NAME(detectBeats(forLayer:bpm:));
 /// [enabled, shutterAngle, shutterPhase, samples, adaptiveLimit, previewSamples, vectorBlur].
@@ -1178,6 +1265,26 @@ NS_SWIFT_NAME(AureaEngine)
 - (uint32_t)exportBitrateBps:(uint32_t)width height:(uint32_t)height fps:(double)fps
                        codec:(AureaExportCodec)codec quality:(uint32_t)quality
                   customMbps:(uint32_t)customMbps;
+
+// --- Omega adicionar (área 08) — EngineOmegaAdd.cpp, ExportRules.hpp ------------
+/// fps da exportação Baixo (0) | Reduzido (1) | Cheio (2), em CENTÉSIMOS de fps
+/// (30 fps → 750 / 1500 / 3000; truncado, sem mínimo: a regra da referência).
+/// `quality` das funções de export acima: 0..2 = fichas antigas; 20..100 = porcentagem.
++ (uint32_t)exportFpsOption:(uint32_t)fps100 option:(uint32_t)option;
+/// Abre um lote de importação: tudo até `endImportBatch` vira UM passo de desfazer.
+- (void)beginImportBatch;
+/// Fecha o lote: `placement` 0 = mesmo início, 1 = em sequência (na ordem de
+/// `layerIds`). Devolve quantas camadas andaram, ou −Errc.
+- (int)endImportBatch:(NSArray<NSNumber*>*)layerIds placement:(uint32_t)placement;
+/// Duração da imagem (quadros) ou corte do vídeo (µs) da camada recém-importada,
+/// no mesmo passo de desfazer. Devolve o Errc (0 = ok).
+- (int)applyImportTiming:(long long)layerId durationFrames:(int64_t)durationFrames
+              sourceInUs:(int64_t)sourceInUs sourceOutUs:(int64_t)sourceOutUs;
+/// "Grupo vazio": id da camada nova, ou −Errc.
+- (long long)addEmptyGroup:(NSString*)name;
+/// "Elemento/Projeto": outro `.aurea` como camada de grupo; −Errc
+/// (InvalidArgument = o próprio projeto; motivo em `-lastImportError`).
+- (long long)insertProjectAsLayer:(NSString*)path name:(NSString*)name;
 - (long long)exportDuration:(BOOL)trimToContent;
 /// One shared undoable operation. A positive ID is the new group; a negative
 /// error code leaves the selection unchanged. The highest selected layer masks
@@ -1272,6 +1379,20 @@ NS_SWIFT_NAME(AureaEngine)
 /// O aparelho tem Neural Engine usável pelo Core ML (informa o medidor;
 /// EngineConfig::hyperNpuAvailable). Vale para motores criados DEPOIS.
 + (void)setHyperNpuAvailable:(BOOL)available NS_SWIFT_NAME(setHyperNpuAvailable(_:));
+// Omega chrome (área 02): moldura do editor (EngineOmegaChrome.cpp).
+/// Os nomes das composições abertas, da principal até a atual (trilha de grupos).
+- (NSArray<NSString*>*)compositionTrail;
+/// Setas do transporte: começo, último quadro, marcadores e, com camada, as
+/// pontas e os keyframes visíveis dela. nil = nada naquela direção.
+- (nullable NSNumber*)transportNavigation:(long long)layerId compositionFrame:(long long)compositionFrame direction:(int32_t)direction NS_SWIFT_NAME(transportNavigation(_:compositionFrame:direction:));
+/// Barra inferior da seleção: 0 cortes, 1 todas depois do cabeçote, 2 todas antes.
+- (uint32_t)multiTimeActions:(NSArray<NSNumber*>*)ids frame:(long long)frame NS_SWIFT_NAME(multiTimeActions(_:frame:));
+/// Partes do estilo copiado (bits Engine::Style*).
+- (uint32_t)copiedStyleParts;
+/// Cola só as partes pedidas (um passo de desfazer); quantas camadas mudaram.
+- (uint32_t)pasteStyleParts:(NSArray<NSNumber*>*)ids parts:(uint32_t)parts NS_SWIFT_NAME(pasteStyleParts(_:parts:));
+/// Modos de visão da prévia (0 normal, 1 só as escolhidas, 2 escolhidas a 50 %) e pixels reais. Nunca no export.
+- (void)setPreviewView:(uint32_t)mode ids:(NSArray<NSNumber*>*)ids pixel:(BOOL)pixel NS_SWIFT_NAME(setPreviewView(_:ids:pixel:));
 @end
 
 // =============================================================================

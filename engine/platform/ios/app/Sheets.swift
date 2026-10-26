@@ -195,10 +195,180 @@ struct AureaActionSheet: View {
 }
 
 // =============================================================================
-// Alerta e pedido de nome (Cupertino: 270, raio 14)
+// Omega fundação · F4: DIÁLOGOS CLAROS (`am_dialog` /
+// `custom_alert_dialog_4_buttons` / `input_text_popup` da referência)
+//
+// Fundo `lightDialog`, raio 15, título 18 médio, mensagem 15, fio de 0,5 e os
+// botões numa fileira de 46 (até 2) ou numa pilha de 44 (3 ou mais, o positivo
+// em cima). Tudo pelos papéis claros: claro no Omega, escuro nos outros temas.
+// Par de `AureaDialog`/`AureaAlert`/`AureaDialogField` do Sheets.kt.
+//
+//   AureaDialog(title: "Sobrescrever?", message: "…", actions: [
+//       DialogAction("Novo", role: .positive) { … },
+//       DialogAction("Sobrescrever", role: .neutral, destructive: true) { … },
+//       DialogAction(AureaText.t("common_cancel"), role: .negative),
+//   ], onDismiss: { request = nil })
 // =============================================================================
 
-/// Diálogo de confirmação no estilo Cupertino (270 dp, raio 14).
+/// O papel de um botão do diálogo: define a ordem e a cor.
+enum DialogRole: CaseIterable { case positive, neutral, negative }
+
+/// Um botão de `AureaDialog`. `dismiss` = o diálogo fecha antes de `onClick`
+/// (o padrão). `destructive` pinta em `lightDanger`. `tag` = id de acessibilidade.
+struct DialogAction {
+    let label: String
+    var role: DialogRole = .neutral
+    var destructive: Bool = false
+    var enabled: Bool = true
+    var dismiss: Bool = true
+    var tag: String? = nil
+    var onClick: () -> Void = {}
+
+    init(_ label: String, role: DialogRole = .neutral, destructive: Bool = false, enabled: Bool = true,
+         dismiss: Bool = true, tag: String? = nil, onClick: @escaping () -> Void = {}) {
+        self.label = label; self.role = role; self.destructive = destructive; self.enabled = enabled
+        self.dismiss = dismiss; self.tag = tag; self.onClick = onClick
+    }
+}
+
+/// Medidas do diálogo claro (as do `am_dialog`; `AureaDialogDefaults` do Kotlin).
+enum AureaDialogMetrics {
+    static let maxWidth: CGFloat = 320
+    static let radius: CGFloat = 15
+    static let rowHeight: CGFloat = 46
+    static let stackHeight: CGFloat = 44
+    static let hairline: CGFloat = 0.5
+    static let fieldHeight: CGFloat = 40
+    static let fieldRadius: CGFloat = 6
+    /// Recuo da caixa até as bordas da tela.
+    static let outerPadding: CGFloat = 24
+}
+
+/// O diálogo claro, com qualquer número de botões (já traz o véu e se apresenta
+/// sozinho num `ZStack`, como o `Dialog` do Android).
+///
+/// - `title`: título (18 médio); nil = sem título.
+/// - `message`: mensagem (15); rola junto com `content` quando não cabe.
+/// - `actions`: até 2 = fileira de 46 (Negativo | Neutro | Positivo); 3 ou mais =
+///   pilha de 44 (Positivo, Neutro, Negativo).
+/// - `content`: conteúdo extra abaixo da mensagem (campo, opções). O texto sem
+///   cor própria sai em `lightText`; use `AureaDialogField` para campos.
+struct AureaDialog: View {
+    private let title: String?
+    private let message: String?
+    private let actions: [DialogAction]
+    private let onDismiss: () -> Void
+    private let tag: String?
+    private let content: AnyView?
+
+    init(title: String?, message: String? = nil, actions: [DialogAction], onDismiss: @escaping () -> Void,
+         tag: String? = nil, content: AnyView? = nil) {
+        self.title = title; self.message = message; self.actions = actions
+        self.onDismiss = onDismiss; self.tag = tag; self.content = content
+    }
+
+    private var ordered: [DialogAction] {
+        DialogRole.allCases.flatMap { role in actions.filter { $0.role == role } }
+    }
+    private var footerHeight: CGFloat {
+        actions.count <= 2 ? AureaDialogMetrics.rowHeight : CGFloat(actions.count) * AureaDialogMetrics.stackHeight
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+        let top = max(0, geometry.safeAreaInsets.top) + 12
+        let bottom = max(0, geometry.safeAreaInsets.bottom) + 12
+        let available = AureaSheetLayout.bodyHeight(content: .greatestFiniteMagnitude, viewport: geometry.size.height,
+                                                   top: top, bottom: bottom,
+                                                   footer: footerHeight + AureaDialogMetrics.hairline)
+        ZStack {
+            AureaColors.scrim
+                .ignoresSafeArea()
+                .onTapGesture { onDismiss() }
+            VStack(spacing: 0) {
+                AureaSheetScroll(maximumHeight: available) {
+                VStack(alignment: .leading, spacing: 0) {
+                    if let title {
+                        Text(title)
+                            .font(.aurea(size: 18, weight: .medium))
+                            .foregroundStyle(AureaColors.lightText)
+                            .padding(.horizontal, 15).padding(.top, 15)
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                    if let message {
+                        Text(message)
+                            .font(.aurea(size: 15))
+                            .foregroundStyle(AureaColors.lightText)
+                            .padding(.horizontal, 15).padding(.top, 10)
+                    }
+                    if let content { content.padding(.horizontal, 15).padding(.top, 10) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 10)
+                .padding(.bottom, 15)
+                }
+                Rectangle()
+                    .fill(AureaColors.lightDivider)
+                    .frame(height: AureaDialogMetrics.hairline)
+                if actions.count <= 2 {
+                    // Fileira: Negativo | Neutro | Positivo (ordem de leitura; espelha em RTL).
+                    HStack(spacing: 0) {
+                        ForEach(Array(ordered.reversed().enumerated()), id: \.offset) { index, action in
+                            if index > 0 {
+                                Rectangle().fill(AureaColors.lightDivider)
+                                    .frame(width: AureaDialogMetrics.hairline, height: AureaDialogMetrics.rowHeight)
+                            }
+                            button(action).frame(height: AureaDialogMetrics.rowHeight)
+                        }
+                    }
+                    .frame(minHeight: AureaDialogMetrics.rowHeight)
+                } else {
+                    // Pilha: Positivo em cima.
+                    VStack(spacing: 0) {
+                        ForEach(Array(ordered.enumerated()), id: \.offset) { index, action in
+                            if index > 0 {
+                                Rectangle().fill(AureaColors.lightDivider).frame(height: AureaDialogMetrics.hairline)
+                            }
+                            button(action).frame(height: AureaDialogMetrics.stackHeight)
+                        }
+                    }
+                }
+            }
+            .frame(width: min(AureaDialogMetrics.maxWidth, max(0, geometry.size.width - 2 * AureaDialogMetrics.outerPadding)))
+            .background(AureaColors.lightDialog,
+                        in: RoundedRectangle(cornerRadius: AureaDialogMetrics.radius))
+            // O texto do `content` sem cor própria sai na tinta do diálogo.
+            .foregroundStyle(AureaColors.lightText)
+            .accessibilityElement(children: .contain)
+            .modifier(OptionalIdentifier(tag: tag))
+        }
+        .padding(.top, top).padding(.bottom, bottom)
+        }
+    }
+
+    private func button(_ action: DialogAction) -> some View {
+        let positive = action.role == .positive
+        let color: Color = !action.enabled ? AureaColors.lightTextFaint
+            : action.destructive ? AureaColors.lightDanger
+            : positive ? AureaColors.lightAccentInk : AureaColors.lightText
+        return Text(action.label)
+            .font(.aurea(size: 16, weight: positive ? .medium : .regular))
+            .foregroundStyle(color)
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .aureaTappable(shrink: 1, enabled: action.enabled) {
+                if action.dismiss { onDismiss() }
+                action.onClick()
+            }
+            .modifier(OptionalIdentifier(tag: action.tag))
+    }
+}
+
+/// Diálogo de confirmação (claro; `AureaDialog` com Cancelar | Confirmar).
+/// Mesma assinatura de sempre: quem já chamava continua igual.
 ///
 /// `cancelLabel` nulo = o rótulo do catálogo, no idioma do app. Esconder o botão
 /// de cancelar é `showCancel` = false, não um rótulo vazio: com sete idiomas, um
@@ -235,78 +405,73 @@ struct AureaAlert: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-        let top = max(0, geometry.safeAreaInsets.top) + 12
-        let bottom = max(0, geometry.safeAreaInsets.bottom) + 12
-        let available = AureaSheetLayout.bodyHeight(content: .greatestFiniteMagnitude, viewport: geometry.size.height,
-                                                   top: top, bottom: bottom,
-                                                   footer: AureaDims.dialogRowH + AureaDims.dialogDivider)
-        ZStack {
-            AureaColors.scrim
-                .ignoresSafeArea()
-                .onTapGesture { onDismiss() }
-            VStack(spacing: 0) {
-                AureaSheetScroll(maximumHeight: available) {
-                VStack(spacing: AureaDims.s1) {
-                    Text(title)
-                        .font(.aurea(size: 17, weight: .semibold))
-                        .foregroundStyle(AureaColors.text)
-                        .multilineTextAlignment(.center)
-                    if let message {
-                        Text(message)
-                            .font(.aurea(size: 13))
-                            .foregroundStyle(AureaColors.text)
-                            .multilineTextAlignment(.center)
-                    }
-                    if let extra { extra }
-                }
-                .padding(.horizontal, AureaDims.dialogPadH)
-                .padding(.top, AureaDims.dialogPadTop)
-                .padding(.bottom, AureaDims.dialogPadBottom)
-                .frame(maxWidth: .infinity)
-                }
-                divider
-                HStack(spacing: 0) {
-                    if showCancel {
-                        dialogButton(cancelLabel ?? AureaText.t("common_cancel"),
-                                     bold: false, color: AureaColors.accent) { onDismiss() }
-                        Rectangle()
-                            .fill(AureaColors.actionDivider)
-                            .frame(width: AureaDims.dialogDivider, height: AureaDims.dialogRowH)
-                    }
-                    dialogButton(confirmLabel, bold: true,
-                                 color: destructive ? AureaColors.destructiveCupertino : AureaColors.accent) {
-                        onDismiss()
-                        onConfirm()
-                    }
-                }
-                .frame(minHeight: AureaDims.dialogRowH)
-            }
-            .frame(width: min(AureaDims.dialogW, max(0, geometry.size.width - 32)))
-            .background(AureaColors.dialogBg,
-                        in: RoundedRectangle(cornerRadius: AureaDims.dialogRadius))
+        var actions: [DialogAction] = []
+        if showCancel {
+            actions.append(DialogAction(cancelLabel ?? AureaText.t("common_cancel"), role: .negative, tag: "dialog.cancel"))
         }
-        .padding(.top, top).padding(.bottom, bottom)
-        }
-    }
-
-    private var divider: some View {
-        Rectangle()
-            .fill(AureaColors.actionDivider)
-            .frame(height: AureaDims.dialogDivider)
-    }
-
-    private func dialogButton(_ label: String, bold: Bool, color: Color,
-                              onClick: @escaping () -> Void) -> some View {
-        Text(label)
-            .font(.aurea(size: 16.8, weight: bold ? .semibold : .regular))
-            .foregroundStyle(color)
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: AureaDims.dialogRowH)
-            .contentShape(Rectangle())
-            .aureaTappable(shrink: 1, action: onClick)
+        actions.append(DialogAction(confirmLabel, role: .positive, destructive: destructive, tag: "dialog.confirm",
+                                    onClick: onConfirm))
+        return AureaDialog(title: title, message: message, actions: actions, onDismiss: onDismiss, content: extra)
     }
 }
+
+/// O campo de texto do diálogo (`input_text_popup`/`am_dialog`): 40, fundo
+/// `lightSurface`, raio 6, dica em `lightTextFaint` e ✕ que apaga o texto.
+struct AureaDialogField: View {
+    @Binding var text: String
+    var placeholder: String? = nil
+    var monospacedDigits: Bool = false
+    var submitLabel: SubmitLabel = .done
+    var tag: String? = nil
+    /// Foco do campo (o `@FocusState` de quem abre o diálogo).
+    var focus: FocusState<Bool>.Binding? = nil
+    var onSubmit: () -> Void = {}
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ZStack(alignment: .leading) {
+                if text.isEmpty, let placeholder {
+                    Text(placeholder).font(.aurea(size: 15)).foregroundStyle(AureaColors.lightTextFaint).lineLimit(1)
+                        .accessibilityHidden(true)
+                }
+                TextField("", text: $text)
+                    .font(monospacedDigits ? .aurea(size: 15).monospacedDigit() : .aurea(size: 15))
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(AureaColors.lightText)
+                    .tint(AureaColors.lightAccentInk)
+                    .submitLabel(submitLabel)
+                    .onSubmit(onSubmit)
+                    .accessibilityLabel(placeholder ?? "")
+                    .modifier(DialogFieldFocus(focus: focus))
+                    .modifier(OptionalIdentifier(tag: tag))
+            }
+            .padding(.leading, 10)
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    CupertinoGlyph.text(CupertinoGlyph.XmarkCircleFill, size: 16, color: AureaColors.lightTextFaint)
+                        .frame(width: 40, height: 40).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(AureaText.t("om_field_clear"))
+            } else {
+                Spacer().frame(width: 10)
+            }
+        }
+        .frame(height: AureaDialogMetrics.fieldHeight)
+        .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: AureaDialogMetrics.fieldRadius))
+    }
+}
+
+private struct DialogFieldFocus: ViewModifier {
+    let focus: FocusState<Bool>.Binding?
+    func body(content: Content) -> some View {
+        if let focus { content.focused(focus) } else { content }
+    }
+}
+
+// =============================================================================
+// Pedido de nome (diálogo claro com campo)
+// =============================================================================
 
 /// Pede um nome (renomear camada/projeto). Vazio não confirma.
 struct AureaNamePrompt: View {
@@ -344,19 +509,11 @@ struct AureaNamePrompt: View {
             }
     }
 
+    /// Omega fundação (F4): o campo do diálogo claro, com ✕ de limpar.
     private var field: some View {
-        TextField("", text: $text)
-            .font(.aurea(size: 15))
-            .foregroundStyle(AureaColors.text)
-            .tint(AureaColors.accent)
-            .submitLabel(.done)
-            .focused($focused)
-            .onSubmit { if !trimmed.isEmpty { onDismiss(); onConfirm(trimmed) } }
-            .padding(.horizontal, AureaDims.s2)
-            .padding(.vertical, 7)
-            .background(AureaColors.fieldDialog,
-                        in: RoundedRectangle(cornerRadius: AureaDims.nameFieldRadius))
-            .padding(.top, 10)
+        AureaDialogField(text: $text, tag: "dialog.field", focus: $focused) {
+            if !trimmed.isEmpty { onDismiss(); onConfirm(trimmed) }
+        }
     }
 }
 
@@ -373,6 +530,22 @@ struct KeypadRequest: Identifiable {
     /// de efeito, min...max é a faixa DIGITADA e isto é o fim da régua.
     var percentBase: Float? = nil
     let onValue: (Float) -> Void
+    // Omega efeitos (P2-2): VÁRIOS CAMPOS no mesmo teclado (X/Y, X/Y/Z, α/β/γ),
+    // uma aba por campo acima do visor; `focus` é o campo que abre selecionado.
+    // Vazio = um campo só (o de sempre). Com campos, o OK chama `onConfirmFields`
+    // com o valor novo de cada campo (nil = não mexido). Par do KeypadRequest.kt.
+    var fields: [KeypadField] = []
+    var focus: Int = 0
+    var onConfirmFields: (([Float?]) -> Void)? = nil
+}
+
+/// Um campo do teclado de vários campos: rótulo (X, Y, α…), valor, padrão e faixa aceita.
+struct KeypadField {
+    let label: String
+    let initial: Float
+    let defaultValue: Float
+    let min: Float
+    let max: Float
 }
 
 enum KeypadExpression {
@@ -427,7 +600,15 @@ struct NumericKeypadSheet: View {
     let onDismiss: () -> Void
     @State private var text = ""
     @State private var selectedAll = true
+    // Omega efeitos (P2-2): o campo escolhido, o texto guardado de cada campo e
+    // quais já foram mexidos (os outros voltam como nil no OK).
+    @State private var field = 0
+    @State private var texts: [String] = []
+    @State private var edited: [Bool] = []
     private let rows = [["7", "8", "9", "⌫"], ["4", "5", "6", "÷"], ["1", "2", "3", "×"], [",", "0", "±", "−"], [":", "%", "=", "+"]]
+    private var multi: Bool { request.fields.count >= 2 && request.onConfirmFields != nil }
+    private var fieldMin: Float { multi && request.fields.indices.contains(field) ? request.fields[field].min : request.min }
+    private var fieldMax: Float { multi && request.fields.indices.contains(field) ? request.fields[field].max : request.max }
     private var percentOf: Double {
         if request.unit == "%" { return 100 }
         let base: Float = request.percentBase ?? request.max
@@ -435,9 +616,37 @@ struct NumericKeypadSheet: View {
     }
     private var result: Double? { KeypadExpression.evaluate(text, percentOf: percentOf) }
     private var value: Float? {
-        guard let result, result.isFinite else { return nil }
-        let clamped = Float(result).clamped(to: (request.min.isNaN ? -.infinity : request.min)...(request.max.isNaN ? .infinity : request.max))
+        guard let result else { return nil }
+        return clamp(result, fieldMin, fieldMax)
+    }
+    private func clamp(_ result: Double, _ lo: Float, _ hi: Float) -> Float? {
+        guard result.isFinite else { return nil }
+        let clamped = Float(result).clamped(to: (lo.isNaN ? -.infinity : lo)...(hi.isNaN ? .infinity : hi))
         return clamped.isFinite ? clamped : nil
+    }
+    /// O valor de cada campo como o OK gravaria (nil = não mexido); `false` = algum campo mexido não fecha a conta.
+    private var fieldValues: (values: [Float?], ok: Bool) {
+        guard multi else { return ([], true) }
+        var ok = true
+        let values = request.fields.indices.map { i -> Float? in
+            let t = i == field ? text : (texts.indices.contains(i) ? texts[i] : "")
+            let touched = (edited.indices.contains(i) && edited[i]) || (i == field && !selectedAll)
+            guard touched else { return nil }
+            let f = request.fields[i]
+            let v = KeypadExpression.evaluate(t, percentOf: percentOf).flatMap { clamp($0, f.min, f.max) }
+            if v == nil { ok = false }
+            return v
+        }
+        return (values, ok)
+    }
+    /// Trocar de aba guarda o texto do campo e seleciona o novo inteiro.
+    private func switchTo(_ i: Int) {
+        guard multi, i != field, texts.indices.contains(i), texts.indices.contains(field) else { return }
+        texts[field] = text
+        if !selectedAll { edited[field] = true }
+        field = i
+        text = texts[i]
+        selectedAll = true
     }
     private func display(_ value: Float) -> String { numeroPtBr(value, casas: request.decimals).replacingOccurrences(of: "-", with: "−") }
     private var hint: String {
@@ -466,11 +675,47 @@ struct NumericKeypadSheet: View {
                 .foregroundStyle(AureaColors.text)
                 .padding(.bottom, bottomInset)
             }.padding(.top, topInset)
-        }.onAppear { text = display(request.value) }
+        }.onAppear {
+            if multi {
+                field = Swift.min(Swift.max(request.focus, 0), request.fields.count - 1)
+                texts = request.fields.map { display($0.initial) }
+                edited = Array(repeating: false, count: request.fields.count)
+                text = texts[field]
+            } else {
+                text = display(request.value)
+            }
+        }
+    }
+    /// Omega efeitos (P2-2): uma aba por campo (X/Y/Z, α/β/γ) com o valor dele; a ativa em destaque.
+    private var fieldTabs: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(request.fields.enumerated()), id: \.offset) { i, f in
+                let on = i == field
+                let shown = on ? text : (texts.indices.contains(i) ? texts[i] : "")
+                Button { switchTo(i) } label: {
+                    VStack(spacing: 0) {
+                        Text(f.label).font(.aurea(size: 11)).foregroundStyle(on ? AureaColors.accent : AureaColors.muted)
+                        Text(shown).font(.aurea(size: 14, weight: .semibold).monospacedDigit()).foregroundStyle(AureaColors.text)
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(f.label + " " + shown)
+                .accessibilityAddTraits(on ? .isSelected : [])
+                .accessibilityIdentifier("keypad.field.\(i)")
+            }
+        }
+        .padding(.bottom, 8)
+        .keepLtr()
     }
     private var keypadContents: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(request.title).font(.aurea(size: 15, weight: .bold)).padding(.bottom, 10)
+            if multi { fieldTabs }
             HStack(spacing: 6) {
                 Spacer(minLength: 0)
                 Text(text).font(.aurea(size: 26, weight: .bold).monospacedDigit()).lineLimit(1).minimumScaleFactor(0.4)
@@ -505,11 +750,17 @@ struct NumericKeypadSheet: View {
                 .frame(maxWidth: .infinity, minHeight: 48)
                 .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
                 .accessibilityIdentifier("numeric.keypad.cancel")
-            Button { if let value { request.onValue(value); onDismiss() } } label: {
+            // Vários campos: o OK vale se todo campo mexido fecha a conta e grava todos de uma vez.
+            let fieldState = fieldValues
+            let ok = multi ? fieldState.ok && (value != nil || selectedAll) : value != nil
+            Button {
+                if multi { request.onConfirmFields?(fieldState.values); onDismiss() }
+                else if let value { request.onValue(value); onDismiss() }
+            } label: {
                 Text("OK").fontWeight(.bold).frame(maxWidth: .infinity, minHeight: 48)
-                    .foregroundStyle(value == nil ? AureaColors.disabled : AureaColors.onAction)
-                    .background(value == nil ? AureaColors.chipHigh : AureaColors.accent, in: RoundedRectangle(cornerRadius: 8))
-            }.disabled(value == nil).accessibilityIdentifier("numeric.keypad.confirm")
+                    .foregroundStyle(ok ? AureaColors.onAction : AureaColors.disabled)
+                    .background(ok ? AureaColors.accent : AureaColors.chipHigh, in: RoundedRectangle(cornerRadius: 8))
+            }.disabled(!ok).accessibilityIdentifier("numeric.keypad.confirm")
         }.font(.aurea(size: 15)).buttonStyle(.plain)
     }
     private func press(_ key: String) {
@@ -569,9 +820,12 @@ struct ColorSheetRequest: Identifiable {
     let withAlpha: Bool
     let onChange: (Float, Float, Float, Float) -> Void
     let onDone: () -> Void
-    init(title: String, initial: [Float], withAlpha: Bool = true,
+    /// Omega aparência (P0-5): retângulo GLOBAL da amostra tocada. Com ele a cor
+    /// abre no balão ancorado (seletor embutido); sem ele, no seletor em tela cheia.
+    let anchor: CGRect?
+    init(title: String, initial: [Float], withAlpha: Bool = true, anchor: CGRect? = nil,
          onChange: @escaping (Float, Float, Float, Float) -> Void, onDone: @escaping () -> Void) {
-        self.title = title; self.initial = initial; self.withAlpha = withAlpha
+        self.title = title; self.initial = initial; self.withAlpha = withAlpha; self.anchor = anchor
         self.onChange = onChange; self.onDone = onDone
     }
 }

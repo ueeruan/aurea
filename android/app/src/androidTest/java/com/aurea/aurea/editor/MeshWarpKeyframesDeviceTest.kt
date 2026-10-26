@@ -41,7 +41,9 @@ class MeshWarpKeyframesDeviceTest {
         compose.waitUntil(10000) { store.effects.size == 1 }
         val effect = store.effects.single().effectId
         val layer = checkNotNull(store.primary)
-        compose.onNodeWithTag("dock.tool.Effects").performScrollTo().performClick()
+        compose.onNodeWithTag("layer.panel.effects").performClick()
+        // Omega (área 07): a lista nasce fechada; a linha abre os controles do efeito.
+        compose.onNodeWithTag("effects.expand.${com.aurea.aurea.effects.effectCardId(effectTypeId("aurea.distort.mesh_warp"))}").performClick()
         compose.onNodeWithTag("fx.mesh_warp.key").performScrollTo().assertIsEnabled().performClick()
         compose.waitUntil(10000) {
             store.keyframes[layer].orEmpty().any { it.property == TrackProperty.MESH_WARP && it.effectIndex == effect && it.time == 0 }

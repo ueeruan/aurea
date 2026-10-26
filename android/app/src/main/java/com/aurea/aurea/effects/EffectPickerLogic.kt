@@ -22,12 +22,6 @@ import com.aurea.aurea.engine.EffectCatalogEntry
 //     dos 7 idiomas do app, pelos sinônimos e pela descrição; o nome vem antes.
 // =============================================================================
 
-/** As duas abas do painel de efeitos. */
-enum class EffectsTab { Applied, Add }
-
-/** Camada com efeito abre na pilha; camada sem efeito abre direto no catálogo. */
-fun initialEffectsTab(effectCount: Int): EffectsTab = if (effectCount > 0) EffectsTab.Applied else EffectsTab.Add
-
 /** Id da ficha "Todos" (testTag `effects.category.all`). */
 const val ALL_CATEGORIES_ID = "all"
 
@@ -118,6 +112,10 @@ fun toolCatalogEntry(tool: EffectTool, name: String): EffectCatalogEntry =
  * "Distorcer" e "Distort"); a tela junta tudo em grupos de gente, na ordem
  * abaixo (a ordem dos ladrilhos na tela). [id] é o testTag/identificador
  * (`effects.category.<id>`), igual no iOS.
+ *
+ * Omega efeitos (navegador, P0-6): primeiro os grupos da referência, na ordem
+ * dela (Cor e luz … Visibilidade, Texto); depois os extras do AUREA (Estilizar,
+ * Glitch, Tempo, Áudio, Utilitário, Plugins); "Outros" sempre por último.
  */
 enum class EffectGroup(val id: String) {
     ColorLight("color_light"),
@@ -130,10 +128,10 @@ enum class EffectGroup(val id: String) {
     Repeat("repeat"),
     Matte("matte"),
     Visibility("visibility"),
+    Text("text"),
     Stylize("stylize"),
     Glitch("glitch"),
     Time("time"),
-    Text("text"),
     Audio("audio"),
     Utility("utility"),
     /** 0.3.0: efeitos instalados por plugin (categoria "Plugins" do motor). */
@@ -241,8 +239,67 @@ fun featuredEntries(sorted: List<EffectCatalogEntry>): List<EffectCatalogEntry> 
     return curated + sorted.filter { it.isNew && it.typeId !in ids }
 }
 
-/** Quantas miniaturas cabem numa página de Recentes/Favoritos (5 por linha, 2 linhas). */
-const val QUICK_PAGE_SIZE = 10
+/**
+ * RECOMENDADOS (Omega efeitos, navegador): o AUREA não tem configuração remota,
+ * então a lista começa na curadoria fixa ([FeaturedKeys]); fica só o que esta
+ * camada aceita ([pickableEffects]), saem os efeitos que a camada JÁ tem
+ * ([applied], por `typeId`) e, se sobrar vaga, entram os novos do motor. No
+ * máximo [max] (6, como a referência).
+ */
+fun recommendedEffects(
+    catalog: List<EffectCatalogEntry>,
+    layerKind: Int,
+    applied: Collection<Int>,
+    max: Int = 6,
+    layerHasAudio: Boolean = true,
+): List<EffectCatalogEntry> {
+    val offered = pickableEffects(catalog, layerHasAudio, layerKind)
+    val byId = offered.associateBy { it.typeId }
+    val taken = applied.toHashSet()
+    val curated = FeaturedKeys.mapNotNull { byId[effectTypeId(it)] }.filter { it.typeId !in taken }
+    val ids = curated.mapTo(HashSet()) { it.typeId }
+    val fresh = offered.filter { it.isNew && it.typeId !in ids && it.typeId !in taken }
+    return (curated + fresh).distinctBy { it.typeId }.take(max.coerceAtLeast(0))
+}
+
+/** Recentes: uma página de até 8, como a referência. */
+const val QUICK_PAGE_SIZE = 8
+
+/**
+ * Itens por página de FAVORITOS para a largura [widthDp] da tela: 2 linhas de
+ * ⌊(L − 20) / 69,5⌋ itens (o item tem 62 dp + 7,5 de espaço). 8 em 360 dp.
+ */
+fun favoritesPerPage(widthDp: Float): Int = 2 * maxOf(1, kotlin.math.floor((widthDp - 20f) / 69.5f).toInt())
+
+/** Colunas da grade de uma categoria: ⌊(L − 30) / 103⌋ (cartão de 88 + 15), no mínimo 1. */
+fun categoryGridColumns(widthDp: Float): Int = maxOf(1, kotlin.math.floor((widthDp - 30f) / 103f).toInt())
+
+/**
+ * As páginas da faixa Recentes/Favoritos: a de Recentes (só se houver) e as de
+ * Favoritos, [perPage] por página. Devolve (é a de Recentes?, itens). Os dois
+ * vazios = nenhuma página (a faixa some).
+ */
+fun <T> quickPages(recents: List<T>, favorites: List<T>, perPage: Int): List<Pair<Boolean, List<T>>> {
+    val pages = ArrayList<Pair<Boolean, List<T>>>()
+    if (recents.isNotEmpty()) pages += true to recents.take(minOf(QUICK_PAGE_SIZE, perPage.coerceAtLeast(1)))
+    favorites.chunked(perPage.coerceAtLeast(1)).forEach { pages += false to it }
+    return pages
+}
+
+/** O código curto de uma variação (linha do detalhe, selo da miniatura): "01", "02"… */
+fun presetCode(preset: Int): String = if (preset < 0) "" else String.format(java.util.Locale.ROOT, "%02d", preset + 1)
+
+/** A ordem do item [index] numa página de 2 linhas que enche por COLUNA (como a referência): (coluna, linha). */
+fun quickCell(index: Int): Pair<Int, Int> = (index / 2) to (index % 2)
+
+/**
+ * A grade de uma categoria em ordem ALFABÉTICA pelo nome no idioma do app
+ * ([nameOf]), com o colador do [locale] (sem diferenciar caixa nem acento).
+ */
+fun <T> sortedByName(entries: List<T>, locale: java.util.Locale, nameOf: (T) -> String): List<T> {
+    val collator = java.text.Collator.getInstance(locale).apply { strength = java.text.Collator.PRIMARY }
+    return entries.sortedWith { a, b -> collator.compare(nameOf(a), nameOf(b)) }
+}
 
 /** O grupo antes e o depois de [group] na ordem da tela (nulo nas pontas). */
 fun adjacentGroups(groups: List<EffectGroup>, group: EffectGroup): Pair<EffectGroup?, EffectGroup?> {
@@ -302,6 +359,91 @@ fun parseRecents(stored: String?): List<Int> =
 
 fun formatRecents(recents: List<Int>): String = recents.joinToString(",")
 
+// --- Omega efeitos (navegador): favoritos e recentes com VARIAÇÃO ------------
+
+/**
+ * Um favorito ou recente: o efeito e, se houver, a variação ([preset] = índice
+ * em `EditorStore.effectPresets(typeId)`; −1 = o efeito base). Gravado como
+ * [key]: "<typeId>" ou "<typeId>/<preset>", com o typeId SEM SINAL (o mesmo
+ * texto no iOS e no `effectCardId`).
+ */
+data class EffectRef(val typeId: Int, val preset: Int = -1) {
+    val isBase: Boolean get() = preset < 0
+    val key: String get() = if (preset >= 0) "${Integer.toUnsignedString(typeId)}/$preset" else Integer.toUnsignedString(typeId)
+}
+
+/**
+ * Lê uma referência gravada. Aceita a lista de inteiros antiga (com sinal,
+ * "-5"), o typeId sem sinal ("4294967291") e "id/preset". Lixo = nulo.
+ */
+fun parseEffectRef(stored: String): EffectRef? {
+    val text = stored.trim()
+    if (text.isEmpty()) return null
+    val slash = text.indexOf('/')
+    val idPart = if (slash < 0) text else text.substring(0, slash)
+    val id = idPart.trim().toLongOrNull()?.takeIf { it in Int.MIN_VALUE.toLong()..0xFFFF_FFFFL } ?: return null
+    if (slash < 0) return EffectRef(id.toInt())
+    val preset = text.substring(slash + 1).trim().toIntOrNull()?.takeIf { it >= 0 } ?: return null
+    return EffectRef(id.toInt(), preset)
+}
+
+/** Os recentes gravados ("12,-5/1,7"): lixo e repetição somem; a ordem fica. */
+fun parseEffectRefs(stored: String?): List<EffectRef> =
+    stored.orEmpty().split(',').mapNotNull(::parseEffectRef).distinct()
+
+/** Os favoritos gravados (conjunto de textos): migra os inteiros antigos como efeito base. */
+fun parseEffectRefSet(stored: Collection<String>): Set<EffectRef> = stored.mapNotNullTo(LinkedHashSet(), ::parseEffectRef)
+
+fun formatEffectRefs(refs: List<EffectRef>): String = refs.joinToString(",") { it.key }
+
+/** O item vai para a frente dos recentes, sem repetir, no máximo [max]. */
+fun pushRecentRef(recents: List<EffectRef>, ref: EffectRef, max: Int): List<EffectRef> =
+    (listOf(ref) + recents.filter { it != ref }).take(max)
+
+/** Marca ou desmarca o favorito (efeito base ou uma variação). */
+fun toggleFavoriteRef(favorites: Set<EffectRef>, ref: EffectRef): Set<EffectRef> =
+    if (ref in favorites) favorites - ref else favorites + ref
+
+/** Um item de Recentes/Favoritos já achado no catálogo desta camada. */
+data class QuickItem(val entry: EffectCatalogEntry, val preset: Int = -1) {
+    val ref: EffectRef get() = EffectRef(entry.typeId, preset)
+}
+
+/**
+ * Os recentes que ainda valem nesta camada, na ordem de uso: o efeito está no
+ * catálogo oferecido e a variação ainda existe ([presetCount] do tipo).
+ */
+fun recentItems(
+    recents: List<EffectRef>,
+    pickable: List<EffectCatalogEntry>,
+    presetCount: (Int) -> Int,
+    max: Int = QUICK_PAGE_SIZE,
+): List<QuickItem> {
+    val byId = pickable.associateBy { it.typeId }
+    return recents.distinct().mapNotNull { r ->
+        val e = byId[r.typeId] ?: return@mapNotNull null
+        if (r.preset >= presetCount(r.typeId)) null else QuickItem(e, r.preset)
+    }.take(max)
+}
+
+/**
+ * Os favoritos na ordem do catálogo (favoritar não embaralha a faixa): o efeito
+ * base e depois as variações dele, pela ordem do preset.
+ */
+fun favoriteItems(
+    favorites: Set<EffectRef>,
+    sorted: List<EffectCatalogEntry>,
+    presetCount: (Int) -> Int,
+): List<QuickItem> {
+    if (favorites.isEmpty()) return emptyList()
+    val byType = favorites.groupBy { it.typeId }
+    return sorted.flatMap { e ->
+        val refs = byType[e.typeId] ?: return@flatMap emptyList()
+        val count = presetCount(e.typeId)
+        refs.map { it.preset }.filter { it < count }.distinct().sorted().map { QuickItem(e, it) }
+    }
+}
+
 // --- Buscar ------------------------------------------------------------------
 
 /**
@@ -319,22 +461,24 @@ fun effectSearchDoc(names: Collection<String>, extra: Collection<String>): Effec
 
 /**
  * A busca: todo termo tem de aparecer em algum lugar do efeito. A ordem é por
- * relevância e, no empate, a do catálogo:
- *  0 nome igual à busca · 1 nome que começa com ela · 2 uma palavra do nome
- *  começa com ela · 3 todos os termos no nome · 4 achado no resto (sinônimo,
- *  categoria, descrição).
+ * PONTOS e, no empate, a do catálogo. Pontos = os da busca do AUREA em 7
+ * idiomas (4 nome igual · 3 nome começa · 2 palavra do nome começa · 1 todos os
+ * termos no nome · 0 achado no resto) SOMADOS aos da referência
+ * ([effectSearchScore], com [fields]: etiqueta ×7, nome ×3, inglês ×2,
+ * descrição ×1). Sem [fields], vale só a primeira parte.
  */
 fun searchEffects(
     sorted: List<EffectCatalogEntry>,
     docs: Map<Int, EffectSearchDoc>,
     query: String,
+    fields: Map<Int, EffectScoreFields> = emptyMap(),
 ): List<EffectCatalogEntry> {
     val q = normalizeSearch(query).replace(Spaces, " ")
     if (q.isEmpty()) return emptyList()
     val terms = q.split(' ')
-    return sorted.mapNotNull { e ->
-        val doc = docs[e.typeId] ?: return@mapNotNull null
-        if (!terms.all { doc.text.contains(it) }) return@mapNotNull null
+    return sorted.mapIndexedNotNull { order, e ->
+        val doc = docs[e.typeId] ?: return@mapIndexedNotNull null
+        if (!terms.all { doc.text.contains(it) }) return@mapIndexedNotNull null
         val rank = when {
             doc.names.any { it == q } -> 0
             doc.names.any { it.startsWith(q) } -> 1
@@ -342,8 +486,61 @@ fun searchEffects(
             doc.names.any { n -> terms.all { n.contains(it) } } -> 3
             else -> 4
         }
-        rank to e
-    }.sortedBy { it.first }.map { it.second }
+        Triple((4 - rank) + effectSearchScore(fields[e.typeId], q), order, e)
+    }.sortedWith(compareByDescending<Triple<Int, Int, EffectCatalogEntry>> { it.first }.thenBy { it.second }).map { it.third }
+}
+
+/**
+ * O que a pontuação da referência olha em UM efeito, já sem acento e em
+ * minúsculas: as etiquetas (rótulos no idioma do app), o nome mostrado, o nome
+ * em inglês e a descrição.
+ */
+class EffectScoreFields(tags: Collection<String>, name: String, english: String, description: String) {
+    val tags: List<String> = tags.map(::normalizeSearch).filter { it.isNotEmpty() }
+    val name: String = normalizeSearch(name)
+    val english: String = normalizeSearch(english)
+    val description: String = normalizeSearch(description)
+}
+
+/** Força do acerto de [query] em [field] (os dois normalizados): igual 3, começa 2, contém 1, nada 0. */
+fun searchMatch(field: String, query: String): Int = when {
+    query.isEmpty() || field.isEmpty() -> 0
+    field == query -> 3
+    field.startsWith(query) -> 2
+    field.contains(query) -> 1
+    else -> 0
+}
+
+/** A pontuação da referência: etiqueta ×7, nome ×3, nome em inglês ×2, descrição ×1 (× a força do acerto). */
+fun effectSearchScore(fields: EffectScoreFields?, query: String): Int {
+    if (fields == null) return 0
+    val q = normalizeSearch(query).replace(Spaces, " ")
+    if (q.isEmpty()) return 0
+    val tag = fields.tags.maxOfOrNull { searchMatch(it, q) } ?: 0
+    return tag * 7 + searchMatch(fields.name, q) * 3 + searchMatch(fields.english, q) * 2 + searchMatch(fields.description, q)
+}
+
+/** Os efeitos que têm TODAS as etiquetas [chips] (fichas no campo), na ordem recebida. */
+fun effectsWithTags(
+    entries: List<EffectCatalogEntry>,
+    chips: Collection<String>,
+    tagsOf: (EffectCatalogEntry) -> Collection<String>,
+): List<EffectCatalogEntry> =
+    if (chips.isEmpty()) entries else entries.filter { e -> tagsOf(e).let { t -> chips.all { it in t } } }
+
+/**
+ * As etiquetas cujo rótulo ([labels]: id → rótulo no idioma do app) casa com o
+ * que se digita: as que começam com o texto antes das que só o contêm. [exclude]
+ * são as fichas já no campo.
+ */
+fun matchingTags(labels: Map<String, String>, query: String, exclude: Collection<String> = emptyList()): List<String> {
+    val q = normalizeSearch(query).replace(Spaces, " ")
+    if (q.isEmpty()) return emptyList()
+    return labels.entries.mapNotNull { (id, label) ->
+        if (id in exclude) return@mapNotNull null
+        val strength = searchMatch(normalizeSearch(label), q)
+        if (strength == 0) null else id to strength
+    }.sortedByDescending { it.second }.map { it.first }
 }
 
 private val Spaces = Regex("\\s+")

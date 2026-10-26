@@ -127,13 +127,18 @@ class ManualEditingWorkflowTest {
         val copiedCard = com.aurea.aurea.effects.effectCardId(copiedType)
         val copiedHeader = "effects.expand.$copiedCard"
         val copiedMenu = "effects.more.$copiedCard"
-        compose.onNodeWithTag("aurea.effects.stack").performScrollToNode(hasTestTag(copiedHeader))
-        if (compose.onAllNodesWithTag(copiedMenu).fetchSemanticsNodes().isEmpty()) {
-            compose.onNodeWithTag(copiedHeader).performClick()
+        // Omega (área 07): os controles de UM efeito abrem SOBRE a lista. Fecha o
+        // que estiver aberto (o 1º efeito da camada abre sozinho), abre o copiado e
+        // usa o ⋮ (menu ancorado) "Copiar efeito".
+        if (compose.onAllNodesWithTag("effects.settings.header").fetchSemanticsNodes().isNotEmpty()) {
+            compose.onNodeWithTag("effects.settings.header").performClick()
+            compose.waitUntil(5000) { compose.onAllNodesWithTag("effects.settings.header").fetchSemanticsNodes().isEmpty() }
         }
-        compose.onNodeWithTag("aurea.effects.stack").performScrollToNode(hasTestTag(copiedMenu))
+        compose.onNodeWithTag("aurea.effects.stack").performScrollToNode(hasTestTag(copiedHeader))
+        compose.onNodeWithTag(copiedHeader).performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithTag(copiedMenu).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag(copiedMenu).performClick()
-        compose.onNodeWithText(context.getString(R.string.fx_copy_this_effect)).performClick()
+        compose.onNodeWithTag("effects.menu.copy").performClick()
         select(clips[1])
         compose.runOnIdle { store.pasteEffects() }
         compose.waitUntil(5000) { store.effects.size==1 }
@@ -146,13 +151,13 @@ class ManualEditingWorkflowTest {
         compose.runOnIdle { val point = store.remapInsert(30); assertTrue(point >= 0); store.remapMove(point, 30, 20f) }
         seek(0)
         compose.runOnIdle { store.addText() }
-        compose.onNodeWithTag("text.content.input").performTextReplacement("MANUAL EDIT")
-        compose.onNodeWithTag("text.content.done").performClick()
+        compose.onNodeWithTag("text.edit.input").performTextReplacement("MANUAL EDIT")
+        compose.onNodeWithTag("text.style.done").performClick()
         compose.waitUntil(5000) { store.textContentRequest == null }
         compose.runOnIdle { store.renameLayer(store.primary!!,"AMV title") }
         compose.runOnIdle { store.addText3D() }
-        compose.onNodeWithTag("text.content.input").performTextReplacement("AUREA")
-        compose.onNodeWithTag("text.content.done").performClick()
+        compose.onNodeWithTag("text.edit.input").performTextReplacement("AUREA")
+        compose.onNodeWithTag("text.style.done").performClick()
         compose.waitUntil(5000) { store.textContentRequest == null }
         compose.runOnIdle { store.renameLayer(store.primary!!,"3D title"); store.setTransform(6,20f) }
         compose.runOnIdle { store.addCamera() }

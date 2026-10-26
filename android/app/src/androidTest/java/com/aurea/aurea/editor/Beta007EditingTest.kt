@@ -37,7 +37,7 @@ class Beta007EditingTest {
         compose.waitUntil(5000) { store.textStyle != null }
         compose.runOnIdle { store.setTextContent("AAAA"); store.setTextSize(64f); store.setTextColor(1f, 0f, 0f, 1f) }
         val id = checkNotNull(store.primary)
-        compose.onNodeWithTag("dock.tool.TextOptions").performScrollTo().performClick()
+        compose.onNodeWithTag("layer.panel.colorFill").performClick()
         compose.onNodeWithTag("text.tracking.key").performScrollTo().assertIsEnabled().performClick()
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 29 && it.time == 0 } }
         compose.runOnIdle { store.seek(60) }

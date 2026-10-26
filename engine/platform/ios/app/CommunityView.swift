@@ -91,6 +91,8 @@ private final class SocialState: ObservableObject {
     @Published var following = false
     @Published var busy = false
     @Published var error: String?
+    /// Omega home: sem rede (URLError de conexão) = o estado sem rede da referência.
+    @Published var offline = false
     var api = SocialAPI(token: "")
     var ownMode = false
     private var generation = UUID()
@@ -98,14 +100,26 @@ private final class SocialState: ObservableObject {
         try Task.checkCancellation()
         if request != generation { throw CancellationError() }
     }
-    func fail(_ error: Error) { self.error = (error as? SocialFailure)?.message ?? AureaText.t("social_error") }
+    func fail(_ error: Error) {
+        let codes: [URLError.Code] = [.notConnectedToInternet, .timedOut, .cannotFindHost, .cannotConnectToHost,
+                                      .networkConnectionLost, .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff]
+        offline = (error as? URLError).map { codes.contains($0.code) } ?? false
+        self.error = (error as? SocialFailure)?.message ?? AureaText.t("social_error")
+    }
+    /// Puxar para atualizar (`.refreshable`): espera o trabalho terminar.
+    func pullRefresh() async {
+        let request = generation
+        error = nil
+        do { try await refresh(); if generation == request { offline = false } }
+        catch { if !Task.isCancelled && generation == request { fail(error) } }
+    }
     func run(_ action: @escaping () async throws -> Void) {
         guard !busy else { return }
         let request = generation
         busy = true; error = nil
         Task {
             defer { if generation == request { busy = false } }
-            do { try requireCurrent(request); try await action() }
+            do { try requireCurrent(request); try await action(); if generation == request { offline = false } }
             catch { if !Task.isCancelled && generation == request { fail(error) } }
         }
     }
@@ -113,7 +127,7 @@ private final class SocialState: ObservableObject {
         let request = UUID(); generation = request
         api = SocialAPI(token: session?.token ?? ""); ownMode = own; profile = nil; feed = []; busy = true; error = nil
         defer { if generation == request { busy = false } }
-        do { try await refresh() } catch { if !Task.isCancelled && generation == request { fail(error) } }
+        do { try await refresh(); offline = false } catch { if !Task.isCancelled && generation == request { fail(error) } }
     }
     func refresh() async throws {
         let request = generation
@@ -169,19 +183,19 @@ private struct SocialAuthor: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                Circle().fill(AureaColors.accent.opacity(0.14))
+                Circle().fill(AureaColors.lightAccentInk.opacity(0.14))
                 Text(String((profile.name.isEmpty ? profile.username : profile.name).prefix(1)).uppercased())
-                    .font(.system(size: large ? 26 : 18, weight: .bold)).foregroundStyle(AureaColors.accent)
+                    .font(.system(size: large ? 26 : 18, weight: .bold)).foregroundStyle(AureaColors.lightAccentInk)
                 if let id = profile.avatar, let url = SocialAPI.assetURL(id) {
                     AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.clear }
                 }
             }.frame(width: large ? 64 : 44, height: large ? 64 : 44).clipShape(Circle()).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) { Text(profile.name.isEmpty ? AureaText.t("social_profile") : profile.name).font(.body.weight(.semibold)); SocialBadge(value: profile.verification) }
-                Text(profile.username.isEmpty ? AureaText.t("social_profile_required") : "@\(profile.username)").font(.caption).foregroundStyle(AureaColors.muted)
+                Text(profile.username.isEmpty ? AureaText.t("social_profile_required") : "@\(profile.username)").font(.caption).foregroundStyle(AureaColors.lightTextMuted)
             }
             Spacer(minLength: 0)
-        }.frame(minHeight: 48).foregroundStyle(AureaColors.text).contentShape(Rectangle())
+        }.frame(minHeight: 48).foregroundStyle(AureaColors.lightText).contentShape(Rectangle())
     }
 }
 
@@ -201,17 +215,37 @@ struct CommunityView: View {
     @State private var comments: SocialPost?
     @State private var people: String?
     var body: some View {
+        // Omega home · P1-4: o casco da referência na Início/Perfil — claro, puxar
+        // para atualizar no lugar do botão, o estado sem rede centralizado e o
+        // indicador no meio enquanto carrega sem itens. O conteúdo social não muda.
         VStack(spacing: 0) {
             HStack {
                 if state.profile != nil && (!profileMode || state.profile?.id != state.me?.id) {
                     Button { state.run { state.profile = profileMode ? state.me : nil; try await state.loadFeed() } } label: { Image(systemName: "chevron.left").mirrorsInRtl().frame(width: 44, height: 44) }.accessibilityLabel(AureaText.t("common_back"))
                 }
-                Text(AureaText.t(state.profile == nil ? "social_community" : "social_profile")).font(.title2.bold())
+                Text(AureaText.t(state.profile == nil ? "social_community" : "social_profile")).font(.aurea(size: 21, weight: .bold))
+                    .foregroundStyle(AureaColors.lightText)
                 Spacer()
-                Button(AureaText.t("social_refresh")) { state.run { try await state.refresh() } }.frame(minHeight: 44)
-            }.padding(.horizontal, 20).disabled(state.busy)
-            if state.busy { ProgressView().frame(maxWidth: .infinity).padding(4) }
-            if let error = state.error { Text(error).font(.subheadline).foregroundStyle(AureaColors.danger).padding(.horizontal, 20).accessibilityIdentifier("social.error") }
+            }.padding(.horizontal, 16).frame(minHeight: 48).disabled(state.busy)
+            if state.busy && !state.feed.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(4) }
+            if let error = state.error, !state.offline {
+                Text(error).font(.subheadline).foregroundStyle(AureaColors.lightDanger).padding(.horizontal, 20).accessibilityIdentifier("social.error")
+            }
+            if state.offline && state.feed.isEmpty && !state.busy {
+                ScrollView {
+                    VStack(spacing: 15) {
+                        CupertinoGlyph.text(CupertinoGlyph.ExclamationmarkTriangle, size: 48, color: AureaColors.lightTextMuted)
+                        Text(AureaText.t("conta_erro_rede")).font(.aurea(size: 12, weight: .bold)).foregroundStyle(AureaColors.lightText)
+                            .multilineTextAlignment(.center).frame(maxWidth: 300)
+                    }.frame(maxWidth: .infinity).padding(.top, 120).padding(24)
+                }
+                .refreshable { await state.pullRefresh() }
+                .accessibilityIdentifier("home.feed.offline")
+            } else if state.busy && state.feed.isEmpty {
+                Spacer()
+                ProgressView().tint(AureaColors.lightAccentInk).accessibilityIdentifier("home.feed.loading")
+                Spacer()
+            } else {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     if let profile = state.profile { profileHeader(profile) }
@@ -219,14 +253,18 @@ struct CommunityView: View {
                     if state.profile == nil || state.profile?.id == state.me?.id {
                         Button { if state.me?.username.isEmpty != false { editing = true } else { composing = true } } label: {
                             Text(AureaText.t("social_create_post")).frame(maxWidth: .infinity, minHeight: 48)
-                        }.buttonStyle(.borderedProminent).tint(AureaColors.accent).disabled(state.me == nil || state.busy).accessibilityIdentifier("social.compose")
+                        }.buttonStyle(.borderedProminent).tint(AureaColors.accent).foregroundStyle(AureaColors.onAccent)
+                            .disabled(state.me == nil || state.busy).accessibilityIdentifier("social.compose")
                     }
-                    if state.feed.isEmpty && !state.busy { Text(AureaText.t("social_empty")).foregroundStyle(AureaColors.muted).padding(.vertical, 24) }
+                    if state.feed.isEmpty && !state.busy { Text(AureaText.t("social_empty")).foregroundStyle(AureaColors.lightTextMuted).padding(.vertical, 24) }
                     ForEach(state.feed) { post in postCard(post) }
                     if state.cursor != nil { Button(AureaText.t("social_more")) { state.run { try await state.loadFeed(more: true) } }.frame(minHeight: 44).disabled(state.busy) }
-                }.padding(16)
-            }.accessibilityIdentifier("social.feed")
-        }.background(AureaColors.background).foregroundStyle(AureaColors.text).tint(AureaColors.accent)
+                }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 69)
+            }
+            .refreshable { await state.pullRefresh() }
+            .accessibilityIdentifier("social.feed")
+            }
+        }.background(AureaColors.lightBackground).foregroundStyle(AureaColors.lightText).tint(AureaColors.lightAccentInk)
             .accessibilityIdentifier("social.screen")
             .task(id: profileMode) { await state.start(conta.sessao(), own: profileMode) }
             .task(id: search) {
@@ -263,7 +301,7 @@ struct CommunityView: View {
     }
     private var feedHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(AureaText.t("social_intro")).font(.subheadline).foregroundStyle(AureaColors.muted)
+            Text(AureaText.t("social_intro")).font(.subheadline).foregroundStyle(AureaColors.lightTextMuted)
             TextField(AureaText.t("social_search"), text: $search).textInputAutocapitalization(.never).autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder).accessibilityIdentifier("social.search")
             ForEach(results) { p in Button { search = ""; state.run { try await state.open(p.id) } } label: { SocialAuthor(profile: p) }.buttonStyle(.plain).disabled(state.busy) }
@@ -290,12 +328,12 @@ struct CommunityView: View {
                 Button(AureaText.t("social_edit_profile")) { editing = true }.buttonStyle(.borderedProminent).accessibilityIdentifier("social.edit")
             } else { Button(AureaText.t(p.followed == true ? "social_unfollow" : "social_follow")) { state.run { try await state.follow(p) } }.buttonStyle(.borderedProminent) }
             if state.canVerify { Button(AureaText.t("social_verification")) { verifying = true }.frame(minHeight: 44) }
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(20).background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 24)).disabled(state.busy)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(20).background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 24)).disabled(state.busy)
     }
     private func postCard(_ post: SocialPost) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Button { state.run { try await state.open(post.author.id) } } label: { SocialAuthor(profile: post.author) }.buttonStyle(.plain)
-            Text(Date(timeIntervalSince1970: post.createdAt / 1000), style: .relative).font(.caption).foregroundStyle(AureaColors.muted)
+            Text(Date(timeIntervalSince1970: post.createdAt / 1000), style: .relative).font(.caption).foregroundStyle(AureaColors.lightTextMuted)
             if !post.body.isEmpty { Text(post.body).textSelection(.enabled) }
             if let a = post.asset {
                 Button { download(a) } label: {
@@ -308,7 +346,7 @@ struct CommunityView: View {
                 Spacer(minLength: 0)
                 if state.me?.id == post.author.id { Button { deleting = post } label: { Image(systemName: "trash").frame(width: 44, height: 44) }.accessibilityLabel(AureaText.t("social_delete_post")) }
             }.frame(minHeight: 44)
-        }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 22)).disabled(state.busy)
+        }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 22)).disabled(state.busy)
     }
     private func download(_ asset: SocialAsset) {
         state.run {
@@ -357,13 +395,13 @@ private struct SocialEditProfile: View {
                     TextField(AureaText.t("social_bio"), text: $bio, axis: .vertical).lineLimit(3...6)
                     Text("\(bio.count)/240").font(.caption)
                 }
-                if let error { Text(error).foregroundStyle(AureaColors.danger) }
+                if let error { Text(error).foregroundStyle(AureaColors.lightDanger) }
                 Button { save() } label: { if busy { ProgressView() } else { Text(AureaText.t("social_save")) } }
                     .disabled(busy || username.range(of: "^[a-zA-Z0-9_]{3,24}$", options: .regularExpression) == nil || name.trimmingCharacters(in: .whitespaces).isEmpty || name.count > 50 || bio.count > 240)
                     .accessibilityIdentifier("social.save")
             }.navigationTitle(AureaText.t("social_edit_profile")).navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button(AureaText.t("editor_fechar")) { dismiss() }.disabled(busy) } }
-        }.tint(AureaColors.accent).interactiveDismissDisabled(busy)
+        }.tint(AureaColors.lightAccentInk).interactiveDismissDisabled(busy)
             .onAppear { username = profile.username; name = profile.name; bio = profile.bio ?? "" }
             .task(id: selectedPhoto) {
                 guard let item = selectedPhoto else { return }; busy = true; defer { busy = false }
@@ -420,8 +458,8 @@ private struct SocialCompose: View {
                     Button(AureaText.t("social_attach_project")) { projects = scanHomeProjects(); picker = "project" }.buttonStyle(.borderless)
                 }.disabled(busy)
                 if let attachment { HStack { Text(attachment.lastPathComponent); Spacer(); Button(AureaText.t("social_remove")) { self.attachment = nil }.disabled(busy) } }
-                Text(AureaText.t("social_file_limit")).font(.caption).foregroundStyle(AureaColors.muted)
-                if let error { Text(error).foregroundStyle(AureaColors.danger) }
+                Text(AureaText.t("social_file_limit")).font(.caption).foregroundStyle(AureaColors.lightTextMuted)
+                if let error { Text(error).foregroundStyle(AureaColors.lightDanger) }
                 Button { publish() } label: { if busy { ProgressView() } else { Text(AureaText.t("social_publish")) } }
                     .disabled(busy || bodyText.count > 2000 || (bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachment == nil)).accessibilityIdentifier("social.publish")
             }.navigationTitle(AureaText.t("social_create_post")).navigationBarTitleDisplayMode(.inline)
@@ -457,7 +495,7 @@ private struct SocialCompose: View {
                     }
                     }
                 }
-        }.tint(AureaColors.accent).interactiveDismissDisabled(busy)
+        }.tint(AureaColors.lightAccentInk).interactiveDismissDisabled(busy)
             .onDisappear { if !busy { for file in temporary { try? FileManager.default.removeItem(at: file) } } }
     }
     private func publish() {
@@ -486,9 +524,9 @@ private struct SocialComments: View {
         NavigationStack {
             VStack {
                 if busy { ProgressView() }
-                if let error { Text(error).foregroundStyle(AureaColors.danger); Button(AureaText.t("social_refresh")) { run { try await load() } } }
+                if let error { Text(error).foregroundStyle(AureaColors.lightDanger); Button(AureaText.t("social_refresh")) { run { try await load() } } }
                 ScrollView { LazyVStack(alignment: .leading, spacing: 16) {
-                    if items.isEmpty && !busy { Text(AureaText.t("social_no_comments")).foregroundStyle(AureaColors.muted) }
+                    if items.isEmpty && !busy { Text(AureaText.t("social_no_comments")).foregroundStyle(AureaColors.lightTextMuted) }
                     ForEach(items) { c in VStack(alignment: .leading, spacing: 6) {
                         Button { openProfile(c.author.id) } label: { SocialAuthor(profile: c.author) }.buttonStyle(.plain)
                         Text(c.body).textSelection(.enabled)
@@ -504,7 +542,7 @@ private struct SocialComments: View {
                 }.padding(16)
             }.navigationTitle(AureaText.t("social_comments")).navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button(AureaText.t("editor_fechar")) { dismiss() }.disabled(busy) } }
-        }.tint(AureaColors.accent).interactiveDismissDisabled(busy).task { run { try await load() } }
+        }.tint(AureaColors.lightAccentInk).interactiveDismissDisabled(busy).task { run { try await load() } }
     }
     private func run(_ action: @escaping () async throws -> Void) {
         guard !busy else { return }; busy = true; error = nil
@@ -533,7 +571,7 @@ private struct SocialPeople: View {
             if cursor != nil { Button(AureaText.t("social_more")) { load(more: true) }.disabled(busy) }
         }.navigationTitle(AureaText.t(type == "followers" ? "social_followers" : "social_following"))
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(AureaText.t("editor_fechar")) { dismiss() } } }
-        }.tint(AureaColors.accent).task { load() }
+        }.tint(AureaColors.lightAccentInk).task { load() }
     }
     private func load(more: Bool = false) {
         guard !busy else { return }; busy = true; error = false

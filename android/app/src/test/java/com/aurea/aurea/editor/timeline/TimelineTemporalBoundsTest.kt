@@ -122,8 +122,9 @@ class TimelineTemporalBoundsTest {
         assertEquals(28f, metrics.row, 0f)
         assertEquals(2.5f, metrics.barTop, 0f)
         assertEquals(23f, metrics.bar, 0f)
-        assertEquals(70f, metrics.headerColumn, 0f)
-        assertEquals(1.5f, metrics.barRadius, 0f)
+        // Omega 0.3.2 (área 03): cabeçalho visível de 62 dp e cartão com cantos de 3 dp.
+        assertEquals(62f, metrics.headerColumn, 0f)
+        assertEquals(3f, metrics.barRadius, 0f)
         assertEquals(100f, Zoom.DEFAULT_PPS, 0f)
     }
 }

@@ -1005,6 +1005,16 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.boolv(l.text.pathLegacyLayout);
     // v50: lente e zoom da análise de câmera (só quando a camada tem uma).
     if (l.cameraTrack) write_camera_lens(w, *l.cameraTrack);
+    // Omega aparência — v51: papel de cada efeito (decorações de Borda e
+    // sombra) e o preenchimento em degradê da forma.
+    w.u32v(static_cast<u32>(l.effects.size()));
+    for (const EffectInstance& e : l.effects) w.u8v(e.role);
+    w.u8v(l.shape.fillKind);
+    w.u8v(l.shape.gradType);
+    w.vec4(l.shape.gradColor0);
+    w.vec4(l.shape.gradColor1);
+    w.vec2(l.shape.gradStart);
+    w.vec2(l.shape.gradEnd);
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -1651,6 +1661,36 @@ void read_layer(ByteReader& r, Layer& l) {
         auto data = std::make_shared<tracking::CameraTrackData>(*l.cameraTrack);
         data->solution.method = static_cast<u8>(tracking::SolveMethod::Tripod);
         l.cameraTrack = std::move(data);
+    }
+    // Omega aparência — v51: papel dos efeitos e degradê da forma. Antes dela,
+    // todo efeito é comum e o preenchimento é a cor sólida (os padrões).
+    if (g_readingTimelineVersion >= 51) {
+        const u32 roles = r.u32v();
+        if (roles != l.effects.size() || r.remaining() < roles) { r.fail(); return; }
+        for (EffectInstance& e : l.effects) {
+            const u8 role = r.u8v();
+            e.role = role <= kLastEffectRole ? role : kEffectRoleNone;
+        }
+        // Decorações sempre DEPOIS dos comuns, na ordem do papel (a mesma
+        // regra que os comandos mantêm): um arquivo mexido à mão não inverte.
+        std::stable_sort(l.effects.begin(), l.effects.end(),
+                         [](const EffectInstance& a, const EffectInstance& b) { return a.role < b.role; });
+        const u8 kind = r.u8v();
+        const u8 type = r.u8v();
+        l.shape.fillKind = kind <= 1 ? kind : 0;
+        l.shape.gradType = type <= 2 ? type : 0;
+        auto color = [](Vec4 c, Vec4 fallback) {
+            return std::isfinite(c.x) && std::isfinite(c.y) && std::isfinite(c.z) && std::isfinite(c.w)
+                ? Vec4{std::clamp(c.x, 0.0f, 1.0f), std::clamp(c.y, 0.0f, 1.0f), std::clamp(c.z, 0.0f, 1.0f), std::clamp(c.w, 0.0f, 1.0f)}
+                : fallback;
+        };
+        auto point = [](Vec2 p, Vec2 fallback) {
+            return std::isfinite(p.x) && std::isfinite(p.y) ? Vec2{std::clamp(p.x, -2.0f, 3.0f), std::clamp(p.y, -2.0f, 3.0f)} : fallback;
+        };
+        l.shape.gradColor0 = color(r.vec4(), Vec4{1.0f, 1.0f, 1.0f, 1.0f});
+        l.shape.gradColor1 = color(r.vec4(), Vec4{0.0f, 0.0f, 0.0f, 1.0f});
+        l.shape.gradStart = point(r.vec2(), Vec2{0.0f, 0.5f});
+        l.shape.gradEnd = point(r.vec2(), Vec2{1.0f, 0.5f});
     }
 }
 

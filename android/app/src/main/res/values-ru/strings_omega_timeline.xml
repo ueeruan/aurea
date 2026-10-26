@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Omega 0.3.2, área 03 (timeline). Textos próprios do AUREA. -->
+    <string name="om_tl_show_tracks">Показать дорожки ключевых кадров</string>
+    <string name="om_tl_hide_tracks">Скрыть дорожки ключевых кадров</string>
+    <string name="om_tl_toggle_selection">Добавить в выделение или убрать</string>
+    <string name="om_tl_move_up">Переместить выше</string>
+    <string name="om_tl_move_down">Переместить ниже</string>
+    <string name="om_tl_info_start">Начало</string>
+    <string name="om_tl_info_offset">Сдвиг</string>
+    <string name="om_tl_info_in">Вход</string>
+    <string name="om_tl_info_end">Конец</string>
+    <string name="om_tl_info_out">Выход</string>
+    <string name="om_tl_info_duration">Длительность</string>
+    <string name="om_tl_info_change">Изменение</string>
+    <string name="om_tl_info_key">Ключевой кадр</string>
+    <string name="om_tl_trim_start_a11y">Обрезать начало: %1$s</string>
+    <string name="om_tl_trim_end_a11y">Обрезать конец: %1$s</string>
+    <string name="om_tl_speed_handle_a11y">Изменить скорость %1$s длиной</string>
+    <string name="om_tl_frame_earlier">На кадр раньше</string>
+    <string name="om_tl_frame_later">На кадр позже</string>
+    <string name="om_tl_marker_hint">Коснитесь часов, чтобы отметить этот момент. Удерживайте, чтобы назвать маркер.</string>
+    <string name="om_tl_prev_marker">Предыдущий маркер</string>
+    <string name="om_tl_next_marker">Следующий маркер</string>
+    <string name="om_tl_time_options">Параметры момента</string>
+    <string name="om_tl_ruler">Линейка таймлайна</string>
+    <string name="om_tl_current_time">Текущее время</string>
+    <string name="om_tl_hidden">Скрыт</string>
+    <string name="om_tl_visible">Виден</string>
+</resources>

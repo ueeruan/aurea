@@ -33,6 +33,11 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 extra;     // x = largura do contorno (px), y = profundidade, z = ponta, w = espessura
     vec4 more;      // x = abertura (graus), y = ponta da seta, z = haste, w = amplitude
     vec4 blob;      // xyz = fases do blob
+    // Omega aparência (P1-4): preenchimento em degradê (linear, pré-multiplicado).
+    vec4 grad0;     // cor do início
+    vec4 grad1;     // cor do fim
+    vec4 gradPts;   // xy = início, zw = fim (relativos à caixa, 0..1, y para baixo)
+    vec4 gradInfo;  // x = 0 cor sólida (fill), 1 linear, 2 radial, 3 angular
 } p;
 
 const float PI = 3.14159265359;
@@ -360,6 +365,34 @@ float shape_sd(vec2 q, vec2 half_) {
     return sd_round_box(q, half_, 0.0);
 }
 
+// Omega aparência (P1-4): a cor do preenchimento no ponto. Sem degradê é a
+// cor sólida; com ele, a posição t ∈ [0,1] entre as pontas (em px da caixa,
+// para o círculo do radial ser redondo numa forma não quadrada):
+//   linear  t = projeção de (ponto − início) sobre (fim − início)
+//   radial  t = |ponto − início| / |fim − início|   (centro no início)
+//   angular t = ângulo de (ponto − início) a partir da direção do fim, horário, / 2π
+// A mistura é na cor linear pré-multiplicada (o espaço de trabalho).
+vec4 fill_color(vec2 uv) {
+    int mode = int(p.gradInfo.x + 0.5);
+    if (mode == 0) return p.fill;
+    vec2 a = p.gradPts.xy * p.size.xy;
+    vec2 b = p.gradPts.zw * p.size.xy;
+    vec2 pt = uv * p.size.xy;
+    vec2 ab = b - a;
+    float len2 = max(dot(ab, ab), 1e-6);
+    float t;
+    if (mode == 1) {
+        t = dot(pt - a, ab) / len2;
+    } else if (mode == 2) {
+        t = length(pt - a) / sqrt(len2);
+    } else {
+        vec2 v = pt - a;
+        float ang = atan(v.y, v.x) - atan(ab.y, ab.x);
+        t = fract(ang / (2.0 * PI));
+    }
+    return mix(p.grad0, p.grad1, clamp(t, 0.0, 1.0));
+}
+
 void main() {
     vec2 half_ = p.size.xy * 0.5;
     vec2 q = (v_uv - 0.5) * p.size.xy;
@@ -368,7 +401,7 @@ void main() {
     vec4 c = vec4(0.0);
     if (p.shape.w > 0.5) {
         float cov = clamp(0.5 - d / aa, 0.0, 1.0);
-        c = p.fill * cov;
+        c = fill_color(v_uv) * cov;
     }
     if (p.extra.x > 0.0) {
         float sd = abs(d) - p.extra.x * 0.5;

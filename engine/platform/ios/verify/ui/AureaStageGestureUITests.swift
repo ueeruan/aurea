@@ -26,29 +26,29 @@ import UIKit
         app = nil
     }
 
-    func testPermanentBeatButtonStaysBesidePlayAndMarksDuringPlayback() throws {
-        let before = try launch("timeline-markers")
-        let marker = app.buttons["transport.marker"].firstMatch
-        let play = app.buttons["transport.play"].firstMatch
-        XCTAssertTrue(marker.waitForExistence(timeout: 5)); XCTAssertTrue(marker.isHittable)
-        XCTAssertTrue(play.isHittable)
-        XCTAssertGreaterThanOrEqual(marker.frame.width, 48)
-        XCTAssertGreaterThanOrEqual(marker.frame.height, 48)
-        XCTAssertLessThanOrEqual(marker.frame.maxX, play.frame.minX + 1)
-        marker.tap()
-        _ = try awaitSnapshot("Toggling the mark at frame60 removes it") { $0.markerCount == before.markerCount - 1 }
-        marker.tap()
-        _ = try awaitSnapshot("The direct button restores the mark") { $0.markerCount == before.markerCount }
-        play.tap()
-        _ = try awaitSnapshot("Playback actually advances") { $0.playing != 0 && $0.corePlayhead > 65 }
-        XCTAssertTrue(marker.isHittable); marker.tap()
-        _ = try awaitSnapshot("Adding a beat keeps playback running") { $0.playing != 0 && $0.markerCount == before.markerCount + 1 }
-        play.tap()
-        _ = try awaitSnapshot("Pause remains beside the marker") { $0.playing == 0 }
-        // A barra nova: grade, prévia rápida e camadas sempre presentes.
-        XCTAssertTrue(app.buttons["transport.grid"].firstMatch.exists)
-        XCTAssertTrue(app.buttons["transport.fastPreview"].firstMatch.exists)
-        XCTAssertTrue(app.buttons["transport.layers"].firstMatch.exists)
+    // Omega chrome (área 02, P0-5): a barra de reprodução da referência tem 7
+    // células — ↶ ↷ ⇤ ▶ ⇥ · Copiar e colar · painel. Marcar foi para o relógio
+    // da timeline (área 03); grade, prévia rápida e camadas saíram da barra.
+    func testTransportHasTheSevenReferenceCells() throws {
+        _ = try launch("timeline-markers")
+        let ids = ["transport.undo", "transport.redo", "transport.previous", "transport.play",
+                   "transport.next", "transport.copyPaste", "transport.viewModes"]
+        var frames: [CGRect] = []
+        for id in ids {
+            let button = app.buttons[id].firstMatch
+            XCTAssertTrue(button.waitForExistence(timeout: 5), id)
+            frames.append(button.frame)
+        }
+        for index in 1..<frames.count {
+            XCTAssertLessThanOrEqual(frames[index - 1].maxX, frames[index].minX + 1, ids[index])
+        }
+        for gone in ["transport.marker", "transport.grid", "transport.fastPreview", "transport.layers"] {
+            XCTAssertFalse(app.buttons[gone].firstMatch.exists, gone)
+        }
+        // O último botão abre a coluna de modos à direita da prévia.
+        app.buttons["transport.viewModes"].firstMatch.tap()
+        XCTAssertTrue(app.otherElements["viewmode.column"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["transport.viewModes"].firstMatch.tap()
     }
 
     func testTimelineMarkersRemainOverClipsWhenFilteringZoomingAndScrubbing() throws {
@@ -150,52 +150,92 @@ import UIKit
         XCTAssertTrue(next.waitForExistence(timeout: 3) && next.isHittable)
         next.tap()
     }
-    func testTextContentSheetKeepsActionsAboveKeyboardAndLongTextCompact() throws {
+    // Omega conteúdo (área 06, P0-1): o diálogo "Editar texto" virou o MODO DE TEXTO —
+    // a faixa de entrada de 60 pt no painel grande, a barra de estilo no topo com o ✓.
+    func testTextModeKeepsTheStripAboveKeyboardAndTypesLive() throws {
         let before = try launch("text-edit-2d")
-        let input = app.textViews["text.content.input"].firstMatch
-        let done = app.buttons["text.content.done"].firstMatch
-        let cancel = app.buttons["text.content.cancel"].firstMatch
+        let input = app.textViews["text.edit.input"].firstMatch
+        let done = app.buttons["text.style.done"].firstMatch
         XCTAssertTrue(input.waitForExistence(timeout: 8))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8))
         dismissTypingIntroductionIfNeeded()
-        XCTAssertTrue(input.isHittable, "The text editor body must not collapse beneath its fixed actions")
-        XCTAssertEqual(app.buttons.matching(identifier: "text.content.done").count, 1)
-        XCTAssertEqual(app.buttons.matching(identifier: "text.content.cancel").count, 1)
-        input.tap()
+        XCTAssertTrue(input.isHittable, "The input strip must stay visible above the keyboard")
+        XCTAssertEqual(app.buttons.matching(identifier: "text.style.done").count, 1)
         input.typeText(String(repeating: "Aurea line\n", count: 32))
-        func checkCompactEditor() {
-            XCTAssertLessThanOrEqual(input.frame.height, 181, "Long content must scroll inside a compact text input")
-            XCTAssertTrue(done.isHittable && cancel.isHittable, "Actions must remain available with the keyboard")
+        func checkStrip() {
+            XCTAssertLessThanOrEqual(input.frame.height, 61, "Long content scrolls inside the 60 pt strip")
+            XCTAssertTrue(done.isHittable, "The style bar keeps Done available with the keyboard")
             let keyboard = app.keyboards.firstMatch
-            if keyboard.exists {
-                XCTAssertLessThanOrEqual(done.frame.maxY, keyboard.frame.minY + 1)
-                XCTAssertLessThanOrEqual(cancel.frame.maxY, keyboard.frame.minY + 1)
-            }
+            if keyboard.exists { XCTAssertLessThanOrEqual(input.frame.maxY, keyboard.frame.minY + 1) }
         }
-        checkCompactEditor()
+        checkStrip()
         XCUIDevice.shared.orientation = .landscapeLeft
         let oriented = NSPredicate { _, _ in self.app.frame.width > self.app.frame.height }
         expectation(for: oriented, evaluatedWith: app)
         waitForExpectations(timeout: 8)
-        checkCompactEditor()
+        checkStrip()
         done.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: input)], timeout: 3), .completed,
-                       "Successful save dismisses the content editor")
+                       "Done leaves the text mode")
         XCTAssertEqual(try snapshot().layerCount, before.layerCount)
     }
-    func testText3DEmptyContentKeepsCancelVisibleWithoutAllowingSave() throws {
+    func testText3DEmptyContentKeepsTheModeOpenWithoutAllowingDone() throws {
         _ = try launch("text-edit-3d")
-        let input = app.textViews["text.content.input"].firstMatch
-        let done = app.buttons["text.content.done"].firstMatch
-        let cancel = app.buttons["text.content.cancel"].firstMatch
+        let input = app.textViews["text.edit.input"].firstMatch
+        let done = app.buttons["text.style.done"].firstMatch
         XCTAssertTrue(input.waitForExistence(timeout: 8))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8))
         dismissTypingIntroductionIfNeeded()
-        // The existing add-text flow selects all initial content on focus.
+        // The add-text flow selects all initial content on focus.
         input.typeText(XCUIKeyboardKey.delete.rawValue)
         XCTAssertFalse(done.isEnabled, "The engine's nonempty 3D text contract is preserved")
-        XCTAssertTrue(cancel.isHittable)
-        cancel.tap()
+        input.typeText("A")
+        XCTAssertTrue(done.isEnabled)
+        done.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: input)], timeout: 3), .completed)
+    }
+    // Omega conteúdo (área 06): par do OmegaContentEditorsTest do Android.
+    func testDrawingEditorKeepsTheChosenToolAndCommitsAStroke() throws {
+        let before = try launch("content-drawing")
+        XCTAssertTrue(app.otherElements["draw.panel"].firstMatch.waitForExistence(timeout: 8))
+        let eraser = app.buttons["draw.tool.eraser"].firstMatch
+        let pen = app.buttons["draw.tool.pen"].firstMatch
+        XCTAssertTrue(eraser.waitForExistence(timeout: 5))
+        eraser.tap()
+        XCTAssertTrue(eraser.isSelected)
+        pen.tap()
+        XCTAssertTrue(pen.isSelected)
+        let surface = app.otherElements["stage.drawing"].firstMatch
+        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+        let revision = try snapshot().modelRevision ?? 0
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.4))
+            .press(forDuration: 0.05, thenDragTo: surface.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.55)))
+        _ = try awaitSnapshot("The stroke reaches the engine") { ($0.modelRevision ?? 0) > revision }
+        XCTAssertEqual(try snapshot().layerCount, before.layerCount, "Strokes are groups of the same drawing layer")
+    }
+    func testEditPointsModeSegmentAndTrackpadPlacePoints() throws {
+        _ = try launch("content-points")
+        XCTAssertTrue(app.otherElements["points.panel"].firstMatch.waitForExistence(timeout: 8))
+        app.buttons["points.mode.keys"].firstMatch.tap()
+        XCTAssertTrue(app.otherElements["points.key"].firstMatch.waitForExistence(timeout: 3) || app.buttons["points.key"].firstMatch.exists)
+        app.buttons["points.mode.points"].firstMatch.tap()
+        XCTAssertTrue(app.otherElements["points.contours"].firstMatch.waitForExistence(timeout: 3) || app.buttons["points.contours"].firstMatch.exists)
+        let trackpad = app.buttons["points.trackpad"].firstMatch.exists ? app.buttons["points.trackpad"].firstMatch : app.otherElements["points.trackpad"].firstMatch
+        XCTAssertTrue(trackpad.waitForExistence(timeout: 3))
+        let revision = try snapshot().modelRevision ?? 0
+        // Contorno vazio: arrastar posiciona o ponto pendente; tocar fixa.
+        trackpad.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: trackpad.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.6)))
+        trackpad.tap()
+        _ = try awaitSnapshot("The trackpad tap appends the pending point") { ($0.modelRevision ?? 0) > revision }
+    }
+    func testDoubleTapOnTheSelectedTextOpensTheTextMode() throws {
+        _ = try launch("text-2d")
+        XCTAssertFalse(app.textViews["text.edit.input"].firstMatch.exists)
+        stage.doubleTap()
+        let input = app.textViews["text.edit.input"].firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 5), "A double tap on the selected text enters the text mode")
+        app.buttons["text.style.done"].firstMatch.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: input)], timeout: 3), .completed)
     }
     func testProjectV47ReopensFromHomeAndClearsScopedLoadErrors() throws {
@@ -230,7 +270,7 @@ import UIKit
     func testVoicePanelShowsItsBodyAndCancelsWithoutRequestingMicrophone() throws {
         let initial = try launch("layer-dock")
         app.buttons["Back (clear the selection)"].firstMatch.tap()
-        let audio = app.buttons["aurea.add.category.2"].firstMatch
+        let audio = app.buttons["addBar.Audio"].firstMatch
         XCTAssertTrue(audio.waitForExistence(timeout: 5)); audio.tap()
         let voice = app.buttons["add.voice"].firstMatch
         XCTAssertTrue(voice.waitForExistence(timeout: 5) && voice.isHittable); voice.tap()
@@ -252,19 +292,26 @@ import UIKit
 
     func testRasterExtrusionPanelEditsNativeDepthAndUndoes() throws {
         _ = try launch("effects")
+        openEffectsBrowserIfNeeded()
         let search = app.buttons["effects.search"].firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5) && search.isHittable); search.tap()
         let field = app.textFields["effects.search.field"].firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap(); field.typeText("3D Extrusion")
         let result = app.buttons["effects.result.\(effectCardId("aurea.generate.raster_extrude"))"].firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 5) && result.isHittable); result.tap()
+        // Omega: o resultado abre o detalhe; a linha do efeito base adiciona.
+        let base = app.buttons["effects.detail.variant.\(effectCardId("aurea.generate.raster_extrude"))"].firstMatch
+        XCTAssertTrue(base.waitForExistence(timeout: 5)); base.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: field)], timeout: 8), .completed)
         let initial = try awaitSnapshot("The extrusion card adds its real native effect") { $0.effectCount == 1 && ($0.rasterDepth ?? -1) >= 0 }
         let effect = try XCTUnwrap(initial.rasterEffectId)
         let depth = try XCTUnwrap(initial.rasterDepth)
         XCTAssertEqual(depth, 32, accuracy: 0.001)
-        let ruler = app.descendants(matching: .any)["effects.param.\(effect).0.0"].firstMatch
-        let stack = app.scrollViews["aurea.effects.stack"].firstMatch
+        // Omega efeitos (P0-2/P0-3): o 1º efeito da camada abre os controles sozinho,
+        // sobre a lista; a profundidade é régua (ou slider, pelo controle do motor).
+        let ruler = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR identifier == %@",
+            "effects.ruler.\(effect).0", "effects.slider.\(effect).0")).firstMatch
+        let stack = app.descendants(matching: .any)["effects.settings.\(effectCardId("aurea.generate.raster_extrude"))"].firstMatch
         XCTAssertTrue(stack.waitForExistence(timeout: 5))
         XCTAssertTrue(ruler.waitForExistence(timeout: 5) && ruler.isHittable, "The tool body must contain an editable depth ruler")
         XCTAssertGreaterThan(ruler.frame.height, 20)
@@ -309,23 +356,25 @@ import UIKit
     private func assertCurrentProjectExports(resolution: String) throws {
         let openExport = app.buttons["Export"].firstMatch
         XCTAssertTrue(openExport.waitForExistence(timeout: 5)); openExport.tap()
-        let resolutionOption = app.buttons[resolution].firstMatch
+        // Omega adicionar (área 08, P0-8): a página "Exportar e compartilhar" — o
+        // Vídeo escolhido mostra a resolução embutida (caixa + menu ancorado).
+        let video = app.buttons["export.option.video"].firstMatch
+        XCTAssertTrue(video.waitForExistence(timeout: 5)); video.tap()
+        let dropdown = app.descendants(matching: .any)["export.option.video.resolution"].firstMatch
+        XCTAssertTrue(dropdown.waitForExistence(timeout: 5)); dropdown.tap()
+        let side = ["480p": "480", "720p": "720", "1080p": "1080", "2K": "1440", "4K": "2160"][resolution] ?? "1080"
+        let resolutionOption = app.descendants(matching: .any)["export.option.video.resolution.\(side)"].firstMatch
         XCTAssertTrue(resolutionOption.waitForExistence(timeout: 5))
         XCTAssertTrue(resolutionOption.isEnabled, "The test resolution must be available")
-        if !resolutionOption.isHittable { app.scrollViews.firstMatch.swipeUp() }
-        XCTAssertTrue(resolutionOption.isHittable); resolutionOption.tap()
-        // The editor toolbar remains visible above the export sheet. Its Export
-        // button opens the sheet; the wide footer button starts the encoder.
-        // Choosing firstMatch taps the toolbar again and never starts export.
-        let start = app.buttons.matching(identifier: "Export").allElementsBoundByIndex.first {
-            $0.isHittable && $0.frame.height >= 50
-        }
-        try XCTUnwrap(start, "The export sheet must expose its wide start button").tap()
+        resolutionOption.tap()
+        let start = app.buttons["export.go"].firstMatch
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
         // Fim do render: o app pede "Adicionar a Fotos" (PHPhotoLibrary .addOnly,
         // publishExportToPhotos) e só mostra "Vídeo pronto" depois da resposta.
         // O alerta é do SpringBoard; esperar o texto não o dispensa (CI 2136/2137:
         // render a 100% em ~10 s e o teste parado no alerta por 300 s).
-        let ready = app.staticTexts["Video ready"]
+        let ready = app.descendants(matching: .any)["export.result"].firstMatch
         let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"].firstMatch
         let deadline = Date().addingTimeInterval(300)
         while !ready.exists && Date() < deadline {
@@ -338,7 +387,10 @@ import UIKit
             _ = ready.waitForExistence(timeout: 2)
         }
         XCTAssertTrue(ready.exists, "The export never reached the done screen")
-        XCTAssertTrue(app.buttons["Open"].isEnabled)
+        // O player está na página do resultado (o "Abrir" saiu): Salvar e Compartilhar.
+        XCTAssertTrue(app.staticTexts["Video ready"].exists)
+        XCTAssertTrue(app.buttons["export.result.share"].isEnabled)
+        XCTAssertTrue(app.buttons["export.result.save"].exists)
     }
 
     func testTransformExpressionExplainsWhyPositionIsControlled() throws {
@@ -497,7 +549,8 @@ import UIKit
         _ = try awaitSnapshot("Animator rail opens Wiggle Y, not the layer transform") {
             $0.sheet == "curve" && $0.curveProperty == 40 && $0.curveParam == 13
         }
-        let bounce = app.buttons["curve.preset.bounce"].firstMatch
+        // Omega painel (P1-11): o grupo "Saltos" aplica o Quique (a 1ª vaga dele).
+        let bounce = app.buttons["curve.category.bounces"].firstMatch
         XCTAssertTrue(bounce.waitForExistence(timeout: 5)); bounce.tap()
         _ = try awaitSnapshot("Animator curve accepts bounce easing") {
             $0.curveKeys.contains { $0.property == 40 && $0.time == 0 && $0.interpolation == 7 }
@@ -534,8 +587,9 @@ import UIKit
         XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
         let added = try awaitSnapshot("Text animation opens in the real effect stack") { $0.effectCount == before.effectCount + 1 }
         XCTAssertEqual(added.textAnimatorCount, before.textAnimatorCount)
-        XCTAssertTrue(app.descendants(matching: .any)["aurea.effects.stack"].firstMatch.waitForExistence(timeout: 5))
-        // Only the expanded card exposes its menu; the older Text Transform stays closed.
+        // Omega efeitos (P0-3): o pedido explícito abre os controles do animador sobre a lista.
+        XCTAssertTrue(app.descendants(matching: .any)["effects.settings.\(effectCardId("aurea.text.animator"))"].firstMatch.waitForExistence(timeout: 5))
+        // Only the open effect exposes its menu; the older Text Transform stays closed.
         XCTAssertTrue(app.buttons["effects.more.\(effectCardId("aurea.text.animator"))"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["effects.more.\(effectCardId("aurea.text.transform"))"].exists)
         try undo()
@@ -554,11 +608,15 @@ import UIKit
         XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
         let added = try awaitSnapshot("Text Transform enters the stack") { $0.effectCount == 1 && ($0.textTransformOffset?.count ?? 0) == 2 }
         XCTAssertEqual(added.textTransformOffset ?? [], [0, 0])
-        let stack = app.scrollViews["aurea.effects.stack"].firstMatch
+        // Omega efeitos (P0-3/P1-3): os controles abertos sobre a lista; o ponto é a
+        // linha `effects.vector.<e>.5` com a régua do eixo escolhido e as caixas X/Y
+        // (`effects.axis.<e>.5.<c>`): tocar na caixa escolhe o eixo da régua.
+        let stack = app.descendants(matching: .any)["effects.settings.body"].firstMatch
+        XCTAssertTrue(stack.waitForExistence(timeout: 5))
         func ruler(_ component: Int) throws -> XCUIElement {
-            let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier MATCHES %@", "effects\\.param\\.[0-9]+\\.5\\.\(component)")).firstMatch
-            XCTAssertTrue(row.waitForExistence(timeout: 5), "Offset row \(component) of the open Text Transform card")
-            // Full swipes can jump past the next44pt row in the compact panel.
+            let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier MATCHES %@", "effects\\.vector\\.[0-9]+\\.5")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 5), "Offset row of the open Text Transform controls")
+            // Full swipes can jump past the next 57pt row in the compact panel.
             // Use its actual position and reverse direction after overscroll.
             for _ in 0..<10 {
                 let viewport = stack.frame.insetBy(dx: 8, dy: 12)
@@ -571,7 +629,13 @@ import UIKit
             }
             XCTAssertTrue(row.isHittable)
             XCTAssertTrue(stack.frame.contains(CGPoint(x: row.frame.midX, y: row.frame.midY)))
-            return row
+            let axis = app.descendants(matching: .any).matching(NSPredicate(format: "identifier MATCHES %@", "effects\\.axis\\.[0-9]+\\.5\\.\(component)")).firstMatch
+            XCTAssertTrue(axis.waitForExistence(timeout: 5) && axis.isHittable, "Axis box \(component) of the offset row")
+            // A régua nasce no eixo X; o 2º toque no eixo já escolhido abriria o teclado.
+            if component > 0 { axis.tap() }
+            let bar = app.descendants(matching: .any).matching(NSPredicate(format: "identifier MATCHES %@", "effects\\.vector\\.[0-9]+\\.5\\.ruler")).firstMatch
+            XCTAssertTrue(bar.waitForExistence(timeout: 5) && bar.isHittable, "Ruler of the offset row")
+            return bar
         }
         let x = try ruler(0)
         x.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -595,7 +659,7 @@ import UIKit
         for _ in 0..<4 {
             let back = app.buttons["Back (clear the selection)"].firstMatch
             if back.waitForExistence(timeout: 3) && back.isHittable { back.tap() }
-            let element = app.buttons["aurea.add.category.4"].firstMatch
+            let element = app.buttons["addBar.Element"].firstMatch
             XCTAssertTrue(element.waitForExistence(timeout: 5)); element.tap()
             let null = app.buttons["Null"].firstMatch
             XCTAssertTrue(null.waitForExistence(timeout: 5)); null.tap()
@@ -650,18 +714,16 @@ import UIKit
         _ = try awaitSnapshot("Existing Android stack is editable on iOS") { $0.effectCount == 7 }
         let menu = app.buttons["effects.more.\(effectCardId("aurea.color.chromatic_aberration"))"].firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout:5)); menu.tap()
-        let copy = app.buttons["Copy this effect"].firstMatch
+        // Omega efeitos (P0-5): o ⋮ é um menu ancorado; "Copiar efeito" tem id.
+        let copy = app.buttons["effects.menu.copy"].firstMatch
         XCTAssertTrue(copy.waitForExistence(timeout: 5)); copy.tap()
         try undo()
         _ = try awaitSnapshot("One undo preserves the imported six effects") { $0.effectCount == 6 }
-        // Copiar e colar mora no menu do projeto (a barra do player só tem
-        // grade, prévia rápida, marcador, tempo, camadas e desfazer/refazer).
-        let projectMenu = app.buttons["editor.projectMenu"].firstMatch
-        XCTAssertTrue(projectMenu.waitForExistence(timeout: 5)); projectMenu.tap()
-        let clipboard = app.buttons["Copy and paste"].firstMatch
+        // Omega chrome (área 02, P0-6): Copiar e colar é o 6º botão da barra de
+        // reprodução; "Colar efeitos" mora no grupo "Mais do AUREA" do popup.
+        let clipboard = app.buttons["transport.copyPaste"].firstMatch
         XCTAssertTrue(clipboard.waitForExistence(timeout: 5)); clipboard.tap()
-        // A folha de copiar/colar anima ao abrir: espera a linha existir.
-        let paste = app.buttons["Paste effects"].firstMatch
+        let paste = app.buttons["copyPaste.more.pasteEffects"].firstMatch
         XCTAssertTrue(paste.waitForExistence(timeout: 5)); paste.tap()
         _ = try awaitSnapshot("Only the chosen effect is pasted, not the whole stack") { $0.effectCount == 7 }
         try undo()
@@ -804,9 +866,10 @@ import UIKit
             open = app.buttons["commandSearchOpen"].firstMatch
         }
         if !open.waitForExistence(timeout: 2) {
-            // Redesenho 2026-09-29: sem camada escolhida, a busca mora no menu da engrenagem.
-            let gear = app.buttons["editor.projectMenu"].firstMatch
-            XCTAssertTrue(gear.waitForExistence(timeout: 5)); gear.tap()
+            // Omega chrome (área 02): a busca mora no cabeçalho dos Ajustes e no grupo
+            // "Mais do AUREA" do Copiar e colar da barra de reprodução (com ou sem camada).
+            let clipboard = app.buttons["transport.copyPaste"].firstMatch
+            XCTAssertTrue(clipboard.waitForExistence(timeout: 5)); clipboard.tap()
             open = app.buttons["commandSearchOpen"].firstMatch
         }
         XCTAssertTrue(open.waitForExistence(timeout: 5)); XCTAssertTrue(open.isHittable); open.tap()
@@ -1019,50 +1082,55 @@ import UIKit
         XCTAssertEqual(before.detail.startFrame, 0)
         let duration = before.detail.endFrame - before.detail.startFrame
         XCTAssertGreaterThan(duration, 0)
-        // The dedicated layer-edge buttons are independent of marker/keyframe navigation.
-        let end = app.buttons["timeline.layer.end"].firstMatch
-        let start = app.buttons["timeline.layer.start"].firstMatch
-        XCTAssertTrue(end.waitForExistence(timeout: 5)); XCTAssertTrue(end.isHittable)
-        end.tap()
-        _ = try awaitSnapshot("Go to the selected layer end") { $0.corePlayhead == before.detail.endFrame }
-        start.tap()
-        _ = try awaitSnapshot("Go to the selected layer start") { $0.corePlayhead == before.detail.startFrame }
-        // Existing marker navigation reaches the fixture's frame60 marker.
-        let timeline = app.otherElements["aurea.parity.timeline"].firstMatch
-        timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0)).withOffset(CGVector(dx: 0, dy: 16)).tap()
-        // Restore the known playhead with the fixture's direct navigation rather than moving the clip while testing an edge.
-        app.buttons["transport.next"].firstMatch.tap()
-        _ = try awaitSnapshot("Navigate to the next mark") { $0.corePlayhead == 60 }
-        let move = app.buttons["timeline.layer.moveStart"].firstMatch
+        // Omega painel (área 04): a fileira "ir ao início/fim" saiu (as ações ficam no
+        // menu da camada). Dentro do clipe o painel mostra o trio; com o cabeçote
+        // fora, o par ◀ Mover · ▶ Esticar ocupa o lugar dele.
+        let trim = app.buttons["timeline.cut.start"].firstMatch
+        XCTAssertTrue(trim.waitForExistence(timeout: 5)); XCTAssertTrue(trim.isHittable)
+        trim.tap()
+        let trimmed = try awaitSnapshot("Trim the start at two seconds") { $0.detail.startFrame == 60 }
+        let kept = trimmed.detail.endFrame - trimmed.detail.startFrame
+        // Omega chrome (área 02, P2-3): sem toque longo — as setas param no começo
+        // da composição (e nos marcadores e pontas da camada no caminho).
+        for _ in 0..<6 {
+            if try snapshot().corePlayhead == 0 { break }
+            app.buttons["transport.previous"].firstMatch.tap()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        }
+        _ = try awaitSnapshot("Back to the composition start") { $0.corePlayhead == 0 }
+        XCTAssertFalse(app.buttons["timeline.cut.split"].firstMatch.exists, "Outside the clip the trio gives way to the pair")
+        let move = app.buttons["layer.panel.timeLeft"].firstMatch
         XCTAssertTrue(move.waitForExistence(timeout: 5))
         XCTAssertTrue(move.isHittable)
         move.tap()
-        let after = try awaitSnapshot("Video moved to the two-second playhead", timeout: 10) {
-            $0.detail.startFrame == 60 && $0.detail.localPlayhead == 0 && $0.corePlayhead == 60
+        let after = try awaitSnapshot("Video moved to start at the playhead", timeout: 10) {
+            $0.detail.startFrame == 0 && $0.corePlayhead == 0
         }
-        XCTAssertEqual(after.detail.endFrame - after.detail.startFrame, duration)
+        XCTAssertEqual(after.detail.endFrame - after.detail.startFrame, kept)
         XCTAssertEqual(after.primaryID, before.primaryID)
+        XCTAssertEqual(kept, duration - 60)
+        try undo()
         try undo()
         let undone = try awaitSnapshot("Undo remains responsive after moving decoded video", timeout: 10) {
             $0.detail.startFrame == before.detail.startFrame && $0.detail.endFrame == before.detail.endFrame
         }
-        XCTAssertEqual(undone.corePlayhead, 60)
+        XCTAssertEqual(undone.corePlayhead, 0)
         XCTAssertEqual(app.state, .runningForeground)
     }
 
     func testEffectsPanelAddsWithOneTapAndKeepsTheStackAtHand() throws {
         _ = try launch("effects")
-        // Camada sem efeito: o painel abre direto no navegador de efeitos
-        // (✕ · título · 🔍, destaques, recentes/favoritos e ladrilhos de categoria).
+        // Omega: o navegador de efeitos (✕ · título · 🔍, Recomendados,
+        // Recentes/Favoritos e categorias) abre pelo "+ Adicionar efeito".
+        openEffectsBrowserIfNeeded()
         let addTab = app.buttons["effects.close"].firstMatch
         XCTAssertTrue(addTab.waitForExistence(timeout: 5))
         let search = app.buttons["effects.search"].firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5)); XCTAssertTrue(search.isHittable)
         XCTAssertGreaterThanOrEqual(search.frame.height, 44)
-        // Destaques e o relógio/estrela de Recentes/Favoritos ficam no topo.
-        XCTAssertTrue(app.buttons["effects.quick.recent"].firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["effects.quick.favorites"].firstMatch.exists)
-        // Os ladrilhos de categoria ficam embaixo dos destaques (grade preguiçosa).
+        // Os Recomendados ficam no topo.
+        XCTAssertTrue(app.descendants(matching: .any)["effects.featured"].firstMatch.waitForExistence(timeout: 5))
+        // Os ladrilhos de categoria ficam embaixo (grade preguiçosa).
         let home = app.scrollViews["effects.home"].firstMatch
         let first = app.buttons["effects.category.color_light"].firstMatch
         for _ in 0..<6 where !(first.exists && first.isHittable) && home.exists { home.swipeUp() }
@@ -1077,20 +1145,27 @@ import UIKit
         let result = app.buttons["effects.result.\(deepGlow)"].firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 5))
         result.tap()
+        // O resultado abre o detalhe; a linha do efeito base adiciona e fecha.
+        let deepBase = app.buttons["effects.detail.variant.\(deepGlow)"].firstMatch
+        XCTAssertTrue(deepBase.waitForExistence(timeout: 5)); deepBase.tap()
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: field)
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 8), .completed)
         _ = try awaitSnapshot("One tap on a search result adds the effect") { $0.effectCount == 1 }
 
-        // O efeito novo aparece aberto na pilha (redesenho 2026-10-01: a tela de
-        // adicionar fecha e a pilha com o trilho fica com o efeito aberto).
+        // Omega efeitos (P0-2/P0-3): o 1º efeito da camada abre os controles sozinho,
+        // sobre a lista (a tela de adicionar fecha).
         let leftCatalog = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: addTab)
         XCTAssertEqual(XCTWaiter.wait(for: [leftCatalog], timeout: 5), .completed)
-        XCTAssertTrue(app.staticTexts["Deep Glow"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["effects.settings.\(deepGlow)"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["effects.more.\(deepGlow)"].firstMatch.waitForExistence(timeout: 5))
+        // Tocar no cabeçalho fecha os controles e a lista volta.
+        let header = app.descendants(matching: .any)["effects.settings.header"].firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 5)); header.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["effects.expand.\(deepGlow)"].firstMatch.waitForExistence(timeout: 5))
 
-        // O rodapé "Add effect" da pilha leva de volta ao catálogo, com o recente à vista.
+        // O "+ Adicionar efeito" da lista leva de volta ao catálogo, com o recente à vista.
         let stack = app.scrollViews["aurea.effects.stack"].firstMatch
-        XCTAssertTrue(stack.exists)
+        XCTAssertTrue(stack.waitForExistence(timeout: 5))
         let add = app.buttons["aurea.effects.add"].firstMatch
         for _ in 0..<8 {
             if add.isHittable { break }
@@ -1102,7 +1177,7 @@ import UIKit
         XCTAssertTrue(addTab.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["effects.recent.\(deepGlow)"].firstMatch.waitForExistence(timeout: 5))
 
-        // Ladrilho de categoria abre o grupo; cartão de um toque, sem ficha no meio.
+        // Ladrilho de categoria abre o grupo; o cartão abre o detalhe e a variação base adiciona.
         let glitch = app.buttons["effects.category.glitch"].firstMatch
         for _ in 0..<6 where !(glitch.exists && glitch.isHittable) && home.exists { home.swipeUp() }
         XCTAssertTrue(glitch.waitForExistence(timeout: 5)); glitch.tap()
@@ -1112,8 +1187,13 @@ import UIKit
         for _ in 0..<8 where !(vhs.exists && vhs.isHittable) { grid.swipeUp() }
         XCTAssertTrue(vhs.waitForExistence(timeout: 5))
         vhs.tap()
+        let vhsBase = app.buttons["effects.detail.variant.\(effectCardId("aurea.glitch.vhs"))"].firstMatch
+        XCTAssertTrue(vhsBase.waitForExistence(timeout: 5)); vhsBase.tap()
         _ = try awaitSnapshot("One tap on a grid card adds the effect") { $0.effectCount == 2 }
-        XCTAssertTrue(app.staticTexts["VHS"].firstMatch.waitForExistence(timeout: 5))
+        // Omega efeitos (P0-2): com um efeito já na camada, o novo entra no FIM da
+        // lista, que continua fechada.
+        XCTAssertTrue(app.descendants(matching: .any)["effects.expand.\(effectCardId("aurea.glitch.vhs"))"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["effects.settings.\(effectCardId("aurea.glitch.vhs"))"].firstMatch.exists)
 
         try undo()
         _ = try awaitSnapshot("Grid add is one undo step") { $0.effectCount == 1 }
@@ -1129,12 +1209,22 @@ import UIKit
         return String(h)
     }
 
+    /// Omega efeitos: camada vazia não abre mais o navegador sozinha; o
+    /// "+ Adicionar efeito" do painel (`aurea.effects.add`) abre.
+    private func openEffectsBrowserIfNeeded() {
+        let close = app.buttons["effects.close"].firstMatch
+        if close.waitForExistence(timeout: 2) { return }
+        let add = app.buttons["aurea.effects.add"].firstMatch
+        if add.waitForExistence(timeout: 5) { add.tap() }
+        _ = close.waitForExistence(timeout: 5)
+    }
+
     func testFloatingAddRestoresPreviewAndClosesAfterSelection() throws {
         let before = try launch("layer-dock")
         let frame = stage.frame
         // O "+" saiu: sem camada escolhida, a barra fixa de adicionar fica embaixo.
         app.buttons["Back (clear the selection)"].firstMatch.tap()
-        let category = app.buttons["aurea.add.category.0"].firstMatch
+        let category = app.buttons["addBar.Shape"].firstMatch
         XCTAssertTrue(category.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(stage.frame.height, frame.height - 1)
         let bubbles = XCTAttachment(screenshot: app.screenshot())
@@ -1143,7 +1233,7 @@ import UIKit
         let circle = app.buttons["Circle"].firstMatch
         XCTAssertTrue(circle.waitForExistence(timeout: 5))
         let dialog = XCTAttachment(screenshot: app.screenshot())
-        dialog.name = "Centered shape dialog"; dialog.lifetime = .keepAlways; self.add(dialog)
+        dialog.name = "Embedded shape page"; dialog.lifetime = .keepAlways; self.add(dialog)
         circle.tap()
         _ = try awaitSnapshot("Shape added and editor responds") { $0.layerCount == before.layerCount + 1 }
         XCTAssertFalse(category.exists)
@@ -1172,7 +1262,7 @@ import UIKit
     func testTextPresetFromTheAddBarAddsOneAnimatedText() throws {
         let before = try launch("layer-dock")
         app.buttons["Back (clear the selection)"].firstMatch.tap()
-        let category = app.buttons["aurea.add.category.8"].firstMatch
+        let category = app.buttons["addBar.TextPresets"].firstMatch
         XCTAssertTrue(category.waitForExistence(timeout: 5)); category.tap()
         let card = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Add text with")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 5)); card.tap()
@@ -1290,8 +1380,10 @@ import UIKit
             XCTAssertTrue(panel.waitForExistence(timeout: 5))
             XCTAssertLessThanOrEqual(panel.frame.height, 281)
             for mode in [1, 2, 0] {
-                let button = app.buttons["curve.mode.\(mode)"]
-                XCTAssertTrue(button.isHittable); button.tap()
+                // Omega painel (P1-11): os modos do gráfico moram no ⋯ do editor de curva.
+                openCurveMenu()
+                let button = app.buttons["curve.mode.\(mode)"].firstMatch
+                XCTAssertTrue(button.waitForExistence(timeout: 5)); button.tap()
                 XCTAssertEqual(app.state, .runningForeground)
             }
             let screenshot = XCTAttachment(screenshot: app.screenshot())
@@ -1390,27 +1482,27 @@ import UIKit
         } while Date() < deadline
     }
 
-    func testContextToolsScrollInOneRowAndOpenTheSelectedTool() throws {
+    /// Omega painel (área 04): a grade fixa do painel da camada (sem rolagem): os
+    /// botões da forma ficam na mesma fileira, com alvo de 44+, e abrem o painel.
+    func testLayerPanelGridOpensTheSelectedTool() throws {
         let before = try launch("layer-dock")
-        let row = app.scrollViews["dock.tools"].firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
-        let shape = app.buttons["dock.tool.shape"].firstMatch
-        XCTAssertTrue(shape.isHittable)
-        let toolY = shape.frame.midY
-        XCTAssertGreaterThanOrEqual(shape.frame.height, 44)
+        let panel = app.otherElements["layer.panel"].firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        let edit = app.buttons["layer.panel.edit"].firstMatch
+        XCTAssertTrue(edit.isHittable)
+        XCTAssertGreaterThanOrEqual(edit.frame.height, 44)
         let stageBefore = stage.frame
-        let color = app.buttons["dock.tool.color"].firstMatch
+        let move = app.buttons["layer.panel.moveTransform"].firstMatch
+        XCTAssertTrue(move.isHittable)
+        XCTAssertEqual(move.frame.midY, edit.frame.midY, accuracy: 1)
+        let color = app.buttons["layer.panel.colorFill"].firstMatch
         XCTAssertTrue(color.isHittable)
-        XCTAssertEqual(color.frame.midY, toolY, accuracy: 1)
         XCTAssertGreaterThanOrEqual(color.frame.height, 44)
+        XCTAssertTrue(app.buttons["layer.panel.blendOpacity"].firstMatch.isHittable)
         XCTAssertEqual(stage.frame.height, stageBefore.height, accuracy: 1)
         XCTAssertEqual(try snapshot().primaryID, before.primaryID)
-        row.swipeLeft()
-        XCTAssertTrue(app.buttons["dock.tool.blend"].firstMatch.isHittable)
-        row.swipeRight()
-        XCTAssertTrue(color.isHittable)
         color.tap()
-        _ = try awaitSnapshot("Scrolling tools still opens the chosen layer panel") {
+        _ = try awaitSnapshot("The grid opens the chosen layer panel") {
             $0.sheet == "panel" && $0.primaryID == before.primaryID
         }
         XCTAssertTrue(app.staticTexts["Fill"].firstMatch.waitForExistence(timeout: 5))
@@ -1515,7 +1607,7 @@ import UIKit
             let selected = try awaitSnapshot("Property curve opens") { $0.sheet == "curve" }
             let group: Set<Int> = curveGroup(Int(selected.curveProperty), threeD: threeD, linked: true)
             XCTAssertEqual(group.count, threeD ? 3 : 2)
-            let preset = app.buttons["curve.preset.bounce"].firstMatch
+            let preset = app.buttons["curve.category.bounces"].firstMatch
             XCTAssertTrue(preset.waitForExistence(timeout: 5)); XCTAssertTrue(preset.isHittable); preset.tap()
             let count = app.buttons["curve.bounce.count"].firstMatch
             XCTAssertTrue(count.waitForExistence(timeout: 5)); count.tap()
@@ -1559,7 +1651,7 @@ import UIKit
             let selected = try awaitSnapshot("Graph opens") { $0.sheet == "curve" }
             let property = Int(selected.curveProperty)
             let group: Set<Int> = curveGroup(property, threeD: threeD)
-            app.buttons["curve.mode.1"].tap()
+            openCurveMenu(); app.buttons["curve.mode.1"].firstMatch.tap()
             let graph = app.otherElements["curve.trackGraph"].firstMatch
             XCTAssertTrue(graph.waitForExistence(timeout: 5))
             let frame = graph.frame
@@ -1595,7 +1687,7 @@ import UIKit
             app.buttons["Edit the property curve"].firstMatch.tap()
             let selected = try awaitSnapshot("Graph opens") { $0.sheet == "curve" }
             let group: Set<Int> = curveGroup(Int(selected.curveProperty), threeD: threeD)
-            app.buttons["curve.mode.2"].tap()
+            openCurveMenu(); app.buttons["curve.mode.2"].firstMatch.tap()
             let graph = app.otherElements["curve.trackGraph"].firstMatch
             XCTAssertTrue(graph.waitForExistence(timeout:5))
             let frame = graph.frame
@@ -1623,7 +1715,7 @@ import UIKit
         let before = try launch("curve-isolation")
         app.buttons["Edit the property curve"].firstMatch.tap()
         let selected = try awaitSnapshot("Graph opens") { $0.sheet == "curve" }
-        app.buttons["curve.mode.1"].tap()
+        openCurveMenu(); app.buttons["curve.mode.1"].firstMatch.tap()
         app.buttons["curve.multi"].tap()
         app.buttons["All"].tap()
         let graph = app.otherElements["curve.trackGraph"].firstMatch
@@ -1803,12 +1895,16 @@ import UIKit
     func testParentToNewNullLinksBothChosenLayersAndOneUndoRemovesIt() throws {
         let before = try launch("parent-new-null")
         let beforeIDs: Set<Int64> = Set(before.layerOrder)
-        let open = app.buttons["link.open"].firstMatch
-        XCTAssertTrue(open.waitForExistence(timeout: 5)); XCTAssertTrue(open.isHittable)
-        open.tap()
-        let row = app.buttons["link.newNull"].firstMatch
+        // Omega chrome (área 02, P1-1): "Vincular escolhidas…" mora no Copiar e colar;
+        // o popup de pai tem linhas de 40 pt e o "Novo nulo" no fim.
+        let clipboard = app.buttons["transport.copyPaste"].firstMatch
+        XCTAssertTrue(clipboard.waitForExistence(timeout: 5)); XCTAssertTrue(clipboard.isHittable)
+        clipboard.tap()
+        let open = app.buttons["copyPaste.more.link"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 5)); open.tap()
+        let row = app.buttons["parent.newNull"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        XCTAssertGreaterThanOrEqual(row.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(row.frame.height, 40)
         row.tap()
         let linked = try awaitSnapshot("A new null is created and selected") {
             $0.layerCount == 3 && $0.selectionCount == 1
@@ -2127,7 +2223,8 @@ import UIKit
         XCTAssertEqual(state.detail.sourceSize.count, 2)
         // "effects": camada sem efeito abre direto na tela cheia "Adicionar efeito",
         // que cobre o palco de propósito.
-        if !["effects", "text-edit-2d", "text-edit-3d"].contains(scene) { XCTAssertTrue(stage.isHittable) }
+        // Omega conteúdo (área 06): desenho e Editar pontos cobrem o palco com o próprio gesto.
+        if !["effects", "text-edit-2d", "text-edit-3d", "content-drawing", "content-points"].contains(scene) { XCTAssertTrue(stage.isHittable) }
         attach("Initial core probe", stage.value as? String ?? "missing")
         return state
     }
@@ -2147,6 +2244,13 @@ import UIKit
         attach("Timed-out probe: \(description)", stage.value as? String ?? "missing")
         XCTFail(description)
         throw ProbeError.timedOut
+    }
+
+    /// Omega painel (P1-11): abre o ⋯ do editor de curva (modos, copiar, colar…).
+    private func openCurveMenu() {
+        let more = app.buttons["curve.menu"].firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        more.tap()
     }
 
     private func undo() throws {

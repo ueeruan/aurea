@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Omega 0.3.2, área 02 (moldura do editor). Textos próprios do AUREA. -->
+    <string name="om_tb_exit">Volver a los proyectos</string>
+    <string name="om_tb_share">Compartir y exportar</string>
+    <string name="om_tb_group_settings">Ajustes del grupo</string>
+    <string name="om_tb_trail_item">Ir a %1$s</string>
+    <string name="om_sel_align">Alinear en pantalla</string>
+    <string name="om_sel_need_three">Elige 3 capas o más para distribuir</string>
+    <string name="om_sel_extend_start">Extender el inicio hasta el cabezal</string>
+    <string name="om_sel_move_start">Llevar el inicio al cabezal</string>
+    <string name="om_sel_extend_end">Extender el final hasta el cabezal</string>
+    <string name="om_sel_move_end">Llevar el final al cabezal</string>
+    <string name="om_sel_distribute_time">Distribuir en el tiempo</string>
+    <string name="om_tr_previous">Ir al evento anterior</string>
+    <string name="om_tr_next">Ir al siguiente evento</string>
+    <string name="om_tr_copy_paste">Copiar y pegar</string>
+    <string name="om_tr_view_modes">Modos de visualización</string>
+    <string name="om_vm_pixel">Píxeles reales</string>
+    <string name="om_vm_grid">Cuadrícula</string>
+    <string name="om_vm_grid_spacing">Espaciado de la cuadrícula</string>
+    <string name="om_vm_solo">Enfoque en la capa elegida</string>
+    <string name="om_vm_solo_off">Normal</string>
+    <string name="om_vm_solo_only">Solo la capa elegida</string>
+    <string name="om_vm_solo_dim" formatted="false">Capa elegida al 50 %</string>
+    <string name="om_vm_camera">Ver a través de la cámara activa</string>
+    <string name="om_vm_camera_unavailable">Aún no disponible en esta versión de prueba</string>
+    <string name="om_vm_zoom_in">Acercar</string>
+    <string name="om_vm_zoom_out">Alejar</string>
+    <string name="om_cp_save_preset">Guardar preset</string>
+    <string name="om_cp_with_style">(con estilo)</string>
+    <string name="om_cp_paste_style_more">Pegar estilo</string>
+    <string name="om_cp_link_selected">Vincular elegidas…</string>
+    <string name="om_ps_color_fill">Pegar color y relleno</string>
+    <string name="om_ps_border_shadow">Pegar borde y sombra</string>
+    <string name="om_ps_blend">Pegar mezcla y opacidad</string>
+    <string name="om_ps_transform">Pegar mover y transformar</string>
+    <string name="om_ps_text">Pegar estilo del texto</string>
+    <string name="om_ps_volume">Pegar volumen</string>
+    <string name="om_ps_effects">Pegar efectos</string>
+    <string name="om_ps_speed">Pegar velocidad</string>
+    <string name="om_ps_paste">Pegar</string>
+    <string name="om_settings_more">Más de AUREA</string>
+    <string name="om_settings_preview">Vista previa</string>
+    <string name="om_settings_editing">Edición</string>
+    <string name="om_settings_import">Importar</string>
+    <string name="om_settings_preview_quality">Calidad de la vista previa</string>
+    <string name="om_gs_size">Ancho, alto del grupo</string>
+    <string name="om_mi_name">Nombre</string>
+    <string name="om_mi_dimensions">Dimensiones (an × al)</string>
+    <string name="om_mi_format">Formato</string>
+    <plurals name="om_layers_selected">
+        <item quantity="one">%d capa seleccionada</item>
+        <item quantity="other">%d capas seleccionadas</item>
+    </plurals>
+    <plurals name="om_cp_duplicate">
+        <item quantity="one">Duplicar capa</item>
+        <item quantity="other">Duplicar %d capas</item>
+    </plurals>
+    <plurals name="om_cp_copy">
+        <item quantity="one">Copiar capa</item>
+        <item quantity="other">Copiar %d capas</item>
+    </plurals>
+    <plurals name="om_cp_paste">
+        <item quantity="one">Pegar capa</item>
+        <item quantity="other">Pegar %d capas</item>
+    </plurals>
+</resources>

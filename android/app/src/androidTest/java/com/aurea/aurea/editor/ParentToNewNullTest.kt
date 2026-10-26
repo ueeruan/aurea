@@ -14,7 +14,7 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 
-/** "Vincular a novo nulo" pela lista de vínculo da barra de lote: as duas
+/** "Vincular a novo nulo" pela lista de vínculo (Copiar e colar → Vincular escolhidas): as duas
  * escolhidas passam a seguir um nulo novo, e UM desfazer tira tudo. */
 class ParentToNewNullTest {
     @get:Rule val compose = createComposeRule()
@@ -43,9 +43,13 @@ class ParentToNewNullTest {
         }
         compose.waitUntil(5000) { store.selection.size == 2 }
 
-        compose.onNodeWithContentDescription(context.getString(R.string.editor_vincular_escolhidas_camada)).performClick()
-        compose.onNodeWithTag("link.newNull")
-            .assertHeightIsAtLeast(48.dp)
+        // Omega chrome (área 02, P1-1): "Vincular escolhidas…" mora no Copiar e colar
+        // do transporte; o popup de pai tem linhas de 40 dp e o "Novo nulo" no fim.
+        compose.onNodeWithTag("transport.copyPaste").performClick()
+        compose.onNodeWithTag("copyPaste.more.link").performScrollTo().performClick()
+        compose.onNodeWithTag("parent.newNull")
+            .performScrollTo()
+            .assertHeightIsAtLeast(40.dp)
             .assertTextContains(context.getString(R.string.editor_vincular_novo_nulo))
             .performClick()
         compose.waitUntil(5000) { store.layers.size == 3 }

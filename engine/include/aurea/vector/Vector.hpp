@@ -110,7 +110,13 @@ void dash(std::vector<Contour>& contours, const std::vector<f32>& pattern, f32 o
 /// cresce a partir de zero (começo) e morre em zero (fim); `ease` 0..1.
 struct StrokeTaper {
     f32 start = 0.0f, end = 0.0f, ease = 0.0f;
-    [[nodiscard]] bool active() const noexcept { return start > 1e-4f || end > 1e-4f; }
+    /// Omega conteúdo (área 06): perfil de largura do pincel (VectorStroke::
+    /// widthProfile, amostras iguais ao longo do comprimento; nulo = constante).
+    /// Multiplica o afinar.
+    const std::vector<f32>* profile = nullptr;
+    [[nodiscard]] bool active() const noexcept {
+        return start > 1e-4f || end > 1e-4f || (profile && profile->size() >= 2);
+    }
 };
 /// Fator da largura (0..1) na fração `u` (0..1) do comprimento.
 [[nodiscard]] f32 taper_factor(const StrokeTaper& t, f32 u) noexcept;

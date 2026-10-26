@@ -158,9 +158,19 @@ enum class BlendMode : u16 {
     // Duff destino-dentro (só fica o que está sob a forma/alfa dela); Exclude
     // = destino-fora (a forma vira um furo no que está embaixo).
     Mask, Exclude,
+    // Omega aparência (2026-10-26, P1-5): os cinco que faltavam do catálogo da
+    // referência. Fórmulas em shaders/composite/blend.frag (cabeçalho) e a
+    // referência independente em tests/test_gpu.cpp (BlendRef).
+    DarkerColor,   ///< 24: a cor (inteira) de menor luminância entre fundo e camada
+    LighterColor,  ///< 25: a cor (inteira) de maior luminância
+    LinearLight,   ///< 26: B + 2S − 1, preso em [0,1]
+    PinLight,      ///< 27: S ≤ ½ → min(B, 2S); senão max(B, 2S − 1)
+    SoftOverlay,   ///< 28: definição do AUREA (a da referência é [NC]): (1 − 2S)·B² + 2S·B
 };
 /// O último modo conhecido (leitura de projeto e validação de comando).
-inline constexpr BlendMode kLastBlendMode = BlendMode::Exclude;
+inline constexpr BlendMode kLastBlendMode = BlendMode::SoftOverlay;
+static_assert(static_cast<u16>(BlendMode::Exclude) == 23 && static_cast<u16>(BlendMode::SoftOverlay) == 28,
+              "BlendMode é contrato de arquivo: só acrescente no fim");
 
 enum class Interpolation : u8 {
     Hold = 0,

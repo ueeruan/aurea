@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega aparência (área 05): mesclagem, transformar, cor e preenchimento,
+         borda e sombra, câmera e seletor de cor. Gerado por gen_strings_aparencia.py. -->
+
+    <!-- Mesclagem e opacidade (P0-1, P1-5) -->
+    <string name="om_ap_blend_darker_color">اللون الأغمق</string>
+    <string name="om_ap_blend_lighter_color">اللون الأفتح</string>
+    <string name="om_ap_blend_linear_light">ضوء خطي</string>
+    <string name="om_ap_blend_pin_light">ضوء نقطي</string>
+    <string name="om_ap_blend_soft_overlay">تراكب ناعم</string>
+    <string name="om_ap_blend_about">حول المزج</string>
+    <string name="om_ap_blend_category">فئة %1$s</string>
+
+    <!-- Mover e transformar (P0-2) -->
+    <string name="om_ap_tf_move">تحريك</string>
+    <string name="om_ap_tf_pivot">المحور</string>
+    <string name="om_ap_tf_rotate">تدوير</string>
+    <string name="om_ap_tf_scale">الحجم</string>
+    <string name="om_ap_tf_skew">إمالة</string>
+    <string name="om_ap_tf_move_hint">مرّر هنا لتحريك الطبقة</string>
+    <string name="om_ap_tf_depth_hint">مرّر هنا لضبط العمق</string>
+    <string name="om_ap_tf_pivot_hint">مرّر هنا لتحريك نقطة الدوران</string>
+    <string name="om_ap_tf_skew_x">الإمالة X</string>
+    <string name="om_ap_tf_skew_y">الإمالة Y</string>
+    <string name="om_ap_tf_width">العرض</string>
+    <string name="om_ap_tf_height">الارتفاع</string>
+    <string name="om_ap_tf_link">الحفاظ على التناسب</string>
+    <string name="om_ap_tf_camera_scale">الكاميرا: تكبير %1$s، زاوية %2$s°</string>
+    <string name="om_ap_tf_dial">قرص التدوير</string>
+    <string name="om_ap_tf_turns">%1$d دورات</string>
+    <string name="om_ap_tf_reset_position">إعادة تعيين الموضع</string>
+    <string name="om_ap_tf_reset_pivot">إعادة تعيين المحور</string>
+    <string name="om_ap_tf_reset_rotation">إعادة تعيين الدوران</string>
+    <string name="om_ap_tf_reset_scale">إعادة تعيين الحجم</string>
+    <string name="om_ap_tf_reset_skew">إعادة تعيين الإمالة</string>
+    <string name="om_ap_tf_reset_all">إعادة تعيين التحويل</string>
+    <string name="om_ap_tf_snap">الالتصاق بالطبقات الأخرى</string>
+    <string name="om_ap_tf_accelerate">تسريع لوحة اللمس</string>
+    <string name="om_ap_tf_nudge">انقر على الحواف للتحريك 1 بكسل</string>
+    <string name="om_ap_tf_motion_path">مسار الحركة</string>
+    <string name="om_ap_tf_axis">المحور %1$s</string>
+
+    <!-- Cor e preenchimento (P0-3, P1-4) -->
+    <string name="om_ap_fill_none">بلا تعبئة</string>
+    <string name="om_ap_fill_color">اللون</string>
+    <string name="om_ap_fill_gradient">تدرج</string>
+    <string name="om_ap_fill_media">وسائط</string>
+    <string name="om_ap_fill_original">الأصلي</string>
+    <string name="om_ap_fill_original_hint">الألوان الأصلية في لوحة المتجه</string>
+    <string name="om_ap_fill_grad_linear">خطي</string>
+    <string name="om_ap_fill_grad_radial">شعاعي</string>
+    <string name="om_ap_fill_grad_sweep">زاوي</string>
+    <string name="om_ap_fill_grad_start">لون البداية</string>
+    <string name="om_ap_fill_grad_end">لون النهاية</string>
+    <string name="om_ap_fill_grad_handles">اسحب طرفي التدرج على المسرح</string>
+
+    <!-- Borda e sombra (P0-4, P1-9) -->
+    <string name="om_ap_bs_title">الحد والظل</string>
+    <string name="om_ap_bs_stroke">الخط</string>
+    <string name="om_ap_bs_borders">الحدود</string>
+    <string name="om_ap_bs_shadow">الظل</string>
+    <string name="om_ap_bs_add_border">إضافة حد</string>
+    <string name="om_ap_bs_border">حد</string>
+    <string name="om_ap_bs_border_n">الحد %1$d</string>
+    <string name="om_ap_bs_delete_border">حذف الحد</string>
+    <string name="om_ap_bs_reorder">اسحب لإعادة الترتيب</string>
+    <string name="om_ap_bs_direction">الاتجاه</string>
+    <string name="om_ap_bs_inside">داخل</string>
+    <string name="om_ap_bs_center">المنتصف</string>
+    <string name="om_ap_bs_outside">خارج</string>
+    <string name="om_ap_bs_color">اللون</string>
+    <string name="om_ap_bs_size">الحجم</string>
+    <string name="om_ap_bs_alpha">الشفافية</string>
+    <string name="om_ap_bs_offset">الإزاحة</string>
+    <string name="om_ap_bs_width">عرض الخط</string>
+    <string name="om_ap_bs_px">%1$s بكسل</string>
+    <string name="om_ap_bs_stroke_unavailable">الخط للأشكال والنص. استخدم الحدود في هذه الطبقة.</string>
+
+    <!-- Câmera (P1-6) -->
+    <string name="om_ap_cam_title">خيارات الكاميرا</string>
+    <string name="om_ap_cam_view">العرض</string>
+    <string name="om_ap_cam_focus">ضبابية التركيز</string>
+    <string name="om_ap_cam_fog">الضباب</string>
+    <string name="om_ap_cam_view_title">عرض الكاميرا</string>
+    <string name="om_ap_cam_view_angle">زاوية الرؤية</string>
+    <string name="om_ap_cam_zoom">التكبير</string>
+    <string name="om_ap_cam_perspective">منظور</string>
+    <string name="om_ap_cam_parallel">متوازية</string>
+    <string name="om_ap_cam_parallel_soon">الكاميرا المتوازية غير متاحة بعد</string>
+    <string name="om_ap_cam_fog_soon">ضباب الكاميرا غير متاح بعد. استخدم ضباب التركيب في إعدادات المشروع.</string>
+    <string name="om_ap_cam_tip">للنظر عبر الكاميرا، فعّل عرض الكاميرا بجانب المسرح.</string>
+    <string name="om_ap_cam_focus_on">ضبابية التركيز مفعّلة</string>
+
+    <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
+    <string name="om_ap_cp_eyedropper">القطّارة</string>
+    <string name="om_ap_cp_eyedropper_hint">اسحب على المسرح لاختيار اللون</string>
+    <string name="om_ap_cp_fine">ضبط دقيق</string>
+    <string name="om_ap_cp_full">مزيد من الألوان</string>
+    <string name="om_ap_cp_unavailable">اللون الشفاف غير متاح هنا</string>
+    <string name="om_ap_cp_add">حفظ في اللوحة</string>
+    <string name="om_ap_cp_copy_code">نسخ رمز اللون</string>
+    <string name="om_ap_cp_paste_code">لصق رمز اللون</string>
+    <string name="om_ap_cp_code_copied">تم نسخ رمز اللون</string>
+    <string name="om_ap_cp_code">رمز اللون %1$s</string>
+    <string name="om_ap_cp_wheel">العجلة</string>
+    <string name="om_ap_cp_rgb">RGB</string>
+    <string name="om_ap_cp_done">تم</string>
+    <string name="om_ap_cp_current">الحالي</string>
+    <string name="om_ap_cp_new">الجديد</string>
+    <string name="om_ap_cp_hue">تدرج اللون</string>
+    <string name="om_ap_cp_saturation">التشبع</string>
+    <string name="om_ap_cp_brightness">السطوع</string>
+    <string name="om_ap_cp_alpha">الشفافية</string>
+    <string name="om_ap_cp_red">أحمر</string>
+    <string name="om_ap_cp_green">أخضر</string>
+    <string name="om_ap_cp_blue">أزرق</string>
+    <string name="om_ap_cp_alpha_toggle">إظهار أو إخفاء الشفافية</string>
+    <string name="om_ap_cp_trash">أفلت هنا للحذف</string>
+    <string name="om_ap_cp_swatch">عينة %1$s</string>
+    <string name="om_ap_cp_palette">اللوحة</string>
+</resources>

@@ -264,8 +264,14 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
     evalSource.clear();
     // Copiar fundo: só a faixa pedida da pilha (o índice continua o da camada).
     const u32 effectEnd = std::min(endEffect, static_cast<u32>(layer.effects.size()));
+    // Omega aparência (P0-4): decorações de Borda e sombra (role ≠ 0) desenham
+    // DEPOIS dos efeitos comuns, na ordem traço → bordas → sombra, mesmo que a
+    // pilha venha fora de ordem (colar/preset acrescentam no fim). O índice
+    // continua a posição na camada.
+    for (u8 rolePass = kEffectRoleNone; rolePass <= kLastEffectRole; ++rolePass)
     for (u32 k = firstEffect; k < effectEnd; ++k) {
         const EffectInstance& effect = layer.effects[k];
+        if (effect.role != rolePass) continue;
         const Effect* fx = effect.enabled ? registry.find(effect.type) : nullptr;
         const ParameterRegistry* fxParams = fx && fx->expands_stack() ? registry.params(effect.type) : nullptr;
         if (fxParams) {

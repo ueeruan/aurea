@@ -483,7 +483,9 @@ struct LayerEffectRow {
     u32 nameOffset      = 0;   // +16
     u32 nameLength      = 0;   // +20
     u32 known           = 0;   // +24  0 = tipo que esta versão não conhece
-    u32 reserved        = 0;   // +28
+    // Omega aparência (P0-4): era `reserved`. 0 = efeito comum; 2 borda, 3
+    // sombra (kEffectRole*): decorações de Borda e sombra, fora da lista de Efeitos.
+    u32 role            = 0;   // +28
 };
 static_assert(sizeof(LayerEffectRow) == 32, "LayerEffectRow e contrato de ABI");
 
@@ -521,8 +523,23 @@ struct EffectParamRow {
     u32 sectionLabelLength = 0; // +124
     u32 tipOffset       = 0;    // +128 dica (ⓘ) acima da linha; vazia = sem
     u32 tipLength       = 0;    // +132
+    // Omega efeitos (0.3.2, área 07, P0-1): APRESENTAÇÃO já resolvida pelo
+    // motor (aurea::resolve_control/step/origin/enum_style, param_enabled).
+    // A linha passou de 136 para 160 bytes: Kotlin (EnginePods.kt,
+    // EffectParam.ROW_BYTES) e ObjC++ (AureaEngine.mm) leem pelo mesmo mapa.
+    u32 control         = 0;    // +136 ParamControl (0 = sem controle numérico)
+    f32 step            = 0.0f; // +140 valor por risco da régua (0 = sem régua)
+    f32 origin          = 0.0f; // +144 origem do preenchimento do slider
+    u32 enumStyle       = 0;    // +148 EnumStyle (0 = não é escolha)
+    u32 rowFlags        = 1u;   // +152 bit0 habilitado, bit1 disco de matiz (kEffectRow*)
+    u32 reservedOmega   = 0;    // +156
 };
-static_assert(sizeof(EffectParamRow) == 136, "EffectParamRow e contrato de ABI");
+static_assert(sizeof(EffectParamRow) == 160, "EffectParamRow e contrato de ABI");
+static_assert(offsetof(EffectParamRow, control) == 136);
+static_assert(offsetof(EffectParamRow, step) == 140);
+static_assert(offsetof(EffectParamRow, origin) == 144);
+static_assert(offsetof(EffectParamRow, enumStyle) == 148);
+static_assert(offsetof(EffectParamRow, rowFlags) == 152);
 static_assert(offsetof(EffectParamRow, value) == 24);
 static_assert(offsetof(EffectParamRow, labelOffset) == 56);
 static_assert(offsetof(EffectParamRow, animated) == 80);
@@ -533,6 +550,10 @@ static_assert(offsetof(EffectParamRow, section) == 100);
 static_assert(offsetof(EffectParamRow, sectionIdOffset) == 112);
 static_assert(offsetof(EffectParamRow, tipOffset) == 128);
 inline constexpr u32 kEffectSectionOpen = 1u << 0;   ///< EffectParamRow::sectionFlags
+// Omega efeitos (P0-1): EffectParamRow::rowFlags.
+inline constexpr u32 kEffectRowEnabled = 1u << 0;    ///< linha editável agora
+inline constexpr u32 kEffectRowHueDisc = 1u << 1;    ///< disco de matiz agrupável
+inline constexpr u32 kEffectRowStepDeclared = 1u << 2; ///< o efeito declarou o passo (casas pelo passo)
 
 // -----------------------------------------------------------------------------
 // Trava final: tudo que atravessa a fronteira precisa ser copiável byte a byte.

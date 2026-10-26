@@ -187,34 +187,15 @@ private fun ShapeTab(env: PanelEnv, s: Sel) {
     val path = g.paths.getOrNull(store.vectorPath) ?: return
     val at = store.vectorPathAt
     val free = path.kind == 0
-    val n = at?.path?.v?.size ?: 0
-    val editing = store.vectorTool == 1
-    val active = PointTool.effective(VectorStageState.pointTool, n)
     var adv by remember { mutableStateOf(false) }
 
-    fun choose(tool: Int) {
-        // Forma pronta vira caminho livre (mesma silhueta) antes de mexer nos pontos.
-        if (!free) store.makeVectorPathEditable()
-        VectorStageState.pointTool = tool
-        store.chooseVectorTool(1)
-    }
-    Spacer(Modifier.height(4.dp))
-    Row(Modifier.fillMaxWidth().padding(start = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        ToolTile(stringResource(R.string.panel_selecionar), editing && active == PointTool.SELECT, icon = { drawSelectIcon(it) }) { choose(PointTool.SELECT) }
-        ToolTile(stringResource(R.string.panel_adicionar_ponto), editing && active == PointTool.ADD, icon = { drawNodeIcon(it, plus = true) }) { choose(PointTool.ADD) }
-        ToolTile(stringResource(R.string.panel_remover_ponto), editing && active == PointTool.REMOVE, enabled = !free || n > 0, icon = { drawNodeIcon(it, plus = false) }) { choose(PointTool.REMOVE) }
-        ToolTile(stringResource(R.string.panel_canto_suave), editing && active == PointTool.CORNER, enabled = !free || n > 1, icon = { drawCornerIcon(it) }) { choose(PointTool.CORNER) }
-        val closed = at?.path?.closed == true
-        ToolTile(if (closed) stringResource(R.string.panel_abrir_caminho) else stringResource(R.string.panel_fechar_caminho), false, enabled = free && n >= 2, icon = { drawCloseIcon(it, closed) }) {
-            VectorPathOps.toggleClosed(store)
-        }
+    // Omega conteúdo (área 06, P0-5): as ferramentas de ponto foram para o modo
+    // "Editar pontos" (três colunas); aqui fica o atalho para ele.
+    Spacer(Modifier.height(6.dp))
+    ActionCard(stringResource(R.string.om_pts_title), stringResource(if (free) R.string.om_pts_open_hint else R.string.panel_ferramentas_pontos_transformam_forma_pronta_caminho)) {
+        env.onOpenPanel(EditorPanel.EditPoints)
     }
     Spacer(Modifier.height(6.dp))
-    if (!editing) {
-        KitHint(if (free) stringResource(R.string.panel_escolha_ferramenta_toque_palco_editar_pontos) else stringResource(R.string.panel_ferramentas_pontos_transformam_forma_pronta_caminho))
-    } else {
-        KitHint(stringResource(R.string.panel_editando_pontos_palco_toque_concluir_palco))
-    }
     if (free) {
         val look = when {
             at?.keyHere == true -> KeyframeLook.KeyHere

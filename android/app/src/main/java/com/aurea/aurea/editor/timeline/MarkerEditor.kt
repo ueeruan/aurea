@@ -19,10 +19,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.ui.theme.AureaTimeline
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.testTag
 
-private val markerPalette = intArrayOf(0xFFF7C34F.toInt(), 0xFF4D6EFF.toInt(), 0xFF70D56B.toInt(),
-    0xFFFFB75B.toInt(), 0xFFD67BDB.toInt(), 0xFFFFFFFF.toInt())
-private fun markerColor(packed: Int) = Color(packed and 255, (packed ushr 8) and 255, (packed ushr 16) and 255)
+// Omega timeline (área 03, P1-3): as quatro aparências da régua. O motor guarda
+// RGBA com o R no byte BAIXO (Marker::color); `MarkerColors` faz a conta nos dois
+// sentidos — a paleta antiga de 6 cores era escrita como ARGB e lida como RGBA.
+private val markerRoles: IntArray get() = IntArray(AureaTimeline.Bookmarks.size) { AureaTimeline.Bookmarks[it].toArgb() }
+private fun markerPacked(index: Int): Int = MarkerColors.pack(AureaTimeline.Bookmarks[index].toArgb())
+private fun markerAppearance(packed: Int): Int = MarkerColors.appearance(packed, markerRoles)
 
 /** Opened by holding the preview anchor or tapping a marker on the ruler; a new marker only exists after Save. */
 @Composable
@@ -36,7 +42,7 @@ internal fun MarkerEditor(store: EditorStore) {
         if (index < 0 && !isNew) { LaunchedEffect(original) { store.closeMarkerEditor() }; return@let }
         var name by remember(original, isNew) { mutableStateOf(if (isNew) "" else store.markerLabel(original)) }
         var frame by remember(original, isNew) { mutableStateOf(original.toString()) }
-        var color by remember(original, isNew) { mutableStateOf(if (index >= 0) markers.colors[index] else markerPalette[0]) }
+        var color by remember(original, isNew) { mutableStateOf(if (index >= 0) markers.colors[index] else markerPacked(0)) }
         // Aberto de dentro do palco (LTR): o diálogo volta à direção do idioma.
         LocaleDirection { AlertDialog(onDismissRequest = { store.closeMarkerEditor(); failure = false },
             title = { Text(stringResource(R.string.marker_edit)) },
@@ -50,10 +56,12 @@ internal fun MarkerEditor(store: EditorStore) {
                 Text(frame.toIntOrNull()?.let { Timecode.format(it.coerceAtLeast(0), store.project.fps) } ?: "—")
                 TextButton(onClick = { frame = store.playhead.toString() }) { Text(stringResource(R.string.marker_at_playhead)) }
                 Row {
-                    markerPalette.forEachIndexed { i, packed ->
+                    val chosen = markerAppearance(color)
+                    AureaTimeline.Bookmarks.forEachIndexed { i, swatch ->
                         val description = stringResource(R.string.marker_color, i + 1)
-                        Box(Modifier.size(40.dp).clickable { color = packed }.semantics { contentDescription = description }, contentAlignment = Alignment.Center) {
-                            Box(Modifier.size(if (color == packed) 32.dp else 22.dp).background(markerColor(packed), CircleShape))
+                        Box(Modifier.size(44.dp).clickable { color = markerPacked(i) }.semantics { contentDescription = description }
+                            .testTag("marker.color.$i"), contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(if (chosen == i) 32.dp else 22.dp).background(swatch, CircleShape))
                         }
                     }
                 }

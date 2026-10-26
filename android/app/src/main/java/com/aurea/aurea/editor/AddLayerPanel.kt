@@ -1,46 +1,60 @@
 package com.aurea.aurea.editor
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.border
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.widthIn
+import androidx.annotation.StringRes
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.annotation.StringRes
-import androidx.compose.ui.res.stringResource
-import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
@@ -50,28 +64,43 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.aurea.aurea.R
 import com.aurea.aurea.editor.panels.EditorPanel
+import com.aurea.aurea.presets.PresetEntry
+import com.aurea.aurea.presets.PresetKind
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.state.ProjectEntry
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
-import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.sin
 
 /**
@@ -85,7 +114,7 @@ internal enum class AddTab(@StringRes val label: Int, val glyph: Char) {
     Media(R.string.sh_add_tab_media, CupertinoGlyph.PhotoOnRectangle),
     Audio(R.string.sh_add_tab_audio, CupertinoGlyph.MusicNote2),
     Text(R.string.sh_add_tab_text, CupertinoGlyph.Textformat),
-    // Ao lado do Texto (que cria o texto direto): a grade dos presets de texto.
+    // Ao lado do Texto (que cria o texto direto): a faixa dos presets de texto.
     TextPresets(R.string.tp_add_tab, CupertinoGlyph.WandStars),
     Element(R.string.sh_add_tab_element, ShellGlyph.CircleGridHex),
     Model3D(R.string.sh_add_tab_3d, CupertinoGlyph.Cube),
@@ -93,171 +122,147 @@ internal enum class AddTab(@StringRes val label: Int, val glyph: Char) {
     Vector(R.string.sh_add_tab_vector, CupertinoGlyph.PencilOutline),
 }
 
+/** Preferências de interface do adicionar (não são do projeto). */
+internal fun omegaAddPrefs(context: Context) = context.getSharedPreferences("omega_add", Context.MODE_PRIVATE)
+
+// =============================================================================
+// O painel embutido (Omega, área 08, P0-1)
+// =============================================================================
+
 /**
- * O adicionar é um painel EMBUTIDO na zona do painel contextual (ADD_BODY no
- * EditorLayout): fileira de categorias em cima (✕ fixo à esquerda, o resto rola
- * de lado) e o conteúdo da categoria logo abaixo, em fichas grandes.
- * Só recurso que existe no motor; nada de "em breve".
+ * O conteúdo do botão aberto na barra de adicionar, EMBUTIDO acima dela
+ * (193 dp no retrato; ver [EditorLayout.ADD_CONTENT]). Sem cabeçalho: o ✕ de
+ * 32 dp fica no canto (alvo de 48). Trocar de botão troca o conteúdo; tocar no
+ * botão aceso, no palco, no Voltar ou adicionar algo fecha.
  */
 @Composable
-internal fun AddLayerPanel(store: EditorStore, ui: EditorUi) {
+internal fun AddLayerPanel(store: EditorStore, ui: EditorUi, modifier: Modifier = Modifier.fillMaxSize()) {
     val close = { ui.adding = false }
-    Column(Modifier.fillMaxWidth().background(AureaColors.EditorPanel).testTag("editor.addPanel")) {
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            val title = if (ui.addTab == AddTab.TextPresets) R.string.tp_title else ui.addTab.label
-            Text(stringResource(title), modifier = Modifier.weight(1f).padding(start = 16.dp), color = AureaColors.Text)
-            ChromeButton(CupertinoGlyph.Xmark, stringResource(R.string.editor_fechar_adicionar), onClick = close)
-        }
-        Box(Modifier.weight(1f, fill = false).fillMaxWidth()) {
+    val closeLabel = stringResource(R.string.editor_fechar_adicionar)
+    Box(modifier.background(AureaColors.AddPanel).testTag("add.panel")) {
+        Box(Modifier.fillMaxSize().testTag("editor.addPanel")) {
             when (ui.addTab) {
-                AddTab.Shape -> ShapesTab(store, close)
-                AddTab.Media -> MediaTab(store, ui, close)
-                AddTab.Audio -> AudioTab(store, ui, close)
-                AddTab.Text -> TextTab(store, ui)
-                AddTab.TextPresets -> com.aurea.aurea.editor.panels.TextPresetPicker(store) { ui.adding = false; ui.panel = null }
-                AddTab.Element -> ElementTab(store, close)
-                AddTab.Model3D -> Model3DTab(store, close)
-                AddTab.Draw -> DrawTab(store, ui)
-                AddTab.Vector -> VectorTab(store, ui)
+                AddTab.Shape -> ShapesPager(store, close)
+                AddTab.Media -> MediaStrip(store, ui, close)
+                AddTab.Audio -> AudioStrip(store, ui, close)
+                AddTab.Text -> ObjectGrid(listOf(
+                    ObjectCell(stringResource(R.string.sh_add_tab_text), "add.text", glyph = CupertinoGlyph.Textformat) {
+                        if (store.addText() >= 0) close()
+                    },
+                ))
+                AddTab.TextPresets -> TextPresetStrip(store, ui, close)
+                AddTab.Element -> ElementGrid(store, ui, close)
+                AddTab.Model3D -> Model3DGrid(store, close)
+                AddTab.Draw -> ObjectGrid(listOf(
+                    ObjectCell(stringResource(R.string.editor_mao_livre), "add.draw.freehand", glyph = ShellGlyph.Scribble) {
+                        if (store.playing) store.pause()
+                        close()
+                        store.chooseVectorTool(2)
+                    },
+                ))
+                AddTab.Vector -> VectorGrid(store, ui)
             }
         }
-    }
-}
-
-// =============================================================================
-// Categorias
-// =============================================================================
-
-/**
- * ✕ fixo + 8 categorias de 64 dp que rolam de lado (em 360 dp cabem ~5 e a
- * seguinte aparece cortada: dá para ver que há mais). A escolhida ganha fundo
- * e cor de destaque, e é trazida para a vista ao abrir.
- */
-@Composable
-private fun AddCategories(ui: EditorUi, close: () -> Unit) {
-    val scroll = rememberScrollState()
-    val itemPx = with(LocalDensity.current) { 64.dp.toPx() }
-    LaunchedEffect(Unit) {
-        val i = ui.addTab.ordinal
-        if (i > 3) scroll.scrollTo(((i - 3) * itemPx).toInt())
-    }
-    Row(Modifier.fillMaxWidth().height(68.dp), verticalAlignment = Alignment.CenterVertically) {
-        ChromeButton(CupertinoGlyph.Xmark, stringResource(R.string.editor_fechar_adicionar), onClick = close, size = 20.dp, width = 44.dp, height = 68.dp)
-        Row(
-            Modifier.weight(1f).fillMaxHeight().horizontalScroll(scroll).padding(end = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .size(48.dp)
+                .testTag("add.close")
+                .semantics { contentDescription = closeLabel }
+                .tocavel(shrink = 1f, onClick = close),
+            contentAlignment = Alignment.Center,
         ) {
-            AddTab.entries.forEach { tab ->
-                val on = ui.addTab == tab
-                val tabLabel = stringResource(tab.label)
-                val color = if (on) AureaColors.Accent else AureaColors.Text
-                Column(
-                    Modifier
-                        .width(64.dp)
-                        .fillMaxHeight()
-                        .padding(horizontal = 2.dp, vertical = 5.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (on) AureaColors.Chip else Color.Transparent)
-                        .semantics { contentDescription = tabLabel }
-                        .tocavel(shrink = 1f) { ui.addTab = tab },
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    CupertinoIcon(tab.glyph, 24.dp, color)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        tabLabel,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, fontWeight = FontWeight.W600, color = color)),
-                    )
-                }
+            Box(
+                Modifier.size(32.dp).clip(CircleShape).background(AureaColors.AddPanelDeep.copy(alpha = 0.85f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                CupertinoIcon(CupertinoGlyph.Xmark, 14.dp, AureaColors.Text)
             }
         }
     }
-    Box(Modifier.fillMaxWidth().height(1.dp).background(AureaColors.Hairline))
 }
 
 // =============================================================================
-// Fichas (todas as categorias menos Forma)
+// Grade de objetos (Elemento, Vetor, 3D): células de 64 dp centradas
 // =============================================================================
 
-/** Uma ficha: ícone da fonte OU desenho próprio, nome curto, ação real. */
-private class AddItem(
+/** Uma célula: ícone (glifo ou desenho) e rótulo de 10 sp em até 2 linhas. */
+internal class ObjectCell(
     val label: String,
+    val tag: String,
     val glyph: Char? = null,
-    val tint: Color = ShellColors.DockTileContent,
+    val tint: Color? = null,
     val draw: (DrawScope.() -> Unit)? = null,
-    /** Identificador para os testes de UI (nulo = sem). */
-    val tag: String? = null,
     val onClick: () -> Unit,
 )
 
 /**
- * Grade de fichas grandes no estilo da doca da camada (ref15): 3 por fileira,
- * 80 dp de altura, ícone 28 e nome em até 2 linhas. Rola se passar de 2 fileiras.
+ * Grade centrada da referência (Objeto): margem de 10 dp, células de 64 × 71
+ * na primeira fileira e 64 × 64 nas outras; com mais células do que cabem,
+ * rola na vertical dentro do painel. [footer] (dica) vai depois da grade.
  */
 @Composable
-private fun CardGrid(items: List<AddItem>, hint: String? = null) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items.chunked(3).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (k in 0 until 3) {
-                    val item = row.getOrNull(k)
-                    if (item == null) Spacer(Modifier.weight(1f)) else AddCard(item)
+internal fun ObjectGrid(cells: List<ObjectCell>, footer: String? = null, warning: String? = null) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val perRow = max(1, ((maxWidth - 20.dp) / 84.dp).toInt()).coerceAtMost(max(1, cells.size))
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            cells.chunked(perRow).forEachIndexed { rowIndex, row ->
+                Row(horizontalArrangement = Arrangement.Center) {
+                    row.forEach { cell -> ObjectCellView(cell, if (rowIndex == 0) 71.dp else 64.dp) }
                 }
             }
-        }
-        if (hint != null) {
-            Text(
-                hint,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
-            )
+            if (footer != null) {
+                Text(
+                    footer,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
+                )
+            }
+            if (warning != null) {
+                Text(
+                    warning,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 2.dp),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 15.sp, color = AureaColors.Warning)),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun RowScope.AddCard(item: AddItem) {
+private fun ObjectCellView(cell: ObjectCell, height: Dp) {
     Column(
         Modifier
-            .weight(1f)
-            .height(80.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(ShellColors.DockTile)
-            .semantics { contentDescription = item.label }
-            .then(if (item.tag != null) Modifier.testTag(item.tag) else Modifier)
-            .tocavel(onClick = item.onClick)
-            .padding(horizontal = 4.dp, vertical = 8.dp),
+            .padding(10.dp)
+            .width(64.dp)
+            .height(height)
+            .semantics { contentDescription = cell.label }
+            .testTag(cell.tag)
+            .tocavel(onClick = cell.onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         when {
-            item.draw != null -> Canvas(Modifier.size(30.dp)) { item.draw.invoke(this) }
-            item.glyph != null -> CupertinoIcon(item.glyph, 28.dp, item.tint)
+            cell.draw != null -> Canvas(Modifier.size(30.dp)) { cell.draw.invoke(this) }
+            cell.glyph != null -> CupertinoIcon(cell.glyph, 28.dp, cell.tint ?: AureaColors.Text)
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(5.dp))
         Text(
-            item.label,
+            cell.label,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            style = AureaType.Base.merge(
-                TextStyle(fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.W500, color = ShellColors.DockTileContent),
-            ),
+            modifier = Modifier.widthIn(max = 60.dp),
+            style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.W500, color = AureaColors.Text)),
         )
     }
 }
 
 // =============================================================================
-// Forma: grade visual das formas do motor (Engine::add_shape)
+// Forma em páginas (P0-2)
 // =============================================================================
 
 /**
@@ -280,71 +285,85 @@ private val SHAPES = listOf(
     32 to R.string.sh_shape_blob,
 )
 
-/** Tocar põe a forma no centro da cena, já escolhida (e fecha o adicionar). */
+/**
+ * Páginas de 3 fileiras × `max(4, (largura − 18)/48)` colunas, células de
+ * 48 dp com a miniatura de 40 (branco a 70 %), sobra repartida entre as
+ * colunas, pontos de página embaixo. Sem rótulo visível (fica na
+ * acessibilidade). Tocar põe a forma no centro, escolhida, e fecha.
+ */
 @Composable
-private fun ShapesTab(store: EditorStore, close: () -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        // Ladrilho de ~64 dp: 5 colunas num telefone, mais num tablet.
-        val cols = ((maxWidth.value - 24f) / 96f).toInt().coerceIn(2, 3)
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            SHAPES.chunked(cols).forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (k in 0 until cols) {
-                        val shape = row.getOrNull(k)
-                        if (shape == null) {
-                            Spacer(Modifier.weight(1f))
-                        } else {
-                            ShapeTile(shape.first, stringResource(shape.second)) {
-                                store.addShape(shape.first)
-                                close()
+private fun ShapesPager(store: EditorStore, close: () -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxSize().testTag("add.shape.pager")) {
+        val usable = maxWidth - 18.dp
+        val cols = max(4, (usable / 48.dp).toInt())
+        val perPage = cols * 3
+        val pages = (SHAPES.size + perPage - 1) / perPage
+        val state = rememberPagerState { pages }
+        val cellWidth = usable / cols
+        Column(Modifier.fillMaxSize().padding(vertical = 5.dp)) {
+            HorizontalPager(state, Modifier.weight(1f).fillMaxWidth()) { page ->
+                val slice = SHAPES.drop(page * perPage).take(perPage)
+                Column(
+                    Modifier.fillMaxSize().padding(horizontal = 9.dp),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    for (row in 0 until 3) {
+                        Row {
+                            for (col in 0 until cols) {
+                                val shape = slice.getOrNull(row * cols + col)
+                                Box(Modifier.width(cellWidth).height(48.dp), contentAlignment = Alignment.Center) {
+                                    if (shape != null) {
+                                        ShapeCell(shape.first, stringResource(shape.second)) {
+                                            store.addShape(shape.first)
+                                            close()
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+            PageDots(pages, state.currentPage, Modifier.align(Alignment.CenterHorizontally).testTag("add.shape.dots"))
         }
     }
 }
 
 @Composable
-private fun RowScope.ShapeTile(preset: Int, label: String, onClick: () -> Unit) {
-    Column(
+private fun ShapeCell(preset: Int, label: String, onClick: () -> Unit) {
+    val ink = AureaColors.Text.copy(alpha = 0.7f)
+    Box(
         Modifier
-            .weight(1f)
+            .size(48.dp)
             .semantics { contentDescription = label }
+            .testTag("add.shape.$preset")
             .tocavel(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        contentAlignment = Alignment.Center,
     ) {
-        Canvas(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(12.dp))
-                .background(ShellColors.DockTile)
-                .padding(12.dp),
-        ) { drawShapePreset(preset) }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            label,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)),
-        )
+        Canvas(Modifier.size(40.dp).padding(2.5.dp)) { drawShapePreset(preset, ink) }
+    }
+}
+
+/** Pontos de página (10 dp de altura), o atual em destaque. */
+@Composable
+internal fun PageDots(count: Int, current: Int, modifier: Modifier = Modifier) {
+    val description = stringResource(R.string.om_add_shape_page, current + 1, count)
+    Row(
+        modifier.height(10.dp).semantics { contentDescription = description },
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(count) { i ->
+            Box(Modifier.size(6.dp).clip(CircleShape).background(if (i == current) AureaColors.Accent else AureaColors.Text.copy(alpha = 0.3f)))
+        }
     }
 }
 
 /** Silhueta de cada preset do motor (mesmo tipo e proporção que a camada nasce). */
-private fun DrawScope.drawShapePreset(preset: Int) {
+private fun DrawScope.drawShapePreset(preset: Int, fill: Color = ShellColors.DockTileContent) {
     val s = size.minDimension
     val o = Offset((size.width - s) / 2, (size.height - s) / 2)
     fun p(x: Float, y: Float) = Offset(o.x + x * s, o.y + y * s)
-    val fill = ShellColors.DockTileContent
     fun poly(vararg pts: Float): Path = Path().apply {
         moveTo(p(pts[0], pts[1]).x, p(pts[0], pts[1]).y)
         var i = 2
@@ -444,108 +463,226 @@ private fun DrawScope.drawShapePreset(preset: Int) {
 }
 
 // =============================================================================
-// Mídia e áudio (fluxos do seletor do sistema, sem mudança)
+// Elemento: grade de objetos (P0-5) e a lista de projetos (P1-6)
 // =============================================================================
 
 /**
- * Mídia pelo seletor do sistema (Photo Picker): vídeo vai para
- * `importVideo`, imagem para `importImage`, pelo tipo MIME.
+ * Câmera, Nulo, Grupo vazio e Elemento/Projeto primeiro (a ordem da
+ * referência), depois os extras do AUREA. Elemento/Projeto troca o conteúdo
+ * pela faixa dos outros projetos.
  */
 @Composable
-private fun MediaTab(store: EditorStore, ui: EditorUi, close: () -> Unit) {
-    MediaGallery(store, close) { openPanel(store, ui, EditorPanel.AiVideo) }
-}
-
-/**
- * Áudio: arquivo de som (m4a, mp3, wav, aac, ogg, flac…), o som de um vídeo
- * da galeria ou a voz gravada no microfone ("Gravar voz", VoiceRecorder.kt) —
- * todos viram camada de áudio pelo mesmo `importAudio`. Marca e batidas moram
- * aqui porque servem para sincronizar com a música.
- */
-@Composable
-private fun AudioTab(store: EditorStore, ui: EditorUi, close: () -> Unit) {
-    val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) {
-            store.importAudio(uri)
-            close()
-        }
+private fun ElementGrid(store: EditorStore, ui: EditorUi, close: () -> Unit) {
+    var projects by rememberSaveable { mutableStateOf(false) }
+    if (projects) {
+        ProjectStrip(store, onBack = { projects = false }, close = close)
+        return
     }
-    val videos = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
-        if (uri != null) {
-            store.importAudio(uri)
-            close()
-        }
-    }
-    CardGrid(
-        listOf(
-            AddItem(stringResource(R.string.editor_musica_ou_som), CupertinoGlyph.MusicNote, AureaColors.Accent) {
-                // SAF (sem READ_MEDIA_AUDIO desde a 0.0.3): provedores que marcam o
-                // .mp3/.m4a/.opus baixado como genérico ou como vídeo MP4 não ficam
-                // cinza. O motor diz "áudio ilegível" se não for som.
-                files.launch(arrayOf("audio/*", "application/ogg", "video/mp4", "application/octet-stream"))
-            },
-            // Narração: o painel de gravação abre por cima da timeline (o palco fica à vista).
-            AddItem(stringResource(R.string.voice_title), CupertinoGlyph.MicFill, AureaColors.Danger, tag = "add.voice") {
-                close()
-                if (store.playing) store.pause()
-                ui.voice = true
-            },
-            AddItem(stringResource(R.string.sh_add_video_sound), CupertinoGlyph.Film) {
-                videos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
-            },
-            AddItem(stringResource(R.string.sh_add_marker_at_playhead), CupertinoGlyph.Bookmark) {
-                close()
-                store.toggleMarker()
-            },
-        ),
-    )
-}
-
-// =============================================================================
-// Texto, elemento e 3D
-// =============================================================================
-
-@Composable
-private fun TextTab(store: EditorStore, ui: EditorUi) {
-    // Legendas automáticas viraram efeito (seletor de efeitos da camada de fala).
-    CardGrid(
-        listOf(
-            AddItem(stringResource(R.string.sh_add_tab_text), CupertinoGlyph.Textformat, AureaColors.Accent) {
-                if (store.addText() >= 0) { ui.adding = false; ui.panel = null }
-            },
-        ),
-    )
-}
-
-/** Peças que não são mídia nem desenho: nulo, partículas (3 receitas), ajuste e grupo. */
-@Composable
-private fun ElementTab(store: EditorStore, close: () -> Unit) {
     val pickToGroup = stringResource(R.string.sh_add_pick_layers_to_group)
-    CardGrid(
+    val emptyGroupName = stringResource(R.string.om_add_empty_group)
+    ObjectGrid(
         listOf(
-            AddItem(stringResource(R.string.sh_add_null), draw = { drawNullIcon() }) { store.addNull(false); close() },
-            // UM sistema, nao tres. Faiscas/Neve/Poeira de luz viraram preset
-            // do mesmo motor — listar os tres aqui prometia tres motores.
-            AddItem(stringResource(R.string.particular_title), CupertinoGlyph.Sparkles, ShellColors.Text3D) {
+            // D6: Câmera aqui (referência) e também na 3D.
+            ObjectCell(stringResource(R.string.om_add_camera), "add.element.camera", glyph = CupertinoGlyph.CameraFill) {
+                store.addCamera(); close()
+            },
+            ObjectCell(stringResource(R.string.sh_add_null), "add.element.null", draw = { drawNullIcon(AureaColors.Text) }) {
+                store.addNull(false); close()
+            },
+            ObjectCell(emptyGroupName, "add.element.emptyGroup", glyph = CupertinoGlyph.Folder) {
+                if (store.addEmptyGroup(emptyGroupName) >= 0) close()
+            },
+            ObjectCell(stringResource(R.string.om_add_element_project), "add.element.project", glyph = CupertinoGlyph.SquareStack3dUp) {
+                projects = true
+            },
+            // Extras do AUREA.
+            ObjectCell(stringResource(R.string.particular_title), "add.element.particles", glyph = CupertinoGlyph.Sparkles, tint = ShellColors.Text3D) {
                 close(); store.addParticles(20)   // 20 = Particular (preset Padrão)
             },
-            AddItem(stringResource(R.string.editor_camada_ajuste), CupertinoGlyph.WandStars) { close(); store.addAdjustmentLayer() },
-            AddItem(stringResource(R.string.scene_flare3d), CupertinoGlyph.Sparkles, ShellColors.Text3D) { store.addLight(3); close() },
-            AddItem(stringResource(R.string.grid_builder), ShellGlyph.CircleGridHex) { store.createGrid(); close() },
-            AddItem(stringResource(R.string.sh_add_group_selection), CupertinoGlyph.Folder) {
-                if (store.selection.isEmpty()) {
-                    store.showToast(pickToGroup)
-                } else {
-                    close()
-                    store.precompose()
-                }
+            ObjectCell(stringResource(R.string.editor_camada_ajuste), "add.element.adjust", glyph = CupertinoGlyph.WandStars) {
+                close(); store.addAdjustmentLayer()
+            },
+            ObjectCell(stringResource(R.string.scene_flare3d), "add.element.flare", glyph = CupertinoGlyph.Sparkles, tint = ShellColors.Text3D) {
+                store.addLight(3); close()
+            },
+            ObjectCell(stringResource(R.string.grid_builder), "add.element.grid", glyph = ShellGlyph.CircleGridHex) {
+                store.createGrid(); close()
+            },
+            ObjectCell(stringResource(R.string.sh_add_group_selection), "add.element.group", glyph = CupertinoGlyph.FolderFill) {
+                if (store.selection.isEmpty()) store.showToast(pickToGroup) else { close(); store.precompose() }
             },
         ),
     )
 }
 
+/**
+ * Faixa de 2 fileiras: [Ver tudo] [Voltar] e os outros projetos do mais
+ * recente para o mais antigo (cartão de 75 dp com miniatura sobre xadrez e
+ * faixa de título). Tocar insere o projeto como camada de grupo.
+ */
 @Composable
-private fun Model3DTab(store: EditorStore, close: () -> Unit) {
+private fun ProjectStrip(store: EditorStore, onBack: () -> Unit, close: () -> Unit) {
+    var all by remember { mutableStateOf(false) }
+    val current = store.project.path
+    val list = remember(store.projects, current) { store.projects.filter { it.path != current }.sortedByDescending { it.modifiedMs } }
+    val insert: (ProjectEntry) -> Unit = { entry -> store.insertProjectAsLayer(entry.path, entry.title); close() }
+    BoxWithConstraints(Modifier.fillMaxSize().testTag("add.element.list")) {
+        val cell = maxHeight / 2
+        LazyHorizontalGrid(
+            rows = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            item {
+                StripActionCell(cell, stringResource(R.string.om_add_view_all), CupertinoGlyph.SquareGrid2x2, "add.element.list.viewAll") { all = true }
+            }
+            item {
+                StripActionCell(cell, stringResource(R.string.om_add_back), CupertinoGlyph.ChevronLeft, "add.element.list.back", onClick = onBack)
+            }
+            itemsIndexed(list, key = { _, e -> e.path }) { _, entry ->
+                ProjectCard(cell, entry, Modifier.testTag("add.element.list.item.${File(entry.path).nameWithoutExtension}")) { insert(entry) }
+            }
+            if (list.isEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Box(Modifier.width(180.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                        Text(stringResource(R.string.om_add_project_none), textAlign = TextAlign.Center,
+                            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+                    }
+                }
+            }
+        }
+    }
+    if (all) ProjectPickerDialog(list, onPick = { all = false; insert(it) }) { all = false }
+}
+
+/** Célula de ação das faixas (Ver tudo, Voltar): 75 dp, ícone + texto de 12. */
+@Composable
+internal fun StripActionCell(cell: Dp, label: String, glyph: Char, tag: String, badge: String? = null, onClick: () -> Unit) {
+    Box(Modifier.size(cell), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier
+                .size(75.dp)
+                .clip(RoundedCornerShape(2.5.dp))
+                .background(AureaColors.AddTile)
+                .semantics { contentDescription = label }
+                .testTag(tag)
+                .tocavel(onClick = onClick)
+                .padding(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            CupertinoIcon(glyph, 22.dp, AureaColors.Text)
+            Spacer(Modifier.height(4.dp))
+            Text(label, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 13.sp, color = AureaColors.Text)))
+        }
+        if (badge != null) {
+            Text(
+                badge,
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 4.dp)
+                    .clip(RoundedCornerShape(3.dp)).background(AureaColors.AddNewBadge).padding(horizontal = 3.dp, vertical = 1.dp),
+                style = AureaType.Base.merge(TextStyle(fontSize = 7.sp, fontWeight = FontWeight.W700, color = AureaColors.AddOnNewBadge)),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProjectCard(cell: Dp, entry: ProjectEntry, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val label = stringResource(R.string.om_add_project_named, entry.title)
+    val thumb by produceState<Bitmap?>(null, entry.thumbnailPath) {
+        value = withContext(Dispatchers.IO) {
+            entry.thumbnailPath?.let { path -> runCatching { BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = 2 }) }.getOrNull() }
+        }
+    }
+    Box(Modifier.size(cell), contentAlignment = Alignment.Center) {
+        Box(
+            modifier
+                .size(75.dp)
+                .clip(RoundedCornerShape(2.5.dp))
+                .drawBehind { drawChecker(AureaColors.AddPanelDeep, AureaColors.AddTile) }
+                .semantics { contentDescription = label }
+                .tocavel(onClick = onClick),
+        ) {
+            thumb?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
+            TitleStrip(entry.title, Modifier.align(Alignment.BottomCenter))
+        }
+    }
+}
+
+/** Faixa de título dos cartões: véu preto a 27 %, nome 10 sp em negrito. */
+@Composable
+internal fun TitleStrip(title: String, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().background(AureaColors.AddTitleScrim).padding(horizontal = 4.dp, vertical = 2.dp)) {
+        Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, fontWeight = FontWeight.W700, color = AureaColors.OnImage)))
+    }
+}
+
+/** Xadrez de 6 dp (fundo transparente dos cartões). */
+internal fun DrawScope.drawChecker(a: Color, b: Color) {
+    drawRect(a)
+    val cell = 6.dp.toPx()
+    var y = 0f
+    var row = 0
+    while (y < size.height) {
+        var x = if (row % 2 == 0) 0f else cell
+        while (x < size.width) {
+            drawRect(b, Offset(x, y), Size(cell, cell))
+            x += cell * 2
+        }
+        y += cell
+        row++
+    }
+}
+
+/** "Ver tudo" dos projetos: a lista inteira em tela cheia, só para escolher. */
+@Composable
+private fun ProjectPickerDialog(list: List<ProjectEntry>, onPick: (ProjectEntry) -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.fillMaxSize().background(AureaColors.AddPanel).statusBarsPadding().navigationBarsPadding()) {
+            BrowserTopBar(stringResource(R.string.om_add_element_project), CupertinoGlyph.Xmark, stringResource(R.string.editor_fechar), "add.element.list.close", onDismiss)
+            if (list.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(stringResource(R.string.om_add_project_none), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
+                }
+            } else {
+                LazyVerticalGrid(GridCells.Adaptive(96.dp), Modifier.fillMaxSize().padding(6.dp)) {
+                    itemsIndexed(list, key = { _, e -> e.path }) { _, entry -> ProjectCard(96.dp, entry) { onPick(entry) } }
+                }
+            }
+        }
+    }
+}
+
+/** Barra de 42 dp dos navegadores: botão à esquerda (✕ ou ←) e o título centrado. */
+@Composable
+internal fun BrowserTopBar(title: String, glyph: Char, description: String, tag: String, onClick: () -> Unit, trailing: @Composable () -> Unit = {}) {
+    Box(Modifier.fillMaxWidth().height(42.dp).background(AureaColors.AddPanel)) {
+        Box(
+            Modifier.align(Alignment.CenterStart).size(44.dp).testTag(tag).semantics { contentDescription = description }.tocavel(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) { CupertinoIcon(glyph, 18.dp, AureaColors.Text) }
+        Text(title, modifier = Modifier.align(Alignment.Center).padding(horizontal = 56.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)))
+        Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) { trailing() }
+    }
+    Box(Modifier.fillMaxWidth().height(0.5.dp).background(AureaColors.AddPanelDeep))
+}
+
+/** Quadrado com a diagonal: o ícone do nulo (camada invisível que serve de pai). */
+private fun DrawScope.drawNullIcon(c: Color = ShellColors.DockTileContent) {
+    val k = size.minDimension / 30f
+    val r = Rect(center.x - 13 * k, center.y - 13 * k, center.x + 13 * k, center.y + 13 * k)
+    drawRoundRect(c, r.topLeft, r.size, CornerRadius(4 * k), style = Stroke(1.8f * k))
+    drawLine(c, Offset(r.left + 3 * k, r.bottom - 3 * k), Offset(r.right - 3 * k, r.top + 3 * k), 1.8f * k)
+}
+
+// =============================================================================
+// 3D (só no AUREA): a mesma grade de objetos
+// =============================================================================
+
+@Composable
+private fun Model3DGrid(store: EditorStore, close: () -> Unit) {
     // glTF/GLB/FBX/OBJ do aparelho. O tipo MIME de modelo 3D varia por
     // gerenciador de arquivos; o filtro real é a extensão, no store.
     // Seleção múltipla: o FBX/OBJ vem com as texturas e o .mtl (ou um .zip).
@@ -556,66 +693,43 @@ private fun Model3DTab(store: EditorStore, close: () -> Unit) {
         }
     }
     // "Formas 3D": a grade das 10 formas prontas (motor: scene3d/Shape3D.hpp).
-    var shapes by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var shapes by rememberSaveable { mutableStateOf(false) }
     if (shapes) {
-        CardGrid(
-            listOf(AddItem(stringResource(R.string.shape3d_back), CupertinoGlyph.ChevronLeft) { shapes = false }) +
+        ObjectGrid(
+            listOf(ObjectCell(stringResource(R.string.shape3d_back), "add.model3d.back", glyph = CupertinoGlyph.ChevronLeft) { shapes = false }) +
                 (0 until com.aurea.aurea.state.Shape3DCatalog.COUNT).map { k ->
-                    AddItem(stringResource(com.aurea.aurea.state.Shape3DCatalog.names[k]), draw = { drawShape3DIcon(k) }) {
+                    ObjectCell(stringResource(com.aurea.aurea.state.Shape3DCatalog.names[k]), "shape3d.add.$k", draw = { drawShape3DIcon(k) }) {
                         store.addShape3D(k)
                         close()
                     }
                 },
-            hint = stringResource(R.string.shape3d_hint),
+            footer = stringResource(R.string.shape3d_hint),
         )
         return
     }
-    CardGrid(
+    ObjectGrid(
         listOf(
-            AddItem(stringResource(R.string.shape3d_title), draw = { drawShape3DIcon(0) }) { shapes = true },
-            AddItem(stringResource(R.string.sh_add_model_3d), CupertinoGlyph.Cube, AureaColors.Accent) {
+            ObjectCell(stringResource(R.string.shape3d_title), "add.model3d.shapes", draw = { drawShape3DIcon(0) }) { shapes = true },
+            ObjectCell(stringResource(R.string.sh_add_model_3d), "add.model3d.file", glyph = CupertinoGlyph.Cube, tint = AureaColors.Accent) {
                 // Keep the broad fallback for providers that assign FBX/OBJ a
                 // generic or vendor-specific MIME type. The shared importer validates it.
                 picker.launch(arrayOf("model/gltf-binary", "model/gltf+json", "model/obj", "model/mtl",
                     "application/x-fbx", "application/zip", "text/plain", "image/*", "application/octet-stream", "*/*"))
             },
-            AddItem(stringResource(R.string.sh_add_text_3d), ShellGlyph.TextformatAlt, ShellColors.Text3D) { store.addText3D(); close() },
-            AddItem(stringResource(R.string.scene_workspace), CupertinoGlyph.Cube, AureaColors.Accent) { close(); store.enterSceneEditor() },
-            AddItem(stringResource(R.string.panel_camera_3d), CupertinoGlyph.CameraFill, AureaColors.Accent) { store.addCamera(); close() },
-            AddItem(stringResource(R.string.real_camera_title), CupertinoGlyph.CameraFill, AureaColors.Accent) { store.startRealCamera(); close() },
-            AddItem(stringResource(R.string.sh_add_null_3d), draw = { drawNullIcon() }) { store.addNull(true); close() },
+            ObjectCell(stringResource(R.string.sh_add_text_3d), "add.model3d.text", glyph = ShellGlyph.TextformatAlt, tint = ShellColors.Text3D) { store.addText3D(); close() },
+            ObjectCell(stringResource(R.string.scene_workspace), "add.model3d.scene", glyph = CupertinoGlyph.Cube) { close(); store.enterSceneEditor() },
+            ObjectCell(stringResource(R.string.panel_camera_3d), "add.model3d.camera", glyph = CupertinoGlyph.CameraFill) { store.addCamera(); close() },
+            ObjectCell(stringResource(R.string.real_camera_title), "add.model3d.realCamera", glyph = CupertinoGlyph.CameraViewfinder) { store.startRealCamera(); close() },
+            ObjectCell(stringResource(R.string.sh_add_null_3d), "add.model3d.null", draw = { drawNullIcon(AureaColors.Text) }) { store.addNull(true); close() },
         ),
-        hint = stringResource(R.string.sh_add_model_3d_hint) + "\n\n" + stringResource(R.string.model3d_risk_warning),
+        footer = stringResource(R.string.sh_add_model_3d_hint),
+        warning = stringResource(R.string.model3d_risk_warning),
     )
 }
 
-/** Quadrado com a diagonal: o ícone do nulo (camada invisível que serve de pai). */
-private fun DrawScope.drawNullIcon() {
-    val k = size.minDimension / 30f
-    val r = Rect(center.x - 13 * k, center.y - 13 * k, center.x + 13 * k, center.y + 13 * k)
-    val c = ShellColors.DockTileContent
-    drawRoundRect(c, r.topLeft, r.size, CornerRadius(4 * k), style = Stroke(1.8f * k))
-    drawLine(c, Offset(r.left + 3 * k, r.bottom - 3 * k), Offset(r.right - 3 * k, r.top + 3 * k), 1.8f * k)
-}
-
 // =============================================================================
-// Desenho e vetor
+// Vetor (P0-7): as 7 fichas na grade de objetos
 // =============================================================================
-
-/** "Mão livre": o palco passa a receber traços (cada traço vira um caminho suave). */
-@Composable
-private fun DrawTab(store: EditorStore, ui: EditorUi) {
-    CardGrid(
-        listOf(
-            AddItem(stringResource(R.string.editor_mao_livre), ShellGlyph.Scribble, AureaColors.Accent) {
-                if (store.playing) store.pause()
-                ui.adding = false
-                store.chooseVectorTool(2)
-            },
-        ),
-        hint = stringResource(R.string.editor_desenhe_dedo_direto_palco_cada_traco),
-    )
-}
 
 /**
  * Vetor: caminhos de pontos editáveis. "Desenhar com pontos" é o preset 0
@@ -623,7 +737,7 @@ private fun DrawTab(store: EditorStore, ui: EditorUi) {
  * caminho; SVG é lido e convertido no motor. Todos abrem o painel Vetor.
  */
 @Composable
-private fun VectorTab(store: EditorStore, ui: EditorUi) {
+private fun VectorGrid(store: EditorStore, ui: EditorUi) {
     val psdPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) { ui.adding = false; store.importPsd(uri) }
     }
@@ -636,17 +750,19 @@ private fun VectorTab(store: EditorStore, ui: EditorUi) {
     fun start(preset: Int) {
         if (store.addVectorLayer(preset) >= 0) openPanel(store, ui, EditorPanel.Vector)
     }
-    CardGrid(
+    ObjectGrid(
         listOf(
-            AddItem(stringResource(R.string.editor_desenhar_pontos), draw = { drawVectorIcon(0) }) { start(0) },
-            AddItem(stringResource(R.string.editor_retangulo), draw = { drawVectorIcon(1) }) { start(1) },
-            AddItem(stringResource(R.string.editor_elipse), draw = { drawVectorIcon(2) }) { start(2) },
-            AddItem(stringResource(R.string.editor_poligono), draw = { drawVectorIcon(3) }) { start(3) },
-            AddItem(stringResource(R.string.editor_estrela), draw = { drawVectorIcon(4) }) { start(4) },
-            AddItem(stringResource(R.string.editor_importar_svg), CupertinoGlyph.DocText) { svgPicker.launch(arrayOf("image/svg+xml", "text/xml", "application/xml", "application/octet-stream")) },
-            AddItem(stringResource(R.string.psd_import), CupertinoGlyph.PhotoOnRectangle) { psdPicker.launch(arrayOf("*/*")) },
+            ObjectCell(stringResource(R.string.editor_desenhar_pontos), "add.vector.points", draw = { drawVectorIcon(0) }) { start(0) },
+            ObjectCell(stringResource(R.string.editor_retangulo), "add.vector.rect", draw = { drawVectorIcon(1) }) { start(1) },
+            ObjectCell(stringResource(R.string.editor_elipse), "add.vector.ellipse", draw = { drawVectorIcon(2) }) { start(2) },
+            ObjectCell(stringResource(R.string.editor_poligono), "add.vector.polygon", draw = { drawVectorIcon(3) }) { start(3) },
+            ObjectCell(stringResource(R.string.editor_estrela), "add.vector.star", draw = { drawVectorIcon(4) }) { start(4) },
+            ObjectCell(stringResource(R.string.editor_importar_svg), "add.vector.svg", glyph = CupertinoGlyph.DocText) {
+                svgPicker.launch(arrayOf("image/svg+xml", "text/xml", "application/xml", "application/octet-stream"))
+            },
+            ObjectCell(stringResource(R.string.psd_import), "add.vector.psd", glyph = CupertinoGlyph.PhotoOnRectangle) { psdPicker.launch(arrayOf("*/*")) },
         ),
-        hint = stringResource(R.string.editor_vetor_contorno_pontos_voce_arrasta_curva),
+        footer = stringResource(R.string.editor_vetor_contorno_pontos_voce_arrasta_curva),
     )
 }
 
@@ -655,7 +771,7 @@ private fun DrawScope.drawVectorIcon(kind: Int) {
     val s = size.minDimension
     val o = Offset((size.width - s) / 2, (size.height - s) / 2)
     fun p(x: Float, y: Float) = Offset(o.x + x * s, o.y + y * s)
-    val line = ShellColors.DockTileContent
+    val line = AureaColors.Text
     val stroke = Stroke(s * 0.06f)
     val pts = mutableListOf<Offset>()
     fun ring(n: Int, rOuter: Float, rInner: Float?): Path = Path().apply {
@@ -701,29 +817,150 @@ private fun DrawScope.drawVectorIcon(kind: Int) {
     }
 }
 
+// =============================================================================
+// Presets como faixa de modelos (P0-6)
+// =============================================================================
+
 /**
- * O painel da categoria escolhida na barra de adicionar: o mesmo
- * [AddLayerPanel] de antes, numa janela no meio da tela.
+ * Faixa de 2 fileiras: [Ver tudo] (o seletor completo de hoje, em tela
+ * cheia), [Descobrir mais] (os presets da comunidade, com o selo NOVO até o
+ * primeiro toque) e os presets de texto, os recentes primeiro. Cartão de
+ * 75 dp com a prévia animada e a faixa de título. Tocar cria o texto já com o
+ * preset e fecha.
+ */
+@Composable
+private fun TextPresetStrip(store: EditorStore, ui: EditorUi, close: () -> Unit) {
+    val context = LocalContext.current
+    val lib = store.presets
+    val prefs = remember { omegaAddPrefs(context) }
+    var discoverSeen by remember { mutableStateOf(prefs.getBoolean("presets.discover.seen", false)) }
+    var discover by remember { mutableStateOf(false) }
+    val entries = remember(lib.user, lib.recents) {
+        val all = lib.entries(PresetKind.Text)
+        val recent = lib.recents.mapNotNull { key -> all.firstOrNull { it.key == key } }
+        recent + all.filter { it !in recent }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize().testTag("add.presets.strip")) {
+        val cell = maxHeight / 2
+        LazyHorizontalGrid(rows = GridCells.Fixed(2), modifier = Modifier.fillMaxSize()) {
+            item {
+                StripActionCell(cell, stringResource(R.string.om_add_view_all), CupertinoGlyph.SquareGrid2x2, "add.presets.viewAll") {
+                    ui.presetsBrowser = true
+                }
+            }
+            item {
+                StripActionCell(cell, stringResource(R.string.om_add_discover_presets), CupertinoGlyph.Sparkles, "add.presets.discover",
+                    badge = if (discoverSeen) null else stringResource(R.string.om_badge_new)) {
+                    if (!discoverSeen) { discoverSeen = true; prefs.edit().putBoolean("presets.discover.seen", true).apply() }
+                    discover = true
+                }
+            }
+            itemsIndexed(entries, key = { _, e -> e.key }) { _, e ->
+                PresetStripCard(cell, e) {
+                    if (store.addTextWithPreset(e, false) >= 0) close()
+                }
+            }
+        }
+    }
+    if (discover) {
+        Dialog(onDismissRequest = { discover = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(Modifier.fillMaxSize().background(AureaColors.LightBackground).statusBarsPadding().navigationBarsPadding()) {
+                BrowserTopBar(stringResource(R.string.om_add_discover_presets), CupertinoGlyph.Xmark, stringResource(R.string.editor_fechar),
+                    "add.presets.discover.close", { discover = false })
+                Box(Modifier.weight(1f).fillMaxWidth()) { com.aurea.aurea.home.CommunityPresetsTab() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PresetStripCard(cell: Dp, e: PresetEntry, onClick: () -> Unit) {
+    val label = stringResource(R.string.tp_add_named, e.name)
+    Box(Modifier.size(cell), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .size(75.dp)
+                .clip(RoundedCornerShape(2.5.dp))
+                .background(AureaColors.AddPanelDeep)
+                .semantics { contentDescription = label }
+                .testTag("add.presets.item.${e.key}")
+                .tocavel(onClick = onClick),
+        ) {
+            PresetMotionThumb(e.textPreset, Modifier.fillMaxSize().padding(bottom = 16.dp))
+            TitleStrip(e.name, Modifier.align(Alignment.BottomCenter))
+        }
+    }
+}
+
+/** "Aa" animado pelo tipo do preset (a mesma ideia da prévia do seletor). */
+@Composable
+private fun PresetMotionThumb(preset: Int?, modifier: Modifier) {
+    val transition = rememberInfiniteTransition(label = "preset strip")
+    val phase by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(2400, easing = LinearEasing)), label = "phase")
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Row {
+            "Aa".forEachIndexed { index, glyph ->
+                val progress = ((phase * 2f).coerceAtMost(2f) - index * .12f).coerceIn(0f, 1f)
+                val opacity = when (preset) {
+                    20, 21, 23, 24 -> (progress * 3f).coerceIn(0f, 1f) * ((1f - phase) * 5f).coerceIn(0f, 1f)
+                    22 -> .3f + .7f * kotlin.math.abs(kotlin.math.sin(phase * 60f + index * 4f))
+                    null -> 1f
+                    else -> (progress * 2f).coerceIn(0.35f, 1f)
+                }
+                val size = if (preset == 19) 1f - .8f * kotlin.math.sin(progress * Math.PI).toFloat() else 1f
+                val lift = if (preset == 2 || preset == 9) (1f - progress) * 8f else 0f
+                Text(glyph.toString(), Modifier.graphicsLayer { alpha = opacity; scaleX = size; scaleY = size; translationY = lift },
+                    style = AureaType.Base.merge(TextStyle(fontSize = 22.sp, fontWeight = FontWeight.W700, color = AureaColors.Text)))
+            }
+        }
+    }
+}
+
+/** "Ver tudo" dos presets: o seletor completo de hoje (Texto | Texto 3D), em tela cheia. */
+@Composable
+internal fun TextPresetsBrowser(store: EditorStore, onAdded: () -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.fillMaxSize().background(AureaColors.AddPanel).statusBarsPadding().navigationBarsPadding().testTag("presets.browser")) {
+            BrowserTopBar(stringResource(R.string.tp_title), CupertinoGlyph.Xmark, stringResource(R.string.editor_fechar), "presets.browser.close", onDismiss)
+            Box(Modifier.weight(1f).fillMaxWidth().padding(top = 6.dp)) {
+                com.aurea.aurea.editor.panels.TextPresetPicker(store) { onAdded(); onDismiss() }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Interface de Edição: a janela de antes (a Edição não tem a barra de adicionar)
+// =============================================================================
+
+/**
+ * O painel da categoria escolhida numa janela no meio da tela. Só a interface
+ * de Edição usa (as figurinhas e os modelos de texto do Dock dela); a
+ * Composição tem o painel embutido acima da barra.
  */
 @Composable
 internal fun AddLayerOverlay(store: EditorStore, ui: EditorUi) {
     val close = { ui.adding = false }
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         BoxWithConstraints(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-            Box(Modifier.widthIn(max = 380.dp).fillMaxWidth().heightIn(max = minOf(maxHeight, 390.dp))
+            Box(Modifier.widthIn(max = 380.dp).fillMaxWidth().heightIn(max = minOf(maxHeight, 300.dp)).height(EditorLayout.ADD_CONTENT.dp + 40.dp)
                 .clip(RoundedCornerShape(20.dp)).border(1.dp, AureaColors.Action, RoundedCornerShape(20.dp))) {
-                AddLayerPanel(store, ui)
+                AddLayerPanel(store, ui, Modifier.fillMaxSize())
             }
         }
     }
 }
 
+// =============================================================================
+// A barra fixa de adicionar (fica: exceção do dono)
+// =============================================================================
+
 /**
  * A barra fixa de adicionar, na base do editor, no lugar do "+": as mesmas
  * categorias ([AddTab], mesmos glifos e nomes). Sempre à vista sem camada
- * escolhida; tocar abre o painel da categoria. A aberta ganha a pílula de
- * destaque. Sem espaço para todas, a barra rola de lado (a seguinte aparece
- * cortada: dá para ver que há mais).
+ * escolhida; tocar abre o conteúdo da categoria logo acima. A aberta ganha a
+ * pílula de destaque. Sem espaço para todas, a barra rola de lado (a seguinte
+ * aparece cortada: dá para ver que há mais). Ids `addBar.<Enum>` (iguais no iOS).
  */
 @Composable
 internal fun AddBar(store: EditorStore, ui: EditorUi, modifier: Modifier = Modifier) {
@@ -732,7 +969,7 @@ internal fun AddBar(store: EditorStore, ui: EditorUi, modifier: Modifier = Modif
     BoxWithConstraints(
         modifier
             .background(AureaColors.EditorBar)
-            .drawBehind { drawRect(AureaColors.EditorBarLine, size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx())) }
+            .drawBehind { drawRect(AureaColors.EditorBarLine, size = Size(size.width, 1.dp.toPx())) }
             .padding(top = 6.dp)
             .testTag("editor.addBar"),
     ) {
@@ -758,7 +995,7 @@ internal fun AddBar(store: EditorStore, ui: EditorUi, modifier: Modifier = Modif
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(12.dp))
                         .background(if (on) AureaColors.Chip else Color.Transparent)
-                        .semantics { contentDescription = label }
+                        .semantics { contentDescription = label; role = Role.Button }
                         .testTag("addBar.${tab.name}")
                         .tocavel(shrink = 1f, haptic = true) { openAdd(store, ui, tab) },
                     horizontalAlignment = Alignment.CenterHorizontally,

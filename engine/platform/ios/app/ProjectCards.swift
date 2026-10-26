@@ -1,9 +1,10 @@
 // =============================================================================
 //  Aurea / platform / ios / app / ProjectCards.swift
 //
-//  Os cartões de projeto e tudo o que os cerca: a barra da lista (contagem,
-//  busca, ordenação, seleção), a barra de lote, os menus/diálogos de um projeto
-//  e a BIBLIOTECA — a leitura real do disco.
+//  Os cartões de projeto e tudo o que os cerca (Omega 0.3.2, área 01): a linha
+//  de 96 pt da referência, a ficha 2 × 2, o vazio, as pílulas, a linha "Meus
+//  projetos", o menu rápido, os diálogos claros de um projeto e a BIBLIOTECA —
+//  a leitura real do disco.
 //
 //  Nada de estado falso: a lista vem dos `.aurea` que estão em Documents e a
 //  ficha de cada um vem do sidecar `<nome>.aurea.meta.json` — o MESMO arquivo
@@ -32,6 +33,8 @@ struct HomeProjectEntry: Identifiable, Equatable {
     var id: String { file.url.path }
     var modified: Date { file.modified }
     var thumbnailURL: URL { file.thumbnailURL }
+    /// Omega home: tamanho do `.aurea` (o scan já lê `.fileSizeKey`).
+    var fileSize: Int64 { file.sizeBytes }
 }
 
 /// O sidecar de um projeto (o `.meta.json` do Android).
@@ -351,15 +354,110 @@ enum HomeSortOrder: Int, CaseIterable, Identifiable {
     }
 }
 
-/// Quantos projetos a Início mostra antes do "Ver todos".
-let homeRecentOnStart = 6
+// =============================================================================
+// Omega home (área 01): as contas da Home clara. Par de `HomeOmegaLogic.kt`
+// (mesmas regras e textos; os testes JVM de lá descrevem estas também).
+// =============================================================================
+/// A ficha 2 × 2 da linha: proporção · resolução (lado menor) · tamanho do
+/// arquivo · fps. Sem medida gravada, proporção e resolução ficam "—".
+struct OmegaProjectFacts: Equatable {
+    let aspect: String
+    let resolution: String
+    let size: String
+    let fps: String
+}
 
-/// Duas colunas em celular, mais em tela larga.
-func homeGridColumns() -> Int {
-    let width = UIScreen.main.bounds.width
-    if width >= 840 { return 4 }
-    if width >= 600 { return 3 }
-    return 2
+func omegaProjectFacts(_ entry: HomeProjectEntry, locale: Locale = Locale(identifier: AureaText.language.resolved.rawValue)) -> OmegaProjectFacts {
+    let known = entry.width > 0 && entry.height > 0
+    return OmegaProjectFacts(
+        aspect: known ? homeAspectLabel(width: entry.width, height: entry.height) : "—",
+        resolution: known ? "\(min(entry.width, entry.height))p" : "—",
+        size: omegaFileSize(entry.fileSize, locale: locale),
+        fps: "\(homeFormatFps(entry.fps)) fps")
+}
+
+/// Tamanho do arquivo (base 1000): "860 B", "12,3 MB", "1,3 GB"; uma casa abaixo de 100, sem ",0".
+func omegaFileSize(_ bytes: Int64, locale: Locale) -> String {
+    if bytes <= 0 { return "0 B" }
+    if bytes < 1000 { return "\(bytes) B" }
+    let units = ["KB", "MB", "GB", "TB"]
+    var value = Double(bytes) / 1000
+    var unit = 0
+    while value >= 1000 && unit < units.count - 1 { value /= 1000; unit += 1 }
+    let formatter = NumberFormatter()
+    formatter.locale = locale
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = false
+    formatter.minimumFractionDigits = 0
+    formatter.maximumFractionDigits = value < 100 ? 1 : 0
+    formatter.roundingMode = .halfEven
+    return (formatter.string(from: NSNumber(value: value)) ?? String(format: "%.1f", value)) + " " + units[unit]
+}
+
+/// Duração: "m:ss" abaixo de 1 h, "h:mm:ss" acima; nil sem duração gravada.
+func omegaProjectDuration(frames: Int, fps: Double) -> String? {
+    guard frames > 0, fps.isFinite, fps > 0 else { return nil }
+    let total = max(0, Int((Double(frames) / fps).rounded()))
+    let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+    return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+}
+
+/// Um item da lista da aba Projetos: cabeçalho de data ou uma fileira de linhas.
+enum OmegaProjectListItem: Identifiable, Equatable {
+    case dateHeader(Date)
+    case cards([HomeProjectEntry])
+    var id: String {
+        switch self {
+        case .dateHeader(let day): return "dia-\(Int(day.timeIntervalSince1970))"
+        case .cards(let entries): return "linha-" + entries.map(\.id).joined(separator: "|")
+        }
+    }
+}
+
+/// Com "Mais recentes", um cabeçalho de data antes do primeiro projeto de cada
+/// dia; `columns` > 1 agrupa as linhas em fileiras sem atravessar o cabeçalho.
+func omegaProjectListItems(_ arranged: [HomeProjectEntry], sort: HomeSortOrder, columns: Int,
+                           calendar: Calendar = .current) -> [OmegaProjectListItem] {
+    let cols = max(1, columns)
+    var out: [OmegaProjectListItem] = []
+    var run: [HomeProjectEntry] = []
+    func flush() {
+        var i = 0
+        while i < run.count { out.append(.cards(Array(run[i..<min(run.count, i + cols)]))); i += cols }
+        run.removeAll()
+    }
+    var lastDay: Date?
+    for entry in arranged {
+        if sort == .recent {
+            let day = calendar.startOfDay(for: entry.modified)
+            if day != lastDay { flush(); out.append(.dateHeader(day)); lastDay = day }
+        }
+        run.append(entry)
+    }
+    flush()
+    return out
+}
+
+/// Colunas de linhas (mínimo 360 pt cada, 12 entre elas).
+func omegaProjectColumns(width: CGFloat) -> Int {
+    min(4, max(1, Int(((width - 32) + 12) / (360 + 12))))
+}
+
+/// Topo do cartão do menu rápido: embaixo se couber até o fim da área, senão
+/// ACIMA do item (referência: `104 + 48 n`, sobe `−(104 + 48n) − 8`).
+func omegaQuickMenuTop(rowTop: CGFloat, rowHeight: CGFloat, options: Int, areaBottom: CGFloat,
+                       gap: CGFloat = 8, optionHeight: CGFloat = 48) -> CGFloat {
+    let menu = optionHeight * CGFloat(options)
+    let below = rowTop + rowHeight + gap
+    return below + menu <= areaBottom ? below : rowTop - gap - menu
+}
+
+/// Nome sugerido: o primeiro "Projeto N" ainda não usado.
+func omegaSuggestedName(_ titles: [String], nameFor: (Int) -> String) -> String {
+    let used = Set(titles.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+    var n = 1
+    while n < 10_000 && used.contains(nameFor(n).lowercased()) { n += 1 }
+    return nameFor(n)
 }
 
 // =============================================================================
@@ -414,6 +512,8 @@ struct HomeThumbnail: View {
     /// O hero tem o seu placeholder (degradê + film grande), o cartão tem a
     /// moldura do formato.
     var hero: Bool = false
+    /// Omega home: sem imagem ainda, o brilho animado da referência.
+    var shimmer: Bool = false
 
     @State private var image: UIImage?
 
@@ -425,6 +525,8 @@ struct HomeThumbnail: View {
         ZStack {
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
+            } else if shimmer {
+                OmegaShimmer()
             } else if hero {
                 LinearGradient(colors: [AureaColors.surfaceHigh, AureaColors.surface],
                                startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -595,351 +697,472 @@ struct HomeCapsLabel: View {
 }
 
 // =============================================================================
-// Os cartões (ProjectCards.kt)
+// Omega home · P0-5: a linha do projeto da referência (par do ProjectCards.kt)
 // =============================================================================
-/// Placeholder de miniatura: degradê #1B2530 → #151C24 (topLeft → bottomRight).
-private let homePlaceholderGradient = LinearGradient(
-    colors: [AureaColors.surfaceHigh, AureaColors.surface],
-    startPoint: .topLeading, endPoint: .bottomTrailing)
+/// Medidas da Home Omega (as da referência; `OmegaHomeDims` do Android).
+enum OmegaHomeDims {
+    static let topBar: CGFloat = 57
+    static let dock: CGFloat = 72
+    static let selectionBar: CGFloat = 72
+    static let gutter: CGFloat = 16
+    static let row: CGFloat = 96
+    static let thumb: CGFloat = 80
+    static let pill: CGFloat = 40
+    static let drawer: CGFloat = 280
+    static let drawerRow: CGFloat = 44
+    static let scrollShadow: CGFloat = 25
+}
 
-/// O cartão "Continuar editando": o projeto mais recente em 16:9, miniatura de
-/// verdade, scrim, nome e a pílula. Toque abre; toque longo ou ⋯ abre o menu.
-struct HomeContinueCard: View {
-    let entry: HomeProjectEntry
-    let onOpen: () -> Void
-    let onMenu: () -> Void
+/// Tipografia da Home Omega (tamanho e peso da referência, fonte do AUREA).
+enum OmegaHomeType {
+    static let tabLabel = Font.aurea(size: 12, weight: .medium)
+    static let pill = Font.aurea(size: 16, weight: .medium)
+    static let listTitle = Font.aurea(size: 18, weight: .bold)
+    static let small = Font.aurea(size: 14)
+    static let rowTitle = Font.aurea(size: 16, weight: .bold)
+    static let meta = Font.aurea(size: 12)
+    static let badge = Font.aurea(size: 10, weight: .medium)
+    static let menu = Font.aurea(size: 16, weight: .medium)
+    static let action = Font.aurea(size: 18)
+    static let body = Font.aurea(size: 16)
+    static let drawerTitle = Font.aurea(size: 17, weight: .bold)
+    static let drawerLabel = Font.aurea(size: 12, weight: .bold)
+    static let drawerNote = Font.aurea(size: 11)
+}
 
-    var body: some View {
-        HStack(spacing: 12) {
-            HomeThumbnail(url: entry.thumbnailURL, stamp: entry.modified,
-                          maxPx: 256, ratio: homeProjectRatio(entry), hero: true)
-                .frame(width: 76, height: 76).clipShape(RoundedRectangle(cornerRadius: 14))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(AureaText.t("home_continue")).font(.aurea(size: 13)).foregroundStyle(AureaColors.accent)
-                Text(entry.title).font(.aurea(size: 17, weight: .semibold)).lineLimit(1)
-                Text(homeProjectSpec(entry)).aureaFont(.cardSpec).foregroundStyle(AureaColors.muted).lineLimit(2)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            HomeRoundIconButton(glyph: CupertinoGlyph.Ellipsis, description: AureaText.t("home_menu_content"), action: onMenu)
-        }.padding(12).foregroundStyle(AureaColors.text)
-            .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 22))
-            .homeTapOrLong(onOpen, long: onMenu)
-            .padding(.horizontal, HomeDims.gutter).padding(.top, 20)
+extension View {
+    /// Sombra colorida (a referência usa azul-marinho translúcido, não preto).
+    func omegaShadow(_ radius: CGFloat, _ color: Color) -> some View {
+        shadow(color: color, radius: radius / 2, x: 0, y: radius / 6)
     }
 }
-/// O cartão da grade: miniatura (raio 12), o nome, a ficha e as reticências.
-/// Escolhendo vários, o toque marca em vez de abrir.
-struct HomeProjectRow: View {
-    let entry: HomeProjectEntry
-    let selecting: Bool
-    let marked: Bool
-    let onOpen: () -> Void
-    let onMenu: () -> Void
-    let onMark: () -> Void
+
+/// O brilho animado do quadrado sem imagem (carregando ou sem miniatura).
+struct OmegaShimmer: View {
+    @State private var phase: CGFloat = -1
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 16) {
-                ZStack {
-                    HomeThumbnail(url: entry.thumbnailURL, stamp: entry.modified, maxPx: 256, ratio: homeProjectRatio(entry))
-                    if selecting {
-                        CupertinoGlyph.text(marked ? CupertinoGlyph.CheckmarkCircleFill : CupertinoGlyph.Circle,
-                            size: 28, color: marked ? AureaColors.accent : AureaColors.text)
-                    }
-                }.frame(width: 84, height: 84).clipped().clipShape(RoundedRectangle(cornerRadius: 8))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.title).font(.aurea(size: 17, weight: .semibold)).foregroundStyle(AureaColors.text).lineLimit(2)
-                    HomeProjectChips(entry: entry).padding(.top, 2)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                Button(action: selecting ? onMark : onMenu) {
-                    CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 20, color: AureaColors.muted)
-                        .frame(width: 48, height: 48).contentShape(Rectangle())
-                }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("home_menu_content"))
-            }.padding(.horizontal, HomeDims.gutter).padding(.vertical, 12).frame(minHeight: 112)
-                .background(selecting && marked ? AureaColors.accentDim : AureaColors.background)
-                .contentShape(Rectangle()).homeTapOrLong(selecting ? onMark : onOpen, long: selecting ? onMark : onMenu)
-                .accessibilityAddTraits(selecting && marked ? .isSelected : [])
-            AureaColors.border.frame(height: 0.5).padding(.leading, 120).padding(.trailing, HomeDims.gutter)
+        GeometryReader { bounds in
+            AureaColors.homeThumb
+                .overlay(
+                    LinearGradient(colors: [.clear, AureaColors.lightSurface.opacity(0.55), .clear],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .frame(width: bounds.size.width)
+                        .offset(x: phase * bounds.size.width * 1.0)
+                )
+                .clipped()
         }
+        .onAppear {
+            withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) { phase = 1 }
+        }
+        .accessibilityHidden(true)
     }
 }
 
-struct HomeProjectCard: View {
+/// A linha de 96 pt: cartão branco de raio 12 com sombra suave, miniatura de 80
+/// com o selo de duração, título 16 negrito, ficha 2 × 2 e o ⋯ (menu rápido).
+/// Toque abre (ou marca, selecionando); toque longo entra na seleção marcando o
+/// projeto (P1-1, com háptico); selecionando, a caixa redonda aparece e o
+/// cartão anda 40 pt em 300 ms; os não marcados ganham um véu claro.
+struct OmegaProjectRow: View {
     let entry: HomeProjectEntry
     let selecting: Bool
     let marked: Bool
+    var interactive = true
     let onOpen: () -> Void
-    let onMenu: () -> Void
-    let onMark: () -> Void
+    let onLongPress: () -> Void
+    /// Recebe o retângulo global do cartão (o menu rápido desenha a cópia no mesmo lugar).
+    let onMenu: (CGRect) -> Void
+    /// O retângulo do cartão, guardado sem redesenhar a linha a cada rolagem.
+    @State private var box = OmegaFrameBox()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack {
-                HomeThumbnail(url: entry.thumbnailURL, stamp: entry.modified,
-                              maxPx: HomeDims.cardDecode, ratio: homeProjectRatio(entry))
-                if selecting {
-                    AureaColors.background.opacity(marked ? 0.35 : 0.15)
-                    VStack {
-                        HStack {
-                            Spacer()
-                            CupertinoGlyph.text(marked ? CupertinoGlyph.CheckmarkCircleFill : CupertinoGlyph.Circle,
-                                                size: HomeDims.iconLg,
-                                                color: marked ? AureaColors.accent : HomeColors.onImage70)
-                        }
-                        Spacer()
+        ZStack(alignment: .leading) {
+            if selecting {
+                ZStack {
+                    if marked {
+                        Circle().fill(AureaColors.lightAccentInk)
+                        CupertinoGlyph.text(CupertinoGlyph.CheckmarkAlt, size: 12, color: AureaColors.lightSurface)
+                    } else {
+                        Circle().strokeBorder(AureaColors.lightTextMuted, lineWidth: 1.5)
                     }
-                    .padding(6)
                 }
+                .frame(width: 20, height: 20).padding(.leading, 2)
+                .accessibilityIdentifier("home.project.check")
+                .transition(.opacity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: HomeDims.rMd))
-            .layoutPriority(1)
+            card
+                .padding(.leading, selecting ? 40 : 0)
+                .animation(.easeInOut(duration: 0.3), value: selecting)
+        }
+        .frame(height: OmegaHomeDims.row)
+        .accessibilityIdentifier("home.project.row")
+    }
 
-            HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(entry.title)
-                        .aureaFont(.cardTitle).foregroundStyle(AureaColors.text)
-                        .lineLimit(1)
-                    Text(homeProjectSpec(entry))
-                        .aureaFont(.cardSpec).foregroundStyle(AureaColors.muted)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Button(action: selecting ? onMark : onMenu) {
-                    CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: HomeDims.menuDotIcon, color: AureaColors.muted)
-                        .frame(width: HomeDims.menuDot, height: HomeDims.menuDot)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(AureaText.t("home_menu_content"))
+    private var card: some View {
+        HStack(spacing: 0) {
+            OmegaProjectThumb(entry: entry)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(entry.title.isEmpty ? AureaText.t("new_project_untitled") : entry.title)
+                    .font(OmegaHomeType.rowTitle).foregroundStyle(AureaColors.lightText).lineLimit(1)
+                OmegaProjectMeta(entry: entry)
             }
-            .padding(.top, 6)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 16)
+            Button { onMenu(box.rect) } label: {
+                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 24, color: AureaColors.lightTextMuted.opacity(selecting ? 0.4 : 1))
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle())
+            .disabled(selecting || !interactive)
+            .accessibilityLabel(AureaText.t("home_menu_content"))
+            .accessibilityIdentifier("home.project.more")
+            .padding(.trailing, 4)
         }
         .padding(8)
-        .aspectRatio(HomeDims.cardAspect, contentMode: .fit)
-        .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: 22))
-        .homeTapOrLong(selecting ? onMark : onOpen, long: selecting ? onMark : onMenu)
-    }
-}
-
-/// `_SemProjetos`: film + a frase. Também serve para busca sem resultado.
-struct HomeProjectsEmptyState: View {
-    let message: String
-
-    var body: some View {
-        HStack(spacing: HomeDims.s3) {
-            CupertinoGlyph.text(CupertinoGlyph.Film, size: 22, color: AureaColors.muted)
-            Text(message)
-                .aureaFont(.empty).foregroundStyle(AureaColors.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 12))
+        .omegaShadow(12, AureaColors.homeShadowSoft)
+        .overlay {
+            if selecting && !marked {
+                RoundedRectangle(cornerRadius: 12).fill(AureaColors.lightSurface.opacity(0.5)).allowsHitTesting(false)
+            }
         }
-        .padding(.leading, HomeDims.gutter)
-        .padding(.trailing, HomeDims.gutter)
-        .padding(.top, HomeDims.s1)
+        .background(GeometryReader { geometry in
+            Color.clear
+                .onAppear { box.rect = geometry.frame(in: .global) }
+                .onChange(of: geometry.frame(in: .global)) { box.rect = $0 }
+        })
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .modifier(OmegaRowGestures(enabled: interactive, onTap: onOpen, onLong: {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            onLongPress()
+        }))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selecting && marked ? [.isButton, .isSelected] : .isButton)
     }
 }
 
-// =============================================================================
-// A barra da lista, o campo de busca e a barra de lote
-// =============================================================================
-/// "{N} projetos" + buscar/ordenar/selecionar; buscando, o campo toma o lugar
-/// do título; selecionando, "{n} escolhidos" + marcar todos + sair.
-struct HomeProjectListBar: View {
-    let count: Int
-    let selecting: Bool
-    let selectedCount: Int
-    let searching: Bool
-    @Binding var query: String
-    let onOpenSearch: () -> Void
-    let onClearSearch: () -> Void
-    let onSort: () -> Void
-    let onSelectAll: () -> Void
-    let onExitSelection: () -> Void
-    var inset: Bool = true
+/// Guarda um retângulo sem ser estado observado (mudar não redesenha).
+final class OmegaFrameBox {
+    var rect: CGRect = .zero
+}
 
-    private var countLabel: String {
-        AureaText.t(count == 1 ? "home_project_count" : "home_project_count_plural", count)
+/// Toque e toque longo (0,45 s) só quando a linha é interativa (a cópia do menu não é).
+private struct OmegaRowGestures: ViewModifier {
+    let enabled: Bool
+    let onTap: () -> Void
+    let onLong: () -> Void
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled { content.homeTapOrLong(onTap, long: onLong) } else { content }
     }
+}
+
+/// Miniatura de 80 (raio 8, fundo `homeThumb`, "cover"); sem imagem, o brilho.
+struct OmegaProjectThumb: View {
+    let entry: HomeProjectEntry
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            HomeThumbnail(url: entry.thumbnailURL, stamp: entry.modified, maxPx: 256,
+                          ratio: homeProjectRatio(entry), shimmer: true)
+            if let duration = omegaProjectDuration(frames: entry.durationFrames, fps: entry.fps) {
+                Text(duration).font(OmegaHomeType.badge).foregroundStyle(AureaColors.homeOnBadge)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(AureaColors.homeBadge, in: RoundedRectangle(cornerRadius: 4))
+                    .padding(4)
+                    .accessibilityIdentifier("home.project.duration")
+            }
+        }
+        .frame(width: OmegaHomeDims.thumb, height: OmegaHomeDims.thumb)
+        .background(AureaColors.homeThumb)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// A ficha 2 × 2 (168): [proporção][resolução] / [tamanho][fps]; ícone 14 e texto 12.
+struct OmegaProjectMeta: View {
+    let entry: HomeProjectEntry
+    var body: some View {
+        let facts = omegaProjectFacts(entry)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 0) {
+                cell(CupertinoGlyph.Crop, facts.aspect)
+                cell(CupertinoGlyph.Tv, facts.resolution)
+            }
+            HStack(spacing: 0) {
+                cell(CupertinoGlyph.DocText, facts.size)
+                cell(CupertinoGlyph.Speedometer, facts.fps)
+            }
+        }
+        .frame(maxWidth: 168, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("home.project.meta")
+    }
+    private func cell(_ glyph: Character, _ text: String) -> some View {
+        HStack(spacing: 6) {
+            CupertinoGlyph.text(glyph, size: 14, color: AureaColors.lightTextMuted)
+            Text(text).font(OmegaHomeType.meta).foregroundStyle(AureaColors.lightTextMuted).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).frame(height: 16)
+    }
+}
+
+/// P0-7: o vazio centralizado (padding 35): título 18 negrito, corpo com o "+"
+/// em negrito, 30 e a ilustração do AUREA (moldura de filme com a marca).
+struct OmegaProjectsEmptyState: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(AureaText.t("home_no_projects")).font(OmegaHomeType.listTitle).foregroundStyle(AureaColors.lightText)
+                .multilineTextAlignment(.center).accessibilityAddTraits(.isHeader)
+            bodyText.font(OmegaHomeType.body).foregroundStyle(AureaColors.lightTextMuted)
+                .multilineTextAlignment(.center).padding(.top, 8)
+            illustration.padding(.top, 30)
+        }
+        .padding(.horizontal, 35)
+        .accessibilityIdentifier("home.empty")
+    }
+    private var bodyText: Text {
+        let full = AureaText.t("om_home_empty_body", "+")
+        guard let range = full.range(of: "+") else { return Text(full) }
+        return Text(String(full[..<range.lowerBound]))
+            + Text("+").fontWeight(.bold).foregroundColor(AureaColors.lightText)
+            + Text(String(full[range.upperBound...]))
+    }
+    private var illustration: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 14).fill(AureaColors.lightSurface)
+            RoundedRectangle(cornerRadius: 14).stroke(AureaColors.lightDivider, lineWidth: 1)
+            VStack {
+                holes
+                Spacer(minLength: 0)
+                holes
+            }.padding(.vertical, 6)
+            HomeBrandLogo().frame(width: 40, height: 40)
+        }
+        .frame(width: 132, height: 96)
+        .omegaShadow(12, AureaColors.homeShadowSoft)
+        .accessibilityHidden(true)
+    }
+    private var holes: some View {
+        HStack(spacing: 0) {
+            ForEach(0..<6, id: \.self) { _ in
+                Spacer(minLength: 0)
+                RoundedRectangle(cornerRadius: 2).fill(AureaColors.homeThumb).frame(width: 10, height: 7)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// Pílula de subaba (40, raio 12, padding 16/2, texto 16 médio): escolhida =
+/// texto claro sobre azul-marinho; não escolhida = cinza sobre branco, que fica
+/// azul-marinho sobre lilás enquanto pressionada (cores lidas pelo REA).
+struct OmegaPill: View {
+    let label: String
+    let selected: Bool
+    let tag: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) { EmptyView() }
+            .buttonStyle(OmegaPillStyle(label: label, selected: selected))
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityIdentifier(tag)
+    }
+}
+
+private struct OmegaPillStyle: ButtonStyle {
+    let label: String
+    let selected: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        let fill = selected ? AureaColors.homePillSelected : configuration.isPressed ? AureaColors.homePillPressed : AureaColors.homePillUnselected
+        let ink = selected ? AureaColors.homeOnPillSelected : configuration.isPressed ? AureaColors.homeOnPillPressed : AureaColors.homeOnPillUnselected
+        return Text(label).font(OmegaHomeType.pill).foregroundStyle(ink).lineLimit(1)
+            .padding(.horizontal, 16).padding(.bottom, 2)
+            .frame(minHeight: OmegaHomeDims.pill)
+            .background(fill, in: RoundedRectangle(cornerRadius: 12))
+            .omegaShadow(12, selected ? AureaColors.homeShadowStrong : AureaColors.homeShadowSoft)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
+/// A fileira de pílulas (rolagem horizontal; 16 antes, 12 entre, 16 depois).
+struct OmegaSubtabs: View {
+    let options: [(label: String, tag: String)]
+    let selected: Int
+    let onSelect: (Int) -> Void
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(Array(options.enumerated()), id: \.offset) { index, option in
+                    OmegaPill(label: option.label, selected: index == selected, tag: option.tag) { onSelect(index) }
+                }
+            }.padding(.horizontal, 16).padding(.vertical, 6)
+        }
+    }
+}
+
+/// A linha "Meus projetos": título 18 negrito; à direita a busca (extra D8) e
+/// "Ordem: …" com o ícone. 24 pt de desenho num alvo de 44.
+struct OmegaListHeader<SortMenu: View>: View {
+    let title: String
+    let sortLabel: String
+    let tag: String
+    let sortTag: String
+    var searchTag: String? = nil
+    var onSearch: (() -> Void)? = nil
+    let onSort: () -> Void
+    @ViewBuilder let sortMenu: (AnyView) -> SortMenu
 
     var body: some View {
         HStack(spacing: 0) {
-            if selecting {
-                Text(AureaText.t("home_selected_chosen", selectedCount))
-                    .aureaFont(.listCount).foregroundStyle(AureaColors.text)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                HomeBarButton(glyph: CupertinoGlyph.CheckmarkCircle,
-                              description: AureaText.t("home_mark_all"), action: onSelectAll)
-                HomeBarButton(glyph: CupertinoGlyph.Xmark,
-                              description: AureaText.t("home_exit_selection"), action: onExitSelection)
-            } else {
-                if searching {
-                    HomeSearchField(query: $query, onClear: onClearSearch)
-                } else {
-                    Text(countLabel)
-                        .aureaFont(.listCount).foregroundStyle(AureaColors.text)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    HomeBarButton(glyph: CupertinoGlyph.Search,
-                                  description: AureaText.t("common_search"), action: onOpenSearch)
-                }
-                HomeBarButton(glyph: CupertinoGlyph.ArrowUpArrowDown,
-                              description: AureaText.t("home_sort_title"), action: onSort)
-                if !searching {
-                    HomeBarButton(glyph: CupertinoGlyph.CheckmarkCircle,
-                                  description: AureaText.t("home_select"), action: onSelectAll)
-                }
+            Text(title).font(OmegaHomeType.listTitle).foregroundStyle(AureaColors.lightText).lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
+            if let onSearch {
+                Button(action: onSearch) {
+                    CupertinoGlyph.text(CupertinoGlyph.Search, size: 20, color: AureaColors.lightText)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }.buttonStyle(AureaPressStyle())
+                    .accessibilityLabel(AureaText.t("common_search"))
+                    .modifier(OptionalIdentifier(tag: searchTag))
             }
+            sortMenu(AnyView(
+                Button(action: onSort) {
+                    HStack(spacing: 4) {
+                        Text(sortLabel).font(OmegaHomeType.small).foregroundStyle(AureaColors.lightText).lineLimit(1)
+                        CupertinoGlyph.text(CupertinoGlyph.ArrowUpArrowDown, size: 16, color: AureaColors.lightText)
+                    }.frame(minHeight: 44).contentShape(Rectangle())
+                }.buttonStyle(AureaPressStyle(shrink: 1))
+                    .accessibilityIdentifier(sortTag)
+            ))
         }
-        .padding(.leading, inset ? HomeDims.gutter : 0)
-        .padding(.trailing, inset ? HomeDims.s3 : 0)
-        .padding(.top, inset ? 18 : 0)
-        .padding(.bottom, inset ? 6 : 0)
+        .padding(.horizontal, OmegaHomeDims.gutter)
+        .frame(minHeight: 44)
+        .accessibilityIdentifier(tag)
     }
 }
 
-/// `_BotaoDaBarra`: padding 8 + ícone 19 muted.
-struct HomeBarButton: View {
-    let glyph: Character
-    let description: String
-    let action: () -> Void
-
+/// A sombra de 25 pt no topo da lista, só quando ela saiu do topo (REA: `P.B8K.Rw`).
+struct OmegaScrollShadow: View {
+    let visible: Bool
     var body: some View {
-        Button(action: action) {
-            CupertinoGlyph.text(glyph, size: 19, color: AureaColors.muted)
-                .frame(width: 48, height: 48)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(description)
+        LinearGradient(colors: [AureaColors.lightShadow, .clear], startPoint: .top, endPoint: .bottom)
+            .frame(height: OmegaHomeDims.scrollShadow)
+            .opacity(visible ? 1 : 0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
-/// O `CupertinoTextField` padrão no escuro (altura 34, raio 5, hairline), com
-/// foco automático e o "x" que limpa e fecha a busca.
-struct HomeSearchField: View {
+/// Campo de busca claro (40, raio 8), com foco automático e o ✕ que limpa e fecha.
+struct OmegaSearchField: View {
     @Binding var query: String
     let onClear: () -> Void
-
     @FocusState private var focused: Bool
-
     var body: some View {
         HStack(spacing: 0) {
+            CupertinoGlyph.text(CupertinoGlyph.Search, size: 16, color: AureaColors.lightTextMuted).padding(.leading, 10)
             ZStack(alignment: .leading) {
                 if query.isEmpty {
-                    Text(AureaText.t("home_search_hint"))
-                        .aureaFont(.searchText).foregroundStyle(HomeColors.fieldPlaceholder)
-                        .lineLimit(1)
+                    Text(AureaText.t("home_search_hint")).font(.aurea(size: 16)).foregroundStyle(AureaColors.lightTextFaint).lineLimit(1)
                 }
-                TextField("", text: $query)
-                    .aureaFont(.searchText).foregroundStyle(AureaColors.text)
-                    .textInputAutocapitalization(.sentences)
-                    .submitLabel(.search)
-                    .focused($focused)
-            }
-            .padding(.horizontal, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
+                TextField("", text: $query).font(.aurea(size: 16)).foregroundStyle(AureaColors.lightText)
+                    .tint(AureaColors.lightAccentInk)
+                    .textInputAutocapitalization(.sentences).submitLabel(.search).focused($focused)
+                    .accessibilityIdentifier("home.projects.searchField")
+            }.padding(.horizontal, 8)
             Button(action: onClear) {
-                CupertinoGlyph.text(CupertinoGlyph.XmarkCircleFill, size: HomeDims.iconSm, color: AureaColors.text)
-                    .padding(.horizontal, HomeDims.s2)
-                    .frame(maxHeight: .infinity)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(AureaText.t("home_clear_search"))
+                CupertinoGlyph.text(CupertinoGlyph.XmarkCircleFill, size: 18, color: AureaColors.lightTextMuted)
+                    .frame(width: 44, height: 40).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel(AureaText.t("home_clear_search"))
         }
-        .frame(height: HomeDims.chipHeight)
-        .background(HomeColors.field)
-        .overlay(RoundedRectangle(cornerRadius: HomeDims.rXs).stroke(HomeColors.fieldBorder, lineWidth: HomeDims.hairline))
-        .clipShape(RoundedRectangle(cornerRadius: HomeDims.rXs))
+        .frame(height: 40)
+        .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(AureaColors.lightDivider, lineWidth: 0.5))
         .onAppear { focused = true }
     }
 }
 
-/// `_AcoesEmLote`: vidro, "{n} escolhidos", Duplicar e Excluir. Fica ACIMA da
-/// barra de abas.
-struct HomeBatchBar: View {
-    let count: Int
-    let onDuplicate: () -> Void
-    let onDelete: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Rectangle().fill(AureaColors.border).frame(height: HomeDims.hairline)
-            HStack(spacing: 0) {
-                Text(AureaText.t("home_selected_chosen", count))
-                    .aureaFont(.batchCount).foregroundStyle(AureaColors.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                HomeBatchButton(glyph: CupertinoGlyph.PlusSquareOnSquare,
-                                label: AureaText.t("common_duplicate"),
-                                color: AureaColors.text, action: onDuplicate)
-                HomeBatchButton(glyph: CupertinoGlyph.Trash,
-                                label: AureaText.t("common_delete"),
-                                color: AureaColors.danger, action: onDelete)
-            }
-            .padding(.horizontal, HomeDims.s3)
-            .padding(.vertical, HomeDims.s2)
-        }
-        .background {
-            HomeGlass(kind: .batch).allowsHitTesting(false)
-        }
-    }
+// =============================================================================
+// Omega home · P1-2: o menu rápido do projeto (referência `ProjectItemSelected`)
+// =============================================================================
+/// Uma opção do menu rápido (texto 16 médio, ícone no fim).
+struct OmegaQuickOption: Identifiable {
+    let id = UUID()
+    let label: String
+    let glyph: Character
+    let tag: String
+    var destructive = false
+    let action: () -> Void
 }
 
-private struct HomeBatchButton: View {
-    let glyph: Character
-    let label: String
-    let color: Color
-    let action: () -> Void
+/// Véu claro na tela inteira (toque fecha; "escape" do VoiceOver também), a
+/// cópia da linha no mesmo lugar e, 8 pt abaixo, o cartão de 70 % alinhado ao
+/// fim com opções de 48. Se não couber até o fim da área útil, o cartão abre
+/// ACIMA do item. Entra com fade de 200 ms. Desenhado na raiz da Home, em
+/// coordenadas globais (`frame(in: .global)`).
+struct OmegaQuickMenu<RowCopy: View>: View {
+    let row: CGRect
+    let areaBottom: CGFloat
+    let options: [OmegaQuickOption]
+    var tag = "home.projectMenu"
+    let onDismiss: () -> Void
+    @ViewBuilder let rowCopy: () -> RowCopy
+    @State private var shown = false
+    @Environment(\.layoutDirection) private var direction
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                CupertinoGlyph.text(glyph, size: 18)
-                Text(label).aureaFont(.batchAction)
+        GeometryReader { geometry in
+            let origin = geometry.frame(in: .global).origin
+            let rowLeft = row.minX - origin.x
+            let rowTop = row.minY - origin.y
+            let width = row.width * 0.7
+            let top = omegaQuickMenuTop(rowTop: rowTop, rowHeight: row.height, options: options.count,
+                                        areaBottom: areaBottom - origin.y)
+            // Alinhado ao FIM da linha (direita em LTR, esquerda em árabe). As
+            // coordenadas globais não espelham; `.position` também não.
+            let left = direction == .leftToRight ? rowLeft + row.width - width : rowLeft
+            ZStack(alignment: .topLeading) {
+                AureaColors.homeMenuScrim.ignoresSafeArea()
+                    .contentShape(Rectangle()).onTapGesture(perform: onDismiss)
+                    .accessibilityLabel(AureaText.t("common_cancel"))
+                    .accessibilityAddTraits(.isButton)
+                rowCopy()
+                    .frame(width: row.width, height: row.height)
+                    .position(x: rowLeft + row.width / 2, y: rowTop + row.height / 2)
+                    .allowsHitTesting(false)
+                    .environment(\.layoutDirection, direction)
+                VStack(spacing: 0) {
+                    ForEach(options) { option in
+                        Button {
+                            onDismiss()
+                            option.action()
+                        } label: {
+                            HStack(spacing: 24) {
+                                Text(option.label).font(OmegaHomeType.menu).lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                CupertinoGlyph.text(option.glyph, size: 20,
+                                                    color: option.destructive ? AureaColors.lightDanger : AureaColors.lightText)
+                            }
+                            .foregroundStyle(option.destructive ? AureaColors.lightDanger : AureaColors.lightText)
+                            .padding(.horizontal, 16).frame(height: 48).contentShape(Rectangle())
+                        }
+                        .buttonStyle(AureaPressStyle(shrink: 1))
+                        .accessibilityIdentifier(option.tag)
+                    }
+                }
+                .environment(\.layoutDirection, direction)
+                .frame(width: width)
+                .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 12))
+                .omegaShadow(12, AureaColors.homeShadowStrong)
+                .position(x: left + width / 2, y: top + CGFloat(options.count) * 24)
+                .accessibilityIdentifier(tag)
             }
-            .foregroundStyle(color)
-            .padding(.horizontal, HomeDims.rMd)
-            .padding(.vertical, HomeDims.s2)
-            .contentShape(Rectangle())
+            .environment(\.layoutDirection, .leftToRight)
         }
-        .buttonStyle(.plain)
-    }
-}
-
-/// Ação secundária da Início: cartão com ícone e rótulo, largura dividida.
-struct HomeStudioAction: View {
-    let glyph: Character
-    let label: String
-    var primary = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
-                CupertinoGlyph.text(glyph, size: 30, color: primary ? AureaColors.onAccent : AureaColors.text)
-                Spacer(minLength: 0)
-                Text(label).font(.aurea(size: 17, weight: .semibold)).multilineTextAlignment(.leading)
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(18).frame(height: 142)
-                .foregroundStyle(primary ? AureaColors.onAccent : AureaColors.text)
-                .background(primary ? AureaColors.accent : AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 22))
-        }.buttonStyle(.plain)
-    }
-}
-
-struct HomeQuickAction: View {
-    let glyph: Character
-    let label: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: HomeDims.s2) {
-                CupertinoGlyph.text(glyph, size: HomeDims.iconMd, color: AureaColors.accent)
-                Text(label).aureaFont(.featureTitle).foregroundStyle(AureaColors.text)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: HomeDims.quickAction)
-            .background(AureaColors.surface, in: RoundedRectangle(cornerRadius: HomeDims.rMd))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        .ignoresSafeArea()
+        .opacity(shown ? 1 : 0)
+        .onAppear { withAnimation(.easeOut(duration: 0.2)) { shown = true } }
+        .accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape, onDismiss)
     }
 }
 
@@ -960,27 +1183,22 @@ extension View {
 }
 
 // =============================================================================
-// Os menus e diálogos de um projeto (ProjectMenu.kt)
+// Os diálogos de um projeto (ProjectMenu.kt, Omega home): um por vez, a partir
+// do menu rápido (P1-2) e da barra de seleção (P0-6). Todos claros (F4).
 // =============================================================================
 enum HomeProjectDialog: Equatable {
-    case menu(HomeProjectEntry)
     case confirmDelete(HomeProjectEntry)
     case rename(HomeProjectEntry)
     /// "Exportar arquivo do projeto": com ou sem a mídia.
     case exportFile(HomeProjectEntry)
-    case deleteAll
     case batchDelete(Set<String>)
-    case sort
 }
 
-/// Desenha o diálogo aberto e age. A lista inteira entra para o "apagar todos"
-/// e para a poda da seleção.
+/// Desenha o diálogo aberto e age.
 struct HomeProjectDialogs: View {
     @Binding var state: HomeProjectDialog?
     @ObservedObject var library: HomeLibrary
-    @ObservedObject var defaults: HomeDefaults
     @Binding var selection: Set<String>
-    let onOpen: (HomeProjectEntry) -> Void
     @EnvironmentObject private var model: AureaModel
     @State private var shared: SharedProjectFile?
 
@@ -992,87 +1210,41 @@ struct HomeProjectDialogs: View {
         switch state {
         case .none:
             EmptyView()
-        case .menu(let entry):
-            HomeActionSheet(
-                title: entry.title,
-                message: homeProjectSpec(entry),
-                actions: [
-                    HomeSheetAction(AureaText.t("common_open")) { onOpen(entry) },
-                    // Começa a seleção de vários com este projeto marcado (spec am-ui P2-8).
-                    HomeSheetAction(AureaText.t("home_select"), tag: "home.project.select") { selection.insert(entry.id) },
-                    HomeSheetAction(AureaText.t("common_duplicate")) {
-                        duplicateHomeProject(entry)
-                        library.refresh()
-                    },
-                    HomeSheetAction(AureaText.t("common_rename")) { state = .rename(entry) },
-                    HomeSheetAction(AureaText.t("project_file_export")) { state = .exportFile(entry) },
-                    HomeSheetAction(AureaText.t("project_delete"), destructive: true) { state = .confirmDelete(entry) },
-                    HomeSheetAction(AureaText.t("project_delete_all"), destructive: true) {
-                        if !library.all.isEmpty { state = .deleteAll }
-                    },
-                ],
-                onDismiss: close)
         case .exportFile(let entry):
-            HomeActionSheet(
-                title: AureaText.t("project_file_export"),
-                message: AureaText.t("project_file_export_message"),
-                actions: [true, false].map { withMedia in
-                    HomeSheetAction(AureaText.t(withMedia ? "project_file_include_media" : "project_file_without_media")) {
-                        model.exportProjectFile(path: entry.id, title: entry.title, includeMedia: withMedia) { url in
-                            if let url { shared = SharedProjectFile(url: url) }
-                        }
-                    }
-                },
-                onDismiss: close)
+            AureaDialog(title: AureaText.t("project_file_export"), message: AureaText.t("project_file_export_message"),
+                        actions: [true, false].map { withMedia in
+                            DialogAction(AureaText.t(withMedia ? "project_file_include_media" : "project_file_without_media"),
+                                         role: withMedia ? .positive : .neutral,
+                                         tag: withMedia ? "home.exportFile.withMedia" : "home.exportFile.withoutMedia") {
+                                selection = []
+                                model.exportProjectFile(path: entry.id, title: entry.title, includeMedia: withMedia) { url in
+                                    if let url { shared = SharedProjectFile(url: url) }
+                                }
+                            }
+                        } + [DialogAction(AureaText.t("common_cancel"), role: .negative)],
+                        onDismiss: close, tag: "home.exportFile")
         case .confirmDelete(let entry):
-            // "Apagar todos" fica só no menu: ao lado da exclusão unitária o
-            // risco de apagar tudo por engano não se paga.
-            HomeActionSheet(
-                title: entry.title,
-                message: nil,
-                actions: [HomeSheetAction(AureaText.t("project_delete"), destructive: true) {
-                    deleteHomeProjects([entry.id])
-                    library.refresh()
-                }],
-                onDismiss: close)
+            AureaAlert(title: entry.title, message: AureaText.t("common_irreversible"),
+                       confirmLabel: AureaText.t("project_delete"), destructive: true,
+                       onConfirm: {
+                           deleteHomeProjects([entry.id])
+                           library.refresh()
+                       }, onDismiss: close)
         case .rename(let entry):
-            HomeRenamePrompt(initial: entry.title,
-                             onSave: { title in
-                                 if title != entry.title { renameHomeProjectTitle(path: entry.id, title: title) }
-                             },
-                             onDismiss: close,
-                             onFinished: { library.refresh() })
-        case .deleteAll:
-            HomeAlert(title: AureaText.t("project_delete_all_title"),
-                      message: AureaText.t("project_delete_all_message", library.all.count),
-                      confirmLabel: AureaText.t("project_delete_all_confirm"),
-                      destructive: true,
-                      onConfirm: {
-                          deleteHomeProjects(library.all.map(\.id))
-                          selection = []
-                          library.refresh()
-                      },
-                      onDismiss: close)
+            AureaNamePrompt(title: AureaText.t("common_rename"), initial: entry.title,
+                            onConfirm: { title in
+                                let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !clean.isEmpty && clean != entry.title { renameHomeProjectTitle(path: entry.id, title: clean) }
+                                library.refresh()
+                            }, onDismiss: close)
         case .batchDelete(let paths):
-            HomeActionSheet(
-                title: AureaText.t("project_delete_many_title", paths.count),
-                message: AureaText.t("common_irreversible"),
-                actions: [HomeSheetAction(AureaText.t("common_delete"), destructive: true) {
-                    deleteHomeProjects(Array(paths))
-                    selection = []
-                    library.refresh()
-                }],
-                onDismiss: close)
-        case .sort:
-            HomeActionSheet(
-                title: AureaText.t("home_sort_title"),
-                message: nil,
-                actions: HomeSortOrder.allCases.map { order in
-                    HomeSheetAction(order.label) {
-                        defaults.sortIndex = order.rawValue
-                    }
-                },
-                onDismiss: close)
+            AureaAlert(title: AureaText.t("project_delete_many_title", paths.count), message: AureaText.t("common_irreversible"),
+                       confirmLabel: AureaText.t("common_delete"), destructive: true,
+                       onConfirm: {
+                           deleteHomeProjects(Array(paths))
+                           selection = []
+                           library.refresh()
+                       }, onDismiss: close)
         }
     }
 

@@ -659,3 +659,212 @@ enum GestureLimit {
         return Int32(clamping: max(0, bounded))
     }
 }
+
+// =============================================================================
+//  Omega 0.3.2 (área 03): regras puras da timeline da referência. Par do bloco
+//  "Omega" de TimelineMath.kt; os mesmos números (verify/check_timeline_omega.py).
+// =============================================================================
+
+/// Degradê do cartão do clipe: variação ESTÁVEL por id (mesma conta inteira do
+/// Android): c0 = mix(A, B, (191·id mod 7)/7), c1 = mix(A, B, (773·id mod 31)/31)
+/// e o degradê vai de c0 a mix(c0, c1, ½).
+enum ClipColors {
+    /// Interpolação por canal ARGB, `num/den` de `a` para `b`, arredondada.
+    static func mix(_ a: UInt32, _ b: UInt32, _ num: Int, _ den: Int) -> UInt32 {
+        guard den > 0 else { return a }
+        let n = min(max(num, 0), den)
+        var out: UInt32 = 0
+        for shift: UInt32 in [24, 16, 8, 0] {
+            let x = Int((a >> shift) & 0xFF), y = Int((b >> shift) & 0xFF)
+            let v = (x * (den - n) + y * n + den / 2) / den
+            out |= UInt32(min(max(v, 0), 255)) << shift
+        }
+        return out
+    }
+
+    private static func floorMod(_ v: Int64, _ m: Int64) -> Int64 { ((v % m) + m) % m }
+
+    /// Índices da variação: (191·id mod 7, 773·id mod 31), sem estourar o Int64.
+    static func steps(_ id: Int64) -> (Int, Int) {
+        (Int(floorMod(2 * floorMod(id, 7), 7)), Int(floorMod(29 * floorMod(id, 31), 31)))
+    }
+
+    /// (início, fim) do degradê da camada `id` a partir do par do tipo, em ARGB.
+    static func vary(_ a: UInt32, _ b: UInt32, id: Int64) -> (UInt32, UInt32) {
+        let k = steps(id)
+        let c0 = mix(a, b, k.0, 7), c1 = mix(a, b, k.1, 31)
+        return (c0, mix(c0, c1, 1, 2))
+    }
+}
+
+/// Cor das marcas (par do `MarkerColors` do Android). O motor guarda RGBA8 com o
+/// R no byte BAIXO (0xAABBGGRR, `Marker::color`); a timeline desenha ARGB.
+enum MarkerColors {
+    /// A cor padrão que o motor dá à marca criada no toque.
+    static let engineDefault: UInt32 = 0xFFF7C34F
+    /// As quatro aparências da Omega em ARGB (os mesmos tons de `AureaTimeline.bookmarks`).
+    static let roles: [UInt32] = [0xFFF16586, 0xFFFAD3A5, 0xFF4BE29D, 0xFF3C8CE7]
+
+    /// RGBA do motor (R baixo) → ARGB. A troca R↔B é a própria inversa.
+    static func unpack(_ packed: UInt32) -> UInt32 {
+        0xFF00_0000 | ((packed & 0xFF) << 16) | (packed & 0xFF00) | ((packed >> 16) & 0xFF)
+    }
+    /// ARGB → RGBA do motor (R baixo), opaco.
+    static func pack(_ argb: UInt32) -> UInt32 { unpack(argb) }
+
+    /// Aparência (0..3): a cor exata de um papel, a cor padrão do motor (= 0) ou o
+    /// papel mais perto (marcas antigas com a paleta de 6 cores).
+    static func appearance(_ packed: UInt32, roles: [UInt32] = MarkerColors.roles) -> Int {
+        guard !roles.isEmpty else { return 0 }
+        if packed | 0xFF00_0000 == engineDefault { return 0 }
+        let argb = unpack(packed)
+        var best = 0, bestD = Int.max
+        for (i, role) in roles.enumerated() {
+            let c = role | 0xFF00_0000
+            if c == argb { return i }
+            let dr = Int((c >> 16) & 0xFF) - Int((argb >> 16) & 0xFF)
+            let dg = Int((c >> 8) & 0xFF) - Int((argb >> 8) & 0xFF)
+            let db = Int(c & 0xFF) - Int(argb & 0xFF)
+            let d = dr * dr + dg * dg + db * db
+            if d < bestD { bestD = d; best = i }
+        }
+        return best
+    }
+}
+
+/// Régua da Omega: tiques pendurados do alto, em três alturas, sem rótulos.
+enum OmegaRuler {
+    static let minTickDp: CGFloat = 4
+    static let secondTick = 2, halfTick = 1, frameTick = 0
+
+    /// Passo dos tiques de quadro: a próxima potência de 2 de max(1, quadros que
+    /// cabem em 4 pt). 30 fps a 100 pt/s = 1; a 10 pt/s = 16.
+    static func frameStep(pps: CGFloat, fps: Float) -> Int {
+        let ppfDp = Double(pps) / Double(TimeAxis.safeFps(fps))
+        guard ppfDp > 0, ppfDp.isFinite else { return 1 << 20 }
+        let n = Int(min(max(1, (Double(minTickDp) / ppfDp).rounded(.down)), Double(1 << 20)))
+        var p = 1
+        while p < n { p <<= 1 }
+        return p
+    }
+
+    /// Passo dos tiques de segundo (em segundos, potência de 2): 4 pt no mínimo entre eles.
+    static func secondStep(pps: CGFloat) -> Int {
+        guard pps > 0, pps.isFinite else { return 1 << 20 }
+        var p = 1
+        while CGFloat(p) * pps < minTickDp && p < (1 << 20) { p <<= 1 }
+        return p
+    }
+
+    /// O 1º quadro que cai no instante `seconds`.
+    static func frameOf(_ seconds: Double, fps: Float) -> Int64 {
+        Int64((seconds * Double(TimeAxis.safeFps(fps)) - 1e-6).rounded(.up))
+    }
+
+    /// O quadro começa um segundo (2), um meio segundo (1) ou nenhum dos dois (0)?
+    static func tickClass(_ frame: Int64, fps: Float) -> Int {
+        let f = Double(TimeAxis.safeFps(fps))
+        func starts(_ period: Double) -> Bool {
+            frame <= 0 || (Double(frame) / period + 1e-9).rounded(.down) > (Double(frame - 1) / period + 1e-9).rounded(.down)
+        }
+        if starts(f) { return secondTick }
+        if starts(f / 2) { return halfTick }
+        return frameTick
+    }
+
+    /// Altura do tique da classe (pt).
+    static func height(_ tickClass: Int) -> CGFloat {
+        tickClass == secondTick ? 18 : tickClass == halfTick ? 12 : 5
+    }
+}
+
+/// Auto-rolagem da Omega (referência: 120 pt/s × fator, a cada quadro).
+enum OmegaScroll {
+    static let edge: CGFloat = 38
+    static let speed: CGFloat = 120
+    static let maxFactor: CGFloat = 8
+
+    /// Fator com sinal na faixa das bordas: 1× ao entrar e até 5× na borda; 0
+    /// fora dela. Só conta o lado a que o dedo FOI desde `from`.
+    static func edgeFactor(pos: CGFloat, from: CGFloat, start: CGFloat, end: CGFloat, zone: CGFloat, intent: CGFloat) -> CGFloat {
+        guard zone > 0, end > start, pos.isFinite else { return 0 }
+        let low = start + zone, high = end - zone
+        if pos < low && pos < from - intent { return -min(maxFactor, max(1, (low - pos) / (zone / 5))) }
+        if pos > high && pos > from + intent { return min(maxFactor, max(1, (pos - high) / (zone / 5))) }
+        return 0
+    }
+
+    /// Reordenar na vertical: em cima, abaixo de `rowsTop + faixa/2`; embaixo, a
+    /// partir de `altura − faixa`. Negativo = rolar para cima.
+    static func reorderFactor(y: CGFloat, height: CGFloat, rowsTop: CGFloat, zone: CGFloat) -> CGFloat {
+        guard zone > 0, y.isFinite else { return 0 }
+        let top = rowsTop + zone / 2
+        if y < top { return -min(maxFactor, max(1, (top - y) / (zone / 3))) }
+        if y > height - zone { return min(maxFactor, max(1, (y - height) / (zone / 5))) }
+        return 0
+    }
+}
+
+/// Quanto do toque longo cada alvo espera na Omega (par do `OmegaHold` do Android).
+enum OmegaHold {
+    enum Target { case trim, body, key, header, other }
+    static func fraction(_ target: Target, compact: Bool) -> Double {
+        switch (target, compact) {
+        case (.trim, true), (.body, true): return 0.25
+        case (.key, true): return 0.9
+        case (.header, false), (.body, false), (.key, false): return 0.95
+        default: return 1
+        }
+    }
+    /// O toque longo do sistema que o iOS iguala ao Android 12+ (400 ms).
+    static let base: Double = 0.4
+}
+
+/// Toque curto na régua da Omega: navega entre os marcadores (não busca o quadro tocado).
+enum MarkerNav {
+    static func target(_ frames: [Int64], x: CGFloat, width: CGFloat, playhead: Int64, near: CGFloat, xOf: (Int64) -> CGFloat) -> Int64? {
+        var best: Int64?
+        var bestD = CGFloat.greatestFiniteMagnitude
+        for f in frames {
+            let d = abs(xOf(f) - x)
+            if d <= near && d < bestD { best = f; bestD = d }
+        }
+        if let best { return best }
+        return x >= width / 2 ? next(frames, playhead) : previous(frames, playhead)
+    }
+    static func next(_ frames: [Int64], _ playhead: Int64) -> Int64? { frames.first { $0 > playhead } }
+    static func previous(_ frames: [Int64], _ playhead: Int64) -> Int64? { frames.last { $0 < playhead } }
+}
+
+/// Pulso ao levantar o clipe: 1 → 1,04 → 1 em 130 ms, curva sin(πt).
+enum LiftPulse {
+    static let duration: Double = 0.13
+    static let peak: CGFloat = 0.04
+    static func scale(_ elapsed: Double) -> CGFloat {
+        guard elapsed > 0, elapsed < duration else { return 1 }
+        return 1 + peak * CGFloat(sin(Double.pi * elapsed / duration))
+    }
+}
+
+/// Reticências no MEIO ("começo…fim"), a maior que cabe (par do Android).
+enum MiddleEllipsis {
+    static func cut(_ text: String, keep: Int) -> String {
+        let letters = Array(text)
+        if keep >= letters.count { return text }
+        let k = max(0, keep), head = (k + 1) / 2, tail = k / 2
+        return String(letters.prefix(head)) + "\u{2026}" + String(letters.suffix(tail))
+    }
+    static func fit(_ text: String, fits: (String) -> Bool) -> String {
+        if text.isEmpty || fits(text) { return text }
+        var lo = 0, hi = text.count - 1
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            if fits(cut(text, keep: mid)) { lo = mid } else { hi = mid - 1 }
+        }
+        let out = cut(text, keep: lo)
+        return lo == 0 && !fits(out) ? "" : out
+    }
+}
+
+/// Duas camadas ou mais escolhidas, ou o modo de escolher várias: a "seleção múltipla" da referência.
+func omegaMultiSelection(layerSelectMode: Bool, selected: Int) -> Bool { layerSelectMode || selected >= 2 }

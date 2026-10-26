@@ -5,6 +5,8 @@ import SwiftUI
 /// xadrez da transparência fora. Excluir (23): a imagem com o disco furado.
 struct BlendCutThumb: View {
     let exclude: Bool
+    /// Omega aparência: o tamanho vem de quem chama (a fileira da mesclagem usa 41 × 41).
+    var size = CGSize(width: 34, height: 22)
     var body: some View {
         Canvas { context, size in
             let r = size.height * 0.40
@@ -21,7 +23,7 @@ struct BlendCutThumb: View {
                 Self.picture(&inner, size)
             }
         }
-        .frame(width: 34, height: 22)
+        .frame(width: size.width, height: size.height)
         .accessibilityLabel(AureaText.t(exclude ? "pn_blend_exclude_desc" : "pn_blend_mask_desc"))
     }
 

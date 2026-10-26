@@ -25,6 +25,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -53,7 +57,25 @@ class KeypadRequest(
     val max: Float,
     val decimals: Int,
     val percentBase: Float = max,
+    /**
+     * Omega efeitos (P2-2): VÁRIOS CAMPOS no mesmo teclado (X/Y, X/Y/Z, α/β/γ),
+     * uma aba por campo no visor; [focus] é o campo que abre selecionado. Vazio
+     * = um campo só (o de sempre). Com campos, o OK chama [onConfirmFields] com
+     * o valor novo de cada campo (nulo = não mexido), num gesto só de quem chama.
+     */
+    val fields: List<KeypadField> = emptyList(),
+    val focus: Int = 0,
+    val onConfirmFields: ((List<Float?>) -> Unit)? = null,
     val onConfirm: (Float) -> Unit,
+)
+
+/** Um campo do teclado de vários campos: rótulo (X, Y, α…), valor, padrão e faixa aceita. */
+class KeypadField(
+    val label: String,
+    val initial: Float,
+    val default: Float,
+    val min: Float,
+    val max: Float,
 )
 
 /**
@@ -146,8 +168,15 @@ object ValueExpression {
  */
 @Composable
 fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
-    var text by remember { mutableStateOf(visor(request.initial, request.decimals)) }
+    // Omega efeitos (P2-2): vários campos (X/Y/Z, α/β/γ) — uma aba por campo.
+    val multi = request.fields.size >= 2 && request.onConfirmFields != null
+    var field by remember { mutableStateOf(if (multi) request.focus.coerceIn(0, request.fields.lastIndex) else 0) }
+    val texts = remember { request.fields.map { visor(it.initial, request.decimals) }.toMutableList() }
+    val edited = remember { MutableList(request.fields.size) { false } }
+    var text by remember { mutableStateOf(if (multi) texts[field] else visor(request.initial, request.decimals)) }
     var selectedAll by remember { mutableStateOf(true) }
+    val fieldMin = if (multi) request.fields[field].min else request.min
+    val fieldMax = if (multi) request.fields[field].max else request.max
     val percentOf = when {
         request.unit == "%" -> 100.0
         request.percentBase.isFinite() -> request.percentBase.toDouble()
@@ -155,9 +184,37 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
     }
     val result = ValueExpression.evaluate(text, percentOf)
     val clamped = result?.toFloat()?.coerceIn(
-        if (request.min.isNaN()) Float.NEGATIVE_INFINITY else request.min,
-        if (request.max.isNaN()) Float.POSITIVE_INFINITY else request.max,
+        if (fieldMin.isNaN()) Float.NEGATIVE_INFINITY else fieldMin,
+        if (fieldMax.isNaN()) Float.POSITIVE_INFINITY else fieldMax,
     )
+    /** Valor de cada campo como o OK gravaria (nulo = não mexido); `false` = algum campo mexido não fecha a conta. */
+    fun fieldValues(): Pair<List<Float?>, Boolean> {
+        if (!multi) return emptyList<Float?>() to true
+        var ok = true
+        val out = request.fields.mapIndexed { i, f ->
+            val t = if (i == field) text else texts[i]
+            val touched = edited[i] || (i == field && !selectedAll)
+            if (!touched) {
+                null
+            } else {
+                val v = ValueExpression.evaluate(t, percentOf)?.toFloat()?.coerceIn(
+                    if (f.min.isNaN()) Float.NEGATIVE_INFINITY else f.min,
+                    if (f.max.isNaN()) Float.POSITIVE_INFINITY else f.max,
+                )
+                if (v == null) ok = false
+                v
+            }
+        }
+        return out to ok
+    }
+    fun switchTo(i: Int) {
+        if (!multi || i == field) return
+        texts[field] = text
+        if (!selectedAll) edited[field] = true
+        field = i
+        text = texts[i]
+        selectedAll = true
+    }
     fun fmt(v: Float) = comUnidade(numeroPtBr(v, request.decimals), request.unit)
     val hint = when {
         text.isNotEmpty() && result == null -> stringResource(R.string.ds_conta_incompleta)
@@ -206,6 +263,33 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
                 style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W700)),
             )
             Spacer(Modifier.height(10.dp))
+            if (multi) {
+                // Omega efeitos (P2-2): uma aba por campo (X/Y/Z, α/β/γ) com o valor dele.
+                KeepLtr { Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    request.fields.forEachIndexed { i, f ->
+                        val on = i == field
+                        val shown = if (on) text else texts[i]
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                                .testTag("keypad.field.$i")
+                                .semantics { selected = on; contentDescription = "${f.label} $shown" }
+                                .tocavel(shrink = 1f) { switchTo(i) }
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(f.label, style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = if (on) AureaColors.Accent else AureaColors.Muted)))
+                            Text(
+                                shown,
+                                maxLines = 1,
+                                style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, fontFeatureSettings = "tnum")),
+                            )
+                        }
+                    }
+                } }
+            }
             // Visor: fundo `palco`, 26 sp w700 tabular à direita + unidade.
             // Visor e teclas em LTR também em árabe (como a calculadora e o
             // discador do sistema): o número cresce para a direita e ⌫ apaga ali.
@@ -291,14 +375,15 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
                     Text(stringResource(R.string.ds_cancelar), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp)))
                 }
                 Spacer(Modifier.width(10.dp))
-                val ok = clamped != null
+                val (values, allOk) = fieldValues()
+                val ok = if (multi) allOk && (clamped != null || selectedAll) else clamped != null
                 Box(
                     Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (ok) AureaColors.Accent else AureaColors.ChipHigh)
                         .tocavel(enabled = ok, shrink = 1f) {
-                            clamped?.let(request.onConfirm)
+                            if (multi) request.onConfirmFields?.invoke(values) else clamped?.let(request.onConfirm)
                             sheet.dismiss()
                         }
                         .padding(vertical = 12.dp),

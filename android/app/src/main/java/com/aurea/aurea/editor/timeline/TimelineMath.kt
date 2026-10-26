@@ -326,6 +326,9 @@ internal object Press {
 
         /** Aceita o toque longo em [now]? */
         fun still(now: Long): Boolean = now - lastMoveAt >= STILL_MS
+
+        /** Omega: prazos curtos (25 % do toque longo) pedem só [quietMs] de dedo quieto. */
+        fun quietFor(now: Long, quietMs: Long): Boolean = now - lastMoveAt >= quietMs
     }
 }
 
@@ -604,3 +607,277 @@ internal object GestureLimit {
         return bounded.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
     }
 }
+
+// =============================================================================
+//  Omega 0.3.2 (área 03): regras puras da timeline da referência. Par do bloco
+//  "Omega" de TimelineMath.swift; os testes de JVM conferem os mesmos números.
+// =============================================================================
+
+/**
+ * Degradê do cartão do clipe. Cada tipo tem um par (A, B); a camada ganha uma
+ * variação ESTÁVEL pelo id, para vizinhas do mesmo tipo ficarem diferentes e a
+ * mesma camada ter sempre a mesma cor: c0 = mix(A, B, (191·id mod 7)/7),
+ * c1 = mix(A, B, (773·id mod 31)/31) e o degradê vai de c0 a mix(c0, c1, ½).
+ * Conta inteira (sem ponto flutuante), igual no iOS.
+ */
+internal object ClipColors {
+    /** Interpolação por canal ARGB, `num/den` de [a] para [b], arredondada. */
+    fun mix(a: Int, b: Int, num: Int, den: Int): Int {
+        if (den <= 0) return a
+        val n = num.coerceIn(0, den)
+        var out = 0
+        for (shift in intArrayOf(24, 16, 8, 0)) {
+            val x = (a ushr shift) and 0xFF
+            val y = (b ushr shift) and 0xFF
+            val v = (x * (den - n) + y * n + den / 2) / den
+            out = out or (v.coerceIn(0, 255) shl shift)
+        }
+        return out
+    }
+
+    private fun floorMod(v: Long, m: Long): Long = ((v % m) + m) % m
+
+    /** Índices da variação: (191·id mod 7, 773·id mod 31), sem estourar o Long. */
+    fun steps(id: Long): IntArray = intArrayOf(
+        floorMod(2L * floorMod(id, 7L), 7L).toInt(),      // 191 ≡ 2 (mod 7)
+        floorMod(29L * floorMod(id, 31L), 31L).toInt(),   // 773 ≡ 29 (mod 31)
+    )
+
+    /** (início, fim) do degradê da camada [id] a partir do par do tipo, em ARGB. */
+    fun vary(a: Int, b: Int, id: Long): IntArray {
+        val k = steps(id)
+        val c0 = mix(a, b, k[0], 7)
+        val c1 = mix(a, b, k[1], 31)
+        return intArrayOf(c0, mix(c0, c1, 1, 2))
+    }
+}
+
+/**
+ * Cor das marcas. O motor guarda RGBA8 com o R no byte BAIXO (0xAABBGGRR,
+ * `Marker::color` em Composition.hpp); a timeline desenha ARGB. A marca nova do
+ * toque (`toggle_marker`) nasce com a cor padrão do motor e aparece como o
+ * primeiro papel (rosa); as quatro aparências da Omega gravam a cor certa.
+ */
+internal object MarkerColors {
+    /** A cor padrão que o motor dá à marca criada no toque. */
+    const val ENGINE_DEFAULT: Int = 0xFFF7C34F.toInt()
+
+    /** RGBA do motor (R baixo) → ARGB. A troca R↔B é a própria inversa. */
+    fun unpack(packed: Int): Int =
+        (0xFF shl 24) or ((packed and 0xFF) shl 16) or (packed and 0xFF00) or ((packed ushr 16) and 0xFF)
+
+    /** ARGB → RGBA do motor (R baixo), opaco. */
+    fun pack(argb: Int): Int = unpack(argb)
+
+    /**
+     * Aparência (0..3) de uma marca: a cor exata de um papel, a cor padrão do
+     * motor (= 0) ou o papel mais perto (marcas antigas com a paleta de 6 cores).
+     */
+    fun appearance(packed: Int, roles: IntArray): Int {
+        if (roles.isEmpty()) return 0
+        if ((packed or (0xFF shl 24)) == ENGINE_DEFAULT) return 0
+        val argb = unpack(packed)
+        var best = 0
+        var bestD = Long.MAX_VALUE
+        for (i in roles.indices) {
+            val c = roles[i] or (0xFF shl 24)
+            if (c == argb) return i
+            val dr = ((c ushr 16) and 0xFF) - ((argb ushr 16) and 0xFF)
+            val dg = ((c ushr 8) and 0xFF) - ((argb ushr 8) and 0xFF)
+            val db = (c and 0xFF) - (argb and 0xFF)
+            val d = dr.toLong() * dr + dg.toLong() * dg + db.toLong() * db
+            if (d < bestD) {
+                bestD = d
+                best = i
+            }
+        }
+        return best
+    }
+}
+
+/** Régua da Omega: tiques pendurados do alto, em três alturas, sem rótulos. */
+internal object OmegaRuler {
+    /** Menor distância entre dois tiques (dp). */
+    const val MIN_TICK_DP = 4f
+    const val SECOND = 2
+    const val HALF = 1
+    const val FRAME = 0
+
+    /**
+     * Passo dos tiques de quadro: a próxima potência de 2 de max(1, quadros que
+     * cabem em 4 dp). 30 fps a 100 dp/s = 1; a 10 dp/s = 16.
+     */
+    fun frameStep(pps: Float, fps: Float): Int {
+        val ppfDp = pps / TimeAxis.safeFps(fps)
+        if (!(ppfDp > 0f) || !ppfDp.isFinite()) return 1 shl 20
+        val n = max(1.0, floor(MIN_TICK_DP / ppfDp.toDouble())).coerceAtMost((1 shl 20).toDouble()).toInt()
+        var p = 1
+        while (p < n) p = p shl 1
+        return p
+    }
+
+    /** Passo dos tiques de segundo (em segundos, potência de 2): 4 dp no mínimo entre eles. */
+    fun secondStep(pps: Float): Int {
+        if (!(pps > 0f) || !pps.isFinite()) return 1 shl 20
+        var p = 1
+        while (p * pps < MIN_TICK_DP && p < (1 shl 20)) p = p shl 1
+        return p
+    }
+
+    /** O 1º quadro que cai no instante [seconds] (com 29,97 fps o segundo 1 é o quadro 30). */
+    fun frameOf(seconds: Double, fps: Float): Long = ceil(seconds * TimeAxis.safeFps(fps) - 1e-6).toLong()
+
+    /** O quadro começa um segundo (2), um meio segundo (1) ou nenhum dos dois (0)? */
+    fun tickClass(frame: Long, fps: Float): Int {
+        val f = TimeAxis.safeFps(fps).toDouble()
+        fun starts(period: Double): Boolean = frame <= 0L ||
+            floor(frame / period + 1e-9) > floor((frame - 1) / period + 1e-9)
+        return when {
+            starts(f) -> SECOND
+            starts(f / 2.0) -> HALF
+            else -> FRAME
+        }
+    }
+
+    /** Altura do tique da classe (dp). */
+    fun heightDp(tickClass: Int): Float = when (tickClass) {
+        SECOND -> 18f
+        HALF -> 12f
+        else -> 5f
+    }
+}
+
+/** Auto-rolagem da Omega (referência: 120 dp/s × fator, a cada quadro). */
+internal object OmegaScroll {
+    const val EDGE_DP = 38f
+    const val SPEED_DP = 120f
+    /** Teto do fator (a referência não limita além da borda; aqui fica em 8×). */
+    const val MAX_FACTOR = 8f
+
+    /**
+     * Fator com sinal na faixa das bordas: 1× ao entrar e até 5× na borda
+     * (`max(1, profundidade / (faixa/5))`); 0 fora dela. Só conta o lado a que o
+     * dedo FOI desde [from] (pegar já na borda não sai rolando).
+     */
+    fun edgeFactor(pos: Float, from: Float, start: Float, end: Float, zone: Float, intent: Float): Float {
+        if (!(zone > 0f) || end <= start || !pos.isFinite()) return 0f
+        val low = start + zone
+        val high = end - zone
+        return when {
+            pos < low && pos < from - intent -> -max(1f, (low - pos) / (zone / 5f)).coerceAtMost(MAX_FACTOR)
+            pos > high && pos > from + intent -> max(1f, (pos - high) / (zone / 5f)).coerceAtMost(MAX_FACTOR)
+            else -> 0f
+        }
+    }
+
+    /**
+     * Reordenar na vertical: em cima, abaixo de `rowsTop + faixa/2`, fator
+     * `max(1, (limite − y) / (faixa/3))`; embaixo, a partir de `altura − faixa`,
+     * `max(1, (y − altura) / (faixa/5))`. Negativo = rolar para cima.
+     */
+    fun reorderFactor(y: Float, height: Float, rowsTop: Float, zone: Float): Float {
+        if (!(zone > 0f) || !y.isFinite()) return 0f
+        val top = rowsTop + zone / 2f
+        return when {
+            y < top -> -max(1f, (top - y) / (zone / 3f)).coerceAtMost(MAX_FACTOR)
+            y > height - zone -> max(1f, (y - height) / (zone / 5f)).coerceAtMost(MAX_FACTOR)
+            else -> 0f
+        }
+    }
+}
+
+/**
+ * Quanto do toque longo do sistema cada alvo espera na Omega: no foco, alça e
+ * corpo em 25 % e losango em 90 %; na visão geral, cabeçalho, clipe e losango
+ * em 95 %; o resto (fundo da linha, alça ≡, tempo atual) o toque longo inteiro.
+ */
+internal object OmegaHold {
+    fun fraction(kind: HitKind, compact: Boolean): Float = when {
+        compact && (kind == HitKind.TRIM_START || kind == HitKind.TRIM_END || kind == HitKind.BODY) -> 0.25f
+        compact && kind == HitKind.KEYFRAME -> 0.9f
+        !compact && (kind == HitKind.HEADER || kind == HitKind.BODY || kind == HitKind.KEYFRAME) -> 0.95f
+        else -> 1f
+    }
+
+    fun millis(longPressMs: Long, kind: HitKind, compact: Boolean): Long =
+        max(1L, Math.round(longPressMs * fraction(kind, compact).toDouble()))
+
+    /** O dedo precisa estar quieto este tanto antes do prazo (no máximo [Press.STILL_MS]). */
+    fun quietMs(holdMs: Long): Long = minOf(Press.STILL_MS, holdMs / 2)
+}
+
+/** Toque curto na régua da Omega: navega entre os marcadores (não busca o quadro tocado). */
+internal object MarkerNav {
+    /**
+     * Marcador a até [near] px do dedo → ele; senão, metade direita da tela = o
+     * próximo depois do cabeçote, metade esquerda = o anterior. [Snap.NONE] = nada.
+     */
+    fun target(frames: IntArray, x: Float, width: Float, playhead: Int, near: Float, xOf: (Int) -> Float): Int {
+        var best = Snap.NONE
+        var bestD = Float.MAX_VALUE
+        for (f in frames) {
+            val d = abs(xOf(f) - x)
+            if (d <= near && d < bestD) {
+                best = f
+                bestD = d
+            }
+        }
+        if (best != Snap.NONE) return best
+        return if (x >= width / 2f) next(frames, playhead) else previous(frames, playhead)
+    }
+
+    fun next(frames: IntArray, playhead: Int): Int {
+        for (f in frames) if (f > playhead) return f
+        return Snap.NONE
+    }
+
+    fun previous(frames: IntArray, playhead: Int): Int {
+        var out = Snap.NONE
+        for (f in frames) if (f < playhead) out = f
+        return out
+    }
+}
+
+/** Pulso ao levantar o clipe: 1 → 1,04 → 1 em 130 ms, curva sin(πt). */
+internal object LiftPulse {
+    const val DURATION_MS = 130L
+    const val PEAK = 0.04f
+
+    fun scale(elapsedMs: Long): Float {
+        if (elapsedMs <= 0L || elapsedMs >= DURATION_MS) return 1f
+        val t = elapsedMs.toDouble() / DURATION_MS
+        return 1f + PEAK * kotlin.math.sin(Math.PI * t).toFloat()
+    }
+}
+
+/** Reticências no MEIO ("começo…fim"), a maior que cabe; conta por ponto de código. */
+internal object MiddleEllipsis {
+    fun cut(text: String, keep: Int): String {
+        val cps = text.codePointCount(0, text.length)
+        if (keep >= cps) return text
+        val k = keep.coerceAtLeast(0)
+        val head = (k + 1) / 2
+        val tail = k / 2
+        val headEnd = text.offsetByCodePoints(0, head)
+        val tailStart = text.offsetByCodePoints(text.length, -tail)
+        return text.substring(0, headEnd) + "…" + text.substring(tailStart)
+    }
+
+    /** Busca binária no total de letras mantidas; "" se nem a reticência cabe. */
+    fun fit(text: String, fits: (String) -> Boolean): String {
+        if (text.isEmpty() || fits(text)) return text
+        val cps = text.codePointCount(0, text.length)
+        var lo = 0
+        var hi = cps - 1
+        while (lo < hi) {
+            val mid = (lo + hi + 1) / 2
+            if (fits(cut(text, mid))) lo = mid else hi = mid - 1
+        }
+        val out = cut(text, lo)
+        return if (lo == 0 && !fits(out)) "" else out
+    }
+}
+
+/** Duas camadas ou mais escolhidas, ou o modo de escolher várias: a "seleção múltipla" da referência. */
+internal fun omegaMultiSelection(layerSelectMode: Boolean, selected: Int): Boolean =
+    layerSelectMode || selected >= 2

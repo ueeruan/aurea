@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Omega 0.3.2, área 03 (timeline). Textos próprios do AUREA. -->
+    <string name="om_tl_show_tracks">Tampilkan trek keyframe</string>
+    <string name="om_tl_hide_tracks">Sembunyikan trek keyframe</string>
+    <string name="om_tl_toggle_selection">Tambah ke atau hapus dari pilihan</string>
+    <string name="om_tl_move_up">Pindah ke atas</string>
+    <string name="om_tl_move_down">Pindah ke bawah</string>
+    <string name="om_tl_info_start">Mulai</string>
+    <string name="om_tl_info_offset">Pergeseran</string>
+    <string name="om_tl_info_in">Masuk</string>
+    <string name="om_tl_info_end">Akhir</string>
+    <string name="om_tl_info_out">Keluar</string>
+    <string name="om_tl_info_duration">Durasi</string>
+    <string name="om_tl_info_change">Perubahan</string>
+    <string name="om_tl_info_key">Keyframe</string>
+    <string name="om_tl_trim_start_a11y">Pangkas awal %1$s</string>
+    <string name="om_tl_trim_end_a11y">Pangkas akhir %1$s</string>
+    <string name="om_tl_speed_handle_a11y">Ubah kecepatan %1$s lewat durasi</string>
+    <string name="om_tl_frame_earlier">Satu bingkai lebih awal</string>
+    <string name="om_tl_frame_later">Satu bingkai lebih lambat</string>
+    <string name="om_tl_marker_hint">Ketuk jam untuk menandai momen ini. Tahan untuk memberi nama penanda.</string>
+    <string name="om_tl_prev_marker">Penanda sebelumnya</string>
+    <string name="om_tl_next_marker">Penanda berikutnya</string>
+    <string name="om_tl_time_options">Opsi waktu</string>
+    <string name="om_tl_ruler">Penggaris linimasa</string>
+    <string name="om_tl_current_time">Waktu saat ini</string>
+    <string name="om_tl_hidden">Tersembunyi</string>
+    <string name="om_tl_visible">Terlihat</string>
+</resources>

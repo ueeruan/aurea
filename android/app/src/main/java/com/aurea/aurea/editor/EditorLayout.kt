@@ -4,14 +4,15 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * As alturas das zonas do editor, resolvidas de uma vez — porte literal de
- * `EditorLayoutMetrics.solve` + a fração do preview de `editor_screen.dart`
- * (A.01). Tudo em dp.
+ * As alturas das zonas do editor, resolvidas de uma vez. Tudo em dp.
  *
- * A regra que a A.01 cobrava: abrir painel, adicionar ou trocar de aba NUNCA
- * move o preview. O painel tira espaço da timeline, e a timeline nunca fica
- * abaixo do piso. Isso também é o que mantém a SurfaceView do motor parada:
- * a superfície só muda de tamanho na tela cheia ou ao girar o aparelho.
+ * Omega fundação (F6, geometria da referência): no telefone em retrato o topo
+ * tem 42, o transporte 46 e embaixo fica uma ZONA FIXA de 280 (timeline +
+ * barra de adicionar, ou a timeline com o painel da camada de 200 por cima).
+ * A prévia é o que sobra e NUNCA muda de altura ao abrir ou fechar painel,
+ * adicionar ou escolher camada — o que também mantém a SurfaceView do motor
+ * parada (a superfície só muda na tela cheia ou ao girar o aparelho). Sem a
+ * divisa arrastável no retrato (decisão D2). O layout largo continua o do AUREA.
  */
 internal data class EditorMetrics(
     val topBar: Float,
@@ -20,41 +21,81 @@ internal data class EditorMetrics(
     val transport: Float,
     val timeline: Float,
     val sheet: Float,
-)
+    /**
+     * Omega fundação: a folha é desenhada POR CIMA da timeline (o painel da
+     * camada de 200 dp cobre a zona por baixo). Falso = empilhada embaixo dela.
+     */
+    val overlay: Boolean = false,
+) {
+    /** A zona inferior inteira: timeline + folha empilhada (com [overlay], só a timeline). */
+    val zone: Float get() = timeline + if (overlay) 0f else sheet
 
-/** O que ocupa a zona do painel contextual (define a fração e o piso). */
+    /** A parte da timeline à vista (com [overlay], o que o painel não cobre: 80 dp). */
+    val visibleTimeline: Float get() = if (overlay) max(0f, timeline - sheet) else timeline
+
+    /** O que a timeline tem coberto embaixo (o `obscuredBottom` da área 03). */
+    val obscuredTimeline: Float get() = if (overlay) min(sheet, timeline) else 0f
+
+    /** Soma das faixas empilhadas: é sempre a altura da área do editor. */
+    val total: Float get() = topBar + preview + strip + transport + zone
+}
+
+/** O que ocupa a zona do painel contextual. */
 internal enum class SheetContent { None, Hint, Dock, Panel, Curve, Batch, Adding, AddBar }
 
 internal object EditorLayout {
-    // Chrome compacto: reduz respiro, preservando alvos de toque de 48 dp.
-    const val TOP_BAR = 56f
-    const val TRANSPORT = 48f
+    /** Barra superior da referência (botões de 40 com alvo de 44+). */
+    const val TOP_BAR = 42f
+    /** Barra de reprodução da referência. */
+    const val TRANSPORT = 46f
     const val STRIP = 0f
-    /** Prévia natural: 360 de 844 no mockup (fração da altura útil). */
+    /** Prévia natural do layout antigo (fica para quem lê o token). */
     const val PREVIEW_NATURAL_FRACTION = 0.45f
     const val TIMELINE_MIN = 110f
     const val PREVIEW_MIN = 96f
-    private const val PREVIEW_FRACTION_MAX = 0.50f   // EditorSession.alturaDoPreview
-    private const val PANEL_FRACTION = 0.40f
-    private const val ADD_BODY = 280f                // abas 54 + 3 fileiras de ladrilhos + paginação
     private const val SHEET_HANDLE = 12f             // ContextSheet.handleHeight
     /** Lote: 4 + tempo 52 + 8 + tela 48 + 8 de respiro. */
     private const val BATCH_BODY = 120f
     private const val HINT_BODY = 30f
-    /** A barra fixa de adicionar (sem camada escolhida): 6 + categorias de 64 (ícone 23 + nome 11). */
+    /** A barra fixa de adicionar do AUREA (fica, exceção do dono): 6 + categorias de 64. */
     const val ADD_BAR = 70f
+    // --- Omega adicionar (área 08, P0-1) ----------------------------------------
+    /**
+     * O conteúdo do botão aberto na barra de adicionar: a área de conteúdo do
+     * popup da referência (251 − 58 de abas = 193). Fica POR CIMA da timeline,
+     * logo acima da barra (que não sai do lugar): a zona continua 210 + 70.
+     */
+    const val ADD_CONTENT = 193f
+
+    /** Altura do conteúdo do adicionar nesta geometria (nunca maior que a timeline à vista). */
+    fun addContent(m: EditorMetrics): Float = min(ADD_CONTENT, m.timeline)
+
     /** Fileira rápida e fichas compactas; todos os alvos têm ao menos 48 dp. */
     const val DOCK_QUICK = 48f
     const val DOCK_TILE = 60f
     /** 8 de topo, rápida, duas fichas com intervalo de 8 e 8 de base. */
     const val DOCK = 8f + DOCK_QUICK + 2f * (8f + DOCK_TILE) + 8f
 
+    // --- Omega fundação (F6): zona inferior fixa -------------------------------
+    /** A zona inferior fixa do retrato (`edit_timeline_height` da referência). */
+    const val BOTTOM_ZONE = 280f
+    /** O painel da camada e os painéis de propriedade (`edit_panel_height`). */
+    const val LAYER_PANEL = 200f
+    /** O que sobra da timeline com o painel aberto: régua 42 + uma linha. */
+    const val TIMELINE_FOCUS = 80f
+
+    /** O painel cresce com a fonte do sistema: 200 em 1×, 240 em 2×. */
+    fun layerPanel(fontScale: Float = 1f): Float = LAYER_PANEL + 40f * (fontScale.coerceIn(1f, 2f) - 1f)
+
+    /** A zona inferior: o painel + a faixa de foco da timeline (280 em 1×). */
+    fun bottomZone(fontScale: Float = 1f): Float = layerPanel(fontScale) + TIMELINE_FOCUS
+
     fun dockTile(fontScale: Float = 1f): Float = DOCK_TILE + 28f * (fontScale.coerceIn(1f, 2f) - 1f)
 
     /** A doca com [rows] fileiras de fichas (1 ou 2): a altura é a do conteúdo. */
     fun dock(rows: Int, fontScale: Float = 1f): Float = 8f + DOCK_QUICK + rows.coerceIn(1, 2) * (8f + dockTile(fontScale)) + 8f
 
-    /** Folga do palco em volta do quadro ajustado (as fichas ficam por cima do quadro). */
+    /** Folga do palco em volta do quadro ajustado (layout antigo; fica para quem lê o token). */
     const val PREVIEW_FIT_MARGIN = 16f
 
     fun workspace(totalHeight: Float) = max(0f, totalHeight - TOP_BAR - TRANSPORT - STRIP)
@@ -63,13 +104,18 @@ internal object EditorLayout {
     fun maxPreview(totalHeight: Float) = max(PREVIEW_MIN, workspace(totalHeight) - TIMELINE_MIN)
 
     /**
-     * [width]/[aspect] (largura ÷ altura do projeto): o palco nunca é mais alto
-     * que o quadro na largura da tela + a folga — num projeto deitado as faixas
-     * vazias acima e abaixo do quadro roubavam a timeline. Em pé (o quadro já
-     * passa da fração) fica como sempre. [preferred] > 0: a altura que a pessoa
-     * escolheu arrastando a divisa palco/transporte (vale sobre as duas).
-     * [dockRows]: fileiras de fichas da doca da camada (a doca tem a altura dela).
+     * O retrato do telefone (e do tablet em pé): prévia = área − 42 − 46 − zona,
+     * igual em todos os [SheetContent]. Dentro da zona:
+     * - [SheetContent.AddBar]: timeline (210) e a barra de adicionar (70) embaixo;
+     * - [SheetContent.Dock], [SheetContent.Panel], [SheetContent.Curve]: timeline na
+     *   zona inteira e a folha (200) POR CIMA ([EditorMetrics.overlay]); ficam 80 de timeline;
+     * - [SheetContent.None]: só a timeline; Hint, Batch e Adding: empilhados embaixo dela.
+     * Tela baixa demais: a prévia fica no piso e a zona encolhe (a soma é sempre a altura).
+     *
+     * [width], [aspect] e [preferred] ficam na assinatura para quem já chamava;
+     * o retrato da Omega não os usa (prévia fixa, sem divisa: decisão D2).
      */
+    @Suppress("UNUSED_PARAMETER")
     fun solve(
         totalHeight: Float,
         content: SheetContent,
@@ -83,58 +129,31 @@ internal object EditorLayout {
         if (fullscreen) {
             return EditorMetrics(0f, max(0f, totalHeight - TRANSPORT), 0f, TRANSPORT, 0f, 0f)
         }
-        val bar = if (totalHeight < 560f) 48f else TOP_BAR
-        val ws = max(0f, totalHeight - bar - TRANSPORT - STRIP)
+        val ws = workspace(totalHeight)
+        val panel = layerPanel(fontScale)
         val previewFloor = min(PREVIEW_MIN, ws * 0.25f)
-        // Stable preview height while floating add controls open and close.
-        val natural = min(420f, totalHeight * PREVIEW_NATURAL_FRACTION)
-        val fitted = if (width > 0f && aspect > 0f && aspect.isFinite()) min(natural, width / aspect + PREVIEW_FIT_MARGIN) else natural
-        var preview = (if (preferred > 0f && preferred.isFinite()) preferred else fitted)
-            .coerceIn(previewFloor, max(previewFloor, ws - min(TIMELINE_MIN, ws * .2f)))
+        val preview = max(previewFloor, ws - bottomZone(fontScale)).coerceAtMost(ws)
+        val zone = ws - preview
 
-        val sheetFraction = when (content) {
-            SheetContent.None -> 0f
-            SheetContent.Hint -> if (ws > 0f) (SHEET_HANDLE + HINT_BODY) / ws else 0f
-            SheetContent.Batch -> if (ws > 0f) (SHEET_HANDLE + BATCH_BODY) / ws else 0f
-            SheetContent.Dock -> if (ws > 0f) dock(2, fontScale) / ws else 0f
-            SheetContent.Panel -> PANEL_FRACTION
-            SheetContent.Curve -> if (ws > 0f) 280f / ws else 0f
-            SheetContent.Adding -> if (ws > 0f) (SHEET_HANDLE + ADD_BODY) / ws else 0f
-            SheetContent.AddBar -> if (ws > 0f) ADD_BAR / ws else 0f
+        fun stacked(body: Float): EditorMetrics {
+            val sheet = body.coerceIn(0f, zone)
+            return EditorMetrics(TOP_BAR, preview, STRIP, TRANSPORT, zone - sheet, sheet)
         }
-        var sheet = if (content != SheetContent.None) ws * sheetFraction.coerceIn(0f, 0.60f) else 0f
-        // Camada escolhida ou painel: piso de 90 (uma linha de camada viva).
-        // Nada escolhido: 120. Adicionando: o menu pode cobrir a timeline.
-        val floor = min(when (content) {
-            SheetContent.Adding, SheetContent.Dock, SheetContent.Panel, SheetContent.Curve, SheetContent.Batch -> TIMELINE_MIN
-            else -> 120f
-        }, if (totalHeight < 560f) 72f else 120f)
-        // Editing controls get usable space first; only the overview keeps
-        // the tall preview. Never shrink every button to preserve the preview.
-        sheet = max(sheet, when (content) {
-            SheetContent.Panel -> min(480f, 288f * fontScale.coerceIn(1f, 1.5f))
-            else -> 0f
-        }).coerceAtMost(max(0f, ws - previewFloor - floor))
-        preview = min(preview, max(previewFloor, ws - sheet - floor))
-        var timeline = ws - preview - sheet
-        if (timeline < floor) {
-            sheet = max(0f, sheet - (floor - timeline))
-            timeline = ws - preview - sheet
+        fun over(body: Float): EditorMetrics {
+            // Ao menos a faixa de foco da timeline fica à vista (menos numa tela baixa).
+            val sheet = min(body, max(0f, zone - min(TIMELINE_FOCUS, zone * 0.3f)))
+            return EditorMetrics(TOP_BAR, preview, STRIP, TRANSPORT, zone, max(0f, sheet), overlay = true)
         }
-        // Uma tira de timeline menor que o mínimo útil não serve para nada:
-        // cede o espaço inteiro ao painel em vez de virar um risco quebrado.
-        if (floor == 0f && timeline > 0f && timeline < TIMELINE_MIN) {
-            sheet += timeline
-            timeline = 0f
+        return when (content) {
+            SheetContent.None -> stacked(0f)
+            SheetContent.AddBar -> stacked(ADD_BAR)
+            SheetContent.Hint -> stacked(SHEET_HANDLE + HINT_BODY)
+            SheetContent.Batch -> stacked(SHEET_HANDLE + BATCH_BODY)
+            // Omega adicionar: a mesma zona da barra (210 + 70); o conteúdo fica por cima da timeline.
+            SheetContent.Adding -> stacked(ADD_BAR)
+            SheetContent.Dock -> over(min(dock(dockRows, fontScale), panel))
+            SheetContent.Panel, SheetContent.Curve -> over(panel)
         }
-        // Doca de uma fileira: o palco fica onde a de duas o deixaria (trocar de
-        // camada nunca mexe no palco); a sobra vai inteira para a timeline.
-        if (content == SheetContent.Dock && dockRows < 2) {
-            val spare = max(0f, sheet - dock(dockRows, fontScale))
-            sheet -= spare
-            timeline += spare
-        }
-        return EditorMetrics(bar, preview, STRIP, TRANSPORT, max(0f, timeline), max(0f, sheet))
     }
 
     /**

@@ -46,5 +46,7 @@ internal fun localizeEffectParams(res: Resources, typeId: Int, params: List<Effe
             enumLabels = options, animated = p.animated, hardMin = p.hardMin, hardMax = p.hardMax,
             section = p.section, sectionId = p.sectionId, sectionLabel = sectionLabel, sectionToggle = p.sectionToggle,
             sectionOpen = p.sectionOpen, tip = tip,
+            // Omega efeitos (P0-1): a apresentação passa intacta.
+            control = p.control, step = p.step, origin = p.origin, enumStyle = p.enumStyle, rowFlags = p.rowFlags,
         )
     }

@@ -56,6 +56,8 @@ data class VPath(
     var outerRoundness: Float = 0f, var innerRoundness: Float = 0f, var rotation: Float = 0f,
     var path: VBezier = VBezier(),
     val keys: MutableList<VKey> = mutableListOf(),
+    /** Omega conteúdo (v3): furo — o contorno recorta o preenchimento do grupo. */
+    var exclude: Boolean = false,
 ) {
     fun copyDeep() = copy(path = path.copyDeep(), keys = keys.map { it.copy(path = it.path.copyDeep()) }.toMutableList())
 }
@@ -78,10 +80,14 @@ data class VGroup(
     var repScale: Float = 100f, var repRotation: Float = 0f, var repStartOpacity: Float = 100f, var repEndOpacity: Float = 100f,
     var repAbove: Int = 0,
     val paths: MutableList<VPath> = mutableListOf(),
+    /** Omega conteúdo (v3): perfil de largura do pincel (0..1 ao longo do traço; vazio = constante). */
+    val widthProfile: MutableList<Float> = mutableListOf(),
+    /** Omega conteúdo (v3): 0 normal, 1 apagar (borracha do desenho). */
+    var composite: Int = 0,
 ) {
     fun copyDeep() = copy(
         fill = fill.copyDeep(), stroke = stroke.copyDeep(), dashes = dashes.toMutableList(),
-        paths = paths.map { it.copyDeep() }.toMutableList(),
+        paths = paths.map { it.copyDeep() }.toMutableList(), widthProfile = widthProfile.toMutableList(),
     )
 }
 
@@ -93,8 +99,12 @@ class VReader(private val d: FloatArray) {
     fun b(): Boolean = f() > 0.5f
 }
 
-data class VectorDoc(val groups: MutableList<VGroup> = mutableListOf()) {
-    fun copyDeep() = VectorDoc(groups.map { it.copyDeep() }.toMutableList())
+data class VectorDoc(
+    val groups: MutableList<VGroup> = mutableListOf(),
+    /** Omega conteúdo (v3): camada de desenho (o editor de desenho abre nela). */
+    var drawing: Boolean = false,
+) {
+    fun copyDeep() = VectorDoc(groups.map { it.copyDeep() }.toMutableList(), drawing)
 
     fun encode(): FloatArray {
         val o = ArrayList<Float>(256)
@@ -109,6 +119,7 @@ data class VectorDoc(val groups: MutableList<VGroup> = mutableListOf()) {
             o += g.dashes.size.toFloat(); o.addAll(g.dashes)
             putPaint(g.stroke, o)
             o += g.taperStart; o += g.taperEnd; o += g.taperEase
+            o += g.widthProfile.size.toFloat(); o.addAll(g.widthProfile); o += g.composite.toFloat()
             o += if (g.trimOn) 1f else 0f; o += g.trimStart; o += g.trimEnd; o += g.trimOffset; o += g.trimMode.toFloat()
             o += if (g.repOn) 1f else 0f; o += g.repCopies; o += g.repOffset; o += g.repAx; o += g.repAy; o += g.repPx; o += g.repPy
             o += g.repScale; o += g.repRotation; o += g.repStartOpacity; o += g.repEndOpacity; o += g.repAbove.toFloat()
@@ -116,19 +127,21 @@ data class VectorDoc(val groups: MutableList<VGroup> = mutableListOf()) {
             for (p in g.paths) {
                 o += p.kind.toFloat(); o += if (p.reversed) 1f else 0f; o += p.cx; o += p.cy; o += p.w; o += p.h; o += p.roundness
                 o += p.points; o += p.outerRadius; o += p.innerRadius; o += p.outerRoundness; o += p.innerRoundness; o += p.rotation
+                o += if (p.exclude) 1f else 0f
                 p.path.encode(o)
                 o += p.keys.size.toFloat()
                 for (k in p.keys) { o += k.frame.toFloat(); o += k.ease.toFloat(); k.path.encode(o) }
             }
         }
+        o += if (drawing) 1f else 0f
         return o.toFloatArray()
     }
 
     fun names(): String = groups.joinToString("\n") { it.name.replace('\n', ' ') }
 
     companion object {
-        /** Versão do fluxo (vector/VectorDocument.cpp): 2 = afinar do contorno. */
-        const val DOC_VERSION = 2f
+        /** Versão do fluxo (vector/VectorDocument.cpp): 2 = afinar do contorno; 3 = perfil, apagar, furo, desenho (Omega). */
+        const val DOC_VERSION = 3f
 
         private fun putPaint(p: VPaint, o: MutableList<Float>) {
             o += p.type.toFloat(); o += p.r; o += p.g; o += p.b; o += p.a; o += p.sx; o += p.sy; o += p.ex; o += p.ey; o += p.opacity
@@ -148,7 +161,7 @@ data class VectorDoc(val groups: MutableList<VGroup> = mutableListOf()) {
             return try {
                 val r = VReader(d)
                 val version = r.f()
-                if (version != 1f && version != DOC_VERSION) return null
+                if (version != 1f && version != 2f && version != DOC_VERSION) return null
                 val nm = names?.split('\n') ?: emptyList()
                 val n = r.i()
                 val doc = VectorDoc()
@@ -161,6 +174,7 @@ data class VectorDoc(val groups: MutableList<VGroup> = mutableListOf()) {
                     repeat(r.i()) { g.dashes += r.f() }
                     g.stroke = getPaint(r)
                     if (version >= 2f) { g.taperStart = r.f(); g.taperEnd = r.f(); g.taperEase = r.f() }
+                    if (version >= 3f) { repeat(r.i()) { g.widthProfile += r.f() }; g.composite = r.i() }
                     g.trimOn = r.b(); g.trimStart = r.f(); g.trimEnd = r.f(); g.trimOffset = r.f(); g.trimMode = r.i()
                     g.repOn = r.b(); g.repCopies = r.f(); g.repOffset = r.f(); g.repAx = r.f(); g.repAy = r.f(); g.repPx = r.f(); g.repPy = r.f()
                     g.repScale = r.f(); g.repRotation = r.f(); g.repStartOpacity = r.f(); g.repEndOpacity = r.f(); g.repAbove = r.i()
@@ -168,12 +182,14 @@ data class VectorDoc(val groups: MutableList<VGroup> = mutableListOf()) {
                         val p = VPath(
                             r.i(), r.b(), r.f(), r.f(), r.f(), r.f(), r.f(), r.f(), r.f(), r.f(), r.f(), r.f(), r.f(),
                         )
+                        if (version >= 3f) p.exclude = r.b()
                         p.path = VBezier.decode(r)
                         repeat(r.i()) { p.keys += VKey(r.f().toInt(), r.i(), VBezier.decode(r)) }
                         g.paths += p
                     }
                     doc.groups += g
                 }
+                if (version >= 3f) doc.drawing = r.b()
                 doc
             } catch (_: IllegalStateException) {
                 null

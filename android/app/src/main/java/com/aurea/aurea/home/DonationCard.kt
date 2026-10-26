@@ -45,29 +45,32 @@ internal fun DonationCard(exporting: Boolean = false) {
             .setPrimaryClip(ClipData.newPlainText("Aurea", value))
         copied = true
     }
-    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp)
-        .background(AureaColors.Surface, RoundedCornerShape(16.dp))
-        .clickable { copied = false; open = true }.padding(16.dp),
+    // Omega home: fora do editor é claro (papéis claros; escuros nos outros temas).
+    Row(Modifier.fillMaxWidth()
+        .background(AureaColors.LightSurfaceAlt, RoundedCornerShape(6.dp))
+        .clickable { copied = false; open = true }.padding(horizontal = 15.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(stringResource(R.string.donation_title), style = AureaType.TitleMedium)
-            Text(stringResource(R.string.donation_note), style = AureaType.BodySmall, color = AureaColors.Muted)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(stringResource(R.string.donation_title), style = AureaType.of(13f, androidx.compose.ui.text.font.FontWeight.W700, 0f, AureaColors.LightText))
+            Text(stringResource(R.string.donation_note), style = AureaType.of(11f, color = AureaColors.LightTextMuted))
         }
-        Text("♡", style = AureaType.HeadlineLarge, color = AureaColors.Accent)
+        Text("♡", style = AureaType.HeadlineLarge, color = AureaColors.LightAccentInk)
     }
     if (open) AlertDialog(
         onDismissRequest = { open = false },
-        containerColor = AureaColors.Surface,
-        title = { Text(stringResource(R.string.donation_title)) },
+        containerColor = AureaColors.LightDialog,
+        titleContentColor = AureaColors.LightText,
+        textContentColor = AureaColors.LightText,
+        title = { Text(stringResource(R.string.donation_title), color = AureaColors.LightText) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(stringResource(R.string.donation_detail))
+                Text(stringResource(R.string.donation_detail), color = AureaColors.LightText)
                 Image(painterResource(R.drawable.donation_pix_qr), stringResource(R.string.donation_pix_qr),
                     Modifier.sizeIn(maxWidth = 240.dp, maxHeight = 240.dp).aspectRatio(1f))
-                Text("Pix · Ruan Pablo", color = AureaColors.Muted)
+                Text("Pix · Ruan Pablo", color = AureaColors.LightTextMuted)
                 OutlinedButton(onClick = { copy(AureaDonations.PIX) }, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.donation_copy_pix))
+                    Text(stringResource(R.string.donation_copy_pix), color = AureaColors.LightText)
                 }
                 OutlinedButton(onClick = {
                     if (exporting) copy(AureaDonations.PAYPAL)
@@ -78,12 +81,12 @@ internal fun DonationCard(exporting: Boolean = false) {
                         Toast.makeText(context, R.string.donation_copied, Toast.LENGTH_SHORT).show()
                     }
                 }, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(if (exporting) R.string.donation_copy_paypal else R.string.donation_paypal))
+                    Text(stringResource(if (exporting) R.string.donation_copy_paypal else R.string.donation_paypal), color = AureaColors.LightText)
                 }
-                if (exporting) Text(stringResource(R.string.donation_export_note), color = AureaColors.Muted)
-                if (copied) Text(stringResource(R.string.donation_copied), color = AureaColors.Accent)
+                if (exporting) Text(stringResource(R.string.donation_export_note), color = AureaColors.LightTextMuted)
+                if (copied) Text(stringResource(R.string.donation_copied), color = AureaColors.LightAccentInk)
             }
         },
-        confirmButton = { TextButton(onClick = { open = false }) { Text(stringResource(R.string.editor_fechar)) } },
+        confirmButton = { TextButton(onClick = { open = false }) { Text(stringResource(R.string.editor_fechar), color = AureaColors.LightAccentInk) } },
     )
 }

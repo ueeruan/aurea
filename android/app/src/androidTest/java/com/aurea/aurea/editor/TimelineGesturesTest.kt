@@ -52,15 +52,20 @@ class TimelineGesturesTest {
         val id = store.layers.single().id
         val end = store.layers.single().endFrame
         compose.runOnIdle { store.select(id) }
-        compose.onNodeWithTag("trial.layer.3d").performClick()
+        // Omega chrome (área 02, P0-3): 3D e desfoque de movimento saíram da barra
+        // da camada e moram no ⋮ (menu ancorado). O 3D alterna sem fechar o menu.
+        compose.onNodeWithTag("layer.menu").performClick()
+        compose.onNodeWithTag("layer.menu.threeD").performScrollTo().performClick()
         compose.waitUntil(5000) { (store.detail?.flags?.and(com.aurea.aurea.engine.PodLayout.FLAG_THREE_D) ?: 0) != 0 }
-        compose.onNodeWithTag("trial.layer.3d").performClick()
+        compose.onNodeWithTag("layer.menu.threeD").performScrollTo().performClick()
         compose.waitUntil(5000) { store.detail?.flags?.and(com.aurea.aurea.engine.PodLayout.FLAG_THREE_D) == 0 }
-        compose.onNodeWithTag("trial.layer.motionBlur").performClick()
+        compose.onNodeWithTag("layer.menu.motionBlur").performScrollTo().performClick()
         compose.waitUntil(5000) { store.detail?.motionBlur == true && store.compMotionBlur }
-        compose.onNodeWithTag("trial.layer.motionBlur").performClick()
+        compose.onNodeWithTag("layer.menu").performClick()
+        compose.onNodeWithTag("layer.menu.motionBlur").performScrollTo().performClick()
         compose.waitUntil(5000) { store.detail?.motionBlur == false }
-        compose.onNodeWithTag("dock.tool.Mask").assertExists()
+        // Omega painel: a máscara mora em Efeitos; o painel da camada mostra a grade da forma.
+        compose.onNodeWithTag("layer.panel.effects").assertExists()
         compose.runOnIdle { store.seek(end + 9000); assertEquals(end, store.playhead) }
         compose.waitUntil(5000) { store.playhead == end }
         compose.runOnIdle { store.scrubStart(end + 90); assertEquals(end, store.playhead); store.scrubTo(-10); assertEquals(0, store.playhead); store.scrubEnd() }
@@ -76,20 +81,22 @@ class TimelineGesturesTest {
         launch(2, shape = true)
         compose.runOnIdle { store.precompose(store.layers.map { it.id }) }
         compose.waitUntil(5000) { store.layers.size == 1 && store.layers.single().kind == 12 }
-        compose.onNodeWithTag("dock.tool.EnterGroup").assertIsDisplayed().performClick()
+        // Omega painel: "Editar grupo" na vaga de edição do painel da camada.
+        compose.onNodeWithTag("layer.panel.edit").assertIsDisplayed().performClick()
         compose.waitUntil(5000) { store.precompDepth == 1 && store.layers.size == 2 }
         compose.runOnIdle { assertTrue(store.selection.isEmpty()); store.closePrecomp() }
         compose.waitUntil(5000) { store.precompDepth == 0 && store.layers.size == 1 }
         compose.runOnIdle { store.select(store.layers.single().id) }
-        compose.onNodeWithTag("dock.tool.EnterGroup").assertIsDisplayed()
+        compose.onNodeWithTag("layer.panel.edit").assertIsDisplayed()
     }
 
-    @Test fun holdingAClipEntersMultipleSelectionAndTappingAnotherAddsIt() {
+    /** Omega (área 03, P1-1): segurar o CABEÇALHO (não mais o clipe) entra na seleção múltipla. */
+    @Test fun holdingAHeaderEntersMultipleSelectionAndTappingAnotherAddsIt() {
         launch(2, shape = true)
         val first = store.layers[0].id
         val second = store.layers[1].id
         timeline().performTouchInput {
-            down(Offset(width / 2f + 40 * density, rowY()))
+            down(Offset(48 * density, rowY()))
             advanceEventTime(650)
             up()
         }
@@ -140,9 +147,11 @@ class TimelineGesturesTest {
             compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == frame } }
         }
         val dpPerFrame = 80f / 30f
+        // Omega (área 03): o losango anda depois do toque longo (o arrasto rápido é scrub).
         timeline().performTouchInput {
             val start = Offset(width / 2f, rowY())
             down(start)
+            advanceEventTime(600)
             moveTo(start + Offset(12 * density, 0f))
             moveTo(start + Offset(60 * dpPerFrame * density, 0f))
             up()
@@ -166,6 +175,7 @@ class TimelineGesturesTest {
         timeline().performTouchInput {
             val start = Offset(width / 2f, rowY())
             down(start)
+            advanceEventTime(600)
             moveTo(start - Offset(12 * density, 0f))
             moveTo(start - Offset(30 * dpPerFrame * density, 0f))
             up()
@@ -390,14 +400,15 @@ class TimelineGesturesTest {
         assertEquals(height, timeline().fetchSemanticsNode().size.height)
     }
 
-    @Test fun holdingLayerBodyReordersWithoutChangingTimingAndOneUndoRestoresOrder() {
+    /** Omega (área 03, P1-6): segurar a alça ≡ (ou o fundo da linha) reordena; a seleção não muda. */
+    @Test fun holdingLayerGripReordersWithoutChangingTimingAndOneUndoRestoresOrder() {
         launch(5)
         val before = store.layers.map { it.id }
         val ranges = store.layers.associate { it.id to Triple(it.startFrame, it.endFrame, it.offsetFrames) }
         val duration = store.project.durationFrames
         val height = timeline().fetchSemanticsNode().size.height
         timeline().performTouchInput {
-            val x = width / 2f + 40 * density
+            val x = width - 15 * density
             down(Offset(x, rowY()))
             advanceEventTime(650)
             moveTo(Offset(x, rowY(1)), 50)
@@ -409,7 +420,7 @@ class TimelineGesturesTest {
             assertEquals(before.toSet(), store.layers.map { it.id }.toSet())
             assertEquals(ranges, store.layers.associate { it.id to Triple(it.startFrame, it.endFrame, it.offsetFrames) })
             assertEquals(duration, store.project.durationFrames)
-            assertEquals(setOf(before.first()), store.timelineOnlySelection)
+            assertTrue(store.selection.isEmpty())
         }
         assertEquals(height, timeline().fetchSemanticsNode().size.height)
         compose.runOnIdle { store.undo() }
@@ -453,11 +464,21 @@ class TimelineGesturesTest {
         }
         assertEquals(height, timeline().fetchSemanticsNode().size.height)
         val playhead = compose.runOnIdle { store.playhead }
-        timeline().performTouchInput { click(Offset(width / 2f + 40 * density, 16 * density)) }
+        // Omega (área 03, P1-2): tocar na régua navega entre marcadores; o zoom se
+        // mede com um scrub lento de 40 dp (sem inércia). A 100 dp/s seriam 12
+        // quadros; ampliada pela pinça, menos.
+        timeline().performTouchInput {
+            val y = height - 12 * density
+            down(Offset(width / 2f + 50 * density, y))
+            moveTo(Offset(width / 2f + 40 * density, y), 200)
+            moveTo(Offset(width / 2f, y), 600)
+            advanceEventTime(300)
+            up()
+        }
         compose.waitUntil(5000) { store.playhead != playhead }
         compose.runOnIdle {
             val frames = store.playhead - playhead
-            assertTrue("A pinça deveria ter ampliado a timeline: 40 dp = $frames quadros", frames in 1..14)
+            assertTrue("A pinça deveria ter ampliado a timeline: 40 dp = $frames quadros", frames in 1..10)
         }
     }
 
@@ -525,9 +546,11 @@ class TimelineGesturesTest {
         compose.waitForIdle()
         val before = store.keyframes[id].orEmpty().map { "${it.property}:${it.time}" }.sorted()
         val dpPerFrame = 80f / 30f
-        fun dragFromCenter() = timeline().performTouchInput {
+        fun dragFromCenter(hold: Boolean = false) = timeline().performTouchInput {
             val start = Offset(width / 2f, rowY())
             down(start)
+            // Omega (área 03): editar o losango pede o toque longo; o arrasto rápido é scrub.
+            if (hold) advanceEventTime(600)
             moveTo(start + Offset(12 * density, 0f))
             moveTo(start + Offset(60 * dpPerFrame * density, 0f))
             up()
@@ -546,7 +569,7 @@ class TimelineGesturesTest {
         compose.waitUntil(5000) { store.selection.contains(id) }
         compose.runOnIdle { store.seek(30) }
         compose.waitUntil(5000) { store.playhead == 30 }
-        dragFromCenter()
+        dragFromCenter(hold = true)
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 0 && it.time == 90 } }
         compose.runOnIdle { store.undo() }
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().map { "${it.property}:${it.time}" }.sorted() == before }
@@ -570,8 +593,8 @@ class TimelineGesturesTest {
         val laneY = metrics.rowsTop + metrics.row + 24 * density
         val dpPerFrame = 80f / 30f
         fun keyX(width: Int, frame: Int) = width / 2f + (frame - 30) * dpPerFrame * density
-        timeline().performTouchInput { click(Offset(if (EditorTimelineRefresh.enabled) width - 14 * density else 46 * density,
-            metrics.rowsTop + metrics.bar / 2)) }   // glifo do tipo: abre as trilhas
+        // Omega (área 03, D-1): as trilhas abrem pelo ⋮ da camada (o mesmo estado do store).
+        compose.runOnIdle { store.toggleTimelineTracks(id) }
         compose.waitForIdle()
         timeline().performTouchInput {
             val start = Offset(keyX(width, 30) + 18 * density, laneY)
@@ -622,8 +645,8 @@ class TimelineGesturesTest {
         fun keyX(width: Int, frame: Int) = width / 2f + (frame - 30) * 80f / 30f * density
 
         // Abrir as trilhas pelo glifo do tipo na pílula da camada (x 38..58; o olho fica em x < 28).
-        timeline().performTouchInput { click(Offset(if (EditorTimelineRefresh.enabled) width - 14 * density else 46 * density,
-            metrics.rowsTop + metrics.bar / 2)) }
+        // Omega (área 03, D-1): as trilhas abrem pelo ⋮ da camada (o mesmo estado do store).
+        compose.runOnIdle { store.toggleTimelineTracks(id) }
         compose.waitForIdle()
 
         fun selectPositionAndScale() {
@@ -732,7 +755,8 @@ class TimelineGesturesTest {
         val end = store.project.durationFrames
         compose.runOnIdle {
             store.setLayerRanges(longArrayOf(id), intArrayOf(0), intArrayOf(end))
-            store.select(id, openOptions = openTransform)
+            // Omega (área 03, P1-7): as alças só existem no foco (camada escolhida com a doca).
+            store.select(id)
             store.seek(end - 10)
         }
         compose.waitUntil(5000) { store.playhead == end - 10 }
@@ -742,8 +766,14 @@ class TimelineGesturesTest {
         val height = timeline().fetchSemanticsNode().size.height
         timeline().performTouchInput {
             // At 80 dp/s, ten frames are 26.67 dp from the playhead.
-            val edge = width / 2f + (80f / 3f + 6f) * density
-            swipe(Offset(edge, rowY()), Offset(width - 36 * density, rowY()), 350)
+            // Omega: zoom inicial de 100 dp/s (10 quadros = 33,3 dp); 12 dp por fora da
+            // ponta cai na alça de fim (pílula de 26 dp por fora do clipe).
+            val edge = width / 2f + (com.aurea.aurea.editor.timeline.Zoom.DEFAULT_PPS / 3f + 12f) * density
+            // Omega (área 03, P1-7): segurar a alça (25 % do toque longo) e então arrastar.
+            down(Offset(edge, rowY()))
+            advanceEventTime(250)
+            moveTo(Offset(width - 36 * density, rowY()), 350)
+            up()
         }
         compose.waitUntil(5000) { store.layers.single().endFrame > end }
         compose.runOnIdle { assertTrue(store.project.durationFrames >= store.layers.single().endFrame) }

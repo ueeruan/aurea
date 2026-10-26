@@ -40,6 +40,10 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -123,6 +127,19 @@ internal fun Modifier.pressHighlight(onClick: () -> Unit): Modifier {
         .drawWithContent {
             drawContent()
             if (pressed) drawRect(AureaColors.PressHighlight)
+        }
+}
+
+/** Omega home: o mesmo realce nas telas claras (a tinta do texto a 6 %, visível no claro). */
+@Composable
+internal fun Modifier.lightPress(onClick: () -> Unit): Modifier {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    return this
+        .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
+        .drawWithContent {
+            drawContent()
+            if (pressed) drawRect(AureaColors.LightText.copy(alpha = 0.06f))
         }
 }
 
@@ -248,95 +265,164 @@ internal fun ScaleDownToFit(modifier: Modifier = Modifier, content: @Composable 
 internal fun Modifier.blockTouches(): Modifier = pointerInput(Unit) {}
 
 // =============================================================================
-// Listas agrupadas (Ajustes)
+// Listas agrupadas da gaveta de ajustes (Omega home · P0-3): cartões de raio 6
+// no papel `LightSurfaceAlt` (grupo da gaveta), linhas de 44 dp, rótulo 12
+// negrito, texto a 15 dp da borda do cartão e fio de 1 dp `LightDivider`.
 // =============================================================================
 
-/** Cabeçalho de grupo em caixa-alta, recuo 16. */
+/** Cabeçalho de grupo (11, secundário), recuo 15. */
 @Composable
 internal fun GroupHeader(text: String) {
-    CapsLabel(text, Modifier.padding(start = AureaDims.S4, bottom = AureaDims.S2))
+    Text(
+        text,
+        style = OmegaHomeType.DrawerNote.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.W600),
+        modifier = Modifier.padding(start = 15.dp, end = 15.dp, bottom = 6.dp)
+            .semantics { heading() },
+    )
 }
 
-/** A caixa de um grupo de linhas. */
+/** A caixa de um grupo de linhas (cartão da gaveta). */
 @Composable
 internal fun Group(content: @Composable () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(AureaShape.Lg)
-            .background(AureaColors.Surface),
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+            .background(AureaColors.LightSurfaceAlt),
     ) { content() }
 }
 
-/** Hairline 0,5 recuada 16 à esquerda. */
+/** Fio de 1 dp recuado 15 dp. */
 @Composable
 internal fun GroupDivider() {
-    Box(Modifier.padding(start = AureaDims.S4).fillMaxWidth().height(AureaDims.Hairline).background(AureaColors.Hairline))
+    Box(Modifier.padding(start = 15.dp).fillMaxWidth().height(1.dp).background(AureaColors.LightDivider))
 }
 
-/** Rótulo + segmentado. */
+/** Rótulo + segmentado da gaveta (o seletor da referência). */
 @Composable
 internal fun <T> SegmentedRow(label: String, values: List<T>, selected: T, labelOf: (T) -> String, onChange: (T) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(AureaDims.S4, 14.dp)) {
-        Text(label, style = AureaType.BodyLarge)
-        Spacer(Modifier.height(10.dp))
-        AureaSegmented(values, selected, labelOf, onChange, AureaColors.SegmentTrack, AureaColors.SegmentThumb, 6.dp)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 10.dp)) {
+        Text(label, style = OmegaHomeType.DrawerLabel)
+        Spacer(Modifier.height(8.dp))
+        OmegaSegmented(values, selected, labelOf, onChange)
     }
 }
 
-/** Título + subtítulo e chevron 16. */
+/**
+ * O seletor segmentado da referência (gaveta e folha "Novo projeto"):
+ * contêiner `LightSurface` de raio 5 com 3 dp de folga; o ativo é a tinta
+ * forte (`LightInk`) com o texto `LightOnInk`, os outros texto `LightText`.
+ */
 @Composable
-internal fun TapRow(title: String, subtitle: String?, onClick: () -> Unit) {
+internal fun <T> OmegaSegmented(
+    values: List<T>,
+    selected: T,
+    label: (T) -> String,
+    onChange: (T) -> Unit,
+    modifier: Modifier = Modifier,
+    height: Dp = 38.dp,
+    radius: Dp = 5.dp,
+    tag: ((T) -> String?)? = null,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = height)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(radius))
+            .background(AureaColors.LightSurface)
+            .padding(3.dp),
+    ) {
+        values.forEach { v ->
+            val chosen = v == selected
+            val t = tag?.invoke(v)
+            Box(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = height - 6.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(radius))
+                    .background(if (chosen) AureaColors.LightInk else androidx.compose.ui.graphics.Color.Transparent)
+                    .then(if (t != null) Modifier.testTag(t) else Modifier)
+                    .semantics { this.selected = chosen }
+                    .clickable(interactionSource = null, indication = null, role = Role.Tab) { if (!chosen) onChange(v) }
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label(v),
+                    style = AureaType.of(12f, androidx.compose.ui.text.font.FontWeight.W600, 0f,
+                        if (chosen) AureaColors.LightOnInk else AureaColors.LightText),
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** Título 12 negrito + subtítulo 11 e o "›" (linha de 44 dp). */
+@Composable
+internal fun TapRow(title: String, subtitle: String?, tag: String? = null, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .pressHighlight(onClick)
-            .padding(AureaDims.S4, AureaDims.S3),
+            .heightIn(min = OmegaHomeDims.DrawerRow)
+            .then(if (tag != null) Modifier.testTag(tag) else Modifier)
+            .lightPress(onClick)
+            .padding(horizontal = 15.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = AureaType.BodyLarge)
+            Text(title, style = OmegaHomeType.DrawerLabel)
             if (subtitle != null) {
                 Spacer(Modifier.height(1.dp))
-                Text(subtitle, style = AureaType.BodySmall)
+                Text(subtitle, style = OmegaHomeType.DrawerNote)
             }
         }
-        CupertinoIcon(CupertinoGlyph.ChevronRight, AureaDims.IconSm, AureaColors.Muted)
+        CupertinoIcon(CupertinoGlyph.ChevronRight, 14.dp, AureaColors.LightTextMuted, Modifier.mirrorInRtl())
     }
 }
 
-/** Nota muted embaixo de uma linha de grupo. */
+/** Nota secundária embaixo de um grupo. */
 @Composable
 internal fun GroupNote(text: String) {
-    Text(text, style = AureaType.Note, modifier = Modifier.fillMaxWidth().padding(start = AureaDims.S4, end = AureaDims.S4, bottom = 14.dp))
+    Text(text, style = OmegaHomeType.DrawerNote, modifier = Modifier.fillMaxWidth().padding(start = 15.dp, end = 15.dp, top = 4.dp, bottom = 10.dp))
 }
 
-/** Linha de lista com ícone à esquerda, título, subtítulo e o que vier à direita. */
+/** Linha com ícone à esquerda, título 12 negrito, subtítulo 11 e o que vier à direita. */
 @Composable
 internal fun TileRow(
     leading: @Composable () -> Unit,
     title: String,
     subtitle: String? = null,
-    subtitleStyle: TextStyle = AureaType.BodySmall,
+    subtitleStyle: TextStyle? = null,
     trailing: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null,
+    tag: String? = null,
 ) {
-    val base = Modifier.fillMaxWidth().heightIn(min = if (subtitle == null) 56.dp else 72.dp)
+    val base = Modifier.fillMaxWidth().heightIn(min = OmegaHomeDims.DrawerRow).then(if (tag != null) Modifier.testTag(tag) else Modifier)
     Row(
-        (if (onClick != null) base.pressHighlight(onClick) else base).padding(start = AureaDims.S4, end = AureaDims.S5, top = AureaDims.S2, bottom = AureaDims.S2),
+        (if (onClick != null) base.lightPress(onClick) else base).padding(horizontal = 15.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(AureaDims.IconLg), contentAlignment = Alignment.CenterStart) { leading() }
-        Spacer(Modifier.width(AureaDims.S4))
+        Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) { leading() }
+        Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, style = AureaType.BodyLarge)
-            if (subtitle != null) Text(subtitle, style = subtitleStyle)
+            Text(title, style = OmegaHomeType.DrawerLabel)
+            if (subtitle != null) Text(subtitle, style = subtitleStyle ?: OmegaHomeType.DrawerNote)
         }
         if (trailing != null) {
-            Spacer(Modifier.width(AureaDims.S4))
+            Spacer(Modifier.width(8.dp))
             trailing()
         }
     }
+}
+
+/** "›" espelhado em árabe (o começo da leitura troca de lado). */
+@Composable
+internal fun Modifier.mirrorInRtl(): Modifier {
+    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == LayoutDirection.Rtl
+    return if (rtl) this.then(Modifier.graphicsLayer { scaleX = -1f }) else this
 }
 
 /** Um botão cheio de largura inteira (criar projeto, ação principal). */

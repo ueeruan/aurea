@@ -13,12 +13,33 @@ class StageZoomMathTest {
     private val compH = 1920f
     private val base = minOf(boxW / compW, boxH / compH)
 
-    @Test fun zoomIsClampedBetweenFitAndEightTimes() {
-        assertEquals(1f, StageZoomMath.clampZoom(0.2f), 0f)
-        assertEquals(8f, StageZoomMath.clampZoom(40f), 0f)
+    // Omega chrome (área 02, P1-2): de 1 % a 6400 %, como a referência.
+    @Test fun zoomIsClampedBetweenOnePercentAndSixtyFourTimes() {
+        assertEquals(0.2f, StageZoomMath.clampZoom(0.2f), 0f)
+        assertEquals(0.01f, StageZoomMath.clampZoom(0.001f), 0f)
+        assertEquals(64f, StageZoomMath.clampZoom(400f), 0f)
         assertEquals(3.5f, StageZoomMath.clampZoom(3.5f), 0f)
         assertEquals(1f, StageZoomMath.clampZoom(Float.NaN), 0f)
         assertEquals(1f, StageZoomMath.clampZoom(Float.POSITIVE_INFINITY), 0f)
+    }
+
+    @Test fun plusAndMinusWalkTheReferenceSteps() {
+        assertEquals(1.5f, StageZoomMath.stepUp(1f), 0f)
+        assertEquals(0.5f, StageZoomMath.stepDown(1f), 0f)
+        // Fora de um degrau: o próximo acima / o último abaixo.
+        assertEquals(3f, StageZoomMath.stepUp(2.4f), 0f)
+        assertEquals(2f, StageZoomMath.stepDown(2.4f), 0f)
+        // Nas pontas, fica.
+        assertEquals(64f, StageZoomMath.stepUp(64f), 0f)
+        assertEquals(0.01f, StageZoomMath.stepDown(0.01f), 0f)
+        assertEquals(0.05f, StageZoomMath.stepUp(0.01f), 0f)
+        assertEquals(32f, StageZoomMath.stepDown(64f), 0f)
+        assertEquals(14, StageZoomMath.STEPS.size)
+    }
+
+    @Test fun belowFitThereIsNoPan() {
+        assertEquals(0f, StageZoomMath.maxPan(0.25f, 800f), 0f)
+        assertEquals(0f, StageZoomMath.clampPan(300f, 0.5f, 800f), 0f)
     }
 
     @Test fun atFitThereIsNoPan() {
@@ -86,5 +107,6 @@ class StageZoomMathTest {
         assertEquals(250, StageZoomMath.percent(2.5f))
         assertFalse(StageZoomMath.isZoomed(1f))
         assertTrue(StageZoomMath.isZoomed(1.1f))
+        assertTrue(StageZoomMath.isZoomed(0.5f))
     }
 }

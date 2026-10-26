@@ -344,27 +344,19 @@ private fun SavePresetDialog(store: EditorStore, kind: PresetKind, onDismiss: ()
         },
         onDismiss = onDismiss,
         extra = {
-            BasicTextField(
+            // Omega fundação: campo e textos do diálogo claro (F4).
+            com.aurea.aurea.ui.ds.AureaDialogField(
                 value = name,
                 onValueChange = { name = it.take(60) },
-                singleLine = true,
-                textStyle = AureaType.Base.merge(TextStyle(fontSize = 15.sp)),
-                cursorBrush = SolidColor(AureaColors.Accent),
-                modifier = Modifier
-                    .padding(top = 10.dp)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(androidx.compose.ui.graphics.Color(0xFF1C1C1E))
-                    .padding(horizontal = 8.dp, vertical = 7.dp),
             )
-            if (exists) Text(stringResource(R.string.panel_ja_existe_sera_substituido), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Danger)))
+            if (exists) Text(stringResource(R.string.panel_ja_existe_sera_substituido), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.LightDanger)))
             if (kind == PresetKind.Text) {
                 Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.panel_estilo), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                    Text(stringResource(R.string.panel_estilo), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.LightText)))
                     AureaToggle(checked = style, onCheckedChange = { style = it })
                 }
                 Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.panel_animacao), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                    Text(stringResource(R.string.panel_animacao), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.LightText)))
                     AureaToggle(checked = anim, onCheckedChange = { anim = it })
                 }
             }

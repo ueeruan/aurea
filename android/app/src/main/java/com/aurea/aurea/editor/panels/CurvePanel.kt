@@ -74,6 +74,13 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
+// Omega painel: (área 04, P1-11) o editor de curva no layout da referência.
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.semantics.disabled
+import com.aurea.aurea.ui.ds.AnchoredMenu
+import com.aurea.aurea.ui.ds.MenuEntry
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -357,17 +364,29 @@ internal fun applyEaseToProperty(store: EditorStore, layer: Long, start: Keyfram
 }
 
 /**
- * O EDITOR DE CURVA [A] ("Easing curve", 11): trilho esquerdo (‹ · ⇄ · ⋯), gráfico
- * com grade tracejada, curva `destaque` e as duas alças brancas, o nome do preset
- * entre ‹ › (trocam de TRECHO, como na A.01), e à direita os presets da família em
- * miniatura com as abas das famílias.
+ * O EDITOR DE CURVA (Omega painel, área 04, P1-11; `fragment_animation_curve`
+ * da referência), na altura dos painéis de propriedade (200 dp):
  *
- * O keyframe vem de `store.selectedKeyframe` (losango tocado na timeline, ou o
- * trecho sob o cabeçote escolhido pelo trilho do painel de origem).
+ *   ┌60──┬──── gráfico (fundo P10) ───────────┬60 presets┬60 grupos┐
+ *   │ ‹  │ [parâmetros, só nos tipos com eles] │ curva 0   │ Curvas  │◇ cue
+ *   │ ◆± │  grade 32×32, curva, alças          │ curva 1   │ Saltos  │
+ *   │ ⇄  │                                     │ curva 2   │ Degraus │
+ *   │ ⋯  │ [◀]      RÓTULO (9, 50 %)      [▶] │ curva 3   │         │
+ *   └────┴─────────────────────────────────────┴───────────┴─────────┘
+ *
+ * O ⋯ traz Copiar, Colar, Colar em todos os keyframes e Passar do ponto, e os
+ * extras do AUREA (Valor, Velocidade, Presets, Curvas salvas, Salvar como
+ * preset, Tela cheia). No trecho de VELOCIDADE só o grupo Curvas responde (as
+ * outras curvas não se dividem). O keyframe vem de `store.selectedKeyframe`.
  */
 private val CurveGreen get() = AureaColors.Accent
 private val CurvePanelFill get() = AureaColors.EditorPanel
 private val CurveRailFill get() = AureaColors.EditorPanelHigh
+
+/** "Passar do ponto" do ⋯: desligado, a alça fica em 0..1 (como a referência sem *overshoot*). */
+internal object CurveSettings {
+    var overshoot by mutableStateOf(true)
+}
 
 @Composable
 internal fun CurvePanel(env: PanelEnv) { ReferenceCurvePanel(env) }
@@ -392,13 +411,10 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
         store.timelineFocus = focusKey?.let { listOf(com.aurea.aurea.engine.TrackKey(it.property, it.effectIndex, it.paramIndex)) }
         onDispose { store.timelineFocus = null }
     }
-    // O gráfico segue o que a pessoa olha, não o que estava aberto quando o
-    // painel abriu: outra camada escolhida (toque, setas ‹ ›, arrasto vertical
-    // da fileira compacta) traz a trilha animada dela; o cabeçote parado noutro
-    // trecho (scrub, rolar a timeline) escolhe esse trecho.
+    // O gráfico segue o que a pessoa olha: outra camada traz a trilha animada
+    // dela; o cabeçote parado noutro trecho escolhe esse trecho.
     LaunchedEffect(store) { snapshotFlow { store.primary }.collect { followGraphLayer(store) } }
     LaunchedEffect(store) {
-        // O primeiro valor é o de quando o painel abriu: o trecho tocado vale.
         snapshotFlow { store.playhead to store.playing }.drop(1)
             .collect { (_, playing) -> if (!playing) followGraphPlayhead(store) }
     }
@@ -418,8 +434,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     }
     val seg = segment
     if (seg == null) {
-        // Propriedade com menos de 2 keyframes: não há curva — avisa e volta,
-        // venha de onde vier (losango tocado, botão de curva de um painel).
+        // Propriedade com menos de 2 keyframes: não há curva — avisa e volta.
         if (store.selectedKeyframe != null) {
             val needTwo = stringResource(R.string.pn_curve_need_two_keys)
             LaunchedEffect(Unit) {
@@ -427,7 +442,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                 back()
             }
         }
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize().background(AureaColors.PanelFrameBackground), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 if (store.selectedKeyframe == null) stringResource(R.string.panel_toque_num_keyframe_timeline_npara_editar) else stringResource(R.string.panel_crie_pelo_menos_2_keyframes_npara),
                 textAlign = TextAlign.Center,
@@ -448,9 +463,9 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     val samples = remember(ease) { engineEaseSamples(ease) }
     val graphMode = store.curveGraphMode
     val copiedMsg = stringResource(R.string.curve_copied)
-    var menu by remember { mutableStateOf(false) }
+    val symmetricMsg = stringResource(R.string.pn_curve_symmetric)
+    val needTwoMsg = stringResource(R.string.pn_curve_need_two_keys)
     var savePrompt by remember { mutableStateOf(false) }
-    var presetMenu by remember { mutableStateOf(false) }
     // As curvas que a pessoa salvou (Presets › Curva): lidas uma vez por lista.
     val savedEntries = store.presets.user[com.aurea.aurea.presets.PresetKind.Curve].orEmpty()
     val saved = remember(savedEntries) {
@@ -467,9 +482,6 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
         val t = store.detail?.localPlayhead
         if (t == null || t < start.time || t >= end.time || end.time <= start.time) null
         else (t - start.time).toFloat() / (end.time - start.time)
-    }
-    val inside by remember(store, start, end) {
-        derivedStateOf { store.detail?.localPlayhead?.let { it >= start.time && it < end.time } ?: false }
     }
 
     fun jump(dir: Int) {
@@ -495,188 +507,140 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     val curveDetail = store.queryDetail(layer)
     val before = curveDetail?.let { store.keyframeNavigation(layer, trackTarget, it.timelineFrame(start.time)) }?.hasPrevious == true
     val after = curveDetail?.let { store.keyframeNavigation(layer, trackTarget, it.timelineFrame(end.time)) }?.hasNext == true
+    // Velocidade: só o grupo Curvas (as outras curvas não se dividem; `disableNonSplittableEasing`).
+    val onlyBezier = start.property == com.aurea.aurea.engine.TrackProperty.SPEED
+    val category = curveCategoryOf(ease)
+    val track = store.keyframes[layer].orEmpty().track(start)
+    val local = store.detail?.takeIf { it.id == layer }?.localPlayhead
+    val keyHere = local != null && track.any { it.time == local }
+    // ◆±: marca ou tira a chave da trilha do trecho no cabeçote (o valor que a curva dá ali).
+    val toggleKey = {
+        val p = progress()
+        val value = when {
+            p != null -> start.value + (end.value - start.value) * (samples?.let { easeSampleAt(it, p) } ?: ease.transform(p))
+            local != null && local >= end.time -> end.value
+            else -> start.value
+        }
+        store.toggleTrackKeyAtPlayhead(layer, trackTarget, value)
+    }
+    val menuEntries = buildList<MenuEntry> {
+        add(MenuEntry.Item(stringResource(R.string.panel_copiar_curva), glyph = CupertinoGlyph.DocOnDoc, tag = "curve.copy") {
+            CurveClipboard.ease = ease
+            store.showToast(copiedMsg)
+        })
+        add(MenuEntry.Item(stringResource(R.string.panel_colar_curva), glyph = CupertinoGlyph.DocOnClipboard,
+            enabled = CurveClipboard.ease != null, tag = "curve.paste") { CurveClipboard.ease?.let { setCurve("colar curva", it) } })
+        add(MenuEntry.Item(stringResource(R.string.om_curve_paste_all), enabled = CurveClipboard.ease != null, tag = "curve.pasteAll") {
+            CurveClipboard.ease?.let { if (!applyEaseToProperty(store, layer, start, it)) store.showToast(needTwoMsg) }
+        })
+        add(MenuEntry.Item(
+            stringResource(if (CurveSettings.overshoot) R.string.om_curve_overshoot_off else R.string.om_curve_overshoot_on),
+            tag = "curve.overshoot",
+        ) { CurveSettings.overshoot = !CurveSettings.overshoot })
+        add(MenuEntry.Divider)
+        // Mais do AUREA.
+        add(MenuEntry.Item(stringResource(R.string.panel_curva), checked = graphMode == 0, tag = "curve.mode.0") { store.curveGraphMode = 0 })
+        add(MenuEntry.Item(stringResource(R.string.particular_curve_value), checked = graphMode == 1, tag = "curve.mode.1") { store.curveGraphMode = 1 })
+        add(MenuEntry.Item(stringResource(R.string.panel_velocidade), checked = graphMode == 2, tag = "curve.mode.2") { store.curveGraphMode = 2 })
+        add(MenuEntry.Item(stringResource(R.string.panel_curve_apply_property), tag = "curve.applyAll") {
+            if (!applyEaseToProperty(store, layer, start, ease)) store.showToast(needTwoMsg)
+        })
+        add(MenuEntry.Item(stringResource(R.string.panel_presets), tag = "curve.presets",
+            submenu = StandardCurves.map { (name, e) -> MenuEntry.Item(stringResource(name)) { setCurve("preset de curva", e) } }))
+        if (saved.isNotEmpty()) {
+            add(MenuEntry.Item(stringResource(R.string.om_curve_saved), tag = "curve.saved",
+                submenu = saved.map { (entry, e) ->
+                    MenuEntry.Item(entry.name, checked = ease.same(e)) {
+                        setCurve("preset de curva", e)
+                        store.presets.markUsed(entry)
+                    }
+                }))
+        }
+        add(MenuEntry.Item(stringResource(R.string.panel_salvar_curva_como_preset), tag = "curve.save") { savePrompt = true })
+        add(MenuEntry.Item(stringResource(if (expanded) R.string.editor_sair_tela_cheia else R.string.panel_expandir), tag = "curve.fullscreen") {
+            if (expanded) collapse() else fullscreen = true
+        })
+    }
 
-    val symmetricMsg = stringResource(R.string.pn_curve_symmetric)
-    val needTwoMsg = stringResource(R.string.pn_curve_need_two_keys)
-    val previousLabel = stringResource(R.string.panel_keyframe_anterior)
-    val nextLabel = stringResource(R.string.panel_proximo_keyframe)
-    Column(Modifier.fillMaxSize().background(CurvePanelFill)) {
-    Row(Modifier.fillMaxWidth().height(48.dp).background(CurveRailFill)) {
-        listOf(R.string.panel_easing_curve, R.string.particular_curve_value, R.string.panel_velocidade).forEachIndexed { index, label ->
-            Box(Modifier.weight(1f).fillMaxHeight().tocavel { store.curveGraphMode = index }, contentAlignment = Alignment.Center) {
-                Text(stringResource(label), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = AureaType.Base.merge(TextStyle(fontSize = 12.sp,
-                        color = if (graphMode == index) AureaColors.Accent else AureaColors.Muted)))
-            }
-        }
-    }
-    Row(Modifier.fillMaxWidth().weight(1f)) {
-        // Trilho esquerdo: voltar · inverter · menu.
-        Column(Modifier.width(48.dp).fillMaxHeight().background(CurveRailFill), horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(Modifier.height(6.dp))
-            Box(Modifier.size(48.dp).tocavel { back() }, contentAlignment = Alignment.Center) {
-                CupertinoIcon(CupertinoGlyph.ChevronBack, 24.dp, Color.White)
-            }
-            Spacer(Modifier.weight(1f))
-            Box(
-                Modifier.size(48.dp).tocavel(enabled = ease.supportsInversion) {
-                    val inv = ease.inverted()
-                    if (inv == null) store.showToast(symmetricMsg)
-                    else {
-                        store.beginGesture("inverter curva")
-                        applyEase(store, layer, start, inv)
-                        store.endGesture()
-                    }
-                },
-                contentAlignment = Alignment.Center,
-            ) {
-                CupertinoIcon(CupertinoGlyph.ArrowRightArrowLeft, 20.dp, Color.White.copy(alpha = if (ease.supportsInversion) 1f else .35f))
-            }
-            // Copiar e colar à mão (pedido da beta): sem abrir o menu.
-            Box(Modifier.size(44.dp).testTag("curve.copy").tocavel {
-                CurveClipboard.ease = ease
-                store.showToast(copiedMsg)
-            }, contentAlignment = Alignment.Center) {
-                CupertinoIcon(CupertinoGlyph.DocOnDoc, 18.dp, Color.White)
-            }
-            Box(Modifier.size(44.dp).testTag("curve.paste").tocavel(enabled = CurveClipboard.ease != null) {
-                CurveClipboard.ease?.let {
-                    store.beginGesture("colar curva")
-                    applyEase(store, layer, start, it)
-                    store.endGesture()
-                }
-            }, contentAlignment = Alignment.Center) {
-                CupertinoIcon(CupertinoGlyph.DocOnClipboard, 18.dp, Color.White.copy(alpha = if (CurveClipboard.ease != null) 1f else .35f))
-            }
-            Box(Modifier.size(48.dp).tocavel { menu = true }, contentAlignment = Alignment.Center) {
-                CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, Color.White)
-                // Menu PEQUENO ao lado dos três pontos (antes: folha que cobria a tela).
-                CurveCompactMenu(menu, onDismiss = { menu = false }, items = listOf(
-                    stringResource(R.string.panel_curva) to { store.curveGraphMode = 0 },
-                    stringResource(R.string.particular_curve_value) to { store.curveGraphMode = 1 },
-                    stringResource(R.string.panel_velocidade) to { store.curveGraphMode = 2 },
-                    stringResource(if (expanded) R.string.editor_sair_tela_cheia else R.string.panel_expandir) to { if (expanded) collapse() else fullscreen = true },
-                    stringResource(R.string.panel_copiar_curva) to { CurveClipboard.ease = ease },
-                    stringResource(R.string.panel_colar_curva) to {
-                        CurveClipboard.ease?.let {
-                            store.beginGesture("colar curva")
-                            applyEase(store, layer, start, it)
-                            store.endGesture()
+    Row(Modifier.fillMaxSize().background(AureaColors.PanelFrameBackground).testTag("curve.panel")) {
+        CurveLeftColumn(
+            onBack = back,
+            keyHere = keyHere,
+            onKey = toggleKey,
+            invertible = ease.supportsInversion,
+            inverted = ease.supportsInversion && isInvertedEase(ease),
+            onInvert = {
+                val inv = ease.inverted()
+                if (inv == null) store.showToast(symmetricMsg) else setCurve("inverter curva", inv)
+            },
+            menuEntries = menuEntries,
+        )
+        CurveDivider()
+        Column(Modifier.weight(1f).fillMaxHeight().background(AureaColors.CurveGraphBackground)) {
+            // Os parâmetros (Quique, Elástico, Passar do ponto) numa faixa no TOPO do gráfico.
+            if (graphMode == 0 && ease.isParametric) {
+                Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    when (ease.interp) {
+                        Interp.OVERSHOOT -> CurveParamSlider(stringResource(R.string.curve_param_amount), ease.overshootAmount, 0f..1f, 0,
+                            "curve.overshoot.amount", null, store, "overshoot") { applyEase(store, layer, start, ease.overshoot(amount = it)) }
+                        Interp.ELASTIC -> {
+                            CurveParamSlider(stringResource(R.string.curve_param_oscillations), ease.elasticCycles.toFloat(), 1f..8f, 6, "curve.elastic.cycles",
+                                stringResource(R.string.curve_param_oscillations_value, ease.elasticCycles), store, "elastic") {
+                                val n = kotlin.math.round(it).toInt().coerceIn(1, 8)
+                                if (n != ease.elasticCycles) applyEase(store, layer, start, ease.elastic(cycles = n))
+                            }
+                            CurveParamSlider(stringResource(R.string.curve_param_damping), ease.elasticDamping, 0f..1f, 0, "curve.elastic.damping", null, store,
+                                "elastic") { applyEase(store, layer, start, ease.elastic(damping = it)) }
                         }
-                    },
-                    stringResource(R.string.panel_curve_apply_property) to {
-                        if (!applyEaseToProperty(store, layer, start, ease)) store.showToast(needTwoMsg)
-                    },
-                    stringResource(R.string.panel_salvar_curva_como_preset) to { savePrompt = true },
-                ))
+                        else -> {
+                            CurveChip("×${ease.bounceCount}", tag = "curve.bounce.count") {
+                                setCurve("bounce", ease.bounce(count = ease.bounceCount % 8 + 1))
+                            }
+                            CurveParamSlider(stringResource(R.string.fx_amplitude), ease.bounceStrength, .1f.. .9f, 0, "curve.bounce.strength", null, store,
+                                "bounce") { applyEase(store, layer, start, ease.bounce(strength = it)) }
+                        }
+                    }
+                }
             }
-            Spacer(Modifier.height(8.dp))
-        }
-        Column(Modifier.weight(1f).fillMaxHeight()) {
             // O gráfico é tempo × valor: não espelha em árabe (ver `KeepLtr`).
-            KeepLtr { Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (graphMode != 0) {
-                    TrackGraph(store, layer, (store.keyframes[layer] ?: emptyList()).track(start), graphMode == 2)
-                } else CurveGraph(
-                    ease = ease,
-                    samples = samples,
-                    progress = progress,
-                    onBegin = { store.beginGesture("curva") },
-                    onChange = { applyEase(store, layer, start, it) },
-                    onEnd = { store.endGesture() },
-                )
-            } }
-            // Parâmetros das curvas que passam do ponto / balançam (um desfazer por arrasto).
-            if (graphMode == 0 && ease.interp == Interp.OVERSHOOT) {
-                Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CurveParamSlider(stringResource(R.string.curve_param_amount), ease.overshootAmount, 0f..1f, 0, "curve.overshoot.amount", null, store,
-                        "overshoot") { applyEase(store, layer, start, ease.overshoot(amount = it)) }
-                }
-            }
-            if (graphMode == 0 && ease.interp == Interp.ELASTIC) {
-                Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CurveParamSlider(stringResource(R.string.curve_param_oscillations), ease.elasticCycles.toFloat(), 1f..8f, 6, "curve.elastic.cycles",
-                        stringResource(R.string.curve_param_oscillations_value, ease.elasticCycles), store, "elastic") {
-                        val n = kotlin.math.round(it).toInt().coerceIn(1, 8)
-                        if (n != ease.elasticCycles) applyEase(store, layer, start, ease.elastic(cycles = n))
+            KeepLtr {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    if (graphMode != 0) {
+                        TrackGraph(store, layer, track, graphMode == 2)
+                    } else {
+                        CurveGraph(
+                            ease = ease,
+                            samples = samples,
+                            progress = progress,
+                            overshoot = CurveSettings.overshoot,
+                            onBegin = { store.beginGesture("curva") },
+                            onChange = { applyEase(store, layer, start, it) },
+                            onEnd = { store.endGesture() },
+                        )
                     }
-                    CurveParamSlider(stringResource(R.string.curve_param_damping), ease.elasticDamping, 0f..1f, 0, "curve.elastic.damping", null, store,
-                        "elastic") { applyEase(store, layer, start, ease.elastic(damping = it)) }
+                    CurveSegmentBar(
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                        before = before,
+                        after = after,
+                        label = if (graphMode == 0) {
+                            if (!ease.hasHandles) stringResource(nameOf(ease)).uppercase() else cubicBezierLabel(ease)
+                        } else stringResource(if (graphMode == 1) R.string.particular_curve_value else R.string.panel_velocidade).uppercase(),
+                        powered = graphMode == 0 && ease.hasHandles,
+                        onPower = { setCurve("força da curva", nextPower(ease)) },
+                        onJump = { jump(it) },
+                    )
                 }
             }
-            if (graphMode == 0 && ease.interp == Interp.BOUNCE) {
-                Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CurveChip(stringResource(R.string.curve_bounce_count) + " ×${ease.bounceCount}", tag = "curve.bounce.count") {
-                        setCurve("bounce", ease.bounce(count = ease.bounceCount % 8 + 1))
-                    }
-                    Text(stringResource(R.string.fx_amplitude), modifier = Modifier.padding(start = 8.dp),
-                        style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = Color.White)))
-                    var changing by remember { mutableStateOf(false) }
-                    val bounceLabel = stringResource(R.string.pn_textpreset_bounce)
-                    androidx.compose.material3.Slider(value = ease.bounceStrength, valueRange = .1f.. .9f,
-                        onValueChange = { if (!changing) { changing = true; store.beginGesture("bounce") }; applyEase(store, layer, start, ease.bounce(strength = it)) },
-                        onValueChangeFinished = { if (changing) { changing = false; store.endGesture() } },
-                        colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = CurveGreen,
-                            activeTrackColor = CurveGreen, inactiveTrackColor = CurveRailFill),
-                        modifier = Modifier.weight(1f).testTag("curve.bounce.strength").semantics { contentDescription = bounceLabel })
-                }
-            }
-            // Presets prontos (menu), salvar a curva e as curvas salvas numa
-            // fileira fina que rola: o painel não cresce.
-            if (graphMode == 0) {
-                Row(
-                    Modifier.fillMaxWidth().height(40.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CurveChip(stringResource(R.string.panel_presets) + " ▾", tag = "curve.presets") { presetMenu = true }
-                    CurveChip("+ " + stringResource(R.string.pn_curve_save), tag = "curve.save") { savePrompt = true }
-                    saved.forEach { (entry, e) ->
-                        CurveChip(entry.name, active = ease.same(e), tag = "curve.saved") {
-                            setCurve("preset de curva", e)
-                            store.presets.markUsed(entry)
-                        }
-                    }
-                }
-            }
-            // ‹ trecho anterior · próximo ›: no sentido do tempo, LTR como o gráfico.
-            KeepLtr { Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(48.dp).semantics { contentDescription = previousLabel }.tocavel(enabled = before) { jump(-1) }, contentAlignment = Alignment.Center) {
-                    CupertinoIcon(CupertinoGlyph.ChevronLeft, 16.dp, if (before) Color.White else AureaColors.Disabled)
-                }
-                Spacer(Modifier.width(4.dp))
-                // A curva do trecho em números; tocar troca a força (×1 → ×2 → ×3).
-                val powered = graphMode == 0 && ease.hasHandles
-                Text(
-                    if (graphMode == 0) {
-                        if (!ease.hasHandles) stringResource(nameOf(ease))
-                        else cubicBezierLabel(ease)
-                    } else stringResource(if (graphMode == 1) R.string.particular_curve_value else R.string.panel_velocidade),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                        .testTag("curve.power")
-                        .tocavel(enabled = powered) {
-                            store.beginGesture("força da curva")
-                            applyEase(store, layer, start, nextPower(ease))
-                            store.endGesture()
-                        }
-                        .padding(vertical = 14.dp),
-                    style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, fontWeight = FontWeight.W400, color = Color.White.copy(alpha = .6f), textAlign = TextAlign.Center)),
-                )
-                Spacer(Modifier.width(4.dp))
-                Box(Modifier.size(48.dp).semantics { contentDescription = nextLabel }.tocavel(enabled = after) { jump(1) }, contentAlignment = Alignment.Center) {
-                    CupertinoIcon(CupertinoGlyph.ChevronRight, 16.dp, if (after) Color.White else AureaColors.Disabled)
-                }
-            } }
         }
-        // Os tipos de curva ao lado do gráfico (como no pedido do beta): cada
-        // botão mostra a curva que aplica, desenhada pelo motor.
-        if (graphMode == 0) CurveTypeRail(ease) { type ->
-            val next = quickTypeEase(type, ease)
-            if (!next.same(ease) || next.interp != ease.interp) setCurve("tipo de curva", next)
+        if (graphMode == 0) {
+            CurveDivider()
+            CurvePresetColumn(category, ease, enabled = !onlyBezier || category == CurveCategory.Curves) { slot ->
+                if (!slot.ease.same(ease) || slot.ease.interp != ease.interp) setCurve("preset de curva", slot.ease)
+            }
+            CurveGroupColumn(category, onlyBezier) { c ->
+                curveCategoryEase(c, ease)?.let { setCurve("tipo de curva", it) }
+            }
         }
-    }
     }
 
     if (savePrompt) {
@@ -691,67 +655,230 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             onDismiss = { savePrompt = false },
         )
     }
-
-    if (presetMenu) {
-        AureaActionSheet(
-            title = stringResource(R.string.panel_presets),
-            actions = StandardCurves.map { (name, e) ->
-                SheetAction(stringResource(name)) { setCurve("preset de curva", e) }
-            },
-            onDismiss = { presetMenu = false },
-        )
-    }
-
 }
 
-/** Menu pequeno que abre AO LADO do botão (texto 13 sp, largura do conteúdo). */
+/** A curva já está do lado "invertido" (o ⇄ fica aceso): bézier que começa rápido, ou parâmetro de sentido. */
+private fun isInvertedEase(e: Ease): Boolean = when (e.interp) {
+    Interp.BOUNCE, Interp.ELASTIC, Interp.OVERSHOOT -> e.y2 == EASE_PARAM_MARKER && e.x2 < .5f
+    Interp.EASE_OUT -> true
+    Interp.BEZIER, Interp.CUSTOM -> e.y1 > e.x1 && e.y2 > e.x2
+    else -> false
+}
+
 @Composable
-private fun CurveCompactMenu(open: Boolean, onDismiss: () -> Unit, items: List<Pair<String, () -> Unit>>) {
-    androidx.compose.material3.DropdownMenu(
-        expanded = open, onDismissRequest = onDismiss,
-        offset = androidx.compose.ui.unit.DpOffset(44.dp, 0.dp),
-        modifier = Modifier.background(Color(0xF0292E3D)).testTag("curve.menu"),
-    ) {
-        items.forEach { (label, action) ->
-            Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = Color.White)),
-                modifier = Modifier.tocavel { onDismiss(); action() }.padding(horizontal = 14.dp, vertical = 9.dp))
+private fun CurveDivider() {
+    Box(Modifier.width(PanelFrameDefaults.Divider).fillMaxHeight().background(AureaColors.PanelFrameDivider))
+}
+
+/** A coluna esquerda do editor (60): ‹ · ◆± · ⇄ · ⋯, células que repartem a altura. */
+@Composable
+private fun CurveLeftColumn(
+    onBack: () -> Unit,
+    keyHere: Boolean,
+    onKey: () -> Unit,
+    invertible: Boolean,
+    inverted: Boolean,
+    onInvert: () -> Unit,
+    menuEntries: List<MenuEntry>,
+) {
+    var menu by remember { mutableStateOf(false) }
+    Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight()) {
+        CurveCell("curve.back", stringResource(R.string.panel_voltar), onBack) {
+            CupertinoIcon(CupertinoGlyph.ChevronLeft, 22.dp, AureaColors.Text)
+        }
+        CurveCell("curve.keyframe", stringResource(if (keyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui), onKey) {
+            com.aurea.aurea.ui.ds.KeyframeDiamondIcon(
+                if (keyHere) com.aurea.aurea.ui.ds.KeyframeLook.KeyHere else com.aurea.aurea.ui.ds.KeyframeLook.Animated,
+                enabled = true, modifier = Modifier.size(24.dp),
+            )
+        }
+        CurveCell("curve.reverse", stringResource(R.string.om_curve_reverse), onInvert, enabled = invertible, alpha = if (invertible) 1f else .5f) {
+            CupertinoIcon(CupertinoGlyph.ArrowRightArrowLeft, 20.dp, if (inverted) AureaColors.Accent else AureaColors.Text)
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            val more = stringResource(R.string.editor_mais)
+            Box(
+                Modifier.fillMaxSize().testTag("curve.menu").semantics { contentDescription = more }.tocavel(shrink = 1f) { menu = true },
+                contentAlignment = Alignment.Center,
+            ) { CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, AureaColors.Text) }
+            AnchoredMenu(expanded = menu, onDismiss = { menu = false }, entries = menuEntries, tag = "curve.menu.list")
         }
     }
 }
 
+@Composable
+private fun ColumnScope.CurveCell(
+    tag: String,
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    alpha: Float = 1f,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        Modifier.weight(1f).fillMaxWidth().testTag(tag)
+            .semantics { contentDescription = label }
+            .tocavel(enabled = enabled, shrink = 1f, onClick = onClick)
+            .alpha(alpha),
+        contentAlignment = Alignment.Center,
+    ) { content() }
+}
+
+/** ◀ trecho anterior · rótulo (9, 50 %) · trecho seguinte ▶, na base do gráfico (LTR). */
+@Composable
+private fun CurveSegmentBar(
+    modifier: Modifier,
+    before: Boolean,
+    after: Boolean,
+    label: String,
+    powered: Boolean,
+    onPower: () -> Unit,
+    onJump: (Int) -> Unit,
+) {
+    val previousLabel = stringResource(R.string.om_curve_prev)
+    val nextLabel = stringResource(R.string.om_curve_next)
+    Row(modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(44.dp, 40.dp).testTag("curve.prev").semantics { contentDescription = previousLabel }.tocavel(enabled = before) { onJump(-1) },
+            contentAlignment = Alignment.Center) {
+            CupertinoIcon(CupertinoGlyph.ChevronLeft, 14.dp, if (before) AureaColors.Text else AureaColors.Disabled)
+        }
+        // A curva do trecho; tocar troca a força (×1 → ×2 → ×3) — extra do AUREA.
+        Text(
+            label,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).testTag("curve.power").tocavel(enabled = powered, shrink = 1f, onClick = onPower).padding(vertical = 12.dp),
+            style = AureaType.Base.merge(TextStyle(fontSize = 9.sp, fontWeight = FontWeight.W500, color = Color.White.copy(alpha = .5f), textAlign = TextAlign.Center)),
+        )
+        Box(Modifier.size(44.dp, 40.dp).testTag("curve.next").semantics { contentDescription = nextLabel }.tocavel(enabled = after) { onJump(1) },
+            contentAlignment = Alignment.Center) {
+            CupertinoIcon(CupertinoGlyph.ChevronRight, 14.dp, if (after) AureaColors.Text else AureaColors.Disabled)
+        }
+    }
+}
+
+/** A coluna de presets (60, 4 vagas do grupo ativo; a acesa com o painel a 50 %). */
+@Composable
+private fun CurvePresetColumn(category: CurveCategory, ease: Ease, enabled: Boolean, onPick: (CurveSlot) -> Unit) {
+    Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight().background(AureaColors.CurveColumn)) {
+        curveSlots(category).forEachIndexed { i, slot ->
+            if (slot == null) {
+                Spacer(Modifier.weight(1f).fillMaxWidth())
+            } else {
+                val active = curveSlotActive(ease, slot.ease)
+                val name = stringResource(slot.name)
+                val points = remember(slot.ease) { engineEaseSamples(slot.ease, 49) ?: FloatArray(49) { slot.ease.transform(it / 48f) } }
+                Box(
+                    Modifier.weight(1f).fillMaxWidth().testTag("curve.slot.$i")
+                        .semantics { contentDescription = name; selected = active }
+                        .tocavel(enabled = enabled, shrink = 1f) { onPick(slot) }
+                        .alpha(if (enabled) 1f else .25f)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(if (active) AureaColors.PanelFrameBackground.copy(alpha = .5f) else Color.Transparent),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CurveThumb(slot.ease, points, if (active) CurveGreen else Color.White)
+                }
+            }
+        }
+    }
+}
+
+/** A coluna de grupos (60): o ativo com o fundo A11 e o losango (cue) apontando para os presets. */
+@Composable
+private fun CurveGroupColumn(category: CurveCategory, onlyBezier: Boolean, onPick: (CurveCategory) -> Unit) {
+    val cue = AureaColors.PanelFrameDivider
+    Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight().background(AureaColors.CurveColumn)) {
+        CurveCategory.entries.forEach { c ->
+            val active = c == category
+            val off = onlyBezier && c != CurveCategory.Curves
+            val name = stringResource(when (c) {
+                CurveCategory.Curves -> R.string.om_curve_cat_curves
+                CurveCategory.Bounces -> R.string.om_curve_cat_bounces
+                CurveCategory.Steps -> R.string.om_curve_cat_steps
+            })
+            val first = curveSlots(c).first()?.ease ?: Ease(Interp.LINEAR, 0f, 0f, 1f, 1f)
+            val points = remember(c) { engineEaseSamples(first, 49) ?: FloatArray(49) { first.transform(it / 48f) } }
+            Box(
+                Modifier.weight(1f).fillMaxWidth().testTag("curve.category.${c.tag}")
+                    .semantics {
+                        contentDescription = name
+                        selected = active
+                        if (off) disabled()
+                    }
+                    .tocavel(enabled = !off, shrink = 1f) { onPick(c) }
+                    .alpha(if (off) .25f else 1f)
+                    .drawBehind {
+                        if (!active) return@drawBehind
+                        // O losango de 45° na borda que encosta nos presets (lado de início).
+                        val s = 7.dp.toPx()
+                        val x = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) size.width else 0f
+                        val path = Path().apply {
+                            moveTo(x, size.height / 2f - s); lineTo(x + s, size.height / 2f)
+                            lineTo(x, size.height / 2f + s); lineTo(x - s, size.height / 2f); close()
+                        }
+                        drawPath(path, cue)
+                    }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(if (active) cue else Color.Transparent),
+                contentAlignment = Alignment.Center,
+            ) {
+                CurveThumb(first, points, if (active) CurveGreen else Color.White)
+            }
+        }
+    }
+}
+
+/** A miniatura de uma curva (o motor amostra), na faixa que cabe o *overshoot*. */
+@Composable
+private fun CurveThumb(ease: Ease, points: FloatArray, color: Color) {
+    Canvas(Modifier.size(36.dp)) {
+        val (lo, hi) = easeRange(ease, points)
+        val pad = 4.dp.toPx()
+        val w = size.width - 2 * pad
+        val h = size.height - 2 * pad
+        val path = Path()
+        points.forEachIndexed { i, v ->
+            val x = pad + w * i / (points.size - 1)
+            val y = pad + h - (v - lo) / (hi - lo) * h
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, color, style = Stroke(1.8.dp.toPx(), cap = StrokeCap.Round))
+    }
+}
+
 /**
- * O GRÁFICO [A] (`_AmCurvePainter`): grade pontilhada 8 × 8 `#34405A`, limites 0 e
- * 1 tracejados, área sob a curva a 10 %, curva `destaque` 3,5, alças brancas
- * (linha 2,5 e bola de 11) com as quedas tracejadas até a base, pontas `destaque`
- * e o ponto rosa que corre com o cabeçote.
- *
- * A alça é escolhida UMA vez, no toque (a mais perto); o resto do arrasto
- * obedece — escolher a cada passo fazia "a curva saltar" para a outra alça.
+ * O GRÁFICO DA CURVA (`EasingCurveView` da referência): margem de 15 dp, grade
+ * 32 × 32 (grossa a cada 8, branco 6 %; fora de 0..1 a 3 %), 0 e 1 tracejados,
+ * a curva em destaque de 3 dp, alças de 12 dp (×1,2 no dedo) ligadas às marcas e
+ * a linha tracejada do cabeçote. O toque pega a alça MAIS PERTO e o arrasto é
+ * RELATIVO (posição de partida + deslocamento); começar e soltar = um desfazer.
  */
 @Composable
 private fun CurveGraph(
     ease: Ease,
     samples: FloatArray?,
     progress: () -> Float?,
+    overshoot: Boolean,
     onBegin: () -> Unit,
     onChange: (Ease) -> Unit,
     onEnd: () -> Unit,
 ) {
     var activeRange by remember { mutableStateOf<Pair<Float, Float>?>(null) }
-    /** A alça no dedo (0 saída, 1 chegada, −1 nenhuma): ganha o halo. */
+    /** A alça no dedo (0 saída, 1 chegada, −1 nenhuma): cresce 1,2×. */
     var activeHandle by remember { mutableIntStateOf(-1) }
-    // Faixa vertical ajustada à curva e às alças; parada enquanto o dedo arrasta.
-    // A faixa cresce para mostrar o overshoot e as oscilações inteiras.
     val fitted = remember(ease, samples) { easeRange(ease, samples) }
     val yMin = activeRange?.first ?: fitted.first
     val yMax = activeRange?.second ?: fitted.second
     val current by rememberUpdatedState(ease)
     val range by rememberUpdatedState(Pair(yMin, yMax))
-    // O gesto vive entre composições: trocar de trecho (‹ ›) troca o keyframe
-    // que recebe a curva, e o gesto tem de escrever no NOVO.
+    val allow by rememberUpdatedState(overshoot)
     val begin by rememberUpdatedState(onBegin)
     val change by rememberUpdatedState(onChange)
     val end by rememberUpdatedState(onEnd)
+    val green = CurveGreen
     Box(
         Modifier
             .fillMaxSize()
@@ -763,43 +890,41 @@ private fun CurveGraph(
                     if (!e0.hasHandles || size.width <= 0 || size.height <= 0) return@awaitEachGesture
                     val (lo, hi) = range
                     val inset = CURVE_INSET.toPx()
-                    val width = max(1f, size.width - 2 * inset)
-                    fun plot(x: Float, y: Float) = Offset(inset + x * width, size.height - (y - lo) / (hi - lo) * size.height)
+                    val w = max(1f, size.width - 2 * inset)
+                    val h = max(1f, size.height - 2 * inset)
+                    fun plot(x: Float, y: Float) = Offset(inset + x * w, inset + (1f - (y - lo) / (hi - lo)) * h)
                     val hh = e0.handles()
                     val p1 = plot(hh[0], hh[1])
                     val p2 = plot(hh[2], hh[3])
                     val k0 = plot(0f, 0f)
                     val k1 = plot(1f, 1f)
-                    // Qualquer toque no gráfico pega a alça mais perto de onde ela
-                    // está — a posição REAL, a mesma desenhada (nada as afasta);
-                    // uma sobre a outra, o lado do toque decide — como no app antigo.
-                    val shown = floatArrayOf(p1.x, p1.y, p2.x, p2.y)
-                    val which = grabHandle(down.position.x, down.position.y, shown, floatArrayOf(k0.x, k0.y, k1.x, k1.y))
+                    val which = grabHandle(down.position.x, down.position.y, floatArrayOf(p1.x, p1.y, p2.x, p2.y), floatArrayOf(k0.x, k0.y, k1.x, k1.y))
                     down.consume()
                     val first = which == 0
+                    val x0 = if (first) hh[0] else hh[2]
+                    val y0 = if (first) hh[1] else hh[3]
                     activeHandle = which
                     activeRange = Pair(lo, hi)
                     var began = false
                     var e = Ease(Interp.BEZIER, hh[0], hh[1], hh[2], hh[3], if (e0.isBezier) e0.power else 1)
                     val snap = CURVE_SNAP.toPx()
                     try {
-                      while (true) {
-                        val ev = awaitPointerEvent()
-                        val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!ch.pressed) break
-                        ch.consume()
-                        // Um toque sem arrasto não mexe em nada.
-                        if (!began) {
-                            if ((ch.position - down.position).getDistance() < viewConfiguration.touchSlop) continue
-                            began = true
-                            begin()
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!ch.pressed) break
+                            ch.consume()
+                            if (!began) {
+                                if ((ch.position - down.position).getDistance() < viewConfiguration.touchSlop) continue
+                                began = true
+                                begin()
+                            }
+                            val d = ch.position - down.position
+                            val p = dragHandle(x0, y0, d.x, d.y, w, h, lo, hi, snap, allow)
+                            if (!p[0].isFinite() || !p[1].isFinite()) continue
+                            e = if (first) e.copy(x1 = p[0], y1 = p[1]) else e.copy(x2 = p[0], y2 = p[1])
+                            change(e)
                         }
-                        // A alça vai para o dedo (x 0..1, y −2..3), encaixando em 0 e 1.
-                        val p = handleAt(ch.position.x, ch.position.y, inset, size.width.toFloat(), size.height.toFloat(), lo, hi, snap)
-                        if (!p[0].isFinite() || !p[1].isFinite()) continue
-                        e = if (first) e.copy(x1 = p[0], y1 = p[1]) else e.copy(x2 = p[0], y2 = p[1])
-                        change(e)
-                      }
                     } finally {
                         activeRange = null
                         activeHandle = -1
@@ -808,65 +933,51 @@ private fun CurveGraph(
                 }
             },
     ) {
-        // A curva, a grade e as alças só mudam com o easing: redesenham raramente.
         Canvas(Modifier.fillMaxSize()) {
             val inset = CURVE_INSET.toPx()
-            fun pt(x: Float, y: Float) = Offset(inset + x * max(1f, size.width - 2 * inset), size.height - (y - yMin) / (yMax - yMin) * size.height)
-            drawGrid(pt(0f, 0f).y, pt(0f, 1f).y)
-            val base = pt(0f, 0f).y
+            val w = max(1f, size.width - 2 * inset)
+            val h = max(1f, size.height - 2 * inset)
+            fun pt(x: Float, y: Float) = Offset(inset + x * w, inset + (1f - (y - yMin) / (yMax - yMin)) * h)
+            val y0 = pt(0f, 0f).y
+            val y1 = pt(0f, 1f).y
+            drawGrid(inset, w, h, y1, y0)
             val curve = Path()
-            val area = Path().apply { moveTo(0f, base) }
             for (i in 0..256) {
                 val t = i / 256f
                 val q = pt(t, samples?.getOrNull(i) ?: ease.transform(t))
                 if (i == 0) curve.moveTo(q.x, q.y) else curve.lineTo(q.x, q.y)
-                area.lineTo(q.x, q.y)
             }
-            area.lineTo(size.width, base)
-            area.close()
-            drawPath(area, CurveGreen.copy(alpha = 0.025f))
-            drawPath(curve, CurveGreen, style = Stroke(3.5.dp.toPx(), cap = StrokeCap.Round))
             val p0 = pt(0f, 0f)
             val p1 = pt(1f, 1f)
             if (ease.hasHandles) {
                 val hh = ease.handles()
-                // Cada bolinha EXATAMENTE no valor dela: o dedo leva só a que
-                // pegou; a outra não sai do lugar (nada de se "repelirem").
                 val h1 = pt(hh[0], hh[1])
                 val h2 = pt(hh[2], hh[3])
-                val dash = Color.White.copy(alpha = 0.30f)
-                fun drop(hp: Offset) {
-                    var y = min(hp.y, base)
-                    val yEnd = max(hp.y, base)
-                    while (y < yEnd) {
-                        drawLine(dash, Offset(hp.x, y), Offset(hp.x, min(y + 3.dp.toPx(), yEnd)), 1.dp.toPx())
-                        y += 6.dp.toPx()
-                    }
-                }
-                drop(h1)
-                drop(h2)
-                // Cada alça ligada à SUA marca: a de saída (cheia) à primeira,
-                // a de chegada (anel) à segunda — dá para saber qual é qual.
-                drawLine(Color.White, p0, h1, 2.5.dp.toPx())
-                drawLine(Color.White.copy(alpha = .7f), p1, h2, 2.5.dp.toPx())
-                if (activeHandle >= 0) drawCircle(CurveGreen.copy(alpha = .22f), HANDLE_HIT.toPx() * .85f, if (activeHandle == 0) h1 else h2)
-                drawCircle(Color.White, 11.dp.toPx(), h1)
-                drawCircle(CurvePanelFill, 9.dp.toPx(), h2)
-                drawCircle(Color.White, 9.dp.toPx(), h2, style = Stroke(3.dp.toPx()))
+                // A linha da marca até a alça, na cor da alça.
+                drawLine(Color.White.copy(alpha = .8f), p0, h1, 1.5.dp.toPx())
+                drawLine(Color.White.copy(alpha = .8f), p1, h2, 1.5.dp.toPx())
             }
-            drawCircle(CurveGreen, 5.dp.toPx(), p0)
-            drawCircle(CurveGreen, 5.dp.toPx(), p1)
+            drawPath(curve, green, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
+            drawCircle(green, 3.dp.toPx(), p0)
+            drawCircle(green, 3.dp.toPx(), p1)
+            if (ease.hasHandles) {
+                val hh = ease.handles()
+                val r = 12.dp.toPx()
+                for (k in 0..1) {
+                    val c = if (k == 0) pt(hh[0], hh[1]) else pt(hh[2], hh[3])
+                    val rr = if (activeHandle == k) r * 1.2f else r
+                    drawCircle(Color.White, rr, c)
+                    drawCircle(green, rr, c, style = Stroke(2.dp.toPx()))
+                }
+            }
         }
-        // Guia do cabeçote em camada própria, sem cobrir os pontos da curva: a
-        // linha e o ponto onde o cabeçote está NA curva.
+        // O cabeçote em camada própria: a linha tracejada no instante do trecho.
         Canvas(Modifier.fillMaxSize()) {
             val f = progress() ?: return@Canvas
             val inset = CURVE_INSET.toPx()
-            val v = samples?.let { easeSampleAt(it, f) } ?: ease.transform(f)
-            val p = Offset(inset + f * max(1f, size.width - 2 * inset), size.height - (v - yMin) / (yMax - yMin) * size.height)
-            drawLine(Color.White.copy(alpha = 0.4f), Offset(p.x, 0f), Offset(p.x, size.height),
-                1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 4.dp.toPx())))
-            drawCircle(Color.White, 4.dp.toPx(), p)
+            val x = inset + f * max(1f, size.width - 2 * inset)
+            drawLine(Color.White.copy(alpha = 0.6f), Offset(x, 0f), Offset(x, size.height),
+                1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())))
         }
     }
 }
@@ -880,71 +991,6 @@ internal fun engineEaseSamples(e: Ease, count: Int = CURVE_SAMPLES): FloatArray?
     val out = FloatArray(count)
     if (com.aurea.aurea.engine.AureaEngine.nativeSampleEase(e.interp, e.x1, e.y1, e.x2, e.y2, e.power, out) == count) out else null
 } catch (_: Throwable) { null }
-
-/** Nome, rótulo de acessibilidade e alvo de teste de cada tipo rápido. */
-@StringRes
-private fun quickTypeName(t: CurveQuickType): Int = when (t) {
-    CurveQuickType.Linear -> R.string.panel_linear
-    CurveQuickType.Ease -> R.string.curve_type_ease
-    CurveQuickType.Overshoot -> R.string.curve_type_overshoot
-    CurveQuickType.Elastic -> R.string.pn_textpreset_elastic
-    CurveQuickType.Bounce -> R.string.pn_textpreset_bounce
-}
-
-private fun quickTypeTag(t: CurveQuickType): String = when (t) {
-    // O Quique mantém o alvo antigo do botão (testes instrumentados).
-    CurveQuickType.Bounce -> "curve.preset.bounce"
-    else -> "curve.type." + t.name.lowercase()
-}
-
-/**
- * Os tipos de curva ao lado do gráfico: Linear, Suave, Passar do ponto,
- * Elástico e Quique. Cada botão desenha a curva padrão do tipo (amostrada pelo
- * motor); o tipo do trecho fica destacado. Rola se o painel for baixo.
- */
-@Composable
-private fun CurveTypeRail(ease: Ease, onPick: (CurveQuickType) -> Unit) {
-    val current = quickTypeOf(ease)
-    val railLabel = stringResource(R.string.curve_types_label)
-    Column(
-        Modifier.width(52.dp).fillMaxHeight().background(CurveRailFill)
-            .verticalScroll(rememberScrollState()).padding(vertical = 4.dp)
-            .semantics { contentDescription = railLabel },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        CurveQuickType.entries.forEach { type ->
-            val active = type == current
-            val name = stringResource(quickTypeName(type))
-            val preview = remember(type) { quickTypeEase(type, Ease(Interp.HOLD, 0f, 0f, 1f, 1f)) }
-            val points = remember(preview) { engineEaseSamples(preview, 49) ?: FloatArray(49) { preview.transform(it / 48f) } }
-            Box(
-                Modifier.size(48.dp).testTag(quickTypeTag(type))
-                    .semantics { contentDescription = name; selected = active }
-                    .tocavel { onPick(type) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Canvas(
-                    Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
-                        .background(if (active) CurveGreen.copy(alpha = .18f) else Color.Transparent)
-                        .border(1.dp, if (active) CurveGreen else Color.White.copy(alpha = .14f), RoundedCornerShape(10.dp)),
-                ) {
-                    val (lo, hi) = easeRange(preview, points)
-                    val pad = 6.dp.toPx()
-                    val w = size.width - 2 * pad
-                    val h = size.height - 2 * pad
-                    val path = Path()
-                    points.forEachIndexed { i, v ->
-                        val x = pad + w * i / (points.size - 1)
-                        val y = pad + h - (v - lo) / (hi - lo) * h
-                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                    }
-                    drawPath(path, if (active) CurveGreen else Color.White, style = Stroke(1.8.dp.toPx(), cap = StrokeCap.Round))
-                }
-            }
-        }
-    }
-}
 
 /**
  * Um parâmetro da curva (Quantidade, Oscilações, Amortecimento): rótulo curto e
@@ -987,27 +1033,36 @@ private fun CurveChip(label: String, active: Boolean = false, tag: String, onTap
     }
 }
 
-/** Margem lateral do gráfico da curva: as pontas e as alças em x = 0 / 1 ficam tocáveis. */
-private val CURVE_INSET = 28.dp
+/** Margem do gráfico da curva (a da referência): as pontas e as alças em 0 / 1 ficam tocáveis. */
+private val CURVE_INSET = 15.dp
 /** Raio do halo da alça no dedo. */
 private val HANDLE_HIT = 28.dp
 /** Encaixe da alça nas linhas 0 e 1 (x e y). */
 private val CURVE_SNAP = 10.dp
 
-private fun DrawScope.drawGrid(y0: Float, y1: Float) {
-    val w = 0.6.dp.toPx()
-    val grid = Color.White.copy(alpha = 0.045f)
-    for (i in 1 until 32) {
-        val x = size.width * i / 32f
-        val y = size.height * i / 32f
-        drawLine(grid, Offset(x, 0f), Offset(x, size.height), w)
-        drawLine(grid, Offset(0f, y), Offset(size.width, y), w)
+/**
+ * A grade da referência: 32 × 32 na área do gráfico, grossa (1 dp) a cada 8 e
+ * fina (0,5 dp); branco 6 % na faixa 0..1 e 3 % fora dela; 0 e 1 tracejados a 25 %.
+ */
+private fun DrawScope.drawGrid(inset: Float, w: Float, h: Float, yTop: Float, yBottom: Float) {
+    val thick = 1.dp.toPx()
+    val thin = 0.5.dp.toPx()
+    fun lines(alpha: Float) {
+        val c = Color.White.copy(alpha = alpha)
+        for (i in 0..32) {
+            val sw = if (i % 8 == 0) thick else thin
+            val x = inset + w * i / 32f
+            val y = inset + h * i / 32f
+            drawLine(c, Offset(x, inset), Offset(x, inset + h), sw)
+            drawLine(c, Offset(inset, y), Offset(inset + w, y), sw)
+        }
     }
-    val lim = Color.White.copy(alpha = 0.24f)
-    for (py in floatArrayOf(y0, y1)) {
-        var x = 0f
-        while (x < size.width) { drawLine(lim, Offset(x, py), Offset(x + 4.5.dp.toPx(), py), w); x += 9.dp.toPx() }
-    }
+    lines(0.03f)
+    // Dentro da faixa 0..1 a grade fica mais forte (3 % + 3 % ≈ 6 %).
+    clipRect(top = minOf(yTop, yBottom), bottom = maxOf(yTop, yBottom)) { lines(0.03f) }
+    val lim = Color.White.copy(alpha = 0.25f)
+    val dash = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 2.dp.toPx()))
+    for (py in floatArrayOf(yTop, yBottom)) drawLine(lim, Offset(inset, py), Offset(inset + w, py), thick, pathEffect = dash)
 }
 
 /** Instante LOCAL do cabeçote na camada [layer] (o tempo das marcas dela). */

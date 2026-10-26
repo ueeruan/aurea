@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Omega 0.3.2, área 02 (moldura do editor). Textos próprios do AUREA. -->
+    <string name="om_tb_exit">Вернуться к проектам</string>
+    <string name="om_tb_share">Поделиться и экспортировать</string>
+    <string name="om_tb_group_settings">Настройки группы</string>
+    <string name="om_tb_trail_item">Перейти к %1$s</string>
+    <string name="om_sel_align">Выровнять на экране</string>
+    <string name="om_sel_need_three">Выберите 3 слоя или больше, чтобы распределить</string>
+    <string name="om_sel_extend_start">Растянуть начало до курсора</string>
+    <string name="om_sel_move_start">Переместить начало к курсору</string>
+    <string name="om_sel_extend_end">Растянуть конец до курсора</string>
+    <string name="om_sel_move_end">Переместить конец к курсору</string>
+    <string name="om_sel_distribute_time">Распределить во времени</string>
+    <string name="om_tr_previous">К предыдущему событию</string>
+    <string name="om_tr_next">К следующему событию</string>
+    <string name="om_tr_copy_paste">Копировать и вставить</string>
+    <string name="om_tr_view_modes">Режимы просмотра</string>
+    <string name="om_vm_pixel">Реальные пиксели</string>
+    <string name="om_vm_grid">Сетка</string>
+    <string name="om_vm_grid_spacing">Шаг сетки</string>
+    <string name="om_vm_solo">Фокус на выбранном слое</string>
+    <string name="om_vm_solo_off">Обычный</string>
+    <string name="om_vm_solo_only">Только выбранный слой</string>
+    <string name="om_vm_solo_dim" formatted="false">Выбранный слой на 50 %</string>
+    <string name="om_vm_camera">Смотреть через активную камеру</string>
+    <string name="om_vm_camera_unavailable">Пока недоступно в этой тестовой версии</string>
+    <string name="om_vm_zoom_in">Приблизить</string>
+    <string name="om_vm_zoom_out">Отдалить</string>
+    <string name="om_cp_save_preset">Сохранить пресет</string>
+    <string name="om_cp_with_style">(со стилем)</string>
+    <string name="om_cp_paste_style_more">Вставить стиль</string>
+    <string name="om_cp_link_selected">Привязать выбранные…</string>
+    <string name="om_ps_color_fill">Вставить цвет и заливку</string>
+    <string name="om_ps_border_shadow">Вставить обводку и тень</string>
+    <string name="om_ps_blend">Вставить наложение и непрозрачность</string>
+    <string name="om_ps_transform">Вставить перемещение и трансформацию</string>
+    <string name="om_ps_text">Вставить стиль текста</string>
+    <string name="om_ps_volume">Вставить громкость</string>
+    <string name="om_ps_effects">Вставить эффекты</string>
+    <string name="om_ps_speed">Вставить скорость</string>
+    <string name="om_ps_paste">Вставить</string>
+    <string name="om_settings_more">Ещё в AUREA</string>
+    <string name="om_settings_preview">Предпросмотр</string>
+    <string name="om_settings_editing">Редактирование</string>
+    <string name="om_settings_import">Импорт</string>
+    <string name="om_settings_preview_quality">Качество предпросмотра</string>
+    <string name="om_gs_size">Ширина, высота группы</string>
+    <string name="om_mi_name">Имя</string>
+    <string name="om_mi_dimensions">Размеры (Ш × В)</string>
+    <string name="om_mi_format">Формат</string>
+    <plurals name="om_layers_selected">
+        <item quantity="one">Выбран %d слой</item>
+        <item quantity="few">Выбрано %d слоя</item>
+        <item quantity="many">Выбрано %d слоёв</item>
+        <item quantity="other">Выбрано %d слоя</item>
+    </plurals>
+    <plurals name="om_cp_duplicate">
+        <item quantity="one">Дублировать %d слой</item>
+        <item quantity="few">Дублировать %d слоя</item>
+        <item quantity="many">Дублировать %d слоёв</item>
+        <item quantity="other">Дублировать %d слоя</item>
+    </plurals>
+    <plurals name="om_cp_copy">
+        <item quantity="one">Копировать %d слой</item>
+        <item quantity="few">Копировать %d слоя</item>
+        <item quantity="many">Копировать %d слоёв</item>
+        <item quantity="other">Копировать %d слоя</item>
+    </plurals>
+    <plurals name="om_cp_paste">
+        <item quantity="one">Вставить слой</item>
+        <item quantity="few">Вставить %d слоя</item>
+        <item quantity="many">Вставить %d слоёв</item>
+        <item quantity="other">Вставить %d слоя</item>
+    </plurals>
+</resources>

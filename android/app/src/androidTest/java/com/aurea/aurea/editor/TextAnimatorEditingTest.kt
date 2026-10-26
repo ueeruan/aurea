@@ -66,7 +66,7 @@ class TextAnimatorEditingTest {
             assertEquals(1, store.selectedKeyframe?.second?.effectIndex)
             assertEquals(13, store.selectedKeyframe?.second?.paramIndex)
         }
-        compose.onNodeWithTag("curve.preset.bounce").performClick()
+        compose.onNodeWithTag("curve.category.bounces").performClick()
         compose.waitUntil(5000) {
             store.primaryKeys().any { it.property == 40 && it.effectIndex == 1 && it.paramIndex == 13 && it.time == 0 && it.interpolation == 7 }
         }
@@ -122,7 +122,7 @@ class TextAnimatorEditingTest {
         compose.runOnIdle { store.setEffectParam(effect, store.paramOf(effect, 0)!!, 100f) }
         compose.waitUntil(5000) { store.primaryKeys().count { it.property == TrackProperty.EFFECT_PARAM && it.effectIndex == effect && it.paramIndex == 0 } == 2 }
         compose.onNodeWithContentDescription(context.getString(R.string.panel_editar_curva_propriedade)).performClick()
-        compose.onNodeWithTag("curve.preset.bounce").performClick()
+        compose.onNodeWithTag("curve.category.bounces").performClick()
         compose.onNodeWithTag("curve.bounce.count").performClick()
         compose.onNodeWithTag("curve.bounce.strength").performTouchInput {
             down(center); moveTo(androidx.compose.ui.geometry.Offset(width * .8f, center.y)); up()

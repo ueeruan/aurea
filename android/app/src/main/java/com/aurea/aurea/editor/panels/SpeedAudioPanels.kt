@@ -65,6 +65,28 @@ import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.abs
+// Omega painel: (área 04) velocidade e volume na moldura comum.
+import androidx.annotation.StringRes
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.unit.Dp
+import com.aurea.aurea.editor.LayerPanelBits
+import com.aurea.aurea.editor.layerAudioEnabled
+import com.aurea.aurea.editor.toastText
+import com.aurea.aurea.engine.TrackKey
+import com.aurea.aurea.ui.ds.NumericKeypadSheet
 import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.pow
@@ -141,172 +163,416 @@ private fun clock(frames: Int, fps: Float): String {
     return "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
 }
 
-/**
- * TEMPO E VELOCIDADE [A] (`showSpeedSheet`): "1,00x · duração", o que acontece
- * com a barra, a régua entre a tartaruga e a lebre (escala logarítmica: meio
- * risco para 0,5x vale o mesmo que para 2x), os atalhos e os interruptores.
- * Velocidade e Reverso são do motor (vídeo, miniatura e som seguem a mesma
- * conta de tempo); o som acompanha a velocidade junto com o tom.
- */
+// =============================================================================
+// Omega painel (área 04, P1-7): VELOCIDADE NA MOLDURA COMUM
+// (`fragment_speed_keyframe` da referência: retempo · valor · régua)
+//
+// Coluna esquerda: ‹ · ◆ (velocidade no cabeçote) · Curva (só Bézier) · ⋯.
+// Vídeo e áudio têm os extras do AUREA nas abas da direita: Velocidade ·
+// Curva de tempo · Opções. Nas camadas sem fonte (forma, texto, nulo…) a
+// velocidade é constante e o motor reescala a animação da própria camada.
+// =============================================================================
+
 @Composable
 internal fun SpeedPanel(env: PanelEnv) {
     val store = env.store
-    val kind by remember(store) { derivedStateOf { store.detail?.kind ?: 0 } }
-    val frames by remember(store) { derivedStateOf { store.detail?.let { it.endFrame - it.startFrame } ?: 0 } }
-    val speed by remember(store) { derivedStateOf { store.detail?.speed ?: 1f } }
-    val reversed by remember(store) { derivedStateOf { store.detail?.reversed ?: false } }
-    val frameBlend by remember(store) { derivedStateOf { store.detail?.frameBlendMode ?: 0 } }
-    val animated by remember(store) { derivedStateOf { store.detail?.speedAnimated ?: false } }
-    val remapping by remember(store) { derivedStateOf { store.detail?.timeRemap ?: false } }
-    val keyHere by remember(store) {
-        derivedStateOf {
-            val d = store.detail
-            d != null && store.keyframes[d.id].orEmpty().any { it.property == TrackProperty.SPEED && it.time == d.localPlayhead }
+    val d by remember(store) { derivedStateOf { store.detail } }
+    val detail = d ?: return
+    val kind = detail.kind
+    val media = kind == LayerType.Video.kind || kind == LayerType.Audio.kind
+    val group = kind == LayerType.Group.kind
+    val keyed = media || group
+    var tab by rememberSaveable(detail.id) { mutableStateOf("speed") }
+    val speedKeys = store.keyframes[detail.id].orEmpty().filter { it.property == TrackProperty.SPEED }
+    val keyHere = speedKeys.any { it.time == detail.localPlayhead }
+    val look = when {
+        !keyed -> KeyframeLook.None
+        keyHere -> KeyframeLook.KeyHere
+        detail.speedAnimated -> KeyframeLook.Animated
+        else -> KeyframeLook.None
+    }
+    val canKey = keyed && !detail.timeRemap
+    val rail = PanelRail(
+        onBack = env.onClose,
+        keyframeLook = look,
+        onKeyframe = if (canKey) ({ store.toggleSpeedKeyframe() }) else null,
+        onDeleteAllKeyframes = { store.deleteAllKeyframes(detail.id, listOf(TrackKey(TrackProperty.SPEED))) },
+        onCurve = if (canKey) ({ openTrackCurve(env, TrackProperty.SPEED) }) else null,
+        curveReady = speedKeys.size >= 2,
+    )
+    val tabs = if (media) listOf(
+        PanelTab("speed", stringResource(R.string.editor_velocidade), glyph = CupertinoGlyph.Speedometer),
+        PanelTab("curve", stringResource(R.string.om_lp_speed_tab_curve), glyph = CupertinoGlyph.Waveform),
+        PanelTab("options", stringResource(R.string.om_lp_speed_tab_options), glyph = CupertinoGlyph.SliderHorizontal3),
+    ) else emptyList()
+    PanelFrame(rail = rail, tabs = tabs, selectedTab = tab, onTab = { tab = it }) {
+        when (if (media) tab else "speed") {
+            "curve" -> SpeedCurveTab(env)
+            "options" -> SpeedOptionsTab(env)
+            else -> SpeedMainTab(env, keyed)
         }
     }
-    val media = kind == LayerType.Video.kind || kind == LayerType.Audio.kind
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 14.dp, end = 18.dp, bottom = 24.dp)) {
-        if (!media) {
-            Text(
-                stringResource(R.string.panel_velocidade_vale_video_audio_nas_outras),
-                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, lineHeight = 18.2.sp, color = AureaColors.Muted)),
+}
+
+/** Aba Velocidade: retempo, valor no cabeçote (toque = teclado) e a régua. */
+@Composable
+private fun SpeedMainTab(env: PanelEnv, keyed: Boolean) {
+    val store = env.store
+    val detail = store.detail ?: return
+    val id = detail.id
+    val row = store.layers.firstOrNull { it.id == id }
+    // O cabeçote é lido dentro do derivedStateOf: só recompõe quando os bits mudam.
+    val bits by remember(id, row?.startFrame, row?.endFrame, row?.locked, detail.speed, detail.timeFlags) {
+        derivedStateOf { store.layerPanelBits(id) }
+    }
+    val animatedSpeed = store.speedCurve?.getOrNull(6)
+    val speed = if (detail.speedAnimated && animatedSpeed != null) animatedSpeed else detail.speed
+    val title = stringResource(R.string.editor_velocidade)
+    val muted = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted))
+    Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp)) {
+        Spacer(Modifier.height(10.dp))
+        RetimeRow(store, id, bits)
+        Spacer(Modifier.height(8.dp))
+        val frozen = keyed && detail.speed == 0f && !detail.speedAnimated
+        val notBakeable = !keyed && bits and LayerPanelBits.SPEED_BAKEABLE == 0
+        val blocked = detail.timeRemap || frozen || notBakeable
+        val value = "${speedLabel(speed)} · ${clock(detail.endFrame - detail.startFrame, store.project.fps)}"
+        when {
+            detail.timeRemap -> Text(stringResource(R.string.om_lp_speed_remap_on), style = muted)
+            frozen -> Text(stringResource(R.string.panel_este_trecho_quadro_parado_apare_bordas), style = muted)
+            notBakeable -> Text(stringResource(R.string.om_lp_speed_keyed), style = muted)
+            else -> Text(
+                value,
+                modifier = Modifier.testTag("speed.value").semantics { contentDescription = "$title $value" }
+                    .tocavel {
+                        env.openKeypad(KeypadRequest(title, speed, "x", 0.05f, 16f, 2) { v ->
+                            if (keyed) store.setLayerSpeed(v) else store.setLayerSpeedBaked(v)
+                        })
+                    },
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)),
             )
-            return@Column
         }
+        Spacer(Modifier.height(6.dp))
+        SpeedSlider(
+            value = speed,
+            enabled = !blocked,
+            height = 40.dp,
+            tag = "speed.slider",
+            onStart = { store.beginGesture("velocidade") },
+            onValue = { v -> if (keyed) store.setLayerSpeed(v) else store.setLayerSpeedBaked(v) },
+            onEnd = { store.endGesture() },
+        )
+        if (!keyed) {
+            Spacer(Modifier.height(4.dp))
+            Text(stringResource(R.string.om_lp_speed_constant_hint), style = muted)
+        }
+        Spacer(Modifier.height(10.dp))
+    }
+}
+
+/** Aba Curva de tempo (extra do AUREA): Normal/Remapear, a curva de velocidade e os prontos. */
+@Composable
+private fun SpeedCurveTab(env: PanelEnv) {
+    val store = env.store
+    val remapping by remember(store) { derivedStateOf { store.detail?.timeRemap ?: false } }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             RemapChip(stringResource(R.string.remap_normal), on = !remapping) { store.applySpeedRamp(-1) }
             RemapChip(stringResource(R.string.remap_linha_tempo), on = remapping) { store.enableManualTimeRemap() }
         }
-        Spacer(Modifier.height(12.dp))
-        if (remapping) {
-            TimeRemapEffectEditor(env, -1)
-            return@Column
-        }
-        if (speed == 0f && !animated) {
-            Text(stringResource(R.string.edt_freeze_frame, clock(frames, store.project.fps)), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(R.string.panel_este_trecho_quadro_parado_apare_bordas),
-                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, lineHeight = 18.2.sp, color = AureaColors.Muted)),
-            )
-            return@Column
-        }
-        Text("${speedLabel(speed)} · ${clock(frames, store.project.fps)}", style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)))
-        Spacer(Modifier.height(10.dp))
-        // O que a mudança de velocidade faz com a barra: o início fica onde está
-        // e o fim acompanha (é o que o motor faz — nada de escolha falsa aqui).
-        // Com keyframes a barra não muda de tamanho: a velocidade varia dentro dela.
-        Text(
-            stringResource(if (animated) R.string.panel_velocidade_keyframes_duracao_fica else R.string.panel_inicio_camada_fica_lugar_fim_acompanha),
-            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted)),
-        )
-        Spacer(Modifier.height(12.dp))
-        // ◇ na etiqueta: grava/apaga o keyframe de velocidade no cabeçote (a
-        // curva aparece nas trilhas e no gráfico como qualquer propriedade).
-        PropertyCustomRow(
-            stringResource(R.string.editor_velocidade),
-            selected = animated,
-            onSelect = { store.toggleSpeedKeyframe() },
-            keyframe = when { keyHere -> KeyframeLook.KeyHere; animated -> KeyframeLook.Animated; else -> KeyframeLook.None },
-        ) {
-        // Tartaruga · régua · lebre em LTR também em árabe: a régua desenha e arrasta em
-        // coordenadas absolutas (direita = mais rápido), então a lebre fica à direita.
-        KeepLtr { Row(verticalAlignment = Alignment.CenterVertically) {
-            CupertinoIcon(CupertinoGlyph.Tortoise, 20.dp, AureaColors.Muted)
-            Spacer(Modifier.width(6.dp))
-            // Régua em log2 × 100: arrastar a mesma distância dobra ou divide.
-            Box(Modifier.weight(1f).height(40.dp)) {
-                TickRuler(
-                    value = { log2Speed(store.detail?.speed ?: 1f) },
-                    unitsPerDp = 1f,
-                    active = true,
-                    modifier = Modifier.fillMaxSize().valueDrag(
-                        enabled = true,
-                        start = { log2Speed(store.detail?.speed ?: 1f) },
-                        unitsPerDp = { 1f },
-                        min = -332f,
-                        max = 332f,
-                        onStart = { store.beginGesture("velocidade") },
-                        onValue = { v -> store.setLayerSpeed(snapSpeed(2f.pow(v / 100f))) },
-                        onEnd = { store.endGesture() },
-                    ),
-                )
-            }
-            Spacer(Modifier.width(6.dp))
-            CupertinoIcon(CupertinoGlyph.Hare, 20.dp, AureaColors.Muted)
-            Spacer(Modifier.width(8.dp))
-            ValueBox(speedLabel(speed), width = 64.dp, onTap = null)
-        } }
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(0.25f to "0,25x", 0.5f to "0,5x", 1f to "1x", 2f to "2x", 4f to "4x").forEach { (value, label) ->
-                val on = kotlin.math.abs(speed - value) < 0.005f
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                        .tocavel(onClick = { store.setLayerSpeed(value) })
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                ) {
-                    Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
-                }
-            }
-        }
         Spacer(Modifier.height(8.dp))
-        if (kind == LayerType.Video.kind) {
+        // As mesmas linhas do painel antigo (par do iOS): o remapeamento em lista,
+        // ou a dica de como a curva de velocidade nasce dos keyframes (◆ na coluna).
+        if (remapping) TimeRemapEffectEditor(env, -1)
+        else Text(stringResource(R.string.panel_velocidade_keyframes_duracao_fica), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+    }
+}
+
+/** Aba Opções (extras do AUREA): valores prontos, de trás para a frente e câmera lenta. */
+@Composable
+private fun SpeedOptionsTab(env: PanelEnv) {
+    val store = env.store
+    val speed by remember(store) { derivedStateOf { store.detail?.speed ?: 1f } }
+    val reversed by remember(store) { derivedStateOf { store.detail?.reversed ?: false } }
+    val frameBlend by remember(store) { derivedStateOf { store.detail?.frameBlendMode ?: 0 } }
+    val isVideo by remember(store) { derivedStateOf { store.detail?.kind == LayerType.Video.kind } }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(0.25f to "0,25x", 0.5f to "0,5x", 1f to "1x", 2f to "2x", 4f to "4x").forEach { (value, label) ->
+                RemapChip(label, on = abs(speed - value) < 0.005f) { store.setLayerSpeed(value) }
+            }
+        }
+        if (isVideo) {
             Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.panel_passar_tras_frente), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
                 AureaToggle(checked = reversed, onCheckedChange = { store.setLayerReversed(it) })
             }
-            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.panel_quadros_camera_lenta), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(0 to stringResource(R.string.panel_repetir_quadro), 1 to stringResource(R.string.panel_misturar), 2 to stringResource(R.string.panel_movimento_suave)).forEach { (m, label) ->
-                        val on = frameBlend == m
-                        Box(
-                            Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                                .tocavel(onClick = { store.setFrameBlend(m) }).padding(horizontal = 10.dp, vertical = 6.dp),
-                        ) {
-                            Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
-                        }
-                    }
+            Text(stringResource(R.string.panel_quadros_camera_lenta), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(0 to stringResource(R.string.panel_repetir_quadro), 1 to stringResource(R.string.panel_misturar), 2 to stringResource(R.string.panel_movimento_suave)).forEach { (m, label) ->
+                    RemapChip(label, on = frameBlend == m) { store.setFrameBlend(m) }
                 }
             }
         }
     }
 }
 
-/** Tartaruga · régua · lebre (log2 × 100: arrastar a mesma distância dobra ou divide). */
+/**
+ * A curva do trecho de [property] no cabeçote: escolhe o keyframe que abre o
+ * trecho e abre o editor de curva (a Curva da coluna esquerda).
+ */
+internal fun openTrackCurve(env: PanelEnv, property: Int) = openTrackCurve(env.store, property) { env.onOpenPanel(EditorPanel.Curve) }
+
+internal fun openTrackCurve(store: EditorStore, property: Int, open: () -> Unit) {
+    val layer = store.primary ?: return
+    val local = store.detail?.localPlayhead ?: 0
+    val keys = store.keyframes[layer].orEmpty().filter { it.property == property }.sortedBy { it.time }
+    if (keys.size < 2) return
+    val key = keys.lastOrNull { it.time <= local }?.takeIf { it != keys.last() }
+        ?: keys[keys.size - 2].takeIf { local >= keys.last().time }
+        ?: keys.first()
+    store.selectKeyframe(layer, key)
+    open()
+}
+
+// =============================================================================
+// Peças da velocidade (o painel acima e a velocidade embutida do grupo)
+// =============================================================================
+
+/** Os quatro botões de retempo (37 dp, S9; alfa 0,35 desabilitado). Estados do motor. */
 @Composable
-private fun SpeedRuler(store: EditorStore, speed: Float) {
-    // Em LTR também em árabe: a régua desenha e arrasta em coordenadas absolutas
-    // (direita = mais rápido), então a lebre fica à direita.
-    KeepLtr { Row(verticalAlignment = Alignment.CenterVertically) {
-        CupertinoIcon(CupertinoGlyph.Tortoise, 20.dp, AureaColors.Muted)
-        Spacer(Modifier.width(6.dp))
-        Box(Modifier.weight(1f).height(40.dp)) {
-            TickRuler(
-                value = { log2Speed(store.detail?.speed ?: 1f) },
-                unitsPerDp = 1f,
-                active = true,
-                modifier = Modifier.fillMaxSize().valueDrag(
-                    enabled = true,
-                    start = { log2Speed(store.detail?.speed ?: 1f) },
-                    unitsPerDp = { 1f },
-                    min = -332f,
-                    max = 332f,
-                    onStart = { store.beginGesture("velocidade") },
-                    onValue = { v -> store.setLayerSpeed(snapSpeed(2f.pow(v / 100f))) },
-                    onEnd = { store.endGesture() },
-                ),
-            )
+internal fun RetimeRow(store: EditorStore, layerId: Long, bits: Int, modifier: Modifier = Modifier) {
+    val locked = bits and LayerPanelBits.LOCKED != 0
+    fun act(edge: Int) {
+        if (locked) { store.toastText(R.string.editor_camada_bloqueada_desbloqueie_editar); return }
+        if (store.playing) store.pause()
+        if (!store.retimeLayerToPlayhead(layerId, edge)) store.toastText(R.string.timeline_cut_failed)
+    }
+    // A ordem do tempo fica LTR em qualquer idioma (como a timeline).
+    KeepLtr {
+        Row(modifier.fillMaxWidth().height(37.dp), horizontalArrangement = Arrangement.spacedBy(1.5.dp)) {
+            RetimeButton(RetimeGlyph.ExtendStart, R.string.om_lp_retime_extend_start, "speed.retime.extendStart",
+                bits and LayerPanelBits.RETIME_EXTEND_START != 0, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)) { act(0) }
+            RetimeButton(RetimeGlyph.ShortenStart, R.string.om_lp_retime_shorten_start, "speed.retime.shortenStart",
+                bits and LayerPanelBits.RETIME_SHORTEN_START != 0, RoundedCornerShape(0.dp)) { act(1) }
+            RetimeButton(RetimeGlyph.ShortenEnd, R.string.om_lp_retime_shorten_end, "speed.retime.shortenEnd",
+                bits and LayerPanelBits.RETIME_SHORTEN_END != 0, RoundedCornerShape(0.dp)) { act(2) }
+            RetimeButton(RetimeGlyph.ExtendEnd, R.string.om_lp_retime_extend_end, "speed.retime.extendEnd",
+                bits and LayerPanelBits.RETIME_EXTEND_END != 0, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp)) { act(3) }
         }
-        Spacer(Modifier.width(6.dp))
-        CupertinoIcon(CupertinoGlyph.Hare, 20.dp, AureaColors.Muted)
-        Spacer(Modifier.width(8.dp))
-        ValueBox(speedLabel(speed), width = 64.dp, onTap = null)
-    } }
+    }
+}
+
+private enum class RetimeGlyph { ExtendStart, ShortenStart, ShortenEnd, ExtendEnd }
+
+@Composable
+private fun RowScope.RetimeButton(
+    glyph: RetimeGlyph,
+    @StringRes label: Int,
+    tag: String,
+    enabled: Boolean,
+    shape: RoundedCornerShape,
+    onClick: () -> Unit,
+) {
+    val text = stringResource(label)
+    Box(
+        Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .clip(shape)
+            .background(AureaColors.LayerPanelRetime)
+            .testTag(tag)
+            .semantics {
+                contentDescription = text
+                if (!enabled) disabled()
+            }
+            .tocavel(enabled = enabled, haptic = true, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.35f),
+        contentAlignment = Alignment.Center,
+    ) {
+        val color = AureaColors.Text
+        Canvas(Modifier.size(22.dp)) {
+            val u = size.width / 24f
+            val stroke = 1.6f * u
+            val start = glyph == RetimeGlyph.ExtendStart || glyph == RetimeGlyph.ShortenStart
+            // O clipe com os "quadros" dentro (retempo muda a velocidade, não só a borda).
+            val l = if (start) 9f else 3f
+            val r = if (start) 21f else 15f
+            drawRoundRect(color, topLeft = Offset(l * u, 7f * u), size = Size((r - l) * u, 10f * u),
+                cornerRadius = CornerRadius(1.5f * u), style = Stroke(stroke))
+            for (i in 1..3) {
+                val x = l + (r - l) * i / 4f
+                drawLine(color.copy(alpha = 0.55f), Offset(x * u, 9.5f * u), Offset(x * u, 14.5f * u), 1f * u)
+            }
+            fun arrow(from: Float, to: Float) {
+                drawLine(color, Offset(from * u, 12f * u), Offset(to * u, 12f * u), stroke, StrokeCap.Round)
+                val dd = if (to < from) 2.5f else -2.5f
+                drawLine(color, Offset(to * u, 12f * u), Offset((to + dd) * u, 9.5f * u), stroke, StrokeCap.Round)
+                drawLine(color, Offset(to * u, 12f * u), Offset((to + dd) * u, 14.5f * u), stroke, StrokeCap.Round)
+            }
+            when (glyph) {
+                RetimeGlyph.ExtendStart -> arrow(8f, 2f)
+                RetimeGlyph.ShortenStart -> arrow(2f, 8f)
+                RetimeGlyph.ShortenEnd -> arrow(22f, 16f)
+                RetimeGlyph.ExtendEnd -> arrow(16f, 22f)
+            }
+        }
+    }
+}
+
+private const val SPEED_MIN = 0.05f
+private const val SPEED_MAX = 4f
+
+/** Encosta em 0,25 · 0,5 · 0,75 · 1 · 2 · 3 e anda de 0,05 em 0,05 (a régua da referência). */
+internal fun snapLinearSpeed(v: Float): Float {
+    for (s in floatArrayOf(0.25f, 0.5f, 0.75f, 1f, 2f, 3f)) if (abs(v - s) < 0.06f) return s
+    return ((v / 0.05f).roundToInt() * 0.05f).coerceIn(SPEED_MIN, SPEED_MAX)
+}
+
+/**
+ * A RÉGUA DA VELOCIDADE (`AlightSlider` da referência): linear de 0,05 a 4×,
+ * origem em 1×, marcas em 0,5 · 1 · 2 · 3 · 4, tartaruga e lebre a 50 % nas
+ * pontas. Um arrasto = um gesto ([onStart]/[onEnd]). LTR em qualquer idioma.
+ */
+@Composable
+internal fun SpeedSlider(
+    value: Float,
+    enabled: Boolean,
+    height: Dp,
+    tag: String,
+    onStart: () -> Unit,
+    onValue: (Float) -> Unit,
+    onEnd: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val begin by rememberUpdatedState(onStart)
+    val send by rememberUpdatedState(onValue)
+    val finish by rememberUpdatedState(onEnd)
+    val label = stringResource(R.string.editor_velocidade)
+    val slower = stringResource(R.string.om_lp_speed_slower)
+    val faster = stringResource(R.string.om_lp_speed_faster)
+    val accent = AureaColors.Accent
+    val text = AureaColors.Text
+    val track = AureaColors.LayerPanelValueBox
+    val state = speedLabel(value)
+    KeepLtr {
+        Row(modifier.fillMaxWidth().height(height).alpha(if (enabled) 1f else 0.35f), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(40.dp).semantics { contentDescription = slower }, contentAlignment = Alignment.Center) {
+                CupertinoIcon(CupertinoGlyph.Tortoise, 20.dp, AureaColors.Text.copy(alpha = 0.5f))
+            }
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .testTag(tag)
+                    .semantics {
+                        contentDescription = label
+                        stateDescription = state
+                        progressBarRangeInfo = ProgressBarRangeInfo(value.coerceIn(SPEED_MIN, SPEED_MAX), SPEED_MIN..SPEED_MAX)
+                        if (enabled) {
+                            setProgress { v -> begin(); send(snapLinearSpeed(v)); finish(); true }
+                        } else {
+                            disabled()
+                        }
+                    }
+                    .pointerInput(enabled) {
+                        if (!enabled) return@pointerInput
+                        val pad = 8.dp.toPx()
+                        fun valueAt(x: Float): Float {
+                            val w = (size.width - pad * 2).coerceAtLeast(1f)
+                            return snapLinearSpeed(SPEED_MIN + ((x - pad) / w).coerceIn(0f, 1f) * (SPEED_MAX - SPEED_MIN))
+                        }
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            down.consume()
+                            begin()
+                            var last = valueAt(down.position.x)
+                            send(last)
+                            while (true) {
+                                val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                change.consume()
+                                val v = valueAt(change.position.x)
+                                if (v != last) { last = v; send(v) }
+                            }
+                            finish()
+                        }
+                    }
+                    .drawBehind {
+                        val pad = 8.dp.toPx()
+                        val w = (size.width - pad * 2).coerceAtLeast(1f)
+                        fun xOf(v: Float) = pad + w * ((v.coerceIn(SPEED_MIN, SPEED_MAX) - SPEED_MIN) / (SPEED_MAX - SPEED_MIN))
+                        val y = size.height / 2f
+                        drawRoundRect(track, topLeft = Offset(pad, y - 2.dp.toPx()), size = Size(w, 4.dp.toPx()), cornerRadius = CornerRadius(2.dp.toPx()))
+                        for (t in floatArrayOf(0.5f, 1f, 2f, 3f, 4f)) {
+                            val x = xOf(t)
+                            drawLine(text.copy(alpha = 0.35f), Offset(x, y + 5.dp.toPx()), Offset(x, y + 9.dp.toPx()), 1.dp.toPx())
+                        }
+                        // Da origem (1×) até o valor, em destaque.
+                        val o = xOf(1f)
+                        val vx = xOf(value)
+                        drawLine(accent, Offset(minOf(o, vx), y), Offset(maxOf(o, vx), y), 4.dp.toPx(), StrokeCap.Round)
+                        drawCircle(text, radius = 8.dp.toPx(), center = Offset(vx, y))
+                    },
+            )
+            Box(Modifier.size(40.dp).semantics { contentDescription = faster }, contentAlignment = Alignment.Center) {
+                CupertinoIcon(CupertinoGlyph.Hare, 20.dp, AureaColors.Text.copy(alpha = 0.5f))
+            }
+        }
+    }
+}
+
+/** Caixa de valor dos painéis embutidos (56 × 36, branco 5 %); o toque abre o teclado. */
+@Composable
+internal fun PopoutValueBox(text: String, tag: String, label: String, onTap: () -> Unit) {
+    Box(
+        Modifier
+            .size(56.dp, 36.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(AureaColors.LayerPanelValueBox)
+            .testTag(tag)
+            .semantics { contentDescription = "$label $text" }
+            .tocavel(onClick = onTap),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
+    }
+}
+
+/**
+ * A VELOCIDADE EMBUTIDA DO GRUPO (o corpo do `panelSpeedControl`): retempo,
+ * a régua de 30 dp e a pílula do valor (toque = teclado, 0,05 a 16×). Grava
+ * por `setLayerSpeed` (o pré-comp anda junto), um passo de desfazer por arrasto.
+ */
+@Composable
+internal fun GroupSpeedBody(store: EditorStore, layerId: Long, bits: Int) {
+    val speed by remember(store) { derivedStateOf { store.detail?.speed ?: 1f } }
+    val title = stringResource(R.string.editor_velocidade)
+    var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
+    Column(Modifier.fillMaxSize().padding(horizontal = 15.dp)) {
+        Spacer(Modifier.height(10.dp))
+        RetimeRow(store, layerId, bits)
+        Spacer(Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            SpeedSlider(
+                value = speed,
+                enabled = bits and LayerPanelBits.LOCKED == 0,
+                height = 30.dp,
+                tag = "layer.panel.groupSpeed.slider",
+                onStart = { store.beginGesture("velocidade") },
+                onValue = { store.setLayerSpeed(it) },
+                onEnd = { store.endGesture() },
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(6.dp))
+            PopoutValueBox(String.format(java.util.Locale.ROOT, "%.2fx", speed), "layer.panel.groupSpeed.value", title) {
+                keypad = KeypadRequest(title, speed, "x", 0.05f, 16f, 2) { v -> store.setLayerSpeed(v) }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+    keypad?.let { r -> NumericKeypadSheet(r, onDismiss = { keypad = null }) }
 }
 
 /**
@@ -409,84 +675,175 @@ private fun snapSpeed(s: Float): Float {
 private fun speedLabel(s: Float): String = "${com.aurea.aurea.ui.ds.numeroPtBr(s, 2)}x"
 
 /**
- * SOM [A] (`audio_sheet.dart`): "Som" com o nível em dB, Mudo, Solo, Volume
- * (animável, com ◇), Ganho, Balanço e fades de igual potência — tudo ligado ao
- * mixer do motor (o mesmo que exporta).
+ * SOM na moldura comum (Omega painel, área 04, P1-8): coluna esquerda com ‹ ·
+ * ◆ (volume) · Curva · "=" (expressão) e as abas Volume · Reforço · Balanço ·
+ * Suavizar. É o mesmo conteúdo do volume embutido que sai do botão Áudio do
+ * painel da camada ([VolumePopoutBody]); aqui ele abre pela trilha da timeline.
  */
 @Composable
 internal fun AudioPanel(env: PanelEnv) {
-    val store = env.store
+    VolumeFrame(env.store, onBack = env.onClose, onOpenPanel = env.onOpenPanel, openKeypad = env.openKeypad)
+}
+
+/** O volume embutido do painel da camada: a mesma moldura, com o teclado próprio. */
+@Composable
+internal fun VolumePopoutBody(store: EditorStore, onClose: () -> Unit, onOpenPanel: (EditorPanel) -> Unit) {
+    var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
+    VolumeFrame(store, onBack = onClose, onOpenPanel = onOpenPanel, openKeypad = { keypad = it }, tagPrefix = "layer.panel.volume")
+    keypad?.let { r -> NumericKeypadSheet(r, onDismiss = { keypad = null }) }
+}
+
+@Composable
+private fun VolumeFrame(
+    store: EditorStore,
+    onBack: () -> Unit,
+    onOpenPanel: (EditorPanel) -> Unit,
+    openKeypad: (KeypadRequest) -> Unit,
+    tagPrefix: String = "volume",
+) {
     val d by remember(store) { derivedStateOf { store.detail } }
-    val detail = d
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 14.dp, end = 18.dp, bottom = 24.dp)) {
-        if (detail == null || !detail.hasAudio) {
-            Text(
-                if (detail?.kind == LayerType.Video.kind) stringResource(R.string.panel_este_video_nao_tem_trilha_som) else stringResource(R.string.panel_esta_camada_nao_tem_audio),
-                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)),
-            )
-            return@Column
+    val detail = d ?: return
+    val row = store.layers.firstOrNull { it.id == detail.id }
+    val bits = remember(detail.id, row?.startFrame, row?.endFrame, row?.locked, store.keyframes[detail.id]?.size, detail.audioFlags) {
+        store.layerPanelBits(detail.id)
+    }
+    // O que a referência chama de `hasAnyAudio` (todo vídeo, áudio, grupo com som) + o som real do vídeo.
+    val hasAudio = detail.hasAudio || layerAudioEnabled(bits)
+    var tab by rememberSaveable(detail.id) { mutableStateOf("volume") }
+    val volumeKeys = listOf(TrackKey(TrackProperty.AUDIO_VOLUME))
+    val keys = store.keyframes[detail.id].orEmpty().filter { it.property == TrackProperty.AUDIO_VOLUME }
+    val look = when {
+        keys.any { it.time == detail.localPlayhead } -> KeyframeLook.KeyHere
+        detail.volumeAnimated -> KeyframeLook.Animated
+        else -> KeyframeLook.None
+    }
+    val volumeLabel = stringResource(R.string.panel_volume)
+    val onVolume = hasAudio && tab == "volume"
+    val rail = PanelRail(
+        onBack = onBack,
+        keyframeLook = if (onVolume) look else KeyframeLook.None,
+        onKeyframe = if (onVolume) ({ store.toggleVolumeKeyframe() }) else null,
+        onDeleteAllKeyframes = { store.deleteAllKeyframes(detail.id, volumeKeys) },
+        onCurve = if (onVolume) ({ openTrackCurve(store, TrackProperty.AUDIO_VOLUME) { onOpenPanel(EditorPanel.Curve) } }) else null,
+        curveReady = keys.size >= 2,
+        expression = if (onVolume) store.expressionLook(volumeKeys) else com.aurea.aurea.engine.ExpressionLook.None,
+        onExpression = if (onVolume) ({ store.openExpression(volumeLabel, volumeKeys, 100f, "%") }) else null,
+    )
+    val tabs = if (hasAudio) listOf(
+        PanelTab("volume", volumeLabel, glyph = CupertinoGlyph.Speaker2),
+        PanelTab("boost", stringResource(R.string.panel_reforco), glyph = CupertinoGlyph.Bolt),
+        PanelTab("pan", stringResource(R.string.panel_esquerda_direita), glyph = CupertinoGlyph.ArrowLeftRight),
+        PanelTab("fades", stringResource(R.string.om_lp_volume_tab_fades), glyph = CupertinoGlyph.Waveform),
+    ) else emptyList()
+    PanelFrame(rail = rail, tabs = tabs, selectedTab = tab, onTab = { tab = it }, modifier = Modifier.testTag("$tagPrefix.frame")) {
+        if (!hasAudio) {
+            // Sem áudio: só o aviso, centralizado, e o ◆ e a Curva desabilitados.
+            Box(Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    stringResource(R.string.panel_esta_camada_nao_tem_audio),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.LayerPanelDisabled)),
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
+            }
+            return@PanelFrame
         }
         val fps = store.project.fps.takeIf { it > 0f } ?: 30f
-        val level = detail.audioVolume * detail.audioGain
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            CupertinoIcon(CupertinoGlyph.Speaker2, 18.dp, AureaColors.Accent)
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.panel_som), style = AureaType.Base.merge(TextStyle(fontSize = 17.sp, fontWeight = FontWeight.W700)))
-            Spacer(Modifier.weight(1f))
-            Text(
-                if (detail.audioMuted || level <= 0f) stringResource(R.string.panel_mudo).lowercase() else db(level),
-                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Accent)),
-            )
-        }
-        Spacer(Modifier.height(10.dp))
-        AudioToggle(stringResource(R.string.panel_mudo), detail.audioMuted) { store.setAudioMuted(it) }
-        AudioToggle(stringResource(R.string.panel_solo), detail.audioSolo) { store.setAudioSolo(it) }
-        val keyLook = when {
-            store.keyframes[detail.id].orEmpty().any { it.property == TrackProperty.AUDIO_VOLUME && it.time == detail.localPlayhead } -> KeyframeLook.KeyHere
-            detail.volumeAnimated -> KeyframeLook.Animated
-            else -> KeyframeLook.None
-        }
-        val volumeKeys = listOf(com.aurea.aurea.engine.TrackKey(TrackProperty.AUDIO_VOLUME))
-        val volumeLabel = stringResource(R.string.panel_volume)
-        AudioRuler(
-            label = stringResource(R.string.panel_volume), keyframe = keyLook, onKeyframe = { store.toggleVolumeKeyframe() },
-            expression = store.expressionLook(volumeKeys), onExpression = { store.openExpression(volumeLabel, volumeKeys, 100f, "%") },
-            value = { store.detail?.audioVolume?.times(100f) ?: 100f }, text = "${(detail.audioVolume * 100f).roundToInt()}%",
-            unitsPerDp = 0.5f, min = 0f, max = 200f, gesture = "volume", store = store,
-        ) { store.setAudioVolume(it / 100f) }
-        AudioRuler(
-            label = stringResource(R.string.panel_reforco), value = { dbValue(store.detail?.audioGain ?: 1f) }, text = db(detail.audioGain),
-            unitsPerDp = 0.1f, min = -24f, max = 12f, gesture = "reforço", store = store,
-        ) { store.setAudioGain(if (it <= -24f) 0f else 10f.pow(it / 20f)) }
-        AudioRuler(
-            label = stringResource(R.string.panel_esquerda_direita), value = { (store.detail?.audioPan ?: 0f) * 100f }, text = pan(detail.audioPan),
-            unitsPerDp = 0.5f, min = -100f, max = 100f, gesture = "balanço", store = store,
-        ) { store.setAudioPan(it / 100f) }
-        val maxFade = max(0f, (detail.endFrame - detail.startFrame) / fps / 2f)
-        AudioRuler(
-            label = stringResource(R.string.panel_entrada_suave), value = { (store.detail?.audioFadeIn ?: 0) / fps }, text = secs(detail.audioFadeIn / fps),
-            unitsPerDp = 0.02f, min = 0f, max = maxFade, gesture = stringResource(R.string.panel_entrada_suave_1fd1), store = store,
-        ) { store.setAudioFade(true, (it * fps).roundToInt()) }
-        AudioRuler(
-            label = stringResource(R.string.panel_saida_suave), value = { (store.detail?.audioFadeOut ?: 0) / fps }, text = secs(detail.audioFadeOut / fps),
-            unitsPerDp = 0.02f, min = 0f, max = maxFade, gesture = stringResource(R.string.panel_saida_suave_9ac9), store = store,
-        ) { store.setAudioFade(false, (it * fps).roundToInt()) }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            stringResource(R.string.panel_volume_sobe_desce_forma_natural_sem),
-            style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 14.85.sp, color = AureaColors.Muted)),
-        )
-        if (detail.kind == LayerType.Video.kind) {
-            Spacer(Modifier.height(12.dp))
-            Row(
-                Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
-                    .tocavel { store.extractAudio(detail.id) }.padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CupertinoIcon(CupertinoGlyph.MusicNote2, 16.dp, AureaColors.Accent)
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.panel_extrair_audio_camada), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+            when (tab) {
+                "boost" -> CompactRuler(
+                    label = stringResource(R.string.panel_reforco), tag = "$tagPrefix.boost",
+                    value = { dbValue(store.detail?.audioGain ?: 1f) }, text = db(detail.audioGain),
+                    unitsPerDp = 0.1f, min = -24f, max = 12f, gesture = "reforço", store = store,
+                    onTap = { openKeypad(KeypadRequest(it, dbValue(detail.audioGain), "dB", -24f, 12f, 1) { v -> store.setAudioGain(if (v <= -24f) 0f else 10f.pow(v / 20f)) }) },
+                ) { store.setAudioGain(if (it <= -24f) 0f else 10f.pow(it / 20f)) }
+                "pan" -> CompactRuler(
+                    label = stringResource(R.string.panel_esquerda_direita), tag = "$tagPrefix.pan",
+                    value = { (store.detail?.audioPan ?: 0f) * 100f }, text = pan(detail.audioPan),
+                    unitsPerDp = 0.5f, min = -100f, max = 100f, gesture = "balanço", store = store,
+                    onTap = { openKeypad(KeypadRequest(it, detail.audioPan * 100f, "", -100f, 100f, 0) { v -> store.setAudioPan(v / 100f) }) },
+                ) { store.setAudioPan(it / 100f) }
+                "fades" -> {
+                    val maxFade = max(0f, (detail.endFrame - detail.startFrame) / fps / 2f)
+                    CompactRuler(
+                        label = stringResource(R.string.panel_entrada_suave), tag = "$tagPrefix.fadeIn",
+                        value = { (store.detail?.audioFadeIn ?: 0) / fps }, text = secs(detail.audioFadeIn / fps),
+                        unitsPerDp = 0.02f, min = 0f, max = maxFade, gesture = "entrada suave", store = store, showLabel = true,
+                        onTap = { openKeypad(KeypadRequest(it, detail.audioFadeIn / fps, "s", 0f, maxFade, 2) { v -> store.setAudioFade(true, (v * fps).roundToInt()) }) },
+                    ) { store.setAudioFade(true, (it * fps).roundToInt()) }
+                    CompactRuler(
+                        label = stringResource(R.string.panel_saida_suave), tag = "$tagPrefix.fadeOut",
+                        value = { (store.detail?.audioFadeOut ?: 0) / fps }, text = secs(detail.audioFadeOut / fps),
+                        unitsPerDp = 0.02f, min = 0f, max = maxFade, gesture = "saída suave", store = store, showLabel = true,
+                        onTap = { openKeypad(KeypadRequest(it, detail.audioFadeOut / fps, "s", 0f, maxFade, 2) { v -> store.setAudioFade(false, (v * fps).roundToInt()) }) },
+                    ) { store.setAudioFade(false, (it * fps).roundToInt()) }
+                }
+                else -> {
+                    // Volume de 0 a 200 % (a faixa do AUREA; a referência vai a 150 %).
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CupertinoIcon(if (detail.audioMuted) CupertinoGlyph.SpeakerSlash else CupertinoGlyph.Speaker2, 18.dp,
+                            if (detail.audioMuted) AureaColors.Accent else AureaColors.Muted)
+                        Spacer(Modifier.width(6.dp))
+                        CompactRuler(
+                            label = volumeLabel, tag = "$tagPrefix.slider",
+                            value = { store.detail?.audioVolume?.times(100f) ?: 100f }, text = "${(detail.audioVolume * 100f).roundToInt()}%",
+                            unitsPerDp = 0.5f, min = 0f, max = 200f, gesture = "volume", store = store,
+                            onTap = { openKeypad(KeypadRequest(it, detail.audioVolume * 100f, "%", 0f, 200f, 0) { v -> store.setAudioVolume(v / 100f) }) },
+                            valueTag = "$tagPrefix.value",
+                        ) { store.setAudioVolume(it / 100f) }
+                    }
+                    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.panel_mudo), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                        AureaToggle(checked = detail.audioMuted, onCheckedChange = { store.setAudioMuted(it) }, modifier = Modifier.testTag("$tagPrefix.mute"))
+                        Spacer(Modifier.width(16.dp))
+                        Text(stringResource(R.string.panel_solo), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                        AureaToggle(checked = detail.audioSolo, onCheckedChange = { store.setAudioSolo(it) }, modifier = Modifier.testTag("$tagPrefix.solo"))
+                    }
+                }
             }
+        }
+    }
+}
+
+/** Régua compacta (40 dp) + caixa de valor de 56 × 36 (toque = teclado). Um arrasto = um gesto. */
+@Composable
+private fun CompactRuler(
+    label: String,
+    tag: String,
+    value: () -> Float,
+    text: String,
+    unitsPerDp: Float,
+    min: Float,
+    max: Float,
+    gesture: String,
+    store: EditorStore,
+    onTap: (String) -> Unit,
+    showLabel: Boolean = false,
+    valueTag: String = "$tag.value",
+    onValue: (Float) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        if (showLabel) Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f).height(40.dp).testTag(tag).semantics { contentDescription = "$label $text" }) {
+                TickRuler(
+                    value = value,
+                    unitsPerDp = unitsPerDp,
+                    active = true,
+                    modifier = Modifier.fillMaxSize().valueDrag(
+                        enabled = true,
+                        start = value,
+                        unitsPerDp = { unitsPerDp },
+                        min = min,
+                        max = max,
+                        onStart = { store.beginGesture(gesture) },
+                        onValue = onValue,
+                        onEnd = { store.endGesture() },
+                    ),
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+            PopoutValueBox(text, valueTag, label) { onTap(label) }
         }
     }
 }

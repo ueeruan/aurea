@@ -105,10 +105,22 @@ struct ContentView: View {
             if let request = model.liveNoticePopup { LiveNoticePopup(request: request) }
             if model.showProjectSettings { ProjectSettingsPanel(onDismiss: { model.showProjectSettings = false }) }
             if let request = model.actionSheet { AureaActionSheet(title: request.title, message: request.message, actions: request.actions) { model.actionSheet = nil } }
-            if let request = model.colorSheet { ColorPickerSheet(request: request) {
-                guard model.colorSheet?.id == request.id else { return }
-                model.colorSheet = nil; request.onDone()
-            }.id(request.id) }
+            if let request = model.colorSheet {
+                // Omega aparência (P0-5 / P1-8): com âncora, o balão com o seletor
+                // embutido; sem âncora, o seletor em tela cheia (ColorPickerKit.swift).
+                // Fechar = `onDone` do pedido, uma vez (o `ColorPickerSheet` antigo fica de reserva).
+                let close: () -> Void = {
+                    guard model.colorSheet?.id == request.id else { return }
+                    model.colorSheet = nil; request.onDone()
+                }
+                Group {
+                    if request.anchor != nil {
+                        ColorPopover(request: request, onDismiss: close)
+                    } else {
+                        ColorPickerFull(request: request, onDismiss: close)
+                    }
+                }.id(request.id)
+            }
             if let request = model.expressionSheet { ExpressionSheet(request: request) {
                 guard model.expressionSheet?.id == request.id else { return }
                 model.expressionSheet = nil

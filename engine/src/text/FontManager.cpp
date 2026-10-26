@@ -7,9 +7,11 @@
 #include "aurea/timeline/Layer.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <vector>
 
 namespace aurea::text {
 
@@ -51,6 +53,106 @@ u32 hash_path(const std::string& s) {
     return h ? h : 1u;
 }
 
+// --- Omega conteúdo (área 06): categoria e escritas da face -----------------------
+
+/// A face tem glifo para `cp`? Lê o `cmap` (formato 4 ou 12). `t` = a tabela inteira.
+bool cmap_has(const std::vector<u8>& t, u32 cp) {
+    if (t.size() < 4) return false;
+    const u16 n = be16(&t[2]);
+    u32 best = 0;
+    int bestScore = -1;
+    for (u16 i = 0; i < n && 4u + 8u * (i + 1u) <= t.size(); ++i) {
+        const u8* r = &t[4 + 8u * i];
+        const u16 plat = be16(r), enc = be16(r + 2);
+        const u32 off = be32(r + 4);
+        if (off + 2 > t.size()) continue;
+        const u16 fmt = be16(&t[off]);
+        const int score = (fmt == 12 && (plat == 3 || plat == 0)) ? 3 : (fmt == 4 && plat == 3 && enc == 1) ? 2 : (fmt == 4 && plat == 0) ? 1 : -1;
+        if (score > bestScore) { bestScore = score; best = off; }
+    }
+    if (bestScore < 0) return false;
+    const u16 fmt = be16(&t[best]);
+    if (fmt == 12) {
+        if (best + 16 > t.size()) return false;
+        const u32 groups = be32(&t[best + 12]);
+        for (u32 g = 0; g < groups && best + 16 + 12u * (g + 1u) <= t.size(); ++g) {
+            const u8* r = &t[best + 16 + 12u * g];
+            if (cp >= be32(r) && cp <= be32(r + 4)) return true;
+        }
+        return false;
+    }
+    if (cp > 0xFFFF || best + 14 > t.size()) return false;
+    const u32 segX2 = be16(&t[best + 6]);
+    const u32 ends = best + 14, starts = ends + segX2 + 2, deltas = starts + segX2, ranges = deltas + segX2;
+    if (ranges + segX2 > t.size()) return false;
+    for (u32 s2 = 0; s2 < segX2; s2 += 2) {
+        const u16 end = be16(&t[ends + s2]);
+        if (end < cp) continue;
+        const u16 start = be16(&t[starts + s2]);
+        if (start > cp) return false;
+        const u16 delta = be16(&t[deltas + s2]);
+        const u16 ro = be16(&t[ranges + s2]);
+        if (ro == 0) return static_cast<u16>(cp + delta) != 0;
+        const u32 at = ranges + s2 + ro + 2u * (cp - start);
+        if (at + 2 > t.size()) return false;
+        const u16 glyph = be16(&t[at]);
+        return glyph != 0 && static_cast<u16>(glyph + delta) != 0;
+    }
+    return false;
+}
+
+std::string lower_ascii(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+/// Categoria pela classe IBM do OS/2, pelo PANOSE, pelo `post` e, na falta, pelo nome.
+u8 font_category(i32 familyClass, const u8* panose, bool fixedPitch, const std::string& family) {
+    const u8 type = panose ? panose[0] : 0, serif = panose ? panose[1] : 0, proportion = panose ? panose[3] : 0;
+    const std::string name = lower_ascii(family);
+    auto contains = [&](const char* w) { return name.find(w) != std::string::npos; };
+    if (fixedPitch || (type == 2 && proportion == 9) || contains("mono") || contains("code") || contains("courier")) return kFontMono;
+    if (familyClass == 10 || type == 3 || contains("script") || contains("hand") || contains("brush") || contains("cursive")) return kFontHandwriting;
+    if (familyClass == 9 || familyClass == 12 || type == 4 || type == 5 || contains("display") || contains("decor")) return kFontDisplay;
+    if ((familyClass >= 1 && familyClass <= 5) || familyClass == 7) return kFontSerif;
+    if (familyClass == 8) return kFontSans;
+    if (type == 2 && serif >= 2 && serif <= 10) return kFontSerif;
+    if (contains("serif") && !contains("sans")) return kFontSerif;
+    return kFontSans;
+}
+
+/// Escritas pelas faixas Unicode do OS/2 (bits 0 latim, 7 grego, 9 cirílico,
+/// 11 hebraico, 13 árabe, 15 devanágari, 24 tailandês, 28/56 hangul,
+/// 49/50 kana, 59 ideogramas CJK).
+u32 scripts_from_ranges(const u32 r[4]) {
+    auto bit = [&](u32 b) { return (r[b / 32] >> (b % 32)) & 1u; };
+    u32 s = 0;
+    if (bit(0) || bit(1) || bit(2) || bit(3)) s |= kScriptLatin;
+    if (bit(7)) s |= kScriptGreek;
+    if (bit(9)) s |= kScriptCyrillic;
+    if (bit(11)) s |= kScriptHebrew;
+    if (bit(13)) s |= kScriptArabic;
+    if (bit(15)) s |= kScriptDevanagari;
+    if (bit(24)) s |= kScriptThai;
+    if (bit(28) || bit(56)) s |= kScriptKorean;
+    if (bit(49) || bit(50)) s |= kScriptJapanese;
+    if (bit(59)) s |= kScriptChinese;
+    return s;
+}
+
+/// As mesmas escritas pelo `cmap` (um caractere típico de cada uma).
+u32 scripts_from_cmap(const std::vector<u8>& cmap) {
+    struct Probe { u32 cp; u32 bit; };
+    static const Probe kProbes[] = {
+        {0x0041, kScriptLatin}, {0x03B1, kScriptGreek}, {0x0416, kScriptCyrillic}, {0x05D0, kScriptHebrew},
+        {0x0639, kScriptArabic}, {0x0915, kScriptDevanagari}, {0x0E01, kScriptThai}, {0xAC00, kScriptKorean},
+        {0x3042, kScriptJapanese}, {0x4E2D, kScriptChinese},
+    };
+    u32 s = 0;
+    for (const Probe& p : kProbes) if (cmap_has(cmap, p.cp)) s |= p.bit;
+    return s;
+}
+
 } // namespace
 
 bool read_font_info(const std::string& path, FontEntry& out) {
@@ -70,13 +172,15 @@ bool read_font_info(const std::string& path, FontEntry& out) {
     const u16 numTables = be16(head + 4);
     std::vector<u8> dir(static_cast<usize>(numTables) * 16);
     if (!read_at(f, base + 12, dir.data(), dir.size())) { std::fclose(f); return false; }
-    u32 nameOff = 0, nameLen = 0, os2Off = 0, os2Len = 0, headOff = 0;
+    u32 nameOff = 0, nameLen = 0, os2Off = 0, os2Len = 0, headOff = 0, postOff = 0, postLen = 0, cmapOff = 0, cmapLen = 0;
     for (u16 i = 0; i < numTables; ++i) {
         const u8* r = &dir[i * 16u];
         const u32 t = be32(r), o = be32(r + 8), l = be32(r + 12);
         if (t == 0x6E616D65u) { nameOff = o; nameLen = l; }        // name
         else if (t == 0x4F532F32u) { os2Off = o; os2Len = l; }     // OS/2
         else if (t == 0x68656164u) { headOff = o; }                // head
+        else if (t == 0x706F7374u) { postOff = o; postLen = l; }   // post (Omega conteúdo)
+        else if (t == 0x636D6170u) { cmapOff = o; cmapLen = l; }   // cmap (Omega conteúdo)
     }
     std::string fam1, fam16, sub2, sub17;
     if (nameOff && nameLen >= 6 && nameLen < (1u << 20)) {
@@ -103,12 +207,22 @@ bool read_font_info(const std::string& path, FontEntry& out) {
     out.style = !sub17.empty() ? sub17 : (!sub2.empty() ? sub2 : "Regular");
     out.weight = 400;
     out.italic = false;
+    // Omega conteúdo (área 06): classe IBM, PANOSE e faixas Unicode (OS/2),
+    // passo fixo (post) e, sem faixas, o cmap.
+    i32 familyClass = 0;
+    u8 panose[10]{};
+    u32 ranges[4]{};
+    bool haveRanges = false;
     if (os2Off && os2Len >= 64) {
         u8 os2[64];
         if (read_at(f, os2Off, os2, 64)) {
             const u16 w = be16(os2 + 4);
             if (w >= 1 && w <= 1000) out.weight = w < 100 ? static_cast<u16>(w * 100) : w;
             out.italic = (be16(os2 + 62) & 1u) != 0;
+            familyClass = static_cast<i32>(os2[30]);   // byte alto de sFamilyClass
+            std::memcpy(panose, os2 + 32, 10);
+            for (int k = 0; k < 4; ++k) ranges[k] = be32(os2 + 42 + 4 * k);
+            haveRanges = (ranges[0] | ranges[1] | ranges[2] | ranges[3]) != 0;
         }
     } else if (headOff) {
         u8 hd[46];
@@ -118,8 +232,21 @@ bool read_font_info(const std::string& path, FontEntry& out) {
             out.italic = (mac & 2u) != 0;
         }
     }
+    bool fixedPitch = false;
+    if (postOff && postLen >= 16) {
+        u8 post[16];
+        if (read_at(f, postOff, post, 16)) fixedPitch = be32(post + 12) != 0;
+    }
+    if (haveRanges) {
+        out.scripts = scripts_from_ranges(ranges);
+    } else if (cmapOff && cmapLen >= 4 && cmapLen <= (16u << 20)) {
+        std::vector<u8> cmap(cmapLen);
+        if (read_at(f, cmapOff, cmap.data(), cmap.size())) out.scripts = scripts_from_cmap(cmap);
+    }
     std::fclose(f);
     if (out.family.empty()) out.family = std::filesystem::path(path).stem().string();
+    out.category = font_category(familyClass, panose, fixedPitch, out.family);
+    if (out.scripts == 0) out.scripts = kScriptLatin;
     out.path = path;
     out.id = hash_path(path);
     return true;
@@ -214,6 +341,22 @@ const FontEntry* FontManager::add_file(const std::string& path, bool imported) {
     }
     entries_.push_back(std::move(e));
     return &entries_.back();
+}
+
+bool FontManager::remove_imported(const std::string& path) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = std::find_if(entries_.begin(), entries_.end(), [&](const FontEntry& e) { return e.path == path; });
+    if (it == entries_.end() || !it->imported) return false;
+    entries_.erase(it);
+    cache_.erase(path);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    return true;
+}
+
+std::string FontManager::resolve(const std::string& stored) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return resolver_ ? resolver_(stored) : stored;
 }
 
 std::shared_ptr<const Font> FontManager::load(const std::string& path) {

@@ -237,6 +237,7 @@ set(AUREA_CORE_SOURCES
     src/vector/Clipper.cpp
     src/vector/Svg.cpp
     src/vector/VectorDocument.cpp
+    src/vector/PathEdit.cpp
     src/engine/EngineVector.cpp
     src/engine/EngineRig.cpp
     src/engine/EngineMeshWarp.cpp
@@ -244,6 +245,13 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineShape3D.cpp
     src/engine/EngineRigPose.cpp
     src/engine/EngineMedia.cpp
+    src/engine/EngineOmegaTimeline.cpp
+    src/engine/EngineOmegaLayer.cpp
+    src/engine/EngineOmegaEffects.cpp
+    src/engine/EngineOmegaContent.cpp
+    src/engine/EngineOmegaAdd.cpp
+    src/engine/EngineOmegaAppearance.cpp
+    src/engine/EngineOmegaChrome.cpp
     src/engine/EngineImageSequence.cpp
     src/engine/EngineProxy.cpp
     src/engine/EngineLayerAnim.cpp
@@ -387,6 +395,13 @@ set(AUREA_IMPORT_BOUNDARIES
     src/audio/AudioBlockCache.cpp
     src/engine/Engine.cpp
     src/engine/EngineMedia.cpp
+    src/engine/EngineOmegaTimeline.cpp
+    src/engine/EngineOmegaLayer.cpp
+    src/engine/EngineOmegaEffects.cpp
+    src/engine/EngineOmegaContent.cpp
+    src/engine/EngineOmegaAdd.cpp
+    src/engine/EngineOmegaAppearance.cpp
+    src/engine/EngineOmegaChrome.cpp
     src/engine/EngineImageSequence.cpp
     src/media/ImageSequence.cpp
     src/engine/EnginePsd.cpp

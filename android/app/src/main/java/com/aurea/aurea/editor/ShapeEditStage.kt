@@ -128,7 +128,13 @@ internal suspend fun AwaitPointerEventScope.shapeEditGesture(store: EditorStore,
     val vy = (c[7] - c[1]) / lenV
     val ku = lenU / w0            // px da composição por px da forma
     val kv = lenV / h0
-    val linked = ShapeEditState.linked
+    // Omega conteúdo (área 06, P0-6/P1-9): as chaves da barra da seção (salvas no
+    // aparelho); a conta da borda/centro e da proporção é do motor.
+    val keepRatio = ContentPrefs.lockAspect
+    val fromCenter = ContentPrefs.fromCenter
+    var lastU = 0f
+    var lastV = 0f
+    var sent = false
     ShapeEditStage.grabbed = handle
     store.beginGesture(if (handle == 8) "raio da forma" else "tamanho da forma")
     down.consume()
@@ -147,27 +153,11 @@ internal suspend fun AwaitPointerEventScope.shapeEditGesture(store: EditorStore,
                 store.setShapeParam(1, r)
                 continue
             }
-            val sx = SIGN_X[handle]
-            val sy = SIGN_Y[handle]
-            // Em volta do centro: cada lado anda o que o dedo andou, o oposto espelha.
-            var w = if (sx != 0) w0 + 2f * sx * du else w0
-            var h = if (sy != 0) h0 + 2f * sy * dv else h0
-            if (linked) {
-                val kx = w / w0
-                val ky = h / h0
-                val k = when {
-                    sx == 0 -> ky
-                    sy == 0 -> kx
-                    abs(kx - 1f) >= abs(ky - 1f) -> kx
-                    else -> ky
-                }
-                w = w0 * k
-                h = h0 * k
-            }
-            w = w.coerceIn(1f, 16384f)
-            h = h.coerceIn(1f, 16384f)
-            if (sx != 0 || linked) store.setShapeParam(5, w)
-            if (sy != 0 || linked) store.setShapeParam(6, h)
+            // O passo desde o último envio (px da forma, eixos da camada).
+            store.resizeShapeHandle(handle, du - lastU, dv - lastV, keepRatio, fromCenter, continuing = sent)
+            lastU = du
+            lastV = dv
+            sent = true
         }
     } finally {
         ShapeEditStage.grabbed = -1

@@ -5,7 +5,16 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** O que o dedo pegou. */
-internal enum class HitKind { NONE, RULER, HEADER_EYE, HEADER, KEYFRAME, TRIM_START, TRIM_END, ARROW_PREV, ARROW_NEXT, CAP_BACK, BODY }
+internal enum class HitKind {
+    NONE, RULER, HEADER_EYE, HEADER, KEYFRAME, TRIM_START, TRIM_END, ARROW_PREV, ARROW_NEXT, CAP_BACK, BODY,
+    /** Omega (área 03, P1-3): a zona de 100 × 38 dp do tempo atual, por cima da régua. */
+    CURRENT_TIME,
+}
+
+/** Omega (área 03, P1-3): o dedo está na zona do tempo atual (centrada no cabeçote)? */
+internal fun omegaCurrentTimeHit(m: TimelineMetrics, x: Float, y: Float, centerX: Float): Boolean =
+    m.referenceTrial && y >= m.omegaTimeTouchTop && y <= m.omegaTimeTouchBottom &&
+        kotlin.math.abs(x - centerX) <= m.omegaTimeTouchHalf
 
 /**
  * Hit-test de UMA linha, com a mesma geometria do pintor. Prioridade (spec

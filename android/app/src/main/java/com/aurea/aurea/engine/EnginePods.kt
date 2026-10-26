@@ -621,9 +621,19 @@ data class LayerEffect(
     val paramCount: Int,
     val name: String,
     val known: Boolean,
+    /** Omega aparência: 0 efeito comum; 2 borda, 3 sombra (decorações de Borda e sombra, fora da lista de Efeitos). */
+    val role: Int = 0,
 ) {
+    /** Decoração de Borda e sombra (não aparece na lista de Efeitos). */
+    val isDecoration: Boolean get() = role != 0
+
     companion object {
         const val ROW_BYTES = 32
+        // Omega aparência: `bridge::LayerEffectRow::role` (EffectInstance::role).
+        const val ROLE_NONE = 0
+        const val ROLE_STROKE = 1
+        const val ROLE_BORDER = 2
+        const val ROLE_SHADOW = 3
 
         internal fun read(rows: ByteBuffer, index: Int, blob: ByteBuffer): LayerEffect {
             val b = index * ROW_BYTES
@@ -634,6 +644,7 @@ data class LayerEffect(
                 paramCount = rows.getInt(b + 12),
                 name = blob.utf8(rows.getInt(b + 16), rows.getInt(b + 20)),
                 known = rows.getInt(b + 24) != 0,
+                role = rows.getInt(b + 28),
             )
         }
     }
@@ -698,20 +709,40 @@ class EffectParam(
     val sectionToggle: Int = -1,
     val sectionOpen: Boolean = true,
     val tip: String = "",
+    // Omega efeitos (área 07, P0-1): apresentação resolvida pelo motor (+136..+159).
+    /** [ParamControl] (0 = sem controle numérico: Bool, escolha, cor...). */
+    val control: Int = ParamControl.AUTO,
+    /** Valor por risco da régua, na unidade do motor (0 = sem régua). */
+    val step: Float = 0f,
+    /** Origem do preenchimento do slider, na unidade do motor. */
+    val origin: Float = 0f,
+    /** [ParamControl.ENUM_SEGMENTED] / [ParamControl.ENUM_DROPDOWN] (0 = não é escolha). */
+    val enumStyle: Int = 0,
+    /** Bits [ROW_ENABLED] e [ROW_HUE_DISC]. Linha antiga: habilitada. */
+    val rowFlags: Int = ROW_ENABLED,
 ) {
     val hidden: Boolean get() = (flags and ParamType.FLAG_HIDDEN) != 0
+    /** Editável agora (habilitação cruzada e interruptor da seção, regra do motor). */
+    val enabled: Boolean get() = (rowFlags and ROW_ENABLED) != 0
 
     override fun equals(other: Any?): Boolean =
         other is EffectParam && index == other.index && type == other.type &&
             value.contentEquals(other.value) && label == other.label && animated == other.animated &&
-            section == other.section && sectionOpen == other.sectionOpen && tip == other.tip
+            section == other.section && sectionOpen == other.sectionOpen && tip == other.tip &&
+            rowFlags == other.rowFlags && control == other.control
 
     override fun hashCode(): Int = 31 * (31 * index + type) + value.contentHashCode()
 
     companion object {
-        const val ROW_BYTES = 136
+        /** 160 bytes desde a Omega (era 136): a apresentação entrou no fim. */
+        const val ROW_BYTES = 160
         /** `bridge::kEffectSectionOpen` (EffectParamRow::sectionFlags). */
         const val SECTION_OPEN = 1
+        /** `bridge::kEffectRowEnabled` / `kEffectRowHueDisc` (EffectParamRow::rowFlags). */
+        const val ROW_ENABLED = 1
+        const val ROW_HUE_DISC = 2
+        /** `bridge::kEffectRowStepDeclared`: o efeito declarou o passo (casas pelo passo). */
+        const val ROW_STEP_DECLARED = 4
 
         internal fun read(rows: ByteBuffer, i: Int, blob: ByteBuffer): EffectParam {
             val b = i * ROW_BYTES
@@ -741,9 +772,31 @@ class EffectParam(
                 sectionId = blob.utf8(rows.getInt(b + 112), rows.getInt(b + 116)),
                 sectionLabel = blob.utf8(rows.getInt(b + 120), rows.getInt(b + 124)),
                 tip = blob.utf8(rows.getInt(b + 128), rows.getInt(b + 132)),
+                control = rows.getInt(b + 136),
+                step = rows.getFloat(b + 140).let { if (it.isFinite() && it > 0f) it else 0f },
+                origin = rows.getFloat(b + 144).let { if (it.isFinite()) it else 0f },
+                enumStyle = rows.getInt(b + 148),
+                rowFlags = rows.getInt(b + 152),
             )
         }
     }
+}
+
+/**
+ * Omega efeitos (área 07, P0-1): espelho de `aurea::ParamControl` e `EnumStyle`
+ * (`EffectParamRow::control` / `enumStyle`). Mesmos números no iOS (`FxParamControl`).
+ */
+object ParamControl {
+    const val AUTO = 0
+    const val SLIDER = 1
+    const val RULER = 2
+    const val POINT = 3
+    const val XYZ = 4
+    const val ORIENTATION = 5
+    const val HUE_DISC = 6
+
+    const val ENUM_SEGMENTED = 1
+    const val ENUM_DROPDOWN = 2
 }
 
 // =============================================================================

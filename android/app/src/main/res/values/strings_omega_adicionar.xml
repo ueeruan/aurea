@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega, área 08: painel de adicionar, navegadores de mídia e de áudio, página Exportar e compartilhar. -->
+    <!-- Painel de adicionar -->
+    <string name="om_add_view_all">Ver tudo</string>
+    <string name="om_add_shape_page">Página %1$d de %2$d</string>
+    <string name="om_add_camera">Câmera</string>
+    <string name="om_add_empty_group">Grupo vazio</string>
+    <string name="om_add_element_project">Elemento / Projeto</string>
+    <string name="om_add_back">Voltar</string>
+    <string name="om_add_project_self">Não dá para inserir o projeto nele mesmo.</string>
+    <string name="om_add_project_none">Nenhum outro projeto ainda.</string>
+    <string name="om_add_project_failed">Não foi possível inserir o projeto: %1$s</string>
+    <string name="om_add_project_named">Inserir %1$s</string>
+    <string name="om_add_discover_presets">Descobrir mais presets</string>
+    <string name="om_badge_new">NOVO</string>
+    <!-- Mídia -->
+    <string name="om_media_all_albums">Tudo</string>
+    <string name="om_media_albums">Álbuns</string>
+    <string name="om_media_recent">Usado recentemente</string>
+    <string name="om_media_back_to_start">Voltar ao início</string>
+    <string name="om_media_photo_named">Foto %1$s</string>
+    <string name="om_media_video_named">Vídeo %1$s, %2$s</string>
+    <plurals name="om_media_selected">
+        <item quantity="one">%1$d selecionado</item>
+        <item quantity="other">%1$d selecionados</item>
+    </plurals>
+    <string name="om_media_add_same_start">Adicionar no mesmo início</string>
+    <string name="om_media_add_sequence">Adicionar em sequência</string>
+    <string name="om_media_image_duration">Duração da imagem</string>
+    <string name="om_media_duration_own">Duração própria desta imagem</string>
+    <string name="om_media_duration_shared">Mesma duração para todas</string>
+    <string name="om_media_trim">Cortar antes de adicionar</string>
+    <string name="om_media_trim_start">Início do corte</string>
+    <string name="om_media_trim_end">Fim do corte</string>
+    <string name="om_media_trimmed">Vídeo cortado</string>
+    <string name="om_media_partial">Você deu acesso a algumas fotos e vídeos</string>
+    <string name="om_media_manage">Gerenciar</string>
+    <string name="om_media_change_album_tip">Toque aqui para trocar de álbum</string>
+    <string name="om_media_select_multiple">Selecionar várias</string>
+    <string name="om_media_add">Adicionar</string>
+    <string name="om_media_show_preview">Mostrar a prévia</string>
+    <!-- Áudio -->
+    <string name="om_audio_title">Áudio</string>
+    <string name="om_audio_songs">Músicas</string>
+    <string name="om_audio_albums">Álbuns</string>
+    <string name="om_audio_artists">Artistas</string>
+    <string name="om_audio_genres">Gêneros</string>
+    <string name="om_audio_device_files">Arquivos do aparelho…</string>
+    <string name="om_audio_unknown">Desconhecido</string>
+    <string name="om_audio_unsupported">Este formato de áudio não é suportado pelo aparelho.</string>
+    <string name="om_audio_unreadable">Não foi possível ler a mídia.</string>
+    <string name="om_audio_empty">Os áudios que você usar aparecem aqui.</string>
+    <string name="om_audio_add_named">Adicionar %1$s</string>
+    <string name="om_audio_preview_named">Ouvir %1$s</string>
+    <string name="om_audio_stop_named">Parar %1$s</string>
+    <plurals name="om_audio_count">
+        <item quantity="one">%1$d áudio</item>
+        <item quantity="other">%1$d áudios</item>
+    </plurals>
+    <!-- Exportar e compartilhar -->
+    <string name="om_exp_title">Exportar e compartilhar</string>
+    <string name="om_exp_space">Espaço disponível</string>
+    <string name="om_exp_size">Tamanho do arquivo (estimativa)</string>
+    <string name="om_exp_package_size">Tamanho do pacote (estimativa)</string>
+    <string name="om_exp_go">Exportar</string>
+    <string name="om_exp_opt_video">Vídeo</string>
+    <string name="om_exp_opt_package">Arquivo do projeto</string>
+    <string name="om_exp_opt_frame">Quadro atual como PNG</string>
+    <string name="om_exp_opt_sequence">Sequência de imagens</string>
+    <string name="om_exp_opt_gif">GIF</string>
+    <string name="om_exp_note_video">MP4, H.264 ou HEVC</string>
+    <string name="om_exp_note_package">.aureaproj, para abrir em outro aparelho</string>
+    <string name="om_exp_note_frame">Uma imagem do quadro no cabeçote</string>
+    <string name="om_exp_note_sequence">PNG numerados num .zip</string>
+    <string name="om_exp_note_gif">Animação curta, sem som</string>
+    <string name="om_exp_settings_named">Ajustes: %1$s</string>
+    <string name="om_exp_info_named">Sobre: %1$s</string>
+    <string name="om_exp_resolution">Resolução para exportação</string>
+    <string name="om_exp_fps_low">Baixo</string>
+    <string name="om_exp_fps_reduced">Reduzido</string>
+    <string name="om_exp_fps_full">Cheio</string>
+    <string name="om_exp_fps_more">Mais…</string>
+    <string name="om_exp_fps_value">%1$s fps</string>
+    <string name="om_exp_quality_low">Baixa</string>
+    <string name="om_exp_quality_high">Alta</string>
+    <string name="om_exp_quality_value">%1$d%%</string>
+    <string name="om_exp_background">Fundo</string>
+    <string name="om_exp_background_open">Mudar o fundo nos ajustes do projeto</string>
+    <string name="om_exp_package_info">Um arquivo .aureaproj com o projeto e, se quiser, a mídia, para abrir em outro aparelho.</string>
+    <string name="om_exp_package_images">Imagens</string>
+    <string name="om_exp_package_videos">Vídeos</string>
+    <string name="om_exp_package_audio">Áudio</string>
+    <string name="om_exp_save">Salvar</string>
+    <string name="om_exp_saved_gallery">Salvo na galeria</string>
+    <string name="om_exp_saved_photos">Salvo em Fotos</string>
+    <string name="om_exp_save_as">Salvar em…</string>
+    <string name="om_exp_close">Fechar</string>
+    <string name="om_exp_seek">Posição do vídeo</string>
+    <string name="om_exp_empty_project">O projeto está vazio. Adicione algo antes de exportar.</string>
+    <string name="om_exp_too_short">O projeto é curto demais para exportar.</string>
+    <string name="om_exp_gif_heavy">Este GIF passa de %1$d quadros: o arquivo fica pesado e alguns apps não abrem.</string>
+    <string name="om_exp_anyway">Exportar mesmo assim</string>
+    <string name="om_exp_eta_less">Falta menos de 1 minuto</string>
+    <plurals name="om_exp_eta_minutes">
+        <item quantity="one">Falta %1$d minuto</item>
+        <item quantity="other">Faltam %1$d minutos</item>
+    </plurals>
+    <string name="om_exp_sequence_first">Primeira imagem de %1$d</string>
+</resources>

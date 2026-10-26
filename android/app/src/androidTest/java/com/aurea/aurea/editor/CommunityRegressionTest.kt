@@ -50,25 +50,28 @@ class CommunityRegressionTest {
         bitmap.recycle()
     }
 
-    @Test fun markerButtonAndArrowsNavigateExactMarkersInsteadOfProjectEdges() {
+    // Omega chrome (área 02, P2-3): as setas do transporte param em CADA
+    // marcador, em ordem, e também no começo e no último quadro (a referência);
+    // não há mais toque longo. Marcar é pelo relógio da timeline (área 03).
+    @Test fun transportArrowsStopAtEveryMarkerAndAtTheProjectEdges() {
         launch()
         for (frame in listOf(10, 40, 90)) {
             seek(frame)
-            compose.onNodeWithTag("transport.marker").performClick()
+            compose.runOnIdle { store.toggleMarker() }
             compose.waitUntil(5000) { frame in store.markers.frames }
         }
+        compose.runOnIdle { store.clearSelection() }
         seek(19)
         compose.onNodeWithTag("transport.next").performClick()
         compose.waitUntil(5000) { store.playhead == 40 }
         compose.onNodeWithTag("transport.previous").performClick()
         compose.waitUntil(5000) { store.playhead == 10 }
         compose.onNodeWithTag("transport.previous").performClick()
-        compose.waitForIdle(); assertEquals(10, store.playhead)
-        seek(90)
-        compose.onNodeWithTag("transport.next").performClick()
-        compose.waitForIdle(); assertEquals(90, store.playhead)
-        compose.onNodeWithTag("transport.previous").performTouchInput { longClick() }
         compose.waitUntil(5000) { store.playhead == 0 }
+        seek(90)
+        val last = store.project.durationFrames - 1
+        compose.onNodeWithTag("transport.next").performClick()
+        compose.waitUntil(5000) { store.playhead == last }
         capture("markers")
     }
 
@@ -117,7 +120,7 @@ class CommunityRegressionTest {
         assertEquals(abs(fit[0]), abs(fit[1]), .00001f)
         assertEquals("relative depth stays unchanged", 1f, fit[2], .00001f)
         assertEquals("effective depth follows width", abs(fit[0]), abs(fit[0] * fit[2]), .00001f)
-        compose.onNodeWithTag("dock.tool.Move").performScrollTo().performClick()
+        compose.onNodeWithTag("layer.panel.moveTransform").performClick()
         compose.onNodeWithContentDescription(context.getString(R.string.panel_escala)).performClick()
         for (auto in listOf(false, true)) {
             compose.runOnIdle { store.autoKeyTransforms = auto; store.setScale3(floatArrayOf(.05f, .1f, .15f)); store.scaleAxesLinked = true }
@@ -181,7 +184,7 @@ class CommunityRegressionTest {
             launch()
             compose.runOnIdle { store.importVideo(android.net.Uri.fromFile(video)) }
             compose.waitUntil(20000) { store.detail?.kind == 1 }
-            compose.onNodeWithTag("dock.tool.Move").performScrollTo().performClick()
+            compose.onNodeWithTag("layer.panel.moveTransform").performClick()
             compose.onNodeWithContentDescription(context.getString(R.string.panel_escala)).performClick()
             for (auto in listOf(false, true)) for (axis in listOf("x", "y")) {
                 compose.runOnIdle { store.autoKeyTransforms = auto; store.setScale3(floatArrayOf(.05f, .1f, 1f)); store.scaleAxesLinked = true }
@@ -199,7 +202,8 @@ class CommunityRegressionTest {
         } finally { video.delete() }
     }
 
-    @Test fun embeddedGalleryOrdersNewestFirstSwitchesTypesAndImportsBoth() {
+    // Omega adicionar (área 08, P0-3): a faixa rápida mistura fotos e vídeos (ids add.media.*).
+    @Test fun embeddedMediaStripMixesTypesNewestFirstAndImportsBoth() {
         for (permission in listOf("READ_MEDIA_IMAGES", "READ_MEDIA_VIDEO")) {
             instrumentation.uiAutomation.executeShellCommand("pm grant ${context.packageName} android.permission.$permission").close()
         }
@@ -229,26 +233,24 @@ class CommunityRegressionTest {
             val now = System.currentTimeMillis() / 1000
             insert("$prefix-old.png", false, now - 60)
             insert("$prefix-new.png", false, now)
-            insert("$prefix-video.mp4", true, now)
+            insert("$prefix-video.mp4", true, now - 30)
+            // O álbum guardado de outra execução não pode esconder os itens do teste.
+            OmegaMediaPrefs.setBucket(context, 0L, "")
             launch()
             compose.onNodeWithTag("addBar.Media").performClick()
-            compose.waitUntil(10000) { compose.onAllNodesWithTag("gallery.item.$prefix-new.png").fetchSemanticsNodes().isNotEmpty() }
-            val ordered = galleryItems(context, false).filter { it.name.startsWith(prefix) }
-            assertEquals(listOf("$prefix-new.png", "$prefix-old.png"), ordered.map { it.name })
-            compose.onNodeWithTag("gallery.videos").performClick()
-            compose.waitUntil(10000) { compose.onAllNodesWithTag("gallery.item.$prefix-video.mp4").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("gallery.item.$prefix-new.png").assertDoesNotExist()
-            compose.onNodeWithTag("gallery.photos").performClick()
-            compose.waitUntil(10000) { compose.onAllNodesWithTag("gallery.item.$prefix-new.png").fetchSemanticsNodes().isNotEmpty() }
-            capture("gallery-photos")
-            compose.onNodeWithTag("gallery.item.$prefix-new.png").performClick()
+            compose.waitUntil(10000) { compose.onAllNodesWithTag("add.media.item.$prefix-new.png").fetchSemanticsNodes().isNotEmpty() }
+            // Fotos e vídeos juntos, do mais novo para o mais antigo.
+            val ordered = mediaItems(context).filter { it.name.startsWith(prefix) }
+            assertEquals(listOf("$prefix-new.png", "$prefix-video.mp4", "$prefix-old.png"), ordered.map { it.name })
+            compose.onNodeWithTag("add.media.viewAll").assertExists()
+            compose.onNodeWithTag("add.media.album").assertExists()
+            capture("media-strip")
+            compose.onNodeWithTag("add.media.item.$prefix-new.png").performClick()
             compose.waitUntil(15000) { store.layers.any { it.kind == 2 } }
             compose.runOnIdle { store.clearSelection() }
             compose.onNodeWithTag("addBar.Media").performClick()
-            compose.onNodeWithTag("gallery.videos").performClick()
-            compose.waitUntil(10000) { compose.onAllNodesWithTag("gallery.item.$prefix-video.mp4").fetchSemanticsNodes().isNotEmpty() }
-            capture("gallery-videos")
-            compose.onNodeWithTag("gallery.item.$prefix-video.mp4").performClick()
+            compose.waitUntil(10000) { compose.onAllNodesWithTag("add.media.item.$prefix-video.mp4").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("add.media.item.$prefix-video.mp4").performClick()
             compose.waitUntil(20000) { store.layers.any { it.kind == 1 } }
             assertEquals(2, store.layers.size)
         } finally { created.forEach { resolver.delete(it, null, null) } }

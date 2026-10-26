@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega painel (área 04): painel da camada, velocidade, volume, curva e presets. -->
+    <string name="om_lp_border_shadow">الحد والظل</string>
+    <string name="om_lp_move_transform">التحريك والتحويل</string>
+    <string name="om_lp_edit_points">تعديل النقاط</string>
+    <string name="om_lp_edit_drawing">تعديل الرسم</string>
+    <string name="om_lp_edit_group">تعديل المجموعة</string>
+    <string name="om_lp_camera_options">خيارات الكاميرا</string>
+    <string name="om_lp_light_options">خيارات الإضاءة</string>
+    <string name="om_lp_edit_particles">تعديل الجسيمات</string>
+    <string name="om_lp_audio">مستوى الصوت والصوت</string>
+    <string name="om_lp_opens_panel">يفتح اللوحة</string>
+    <string name="om_lp_move_start_to_playhead">نقل الطبقة لتبدأ عند مؤشر التشغيل</string>
+    <string name="om_lp_move_end_to_playhead">نقل الطبقة لتنتهي عند مؤشر التشغيل</string>
+    <string name="om_lp_retime_extend_start">مدّ البداية حتى مؤشر التشغيل (يغيّر السرعة)</string>
+    <string name="om_lp_retime_shorten_start">تقصير البداية حتى مؤشر التشغيل (يغيّر السرعة)</string>
+    <string name="om_lp_retime_shorten_end">تقصير النهاية حتى مؤشر التشغيل (يغيّر السرعة)</string>
+    <string name="om_lp_retime_extend_end">مدّ النهاية حتى مؤشر التشغيل (يغيّر السرعة)</string>
+    <string name="om_lp_speed_slower">أبطأ</string>
+    <string name="om_lp_speed_faster">أسرع</string>
+    <string name="om_lp_speed_close">إغلاق السرعة</string>
+    <string name="om_lp_speed_tab_curve">منحنى الوقت</string>
+    <string name="om_lp_speed_tab_options">خيارات</string>
+    <string name="om_lp_speed_constant_hint">تتبع حركة الطبقة السرعة وتتغير المدة معها.</string>
+    <string name="om_lp_speed_keyed">تحتوي هذه الطبقة على سرعة متحركة أو منحنى وقت.</string>
+    <string name="om_lp_speed_remap_on">إعادة تعيين الوقت مفعّلة: اضبطها في تبويب منحنى الوقت.</string>
+    <string name="om_lp_volume_close">إغلاق مستوى الصوت</string>
+    <string name="om_lp_volume_tab_fades">التلاشي</string>
+    <string name="om_lp_missing_media_title">الوسائط غير موجودة</string>
+    <string name="om_lp_missing_media">الوسائط الأصلية لهذه الطبقة مفقودة أو نُقلت.</string>
+    <string name="om_presets_empty_title">لا توجد إعدادات مسبقة بعد</string>
+    <string name="om_presets_empty_body">احفظ خصائص الطبقة وإطاراتها المفتاحية كإعداد مسبق لاستخدامها مرة أخرى.</string>
+    <string name="om_presets_empty_browse">تصفح الإعدادات المسبقة</string>
+    <string name="om_curve_cat_curves">المنحنيات</string>
+    <string name="om_curve_cat_bounces">الارتدادات والتموجات</string>
+    <string name="om_curve_cat_steps">الدرجات</string>
+    <string name="om_curve_reverse">عكس المنحنى</string>
+    <string name="om_curve_paste_all">لصق المنحنى في كل الإطارات المفتاحية</string>
+    <string name="om_curve_overshoot_on">السماح بالتجاوز</string>
+    <string name="om_curve_overshoot_off">تعطيل التجاوز</string>
+    <string name="om_curve_prev">المقطع السابق</string>
+    <string name="om_curve_next">المقطع التالي</string>
+    <string name="om_curve_no_segment">انقل مؤشر التشغيل بين إطارين مفتاحيين</string>
+    <string name="om_curve_saved">المنحنيات المحفوظة</string>
+</resources>

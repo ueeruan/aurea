@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor.panels
 
+import com.aurea.aurea.editor.ContentSectionTrailing
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -78,7 +79,13 @@ import kotlin.math.sin
  * alças de canto e as linhas de tamanho respeitam a mesma).
  */
 internal object ShapeEditState {
-    var linked by mutableStateOf(false)
+    /**
+     * Omega conteúdo (área 06, P0-6): a proporção travada mora na barra da seção
+     * e fica salva no aparelho (`aurea.shape.lockAspect`, ContentPrefs).
+     */
+    var linked: Boolean
+        get() = com.aurea.aurea.editor.ContentPrefs.lockAspect
+        set(value) = com.aurea.aurea.editor.ContentPrefs.setLockAspect(value)
     /** Parâmetro que o losango do trilho grava (5 = largura, 6 = altura, 1 = raio…). */
     var param by mutableIntStateOf(5)
 }
@@ -147,6 +154,10 @@ internal fun shapeName(type: Int): String = stringResource(when (type) {
 @Composable
 internal fun ShapeEditPanel(env: PanelEnv) {
     val store = env.store
+    // Omega conteúdo: as chaves de proporção e de centro (salvas no aparelho).
+    val prefsContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) { com.aurea.aurea.editor.ContentPrefs.load(prefsContext) }
+    PublishBarActions(null) { ContentSectionTrailing(store, EditorPanel.ShapeEdit) }
     val d by remember(store) { derivedStateOf { store.detail } }
     val detail = d ?: return
     if (detail.kind != com.aurea.aurea.ui.theme.LayerType.Shape.kind) {
@@ -287,8 +298,6 @@ private fun ShapeSwitcher(store: EditorStore, type: Int) {
     }
     val prevLabel = stringResource(R.string.panel_forma_anterior)
     val nextLabel = stringResource(R.string.panel_proxima_forma)
-    val keepRatioLabel = stringResource(R.string.panel_manter_proporcao)
-    val freeRatioLabel = stringResource(R.string.panel_soltar_proporcao)
     Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier.size(44.dp).semantics { contentDescription = prevLabel }.tocavel(shrink = 1f) { go(-1) },
@@ -306,19 +315,8 @@ private fun ShapeSwitcher(store: EditorStore, type: Int) {
         ) { CupertinoIcon(CupertinoGlyph.ChevronRight, 18.dp, AureaColors.Text) }
         Spacer(Modifier.width(6.dp))
         Text(shapeName(type), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W700)))
-        val linked = ShapeEditState.linked
-        Box(
-            Modifier
-                .size(44.dp, 36.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(if (linked) AureaColors.AccentDim else AureaColors.Chip)
-                .then(if (linked) Modifier.border(1.5.dp, AureaColors.Accent, RoundedCornerShape(8.dp)) else Modifier)
-                .semantics { contentDescription = if (linked) freeRatioLabel else keepRatioLabel }
-                .tocavel(shrink = 1f) { ShapeEditState.linked = !linked },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(if (linked) Icons.Rounded.Link else Icons.Rounded.LinkOff, contentDescription = null, tint = if (linked) AureaColors.Accent else AureaColors.Text, modifier = Modifier.size(20.dp))
-        }
+        // Omega conteúdo (área 06, P0-6): a corrente de proporção saiu daqui e foi
+        // para a barra da seção ("Manter proporção" e "A partir do centro").
     }
 }
 

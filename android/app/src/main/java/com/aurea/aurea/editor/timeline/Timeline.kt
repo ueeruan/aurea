@@ -37,6 +37,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
+import com.aurea.aurea.ui.ds.AnchoredMenu
+import com.aurea.aurea.ui.ds.MenuEntry
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
@@ -85,6 +93,8 @@ fun Timeline(
     onTrackTap: (layer: Long, property: Int, effect: Int, param: Int) -> Unit = { _, _, _, _ -> },
     onKeyframeTap: (layer: Long, key: KeyframeRow) -> Unit = { _, _ -> },
     timecodeStyle: TimecodeStyle = TimecodeStyle.Underline,
+    /** Omega (área 03, P1-8): painel Velocidade aberto — as alças do foco esticam a velocidade. */
+    speedHandles: Boolean = false,
 ) {
     val density = LocalDensity.current
     val referenceTrial = com.aurea.aurea.editor.EditorTimelineRefresh.enabled
@@ -106,12 +116,15 @@ fun Timeline(
     }
     // Escolhendo keyframes ou várias camadas, a timeline fica inteira.
     var showAllLayers by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    // Omega (P1-3): o menu ancorado na aba do tempo atual (segurar o relógio).
+    var timeMenu by remember { androidx.compose.runtime.mutableStateOf(false) }
     val shownCompact = !showAllLayers && timelineCompact(compact, compactDock, tracksOpen, store.keySelectMode || store.layerSelectMode)
 
     // Parâmetros entram depois da composição (o desenho e os gestos leem daqui).
     SideEffect {
         controller.metrics = metrics
         controller.onEmptyTap = onEmptyTap
+        controller.onTimeMenu = { timeMenu = true }
         controller.onKeyframeTap = onKeyframeTap
         controller.onTrackTap = onTrackTap
         controller.haptics = haptics
@@ -119,7 +132,15 @@ fun Timeline(
         state.compact = shownCompact
         state.compactByDock = shownCompact && !compact
         state.timecodeBox = timecodeStyle == TimecodeStyle.Box
+        state.speedHandles = speedHandles
     }
+    // Omega (P1-9): a linha que sai do foco volta com o fade de 600 ms.
+    LaunchedEffect(controller) {
+        snapshotFlow { state.compact to store.primary }
+            .collect { (isCompact, primary) -> controller.noteCompact(isCompact, primary, System.nanoTime()) }
+    }
+    // Omega (P1-3): a dica do marcador, uma vez, quando a timeline abre sem marcadores.
+    if (referenceTrial) OmegaMarkerHint(store)
     // Saiu da tela no meio de um gesto: scrub e passo de desfazer fecham em par.
     DisposableEffect(controller) { onDispose { controller.dispose() } }
     LaunchedEffect(controller) {
@@ -162,11 +183,25 @@ fun Timeline(
             Box(Modifier.fillMaxWidth().height((metrics.rulerTicks / density.density).dp)
                 .testTag("timeline.preview.buffer").semantics { contentDescription = bufferDescription })
         }
+        // Omega (P0-3, P2-4): cabeçalhos, régua e tempo atual para o leitor de tela.
+        if (referenceTrial) {
+            OmegaLayerSemantics(store)
+            OmegaRulerSemantics(store, Modifier.fillMaxWidth().height((metrics.rowsTop / density.density).dp))
+            if (shownCompact) OmegaTrimSemantics(store, speedHandles)
+            // A âncora do menu do tempo atual: a zona de 100 × 38 dp da aba (sem toque próprio).
+            Box(Modifier.align(Alignment.TopCenter).padding(top = 5.dp).size(100.dp, 38.dp)) {
+                if (timeMenu) OmegaTimeMenu(store) { timeMenu = false }
+            }
+        }
         // Irmã (não filha) da superfície de gestos: o toque num botão da barra
         // não chega à timeline embaixo dele.
         KeyActionBar(store, shownCompact, Modifier.align(if (shownCompact) Alignment.TopEnd else Alignment.BottomCenter))
-        LayerPickBar(store, Modifier.align(Alignment.BottomCenter))
-        if (store.selection.isNotEmpty() && (compact || compactDock)) {
+        // Omega (P2-5): a barra de cima da seleção (BatchTopBar) já tem o Concluir.
+        if (!referenceTrial) LayerPickBar(store, Modifier.align(Alignment.BottomCenter))
+        // Omega (P1-5/P1-7): barra de info do gesto (início, deslocamento, corte).
+        store.timelineInfo?.let { info -> OmegaInfoBar(info, Modifier.align(Alignment.TopCenter)) }
+        // Omega (P2-5): o botão "Todas/Seleção" sai (a referência não tem; o foco mostra só a camada).
+        if (!referenceTrial && store.selection.isNotEmpty() && (compact || compactDock)) {
             val filterDescription = stringResource(if (showAllLayers) R.string.timeline_selected_only else R.string.timeline_show_all)
             androidx.compose.material3.TextButton(onClick = { showAllLayers = !showAllLayers },
                 modifier = Modifier.align(Alignment.TopStart).width(84.dp).height(44.dp)
@@ -251,6 +286,224 @@ private fun KeyActionBar(store: EditorStore, compact: Boolean, modifier: Modifie
         KeyAction(stringResource(R.string.editor_concluir), "timeline.keys.done") { store.clearKeySelection() }
     }
 }
+
+// =============================================================================
+// Omega 0.3.2 (área 03)
+// =============================================================================
+
+/**
+ * Barra de informação do gesto (P1-5/P1-7): pares rótulo–valor do mover, do
+ * aparar, da alça de velocidade e do losango. Fica por cima da régua enquanto o
+ * dedo arrasta; a barra de reprodução pode ler o mesmo `store.timelineInfo`.
+ */
+@Composable
+private fun OmegaInfoBar(info: List<Pair<String, String>>, modifier: Modifier) {
+    Row(
+        modifier
+            .padding(top = 2.dp)
+            .background(AureaColors.EditorPanel, RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .testTag("timeline.info")
+            .semantics(mergeDescendants = true) {},
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        info.forEachIndexed { i, (label, value) ->
+            if (i > 0) Box(Modifier.width(10.dp))
+            Text(label, fontSize = 11.sp, maxLines = 1, color = AureaColors.Muted)
+            Box(Modifier.width(4.dp))
+            Text(value, fontSize = 12.sp, maxLines = 1, color = AureaColors.Text,
+                style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"))
+        }
+    }
+}
+
+/**
+ * Menu do tempo atual (P1-3, segurar o relógio): editar o marcador do quadro
+ * (ou criar um com nome) e excluí-lo, se houver. Os itens de introdução/final
+ * da referência não se aplicam; o quadro de capa (P2-6) ainda não existe no motor.
+ */
+@Composable
+private fun OmegaTimeMenu(store: EditorStore, onDismiss: () -> Unit) {
+    val frame = store.playhead
+    val marked = frame in store.markers.frames
+    val entries = buildList {
+        add(MenuEntry.Item(stringResource(R.string.marker_edit), glyph = CupertinoGlyph.Bookmark, tag = "timeline.currentTime.menu.edit") {
+            store.openMarkerEditor(frame)
+        })
+        if (marked) {
+            add(MenuEntry.Item(stringResource(R.string.common_delete), glyph = CupertinoGlyph.Trash, destructive = true,
+                tag = "timeline.currentTime.menu.delete") { store.deleteMarker(frame) })
+        }
+    }
+    AnchoredMenu(expanded = true, onDismiss = onDismiss, entries = entries, tag = "timeline.currentTime.menu")
+}
+
+/** A dica do marcador (P1-3), uma vez por aparelho, quando a timeline abre sem marcadores. */
+@Composable
+private fun OmegaMarkerHint(store: EditorStore) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val hint = stringResource(R.string.om_tl_marker_hint)
+    LaunchedEffect(Unit) {
+        val prefs = context.applicationContext.getSharedPreferences(OMEGA_PREFS, android.content.Context.MODE_PRIVATE)
+        if (prefs.getBoolean(OMEGA_MARKER_HINT_KEY, false)) return@LaunchedEffect
+        kotlinx.coroutines.delay(OMEGA_HINT_DELAY_MS)
+        if (store.markers.size > 0) return@LaunchedEffect
+        store.showToast(hint)
+        prefs.edit().putBoolean(OMEGA_MARKER_HINT_KEY, true).apply()
+    }
+}
+
+/**
+ * Cada cabeçalho é um elemento do leitor de tela (P0-3, mesmo id do iOS):
+ * nome, estado (visível/oculta), escolhida, e as ações mostrar/ocultar, pôr na
+ * seleção e mover para cima/baixo (quem não faz o gesto de reordenar). O olho
+ * tem o seu elemento (`.eye`).
+ */
+@Composable
+private fun OmegaLayerSemantics(store: EditorStore) {
+    val show = stringResource(R.string.editor_mostrar_camada)
+    val hide = stringResource(R.string.editor_ocultar_camada)
+    val toggleSelection = stringResource(R.string.om_tl_toggle_selection)
+    val up = stringResource(R.string.om_tl_move_up)
+    val down = stringResource(R.string.om_tl_move_down)
+    val visibleText = stringResource(R.string.om_tl_visible)
+    val hiddenText = stringResource(R.string.om_tl_hidden)
+    val layers = store.layers
+    val selection = store.selection
+    layers.forEachIndexed { index, l ->
+        val id = l.id
+        val visible = l.visible
+        val name = l.name
+        val count = layers.size
+        Box(
+            Modifier.size(1.dp).testTag("timeline.layer.$id").semantics {
+                contentDescription = name
+                stateDescription = if (visible) visibleText else hiddenText
+                selected = id in selection
+                onClick {
+                    store.select(id)
+                    true
+                }
+                customActions = buildList {
+                    add(CustomAccessibilityAction(if (visible) hide else show) { store.setLayerVisible(id, !visible); true })
+                    add(CustomAccessibilityAction(toggleSelection) {
+                        if (!store.layerSelectMode) {
+                            store.select(id, openOptions = false)
+                            store.changeLayerSelectMode(true)
+                        } else {
+                            store.toggleLayerPick(id)
+                        }
+                        true
+                    })
+                    if (index > 0) add(CustomAccessibilityAction(up) { store.reorderLayer(id, index - 1); true })
+                    if (index < count - 1) add(CustomAccessibilityAction(down) { store.reorderLayer(id, index + 1); true })
+                }
+            },
+        )
+        Box(
+            Modifier.size(1.dp).testTag("timeline.layer.$id.eye").semantics {
+                contentDescription = (if (visible) hide else show) + ": " + name
+                onClick {
+                    store.setLayerVisible(id, !visible)
+                    true
+                }
+            },
+        )
+    }
+}
+
+/**
+ * Régua e tempo atual para o leitor de tela (P2-4): a régua navega entre os
+ * marcadores; o tempo atual marca/desmarca o instante e abre as opções dele (o
+ * editor do marcador). O valor do tempo só é lido com o leitor de tela ligado
+ * (senão o relógio recomporia a cada quadro do play).
+ */
+@Composable
+private fun OmegaRulerSemantics(store: EditorStore, modifier: Modifier) {
+    val ruler = stringResource(R.string.om_tl_ruler)
+    val previous = stringResource(R.string.om_tl_prev_marker)
+    val next = stringResource(R.string.om_tl_next_marker)
+    val current = stringResource(R.string.om_tl_current_time)
+    val mark = stringResource(R.string.editor_marcar_ou_desmarcar_este_instante)
+    val options = stringResource(R.string.om_tl_time_options)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val reading = remember(context) {
+        (context.getSystemService(android.content.Context.ACCESSIBILITY_SERVICE) as? android.view.accessibility.AccessibilityManager)
+            ?.isTouchExplorationEnabled == true
+    }
+    Box(
+        modifier.testTag("timeline.ruler").semantics {
+            contentDescription = ruler
+            customActions = listOf(
+                CustomAccessibilityAction(previous) { store.seekToPreviousMarker() },
+                CustomAccessibilityAction(next) { store.seekToFollowingMarker() },
+            )
+        },
+    ) {
+        val value = if (reading) Timecode.format(store.playhead, store.project.fps) else ""
+        Box(
+            Modifier.align(Alignment.TopCenter).size(100.dp, 38.dp).testTag("timeline.currentTime").semantics {
+                contentDescription = current
+                if (value.isNotEmpty()) stateDescription = value
+                onClick(label = mark) {
+                    store.toggleMarker()
+                    true
+                }
+                customActions = listOf(CustomAccessibilityAction(options) { store.openMarkerEditor(store.playhead); true })
+            },
+        )
+    }
+}
+
+/**
+ * Alças do foco para o leitor de tela (P1-7/P1-8): aparar início e fim (ou
+ * esticar a velocidade, com o painel Velocidade) um quadro por vez, para quem
+ * não faz o gesto de segurar e arrastar.
+ */
+@Composable
+private fun OmegaTrimSemantics(store: EditorStore, speed: Boolean) {
+    val id = store.primary ?: return
+    if (store.selection.size != 1) return
+    val layer = store.layers.firstOrNull { it.id == id } ?: return
+    if (layer.locked) return
+    val name = layer.name
+    val start = layer.startFrame
+    val end = layer.endFrame
+    val earlier = stringResource(R.string.om_tl_frame_earlier)
+    val later = stringResource(R.string.om_tl_frame_later)
+    val startLabel = stringResource(if (speed) R.string.om_tl_speed_handle_a11y else R.string.om_tl_trim_start_a11y, name)
+    val endLabel = stringResource(if (speed) R.string.om_tl_speed_handle_a11y else R.string.om_tl_trim_end_a11y, name)
+    fun startTo(frame: Int) {
+        if (frame < 0 || frame >= end) return
+        if (speed) store.stretchLayerSpan(id, frame, end) else store.trimStart(id, frame)
+    }
+    fun endTo(frame: Int) {
+        if (frame <= start) return
+        if (speed) store.stretchLayerSpan(id, start, frame) else store.trimEnd(id, frame)
+    }
+    Box(
+        Modifier.size(1.dp).testTag("timeline.clip.$id.trimStart").semantics {
+            contentDescription = startLabel
+            customActions = listOf(
+                CustomAccessibilityAction(earlier) { startTo(start - 1); true },
+                CustomAccessibilityAction(later) { startTo(start + 1); true },
+            )
+        },
+    )
+    Box(
+        Modifier.size(1.dp).testTag("timeline.clip.$id.trimEnd").semantics {
+            contentDescription = endLabel
+            customActions = listOf(
+                CustomAccessibilityAction(earlier) { endTo(end - 1); true },
+                CustomAccessibilityAction(later) { endTo(end + 1); true },
+            )
+        },
+    )
+}
+
+private const val OMEGA_PREFS = "aurea.timeline"
+private const val OMEGA_MARKER_HINT_KEY = "omega_marker_hint_shown"
+private const val OMEGA_HINT_DELAY_MS = 900L
 
 /** Botão da barra: alvo de 48 dp no mínimo (texto curto no meio). */
 @Composable

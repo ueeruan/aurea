@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega aparência (área 05): mesclagem, transformar, cor e preenchimento,
+         borda e sombra, câmera e seletor de cor. Gerado por gen_strings_aparencia.py. -->
+
+    <!-- Mesclagem e opacidade (P0-1, P1-5) -->
+    <string name="om_ap_blend_darker_color">Более тёмный цвет</string>
+    <string name="om_ap_blend_lighter_color">Более светлый цвет</string>
+    <string name="om_ap_blend_linear_light">Линейный свет</string>
+    <string name="om_ap_blend_pin_light">Точечный свет</string>
+    <string name="om_ap_blend_soft_overlay">Мягкое перекрытие</string>
+    <string name="om_ap_blend_about">О наложении</string>
+    <string name="om_ap_blend_category">Категория «%1$s»</string>
+
+    <!-- Mover e transformar (P0-2) -->
+    <string name="om_ap_tf_move">Переместить</string>
+    <string name="om_ap_tf_pivot">Опорная точка</string>
+    <string name="om_ap_tf_rotate">Повернуть</string>
+    <string name="om_ap_tf_scale">Масштаб</string>
+    <string name="om_ap_tf_skew">Наклон</string>
+    <string name="om_ap_tf_move_hint">Ведите здесь, чтобы двигать слой</string>
+    <string name="om_ap_tf_depth_hint">Ведите здесь, чтобы менять глубину</string>
+    <string name="om_ap_tf_pivot_hint">Ведите здесь, чтобы двигать опорную точку</string>
+    <string name="om_ap_tf_skew_x">Наклон X</string>
+    <string name="om_ap_tf_skew_y">Наклон Y</string>
+    <string name="om_ap_tf_width">Ширина</string>
+    <string name="om_ap_tf_height">Высота</string>
+    <string name="om_ap_tf_link">Сохранять пропорции</string>
+    <string name="om_ap_tf_camera_scale">Камера: зум %1$s, угол %2$s°</string>
+    <string name="om_ap_tf_dial">Колесо поворота</string>
+    <string name="om_ap_tf_turns">Оборотов: %1$d</string>
+    <string name="om_ap_tf_reset_position">Сбросить положение</string>
+    <string name="om_ap_tf_reset_pivot">Сбросить опорную точку</string>
+    <string name="om_ap_tf_reset_rotation">Сбросить поворот</string>
+    <string name="om_ap_tf_reset_scale">Сбросить масштаб</string>
+    <string name="om_ap_tf_reset_skew">Сбросить наклон</string>
+    <string name="om_ap_tf_reset_all">Сбросить трансформацию</string>
+    <string name="om_ap_tf_snap">Прилипание к другим слоям</string>
+    <string name="om_ap_tf_accelerate">Ускорение трекпада</string>
+    <string name="om_ap_tf_nudge">Нажимайте у краёв, чтобы сдвинуть на 1 px</string>
+    <string name="om_ap_tf_motion_path">Траектория</string>
+    <string name="om_ap_tf_axis">Ось %1$s</string>
+
+    <!-- Cor e preenchimento (P0-3, P1-4) -->
+    <string name="om_ap_fill_none">Без заливки</string>
+    <string name="om_ap_fill_color">Цвет</string>
+    <string name="om_ap_fill_gradient">Градиент</string>
+    <string name="om_ap_fill_media">Медиа</string>
+    <string name="om_ap_fill_original">Исходный</string>
+    <string name="om_ap_fill_original_hint">Исходные цвета — в панели «Вектор»</string>
+    <string name="om_ap_fill_grad_linear">Линейный</string>
+    <string name="om_ap_fill_grad_radial">Радиальный</string>
+    <string name="om_ap_fill_grad_sweep">Угловой</string>
+    <string name="om_ap_fill_grad_start">Начальный цвет</string>
+    <string name="om_ap_fill_grad_end">Конечный цвет</string>
+    <string name="om_ap_fill_grad_handles">Перетаскивайте концы градиента на сцене</string>
+
+    <!-- Borda e sombra (P0-4, P1-9) -->
+    <string name="om_ap_bs_title">Обводка и тень</string>
+    <string name="om_ap_bs_stroke">Контур</string>
+    <string name="om_ap_bs_borders">Обводки</string>
+    <string name="om_ap_bs_shadow">Тень</string>
+    <string name="om_ap_bs_add_border">Добавить обводку</string>
+    <string name="om_ap_bs_border">Обводка</string>
+    <string name="om_ap_bs_border_n">Обводка %1$d</string>
+    <string name="om_ap_bs_delete_border">Удалить обводку</string>
+    <string name="om_ap_bs_reorder">Перетащите, чтобы изменить порядок</string>
+    <string name="om_ap_bs_direction">Направление</string>
+    <string name="om_ap_bs_inside">Внутри</string>
+    <string name="om_ap_bs_center">По центру</string>
+    <string name="om_ap_bs_outside">Снаружи</string>
+    <string name="om_ap_bs_color">Цвет</string>
+    <string name="om_ap_bs_size">Размер</string>
+    <string name="om_ap_bs_alpha">Альфа</string>
+    <string name="om_ap_bs_offset">Смещение</string>
+    <string name="om_ap_bs_width">Толщина контура</string>
+    <string name="om_ap_bs_px">%1$s px</string>
+    <string name="om_ap_bs_stroke_unavailable">Контур есть у фигур и текста. Для этого слоя используйте обводки.</string>
+
+    <!-- Câmera (P1-6) -->
+    <string name="om_ap_cam_title">Параметры камеры</string>
+    <string name="om_ap_cam_view">Вид</string>
+    <string name="om_ap_cam_focus">Размытие фокуса</string>
+    <string name="om_ap_cam_fog">Туман</string>
+    <string name="om_ap_cam_view_title">Вид камеры</string>
+    <string name="om_ap_cam_view_angle">Угол обзора</string>
+    <string name="om_ap_cam_zoom">Зум</string>
+    <string name="om_ap_cam_perspective">Перспектива</string>
+    <string name="om_ap_cam_parallel">Параллельная</string>
+    <string name="om_ap_cam_parallel_soon">Параллельная камера пока недоступна</string>
+    <string name="om_ap_cam_fog_soon">Туман камеры пока недоступен. Используйте туман композиции в настройках проекта.</string>
+    <string name="om_ap_cam_tip">Чтобы смотреть через камеру, включите вид камеры рядом со сценой.</string>
+    <string name="om_ap_cam_focus_on">Размытие фокуса включено</string>
+
+    <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
+    <string name="om_ap_cp_eyedropper">Пипетка</string>
+    <string name="om_ap_cp_eyedropper_hint">Ведите по сцене, чтобы выбрать цвет</string>
+    <string name="om_ap_cp_fine">Точная настройка</string>
+    <string name="om_ap_cp_full">Другие цвета</string>
+    <string name="om_ap_cp_unavailable">Прозрачный цвет здесь недоступен</string>
+    <string name="om_ap_cp_add">Сохранить в палитру</string>
+    <string name="om_ap_cp_copy_code">Скопировать код цвета</string>
+    <string name="om_ap_cp_paste_code">Вставить код цвета</string>
+    <string name="om_ap_cp_code_copied">Код цвета скопирован</string>
+    <string name="om_ap_cp_code">Код цвета %1$s</string>
+    <string name="om_ap_cp_wheel">Круг</string>
+    <string name="om_ap_cp_rgb">RGB</string>
+    <string name="om_ap_cp_done">Готово</string>
+    <string name="om_ap_cp_current">Текущий</string>
+    <string name="om_ap_cp_new">Новый</string>
+    <string name="om_ap_cp_hue">Тон</string>
+    <string name="om_ap_cp_saturation">Насыщенность</string>
+    <string name="om_ap_cp_brightness">Яркость</string>
+    <string name="om_ap_cp_alpha">Альфа</string>
+    <string name="om_ap_cp_red">Красный</string>
+    <string name="om_ap_cp_green">Зелёный</string>
+    <string name="om_ap_cp_blue">Синий</string>
+    <string name="om_ap_cp_alpha_toggle">Показать или скрыть альфу</string>
+    <string name="om_ap_cp_trash">Отпустите здесь, чтобы удалить</string>
+    <string name="om_ap_cp_swatch">Образец %1$s</string>
+    <string name="om_ap_cp_palette">Палитра</string>
+</resources>

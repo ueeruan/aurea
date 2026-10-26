@@ -43,10 +43,47 @@ inline constexpr u32 kExportAudioKbps = 192;
     }
 }
 
+// --- Omega adicionar (área 08, P1-9): qualidade em porcentagem ---------------
+// A tela da Omega usa um controle deslizante de 20 a 100 (o da referência). O
+// fator é do AUREA (a referência só dá o intervalo), linear por partes e
+// casado com as três fichas antigas: 20 → 0,6 (Baixa) · 60 → 1,0 (Normal) ·
+// 100 → 1,5 (Alta). A taxa manual do "Avançado" continua vencendo.
+inline constexpr u32 kExportQualityPercentMin = 20;
+inline constexpr u32 kExportQualityPercentMax = 100;
+inline constexpr u32 kExportQualityPercentDefault = 60;
+
+[[nodiscard]] inline f64 export_quality_factor_percent(u32 percent) noexcept {
+    const f64 q = std::clamp(static_cast<f64>(percent), static_cast<f64>(kExportQualityPercentMin),
+                             static_cast<f64>(kExportQualityPercentMax));
+    return q <= 60.0 ? 0.6 + (q - 20.0) * (0.4 / 40.0) : 1.0 + (q - 60.0) * (0.5 / 40.0);
+}
+
+/// O código de qualidade da sessão (`ExportSettings::quality`, que viaja pelas
+/// pontes e pelo checkpoint como u32): 0, 1, 2 = Baixa, Normal, Alta (as fichas
+/// antigas); 3 ou mais = porcentagem (presa em 20..100, a tela da Omega).
+[[nodiscard]] inline f64 export_quality_factor_code(u32 code) noexcept {
+    return code <= 2 ? export_quality_factor(static_cast<ExportQuality>(code)) : export_quality_factor_percent(code);
+}
+
+/// A conta da taxa automática com o fator de qualidade já resolvido.
+[[nodiscard]] inline u32 export_video_bitrate_bps_factor(u32 width, u32 height, f64 fps, ExportCodec codec,
+                                                         f64 qualityFactor, u32 customMbps = 0) noexcept;
+
 /// Taxa de vídeo recomendada (bps) para a saída `width`×`height` a `fps`.
 /// `customMbps` > 0 = o usuário escolheu à mão (respeitado, só com teto).
 [[nodiscard]] inline u32 export_video_bitrate_bps(u32 width, u32 height, f64 fps, ExportCodec codec,
                                                   ExportQuality quality, u32 customMbps = 0) noexcept {
+    return export_video_bitrate_bps_factor(width, height, fps, codec, export_quality_factor(quality), customMbps);
+}
+
+/// Omega adicionar: o mesmo, com o código de qualidade (0..2 ou porcentagem).
+[[nodiscard]] inline u32 export_video_bitrate_bps_code(u32 width, u32 height, f64 fps, ExportCodec codec,
+                                                       u32 qualityCode, u32 customMbps = 0) noexcept {
+    return export_video_bitrate_bps_factor(width, height, fps, codec, export_quality_factor_code(qualityCode), customMbps);
+}
+
+[[nodiscard]] inline u32 export_video_bitrate_bps_factor(u32 width, u32 height, f64 fps, ExportCodec codec,
+                                                         f64 qualityFactor, u32 customMbps) noexcept {
     if (customMbps > 0) {
         return static_cast<u32>(std::clamp(static_cast<f64>(customMbps) * 1.0e6, kExportMinVideoBps, kExportMaxVideoBps));
     }
@@ -65,7 +102,7 @@ inline constexpr u32 kExportAudioKbps = 192;
     f64 mbps = a.mbps * std::pow(px / a.pixels, slope);
     const f64 f = fps > 0.0 ? fps : 30.0;
     mbps *= std::pow(std::clamp(f, 1.0, 240.0) / 30.0, 0.6);
-    mbps *= export_quality_factor(quality);
+    mbps *= qualityFactor > 0.0 ? qualityFactor : 1.0;
     if (codec == ExportCodec::HEVC || codec == ExportCodec::AV1) mbps *= 0.65;
     return static_cast<u32>(std::clamp(mbps * 1.0e6, kExportMinVideoBps, kExportMaxAutoVideoBps));
 }

@@ -20,6 +20,7 @@
 #include "aurea/text/TextTransform.hpp"
 #include "aurea/timeline/LayerAnimator.hpp"
 #include "aurea/timeline/ShapeGeometry.hpp"
+#include "aurea/timeline/ShapeFill.hpp"   // Omega aparência: preenchimento animável
 #include "aurea/vector/Vector.hpp"
 #include "aurea/animation/KeyframeOptimize.hpp"
 #include "aurea/core/Log.hpp"
@@ -115,6 +116,10 @@ void freeze_last_shape_key(Layer& layer, const Track& track, FrameIndex local) n
         *field = shape::clamp_param(param, track.sample(local));
         // The retained empty track keeps the same centered source convention;
         // authored anchors (including their keys/expressions) stay unchanged.
+    } else if (f32* fill = shape_fill::static_field(layer.shape, param)) {
+        // Omega aparência: a cor/degradê do preenchimento também fica no valor da
+        // última chave que sai (não volta à cor antiga).
+        *fill = shape_fill::clamp_component(param, track.sample(local));
     }
 }
 
@@ -7479,6 +7484,13 @@ u32 Engine::paste_style(const u64* ids, u32 count) noexcept {
             d->shape.filled = s.shape.filled;
             d->shape.strokeColor = s.shape.strokeColor;
             d->shape.strokeWidth = s.shape.strokeWidth;
+            // Omega aparência: o degradê faz parte do preenchimento.
+            d->shape.fillKind = s.shape.fillKind;
+            d->shape.gradType = s.shape.gradType;
+            d->shape.gradColor0 = s.shape.gradColor0;
+            d->shape.gradColor1 = s.shape.gradColor1;
+            d->shape.gradStart = s.shape.gradStart;
+            d->shape.gradEnd = s.shape.gradEnd;
         }
         ++done;
     }
@@ -10619,6 +10631,8 @@ RenderSettings Engine::current_render_settings() noexcept {
             rs.previewDenominator = scale.denominator;
         }
     }
+    // Omega chrome (área 02): modos de visão da prévia (EngineOmegaChrome.cpp).
+    apply_omega_view_locked(rs);
     return rs;
 }
 
@@ -13285,6 +13299,7 @@ u32 Engine::query_layer_effects(u64 layerId, bridge::LayerEffectRow* out, u32 ca
         row.enabled = inst.enabled ? 1u : 0u;
         row.paramCount = static_cast<u32>(inst.params.size());
         row.known = e ? 1u : 0u;
+        row.role = inst.role;   // Omega aparência: decoração de Borda e sombra (≠ 0)
         (void)put_string(blob, blobCapacity, cursor, e ? e->info().name : "efeito indisponivel",
                          row.nameOffset, row.nameLength);
         out[written++] = row;
@@ -13399,6 +13414,10 @@ void fill_param_section(const ParameterRegistry& params, const ParamSpec& spec, 
 
 } // namespace
 
+// Omega efeitos (área 07, P0-1): apresentação da linha (+136..+159), em EngineOmegaEffects.cpp.
+void omega_fill_param_presentation(const ParameterRegistry& params, u32 index, const EffectInstance* effect,
+                                   const TrackSet* tracks, FrameIndex local, bridge::EffectParamRow& row) noexcept;
+
 u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRow* out, u32 capacity,
                                 char* blob, u32 blobCapacity) noexcept {
     if (!out) return 0;
@@ -13480,6 +13499,7 @@ u32 Engine::query_effect_params(u64 layerId, u32 effectId, bridge::EffectParamRo
         // (a UI cai no rótulo do motor), nunca o rótulo.
         (void)put_string(blob, blobCapacity, cursor, spec.id, row.idOffset, row.idLength);
         fill_param_section(*params, spec, inst->sectionsFlipped, row, blob, blobCapacity, cursor, sectionBlob);
+        omega_fill_param_presentation(*params, i, inst, &l->tracks, local, row);   // Omega efeitos (P0-1)
         const u32 comps = component_count(spec.type);
         for (u32 c = 0; c < comps; ++c) {
             const Track* t = l->tracks.find(TrackProperty::EffectParam, inst->id, param_track_key(i, c));
@@ -13541,6 +13561,7 @@ u32 Engine::query_effect_specs(u32 typeId, bridge::EffectParamRow* out, u32 capa
         }
         (void)put_string(blob, blobCapacity, cursor, spec.id, row.idOffset, row.idLength);
         fill_param_section(*params, spec, 0u, row, blob, blobCapacity, cursor, sectionBlob);
+        omega_fill_param_presentation(*params, i, nullptr, nullptr, FrameIndex{0}, row);   // Omega efeitos (P0-1)
         out[written++] = row;
     }
     return written;
@@ -14095,8 +14116,9 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
     // A taxa vem da MESMA regra que a tela Exportar mostra (BitratePolicy):
     // 1080p30 Normal ≈ 8 Mbps, 4K30 ≈ 32 Mbps; Mbps manual só com teto. No
     // modo de segurança, o bitrate continua sendo o solicitado.
-    vc.bitrateBps = export_video_bitrate_bps(ctx->outputWidth, ctx->outputHeight, ctx->fps, vc.codec,
-        static_cast<ExportQuality>(std::min<u32>(settings.quality, 2u)), settings.videoBitrateMbps);
+    // Omega adicionar (área 08, P1-9): `quality` 0..2 = fichas antigas; 20..100 = porcentagem.
+    vc.bitrateBps = export_video_bitrate_bps_code(ctx->outputWidth, ctx->outputHeight, ctx->fps, vc.codec,
+        settings.quality, settings.videoBitrateMbps);
     vc.profile = ctx->safeMode > 0 ? kExportProfileBaseline : kExportProfileDefault;
     vc.preferSoftware = ctx->safeMode >= 2;
     // CBR só quando pedido; o padrão é VBR com pico limitado no encoder.
@@ -17597,8 +17619,13 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             // 3D Shatter de verdade: a camada entra na cena 3D e as peças voam
             // no mundo (câmera, profundidade e luzes da cena) — ver Shatter3D.hpp.
             if (type == effect_type_id(effect_keys::kShatter3D) && raster_extrude::accepts(l->kind)) l->threeD = true;
-            if (cmd.effect_add.index < l->effects.size()) {
-                l->effects.insert(l->effects.begin() + cmd.effect_add.index, std::move(e));
+            // Omega aparência: as decorações (Borda e sombra) ficam sempre no
+            // fim da pilha; um efeito comum entra antes da primeira delas.
+            const u32 firstDecoration = static_cast<u32>(std::find_if(l->effects.begin(), l->effects.end(),
+                [](const EffectInstance& item) { return item.role != kEffectRoleNone; }) - l->effects.begin());
+            const u32 at = std::min(cmd.effect_add.index, firstDecoration);
+            if (at < l->effects.size()) {
+                l->effects.insert(l->effects.begin() + at, std::move(e));
             } else {
                 l->effects.push_back(std::move(e));
             }
@@ -17656,8 +17683,19 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             Layer* l = need_layer(cmd.effect_reorder.layer);
             if (!l) return Errc::NotFound;
             const u32 from = l->effect_index(cmd.effect_reorder.effect);
-            const u32 to = cmd.effect_reorder.newIndex;
+            u32 to = cmd.effect_reorder.newIndex;
             if (from == kInvalidIndex || to >= l->effects.size()) return Errc::OutOfRange;
+            {
+                // Omega aparência: cada efeito anda só dentro do grupo do seu
+                // papel (comuns antes; bordas entre si; a sombra no fim).
+                const u8 role = l->effects[from].role;
+                u32 lo = 0, hi = 0;
+                for (u32 i = 0; i < l->effects.size(); ++i) {
+                    if (l->effects[i].role < role) lo = i + 1;
+                    if (l->effects[i].role <= role) hi = i;
+                }
+                to = std::clamp(to, lo, hi);
+            }
             EffectInstance e = std::move(l->effects[from]);
             l->effects.erase(l->effects.begin() + from);
             l->effects.insert(l->effects.begin() + to, std::move(e));

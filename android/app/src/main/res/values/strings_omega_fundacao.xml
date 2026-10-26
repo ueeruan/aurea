@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega fundação: menu ancorado, diálogo claro e moldura dos painéis. -->
+    <string name="om_menu_back">Voltar</string>
+    <string name="om_field_clear">Apagar o texto</string>
+    <string name="om_panel_delete_all_keyframes_q">Apagar todos os keyframes desta propriedade?</string>
+    <string name="om_panel_keyframes_needed">Faltam keyframes</string>
+</resources>

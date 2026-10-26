@@ -108,6 +108,18 @@ bool Engine::set_vector_document(u64 layerId, const f32* data, usize count, cons
     if (!l) return false;
     VectorData d;
     if (!vector::decode_document(data, count, names, d) || d.groups.size() != l->shape.vector.groups.size()) return false;
+    // Omega conteúdo (área 06): um fluxo anterior à v3 não carrega o furo, o
+    // apagar, o perfil do pincel nem a marca de desenho — ficam os da camada.
+    if (count > 0 && data[0] < 3.0f) {
+        const VectorData& cur = l->shape.vector;
+        d.drawing = cur.drawing;
+        for (usize gi = 0; gi < d.groups.size(); ++gi) {
+            d.groups[gi].composite = cur.groups[gi].composite;
+            d.groups[gi].stroke.widthProfile = cur.groups[gi].stroke.widthProfile;
+            if (d.groups[gi].paths.size() != cur.groups[gi].paths.size()) continue;
+            for (usize pi = 0; pi < d.groups[gi].paths.size(); ++pi) d.groups[gi].paths[pi].exclude = cur.groups[gi].paths[pi].exclude;
+        }
+    }
     if (d == l->shape.vector) return true;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "camada vetorial");
     bump_model_revision_locked();

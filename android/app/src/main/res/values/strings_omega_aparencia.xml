@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega aparência (área 05): mesclagem, transformar, cor e preenchimento,
+         borda e sombra, câmera e seletor de cor. Gerado por gen_strings_aparencia.py. -->
+
+    <!-- Mesclagem e opacidade (P0-1, P1-5) -->
+    <string name="om_ap_blend_darker_color">Cor mais escura</string>
+    <string name="om_ap_blend_lighter_color">Cor mais clara</string>
+    <string name="om_ap_blend_linear_light">Luz linear</string>
+    <string name="om_ap_blend_pin_light">Luz pontual</string>
+    <string name="om_ap_blend_soft_overlay">Sobreposição suave</string>
+    <string name="om_ap_blend_about">Sobre a mesclagem</string>
+    <string name="om_ap_blend_category">Categoria %1$s</string>
+
+    <!-- Mover e transformar (P0-2) -->
+    <string name="om_ap_tf_move">Mover</string>
+    <string name="om_ap_tf_pivot">Pivô</string>
+    <string name="om_ap_tf_rotate">Girar</string>
+    <string name="om_ap_tf_scale">Escala</string>
+    <string name="om_ap_tf_skew">Inclinar</string>
+    <string name="om_ap_tf_move_hint">Deslize aqui para mover a camada</string>
+    <string name="om_ap_tf_depth_hint">Deslize aqui para ajustar a profundidade</string>
+    <string name="om_ap_tf_pivot_hint">Deslize aqui para mover o ponto de giro</string>
+    <string name="om_ap_tf_skew_x">Inclinação X</string>
+    <string name="om_ap_tf_skew_y">Inclinação Y</string>
+    <string name="om_ap_tf_width">Largura</string>
+    <string name="om_ap_tf_height">Altura</string>
+    <string name="om_ap_tf_link">Manter a proporção</string>
+    <string name="om_ap_tf_camera_scale">Câmera: zoom %1$s, ângulo %2$s°</string>
+    <string name="om_ap_tf_dial">Roda de rotação</string>
+    <string name="om_ap_tf_turns">%1$d voltas</string>
+    <string name="om_ap_tf_reset_position">Redefinir posição</string>
+    <string name="om_ap_tf_reset_pivot">Redefinir pivô</string>
+    <string name="om_ap_tf_reset_rotation">Redefinir rotação</string>
+    <string name="om_ap_tf_reset_scale">Redefinir escala</string>
+    <string name="om_ap_tf_reset_skew">Redefinir inclinação</string>
+    <string name="om_ap_tf_reset_all">Redefinir transformação</string>
+    <string name="om_ap_tf_snap">Ímã nas outras camadas</string>
+    <string name="om_ap_tf_accelerate">Acelerar o trackpad</string>
+    <string name="om_ap_tf_nudge">Toque nas bordas para mover 1 px</string>
+    <string name="om_ap_tf_motion_path">Trajetória</string>
+    <string name="om_ap_tf_axis">Eixo %1$s</string>
+
+    <!-- Cor e preenchimento (P0-3, P1-4) -->
+    <string name="om_ap_fill_none">Sem preenchimento</string>
+    <string name="om_ap_fill_color">Cor</string>
+    <string name="om_ap_fill_gradient">Degradê</string>
+    <string name="om_ap_fill_media">Mídia</string>
+    <string name="om_ap_fill_original">Original</string>
+    <string name="om_ap_fill_original_hint">As cores originais ficam no painel Vetor</string>
+    <string name="om_ap_fill_grad_linear">Linear</string>
+    <string name="om_ap_fill_grad_radial">Radial</string>
+    <string name="om_ap_fill_grad_sweep">Angular</string>
+    <string name="om_ap_fill_grad_start">Cor inicial</string>
+    <string name="om_ap_fill_grad_end">Cor final</string>
+    <string name="om_ap_fill_grad_handles">Arraste as pontas do degradê no palco</string>
+
+    <!-- Borda e sombra (P0-4, P1-9) -->
+    <string name="om_ap_bs_title">Borda e sombra</string>
+    <string name="om_ap_bs_stroke">Traço</string>
+    <string name="om_ap_bs_borders">Bordas</string>
+    <string name="om_ap_bs_shadow">Sombra</string>
+    <string name="om_ap_bs_add_border">Adicionar borda</string>
+    <string name="om_ap_bs_border">Borda</string>
+    <string name="om_ap_bs_border_n">Borda %1$d</string>
+    <string name="om_ap_bs_delete_border">Apagar borda</string>
+    <string name="om_ap_bs_reorder">Arraste para reordenar</string>
+    <string name="om_ap_bs_direction">Direção</string>
+    <string name="om_ap_bs_inside">Dentro</string>
+    <string name="om_ap_bs_center">Centro</string>
+    <string name="om_ap_bs_outside">Fora</string>
+    <string name="om_ap_bs_color">Cor</string>
+    <string name="om_ap_bs_size">Tamanho</string>
+    <string name="om_ap_bs_alpha">Alfa</string>
+    <string name="om_ap_bs_offset">Deslocamento</string>
+    <string name="om_ap_bs_width">Largura do traço</string>
+    <string name="om_ap_bs_px">%1$s px</string>
+    <string name="om_ap_bs_stroke_unavailable">O traço é da forma e do texto. Use Bordas nesta camada.</string>
+
+    <!-- Câmera (P1-6) -->
+    <string name="om_ap_cam_title">Opções da câmera</string>
+    <string name="om_ap_cam_view">Visão</string>
+    <string name="om_ap_cam_focus">Desfoque de foco</string>
+    <string name="om_ap_cam_fog">Névoa</string>
+    <string name="om_ap_cam_view_title">Visão da câmera</string>
+    <string name="om_ap_cam_view_angle">Ângulo de visão</string>
+    <string name="om_ap_cam_zoom">Zoom</string>
+    <string name="om_ap_cam_perspective">Perspectiva</string>
+    <string name="om_ap_cam_parallel">Paralela</string>
+    <string name="om_ap_cam_parallel_soon">A câmera paralela ainda não está disponível</string>
+    <string name="om_ap_cam_fog_soon">A névoa da câmera ainda não está disponível. Use a névoa da composição nos Ajustes do projeto.</string>
+    <string name="om_ap_cam_tip">Para ver pelo olho da câmera, ligue a visão pela câmera ao lado do palco.</string>
+    <string name="om_ap_cam_focus_on">Desfoque de foco ligado</string>
+
+    <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
+    <string name="om_ap_cp_eyedropper">Conta-gotas</string>
+    <string name="om_ap_cp_eyedropper_hint">Arraste no palco para escolher a cor</string>
+    <string name="om_ap_cp_fine">Ajuste fino</string>
+    <string name="om_ap_cp_full">Mais cores</string>
+    <string name="om_ap_cp_unavailable">Cor com transparência não disponível aqui</string>
+    <string name="om_ap_cp_add">Salvar na paleta</string>
+    <string name="om_ap_cp_copy_code">Copiar código da cor</string>
+    <string name="om_ap_cp_paste_code">Colar código da cor</string>
+    <string name="om_ap_cp_code_copied">Código da cor copiado</string>
+    <string name="om_ap_cp_code">Código da cor %1$s</string>
+    <string name="om_ap_cp_wheel">Roda</string>
+    <string name="om_ap_cp_rgb">RGB</string>
+    <string name="om_ap_cp_done">Pronto</string>
+    <string name="om_ap_cp_current">Atual</string>
+    <string name="om_ap_cp_new">Nova</string>
+    <string name="om_ap_cp_hue">Matiz</string>
+    <string name="om_ap_cp_saturation">Saturação</string>
+    <string name="om_ap_cp_brightness">Brilho</string>
+    <string name="om_ap_cp_alpha">Alfa</string>
+    <string name="om_ap_cp_red">Vermelho</string>
+    <string name="om_ap_cp_green">Verde</string>
+    <string name="om_ap_cp_blue">Azul</string>
+    <string name="om_ap_cp_alpha_toggle">Mostrar ou esconder o alfa</string>
+    <string name="om_ap_cp_trash">Solte aqui para apagar</string>
+    <string name="om_ap_cp_swatch">Amostra %1$s</string>
+    <string name="om_ap_cp_palette">Paleta</string>
+</resources>

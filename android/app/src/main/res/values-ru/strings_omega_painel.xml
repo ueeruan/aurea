@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega painel (área 04): painel da camada, velocidade, volume, curva e presets. -->
+    <string name="om_lp_border_shadow">Обводка и тень</string>
+    <string name="om_lp_move_transform">Перемещение и трансформация</string>
+    <string name="om_lp_edit_points">Изменить точки</string>
+    <string name="om_lp_edit_drawing">Изменить рисунок</string>
+    <string name="om_lp_edit_group">Изменить группу</string>
+    <string name="om_lp_camera_options">Параметры камеры</string>
+    <string name="om_lp_light_options">Параметры света</string>
+    <string name="om_lp_edit_particles">Изменить частицы</string>
+    <string name="om_lp_audio">Громкость и звук</string>
+    <string name="om_lp_opens_panel">открывает панель</string>
+    <string name="om_lp_move_start_to_playhead">Сдвинуть слой, чтобы он начинался у указателя</string>
+    <string name="om_lp_move_end_to_playhead">Сдвинуть слой, чтобы он заканчивался у указателя</string>
+    <string name="om_lp_retime_extend_start">Растянуть начало до указателя (меняет скорость)</string>
+    <string name="om_lp_retime_shorten_start">Сжать начало до указателя (меняет скорость)</string>
+    <string name="om_lp_retime_shorten_end">Сжать конец до указателя (меняет скорость)</string>
+    <string name="om_lp_retime_extend_end">Растянуть конец до указателя (меняет скорость)</string>
+    <string name="om_lp_speed_slower">Медленнее</string>
+    <string name="om_lp_speed_faster">Быстрее</string>
+    <string name="om_lp_speed_close">Закрыть скорость</string>
+    <string name="om_lp_speed_tab_curve">Кривая времени</string>
+    <string name="om_lp_speed_tab_options">Параметры</string>
+    <string name="om_lp_speed_constant_hint">Анимация слоя следует за скоростью, и длительность меняется вместе с ней.</string>
+    <string name="om_lp_speed_keyed">У этого слоя анимированная скорость или кривая времени.</string>
+    <string name="om_lp_speed_remap_on">Переназначение времени включено: настройте его на вкладке «Кривая времени».</string>
+    <string name="om_lp_volume_close">Закрыть громкость</string>
+    <string name="om_lp_volume_tab_fades">Затухания</string>
+    <string name="om_lp_missing_media_title">Медиафайл не найден</string>
+    <string name="om_lp_missing_media">Исходный медиафайл этого слоя пропал или был перемещён.</string>
+    <string name="om_presets_empty_title">Пресетов пока нет</string>
+    <string name="om_presets_empty_body">Сохраните свойства и ключевые кадры слоя как пресет, чтобы использовать их снова.</string>
+    <string name="om_presets_empty_browse">Смотреть пресеты</string>
+    <string name="om_curve_cat_curves">Кривые</string>
+    <string name="om_curve_cat_bounces">Отскоки и колебания</string>
+    <string name="om_curve_cat_steps">Ступени</string>
+    <string name="om_curve_reverse">Обратить кривую</string>
+    <string name="om_curve_paste_all">Вставить кривую во все ключевые кадры</string>
+    <string name="om_curve_overshoot_on">Разрешить перелёт</string>
+    <string name="om_curve_overshoot_off">Без перелёта</string>
+    <string name="om_curve_prev">Предыдущий отрезок</string>
+    <string name="om_curve_next">Следующий отрезок</string>
+    <string name="om_curve_no_segment">Поставьте указатель между двумя ключевыми кадрами</string>
+    <string name="om_curve_saved">Сохранённые кривые</string>
+</resources>

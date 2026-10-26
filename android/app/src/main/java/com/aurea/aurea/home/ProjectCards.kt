@@ -1,16 +1,17 @@
 package com.aurea.aurea.home
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -25,406 +27,341 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.aurea.aurea.R
 import com.aurea.aurea.state.ProjectEntry
 import com.aurea.aurea.ui.theme.AureaColors
-import com.aurea.aurea.ui.theme.AureaDims
-import com.aurea.aurea.ui.theme.AureaShape
-import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
-import androidx.compose.ui.res.stringResource
-import com.aurea.aurea.R
-import com.aurea.aurea.ui.i18n.plural
 import com.aurea.aurea.ui.theme.tocavel
-import java.time.LocalTime
-
-/** Placeholder de miniatura: degradê #1B2530 → #151C24 (topLeft → bottomRight). */
-private val PlaceholderBrush = Brush.linearGradient(listOf(AureaColors.SurfaceHigh, AureaColors.Surface))
-
-/** Scrim do hero: transparente até 45 %, preto 70 % no fim. */
-private val HeroScrimBrush = Brush.verticalGradient(0.45f to Color.Transparent, 1f to AureaColors.ImageScrim)
-
-/** A compact project library: real thumbnail, readable title and explicit menu. */
-@Composable
-internal fun ProjectListRow(entry: ProjectEntry, thumbs: HomeThumbnails, selecting: Boolean, marked: Boolean,
-                           onOpen: () -> Unit, onMenu: () -> Unit, onMark: () -> Unit) {
-    val image = rememberProjectThumbnail(thumbs, entry, 256)
-    Row(Modifier.fillMaxWidth().heightIn(min = 112.dp)
-        .background(if (selecting && marked) AureaColors.AccentDim else AureaColors.Background)
-        .semantics { if (selecting) selected = marked }
-        .tocavel(onLongClick = if (selecting) onMark else onMenu, onClick = if (selecting) onMark else onOpen)
-        .padding(horizontal = AureaDims.Gutter, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Box(Modifier.size(84.dp).clip(AureaShape.Sm).background(AureaColors.Surface), contentAlignment = Alignment.Center) {
-            if (image != null) Image(image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, filterQuality = FilterQuality.Low)
-            else FormatPlaceholder(projectRatio(entry))
-            if (selecting) CupertinoIcon(if (marked) CupertinoGlyph.CheckmarkCircleFill else CupertinoGlyph.Circle,
-                28.dp, if (marked) AureaColors.Accent else AureaColors.Text)
-        }
-        Column(Modifier.weight(1f)) {
-            Text(entry.title, style = AureaType.TitleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            ProjectChips(entry, Modifier.padding(top = 6.dp))
-        }
-        val menuLabel = stringResource(R.string.home_menu_content)
-        Box(Modifier.size(48.dp).semantics { contentDescription = menuLabel }
-            .tocavel(onClick = if (selecting) onMark else onMenu), contentAlignment = Alignment.Center) {
-            CupertinoIcon(CupertinoGlyph.Ellipsis, 20.dp, AureaColors.Muted)
-        }
-    }
-    Box(Modifier.fillMaxWidth().padding(start = 120.dp, end = AureaDims.Gutter).height(0.5.dp).background(AureaColors.Border))
-}
 
 /**
- * Chips de metadados da linha (spec am-ui §6): fps, proporção, resolução e
- * tamanho, cada um com o seu ícone. Quebram de linha quando a coluna é
- * estreita; o leitor de tela lê os quatro de uma vez (`home.project.meta`).
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ProjectChips(entry: ProjectEntry, modifier: Modifier = Modifier) {
-    val chips = remember(entry) { projectChips(entry) }
-    FlowRow(
-        modifier.testTag("home.project.meta").semantics(mergeDescendants = true) {},
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        for (chip in chips) {
-            Row(
-                Modifier.clip(RoundedCornerShape(6.dp)).background(AureaColors.Surface)
-                    .padding(horizontal = 6.dp, vertical = 3.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CupertinoIcon(chip.kind.glyph, 11.dp, AureaColors.Muted)
-                Spacer(Modifier.width(4.dp))
-                Text(chip.text, style = AureaType.BodySmall, color = AureaColors.Muted, maxLines = 1)
-            }
-        }
-    }
-}
-
-/** Ícone de cada chip (o mesmo glifo no iOS). */
-private val ProjectChipKind.glyph: Char
-    get() = when (this) {
-        ProjectChipKind.Fps -> CupertinoGlyph.Speedometer
-        ProjectChipKind.Aspect -> CupertinoGlyph.Crop
-        ProjectChipKind.Resolution -> CupertinoGlyph.Tv
-        ProjectChipKind.Size -> CupertinoGlyph.Fullscreen
-    }
-
-/**
- * A saudação pela hora do aparelho (05–11 dia, 12–17 tarde, resto noite).
+ * Omega home · P0-5: a linha do projeto (96 dp) da referência — cartão branco
+ * de raio 12 com sombra suave, miniatura de 80 dp com o selo de duração, o
+ * título (16 negrito) e a ficha 2 × 2 (proporção · resolução · tamanho · fps),
+ * e o ⋯ que abre o menu rápido.
  *
- * @Composable porque o texto vem do catálogo — a hora continua sendo a do
- * aparelho, o rótulo é que muda de idioma.
- */
-@Composable
-private fun greeting(): String {
-    val h = LocalTime.now().hour
-    return when {
-        h in 5..11 -> stringResource(R.string.greeting_morning)
-        h in 12..17 -> stringResource(R.string.greeting_afternoon)
-        else -> stringResource(R.string.greeting_evening)
-    }
-}
-
-/**
- * O cabeçalho da Início: logo 38, "Aurea" 30 w800, a saudação e os dois
- * acessos rápidos (buscar, ajustes). O avatar de perfil saiu com a aba (§2).
- */
-@Composable
-internal fun HomeHeader(onSearch: () -> Unit, onSettings: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(start = AureaDims.Gutter, top = 14.dp, end = AureaDims.S3, bottom = AureaDims.S3),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AureaLogo(30.dp)
-        Spacer(Modifier.width(AureaDims.S3))
-        Column(Modifier.weight(1f)) {
-            Text("AUREA", style = AureaType.TitleLarge)
-            Spacer(Modifier.height(2.dp))
-            Text(greeting(), style = AureaType.Greeting, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        RoundIconButton(CupertinoGlyph.Search, stringResource(R.string.home_search_projects), onSearch)
-        Spacer(Modifier.width(2.dp))
-        RoundIconButton(CupertinoGlyph.SliderHorizontal3, stringResource(R.string.home_title_settings), onSettings)
-    }
-}
-
-/**
- * O cartão "Continuar editando": o projeto mais recente em 16:9, miniatura de
- * verdade, scrim, nome e a pílula. Toque abre; toque longo ou ⋯ abre o menu.
- */
-@Composable
-internal fun ContinueEditingCard(entry: ProjectEntry, thumbs: HomeThumbnails, onOpen: () -> Unit, onMenu: () -> Unit) {
-    val spec = remember(entry) { projectSpec(entry) }
-    val image = rememberProjectThumbnail(thumbs, entry, 256)
-    Row(Modifier.padding(start = AureaDims.Gutter, top = 20.dp, end = AureaDims.Gutter)
-        .fillMaxWidth().clip(AureaShape.Xl).background(AureaColors.Surface)
-        .tocavel(onLongClick = onMenu, onClick = onOpen).padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(76.dp).clip(AureaShape.Md).background(PlaceholderBrush), contentAlignment = Alignment.Center) {
-            if (image != null) Image(image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.Low)
-            else CupertinoIcon(CupertinoGlyph.Film, 28.dp, AureaColors.Muted)
-        }
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            Text(stringResource(R.string.home_continue), style = AureaType.BodySmall, color = AureaColors.Accent)
-            Text(entry.title, style = AureaType.TitleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(vertical = 3.dp))
-            Text(spec, style = AureaType.CardSpec, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-        RoundIconButton(CupertinoGlyph.Ellipsis, stringResource(R.string.home_menu_content), onMenu)
-    }
-}
-/**
- * O cartão da grade: miniatura (raio 14) ou a moldura do formato, o nome, a
- * ficha e as reticências. Escolhendo vários, o toque marca em vez de abrir.
+ * Gestos (P1-1, A.01 cede à referência): toque abre (ou marca, selecionando);
+ * toque longo entra na seleção marcando este projeto, com háptico; o ⋯ fica
+ * desabilitado na seleção. Selecionando, a caixa redonda aparece no início e o
+ * cartão anda 40 dp em 300 ms; os não marcados ganham um véu claro.
  *
- * A miniatura é decodificada no tamanho do CARTÃO ([CARD_DECODE_PX]), não no
- * tamanho do hero — numa grade de dezenas de projetos isso é a diferença entre
- * alguns MB e algumas dezenas de MB (§74).
+ * [coords] recebe as coordenadas do cartão (o menu rápido desenha a cópia no
+ * mesmo lugar).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun ProjectGridCard(
+internal fun ProjectRowCard(
     entry: ProjectEntry,
     thumbs: HomeThumbnails,
     selecting: Boolean,
     marked: Boolean,
     onOpen: () -> Unit,
-    onMenu: () -> Unit,
-    onMark: () -> Unit,
-    modifier: Modifier,
+    onLongPress: () -> Unit,
+    onMenu: (LayoutCoordinates?) -> Unit,
+    modifier: Modifier = Modifier,
+    interactive: Boolean = true,
 ) {
-    val spec = remember(entry) { projectSpec(entry) }
-    val image = rememberProjectThumbnail(thumbs, entry)
-    Column(
-        modifier
-            .aspectRatio(HOME_CARD_ASPECT)
-            .clip(AureaShape.Xl).background(AureaColors.Surface)
-            .tocavel(onLongClick = if (selecting) onMark else onMenu, onClick = if (selecting) onMark else onOpen)
-            .padding(8.dp),
-    ) {
-        Box(Modifier.weight(1f).fillMaxWidth().clip(AureaShape.Md)) {
-            if (image != null) {
-                Image(image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.Low)
-            } else {
-                FormatPlaceholder(projectRatio(entry))
-            }
-            if (selecting) {
-                Box(Modifier.fillMaxSize().background(AureaColors.Background.copy(alpha = if (marked) 0.35f else 0.15f)))
-                Box(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
-                    CupertinoIcon(
-                        if (marked) CupertinoGlyph.CheckmarkCircleFill else CupertinoGlyph.Circle,
-                        AureaDims.IconLg,
-                        if (marked) AureaColors.Accent else AureaColors.OnImage70,
-                    )
-                }
+    val haptics = LocalHapticFeedback.current
+    val shift by animateDpAsState(if (selecting) 40.dp else 0.dp, tween(300), label = "linha-desliza")
+    val holder = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val shape = RoundedCornerShape(12.dp)
+    Box(modifier.fillMaxWidth().height(OmegaHomeDims.Row).testTag("home.project.row")) {
+        if (selecting || shift > 0.dp) {
+            Box(
+                Modifier.align(Alignment.CenterStart).padding(start = 2.dp).size(20.dp).testTag("home.project.check")
+                    .clip(CircleShape)
+                    .then(
+                        if (marked) Modifier.background(AureaColors.LightAccentInk)
+                        else Modifier.border(1.5.dp, AureaColors.LightTextMuted, CircleShape)
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (marked) CupertinoIcon(CupertinoGlyph.CheckmarkAlt, 12.dp, AureaColors.LightSurface)
             }
         }
-        Spacer(Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier
+                .padding(start = shift)
+                .fillMaxSize()
+                .homeShadow(12.dp, shape, AureaColors.HomeShadowSoft)
+                .clip(shape)
+                .background(AureaColors.LightSurface)
+                .onGloballyPositioned { holder[0] = it }
+                .semantics(mergeDescendants = true) {
+                    if (selecting) selected = marked
+                    role = Role.Button
+                }
+                .then(
+                    if (interactive) Modifier.combinedClickable(
+                        onClick = onOpen,
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongPress()
+                        },
+                    ) else Modifier
+                )
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ProjectThumb(entry, thumbs)
+            Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(entry.title, style = AureaType.CardTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(1.dp))
-                Text(spec, style = AureaType.CardSpec, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    entry.title.ifBlank { stringResource(R.string.new_project_untitled) },
+                    style = OmegaHomeType.RowTitle,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(8.dp))
+                ProjectMetaGrid(entry)
             }
             val menuLabel = stringResource(R.string.home_menu_content)
             Box(
                 Modifier
-                    .size(40.dp)
-                    .semantics { contentDescription = menuLabel }
-                    .tocavel(onClick = if (selecting) onMark else onMenu),
+                    .size(44.dp)
+                    .testTag("home.project.more")
+                    .semantics {
+                        contentDescription = menuLabel
+                        if (selecting) disabled()
+                    }
+                    .tocavel(enabled = !selecting && interactive) { onMenu(holder[0]) },
                 contentAlignment = Alignment.Center,
             ) {
-                CupertinoIcon(CupertinoGlyph.Ellipsis, 18.dp, AureaColors.Muted)
+                CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, AureaColors.LightTextMuted.copy(alpha = if (selecting) 0.4f else 1f))
             }
+            Spacer(Modifier.width(4.dp))
         }
-    }
-}
-
-/** Antes da 1ª miniatura: a moldura do formato do projeto. */
-@Composable
-private fun FormatPlaceholder(ratio: Float) {
-    Box(Modifier.fillMaxSize().background(PlaceholderBrush), contentAlignment = Alignment.Center) {
-        val frame = if (ratio >= 1f) Modifier.fillMaxWidth(0.52f).aspectRatio(ratio)
-        else Modifier.fillMaxHeight(0.62f).aspectRatio(ratio, matchHeightConstraintsFirst = true)
-        Box(
-            frame.clip(RoundedCornerShape(AureaDims.S1)).background(AureaColors.Background.copy(alpha = 0.55f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            CupertinoIcon(CupertinoGlyph.Film, 18.dp, AureaColors.Muted)
+        // Os não marcados ficam sob um véu claro enquanto se escolhe.
+        if (selecting && !marked) {
+            Box(
+                Modifier.padding(start = shift).fillMaxSize().clip(shape)
+                    .background(AureaColors.LightSurface.copy(alpha = 0.5f)),
+            )
         }
-    }
-}
-
-/** `_SemProjetos`: film + a frase. Também serve para busca sem resultado. */
-@Composable
-internal fun ProjectsEmptyState(message: String? = null) {
-    val text = message ?: stringResource(R.string.home_empty_hint)
-    Row(
-        Modifier.fillMaxWidth().padding(start = AureaDims.Gutter, top = AureaDims.S1, end = AureaDims.Gutter),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CupertinoIcon(CupertinoGlyph.Film, 22.dp, AureaColors.Muted)
-        Spacer(Modifier.width(AureaDims.S3))
-        Text(text, style = AureaType.Empty, modifier = Modifier.weight(1f))
     }
 }
 
 /**
- * A barra da lista: "{N} projetos" + buscar/ordenar/selecionar; buscando, o
- * campo toma o lugar do título; selecionando, "{n} escolhidos" + marcar todos
- * + sair.
+ * Miniatura de 80 dp (raio 8, fundo `HomeThumb`, imagem em "cover"); sem
+ * imagem ainda, o brilho animado. O selo de duração fica no canto inferior
+ * de início.
  */
 @Composable
-internal fun ProjectListBar(
-    count: Int,
-    selecting: Boolean,
-    selectedCount: Int,
-    searching: Boolean,
-    query: String,
-    onQuery: (String) -> Unit,
-    onOpenSearch: () -> Unit,
-    onClearSearch: () -> Unit,
-    onSort: () -> Unit,
-    onSelectAll: () -> Unit,
-    onExitSelection: () -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(start = AureaDims.Gutter, top = 18.dp, end = AureaDims.S3, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (selecting) {
-            Text(stringResource(R.string.home_selected_chosen, selectedCount), style = AureaType.ListCount, modifier = Modifier.weight(1f))
-            BarButton(CupertinoGlyph.CheckmarkCircle, stringResource(R.string.home_mark_all), onSelectAll)
-            BarButton(CupertinoGlyph.Xmark, stringResource(R.string.home_exit_selection), onExitSelection)
-            return@Row
-        }
-        if (!searching) {
-            Text(plural(R.plurals.home_project_count, count), style = AureaType.ListCount, modifier = Modifier.weight(1f))
-            BarButton(CupertinoGlyph.Search, stringResource(R.string.common_search), onOpenSearch)
+internal fun ProjectThumb(entry: ProjectEntry, thumbs: HomeThumbnails) {
+    val image = rememberProjectThumbnail(thumbs, entry, 256)
+    Box(Modifier.size(OmegaHomeDims.Thumb).clip(RoundedCornerShape(8.dp)).background(AureaColors.HomeThumb)) {
+        if (image != null) {
+            Image(image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.Low)
         } else {
-            SearchField(query, onQuery, onClearSearch, Modifier.weight(1f))
+            HomeShimmer(Modifier.fillMaxSize())
         }
-        BarButton(CupertinoGlyph.ArrowUpArrowDown, stringResource(R.string.home_sort_title), onSort)
-        if (!searching) BarButton(CupertinoGlyph.CheckmarkCircle, stringResource(R.string.home_select)) { onSelectAll() }
+        val duration = remember(entry.durationFrames, entry.fps) { formatProjectDuration(entry.durationFrames, entry.fps) }
+        if (duration != null) {
+            Text(
+                duration,
+                style = OmegaHomeType.Badge,
+                maxLines = 1,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(4.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(AureaColors.HomeBadge)
+                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                    .testTag("home.project.duration"),
+            )
+        }
     }
 }
 
-/** `_BotaoDaBarra`: padding 8 + ícone 19 muted. */
+/**
+ * A ficha 2 × 2 (168 dp): [proporção][resolução] / [tamanho][fps], cada
+ * célula com ícone de 16 dp e texto 12. O leitor de tela lê os quatro juntos
+ * (`home.project.meta`).
+ */
 @Composable
-private fun BarButton(glyph: Char, description: String, onClick: () -> Unit) {
+internal fun ProjectMetaGrid(entry: ProjectEntry) {
+    val facts = remember(entry) { projectFacts(entry) }
+    Column(
+        Modifier.widthIn(max = 168.dp).testTag("home.project.meta").semantics(mergeDescendants = true) {},
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row {
+            MetaCell(CupertinoGlyph.Crop, facts.aspect, Modifier.weight(1f))
+            MetaCell(CupertinoGlyph.Tv, facts.resolution, Modifier.weight(1f))
+        }
+        Row {
+            MetaCell(CupertinoGlyph.DocText, facts.size, Modifier.weight(1f))
+            MetaCell(CupertinoGlyph.Speedometer, facts.fps, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun MetaCell(glyph: Char, text: String, modifier: Modifier) {
+    Row(modifier.height(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        CupertinoIcon(glyph, 14.dp, AureaColors.LightTextMuted)
+        Spacer(Modifier.width(6.dp))
+        Text(text, style = OmegaHomeType.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * Omega home · P0-7: o estado vazio centralizado (padding 35): título 18
+ * negrito, corpo com o "+" em negrito, 30 dp e a ilustração do AUREA (uma
+ * moldura de filme com a marca, desenhada em código).
+ */
+@Composable
+internal fun ProjectsEmptyState(modifier: Modifier = Modifier) {
+    Column(
+        modifier.fillMaxWidth().padding(horizontal = 35.dp).testTag("home.empty"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            stringResource(R.string.home_no_projects),
+            style = OmegaHomeType.ListTitle,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.semantics { heading() },
+        )
+        Spacer(Modifier.height(8.dp))
+        val body = stringResource(R.string.om_home_empty_body, PLUS_MARK)
+        val bold = OmegaHomeType.Body.copy(fontWeight = FontWeight.W700, color = AureaColors.LightText).toSpanStyle()
+        Text(
+            buildAnnotatedString {
+                val at = body.indexOf(PLUS_MARK)
+                if (at < 0) append(body) else {
+                    append(body.substring(0, at))
+                    withStyle(SpanStyle(fontWeight = bold.fontWeight, color = bold.color)) { append(PLUS_MARK) }
+                    append(body.substring(at + PLUS_MARK.length))
+                }
+            },
+            style = OmegaHomeType.Body,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(30.dp))
+        EmptyIllustration()
+    }
+}
+
+private const val PLUS_MARK = "+"
+
+/** Moldura de filme (perfurações em cima e embaixo) com a marca do AUREA no meio. */
+@Composable
+private fun EmptyIllustration() {
+    val frame = AureaColors.LightSurface
+    val line = AureaColors.LightDivider
+    val holes = AureaColors.HomeThumb
     Box(
         Modifier
-            .semantics { contentDescription = description }
-            .tocavel(onClick = onClick)
-            .size(48.dp),
+            .size(width = 132.dp, height = 96.dp)
+            .homeShadow(12.dp, RoundedCornerShape(14.dp), AureaColors.HomeShadowSoft)
+            .clip(RoundedCornerShape(14.dp))
+            .background(frame)
+            .border(1.dp, line, RoundedCornerShape(14.dp))
+            .drawBehind {
+                val hole = Size(10.dp.toPx(), 7.dp.toPx())
+                val gap = (size.width - hole.width * 6) / 7
+                for (i in 0 until 6) {
+                    val x = gap + i * (hole.width + gap)
+                    drawRoundRect(holes, Offset(x, 6.dp.toPx()), hole, CornerRadius(2.dp.toPx()))
+                    drawRoundRect(holes, Offset(x, size.height - 6.dp.toPx() - hole.height), hole, CornerRadius(2.dp.toPx()))
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
-        CupertinoIcon(glyph, 19.dp, AureaColors.Muted)
+        AureaLogo(40.dp)
     }
 }
 
+/** Busca sem resultado (a lista existe, o filtro não achou nada). */
+@Composable
+internal fun ProjectsNoResults() {
+    Text(
+        stringResource(R.string.home_no_results),
+        style = OmegaHomeType.Body,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 35.dp, vertical = 32.dp),
+    )
+}
+
 /**
- * O `CupertinoTextField` padrão no escuro (altura 34, raio 5, hairline),
- * com foco automático e o "x" que limpa e fecha a busca.
+ * O campo de busca claro (40 dp, raio 8), com foco automático e o ✕ que limpa
+ * e fecha a busca (extra do AUREA, D8).
  */
 @Composable
-internal fun SearchField(query: String, onQuery: (String) -> Unit, onClear: () -> Unit, modifier: Modifier) {
+internal fun HomeSearchField(query: String, onQuery: (String) -> Unit, onClear: () -> Unit, modifier: Modifier = Modifier) {
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     BasicTextField(
         value = query,
         onValueChange = onQuery,
         singleLine = true,
-        textStyle = AureaType.SearchText,
-        cursorBrush = SolidColor(AureaColors.Accent),
+        textStyle = OmegaHomeType.Menu.copy(fontWeight = FontWeight.Normal),
+        cursorBrush = SolidColor(AureaColors.LightAccentInk),
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Search),
-        modifier = modifier.height(AureaDims.ChipHeight).focusRequester(focus),
+        modifier = modifier.height(40.dp).focusRequester(focus).testTag("home.projects.searchField"),
         decorationBox = { inner ->
             Row(
                 Modifier
                     .fillMaxSize()
-                    .clip(AureaShape.Xs)
-                    .background(AureaColors.Field)
-                    .border(Dp.Hairline, AureaColors.FieldBorder, AureaShape.Xs),
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(AureaColors.LightSurface)
+                    .border(0.5.dp, AureaColors.LightDivider, RoundedCornerShape(8.dp)),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.weight(1f).padding(horizontal = 7.dp), contentAlignment = Alignment.CenterStart) {
-                    if (query.isEmpty()) Text(stringResource(R.string.home_search_hint), style = AureaType.SearchPlaceholder, maxLines = 1)
+                CupertinoIcon(CupertinoGlyph.Search, 16.dp, AureaColors.LightTextMuted, Modifier.padding(start = 10.dp))
+                Box(Modifier.weight(1f).padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
+                    if (query.isEmpty()) Text(stringResource(R.string.home_search_hint),
+                        style = OmegaHomeType.Menu.copy(fontWeight = FontWeight.Normal, color = AureaColors.LightTextFaint), maxLines = 1)
                     inner()
                 }
                 val clearLabel = stringResource(R.string.home_clear_search)
                 Box(
                     Modifier
                         .fillMaxHeight()
+                        .width(44.dp)
                         .semantics { contentDescription = clearLabel }
-                        .tocavel(onClick = onClear)
-                        .padding(horizontal = AureaDims.S2),
+                        .tocavel(onClick = onClear),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CupertinoIcon(CupertinoGlyph.XmarkCircleFill, AureaDims.IconSm, AureaColors.Text)
+                    CupertinoIcon(CupertinoGlyph.XmarkCircleFill, 18.dp, AureaColors.LightTextMuted)
                 }
             }
         },
     )
 }
-
-/**
- * `_AcoesEmLote`: vidro, "{n} escolhidos", Duplicar e Excluir. Posicionada
- * explicitamente ACIMA da barra de abas.
- */
-@Composable
-internal fun BatchActionsBar(count: Int, backdrop: Backdrop, onDuplicate: () -> Unit, onDelete: () -> Unit, modifier: Modifier) {
-    Column(
-        modifier
-            .fillMaxWidth()
-            .blockTouches()
-            .glass(backdrop, com.aurea.aurea.ui.theme.AureaElevation.BatchBarBlur,
-                com.aurea.aurea.ui.theme.AureaElevation.batchBarTint(),
-                com.aurea.aurea.ui.theme.AureaElevation.batchBarFallback()),
-    ) {
-        Box(Modifier.fillMaxWidth().height(AureaDims.Hairline).background(AureaColors.Border))
-        Row(Modifier.fillMaxWidth().padding(horizontal = AureaDims.S3, vertical = AureaDims.S2), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.home_selected_chosen, count), style = AureaType.BatchCount, modifier = Modifier.weight(1f))
-            BatchButton(CupertinoGlyph.PlusSquareOnSquare, stringResource(R.string.common_duplicate), AureaColors.Text, AureaType.BatchAction, onDuplicate)
-            BatchButton(CupertinoGlyph.Trash, stringResource(R.string.common_delete), AureaColors.Danger, AureaType.BatchDanger, onDelete)
-        }
-    }
-}
-
-@Composable
-private fun BatchButton(glyph: Char, label: String, tint: Color, style: androidx.compose.ui.text.TextStyle, onClick: () -> Unit) {
-    Row(
-        Modifier.tocavel(onClick = onClick).padding(horizontal = 14.dp, vertical = AureaDims.S2),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CupertinoIcon(glyph, 18.dp, tint)
-        Spacer(Modifier.width(6.dp))
-        Text(label, style = style)
-    }
-}
-
-/** Proporção do cartão da grade: miniatura + duas linhas de texto. */
-internal const val HOME_CARD_ASPECT = 1.08f

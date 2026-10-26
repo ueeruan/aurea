@@ -2395,3 +2395,307 @@ enum FxPluginTexts {
         return p.params[index]
     }
 }
+
+// =============================================================================
+// Omega efeitos (área 07): a CONTA dos controles da referência — slider com
+// zonas de encaixe, régua de riscos (1 risco = 1 passo, arremesso, encaixe),
+// alturas das linhas, casas pelo passo, voltas de ângulo, a regra de abrir o
+// efeito novo, os tempos do guia e o trackball da orientação. Espelho EXATO do
+// `FxParamMath` do ParamRowMath.kt (mesmos nomes, mesma conta; arredondamento
+// "metade para o par", como o `kotlin.math.round`). Os mesmos casos do
+// `FxParamMathTest` rodam em `verify/check_effects_omega.py` (swiftc no macOS).
+// =============================================================================
+enum FxParamMath {
+    /// Alturas das linhas (pt), as da referência (`effect_setting_*`).
+    static let ROW_SLIDER: CGFloat = 51
+    static let ROW_RULER: CGFloat = 57
+    static let ROW_SMALL: CGFloat = 38
+    static let ROW_SECTION: CGFloat = 43
+    static let ROW_LIST: CGFloat = 37
+    /// Folga entre itens da lista e padding da sobreposição (pt).
+    static let LIST_GAP: CGFloat = 6.5
+    /// Rótulo e caixa de valor (pt); margem 3 em volta do rótulo.
+    static let LABEL_W: CGFloat = 75
+    static let VALUE_W: CGFloat = 56
+    static let LABEL_MARGIN: CGFloat = 3
+    /// Régua: risco a cada 5,5 pt, maior a cada 5 riscos; agulha 1,5 pt.
+    static let TICK_SPACING: CGFloat = 5.5
+    static let MAJOR_EVERY = 5
+    /// Arremesso acima de 300 pt/s; o gesto começa depois de ¾ do touch slop.
+    static let FLING_MIN_PX_S: CGFloat = 300
+    static let RULER_SLOP_FRACTION: CGFloat = 0.75
+    /// Slider: o gesto começa depois de ½ touch slop; 10 pt de pista em cada encaixe.
+    static let SLIDER_SLOP_FRACTION: CGFloat = 0.5
+    static let SLIDER_SNAP_DP: CGFloat = 10
+    /// Abrir/fechar os controles e a seta da seção (ms).
+    static let OPEN_MS = 200
+    static let SECTION_ARROW_MS = 300
+    /// iOS: o touch slop (o `scaledTouchSlop` do Android, ~8 dp).
+    static let TOUCH_SLOP: CGFloat = 8
+
+    /// Altura da linha pelo controle do motor (`ParamControl`).
+    static func rowHeight(_ control: Int, _ type: Int) -> CGFloat {
+        switch control {
+        case FxParamControl.slider: return ROW_SLIDER
+        case FxParamControl.ruler, FxParamControl.point, FxParamControl.xyz, FxParamControl.orientation: return ROW_RULER
+        case FxParamControl.hueDisc: return 150
+        default:
+            return type == fxParamFloat || type == fxParamInt || type == fxParamAngle ? ROW_RULER : ROW_SMALL
+        }
+    }
+
+    /// O controle que a linha usa: o do motor; linha antiga (0) num número cai na
+    /// régua, num ponto em Point/Xyz.
+    static func controlFor(_ control: Int, _ type: Int) -> Int {
+        if control != FxParamControl.auto { return control }
+        if type == fxParamPoint2D { return FxParamControl.point }
+        if type == fxParamPoint3D { return FxParamControl.xyz }
+        if type == fxParamFloat || type == fxParamInt || type == fxParamAngle { return FxParamControl.ruler }
+        return FxParamControl.auto
+    }
+
+    // --- Slider ---------------------------------------------------------------
+
+    /// Encaixes dentro da faixa, ordenados e sem repetição.
+    private static func snapsIn(_ min: Float, _ max: Float, _ snaps: [Float]) -> [Float] {
+        var out: [Float] = []
+        for s in snaps where s.isFinite && s > min && s < max && !out.contains(s) { out.append(s) }
+        return out.sorted()
+    }
+
+    /// Valor na posição `x` (pt) de um trilho de `width` pt: cada encaixe ganha
+    /// `snapPx` de pista onde o valor fica parado; fora deles, linear, preso e
+    /// quantizado em `step` (0 = contínuo). Absoluto: o valor vai para o dedo.
+    static func sliderValueAt(x: Float, width: Float, min: Float, max: Float, step: Float, snaps: [Float], snapPx: Float) -> Float {
+        if !(max > min) || !(width > 0) { return min }
+        let inner = snapsIn(min, max, snaps)
+        let zone: Float = snapPx.isFinite && snapPx > 0 ? snapPx : 0
+        let usable = Swift.max(width - zone * Float(inner.count), 1)
+        let range = max - min
+        let pos = Swift.min(Swift.max(x, 0), width)
+        // Pistas: antes do encaixe k (a partir de 0) já passaram k zonas.
+        var passed = 0
+        for (k, s) in inner.enumerated() {
+            let start = (s - min) / range * usable + zone * Float(k)
+            if pos < start { break }
+            if pos <= start + zone { return s }
+            passed = k + 1
+        }
+        let raw = min + Swift.min(Swift.max((pos - zone * Float(passed)) / usable, 0), 1) * range
+        let q = step > 0 && step.isFinite ? min + ((raw - min) / step).rounded(.toNearestOrEven) * step : raw
+        return Swift.min(Swift.max(q, min), max)
+    }
+
+    /// O inverso: onde (pt) o polegar fica para `value` (no meio da pista do encaixe).
+    static func sliderX(value: Float, width: Float, min: Float, max: Float, snaps: [Float], snapPx: Float) -> Float {
+        if !(max > min) || !(width > 0) { return 0 }
+        let inner = snapsIn(min, max, snaps)
+        let zone: Float = snapPx.isFinite && snapPx > 0 ? snapPx : 0
+        let usable = Swift.max(width - zone * Float(inner.count), 1)
+        let v = Swift.min(Swift.max(value, min), max)
+        let before = inner.filter { $0 < v }.count
+        let onSnap = inner.firstIndex(of: v) != nil
+        let base = (v - min) / (max - min) * usable + zone * Float(before)
+        return onSnap ? base + zone / 2 : base
+    }
+
+    // --- Régua ---------------------------------------------------------------
+
+    /// Valor depois de andar `scrolledPx` (dedo para a esquerda = positivo): 1 risco = 1 `step`.
+    static func rulerValueAfter(start: Float, scrolledPx: Float, spacingPx: Float, step: Float) -> Float {
+        if !(spacingPx > 0) || !step.isFinite || step <= 0 { return start }
+        return start + scrolledPx / spacingPx * step
+    }
+
+    /// Encaixa no risco mais próximo (múltiplos de `step`).
+    static func snapToTick(_ value: Float, step: Float) -> Float {
+        if !(step > 0) || !step.isFinite || !value.isFinite { return value }
+        return (value / step).rounded(.toNearestOrEven) * step
+    }
+
+    /// Prende na faixa da régua (faixa invertida ou NaN: devolve o valor).
+    static func limitRange(_ value: Float, min: Float, max: Float) -> Float {
+        if min.isNaN || max.isNaN { return value }
+        return Swift.min(Swift.max(value, Swift.min(min, max)), Swift.max(min, max))
+    }
+
+    /// O passo de `from` para `to` cruzou (ou chegou a) um risco de encaixe? Vibra uma vez.
+    static func crossedSnap(from: Float, to: Float, snaps: [Float]) -> Bool {
+        if from == to { return false }
+        let lo = Swift.min(from, to)
+        let hi = Swift.max(from, to)
+        return snaps.contains { $0.isFinite && $0 != from && $0 >= lo && $0 <= hi }
+    }
+
+    // --- Formato --------------------------------------------------------------
+
+    /// Casas pelo passo (regra da referência): < 0,00009 → 5 … < 0,9 → 1; senão 0.
+    static func decimalsForStep(_ step: Float) -> Int {
+        let s = abs(step)
+        if !s.isFinite || s == 0 { return 2 }
+        if s < 0.00009 { return 5 }
+        if s < 0.0009 { return 4 }
+        if s < 0.009 { return 3 }
+        if s < 0.09 { return 2 }
+        if s < 0.9 { return 1 }
+        return 0
+    }
+
+    /// Ângulo além de ±360°: as voltas inteiras vão para a linha auxiliar ("N× +")
+    /// e o valor mostra o resto. Dentro de ±360°: sem auxiliar (0 voltas).
+    static func angleTurns(_ degrees: Float) -> (turns: Int, rest: Float) {
+        if !degrees.isFinite || abs(degrees) <= 360 { return (0, degrees) }
+        let turns = Int(degrees / 360)
+        return (turns, degrees - Float(turns) * 360)
+    }
+
+    // --- Lista -----------------------------------------------------------------
+
+    /// O efeito recém-adicionado abre os controles sozinho? Só quando a camada
+    /// NÃO tinha efeito nenhum antes de adicionar (referência: `autoSelectEffect`).
+    static func opensAfterAdd(previousCount: Int, addedCount: Int) -> Bool { previousCount == 0 && addedCount > 0 }
+
+    // --- Guia "deslize para ajustar" -------------------------------------------
+
+    /// Tempos do guia (ms): entra, espera, sai.
+    enum Guide {
+        case short, medium, long
+        var fadeIn: Int {
+            switch self {
+            case .short: return 100
+            case .medium: return 100
+            case .long: return 300
+            }
+        }
+        var hold: Int {
+            switch self {
+            case .short: return 500
+            case .medium: return 900
+            case .long: return 1800
+            }
+        }
+        var fadeOut: Int {
+            switch self {
+            case .short: return 900
+            case .medium: return 1400
+            case .long: return 2000
+            }
+        }
+        var total: Int { fadeIn + hold + fadeOut }
+
+        /// Alfa do guia `t` ms depois de aparecer.
+        func alphaAt(_ t: Int64) -> Float {
+            if t < 0 { return 0 }
+            if t < Int64(fadeIn) { return Float(t) / Float(fadeIn) }
+            if t < Int64(fadeIn + hold) { return 1 }
+            if t < Int64(total) { return 1 - Float(t - Int64(fadeIn + hold)) / Float(fadeOut) }
+            return 0
+        }
+    }
+
+    // --- Trackball da orientação (α inclinação em X, β guinada em Y, γ rolagem em Z) ---
+
+    /// Gira a orientação (graus) pelo arrasto de (x0,y0) a (x1,y1), normalizados em
+    /// [−1, 1] (centro do preview = 0, y para baixo). Trackball clássico: os dois
+    /// pontos sobem para a esfera unitária e a rotação entre eles compõe com a
+    /// atual. `invert` troca a ordem do produto (referência). Devolve α, β, γ.
+    static func trackball(alpha: Float, beta: Float, gamma: Float, x0: Float, y0: Float, x1: Float, y1: Float,
+                          invert: Bool = false) -> [Float] {
+        func sphere(_ x: Float, _ y: Float) -> [Double] {
+            let px = Double(x)
+            let py = -Double(y)
+            let d = px * px + py * py
+            if d <= 1 { return [px, py, (1 - d).squareRoot()] }
+            let n = d.squareRoot()
+            return [px / n, py / n, 0]
+        }
+        let a = sphere(x0, y0)
+        let b = sphere(x1, y1)
+        let ax = a[1] * b[2] - a[2] * b[1]
+        let ay = a[2] * b[0] - a[0] * b[2]
+        let az = a[0] * b[1] - a[1] * b[0]
+        let dot = Swift.min(Swift.max(a[0] * b[0] + a[1] * b[1] + a[2] * b[2], -1), 1)
+        let len = (ax * ax + ay * ay + az * az).squareRoot()
+        if len < 1e-9 { return [alpha, beta, gamma] }
+        let half = acos(dot) / 2
+        let s = sin(half) / len
+        let drag: [Double] = [cos(half), ax * s, ay * s, az * s]   // w, x, y, z
+        let cur = eulerToQuat(Double(alpha), Double(beta), Double(gamma))
+        let q = invert ? quatMul(cur, drag) : quatMul(drag, cur)
+        let e = quatToEuler(q)
+        return [Float(e[0]), Float(e[1]), Float(e[2])]
+    }
+
+    /// Ordem X (α) → Y (β) → Z (γ), graus → quatérnio (w, x, y, z).
+    static func eulerToQuat(_ alpha: Double, _ beta: Double, _ gamma: Double) -> [Double] {
+        let r = Double.pi / 180
+        let cx = cos(alpha * r / 2), sx = sin(alpha * r / 2)
+        let cy = cos(beta * r / 2), sy = sin(beta * r / 2)
+        let cz = cos(gamma * r / 2), sz = sin(gamma * r / 2)
+        // q = qz · qy · qx (aplica X, depois Y, depois Z)
+        let w = cz * cy * cx + sz * sy * sx
+        let x = cz * cy * sx - sz * sy * cx
+        let y = cz * sy * cx + sz * cy * sx
+        let z = sz * cy * cx - cz * sy * sx
+        return [w, x, y, z]
+    }
+
+    /// O inverso de `eulerToQuat` (graus).
+    static func quatToEuler(_ q: [Double]) -> [Double] {
+        let w = q[0], x = q[1], y = q[2], z = q[3]
+        let d = 180 / Double.pi
+        let sinp = Swift.min(Swift.max(2 * (w * y - z * x), -1), 1)
+        let alpha = atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)) * d
+        let beta = asin(sinp) * d
+        let gamma = atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)) * d
+        return [alpha, beta, gamma]
+    }
+
+    private static func quatMul(_ a: [Double], _ b: [Double]) -> [Double] {
+        let w = a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3]
+        let x = a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2]
+        let y = a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1]
+        let z = a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0]
+        return [w, x, y, z]
+    }
+}
+
+/// Omega efeitos (P0-2): o efeito aparece na lista de Efeitos? As decorações de
+/// Borda e sombra (`role` ≠ 0, área 05) ficam fora. O modelo já as separa em
+/// `decorations`; o filtro fica aqui para a regra ter um nome só.
+func fxShownInEffectList(_ e: EffectItem) -> Bool { !e.isDecoration }
+
+/// Omega efeitos (P0-4): passo de reserva quando a linha não traz `step` (ponte
+/// antiga): Int e ângulo = 1; Float = faixa/200 arredondado para 1·10ⁿ, 2·10ⁿ
+/// ou 5·10ⁿ (a regra `resolve_step` do motor).
+func fxFallbackStep(type: Int, min: Float, max: Float) -> Float {
+    if type == fxParamInt || type == fxParamAngle { return 1 }
+    let range = Double(max - min)
+    guard range.isFinite, range > 0 else { return 0.01 }
+    let raw = range / 200
+    let power = pow(10, floor(log10(raw)))
+    let mantissa = raw / power
+    let nice: Double = mantissa < 1.5 ? 1 : mantissa < 3.5 ? 2 : mantissa < 7.5 ? 5 : 10
+    return Float(nice * power)
+}
+
+/// O passo por risco da linha, na unidade do MOTOR (o `step` do motor ou a reserva).
+func fxParamStep(_ param: EffectParamItem) -> Float {
+    param.step > 0 && param.step.isFinite ? param.step
+        : fxFallbackStep(type: Int(param.type), min: param.minValue, max: param.maxValue)
+}
+
+/// Omega efeitos (P2-3): a exibição com as casas pelo PASSO quando o efeito o
+/// declarou (`rowFlags` bit 2) e a tabela humana não fixa as casas; sem o bit,
+/// a regra de sempre (casas pela faixa). Igual no Android.
+func fxParamDisplay(_ typeId: UInt32, _ s: FxParamSlot, step: Float, rowFlags: UInt32) -> FxParamDisplay {
+    var d = fxParamDisplay(typeId, s)
+    let fixed = FxTableById[typeId]?.params[s.index]?.decimals != nil
+    if rowFlags & 4 != 0 && !fixed && step.isFinite && step > 0 {
+        d.decimals = FxParamMath.decimalsForStep(step * d.scale)
+    }
+    return d
+}
+
+/// Plugin de efeito instalado (0.3.0)? O selo da lista mostra a peça.
+func fxIsPluginEffect(_ typeId: UInt32) -> Bool { FxPluginTexts.plugins.contains { $0.effectTypeId == typeId } }

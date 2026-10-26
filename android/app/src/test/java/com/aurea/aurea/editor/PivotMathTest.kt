@@ -63,6 +63,32 @@ class PivotMathTest {
         assertEquals(100f, p[1], 0.001f)
     }
 
+    // Omega aparência: com inclinação (matriz T·R·S·K·T(−âncora)), o pivô anda e a imagem fica.
+    @Test fun skewedLayerKeepsItsPixelsWhenThePivotMoves() {
+        val pos = floatArrayOf(700f, 300f, 0f)
+        val rot = floatArrayOf(0f, 0f, 25f)
+        val scale = floatArrayOf(1.4f, 0.8f, 1f)
+        val anchor = floatArrayOf(50f, 20f, 0f)
+        val skew = floatArrayOf(20f, -12f)
+        val dx = 64f
+        val dy = -37f
+        val da = PivotMath.anchorDelta(dx, dy, rot, scale, false, true, skew)
+        assertNotNull(da)
+        val anchor2 = FloatArray(3) { anchor[it] + da!![it] }
+        val pos2 = floatArrayOf(pos[0] + dx, pos[1] + dy, pos[2])
+        for (p in corners) {
+            val before = PivotMath.place(pos, rot, scale, anchor, false, true, p, skew)
+            val after = PivotMath.place(pos2, rot, scale, anchor2, false, true, p, skew)
+            assertEquals(before[0], after[0], 0.05f)
+            assertEquals(before[1], after[1], 0.05f)
+        }
+        // Inclinação X (graus) cisalha na VERTICAL: o ponto 100 px à direita da âncora desce 100·rad(45°).
+        val p = PivotMath.place(floatArrayOf(0f, 0f, 0f), floatArrayOf(0f, 0f, 0f), floatArrayOf(1f, 1f, 1f),
+            floatArrayOf(0f, 0f, 0f), false, true, floatArrayOf(100f, 0f, 0f), floatArrayOf(45f, 0f))
+        assertEquals(100f, p[0], 0.001f)
+        assertEquals(78.54f, p[1], 0.01f)
+    }
+
     @Test fun flattenedLayerRefusesInsteadOfExploding() {
         assertNull(PivotMath.anchorDelta(10f, 0f, floatArrayOf(0f, 0f, 0f), floatArrayOf(0f, 1f, 1f), false, true))
     }

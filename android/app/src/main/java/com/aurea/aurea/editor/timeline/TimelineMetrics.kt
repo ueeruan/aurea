@@ -22,16 +22,18 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f, va
     // Reference density, expanded for larger system text; drawing and hits share it.
     val row = dp(if (referenceTrial) 28f + 24f * (fontScale.coerceIn(1f, 2f) - 1f) else AureaTimeline.Row.value)
     val bar = dp(if (referenceTrial) 23f + 20f * (fontScale.coerceIn(1f, 2f) - 1f) else AureaTimeline.Bar.value)
-    val barRadius = dp(if (referenceTrial) 1.5f else AureaTimeline.BarRadius.value)
+    // Omega (área 03): cartão com cantos de 3 dp (antes 1,5).
+    val barRadius = dp(if (referenceTrial) 3f else AureaTimeline.BarRadius.value)
     val track = dp(AureaTimeline.KeyframeTrack.value)
     /** Começo da faixa dos losangos (medido do topo da barra). */
     val trackTop = bar - track
     /** Folga abaixo das linhas (a última não cola na borda). */
-    val bottomPad = dp(24f)
+    val bottomPad = dp(if (referenceTrial) 0f else 24f)   // Omega: sem sobra (os +74 eram do "+" excluído)
 
     // --- Pílula da fileira (olho + miniatura/tipo), colada à esquerda -----------
     /** Largura da pílula; as barras passam por baixo dela. */
-    val headerColumn = dp(if (referenceTrial) 70f else AureaTimeline.HeaderColumn.value)
+    // Omega: a pílula vai de x −8 a 62; só 62 dp ficam à vista e as barras passam por baixo.
+    val headerColumn = dp(if (referenceTrial) 62f else AureaTimeline.HeaderColumn.value)
     /** A pílula: 28 de altura, começa 2 dp acima da barra, raio 14 só à direita. */
     val pillInset = if (referenceTrial) dp(1.5f) else dp(AureaTimeline.RowPillInset.value)
     val pillHeight = if (referenceTrial) row - dp(2f) else dp(AureaTimeline.RowPillHeight.value)
@@ -42,17 +44,17 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f, va
     val gutterIconCx = dp(17f)
     val gutterEye = AureaTimeline.GutterEyeSize.value
     /** Olho de 20, centrado em x 16. */
-    val gutterEyeCx = dp(if (referenceTrial) 23f else 16f)
+    val gutterEyeCx = dp(if (referenceTrial) 17f else 16f)
     /** Miniatura / "T" / ponto / nota de 20, de x 38 a 58. */
     val glyphBox = dp(AureaTimeline.GlyphBox.value)
-    val glyphBoxLeft = dp(if (referenceTrial) 42f else 38f)
+    val glyphBoxLeft = dp(if (referenceTrial) 34f else 38f)
     val glyphBoxRadius = dp(3f)
     val glyphIcon = 12f
     val glyphDot = dp(10f)
     val gutterLock = 10f
     val gutterLockCx = dp(66f)
     /** Toque do olho: o começo da pílula até antes do quadradinho; o resto é do tipo (abre as trilhas). */
-    val eyeHitRight = dp(if (referenceTrial) 40f else 28f)
+    val eyeHitRight = dp(if (referenceTrial) 36f else 28f)
     /** Onde começa o nome de uma trilha de propriedade (depois do chevron). */
     val laneLabelLeft = dp(30f)
 
@@ -135,7 +137,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f, va
     val balloonGap = dp(3f)
 
     // --- Cabeçote e relógio ----------------------------------------------------------
-    val playhead = dp(AureaTimeline.Playhead.value)
+    val playhead = dp(if (referenceTrial) 1.5f else AureaTimeline.Playhead.value)
     val knob = dp(AureaTimeline.PlayheadKnob.value)
     val knobRadius = dp(2f)
     /** Triângulo do cabeçote no alto da régua (camada escolhida): 10 × 8, em destaque. */
@@ -155,7 +157,7 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f, va
     /** Rótulo da régua perto do relógio some (não disputa leitura com ele). */
     val timecodeZoneHalf = dp(44f)
     /** O fio começa abaixo do relógio e atravessa toda a área livre da timeline. */
-    val playheadTop = dp(if (referenceTrial) 34f + 14f * (fontScale.coerceIn(1f, 2f) - 1f) else 36f)
+    val playheadTop = if (referenceTrial) dp(35f + 14f * (fontScale.coerceIn(1f, 2f) - 1f)) else dp(36f)
 
     // --- Gestos -------------------------------------------------------------------------
     val snapClip = dp(12f)          // ímã de clipe e alça
@@ -175,4 +177,76 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f, va
     val guide = dp(1f)
     val reorderLine = dp(2f)
     val reorderDot = dp(3f)
+
+    // --- Omega 0.3.2 (área 03) ----------------------------------------------------------
+    private val textScale = fontScale.coerceIn(1f, 2f) - 1f
+    /** Pílula do cabeçalho: começa 8 dp fora da tela (x −8) e vai até [headerColumn]. */
+    val omegaPillLeft = dp(-8f)
+    /** Topo da pílula medido do topo da LINHA (1 dp de margem em cima e embaixo). */
+    val omegaPillTop = dp(1f)
+    val omegaPillBorder = dp(0.5f)
+    /** Faixa da etiqueta à esquerda: 2 dp à vista, de y 1,8 até 2 dp antes do fim da linha. */
+    val omegaTagWidth = dp(2f)
+    val omegaTagTop = dp(1.8f)
+    val omegaTagBottomGap = dp(2f)
+    val omegaEyeGlyph = 18f
+    val omegaCheckGlyph = 16f
+    /** Miniatura da camada no cabeçalho: 20 × 23 em x 34..54 (ajustada). */
+    val omegaThumbLeft = dp(34f)
+    val omegaThumbWidth = dp(20f)
+    val omegaThumbHeight = dp(23f)
+    /** Recorte: a miniatura anda 7 dp para a esquerda e fica com 83 %. */
+    val omegaClipShift = dp(7f)
+    val omegaClipScale = 0.83f
+    /** Indicador "↳" de 14 × 16 no canto de baixo à direita do cabeçalho. */
+    val omegaClipIndicatorCx = dp(55f)
+    val omegaClipIndicatorCy = dp(20f)
+    /** Cadeado no canto de cima à direita da miniatura. */
+    val omegaLockCx = dp(50f)
+    val omegaLockCy = dp(7f)
+    /** Alça ≡ da linha: 8 × 7 dp a 5 dp da borda direita; o toque longo nela reordena. */
+    val omegaGripRight = dp(5f)
+    val omegaGripWidth = dp(8f)
+    val omegaGripZone = dp(30f)
+    /** Tempo atual: aba de 70 × 18 com o canto de cima à esquerda chanfrado. */
+    val omegaTabTop = dp(18f + 7f * textScale)
+    val omegaTabHeight = dp(18f + 7f * textScale)
+    val omegaTabMinWidth = dp(70f)
+    val omegaTabPad = dp(5f)
+    val omegaTabRadius = dp(2f)
+    val omegaTabChamfer = dp(6f)
+    val omegaTabStroke = dp(1f)
+    val omegaTimecodeBaseline = omegaTabTop + dp(13f + 6f * textScale)
+    /** Zona do toque no tempo atual: 100 × 38 centrada, de y 5 a 43. */
+    val omegaTimeTouchHalf = dp(50f)
+    val omegaTimeTouchTop = dp(5f)
+    val omegaTimeTouchBottom = dp(43f)
+    /** Tiques: segundo 18, meio segundo 12, quadro 5 (dp); 1 dp de largura. */
+    val omegaTick = dp(1f)
+    /** Marcador: fio de 1 dp pela régua e bandeirola de 5 dp (2 dp; 4 dp no quadro atual). */
+    val omegaMarkerFlag = dp(5f)
+    val omegaMarkerFlagTip = dp(1f)
+    val omegaMarkerFlagSmall = dp(2f)
+    val omegaMarkerFlagLarge = dp(4f)
+    /** Toque na régua: até 21 dp de um marcador vai até ele. */
+    val omegaMarkerNear = dp(21f)
+    /** Rótulo do clipe: 14 dp para dentro do cartão. */
+    val omegaLabelInset = dp(14f)
+    /** Losangos: 0,65 × barra em edição, 0,4 × barra nos outros parâmetros (proporção 2:3). */
+    val omegaKeyEdit = bar * 0.65f
+    val omegaKeyAlt = bar * 0.4f
+    val omegaKeyStroke = dp(1f)
+    val omegaKeyAltStroke = dp(0.5f)
+    val omegaKeyRing = dp(4f)
+    /** Zebra de quadros: cada faixa tem pelo menos 4 dp (≈ 10 px na referência). */
+    val omegaZebraMin = dp(4f)
+    /** Onda: barras de 1 dp. */
+    val omegaWave = dp(1f)
+    /** Sombra do cartão (0,5 dp) e a do clipe levantado (8 dp). */
+    val omegaShadow = dp(0.5f)
+    val omegaLiftShadow = dp(8f)
+    /** Alças do foco: pílula de 26 × barra com a ponta de fora redonda. */
+    val omegaHandle = dp(26f)
+    val omegaHandleChevron = dp(5f)
+    val omegaHandleStroke = dp(2f)
 }

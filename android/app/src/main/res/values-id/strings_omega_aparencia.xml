@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega aparência (área 05): mesclagem, transformar, cor e preenchimento,
+         borda e sombra, câmera e seletor de cor. Gerado por gen_strings_aparencia.py. -->
+
+    <!-- Mesclagem e opacidade (P0-1, P1-5) -->
+    <string name="om_ap_blend_darker_color">Warna lebih gelap</string>
+    <string name="om_ap_blend_lighter_color">Warna lebih terang</string>
+    <string name="om_ap_blend_linear_light">Cahaya linear</string>
+    <string name="om_ap_blend_pin_light">Cahaya titik</string>
+    <string name="om_ap_blend_soft_overlay">Hamparan lembut</string>
+    <string name="om_ap_blend_about">Tentang campuran</string>
+    <string name="om_ap_blend_category">Kategori %1$s</string>
+
+    <!-- Mover e transformar (P0-2) -->
+    <string name="om_ap_tf_move">Pindah</string>
+    <string name="om_ap_tf_pivot">Pivot</string>
+    <string name="om_ap_tf_rotate">Putar</string>
+    <string name="om_ap_tf_scale">Skala</string>
+    <string name="om_ap_tf_skew">Miringkan</string>
+    <string name="om_ap_tf_move_hint">Geser di sini untuk memindahkan layer</string>
+    <string name="om_ap_tf_depth_hint">Geser di sini untuk mengatur kedalaman</string>
+    <string name="om_ap_tf_pivot_hint">Geser di sini untuk memindahkan titik putar</string>
+    <string name="om_ap_tf_skew_x">Kemiringan X</string>
+    <string name="om_ap_tf_skew_y">Kemiringan Y</string>
+    <string name="om_ap_tf_width">Lebar</string>
+    <string name="om_ap_tf_height">Tinggi</string>
+    <string name="om_ap_tf_link">Pertahankan proporsi</string>
+    <string name="om_ap_tf_camera_scale">Kamera: zoom %1$s, sudut %2$s°</string>
+    <string name="om_ap_tf_dial">Roda putar</string>
+    <string name="om_ap_tf_turns">%1$d putaran</string>
+    <string name="om_ap_tf_reset_position">Atur ulang posisi</string>
+    <string name="om_ap_tf_reset_pivot">Atur ulang pivot</string>
+    <string name="om_ap_tf_reset_rotation">Atur ulang rotasi</string>
+    <string name="om_ap_tf_reset_scale">Atur ulang skala</string>
+    <string name="om_ap_tf_reset_skew">Atur ulang kemiringan</string>
+    <string name="om_ap_tf_reset_all">Atur ulang transformasi</string>
+    <string name="om_ap_tf_snap">Tempel ke layer lain</string>
+    <string name="om_ap_tf_accelerate">Percepat trackpad</string>
+    <string name="om_ap_tf_nudge">Ketuk tepi untuk memindah 1 px</string>
+    <string name="om_ap_tf_motion_path">Lintasan gerak</string>
+    <string name="om_ap_tf_axis">Sumbu %1$s</string>
+
+    <!-- Cor e preenchimento (P0-3, P1-4) -->
+    <string name="om_ap_fill_none">Tanpa isian</string>
+    <string name="om_ap_fill_color">Warna</string>
+    <string name="om_ap_fill_gradient">Gradien</string>
+    <string name="om_ap_fill_media">Media</string>
+    <string name="om_ap_fill_original">Asli</string>
+    <string name="om_ap_fill_original_hint">Warna asli ada di panel Vektor</string>
+    <string name="om_ap_fill_grad_linear">Linear</string>
+    <string name="om_ap_fill_grad_radial">Radial</string>
+    <string name="om_ap_fill_grad_sweep">Sudut</string>
+    <string name="om_ap_fill_grad_start">Warna awal</string>
+    <string name="om_ap_fill_grad_end">Warna akhir</string>
+    <string name="om_ap_fill_grad_handles">Seret ujung gradien di panggung</string>
+
+    <!-- Borda e sombra (P0-4, P1-9) -->
+    <string name="om_ap_bs_title">Batas &amp; bayangan</string>
+    <string name="om_ap_bs_stroke">Garis</string>
+    <string name="om_ap_bs_borders">Batas</string>
+    <string name="om_ap_bs_shadow">Bayangan</string>
+    <string name="om_ap_bs_add_border">Tambah batas</string>
+    <string name="om_ap_bs_border">Batas</string>
+    <string name="om_ap_bs_border_n">Batas %1$d</string>
+    <string name="om_ap_bs_delete_border">Hapus batas</string>
+    <string name="om_ap_bs_reorder">Seret untuk mengurutkan</string>
+    <string name="om_ap_bs_direction">Arah</string>
+    <string name="om_ap_bs_inside">Dalam</string>
+    <string name="om_ap_bs_center">Tengah</string>
+    <string name="om_ap_bs_outside">Luar</string>
+    <string name="om_ap_bs_color">Warna</string>
+    <string name="om_ap_bs_size">Ukuran</string>
+    <string name="om_ap_bs_alpha">Alfa</string>
+    <string name="om_ap_bs_offset">Pergeseran</string>
+    <string name="om_ap_bs_width">Lebar garis</string>
+    <string name="om_ap_bs_px">%1$s px</string>
+    <string name="om_ap_bs_stroke_unavailable">Garis untuk bentuk dan teks. Gunakan Batas pada layer ini.</string>
+
+    <!-- Câmera (P1-6) -->
+    <string name="om_ap_cam_title">Opsi kamera</string>
+    <string name="om_ap_cam_view">Pandangan</string>
+    <string name="om_ap_cam_focus">Blur fokus</string>
+    <string name="om_ap_cam_fog">Kabut</string>
+    <string name="om_ap_cam_view_title">Pandangan kamera</string>
+    <string name="om_ap_cam_view_angle">Sudut pandang</string>
+    <string name="om_ap_cam_zoom">Zoom</string>
+    <string name="om_ap_cam_perspective">Perspektif</string>
+    <string name="om_ap_cam_parallel">Paralel</string>
+    <string name="om_ap_cam_parallel_soon">Kamera paralel belum tersedia</string>
+    <string name="om_ap_cam_fog_soon">Kabut kamera belum tersedia. Gunakan kabut komposisi di Pengaturan proyek.</string>
+    <string name="om_ap_cam_tip">Untuk melihat lewat kamera, nyalakan pandangan kamera di samping panggung.</string>
+    <string name="om_ap_cam_focus_on">Blur fokus aktif</string>
+
+    <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
+    <string name="om_ap_cp_eyedropper">Pipet</string>
+    <string name="om_ap_cp_eyedropper_hint">Seret di panggung untuk memilih warna</string>
+    <string name="om_ap_cp_fine">Pemilih halus</string>
+    <string name="om_ap_cp_full">Warna lainnya</string>
+    <string name="om_ap_cp_unavailable">Warna transparan tidak tersedia di sini</string>
+    <string name="om_ap_cp_add">Simpan ke palet</string>
+    <string name="om_ap_cp_copy_code">Salin kode warna</string>
+    <string name="om_ap_cp_paste_code">Tempel kode warna</string>
+    <string name="om_ap_cp_code_copied">Kode warna disalin</string>
+    <string name="om_ap_cp_code">Kode warna %1$s</string>
+    <string name="om_ap_cp_wheel">Roda</string>
+    <string name="om_ap_cp_rgb">RGB</string>
+    <string name="om_ap_cp_done">Selesai</string>
+    <string name="om_ap_cp_current">Saat ini</string>
+    <string name="om_ap_cp_new">Baru</string>
+    <string name="om_ap_cp_hue">Rona</string>
+    <string name="om_ap_cp_saturation">Saturasi</string>
+    <string name="om_ap_cp_brightness">Kecerahan</string>
+    <string name="om_ap_cp_alpha">Alfa</string>
+    <string name="om_ap_cp_red">Merah</string>
+    <string name="om_ap_cp_green">Hijau</string>
+    <string name="om_ap_cp_blue">Biru</string>
+    <string name="om_ap_cp_alpha_toggle">Tampilkan atau sembunyikan alfa</string>
+    <string name="om_ap_cp_trash">Lepas di sini untuk menghapus</string>
+    <string name="om_ap_cp_swatch">Contoh %1$s</string>
+    <string name="om_ap_cp_palette">Palet</string>
+</resources>

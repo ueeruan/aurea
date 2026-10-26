@@ -127,7 +127,10 @@ internal class VoiceTakeRecorder(
             r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
             r.setAudioChannels(1)
-            r.setAudioSamplingRate(44_100)
+            // Omega adicionar (área 08, P1-12): 48 kHz nas duas plataformas (o iOS já
+            // gravava a 48 kHz; é a taxa do áudio do export). Aparelho sem 48 kHz no
+            // AAC: o MediaRecorder escolhe a mais próxima.
+            r.setAudioSamplingRate(48_000)
             r.setAudioEncodingBitRate(128_000)
             r.setOutputFile(file.absolutePath)
             // O microfone sumiu no meio (outro app tomou, erro do servidor de mídia):

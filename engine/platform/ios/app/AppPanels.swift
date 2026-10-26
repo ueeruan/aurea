@@ -111,17 +111,24 @@ struct LiveNoticePopup: View {
 }
 
 /// `editor/ProjectSettingsSheet.kt`: changes apply immediately to the core.
-/// The source sheet has four controls: aspect, resolution, fps and background.
+/// Omega chrome (área 02, P1-6): o painel da referência (`project_settings_fragment`)
+/// — véu de 30 %, painel embaixo no fundo S9 com raio 20 só em cima, entra
+/// subindo em 200 ms; a lupa da busca e o ✕ no topo. Fora de grupo: proporção,
+/// tamanho livre, resolução, taxa de quadros, duração (extra do AUREA) e fundo.
+/// Dentro de grupo (⚙ do grupo): largura × altura e fundo do GRUPO. Embaixo, a
+/// seção "Mais do AUREA" com o que morava no menu da engrenagem.
 struct ProjectSettingsPanel: View {
     @EnvironmentObject private var model: AureaModel
     var onDismiss: () -> Void = {}
     @State private var free = false
-    @State private var menu: String?
     @State private var pickingBackground = false
+    @State private var enter: CGFloat = 1
     private let aspects: [(String, Float)] = [("16:9", 16 / 9), ("9:16", 9 / 16), ("4:5", 4 / 5), ("1:1", 1), ("4:3", 4 / 3)]
     private let resolutions: [(Int, String)] = [(480, "480p (SD)"), (720, "720p (HD)"), (1080, "1080p (FHD)"), (1440, "1440p (QHD)"), (2160, "2160p (4K)")]
     /// Atalhos; qualquer outra taxa (1–240, 23,976, 29,97…) vem de "Personalizado…".
     private let frameRates = [24, 25, 30, 50, 60, 90, 120, 144, 240]
+    private let shutterOptions: [Float] = [90, 180, 270, 360]
+    private var group: Bool { model.engine.precompDepth > 0 }
     private var id: UInt64 { (model.composition["id"] as? NSNumber)?.uint64Value ?? 0 }
     private var width: Int { Int(model.compositionWidth) }
     private var height: Int { Int(model.compositionHeight) }
@@ -148,180 +155,296 @@ struct ProjectSettingsPanel: View {
     var body: some View {
         GeometryReader { bounds in
             ZStack(alignment: .bottom) {
-                Color.black.opacity(0.38).ignoresSafeArea().onTapGesture(perform: close)
+                Color.black.opacity(0.3).ignoresSafeArea().onTapGesture(perform: close)
+                    .accessibilityIdentifier("projectSettings.scrim")
                 VStack(spacing: 0) {
-                    Capsule().fill(AureaColors.muted.opacity(0.5)).frame(width: 36, height: 4).padding(.top, 6)
+                    HStack(spacing: 0) {
+                        Text(AureaText.t(group ? "om_tb_group_settings" : "editor_projeto_cbe9")).font(.aurea(size: 15, weight: .semibold))
+                            .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                        Button {
+                            close()
+                            OmegaChromeRequests.shared.commandSearch = true
+                        } label: {
+                            CupertinoGlyph.text(CupertinoGlyph.Search, size: 19).frame(width: 40, height: 44).contentShape(Rectangle())
+                        }.buttonStyle(.plain).accessibilityLabel(AureaText.t("edt_cmd_search_desc")).accessibilityIdentifier("commandSearchOpen")
+                        Button(action: close) {
+                            CupertinoGlyph.text(CupertinoGlyph.Xmark, size: 18).frame(width: 40, height: 44).contentShape(Rectangle())
+                        }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_fechar")).accessibilityIdentifier("projectSettings.close")
+                    }.padding(.leading, 18).padding(.trailing, 6).padding(.top, 6)
                     ScrollView {
                         VStack(spacing: 0) {
-                            HStack(spacing: 0) {
-                                Button(action: close) {
-                                    CupertinoGlyph.text(CupertinoGlyph.Xmark, size: 20).frame(width: 44, height: 44).contentShape(Rectangle())
-                                }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_fechar"))
-                                Text(AureaText.t("editor_projeto_cbe9")).font(.aurea(size: 16, weight: .bold))
-                                Spacer()
-                            }.padding(.leading, 6).padding(.trailing, 18)
-                            // Interface do projeto (0.2.5): Composição ou Edição, trocável a qualquer momento.
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(AureaText.t("ui_mode_label")).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.muted)
-                                UiModeChoice(selected: model.uiMode) { model.setUiMode($0) }
-                            }.padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 4)
-                            aspectRow
-                            if free {
-                                settingLine("editor_tamanho") {
+                            if !group { aspectRow }
+                            if free || group {
+                                settingLine(group ? "om_gs_size" : "editor_tamanho") {
                                     HStack(spacing: 0) {
-                                        sizeBox(width, title: "editor_largura") { setSize(Int($0.rounded()), height) }
-                                        Text("×").font(.aurea(size: 15)).foregroundStyle(AureaColors.muted).padding(.horizontal, 10)
-                                        sizeBox(height, title: "editor_altura") { setSize(width, Int($0.rounded())) }
-                                        Text("px").font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.leading, 8)
-                                    }.keepLtr()   // largura × altura px: a ordem do dado, em qualquer idioma
+                                        sizeBox(width, title: "editor_largura", tag: group ? "groupSettings.size.w" : "projectSettings.size.w") { setSize(Int($0.rounded()), height) }
+                                        Text("×").font(.aurea(size: 15)).foregroundStyle(AureaColors.muted).padding(.horizontal, 8)
+                                        sizeBox(height, title: "editor_altura", tag: group ? "groupSettings.size.h" : "projectSettings.size.h") { setSize(width, Int($0.rounded())) }
+                                    }.frame(width: 200).keepLtr()   // largura × altura: a ordem do dado, em qualquer idioma
                                 }
                             }
-                            settingLine("editor_resolucao") {
-                                dropdown(resolutions.first { $0.0 == shortest }?.1 ?? "\(shortest)p", key: "res")
-                            }
-                            settingLine("editor_quadros_segundo") {
-                                dropdown(homeFormatFps(model.compositionFps).replacingOccurrences(of: ".", with: ",") + " fps", key: "fps")
-                            }
-                            settingLine("editor_duracao") {
-                                Button {
-                                    model.numericKeypad = KeypadRequest(title: AureaText.t("editor_duracao"),
-                                        value: Float(Double(model.compositionDuration) / model.compositionFps), unit: "s",
-                                        min: Float(1 / model.compositionFps), max: 86400, decimals: 3, onValue: { seconds in
-                                            let frames = max(1, Int64((Double(seconds) * model.compositionFps).rounded()))
-                                            model.mutate { $0.setComposition(id, duration: frames) }
-                                            model.refreshModel(force: true)
-                                        })
-                                } label: {
-                                    Text(String(format: "%.3f s", Double(model.compositionDuration) / model.compositionFps))
-                                        .font(.aurea(size: 15, weight: .semibold).monospacedDigit())
-                                        .frame(maxWidth: .infinity).frame(height: 46)
-                                        .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
-                                }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_duracao"))
+                            if !group {
+                                settingLine("editor_resolucao") {
+                                    dropdown(resolutions.first { $0.0 == shortest }?.1 ?? "\(shortest)p", key: "res",
+                                             tag: "projectSettings.resolution", label: "editor_resolucao")
+                                }
+                                settingLine("editor_quadros_segundo") {
+                                    dropdown(homeFormatFps(model.compositionFps).replacingOccurrences(of: ".", with: ",") + " fps", key: "fps",
+                                             tag: "projectSettings.fps", label: "editor_quadros_segundo")
+                                }
+                                // Extra do AUREA (sem par na referência): a duração da composição.
+                                settingLine("editor_duracao") {
+                                    Button {
+                                        model.numericKeypad = KeypadRequest(title: AureaText.t("editor_duracao"),
+                                            value: Float(Double(model.compositionDuration) / model.compositionFps), unit: "s",
+                                            min: Float(1 / model.compositionFps), max: 86400, decimals: 3, onValue: { seconds in
+                                                let frames = max(1, Int64((Double(seconds) * model.compositionFps).rounded()))
+                                                model.mutate { $0.setComposition(id, duration: frames) }
+                                                model.refreshModel(force: true)
+                                            })
+                                    } label: {
+                                        Text(String(format: "%.3f s", Double(model.compositionDuration) / model.compositionFps))
+                                            .font(.aurea(size: 15, weight: .semibold).monospacedDigit()).foregroundStyle(AureaColors.lightText)
+                                            .frame(width: 180, height: 40)
+                                            .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 8))
+                                    }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_duracao")).accessibilityIdentifier("projectSettings.duration")
+                                }
                             }
                             settingLine("editor_plano_fundo") {
-                                dropdown(backgroundName, key: "bg", swatch: backgroundTransparent ? Color.clear
+                                dropdown(backgroundName, key: "bg", tag: group ? "groupSettings.background" : "projectSettings.background", label: "editor_plano_fundo",
+                                         swatch: backgroundTransparent ? Color.clear
                                          : Color(.sRGB, red: Double(background[0]), green: Double(background[1]), blue: Double(background[2]), opacity: 1))
                             }
+                            moreInAurea
                             Spacer().frame(height: 16)
                         }.padding(.bottom, 12)
                     }
                 }
-                .frame(height: min(bounds.size.height * 0.7, free ? 436 : 378))
-                .frame(maxWidth: .infinity).background(AureaColors.editorPanel)
+                .frame(maxHeight: bounds.size.height * 0.85)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity).background(OmegaChrome.column)
                 .clipShape(TopCorners())
+                .contentShape(Rectangle())
+                .onTapGesture {}
+                .offset(y: enter * bounds.size.height)
+                .accessibilityIdentifier("projectSettings")
             }
-            .overlayPreferenceValue(MenuAnchors.self) { anchors in
-                GeometryReader { geometry in
-                    if let key = menu, let anchor = anchors[key] {
-                        let rect = geometry[anchor], items = menuItems(key)
-                        let popupWidth: CGFloat = min(220, geometry.size.width - 16)
-                        let popupHeight = CGFloat(items.count) * 40 + 8
-                        let x = min(max(8, rect.maxX - popupWidth), max(8, geometry.size.width - popupWidth - 8))
-                        let below = rect.maxY + 4
-                        let y = max(8, below + popupHeight <= geometry.size.height - 8 ? below : rect.minY - 4 - popupHeight)
-                        Color.clear.contentShape(Rectangle()).onTapGesture { menu = nil }
-                        popup(items).frame(width: popupWidth, height: popupHeight).position(x: x + popupWidth / 2, y: y + popupHeight / 2)
-                    }
-                }
+        }.foregroundStyle(AureaColors.text)
+            .onAppear {
+                free = preset == nil
+                // Entra subindo em 200 ms (depois de medir).
+                withAnimation(.easeOut(duration: 0.2)) { enter = 0 }
             }
-        }.foregroundStyle(AureaColors.text).onAppear { free = preset == nil }.onDisappear { finishColor() }
+            .onDisappear { finishColor() }
     }
+
+    // --- Mais do AUREA -----------------------------------------------------------
+    @ViewBuilder private var moreInAurea: some View {
+        AureaColors.border.frame(height: 1).padding(.top, 12)
+        Text(AureaText.t("om_settings_more")).font(.aurea(size: 13, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 2).accessibilityIdentifier("projectSettings.more")
+        // Interface do projeto (0.2.5): Composição ou Edição, trocável a qualquer momento.
+        VStack(alignment: .leading, spacing: 8) {
+            Text(AureaText.t("ui_mode_label")).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.muted)
+            UiModeChoice(selected: model.uiMode) { model.setUiMode($0) }
+        }.padding(.horizontal, 18).padding(.top, 4).padding(.bottom, 4)
+
+        subheader("om_settings_preview")
+        settingLine("om_settings_preview_quality") { previewQuality }
+        toggleRow("editor_reproducao_loop", on: model.looping, tag: "projectSettings.more.loop") { model.setLooping(!model.looping) }
+        actionRow(model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia", tag: "projectSettings.more.fullscreen") {
+            close(); model.fullscreen.toggle()
+        }
+        toggleRow("editor_desfoque_movimento_composicao", on: model.compMotionBlur, tag: "projectSettings.more.motionBlur",
+                  detail: "editor_camadas_desfoque_movimento_so_borram_isto") { model.setCompositionMotionBlur(!model.compMotionBlur) }
+        if model.compMotionBlur {
+            let shutter = Int(model.shutterAngle)
+            HStack(spacing: 0) {
+                Text(AureaText.t("sh_menu_shutter", String(shutter))).font(.aurea(size: 15)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                AureaDropdown(value: "\(shutter)°", tag: "projectSettings.more.shutter", accessibilityLabel: AureaText.t("sh_menu_shutter", String(shutter))) {
+                    shutterOptions.map { angle in .item("\(Int(angle))°", selected: Int(angle) == shutter) { model.changeShutterAngle(angle) } }
+                }
+            }.padding(.horizontal, 18).padding(.vertical, 5)
+        }
+        toggleRow("editor_diagnostico_tela", on: model.hudVisible, tag: "projectSettings.more.hud",
+                  detail: "editor_quadros_segundo_tempos_gpu_memoria_decodificador") { model.toggleHud() }
+        actionRow("ios_perf_test_a11y", tag: "projectSettings.more.perfTest") { close(); OmegaChromeRequests.shared.performanceTest = true }
+
+        subheader("om_settings_editing")
+        toggleRow("i18n_snapping", on: model.snapping, tag: "projectSettings.more.snapping") { model.snapping.toggle() }
+        toggleRow("editor_keyframes_todas_camadas", on: model.showAllKeyframes, tag: "projectSettings.more.allKeys",
+                  detail: "editor_keyframes_todas_camadas_detalhe") { model.showAllKeyframes.toggle() }
+        toggleRow("editor_timeline_magnetica_modo_edicao", on: model.editMode, tag: "projectSettings.more.magnetic",
+                  detail: "editor_aparar_empurra_camadas_seguintes_excluir_fecha") { model.toggleEditMode() }
+        actionRow("editor_remover_espacos_vazios", tag: "projectSettings.more.removeGaps") { close(); model.removeGaps() }
+        actionRow("editor_aparar_projeto_cabecote", tag: "projectSettings.more.trimProject", enabled: model.status.playhead > 0) {
+            close(); model.trimProjectAtPlayhead()
+        }
+
+        subheader("editor_marcas_ritmo")
+        let marked = model.markerFrames.contains(model.status.playhead)
+        toggleRow("editor_marcar_ou_desmarcar_este_instante", on: marked, tag: "projectSettings.more.marker") { model.toggleMarkerAt(model.status.playhead) }
+        actionRow("marker_edit", tag: "projectSettings.more.editMarker", enabled: marked) { close(); model.editMarkerAtPlayhead() }
+        actionRow("editor_ir_proxima_marca", tag: "projectSettings.more.nextMarker", enabled: !model.markerFrames.isEmpty) {
+            close(); model.seekToNextMarker()
+        }
+
+        subheader("om_settings_import")
+        actionRow("ae_import_menu", tag: "menu.ae_import",
+                  detail: model.primarySelection != nil ? "ae_import_layer_detail" : "ae_import_new_layer_detail") {
+            close(); OmegaChromeRequests.shared.aeImport = true
+        }
+    }
+
+    /// Qualidade da prévia (D3): não muda a exportação.
+    private var previewQuality: some View {
+        let label: String = model.rawPlayback ? "RAW" : model.status.previewAuto != 0 ? "Auto"
+            : (max(1, model.status.previewNumerator) >= max(1, model.status.previewDenominator) ? AureaText.t("i18n_preview_full")
+               : "1/\(max(1, model.status.previewDenominator) / max(1, model.status.previewNumerator))")
+        return AureaDropdown(value: label, tag: "projectSettings.previewQuality", accessibilityLabel: AureaText.t("om_settings_preview_quality")) {
+            var entries: [MenuEntry] = []
+            if ProxyOptimizer.shared.summary.generating > 0 {
+                entries.append(.item(AureaText.t("proxy_optimizing", ProxyOptimizer.shared.summary.percent), enabled: false))
+            }
+            #if DEBUG
+            // Teste de reprodução crua (texto fixo, sem tradução): só no build Debug.
+            entries.append(.item(model.rawPlayback ? AureaText.t("ios_raw_back_to_compositor") : "AUREA RAW PLAYBACK TEST",
+                                 selected: model.rawPlayback, tag: "rawPlaybackToggle") { model.toggleRawPlayback() })
+            #endif
+            let names = ["Auto", AureaText.t("i18n_preview_full"), "1/2", "1/4", "1/8"]
+            let denominators: [UInt32] = [1, 1, 2, 4, 8]
+            for index in names.indices {
+                let denominator = denominators[index]
+                let on = index == 0 ? model.status.previewAuto != 0 : model.status.previewAuto == 0 && model.status.previewDenominator == denominator
+                entries.append(.item(names[index], selected: on) { model.setPreviewScale(num: 1, den: denominator, auto: index == 0) })
+            }
+            return entries
+        }
+    }
+
+    private func subheader(_ key: String) -> some View {
+        Text(AureaText.t(key)).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.muted)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 2)
+    }
+
+    /// Linha compacta de 40 pt com o interruptor à direita.
+    private func toggleRow(_ key: String, on: Bool, tag: String, detail: String? = nil, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(AureaText.t(key)).font(.aurea(size: 14))
+                if let detail { Text(AureaText.t(detail)).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted) }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            AureaToggle(checked: on) { _ in action() }
+        }
+        .padding(.horizontal, 18).padding(.vertical, 4).frame(minHeight: 40)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: action)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(AureaText.t(key))
+        .accessibilityValue(AureaText.t(on ? "common_on" : "common_off"))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(.default, action)
+        .accessibilityIdentifier(tag)
+    }
+
+    /// Linha compacta de 40 pt que faz uma ação (apagada quando não vale agora).
+    private func actionRow(_ key: String, tag: String, enabled: Bool = true, detail: String? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(AureaText.t(key)).font(.aurea(size: 14)).foregroundStyle(enabled ? AureaColors.text : StageInk.disabledMuted)
+                    if let detail { Text(AureaText.t(detail)).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted) }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: enabled ? AureaColors.muted : StageInk.disabledMuted).mirrorsInRtl()
+            }.padding(.horizontal, 18).padding(.vertical, 4).frame(minHeight: 40).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityIdentifier(tag)
+    }
+
+    /// Proporções desenhadas no formato (lado maior 40): borda branca, acesa no destaque.
+    /// Os vãos entre elas também tocam (o alvo é 48 × 52).
     private var aspectRow: some View {
         HStack(spacing: 0) {
             ForEach(Array(aspects.enumerated()), id: \.offset) { index, option in
                 if index > 0 { Spacer(minLength: 0) }
                 let on = !free && preset == option.0
+                let ink = on ? AureaColors.accent : AureaColors.text
                 Button {
                     free = false
                     if preset != option.0 { applyAspect(option.1) }
                 } label: {
-                    Text(option.0).font(.aurea(size: 12, weight: .bold)).foregroundStyle(on ? AureaColors.onAccent : AureaColors.text)
-                        .frame(width: option.1 >= 1 ? 44 : CGFloat(44 * max(0.5, option.1) + 6),
-                               height: option.1 >= 1 ? CGFloat(44 / option.1 + 6) : 44)
-                        .background(on ? AureaColors.accent : AureaColors.chip, in: RoundedRectangle(cornerRadius: 6))
-                }.buttonStyle(.plain).accessibilityLabel(AureaText.t("sh_aspect_ratio_desc", option.0))
+                    Text(option.0).font(.aurea(size: 10, weight: .bold)).foregroundStyle(ink)
+                        .frame(width: option.1 >= 1 ? 40 : CGFloat(40 * max(0.5, option.1) + 6),
+                               height: option.1 >= 1 ? CGFloat(40 / option.1 + 6) : 40)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(ink, lineWidth: 1.5))
+                        .frame(width: 48, height: 52).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .accessibilityLabel(AureaText.t("sh_aspect_ratio_desc", option.0))
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                    .accessibilityIdentifier("projectSettings.aspect.\(option.0)")
             }
             Spacer(minLength: 0)
             Button { free = true } label: {
-                CupertinoGlyph.text(CupertinoGlyph.Pencil, size: 18, color: free ? AureaColors.onAccent : AureaColors.text)
-                    .frame(width: 40, height: 40).background(free ? AureaColors.accent : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                CupertinoGlyph.text(CupertinoGlyph.Pencil, size: 18, color: free ? AureaColors.accent : AureaColors.text)
+                    .frame(width: 40, height: 40)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(free ? AureaColors.accent : AureaColors.text, lineWidth: 1.5))
+                    .frame(width: 48, height: 52).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_tamanho_livre"))
-        }.padding(.horizontal, 18).frame(height: 64)
+                .accessibilityAddTraits(free ? .isSelected : [])
+                .accessibilityIdentifier("projectSettings.aspect.free")
+        }.padding(.horizontal, 30).frame(height: 56)
     }
     private func settingLine<Content: View>(_ key: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 0) {
-            Text(AureaText.t(key)).font(.aurea(size: 14)).lineLimit(2).padding(.trailing, 8).frame(width: 132, alignment: .leading)
-            content().frame(maxWidth: .infinity)
-        }.padding(.horizontal, 18).padding(.vertical, 6)
+            Text(AureaText.t(key)).font(.aurea(size: 15)).lineLimit(2).padding(.trailing, 8).frame(maxWidth: .infinity, alignment: .leading)
+            content()
+        }.padding(.horizontal, 18).padding(.vertical, 5)
     }
-    private func dropdown(_ value: String, key: String, swatch: Color? = nil) -> some View {
-        Button { menu = key } label: {
-            HStack(spacing: 0) {
-                if let swatch {
-                    // Color.clear = fundo transparente: o xadrez aparece atrás.
-                    AureaColorSwatch(color: swatch).clipShape(RoundedRectangle(cornerRadius: 5)).frame(width: 24, height: 24)
-                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(AureaColors.border, lineWidth: 1)).padding(.trailing, 10)
-                }
-                Text(value).font(.aurea(size: 15, weight: .semibold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                CupertinoGlyph.text(CupertinoGlyph.ChevronDown, size: 15, color: AureaColors.muted)
-            }.padding(.horizontal, 14).frame(height: 46).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
-        }.buttonStyle(.plain).anchorPreference(key: MenuAnchors.self, value: .bounds) { [key: $0] }
+    /// A caixa suspensa clara da referência (180 de largura).
+    private func dropdown(_ value: String, key: String, tag: String, label: String, swatch: Color? = nil) -> some View {
+        AureaDropdown(value: value, swatch: swatch, tag: tag, accessibilityLabel: AureaText.t(label)) { menuItems(key) }
     }
-    private func sizeBox(_ value: Int, title: String, onValue: @escaping (Float) -> Void) -> some View {
+    private func sizeBox(_ value: Int, title: String, tag: String, onValue: @escaping (Float) -> Void) -> some View {
         Button {
             model.numericKeypad = KeypadRequest(title: AureaText.t(title), value: Float(value), unit: "px", min: 16, max: 8192, decimals: 0, onValue: onValue)
         } label: {
-            Text(String(value)).font(.aurea(size: 15, weight: .semibold).monospacedDigit())
-                .frame(maxWidth: .infinity).frame(height: 46).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
-        }.buttonStyle(.plain)
+            Text(String(value)).font(.aurea(size: 15, weight: .semibold).monospacedDigit()).foregroundStyle(AureaColors.lightText)
+                .frame(maxWidth: .infinity).frame(height: 40).background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 8))
+        }.buttonStyle(.plain).accessibilityIdentifier(tag)
     }
-    private struct MenuItem: Identifiable {
-        let label: String; let checked: Bool; let action: () -> Void
-        var id: String { label }
-    }
-    private func menuItems(_ key: String) -> [MenuItem] {
+    private func menuItems(_ key: String) -> [MenuEntry] {
         if key == "res" {
-            return resolutions.map { side, label in
-                MenuItem(label: label, checked: shortest == side) { let size = sizeFor(side, ratio: ratio); setSize(size.0, size.1) }
+            return resolutions.map { side, label -> MenuEntry in
+                .item(label, selected: shortest == side) { let size = sizeFor(side, ratio: ratio); setSize(size.0, size.1) }
             }
         }
         if key == "fps" {
             let custom = !frameRates.contains { abs(model.compositionFps - Double($0)) < 0.01 }
-            return frameRates.map { fps in
-                MenuItem(label: "\(fps) fps", checked: abs(model.compositionFps - Double(fps)) < 0.01) { setFps(Double(fps)) }
-            } + [MenuItem(label: AureaText.t("project_fps_custom"), checked: custom) {
+            let rates: [MenuEntry] = frameRates.map { fps -> MenuEntry in
+                .item("\(fps) fps", selected: abs(model.compositionFps - Double(fps)) < 0.01) { setFps(Double(fps)) }
+            }
+            return rates + [.item(AureaText.t("project_fps_custom"), selected: custom) {
                 // fps livre: o teclado limita a 1–240 e aceita decimais (29,97).
                 model.numericKeypad = KeypadRequest(title: AureaText.t("project_fps_custom_title"), value: Float(model.compositionFps),
                                                     unit: "fps", min: 1, max: 240, decimals: 3, onValue: { setFps(Double($0)) })
             }]
         }
         return [
-            MenuItem(label: AureaText.t("sh_bg_black"), checked: backgroundName == AureaText.t("sh_bg_black")) { setBackground([0, 0, 0, 1]) },
-            MenuItem(label: AureaText.t("sh_bg_white"), checked: backgroundName == AureaText.t("sh_bg_white")) { setBackground([1, 1, 1, 1]) },
+            .item(AureaText.t("sh_bg_black"), selected: backgroundName == AureaText.t("sh_bg_black")) { setBackground([0, 0, 0, 1]) },
+            .item(AureaText.t("sh_bg_white"), selected: backgroundName == AureaText.t("sh_bg_white")) { setBackground([1, 1, 1, 1]) },
             // Sem fundo: o motor guarda a cor e exporta PNG/GIF com alfa.
-            MenuItem(label: AureaText.t("sh_bg_transparent"), checked: backgroundTransparent) {
+            .item(AureaText.t("sh_bg_transparent"), selected: backgroundTransparent) {
                 setBackground([background[0], background[1], background[2], 0])
             },
-            MenuItem(label: AureaText.t("editor_outra_cor"), checked: backgroundName == AureaText.t("editor_personalizada")) {
+            .item(AureaText.t("editor_outra_cor"), selected: backgroundName == AureaText.t("editor_personalizada")) {
                 model.engine.run { $0.beginUndoGroup() }; pickingBackground = true
                 // ProjectSettingsSheet.kt passes composition background as display sRGB.
                 model.colorSheet = ColorSheetRequest(title: AureaText.t("ds_cor"), initial: Array(background.prefix(3)) + [1], withAlpha: false,
                     onChange: { r, g, b, _ in setBackground([r, g, b, 1]) }, onDone: finishColor)
             },
         ]
-    }
-    private func popup(_ items: [MenuItem]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(items) { item in
-                Button { menu = nil; item.action() } label: {
-                    HStack(spacing: 10) {
-                        Rectangle().fill(item.checked ? AureaColors.accent : .clear).frame(width: 4, height: 24)
-                        Text(item.label).font(.aurea(size: 13)).foregroundStyle(item.checked ? AureaColors.accent : AureaColors.text)
-                            .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                    }.padding(.trailing, 10).frame(height: 40).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-            }
-        }.padding(.vertical, 4).background(AureaColors.pill, in: RoundedRectangle(cornerRadius: 8))
     }
     private func applyAspect(_ target: Float) {
         var size = sizeFor(shortest, ratio: target)
@@ -354,12 +477,8 @@ struct ProjectSettingsPanel: View {
         if pickingBackground { model.engine.run { $0.endUndoGroup() }; pickingBackground = false }
     }
     private func close() { finishColor(); onDismiss() }
-    private struct MenuAnchors: PreferenceKey {
-        static var defaultValue: [String: Anchor<CGRect>] = [:]
-        static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) { value.merge(nextValue(), uniquingKeysWith: { _, next in next }) }
-    }
     private struct TopCorners: Shape {
-        var radius: CGFloat = 18
+        var radius: CGFloat = 20
         func path(in rect: CGRect) -> Path {
             var path = Path()
             path.move(to: CGPoint(x: 0, y: rect.maxY)); path.addLine(to: CGPoint(x: 0, y: radius))

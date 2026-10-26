@@ -38,10 +38,17 @@ struct EditModeView: View {
 
     var body: some View {
         let previewH = model.fullscreen ? max(0, height - 52) : min(max(height * 0.40, 160), 560)
+        // Omega conteúdo (área 06, P2-15): o modo de texto também na Edição — a barra de
+        // estilo no topo (52) e o painel grande embaixo do palco.
+        let texting = model.textModeActive && !model.fullscreen
         VStack(spacing: 0) {
-            if !model.fullscreen { topBar }
+            if texting { TextStyleBar().frame(height: 52).zIndex(2) }
+            else if !model.fullscreen { topBar }
             PreviewStage(height: previewH).background(EditColors.preview)
                 .environment(\.layoutDirection, .leftToRight)
+            if texting {
+                TextEditPanel().frame(maxHeight: .infinity)
+            } else {
             playBar
             if !model.fullscreen {
                 if model.panel != .none && model.panel != .dock {
@@ -56,7 +63,9 @@ struct EditModeView: View {
                     dock
                 }
             }
+            }
         }
+        .overlay(alignment: .top) { if texting { TextStylePopupLayer(top: 52) } }
         .background(EditColors.canvas.ignoresSafeArea())
         .onChange(of: model.primarySelection) { _ in syncLevel() }
         .onAppear(perform: syncLevel)
@@ -114,7 +123,7 @@ struct EditModeView: View {
             } label: {
                 CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 20).frame(width: 44, height: 44).contentShape(Rectangle())
             }.accessibilityLabel(AureaText.t("edit_more")).accessibilityIdentifier("edit.more")
-            Button { if model.status.playing != 0 { model.pause() }; model.showExport = true } label: {
+            Button { if model.status.playing != 0 { model.pause() }; model.openExport() /* Omega adicionar (área 08, P1-12): limpa o resultado anterior */ } label: {
                 Text(AureaText.t("edit_export")).font(.aurea(size: 14, weight: .bold)).foregroundStyle(AureaColors.background)
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 8))
@@ -319,7 +328,10 @@ struct EditModeView: View {
             return list
         case .textClip:
             return [
-                item("editText", CupertinoGlyph.Pencil, "edit_clip_edit_text") { panel(.text) },
+                // Omega conteúdo (área 06, P2-15): "Editar texto" abre o MODO DE TEXTO e "Fonte"
+                // o navegador de fontes (par do EditModeScreen.kt).
+                item("editText", CupertinoGlyph.Pencil, "edit_clip_edit_text") { _ = model.openTextEdit() },
+                item("font", CupertinoGlyph.Textformat, "edit_clip_font") { FontBrowserRequest.shared.open = true },
                 animations, effects, transform, split, duplicate, delete,
             ]
         case .audioClip:
@@ -329,7 +341,14 @@ struct EditModeView: View {
                 effects, split, duplicate, delete,
             ]
         case .otherClip:
-            return [effects, filters, adjust, transform, opacity, mask, split, duplicate, delete]
+            // Omega conteúdo (área 06, P2-15): forma → Editar forma; vetor → Editar pontos; desenho → desenho.
+            var list: [EditDockItem] = []
+            if model.selectedLayer?.kind == 5 {
+                if model.isDrawingLayer { list.append(item("editDrawing", CupertinoGlyph.Scribble, "om_draw_title") { panel(.drawing) }) }
+                else if model.isVectorLayer { list.append(item("editPoints", CupertinoGlyph.PencilOutline, "om_pts_title") { EditPointsState.shared.reset(); panel(.editPoints) }) }
+                else { list.append(item("editShape", ShellGlyph.SliderHorizontalBelowRectangle, "sh_dock_edit_shape") { panel(.shapeEdit) }) }
+            }
+            return list + [effects, filters, adjust, transform, opacity, mask, split, duplicate, delete]
         }
     }
 }

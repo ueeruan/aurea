@@ -38,7 +38,8 @@ class TimelineArrangementTest {
             store.selectAll()
         }
         compose.waitUntil(5000) { store.selection.size == 3 && store.layers.map { it.startFrame } == listOf(10, 12, 71) }
-        compose.onNodeWithTag("timeline.batch.tools").assertIsDisplayed()
+        // Omega chrome (área 02, P0-4): a barra inferior flutuante da seleção múltipla.
+        compose.onNodeWithTag("batch.bottom").assertIsDisplayed()
         for (mode in 3..6) compose.onNodeWithTag("timeline.arrange.$mode").assertDoesNotExist()
         compose.onNodeWithTag("stagger_row").assertDoesNotExist()
         val align = com.aurea.aurea.ui.i18n.AppText.get(context, com.aurea.aurea.R.string.editor_alinhar_inicios)

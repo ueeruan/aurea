@@ -48,11 +48,65 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     // --- Abas ------------------------------------------------------------------
-    var tab by mutableIntStateOf(PROJECTS_TAB)
+    // Omega home · P1-8 (D5): a primeira abertura é em Início; depois, sempre a
+    // última aba usada (gravada), inclusive na volta do editor.
+    var tab by mutableIntStateOf(prefs.getInt(KEY_TAB, HOME_TAB).takeIf { it in 0 until TAB_COUNT } ?: HOME_TAB)
         private set
 
     fun selectTab(i: Int) {
+        if (i !in 0 until TAB_COUNT) return
         tab = i
+        prefs.edit { putInt(KEY_TAB, i) }
+    }
+
+    // --- Omega home · P1-6: o que a folha "Novo projeto" lembra entre aberturas.
+    // Nulo = ainda não escolhido (vale o padrão dos Ajustes). Mudar um padrão nos
+    // Ajustes esquece a última escolha daquele campo.
+    internal var lastFree by mutableStateOf(prefs.getBoolean(KEY_NP_FREE, false))
+        private set
+    internal var lastFreeWidth by mutableIntStateOf(prefs.getInt(KEY_NP_FREE_W, 1080))
+        private set
+    internal var lastFreeHeight by mutableIntStateOf(prefs.getInt(KEY_NP_FREE_H, 1350))
+        private set
+    internal var lastKeepRatio by mutableStateOf(prefs.getBoolean(KEY_NP_KEEP, true))
+        private set
+    internal var lastFps by mutableStateOf(prefs.getFloat(KEY_NP_FPS, 0f).takeIf { it > 0f })
+        private set
+    /** Fundo: "r,g,b" (0–1) ou "t" (transparente). */
+    internal var lastBackground by mutableStateOf(prefs.getString(KEY_NP_BG, null))
+        private set
+
+    internal fun rememberNewProject(
+        aspectKey: String?, resolution: Int?, free: Boolean, freeWidth: Int, freeHeight: Int,
+        keepRatio: Boolean, fps: Double, background: FloatArray, transparent: Boolean,
+    ) {
+        lastFree = free
+        lastFreeWidth = freeWidth
+        lastFreeHeight = freeHeight
+        lastKeepRatio = keepRatio
+        lastFps = fps.toFloat()
+        lastBackground = if (transparent) "t" else background.take(3).joinToString(",")
+        if (aspectKey != null) defaultAspectKey = aspectKey
+        if (resolution != null) defaultResolution = resolution
+        prefs.edit {
+            putBoolean(KEY_NP_FREE, free)
+            putInt(KEY_NP_FREE_W, freeWidth)
+            putInt(KEY_NP_FREE_H, freeHeight)
+            putBoolean(KEY_NP_KEEP, keepRatio)
+            putFloat(KEY_NP_FPS, fps.toFloat())
+            putString(KEY_NP_BG, lastBackground)
+            if (aspectKey != null) putString(KEY_ASPECT, aspectKey)
+            if (resolution != null) putInt(KEY_RESOLUTION, resolution)
+        }
+    }
+
+    // --- Omega home · P2-1: "Prévia leve" (o editor abre com a prévia em 1/2).
+    internal var lightPreview by mutableStateOf(prefs.getBoolean(KEY_LIGHT_PREVIEW, false))
+        private set
+
+    internal fun changeLightPreview(on: Boolean) {
+        lightPreview = on
+        prefs.edit { putBoolean(KEY_LIGHT_PREVIEW, on) }
     }
 
     private val scrollIndex = IntArray(TAB_COUNT)
@@ -120,7 +174,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     internal fun changeDefaultAspect(key: String) {
         defaultAspectKey = key
-        prefs.edit { putString(KEY_ASPECT, key) }
+        // Omega home: o formato padrão vale na próxima folha (sai do "Livre").
+        lastFree = false
+        prefs.edit {
+            putString(KEY_ASPECT, key)
+            putBoolean(KEY_NP_FREE, false)
+        }
     }
 
     internal fun changeDefaultResolution(v: Int) {
@@ -130,7 +189,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     internal fun changeDefaultFps(v: Int) {
         defaultFps = v
-        prefs.edit { putInt(KEY_FPS, v) }
+        // Omega home: o padrão novo vale na próxima folha (esquece a última taxa).
+        lastFps = null
+        prefs.edit {
+            putInt(KEY_FPS, v)
+            remove(KEY_NP_FPS)
+        }
     }
 
     // --- Tema do app (Ajustes) ----------------------------------------------------
@@ -259,14 +323,30 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
-        /** Início · Projetos · Ajustes. */
+        /**
+         * Omega home · P0-2: Início (Comunidade) · Perfil · [+] · Projetos ·
+         * Presets. Os Ajustes saíram da barra para a gaveta (P0-3).
+         */
         const val TAB_COUNT = 4
         const val HOME_TAB = 0
         const val PROJECTS_TAB = 1
-        const val SETTINGS_TAB = 2
+        const val PRESETS_TAB = 2
         const val PROFILE_TAB = 3
 
         private const val PREFS = "aurea.home"
+        // Omega home.
+        internal const val KEY_TAB = "home.tab"
+        private const val KEY_NP_FREE = "newProject.free"
+        private const val KEY_NP_FREE_W = "newProject.freeWidth"
+        private const val KEY_NP_FREE_H = "newProject.freeHeight"
+        private const val KEY_NP_KEEP = "newProject.keepRatio"
+        private const val KEY_NP_FPS = "newProject.fps"
+        private const val KEY_NP_BG = "newProject.background"
+        internal const val KEY_LIGHT_PREVIEW = "settings.lightPreview"
+
+        /** "Prévia leve" ligada (lida pelo editor ao abrir um projeto). */
+        fun lightPreviewEnabled(context: Context): Boolean =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_LIGHT_PREVIEW, false)
         private const val KEY_SORT = "projetos.ordem"
         private const val KEY_ASPECT = "settings.defaultAspect"
         private const val KEY_RESOLUTION = "settings.defaultResolution"

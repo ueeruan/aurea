@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Omega 0.3.2, área 02 (moldura do editor). Textos próprios do AUREA. -->
+    <string name="om_tb_exit">Back to projects</string>
+    <string name="om_tb_share">Share and export</string>
+    <string name="om_tb_group_settings">Group settings</string>
+    <string name="om_tb_trail_item">Go to %1$s</string>
+    <string name="om_sel_align">Align on screen</string>
+    <string name="om_sel_need_three">Select 3 or more layers to distribute</string>
+    <string name="om_sel_extend_start">Extend start to playhead</string>
+    <string name="om_sel_move_start">Move start to playhead</string>
+    <string name="om_sel_extend_end">Extend end to playhead</string>
+    <string name="om_sel_move_end">Move end to playhead</string>
+    <string name="om_sel_distribute_time">Distribute in time</string>
+    <string name="om_tr_previous">Go to previous event</string>
+    <string name="om_tr_next">Go to next event</string>
+    <string name="om_tr_copy_paste">Copy and paste</string>
+    <string name="om_tr_view_modes">View modes</string>
+    <string name="om_vm_pixel">Actual pixels</string>
+    <string name="om_vm_grid">Grid</string>
+    <string name="om_vm_grid_spacing">Grid spacing</string>
+    <string name="om_vm_solo">Selected layer focus</string>
+    <string name="om_vm_solo_off">Normal</string>
+    <string name="om_vm_solo_only">Selected layer only</string>
+    <string name="om_vm_solo_dim" formatted="false">Selected layer at 50%</string>
+    <string name="om_vm_camera">View through active camera</string>
+    <string name="om_vm_camera_unavailable">Not available yet in this test version</string>
+    <string name="om_vm_zoom_in">Zoom in</string>
+    <string name="om_vm_zoom_out">Zoom out</string>
+    <string name="om_cp_save_preset">Save preset</string>
+    <string name="om_cp_with_style">(including style)</string>
+    <string name="om_cp_paste_style_more">Paste style</string>
+    <string name="om_cp_link_selected">Link selected…</string>
+    <string name="om_ps_color_fill">Paste color &amp; fill</string>
+    <string name="om_ps_border_shadow">Paste border &amp; shadow</string>
+    <string name="om_ps_blend">Paste blending &amp; opacity</string>
+    <string name="om_ps_transform">Paste move &amp; transform</string>
+    <string name="om_ps_text">Paste text style</string>
+    <string name="om_ps_volume">Paste volume</string>
+    <string name="om_ps_effects">Paste effects</string>
+    <string name="om_ps_speed">Paste speed</string>
+    <string name="om_ps_paste">Paste</string>
+    <string name="om_settings_more">More in AUREA</string>
+    <string name="om_settings_preview">Preview</string>
+    <string name="om_settings_editing">Editing</string>
+    <string name="om_settings_import">Import</string>
+    <string name="om_settings_preview_quality">Preview quality</string>
+    <string name="om_gs_size">Group width, height</string>
+    <string name="om_mi_name">Name</string>
+    <string name="om_mi_dimensions">Dimensions (W × H)</string>
+    <string name="om_mi_format">Format</string>
+    <plurals name="om_layers_selected">
+        <item quantity="one">%d layer selected</item>
+        <item quantity="other">%d layers selected</item>
+    </plurals>
+    <plurals name="om_cp_duplicate">
+        <item quantity="one">Duplicate layer</item>
+        <item quantity="other">Duplicate %d layers</item>
+    </plurals>
+    <plurals name="om_cp_copy">
+        <item quantity="one">Copy layer</item>
+        <item quantity="other">Copy %d layers</item>
+    </plurals>
+    <plurals name="om_cp_paste">
+        <item quantity="one">Paste layer</item>
+        <item quantity="other">Paste %d layers</item>
+    </plurals>
+</resources>

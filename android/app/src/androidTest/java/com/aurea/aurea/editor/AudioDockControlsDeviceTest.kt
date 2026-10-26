@@ -66,7 +66,9 @@ class AudioDockControlsDeviceTest {
         }
         assertEquals(originalDuration, nativeDuration())
 
-        compose.onNodeWithTag("dock.tool.Mute").assertIsDisplayed().performClick()
+        // Omega painel: o Áudio do painel da camada abre o volume embutido (Mudo dentro).
+        compose.onNodeWithTag("layer.panel.audio").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("layer.panel.volume.mute").assertIsDisplayed().performClick()
         compose.waitUntil(5000) { store.detail?.audioMuted == true }
         assertEquals(.65f, store.detail!!.audioVolume, 0f)
         compose.runOnIdle { store.undo() }
@@ -75,7 +77,10 @@ class AudioDockControlsDeviceTest {
         compose.runOnIdle { store.redo() }
         compose.waitUntil(5000) { store.detail?.audioMuted == true }
 
-        compose.onNodeWithTag("dock.tool.Speed").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("layer.panel.volume.close").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("layer.panel.speed").assertIsDisplayed().performClick()
+        // Os valores prontos moram na aba Opções da moldura (a 3ª aba).
+        compose.onNodeWithTag("panel.tab.2").assertIsDisplayed().performClick()
         compose.onNodeWithText("2x").performScrollTo().performClick()
         compose.waitUntil(5000) { nativeDuration() == originalDuration / 2 }
         assertEquals(originalDuration / 2, nativeDuration())

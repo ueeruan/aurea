@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Omega 0.3.2, área 02 (moldura do editor). Textos próprios do AUREA. -->
+    <string name="om_tb_exit">प्रोजेक्ट्स पर वापस जाएँ</string>
+    <string name="om_tb_share">शेयर और एक्सपोर्ट करें</string>
+    <string name="om_tb_group_settings">ग्रुप सेटिंग्स</string>
+    <string name="om_tb_trail_item">%1$s पर जाएँ</string>
+    <string name="om_sel_align">स्क्रीन पर संरेखित करें</string>
+    <string name="om_sel_need_three">बाँटने के लिए 3 या ज़्यादा लेयर चुनें</string>
+    <string name="om_sel_extend_start">शुरुआत को प्लेहेड तक बढ़ाएँ</string>
+    <string name="om_sel_move_start">शुरुआत को प्लेहेड पर ले जाएँ</string>
+    <string name="om_sel_extend_end">अंत को प्लेहेड तक बढ़ाएँ</string>
+    <string name="om_sel_move_end">अंत को प्लेहेड पर ले जाएँ</string>
+    <string name="om_sel_distribute_time">समय में बाँटें</string>
+    <string name="om_tr_previous">पिछले इवेंट पर जाएँ</string>
+    <string name="om_tr_next">अगले इवेंट पर जाएँ</string>
+    <string name="om_tr_copy_paste">कॉपी और पेस्ट</string>
+    <string name="om_tr_view_modes">व्यू मोड</string>
+    <string name="om_vm_pixel">असली पिक्सेल</string>
+    <string name="om_vm_grid">ग्रिड</string>
+    <string name="om_vm_grid_spacing">ग्रिड की दूरी</string>
+    <string name="om_vm_solo">चुनी गई लेयर पर फ़ोकस</string>
+    <string name="om_vm_solo_off">सामान्य</string>
+    <string name="om_vm_solo_only">सिर्फ़ चुनी गई लेयर</string>
+    <string name="om_vm_solo_dim" formatted="false">चुनी गई लेयर 50% पर</string>
+    <string name="om_vm_camera">सक्रिय कैमरे से देखें</string>
+    <string name="om_vm_camera_unavailable">इस टेस्ट वर्ज़न में अभी उपलब्ध नहीं</string>
+    <string name="om_vm_zoom_in">ज़ूम इन</string>
+    <string name="om_vm_zoom_out">ज़ूम आउट</string>
+    <string name="om_cp_save_preset">प्रीसेट सेव करें</string>
+    <string name="om_cp_with_style">(स्टाइल के साथ)</string>
+    <string name="om_cp_paste_style_more">स्टाइल पेस्ट करें</string>
+    <string name="om_cp_link_selected">चुनी गई लेयर जोड़ें…</string>
+    <string name="om_ps_color_fill">रंग और फ़िल पेस्ट करें</string>
+    <string name="om_ps_border_shadow">बॉर्डर और शैडो पेस्ट करें</string>
+    <string name="om_ps_blend">ब्लेंडिंग और अपारदर्शिता पेस्ट करें</string>
+    <string name="om_ps_transform">मूव और ट्रांसफ़ॉर्म पेस्ट करें</string>
+    <string name="om_ps_text">टेक्स्ट स्टाइल पेस्ट करें</string>
+    <string name="om_ps_volume">वॉल्यूम पेस्ट करें</string>
+    <string name="om_ps_effects">इफ़ेक्ट पेस्ट करें</string>
+    <string name="om_ps_speed">स्पीड पेस्ट करें</string>
+    <string name="om_ps_paste">पेस्ट करें</string>
+    <string name="om_settings_more">AUREA में और</string>
+    <string name="om_settings_preview">प्रीव्यू</string>
+    <string name="om_settings_editing">एडिटिंग</string>
+    <string name="om_settings_import">इम्पोर्ट करें</string>
+    <string name="om_settings_preview_quality">प्रीव्यू क्वालिटी</string>
+    <string name="om_gs_size">ग्रुप की चौड़ाई, ऊँचाई</string>
+    <string name="om_mi_name">नाम</string>
+    <string name="om_mi_dimensions">आयाम (चौ × ऊँ)</string>
+    <string name="om_mi_format">फ़ॉर्मैट</string>
+    <plurals name="om_layers_selected">
+        <item quantity="one">%d लेयर चुनी गई</item>
+        <item quantity="other">%d लेयर चुनी गईं</item>
+    </plurals>
+    <plurals name="om_cp_duplicate">
+        <item quantity="one">लेयर डुप्लिकेट करें</item>
+        <item quantity="other">%d लेयर डुप्लिकेट करें</item>
+    </plurals>
+    <plurals name="om_cp_copy">
+        <item quantity="one">लेयर कॉपी करें</item>
+        <item quantity="other">%d लेयर कॉपी करें</item>
+    </plurals>
+    <plurals name="om_cp_paste">
+        <item quantity="one">लेयर पेस्ट करें</item>
+        <item quantity="other">%d लेयर पेस्ट करें</item>
+    </plurals>
+</resources>

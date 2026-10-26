@@ -149,4 +149,42 @@ inline constexpr u32 kExportFailureShift = 24;
     return ExportFailure::Other;
 }
 
+// -----------------------------------------------------------------------------
+// Omega adicionar (área 08, P1-8): taxa de quadros da exportação em três
+// escolhas, Baixo | Reduzido | Cheio, sobre a taxa do projeto. A regra vem da
+// referência (evidência REA ev_245a51ab…, `iV.oC.Rw`): trabalha em CENTÉSIMOS
+// de fps, divide em ponto flutuante de 32 bits e TRUNCA (sem arredondar para
+// fps inteiro e sem mínimo):
+//   projeto ≤ 15 fps → Baixo = 1/3, Reduzido = 2/3, Cheio = o do projeto;
+//   projeto  > 15 fps → Baixo = 1/4, Reduzido = 1/2, Cheio = o do projeto.
+// Exemplos: 30 fps → 7,5 e 15; 25 fps → 6,25 e 12,5; 12 fps → 4 e 8.
+// As duas telas mostram o rótulo "N fps" com até duas casas por esta conta.
+// -----------------------------------------------------------------------------
+enum class ExportFpsOption : u32 { Low = 0, Reduced = 1, Full = 2 };
+
+/// Centésimos de fps de uma taxa em quadros por segundo (29,97 → 2997).
+[[nodiscard]] inline u32 export_fps100(f64 fps) noexcept {
+    if (!(fps > 0.0) || !std::isfinite(fps)) return 0;
+    return static_cast<u32>(std::min(std::llround(fps * 100.0), static_cast<long long>(1'000'000)));
+}
+
+/// A taxa da escolha, em centésimos de fps (a do projeto também em centésimos).
+[[nodiscard]] inline u32 export_fps_option(u32 fps100, ExportFpsOption option) noexcept {
+    const f32 v = static_cast<f32>(fps100);
+    const bool slow = fps100 <= 1500;
+    switch (option) {
+        case ExportFpsOption::Full: return fps100;
+        case ExportFpsOption::Reduced:
+            return slow ? static_cast<u32>((v / 3.0f) * 2.0f) : static_cast<u32>(v / 2.0f);
+        case ExportFpsOption::Low:
+        default:
+            return slow ? static_cast<u32>(v / 3.0f) : static_cast<u32>(v / 4.0f);
+    }
+}
+
+/// O mesmo, com a escolha pelo número estável das pontes (0 Baixo, 1 Reduzido, 2 Cheio).
+[[nodiscard]] inline u32 export_fps_option(u32 fps100, u32 option) noexcept {
+    return export_fps_option(fps100, option <= 2 ? static_cast<ExportFpsOption>(option) : ExportFpsOption::Full);
+}
+
 } // namespace aurea

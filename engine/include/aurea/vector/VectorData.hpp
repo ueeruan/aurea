@@ -65,6 +65,10 @@ struct VectorPath {
     f32  rotation = 0.0f;                ///< graus
     bool reversed = false;               ///< direção invertida (furo em não-zero)
     std::vector<PathKey> keys;           ///< morph (só Free); vazio = parado
+    /// Omega conteúdo (área 06): FURO. O contorno recorta o preenchimento do
+    /// grupo (o "preencher ↔ furo" do menu de contornos); o contorno continua
+    /// sendo desenhado. Documento v3.
+    bool exclude = false;
     friend bool operator==(const VectorPath&, const VectorPath&) noexcept = default;
 };
 
@@ -105,6 +109,10 @@ struct VectorStroke {
     /// zero no começo / volta a zero no fim; `taperEase` (0..100 %) arredonda
     /// a rampa (0 = reta, 100 = bojuda). 0/0 = largura constante.
     f32  taperStart = 0.0f, taperEnd = 0.0f, taperEase = 0.0f;
+    /// Omega conteúdo (área 06): perfil de largura do pincel — fator (0..1) da
+    /// largura em amostras IGUALMENTE espaçadas ao longo do comprimento (a
+    /// pressão do dedo). Vazio = largura constante. Documento v3.
+    std::vector<f32> widthProfile;
     friend bool operator==(const VectorStroke&, const VectorStroke&) noexcept = default;
 };
 
@@ -144,11 +152,24 @@ struct VectorGroup {
     Vec2 scale{100.0f, 100.0f};          ///< %
     f32  rotation = 0.0f;                ///< graus
     f32  opacity = 100.0f;               ///< %
+    /// Omega conteúdo (área 06): composição do grupo sobre os grupos de BAIXO
+    /// (os anteriores na lista). 0 normal; 1 apagar (a borracha do desenho):
+    /// a forma do grupo é tirada da geometria dos grupos anteriores — destino
+    /// × (1 − α), com α = 1. Documento v3.
+    u8   composite = 0;
     friend bool operator==(const VectorGroup&, const VectorGroup&) noexcept = default;
 };
 
+/// Composição do grupo (VectorGroup::composite).
+inline constexpr u8 kVectorCompositeNormal = 0;
+inline constexpr u8 kVectorCompositeErase = 1;
+
 struct VectorData {
     std::vector<VectorGroup> groups;
+    /// Omega conteúdo (área 06): camada de DESENHO (traços de caneta, pincel,
+    /// preencher e borracha). Só diz à interface qual editor abrir; o desenho
+    /// continua editável como vetor. Documento v3.
+    bool drawing = false;
     friend bool operator==(const VectorData&, const VectorData&) noexcept = default;
 };
 

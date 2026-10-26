@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aurea.aurea.R
 import com.aurea.aurea.editor.panels.effectTypeId
+import com.aurea.aurea.effects.effectCardId
 import com.aurea.aurea.engine.EffectParam
 import com.aurea.aurea.engine.KeyframeRow
 import com.aurea.aurea.engine.ParamType
@@ -54,17 +55,29 @@ class EffectVectorRowsDeviceTest {
         effect = store.effects.single { it.typeId == type }.effectId
         compose.waitUntil(10000) { store.effectParams[effect]?.any { it.type == ParamType.POINT2D && !it.hidden } == true }
         parameter = store.effectParams.getValue(effect).single { it.type == ParamType.POINT2D && !it.hidden }.index
-        compose.onNodeWithTag("dock.tool.Effects").performScrollTo().performClick()
+        compose.onNodeWithTag("layer.panel.effects").performClick()
+        openControls()
         revealCenter()
-        compose.onNodeWithTag("$prefix.axis.0").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("$prefix.axis.1").assertIsDisplayed()
+        compose.onNodeWithTag(axisTag(0)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag(axisTag(1)).assertIsDisplayed()
         compose.runOnIdle { assertEquals(ParamType.POINT2D, nativeParameter(layer, effect).type) }
     }
 
+    /** Omega (área 07): a lista nasce fechada; tocar na linha abre os controles do efeito. */
+    private fun openControls() {
+        val card = effectCardId(type)
+        if (compose.onAllNodesWithTag("effects.settings.$card").fetchSemanticsNodes().isNotEmpty()) return
+        compose.onNodeWithTag("effects.expand.$card").performClick()
+        compose.waitUntil(10000) { compose.onAllNodesWithTag("effects.settings.$card").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    /** Omega (área 07, P1-3): caixa de eixo `effects.axis.<efeito>.<parâmetro>.<eixo>`. */
+    private fun axisTag(axis: Int) = "effects.axis.$effect.$parameter.$axis"
+
     private fun revealCenter() {
-        // Motion Tile's center is an advanced parameter in the production UI.
-        if (compose.onAllNodesWithTag("$prefix.axis.0").fetchSemanticsNodes().isEmpty())
-            compose.onNodeWithText(context.getString(R.string.ds_avancado)).performScrollTo().performClick()
+        // Motion Tile's center is an advanced parameter: the "Avançado" section (Omega).
+        if (compose.onAllNodesWithTag(axisTag(0)).fetchSemanticsNodes().isEmpty())
+            compose.onNodeWithTag("effects.section.$effect.advanced").performScrollTo().performClick()
     }
 
     private fun nativeParameter(owner: Long, fx: Int): EffectParam {
@@ -80,11 +93,14 @@ class EffectVectorRowsDeviceTest {
             it.property == TrackProperty.EFFECT_PARAM && it.effectIndex == effect && it.paramIndex / 4 == parameter
         }
     }
-    private fun choose(axis: Int) = compose.onNodeWithTag("$prefix.axis.$axis").performScrollTo().performClick()
+    private fun choose(axis: Int) = compose.onNodeWithTag(axisTag(axis)).performScrollTo().performClick()
+    // The Omega ruler flings above 300 px/s; the finger rests before lifting so
+    // each scrub is exactly one gesture (and one undo step) with no fling.
     private fun scrub() = compose.onNodeWithTag("$prefix.ruler").performTouchInput {
         down(center)
         moveBy(Offset(-48f, 0f), 16)
         moveBy(Offset(-12f, 0f), 16)
+        moveBy(Offset.Zero, 120)
         up()
     }
     private fun shot(name: String) {
@@ -173,6 +189,7 @@ class EffectVectorRowsDeviceTest {
         lateinit var secondValues: FloatArray
         compose.runOnIdle { secondValues = nativeValues(second, secondEffect); store.select(layer) }
         compose.waitUntil(10000) { store.primary == layer && store.effectParams[effect]?.any { it.index == parameter } == true }
+        openControls()
         revealCenter()
         // First tap selects, second tap opens the production NumericKeypadSheet.
         choose(0)

@@ -111,4 +111,45 @@ internal object ShellGlyph {
     const val WaveformPathEcg = '\uF89A'
     const val Table = '\uF844'
     const val TextformatAlt = '\uF860'
+
+    // --- Omega chrome (\u00E1rea 02): glifos do CupertinoIcons.ttf (conferidos na fonte) ---
+    /** Sair para os projetos (seta saindo da caixa para a esquerda). */
+    const val ExitBox = '\uF90C'
+    /** \u22EE (menu da camada). */
+    const val EllipsisVertical = '\uF8DA'
+    /** Lupa com + / \u2212 (modo zoom do canvas). */
+    const val ZoomIn = '\uF8AC'
+    const val ZoomOut = '\uF8AD'
+    /** Painel lateral \u00E0 direita (abre e fecha a coluna de modos). */
+    const val SidebarRight = '\uF7D7'
+    /** \u00AB\u00AB (o primeiro item da trilha de grupos). */
+    const val ChevronLeft2 = '\uF5DA'
+    /** Grade de quadradinhos (pixels reais). */
+    const val PixelGrid = '\uF808'
+    /** Destaque da camada escolhida: normal, s\u00F3 ela (cheio), ela a 50 % (meio). */
+    const val SoloOff = '\uF7DF'
+    const val SoloOn = '\uF7E0'
+    /** Mover uma ponta at\u00E9 o cabe\u00E7ote (barra inferior da sele\u00E7\u00E3o). */
+    const val ArrowLeftSquare = '\uF505'
+    const val ArrowRightSquare = '\uF512'
+}
+
+/**
+ * Omega chrome (\u00E1rea 02): os pap\u00E9is da moldura do editor da refer\u00EAncia, todos
+ * pelos tokens da paleta (no Omega: A10 barra, A9 camada, S8 se\u00E7\u00E3o, S9 coluna,
+ * S10 trilha). Nenhuma cor solta nos composables da moldura.
+ */
+internal object OmegaChrome {
+    /** Barras do projeto e de reprodu\u00E7\u00E3o (A10). */
+    val Bar get() = AureaColors.Surface
+    /** Barra da camada escolhida (A9). */
+    val LayerBar get() = AureaColors.SurfaceHigh
+    /** Coluna de modos, barra inferior da sele\u00E7\u00E3o e o girador da grade (S9). */
+    val Column get() = AureaColors.ChipHigh
+    /** O primeiro item da trilha de grupos (S10). */
+    val TrailRoot get() = AureaColors.EditorRowPill
+    /** Caixa do zoom na coluna (A10). */
+    val ZoomChip get() = AureaColors.Surface
+    /** Texto secund\u00E1rio da moldura (P5). */
+    val Secondary get() = AureaColors.Muted
 }

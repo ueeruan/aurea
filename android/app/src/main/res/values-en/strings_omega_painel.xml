@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega painel (área 04): painel da camada, velocidade, volume, curva e presets. -->
+    <string name="om_lp_border_shadow">Border and shadow</string>
+    <string name="om_lp_move_transform">Move and transform</string>
+    <string name="om_lp_edit_points">Edit points</string>
+    <string name="om_lp_edit_drawing">Edit drawing</string>
+    <string name="om_lp_edit_group">Edit group</string>
+    <string name="om_lp_camera_options">Camera options</string>
+    <string name="om_lp_light_options">Light options</string>
+    <string name="om_lp_edit_particles">Edit particles</string>
+    <string name="om_lp_audio">Volume and audio</string>
+    <string name="om_lp_opens_panel">opens the panel</string>
+    <string name="om_lp_move_start_to_playhead">Move the layer to start at the playhead</string>
+    <string name="om_lp_move_end_to_playhead">Move the layer to end at the playhead</string>
+    <string name="om_lp_retime_extend_start">Stretch the start to the playhead (changes speed)</string>
+    <string name="om_lp_retime_shorten_start">Shorten the start to the playhead (changes speed)</string>
+    <string name="om_lp_retime_shorten_end">Shorten the end to the playhead (changes speed)</string>
+    <string name="om_lp_retime_extend_end">Stretch the end to the playhead (changes speed)</string>
+    <string name="om_lp_speed_slower">Slower</string>
+    <string name="om_lp_speed_faster">Faster</string>
+    <string name="om_lp_speed_close">Close speed</string>
+    <string name="om_lp_speed_tab_curve">Time curve</string>
+    <string name="om_lp_speed_tab_options">Options</string>
+    <string name="om_lp_speed_constant_hint">The layer\'s animation follows the speed and the duration changes with it.</string>
+    <string name="om_lp_speed_keyed">This layer has animated speed or a time curve.</string>
+    <string name="om_lp_speed_remap_on">Time remapping is on: adjust it in the Time curve tab.</string>
+    <string name="om_lp_volume_close">Close volume</string>
+    <string name="om_lp_volume_tab_fades">Fades</string>
+    <string name="om_lp_missing_media_title">Media not found</string>
+    <string name="om_lp_missing_media">This layer\'s original media is missing or was moved.</string>
+    <string name="om_presets_empty_title">No presets yet</string>
+    <string name="om_presets_empty_body">Save a layer\'s properties and keyframes as a preset to use them again.</string>
+    <string name="om_presets_empty_browse">Browse presets</string>
+    <string name="om_curve_cat_curves">Curves</string>
+    <string name="om_curve_cat_bounces">Bounces and waves</string>
+    <string name="om_curve_cat_steps">Steps</string>
+    <string name="om_curve_reverse">Reverse the curve</string>
+    <string name="om_curve_paste_all">Paste the curve to all keyframes</string>
+    <string name="om_curve_overshoot_on">Allow overshoot</string>
+    <string name="om_curve_overshoot_off">Disable overshoot</string>
+    <string name="om_curve_prev">Previous segment</string>
+    <string name="om_curve_next">Next segment</string>
+    <string name="om_curve_no_segment">Move the playhead between two keyframes</string>
+    <string name="om_curve_saved">Saved curves</string>
+</resources>

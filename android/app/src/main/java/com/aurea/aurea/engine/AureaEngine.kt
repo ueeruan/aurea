@@ -181,6 +181,28 @@ class AureaEngine private constructor() {
         /** Parte do trackball sob o dedo: 0..2 anel X/Y/Z, 3 anel da vista, 4 esfera, −1 nada. */
         @JvmStatic external fun trackballHit(axes: FloatArray, x: Float, y: Float, radius: Float, tolerance: Float): Int
         @JvmStatic external fun fitCanvas(values: FloatArray, fill: Boolean): FloatArray
+        // Omega aparência (área 05): contas puras do motor (core/SnapMath.hpp, core/ColorCode.hpp),
+        // as mesmas do iOS.
+        /** Ímã grudento: [valor, índice do alvo em que parou ou −1]. `targets` crescentes. */
+        @JvmStatic external fun snapValueFromFinger(targets: FloatArray, plateau: Float, finger: Float): FloatArray
+        /** Ponto de partida do gesto no eixo do dedo (meio do patamar se o valor já está num alvo). */
+        @JvmStatic external fun snapFingerFromValue(targets: FloatArray, plateau: Float, value: Float): Float
+        /** Roda de rotação: [ângulo com o ímã de 45° (zona 2°), 1 se grudou]. */
+        @JvmStatic external fun dialSnap(accumDeg: Float): FloatArray
+        /** Anel de matiz: [matiz com o ímã de 60°, 1 se grudou]. */
+        @JvmStatic external fun hueSnap(hueDeg: Float): FloatArray
+        /** Toque no anel: continua da matiz atual ou salta para o múltiplo de 60° (> 45° de distância). */
+        @JvmStatic external fun hueTouchStart(currentDeg: Float, touchDeg: Float): Float
+        /** Aceleração opcional do trackpad para a velocidade amortecida (px/s). */
+        @JvmStatic external fun padAcceleration(smoothedSpeed: Float): Float
+        /** Toque-empurrão: 0 nada, 1 esquerda, 2 cima, 3 direita, 4 baixo. */
+        @JvmStatic external fun nudgeSide(x: Float, y: Float, width: Float, height: Float): Int
+        /** Código de cor colado → RGBA 0..1, ou null se não for cor. */
+        @JvmStatic external fun parseColorCode(text: String): FloatArray?
+        /** "#RRGGBB" (ou "#RRGGBBAA" com alfa e [withAlpha]). */
+        @JvmStatic external fun formatColorCode(r: Float, g: Float, b: Float, a: Float, withAlpha: Boolean): String
+        /** Texto escuro por cima da cor (luminância > ½ ou alfa < ½). */
+        @JvmStatic external fun colorWantsDarkText(r: Float, g: Float, b: Float, a: Float): Boolean
         @JvmStatic external fun previewGestureValue(basis: FloatArray, dx: Float, dy: Float, rotate: Boolean): FloatArray
         @JvmStatic external fun nativeDestroy(handle: Long)
 
@@ -192,6 +214,12 @@ class AureaEngine private constructor() {
         @JvmStatic external fun nativeSampleEase(interp: Int, x1: Float, y1: Float, x2: Float, y2: Float, power: Int, out: FloatArray): Int
         /** Taxa de vídeo (bps) que o export usaria: a regra do motor (BitratePolicy). `quality` 0/1/2. */
         @JvmStatic external fun nativeExportBitrateBps(width: Int, height: Int, fps: Double, codec: Int, quality: Int, customMbps: Int): Long
+        /**
+         * Omega adicionar (área 08, P1-8): fps da exportação Baixo (0) | Reduzido (1) |
+         * Cheio (2), em CENTÉSIMOS de fps (export_fps_option, ExportRules.hpp): 30 fps
+         * → 750 / 1500 / 3000. Truncado, sem mínimo (a regra da referência).
+         */
+        @JvmStatic external fun nativeExportFpsOption(fps100: Int, option: Int): Int
         /**
          * O degrau do encoder de vídeo que o último export usou (escada do motor:
          * "surface:…", "buffer:…", "legacy:…", "software:…", com os que falharam
@@ -625,6 +653,16 @@ class AureaEngine private constructor() {
     fun pasteTransform(ids: LongArray): Int = nativePasteTransform(nativeHandle, ids)
     fun copyEffects(layer: Long, effect: Int = -1): Int = nativeCopyEffects(nativeHandle, layer, effect)
     fun pasteEffects(ids: LongArray): Int = nativePasteEffects(nativeHandle, ids)
+    // Omega efeitos (área 07, P0-1): menu ⋮ do efeito.
+    /** Duplica o efeito no FIM da pilha (um desfazer); devolve o id novo ou −1. */
+    fun duplicateEffect(layer: Long, effect: Int): Int = nativeDuplicateEffect(nativeHandle, layer, effect)
+    /** Cola as configurações do efeito copiado (mesmo tipo) neste efeito; um desfazer. */
+    fun pasteEffectSettings(layer: Long, effect: Int): Boolean = nativePasteEffectSettings(nativeHandle, layer, effect)
+    /** Tipo do efeito na área de transferência quando ela guarda UM só; 0 = vazia ou vários. */
+    fun clipboardEffectType(): Int = nativeClipboardEffectType(nativeHandle)
+    private external fun nativeDuplicateEffect(handle: Long, layer: Long, effect: Int): Int
+    private external fun nativePasteEffectSettings(handle: Long, layer: Long, effect: Int): Boolean
+    private external fun nativeClipboardEffectType(handle: Long): Int
     fun copyKeyframes(layer: Long, frame: Long): Int = nativeCopyKeyframes(nativeHandle, layer, frame)
     fun copyKeyframeSelection(layer: Long, references: LongArray): Int = nativeKeyframeSelection(nativeHandle, layer, references, 0, 0)
     fun editKeyframeSelection(layer: Long, references: LongArray, delta: Int, remove: Boolean = false): Int =
@@ -1163,6 +1201,77 @@ class AureaEngine private constructor() {
         nativeEditClipTime(nativeHandle, layer, operation, amount, previous, next)
     fun queryClipTimeActions(layer: Long, frame: Long): Int = nativeQueryClipTimeActions(nativeHandle, layer, frame)
     fun trimComposition(frame: Long): Boolean = nativeTrimComposition(nativeHandle, frame)
+    // Omega timeline (área 03, P1-8): alça de velocidade — estica mantendo o trecho da fonte.
+    fun stretchLayerSpan(layer: Long, start: Long, end: Long): Boolean = nativeStretchLayerSpan(nativeHandle, layer, start, end)
+    private external fun nativeStretchLayerSpan(handle: Long, layer: Long, start: Long, end: Long): Boolean
+    // Omega aparência (área 05) — EngineOmegaAppearance.cpp.
+    /** Decoração de Borda e sombra ([role] 2 borda, 3 sombra): id do efeito ou −1. Um passo de desfazer. */
+    fun decorationAdd(layer: Long, role: Int): Int = nativeDecorationAdd(nativeHandle, layer, role)
+    /** Reordena a decoração dentro do grupo do papel dela ([slot] 0 = a primeira). */
+    fun decorationMove(layer: Long, effectId: Int, slot: Int): Boolean = nativeDecorationMove(nativeHandle, layer, effectId, slot)
+    /** Deslocamento X/Y (px) da sombra → direção e distância do efeito. */
+    fun decorationSetShadowOffset(layer: Long, effectId: Int, dx: Float, dy: Float): Boolean =
+        nativeDecorationSetShadowOffset(nativeHandle, layer, effectId, dx, dy)
+    /** [dx, dy] da sombra no cabeçote, ou null. */
+    fun decorationShadowOffset(layer: Long, effectId: Int): FloatArray? = nativeDecorationShadowOffset(nativeHandle, layer, effectId)
+    /** Preenchimento da forma no cabeçote (24 valores; ver Engine::query_shape_fill), ou null. */
+    fun queryShapeFill(layer: Long): FloatArray? = nativeQueryShapeFill(nativeHandle, layer)
+    /** 0 nenhum, 1 cor, 2 degradê. */
+    fun setShapeFillMode(layer: Long, mode: Int): Boolean = nativeSetShapeFillMode(nativeHandle, layer, mode)
+    /** 0 linear, 1 radial, 2 angular. */
+    fun setShapeGradientType(layer: Long, type: Int): Boolean = nativeSetShapeGradientType(nativeHandle, layer, type)
+    /** Grupo 0 cor, 1 cor do início, 2 cor do fim (4 valores); 3/4 pontas (2 valores). */
+    fun setShapeFillValue(layer: Long, group: Int, values: FloatArray): Boolean = nativeSetShapeFillValue(nativeHandle, layer, group, values)
+    fun toggleShapeFillKey(layer: Long, group: Int): Boolean = nativeToggleShapeFillKey(nativeHandle, layer, group)
+    /** Alvos do ímã intercalados [valor, guia, …]: [axis] 0/1 posição X/Y, 2/3 largura/altura. */
+    fun querySnapTargets(layer: Long, axis: Int): FloatArray? = nativeQuerySnapTargets(nativeHandle, layer, axis)
+    private external fun nativeDecorationAdd(handle: Long, layer: Long, role: Int): Int
+    private external fun nativeDecorationMove(handle: Long, layer: Long, effectId: Int, slot: Int): Boolean
+    private external fun nativeDecorationSetShadowOffset(handle: Long, layer: Long, effectId: Int, dx: Float, dy: Float): Boolean
+    private external fun nativeDecorationShadowOffset(handle: Long, layer: Long, effectId: Int): FloatArray?
+    private external fun nativeQueryShapeFill(handle: Long, layer: Long): FloatArray?
+    private external fun nativeSetShapeFillMode(handle: Long, layer: Long, mode: Int): Boolean
+    private external fun nativeSetShapeGradientType(handle: Long, layer: Long, type: Int): Boolean
+    private external fun nativeSetShapeFillValue(handle: Long, layer: Long, group: Int, values: FloatArray): Boolean
+    private external fun nativeToggleShapeFillKey(handle: Long, layer: Long, group: Int): Boolean
+    private external fun nativeQuerySnapTargets(handle: Long, layer: Long, axis: Int): FloatArray?
+    // Omega chrome (área 02): moldura do editor — EngineOmegaChrome.cpp.
+    /** Nomes das composições abertas, da principal até a atual (a trilha de grupos). */
+    fun compositionTrail(): List<String> =
+        (nativeCompositionTrail(nativeHandle) ?: "").split('\u001F')
+    /** Setas do transporte: começo, último quadro, marcadores e, com camada, as pontas e os keyframes dela. */
+    fun queryTransportNavigation(layer: Long?, compositionFrame: Int, direction: Int): Int? =
+        nativeQueryTransportNavigation(nativeHandle, layer ?: 0L, compositionFrame.toLong(), direction)
+            .takeIf { it in 0..Int.MAX_VALUE.toLong() }?.toInt()
+    /** Barra inferior da seleção: 0 cortes, 1 todas depois do cabeçote, 2 todas antes. */
+    fun queryMultiTimeActions(ids: LongArray, frame: Int): Int = nativeQueryMultiTimeActions(nativeHandle, ids, frame.toLong())
+    /** Partes do estilo copiado (bits de `Engine::Style*`). */
+    fun copiedStyleParts(): Int = nativeCopiedStyleParts(nativeHandle)
+    /** Cola só as partes pedidas (um passo de desfazer); quantas camadas mudaram. */
+    fun pasteStyleParts(ids: LongArray, parts: Int): Int = nativePasteStyleParts(nativeHandle, ids, parts)
+    /** Modos de visão da prévia (0 normal, 1 só as escolhidas, 2 escolhidas a 50 %) e pixels reais. Nunca no export. */
+    fun setPreviewView(mode: Int, ids: LongArray, pixel: Boolean) = nativeSetPreviewView(nativeHandle, mode, ids, pixel)
+    private external fun nativeCompositionTrail(handle: Long): String?
+    private external fun nativeQueryTransportNavigation(handle: Long, layer: Long, frame: Long, direction: Int): Long
+    private external fun nativeQueryMultiTimeActions(handle: Long, ids: LongArray, frame: Long): Int
+    private external fun nativeCopiedStyleParts(handle: Long): Int
+    private external fun nativePasteStyleParts(handle: Long, ids: LongArray, parts: Int): Int
+    private external fun nativeSetPreviewView(handle: Long, mode: Int, ids: LongArray, pixel: Boolean)
+    // Omega painel: (área 04) painel da camada — Engine::query_layer_panel e cia.
+    /** Bits do painel da camada com o cabeçote em [frame] (ver [LayerPanelBits]). */
+    fun queryLayerPanel(layer: Long, frame: Long): Int = nativeQueryLayerPanel(nativeHandle, layer, frame)
+    /** Move a camada para começar (ou, com [alignEnd], terminar) no cabeçote. */
+    fun moveLayerToPlayhead(layer: Long, frame: Long, alignEnd: Boolean): Boolean =
+        nativeMoveLayerToPlayhead(nativeHandle, layer, frame, alignEnd)
+    /** Retempo: 0 esticar início, 1 encurtar início, 2 encurtar fim, 3 esticar fim (muda a velocidade). */
+    fun retimeLayerToPlayhead(layer: Long, edge: Int, frame: Long): Boolean =
+        nativeRetimeLayerToPlayhead(nativeHandle, layer, edge, frame)
+    /** Velocidade constante em qualquer tipo, reescalando a animação da camada. */
+    fun setLayerSpeedBaked(layer: Long, speed: Float): Boolean = nativeSetLayerSpeedBaked(nativeHandle, layer, speed)
+    private external fun nativeQueryLayerPanel(handle: Long, layer: Long, frame: Long): Int
+    private external fun nativeMoveLayerToPlayhead(handle: Long, layer: Long, frame: Long, alignEnd: Boolean): Boolean
+    private external fun nativeRetimeLayerToPlayhead(handle: Long, layer: Long, edge: Int, frame: Long): Boolean
+    private external fun nativeSetLayerSpeedBaked(handle: Long, layer: Long, speed: Float): Boolean
 
     /**
      * LINHA MAGNÉTICA da camada: os cortes dela viram uma faixa de montagem de
@@ -1254,6 +1363,24 @@ class AureaEngine private constructor() {
      * [orientation] = EXIF 1..8 dos pixels CRUS: o motor gira e reduz o que não
      * couber (ImageResample.hpp) em vez de recusar a foto.
      */
+    // --- Omega adicionar (área 08): lote, grupo vazio, projeto como camada -------
+    /** Abre um lote de importação: tudo até [endImportBatch] vira UM passo de desfazer. */
+    fun beginImportBatch() = nativeWork.run(Unit) { nativeBeginImportBatch(nativeHandle) }
+    /** Fecha o lote: `placement` 0 = mesmo início, 1 = em sequência (ordem de [ids]). Camadas que andaram, ou −Errc. */
+    fun endImportBatch(ids: LongArray, placement: Int): Int = nativeWork.run(-5) { nativeEndImportBatch(nativeHandle, ids, placement) }
+    /** Duração da imagem (quadros) ou corte do vídeo (µs), no mesmo passo de desfazer da importação. Errc. */
+    fun applyImportTiming(layer: Long, durationFrames: Long, sourceInUs: Long, sourceOutUs: Long): Int =
+        nativeWork.run(5) { nativeApplyImportTiming(nativeHandle, layer, durationFrames, sourceInUs, sourceOutUs) }
+    /** "Grupo vazio": a camada nova (id) ou −Errc. */
+    fun addEmptyGroup(name: String): Long = nativeWork.run(-5L) { nativeAddEmptyGroup(nativeHandle, name) }
+    /** "Elemento/Projeto": outro projeto como camada de grupo; −Errc (InvalidArgument = o próprio projeto). */
+    fun insertProjectAsLayer(path: String, name: String): Long = nativeWork.run(-5L) { nativeInsertProjectAsLayer(nativeHandle, path, name) }
+    private external fun nativeBeginImportBatch(handle: Long)
+    private external fun nativeEndImportBatch(handle: Long, ids: LongArray, placement: Int): Int
+    private external fun nativeApplyImportTiming(handle: Long, layer: Long, durationFrames: Long, sourceInUs: Long, sourceOutUs: Long): Int
+    private external fun nativeAddEmptyGroup(handle: Long, name: String): Long
+    private external fun nativeInsertProjectAsLayer(handle: Long, path: String, name: String): Long
+
     fun importImage(rgba: ByteBuffer, width: Int, height: Int, name: String, source: String, orientation: Int = 1): Long =
         nativeWork.run(-5L) { nativeImportImage(nativeHandle, rgba, width, height, name, source, orientation) }
 
@@ -1894,6 +2021,39 @@ class AureaEngine private constructor() {
     private external fun nativeQueryTextPath(handle: Long, layer: Long): LongArray?
     private external fun nativeSetTextPathOptions(handle: Long, layer: Long, pathLayer: Long, mask: Int, firstMargin: Float, lastMargin: Float,
                                                   perpendicular: Boolean, reverse: Boolean, forceAlign: Boolean): Boolean
+
+    // --- Omega conteúdo (área 06; EngineOmegaContent.cpp) -----------------------
+    /** Camada de desenho vazia (vetorial marcada como desenho). Id ≥ 0 ou −Errc. */
+    fun addDrawingLayer(): Long = nativeAddDrawingLayer(nativeHandle)
+    /**
+     * Um traço do editor de desenho (Engine::add_drawing_stroke): [tool] 0 caneta,
+     * 1 pincel, 2 preencher, 3 borracha; [xyp] = x, y (px da composição) e pressão
+     * intercalados. `layer` 0 cria a camada. Id ≥ 0 ou −Errc.
+     */
+    fun addDrawingStroke(layer: Long, tool: Int, rgba: FloatArray, width: Float, xyp: FloatArray): Long =
+        nativeAddDrawingStroke(nativeHandle, layer, tool, rgba, width, xyp)
+    /** Bits: 1 vetorial, 2 desenho. */
+    fun vectorLayerFlags(layer: Long): Int = nativeVectorLayerFlags(nativeHandle, layer)
+    /** Operação de ponto (Engine::PathOp) no espaço do grupo. Índice escolhido ou −1. */
+    fun editVectorPath(layer: Long, group: Int, path: Int, op: Int, args: FloatArray, continuing: Boolean): Int =
+        nativeEditVectorPath(nativeHandle, layer, group, path, op, args, continuing)
+    /** Alça de largura da caixa de texto (dx, dy em px da composição). */
+    fun dragTextBoxWidth(layer: Long, dx: Float, dy: Float, continuing: Boolean): Boolean =
+        nativeDragTextBoxWidth(nativeHandle, layer, dx, dy, continuing)
+    /** Alça de tamanho da forma (0..7), du/dv = passo em px da forma. */
+    fun resizeShapeHandle(layer: Long, handle: Int, du: Float, dv: Float, keepRatio: Boolean, fromCenter: Boolean, continuing: Boolean): Boolean =
+        nativeResizeShapeHandle(nativeHandle, layer, handle, du, dv, keepRatio, fromCenter, continuing)
+    /** Apaga uma fonte importada (arquivo + lista); os textos voltam à fonte padrão. */
+    fun removeImportedFont(path: String): Boolean = nativeWork.run(false) { nativeRemoveImportedFont(nativeHandle, path) }
+
+    private external fun nativeAddDrawingLayer(handle: Long): Long
+    private external fun nativeAddDrawingStroke(handle: Long, layer: Long, tool: Int, rgba: FloatArray, width: Float, xyp: FloatArray): Long
+    private external fun nativeVectorLayerFlags(handle: Long, layer: Long): Int
+    private external fun nativeEditVectorPath(handle: Long, layer: Long, group: Int, path: Int, op: Int, args: FloatArray, continuing: Boolean): Int
+    private external fun nativeDragTextBoxWidth(handle: Long, layer: Long, dx: Float, dy: Float, continuing: Boolean): Boolean
+    private external fun nativeResizeShapeHandle(handle: Long, layer: Long, which: Int, du: Float, dv: Float,
+                                                 keepRatio: Boolean, fromCenter: Boolean, continuing: Boolean): Boolean
+    private external fun nativeRemoveImportedFont(handle: Long, path: String): Boolean
 }
 
 /** The ten-slot JNI contract uses integers, including cache byte counters. */

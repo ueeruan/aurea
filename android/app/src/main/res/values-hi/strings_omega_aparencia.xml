@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega aparência (área 05): mesclagem, transformar, cor e preenchimento,
+         borda e sombra, câmera e seletor de cor. Gerado por gen_strings_aparencia.py. -->
+
+    <!-- Mesclagem e opacidade (P0-1, P1-5) -->
+    <string name="om_ap_blend_darker_color">गहरा रंग</string>
+    <string name="om_ap_blend_lighter_color">हल्का रंग</string>
+    <string name="om_ap_blend_linear_light">रैखिक प्रकाश</string>
+    <string name="om_ap_blend_pin_light">पिन लाइट</string>
+    <string name="om_ap_blend_soft_overlay">सौम्य ओवरले</string>
+    <string name="om_ap_blend_about">ब्लेंडिंग के बारे में</string>
+    <string name="om_ap_blend_category">%1$s श्रेणी</string>
+
+    <!-- Mover e transformar (P0-2) -->
+    <string name="om_ap_tf_move">खिसकाएँ</string>
+    <string name="om_ap_tf_pivot">पिवट</string>
+    <string name="om_ap_tf_rotate">घुमाएँ</string>
+    <string name="om_ap_tf_scale">स्केल</string>
+    <string name="om_ap_tf_skew">तिरछा करें</string>
+    <string name="om_ap_tf_move_hint">लेयर खिसकाने के लिए यहाँ स्लाइड करें</string>
+    <string name="om_ap_tf_depth_hint">गहराई बदलने के लिए यहाँ स्लाइड करें</string>
+    <string name="om_ap_tf_pivot_hint">पिवट पॉइंट खिसकाने के लिए यहाँ स्लाइड करें</string>
+    <string name="om_ap_tf_skew_x">तिरछापन X</string>
+    <string name="om_ap_tf_skew_y">तिरछापन Y</string>
+    <string name="om_ap_tf_width">चौड़ाई</string>
+    <string name="om_ap_tf_height">ऊँचाई</string>
+    <string name="om_ap_tf_link">अनुपात बनाए रखें</string>
+    <string name="om_ap_tf_camera_scale">कैमरा: ज़ूम %1$s, कोण %2$s°</string>
+    <string name="om_ap_tf_dial">घुमाव पहिया</string>
+    <string name="om_ap_tf_turns">%1$d चक्कर</string>
+    <string name="om_ap_tf_reset_position">स्थिति रीसेट करें</string>
+    <string name="om_ap_tf_reset_pivot">पिवट रीसेट करें</string>
+    <string name="om_ap_tf_reset_rotation">घुमाव रीसेट करें</string>
+    <string name="om_ap_tf_reset_scale">स्केल रीसेट करें</string>
+    <string name="om_ap_tf_reset_skew">तिरछापन रीसेट करें</string>
+    <string name="om_ap_tf_reset_all">ट्रांसफ़ॉर्म रीसेट करें</string>
+    <string name="om_ap_tf_snap">दूसरी लेयरों से चिपकाएँ</string>
+    <string name="om_ap_tf_accelerate">ट्रैकपैड तेज़ करें</string>
+    <string name="om_ap_tf_nudge">1 px खिसकाने के लिए किनारों पर टैप करें</string>
+    <string name="om_ap_tf_motion_path">गति पथ</string>
+    <string name="om_ap_tf_axis">%1$s अक्ष</string>
+
+    <!-- Cor e preenchimento (P0-3, P1-4) -->
+    <string name="om_ap_fill_none">कोई भराव नहीं</string>
+    <string name="om_ap_fill_color">रंग</string>
+    <string name="om_ap_fill_gradient">ग्रेडिएंट</string>
+    <string name="om_ap_fill_media">मीडिया</string>
+    <string name="om_ap_fill_original">मूल</string>
+    <string name="om_ap_fill_original_hint">मूल रंग वेक्टर पैनल में हैं</string>
+    <string name="om_ap_fill_grad_linear">रैखिक</string>
+    <string name="om_ap_fill_grad_radial">रेडियल</string>
+    <string name="om_ap_fill_grad_sweep">कोणीय</string>
+    <string name="om_ap_fill_grad_start">शुरुआती रंग</string>
+    <string name="om_ap_fill_grad_end">अंतिम रंग</string>
+    <string name="om_ap_fill_grad_handles">मंच पर ग्रेडिएंट के सिरे खींचें</string>
+
+    <!-- Borda e sombra (P0-4, P1-9) -->
+    <string name="om_ap_bs_title">बॉर्डर और छाया</string>
+    <string name="om_ap_bs_stroke">स्ट्रोक</string>
+    <string name="om_ap_bs_borders">बॉर्डर</string>
+    <string name="om_ap_bs_shadow">छाया</string>
+    <string name="om_ap_bs_add_border">बॉर्डर जोड़ें</string>
+    <string name="om_ap_bs_border">बॉर्डर</string>
+    <string name="om_ap_bs_border_n">बॉर्डर %1$d</string>
+    <string name="om_ap_bs_delete_border">बॉर्डर हटाएँ</string>
+    <string name="om_ap_bs_reorder">क्रम बदलने के लिए खींचें</string>
+    <string name="om_ap_bs_direction">दिशा</string>
+    <string name="om_ap_bs_inside">अंदर</string>
+    <string name="om_ap_bs_center">बीच</string>
+    <string name="om_ap_bs_outside">बाहर</string>
+    <string name="om_ap_bs_color">रंग</string>
+    <string name="om_ap_bs_size">आकार</string>
+    <string name="om_ap_bs_alpha">अल्फ़ा</string>
+    <string name="om_ap_bs_offset">ऑफ़सेट</string>
+    <string name="om_ap_bs_width">स्ट्रोक की चौड़ाई</string>
+    <string name="om_ap_bs_px">%1$s px</string>
+    <string name="om_ap_bs_stroke_unavailable">स्ट्रोक आकार और टेक्स्ट के लिए है। इस लेयर पर बॉर्डर का उपयोग करें।</string>
+
+    <!-- Câmera (P1-6) -->
+    <string name="om_ap_cam_title">कैमरा विकल्प</string>
+    <string name="om_ap_cam_view">दृश्य</string>
+    <string name="om_ap_cam_focus">फ़ोकस ब्लर</string>
+    <string name="om_ap_cam_fog">कोहरा</string>
+    <string name="om_ap_cam_view_title">कैमरा दृश्य</string>
+    <string name="om_ap_cam_view_angle">दृश्य कोण</string>
+    <string name="om_ap_cam_zoom">ज़ूम</string>
+    <string name="om_ap_cam_perspective">परिप्रेक्ष्य</string>
+    <string name="om_ap_cam_parallel">समानांतर</string>
+    <string name="om_ap_cam_parallel_soon">समानांतर कैमरा अभी उपलब्ध नहीं है</string>
+    <string name="om_ap_cam_fog_soon">कैमरा कोहरा अभी उपलब्ध नहीं है। प्रोजेक्ट सेटिंग्स में कंपोज़िशन कोहरा इस्तेमाल करें।</string>
+    <string name="om_ap_cam_tip">कैमरे की नज़र से देखने के लिए मंच के पास कैमरा दृश्य चालू करें।</string>
+    <string name="om_ap_cam_focus_on">फ़ोकस ब्लर चालू</string>
+
+    <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
+    <string name="om_ap_cp_eyedropper">आईड्रॉपर</string>
+    <string name="om_ap_cp_eyedropper_hint">रंग चुनने के लिए मंच पर खींचें</string>
+    <string name="om_ap_cp_fine">बारीक चयन</string>
+    <string name="om_ap_cp_full">और रंग</string>
+    <string name="om_ap_cp_unavailable">पारदर्शी रंग यहाँ उपलब्ध नहीं है</string>
+    <string name="om_ap_cp_add">पैलेट में सहेजें</string>
+    <string name="om_ap_cp_copy_code">रंग कोड कॉपी करें</string>
+    <string name="om_ap_cp_paste_code">रंग कोड पेस्ट करें</string>
+    <string name="om_ap_cp_code_copied">रंग कोड कॉपी हुआ</string>
+    <string name="om_ap_cp_code">रंग कोड %1$s</string>
+    <string name="om_ap_cp_wheel">पहिया</string>
+    <string name="om_ap_cp_rgb">RGB</string>
+    <string name="om_ap_cp_done">हो गया</string>
+    <string name="om_ap_cp_current">वर्तमान</string>
+    <string name="om_ap_cp_new">नया</string>
+    <string name="om_ap_cp_hue">ह्यू</string>
+    <string name="om_ap_cp_saturation">संतृप्ति</string>
+    <string name="om_ap_cp_brightness">चमक</string>
+    <string name="om_ap_cp_alpha">अल्फ़ा</string>
+    <string name="om_ap_cp_red">लाल</string>
+    <string name="om_ap_cp_green">हरा</string>
+    <string name="om_ap_cp_blue">नीला</string>
+    <string name="om_ap_cp_alpha_toggle">अल्फ़ा दिखाएँ या छिपाएँ</string>
+    <string name="om_ap_cp_trash">हटाने के लिए यहाँ छोड़ें</string>
+    <string name="om_ap_cp_swatch">नमूना %1$s</string>
+    <string name="om_ap_cp_palette">पैलेट</string>
+</resources>

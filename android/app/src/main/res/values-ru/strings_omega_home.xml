@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega home (área 01): barra superior, dock, gaveta, aba Projetos, Presets, folha Novo projeto e Sobre. -->
+    <string name="om_home_account">Аккаунт</string>
+    <string name="om_home_action_export">Экспорт</string>
+    <string name="om_home_empty_body">Нажмите %1$s, чтобы создать первый проект.</string>
+    <string name="om_home_my_projects">Мои проекты</string>
+    <string name="om_home_sort_current">Порядок: %1$s</string>
+    <string name="om_home_my_presets">Мои пресеты</string>
+    <string name="om_home_presets_empty">Вы ещё не сохранили ни одного пресета. В редакторе сохраните его на панели пресетов слоя.</string>
+    <string name="om_home_preset_builtin">Встроен в AUREA</string>
+    <string name="om_home_preset_menu">Меню пресета</string>
+    <string name="om_home_preset_delete_q">Удалить пресет «%1$s»?</string>
+    <string name="om_home_preset_name_taken">Пресет с таким именем уже есть.</string>
+    <string name="om_drawer_support">Поддержка</string>
+    <string name="om_drawer_light_preview">Облегчённый предпросмотр</string>
+    <string name="om_drawer_light_preview_note">Редактор открывается с предпросмотром 1/2: работать плавнее, а экспорт остаётся в полном качестве.</string>
+    <string name="om_new_frame_size">Размер кадра</string>
+    <string name="om_new_keep_ratio">Сохранять пропорции</string>
+    <string name="om_new_clear_name">Очистить название</string>
+    <string name="om_new_bg_light_grey">Светло-серый</string>
+    <string name="om_new_bg_green">Зелёный</string>
+    <string name="om_new_bg_blue">Синий</string>
+    <string name="om_new_over_limit">(выше предела)</string>
+    <string name="om_about_version">Версия</string>
+    <string name="om_about_build">Сборка</string>
+    <string name="om_about_device">Устройство</string>
+    <string name="om_about_chipset">Процессор</string>
+    <string name="om_about_system">Система</string>
+    <string name="om_about_memory">Память</string>
+    <string name="om_about_storage">Хранилище</string>
+    <string name="om_about_storage_value">Свободно %1$s из %2$s</string>
+    <string name="om_about_export_max">Макс. экспорт</string>
+    <string name="om_about_languages">Языки</string>
+    <string name="om_about_copied">Сведения скопированы</string>
+    <string name="om_about_copy_hint">Нажмите на таблицу, чтобы скопировать её (пригодится при сообщении о проблеме).</string>
+    <string name="om_about_cores">Ядер: %1$d</string>
+</resources>

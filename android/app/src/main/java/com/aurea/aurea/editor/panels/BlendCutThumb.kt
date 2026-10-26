@@ -24,9 +24,10 @@ import com.aurea.aurea.R
  * `exclude` = false → Máscara (BlendMode::Mask 22), true → Excluir (23).
  */
 @Composable
-internal fun BlendCutThumb(exclude: Boolean) {
+internal fun BlendCutThumb(exclude: Boolean, modifier: Modifier = Modifier.size(34.dp, 22.dp)) {
     val desc = stringResource(if (exclude) R.string.pn_blend_exclude_desc else R.string.pn_blend_mask_desc)
-    Canvas(Modifier.size(34.dp, 22.dp).semantics { contentDescription = desc }) {
+    // Omega aparência: o tamanho vem de quem chama (a fileira da mesclagem usa 45 dp).
+    Canvas(modifier.semantics { contentDescription = desc }) {
         val r = size.height * 0.40f
         val disc = Path().apply {
             addOval(androidx.compose.ui.geometry.Rect(Offset(size.width / 2f, size.height / 2f), r))

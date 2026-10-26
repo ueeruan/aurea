@@ -359,6 +359,8 @@ void initialize_instance(EffectInstance& instance, const ParameterRegistry& para
             slot.constant.ref = instance.gradients.size() - 1;
         }
     }
+    // Omega efeitos (P0-1): seção "edite primeiro" nasce aberta na instância nova.
+    apply_edit_first_sections(instance, params);
 }
 
 } // namespace aurea

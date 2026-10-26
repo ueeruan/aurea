@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
@@ -43,18 +44,19 @@ internal fun CommunityPresetsTab() {
         catch (_: Exception) { failed = true; items = emptyList(); message = context.getString(R.string.home_community_unavailable) }
         finally { loading = false }
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    // Omega home: a subaba "Comunidade" da aba Presets (clara, como a Home).
+    HomeMaterial {
+    LazyColumn(Modifier.fillMaxSize().testTag("home.presets.community"),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Text(stringResource(R.string.home_community_title), style = AureaType.HeadlineLarge)
-            Text(stringResource(R.string.home_community_caption_hint), style = AureaType.Body, color = AureaColors.Muted,
-                modifier = Modifier.padding(top = 8.dp))
+            Text(stringResource(R.string.home_community_caption_hint), style = OmegaHomeType.Body)
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = !offline, onClick = { offline = false }, label = { Text(stringResource(R.string.home_presets_short)) })
                 FilterChip(selected = offline, onClick = { offline = true }, label = { Text(stringResource(R.string.home_downloaded)) })
             }
-            Row {
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 OutlinedTextField(value = query, onValueChange = { query = it.take(80) }, singleLine = true,
                     label = { Text(stringResource(R.string.home_search_presets)) }, modifier = Modifier.weight(1f))
                 TextButton(enabled = !loading, onClick = { revision++ }, modifier = Modifier.heightIn(min = 56.dp)) {
@@ -64,17 +66,18 @@ internal fun CommunityPresetsTab() {
         }
         if (loading) item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
         message?.let { text -> item {
-            Text(text, color = AureaColors.Muted)
+            Text(text, color = AureaColors.LightTextMuted)
             if (failed) TextButton(onClick = { revision++ }) { Text(stringResource(R.string.home_retry)) }
         } }
         if (!loading && items.isEmpty() && message == null) item {
-            Text(stringResource(R.string.home_no_presets), color = AureaColors.Muted, modifier = Modifier.padding(vertical = 32.dp))
+            Text(stringResource(R.string.home_no_presets), color = AureaColors.LightTextMuted, modifier = Modifier.padding(vertical = 32.dp))
         }
         items(items, key = { it.getString("id") }) { entry ->
             val id = entry.getString("id")
-            Column(Modifier.fillMaxWidth().background(AureaColors.Surface, RoundedCornerShape(20.dp)).padding(20.dp)) {
-                Text(entry.optString("name"), style = AureaType.TitleMedium)
-                Text(entry.optString("author", "Aurea"), style = AureaType.BodySmall, color = AureaColors.Muted)
+            Column(Modifier.fillMaxWidth().homeShadow(12.dp, RoundedCornerShape(12.dp), AureaColors.HomeShadowSoft)
+                .background(AureaColors.LightSurface, RoundedCornerShape(12.dp)).padding(16.dp)) {
+                Text(entry.optString("name"), style = OmegaHomeType.RowTitle)
+                Text(entry.optString("author", "Aurea"), style = OmegaHomeType.Meta)
                 TextButton(enabled = downloading == null && !offline, onClick = {
                     downloading = id
                     scope.launch {
@@ -92,5 +95,6 @@ internal fun CommunityPresetsTab() {
                 }
             }
         }
+    }
     }
 }

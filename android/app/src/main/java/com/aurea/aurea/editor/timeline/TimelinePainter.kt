@@ -7,9 +7,13 @@ import android.util.SparseArray
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -190,6 +194,11 @@ internal class TimelinePainter(
 
     // =================================================================================
     fun draw(scope: DrawScope, c: TimelineController) = with(scope) {
+        // Omega 0.3.2 (área 03): a timeline da referência tem o pintor dela.
+        if (m.referenceTrial) {
+            drawOmega(c)
+            return@with
+        }
         val w = size.width
         val h = size.height
         val store = c.store
@@ -692,6 +701,7 @@ internal class TimelinePainter(
         canvas: android.graphics.Canvas, r: RowModel, top: Float, x0: Float, x1: Float, w: Float,
         view: Double, ppf: Float, cx: Float, fps: Float,
         cache: com.aurea.aurea.state.ThumbnailCache, generation: Int,
+        dividers: Boolean = true,
     ): Boolean {
         val heightPx = m.bar.roundToInt().coerceIn(1, THUMB_MAX_PX)
         val tile = heightPx * thumbs.aspect(cache, r.id)
@@ -711,8 +721,8 @@ internal class TimelinePainter(
                 val l = origin + i * tile
                 rectF.set(l, top, l + tile, top + m.bar)
                 canvas.drawBitmap(bmp, null, rectF, bitmapPaint)
-                // Divisa fina entre os quadros da tira (mockup).
-                if (l > x0 + 1f) canvas.drawLine(l, top, l, top + m.bar, dividerPaint)
+                // Divisa fina entre os quadros da tira (mockup); a Omega não tem.
+                if (dividers && l > x0 + 1f) canvas.drawLine(l, top, l, top + m.bar, dividerPaint)
                 drew = true
             }
             i++
@@ -1271,7 +1281,820 @@ internal class TimelinePainter(
         drawText(layout, color = tint, topLeft = Offset(cx - layout.size.width / 2f, cy - layout.size.height / 2f))
     }
 
+    // =================================================================================
+    // Omega 0.3.2 (área 03): a timeline da referência, com o desenho do AUREA.
+    // Ordem de pintura (P0-2): linhas → cabeçalhos e alças ≡ → régua opaca →
+    // tiques, marcadores, aba do tempo e cursor.
+    // =================================================================================
+    /** Pílula do cabeçalho: x −8..62 (só 62 à vista), ponta direita redonda. */
+    private val omegaPill = Path().apply {
+        addRoundRect(
+            androidx.compose.ui.geometry.RoundRect(
+                m.omegaPillLeft, 0f, m.headerColumn, m.pillHeight,
+                topLeftCornerRadius = CornerRadius.Zero,
+                topRightCornerRadius = CornerRadius(m.pillHeight / 2f),
+                bottomRightCornerRadius = CornerRadius(m.pillHeight / 2f),
+                bottomLeftCornerRadius = CornerRadius.Zero,
+            ),
+        )
+    }
+    private val omegaPillStroke = Stroke(m.omegaPillBorder)
+    private val omegaTabStroke = Stroke(m.omegaTabStroke)
+    private val omegaKeyStroke = Stroke(m.omegaKeyStroke, join = StrokeJoin.Round)
+    private val omegaKeyAltStroke = Stroke(m.omegaKeyAltStroke, join = StrokeJoin.Round)
+    private val omegaKeyRingStroke = Stroke(m.omegaKeyRing, join = StrokeJoin.Round)
+    private val omegaHandleStroke = Stroke(m.omegaHandleStroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    private val omegaTickStroke = Stroke(m.omegaTick)
+    /** Tiques por classe: 0 quadro, 1 meio segundo, 2 segundo. */
+    private val omegaTicks = arrayOf(Path(), Path(), Path())
+    private val omegaTabPath = Path()
+    private val omegaFlag = Path()
+    private val omegaTriangle = Path()
+    private val omegaHandlePath = Path()
+    private val omegaChevron = Path()
+    private val omegaLayerPaint = androidx.compose.ui.graphics.Paint()
+    /** Losango arredondado (2:3) por altura em px (poucos tamanhos: em edição, outros, empilhado). */
+    private val omegaDiamonds = HashMap<Int, Path>()
+    private val omegaNames = LongSparseArray<NameLayout>()
+    private val omegaLabelStyle = TextStyle(
+        fontSize = 11.sp,
+        fontWeight = FontWeight.W500,
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
+    )
+    /** As quatro aparências dos marcadores em ARGB (para achar a de cada marca). */
+    private val omegaRoles = IntArray(AureaTimeline.Bookmarks.size) { AureaTimeline.Bookmarks[it].toArgb() }
+
+    private fun markerColor(packed: Int): Color =
+        AureaTimeline.Bookmarks[MarkerColors.appearance(packed, omegaRoles).coerceIn(0, AureaTimeline.Bookmarks.lastIndex)]
+
+    private fun DrawScope.drawOmega(c: TimelineController) {
+        val w = size.width
+        val h = size.height
+        val store = c.store
+        val st = c.state
+        val fps = TimeAxis.safeFps(store.project.fps)
+        val ppf = TimeAxis.pxPerFrame(st.pps, m.density, fps)
+        val view = c.view()
+        val cx = w / 2f
+        val compact = st.compact
+        waveStore = store
+        val rows = c.rows.value
+        val n = c.rowCount(rows)
+        st.redrawTick   // lido: as miniaturas que não couberam neste quadro pedem o próximo
+        thumbs.beginFrame(THUMB_QUERIES_PER_FRAME)
+        frameNanos = System.nanoTime()
+        playheadFrame = store.playhead
+        if (n > 0) omegaRows(c, rows, n, w, h, view, ppf, cx, fps, compact)
+        // A régua é opaca: cobre os clipes que rolam para cima dela.
+        drawRect(AureaColors.EditorCanvas, Offset.Zero, Size(w, m.rowsTop))
+        omegaRuler(st, w, view, ppf, cx, fps)
+        val buffer = 3f * m.density
+        for (range in store.previewBufferRanges) {
+            val left = TimeAxis.xOf(range.startFrame.toDouble(), view, ppf, cx).coerceAtLeast(0f)
+            val right = TimeAxis.xOf(range.endFrame.toDouble(), view, ppf, cx).coerceAtMost(w)
+            if (right > left) drawRect(PREVIEW_BUFFER, Offset(left, m.rowsTop - buffer), Size(right - left, buffer))
+        }
+        val mk = store.markers
+        val marked = omegaMarkers(mk, w, view, ppf, cx)
+        omegaTimeTab(cx, store.playhead, fps, marked >= 0)
+        if (thumbs.starved) c.requestRedraw()
+        c.settleFades(frameNanos)
+        // Pulso de 130 ms do clipe levantado: mais quadros enquanto ele dura.
+        if (st.movingIds.isNotEmpty() && (frameNanos - st.liftStartNanos) / 1_000_000L < LiftPulse.DURATION_MS) c.requestRedraw()
+        // Cursor de 1,5 dp, interrompido na aba; na cor do marcador do quadro; a 50 % movendo.
+        val playheadX = TimeAxis.xOf(store.playhead.toDouble(), view, ppf, cx)
+        var color = if (marked >= 0) markerColor(mk.colors[marked]) else AureaColors.Playhead
+        if (st.moveOrigStart != Snap.NONE) color = color.copy(alpha = color.alpha * 0.5f)
+        val half = m.playhead / 2f
+        drawRect(color, Offset(playheadX - half, 0f), Size(m.playhead, m.omegaTabTop + m.density))
+        val resume = m.omegaTabTop + m.omegaTabHeight - m.density
+        drawRect(color, Offset(playheadX - half, resume), Size(m.playhead, max(0f, h - resume)))
+    }
+
+    /** A câmera principal: a 1ª câmera visível de cima para baixo (P2-2; o AUREA não expõe outra). */
+    private fun omegaMainCamera(rows: List<RowModel>): Long {
+        for (r in rows) if (r.track == null && r.type == LayerType.Camera && r.visible) return r.id
+        return TimelineController.NO_ID
+    }
+
+    private fun DrawScope.omegaRows(
+        c: TimelineController, rows: List<RowModel>, n: Int, w: Float, h: Float,
+        view: Double, ppf: Float, cx: Float, fps: Float, compact: Boolean,
+    ) {
+        val st = c.state
+        val store = c.store
+        val scroll = c.clampedScroll(n)
+        val first = max(0, c.rowIndexAt(scroll))
+        val last = min(n - 1, c.rowIndexAt(scroll + h - m.rowsTop))
+        val preview = if (st.reorderSource >= 0 && !compact) Reorder.preview(
+            FloatArray(n + 1) { c.rowTop(it) }, timelineGroupKeys(rows, byLine = false),
+            st.reorderSource, st.reorderTarget, st.reorderTop - m.rowsTop + scroll,
+        ) else null
+        val indices = if (preview != null) 0 until n else first..last
+        val passes = if (preview != null) 0..1 else 0..0
+        val cache = store.thumbnails
+        val generation = store.thumbnailGeneration
+        val multi = omegaMultiSelection(store.layerSelectMode, c.selectionSize())
+        val hideEyes = multi && c.selectionSize() > 0
+        val camera = if (compact) TimelineController.NO_ID else omegaMainCamera(rows)
+        fun topOf(i: Int): Float = m.rowsTop + c.rowTop(i) - scroll + (preview?.offsets?.get(i) ?: 0f)
+
+        // 1) Fundo da linha da câmera principal (vermelho 10 %).
+        if (camera != TimelineController.NO_ID) for (i in indices) {
+            val r = c.rowAt(rows, i) ?: continue
+            if (r.track != null || r.id != camera) continue
+            val top = topOf(i)
+            val rh = c.rowHeight(r)
+            if (top + rh < m.rowsTop || top > h) continue
+            drawRect(AureaTimeline.MainCameraRow, Offset(0f, top), Size(w, rh))
+        }
+        // 2) Os clipes; a linha arrastada (reordenar) por último, sobre o fundo dela.
+        for (pass in passes) for (i in indices) {
+            val lifted = preview != null && i in preview.sourceStart until preview.sourceEnd
+            if (preview != null && lifted != (pass == 1)) continue
+            val r = c.rowAt(rows, i) ?: continue
+            val top = topOf(i)
+            val rh = c.rowHeight(r)
+            if (top + rh < m.rowsTop || top > h) continue
+            if (lifted) drawRect(AureaTimeline.OmegaDragRow, Offset(0f, top), Size(w, rh))
+            val fade = c.rowAlpha(r, frameNanos)
+            if (fade < 1f) beginFade(fade, top, rh, w)
+            if (r.track != null) omegaLane(c, r, top, w, view, ppf, cx, fps)
+            else for (s in r.segments) omegaClip(c, s, top, w, view, ppf, cx, fps, compact, cache, generation)
+            if (fade < 1f) drawContext.canvas.restore()
+        }
+        // 3) Cabeçalhos e alças ≡ por cima: as barras passam por baixo deles.
+        for (pass in passes) for (i in indices) {
+            val lifted = preview != null && i in preview.sourceStart until preview.sourceEnd
+            if (preview != null && lifted != (pass == 1)) continue
+            val r = c.rowAt(rows, i) ?: continue
+            val top = topOf(i)
+            val rh = c.rowHeight(r)
+            if (top + rh < m.rowsTop || top > h) continue
+            val fade = c.rowAlpha(r, frameNanos)
+            if (fade < 1f) beginFade(fade, top, rh, w)
+            val track = r.track
+            if (track != null) {
+                drawLaneGutter(r, track, top, rh, c.openGroups.value)
+            } else {
+                val activated = !compact && multi && c.isSelected(r.id)
+                omegaHeader(c, r, top, activated, hideEyes && !compact, fps)
+                if (!compact) omegaGrip(top, rh, w)
+            }
+            if (fade < 1f) drawContext.canvas.restore()
+        }
+        // 4) Retângulo da seleção de losangos (do AUREA) e fio do ímã.
+        if (st.boxActive) {
+            val xa = TimeAxis.xOf(st.boxFrame0, view, ppf, cx)
+            val xb = TimeAxis.xOf(st.boxFrame1, view, ppf, cx)
+            val ya = m.rowsTop + st.boxY0 - scroll
+            val yb = m.rowsTop + st.boxY1 - scroll
+            val topLeft = Offset(min(xa, xb), min(ya, yb))
+            val boxSize = Size(abs(xb - xa), abs(yb - ya))
+            drawRect(AureaColors.Accent.copy(alpha = 0.14f), topLeft, boxSize)
+            drawRect(AureaColors.Accent, topLeft, boxSize, style = Stroke(m.guide))
+        }
+        val g = st.guideFrame
+        if (g != Snap.NONE) {
+            val gx = TimeAxis.xOf(g.toDouble(), view, ppf, cx)
+            if (gx >= m.headerColumn && gx <= w) {
+                drawRect(AureaColors.Accent, Offset(gx - m.guide / 2f, m.rowsTop), Size(m.guide, h - m.rowsTop))
+            }
+        }
+    }
+
+    /** Trilha de propriedade aberta (só do AUREA, D-1): nome e losangos editáveis. */
+    private fun DrawScope.omegaLane(c: TimelineController, r: RowModel, top: Float, w: Float, view: Double, ppf: Float, cx: Float, fps: Float) {
+        val laneH = LANE_HEIGHT_DP * m.density
+        val cy = top + laneH / 2f
+        drawLine(AureaTimeline.OmegaHeaderBorder, Offset(m.headerColumn, top + laneH), Offset(w, top + laneH))
+        val labelWidth = min(w - m.laneLabelLeft - 8f * m.density, 240f * m.density)
+        if (labelWidth > 0f) {
+            val label = nameLayout(r, labelWidth)
+            drawText(label, alpha = if (r.track?.group == true) 0.9f else 0.6f, topLeft = Offset(m.laneLabelLeft, cy - label.size.height / 2f))
+        }
+        omegaKeys(c, r, cy, w, view, ppf, cx, fps, editing = true, editH = m.omegaKeyAlt * 1.2f, altH = m.omegaKeyAlt)
+    }
+
+    /** Cartão do clipe (P0-4): degradê por tipo e id, zebra, tira, onda, etiqueta e rótulo. */
+    private fun DrawScope.omegaClip(
+        c: TimelineController, r: RowModel, rowTop: Float, w: Float, view: Double, ppf: Float, cx: Float, fps: Float,
+        compact: Boolean, cache: com.aurea.aurea.state.ThumbnailCache, generation: Int,
+    ) {
+        val st = c.state
+        val store = c.store
+        val top = rowTop + m.barTop
+        val selected = c.isSelected(r.id)
+        // Legenda (só do AUREA): os blocos dela, como antes.
+        if (store.captionTracks.any { it.layer == r.id }) {
+            drawRow(r, top, w, view, ppf, cx, fps, compact, selected, false, false, Snap.NONE, Snap.NONE, cache, generation, null, keysShown = false)
+            return
+        }
+        // Prévia da alça de velocidade: a largura nova enquanto o dedo arrasta.
+        val stretching = st.stretchId == r.id && st.stretchStart != Snap.NONE
+        val startF = if (stretching) st.stretchStart else r.start
+        val endF = if (stretching) st.stretchEnd else r.end
+        val x0 = TimeAxis.xOf(startF.toDouble(), view, ppf, cx)
+        val x1 = TimeAxis.xOf(endF.toDouble(), view, ppf, cx)
+        val pad = m.barRadius * 2f
+        if (x1 >= -pad && x0 <= w + pad) {
+            val left = max(x0, -pad)
+            val right = min(x1, w + pad)
+            val bottom = top + m.bar
+            val radius = ClipGeometry.cornerRadius(right - left, m.bar, m.barRadius)
+            val moving = st.isMoving(r.id)
+            val pulse = if (moving) LiftPulse.scale((frameNanos - st.liftStartNanos) / 1_000_000L) else 1f
+            // Sombra: leve sempre; mais forte e espalhada com o clipe levantado.
+            if (moving) {
+                val layer = AureaTimeline.ClipLiftShadow.copy(alpha = AureaTimeline.ClipLiftShadow.alpha / 3f)
+                for (k in 1..3) {
+                    val g = m.omegaLiftShadow * k / 3f
+                    drawRoundRect(layer, Offset(left - g / 2f, top - g / 4f + m.omegaShadow * 2f), Size(right - left + g, m.bar + g / 2f), CornerRadius(radius + g / 2f))
+                }
+            } else {
+                drawRoundRect(AureaTimeline.ClipShadow, Offset(left, top + m.omegaShadow), Size(right - left, m.bar), CornerRadius(radius))
+            }
+            withTransform({ scale(pulse, pulse, Offset((left + right) / 2f, top + m.bar / 2f)) }) {
+                val canvas = drawContext.canvas.nativeCanvas
+                rectF.set(left, top, right, bottom)
+                barClip.reset()
+                barClip.addRoundRect(rectF, radius, radius, android.graphics.Path.Direction.CW)
+                canvas.save()
+                canvas.clipPath(barClip)
+                // 1. Degradê horizontal do retângulo INTEIRO do clipe (não anda com a rolagem).
+                val pair = AureaTimeline.clipGradient(r.type)
+                val grad = ClipColors.vary(pair.first.toArgb(), pair.second.toArgb(), r.id)
+                drawRect(
+                    Brush.horizontalGradient(listOf(Color(grad[0]), Color(grad[1])), startX = x0, endX = max(x1, x0 + 1f)),
+                    Offset(left, top), Size(right - left, m.bar),
+                )
+                // 2. Zebra de quadros.
+                omegaZebra(startF, top, left, right, view, ppf, cx)
+                // 3. Tira de miniaturas, sem véu nem divisórias.
+                bitmapPaint.alpha = 255
+                if (r.hasThumbs) drawThumbs(canvas, r, top, x0, x1, w, view, ppf, cx, fps, cache, generation, dividers = false)
+                // 4. Onda de 1 dp.
+                if (r.type == LayerType.Audio || r.type == LayerType.Video) omegaWave(canvas, r, top, x0, x1, w, view, ppf, cx)
+                // 5. Triângulo da etiqueta no canto de cima à esquerda (catetos de meia barra).
+                val tag = ShellColors.LabelPalette.getOrNull(r.label - 1)
+                if (tag != null) {
+                    val leg = m.bar / 2f
+                    omegaTriangle.reset()
+                    omegaTriangle.moveTo(x0, top)
+                    omegaTriangle.lineTo(x0 + leg, top)
+                    omegaTriangle.lineTo(x0, top + leg)
+                    omegaTriangle.close()
+                    drawPath(omegaTriangle, tag)
+                }
+                // 6. Rótulo de 11 sp na borda do clipe (14 dp para dentro), reticências no meio.
+                omegaLabel(r, top, x0, x1)
+                canvas.restore()
+            }
+            // Escolhida na visão geral: o contorno branco de 2 dp do AUREA.
+            if (selected && !compact) {
+                clipRect(left, top, right, bottom) {
+                    val stroke = ClipGeometry.strokeWidth(right - left, m.bar, m.selStroke)
+                    if (right - left <= stroke) {
+                        drawRect(AureaTimeline.ClipSelected, Offset(left, top), Size(right - left, m.bar))
+                    } else {
+                        drawRoundRect(
+                            AureaTimeline.ClipSelected,
+                            Offset(left + stroke / 2f, top + stroke / 2f),
+                            Size(right - left - stroke, m.bar - stroke),
+                            CornerRadius(ClipGeometry.cornerRadius(right - left - stroke, m.bar - stroke, m.barRadius - stroke / 2f)),
+                            style = selStroke,
+                        )
+                    }
+                }
+            }
+            // Alças do foco (P1-7; com o painel Velocidade, as de velocidade, P1-8).
+            if (compact && selected && c.selectionSize() == 1 && !r.locked) omegaHandles(st, x0, x1, top, w)
+        }
+        // Losangos (P0-6): em edição na camada escolhida; os outros, pequenos e a 160/255.
+        if (KeyframeVisibility.visible(store.showAllKeyframes, false, selected)) {
+            val editing = KeyframeVisibility.editable(selected, store.keySelectMode) && c.selectionSize() < 2
+            omegaKeys(c, r, top + m.bar / 2f, w, view, ppf, cx, fps, editing, m.omegaKeyEdit, m.omegaKeyAlt)
+        }
+    }
+
+    /** Zebra de quadros: faixas brancas de meio quadro, uma sim e uma não (dobra até ter 4 dp). */
+    private fun DrawScope.omegaZebra(startF: Int, top: Float, left: Float, right: Float, view: Double, ppf: Float, cx: Float) {
+        if (!(ppf > 0f)) return
+        var band = 0.5
+        while (band * ppf < m.omegaZebraMin && band < 1e7) band *= 2.0
+        val bandPx = (band * ppf).toFloat()
+        val fromK = max(0L, floor((TimeAxis.frameAt(left, view, ppf, cx) - startF) / band).toLong())
+        val toK = ceil((TimeAxis.frameAt(right, view, ppf, cx) - startF) / band).toLong()
+        var k = fromK + (fromK and 1L)
+        var count = 0
+        while (k <= toK && count < ZEBRA_MAX) {
+            val xa = TimeAxis.xOf(startF + k * band, view, ppf, cx)
+            drawRect(AureaTimeline.ClipZebra, Offset(xa, top), Size(bandPx, m.bar))
+            k += 2
+            count++
+        }
+    }
+
+    /** Onda (P0-4): barras de 1 dp centradas; no áudio a barra toda, no vídeo a faixa de baixo. */
+    private fun omegaWave(
+        canvas: android.graphics.Canvas, r: RowModel, top: Float, x0: Float, x1: Float, w: Float,
+        view: Double, ppf: Float, cx: Float,
+    ) {
+        val store = waveStore ?: return
+        val visL = max(x0, 0f)
+        val visR = min(x1, w)
+        if (visR <= visL || ppf <= 0f) return
+        val fpb = WaveGrid.framesPerBucket(max(1f, m.density * 1.5f), ppf)
+        val first = WaveGrid.bucketAt(TimeAxis.frameAt(visL, view, ppf, cx), fpb)
+        val last = WaveGrid.bucketAt(TimeAxis.frameAt(visR, view, ppf, cx), fpb)
+        val e = waves.get(waveSource, r.id, store.layers, store.thumbnailGeneration, fpb, first, last) ?: return
+        val audio = r.type == LayerType.Audio
+        val areaTop = if (audio) top else top + m.bar * 0.6f
+        val areaBottom = top + m.bar
+        val mid = (areaTop + areaBottom) / 2f
+        val half = (areaBottom - areaTop) / 2f
+        var k = 0
+        var b = first
+        while (b <= last && k + 4 <= waveLines.size) {
+            val v = e.at(b) / 256f * half
+            val x = TimeAxis.xOf((b + 0.5) * fpb, view, ppf, cx)
+            b++
+            if (v < 0.5f || x < visL || x > visR) continue
+            waveLines[k++] = x
+            waveLines[k++] = mid - v
+            waveLines[k++] = x
+            waveLines[k++] = mid + v
+        }
+        if (k == 0) return
+        wavePaint.color = AureaTimeline.ClipWave.toArgb()
+        wavePaint.strokeWidth = m.omegaWave
+        canvas.drawLines(waveLines, 0, k, wavePaint)
+    }
+
+    /** Rótulo do clipe (D-3): na borda do clipe, não acompanha a rolagem. */
+    private fun DrawScope.omegaLabel(r: RowModel, top: Float, x0: Float, x1: Float) {
+        if (r.name.isEmpty()) return
+        val avail = (x1 - x0) - 2f * m.omegaLabelInset
+        if (avail < NAME_MIN_DP * m.density) return
+        val layout = omegaNameLayout(r, avail) ?: return
+        val color = if (r.type == LayerType.Audio) AureaTimeline.ClipLabelOnAudio else AureaTimeline.ClipLabel
+        drawText(layout, color = color, topLeft = Offset(x0 + m.omegaLabelInset, top + m.bar / 2f - layout.size.height / 2f))
+    }
+
+    /** Nome com reticências no MEIO na largura disponível (em degraus de 12 dp). */
+    private fun omegaNameLayout(r: RowModel, availPx: Float): TextLayoutResult? {
+        val step = NAME_STEP_DP * m.density
+        val bucket = (availPx / step).toInt()
+        if (bucket <= 0) return null
+        val cached = omegaNames.get(r.id)
+        if (cached != null && cached.bucket == bucket && cached.name == r.name) return cached.layout
+        val limit = bucket * step
+        fun measure(text: String) = measurer.measure(text, omegaLabelStyle, softWrap = false, maxLines = 1)
+        val fitted = MiddleEllipsis.fit(r.name) { measure(it).size.width <= limit }
+        if (fitted.isEmpty()) return null
+        val layout = measure(fitted)
+        if (omegaNames.size() > NAME_CACHE) omegaNames.clear()
+        omegaNames.put(r.id, NameLayout(r.name, bucket, layout))
+        return layout
+    }
+
+    /** Losango arredondado de altura [h] px e largura 2/3, centrado na origem. */
+    private fun omegaDiamond(h: Float): Path {
+        val key = (h * 4f).roundToInt()
+        return omegaDiamonds.getOrPut(key) {
+            val hh = h / 2f
+            val hw = h / 3f
+            val px = floatArrayOf(0f, hw, 0f, -hw)
+            val py = floatArrayOf(-hh, 0f, hh, 0f)
+            val k = 0.22f
+            Path().apply {
+                for (i in 0 until 4) {
+                    val p = (i + 3) % 4
+                    val q = (i + 1) % 4
+                    val inX = px[i] + (px[p] - px[i]) * k
+                    val inY = py[i] + (py[p] - py[i]) * k
+                    val outX = px[i] + (px[q] - px[i]) * k
+                    val outY = py[i] + (py[q] - py[i]) * k
+                    if (i == 0) moveTo(inX, inY) else lineTo(inX, inY)
+                    quadraticTo(px[i], py[i], outX, outY)
+                }
+                close()
+            }
+        }
+    }
+
+    /** Losango dos outros parâmetros (e de toda camada fora de edição): branco a 160/255, traço de 0,5 dp. */
+    private fun DrawScope.omegaAltKey(x: Float, cy: Float, h: Float) {
+        val path = omegaDiamond(h)
+        translate(x, cy) {
+            drawPath(path, AureaTimeline.KeyAlt)
+            drawPath(path, AureaTimeline.KeyAltStroke, style = omegaKeyAltStroke)
+        }
+    }
+
+    /**
+     * Losango em edição: branco com traço preto de 1 dp. Realçado (escolhido, na
+     * seleção ou sob o cabeçote): 85 % com o contorno em destaque por trás.
+     * Empilhado (vários parâmetros, ou só parte deles, no instante): dois a ±20 %
+     * da altura, o de baixo cinza no parcial. No arrasto: só o contorno.
+     */
+    private fun DrawScope.omegaEditKey(x: Float, cy: Float, h: Float, highlighted: Boolean, dragging: Boolean, stacked: Boolean, partial: Boolean) {
+        if (dragging) {
+            translate(x, cy) { drawPath(omegaDiamond(h), AureaTimeline.KeyFill, style = omegaKeyAltStroke) }
+            return
+        }
+        if (highlighted) translate(x, cy) { drawPath(omegaDiamond(h), AureaColors.Accent, style = omegaKeyRingStroke) }
+        val s = if (highlighted) 0.85f else 1f
+        if (stacked) {
+            val small = omegaDiamond(h * 0.75f * s)
+            val dy = h * 0.2f
+            translate(x, cy + dy) {
+                drawPath(small, if (partial) AureaTimeline.KeyPartial else AureaTimeline.KeyFill)
+                drawPath(small, AureaTimeline.KeyStroke, style = omegaKeyStroke)
+            }
+            translate(x, cy - dy) {
+                drawPath(small, AureaTimeline.KeyFill)
+                drawPath(small, AureaTimeline.KeyStroke, style = omegaKeyStroke)
+            }
+        } else {
+            val path = omegaDiamond(h * s)
+            translate(x, cy) {
+                drawPath(path, AureaTimeline.KeyFill)
+                drawPath(path, AureaTimeline.KeyStroke, style = omegaKeyStroke)
+            }
+        }
+    }
+
+    /** Instantes densos (a menos de 4 dp) viram uma pílula no estilo da linha (do AUREA). */
+    private fun DrawScope.omegaKeyPill(xa: Float, xb: Float, cy: Float, h: Float, editing: Boolean) {
+        val ph = h * 2f / 3f
+        val wPill = max(xb - xa, ph)
+        val left = (xa + xb) / 2f - wPill / 2f
+        val corner = CornerRadius(ph / 2f)
+        drawRoundRect(if (editing) AureaTimeline.KeyFill else AureaTimeline.KeyAlt, Offset(left, cy - ph / 2f), Size(wPill, ph), corner)
+        drawRoundRect(
+            if (editing) AureaTimeline.KeyStroke else AureaTimeline.KeyAltStroke,
+            Offset(left, cy - ph / 2f), Size(wPill, ph), corner,
+            style = if (editing) omegaKeyStroke else omegaKeyAltStroke,
+        )
+    }
+
+    /** Quantas trilhas diferentes têm keyframe no instante (sem alocar). */
+    private fun distinctTracks(keys: List<com.aurea.aurea.engine.KeyframeRow>): Int {
+        var n = 0
+        for (i in keys.indices) {
+            val k = keys[i]
+            var seen = false
+            for (j in 0 until i) {
+                val o = keys[j]
+                if (o.property == k.property && o.effectIndex == k.effectIndex && o.paramIndex == k.paramIndex) {
+                    seen = true
+                    break
+                }
+            }
+            if (!seen) n++
+        }
+        return n
+    }
+
+    /** Os losangos de uma linha (P0-6), centrados em [cy]. */
+    private fun DrawScope.omegaKeys(
+        c: TimelineController, r: RowModel, cy: Float, w: Float, view: Double, ppf: Float, cx: Float, fps: Float,
+        editing: Boolean, editH: Float, altH: Float,
+    ) {
+        val store = c.store
+        val st = c.state
+        // Os dos outros parâmetros (sem toque) primeiro, sempre pequenos.
+        val dim = r.dimInstants
+        if (dim.isNotEmpty()) {
+            val need = 2 * ((w + 2f * m.keyTouchHalf) / m.keyMergeGap).toInt() + 8
+            if (dimGroupBuf.size < need) dimGroupBuf = IntArray(need)
+            val groups = Keyframes.visibleGroups(dim, view, ppf, cx, w, m.keyTouchHalf, m.keyMergeGap, dimGroupBuf)
+            for (g in 0 until groups) {
+                val i = dimGroupBuf[2 * g]
+                val j = dimGroupBuf[2 * g + 1]
+                val xa = TimeAxis.xOf(dim[i].toDouble(), view, ppf, cx)
+                if (i == j) omegaAltKey(xa, cy, altH)
+                else omegaKeyPill(xa, TimeAxis.xOf(dim[j].toDouble(), view, ppf, cx), cy, altH, false)
+            }
+        }
+        val inst = r.instants
+        if (inst.isEmpty()) return
+        val selKey = store.selectedKeyframe
+        val selFrame = if (editing && selKey != null && selKey.first == r.id) r.selectedFrame(selKey.second) else Snap.NONE
+        val dragFrame = if (st.dragKeyLayer == r.id) st.dragKeyFrame else Snap.NONE
+        val keySel = store.keySelection
+        val picked = if (editing && keySel != null && keySel.on(r.id).isNotEmpty()) pickedInstants(r, keySel) else null
+        val focusCount = if (editing && r.track == null && r.id == store.primary) store.timelineFocus?.size ?: 0 else 0
+        val need = 2 * ((w + 2f * m.keyTouchHalf) / m.keyMergeGap).toInt() + 8
+        if (groupBuf.size < need) groupBuf = IntArray(need)
+        val groups = Keyframes.visibleGroups(inst, view, ppf, cx, w, m.keyTouchHalf, m.keyMergeGap, groupBuf)
+        var dragX = Float.NaN
+        for (g in 0 until groups) {
+            val i = groupBuf[2 * g]
+            val j = groupBuf[2 * g + 1]
+            val xa = TimeAxis.xOf(inst[i].toDouble(), view, ppf, cx)
+            if (j == i) {
+                val f = inst[i]
+                if (!editing) {
+                    omegaAltKey(xa, cy, altH)
+                    continue
+                }
+                val dragging = f == dragFrame
+                if (dragging) dragX = xa
+                val highlighted = f == selFrame || picked?.get(i) == true || f == playheadFrame
+                val distinct = if (focusCount >= 2) distinctTracks(r.keysAt[i]) else 1
+                val stacked = focusCount >= 2 && (distinct >= 2 || distinct < focusCount)
+                omegaEditKey(xa, cy, editH, highlighted, dragging, stacked, stacked && distinct < focusCount)
+            } else {
+                omegaKeyPill(xa, TimeAxis.xOf(inst[j].toDouble(), view, ppf, cx), cy, if (editing) editH else altH, editing)
+                if (!editing) continue
+                // A pílula resume as chaves densas; as em foco ficam no tempo delas, por cima.
+                for (f in intArrayOf(selFrame, dragFrame, playheadFrame)) {
+                    if (!Keyframes.groupHas(inst, i, j, f)) continue
+                    val x = TimeAxis.xOf(f.toDouble(), view, ppf, cx)
+                    if (f == dragFrame) dragX = x
+                    omegaEditKey(x, cy, editH, f != dragFrame, f == dragFrame, false, false)
+                }
+            }
+        }
+        if (!dragX.isNaN()) drawBalloon(dragX, cy, dragFrame, fps)
+    }
+
+    /**
+     * Cabeçalho da linha (P0-3): pílula de x −8 a 62 (destaque na seleção
+     * múltipla), faixa da etiqueta de 2 dp, olho em x 17 (✓ nas escolhidas;
+     * some em todas enquanto há seleção múltipla), miniatura 20 × 23 em x 34..54,
+     * recorte com o "↳" e o cadeado no canto da miniatura.
+     */
+    private fun DrawScope.omegaHeader(c: TimelineController, r: RowModel, rowTop: Float, activated: Boolean, hideEye: Boolean, fps: Float) {
+        val pillTop = rowTop + m.omegaPillTop
+        translate(0f, pillTop) {
+            drawPath(omegaPill, if (activated) AureaColors.Accent else AureaTimeline.OmegaHeader)
+            drawPath(omegaPill, AureaTimeline.OmegaHeaderBorder, style = omegaPillStroke)
+        }
+        val cy = pillTop + m.pillHeight / 2f
+        if (!activated) {
+            val tag = ShellColors.LabelPalette.getOrNull(r.label - 1)
+            if (tag != null) {
+                val tagTop = rowTop + m.omegaTagTop
+                drawRect(tag, Offset(0f, tagTop), Size(m.omegaTagWidth, max(0f, c.rowHeight(r) - m.omegaTagTop - m.omegaTagBottomGap)))
+            }
+        }
+        if (activated) {
+            drawGlyph(CupertinoGlyph.CheckmarkCircleFill, m.omegaCheckGlyph, AureaColors.OnAccent.copy(alpha = 0.8f), m.gutterEyeCx, cy)
+        } else if (!hideEye) {
+            drawGlyph(
+                if (r.visible) CupertinoGlyph.Eye else CupertinoGlyph.EyeSlash,
+                m.omegaEyeGlyph,
+                AureaTimeline.GutterEye.copy(alpha = if (r.visible) 0.9f else 0.5f),
+                m.gutterEyeCx, cy,
+            )
+        }
+        val ink = if (activated) AureaColors.OnAccent else AureaTimeline.GutterEye
+        val alpha = if (r.visible) 1f else 0.6f
+        val clipped = r.clipToBelow
+        val scale = if (clipped) m.omegaClipScale else 1f
+        val bw = m.omegaThumbWidth * scale
+        val bh = m.omegaThumbHeight * scale
+        val bcx = m.omegaThumbLeft + m.omegaThumbWidth / 2f - (if (clipped) m.omegaClipShift else 0f)
+        val tinted = ink.copy(alpha = ink.alpha * alpha)
+        when (r.type) {
+            LayerType.Video, LayerType.Image -> if (!omegaThumb(c, r, bcx - bw / 2f, cy - bh / 2f, bw, bh, fps, alpha)) {
+                drawGlyph(r.type.glyph, m.glyphIcon, tinted, bcx, cy)
+            }
+            LayerType.Audio -> drawGlyph(CupertinoGlyph.MusicNote, 10f, ink.copy(alpha = 0.8f * alpha), bcx, cy)
+            LayerType.Text -> {
+                val layout = glyphT ?: measurer.measure("T", glyphTextStyle).also { glyphT = it }
+                drawText(layout, color = ink, alpha = alpha, topLeft = Offset(bcx - layout.size.width / 2f, cy - layout.size.height / 2f))
+            }
+            LayerType.Shape -> drawCircle(tinted, m.glyphDot / 2f * scale, Offset(bcx, cy))
+            else -> drawGlyph(r.type.glyph, m.glyphIcon, tinted, bcx, cy)
+        }
+        if (clipped) {
+            val layout = glyphClip ?: measurer.measure("↳", clipGlyphStyle).also { glyphClip = it }
+            drawText(
+                layout, color = ink, alpha = if (r.visible) 1f else 0.5f,
+                topLeft = Offset(m.omegaClipIndicatorCx - layout.size.width / 2f, rowTop + m.omegaClipIndicatorCy - layout.size.height / 2f),
+            )
+        }
+        if (r.locked) drawGlyph(CupertinoGlyph.LockFill, 9f, AureaColors.Muted, m.omegaLockCx, rowTop + m.omegaLockCy)
+    }
+
+    /** Miniatura da mídia AJUSTADA na caixa (sem cortar), da mesma tira em cache da barra. */
+    private fun DrawScope.omegaThumb(c: TimelineController, r: RowModel, left: Float, top: Float, bw: Float, bh: Float, fps: Float, alpha: Float): Boolean {
+        val heightPx = m.bar.roundToInt().coerceIn(1, THUMB_MAX_PX)
+        val image = r.type == LayerType.Image
+        val bucket = if (image) -1 else Thumbs.bucketOf(r.offset.toDouble(), fps)
+        val frame = if (image) r.start else Keyframes.toTimeline(Thumbs.requestLocalFrame(bucket, fps), r.start, r.offset)
+        val bmp = thumbs.get(c.store.thumbnails, r.id, bucket, frame, heightPx, c.store.thumbnailGeneration) ?: return false
+        if (bmp.width <= 0 || bmp.height <= 0) return false
+        val s = min(bw / bmp.width, bh / bmp.height)
+        val dw = bmp.width * s
+        val dh = bmp.height * s
+        rectF.set(left + (bw - dw) / 2f, top + (bh - dh) / 2f, left + (bw + dw) / 2f, top + (bh + dh) / 2f)
+        bitmapPaint.alpha = (alpha * 255f).roundToInt()
+        drawContext.canvas.nativeCanvas.drawBitmap(bmp, null, rectF, bitmapPaint)
+        return true
+    }
+
+    /** Alça ≡ da linha: três barrinhas de 8 dp a 5 dp da borda direita (o toque longo reordena). */
+    private fun DrawScope.omegaGrip(rowTop: Float, rh: Float, w: Float) {
+        val cy = rowTop + rh / 2f
+        val right = w - m.omegaGripRight
+        val left = right - m.omegaGripWidth
+        val d = m.density
+        for (k in -1..1) {
+            val y = cy + k * 3f * d - d / 2f
+            drawRect(AureaTimeline.OmegaGripShadow, Offset(left, y + d), Size(m.omegaGripWidth, d))
+            drawRect(AureaTimeline.OmegaGrip, Offset(left, y), Size(m.omegaGripWidth, d))
+        }
+    }
+
+    /** Alças do foco (P1-7): pílulas brancas por fora das bordas, alfa pelo estado do gesto. */
+    private fun DrawScope.omegaHandles(st: TimelineState, x0: Float, x1: Float, top: Float, w: Float) {
+        val alpha = when (st.handleState) {
+            1 -> 0.3f
+            2 -> 0.5f
+            3 -> 0f
+            else -> 0.2f
+        }
+        if (alpha <= 0f) return
+        clipRect(left = m.headerColumn, right = w) {
+            omegaHandle(x0 - m.omegaHandle, top, start = true, alpha = alpha, speed = st.speedHandles)
+            omegaHandle(x1, top, start = false, alpha = alpha, speed = st.speedHandles)
+        }
+    }
+
+    /** Uma alça: a ponta de fora redonda e o chevron vazado (‹ ou ›; ≪ ≫ na velocidade). */
+    private fun DrawScope.omegaHandle(left: Float, top: Float, start: Boolean, alpha: Float, speed: Boolean) {
+        val hw = m.omegaHandle
+        val bar = m.bar
+        val round = CornerRadius(bar / 2f)
+        val flat = CornerRadius(m.omegaTabRadius)
+        omegaHandlePath.reset()
+        omegaHandlePath.addRoundRect(
+            androidx.compose.ui.geometry.RoundRect(
+                left, top, left + hw, top + bar,
+                topLeftCornerRadius = if (start) round else flat,
+                topRightCornerRadius = if (start) flat else round,
+                bottomRightCornerRadius = if (start) flat else round,
+                bottomLeftCornerRadius = if (start) round else flat,
+            ),
+        )
+        omegaLayerPaint.alpha = alpha
+        drawContext.canvas.saveLayer(androidx.compose.ui.geometry.Rect(left, top, left + hw, top + bar), omegaLayerPaint)
+        drawPath(omegaHandlePath, AureaTimeline.TrimGrip)
+        val cx = left + hw / 2f
+        val cy = top + bar / 2f
+        val s = m.omegaHandleChevron
+        omegaChevron.reset()
+        val dir = if (start) 1f else -1f
+        val offsets = if (speed) floatArrayOf(-s * 0.55f, s * 0.55f) else floatArrayOf(0f)
+        for (o in offsets) {
+            omegaChevron.moveTo(cx + o + dir * s / 2f, cy - s)
+            omegaChevron.lineTo(cx + o - dir * s / 2f, cy)
+            omegaChevron.lineTo(cx + o + dir * s / 2f, cy + s)
+        }
+        drawPath(omegaChevron, AureaTimeline.KeyStroke, style = omegaHandleStroke, blendMode = BlendMode.Clear)
+        drawContext.canvas.restore()
+    }
+
+    /** Régua (P0-5): tiques de 1 dp pendurados do alto — segundo 18, meio 12, quadro 5 —, sem rótulos. */
+    private fun DrawScope.omegaRuler(st: TimelineState, w: Float, view: Double, ppf: Float, cx: Float, fps: Float) {
+        for (p in omegaTicks) p.reset()
+        val t0 = TimeAxis.frameAt(0f, view, ppf, cx)
+        val t1 = TimeAxis.frameAt(w, view, ppf, cx)
+        if (t1 < 0.0) return
+        val fFirst = max(0L, floor(t0).toLong())
+        val fLast = ceil(t1).toLong()
+        val pps = st.pps
+        val step = OmegaRuler.frameStep(pps, fps)
+        val secStep = OmegaRuler.secondStep(pps)
+        val sec0 = max(0L, floor(fFirst / fps.toDouble()).toLong())
+        val sec1 = ceil(fLast / fps.toDouble()).toLong()
+        fun tick(path: Path, frame: Long, heightDp: Float) {
+            val x = TimeAxis.xOf(frame.toDouble(), view, ppf, cx)
+            if (x < -1f || x > w + 1f) return
+            path.moveTo(x, 0f)
+            path.lineTo(x, heightDp * m.density)
+        }
+        var s = (sec0 / secStep) * secStep
+        while (s <= sec1) {
+            tick(omegaTicks[OmegaRuler.SECOND], OmegaRuler.frameOf(s.toDouble(), fps), OmegaRuler.heightDp(OmegaRuler.SECOND))
+            s += secStep
+        }
+        if (secStep == 1 && pps / 2f >= OmegaRuler.MIN_TICK_DP) {
+            for (k in sec0..sec1) tick(omegaTicks[OmegaRuler.HALF], OmegaRuler.frameOf(k + 0.5, fps), OmegaRuler.heightDp(OmegaRuler.HALF))
+        }
+        if (secStep == 1 && step < fps / 2f) {
+            var f = (fFirst / step) * step
+            while (f <= fLast) {
+                if (OmegaRuler.tickClass(f, fps) == OmegaRuler.FRAME) tick(omegaTicks[OmegaRuler.FRAME], f, OmegaRuler.heightDp(OmegaRuler.FRAME))
+                f += step
+            }
+        }
+        for (p in omegaTicks) drawPath(p, AureaTimeline.OmegaTick, style = omegaTickStroke)
+        // Mover (P1-5): os tiques do início e do fim originais em branco, os novos em destaque.
+        if (st.moveOrigStart != Snap.NONE) {
+            omegaHighlightTick(st.moveOrigStart, AureaColors.Playhead, view, ppf, cx, fps)
+            omegaHighlightTick(st.moveOrigEnd, AureaColors.Playhead, view, ppf, cx, fps)
+            omegaHighlightTick(st.moveNewStart, AureaColors.Accent, view, ppf, cx, fps)
+            omegaHighlightTick(st.moveNewEnd, AureaColors.Accent, view, ppf, cx, fps)
+        }
+    }
+
+    private fun DrawScope.omegaHighlightTick(frame: Int, color: Color, view: Double, ppf: Float, cx: Float, fps: Float) {
+        if (frame == Snap.NONE) return
+        val x = TimeAxis.xOf(frame.toDouble(), view, ppf, cx)
+        val hDp = OmegaRuler.heightDp(OmegaRuler.tickClass(frame.toLong(), fps))
+        drawRect(color, Offset(x - m.omegaTick / 2f, 0f), Size(m.omegaTick, hDp * m.density))
+    }
+
+    /** Marcadores (P1-3): fio de 1 dp pela régua (≈ 59 %) e a bandeirola cheia. Devolve o do quadro atual (−1 = nenhum). */
+    private fun DrawScope.omegaMarkers(mk: com.aurea.aurea.state.EditorStore.Markers, w: Float, view: Double, ppf: Float, cx: Float): Int {
+        var atPlayhead = -1
+        for (i in 0 until mk.size) {
+            val f = mk.frames[i]
+            if (f == playheadFrame) atPlayhead = i
+            val x = TimeAxis.xOf(f.toDouble(), view, ppf, cx)
+            if (x < -m.omegaMarkerFlagLarge || x > w + m.omegaTick) continue
+            val color = markerColor(mk.colors[i])
+            drawRect(color.copy(alpha = MARKER_LINE_ALPHA), Offset(x - m.omegaTick / 2f, 0f), Size(m.omegaTick, m.rowsTop))
+            val d = if (f == playheadFrame) m.omegaMarkerFlagLarge else m.omegaMarkerFlagSmall
+            omegaFlag.reset()
+            omegaFlag.moveTo(x, 0f)
+            omegaFlag.lineTo(x, m.omegaMarkerFlag)
+            omegaFlag.lineTo(x - d, m.omegaMarkerFlag)
+            omegaFlag.lineTo(x, m.omegaMarkerFlagTip)
+            omegaFlag.close()
+            drawPath(omegaFlag, color)
+        }
+        return atPlayhead
+    }
+
+    /**
+     * Aba do tempo atual (P0-5): 70 × 18 dp centrada no cursor, cantos de 2 e o
+     * de cima à esquerda chanfrado; `MM:SS:FF` branco tabular. Num marcador, o
+     * contorno de 1 dp na cor do primeiro papel.
+     */
+    private fun DrawScope.omegaTimeTab(cx: Float, frame: Int, fps: Float, marked: Boolean) {
+        if (digits[0] == null) {
+            for (dgt in 0..9) digits[dgt] = measurer.measure(dgt.toString(), digitStyle)
+            digits[10] = measurer.measure(":", digitStyle)
+            digitWidth = (0..9).maxOf { digits[it]!!.size.width }.toFloat()
+            colonWidth = digits[10]!!.size.width.toFloat()
+            digitBaseline = digits[0]!!.firstBaseline
+        }
+        Timecode.split(frame, fps, tc)
+        val ffDigits = if (fps > 100f) 3 else 2
+        var hourDigits = 0
+        var hv = tc[0]
+        while (hv > 0) {
+            hourDigits++
+            hv /= 10
+        }
+        val colons = if (hourDigits > 0) 3 else 2
+        val total = (hourDigits + 4 + ffDigits) * digitWidth + colons * colonWidth
+        val tabW = max(m.omegaTabMinWidth, total + 2f * m.omegaTabPad)
+        val left = cx - tabW / 2f
+        val right = cx + tabW / 2f
+        val top = m.omegaTabTop
+        val bottom = top + m.omegaTabHeight
+        val r = m.omegaTabRadius
+        val ch = m.omegaTabChamfer
+        omegaTabPath.reset()
+        omegaTabPath.moveTo(left + ch, top)
+        omegaTabPath.lineTo(right - r, top)
+        omegaTabPath.quadraticTo(right, top, right, top + r)
+        omegaTabPath.lineTo(right, bottom - r)
+        omegaTabPath.quadraticTo(right, bottom, right - r, bottom)
+        omegaTabPath.lineTo(left + r, bottom)
+        omegaTabPath.quadraticTo(left, bottom, left, bottom - r)
+        omegaTabPath.lineTo(left, top + ch)
+        omegaTabPath.close()
+        drawPath(omegaTabPath, AureaTimeline.OmegaTimeTab)
+        if (marked) drawPath(omegaTabPath, AureaTimeline.Bookmarks[0], style = omegaTabStroke)
+        val textTop = m.omegaTimecodeBaseline - digitBaseline
+        var x = cx - total / 2f
+        if (hourDigits > 0) {
+            x = drawNumber(tc[0], hourDigits, x, textTop)
+            x = drawColon(x, textTop)
+        }
+        x = drawNumber(tc[1], 2, x, textTop)
+        x = drawColon(x, textTop)
+        x = drawNumber(tc[2], 2, x, textTop)
+        x = drawColon(x, textTop)
+        drawNumber(tc[3], ffDigits, x, textTop)
+    }
+
     private companion object {
+        /** Faixa da prévia já calculada (a mesma cor do desenho de antes). */
+        val PREVIEW_BUFFER = Color(0xFF4DA3FF)
+        /** Fio do marcador: alfa 150/255 da referência. */
+        const val MARKER_LINE_ALPHA = 150f / 255f
+        /** Teto de faixas da zebra por clipe e quadro (uma tela larga cabe com folga). */
+        const val ZEBRA_MAX = 4096
         const val THUMB_MAX_PX = 512
         /** Quadradinho da camada recortada: um pouco menor, encostado à direita. */
         const val CLIP_BOX_SCALE = 0.82f

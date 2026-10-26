@@ -22,81 +22,120 @@ import org.junit.Rule
 import org.junit.Test
 import java.io.File
 
+/**
+ * Omega 0.3.2 (área 01): o dock Início · Perfil · [+] · Projetos · Presets, a
+ * primeira abertura em Início (D5) e a última aba lembrada, a conta pelo
+ * avatar, a gaveta de ajustes e a folha "Novo projeto".
+ */
 class HomeNavigationTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun appWithoutSessionOpensProjectsAndOptionalLoginCanBeClosed() {
+    private fun freshHome() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         check(context.packageName.endsWith(".uitest"))
+        context.getSharedPreferences("aurea.releaseNotes", android.content.Context.MODE_PRIVATE).edit()
+            .putString("read", "${com.aurea.aurea.BuildConfig.VERSION_NAME}:${com.aurea.aurea.BuildConfig.VERSION_CODE}").commit()
+        // D5: sem aba gravada = primeira abertura.
+        context.getSharedPreferences("aurea.home", android.content.Context.MODE_PRIVATE).edit()
+            .remove(HomeViewModel.KEY_TAB).commit()
+        AureaDonations.launchPromptPending = false
+    }
+
+    @Test fun appWithoutSessionOpensStartAndOptionalLoginCanBeClosed() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        freshHome()
         com.aurea.aurea.captions.KeyVault(context).apply {
             remove("conta_token")
             remove("conta_email")
         }
-        context.getSharedPreferences("aurea.releaseNotes", android.content.Context.MODE_PRIVATE).edit()
-            .putString("read", "${com.aurea.aurea.BuildConfig.VERSION_NAME}:${com.aurea.aurea.BuildConfig.VERSION_CODE}").commit()
-        AureaDonations.launchPromptPending = false
         compose.setContent {
             val store: EditorStore = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
             com.aurea.aurea.ui.AureaApp(store)
         }
-        compose.onNodeWithTag("home.projects").assertIsSelected()
+        compose.onNodeWithTag("home.community").assertIsSelected()
         compose.onNodeWithTag("conta.email").assertDoesNotExist()
-        compose.onNodeWithTag("home.menu").performClick()
-        compose.onNodeWithText(context.getString(com.aurea.aurea.R.string.conta_sair)).assertDoesNotExist()
-        compose.onNodeWithText(context.getString(com.aurea.aurea.R.string.conta_entrar)).performClick()
+        // Sem login, o avatar abre a tela de entrar (P0-4).
+        compose.onNodeWithTag("home.account").performClick()
         compose.onNodeWithTag("conta.email").assertIsDisplayed()
         compose.onNodeWithTag("conta.fechar").performClick()
         compose.onNodeWithTag("conta.email").assertDoesNotExist()
+        compose.onNodeWithTag("home.projects").performClick()
         compose.onNodeWithTag("home.projects").assertIsSelected()
         compose.onNodeWithTag("home.create").performClick()
-        compose.onNodeWithText(context.getString(com.aurea.aurea.R.string.new_project_title)).assertIsDisplayed()
+        compose.onNodeWithTag("newProject.sheet").assertIsDisplayed()
     }
 
     @Test fun narrowDockKeepsCreateCenteredAndTargetsSeparateWithLargeText() {
-        val calls = IntArray(5)
+        val picked = mutableListOf<Int>()
+        var created = 0
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, 1.5f)) {
                 AureaTheme {
                     Box(Modifier.width(320.dp).testTag("dockBounds")) {
-                        HomeDock(HomeViewModel.PROJECTS_TAB, { calls[1]++ }, { calls[3]++ },
-                            { calls[2]++ }, { calls[0]++ }, {}, { calls[4]++ })
+                        HomeDock(HomeViewModel.PROJECTS_TAB, { picked += it }, { created++ })
                     }
                 }
             }
         }
-        val tags = listOf("home.menu", "home.projects", "home.create", "home.community", "home.profile")
+        val tags = listOf("home.community", "home.profile", "home.create", "home.projects", "home.presets")
         val bounds = tags.map {
             compose.onNodeWithTag(it).assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
             compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot
         }
         val parent = compose.onNodeWithTag("dockBounds").fetchSemanticsNode().boundsInRoot
         assertEquals(parent.center.x, bounds[2].center.x, 1f)
-        bounds.zipWithNext().forEach { (a,b) -> assertTrue(a.right <= b.left + 1f) }
+        bounds.zipWithNext().forEach { (a, b) -> assertTrue(a.right <= b.left + 1f) }
+        compose.onNodeWithTag("home.projects").assertIsSelected()
         tags.forEach { compose.onNodeWithTag(it).performClick() }
-        compose.runOnIdle { assertEquals(listOf(1,1,1,1,1), calls.toList()) }
+        compose.runOnIdle {
+            assertEquals(listOf(HomeViewModel.HOME_TAB, HomeViewModel.PROFILE_TAB, HomeViewModel.PROJECTS_TAB, HomeViewModel.PRESETS_TAB), picked)
+            assertEquals(1, created)
+        }
     }
 
-    @Test fun homeStartsWithProjectsAndCreateOpensTheExistingProjectSheet() {
+    @Test fun homeStartsInStartRemembersTheLastTabAndCreateOpensTheSheet() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        assertTrue(context.packageName.endsWith(".uitest"))
-        context.getSharedPreferences("aurea.releaseNotes", android.content.Context.MODE_PRIVATE).edit()
-            .putString("read", "${com.aurea.aurea.BuildConfig.VERSION_NAME}:${com.aurea.aurea.BuildConfig.VERSION_CODE}").commit()
-        AureaDonations.launchPromptPending = false
+        freshHome()
         compose.setContent {
             val store: EditorStore = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
             AureaTheme { HomeScreen(store) }
         }
+        compose.onNodeWithTag("home.community").assertIsSelected()
+        compose.onNodeWithTag("home.projects").performClick()
         compose.onNodeWithTag("home.projects").assertIsSelected()
-        val file = File(context.getExternalFilesDir(null), "home-redesign.png")
+        compose.runOnIdle {
+            val saved = context.getSharedPreferences("aurea.home", android.content.Context.MODE_PRIVATE).getInt(HomeViewModel.KEY_TAB, -1)
+            assertEquals(HomeViewModel.PROJECTS_TAB, saved)
+        }
+        compose.onNodeWithTag("home.projects.subtab.projects").assertIsSelected()
+        val file = File(context.getExternalFilesDir(null), "home-omega.png")
         compose.waitForIdle()
         val screenshot = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
         try { file.outputStream().use { assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, it)) } }
         finally { screenshot.recycle() }
         InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(
-            "cp '${file.absolutePath}' /sdcard/Download/aurea-home-redesign.png").close()
+            "cp '${file.absolutePath}' /sdcard/Download/aurea-home-omega.png").close()
         compose.onNodeWithTag("home.create").performClick()
-        compose.onNodeWithText(context.getString(com.aurea.aurea.R.string.new_project_title)).assertIsDisplayed()
+        compose.onNodeWithTag("newProject.sheet").assertIsDisplayed()
+        compose.onNodeWithTag("newProject.uiMode.composition").assertIsSelected()
+        compose.onNodeWithTag("newProject.cancel").performClick()
+        compose.waitUntil(3_000) { compose.onAllNodesWithTag("newProject.sheet").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test fun menuOpensTheSettingsDrawerWithTheCreateCard() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        freshHome()
+        compose.setContent {
+            val store: EditorStore = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
+            AureaTheme { HomeScreen(store) }
+        }
+        compose.onNodeWithTag("home.drawer.title").assertIsNotDisplayed()
+        compose.onNodeWithTag("home.menu").performClick()
+        compose.waitUntil(3_000) { runCatching { compose.onNodeWithTag("home.drawer.title").assertIsDisplayed() }.isSuccess }
+        compose.onNodeWithTag("home.drawer.importMedia").assertIsDisplayed()
+        compose.onNodeWithTag("home.drawer.importProject").assertIsDisplayed()
+        compose.onNodeWithTag("home.drawer.hyper").assertIsDisplayed()
     }
 
     @Test fun oldReadMarkerShowsInstalledReleaseNotesAndDismissalStoresCurrentEdition() {
@@ -115,12 +154,12 @@ class HomeNavigationTest {
                 assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, it))
             }
         } finally { screenshot.recycle() }
-        compose.onNodeWithText(context.getString(com.aurea.aurea.R.string.editor_fechar)).performClick()
+        compose.onNodeWithTag("releaseNotes.close").performClick()
         compose.runOnIdle {
             assertEquals("${com.aurea.aurea.BuildConfig.VERSION_NAME}:${com.aurea.aurea.BuildConfig.VERSION_CODE}", preferences.getString("read", null))
         }
         compose.onNodeWithText(version, substring = true).assertDoesNotExist()
-        compose.onNodeWithText(context.getString(com.aurea.aurea.R.string.release_notes_title)).performClick()
+        compose.onNodeWithTag("home.releaseNotes").performClick()
         compose.onNodeWithText(version, substring = true).assertIsDisplayed()
     }
 }

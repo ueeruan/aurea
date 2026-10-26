@@ -72,34 +72,39 @@ def main():
     color_host = block(property_panel, '.sheet(item: $picker)')
     marker_host = block(editor, '.sheet(item: $model.markerEditingFrame)')
     about_host = block(effects, '.sheet(item: $about)')
-    text = block(editor, 'private struct TextContentEditor: View')
+    # Omega conteúdo (área 06, P0-1): o diálogo "Editar texto" virou o MODO DE TEXTO
+    # (faixa de entrada no painel grande, TextEditModeView.swift).
+    textmode = (APP / 'TextEditModeView.swift').read_text(encoding='utf-8')
+    text = block(textmode, 'struct TextEditPanel: View')
     overlay = block(sheets, 'struct AureaBottomOverlay<Content: View>: View')
-    alert = block(sheets, 'struct AureaAlert: View')
+    # Omega fundação (F4): o AureaAlert virou um AureaDialog claro (mesmo contrato).
+    alert = block(sheets, 'struct AureaDialog: View')
     action = block(sheets, 'struct AureaActionSheet: View')
     scroll = block(sheets, 'private struct AureaSheetScroll<Content: View>: View')
     contracts = {
-        'text editor is an overlay rather than a forced large native sheet':
-            '.sheet(item: $model.textContentRequest)' not in editor and '.id(request.presentationID)' in editor,
-        'text input has a measured compact height and native scrolling':
-            '.frame(height: inputHeight)' in text and 'scrollable: true' in text and 'AureaSheetLayout.textInputHeight' in text,
-        'text actions live outside the scrolling body':
-            'fixedFooter: AnyView(actions)' in text and 'private var actions:' in text,
-        'text input preserves autofocus, selection and commit callback':
-            all(token in text for token in ['autoFocus: true', 'selectAllOnFocus: request.selectAll', 'NSRange', 'model.commitTextContent(request, content: content)', '.disabled(!valid)']),
-        'delayed dismissal belongs to the current text presentation':
-            'model.textContentRequest?.presentationID == request.presentationID' in text,
+        'text editing is the text mode, not a sheet or a dialog':
+            '.sheet(item: $model.textContentRequest)' not in editor and 'TextContentEditor(' not in editor and 'TextEditPanel()' in editor,
+        'text mode input strip is 60 pt and scrolls long text natively':
+            'let strip: CGFloat = 60' in text and '.frame(height: strip)' in text and 'view.isScrollEnabled = true' in textmode,
+        'text mode Done lives in the style bar and refuses an empty 3D text':
+            '"text.style.done"' in textmode and 'state.draftBlank' in textmode and 'enabled: !blank' in textmode,
+        'text input focuses, selects new text and types live':
+            all(token in textmode for token in ['becomeFirstResponder()', 'selectAllInitially', 'NSRange', 'model.typeText(next)']),
+        'text strip rises above the keyboard without shrinking the editor':
+            'keyboardWillChangeFrameNotification' in text and '.ignoresSafeArea(model.textModeActive ? .keyboard : [], edges: .bottom)' in editor,
         'overlay uses the keyboard-adjusted viewport without subtracting its insets twice':
             'viewport: geometry.size.height' in overlay and 'geometry.safeAreaInsets' not in overlay and 'ignoresSafeArea(.keyboard' not in overlay,
         'overlay deducts measured fixed actions from scroll height':
             'footer: footerHeight' in overlay and 'AureaSheetFooterHeight.self' in overlay,
         'scroll keeps natural short content and limits long content':
             'AureaSheetLayout.scrollHeight(content: contentHeight, maximum: maximumHeight)' in scroll and '.fixedSize(horizontal: false, vertical: true)' in scroll and 'guard $0.isFinite, $0 > 0' in scroll,
-        'text sheet identifies its card without replacing identifiers of child actions':
-            'accessibilityID: "text.content.sheet"' in text and '.accessibilityElement(children: .contain)' in overlay,
+        'text mode identifies its panel without replacing identifiers of child controls':
+            '.accessibilityIdentifier("text.edit.mode")' in text and '.accessibilityElement(children: .contain)' in text
+            and '.accessibilityElement(children: .contain)' in overlay,
         'long action menus scroll with cancel after scroll':
             action.index('AureaSheetScroll(') < action.index('Text(AureaText.t("common_cancel"))') and 'footer: AureaDims.actionRowMinH' in action,
         'alerts scroll with confirmation outside body and width limited to viewport':
-            alert.index('AureaSheetScroll(') < alert.index('HStack(spacing: 0)') and 'geometry.size.width - 32' in alert,
+            alert.index('AureaSheetScroll(') < alert.index('HStack(spacing: 0)') and 'geometry.size.width - 2 * AureaDialogMetrics.outerPadding' in alert,
         'color and expression actions use fixed footer':
             'color.picker.done' in sheets and 'AureaBottomOverlay(modal: true, onDismiss: onDismiss, fixedFooter:' in animation,
         'local keypad and color native windows have compact detents and controlled dismissal':

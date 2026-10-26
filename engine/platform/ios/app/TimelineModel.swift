@@ -41,22 +41,24 @@ struct TimelineMetrics {
     var pillRadius: CGFloat { pillHeight / 2 }
     var barTop: CGFloat { reference ? dp(AureaTimeline.referenceBarTop) : pillTop + dp(2) }
     var bar: CGFloat { dp(reference ? AureaTimeline.referenceBar + 20 * textScale : AureaTimeline.bar) }
-    var barRadius: CGFloat { dp(reference ? AureaTimeline.referenceBarRadius : AureaTimeline.barRadius) }
+    // Omega (área 03): cartão com cantos de 3 (antes 1,5).
+    var barRadius: CGFloat { dp(reference ? AureaTimeline.omegaBarRadius : AureaTimeline.barRadius) }
     var track: CGFloat { dp(11) }
     /// Começo da faixa dos losangos (medido do topo da barra).
     var trackTop: CGFloat { bar - track }
     /// Folga abaixo das linhas (a última não cola na borda).
-    var bottomPad: CGFloat { dp(24) }
+    var bottomPad: CGFloat { dp(reference ? 0 : 24) }
 
     // --- Pílula da fileira (olho + quadradinho do glifo, colada à esquerda) -------
     /// Largura da pílula; as barras passam por BAIXO dela (ela é opaca).
-    var headerColumn: CGFloat { dp(AureaTimeline.headerColumn) }
+    /// Omega: a pílula vai de x −8 a 62; só 62 ficam à vista.
+    var headerColumn: CGFloat { dp(reference ? AureaTimeline.omegaHeaderColumn : AureaTimeline.headerColumn) }
     /// Visibility occupies the first 44pt; the thumbnail opens layer tracks.
     var eyeIcon: CGFloat { reference ? 18 : 20 }
-    var eyeCx: CGFloat { dp(reference ? 23 : 16) }
-    var eyeHitRight: CGFloat { dp(reference ? 40 : 28) }
+    var eyeCx: CGFloat { dp(reference ? 17 : 16) }
+    var eyeHitRight: CGFloat { dp(reference ? 36 : 28) }
     /// Thumbnail 20 × 20 at x42..62 in the expanded 70pt header.
-    var glyphBoxLeft: CGFloat { dp(reference ? 42 : 38) }
+    var glyphBoxLeft: CGFloat { dp(reference ? 34 : 38) }
     var glyphBox: CGFloat { dp(20) }
     var glyphBoxRadius: CGFloat { dp(3) }
     var glyphBoxStroke: CGFloat { dp(1.5) }
@@ -150,8 +152,8 @@ struct TimelineMetrics {
 
     // --- Cabeçote e relógio ----------------------------------------------------------
     /// Cabeçote branco de 1 pt, de y 36 (abaixo do relógio) até o fim.
-    var playhead: CGFloat { dp(AureaTimeline.playhead) }
-    var playheadTop: CGFloat { dp(reference ? 34 + 14 * textScale : 36) }
+    var playhead: CGFloat { dp(reference ? 1.5 : AureaTimeline.playhead) }
+    var playheadTop: CGFloat { dp(reference ? 35 + 14 * textScale : 36) }
     /// Compacto (painel aberto): o cabeçote vermelho de antes, de cima a baixo.
     var compactPlayhead: CGFloat { dp(1.6) }
     var knob: CGFloat { dp(8) }
@@ -191,6 +193,70 @@ struct TimelineMetrics {
     var guide: CGFloat { dp(1) }
     var reorderLine: CGFloat { dp(2) }
     var reorderDot: CGFloat { dp(3) }
+
+    // --- Omega 0.3.2 (área 03), par do TimelineMetrics.kt -------------------------------
+    /// Pílula do cabeçalho: começa 8 fora da tela (x −8) e vai até `headerColumn`.
+    var omegaPillLeft: CGFloat { dp(-8) }
+    /// Topo da pílula medido do topo da LINHA (1 de margem em cima e embaixo).
+    var omegaPillTop: CGFloat { dp(1) }
+    var omegaPillBorder: CGFloat { dp(0.5) }
+    /// Faixa da etiqueta à esquerda: 2 à vista, de y 1,8 até 2 antes do fim da linha.
+    var omegaTagWidth: CGFloat { dp(2) }
+    var omegaTagTop: CGFloat { dp(1.8) }
+    var omegaTagBottomGap: CGFloat { dp(2) }
+    var omegaEyeGlyph: CGFloat { 18 }
+    var omegaCheckGlyph: CGFloat { 16 }
+    /// Miniatura da camada no cabeçalho: 20 × 23 em x 34..54 (ajustada).
+    var omegaThumbLeft: CGFloat { dp(34) }
+    var omegaThumbWidth: CGFloat { dp(20) }
+    var omegaThumbHeight: CGFloat { dp(23) }
+    /// Recorte: a miniatura anda 7 para a esquerda e fica com 83 %.
+    var omegaClipShift: CGFloat { dp(7) }
+    var omegaClipScale: CGFloat { 0.83 }
+    var omegaClipIndicatorCx: CGFloat { dp(55) }
+    var omegaClipIndicatorCy: CGFloat { dp(20) }
+    var omegaLockCx: CGFloat { dp(50) }
+    var omegaLockCy: CGFloat { dp(7) }
+    /// Alça ≡ da linha: 8 × 7 a 5 da borda direita; o toque longo nela reordena.
+    var omegaGripRight: CGFloat { dp(5) }
+    var omegaGripWidth: CGFloat { dp(8) }
+    var omegaGripZone: CGFloat { dp(30) }
+    /// Tempo atual: aba de 70 × 18 com o canto de cima à esquerda chanfrado.
+    var omegaTabTop: CGFloat { dp(18 + 7 * textScale) }
+    var omegaTabHeight: CGFloat { dp(18 + 7 * textScale) }
+    var omegaTabMinWidth: CGFloat { dp(70) }
+    var omegaTabPad: CGFloat { dp(5) }
+    var omegaTabRadius: CGFloat { dp(2) }
+    var omegaTabChamfer: CGFloat { dp(6) }
+    var omegaTabStroke: CGFloat { dp(1) }
+    var omegaTimecodeBaseline: CGFloat { omegaTabTop + dp(13 + 6 * textScale) }
+    /// Zona do toque no tempo atual: 100 × 38 centrada, de y 5 a 43.
+    var omegaTimeTouchHalf: CGFloat { dp(50) }
+    var omegaTimeTouchTop: CGFloat { dp(5) }
+    var omegaTimeTouchBottom: CGFloat { dp(43) }
+    var omegaTick: CGFloat { dp(1) }
+    /// Marcador: fio de 1 pela régua e bandeirola de 5 (2; 4 no quadro atual).
+    var omegaMarkerFlag: CGFloat { dp(5) }
+    var omegaMarkerFlagTip: CGFloat { dp(1) }
+    var omegaMarkerFlagSmall: CGFloat { dp(2) }
+    var omegaMarkerFlagLarge: CGFloat { dp(4) }
+    var omegaMarkerNear: CGFloat { dp(21) }
+    /// Rótulo do clipe: 14 para dentro do cartão.
+    var omegaLabelInset: CGFloat { dp(14) }
+    /// Losangos: 0,65 × barra em edição, 0,4 × barra nos outros parâmetros (2:3).
+    var omegaKeyEdit: CGFloat { bar * 0.65 }
+    var omegaKeyAlt: CGFloat { bar * 0.4 }
+    var omegaKeyStroke: CGFloat { dp(1) }
+    var omegaKeyAltStroke: CGFloat { dp(0.5) }
+    var omegaKeyRing: CGFloat { dp(4) }
+    var omegaZebraMin: CGFloat { dp(4) }
+    var omegaWave: CGFloat { dp(1) }
+    var omegaShadow: CGFloat { dp(0.5) }
+    var omegaLiftShadow: CGFloat { dp(8) }
+    /// Alças do foco: pílula de 26 × barra com a ponta de fora redonda.
+    var omegaHandle: CGFloat { dp(26) }
+    var omegaHandleChevron: CGFloat { dp(5) }
+    var omegaHandleStroke: CGFloat { dp(2) }
 }
 
 // =============================================================================
@@ -385,6 +451,20 @@ func timelineSharedRows(_ rows: [TimelineRow]) -> [TimelineRow] {
     return out
 }
 
+/// Omega (área 03, P1-5/P1-7): um par rótulo–valor da barra de informação do
+/// gesto da timeline (mover, aparar, alça de velocidade, losango).
+struct TimelineInfoItem: Equatable {
+    let label: String
+    let value: String
+}
+
+/// Omega (área 03, P0-1): UMA camada por linha, na ordem de desenho (a de cima
+/// primeiro), como na referência. O motor continua com o `trackId` e o ripple
+/// magnético; nada no arquivo muda. Fora da Omega, as fileiras por LINHA.
+func timelineLayerRows(_ rows: [TimelineRow], perLayer: Bool) -> [TimelineRow] {
+    perLayer ? rows : timelineSharedRows(rows)
+}
+
 /// O resumo de uma fileira compartilhada: a pílula acende se algum trecho aparece e trava se todos travam.
 private func timelineSharedRow(line: UInt32, _ segments: [TimelineRow]) -> TimelineRow {
     let head = segments[0]
@@ -407,11 +487,12 @@ private func timelineSharedRow(line: UInt32, _ segments: [TimelineRow]) -> Timel
 /// Android): fileiras seguidas com a mesma chave andam juntas. Trilha de
 /// propriedade aberta anda com a camada dona; as fileiras de uma linha andam
 /// juntas; o resto é a própria camada.
-func timelineGroupKeys(_ rows: [TimelineRow]) -> [Int64] {
+func timelineGroupKeys(_ rows: [TimelineRow], byLine: Bool = true) -> [Int64] {
     var keys = [Int64](repeating: 0, count: rows.count)
     for (i, row) in rows.enumerated() {
         if row.track != nil && i > 0 { keys[i] = keys[i - 1] }
-        else if row.line != 0 { keys[i] = Int64.min + Int64(row.line) }
+        // Omega (área 03, P0-1): uma camada por linha; cada fileira anda sozinha.
+        else if byLine && row.line != 0 { keys[i] = Int64.min + Int64(row.line) }
         else { keys[i] = row.id }
     }
     return keys

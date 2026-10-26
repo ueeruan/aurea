@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega fundação: menu ancorado, diálogo claro e moldura dos painéis. -->
+    <string name="om_menu_back">वापस</string>
+    <string name="om_field_clear">टेक्स्ट मिटाएँ</string>
+    <string name="om_panel_delete_all_keyframes_q">इस प्रॉपर्टी के सभी कीफ़्रेम मिटाएँ?</string>
+    <string name="om_panel_keyframes_needed">कीफ़्रेम चाहिए</string>
+</resources>

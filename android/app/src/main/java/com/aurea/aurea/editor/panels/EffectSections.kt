@@ -1,6 +1,7 @@
 package com.aurea.aurea.editor.panels
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -10,6 +11,7 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -130,11 +133,18 @@ internal fun stagePointEligible(type: Int, flags: Int): Boolean =
 internal fun fxSwipeCommits(dx: Float, width: Float, minPx: Float): Boolean =
     dx < 0f && -dx >= max(minPx, width * 0.35f)
 
+/** A curva padrão do Android (AccelerateDecelerate): `cos((t + 1)π)/2 + 0,5`. Seta da seção e abertura dos controles. */
+internal val FxAccelDecel = Easing { t -> (kotlin.math.cos((t + 1.0) * Math.PI) / 2.0 + 0.5).toFloat() }
+
 /**
- * Cabeçalho de SEÇÃO (43 dp de faixa): seta que gira 0→90° em 300 ms, título,
- * contagem quando recolhida e o interruptor que liga a seção. Tocar na faixa
- * abre/recolhe; o interruptor escreve o Bool (um passo de desfazer).
- * testTags `effects.section.<efeito>.<ordinal>` e `effects.section.toggle.<efeito>.<ordinal>` (iguais no iOS).
+ * Cabeçalho de SEÇÃO da referência (`effect_setting_static_section`, 43 dp):
+ * faixa «superfície baixa» de 40 colada embaixo (3 de folga em cima), seta de 20
+ * no texto a 30 % que gira 0→90° em 300 ms acelera-desacelera, título 14 regular
+ * (margem 13) e o interruptor opcional (margem 20). A contagem "N ajustes" quando
+ * recolhida é extra do AUREA. Tocar na faixa abre/recolhe; o interruptor escreve
+ * o Bool (um passo de desfazer).
+ * testTags `effects.section.<efeito>.<ordinal>` e `effects.section.toggle.<efeito>.<ordinal>` (iguais no iOS);
+ * o "Avançado" usa [tag] `effects.section.<efeito>.advanced`.
  */
 @Composable
 internal fun FxSectionHeader(
@@ -144,9 +154,11 @@ internal fun FxSectionHeader(
     toggleOn: Boolean,
     onOpen: (Boolean) -> Unit,
     onToggle: (Boolean) -> Unit,
+    tag: String = "effects.section.$effectId.${section.ordinal}",
+    toggleEnabled: Boolean = true,
 ) {
     val angle by animateFloatAsState(
-        if (section.open) 90f else 0f, tween(300, easing = FastOutSlowInEasing), label = "secao",
+        if (section.open) 90f else 0f, tween(300, easing = FxAccelDecel), label = "secao",
     )
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val a11y = stringResource(
@@ -154,86 +166,87 @@ internal fun FxSectionHeader(
     )
     val count = section.params.size
     val countText = if (count == 1) stringResource(R.string.ds_1_ajuste) else stringResource(R.string.ds_adjustment_count, count)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp)
-            .height(43.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(ParamRowColors.ValueBox),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    Column(Modifier.fillMaxWidth().height(43.dp)) {
+        Spacer(Modifier.height(3.dp))
         Row(
             Modifier
-                .weight(1f)
-                .height(43.dp)
-                .testTag("effects.section.$effectId.${section.ordinal}")
-                .semantics {
-                    contentDescription = a11y
-                    role = Role.Button
-                    if (!section.open) stateDescription = countText
-                }
-                .tocavel(shrink = 1f) { onOpen(!section.open) }
-                .padding(start = 10.dp),
+                .fillMaxWidth()
+                .height(40.dp)
+                .background(AureaColors.FxLowSurface),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CupertinoIcon(
-                CupertinoGlyph.ChevronRight, 13.dp, AureaColors.Muted,
-                Modifier.graphicsLayer { rotationZ = if (rtl) -angle else angle },
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                section.label,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-                style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)),
-            )
-            Spacer(Modifier.width(8.dp))
-            if (!section.open) {
-                Text(countText, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+            Row(
+                Modifier
+                    .weight(1f)
+                    .height(40.dp)
+                    .testTag(tag)
+                    .semantics {
+                        contentDescription = a11y
+                        role = Role.Button
+                        if (!section.open) stateDescription = countText
+                    }
+                    .tocavel(shrink = 1f) { onOpen(!section.open) }
+                    .padding(start = 6.dp, end = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CupertinoIcon(
+                    CupertinoGlyph.ChevronRight, 20.dp, AureaColors.Text.copy(alpha = 0.3f),
+                    Modifier.graphicsLayer { rotationZ = if (rtl) -angle else angle },
+                )
+                Spacer(Modifier.width(13.dp))
+                Text(
+                    section.label,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W400, color = AureaColors.Text)),
+                )
+                Spacer(Modifier.width(8.dp))
+                if (!section.open) {
+                    Text(countText, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.FxTipText)))
+                }
             }
-        }
-        if (section.toggle != null) {
-            AureaToggle(
-                checked = toggleOn,
-                modifier = Modifier.testTag("effects.section.toggle.$effectId.${section.ordinal}").semantics {
-                    contentDescription = toggleLabel
-                    role = Role.Switch
-                    toggleableState = if (toggleOn) ToggleableState.On else ToggleableState.Off
-                },
-                onCheckedChange = onToggle,
-            )
-            Spacer(Modifier.width(8.dp))
-        } else {
-            Spacer(Modifier.width(6.dp))
+            if (section.toggle != null) {
+                AureaToggle(
+                    checked = toggleOn,
+                    enabled = toggleEnabled,
+                    modifier = Modifier.testTag("effects.section.toggle.$effectId.${section.ordinal}").semantics {
+                        contentDescription = toggleLabel
+                        role = Role.Switch
+                        toggleableState = if (toggleOn) ToggleableState.On else ToggleableState.Off
+                    },
+                    onCheckedChange = onToggle,
+                )
+                Spacer(Modifier.width(20.dp))
+            }
         }
     }
 }
 
-/** DICA só de leitura: ⓘ + texto, acima da linha do parâmetro. testTag `effects.tip.<efeito>.<índice>`. */
+/** DICA só de leitura: ⓘ 14 + texto 12 em «texto de dica», margens 8, acima da linha. testTag `effects.tip.<efeito>.<índice>`. */
 @Composable
 internal fun FxTipRow(effectId: Int, index: Int, text: String) {
     val a11y = stringResource(R.string.fxui_a11y_tip, text)
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 6.dp, end = 6.dp, top = 4.dp, bottom = 2.dp)
+            .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 2.dp)
             .testTag("effects.tip.$effectId.$index")
             .semantics(mergeDescendants = true) { contentDescription = a11y },
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.Start,
     ) {
-        CupertinoIcon(CupertinoGlyph.InfoCircle, 14.dp, AureaColors.Muted, Modifier.padding(top = 1.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(text, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+        CupertinoIcon(CupertinoGlyph.InfoCircle, 14.dp, AureaColors.FxTipText, Modifier.padding(top = 1.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(text, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.FxTipText)))
     }
 }
 
 /**
- * DESLIZAR PARA A ESQUERDA no cabeçalho do cartão apaga o efeito ([fxSwipeCommits]);
- * antes do limite, solta e volta. Atrás do cartão aparece a faixa vermelha com 🗑.
- * O leitor de tela ganha a mesma ação ("Remover …") sem o gesto.
+ * DESLIZAR PARA A ESQUERDA numa linha da lista de efeitos apaga o efeito
+ * ([fxSwipeCommits]); antes do limite, solta e volta. Atrás da linha aparece a
+ * faixa vermelha com 🗑 (Omega: na forma da linha de 37 dp, raio 5). O leitor de
+ * tela ganha a mesma ação ("Remover …") sem o gesto.
  */
 @Composable
 internal fun FxSwipeToDelete(
@@ -241,6 +254,7 @@ internal fun FxSwipeToDelete(
     removeLabel: String,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(5.dp),
     content: @Composable () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -264,11 +278,11 @@ internal fun FxSwipeToDelete(
     ) {
         if (offset.value < 0f) {
             Row(
-                Modifier.matchParentSize().padding(bottom = 8.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Danger),
+                Modifier.matchParentSize().clip(shape).background(AureaColors.Danger),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CupertinoIcon(CupertinoGlyph.Trash, 20.dp, AureaColors.Text, Modifier.padding(end = 20.dp))
+                CupertinoIcon(CupertinoGlyph.Trash, 18.dp, AureaColors.Text, Modifier.padding(end = 14.dp))
             }
         }
         Box(

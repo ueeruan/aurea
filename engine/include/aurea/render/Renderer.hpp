@@ -265,6 +265,11 @@ struct LayerSource {
     Vec4     shapeExtra{};
     Vec4     shapeMore{};
     Vec4     shapeBlob{};
+    // Omega aparência (P1-4): degradê do preenchimento (shape.frag `grad*`).
+    Vec4     shapeGrad0{};        ///< cor do início, linear pré-multiplicada
+    Vec4     shapeGrad1{};        ///< cor do fim
+    Vec4     shapeGradPoints{};   ///< xy início, zw fim (relativos à caixa, 0..1)
+    Vec4     shapeGradInfo{};     ///< x = 0 sem degradê, 1 linear, 2 radial, 3 angular
 
     // Camada vetorial: triângulos em FrameSnapshot::vec (2 vec4 por vértice,
     // a partir de `vecFirst`) e as tintas logo depois (`paintFirst`, em vec4).
@@ -514,6 +519,12 @@ struct RenderSettings {
     Vec4 pasteboard{0.149f, 0.173f, 0.208f, 1.0f};
     f32  viewportZoom = 1.0f;
     Vec2 viewportPan{0.0f, 0.0f};
+    // Omega chrome (área 02): modos de visão da prévia (Engine::set_preview_view).
+    // Valem só na composição da raiz e nunca com `finalQuality` (export).
+    u8   viewSelection = 0;          ///< 0 normal, 1 só as escolhidas, 2 escolhidas a 50 %
+    u32  viewSelectionCount = 0;
+    u64  viewSelectionIds[64]{};     ///< ids empacotados (Engine::kOmegaViewMaxIds)
+    bool pixelPreview = false;       ///< saída por vizinho mais próximo (pixels reais)
     /// Export: amostras de desfoque de movimento da qualidade final
     /// (`MotionBlurSettings::samples`); a prévia também, reduzida pela folga do aparelho.
     bool finalQuality = false;

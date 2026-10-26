@@ -3,70 +3,85 @@ package com.aurea.aurea.effects
 import android.content.Context
 import android.content.res.Configuration
 import android.content.res.Resources
-import androidx.compose.foundation.Image
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -78,17 +93,16 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.Hyphens
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.aurea.aurea.R
@@ -99,37 +113,75 @@ import com.aurea.aurea.engine.EffectCatalogEntry
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaDims
-import com.aurea.aurea.ui.theme.AureaShape
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
-import kotlinx.coroutines.launch
 import java.util.Locale
 
 // =============================================================================
-//  O NAVEGADOR DE EFEITOS (0.2.5): ✕ · título · 🔍; destaques em cartões
-//  grandes; Recentes/Favoritos em miniaturas; ladrilhos das categorias. A
-//  categoria abre uma grade de cartões quadrados. A busca mantém a comparação
-//  Antes/Depois do motor. Um toque adiciona; segurar favorita. Ferramentas
-//  abrem seus próprios painéis.
+//  O NAVEGADOR DE EFEITOS (0.3.2 Omega, área 07 P0-6): as medidas e os fluxos
+//  da referência, com os extras do AUREA.
+//
+//   · Moldura: fundo «superfície de lista», cabeçalho de 44 (✕/‹ · título 17 ·
+//     🔍, que some dentro da categoria) e o fio de 0,5 só com conteúdo rolado.
+//     Entrar numa categoria desliza 100 dp em 100 ms; voltar faz o inverso.
+//   · Início: RECOMENDADOS (faixa de 186, até 6, sem os efeitos que a camada já
+//     tem), RECENTES/FAVORITOS (faixa de 210 em páginas de 2 linhas; toque
+//     ADICIONA, toque longo abre o DETALHE) e as CATEGORIAS (2 colunas, 65 dp).
+//     A porta "Gerenciar plugins" continua no fim.
+//   · Categoria: grade de cartões de 88 dp em ordem alfabética, anterior/próxima
+//     nas pontas. Toque no cartão → detalhe.
+//   · Busca: etiquetas sugeridas, etiqueta vira ficha no campo, resultados em
+//     linhas por pontos (etiqueta ×7, nome ×3, inglês ×2, descrição ×1) somados
+//     à busca do AUREA em 7 idiomas. Toque → detalhe.
+//   · Detalhe (EffectsCatalogView.kt): folha paginada com as variações; tocar
+//     numa variação adiciona (efeito + preset, um passo de desfazer) e fecha.
+//
+//  Extras do AUREA mantidos: ferramentas-efeito (Máscara, Rastreio, Legendas
+//  abrem o painel delas), plugins, selo "Novo", "!" de efeito pesado, cadeado
+//  Hyper e as prévias reais do motor (só o "depois", sem rótulos).
 // =============================================================================
 
-private const val PREVIEW_W = 320
-private const val PREVIEW_H = 200
-/** Quanto a animação do cartão segue depois de soltar: um laço de 16 quadros. */
-private const val HELD_LINGER_MS = 1100L
-/** "Prévias de efeitos" (Ajustes): o navegador inteiro lê daqui, sem passar por cada cartão. */
-private val LocalEffectPreviewsOn = androidx.compose.runtime.staticCompositionLocalOf { true }
-/** Os destaques são maiores: a prévia deles é gerada com mais pixels. */
-private const val FEATURED_W = 512
-private const val FEATURED_H = 320
-private val CardMin = 152.dp
+/** Onde o detalhe abriu: a lista que ele pagina e o item tocado. */
+private class DetailRequest(val entries: List<EffectCatalogEntry>, val index: Int)
+
+/** A pilha do navegador: categoria aberta, busca (com fichas) e detalhe. */
+@Stable
+private class BrowserNav {
+    var groupId by mutableStateOf<String?>(null)
+    var searching by mutableStateOf(false)
+    var searchChips by mutableStateOf<List<String>>(emptyList())
+    var searchEpoch by mutableIntStateOf(0)
+    var detail by mutableStateOf<DetailRequest?>(null)
+    var detailClose by mutableIntStateOf(0)
+
+    fun openSearch(chips: List<String>) {
+        searchChips = chips
+        searchEpoch++
+        searching = true
+    }
+
+    /** O voltar do sistema desempilha: detalhe → busca → categoria → fecha. */
+    fun back(onDismiss: () -> Unit) {
+        when {
+            detail != null -> detailClose++
+            searching -> searching = false
+            groupId != null -> groupId = null
+            else -> onDismiss()
+        }
+    }
+}
 
 /**
- * A folha. [onPick] recebe o EFEITO tocado (quem chama adiciona e fecha);
- * [onTool] a FERRAMENTA tocada (quem chama fecha e abre a ferramenta). Os
- * recentes são gravados aqui, para os dois casos.
+ * A folha. [onPick] recebe o EFEITO base escolhido (quem chama adiciona e
+ * fecha); [onTool] a FERRAMENTA (quem chama fecha e abre a ferramenta).
+ *
+ * [onPickVariant] (Omega efeitos): recebe TODA adição, com a variação (índice em
+ * `store.effectPresets(typeId)`; −1 = só o efeito); quem chama adiciona e fecha.
+ * Nulo: o efeito base vai para [onPick] e a variação a
+ * [EditorStore.addEffectWithPreset], e a folha fecha com [onDismiss]. Os
+ * recentes são gravados aqui, nos três casos.
  */
 @Composable
 internal fun EffectAddSheet(
@@ -138,24 +190,25 @@ internal fun EffectAddSheet(
     onPick: (EffectCatalogEntry) -> Unit,
     onTool: (EffectTool) -> Unit,
     onDismiss: () -> Unit,
+    onPickVariant: ((EffectCatalogEntry, Int) -> Unit)? = null,
 ) {
-    var groupId by rememberSaveable { mutableStateOf<String?>(null) }
+    val nav = remember { BrowserNav() }
     Dialog(
-        onDismissRequest = { if (groupId != null) groupId = null else onDismiss() },
+        onDismissRequest = { nav.back(onDismiss) },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        EffectAddSheetBody(store, layerHasAudio, groupId, { groupId = it }, onPick, onTool, onDismiss)
+        EffectBrowserBody(store, layerHasAudio, nav, onPick, onTool, onPickVariant, onDismiss)
     }
 }
 
 @Composable
-private fun EffectAddSheetBody(
+private fun EffectBrowserBody(
     store: EditorStore,
     layerHasAudio: Boolean,
-    groupId: String?,
-    onGroup: (String?) -> Unit,
+    nav: BrowserNav,
     onPick: (EffectCatalogEntry) -> Unit,
     onTool: (EffectTool) -> Unit,
+    onPickVariant: ((EffectCatalogEntry, Int) -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     val prefs = store.effectPrefs
@@ -173,251 +226,440 @@ private fun EffectAddSheetBody(
         val all = effects + pickableTools(kind).map { toolCatalogEntry(it, toolNames.getValue(it)) }
         arrangeCatalog(all, effectCategories(all))
     }
-    val groups = remember(sorted) { groupEntries(sorted) }
-    val group = groups.firstOrNull { it.first.id == groupId }
-    var searching by remember { mutableStateOf(false) }
+    val locale = LocalConfiguration.current.locales[0]
+    val names = sorted.associate { it.typeId to pickerEntryName(it) }
+    // Dentro da categoria, ordem ALFABÉTICA pelo nome mostrado (como a referência).
+    val groups = remember(sorted, names, locale) {
+        groupEntries(sorted).map { (g, list) -> g to sortedByName(list, locale) { names[it.typeId] ?: it.name } }
+    }
+    val presetCount: (Int) -> Int = remember(store) { { t: Int -> if (effectToolOf(t) != null) 0 else store.effectPresets(t).size } }
+    val recents = remember(prefs.recentRefs, sorted) { recentItems(prefs.recentRefs, sorted, presetCount) }
+    val favorites = remember(prefs.favoriteRefs, sorted) { favoriteItems(prefs.favoriteRefs, sorted, presetCount) }
+    val applied = store.effects.map { it.typeId }
+    val recommended = remember(sorted, kind, applied, layerHasAudio) { recommendedEffects(sorted, kind, applied, 6, layerHasAudio) }
     var managingPlugins by remember { mutableStateOf(false) }
-    val recents = remember(prefs.recents, sorted) { recentEffects(prefs.recents, sorted) }
-    val favorites = remember(prefs.favorites, sorted) { favoriteEffects(prefs.favorites, sorted) }
-    val featured = remember(sorted) { featuredEntries(sorted) }
-    val onFavorite = rememberFavoriteToggle(store)
     // 0.3.2: efeito Hyper sem o acesso abre a tela bloqueada (HyperEffectGate).
     var hyperLocked by remember { mutableStateOf(false) }
-    val pick: (EffectCatalogEntry) -> Unit = { e ->
+    val add: (EffectCatalogEntry, Int) -> Unit = { e, preset ->
         if (HyperEffectGate.locked(e.typeId)) {
             hyperLocked = true
         } else {
-            prefs.addRecent(e.typeId)
             val tool = effectToolOf(e.typeId)
-            if (tool != null) onTool(tool) else onPick(e)
-        }
-    }
-    Column(Modifier.fillMaxSize().background(AureaColors.EditorPanel).windowInsetsPadding(WindowInsets.safeDrawing)) {
-        SheetTopBar(
-            title = group?.let { stringResource(effectGroupLabelRes(it.first)) } ?: stringResource(R.string.fx_browser_title),
-            inGroup = group != null,
-            onBack = { onGroup(null) }, onClose = onDismiss, onSearch = { searching = true },
-        )
-        CompositionLocalProvider(LocalEffectPreviewsOn provides prefs.previewsEnabled) {
-            if (group == null) {
-                BrowserHome(store, featured, recents, favorites, groups, prefs.favorites, pick, onFavorite, { managingPlugins = true }) { onGroup(it.id) }
-            } else {
-                val (previous, next) = adjacentGroups(groups.map { it.first }, group.first)
-                GroupGrid(store, group.first, group.second, prefs.favorites, previous, next, pick, onFavorite) { onGroup(it.id) }
+            val variant = if (tool != null) -1 else preset
+            prefs.addRecent(EffectRef(e.typeId, variant))
+            when {
+                tool != null -> onTool(tool)
+                onPickVariant != null -> onPickVariant(e, variant)
+                variant < 0 -> onPick(e)
+                else -> { store.addEffectWithPreset(e.typeId, variant); onDismiss() }
             }
         }
     }
-    if (searching) EffectSearchSheet(store, sorted, prefs.favorites, { searching = false; pick(it) }, onFavorite, { searching = false })
+    val openDetail: (List<EffectCatalogEntry>, Int) -> Unit = { list, i -> nav.detail = DetailRequest(list, i) }
+    val homeState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
+    val previewsOn = prefs.previewsEnabled
+    val shift = with(LocalDensity.current) { 100.dp.roundToPx() } * (if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1 else 1)
+
+    Box(Modifier.fillMaxSize().background(AureaColors.FxListSurface)) {
+        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+            val openId = nav.groupId?.takeIf { id -> groups.any { it.first.id == id } }
+            val open = groups.firstOrNull { it.first.id == openId }
+            val scrolled = if (open == null) homeState.canScrollBackward else gridState.canScrollBackward
+            BrowserTopBar(
+                title = open?.let { stringResource(effectGroupLabelRes(it.first)) } ?: stringResource(R.string.fx_browser_title),
+                inGroup = open != null,
+                divider = scrolled,
+                onBack = { nav.groupId = null },
+                onClose = onDismiss,
+                onSearch = { nav.openSearch(emptyList()) },
+            )
+            AnimatedContent(
+                targetState = openId,
+                // Anterior/próxima trocam a categoria NO LUGAR: só início ↔ categoria anima.
+                contentKey = { it != null },
+                transitionSpec = {
+                    if (targetState != null) {
+                        (slideInHorizontally(tween(100, easing = LinearOutSlowInEasing)) { shift } + fadeIn(tween(25)))
+                            .togetherWith(ExitTransition.None)
+                    } else {
+                        EnterTransition.None.togetherWith(
+                            slideOutHorizontally(tween(100, easing = FastOutLinearInEasing)) { shift } +
+                                fadeOut(tween(25, delayMillis = 75)),
+                        ).apply { targetContentZIndex = -1f }
+                    }
+                },
+                label = "fx-categoria",
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            ) { id ->
+                val shown = id?.let { g -> groups.firstOrNull { it.first.id == g } }
+                if (shown == null) {
+                    BrowserHome(
+                        store, homeState, recommended, recents, favorites, groups, previewsOn,
+                        onAdd = add, onDetail = openDetail, onGroup = { nav.groupId = it.id }, onPlugins = { managingPlugins = true },
+                    )
+                } else {
+                    val (previous, next) = adjacentGroups(groups.map { it.first }, shown.first)
+                    GroupGrid(store, gridState, shown.first, shown.second, previous, next, previewsOn, openDetail) { nav.groupId = it.id }
+                }
+            }
+        }
+        if (nav.searching) {
+            key(nav.searchEpoch) {
+                SearchPane(
+                    store, sorted, nav.searchChips, onChips = { nav.searchChips = it }, previewsOn = previewsOn,
+                    onDetail = openDetail, onClose = { nav.searching = false },
+                )
+            }
+        }
+        nav.detail?.let { request ->
+            key(request) {
+                EffectDetailOverlay(
+                    store = store,
+                    entries = request.entries,
+                    startIndex = request.index,
+                    closeSignal = nav.detailClose,
+                    onClosed = { if (nav.detail === request) nav.detail = null },
+                    variants = true,
+                    onAdd = add,
+                    onTag = { tag -> nav.detail = null; nav.openSearch(listOf(tag)) },
+                )
+            }
+        }
+    }
     if (hyperLocked) com.aurea.aurea.hyper.HyperLockedDialog { hyperLocked = false }
     // 0.3.0: plugins de efeito (instalar, ver, remover); o catálogo relido entra nos grupos acima.
     if (managingPlugins) PluginManagerSheet(store) { managingPlugins = false }
 }
 
 /**
- * A TELA INICIAL do navegador, de cima para baixo: DESTAQUES (cartões grandes
- * que rolam para o lado), RECENTES e FAVORITOS (duas páginas de miniaturas, 5
- * por linha, trocadas pelo relógio e pela estrela) e os LADRILHOS das
- * categorias, dois por linha, com a prévia real escurecida e o nome no meio.
+ * O cabeçalho de 44: ✕ (ou ‹ dentro de uma categoria) · título 17 · 🔍 (some
+ * na categoria). Fio de 0,5 embaixo só com o conteúdo rolado. Ids
+ * `effects.close`, `effects.back` e `effects.search` (iguais no iOS).
+ */
+@Composable
+private fun BrowserTopBar(title: String, inGroup: Boolean, divider: Boolean, onBack: () -> Unit, onClose: () -> Unit, onSearch: () -> Unit) {
+    val closeLabel = stringResource(R.string.common_close)
+    val backLabel = stringResource(R.string.fxui_back_categories)
+    val searchLabel = stringResource(R.string.fxui_search_effects)
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(AureaDims.MinTap)
+                    .testTag(if (inGroup) "effects.back" else "effects.close")
+                    .semantics { contentDescription = if (inGroup) backLabel else closeLabel; role = Role.Button }
+                    .tocavel(shrink = 1f, role = null, onClick = if (inGroup) onBack else onClose),
+                contentAlignment = Alignment.Center,
+            ) {
+                CupertinoIcon(if (inGroup) CupertinoGlyph.ChevronBack else CupertinoGlyph.Xmark, 22.dp, AureaColors.Text)
+            }
+            Text(
+                title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = AureaType.of(17f, FontWeight.W500, color = AureaColors.Text),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f).padding(horizontal = AureaDims.S1).semantics { heading() },
+            )
+            if (inGroup) {
+                Spacer(Modifier.size(AureaDims.MinTap))
+            } else {
+                Box(
+                    Modifier
+                        .size(AureaDims.MinTap)
+                        .testTag("effects.search")
+                        .semantics { contentDescription = searchLabel; role = Role.Button }
+                        .tocavel(shrink = 1f, role = null, onClick = onSearch),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CupertinoIcon(CupertinoGlyph.Search, 22.dp, AureaColors.Text)
+                }
+            }
+        }
+        if (divider) Box(Modifier.fillMaxWidth().height(0.5.dp).background(AureaColors.FxLowSurface))
+        else Spacer(Modifier.height(0.5.dp))
+    }
+}
+
+/**
+ * A TELA INICIAL: Recomendados, Recentes/Favoritos, as categorias em 2
+ * colunas e a porta "Gerenciar plugins" (`effects.home`).
  */
 @Composable
 private fun BrowserHome(
     store: EditorStore,
-    featured: List<EffectCatalogEntry>,
-    recents: List<EffectCatalogEntry>,
-    favorites: List<EffectCatalogEntry>,
+    state: LazyListState,
+    recommended: List<EffectCatalogEntry>,
+    recents: List<QuickItem>,
+    favorites: List<QuickItem>,
     groups: List<Pair<EffectGroup, List<EffectCatalogEntry>>>,
-    favoriteIds: Set<Int>,
-    onPick: (EffectCatalogEntry) -> Unit,
-    onFavorite: (EffectCatalogEntry, String) -> Unit,
-    onPlugins: () -> Unit,
+    previewsOn: Boolean,
+    onAdd: (EffectCatalogEntry, Int) -> Unit,
+    onDetail: (List<EffectCatalogEntry>, Int) -> Unit,
     onGroup: (EffectGroup) -> Unit,
+    onPlugins: () -> Unit,
 ) {
-    val screen = LocalConfiguration.current.screenWidthDp.dp
-    val featuredLabel = stringResource(R.string.fx_browser_featured)
+    val perPage = favoritesPerPage(LocalConfiguration.current.screenWidthDp.toFloat())
+    val pages = remember(recents, favorites, perPage) { quickPages(recents, favorites, perPage) }
+    // Só Recentes à vista: uma página de Favoritos com o convite da estrela.
+    val hint = favorites.isEmpty() && recents.isNotEmpty()
     val categoriesLabel = stringResource(R.string.fx_browser_categories)
-    LazyColumn(
-        Modifier.fillMaxSize().testTag("effects.home"),
-        contentPadding = PaddingValues(top = AureaDims.S2, bottom = AureaDims.S6),
-        verticalArrangement = Arrangement.spacedBy(AureaDims.S4),
-    ) {
-        if (featured.isNotEmpty()) item(key = "destaques") {
-            val cardW = ((screen - 44.dp) / 1.7f).coerceIn(150.dp, 300.dp)
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.fillMaxWidth().testTag("effects.featured").semantics { contentDescription = featuredLabel },
-            ) {
-                items(featured, key = { it.typeId }) { e ->
-                    FeaturedEffectCard(e, store.effectPreviews, cardW, e.typeId in favoriteIds, onPick, onFavorite)
-                }
-            }
-        }
-        item(key = "rapidos") { QuickPages(store, recents, favorites, favoriteIds, screen, onPick, onFavorite) }
+    LazyColumn(state = state, modifier = Modifier.fillMaxSize().testTag("effects.home")) {
+        if (recommended.isNotEmpty()) item(key = "recomendados") { RecommendedBand(store, recommended, previewsOn, onDetail) }
+        if (pages.isNotEmpty()) item(key = "rapidos") { QuickBand(store, pages, perPage, hint, previewsOn, onAdd, onDetail) }
         item(key = "titulo-categorias") {
             Spacer(Modifier.height(0.dp).semantics { contentDescription = categoriesLabel; heading() })
         }
         // A chave da linha leva prefixo: com um plugin instalado o grupo "plugins" pode abrir
         // uma linha e colidir com a porta fixa abaixo ("Key was already used" fechava o app).
         items(groups.chunked(2), key = { row -> groupRowKey(row.map { it.first }) }) { row ->
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                row.forEach { (g, entries) ->
-                    GroupTile(g, entries, store.effectPreviews, Modifier.weight(1f)) { onGroup(g) }
-                }
+            Row(
+                Modifier.fillMaxWidth().background(AureaColors.FxDarkest).padding(bottom = 1.dp),
+                horizontalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                row.forEach { (g, entries) -> GroupTile(store, g, entries, previewsOn, Modifier.weight(1f)) { onGroup(g) } }
                 if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
         // 0.3.0: a porta dos plugins fica sempre à vista (a categoria só aparece com um instalado).
         item(key = PLUGIN_DOOR_KEY) {
             Row(
-                Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(AureaColors.Chip)
-                    .testTag("effects.plugins").tocavel(onClick = onPlugins).padding(horizontal = 14.dp, vertical = 12.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .background(AureaColors.FxListSurface)
+                    .testTag("effects.plugins")
+                    .tocavel(shrink = 1f, onClick = onPlugins)
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 CupertinoIcon(CupertinoGlyph.SquareStack3dUp, 20.dp, AureaColors.Accent)
                 Spacer(Modifier.width(10.dp))
-                Text(stringResource(R.string.plug_manage), modifier = Modifier.weight(1f),
-                    style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text)))
-                CupertinoIcon(CupertinoGlyph.ChevronRight, 14.dp, AureaColors.Muted)
+                Text(stringResource(R.string.plug_manage), modifier = Modifier.weight(1f), style = AureaType.of(14f, color = AureaColors.Text))
+                CupertinoIcon(CupertinoGlyph.ChevronRight, 14.dp, AureaColors.FxTextSecondary)
             }
         }
-    }
-}
-
-/** Cartão grande da faixa de destaques: a prévia antes | depois do motor e o nome embaixo. */
-@Composable
-private fun FeaturedEffectCard(
-    entry: EffectCatalogEntry,
-    previews: EffectPreviewStore?,
-    width: Dp,
-    favorite: Boolean,
-    onPick: (EffectCatalogEntry) -> Unit,
-    onFavorite: (EffectCatalogEntry, String) -> Unit,
-) {
-    val name = pickerEntryName(entry)
-    val addLabel = stringResource(R.string.effects_card_add, name)
-    val favoriteLabel = stringResource(if (favorite) R.string.effect_tirar_favoritos else R.string.effect_nos_favoritos)
-    Column(
-        Modifier.width(width).testTag("effects.featured." + effectCardId(entry.typeId))
-            .semantics {
-                contentDescription = addLabel
-                customActions = listOf(CustomAccessibilityAction(favoriteLabel) { onFavorite(entry, name); true })
-            }
-            .tocavel(shrink = 0.96f, haptic = true, onLongClick = { onFavorite(entry, name) }, onClick = { onPick(entry) }),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(Modifier.width(width).aspectRatio(1.6f).clip(RoundedCornerShape(18.dp)).background(AureaColors.EditorPanelHigh)) {
-            EffectThumb(entry, previews, FEATURED_W, FEATURED_H, labels = true)
-            EffectBadges(entry, favorite)
-        }
-        Spacer(Modifier.height(AureaDims.S2))
-        Text(name, style = AureaType.of(14f, FontWeight.W500), textAlign = TextAlign.Center, maxLines = 2,
-            overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
     }
 }
 
 /**
- * RECENTES e FAVORITOS: duas páginas que deslizam, 5 miniaturas por linha
- * (até 2 linhas), e embaixo o relógio e a estrela que dizem (e trocam) a página.
+ * RECOMENDADOS: faixa de 186 «superfície baixa» que rola para o lado, itens de
+ * 121×153 (miniatura 115) e véus de 80 nas bordas só quando dá para rolar
+ * daquele lado. Toque → detalhe paginado pelos recomendados.
  */
 @Composable
-private fun QuickPages(
+private fun RecommendedBand(
     store: EditorStore,
-    recents: List<EffectCatalogEntry>,
-    favorites: List<EffectCatalogEntry>,
-    favoriteIds: Set<Int>,
-    screen: Dp,
-    onPick: (EffectCatalogEntry) -> Unit,
-    onFavorite: (EffectCatalogEntry, String) -> Unit,
+    entries: List<EffectCatalogEntry>,
+    previewsOn: Boolean,
+    onDetail: (List<EffectCatalogEntry>, Int) -> Unit,
 ) {
-    val pager = rememberPagerState(pageCount = { 2 })
-    val scope = rememberCoroutineScope()
-    val tile = ((screen - 32.dp - 40.dp) / 5).coerceIn(52.dp, 96.dp)
-    val rows = maxOf(1, minOf(2, (maxOf(recents.size, favorites.size) + 4) / 5))
-    val pageHeight = (tile + 34.dp) * rows + 10.dp * (rows - 1)
-    Column(Modifier.fillMaxWidth().testTag("effects.quick")) {
-        HorizontalPager(pager, Modifier.fillMaxWidth().height(pageHeight), key = { it }) { page ->
-            val shown = (if (page == 0) recents else favorites).take(QUICK_PAGE_SIZE)
-            if (shown.isEmpty()) {
+    val label = stringResource(R.string.om_fx_recommended)
+    val row = rememberLazyListState()
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val veil = AureaColors.FxSunken
+    val clear = veil.copy(alpha = 0f)
+    Box(
+        Modifier.fillMaxWidth().height(186.dp).background(AureaColors.FxLowSurface)
+            .testTag("effects.featured").semantics { contentDescription = label },
+    ) {
+        LazyRow(
+            state = row,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 7.5.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            itemsIndexed(entries, key = { _, e -> e.typeId }) { i, e ->
+                RecommendedItem(e, store.effectPreviews, previewsOn) { onDetail(entries, i) }
+            }
+        }
+        if (row.canScrollBackward) {
+            Box(
+                Modifier.align(Alignment.CenterStart).width(80.dp).fillMaxHeight()
+                    .background(Brush.horizontalGradient(if (rtl) listOf(clear, veil) else listOf(veil, clear))),
+            )
+        }
+        if (row.canScrollForward) {
+            Box(
+                Modifier.align(Alignment.CenterEnd).width(80.dp).fillMaxHeight()
+                    .background(Brush.horizontalGradient(if (rtl) listOf(veil, clear) else listOf(clear, veil))),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecommendedItem(entry: EffectCatalogEntry, previews: EffectPreviewStore?, previewsOn: Boolean, onClick: () -> Unit) {
+    val name = pickerEntryName(entry)
+    Column(
+        Modifier
+            .width(121.dp)
+            .height(153.dp)
+            .testTag("effects.featured." + effectCardId(entry.typeId))
+            .semantics { contentDescription = name }
+            .tocavel(shrink = 0.96f, onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.padding(top = 8.dp).size(115.dp)) {
+            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(5.dp)).background(AureaColors.FxPanel)) {
+                EffectAfterPreview(entry, previews, previewsOn, FX_PREVIEW_LARGE_W, FX_PREVIEW_LARGE_H)
+            }
+            if (entry.isNew) NewBadge(Modifier.align(Alignment.TopStart).padding(5.dp))
+            EffectBadge(entry, Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp))
+        }
+        Text(
+            name,
+            style = AureaType.of(10f, color = AureaColors.Text, lineHeight = 1.2f),
+            textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp, start = 2.dp, end = 2.dp),
+        )
+    }
+}
+
+/**
+ * RECENTES/FAVORITOS: faixa de 210 com páginas de 2 linhas (a de Recentes, se
+ * houver, e as de Favoritos) e o indicador de 9 dp embaixo (relógio = Recentes,
+ * estrela = cada página de Favoritos). A página à vista é lembrada.
+ * Toque ADICIONA; toque longo abre o DETALHE.
+ */
+@Composable
+private fun QuickBand(
+    store: EditorStore,
+    pages: List<Pair<Boolean, List<QuickItem>>>,
+    perPage: Int,
+    hint: Boolean,
+    previewsOn: Boolean,
+    onAdd: (EffectCatalogEntry, Int) -> Unit,
+    onDetail: (List<EffectCatalogEntry>, Int) -> Unit,
+) {
+    val prefs = store.effectPrefs
+    val total = pages.size + if (hint) 1 else 0
+    val pager = rememberPagerState(initialPage = prefs.quickPage.coerceIn(0, (total - 1).coerceAtLeast(0))) { total }
+    LaunchedEffect(pager) { snapshotFlow { pager.settledPage }.collect { prefs.updateQuickPage(it) } }
+    val columns = (perPage / 2).coerceAtLeast(1)
+    // O detalhe pagina por todos os efeitos da faixa (um por efeito, sem repetir).
+    val detailList = remember(pages) { pages.flatMap { it.second }.map { it.entry }.distinctBy { it.typeId } }
+    val openDetail: (QuickItem) -> Unit = { item ->
+        onDetail(detailList, detailList.indexOfFirst { it.typeId == item.entry.typeId }.coerceAtLeast(0))
+    }
+    val recentLabel = stringResource(R.string.om_fx_recent)
+    val favoritesLabel = stringResource(R.string.om_fx_favorites)
+    Column(Modifier.fillMaxWidth().height(210.dp).background(AureaColors.FxListSurface).testTag("effects.quick")) {
+        HorizontalPager(
+            pager,
+            Modifier.fillMaxWidth().weight(1f).padding(horizontal = 10.dp),
+            contentPadding = PaddingValues(vertical = 5.dp),
+        ) { page ->
+            val p = pages.getOrNull(page)
+            if (p == null) {
                 Box(Modifier.fillMaxSize().padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
-                    Text(stringResource(if (page == 0) R.string.fx_browser_recent_empty else R.string.fx_browser_favorites_empty),
-                        style = AureaType.of(13f, color = AureaColors.Muted), textAlign = TextAlign.Center)
+                    Text(stringResource(R.string.om_fx_favorites_empty_star), style = AureaType.of(13f, color = AureaColors.FxTextSecondary),
+                        textAlign = TextAlign.Center)
                 }
             } else {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    shown.chunked(5).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            row.forEach { e ->
-                                QuickTile(e, store.effectPreviews, tile, e.typeId in favoriteIds,
-                                    if (page == 0) "effects.recent." else "effects.favorite.", onPick, onFavorite)
+                Row(Modifier.fillMaxSize()) {
+                    repeat(columns) { c ->
+                        Column(
+                            Modifier.weight(1f).fillMaxHeight(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.SpaceEvenly,
+                        ) {
+                            repeat(2) { r ->
+                                val (col, row) = c to r
+                                val item = p.second.getOrNull(col * 2 + row)
+                                if (item == null) Spacer(Modifier.size(62.dp, 82.dp))
+                                else QuickTile(item, p.first, store.effectPreviews, previewsOn, onAdd, openDetail)
                             }
                         }
                     }
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(top = AureaDims.S1), horizontalArrangement = Arrangement.Center) {
-            listOf(
-                Triple(CupertinoGlyph.Clock, R.string.fx_browser_page_recent, "effects.quick.recent"),
-                Triple(CupertinoGlyph.StarFill, R.string.fx_browser_page_favorites, "effects.quick.favorites"),
-            ).forEachIndexed { index, (glyph, label, tag) ->
-                val active = pager.currentPage == index
-                val description = stringResource(label)
+        Row(Modifier.fillMaxWidth().padding(bottom = 5.dp), horizontalArrangement = Arrangement.Center) {
+            repeat(total) { i ->
+                val active = pager.currentPage == i
+                val recent = pages.getOrNull(i)?.first == true
+                val label = stringResource(R.string.om_fx_quick_page, i + 1, total) + ", " + (if (recent) recentLabel else favoritesLabel)
                 Box(
-                    Modifier.size(AureaDims.MinTap).testTag(tag)
-                        .semantics { contentDescription = description; selected = active; role = Role.Tab }
-                        .tocavel(shrink = 1f, role = null, onClick = { scope.launch { pager.animateScrollToPage(index) } }),
+                    Modifier.padding(horizontal = 4.dp).size(9.dp).testTag("effects.quick.page.$i")
+                        .semantics { contentDescription = label; selected = active },
                     contentAlignment = Alignment.Center,
                 ) {
-                    CupertinoIcon(glyph, 16.dp, if (active) AureaColors.Accent else AureaColors.Muted.copy(alpha = 0.6f))
+                    CupertinoIcon(
+                        if (recent) CupertinoGlyph.Clock else CupertinoGlyph.StarFill, 9.dp,
+                        if (active) AureaColors.Text else AureaColors.FxDisabledText,
+                    )
                 }
             }
         }
     }
 }
 
-/** Miniatura de Recentes/Favoritos: quadradinho com a prévia e o nome numa linha. */
+/** Item de 62×82: miniatura 55 (com o código da variação na base), selo e nome 9 em 2 linhas. */
 @Composable
 private fun QuickTile(
-    entry: EffectCatalogEntry,
+    item: QuickItem,
+    recent: Boolean,
     previews: EffectPreviewStore?,
-    size: Dp,
-    favorite: Boolean,
-    tagPrefix: String,
-    onPick: (EffectCatalogEntry) -> Unit,
-    onFavorite: (EffectCatalogEntry, String) -> Unit,
+    previewsOn: Boolean,
+    onAdd: (EffectCatalogEntry, Int) -> Unit,
+    onDetail: (QuickItem) -> Unit,
 ) {
-    val name = pickerEntryName(entry)
-    val addLabel = stringResource(R.string.effects_card_add, name)
-    val favoriteLabel = stringResource(if (favorite) R.string.effect_tirar_favoritos else R.string.effect_nos_favoritos)
+    val e = item.entry
+    val name = pickerEntryName(e)
+    val code = presetCode(item.preset)
+    val id = effectCardId(e.typeId) + if (item.preset >= 0) ".${item.preset}" else ""
+    val addLabel = stringResource(R.string.effects_card_add, if (code.isEmpty()) name else "$name $code")
+    val detailsLabel = stringResource(R.string.om_fx_menu_details)
+    val panel = AureaColors.FxPanel
     Column(
-        Modifier.width(size).testTag(tagPrefix + effectCardId(entry.typeId))
+        Modifier
+            .size(62.dp, 82.dp)
+            .testTag((if (recent) "effects.recent." else "effects.favorite.") + id)
             .semantics {
                 contentDescription = addLabel
-                customActions = listOf(CustomAccessibilityAction(favoriteLabel) { onFavorite(entry, name); true })
+                customActions = listOf(CustomAccessibilityAction(detailsLabel) { onDetail(item); true })
             }
-            .tocavel(shrink = 0.94f, haptic = true, onLongClick = { onFavorite(entry, name) }, onClick = { onPick(entry) }),
+            .tocavel(shrink = 0.94f, haptic = true, onLongClick = { onDetail(item) }, onClick = { onAdd(e, item.preset) }),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.size(size).clip(RoundedCornerShape(12.dp)).background(AureaColors.EditorPanelHigh)) {
-            EffectThumb(entry, previews, PREVIEW_W, PREVIEW_H)
-            if (effectCost(entry.effectClass) >= 3) HeavyBadge(Modifier.align(Alignment.TopEnd).padding(4.dp))
-            if (HyperEffectGate.locked(entry.typeId)) HyperLockBadge(Modifier.align(Alignment.TopStart).padding(4.dp))
+        Box(Modifier.padding(top = 8.dp).size(55.dp)) {
+            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(5.dp)).background(panel)) {
+                EffectAfterPreview(e, previews, previewsOn)
+                if (code.isNotEmpty()) {
+                    Text(
+                        code,
+                        style = AureaType.of(10f, FontWeight.W600, color = AureaColors.Text),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                            .background(Brush.verticalGradient(listOf(panel.copy(alpha = 0f), panel))),
+                    )
+                }
+            }
+            EffectBadge(e, Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp))
         }
-        Text(name, style = AureaType.of(11.5f), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+        Text(
+            name,
+            style = AureaType.of(9f, color = AureaColors.Text, lineHeight = 1.05f),
+            textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
 /**
- * O LADRILHO de uma categoria: a prévia real de um efeito dela, escurecida, e o
- * nome em branco, em negrito, no meio (`effects.category.<id>`). Grupo sem
+ * O LADRILHO de uma categoria (65 dp): a prévia de um efeito dela a 70 %, véu
+ * «painel» a 50 % e o nome 15 negrito (`effects.category.<id>`). Grupo sem
  * prévia (Texto, Áudio, Utilitário) usa a cartela com o glifo do grupo.
  */
 @Composable
 private fun GroupTile(
+    store: EditorStore,
     group: EffectGroup,
     entries: List<EffectCatalogEntry>,
-    previews: EffectPreviewStore?,
+    previewsOn: Boolean,
     modifier: Modifier,
     onClick: () -> Unit,
 ) {
@@ -425,101 +667,131 @@ private fun GroupTile(
     val description = stringResource(R.string.fx_browser_open_group, label)
     val banner = remember(group, entries) { groupBannerEntry(group, entries) }
     Box(
-        modifier.height(78.dp).clip(RoundedCornerShape(16.dp)).background(AureaColors.EditorPanelHigh)
+        modifier
+            .height(65.dp)
+            .background(AureaColors.FxPanel)
             .testTag("effects.category." + group.id)
             .semantics { contentDescription = description; role = Role.Button }
-            .tocavel(shrink = 0.97f, role = null, onClick = onClick),
+            .tocavel(shrink = 1f, role = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        if (banner != null) EffectThumb(banner, previews, PREVIEW_W, PREVIEW_H, comparison = false) else ToolPlate(effectGroupGlyph(group), alpha = 0.35f)
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.38f), Color.Black.copy(alpha = 0.58f)))))
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = 0.7f }) {
+            if (banner != null) EffectAfterPreview(banner, store.effectPreviews, previewsOn)
+            else EffectToolPlate(effectGroupGlyph(group), alpha = 0.35f)
+        }
+        Box(Modifier.fillMaxSize().background(AureaColors.FxPanel.copy(alpha = 0.5f)))
         Text(
             label,
-            style = AureaType.of(17f, FontWeight.W800, color = Color.White).copy(shadow = Shadow(Color.Black.copy(alpha = 0.6f), blurRadius = 8f)),
+            style = AureaType.of(15f, FontWeight.Bold, color = AureaColors.Text),
             textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 10.dp),
+            modifier = Modifier.padding(horizontal = 8.dp),
         )
     }
 }
 
 /**
- * Dentro de uma categoria: a grade de cartões com a prévia ANTES | DEPOIS do
- * motor, o nome e a categoria (o cartão de sempre, dois por linha no celular)
- * e, no fim, os atalhos para a categoria anterior e a próxima.
+ * Dentro de uma categoria: a grade de cartões de 88 dp (⌊(L − 30) / 103⌋
+ * colunas) e, embaixo, anterior/próxima nas pontas (desabilitados nas pontas),
+ * que trocam a categoria no lugar. Toque no cartão → detalhe.
  */
 @Composable
 private fun GroupGrid(
     store: EditorStore,
+    state: LazyGridState,
     group: EffectGroup,
     entries: List<EffectCatalogEntry>,
-    favoriteIds: Set<Int>,
     previous: EffectGroup?,
     next: EffectGroup?,
-    onPick: (EffectCatalogEntry) -> Unit,
-    onFavorite: (EffectCatalogEntry, String) -> Unit,
+    previewsOn: Boolean,
+    onDetail: (List<EffectCatalogEntry>, Int) -> Unit,
     onGroup: (EffectGroup) -> Unit,
 ) {
-    val grid = rememberLazyGridState()
-    LaunchedEffect(group) { grid.scrollToItem(0) }
-    val previewsOn = LocalEffectPreviewsOn.current
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(CardMin + AureaDims.S2), state = grid,
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = AureaDims.S2, bottom = AureaDims.S6),
-        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxSize().testTag("effects.grid"),
-    ) {
-        if (entries.isEmpty()) item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
-            EmptyLine(stringResource(R.string.effect_empty_category))
-        }
-        items(entries, key = { it.typeId }, contentType = { "effect" }) { e ->
-            EffectPickCard(e, store.effectPreviews, e.typeId in favoriteIds, "effects.card.", onPick, onFavorite, nameSize = 14f,
-                previewsOn = previewsOn)
-        }
-        if (previous != null || next != null) item(key = "vizinhos", span = { GridItemSpan(maxLineSpan) }) {
-            Row(Modifier.fillMaxWidth().padding(top = AureaDims.S2), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                NeighborButton(previous, forward = false, Modifier.weight(1f), onGroup)
-                NeighborButton(next, forward = true, Modifier.weight(1f), onGroup)
+    LaunchedEffect(group) { state.scrollToItem(0) }
+    val columns = categoryGridColumns(LocalConfiguration.current.screenWidthDp.toFloat())
+    Column(Modifier.fillMaxSize()) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            state = state,
+            contentPadding = PaddingValues(start = 15.dp, end = 15.dp, top = 4.dp, bottom = 8.dp),
+            modifier = Modifier.fillMaxWidth().weight(1f).testTag("effects.grid"),
+        ) {
+            if (entries.isEmpty()) item(key = "vazio", span = { GridItemSpan(maxLineSpan) }) {
+                EmptyLine(stringResource(R.string.effect_empty_category))
             }
+            itemsIndexed(entries, key = { _, e -> e.typeId }) { i, e ->
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    GridCard(e, store.effectPreviews, previewsOn) { onDetail(entries, i) }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().height(50.dp), verticalAlignment = Alignment.CenterVertically) {
+            NeighborArrow(previous, forward = false, onGroup)
+            Spacer(Modifier.weight(1f))
+            NeighborArrow(next, forward = true, onGroup)
         }
     }
 }
 
+/** Cartão de 88: miniatura 80 (raio 5), selo 23 no canto e nome 10 em 2 linhas (com hifenização). */
 @Composable
-private fun NeighborButton(group: EffectGroup?, forward: Boolean, modifier: Modifier, onGroup: (EffectGroup) -> Unit) {
-    if (group == null) { Spacer(modifier); return }
-    val label = stringResource(effectGroupLabelRes(group))
-    val description = stringResource(if (forward) R.string.fx_browser_next_group else R.string.fx_browser_prev_group, label)
-    Row(
-        modifier.heightIn(min = AureaDims.MinTap).clip(AureaShape.Chip).background(AureaColors.SurfaceHigh)
-            .testTag(if (forward) "effects.group.next" else "effects.group.previous")
-            .semantics { contentDescription = description }
-            .tocavel(shrink = 1f, onClick = { onGroup(group) }).padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = if (forward) Arrangement.End else Arrangement.Start,
+private fun GridCard(entry: EffectCatalogEntry, previews: EffectPreviewStore?, previewsOn: Boolean, onClick: () -> Unit) {
+    val name = pickerEntryName(entry)
+    Column(
+        Modifier
+            .width(88.dp)
+            .testTag("effects.card." + effectCardId(entry.typeId))
+            .semantics { contentDescription = name }
+            .tocavel(shrink = 0.96f, onClick = onClick)
+            .padding(bottom = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (!forward) CupertinoIcon(CupertinoGlyph.ChevronLeft, AureaDims.IconSm, AureaColors.Muted)
-        Text(label, style = AureaType.of(13f, FontWeight.W600, color = AureaColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 6.dp).weight(1f, fill = false))
-        if (forward) CupertinoIcon(CupertinoGlyph.ChevronRight, AureaDims.IconSm, AureaColors.Muted)
+        Box(Modifier.padding(top = 8.dp).size(80.dp)) {
+            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(5.dp)).background(AureaColors.FxPanel)) {
+                EffectAfterPreview(entry, previews, previewsOn)
+            }
+            if (entry.isNew) NewBadge(Modifier.align(Alignment.TopStart).padding(4.dp))
+            EffectBadge(entry, Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp))
+        }
+        Text(
+            name,
+            style = AureaType.of(10f, color = AureaColors.Text, lineHeight = 1.2f).copy(hyphens = Hyphens.Auto, lineBreak = LineBreak.Paragraph),
+            textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        )
     }
 }
 
-/** Selos do cartão: "Novo" no canto de cima, estrela do favorito e o "!" do efeito pesado. */
+/** Anterior/próxima categoria: 40×50 na referência, alvo de 44×50 aqui. */
 @Composable
-private fun BoxScope.EffectBadges(entry: EffectCatalogEntry, favorite: Boolean) {
-    if (entry.isNew) {
-        Text(stringResource(R.string.fx_browser_badge), style = AureaType.of(10.5f, FontWeight.W700, color = AureaColors.EditorPanel),
-            modifier = Modifier.align(Alignment.TopStart).padding(6.dp).clip(AureaShape.Chip).background(AureaColors.Accent)
-                .padding(horizontal = 6.dp, vertical = 2.dp))
+private fun NeighborArrow(target: EffectGroup?, forward: Boolean, onGroup: (EffectGroup) -> Unit) {
+    val targetLabel = target?.let { stringResource(effectGroupLabelRes(it)) }
+    val label = if (targetLabel != null) {
+        stringResource(if (forward) R.string.fx_browser_next_group else R.string.fx_browser_prev_group, targetLabel)
+    } else {
+        stringResource(if (forward) R.string.om_fx_category_next else R.string.om_fx_category_prev)
     }
-    Row(Modifier.align(Alignment.TopEnd).padding(5.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (HyperEffectGate.locked(entry.typeId)) HyperLockBadge()
-        if (effectCost(entry.effectClass) >= 3) HeavyBadge()
-        if (favorite) {
-            Box(Modifier.size(20.dp).clip(AureaShape.Circle).background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
-                CupertinoIcon(CupertinoGlyph.StarFill, AureaDims.IconXs, AureaColors.Accent)
-            }
-        }
+    val enabled = target != null
+    Box(
+        Modifier
+            .size(width = AureaDims.MinTap, height = 50.dp)
+            .testTag(if (forward) "effects.category.next" else "effects.category.prev")
+            .semantics { contentDescription = label; role = Role.Button }
+            .tocavel(enabled = enabled, shrink = 1f, role = null, onClick = { target?.let(onGroup) }),
+        contentAlignment = Alignment.Center,
+    ) {
+        CupertinoIcon(
+            if (forward) CupertinoGlyph.ChevronRight else CupertinoGlyph.ChevronLeft, 20.dp,
+            if (enabled) AureaColors.Text else AureaColors.FxDisabledText,
+        )
+    }
+}
+
+/** O selo de 23 no canto: cadeado Hyper ou o "!" de efeito pesado. */
+@Composable
+private fun EffectBadge(entry: EffectCatalogEntry, modifier: Modifier = Modifier) {
+    when {
+        HyperEffectGate.locked(entry.typeId) -> HyperLockBadge(modifier)
+        effectCost(entry.effectClass) >= 3 -> HeavyBadge(modifier)
     }
 }
 
@@ -528,136 +800,22 @@ private fun BoxScope.EffectBadges(entry: EffectCatalogEntry, favorite: Boolean) 
 private fun HeavyBadge(modifier: Modifier = Modifier) {
     val label = stringResource(R.string.fx_browser_heavy)
     Box(
-        modifier.size(20.dp).clip(AureaShape.Circle).background(Color.White).semantics { contentDescription = label },
+        modifier.size(23.dp).clip(CircleShape).background(AureaColors.OnImage).semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        Text("!", style = AureaType.of(13f, FontWeight.W900, color = Color.Black))
+        Text("!", style = AureaType.of(13f, FontWeight.W900, color = AureaColors.FxDarkest))
     }
 }
 
-/**
- * A prévia do motor no quadro: a COMPARAÇÃO inteira, antes | depois com o traço
- * no meio (cortada pelo centro quando o quadro é mais estreito), com os selos
- * "Antes" e "Depois" se [labels]; ou, com [comparison] desligado, só a metade
- * "depois" (o fundo do ladrilho da categoria). Ferramenta mostra a cartela
- * dela; enquanto a prévia não chega, a cartela genérica da categoria.
- */
+/** O selo "Novo" do AUREA (efeito marcado como novo pelo motor). */
 @Composable
-private fun EffectThumb(
-    entry: EffectCatalogEntry,
-    previews: EffectPreviewStore?,
-    width: Int,
-    height: Int,
-    comparison: Boolean = true,
-    labels: Boolean = false,
-) {
-    val tool = effectToolOf(entry.typeId)
-    if (tool != null) { ToolPlate(toolGlyph(tool)); return }
-    // "Prévias de efeitos" desligado em Ajustes (0.2.4): só a cartela, sem pedir render.
-    val image = rememberEffectPreviewState(previews?.takeIf { LocalEffectPreviewsOn.current }, entry.typeId, width, height).image
-    if (image == null) { GenericPlate(categoryGlyph(entry.category)); return }
-    androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-        if (size.width < 1f || size.height < 1f) return@Canvas
-        val crop = if (comparison) centerCrop(image.width, image.height, size.width / size.height)
-            else effectOnlyCrop(image.width, image.height, size.width / size.height)
-        drawImage(
-            image,
-            srcOffset = IntOffset(crop[0], crop[1]), srcSize = IntSize(crop[2], crop[3]),
-            dstSize = IntSize(size.width.toInt(), size.height.toInt()), filterQuality = FilterQuality.Medium,
-        )
-    }
-    if (labels) {
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-            Box(Modifier.fillMaxSize()) {
-                Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    PreviewLabel(stringResource(R.string.fx_browser_before))
-                    PreviewLabel(stringResource(R.string.fx_browser_after))
-                }
-            }
-        }
-    }
-}
-
-/** Corte pelo centro da imagem inteira para o aspecto [dstAspect]: [x, y, largura, altura]. */
-private fun centerCrop(width: Int, height: Int, dstAspect: Float): IntArray {
-    if (width <= 0 || height <= 0 || !(dstAspect > 0f)) return intArrayOf(0, 0, maxOf(width, 1), maxOf(height, 1))
-    val src = width.toFloat() / height
-    return if (src > dstAspect) {
-        val w = (height * dstAspect).toInt().coerceIn(1, width)
-        intArrayOf((width - w) / 2, 0, w, height)
-    } else {
-        val h = (width / dstAspect).toInt().coerceIn(1, height)
-        intArrayOf(0, (height - h) / 2, width, h)
-    }
-}
-
-/**
- * A barra da folha: ✕ (ou ‹ dentro de um grupo) · título · 🔍. Alvos de 44 dp.
- * testTags `effects.close`, `effects.back` e `effects.search` (iguais no iOS).
- */
-@Composable
-private fun SheetTopBar(title: String, inGroup: Boolean, onBack: () -> Unit, onClose: () -> Unit, onSearch: () -> Unit) {
-    val closeLabel = stringResource(R.string.common_close)
-    val backLabel = stringResource(R.string.fxui_back_categories)
-    val searchLabel = stringResource(R.string.fxui_search_effects)
-    Row(
-        Modifier.fillMaxWidth().height(AureaDims.EditorTopBar + AureaDims.S2).padding(horizontal = AureaDims.S1),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier
-                .size(AureaDims.MinTap + AureaDims.S1, AureaDims.MinTap)
-                .testTag(if (inGroup) "effects.back" else "effects.close")
-                .semantics { contentDescription = if (inGroup) backLabel else closeLabel; role = Role.Button }
-                .tocavel(shrink = 1f, onClick = if (inGroup) onBack else onClose),
-            contentAlignment = Alignment.Center,
-        ) {
-            CupertinoIcon(if (inGroup) CupertinoGlyph.ChevronBack else CupertinoGlyph.Xmark, AureaDims.IconLg, AureaColors.Text)
-        }
-        Text(
-            title,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = AureaType.of(18f, FontWeight.W700),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.weight(1f).padding(horizontal = AureaDims.S1).semantics { heading() },
-        )
-        Box(
-            Modifier
-                .size(AureaDims.MinTap + AureaDims.S1, AureaDims.MinTap)
-                .testTag("effects.search")
-                .semantics { contentDescription = searchLabel; role = Role.Button }
-                .tocavel(shrink = 1f, onClick = onSearch),
-            contentAlignment = Alignment.Center,
-        ) {
-            CupertinoIcon(CupertinoGlyph.Search, AureaDims.IconLg, AureaColors.Text)
-        }
-    }
-}
-
-/** Cartela das ferramentas (e dos grupos sem prévia): degradê do Aurea e o glifo no meio. */
-@Composable
-private fun ToolPlate(glyph: Char, glyphSize: Dp = 26.dp, alpha: Float = 1f) {
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(AureaColors.ActionDim, AureaColors.SurfaceHigh))),
-        contentAlignment = Alignment.Center,
-    ) {
-        CupertinoIcon(glyph, glyphSize, AureaColors.Accent.copy(alpha = alpha))
-    }
-}
-
-/** Segurar o cartão: favorita ou desfavorita, e diz o que fez (o gesto não se vê). */
-@Composable
-private fun rememberFavoriteToggle(store: EditorStore): (EffectCatalogEntry, String) -> Unit {
-    val context = LocalContext.current
-    return remember(store, context) {
-        { e, name ->
-            val on = store.effectPrefs.toggleFavorite(e.typeId)
-            store.showToast(context.getString(if (on) R.string.effects_favorite_added else R.string.effects_favorite_removed, name))
-        }
-    }
+private fun NewBadge(modifier: Modifier = Modifier) {
+    Text(
+        stringResource(R.string.fx_browser_badge),
+        style = AureaType.of(9f, FontWeight.W700, color = AureaColors.OnAction),
+        maxLines = 1,
+        modifier = modifier.clip(RoundedCornerShape(4.dp)).background(AureaColors.Accent).padding(horizontal = 4.dp, vertical = 1.dp),
+    )
 }
 
 @Composable
@@ -665,245 +823,267 @@ private fun EmptyLine(text: String) {
     Text(
         text,
         textAlign = TextAlign.Center,
-        style = AureaType.of(13f, color = AureaColors.Muted, lineHeight = 1.4f),
+        style = AureaType.of(13f, color = AureaColors.FxTextSecondary, lineHeight = 1.4f),
         modifier = Modifier.fillMaxWidth().padding(AureaDims.S4),
     )
 }
 
+// --- A BUSCA ------------------------------------------------------------------
+
+/** Caractere invisível antes do texto quando há fichas: apagá-lo (⌫) apaga a última ficha. */
+private const val CHIP_SENTINEL = "​"
+
 /**
- * O CARTÃO: a prévia real do efeito (ou a cartela enquanto ela não chega; a
- * ferramenta tem a cartela dela), a estrela quando é favorito e o nome em até
- * duas linhas. Um toque adiciona; segurar favorita. Todo o cartão é o alvo.
+ * A BUSCA, cobrindo o cabeçalho (fundo «busca»): ‹ · campo «campo» de raio 10
+ * com 🔍, as fichas de etiqueta, o texto e ✕. Vazia: etiquetas sugeridas em
+ * coluna. Digitando: as etiquetas que casam numa fileira e os resultados em
+ * linhas. Toque no resultado → detalhe. Ids `effects.search.field`,
+ * `effects.search.back`, `effects.search.clear`, `effects.search.tag.<tag>`,
+ * `effects.search.chip.<tag>` e `effects.result.<id>`.
  */
 @Composable
-private fun EffectPickCard(
-    entry: EffectCatalogEntry,
-    previews: EffectPreviewStore?,
-    favorite: Boolean,
-    tagPrefix: String,
-    onPick: (EffectCatalogEntry) -> Unit,
-    onFavorite: (EffectCatalogEntry, String) -> Unit,
-    modifier: Modifier = Modifier,
-    aspect: Float = 1.6f,
-    nameSize: Float = 14f,
-    /** "Prévias de efeitos" desligado em Ajustes: só a cartela, sem pedir render. */
-    previewsOn: Boolean = true,
+private fun SearchPane(
+    store: EditorStore,
+    sorted: List<EffectCatalogEntry>,
+    chips: List<String>,
+    onChips: (List<String>) -> Unit,
+    previewsOn: Boolean,
+    onDetail: (List<EffectCatalogEntry>, Int) -> Unit,
+    onClose: () -> Unit,
 ) {
-    val name = pickerEntryName(entry)
-    val tool = effectToolOf(entry.typeId)
-    val addLabel = stringResource(R.string.effects_card_add, name)
-    // SEGURADO: toca a animação que a ficha já gerou (cena Foto, a mesma da
-    // grade). A grade nunca pede sequência ao motor; sem tira guardada, nada
-    // muda. Desligado por "Prévias de efeitos" e por "Remover animações".
-    var held by remember { mutableStateOf(false) }
-    // Ao soltar, completa um laço (~1 s) antes de voltar ao quadro parado — o
-    // toque longo que favorita termina em 0,45 s, igual no iOS.
-    var lingering by remember { mutableStateOf(false) }
-    LaunchedEffect(held) {
-        if (held) lingering = true else { kotlinx.coroutines.delay(HELD_LINGER_MS); lingering = false }
+    // O índice é montado aqui, fora do que lê o texto digitado: digitar não o refaz.
+    val index = rememberEffectSearchIndex(sorted)
+    val tagLabels = LinkedHashMap<String, String>().apply {
+        EffectTagIds.forEach { t -> effectTagLabelRes(t)?.let { put(t, stringResource(it)) } }
     }
-    val reduceMotion = rememberReduceMotion()
-    val heldStore = previews?.animated?.takeIf { (held || lingering) && previewsOn && !reduceMotion && tool == null }
-    val heldAnimation = rememberAnimatedEffectPreview(heldStore, entry.typeId, EffectPreviewScene.PHOTO.id, generate = false)
-    val favoriteLabel = stringResource(if (favorite) R.string.effect_tirar_favoritos else R.string.effect_nos_favoritos)
-    Column(
-        modifier
-            .clip(AureaShape.Card).background(AureaColors.EditorPanelHigh)
-            .testTag(tagPrefix + effectCardId(entry.typeId))
-            .semantics {
-                contentDescription = addLabel
-                customActions = listOf(CustomAccessibilityAction(favoriteLabel) { onFavorite(entry, name); true })
-            }
-            .pointerInput(Unit) {
-                // Só observa (passo Initial, sem consumir): o toque, o toque
-                // longo e a rolagem da grade continuam com quem já os trata.
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                    held = true
-                    try {
-                        do {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                        } while (event.changes.any { it.pressed })
-                    } finally {
-                        held = false
-                    }
-                }
-            }
-            .tocavel(shrink = 0.96f, haptic = true, onLongClick = { onFavorite(entry, name) }, onClick = { onPick(entry) }),
-    ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(aspect).clip(AureaShape.Card)) {
-            if (tool != null) {
-                ToolPlate(toolGlyph(tool))
-            } else if (!previewsOn) {
-                GenericPlate(categoryGlyph(entry.category))
-            } else if (heldAnimation.frames.isNotEmpty()) {
-                AnimatedPreviewFrames(heldAnimation.frames, playing = true, contentScale = ContentScale.Fit)
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        PreviewLabel(stringResource(R.string.fx_browser_before))
-                        PreviewLabel(stringResource(R.string.fx_browser_after))
-                    }
-                }
-            } else {
-                val state = rememberEffectPreviewState(previews, entry.typeId, PREVIEW_W, PREVIEW_H)
-                val preview = state.image
-                if (preview != null) {
-                    Image(preview, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, filterQuality = FilterQuality.Medium)
-                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                        Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                            PreviewLabel(stringResource(R.string.fx_browser_before))
-                            PreviewLabel(stringResource(R.string.fx_browser_after))
-                        }
-                    }
-                } else {
-                    GenericPlate(categoryGlyph(entry.category))
-                    Text(stringResource(when {
-                        entry.effectClass == 3 || entry.effectClass == 4 -> R.string.fx_browser_timeline_preview
-                        state.loading -> R.string.fx_browser_loading
-                        else -> R.string.fx_browser_preview_unavailable
-                    }), style = AureaType.of(12f, color = AureaColors.Text), textAlign = TextAlign.Center,
-                        modifier = Modifier.align(Alignment.Center).padding(8.dp))
-                }
-            }
-            if (entry.isNew) {
-                Text(stringResource(R.string.fx_browser_badge), style = AureaType.of(11f, FontWeight.W700, color = AureaColors.EditorPanel),
-                    modifier = Modifier.align(Alignment.TopStart).padding(6.dp).clip(AureaShape.Chip).background(AureaColors.Accent).padding(horizontal = 6.dp, vertical = 3.dp))
-            }
-            if (favorite) {
-                Box(
-                    Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(AureaDims.S1)
-                        .size(22.dp)
-                        .clip(AureaShape.Circle)
-                        .background(Color.Black.copy(alpha = 0.45f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CupertinoIcon(CupertinoGlyph.StarFill, AureaDims.IconXs, AureaColors.Accent)
-                }
-            }
-            if (HyperEffectGate.locked(entry.typeId)) HyperLockBadge(Modifier.align(Alignment.TopEnd).padding(top = if (favorite) 30.dp else AureaDims.S1, end = AureaDims.S1))
+    val available = remember(sorted, index) { EffectTagIds.filter { t -> sorted.any { t in index.tags[it.typeId].orEmpty() } } }
+    val locale = LocalConfiguration.current.locales[0]
+    var field by remember {
+        mutableStateOf(if (chips.isEmpty()) TextFieldValue("") else TextFieldValue(CHIP_SENTINEL, TextRange(1)))
+    }
+    val query = field.text.replace(CHIP_SENTINEL, "")
+    val results = remember(sorted, index, query, chips, locale) {
+        val base = effectsWithTags(sorted, chips) { index.tags[it.typeId].orEmpty() }
+        when {
+            query.isNotBlank() -> searchEffects(base, index.docs, query, index.fields)
+            chips.isNotEmpty() -> sortedByName(base, locale) { index.names[it.typeId] ?: it.name }
+            else -> emptyList()
         }
-        Spacer(Modifier.height(AureaDims.S1))
-        Text(
-            name,
-            maxLines = 3,
-            minLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            style = AureaType.of(nameSize, FontWeight.W600, lineHeight = 1.2f),
-            modifier = Modifier.padding(horizontal = 10.dp),
-        )
-        Text(stringResource(effectGroupLabelRes(effectGroupOf(entry))), style = AureaType.of(12f, color = AureaColors.Muted),
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 10.dp))
     }
-}
-
-@Composable
-private fun PreviewLabel(text: String) {
-    Text(text, style = AureaType.of(10.5f, FontWeight.W600, color = Color.White),
-        modifier = Modifier.clip(AureaShape.Chip).background(Color.Black.copy(alpha = 0.75f)).padding(horizontal = 5.dp, vertical = 2.dp))
-}
-
-/**
- * A FOLHA DE BUSCA: tela cheia acima do teclado, com o campo já focado
- * (testTag `effects.search.field`) e a grade filtrando a cada letra. Um toque no
- * resultado (`effects.result.<id>`) adiciona e fecha.
- */
-@Composable
-private fun EffectSearchSheet(
-    store: EditorStore,
-    sorted: List<EffectCatalogEntry>,
-    favorites: Set<Int>,
-    onPick: (EffectCatalogEntry) -> Unit,
-    onFavorite: (EffectCatalogEntry, String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    // O índice é montado aqui, fora do escopo que lê a busca: digitar não o refaz.
-    val docs = rememberEffectSearchIndex(sorted)
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        SearchSheetBody(store, sorted, docs, favorites, onPick, onFavorite, onDismiss)
+    val matching = remember(query, chips, available, tagLabels) {
+        matchingTags(tagLabels.filterKeys { it in available }, query, chips)
     }
-}
-
-@Composable
-private fun SearchSheetBody(
-    store: EditorStore,
-    sorted: List<EffectCatalogEntry>,
-    docs: Map<Int, EffectSearchDoc>,
-    favorites: Set<Int>,
-    onPick: (EffectCatalogEntry) -> Unit,
-    onFavorite: (EffectCatalogEntry, String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var query by rememberSaveable { mutableStateOf("") }
-    val results = remember(sorted, docs, query) { if (query.isBlank()) sorted else searchEffects(sorted, docs, query) }
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    LaunchedEffect(Unit) { focus.requestFocus() }
-    val back = stringResource(R.string.common_close)
-    val clear = stringResource(R.string.home_clear_search)
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val addChip: (String) -> Unit = { tag ->
+        if (tag !in chips) onChips(chips + tag)
+        field = TextFieldValue(CHIP_SENTINEL, TextRange(1))
+    }
+    val removeChip: (String) -> Unit = { tag ->
+        val next = chips - tag
+        onChips(next)
+        val text = (if (next.isEmpty()) "" else CHIP_SENTINEL) + query
+        field = TextFieldValue(text, TextRange(text.length))
+    }
+    val backLabel = stringResource(R.string.common_close)
+    val clearLabel = stringResource(R.string.om_fx_search_clear)
     Column(
         Modifier
             .fillMaxSize()
-            .background(AureaColors.EditorPanel)
+            .background(AureaColors.FxSearch)
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .imePadding(),
     ) {
-        Row(
-            Modifier.fillMaxWidth().height(AureaDims.EditorTopBar + AureaDims.S2).padding(end = AureaDims.S3),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(AureaDims.MinTap + AureaDims.S1, AureaDims.MinTap).testTag("effects.search.back").semantics { contentDescription = back }.tocavel(shrink = 1f, onClick = onDismiss),
+                Modifier.size(AureaDims.MinTap).testTag("effects.search.back")
+                    .semantics { contentDescription = backLabel; role = Role.Button }
+                    .tocavel(shrink = 1f, role = null, onClick = onClose),
                 contentAlignment = Alignment.Center,
             ) {
-                CupertinoIcon(CupertinoGlyph.ChevronBack, AureaDims.IconLg, AureaColors.Text)
+                CupertinoIcon(CupertinoGlyph.ChevronBack, 22.dp, AureaColors.Text)
             }
             Row(
-                Modifier.weight(1f).height(AureaDims.MinTap).clip(AureaShape.Chip).background(AureaColors.FieldFilled).padding(start = AureaDims.S2),
+                Modifier
+                    .weight(1f)
+                    .padding(end = 10.dp)
+                    .height(AureaDims.MinTap)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AureaColors.FxField)
+                    .padding(start = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CupertinoIcon(CupertinoGlyph.Search, AureaDims.IconSm, AureaColors.Muted)
+                CupertinoIcon(CupertinoGlyph.Search, 16.dp, AureaColors.FxTextSecondary)
                 Spacer(Modifier.width(6.dp))
+                if (chips.isNotEmpty()) {
+                    Row(Modifier.widthIn(max = 180.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                        chips.forEach { tag -> FieldChip(tag, tagLabels[tag] ?: tag) { removeChip(tag) } }
+                    }
+                }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                    if (query.isEmpty()) {
-                        Text(stringResource(R.string.effect_buscar_glitch_vhs_desfoque_cor), style = AureaType.of(14f, color = AureaColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (query.isEmpty() && chips.isEmpty()) {
+                        Text(stringResource(R.string.effect_buscar_glitch_vhs_desfoque_cor), style = AureaType.of(15f, color = AureaColors.FxTextSecondary),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     BasicTextField(
-                        value = query,
-                        onValueChange = { query = it },
+                        value = field,
+                        onValueChange = { v ->
+                            field = when {
+                                chips.isEmpty() -> v
+                                // ⌫ apagou o caractere invisível: sai a última ficha, o texto fica.
+                                !v.text.contains(CHIP_SENTINEL) -> {
+                                    val next = chips.dropLast(1)
+                                    onChips(next)
+                                    if (next.isEmpty()) v else TextFieldValue(CHIP_SENTINEL + v.text, TextRange(v.selection.start + 1, v.selection.end + 1))
+                                }
+                                // O cursor foi para antes do invisível: ele volta para o começo.
+                                !v.text.startsWith(CHIP_SENTINEL) -> {
+                                    val text = CHIP_SENTINEL + v.text.replace(CHIP_SENTINEL, "")
+                                    TextFieldValue(text, TextRange(text.length))
+                                }
+                                v.selection.min == 0 -> v.copy(selection = TextRange(maxOf(1, v.selection.start), maxOf(1, v.selection.end)))
+                                else -> v
+                            }
+                        },
                         singleLine = true,
-                        textStyle = AureaType.of(15f),
+                        textStyle = AureaType.of(15f, color = AureaColors.Text),
                         cursorBrush = SolidColor(AureaColors.Accent),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
                         modifier = Modifier.fillMaxWidth().focusRequester(focus).testTag("effects.search.field"),
                     )
                 }
-                if (query.isNotEmpty()) {
+                if (query.isNotEmpty() || chips.isNotEmpty()) {
                     Box(
-                        Modifier.size(AureaDims.MinTap).semantics { contentDescription = clear }.tocavel { query = "" },
+                        Modifier.size(AureaDims.MinTap).testTag("effects.search.clear")
+                            .semantics { contentDescription = clearLabel; role = Role.Button }
+                            .tocavel(shrink = 1f, role = null) {
+                                onChips(emptyList())
+                                field = TextFieldValue("")
+                                runCatching { focus.requestFocus() }
+                            },
                         contentAlignment = Alignment.Center,
                     ) {
-                        CupertinoIcon(CupertinoGlyph.XmarkCircleFill, AureaDims.IconSm, AureaColors.Muted)
+                        CupertinoIcon(CupertinoGlyph.XmarkCircleFill, 16.dp, AureaColors.FxTextSecondary)
                     }
                 }
             }
         }
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(CardMin + AureaDims.S2),
-            contentPadding = PaddingValues(start = AureaDims.S3, end = AureaDims.S3, top = AureaDims.S2, bottom = AureaDims.S5),
-            horizontalArrangement = Arrangement.spacedBy(AureaDims.S3),
-            verticalArrangement = Arrangement.spacedBy(AureaDims.S3),
-            modifier = Modifier.fillMaxWidth().weight(1f).testTag("effects.search.results"),
+        if (chips.isEmpty() && query.isBlank()) {
+            // Vazia: as etiquetas sugeridas, em coluna.
+            val title = stringResource(R.string.om_fx_search_tags)
+            Column(
+                Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(top = 20.dp, bottom = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(title, style = AureaType.of(12f, FontWeight.W600, color = AureaColors.FxTextSecondary),
+                    modifier = Modifier.padding(bottom = 6.dp).semantics { heading() })
+                available.forEach { tag -> SearchTagChip(tag, tagLabels[tag] ?: tag) { addChip(tag) } }
+            }
+        } else {
+            if (matching.isNotEmpty()) {
+                LazyRow(
+                    Modifier.fillMaxWidth().padding(top = 4.dp),
+                    contentPadding = PaddingValues(horizontal = 15.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(matching, key = { it }) { tag -> SearchTagChip(tag, tagLabels[tag] ?: tag) { addChip(tag) } }
+                }
+            }
+            LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("effects.search.results")) {
+                if (results.isEmpty()) item(key = "vazio") { EmptyLine(stringResource(R.string.effect_empty_search)) }
+                itemsIndexed(results, key = { _, e -> e.typeId }) { i, e ->
+                    ResultRow(e, index.english[e.typeId], store.effectPreviews, previewsOn) {
+                        keyboard?.hide()
+                        onDetail(results, i)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Etiqueta sugerida ou que casa: 23 de altura (12, padding 15/3, borda 0,8), num alvo de 44. */
+@Composable
+private fun SearchTagChip(tag: String, label: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(10.dp)
+    Box(
+        Modifier.heightIn(min = AureaDims.MinTap).testTag("effects.search.tag.$tag")
+            .semantics { contentDescription = label; role = Role.Button }
+            .tocavel(shrink = 0.96f, role = null, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.height(23.dp).clip(shape).background(AureaColors.FxListSurface).border(0.8.dp, AureaColors.FxDarkest, shape)
+                .padding(horizontal = 15.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            if (results.isEmpty()) {
-                item(key = "vazio", span = { GridItemSpan(maxLineSpan) }) { EmptyLine(stringResource(R.string.effect_empty_search)) }
+            Text(label, style = AureaType.of(12f, color = AureaColors.Text), maxLines = 1)
+        }
+    }
+}
+
+/** A ficha dentro do campo: tocar tira a etiqueta (o ⌫ também). */
+@Composable
+private fun FieldChip(tag: String, label: String, onRemove: () -> Unit) {
+    val remove = stringResource(R.string.om_fx_search_tag_remove, label)
+    val shape = RoundedCornerShape(10.dp)
+    Box(
+        Modifier.heightIn(min = AureaDims.MinTap).padding(end = 4.dp).testTag("effects.search.chip.$tag")
+            .semantics { contentDescription = remove; role = Role.Button }
+            .tocavel(shrink = 0.96f, role = null, onClick = onRemove),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.height(23.dp).clip(shape).background(AureaColors.FxListSurface).border(0.8.dp, AureaColors.FxDarkest, shape)
+                .padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(label, style = AureaType.of(12f, color = AureaColors.Text), maxLines = 1)
+        }
+    }
+}
+
+/** Linha de resultado: miniatura 80, nome 17, nome em inglês 14 (se diferente) e a descrição 11 até a base. */
+@Composable
+private fun ResultRow(
+    entry: EffectCatalogEntry,
+    english: String?,
+    previews: EffectPreviewStore?,
+    previewsOn: Boolean,
+    onClick: () -> Unit,
+) {
+    val name = pickerEntryName(entry)
+    val description = effectDescription(entry.typeId, entry.category)
+    val second = english?.takeIf { it.isNotBlank() && it != name }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .testTag("effects.result." + effectCardId(entry.typeId))
+            .semantics { contentDescription = name }
+            .tocavel(shrink = 1f, onClick = onClick)
+            .padding(horizontal = 15.dp, vertical = 8.dp),
+    ) {
+        Box(Modifier.size(80.dp)) {
+            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(5.dp)).background(AureaColors.FxPanel)) {
+                EffectAfterPreview(entry, previews, previewsOn)
             }
-            items(results, key = { it.typeId }, contentType = { "efeito" }) { e ->
-                EffectPickCard(e, store.effectPreviews, e.typeId in favorites, "effects.result.", onPick, onFavorite,
-                    previewsOn = store.effectPrefs.previewsEnabled)
+            if (entry.isNew) NewBadge(Modifier.align(Alignment.TopStart).padding(4.dp))
+            EffectBadge(entry, Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f).height(80.dp)) {
+            Text(name, style = AureaType.of(17f, color = AureaColors.Text), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (second != null) {
+                Text(second, style = AureaType.of(14f, color = AureaColors.FxTextSecondary), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            Text(
+                description,
+                style = AureaType.of(11f, color = AureaColors.Text, lineHeight = 1.3f),
+                maxLines = if (second != null) 2 else 3, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp),
+            )
         }
     }
 }
@@ -917,6 +1097,9 @@ private fun languageResources(context: Context): List<Resources> = AppLanguageTa
     val config = Configuration(context.resources.configuration).apply { setLocale(Locale.forLanguageTag(tag)) }
     context.createConfigurationContext(config).resources
 }
+
+private fun englishResources(context: Context): Resources =
+    context.createConfigurationContext(Configuration(context.resources.configuration).apply { setLocale(Locale.ENGLISH) }).resources
 
 /** O rótulo traduzido de uma categoria conhecida (as mesmas do `effectCategoryLabel`). */
 private fun categoryLabelRes(category: String): Int? = when (normalizeSearch(category)) {
@@ -939,20 +1122,41 @@ private fun categoryLabelRes(category: String): Int? = when (normalizeSearch(cat
 }
 
 /**
+ * O que a busca sabe do catálogo: [docs] (o texto em 7 idiomas, para filtrar e
+ * para a ordem do AUREA), [fields] (o que a pontuação da referência olha), as
+ * etiquetas de cada efeito ([tags]), o nome em inglês ([english]) e o nome
+ * mostrado ([names]).
+ */
+private class SearchIndex(
+    val docs: Map<Int, EffectSearchDoc>,
+    val fields: Map<Int, EffectScoreFields>,
+    val tags: Map<Int, List<String>>,
+    val english: Map<Int, String>,
+    val names: Map<Int, String>,
+)
+
+/**
  * O índice da busca: no idioma do app, tudo o que o catálogo sabe (nome,
- * sinônimos da tabela humana, descrição); nos 7 idiomas, o nome, a categoria e
- * o GRUPO da tela (e o nome das ferramentas); e os sinônimos de categoria.
- * Refeito só quando o catálogo ou o idioma mudam.
+ * sinônimos da tabela humana, descrição); nos 7 idiomas, o nome, a categoria, o
+ * GRUPO da tela, as ETIQUETAS (e o nome das ferramentas); e os sinônimos de
+ * categoria. Refeito só quando o catálogo ou o idioma mudam.
  */
 @Composable
-private fun rememberEffectSearchIndex(entries: List<EffectCatalogEntry>): Map<Int, EffectSearchDoc> {
+private fun rememberEffectSearchIndex(entries: List<EffectCatalogEntry>): SearchIndex {
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
     val current = catalogHaystack(entries)
     val human = entries.associate { it.typeId to effectSearchText(it.typeId, it.name, it.category) }
-    return remember(entries, locale, current, human) {
+    val shown = entries.associate { it.typeId to pickerEntryName(it) }
+    val descriptions = entries.associate { it.typeId to effectDescription(it.typeId, it.category) }
+    return remember(entries, locale, current, human, shown, descriptions) {
         val languages = languageResources(context)
-        entries.associate { e ->
+        val english = englishResources(context)
+        val tagsById = entries.associate { it.typeId to effectTags(it) }
+        val englishById = entries.associate { e ->
+            e.typeId to (effectToolOf(e.typeId)?.let { english.getString(toolLabelRes(it)) } ?: englishEffectName(e.typeId, e.name, english))
+        }
+        val docs = entries.associate { e ->
             val tool = effectToolOf(e.typeId)
             val names = buildList {
                 add(e.name)
@@ -969,8 +1173,15 @@ private fun rememberEffectSearchIndex(entries: List<EffectCatalogEntry>): Map<In
                 add(categorySynonyms(e.category))
                 // Ladrilho / repetição de borda: "motion tile", "mosaico"... nos 7 idiomas.
                 languages.forEach { add(com.aurea.aurea.editor.panels.tileSearchTerms(e.typeId, it)) }
+                // Etiquetas (P2-4) nos 7 idiomas: "glitch", "сбой", "retrô"...
+                tagsById[e.typeId].orEmpty().forEach { t -> effectTagLabelRes(t)?.let { res -> languages.forEach { add(it.getString(res)) } } }
             }
             e.typeId to effectSearchDoc(names, extra)
         }
+        val fields = entries.associate { e ->
+            val tagLabels = tagsById[e.typeId].orEmpty().mapNotNull { t -> effectTagLabelRes(t)?.let { context.getString(it) } }
+            e.typeId to EffectScoreFields(tagLabels, shown[e.typeId].orEmpty(), englishById[e.typeId].orEmpty(), descriptions[e.typeId].orEmpty())
+        }
+        SearchIndex(docs, fields, tagsById, englishById, shown)
     }
 }

@@ -180,6 +180,10 @@ struct PreviewMetalView: UIViewRepresentable {
         private var shapeV = SIMD2<Float>.zero
         private var shapeScale = SIMD2<Float>(repeating: 1)
         private var shapeLinked = true
+        // Omega conteúdo (área 06, P0-6): o passo já enviado ao motor (px da forma) e se o gesto já abriu o desfazer.
+        private var shapeLastU: Float = 0
+        private var shapeLastV: Float = 0
+        private var shapeSent = false
         // Alça branca de esticar: índice, âncora e alça na composição, direção da conta.
         private var resizeHandle = -1
         private var resizeAnchor = SIMD2<Float>(0, 0)
@@ -187,6 +191,8 @@ struct PreviewMetalView: UIViewRepresentable {
         private var resizeAxis = SIMD2<Float>(1, 0)
         private var resizeBase: Float = 1
         private let snapFeedback = UISelectionFeedbackGenerator()
+        // Omega aparência (P1-1/P1-4): o toque do conta-gotas ao vivo e das pontas do degradê.
+        let omegaAppearance = OmegaAppearanceStageGesture()
 
         init(model: AureaModel, shell: ShellPresentation, compositionSize: CGSize, interactive: Bool) {
             self.model = model
@@ -211,7 +217,8 @@ struct PreviewMetalView: UIViewRepresentable {
             let height = max(1, view.bounds.height)
             let compWidth = max(1, compositionSize.width)
             let compHeight = max(1, compositionSize.height)
-            return Float(max(compWidth / width, compHeight / height) / max(1, StageViewZoom.shared.zoom))
+            // Omega chrome (área 02, P1-2): o zoom da vista agora vai de 1 % a 6400 %.
+            return Float(max(compWidth / width, compHeight / height) / max(StageZoomMath.minZoom, StageViewZoom.shared.zoom))
         }
 
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
@@ -229,14 +236,15 @@ struct PreviewMetalView: UIViewRepresentable {
                     else if model.vectorPointTool == 3 { toggleVectorCorner(hit, mask: mask) }
                     else {
                         if model.vectorPointTool == 1 && hit == 0 && !mask.closed && mask.points.count >= 18 && model.selectedMaskPoint == mask.points.count / 6 - 1 {
-                            model.setMaskPoints(mask.points, closed: true)
+                            model.editVectorPath(PathOps.setClosed, [1]); model.refreshMasks()   // Omega conteúdo (P1-8)
                         }
                         model.selectedMaskPoint = hit
                     }
                 } else if model.vectorPointTool == 1 {
                     if !insertVectorPoint(local, mask: mask, tolerance: Float(factor) * 20) && !mask.closed {
-                        model.setMaskPoints(mask.points + [local.x, local.y, 0, 0, 0, 0], closed: false)
-                        model.selectedMaskPoint = mask.points.count / 6
+                        // Omega conteúdo (área 06, P1-8): acrescentar na ponta é regra do motor.
+                        let r = model.editVectorPath(PathOps.append, [local.x, local.y, 0]); model.refreshMasks()
+                        model.selectedMaskPoint = r >= 0 ? Int(r) : nil
                     }
                 } else { model.selectedMaskPoint = nil }
                 return
@@ -285,30 +293,20 @@ struct PreviewMetalView: UIViewRepresentable {
             guard a.count == 6 else { return hypot(delta.x, delta.y) }
             return hypot(a[0] * delta.x + a[2] * delta.y, a[1] * delta.x + a[3] * delta.y)
         }
-        // Direct port of VectorStage.VectorPathOps; all commits go to the C++ path.
+        // Omega conteúdo (área 06, P1-8): as REGRAS de ponto (apagar, canto ↔ curva, inserir,
+        // acrescentar, alças) são do motor (Engine::edit_vector_path, PathEdit.cpp); aqui só a escolha.
         private func deleteVectorPoint(_ i: Int, mask: MaskItem) {
-            var points = mask.points
-            points.removeSubrange((i * 6)..<(i * 6 + 6))
-            model.setMaskPoints(points, closed: points.count >= 18 && mask.closed)
-            model.selectedMaskPoint = points.isEmpty ? nil : min(i, points.count / 6 - 1)
+            let r = model.editVectorPath(PathOps.remove, [Float(i)])
+            model.refreshMasks()
+            let left = (model.editingMask?.points.count ?? 0) / 6
+            model.selectedMaskPoint = r >= 0 && left > 0 ? min(Int(r), left - 1) : nil
         }
         private func toggleVectorCorner(_ i: Int, mask: MaskItem) {
-            var p = mask.points
-            let at = i * 6, n = p.count / 6
-            if hypot(p[at + 2], p[at + 3]) > 0.001 || hypot(p[at + 4], p[at + 5]) > 0.001 {
-                for offset in 2...5 { p[at + offset] = 0 }
-            } else {
-                let prev = (i > 0 ? i - 1 : (mask.closed ? n - 1 : i)) * 6
-                let next = (i < n - 1 ? i + 1 : (mask.closed ? 0 : i)) * 6
-                let d = SIMD2(p[next] - p[prev], p[next + 1] - p[prev + 1])
-                let length = hypot(d.x, d.y)
-                guard length >= 0.001 else { return }
-                let lin = hypot(p[at] - p[prev], p[at + 1] - p[prev + 1]) / 3
-                let lout = hypot(p[next] - p[at], p[next + 1] - p[at + 1]) / 3
-                p[at + 2] = -d.x / length * lin; p[at + 3] = -d.y / length * lin
-                p[at + 4] = d.x / length * lout; p[at + 5] = d.y / length * lout
-            }
-            model.setMaskPoints(p, closed: mask.closed); model.selectedMaskPoint = i
+            let at = i * 6
+            guard at + 5 < mask.points.count else { return }
+            let curve = hypot(mask.points[at + 2], mask.points[at + 3]) > 0.001 || hypot(mask.points[at + 4], mask.points[at + 5]) > 0.001
+            model.editVectorPath(PathOps.setType, [Float(i), curve ? 0 : 1])
+            model.refreshMasks(); model.selectedMaskPoint = i
         }
         @discardableResult
         private func insertVectorPoint(_ pos: SIMD2<Float>, mask: MaskItem, tolerance: Float) -> Bool {
@@ -327,17 +325,11 @@ struct PreviewMetalView: UIViewRepresentable {
                 }
             }
             guard let i = segment else { return false }
-            let j = (i + 1) % n, a = vertex(i), b = vertex(j)
-            let p1 = a + vertex(i, 4), p2 = b + vertex(j, 2)
-            func lerp(_ a: SIMD2<Float>, _ b: SIMD2<Float>) -> SIMD2<Float> { a + (b - a) * bestT }
-            let aa = lerp(a, p1), bb = lerp(p1, p2), cc = lerp(p2, b)
-            let dd = lerp(aa, bb), ee = lerp(bb, cc), f = lerp(dd, ee)
-            p[i * 6 + 4] = aa.x - a.x; p[i * 6 + 5] = aa.y - a.y
-            p[j * 6 + 2] = cc.x - b.x; p[j * 6 + 3] = cc.y - b.y
-            let index = j == 0 ? n : i + 1
-            p.insert(contentsOf: [f.x, f.y, dd.x - f.x, dd.y - f.y, ee.x - f.x, ee.y - f.y], at: index * 6)
-            model.setMaskPoints(p, closed: mask.closed); model.selectedMaskPoint = index
-            return true
+            // Omega conteúdo (área 06, P1-8): o corte de De Casteljau é do motor (a curva não muda).
+            let r = model.editVectorPath(PathOps.insert, [Float(i), bestT])
+            model.refreshMasks()
+            if r >= 0 { model.selectedMaskPoint = Int(r) }
+            return r >= 0
         }
         private func handleMaskPan(_ gesture: UIPanGestureRecognizer, view: UIView) {
             let factor = scaleFactor(view), c = compositionPoint(gesture.location(in: view), view: view)
@@ -363,13 +355,30 @@ struct PreviewMetalView: UIViewRepresentable {
                 if model.panel == .vector && (model.vectorPointTool == 2 || model.vectorPointTool == 3) && maskDragHandle == 0 { maskDragPoint = nil; return }
                 if maskDragPoint == nil && model.maskDrawing && !mask.closed {
                     maskDragPoint = mask.points.count / 6; maskDragHandle = 4
-                    model.setMaskPoints(mask.points + [local.x, local.y, 0, 0, 0, 0], closed: false)
+                    // Omega conteúdo (área 06, P1-8): no vetor, acrescentar é regra do motor.
+                    if model.panel == .vector { model.editVectorPath(PathOps.append, [local.x, local.y, 0]); model.refreshMasks() }
+                    else { model.setMaskPoints(mask.points + [local.x, local.y, 0, 0, 0, 0], closed: false) }
                     maskDragChanged = true; maskDragSmooth = true; maskOppositeLength = -1
                 }
                 if let n = maskDragPoint, n * 6 + 1 < mask.points.count { maskDragOffset = SIMD2(mask.points[n * 6], mask.points[n * 6 + 1]) - local }
                 model.selectedMaskPoint = maskDragPoint
             case .changed:
                 guard let n = maskDragPoint, n * 6 + 5 < mask.points.count else { return }
+                if model.panel == .vector {
+                    // Omega conteúdo (área 06, P1-8): ponto e alças do vetor pelas regras do motor
+                    // (alça suave = ângulo preso; ponto novo = ângulo e comprimento presos).
+                    if maskDragHandle == 0 {
+                        let d = local + maskDragOffset - SIMD2(mask.points[n * 6], mask.points[n * 6 + 1])
+                        model.editVectorPath(PathOps.movePoints, [d.x, d.y, Float(n)], continuing: maskDragChanged)
+                    } else {
+                        let wanted = local - SIMD2(mask.points[n * 6], mask.points[n * 6 + 1])
+                        let d = wanted - SIMD2(mask.points[n * 6 + maskDragHandle], mask.points[n * 6 + maskDragHandle + 1])
+                        model.editVectorPath(PathOps.moveHandle, [Float(n), maskDragHandle == 4 ? 1 : 0, d.x, d.y,
+                                                                  maskDragSmooth ? 1 : 0, maskOppositeLength < 0 ? 1 : 0], continuing: maskDragChanged)
+                    }
+                    model.refreshMasks(); maskDragChanged = true
+                    return
+                }
                 if maskDragHandle == 0 { mask.points[n * 6] = local.x + maskDragOffset.x; mask.points[n * 6 + 1] = local.y + maskDragOffset.y }
                 else {
                     let dx = local.x - mask.points[n * 6], dy = local.y - mask.points[n * 6 + 1]
@@ -537,6 +546,9 @@ struct PreviewMetalView: UIViewRepresentable {
 
         // Stage.kt's pointer arbiter: handles > selected body > top layer > empty.
         func stageEvent(_ points: [StageTouchPoint], cancelled: Bool, view: UIView) {
+            // Omega aparência (P1-1/P1-4): conta-gotas ligado ou pontas do degradê abertas
+            // pegam a sequência inteira de toques antes do resto do palco.
+            if omegaAppearanceEvent(points, cancelled: cancelled, view: view) { return }
             if cancelled || !interactive {
                 finishStageEdit(); stageFinger = nil; stageMode = .idle; return
             }
@@ -629,7 +641,9 @@ struct PreviewMetalView: UIViewRepresentable {
                             model.changeTimelineLayerSelectMode(true)
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         } else if let hit {
-                            if model.primarySelection != hit || model.selection.count != 1 { model.select(layerId: hit, additive: false) }
+                            // Omega conteúdo (área 06, P0-7): o segundo toque na MESMA camada abre o editor do tipo dela.
+                            if !OmegaContentEditors.doubleTap(model, hit: hit),
+                               model.primarySelection != hit || model.selection.count != 1 { model.select(layerId: hit, additive: false) }
                         } else if !held { model.clearSelection() }
                     }
                 }
@@ -1104,7 +1118,9 @@ struct PreviewMetalView: UIViewRepresentable {
             let lengthU = hypot(u.x, u.y), lengthV = hypot(v.x, v.y)
             guard lengthU >= 0.0001 && lengthV >= 0.0001 else { return false }
             shapeU = u / lengthU; shapeV = v / lengthV; shapeScale = SIMD2(lengthU / shapeWidth, lengthV / shapeHeight)
-            shapeLinked = model.shapeSizeLinked; shell.grabbedShapeHandle = shapeHandle
+            // Omega conteúdo (área 06, P0-6): "manter proporção" é a chave da barra da seção (salva no aparelho).
+            shapeLinked = ContentPrefs.shared.lockAspect; shapeLastU = 0; shapeLastV = 0; shapeSent = false
+            shell.grabbedShapeHandle = shapeHandle
             beginEdit(shapeHandle == 8 ? "raio da forma" : "tamanho da forma"); return true
         }
         private func stepShape(_ point: CGPoint, view: UIView) {
@@ -1114,16 +1130,11 @@ struct PreviewMetalView: UIViewRepresentable {
             if shapeHandle == 8 {
                 _ = model.engine.editShape(id, param: 1, value: (shapeRadius + (du + dv) / 2).clamped(to: 0...(min(shapeWidth, shapeHeight) / 2)), continuing: false)
             } else {
-                let sx: Float = [-1, 1, 1, -1, 0, 1, 0, -1][shapeHandle], sy: Float = [-1, -1, 1, 1, -1, 0, 1, 0][shapeHandle]
-                var w = sx != 0 ? shapeWidth + 2 * sx * du : shapeWidth
-                var h = sy != 0 ? shapeHeight + 2 * sy * dv : shapeHeight
-                if shapeLinked {
-                    let kx = w / shapeWidth, ky = h / shapeHeight
-                    let k = sx == 0 ? ky : sy == 0 ? kx : abs(kx - 1) >= abs(ky - 1) ? kx : ky
-                    w = shapeWidth * k; h = shapeHeight * k
-                }
-                if sx != 0 || shapeLinked { _ = model.engine.editShape(id, param: 5, value: w.clamped(to: 1...16384), continuing: false) }
-                if sy != 0 || shapeLinked { _ = model.engine.editShape(id, param: 6, value: h.clamped(to: 1...16384), continuing: false) }
+                // Omega conteúdo (área 06, P0-6): a regra (a partir do centro ou da borda oposta,
+                // manter proporção) é do motor; vai o passo desde o último envio, em px da forma.
+                _ = model.engine.resizeShapeHandle(id, handle: UInt32(shapeHandle), du: du - shapeLastU, dv: dv - shapeLastV,
+                                                   keepRatio: shapeLinked, fromCenter: ContentPrefs.shared.fromCenter, continuing: shapeSent)
+                shapeLastU = du; shapeLastV = dv; shapeSent = true
             }
             model.refreshSelectedLayer(); model.invalidatePreview()
         }
@@ -1348,25 +1359,45 @@ enum LayerResizeGeometry {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     @ObservedObject private var viewZoom = StageViewZoom.shared
+    @ObservedObject private var modes = ViewModeState.shared
     var body: some View {
         Canvas { context, size in
             let cw = CGFloat(max(1, model.compositionWidth)), ch = CGFloat(max(1, model.compositionHeight))
             let placed = StageZoomMath.fit(size: size, composition: CGSize(width: cw, height: ch), zoom: viewZoom.zoom, pan: viewZoom.pan)
             let fit = placed.scale, ox = placed.origin.x, oy = placed.origin.y
             func screen(_ x: Float, _ y: Float) -> CGPoint { CGPoint(x: CGFloat(x) * fit + ox, y: CGFloat(y) * fit + oy) }
-            // Grade de terços + cruz do centro, ligada pela barra do player.
-            if shell.showGrid {
-                let ink = Color.white.opacity(0.35)
+            // Omega chrome (área 02, P1-2): o tamanho da composição em 1× vai para os
+            // degraus de zoom da coluna; a grade de ESPAÇAMENTO (px da composição, a
+            // partir do centro) + a cruz do centro, ligada pela coluna de modos.
+            let base = fit / max(StageZoomMath.minZoom, viewZoom.zoom)
+            viewZoom.noteExtent(CGSize(width: cw * base, height: ch * base), pixelScale: UIScreen.main.scale)
+            if modes.grid {
+                let ink = AureaColors.text.opacity(0.35)
+                let step = CGFloat(max(1, modes.gridSpacing))
                 var grid = Path()
-                for k in 1...2 {
-                    let gx = Float(cw) * Float(k) / 3, gy = Float(ch) * Float(k) / 3
-                    grid.move(to: screen(gx, 0)); grid.addLine(to: screen(gx, Float(ch)))
-                    grid.move(to: screen(0, gy)); grid.addLine(to: screen(Float(cw), gy))
+                // Linhas a menos de 4 pt na tela viram borrão: só a cruz do centro.
+                if step * fit >= 4 {
+                    var d = step
+                    while d <= cw / 2 {
+                        for gx in [cw / 2 - d, cw / 2 + d] {
+                            grid.move(to: screen(Float(gx), 0)); grid.addLine(to: screen(Float(gx), Float(ch)))
+                        }
+                        d += step
+                    }
+                    d = step
+                    while d <= ch / 2 {
+                        for gy in [ch / 2 - d, ch / 2 + d] {
+                            grid.move(to: screen(0, Float(gy))); grid.addLine(to: screen(Float(cw), Float(gy)))
+                        }
+                        d += step
+                    }
                 }
-                let c = screen(Float(cw) / 2, Float(ch) / 2)
-                grid.move(to: CGPoint(x: c.x - 10, y: c.y)); grid.addLine(to: CGPoint(x: c.x + 10, y: c.y))
-                grid.move(to: CGPoint(x: c.x, y: c.y - 10)); grid.addLine(to: CGPoint(x: c.x, y: c.y + 10))
                 context.stroke(grid, with: .color(ink), lineWidth: 1)
+                var cross = Path()
+                let c = screen(Float(cw) / 2, Float(ch) / 2)
+                cross.move(to: CGPoint(x: c.x - 10, y: c.y)); cross.addLine(to: CGPoint(x: c.x + 10, y: c.y))
+                cross.move(to: CGPoint(x: c.x, y: c.y - 10)); cross.addLine(to: CGPoint(x: c.x, y: c.y + 10))
+                context.stroke(cross, with: .color(AureaColors.text.opacity(0.6)), lineWidth: 1.5)
             }
             if let x = shell.snapX {
                 var p = Path(); p.move(to: screen(x, 0)); p.addLine(to: screen(x, Float(ch)))
@@ -1376,6 +1407,9 @@ enum LayerResizeGeometry {
                 var p = Path(); p.move(to: screen(0, y)); p.addLine(to: screen(Float(cw), y))
                 context.stroke(p, with: .color(Color(hex: 0xFF6B6B).opacity(0.8)), lineWidth: 1.5)
             }
+            // Omega aparência: guias do ímã do trackpad (Mover) e trajetória da posição
+            // (OmegaTransformStage, TrackballOverlay.swift).
+            OmegaTransformStage.draw(&context, model: model, width: Float(cw), height: Float(ch), screen: screen)
             guard ShapeStageGeometry.enabled(model) else { return }
             var data: [Float] = []; guard StageGeom.corners(model.detail, &data) else { return }
             let points = ShapeStageGeometry.handles(model.detail, corners: stride(from: 0, to: 8, by: 2).map { screen(data[$0], data[$0 + 1]) })
@@ -1389,5 +1423,302 @@ enum LayerResizeGeometry {
                 else { context.stroke(disk(points[i], radius), with: .color(AureaColors.accent), lineWidth: 1.5) }
             }
         }
+        // Omega aparência (P1-1/P1-4): mira e lupa do conta-gotas, alças das pontas do degradê.
+        .overlay { OmegaAppearanceStageOverlay() }
+    }
+}
+
+// =============================================================================
+// Omega aparência (área 05): conta-gotas AO VIVO (P1-1) e pontas do degradê
+// (P1-4) no palco. Par do bloco "Omega aparência" do Stage.kt.
+//
+// • Conta-gotas (`model.eyedropper`, ligado pelo seletor): arrastar em
+//   QUALQUER lugar do palco anda a mira RELATIVA (EyedropperStage), que amostra
+//   do quadro capturado no começo de cada arrasto; soltar aplica. Continua
+//   ligado até o seletor desligar.
+// • Pontas do degradê (`FillStageState.gradientHandles`, ligado pelo painel Cor
+//   e preenchimento com o Degradê aberto): o toque pega a ponta mais perto,
+//   passa do "touch slop" e arrasta (relativo à caixa da camada) num passo de
+//   desfazer (grupos 3/4 do preenchimento).
+// =============================================================================
+
+/// Uma sequência de toques que o conta-gotas ou as pontas do degradê pegaram,
+/// do primeiro dedo até soltar todos.
+@MainActor final class OmegaAppearanceStageGesture {
+    enum Mode { case idle, eyedropper, gradient, drain }
+    var mode: Mode = .idle
+    var finger: ObjectIdentifier?
+    var last = CGPoint.zero
+    var down = CGPoint.zero
+    var handle = -1
+    var startRel = SIMD2<Float>(0, 0)
+    var basisU = SIMD2<Float>(1, 0)
+    var basisV = SIMD2<Float>(0, 1)
+    var began = false
+    /// "Touch slop": abaixo disto o toque não arrasta a ponta.
+    static let slop: CGFloat = 8
+}
+
+/// A caixa da camada como base: ponto relativo (0..1) ↔ px da composição.
+enum OmegaFillGeometry {
+    struct Basis {
+        let origin: SIMD2<Float>
+        let u: SIMD2<Float>
+        let v: SIMD2<Float>
+        func point(_ rel: SIMD2<Float>) -> SIMD2<Float> { origin + u * rel.x + v * rel.y }
+        /// Δ em px da composição → Δ relativo à caixa (nil = caixa achatada).
+        func relative(_ delta: SIMD2<Float>) -> SIMD2<Float>? {
+            let det = u.x * v.y - v.x * u.y
+            guard abs(det) > 1e-6 else { return nil }
+            return SIMD2((delta.x * v.y - v.x * delta.y) / det, (u.x * delta.y - delta.x * u.y) / det)
+        }
+    }
+
+    /// Cantos TL, TR, BR, BL do detalhe: origem TL, u = TR − TL, v = BL − TL.
+    static func basis(_ detail: [String: Any]) -> Basis? {
+        var c: [Float] = []
+        guard StageGeom.corners(detail, &c), c.count == 8 else { return nil }
+        let origin = SIMD2(c[0], c[1])
+        return Basis(origin: origin, u: SIMD2(c[2], c[3]) - origin, v: SIMD2(c[6], c[7]) - origin)
+    }
+
+    /// As pontas (início, fim) relativas à caixa, do preenchimento no cabeçote.
+    static func ends(_ fill: [Float]) -> [SIMD2<Float>]? {
+        guard fill.count >= 24 else { return nil }
+        return [SIMD2(fill[ShapeFillIndex.start], fill[ShapeFillIndex.start + 1]),
+                SIMD2(fill[ShapeFillIndex.end], fill[ShapeFillIndex.end + 1])]
+    }
+}
+
+extension PreviewMetalView.Coordinator {
+    /// true = esta sequência de toques é do conta-gotas ou das pontas do degradê.
+    func omegaAppearanceEvent(_ points: [StageTouchPoint], cancelled: Bool, view: UIView) -> Bool {
+        let s = omegaAppearance
+        let pressed = points.filter(\.pressed)
+        switch s.mode {
+        case .idle:
+            guard !cancelled, interactive, stageFinger == nil, let first = pressed.first else { return false }
+            if model.eyedropper != nil {
+                if model.status.playing != 0 { model.playPause() }
+                s.mode = .eyedropper
+                s.finger = first.id
+                s.last = first.position
+                EyedropperStage.shared.begin(model, composition: compositionSize)
+                return true
+            }
+            if FillStageState.shared.gradientHandles, editableSelection(), startGradientHandle(first, view: view) {
+                return true
+            }
+            return false
+        case .drain:
+            if cancelled || pressed.isEmpty { s.mode = .idle }
+            return true
+        case .eyedropper:
+            if cancelled {
+                EyedropperStage.shared.cancel(model)
+                s.mode = .idle
+                return true
+            }
+            guard let finger = pressed.first(where: { $0.id == s.finger }) else {
+                EyedropperStage.shared.end(model)
+                s.mode = pressed.isEmpty ? .idle : .drain
+                return true
+            }
+            let f = CGFloat(scaleFactor(view))
+            EyedropperStage.shared.move((finger.position.x - s.last.x) * f, (finger.position.y - s.last.y) * f, model: model)
+            s.last = finger.position
+            return true
+        case .gradient:
+            if cancelled {
+                finishGradientHandle()
+                s.mode = .idle
+                return true
+            }
+            guard let finger = pressed.first(where: { $0.id == s.finger }) else {
+                finishGradientHandle()
+                s.mode = pressed.isEmpty ? .idle : .drain
+                return true
+            }
+            stepGradientHandle(finger.position, view: view)
+            return true
+        }
+    }
+
+    /// Escolhe a ponta mais perto do toque (na tela).
+    private func startGradientHandle(_ first: StageTouchPoint, view: UIView) -> Bool {
+        let fill = model.shapeFill
+        guard fill.count >= 24, fill[ShapeFillIndex.supported] > 0.5, fill[ShapeFillIndex.kind] > 0.5,
+              let basis = OmegaFillGeometry.basis(model.detail), let ends = OmegaFillGeometry.ends(fill) else { return false }
+        let screens = ends.map { rel -> CGPoint in
+            let c = basis.point(rel)
+            return screenPoint(c.x, c.y, view: view)
+        }
+        let d0 = hypot(first.position.x - screens[0].x, first.position.y - screens[0].y)
+        let d1 = hypot(first.position.x - screens[1].x, first.position.y - screens[1].y)
+        let s = omegaAppearance
+        s.handle = d1 < d0 ? 1 : 0
+        s.startRel = ends[s.handle]
+        s.basisU = basis.u
+        s.basisV = basis.v
+        s.mode = .gradient
+        s.finger = first.id
+        s.down = first.position
+        s.began = false
+        return true
+    }
+
+    private func stepGradientHandle(_ point: CGPoint, view: UIView) {
+        let s = omegaAppearance
+        if !s.began {
+            guard hypot(point.x - s.down.x, point.y - s.down.y) > OmegaAppearanceStageGesture.slop,
+                  editableSelection() else { return }
+            if model.status.playing != 0 { model.playPause() }
+            model.beginGesture("pontas do degradê")
+            s.began = true
+            FillStageState.shared.grabbed = s.handle
+        }
+        let f = scaleFactor(view)
+        let delta = SIMD2<Float>(Float(point.x - s.down.x) * f, Float(point.y - s.down.y) * f)
+        let basis = OmegaFillGeometry.Basis(origin: SIMD2<Float>(0, 0), u: s.basisU, v: s.basisV)
+        guard let rel = basis.relative(delta) else { return }
+        let next = s.startRel + rel
+        model.setShapeFillValue(s.handle == 0 ? ShapeFillIndex.groupStartPoint : ShapeFillIndex.groupEndPoint, [next.x, next.y])
+    }
+
+    private func finishGradientHandle() {
+        let s = omegaAppearance
+        if s.began { model.endGesture() }
+        s.began = false
+        s.handle = -1
+        FillStageState.shared.grabbed = -1
+    }
+}
+
+/// O desenho do conta-gotas (mira, lupa e a faixa de dica no topo do palco) e
+/// das alças do degradê. Sem toque (o palco por baixo é quem trata o gesto);
+/// ids de acessibilidade `stage.eyedropper` e `stage.gradient.<start|end>`.
+@MainActor struct OmegaAppearanceStageOverlay: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var viewZoom = StageViewZoom.shared
+    @ObservedObject private var dropper = EyedropperStage.shared
+    @ObservedObject private var fillStage = FillStageState.shared
+
+    private struct HandlePair {
+        let start: CGPoint
+        let end: CGPoint
+        let c0: [Float]
+        let c1: [Float]
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let cw = CGFloat(max(1, model.compositionWidth)), ch = CGFloat(max(1, model.compositionHeight))
+            let placed = StageZoomMath.fit(size: geo.size, composition: CGSize(width: cw, height: ch), zoom: viewZoom.zoom, pan: viewZoom.pan)
+            let handles = gradientHandles(scale: placed.scale, origin: placed.origin)
+            let cross = crosshair(scale: placed.scale, origin: placed.origin, cw: cw, ch: ch)
+            ZStack(alignment: .topLeading) {
+                Canvas { context, _ in
+                    if let handles { drawHandles(&context, handles) }
+                    if let cross { drawEyedropper(&context, cross, cw: cw, ch: ch) }
+                }
+                if let handles {
+                    marker(handles.start, key: "om_ap_fill_grad_start", tag: "stage.gradient.start")
+                    marker(handles.end, key: "om_ap_fill_grad_end", tag: "stage.gradient.end")
+                }
+                if let cross {
+                    marker(cross, key: "om_ap_cp_eyedropper", tag: "stage.eyedropper")
+                    Text(AureaText.t("om_ap_cp_eyedropper_hint"))
+                        .font(.aurea(size: 12, weight: .semibold))
+                        .foregroundStyle(AureaColors.text)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(StageInk.resolutionChip, in: Capsule())
+                        .frame(width: geo.size.width)
+                        .padding(.top, 8)
+                        .accessibilityIdentifier("stage.eyedropper.hint")
+                }
+            }
+        }
+    }
+
+    private func gradientHandles(scale: CGFloat, origin: CGPoint) -> HandlePair? {
+        let fill = model.shapeFill
+        guard fillStage.gradientHandles, model.selection.count == 1, fill.count >= 24, fill[ShapeFillIndex.kind] > 0.5,
+              let basis = OmegaFillGeometry.basis(model.detail), let ends = OmegaFillGeometry.ends(fill) else { return nil }
+        let points = ends.map { rel -> CGPoint in
+            let c = basis.point(rel)
+            return CGPoint(x: CGFloat(c.x) * scale + origin.x, y: CGFloat(c.y) * scale + origin.y)
+        }
+        return HandlePair(start: points[0], end: points[1],
+                          c0: Array(fill[ShapeFillIndex.color0..<(ShapeFillIndex.color0 + 4)]),
+                          c1: Array(fill[ShapeFillIndex.color1..<(ShapeFillIndex.color1 + 4)]))
+    }
+
+    private func crosshair(scale: CGFloat, origin: CGPoint, cw: CGFloat, ch: CGFloat) -> CGPoint? {
+        guard model.eyedropper != nil else { return nil }
+        let p = dropper.crosshair ?? CGPoint(x: cw / 2, y: ch / 2)
+        return CGPoint(x: p.x * scale + origin.x, y: p.y * scale + origin.y)
+    }
+
+    private func disk(_ p: CGPoint, _ r: CGFloat) -> Path {
+        Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r))
+    }
+
+    private func drawHandles(_ context: inout GraphicsContext, _ h: HandlePair) {
+        var line = Path()
+        line.move(to: h.start)
+        line.addLine(to: h.end)
+        context.stroke(line, with: .color(StageInk.outlineUnder), lineWidth: 3.5)
+        context.stroke(line, with: .color(AureaColors.onImage), lineWidth: 1.5)
+        for (index, point) in [h.start, h.end].enumerated() {
+            let radius: CGFloat = fillStage.grabbed == index ? 12 : 10
+            context.fill(disk(point, radius + 2), with: .color(StageInk.outlineUnder))
+            context.fill(disk(point, radius), with: .color(AureaColors.onImage))
+            context.fill(disk(point, radius - 3), with: .color(PickerColor.color(index == 0 ? h.c0 : h.c1)))
+        }
+    }
+
+    /// A mira (sempre, com o conta-gotas ligado) e a lupa (durante o arrasto):
+    /// ~11 pixels do quadro capturado ampliados, o pixel do centro marcado e o
+    /// anel com a cor amostrada.
+    private func drawEyedropper(_ context: inout GraphicsContext, _ p: CGPoint, cw: CGFloat, ch: CGFloat) {
+        let ring = disk(p, 9)
+        context.stroke(ring, with: .color(StageInk.outlineUnder), lineWidth: 4)
+        context.stroke(ring, with: .color(AureaColors.onImage), lineWidth: 2)
+        var cross = Path()
+        cross.move(to: CGPoint(x: p.x - 16, y: p.y)); cross.addLine(to: CGPoint(x: p.x - 5, y: p.y))
+        cross.move(to: CGPoint(x: p.x + 5, y: p.y)); cross.addLine(to: CGPoint(x: p.x + 16, y: p.y))
+        cross.move(to: CGPoint(x: p.x, y: p.y - 16)); cross.addLine(to: CGPoint(x: p.x, y: p.y - 5))
+        cross.move(to: CGPoint(x: p.x, y: p.y + 5)); cross.addLine(to: CGPoint(x: p.x, y: p.y + 16))
+        context.stroke(cross, with: .color(StageInk.outlineUnder), lineWidth: 3.5)
+        context.stroke(cross, with: .color(AureaColors.onImage), lineWidth: 1.5)
+        guard dropper.dragging, let shot = dropper.shot, let point = dropper.crosshair,
+              shot.width > 0, shot.height > 0 else { return }
+        let r: CGFloat = 34, zoom = 2 * r / 11
+        let px = (point.x / cw * CGFloat(shot.width)).rounded(.down)
+        let py = (point.y / ch * CGFloat(shot.height)).rounded(.down)
+        let above = p.y - r - 26
+        let c = CGPoint(x: p.x, y: above >= r ? above : p.y + r + 26)
+        var lens = context
+        lens.clip(to: disk(c, r))
+        lens.fill(disk(c, r), with: .color(StageInk.outlineUnder))
+        let image = lens.resolve(Image(uiImage: shot.image).interpolation(.none))
+        lens.draw(image, in: CGRect(x: c.x - (px + 0.5) * zoom, y: c.y - (py + 0.5) * zoom,
+                                    width: CGFloat(shot.width) * zoom, height: CGFloat(shot.height) * zoom))
+        lens.stroke(Path(CGRect(x: c.x - zoom / 2, y: c.y - zoom / 2, width: zoom, height: zoom)),
+                    with: .color(AureaColors.onImage), lineWidth: 1.5)
+        let sampled = dropper.color ?? [1, 1, 1, 1]
+        context.stroke(disk(c, r - 2.5), with: .color(PickerColor.color(sampled)), lineWidth: 5)
+        context.stroke(disk(c, r + 2.5), with: .color(AureaColors.onImage), lineWidth: 1.5)
+    }
+
+    private func marker(_ point: CGPoint, key: String, tag: String) -> some View {
+        Color.clear
+            .frame(width: 44, height: 44)
+            .position(point)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(AureaText.t(key))
+            .accessibilityIdentifier(tag)
     }
 }

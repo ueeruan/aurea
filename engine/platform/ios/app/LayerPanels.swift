@@ -800,12 +800,10 @@ struct PresetDialog: View {
     }
     private func fields(_ kind: PanelPresetKind) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            TextField("", text: Binding(get: { name }, set: { name = String($0.prefix(60)) }))
-                .font(.aurea(size: 15)).textFieldStyle(.plain).foregroundStyle(AureaColors.text).tint(AureaColors.accent)
-                .padding(.horizontal, 8).padding(.vertical, 7)
-                .background(Color(hex: 0x1C1C1E), in: RoundedRectangle(cornerRadius: 7)).padding(.top, 10)
+            // Omega fundação (F4): campo e textos do diálogo claro.
+            AureaDialogField(text: Binding(get: { name }, set: { name = String($0.prefix(60)) }))
             if !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && request.exists(name) {
-                Text(AureaText.t("panel_ja_existe_sera_substituido")).font(.aurea(size: 12)).foregroundStyle(AureaColors.danger)
+                Text(AureaText.t("panel_ja_existe_sera_substituido")).font(.aurea(size: 12)).foregroundStyle(AureaColors.lightDanger)
             }
             if kind == .text {
                 HStack {
@@ -1036,14 +1034,19 @@ enum LayerColors {
     }
 }
 
-// AppearancePanel.kt: original opacity rail and grouped blend thumbnails.
+// Omega aparência (área 05, P0-1 + P1-5) — par do AppearancePanel.kt: MESCLAGEM E
+// OPACIDADE em página única, como a referência. A régua de opacidade no topo e, embaixo,
+// a sanfona de categorias (uma aberta por vez; "Normal" aplica direto; abrir rola a
+// categoria para o topo) com os modos numa fileira horizontal de itens 60×80. O texto
+// de ajuda saiu da página e virou a entrada "Sobre a mesclagem" do ⋯.
 struct AppearancePanel: View {
     @EnvironmentObject private var model: AureaModel
-    @State private var tab = 0
-    @State private var openCategories = Set<Int>()
+    @State private var openCategory: Int?
+    @State private var openedFor: Int64?
     private var id: Int64 { model.primarySelection ?? 0 }
     private var opacity: Float { (model.detail["opacity"] as? NSNumber)?.floatValue ?? 1 }
     private var mode: UInt32 { model.selectedLayer?.blendMode ?? 0 }
+    private var locked: Bool { model.selectedLayer?.locked == true }
     private var keys: [KeyframeItem] { (model.keyframes[id] ?? []).filter { $0.property == 12 && $0.effectIndex == .max && $0.paramIndex == 0 }.sorted { $0.time < $1.time } }
     private var look: KeyframeLook { keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated }
     private var expr: ExpressionLook {
@@ -1052,24 +1055,49 @@ struct AppearancePanel: View {
         if (info["enabled"] as? NSNumber)?.boolValue == false { return .off }
         return (info["error"] as? String ?? "").isEmpty ? .ok : .error
     }
-    // Divide 18, Vivid Light 19, Linear Dodge 20 e Linear Burn 21 vieram do
-    // editor antigo; entram nos mesmos grupos do AE (escurecer / clarear /
-    // contraste) e a lista `modes` segue indexada pelo valor de BlendMode.
-    // Máscara 22 / Excluir 23: a máscara do Alight Motion (recorta / fura as de baixo).
-    private static let groups: [[Int]] = [[0], [6, 3, 9, 21, 18], [7, 4, 8, 1, 20], [5, 11, 10, 19], [12, 13, 2], [14, 15, 16, 17], [22, 23]]
-    private static let titles = ["panel_normal", "pn_blend_darken", "pn_blend_lighten", "pn_blend_cat_contrast", "pn_blend_difference", "pn_blend_color", "pn_blend_cat_mask"]
+    /// A ORDEM DA REFERÊNCIA (catálogo de 28). Números = `aurea::BlendMode` (Types.hpp);
+    /// "Adicionar" (1) é extra do AUREA, no fim de Clarear. `direct` = toque aplica sem abrir.
+    private static let categories: [(key: String, title: String, modes: [Int], direct: Int?)] = [
+        ("normal", "panel_normal", [0], 0),
+        ("darken", "pn_blend_darken", [3, 6, 24, 9, 21], nil),
+        ("lighten", "pn_blend_lighten", [4, 7, 25, 8, 20, 1], nil),
+        ("contrast", "pn_blend_cat_contrast", [5, 11, 10, 28, 19, 26, 27], nil),
+        ("difference", "pn_blend_difference", [12, 13, 2, 18], nil),
+        ("color", "pn_blend_color", [14, 15, 16, 17], nil),
+        ("mask", "pn_blend_cat_mask", [22, 23], nil),
+    ]
     static let modes = ["panel_normal", "pn_blend_add", "pn_blend_subtract", "pn_blend_multiply", "pn_blend_screen", "pn_blend_overlay",
         "pn_blend_darken", "pn_blend_lighten", "pn_blend_color_dodge", "pn_blend_color_burn", "pn_blend_hard_light", "pn_blend_soft_light",
         "pn_blend_difference", "pn_blend_exclusion", "pn_blend_hue", "pn_blend_saturation", "pn_blend_color", "pn_blend_luminosity",
-        "pn_blend_divide", "pn_blend_vivid_light", "pn_blend_linear_dodge", "pn_blend_linear_burn", "pn_blend_mask", "pn_blend_exclude"]
-    private static let previews: [GraphicsContext.BlendMode] = [.normal, .plusLighter, .normal, .multiply, .screen, .overlay, .darken, .lighten,
+        "pn_blend_divide", "pn_blend_vivid_light", "pn_blend_linear_dodge", "pn_blend_linear_burn", "pn_blend_mask", "pn_blend_exclude",
+        "om_ap_blend_darker_color", "om_ap_blend_lighter_color", "om_ap_blend_linear_light", "om_ap_blend_pin_light", "om_ap_blend_soft_overlay"]
+    /// A miniatura é ilustrativa (o modo do sistema mais próximo); a conta é a do motor (blend.frag).
+    private static let previews: [GraphicsContext.BlendMode] = [.normal, .plusLighter, .difference, .multiply, .screen, .overlay, .darken, .lighten,
         .colorDodge, .colorBurn, .hardLight, .softLight, .difference, .exclusion, .hue, .saturation, .color, .luminosity,
-        .normal, .normal, .plusLighter, .normal, .destinationIn, .destinationOut]
+        .colorDodge, .colorDodge, .plusLighter, .multiply, .destinationIn, .destinationOut,
+        .darken, .lighten, .hardLight, .overlay, .softLight]
+
     private func write(_ value: Float) { model.editTransform(12, value: value.clamped(to: 0...100) / 100) }
+    private func setMode(_ value: Int) {
+        guard !locked else { return }
+        model.mutate { $0.setLayer(id, blendMode: UInt32(value)) }
+        model.refreshModel(force: true)
+    }
     private func key() {
         model.mutate { core in
             if look == .keyHere { core.deleteKeyframe(forLayer: id, property: 12, time: model.localPlayhead) }
             else { core.insertKeyframe(forLayer: id, property: 12, time: model.localPlayhead, value: opacity) }
+        }
+        model.refreshModel(force: true)
+    }
+    /// ◆ segurado: apaga todas as chaves da opacidade num passo de desfazer.
+    private func deleteAll() {
+        let times = keys.map(\.time)
+        guard !times.isEmpty else { return }
+        model.mutate { core in
+            core.beginUndoGroup()
+            for time in times { core.deleteKeyframe(forLayer: id, property: 12, time: time) }
+            core.endUndoGroup()
         }
         model.refreshModel(force: true)
     }
@@ -1079,94 +1107,158 @@ struct AppearancePanel: View {
     }
     private func expression() { model.expressionSheet = ExpressionRequest(layer: id, label: AureaText.t("panel_opacidade"), tracks: [ExpressionTrack(property: 12)], scale: 100, unit: "%") }
     private func keypad() { model.numericKeypad = KeypadRequest(title: AureaText.t("panel_opacidade"), value: opacity * 100, unit: "%", min: 0, max: 100, decimals: 0, onValue: write) }
-    var body: some View {
-        VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_mistura_opacidade")) { model.panel = .none }
-            HStack(spacing: 0) {
-                LeftRail(keyframeLook: look, onKeyframe: tab == 0 ? key : nil, curveAnimated: look != .none,
-                    onCurve: tab == 0 && keys.count >= 2 ? curve : nil, expression: expr, onExpression: tab == 0 ? expression : nil, onBack: { model.panel = .none })
-                VStack(spacing: 0) {
-                    // A máscara virou efeito (seletor de efeitos): sem aba própria aqui.
-                    ParamTabs([AureaText.t("panel_opacidade"), AureaText.t("panel_mistura")], selected: tab, onSelect: { value in
-                        tab = value
-                    }, animated: { $0 == 0 && look != .none })
-                    if tab == 0 { opacityBody } else { blendBody }
-                }
-            }
-        }.foregroundStyle(AureaColors.text)
-            .onAppear {
-                openCategories = Set(Self.groups.indices.filter { Self.groups[$0].contains(Int(mode)) })
-                model.timelineFocus = [TimelineTrack(property: 12)]
-            }
-            .onChange(of: id) { _ in model.timelineFocus = [TimelineTrack(property: 12)] }
-            .onDisappear { model.timelineFocus = nil }
-    }
-    private var opacityBody: some View {
-        VStack(spacing: 6) {
-            PropertyCustomRow(AureaText.t("panel_opacidade"), selected: true, onSelect: {}, keyframe: look, expression: expr, onExpression: expression) {
-                HStack(spacing: 8) {
-                    ruler(40)
-                    ValueBox("\(Int((opacity * 100).rounded()))%", width: 68, onTap: keypad)
-                }
-            }
-            GeometryReader { bounds in ruler(bounds.size.height) }
-        }.padding(.leading, 2).padding(.trailing, 10).padding(.top, 6).padding(.bottom, 10)
-    }
-    private func ruler(_ height: CGFloat) -> some View {
-        TickRuler(value: { opacity * 100 }, unitsPerDp: 0.35, active: true, height: height)
-            .valueDrag(enabled: true, start: { opacity * 100 }, unitsPerDp: { 0.35 }, min: 0, max: 100,
-                onStart: { model.engine.beginUndoGroup() }, onValue: write, onEnd: { model.engine.endUndoGroup() })
-    }
-    private var blendBody: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Self.groups.indices, id: \.self) { index in
-                    blendCategory(index)
-                }
-                Text(AureaText.t("pn_blend_help")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(3).padding(.top, 4)
-            }.padding(.leading, 8).padding(.trailing, 12).padding(.top, 4).padding(.bottom, 12)
+    private func showAbout() {
+        AureaPopupPresenter.shared.presentDialog { close in
+            AureaAlert(title: AureaText.t("om_ap_blend_about"), message: AureaText.t("pn_blend_help"), showCancel: false,
+                       onConfirm: {}, onDismiss: close)
         }
     }
-    private func blendCategory(_ index: Int) -> some View {
-        VStack(spacing: 0) {
+
+    var body: some View {
+        PanelFrame(rail: PanelRail(onBack: { model.panel = .none }, keyframeLook: look, onKeyframe: key,
+                                   onDeleteAllKeyframes: deleteAll, onCurve: curve, curveReady: keys.count >= 2,
+                                   expression: expr, onExpression: expression,
+                                   moreEntries: { [.item(AureaText.t("om_ap_blend_about"), glyph: CupertinoGlyph.InfoCircle, tag: "blend.about") { showAbout() }] }),
+                   scrollContent: false) {
+            VStack(spacing: 0) {
+                opacityLine
+                accordion
+            }
+        }
+        .foregroundStyle(AureaColors.text)
+        .onAppear { syncOpenCategory(); model.timelineFocus = [TimelineTrack(property: 12)] }
+        .onChange(of: id) { _ in syncOpenCategory(); model.timelineFocus = [TimelineTrack(property: 12)] }
+        .onDisappear { model.timelineFocus = nil }
+    }
+
+    /// A categoria do modo ligado nasce aberta (Normal não abre).
+    private func syncOpenCategory() {
+        guard openedFor != id else { return }
+        openedFor = id
+        openCategory = Self.categories.firstIndex { $0.direct == nil && $0.modes.contains(Int(mode)) }
+    }
+
+    /// Ícone · régua · caixa de valor 56 (teclado 0–100). Um arrasto = um desfazer.
+    private var opacityLine: some View {
+        HStack(spacing: 6) {
+            CupertinoGlyph.text(CupertinoGlyph.CircleLefthalfFill, size: 22, color: AureaColors.text)
+            TickRuler(value: { opacity * 100 }, unitsPerDp: 0.35, active: true, height: 40)
+                .valueDrag(enabled: !locked, start: { opacity * 100 }, unitsPerDp: { 0.35 }, min: 0, max: 100,
+                           onStart: { model.beginGesture("opacidade") }, onValue: write, onEnd: { model.endGesture() })
+                .accessibilityElement()
+                .accessibilityLabel(AureaText.t("panel_opacidade"))
+                .accessibilityValue("\(Int((opacity * 100).rounded()))%")
+                .accessibilityIdentifier("blend.opacity.ruler")
+            ValueBox("\(Int((opacity * 100).rounded()))%", enabled: !locked, width: 56, onTap: keypad)
+                .accessibilityIdentifier("blend.opacity.value")
+        }
+        .frame(height: 40)
+        .padding(.top, 5).padding(.leading, 6).padding(.trailing, 4)
+    }
+
+    private var accordion: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(spacing: 0) {
+                    ForEach(Self.categories.indices, id: \.self) { index in
+                        category(index, proxy: proxy).id(index)
+                    }
+                }.padding(.bottom, 6.5)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func category(_ index: Int, proxy: ScrollViewProxy) -> some View {
+        let cat = Self.categories[index]
+        let isOpen = openCategory == index
+        let current = cat.modes.contains(Int(mode))
+        return VStack(spacing: 0) {
             Button {
-                if openCategories.contains(index) { openCategories.remove(index) } else { openCategories.insert(index) }
+                if let direct = cat.direct {
+                    setMode(direct)
+                    openCategory = nil
+                } else if isOpen {
+                    openCategory = nil
+                } else {
+                    openCategory = index
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(index, anchor: .top) }
+                }
             } label: {
-                HStack(spacing: 8) {
-                    CupertinoGlyph.text(openCategories.contains(index) ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronRight, size: 13, color: AureaColors.muted)
-                        .mirrorsInRtl(!openCategories.contains(index))
-                    Text(AureaText.t(Self.titles[index])).font(.aurea(size: 13.5, weight: .semibold))
-                    Spacer(minLength: 0)
-                    if Self.groups[index].contains(Int(mode)) {
-                        Text(AureaText.t(Self.modes[Int(mode)])).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
+                HStack(spacing: 6) {
+                    if cat.direct == nil {
+                        CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 13, color: AureaColors.muted)
+                            .mirrorsInRtl(!isOpen)
+                            .rotationEffect(.degrees(isOpen ? 90 : 0))
+                            .animation(.easeOut(duration: 0.15), value: isOpen)
+                            .frame(width: 18, height: 18)
+                    } else {
+                        Color.clear.frame(width: 18, height: 18)
+                    }
+                    Text(AureaText.t(cat.title)).font(.aurea(size: 13.5, weight: .semibold)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    if current {
+                        Text(AureaText.t(Self.modes[Int(mode)])).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent).lineLimit(1)
                         CupertinoGlyph.text(CupertinoGlyph.CheckmarkCircleFill, size: 16, color: AureaColors.accent)
                     }
-                }.frame(height: 40).contentShape(Rectangle())
-            }.buttonStyle(.plain)
-            if openCategories.contains(index) {
-                AureaFlowLayout(hGap: 8, vGap: 8) {
-                    ForEach(Self.groups[index], id: \.self) { value in blendChip(value) }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 8)
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 37)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(locked)
+            .accessibilityIdentifier("blend.category.\(cat.key)")
+            .accessibilityAddTraits(current ? .isSelected : [])
+            if isOpen {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 2) {
+                        ForEach(cat.modes, id: \.self) { value in modeItem(value) }
+                    }.padding(.horizontal, 4)
+                }
+                .frame(height: 80)
             }
         }
+        .background(isOpen ? AureaColors.chip : AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 5))
+        .padding(.horizontal, 6.5)
+        .padding(.top, 6.5)
     }
-    private func blendChip(_ value: Int) -> some View {
-        Button {
-            model.mutate { $0.setLayer(id, blendMode: UInt32(value)) }; model.refreshModel(force: true)
-        } label: {
+
+    /// Um modo: 60 × 80 — miniatura de 45 (raio = lado/6) e o nome 11.
+    private func modeItem(_ value: Int) -> some View {
+        let lit = mode == UInt32(value)
+        return Button { setMode(value) } label: {
             VStack(spacing: 4) {
-                if value >= 22 { BlendCutThumb(exclude: value == 23) } else {
-                Canvas { context, size in
-                    let r = size.height * 0.46
-                    context.fill(Path(ellipseIn: CGRect(x: size.width * 0.38 - r, y: size.height / 2 - r, width: r * 2, height: r * 2)), with: .color(AureaColors.blendThumbBottom))
-                    context.blendMode = Self.previews[value]
-                    context.fill(Path(ellipseIn: CGRect(x: size.width * 0.62 - r, y: size.height / 2 - r, width: r * 2, height: r * 2)), with: .color(AureaColors.blendThumbTop))
-                }.frame(width: 34, height: 22).drawingGroup()
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7.5).fill(AureaColors.surface)
+                    if value == 22 || value == 23 {
+                        BlendCutThumb(exclude: value == 23, size: CGSize(width: 41, height: 41))
+                    } else {
+                        Canvas { context, size in
+                            let r = min(size.width, size.height) * 0.30
+                            context.fill(Path(ellipseIn: CGRect(x: size.width * 0.38 - r, y: size.height / 2 - r, width: r * 2, height: r * 2)), with: .color(AureaColors.blendThumbBottom))
+                            context.blendMode = Self.previews[value]
+                            context.fill(Path(ellipseIn: CGRect(x: size.width * 0.62 - r, y: size.height / 2 - r, width: r * 2, height: r * 2)), with: .color(AureaColors.blendThumbTop))
+                        }
+                        .frame(width: 41, height: 41)
+                        .drawingGroup()
+                    }
                 }
-                Text(AureaText.t(Self.modes[value])).font(.aurea(size: 9.5)).foregroundStyle(mode == UInt32(value) ? AureaColors.accent : AureaColors.text).lineLimit(1).padding(.horizontal, 4)
-            }.padding(.vertical, 8).frame(width: 74).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(mode == UInt32(value) ? AureaColors.accent : .clear, lineWidth: 2))
-        }.buttonStyle(.plain)
+                .frame(width: 45, height: 45)
+                .clipShape(RoundedRectangle(cornerRadius: 7.5))
+                .overlay(RoundedRectangle(cornerRadius: 7.5).stroke(lit ? AureaColors.accent : .clear, lineWidth: 2))
+                Text(AureaText.t(Self.modes[value])).font(.aurea(size: 11))
+                    .foregroundStyle(lit ? AureaColors.accent : AureaColors.muted)
+                    .lineLimit(1).padding(.horizontal, 2)
+            }
+            .frame(width: 60, height: 80)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(locked)
+        .accessibilityLabel(AureaText.t(Self.modes[value]))
+        .accessibilityAddTraits(lit ? .isSelected : [])
+        .accessibilityIdentifier("blend.mode.\(value)")
     }
 }
 
@@ -1238,209 +1330,8 @@ struct ClipEditPanel: View {
     }
 }
 
-struct SpeedPanel: View {
-    @EnvironmentObject private var model: AureaModel
-    private var id: Int64 { model.primarySelection ?? 0 }
-    private var speed: Float { (model.detail["speed"] as? NSNumber)?.floatValue ?? 1 }
-    private var flags: UInt32 { (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0 }
-    private var kind: UInt32 { model.selectedLayer?.kind ?? 0 }
-    private var remap: Bool { flags & 4 != 0 }
-    /// Velocidade com keyframe (bit 6): `speed` é a do cabeçote e mexer grava keyframe.
-    private var animated: Bool { flags & 64 != 0 }
-    private var speedKeyHere: Bool {
-        (model.keyframes[id] ?? []).contains { $0.property == 39 && $0.effectIndex == .max && $0.time == model.localPlayhead }
-    }
-    private var speedKeyLook: KeyframeLook { speedKeyHere ? .keyHere : animated ? .animated : .none }
-    private func toggleSpeedKey() {
-        change { core in
-            if speedKeyHere { core.deleteKeyframe(forLayer: id, property: 39, time: model.localPlayhead) }
-            else { core.insertKeyframe(forLayer: id, property: 39, time: model.localPlayhead, value: speed.clamped(to: 0.05...16)) }
-        }
-    }
-    private var clock: String {
-        let seconds = Int((Double(model.selectedLayer?.duration ?? 0) / max(1, model.compositionFps)).rounded())
-        return String(format: "%d:%02d", seconds / 60, seconds % 60)
-    }
-    private var logarithm: Float { log2(speed.clamped(to: 0.05...16)) * 100 }
-    private func change(_ action: (AureaEngine) -> Void) { model.mutate(action); model.refreshModel(force: true) }
-    private func speedText(_ value: Float) -> String { String(format: "%.2f", value).replacingOccurrences(of: ".", with: ",") + "x" }
-    private func setSpeed(_ value: Float) {
-        let v = value.clamped(to: 0.05...16)
-        // Com keyframe, mexer grava/atualiza o keyframe no cabeçote (como o volume).
-        if animated { change { $0.insertKeyframe(forLayer: id, property: 39, time: model.localPlayhead, value: v) } }
-        else { change { $0.setLayer(id, speed: v) } }
-    }
-    private func snap(_ value: Float) -> Float {
-        for tick: Float in [0.25, 0.5, 1, 2, 4] where abs(value - tick) / tick < 0.03 { return tick }
-        return (value * 100).rounded() / 100
-    }
-    var body: some View {
-        VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_tempo_velocidade")) { model.panel = .none }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if kind != 1 && kind != 3 {
-                        hint("panel_velocidade_vale_video_audio_nas_outras", size: 13)
-                    } else {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                speedChip(AureaText.t("remap_normal"), on: !remap) { change { $0.setTimeRemap(false, forLayer: id) } }
-                                speedChip(AureaText.t("remap_linha_tempo"), on: remap) { change { $0.setTimeRemap(true, forLayer: id) } }
-                            }
-                        }.padding(.bottom, 12)
-                        if remap {
-                            TimeRemapEffectEditor(effectId: .max)
-                        } else if speed == 0 && !animated {
-                            Text(AureaText.t("ios_frozen_frame_at", clock)).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
-                            hint("panel_este_trecho_quadro_parado_apare_bordas", size: 13).padding(.top, 8)
-                        } else {
-                            Text(speedText(speed) + " · " + clock).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent)
-                            hint(animated ? "panel_velocidade_keyframes_duracao_fica" : "panel_inicio_camada_fica_lugar_fim_acompanha", size: 12).padding(.top, 10)
-                            // ◇ na etiqueta: grava/apaga o keyframe de velocidade no cabeçote.
-                            PropertyCustomRow(AureaText.t("editor_velocidade"), selected: animated, onSelect: toggleSpeedKey, keyframe: speedKeyLook) {
-                                HStack(spacing: 6) {
-                                    CupertinoGlyph.text(CupertinoGlyph.Tortoise, size: 20, color: AureaColors.muted)
-                                    TickRuler(value: { logarithm }, unitsPerDp: 1, active: true, height: 40)
-                                        .valueDrag(enabled: true, start: { logarithm }, unitsPerDp: { 1 }, min: -332, max: 332,
-                                            onStart: { model.engine.beginUndoGroup() }, onValue: { setSpeed(snap(pow(2, $0 / 100))) },
-                                            onEnd: { model.engine.endUndoGroup() })
-                                    CupertinoGlyph.text(CupertinoGlyph.Hare, size: 20, color: AureaColors.muted)
-                                    ValueBox(speedText(speed), width: 64).padding(.leading, 2)
-                                }
-                            }.padding(.top, 12)
-                            HStack(spacing: 6) {
-                                ForEach(Array([Float(0.25), 0.5, 1, 2, 4].enumerated()), id: \.offset) { index, value in
-                                    speedChip(["0,25x", "0,5x", "1x", "2x", "4x"][index], on: abs(speed - value) < 0.005) { setSpeed(value) }
-                                }
-                            }.padding(.top, 12)
-                            if kind == 1 {
-                                HStack {
-                                    Text(AureaText.t("panel_passar_tras_frente")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-                                    AureaToggle(checked: flags & 1 != 0) { v in change { $0.setLayer(id, reversed: v) } }
-                                }.frame(height: 48).padding(.top, 8)
-                                HStack(spacing: 6) {
-                                    Text(AureaText.t("panel_quadros_camera_lenta")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-                                    ForEach(Array(["panel_repetir_quadro", "panel_misturar", "panel_movimento_suave"].enumerated()), id: \.offset) { index, key in
-                                        speedChip(AureaText.t(key), on: (flags & 16 != 0 ? 2 : flags & 8 != 0 ? 1 : 0) == index, padding: 10) {
-                                            change { $0.setFrameBlendForLayer(id, mode: UInt32(index)) }
-                                        }
-                                    }
-                                }.frame(height: 48)
-                            }
-                        }
-                    }
-                }.padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }.foregroundStyle(AureaColors.text)
-    }
-    private func speedChip(_ label: String, on: Bool, padding: CGFloat = 12, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
-                .padding(.horizontal, padding).frame(minHeight: 44).background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
-    }
-    private func hint(_ key: String, size: CGFloat) -> some View {
-        Text(AureaText.t(key)).font(.aurea(size: size)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
-    }
-}
-
-struct AudioPanel: View {
-    @EnvironmentObject private var model: AureaModel
-    private var id: Int64 { model.primarySelection ?? 0 }
-    private func scalar(_ key: String, _ fallback: Float = 0) -> Float { (model.detail[key] as? NSNumber)?.floatValue ?? fallback }
-    private var flags: UInt32 { (model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0 }
-    private var fps: Float { Float(max(1, model.compositionFps)) }
-    private var volumeKeys: [KeyframeItem] { (model.keyframes[id] ?? []).filter { $0.property == 32 && $0.effectIndex == .max && $0.paramIndex == 0 } }
-    private var keyLook: KeyframeLook { volumeKeys.contains { $0.time == model.localPlayhead } ? .keyHere : flags & 8 != 0 ? .animated : .none }
-    private var expressionLook: ExpressionLook {
-        let info = model.engine.expression(id, property: 32, effect: .max, param: 0)
-        guard (info["exists"] as? NSNumber)?.boolValue == true else { return .none }
-        if (info["enabled"] as? NSNumber)?.boolValue == false { return .off }
-        return (info["error"] as? String ?? "").isEmpty ? .ok : .error
-    }
-    private func change(_ action: (AureaEngine) -> Void) { model.mutate(action); model.refreshModel(force: true) }
-    private func decibel(_ value: Float) -> String {
-        guard value > 0 else { return "−∞ dB" }
-        let v = (20 * log10(value) * 10).rounded() / 10
-        return (v > 0 ? "+" : v < 0 ? "−" : "") + String(format: "%.1f", abs(v)).replacingOccurrences(of: ".", with: ",") + " dB"
-    }
-    private func seconds(_ value: Float) -> String { String(format: "%.2f s", value).replacingOccurrences(of: ".", with: ",") }
-    private func toggleVolumeKey() {
-        change { core in
-            if keyLook == .keyHere { core.deleteKeyframe(forLayer: id, property: 32, time: model.localPlayhead) }
-            else { core.insertKeyframe(forLayer: id, property: 32, time: model.localPlayhead, value: scalar("audioVolume", 1)) }
-        }
-    }
-    private func openExpression() { model.expressionSheet = ExpressionRequest(layer: id, label: AureaText.t("panel_volume"), tracks: [ExpressionTrack(property: 32)], scale: 100, unit: "%") }
-    var body: some View {
-        VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_som")) { model.panel = .none }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if flags & 4 == 0 {
-                        Text(AureaText.t(model.selectedLayer?.kind == 1 ? "panel_este_video_nao_tem_trilha_som" : "panel_esta_camada_nao_tem_audio")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
-                    } else {
-                        HStack(spacing: 8) {
-                            CupertinoGlyph.text(CupertinoGlyph.Speaker2, size: 18, color: AureaColors.accent)
-                            Text(AureaText.t("panel_som")).font(.aurea(size: 17, weight: .bold))
-                            Spacer(minLength: 0)
-                            Text(flags & 1 != 0 || scalar("audioVolume", 1) * scalar("audioGain", 1) <= 0 ? "mudo" : decibel(scalar("audioVolume", 1) * scalar("audioGain", 1))).font(.aurea(size: 13)).foregroundStyle(AureaColors.accent)
-                        }.padding(.bottom, 10)
-                        audioToggle("panel_mudo", checked: flags & 1 != 0) { v in change { $0.setLayer(id, audioMuted: v) } }
-                        audioToggle("panel_solo", checked: flags & 2 != 0) { v in change { $0.setLayer(id, audioSolo: v) } }
-                        audioRuler("panel_volume", value: scalar("audioVolume", 1) * 100, text: "\(Int((scalar("audioVolume", 1) * 100).rounded()))%", units: 0.5, min: 0, max: 200,
-                            keyframe: keyLook, onKeyframe: toggleVolumeKey, expression: expressionLook, onExpression: openExpression) { v in
-                            change { core in
-                                if flags & 8 != 0 { core.insertKeyframe(forLayer: id, property: 32, time: model.localPlayhead, value: v / 100) }
-                                else { core.setLayer(id, audioVolume: v / 100) }
-                            }
-                        }
-                        audioRuler("panel_reforco", value: scalar("audioGain", 1) <= 0 ? -24 : (20 * log10(scalar("audioGain", 1))).clamped(to: -24...12), text: decibel(scalar("audioGain", 1)), units: 0.1, min: -24, max: 12) { v in
-                            change { $0.setLayer(id, audioGain: v <= -24 ? 0 : pow(10, v / 20)) }
-                        }
-                        let pan = Int((scalar("audioPan") * 100).rounded())
-                        audioRuler("panel_esquerda_direita", value: scalar("audioPan") * 100, text: pan == 0 ? AureaText.t("panel_centro") : pan < 0 ? AureaText.t("ios_pan_left_n", -pan) : AureaText.t("ios_pan_right_n", pan), units: 0.5, min: -100, max: 100) { v in change { $0.setLayer(id, audioPan: v / 100) } }
-                        let maxFade = max(0, Float(model.selectedLayer?.duration ?? 0) / fps / 2)
-                        audioRuler("panel_entrada_suave", value: scalar("audioFadeIn") / fps, text: seconds(scalar("audioFadeIn") / fps), units: 0.02, min: 0, max: maxFade) { v in change { $0.setLayer(id, fadeIn: Int32((v * fps).rounded())) } }
-                        audioRuler("panel_saida_suave", value: scalar("audioFadeOut") / fps, text: seconds(scalar("audioFadeOut") / fps), units: 0.02, min: 0, max: maxFade) { v in change { $0.setLayer(id, fadeOut: Int32((v * fps).rounded())) } }
-                        Text(AureaText.t("panel_volume_sobe_desce_forma_natural_sem")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted).padding(.top, 6).fixedSize(horizontal: false, vertical: true)
-                        if model.selectedLayer?.kind == 1 {
-                            Button {
-                                let added = model.engine.extractAudio(fromLayer: id)
-                                if added > 0 { model.refreshModel(force: true); model.select(layerId: added, additive: false) }
-                                else { model.toast = AureaEngineText.sentence(model.engine.lastImportError) }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    CupertinoGlyph.text(CupertinoGlyph.MusicNote2, size: 16, color: AureaColors.accent)
-                                    Text(AureaText.t("panel_extrair_audio_camada")).font(.aurea(size: 13))
-                                    Spacer(minLength: 0)
-                                }.padding(.horizontal, 12).frame(height: 44).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
-                            }.buttonStyle(.plain).padding(.top, 12)
-                        }
-                    }
-                }.padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }.foregroundStyle(AureaColors.text)
-    }
-    private func audioToggle(_ key: String, checked: Bool, onChange: @escaping (Bool) -> Void) -> some View {
-        HStack {
-            Text(AureaText.t(key)).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-            AureaToggle(checked: checked, onCheckedChange: onChange)
-        }.frame(height: 48)
-    }
-    private func audioRuler(_ key: String, value: Float, text: String, units: Float, min: Float, max: Float,
-        keyframe: KeyframeLook = .none, onKeyframe: (() -> Void)? = nil, expression: ExpressionLook = .none,
-        onExpression: (() -> Void)? = nil, onValue: @escaping (Float) -> Void) -> some View {
-        PropertyCustomRow(AureaText.t(key), selected: keyframe != .none, onSelect: { onKeyframe?() }, keyframe: keyframe, expression: expression, onExpression: onExpression) {
-            HStack(spacing: 8) {
-                TickRuler(value: { value }, unitsPerDp: units, active: true, height: 40)
-                    .valueDrag(enabled: true, start: { value }, unitsPerDp: { units }, min: min, max: max,
-                        onStart: { model.engine.beginUndoGroup() }, onValue: onValue, onEnd: { model.engine.endUndoGroup() })
-                ValueBox(text)
-            }
-        }
-    }
-}
+// Omega painel: (área 04) `SpeedPanel` e `AudioPanel` foram para a moldura comum
+// em LayerPanelView.swift (par do SpeedAudioPanels.kt).
 
 struct ShapePanel: View {
     @EnvironmentObject private var model: AureaModel
@@ -1567,12 +1458,8 @@ struct ShapePanel: View {
             switchButton(CupertinoGlyph.ChevronRight, label: AureaText.t("panel_proxima_forma"), delta: 1)
             Color.clear.frame(width: 6)
             Text(shapeName).font(.aurea(size: 15, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
-            Button { model.shapeSizeLinked.toggle() } label: {
-                MaterialGlyph(model.shapeSizeLinked ? "rounded.Link" : "rounded.LinkOff", size: 20, color: model.shapeSizeLinked ? AureaColors.accent : AureaColors.text)
-                    .frame(width: 44, height: 36)
-                    .background(model.shapeSizeLinked ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(model.shapeSizeLinked ? AureaColors.accent : .clear, lineWidth: 1.5))
-            }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t(model.shapeSizeLinked ? "panel_soltar_proporcao" : "panel_manter_proporcao"))
+            // Omega conteúdo (área 06, P0-6): "manter proporção" e "a partir do centro" moram
+            // na barra da seção (ContentSectionTrailing), salvos no aparelho.
         }.frame(height: 52)
     }
     private func switchButton(_ glyph: Character, label: String, delta: Int) -> some View {
@@ -1711,7 +1598,7 @@ struct ShapePanel: View {
     }
     private func writeSize(_ amount: Float, from: [Float]) {
         let v = amount.clamped(to: 1...16384)
-        if model.shapeSizeLinked {
+        if ContentPrefs.shared.lockAspect {   // Omega conteúdo (área 06, P0-6)
             let k = from[axis] > 0 ? v / from[axis] : 1
             write(5, axis == 0 ? v : (from[0] * k).clamped(to: 1...16384))
             write(6, axis == 1 ? v : (from[1] * k).clamped(to: 1...16384))
@@ -2132,7 +2019,9 @@ struct TextAnimationSection: View {
                     }
                 }.frame(height: 44)
             }
-            ForEach(animators.indices, id: \.self) { index in NativeTextAnimatorCard(index: UInt32(index), values: animators[index]).padding(.top, 8) }
+            // Omega conteúdo (área 06, P1-11): os animadores em LISTA (linha de 37 pt que abre os
+            // ajustes a partir dela) e "+ Adicionar" no fim, com os tipos.
+            TextAnimatorList(animators: animators, reload: refresh, beforeAnimation: beforeAnimation).padding(.top, 6)
             if showAnimatorEffect { NativePanelChip(AureaText.t("text_animator_add")) {
                 beforeAnimation()
                 model.addEffectAndFocus(fxEffectTypeId("aurea.text.animator"), layer: id)
@@ -2150,6 +2039,178 @@ struct TextAnimationSection: View {
             } message: {
                 Text(AureaText.t("ios_text_anim_failed"))
             }
+    }
+}
+
+/// Omega conteúdo (área 06, P1-11): a LISTA de animadores. Cada um é uma linha de 37 pt
+/// (▸, ícone, nome e o que ele mexe); tocar abre os ajustes a partir da linha (200 ms)
+/// com cabeçalho ▾ · ícone · nome · liga · ⋯ (duplicar, subir, descer) · 🗑. O último
+/// item é "+ Adicionar", que abre os tipos. Par do AnimatorList do TextAnimSection.kt.
+private struct TextAnimatorList: View {
+    @EnvironmentObject private var model: AureaModel
+    let animators: [[Float]]
+    let reload: () -> Void
+    var beforeAnimation: () -> Void = {}
+    @State private var open = -1
+    @State private var adding = false
+    @State private var more = -1
+    private var id: Int64 { model.primarySelection ?? 0 }
+    /// As propriedades do animador (bit do motor, rótulo), na ordem do cartão.
+    private static let props: [(Int, String)] = [
+        (1 << 0, "fx_posicao"), (1 << 1, "panel_escala"), (1 << 2, "panel_rotacao"), (1 << 3, "panel_opacidade"),
+        (1 << 4, "ios_spacing"), (1 << 5, "panel_desfoque"), (1 << 6, "ios_skew"), (1 << 7, "panel_contorno"),
+        (1 << 8, "ios_scramble_letter"), (1 << 9, "panel_cor"), (1 << 10, "panel_cor_contorno"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(animators.indices, id: \.self) { index in
+                VStack(spacing: 0) {
+                    if open == index {
+                        header(index)
+                        NativeTextAnimatorCard(index: UInt32(index), values: animators[index], embedded: true)
+                    } else {
+                        row(index)
+                    }
+                }
+                .background(AureaColors.fxListSurface, in: RoundedRectangle(cornerRadius: 5))
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .padding(.vertical, 3.25)
+            }
+            Button { adding = true } label: {
+                HStack(spacing: 8) {
+                    CupertinoGlyph.text(CupertinoGlyph.Plus, size: 16)
+                    Text(AureaText.t("la_add")).font(.aurea(size: 13))
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10).frame(height: 37)
+                .background(AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: 5))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle(shrink: 1))
+            .padding(.vertical, 2)
+            .accessibilityIdentifier("anim.add")
+            .aureaAnchoredMenu(isPresented: $adding, width: 300, tone: .editor, tag: "anim.add.menu") { addEntries() }
+        }
+        .foregroundStyle(AureaColors.text)
+        .animation(.easeInOut(duration: 0.2), value: open)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(AureaText.t("om_anim_list_cd"))
+        .accessibilityIdentifier("anim.list")
+        .onChange(of: model.primarySelection) { _ in open = -1 }
+    }
+
+    private func what(_ v: [Float]) -> String {
+        let bits = Int(v.count > 1 ? v[1] : 0)
+        return Self.props.filter { bits & $0.0 != 0 }.map { AureaText.t($0.1) }.joined(separator: ", ")
+    }
+
+    /// A linha fechada: ▸ (alfa 0,3), ícone do tipo, o nome e o que ele mexe.
+    private func row(_ index: Int) -> some View {
+        let v = animators[index], list = what(v)
+        return Button { open = index } label: {
+            HStack(spacing: 0) {
+                CupertinoGlyph.text(CupertinoGlyph.ArrowtriangleRightFill, size: 18, color: AureaColors.text.opacity(0.3))
+                Color.clear.frame(width: 4, height: 1)
+                CupertinoGlyph.text(CupertinoGlyph.Textformat, size: 18, color: v[0] > 0.5 ? AureaColors.text : AureaColors.muted)
+                Color.clear.frame(width: 8, height: 1)
+                Text(AureaText.t("edt_animation_n", index + 1)).font(.aurea(size: 13, weight: .semibold))
+                Color.clear.frame(width: 8, height: 1)
+                Text(list).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 6).frame(height: 37).contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .accessibilityLabel(AureaText.t("om_anim_item_cd", index + 1, list))
+        .accessibilityIdentifier("anim.item.\(index)")
+    }
+
+    /// Cabeçalho do animador aberto: ▾ · ícone · nome · liga · ⋯ · 🗑.
+    private func header(_ index: Int) -> some View {
+        let v = animators[index]
+        return HStack(spacing: 0) {
+            Button { open = -1 } label: {
+                CupertinoGlyph.text(CupertinoGlyph.ArrowtriangleDownFill, size: 16).frame(width: 36, height: 40).contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle(shrink: 1))
+            .accessibilityLabel(AureaText.t("om_anim_collapse_cd"))
+            CupertinoGlyph.text(CupertinoGlyph.Textformat, size: 18)
+            Color.clear.frame(width: 8, height: 1)
+            Text(AureaText.t("edt_animation_n", index + 1)).font(.aurea(size: 13, weight: .bold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            AureaToggle(checked: v[0] > 0.5) { set(index, [0: $0 ? 1 : 0]) }
+            Button { more = index } label: {
+                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 18, color: AureaColors.fxListIcon).frame(width: 36, height: 40).contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle(shrink: 1))
+            .accessibilityLabel(AureaText.t("editor_mais"))
+            .accessibilityIdentifier("anim.item.\(index).more")
+            .aureaAnchoredMenu(isPresented: Binding(get: { more == index }, set: { if !$0 { more = -1 } }), tone: .editor, alignEnd: true,
+                               tag: "anim.item.\(index).menu") {
+                [
+                    .item(AureaText.t("om_anim_duplicate"), glyph: CupertinoGlyph.PlusSquareOnSquare, tag: "anim.item.\(index).duplicate") {
+                        if model.engine.duplicateTextAnimator(id, index: UInt32(index)) >= 0 { open = index + 1 }
+                        reload()
+                    },
+                    .item(AureaText.t("panel_mover_cima"), glyph: CupertinoGlyph.ArrowUp, enabled: index > 0) {
+                        if model.engine.moveTextAnimator(id, from: UInt32(index), to: UInt32(index - 1)) { open = index - 1 }
+                        reload()
+                    },
+                    .item(AureaText.t("panel_mover_baixo"), glyph: CupertinoGlyph.ArrowDown, enabled: index < animators.count - 1) {
+                        if model.engine.moveTextAnimator(id, from: UInt32(index), to: UInt32(index + 1)) { open = index + 1 }
+                        reload()
+                    },
+                ]
+            }
+            Button {
+                model.engine.removeTextAnimator(id, index: UInt32(index))
+                open = -1
+                reload()
+            } label: {
+                CupertinoGlyph.text(CupertinoGlyph.Trash, size: 18, color: AureaColors.fxListIcon).frame(width: 36, height: 40).contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle(shrink: 1))
+            .accessibilityLabel(AureaText.t("panel_remover"))
+            .accessibilityIdentifier("anim.item.\(index).delete")
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 40)
+    }
+
+    private func set(_ index: Int, _ updates: [Int: Float]) {
+        let flat = model.engine.textAnimators(id).map(\.floatValue), start = index * 40
+        guard flat.count >= start + 40 else { return }
+        var next = Array(flat[start..<(start + 40)])
+        for (slot, value) in updates { next[slot] = value }
+        _ = model.engine.setTextAnimator(id, index: UInt32(index), values: next.map { NSNumber(value: $0) })
+        reload()
+    }
+
+    /// Os tipos do "+ Adicionar": de texto (por propriedade), de camada e os efeitos de movimento.
+    private func addEntries() -> [MenuEntry] {
+        var entries: [MenuEntry] = [.header(AureaText.t("text_animator_add"))]
+        for (bit, key) in Self.props {
+            entries.append(.item(AureaText.t(key), glyph: CupertinoGlyph.Textformat) {
+                beforeAnimation()
+                let created = model.engine.addTextAnimator(id, props: UInt32(bit))
+                reload()
+                if created >= 0 { open = created }
+            })
+        }
+        entries.append(.divider)
+        entries.append(.item(AureaText.t("la_animators"), glyph: CupertinoGlyph.Move) { model.transformTab = 6; model.openPanel(.transform) })
+        let motion: [(String, String)] = [("aurea.motion.oscillate.cycles", "fx_name_oscillate"), ("aurea.motion.swing", "fx_name_swing"),
+                                          ("aurea.motion.wiggle", "fx_name_wiggle"), ("aurea.motion.twitch", "fx_name_twitch")]
+        for (type, key) in motion {
+            entries.append(.item(AureaText.t(key), glyph: CupertinoGlyph.Sparkles) {
+                beforeAnimation()
+                model.addEffectAndFocus(fxEffectTypeId(type), layer: id)
+                reload()
+                model.openPanel(.effects)
+            })
+        }
+        return entries
     }
 }
 
@@ -2189,6 +2250,8 @@ private struct NativeTextAnimatorCard: View {
     @EnvironmentObject private var model: AureaModel
     let index: UInt32
     let values: [Float]
+    /// Omega conteúdo (área 06, P1-11): dentro da lista o cabeçalho é da linha aberta.
+    var embedded = false
     private var id: Int64 { model.primarySelection ?? 0 }
     // Portuguese names stay as the undo labels sent to the engine; the screen shows `titles`.
     private let names = ["Posição", "Escala", "Rotação", "Opacidade", "Espaçamento", "Desfoque", "Inclinação", "Contorno", "Embaralhar letra", "Cor", "Cor do contorno"]
@@ -2202,11 +2265,13 @@ private struct NativeTextAnimatorCard: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(AureaText.t("ios_animation_n", Int(index) + 1)).font(.aurea(size: 13, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
-                NativePanelChip(AureaText.t("panel_remover")) { model.engine.removeTextAnimator(id, index: index); model.refreshModel(force: true) }
-                AureaToggle(checked: values[0] > 0.5) { set([0: $0 ? 1 : 0]) }
-            }.frame(height: 40)
+            if !embedded {
+                HStack(spacing: 8) {
+                    Text(AureaText.t("ios_animation_n", Int(index) + 1)).font(.aurea(size: 13, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
+                    NativePanelChip(AureaText.t("panel_remover")) { model.engine.removeTextAnimator(id, index: index); model.refreshModel(force: true) }
+                    AureaToggle(checked: values[0] > 0.5) { set([0: $0 ? 1 : 0]) }
+                }.frame(height: 40)
+            }
             choices("panel_anima_cada", ["panel_letra", "panel_palavra", "panel_linha"], slot: 2)
             choices("panel_escolhe", ["panel_ordem", "panel_sorteado", "ios_range_ae"], slot: 3)
             selectorControls
@@ -2219,7 +2284,7 @@ private struct NativeTextAnimatorCard: View {
                     }
                 }.frame(height: 44)
             }
-        }.padding(8).background(AureaColors.chip.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+        }.padding(8).background(embedded ? Color.clear : AureaColors.chip.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
     }
     @ViewBuilder private var selectorControls: some View {
         if Int(values[3]) != 1 {

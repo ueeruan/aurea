@@ -69,6 +69,8 @@ object PluginTexts {
                 enumLabels = options, animated = p.animated, hardMin = p.hardMin, hardMax = p.hardMax,
                 section = p.section, sectionId = p.sectionId, sectionLabel = p.sectionLabel, sectionToggle = p.sectionToggle,
                 sectionOpen = p.sectionOpen, tip = p.tip,
+                // Omega efeitos (P0-1): a apresentação passa intacta.
+                control = p.control, step = p.step, origin = p.origin, enumStyle = p.enumStyle, rowFlags = p.rowFlags,
             )
         }
     }

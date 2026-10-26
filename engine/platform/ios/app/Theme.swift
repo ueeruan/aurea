@@ -80,17 +80,46 @@ struct AureaPalette: Identifiable {
     /// Ícone e texto sobre a cor de marca (`brand`/`action`): branco nos temas
     /// escuros, escuro no Omega, cujo destaque é claro.
     var onBrandOverride: Color? = nil
+    // Omega fundação: papéis das telas claras. Nil = derivados dos tons escuros
+    // deste tema (`AureaLightRoles.mapped(from:)`); só o Omega é claro.
+    var lightRolesOverride: AureaLightRoles? = nil
+    // Omega timeline (área 03): cabeçalho da linha, aba do tempo atual e fundo da
+    // linha arrastada. Nil = derivados dos tons deste tema (par do Android).
+    var timelineHeaderOverride: Color? = nil
+    var timelineTimeTabOverride: Color? = nil
+    var timelineDragRowOverride: Color? = nil
+    var timelineHeader: Color { timelineHeaderOverride ?? editorRowPill }
+    var timelineTimeTab: Color { timelineTimeTabOverride ?? editorRowPill }
+    var timelineDragRow: Color { timelineDragRowOverride ?? chipHigh }
+    // Omega painel: (área 04) fundo do gráfico do editor de curva (P10 da
+    // referência; par do `curveGraph` do Android). Os outros temas derivam do
+    // campo alto que já têm. Pelo id, para não mexer no init da paleta.
+    var curveGraph: Color { id == "omega" ? Color(hex: 0xFF474D70) : chipHigh }
+    /// Os papéis claros em uso (ver `AureaLightRoles`).
+    var light: AureaLightRoles { lightRolesOverride ?? .mapped(from: self) }
+    /// Omega efeitos (área 07): papéis do painel de efeitos (ver `AureaFxRoles`).
+    /// Pelo id, para não mexer no init da paleta (par do `fx` do Android).
+    var fx: AureaFxRoles { id == "omega" ? .omega : .mapped(from: self) }
+    /// Omega conteúdo (área 06): papéis dos editores de conteúdo (ver `AureaContentRoles`).
+    var content: AureaContentRoles { id == "omega" ? .omega : .mapped(from: self) }
+    /// Omega home (área 01): papéis só da Home (ver `AureaHomeRoles`; par do `home` do Android).
+    var home: AureaHomeRoles { id == "omega" ? .omega : .mapped(from: self) }
     var editorCanvas: Color { editorCanvasOverride ?? editorPanelHigh }
     var editorBar: Color { editorBarOverride ?? surfaceHigh }
     var editorBarLine: Color { editorBarLineOverride ?? border }
     var editorRowPill: Color { editorRowPillOverride ?? chip }
     var editorGlyphBox: Color { editorGlyphBoxOverride ?? chipHigh }
+    /// Omega fundação: faltava (o `AureaColors.onAction` já lia `palette.onBrand`).
+    /// Mesmo padrão do Android: branco #F7F9FB nos temas escuros.
+    var onBrand: Color { onBrandOverride ?? Color(hex: 0xFFF7F9FB) }
     /// Omega (versão de teste 0.3.2): a tela de edição segue a referência de mercado
     /// estudada em `build/reference/am-omega-20261026/` — fundos azul-marinho em
     /// camadas e um único destaque verde-menta. Mesmos valores do Android.
     static let omega = AureaPalette(id: "omega", brandDeep: Color(hex: 0xFF0F5042), brand: Color(hex: 0xFF00FFA8), accent: Color(hex: 0xFF00FFA8), keyframe: Color(hex: 0xFF00FFA8), background: Color(hex: 0xFF141620), surface: Color(hex: 0xFF191B27), surfaceHigh: Color(hex: 0xFF202332), chip: Color(hex: 0xFF2B2E3C), chipHigh: Color(hex: 0xFF333750), border: Color(hex: 0xFF292D40), muted: Color(hex: 0xFFA3A5B0), subtle: Color(hex: 0xFF767A88), onAccent: Color(hex: 0xFF131313), accentDim: Color(hex: 0xFF0F5042), keyframeDim: Color(hex: 0xFF0F5042), stage: Color(hex: 0xFF0C0D13), hairline: Color(hex: 0xB8292D40), editorTopBar: Color(hex: 0xFF141620), editorPanel: Color(hex: 0xFF202332), editorPanelHigh: Color(hex: 0xFF2B2E3C), pill: Color(hex: 0xFF202332), actionDim: Color(hex: 0xFF0F5042), statusBarVeil: Color(hex: 0xFF0C0D13), systemBarVeil: Color(hex: 0xFF0C0D13), tickWeak: Color(hex: 0xFF494C5A), tickStrong: Color(hex: 0xFF818390), railModeFill: Color(hex: 0xFF2B2E3C), fieldFilled: Color(hex: 0xFF2A2F36),
                                     editorCanvasOverride: Color(hex: 0xFF141620), editorBarOverride: Color(hex: 0xFF202332), editorBarLineOverride: Color(hex: 0xFF292D40),
-                                    editorRowPillOverride: Color(hex: 0xFF262A3C), editorGlyphBoxOverride: Color(hex: 0xFF333750), onBrandOverride: Color(hex: 0xFF131313))
+                                    editorRowPillOverride: Color(hex: 0xFF262A3C), editorGlyphBoxOverride: Color(hex: 0xFF333750), onBrandOverride: Color(hex: 0xFF131313),
+                                    lightRolesOverride: .omega,
+                                    timelineHeaderOverride: Color(hex: 0xFF2C313F), timelineTimeTabOverride: Color(hex: 0xFF282C3F), timelineDragRowOverride: Color(hex: 0xFF484B5B))
     static let aurea = AureaPalette(id: "aurea", brandDeep: Color(hex: 0xFF123A63), brand: Color(hex: 0xFF245D8C), accent: Color(hex: 0xFF6FAED9), keyframe: Color(hex: 0xFFA9D3EC), background: Color(hex: 0xFF0F141A), surface: Color(hex: 0xFF151C24), surfaceHigh: Color(hex: 0xFF1B2530), chip: Color(hex: 0xFF212D3A), chipHigh: Color(hex: 0xFF323D49), border: Color(hex: 0xFF273442), muted: Color(hex: 0xFFAAB6C3), subtle: Color(hex: 0xFF7C8A99), onAccent: Color(hex: 0xFF0B1117), accentDim: Color(hex: 0xFF1D3A55), keyframeDim: Color(hex: 0xFF22405A), stage: Color(hex: 0xFF0A0E13), hairline: Color(hex: 0xB8273442), editorTopBar: Color(hex: 0xFF0F141A), editorPanel: Color(hex: 0xFF0F141A), editorPanelHigh: Color(hex: 0xFF151C24), pill: Color(hex: 0xFF1B2530), actionDim: Color(hex: 0xFF16304A), statusBarVeil: Color(hex: 0xFF070A0E), systemBarVeil: Color(hex: 0xFF0B0F13), tickWeak: Color(hex: 0xFF43516A), tickStrong: Color(hex: 0xFF7485A3), railModeFill: Color(hex: 0xFF1E222D), fieldFilled: Color(hex: 0xFF272B33),
                                     editorCanvasOverride: Color(hex: 0xFF161C2A), editorBarOverride: Color(hex: 0xFF1B2330), editorBarLineOverride: Color(hex: 0xFF2A3444),
                                     editorRowPillOverride: Color(hex: 0xFF222B3B), editorGlyphBoxOverride: Color(hex: 0xFF2E3B4E))
@@ -107,6 +136,247 @@ struct AureaPalette: Identifiable {
 /// que é a identidade da raiz).
 enum AureaTheme {
     static var palette: AureaPalette = .of(UserDefaults.standard.string(forKey: "aurea.theme"))
+}
+
+// =============================================================================
+// Omega fundação: PAPÉIS CLAROS (telas fora do editor)
+//
+// A referência é clara fora do editor: Home, gaveta, folha "Novo projeto",
+// página de exportação, diálogos e menus popup. Essas telas pintam SÓ com estes
+// papéis (`AureaColors.light*`). No Omega os valores são claros; nos outros seis
+// temas cada papel cai no tom escuro que o tema já tem (texto claro). Par exato
+// de `AureaLightRoles` do AureaTokens.kt (mesmos nomes e valores).
+// =============================================================================
+struct AureaLightRoles {
+    /// Verdadeiro só quando os papéis são claros (barra de status escura).
+    let isLight: Bool
+    /// Fundo da página: abas da Home, gaveta, cabeçalhos.
+    let background: Color
+    /// Folha/página agrupada: "Novo projeto", página de exportação.
+    let sheet: Color
+    /// Superfície: cartões, menus popup, caixas suspensas, campos, barra de abas.
+    let surface: Color
+    /// Fundo dos diálogos.
+    let dialog: Color
+    /// Superfície alternativa: grupo da gaveta, linha pressionada ou escolhida.
+    let surfaceAlt: Color
+    /// Texto e ícone principais.
+    let text: Color
+    /// Texto secundário: rótulo, sublinha, valor à direita.
+    let textMuted: Color
+    /// Dica, placeholder e texto desabilitado.
+    let textFaint: Color
+    /// Fio divisório (0,5–1 pt).
+    let divider: Color
+    /// Preenchimento forte: segmento ativo, botão principal (Exportar).
+    let ink: Color
+    /// Texto e ícone sobre `ink`.
+    let onInk: Color
+    /// Destaque legível sobre as superfícies claras: botão positivo, ✓, barra da linha escolhida.
+    let accentInk: Color
+    /// Ação destrutiva sobre as superfícies claras.
+    let danger: Color
+    /// Sombra de cartões e menus.
+    let shadow: Color
+
+    /// Omega: os valores da referência. `accentInk` é um verde escuro (4,9:1
+    /// sobre o diálogo) em vez do menta puro, ilegível sobre branco (1,3:1).
+    static let omega = AureaLightRoles(
+        isLight: true,
+        background: Color(hex: 0xFFF6F6F6), sheet: Color(hex: 0xFFEDEEF0), surface: Color(hex: 0xFFFFFFFF),
+        dialog: Color(hex: 0xFFF5F5F8), surfaceAlt: Color(hex: 0xFFEAEAEC),
+        text: Color(hex: 0xFF1E2239), textMuted: Color(hex: 0xFF8C8E93), textFaint: Color(hex: 0xFFA9ABB4),
+        divider: Color(hex: 0xFFD8D8D8), ink: Color(hex: 0xFF1E2239), onInk: Color(hex: 0xFF00FFA8),
+        accentInk: Color(hex: 0xFF007A50), danger: Color(hex: 0xFFC62828), shadow: Color(hex: 0x261E2239))
+
+    /// Temas escuros: cada papel no tom escuro que o tema já tem.
+    static func mapped(from p: AureaPalette) -> AureaLightRoles {
+        AureaLightRoles(
+            isLight: false,
+            background: p.background, sheet: p.surface, surface: p.surfaceHigh,
+            dialog: p.surfaceHigh, surfaceAlt: p.chip,
+            text: Color(hex: 0xFFF7F9FB), textMuted: p.muted, textFaint: p.subtle,
+            divider: p.border, ink: p.brand, onInk: p.onBrand,
+            accentInk: p.accent, danger: Color(hex: 0xFFFF453A), shadow: Color(hex: 0x73000000))
+    }
+}
+
+// =============================================================================
+// Omega home: PAPÉIS SÓ DA HOME (área 01). O que a Home da referência pinta e os
+// papéis claros comuns não cobrem: gaveta, miniatura, barra de seleção, véu do
+// menu rápido, cobertura, avatar sem login, pílulas das subabas (cores lidas pelo
+// REA), sombras de 5 % e 20 % e o selo de duração. Claros no Omega; nos outros
+// temas, os tons escuros do tema. Par exato de `AureaHomeRoles` do AureaTokens.kt.
+// =============================================================================
+struct AureaHomeRoles {
+    let drawer: Color
+    let thumb: Color
+    let selectionBar: Color
+    let onSelectionBar: Color
+    let menuScrim: Color
+    let cover: Color
+    let avatar: Color
+    let onAvatar: Color
+    let pillSelected: Color
+    let onPillSelected: Color
+    let pillUnselected: Color
+    let onPillUnselected: Color
+    let pillPressed: Color
+    let onPillPressed: Color
+    let shadowSoft: Color
+    let shadowStrong: Color
+    let badge: Color
+    let onBadge: Color
+
+    /// Omega: os valores da referência (cores das pílulas lidas pelo REA).
+    static let omega = AureaHomeRoles(
+        drawer: Color(hex: 0xFFFAFAFA), thumb: Color(hex: 0xFFD5D5D5),
+        selectionBar: Color(hex: 0xFF43486B), onSelectionBar: Color(hex: 0xFFFFFFFF),
+        menuScrim: Color(hex: 0xCCEDEDED), cover: Color(hex: 0xB3000000),
+        avatar: Color(hex: 0xFF626575), onAvatar: Color(hex: 0xFFFFFFFF),
+        pillSelected: Color(hex: 0xFF1F2238), onPillSelected: Color(hex: 0xFFFFFFFF),
+        pillUnselected: Color(hex: 0xFFFFFFFF), onPillUnselected: Color(hex: 0xFF8D8D8D),
+        pillPressed: Color(hex: 0xFFE9ECFF), onPillPressed: Color(hex: 0xFF1F2238),
+        shadowSoft: Color(hex: 0x0C1F2238), shadowStrong: Color(hex: 0x331F2238),
+        badge: Color(hex: 0xFF1E2239), onBadge: Color(hex: 0xFFFFFFFF))
+
+    /// Temas escuros: cada papel no tom escuro que o tema já tem.
+    static func mapped(from p: AureaPalette) -> AureaHomeRoles {
+        AureaHomeRoles(
+            drawer: p.surface, thumb: p.chip,
+            selectionBar: p.chipHigh, onSelectionBar: Color(hex: 0xFFF7F9FB),
+            menuScrim: p.background.opacity(0.8), cover: Color(hex: 0xB3000000),
+            avatar: p.chipHigh, onAvatar: Color(hex: 0xFFF7F9FB),
+            pillSelected: p.brand, onPillSelected: p.onBrand,
+            pillUnselected: p.surfaceHigh, onPillUnselected: p.muted,
+            pillPressed: p.chip, onPillPressed: Color(hex: 0xFFF7F9FB),
+            shadowSoft: Color(hex: 0x26000000), shadowStrong: Color(hex: 0x59000000),
+            badge: Color(hex: 0xB3000000), onBadge: Color(hex: 0xFFFFFFFF))
+    }
+}
+
+// =============================================================================
+// Omega efeitos (área 07): PAPÉIS do painel de efeitos, das linhas de parâmetro
+// e do navegador de efeitos. No Omega valem os tons da referência; nos outros
+// seis temas cada papel cai no tom que o tema já tem. Par exato de
+// `AureaFxRoles` do AureaTokens.kt (mesmos nomes e valores).
+// =============================================================================
+struct AureaFxRoles {
+    /// «painel» (A9): fundo do painel de efeitos.
+    let panel: Color
+    /// «superfície de lista» (S9): linha do efeito, cabeçalho e corpo dos controles, navegador.
+    let listSurface: Color
+    /// «superfície baixa» (S10): "+ Adicionar efeito", faixa da seção, recomendados.
+    let lowSurface: Color
+    /// «afundado» (A11): rótulo ativo, caixa pressionada, suspenso.
+    let sunken: Color
+    /// «mais escuro» (A12): grade de categorias, folha de detalhe, borda das etiquetas.
+    let darkest: Color
+    /// «busca» (S8) e «campo» (S6) do navegador.
+    let search: Color
+    let field: Color
+    /// «segmento» (P11) e «segmento ativo» (P10) da escolha segmentada.
+    let segment: Color
+    let segmentOn: Color
+    /// «rótulo» (P11 a 30 %) e «véu 20 %» (caixa de valor).
+    let label: Color
+    let valueVeil: Color
+    /// «eixo X» (C1), «eixo Z» (L3_A) e «agulha» (C1).
+    let axisX: Color
+    let axisZ: Color
+    let needle: Color
+    /// «risco» (D1), «trilho» (P3) e trilho desabilitado.
+    let tick: Color
+    let track: Color
+    let trackDisabled: Color
+    /// «texto de dica» (S2), «texto desabilitado» (S1), «texto de cor» (P6), «rótulo de eixo» (P3).
+    let tipText: Color
+    let disabledText: Color
+    let colorText: Color
+    let axisLabel: Color
+    /// «ícone de lista» (⋮ e 🗑 do cabeçalho) e «texto secundário» (P5).
+    let listIcon: Color
+    let textSecondary: Color
+    /// Véu da folha de detalhe (preto 30 %).
+    let scrim: Color
+
+    /// Omega: os valores da referência (colors-default.tsv).
+    static let omega = AureaFxRoles(
+        panel: Color(hex: 0xFF202332), listSurface: Color(hex: 0xFF333750), lowSurface: Color(hex: 0xFF262A3C),
+        sunken: Color(hex: 0xFF141620), darkest: Color(hex: 0xFF0C0D13), search: Color(hex: 0xFF292D40),
+        field: Color(hex: 0xFF3B3F54), segment: Color(hex: 0xFF3D4260), segmentOn: Color(hex: 0xFF474D70),
+        label: Color(hex: 0x4D3D4260), valueVeil: Color(hex: 0x33000000),
+        axisX: Color(hex: 0xFF69FC97), axisZ: Color(hex: 0xFF48C3F5), needle: Color(hex: 0xFF69FC97),
+        tick: Color(hex: 0xFFBDBDBD), track: Color(hex: 0xFFA9ABB4), trackDisabled: Color(hex: 0xFF4F5264),
+        tipText: Color(hex: 0xFF767A88), disabledText: Color(hex: 0xFF818390), colorText: Color(hex: 0xFF9D9FA5),
+        axisLabel: Color(hex: 0xFFA9ABB4), listIcon: Color(hex: 0xFFEAEBED), textSecondary: Color(hex: 0xFF8C8E93),
+        scrim: Color(hex: 0x4D000000))
+
+    /// Temas escuros: cada papel no tom que o tema já tem.
+    static func mapped(from p: AureaPalette) -> AureaFxRoles {
+        AureaFxRoles(
+            panel: p.editorPanel, listSurface: p.chipHigh, lowSurface: p.editorRowPill,
+            sunken: p.background, darkest: p.stage, search: p.border,
+            field: p.chip, segment: p.chip, segmentOn: p.chipHigh,
+            label: p.chip, valueVeil: Color(hex: 0x33000000),
+            axisX: p.keyframe, axisZ: p.accent, needle: p.accent,
+            tick: p.tickStrong, track: p.muted, trackDisabled: p.chipHigh,
+            tipText: p.subtle, disabledText: p.subtle, colorText: p.muted,
+            axisLabel: p.muted, listIcon: Color(hex: 0xFFF7F9FB), textSecondary: p.muted,
+            scrim: Color(hex: 0x4D000000))
+    }
+}
+
+// =============================================================================
+// Omega conteúdo (área 06): PAPÉIS dos editores de conteúdo (modo de texto,
+// navegador de fontes, desenho e Editar pontos). No Omega valem os tons da
+// referência; nos outros seis temas cada papel cai no tom que o tema já tem.
+// Par exato de `AureaContentRoles` do AureaTokens.kt (mesmos nomes e valores).
+// =============================================================================
+struct AureaContentRoles {
+    /// «barra de ferramentas mais escura» (K2): a barra de estilo do modo de texto.
+    let styleBar: Color
+    /// «botão de estilo»: as peças da barra de estilo e o corpo dos popups.
+    let styleButton: Color
+    /// «superfície mais escura» (A1): a faixa de entrada do texto.
+    let inputStrip: Color
+    /// «fundo do painel de edição» (A3): o painel grande do modo de texto.
+    let editPanel: Color
+    /// «superfície do navegador» (S10) e «linha fina» (branco 10 %).
+    let browser: Color
+    let browserLine: Color
+    /// «fundo do painel» (A9) e «superfície elevada» (A2): gaveta de filtros e cabeçalho.
+    let drawer: Color
+    let drawerHeader: Color
+    /// «superfície elevada» (S10): o trackpad do Editar pontos.
+    let trackpad: Color
+    /// «texto secundário» (P6): texto-guia do trackpad.
+    let guide: Color
+    /// «linha forte» (A11): divisórias de 0,7 das colunas.
+    let strongLine: Color
+    /// Marcador da faixa de pontos (o escolhido usa o destaque).
+    let pointMarker: Color
+    /// «texto terciário»: dica do campo de texto.
+    let hint: Color
+    /// Pílula do valor (espessura do desenho).
+    let valuePill: Color
+
+    static let omega = AureaContentRoles(
+        styleBar: Color(hex: 0xFF0F1418), styleButton: Color(hex: 0xFF2A2F36), inputStrip: Color(hex: 0xFF191C25),
+        editPanel: Color(hex: 0xFF242636), browser: Color(hex: 0xFF262A3C), browserLine: Color(hex: 0x1AFFFFFF),
+        drawer: Color(hex: 0xFF202332), drawerHeader: Color(hex: 0xFF1E2239), trackpad: Color(hex: 0xFF262A3C),
+        guide: Color(hex: 0xFF9D9FA5), strongLine: Color(hex: 0xFF141620), pointMarker: Color(hex: 0xFF767A88),
+        hint: Color(hex: 0x30FFFFFF), valuePill: Color(hex: 0xFF262A3C))
+
+    /// Temas escuros: cada papel no tom que o tema já tem.
+    static func mapped(from p: AureaPalette) -> AureaContentRoles {
+        AureaContentRoles(
+            styleBar: p.stage, styleButton: p.chip, inputStrip: p.surface,
+            editPanel: p.editorPanelHigh, browser: p.editorPanel, browserLine: p.border,
+            drawer: p.surfaceHigh, drawerHeader: p.surface, trackpad: p.editorRowPill,
+            guide: p.muted, strongLine: p.background, pointMarker: p.subtle,
+            hint: p.subtle, valuePill: p.editorRowPill)
+    }
 }
 
 // =============================================================================
@@ -226,6 +496,137 @@ enum AureaColors {
     static let effectPreviewDisc   = Color(hex: 0xFF4D2D)
     static let blendThumbBottom    = Color(hex: 0xFF8A3D)
     static let blendThumbTop       = Color(hex: 0x3D9BFF)
+
+    // --- Omega fundação: papéis claros (fora do editor; ver AureaLightRoles) ----
+    // Claros no Omega, escuros nos outros temas. Home, gaveta, Novo projeto,
+    // exportação, diálogos e menus popup pintam só com estes.
+    static var lightIsLight: Bool { AureaTheme.palette.light.isLight }
+    static var lightBackground: Color { AureaTheme.palette.light.background }
+    static var lightSheet: Color { AureaTheme.palette.light.sheet }
+    static var lightSurface: Color { AureaTheme.palette.light.surface }
+    static var lightDialog: Color { AureaTheme.palette.light.dialog }
+    static var lightSurfaceAlt: Color { AureaTheme.palette.light.surfaceAlt }
+    static var lightText: Color { AureaTheme.palette.light.text }
+    static var lightTextMuted: Color { AureaTheme.palette.light.textMuted }
+    static var lightTextFaint: Color { AureaTheme.palette.light.textFaint }
+    static var lightDivider: Color { AureaTheme.palette.light.divider }
+    static var lightInk: Color { AureaTheme.palette.light.ink }
+    static var lightOnInk: Color { AureaTheme.palette.light.onInk }
+    static var lightAccentInk: Color { AureaTheme.palette.light.accentInk }
+    static var lightDanger: Color { AureaTheme.palette.light.danger }
+    static var lightShadow: Color { AureaTheme.palette.light.shadow }
+    static var LightIsLight: Bool { lightIsLight }
+    static var LightBackground: Color { lightBackground }
+    static var LightSheet: Color { lightSheet }
+    static var LightSurface: Color { lightSurface }
+    static var LightDialog: Color { lightDialog }
+    static var LightSurfaceAlt: Color { lightSurfaceAlt }
+    static var LightText: Color { lightText }
+    static var LightTextMuted: Color { lightTextMuted }
+    static var LightTextFaint: Color { lightTextFaint }
+    static var LightDivider: Color { lightDivider }
+    static var LightInk: Color { lightInk }
+    static var LightOnInk: Color { lightOnInk }
+    static var LightAccentInk: Color { lightAccentInk }
+    static var LightDanger: Color { lightDanger }
+    static var LightShadow: Color { lightShadow }
+
+    // --- Omega home: papéis só da Home (ver AureaHomeRoles) -------------------
+    static var homeDrawer: Color { AureaTheme.palette.home.drawer }
+    static var homeThumb: Color { AureaTheme.palette.home.thumb }
+    static var homeSelectionBar: Color { AureaTheme.palette.home.selectionBar }
+    static var homeOnSelectionBar: Color { AureaTheme.palette.home.onSelectionBar }
+    static var homeMenuScrim: Color { AureaTheme.palette.home.menuScrim }
+    static var homeCover: Color { AureaTheme.palette.home.cover }
+    static var homeAvatar: Color { AureaTheme.palette.home.avatar }
+    static var homeOnAvatar: Color { AureaTheme.palette.home.onAvatar }
+    static var homePillSelected: Color { AureaTheme.palette.home.pillSelected }
+    static var homeOnPillSelected: Color { AureaTheme.palette.home.onPillSelected }
+    static var homePillUnselected: Color { AureaTheme.palette.home.pillUnselected }
+    static var homeOnPillUnselected: Color { AureaTheme.palette.home.onPillUnselected }
+    static var homePillPressed: Color { AureaTheme.palette.home.pillPressed }
+    static var homeOnPillPressed: Color { AureaTheme.palette.home.onPillPressed }
+    static var homeShadowSoft: Color { AureaTheme.palette.home.shadowSoft }
+    static var homeShadowStrong: Color { AureaTheme.palette.home.shadowStrong }
+    static var homeBadge: Color { AureaTheme.palette.home.badge }
+    static var homeOnBadge: Color { AureaTheme.palette.home.onBadge }
+
+    // --- Omega fundação: moldura dos painéis de propriedade (F5, PanelFrame) ----
+    /// Fundo da moldura e das colunas (A9 da referência).
+    static var panelFrameBackground: Color { AureaTheme.palette.editorPanel }
+    /// Véu do conteúdo central: branco 10 % sobre a moldura.
+    static let panelFrameContent = Color(hex: 0x1AFFFFFF)
+    /// Divisórias de 0,7 e fundo da aba ativa (A11).
+    static var panelFrameDivider: Color { AureaTheme.palette.background }
+    /// Barra do painel de propriedade, mais clara que a da camada (S8).
+    static var panelBar: Color { AureaTheme.palette.border }
+    static var PanelFrameBackground: Color { panelFrameBackground }
+    static let PanelFrameContent = panelFrameContent
+    static var PanelFrameDivider: Color { panelFrameDivider }
+    static var PanelBar: Color { panelBar }
+
+    // Omega painel: (área 04) papéis do painel da camada da referência (par do Android).
+    /// Fundo do painel da camada (A9).
+    static var layerPanel: Color { AureaTheme.palette.editorPanel }
+    /// Pílula do trio de tempo e cartão do painel embutido (S8).
+    static var layerPanelButton: Color { AureaTheme.palette.border }
+    /// Botão pressionado (A11).
+    static var layerPanelPressed: Color { AureaTheme.palette.background }
+    /// Corpo dos painéis embutidos de velocidade e volume (A10).
+    static var layerPanelBody: Color { AureaTheme.palette.surface }
+    /// Botões de retempo (S9).
+    static var layerPanelRetime: Color { AureaTheme.palette.chipHigh }
+    /// Ícone e rótulo desabilitados (S1).
+    static var layerPanelDisabled: Color { AureaTheme.palette.tickStrong }
+    /// Caixa de valor dos painéis embutidos (branco 5 %).
+    static let layerPanelValueBox = Color(hex: 0x0DFFFFFF)
+    /// Fundo do gráfico do editor de curva (P10).
+    static var curveGraphBackground: Color { AureaTheme.palette.curveGraph }
+    /// Coluna de presets e grupos do editor de curva (S9).
+    static var curveColumn: Color { AureaTheme.palette.chipHigh }
+
+    // --- Omega efeitos (área 07): papéis do painel de efeitos e do navegador ----
+    // Ver `AureaFxRoles` (par dos `AureaColors.Fx*` do AureaTokens.kt).
+    static var fxPanel: Color { AureaTheme.palette.fx.panel }
+    static var fxListSurface: Color { AureaTheme.palette.fx.listSurface }
+    static var fxLowSurface: Color { AureaTheme.palette.fx.lowSurface }
+    static var fxSunken: Color { AureaTheme.palette.fx.sunken }
+    static var fxDarkest: Color { AureaTheme.palette.fx.darkest }
+    static var fxSearch: Color { AureaTheme.palette.fx.search }
+    static var fxField: Color { AureaTheme.palette.fx.field }
+    static var fxSegment: Color { AureaTheme.palette.fx.segment }
+    static var fxSegmentOn: Color { AureaTheme.palette.fx.segmentOn }
+    static var fxLabel: Color { AureaTheme.palette.fx.label }
+    static var fxValueVeil: Color { AureaTheme.palette.fx.valueVeil }
+    static var fxAxisX: Color { AureaTheme.palette.fx.axisX }
+    static var fxAxisZ: Color { AureaTheme.palette.fx.axisZ }
+    static var fxNeedle: Color { AureaTheme.palette.fx.needle }
+    static var fxTick: Color { AureaTheme.palette.fx.tick }
+    static var fxTrack: Color { AureaTheme.palette.fx.track }
+    static var fxTrackDisabled: Color { AureaTheme.palette.fx.trackDisabled }
+    static var fxTipText: Color { AureaTheme.palette.fx.tipText }
+    static var fxDisabledText: Color { AureaTheme.palette.fx.disabledText }
+    static var fxColorText: Color { AureaTheme.palette.fx.colorText }
+    static var fxAxisLabel: Color { AureaTheme.palette.fx.axisLabel }
+    static var fxListIcon: Color { AureaTheme.palette.fx.listIcon }
+    static var fxTextSecondary: Color { AureaTheme.palette.fx.textSecondary }
+    static var fxScrim: Color { AureaTheme.palette.fx.scrim }
+    // Omega conteúdo (área 06): papéis dos editores de conteúdo (ver `AureaContentRoles`;
+    // par dos `AureaColors.Content*` do AureaTokens.kt).
+    static var contentStyleBar: Color { AureaTheme.palette.content.styleBar }
+    static var contentStyleButton: Color { AureaTheme.palette.content.styleButton }
+    static var contentInputStrip: Color { AureaTheme.palette.content.inputStrip }
+    static var contentEditPanel: Color { AureaTheme.palette.content.editPanel }
+    static var contentBrowser: Color { AureaTheme.palette.content.browser }
+    static var contentBrowserLine: Color { AureaTheme.palette.content.browserLine }
+    static var contentDrawer: Color { AureaTheme.palette.content.drawer }
+    static var contentDrawerHeader: Color { AureaTheme.palette.content.drawerHeader }
+    static var contentTrackpad: Color { AureaTheme.palette.content.trackpad }
+    static var contentGuide: Color { AureaTheme.palette.content.guide }
+    static var contentStrongLine: Color { AureaTheme.palette.content.strongLine }
+    static var contentPointMarker: Color { AureaTheme.palette.content.pointMarker }
+    static var contentHint: Color { AureaTheme.palette.content.hint }
+    static var contentValuePill: Color { AureaTheme.palette.content.valuePill }
 
     // --- Timeline da A.01 (AureaTimeline.kt) ---------------------------------
     static let tickMajor  = Color(hex: 0x8A97AD)
@@ -791,8 +1192,9 @@ enum AureaDims {
 
 /// Medidas que só a casca do editor usa (espelho de `ShellDims`).
 enum ShellDims {
-    static let topBar: CGFloat = AureaDims.topBar
-    static let transport: CGFloat = AureaDims.transport
+    // Omega fundação (F6): as barras do editor seguem o EditorLayout (42 / 46), como o ShellDims.kt.
+    static let topBar: CGFloat = EditorLayout.topBar
+    static let transport: CGFloat = EditorLayout.transport
     static let strip: CGFloat = AureaDims.strip
     static let sheetHandle: CGFloat = AureaDims.sheetHandle
     static let fullscreenTimeBar: CGFloat = AureaDims.fullscreenTimeBar
@@ -963,6 +1365,59 @@ enum AureaTimeline {
     static let BarRadius = barRadius, KeyframeTrack = keyframeTrack
     static let HeaderColumn = headerColumn
     static let Playhead = playhead, PlayheadKnob = playheadKnob
+
+    // --- Omega 0.3.2 (área 03): papéis da timeline (par do AureaTimeline.kt) ------
+    /// Medidas da Omega: cartão com cantos de 3 e o cabeçalho visível de 62.
+    static let omegaBarRadius: CGFloat = 3
+    static let omegaHeaderColumn: CGFloat = 62
+    /// Pílula do cabeçalho, aba do tempo atual e linha arrastada (do tema).
+    static var omegaHeader: Color { AureaTheme.palette.timelineHeader }
+    static var omegaTimeTab: Color { AureaTheme.palette.timelineTimeTab }
+    static var omegaDragRow: Color { AureaTheme.palette.timelineDragRow }
+    /// Traço de 0,5 pt da pílula (branco 10 %) e tiques da régua (branco 15 %).
+    static let omegaHeaderBorder = Color(hex: 0x1AFFFFFF)
+    static let omegaTick = Color(hex: 0x26FFFFFF)
+    /// As três barrinhas da alça ≡ da linha e a sombra delas.
+    static let omegaGrip = Color(hex: 0x4DFFFFFF)
+    static let omegaGripShadow = Color(hex: 0xB31B1F32)
+    /// Marcadores da régua, pela aparência (índice mod 4).
+    static let bookmarks: [Color] = [Color(hex: 0xFFF16586), Color(hex: 0xFFFAD3A5), Color(hex: 0xFF4BE29D), Color(hex: 0xFF3C8CE7)]
+    /// Fundo da linha da câmera principal (vermelho 10 %).
+    static let mainCameraRow = Color(hex: 0x1AD13665)
+    /// Rótulo do clipe (preto; branco no áudio), onda e zebra de quadros.
+    static let clipLabel = Color(hex: 0xFF000000)
+    static let clipLabelOnAudio = Color(hex: 0xFFFFFFFF)
+    static let clipWave = Color(hex: 0xFFEAEAEA)
+    static let clipZebra = Color(hex: 0x10FFFFFF)
+    /// Sombra leve do cartão e a do clipe levantado.
+    static let clipShadow = Color(hex: 0x40000000)
+    static let clipLiftShadow = Color(hex: 0x4D000000)
+    /// Losango em edição (branco, traço preto), dos outros parâmetros (160/255) e parcial.
+    static let keyFill = Color(hex: 0xFFFFFFFF)
+    static let keyStroke = Color(hex: 0xFF000000)
+    static let keyAlt = Color(hex: 0xA0FFFFFF)
+    static let keyAltStroke = Color(hex: 0xFFFFFFFF)
+    static let keyPartial = Color(hex: 0xFF9D9FA5)
+    /// Alças de corte e de velocidade do modo foco (o alfa varia com o gesto).
+    static let trimGrip = Color(hex: 0xFFFFFFFF)
+
+    /// Par do degradê do clipe por tipo (início, fim), em ARGB. Os sete primeiros
+    /// são os da referência; 3D, partículas, ajuste e luz só existem no AUREA.
+    static func clipGradient(_ type: TimelineLayerType) -> (UInt32, UInt32) {
+        switch type {
+        case .video, .image: return (0xFF48C3F5, 0xFF156AE0)
+        case .shape: return (0xFF52CCBC, 0xFF46A8D6)
+        case .group: return (0xFFF16586, 0xFFF66A28)
+        case .text: return (0xFFFAD961, 0xFFF89436)
+        case .audio: return (0xFF5236D1, 0xFFAF62D6)
+        case .camera: return (0xFFD13665, 0xFFAA214A)
+        case .null: return (0xFFBDC3CE, 0xFFA2AEC6)
+        case .model3D: return (0xFF7ED9A0, 0xFF2FA36B)
+        case .particles: return (0xFFE07BD8, 0xFF9B4FD9)
+        case .adjustment: return (0xFF8E9BB8, 0xFF5D6A8A)
+        case .light: return (0xFFB8F0FF, 0xFF5EC8E8)
+        }
+    }
 }
 
 /// Fundo escuro, faixa sólida, texto claro e forma de onda de um tipo de clipe.
@@ -991,25 +1446,47 @@ struct EditorMetrics {
     var transport: CGFloat
     var timeline: CGFloat
     var sheet: CGFloat
+    /// Omega fundação: a folha é desenhada POR CIMA da timeline (o painel da
+    /// camada de 200 cobre a zona por baixo). Falso = empilhada embaixo dela.
+    var overlay: Bool = false
+
+    /// A zona inferior inteira: timeline + folha empilhada (com `overlay`, só a timeline).
+    var zone: CGFloat { timeline + (overlay ? 0 : sheet) }
+    /// A parte da timeline à vista (com `overlay`, o que o painel não cobre: 80).
+    var visibleTimeline: CGFloat { overlay ? max(0, timeline - sheet) : timeline }
+    /// O que a timeline tem coberto embaixo (o `obscuredBottom` da área 03).
+    var obscuredTimeline: CGFloat { overlay ? min(sheet, timeline) : 0 }
+    /// Soma das faixas empilhadas: é sempre a altura da área do editor.
+    var total: CGFloat { topBar + preview + strip + transport + zone }
 }
 
+/// Omega fundação (F6, geometria da referência; par do `EditorLayout.kt`): no
+/// telefone em retrato o topo tem 42, o transporte 46 e embaixo fica uma ZONA
+/// FIXA de 280 (timeline + barra de adicionar, ou a timeline com o painel da
+/// camada de 200 por cima). A prévia é o resto e NUNCA muda de altura ao abrir
+/// ou fechar painel. Sem a divisa arrastável no retrato (D2). O largo fica.
 enum EditorLayout {
-    /// Chrome compacto; preserva os alvos de toque do transporte.
-    static let topBar: CGFloat = 56
-    static let transport: CGFloat = 48
+    /// Barra superior da referência (botões de 40 com alvo de 44+).
+    static let topBar: CGFloat = 42
+    /// Barra de reprodução da referência.
+    static let transport: CGFloat = 46
     static let strip: CGFloat = 0
     static let timelineMin: CGFloat = 110
     static let previewMin: CGFloat = 96
-    private static let previewFractionMax: CGFloat = 0.50
-    private static let panelFraction: CGFloat = 0.40
-    private static let addBody: CGFloat = 280
     private static let sheetHandle: CGFloat = 12
     /// Lote: 4 + tempo 52 + 8 + tela 48 + 8 de respiro.
     private static let batchBody: CGFloat = 120
     private static let hintBody: CGFloat = 30
-    /// A barra fixa de adicionar (sem camada escolhida): ícone 23 + nome 11,
-    /// itens de 64 e 3 de respiro em cima e embaixo (fora a área segura).
+    /// A barra fixa de adicionar do AUREA (fica, exceção do dono): ícone 23 +
+    /// nome 11, itens de 64 e 3 de respiro em cima e embaixo (fora a área segura).
     static let addBar: CGFloat = 70
+    // --- Omega adicionar (área 08, P0-1) ----------------------------------------
+    /// O conteúdo do botão aberto na barra de adicionar: a área de conteúdo do popup
+    /// da referência (251 − 58 = 193). Fica POR CIMA da timeline, logo acima da
+    /// barra (que não sai do lugar): a zona continua 210 + 70. Par do `ADD_CONTENT`.
+    static let addContentHeight: CGFloat = 193
+    /// Altura do conteúdo do adicionar nesta geometria (nunca maior que a timeline à vista).
+    static func addContent(_ m: EditorMetrics) -> CGFloat { min(addContentHeight, m.timeline) }
     /// Doca da camada, compacta (EditorLayout.kt `DOCK`): fileira rápida de
     /// ícones e fichas baixas; a altura é a do conteúdo.
     static let dockQuick: CGFloat = 48
@@ -1019,9 +1496,21 @@ enum EditorLayout {
     /// A doca com `rows` fileiras de fichas (1 ou 2): a altura é a do conteúdo.
     static func dockHeight(rows: Int, fontScale: CGFloat = 1) -> CGFloat { 8 + dockQuick + CGFloat(min(max(rows, 1), 2)) * (8 + dockTileHeight(fontScale: fontScale)) + 8 }
 
-    /// Folga do palco em volta do quadro ajustado (as fichas ficam por cima do quadro).
+    // --- Omega fundação (F6): zona inferior fixa -------------------------------
+    /// A zona inferior fixa do retrato (`edit_timeline_height` da referência).
+    static let bottomZoneHeight: CGFloat = 280
+    /// O painel da camada e os painéis de propriedade (`edit_panel_height`).
+    static let layerPanelHeight: CGFloat = 200
+    /// O que sobra da timeline com o painel aberto: régua 42 + uma linha.
+    static let timelineFocus: CGFloat = 80
+    /// O painel cresce com a fonte do sistema: 200 em 1×, 240 em 2×.
+    static func layerPanel(fontScale: CGFloat = 1) -> CGFloat { layerPanelHeight + 40 * (min(max(fontScale, 1), 2) - 1) }
+    /// A zona inferior: o painel + a faixa de foco da timeline (280 em 1×).
+    static func bottomZone(fontScale: CGFloat = 1) -> CGFloat { layerPanel(fontScale: fontScale) + timelineFocus }
+
+    /// Folga do palco em volta do quadro ajustado (layout antigo; fica para quem lê o token).
     static let previewFitMargin: CGFloat = 16
-    /// Fração da altura total que o palco ocupa quando ninguém arrastou a divisa.
+    /// Fração do palco do layout antigo (fica para quem lê o token).
     static let naturalPreviewFraction: CGFloat = 0.45
     /// Margem lateral do palco fora da tela cheia.
     static let previewSideMargin: CGFloat = 8
@@ -1033,63 +1522,47 @@ enum EditorLayout {
     /// O palco mais alto possível: a timeline nunca fica abaixo do piso.
     static func maxPreview(_ total: CGFloat) -> CGFloat { max(previewMin, workspace(total) - timelineMin) }
 
-    /// `width`/`aspect` (largura ÷ altura do projeto): o palco nunca é mais alto
-    /// que o quadro na largura da tela + a folga — num projeto deitado as faixas
-    /// vazias roubavam a timeline; em pé fica como sempre. `preferred` > 0: a
-    /// altura escolhida arrastando a divisa palco/transporte (vale sobre as duas).
-    /// Par do `EditorLayout.solve` do Android.
+    /// O retrato do telefone (e do tablet em pé): prévia = área − 42 − 46 − zona,
+    /// igual em todos os `SheetContent`. Dentro da zona: `.addBar` = timeline (210)
+    /// + barra (70) embaixo; `.dock`, `.panel`, `.curve` = timeline na zona inteira
+    /// e a folha (200) POR CIMA (`overlay`; ficam 80 de timeline); `.none` = só a
+    /// timeline; `.hint`, `.batch`, `.adding` = empilhados embaixo dela. Tela baixa
+    /// demais: a prévia fica no piso e a zona encolhe (a soma é sempre a altura).
+    /// `width`, `aspect` e `preferred` ficam para quem já chamava; o retrato da
+    /// Omega não os usa (prévia fixa, sem divisa: D2). Par do `EditorLayout.solve`.
     static func solve(total: CGFloat, content: SheetContent, fullscreen: Bool,
                       width: CGFloat = 0, aspect: CGFloat = 0, preferred: CGFloat = 0, dockRows: Int = 2, fontScale: CGFloat = 1) -> EditorMetrics {
         if fullscreen {
             return EditorMetrics(topBar: 0, preview: max(0, total - transport), strip: 0,
                                  transport: transport, timeline: 0, sheet: 0)
         }
-        let bar: CGFloat = total < 560 ? 48 : topBar
-        let ws = max(0, total - bar - transport - strip)
+        let ws = workspace(total)
+        let panel = layerPanel(fontScale: fontScale)
         let previewFloor = min(previewMin, ws * 0.25)
-        // Palco natural ≈ 45 % da altura do editor (360 num 844 do protótipo).
-        let natural = min(420, total * naturalPreviewFraction)
-        let fitted = width > 0 && aspect > 0 && aspect.isFinite ? min(natural, width / aspect + previewFitMargin) : natural
-        var preview = (preferred > 0 && preferred.isFinite ? preferred : fitted)
-            .clamped(to: previewFloor...max(previewFloor, ws - min(timelineMin, ws * 0.2)))
+        let preview = min(max(previewFloor, ws - bottomZone(fontScale: fontScale)), ws)
+        let zone = ws - preview
 
-        var sheetFraction: CGFloat = 0
+        func stacked(_ body: CGFloat) -> EditorMetrics {
+            let sheet = min(max(body, 0), zone)
+            return EditorMetrics(topBar: topBar, preview: preview, strip: strip, transport: transport,
+                                 timeline: zone - sheet, sheet: sheet)
+        }
+        func over(_ body: CGFloat) -> EditorMetrics {
+            // Ao menos a faixa de foco da timeline fica à vista (menos numa tela baixa).
+            let sheet = min(body, max(0, zone - min(timelineFocus, zone * 0.3)))
+            return EditorMetrics(topBar: topBar, preview: preview, strip: strip, transport: transport,
+                                 timeline: zone, sheet: max(0, sheet), overlay: true)
+        }
         switch content {
-        case .none: sheetFraction = 0
-        case .hint: sheetFraction = ws > 0 ? (sheetHandle + hintBody) / ws : 0
-        case .batch: sheetFraction = ws > 0 ? (sheetHandle + batchBody) / ws : 0
-        case .dock: sheetFraction = ws > 0 ? dockHeight(rows: 2, fontScale: fontScale) / ws : 0
-        case .panel: sheetFraction = panelFraction
-        case .curve: sheetFraction = ws > 0 ? 280 / ws : 0
-        case .adding: sheetFraction = ws > 0 ? (sheetHandle + addBody) / ws : 0
-        case .addBar: sheetFraction = ws > 0 ? addBar / ws : 0
+        case .none: return stacked(0)
+        case .addBar: return stacked(addBar)
+        case .hint: return stacked(sheetHandle + hintBody)
+        case .batch: return stacked(sheetHandle + batchBody)
+        // Omega adicionar: a mesma zona da barra (210 + 70); o conteúdo fica por cima da timeline.
+        case .adding: return stacked(addBar)
+        case .dock: return over(min(dockHeight(rows: dockRows, fontScale: fontScale), panel))
+        case .panel, .curve: return over(panel)
         }
-        var sheet = content == .none ? 0 : ws * min(max(sheetFraction, 0), 0.60)
-
-        var floor: CGFloat
-        switch content {
-        case .adding, .dock, .panel, .curve, .batch: floor = timelineMin
-        default: floor = 120
-        }
-        floor = min(floor, total < 560 ? 72 : 120)
-        // Make room for editing controls instead of compressing their targets.
-        let requiredSheet: CGFloat = content == .panel ? min(480, 288 * min(max(fontScale, 1), 1.5)) : 0
-        sheet = min(max(sheet, requiredSheet), max(0, ws - previewFloor - floor))
-        preview = min(preview, max(previewFloor, ws - sheet - floor))
-        var timeline = ws - preview - sheet
-        if timeline < floor {
-            sheet = max(0, sheet - (floor - timeline))
-            timeline = ws - preview - sheet
-        }
-        // Doca de uma fileira: o palco fica onde a de duas o deixaria (trocar de
-        // camada nunca mexe no palco); a sobra vai inteira para a timeline.
-        if content == .dock && dockRows < 2 {
-            let spare = max(0, sheet - dockHeight(rows: dockRows, fontScale: fontScale))
-            sheet -= spare
-            timeline += spare
-        }
-        return EditorMetrics(topBar: bar, preview: preview, strip: strip,
-                             transport: transport, timeline: max(0, timeline), sheet: max(0, sheet))
     }
 
     /// Layout largo: SÓ em paisagem com largura ≥ 600 (o mesmo do Android).
@@ -1110,8 +1583,6 @@ enum EditorLayout {
         min(max(width * 0.4, 240), 420)
     }
 }
-
-/// Os mesmos números com os nomes do Kotlin (`EditorLayoutMetrics`).
 enum EditorLayoutMetrics {
     static let topBar: CGFloat = EditorLayout.topBar
     static let transport: CGFloat = EditorLayout.transport

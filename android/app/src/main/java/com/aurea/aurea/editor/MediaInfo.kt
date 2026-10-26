@@ -8,6 +8,7 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.text.format.Formatter
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,6 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.ui.ds.AureaDialog
+import com.aurea.aurea.ui.ds.DialogAction
+import com.aurea.aurea.ui.ds.DialogRole
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import kotlinx.coroutines.Dispatchers
@@ -153,6 +157,17 @@ internal object MediaInfoProbe {
 
     private fun MediaFormat.intOr(key: String): Int = if (containsKey(key)) runCatching { getInteger(key) }.getOrDefault(0) else 0
 
+    /** "hhh:mm:ss.ttt" (vídeo) ou "hhh:mm:ss" (áudio): a duração da referência. */
+    fun clock(us: Long, millis: Boolean): String {
+        val totalMs = us / 1000
+        val h = totalMs / 3_600_000
+        val m = (totalMs / 60_000) % 60
+        val s = (totalMs / 1000) % 60
+        val ms = totalMs % 1000
+        return if (millis) String.format(Locale.ROOT, "%d:%02d:%02d.%03d", h, m, s, ms)
+        else String.format(Locale.ROOT, "%d:%02d:%02d", h, m, s)
+    }
+
     /** "1:02,5" / "12,0 s": duração curta e legível. */
     fun duration(us: Long): String {
         val s = us / 1e6
@@ -161,9 +176,15 @@ internal object MediaInfoProbe {
     }
 }
 
-/** A folha com as informações da mídia da camada `layer`. */
+/**
+ * Omega chrome (área 02, P2-4): "Informações da mídia" como o diálogo claro da
+ * referência (`media_info_dialog`): uma tabela na ordem Nome · Dimensões · Taxa
+ * de quadros · Duração · Formato · Tamanho · Taxa de amostragem, e depois os
+ * extras do AUREA (codecs, canais, HDR). O que não se aplica ao tipo some
+ * (imagem sem taxa, duração e amostragem; áudio sem dimensões).
+ */
 @Composable
-internal fun MediaInfoSheet(store: EditorStore, layer: Long, onDismiss: () -> Unit) {
+internal fun MediaInfoDialog(store: EditorStore, layer: Long, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var loaded by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf<MediaInfo?>(null) }
@@ -171,22 +192,33 @@ internal fun MediaInfoSheet(store: EditorStore, layer: Long, onDismiss: () -> Un
         info = withContext(Dispatchers.IO) { store.layerSourcePath(layer)?.let { MediaInfoProbe.read(context.applicationContext, it) } }
         loaded = true
     }
-    ShellMenuSheet(onDismiss) {
-        MenuSection(stringResource(R.string.media_info_title))
+    AureaDialog(
+        title = stringResource(R.string.media_info_title),
+        actions = listOf(DialogAction(stringResource(R.string.common_ok), DialogRole.Positive, tag = "mediaInfo.ok")),
+        onDismiss = onDismiss,
+        tag = "mediaInfo.dialog",
+    ) {
         val i = info
-        when {
-            !loaded -> Unit
-            i == null -> InfoLine(stringResource(R.string.media_info_unreadable), "")
-            else -> {
-                InfoLine(stringResource(R.string.media_info_file), i.fileName)
-                if (i.sizeBytes > 0) InfoLine(stringResource(R.string.media_info_size), Formatter.formatFileSize(context, i.sizeBytes))
-                if (i.width > 0) InfoLine(stringResource(R.string.media_info_resolution), ltrPlain("${i.width} × ${i.height}"))
-                if (i.fps > 0f) InfoLine(stringResource(R.string.media_info_fps), String.format(Locale.getDefault(), "%.3f", i.fps).trimEnd('0').trimEnd(',', '.'))
-                if (i.durationUs > 0) InfoLine(stringResource(R.string.media_info_duration), MediaInfoProbe.duration(i.durationUs))
-                if (i.videoCodec.isNotEmpty()) InfoLine(stringResource(R.string.media_info_video_codec), i.videoCodec)
-                if (i.audioCodec.isNotEmpty()) InfoLine(stringResource(R.string.media_info_audio_codec), i.audioCodec)
-                if (i.sampleRate > 0) InfoLine(stringResource(R.string.media_info_sample_rate), "${i.sampleRate} Hz" + if (i.channels > 0) " · ${i.channels} ch" else "")
-                i.hdr?.let { InfoLine(stringResource(R.string.media_info_hdr), stringResource(if (it) R.string.common_yes else R.string.common_no)) }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
+            when {
+                !loaded -> Unit
+                i == null -> InfoLine(stringResource(R.string.media_info_unreadable), "")
+                else -> {
+                    val image = i.videoCodec.isNotEmpty() && i.durationUs <= 0L && i.audioCodec.isEmpty()
+                    val audioOnly = i.width <= 0 && i.audioCodec.isNotEmpty()
+                    InfoLine(stringResource(R.string.om_mi_name), i.fileName)
+                    if (!audioOnly && i.width > 0) InfoLine(stringResource(R.string.om_mi_dimensions), ltrPlain("${i.width} × ${i.height}"))
+                    if (!image && i.fps > 0f) InfoLine(stringResource(R.string.media_info_fps), String.format(Locale.getDefault(), "%.3f", i.fps).trimEnd('0').trimEnd(',', '.'))
+                    if (!image && i.durationUs > 0) InfoLine(stringResource(R.string.media_info_duration), ltrPlain(MediaInfoProbe.clock(i.durationUs, millis = !audioOnly)))
+                    val format = i.fileName.substringAfterLast('.', "").uppercase(Locale.ROOT)
+                    if (format.isNotEmpty()) InfoLine(stringResource(R.string.om_mi_format), format)
+                    if (i.sizeBytes > 0) InfoLine(stringResource(R.string.media_info_size), Formatter.formatFileSize(context, i.sizeBytes))
+                    if (!image && i.sampleRate > 0) InfoLine(stringResource(R.string.media_info_sample_rate), "${i.sampleRate} Hz")
+                    // Extras do AUREA.
+                    if (i.videoCodec.isNotEmpty()) InfoLine(stringResource(R.string.media_info_video_codec), i.videoCodec)
+                    if (i.audioCodec.isNotEmpty()) InfoLine(stringResource(R.string.media_info_audio_codec), i.audioCodec + if (i.channels > 0) " · ${i.channels} ch" else "")
+                    i.hdr?.let { InfoLine(stringResource(R.string.media_info_hdr), stringResource(if (it) R.string.common_yes else R.string.common_no)) }
+                }
             }
         }
     }
@@ -195,11 +227,11 @@ internal fun MediaInfoSheet(store: EditorStore, layer: Long, onDismiss: () -> Un
 @Composable
 private fun InfoLine(label: String, value: String) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(horizontal = 20.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().heightIn(min = 30.dp).padding(vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Text)))
+        Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.LightText)))
         Spacer(Modifier.width(16.dp))
-        Text(value, Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Muted, textAlign = TextAlign.End)))
+        Text(value, Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.LightText, textAlign = TextAlign.End)))
     }
 }

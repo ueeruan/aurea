@@ -149,7 +149,7 @@ class Beta008DeviceTest {
         assertTrue(store.engineForStress.modelMissingTextures(id).isEmpty())
         assertTrue(visible(capture()) > 100)
         compose.runOnIdle { store.select(id) }
-        compose.onNodeWithTag("dock.tool.TextOptions").performScrollTo().performClick()
+        compose.onNodeWithTag("layer.panel.colorFill").performClick()
         compose.onNodeWithTag("text3d.texture.clear").performScrollTo().performClick()
         compose.waitUntil(10000) { !store.hasText3DTexture() }
         assertTrue(store.text3d!!.bevel)
@@ -162,7 +162,7 @@ class Beta008DeviceTest {
         launch("008 rotation field")
         compose.runOnIdle { store.addShape(0); store.setTransform(8, 45f) }
         compose.waitUntil(10000) { store.detail?.rotation?.get(2) == 45f }
-        compose.onNodeWithTag("dock.tool.Move").performScrollTo().performClick()
+        compose.onNodeWithTag("layer.panel.moveTransform").performClick()
         compose.onNodeWithContentDescription(context.getString(R.string.panel_rotacao)).performClick()
         for (tag in listOf("transform.rotation.axis.0")) {
             compose.onNodeWithTag(tag).performClick()

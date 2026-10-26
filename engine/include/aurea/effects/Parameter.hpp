@@ -121,6 +121,29 @@ inline constexpr u16 kParamRefKindMask = kParamRefCamera | kParamRefNull | kPara
 /// Marca de "faixa digitada não declarada": vale a faixa do slider.
 inline constexpr f32 kParamSameAsSlider = std::numeric_limits<f32>::quiet_NaN();
 
+// Omega efeitos (0.3.2, área 07, P0-1): APRESENTAÇÃO do parâmetro no painel.
+// Só como a linha aparece e responde (controle, passo da régua, origem do
+// slider, estilo da escolha, habilitação cruzada). Nada disso entra no projeto
+// salvo: índice, valor e trilhas continuam os de sempre.
+
+/// O controle da linha. `Auto` = regra do motor (`resolve_control`).
+enum class ParamControl : u8 {
+    Auto = 0,
+    Slider,        ///< trilho com polegar, valor absoluto na posição do dedo
+    Ruler,         ///< régua de riscos: 1 risco = 1 `step`
+    Point,         ///< Point2D: régua + caixas X/Y
+    Xyz,           ///< Point3D: régua + caixas X/Y/Z
+    Orientation,   ///< Point3D em graus (α/β/γ): régua + trackball no preview
+    HueDisc,       ///< Point2D matiz/força num disco (agrupa até 4)
+};
+
+/// Como uma escolha (Enum) aparece. `Auto` = regra do motor (`resolve_enum_style`).
+enum class EnumStyle : u8 { Auto = 0, Segmented, Dropdown };
+
+/// Bits de `EffectParamRow::rowFlags` (ponte).
+inline constexpr u32 kParamRowEnabled = 1u << 0;   ///< editável agora (habilitação cruzada)
+inline constexpr u32 kParamRowHueDisc = 1u << 1;   ///< desenhar como disco de matiz agrupável
+
 struct ParamSpec {
     const char* id = "";          ///< chave estável (projeto, UI)
     const char* label = "";       ///< nome na interface
@@ -147,6 +170,21 @@ struct ParamSpec {
     /// parâmetro; nula = sem dica. Texto do motor (pt-BR) — a UI traduz pela
     /// identidade (chave do efeito + índice), como o rótulo.
     const char* tip = nullptr;
+    // Omega efeitos (P0-1): apresentação; padrões compatíveis (= regra do motor).
+    /// Controle da linha (Auto = `resolve_control`).
+    ParamControl control = ParamControl::Auto;
+    /// Estilo da escolha (Auto = `resolve_enum_style`).
+    EnumStyle   enumStyle = EnumStyle::Auto;
+    /// Valor por risco da régua (NaN = `resolve_step`).
+    f32         step = kParamSameAsSlider;
+    /// Origem do preenchimento do slider (NaN = `resolve_origin`).
+    f32         origin = kParamSameAsSlider;
+    /// Habilitação cruzada: o parâmetro só fica editável quando o Bool
+    /// `enabledBy` está ligado (bit 0 de `enabledMask`; bit 1 = desligado) ou
+    /// quando o Enum `enabledBy` está numa opção cujo bit está na máscara.
+    /// kInvalidIndex = sempre habilitado (salvo o interruptor da seção).
+    u32         enabledBy = kInvalidIndex;
+    u32         enabledMask = 0;
 
     [[nodiscard]] bool animatable() const noexcept {
         return (flags & kParamAnimatable) != 0 && component_count(type) > 0;
@@ -170,6 +208,11 @@ struct ParamSection {
     const char* label = "";     ///< título (texto do motor, pt-BR)
     u32         toggle = kInvalidIndex;
     bool        open = true;
+    /// Omega efeitos (P0-1): "edite primeiro". Seção declarada recolhida que
+    /// NASCE aberta numa instância nova (todos os valores no padrão). O estado
+    /// inicial vai para `sectionsFlipped` na criação (`initialize_instance`),
+    /// sem mudar o formato; depois disso a pessoa manda.
+    bool        editFirst = false;
 };
 
 /// Máximo de seções por efeito: o estado aberto/recolhido de cada uma é
@@ -228,6 +271,59 @@ public:
                           u32 toggle = kInvalidIndex, bool open = true) noexcept;
     /// Põe uma DICA (ⓘ, só leitura) acima do parâmetro `index`. Devolve `index`.
     u32 set_tip(u32 index, const char* text) noexcept;
+
+    // --- Omega efeitos (P0-1): apresentação, efeito a efeito -------------------
+    // Todos devolvem `index` (kInvalidIndex se não existe) para encadear e nunca
+    // mudam índice, valor nem faixa: só como a linha aparece.
+    /// Controle da linha. Recusa combinação sem sentido (Point num Float...).
+    u32 set_control(u32 index, ParamControl control) noexcept {
+        if (index >= specs_.size()) return kInvalidIndex;
+        ParamSpec& s = specs_[index];
+        const bool scalar = s.type == ParamType::Float || s.type == ParamType::Int || s.type == ParamType::Angle;
+        const bool ok = control == ParamControl::Auto ||
+            ((control == ParamControl::Slider || control == ParamControl::Ruler) && scalar) ||
+            ((control == ParamControl::Point || control == ParamControl::HueDisc) && s.type == ParamType::Point2D) ||
+            ((control == ParamControl::Xyz || control == ParamControl::Orientation) && s.type == ParamType::Point3D);
+        if (ok) s.control = control;
+        return index;
+    }
+    /// Valor por risco da régua (> 0 e finito; senão volta à regra).
+    u32 set_step(u32 index, f32 step) noexcept {
+        if (index >= specs_.size()) return kInvalidIndex;
+        specs_[index].step = std::isfinite(step) && step > 0.0f ? step : kParamSameAsSlider;
+        return index;
+    }
+    /// Origem do preenchimento do slider (finita; senão volta à regra).
+    u32 set_origin(u32 index, f32 origin) noexcept {
+        if (index >= specs_.size()) return kInvalidIndex;
+        specs_[index].origin = std::isfinite(origin) ? origin : kParamSameAsSlider;
+        return index;
+    }
+    /// Estilo da escolha (só Enum).
+    u32 set_enum_style(u32 index, EnumStyle style) noexcept {
+        if (index >= specs_.size()) return kInvalidIndex;
+        if (specs_[index].type == ParamType::Enum) specs_[index].enumStyle = style;
+        return index;
+    }
+    /// Habilitação cruzada: `index` só fica editável com o Bool `controller`
+    /// ligado (mask 1; 2 = desligado) ou com o Enum `controller` numa opção do
+    /// `mask` (bit k = opção k). Controlador que não é Bool/Enum, o próprio
+    /// parâmetro ou inexistente: recusado (nada muda).
+    u32 set_enabled_by(u32 index, u32 controller, u32 mask) noexcept {
+        if (index >= specs_.size()) return kInvalidIndex;
+        if (controller >= specs_.size() || controller == index || mask == 0) return index;
+        const ParamType t = specs_[controller].type;
+        if (t != ParamType::Bool && t != ParamType::Enum) return index;
+        specs_[index].enabledBy = controller;
+        specs_[index].enabledMask = mask;
+        return index;
+    }
+    /// Marca a seção `ordinal` (1-based) como "edite primeiro".
+    u32 set_section_edit_first(u32 ordinal, bool editFirst = true) noexcept {
+        if (ordinal < 1 || ordinal > sections_.size()) return kInvalidIndex;
+        sections_[ordinal - 1].editFirst = editFirst;
+        return ordinal;
+    }
 
     [[nodiscard]] u32 count() const noexcept { return static_cast<u32>(specs_.size()); }
     [[nodiscard]] const ParamSpec& at(u32 i) const noexcept { return specs_[i]; }
@@ -316,6 +412,11 @@ struct EffectInstance {
     /// nos bits 1..7 do mesmo byte de `expanded` — leitor antigo lê o byte
     /// como bool (≠ 0) e não usa; projeto antigo traz 0 (tudo como declarado).
     u8           sectionsFlipped = 0;
+    // Omega aparência (P0-4): DECORAÇÃO da camada (Borda e sombra). 0 = efeito
+    // comum (aparece na lista de Efeitos); os outros são efeitos existentes com
+    // papel fixo, escondidos da lista e sempre DEPOIS dos comuns, na ordem
+    // traço → bordas → sombra (kEffectRole*). Gravado na timeline v51.
+    u8           role = 0;
     std::vector<ParamSlot>    params;
     std::vector<CurveData>    curves;      ///< indexado por ParamValue::ref
     std::vector<GradientData> gradients;
@@ -323,6 +424,14 @@ struct EffectInstance {
     /// Malha de deformação (só aurea.distort.mesh_warp; vazio nos outros).
     std::vector<MeshWarpData> meshes;
 };
+
+// Omega aparência (P0-4): papéis de `EffectInstance::role`. A ordem numérica é
+// a ordem de desenho depois dos efeitos comuns.
+inline constexpr u8 kEffectRoleNone = 0;     ///< efeito comum
+inline constexpr u8 kEffectRoleStroke = 1;   ///< traço (reservado: forma/texto usam o traço nativo)
+inline constexpr u8 kEffectRoleBorder = 2;   ///< borda (aurea.stylize.stroke_outline)
+inline constexpr u8 kEffectRoleShadow = 3;   ///< sombra (aurea.stylize.drop_shadow)
+inline constexpr u8 kLastEffectRole = kEffectRoleShadow;
 
 /// Chave do track de um componente de parâmetro. O track mora no `TrackSet`
 /// da layer com `TrackProperty::EffectParam`, `effectIndex = id do efeito` e
@@ -343,5 +452,38 @@ struct EffectInstance {
 
 /// Cria os slots de uma instância nova com os padrões da declaração.
 void initialize_instance(EffectInstance& instance, const ParameterRegistry& params);
+
+// -----------------------------------------------------------------------------
+// Omega efeitos (P0-1): regras de apresentação (EngineOmegaEffects.cpp). Puras,
+// testadas no host; as duas interfaces leem o resultado pela ponte.
+// -----------------------------------------------------------------------------
+
+/// O controle que a linha usa. Declarado vence; senão: Angle → Ruler;
+/// Point2D → Point; Point3D → Xyz; Float/Int com faixa de slider finita e faixa
+/// digitada até 4× a do slider → Slider; o resto → Ruler. Tipos sem controle
+/// numérico (Bool, Enum, cor...) devolvem Auto.
+[[nodiscard]] ParamControl resolve_control(const ParamSpec& spec) noexcept;
+/// Valor por risco da régua. Declarado vence; senão Int = 1, Angle = 1°,
+/// Float/ponto = (max − min)/200 arredondado para 1·10ⁿ, 2·10ⁿ ou 5·10ⁿ.
+[[nodiscard]] f32 resolve_step(const ParamSpec& spec) noexcept;
+/// Origem do preenchimento do slider: declarada; senão 0 quando a faixa cruza o
+/// zero (slider bipolar), senão o mínimo.
+[[nodiscard]] f32 resolve_origin(const ParamSpec& spec) noexcept;
+/// Estilo da escolha: declarado; senão Segmented com até 4 opções de até 10
+/// caracteres (UTF-8 contado por letra), senão Dropdown.
+[[nodiscard]] EnumStyle resolve_enum_style(const ParamSpec& spec) noexcept;
+/// O parâmetro `index` está editável agora? Habilitação cruzada (`enabledBy`)
+/// e interruptor da seção (os membros dependem dele), recursivo (o controlador
+/// também precisa estar habilitado) e protegido contra ciclo. `tracks` nulo =
+/// só os valores constantes.
+[[nodiscard]] bool param_enabled(const EffectInstance& effect, const ParameterRegistry& params, u32 index,
+                                 const TrackSet* tracks, FrameIndex localTime) noexcept;
+/// Os parâmetros da instância estão todos no padrão da declaração (constante,
+/// sem trilha com keyframe)? É o que decide a seção "edite primeiro".
+[[nodiscard]] bool effect_at_defaults(const EffectInstance& effect, const ParameterRegistry& params,
+                                      const TrackSet* tracks) noexcept;
+/// Estado inicial das seções "edite primeiro" de uma instância nova: liga o
+/// bit de troca das seções recolhidas marcadas `editFirst`.
+void apply_edit_first_sections(EffectInstance& instance, const ParameterRegistry& params) noexcept;
 
 } // namespace aurea

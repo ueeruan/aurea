@@ -1902,12 +1902,20 @@ internal fun paramDisplay(typeId: Int, s: ParamSlot): ParamDisplay {
             else -> 2
         }
     }
+    val finalScale = h?.scale ?: scale
+    // Omega efeitos (P2-3): o efeito DECLAROU o passo da régua → as casas vêm do
+    // passo (regra da referência: < 0,00009 → 5 … < 0,9 → 1), na unidade mostrada.
+    val stepDecimals = if (s.stepDeclared && s.step > 0f && s.type != ParamType.INT) {
+        com.aurea.aurea.ui.ds.FxParamMath.decimalsForStep(s.step * abs(finalScale))
+    } else {
+        null
+    }
     return ParamDisplay(
         labelRes = h?.label,
         engineLabel = s.label,
-        scale = h?.scale ?: scale,
+        scale = finalScale,
         suffix = h?.suffix ?: suffix,
-        decimals = h?.decimals ?: decimals,
+        decimals = h?.decimals ?: stepDecimals ?: decimals,
     )
 }
 

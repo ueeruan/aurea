@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega home (área 01): barra superior, dock, gaveta, aba Projetos, Presets, folha Novo projeto e Sobre. -->
+    <string name="om_home_account">Cuenta</string>
+    <string name="om_home_action_export">Exportar</string>
+    <string name="om_home_empty_body">Toca %1$s para crear tu primer proyecto.</string>
+    <string name="om_home_my_projects">Mis proyectos</string>
+    <string name="om_home_sort_current">Orden: %1$s</string>
+    <string name="om_home_my_presets">Mis presets</string>
+    <string name="om_home_presets_empty">Aún no guardaste presets. En el editor, guarda uno desde el panel de presets de la capa.</string>
+    <string name="om_home_preset_builtin">Incluido en AUREA</string>
+    <string name="om_home_preset_menu">Menú del preset</string>
+    <string name="om_home_preset_delete_q">¿Eliminar el preset «%1$s»?</string>
+    <string name="om_home_preset_name_taken">Ya existe un preset con ese nombre.</string>
+    <string name="om_drawer_support">Soporte</string>
+    <string name="om_drawer_light_preview">Vista previa ligera</string>
+    <string name="om_drawer_light_preview_note">El editor abre con la vista previa a 1/2: editas con más fluidez; la exportación mantiene la calidad total.</string>
+    <string name="om_new_frame_size">Tamaño del cuadro</string>
+    <string name="om_new_keep_ratio">Mantener proporción</string>
+    <string name="om_new_clear_name">Borrar nombre</string>
+    <string name="om_new_bg_light_grey">Gris claro</string>
+    <string name="om_new_bg_green">Verde</string>
+    <string name="om_new_bg_blue">Azul</string>
+    <string name="om_new_over_limit">(sobre el límite)</string>
+    <string name="om_about_version">Versión</string>
+    <string name="om_about_build">Compilación</string>
+    <string name="om_about_device">Dispositivo</string>
+    <string name="om_about_chipset">Procesador</string>
+    <string name="om_about_system">Sistema</string>
+    <string name="om_about_memory">Memoria</string>
+    <string name="om_about_storage">Almacenamiento</string>
+    <string name="om_about_storage_value">%1$s libres de %2$s</string>
+    <string name="om_about_export_max">Exportación máxima</string>
+    <string name="om_about_languages">Idiomas</string>
+    <string name="om_about_copied">Información copiada</string>
+    <string name="om_about_copy_hint">Toca la tabla para copiarla (útil para reportar un problema).</string>
+    <string name="om_about_cores">%1$d núcleos</string>
+</resources>

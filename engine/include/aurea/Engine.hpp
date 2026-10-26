@@ -521,6 +521,62 @@ public:
     /// Mídias de um `.aurea` fechado, já com o caminho legível (`resolved`).
     /// É o "Exportar arquivo do projeto" (ProjectPackage.hpp).
     [[nodiscard]] Status project_file_media(const char* path, std::vector<package::MediaRef>& out) noexcept;
+
+    // --- Omega adicionar (área 08) — src/engine/EngineOmegaAdd.cpp -----------------
+    /// Como o lote do navegador de mídia arruma as camadas (número estável das pontes).
+    enum class MediaBatchPlacement : u32 {
+        SameStart = 0,   ///< todas no cabeçote; a 1ª escolhida embaixo, as seguintes acima
+        Sequence = 1,    ///< uma depois da outra, na ordem de escolha, a partir do cabeçote
+    };
+    /// Abre um LOTE de importação: tudo o que entrar até `end_import_batch`
+    /// (vídeos, imagens, cortes e durações) vira UM passo de desfazer. A cópia e
+    /// a decodificação continuam na plataforma (uma mídia por vez, memória
+    /// limitada); o motor só guarda o passo aberto. Abrir de novo não empilha.
+    void begin_import_batch() noexcept;
+    /// Fecha o lote: arruma `ids` (na ordem de escolha) pelo `placement` a partir
+    /// do cabeçote de quando o lote abriu, escolhe as camadas e fecha o passo.
+    /// Devolve quantas camadas andaram no tempo. Sem lote aberto, só arruma.
+    [[nodiscard]] Result<u32> end_import_batch(const u64* ids, u32 count, MediaBatchPlacement placement) noexcept;
+    /// Duração e corte pedidos no navegador, aplicados à camada RECÉM-importada
+    /// no MESMO passo de desfazer da importação (dentro ou fora do lote):
+    /// imagem: `durationFrames` > 0 = a camada dura isso (quadros da composição);
+    /// vídeo: `sourceOutUs` > `sourceInUs` ≥ 0 = a camada mostra só esse trecho
+    /// da fonte (começa no cabeçote; comprimento = out − in; a origem desloca).
+    /// Zeros = a regra de sempre. A composição cresce quando a camada passa do fim.
+    [[nodiscard]] Status apply_import_timing(u64 layerId, i64 durationFrames, i64 sourceInUs, i64 sourceOutUs) noexcept;
+    /// Um item do lote já pronto para o motor (vídeo por caminho; imagem já
+    /// decodificada em RGBA8, como `import_image`).
+    struct MediaBatchItem {
+        bool video = false;
+        VideoImport source;          ///< vídeo: caminho e nome
+        i64 sourceInUs = 0;          ///< vídeo: corte (0, 0 = inteiro)
+        i64 sourceOutUs = 0;
+        const u8* rgba = nullptr;    ///< imagem: pixels (não é copiado depois da chamada)
+        u32 width = 0;
+        u32 height = 0;
+        std::string name;
+        std::string sourcePath;
+        u8 orientation = 1;
+        i64 durationFrames = 0;      ///< imagem: duração (0 = a regra de sempre)
+    };
+    /// O lote inteiro numa chamada (testes e quem já tem tudo em memória): abre,
+    /// importa na ordem, aplica corte e duração, arruma e fecha — UM desfazer.
+    /// Devolve os ids que entraram (na ordem); `firstError` = a 1ª recusa.
+    [[nodiscard]] std::vector<u64> import_media_batch(const std::vector<MediaBatchItem>& items,
+                                                      MediaBatchPlacement placement, Status* firstError = nullptr) noexcept;
+    /// "Grupo vazio" (P1-5): uma composição nova e vazia (tamanho, fps e
+    /// duração da atual; fundo transparente) e UMA camada que a mostra, no
+    /// cabeçote, já escolhida. Um passo de desfazer. `name` nulo = "Grupo vazio".
+    [[nodiscard]] Result<u64> add_empty_group(const char* name = nullptr) noexcept;
+    /// "Elemento/Projeto" (P1-6): outro projeto `.aurea` vira UMA camada de
+    /// grupo no cabeçote — a composição principal dele e as aninhadas entram
+    /// com handles novos e a mídia é importada (o mesmo caminho do colar entre
+    /// projetos). Recusa o próprio projeto (ciclo). Um passo de desfazer.
+    [[nodiscard]] Result<u64> insert_project_as_layer(const char* projectPath, const char* name = nullptr) noexcept;
+private:
+    bool omegaImportBatch_ = false;   ///< Omega adicionar: lote aberto (begin/end_import_batch)
+    i64 omegaImportBatchFrame_ = 0;   ///< o cabeçote quando o lote abriu
+public:
     /// "Extrair o áudio": o som de um vídeo vira uma camada própria (mesmo
     /// tempo, mesmo corte) e o vídeo fica mudo. Uma ação de desfazer.
     [[nodiscard]] Result<u64> extract_audio(u64 videoLayerId) noexcept;
@@ -603,6 +659,56 @@ public:
     /// caminho suave (ajuste de Schneider, `error` px). `layerId` = 0 cria uma
     /// camada vetorial nova; senão entra como grupo novo nela. Devolve a camada.
     [[nodiscard]] Result<u64> add_freehand_path(u64 layerId, const f32* xy, usize count, f32 error) noexcept;
+
+    // --- Omega conteúdo (área 06; EngineOmegaContent.cpp) -------------------------
+    /// Camada de DESENHO vazia (vetorial com `VectorData::drawing`), do cabeçote
+    /// até o fim, no centro. Um passo de desfazer. Devolve o id.
+    [[nodiscard]] Result<u64> add_drawing_layer() noexcept;
+    /// Ferramentas do desenho (add_drawing_stroke).
+    static constexpr u32 kDrawPen = 0, kDrawBrush = 1, kDrawFill = 2, kDrawEraser = 3;
+    /// Um traço do editor de desenho vira um grupo novo na camada (`layerId` 0
+    /// cria a camada de desenho). `xyp` = x, y (px da COMPOSIÇÃO, como a mão
+    /// livre) e pressão 0..1, intercalados (`count` floats, múltiplo de 3).
+    /// `rgba` = cor sRGB com alfa reto; `width` = espessura em px da composição.
+    ///  - caneta: curva suave (Schneider) com contorno redondo de largura fixa;
+    ///  - pincel: o mesmo, com a largura pela pressão (VectorStroke::widthProfile);
+    ///  - preencher: caminho fechado pelos pontos, só preenchimento;
+    ///  - borracha: contorno redondo com composite = apagar (tira dos de baixo).
+    /// Um passo de desfazer por traço. Devolve a camada.
+    [[nodiscard]] Result<u64> add_drawing_stroke(u64 layerId, u32 tool, const f32* rgba, f32 width, const f32* xyp, usize count) noexcept;
+    /// Bits da camada vetorial: 1 é vetorial, 2 é desenho. 0 = não é vetorial.
+    [[nodiscard]] u32 vector_layer_flags(u64 layerId) noexcept;
+    /// Operações de ponto (vector/PathEdit.hpp) no caminho livre `path` do
+    /// grupo, no espaço do GRUPO. Com keyframes de forma, grava o keyframe do
+    /// cabeçote (como `set_vector_path`). `continuing` = mesmo arrasto.
+    /// Devolve o índice do ponto que fica escolhido (ou 0), −1 = falhou.
+    enum class PathOp : u32 {
+        MovePoints = 0,   ///< dx, dy, i0, i1, …          (laço: vários pontos)
+        MoveHandle = 1,   ///< i, lado (0 in, 1 out), dx, dy, travaÂngulo, travaComprimento
+        Insert = 2,       ///< trecho, t                   → índice do ponto novo
+        Remove = 3,       ///< i                           → o vizinho que fica escolhido (−1 vazio)
+        SetType = 4,      ///< i, curva (0 canto, 1 curva)
+        Append = 5,       ///< x, y, noComeço (0/1)        → índice do ponto novo
+        SetClosed = 6,    ///< fechado (0/1)
+        SetExclude = 7,   ///< furo (0/1) — o contorno recorta o preenchimento do grupo
+    };
+    i32 edit_vector_path(u64 layerId, u32 group, u32 path, PathOp op, const f32* args, u32 argc, bool continuing) noexcept;
+    /// Arrastar a alça de LARGURA da caixa de texto no palco (modo de texto).
+    /// `dx, dy` em px da composição; o motor projeta no eixo X da camada. Pela
+    /// direção do texto: esquerda + dx, centro + 2·dx, direita − dx; mínimo 50 px,
+    /// arredondado. Texto de ponto (boxMode 0) vira parágrafo (1) com a largura
+    /// atual. A borda oposta fica parada (a posição compensa, sem posição animada).
+    bool drag_text_box_width(u64 layerId, f32 dx, f32 dy, bool continuing) noexcept;
+    /// Alça de tamanho da forma (Editar forma): 0 TL, 1 TR, 2 BR, 3 BL, 4 cima,
+    /// 5 direita, 6 baixo, 7 esquerda. `du, dv` = quanto o dedo andou DESDE o
+    /// último envio, em px da forma (eixos da camada). `keepRatio` mantém a
+    /// proporção; `fromCenter` muda em volta do centro (senão a borda oposta
+    /// fica parada e a posição da camada anda junto). Respeita os keyframes.
+    bool resize_shape_handle(u64 layerId, u32 handle, f32 du, f32 dv, bool keepRatio, bool fromCenter, bool continuing) noexcept;
+    /// Apaga uma fonte IMPORTADA (tira da lista e apaga o arquivo da pasta das
+    /// importadas). Os textos que a usavam voltam para a fonte padrão.
+    bool remove_imported_font(const std::string& path) noexcept;
+
     /// SVG → camada vetorial nova (um grupo por forma), centrada na composição.
     [[nodiscard]] Result<u64> import_svg(const std::string& text, const char* name) noexcept;
     [[nodiscard]] Result<u64> import_psd(const std::string& path, const char* name, bool* approximated = nullptr) noexcept;
@@ -1454,6 +1560,21 @@ public:
     /// pré-comp com outro fps os quadros são reescalados.
     u32 copy_effects(u64 layerId, u32 effectId = kInvalidIndex) noexcept;
     u32 paste_effects(const u64* ids, u32 count) noexcept;
+    // --- Omega efeitos (área 07, P0-1): menu ⋮ do efeito — EngineOmegaEffects.cpp ---
+    /// Duplica o efeito `effectId` da camada: parâmetros, keyframes, expressões
+    /// e malha vão para uma cópia no FIM da pilha, num passo de desfazer.
+    /// Devolve o id novo; kInvalidIndex = camada travada, efeito inexistente ou
+    /// tipo que não se repete (remapear tempo, layout de texto/forma 3D).
+    u32 duplicate_effect(u64 layerId, u32 effectId) noexcept;
+    /// Cola as CONFIGURAÇÕES do efeito da área de transferência no efeito
+    /// `effectId`: só quando a área de transferência tem UM efeito e do mesmo
+    /// tipo. Troca parâmetros, trilhas (keyframes e expressões) e malha;
+    /// mantém id, posição, ligado/desligado e o estado do painel. Um passo de
+    /// desfazer. false = nada mudou.
+    bool paste_effect_settings(u64 layerId, u32 effectId) noexcept;
+    /// Tipo do efeito na área de transferência quando ela guarda exatamente UM
+    /// efeito (o que "Colar configurações" aceita); 0 = vazia ou vários.
+    [[nodiscard]] u32 clipboard_effect_type() noexcept;
     /// Keyframes no instante do frame (todas as propriedades com marca ali).
     u32 copy_keyframes(u64 layerId, i64 frame) noexcept;
     /// Packed references: property, effect ID, parameter component, local frame.
@@ -1580,10 +1701,151 @@ public:
     /// Neighbours are explicit IDs; invalid/locked edits leave history untouched.
     /// Slip changes source time only. Roll/slide never ripple unrelated layers.
     bool edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous = 0, u64 next = 0) noexcept;
+    // --- Omega timeline (área 03, P1-8): alças de velocidade -----------------------
+    /// Estica (ou encolhe) a camada para [newStart, newEnd) mantendo o MESMO
+    /// trecho da fonte: a velocidade vira `velocidade × antiga / nova` (faixa
+    /// 0,05…16×; fora dela a duração para no limite). Chaves de velocidade e de
+    /// remapeamento e os keyframes da camada são reescalados no tempo local (a
+    /// partir do ponto de entrada), como na referência. Linha magnética: o
+    /// começo fica e os vizinhos da linha andam junto com o fim. Um passo de
+    /// desfazer; camada travada ou vizinho travado no caminho = false.
+    bool stretch_layer_span(u64 layerId, i64 newStart, i64 newEnd) noexcept;
+    // Omega painel: (área 04) painel da camada — src/engine/EngineOmegaLayer.cpp ----
+    /// Bits de `query_layer_panel` (os 5 primeiros são os de `query_clip_time_actions`).
+    static constexpr u32 kLayerPanelTrimStart = 1;            ///< cabeçote dentro (s ≤ t ≤ e): trio
+    static constexpr u32 kLayerPanelSplit = 2;
+    static constexpr u32 kLayerPanelTrimEnd = 4;
+    static constexpr u32 kLayerPanelExtendStart = 8;          ///< cabeçote antes: esticar o início (op 8)
+    static constexpr u32 kLayerPanelExtendEnd = 16;           ///< cabeçote depois: esticar o fim (op 9)
+    static constexpr u32 kLayerPanelMoveStart = 32;           ///< cabeçote antes: mover para começar nele
+    static constexpr u32 kLayerPanelMoveEnd = 64;             ///< cabeçote depois: mover para terminar nele
+    static constexpr u32 kLayerPanelRetimeExtendStart = 128;  ///< retempo (muda a velocidade), t < s
+    static constexpr u32 kLayerPanelRetimeShortenStart = 256; ///< s < t < e
+    static constexpr u32 kLayerPanelRetimeShortenEnd = 512;   ///< s < t < e
+    static constexpr u32 kLayerPanelRetimeExtendEnd = 1024;   ///< t > e
+    static constexpr u32 kLayerPanelLocked = 2048;
+    static constexpr u32 kLayerPanelHasAudio = 4096;          ///< `hasAnyAudio`: vídeo, áudio, grupo com som
+    static constexpr u32 kLayerPanelGainKeys = 8192;          ///< volume com mais de 1 keyframe
+    static constexpr u32 kLayerPanelMissingMedia = 16384;     ///< o arquivo da fonte sumiu
+    static constexpr u32 kLayerPanelSpeedBakeable = 32768;    ///< sem curva de tempo nem velocidade animada
+    /// O estado do painel da camada com o cabeçote em `frame` (bits acima).
+    /// Camada travada: some o mover e o retempo; o bit `Locked` avisa a UI.
+    [[nodiscard]] u32 query_layer_panel(u64 layerId, i64 frame) noexcept;
+    /// Move a camada inteira para COMEÇAR em `frame` ou, com `alignEnd`, para
+    /// TERMINAR nele (fim exclusivo no cabeçote, como o aparar fim). Duração,
+    /// fonte e keyframes andam juntos; um passo de desfazer (op 6).
+    bool move_layer_to_playhead(u64 layerId, i64 frame, bool alignEnd) noexcept;
+    /// Retempo: leva uma ponta até `frame` MUDANDO a velocidade e mantendo o
+    /// trecho da fonte (`stretch_layer_span`). `edge`: 0 esticar o início (t < s),
+    /// 1 encurtar o início (s < t < e), 2 encurtar o fim (s < t < e), 3 esticar o
+    /// fim (t > e). Fora da regra ou travada = false.
+    bool retime_layer_to_playhead(u64 layerId, u32 edge, i64 frame) noexcept;
+    /// Velocidade constante em QUALQUER tipo (0,05…16×): a duração acompanha e
+    /// a animação da própria camada (keyframes, máscaras, caminhos, malhas) é
+    /// reescalada no tempo local, então forma, texto, nulo, câmera… tocam mais
+    /// rápido ou mais devagar; com fonte, o trecho da fonte fica. Os passos
+    /// seguidos sem outra edição no meio partem da MESMA camada de partida (um
+    /// arrasto não acumula arredondamento). Recusa curva de tempo e velocidade
+    /// animada (essas usam o painel de velocidade completo) e camada travada.
+    bool set_layer_speed_baked(u64 layerId, f32 speed) noexcept;
     /// Contextual dock actions: trim-in=1, split=2, trim-out=4,
     /// extend-in to playhead=8, extend-out to playhead=16. At either edge
     /// the three cuts remain visible; edits still require a nonempty interval.
     [[nodiscard]] u32 query_clip_time_actions(u64 layerId, i64 frame) noexcept;
+
+    // --- Omega aparência (área 05) — src/engine/EngineOmegaAppearance.cpp ----------
+    // Borda e sombra (P0-4): DECORAÇÕES = efeitos existentes com papel fixo
+    // (EffectInstance::role), escondidos da lista de Efeitos e sempre no fim da
+    // pilha (traço → bordas → sombra). Remover/ligar/parâmetros usam os
+    // comandos de efeito de sempre (EffectRemove, EffectSetEnabled, …).
+    /// Põe uma decoração (`role` = kEffectRoleBorder ou kEffectRoleShadow):
+    /// borda nova = Contorno da silhueta DENTRO, branco, 6 px, no fim das
+    /// bordas; sombra = Sombra projetada preta, deslocamento (5, 5) px (uma por
+    /// camada: já existindo, devolve a dela e a liga). Um passo de desfazer.
+    /// Devolve o id do efeito; kInvalidIndex = camada travada/sem lugar.
+    u32 decoration_add(u64 layerId, u32 role) noexcept;
+    /// Reordena uma decoração DENTRO do grupo do papel dela (`slot` 0 = a
+    /// primeira borda). Um passo de desfazer. false = nada mudou.
+    bool decoration_move(u64 layerId, u32 effectId, u32 slot) noexcept;
+    /// Deslocamento X/Y (px) da sombra → direção (graus) e distância do efeito
+    /// (sem parâmetro novo de shader). Animados: keyframe no cabeçote. Um passo.
+    bool decoration_set_shadow_offset(u64 layerId, u32 effectId, f32 dx, f32 dy) noexcept;
+    /// O deslocamento X/Y (px) da sombra no cabeçote (a conta inversa). false =
+    /// não é uma sombra desta camada.
+    bool decoration_shadow_offset(u64 layerId, u32 effectId, f32& dx, f32& dy) noexcept;
+
+    // Cor e preenchimento (P0-3 / P1-4): forma SDF (não vetorial).
+    static constexpr u32 kShapeFillFloats = 24;
+    /// O preenchimento no cabeçote: [0] tipo (0 cor, 1 degradê), [1] degradê
+    /// (0 linear, 1 radial, 2 angular), [2] preenchido (0/1), [3..6] cor RGBA,
+    /// [7..10] cor do início, [11..14] cor do fim, [15..16] ponta inicial,
+    /// [17..18] ponta final (relativas à caixa), [19] grupos com keyframe,
+    /// [20] grupos com keyframe no cabeçote (bits: timeline/ShapeFill.hpp),
+    /// [21] 1 = forma que aceita preenchimento, [22..23] tamanho da caixa (px).
+    /// Cores em sRGB reto 0..1. Devolve kShapeFillFloats ou 0.
+    u32 query_shape_fill(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// Tipo do preenchimento: 0 nenhum (filled = false), 1 cor sólida, 2 degradê
+    /// (a primeira vez parte da cor atual). Um passo de desfazer.
+    bool set_shape_fill_mode(u64 layerId, u32 mode) noexcept;
+    /// 0 linear, 1 radial, 2 angular. Um passo de desfazer.
+    bool set_shape_gradient_type(u64 layerId, u32 type) noexcept;
+    /// Valor de um grupo (shape_fill::kGroup*: 0 cor, 1 cor do início, 2 cor do
+    /// fim, 3/4 pontas): `count` = 4 (cor) ou 2 (ponta). Com keyframe no grupo,
+    /// grava/edita o keyframe do cabeçote; senão o valor parado. Cada chamada
+    /// abre um passo de desfazer — um arrasto vai dentro de um grupo da UI.
+    bool set_shape_fill_value(u64 layerId, u32 group, const f32* values, u32 count) noexcept;
+    /// ◆ do grupo: keyframe no cabeçote em todos os componentes ↔ tira. Um passo.
+    bool toggle_shape_fill_key(u64 layerId, u32 group) noexcept;
+
+    // Ímã do trackpad e das réguas (P1-2; contas em core/SnapMath.hpp).
+    /// Alvos no cabeçote. `axis` 0/1: valores da POSIÇÃO X/Y (espaço do pai) em
+    /// que uma borda ou o centro da caixa da camada encosta numa borda/centro
+    /// de outra camada visível ou da composição; `guides` (opcional) recebe a
+    /// linha-guia de cada alvo em px da composição. `axis` 2/3: larguras/
+    /// alturas (px da composição) das outras camadas e da composição (marcas
+    /// das réguas de Escala). Ordenados e sem repetidos. Camada em perspectiva
+    /// ou pai girado: 0 alvos.
+    u32 query_snap_targets(u64 layerId, u32 axis, f32* values, f32* guides, u32 capacity) noexcept;
+
+    // --- Omega chrome (área 02): moldura do editor — EngineOmegaChrome.cpp ---------
+    /// Trilha de grupos: os nomes das composições do caminho aberto, da
+    /// principal até a atual, separados por U+001F (o item 0 é a principal).
+    [[nodiscard]] std::string composition_trail() noexcept;
+    /// Setas do transporte (referência): além dos marcadores e dos keyframes
+    /// visíveis da camada (`query_timeline_navigation`), o começo (0), o último
+    /// quadro e, com camada, o início e o fim dela. Estrito na direção; false =
+    /// nada naquela direção (a UI fica parada).
+    bool query_transport_navigation(u64 layerId, i64 compositionFrame, i32 direction,
+                                    i64& targetFrame) noexcept;
+    /// Barra inferior da seleção múltipla com o cabeçote em `frame`: 0 = cortes
+    /// (aparar início · dividir · aparar fim), 1 = todas começam no cabeçote ou
+    /// depois (estender/levar o início), 2 = todas acabam no cabeçote ou antes
+    /// (estender/levar o fim).
+    [[nodiscard]] u32 query_multi_time_actions(const u64* ids, u32 count, i64 frame) noexcept;
+    /// Partes do "Colar estilo" (bits estáveis, os mesmos nas duas plataformas).
+    static constexpr u32 StyleColorFill = 1;      ///< cor e preenchimento (forma, texto)
+    static constexpr u32 StyleBorderShadow = 2;   ///< contorno/sombra e os efeitos de borda e sombra
+    static constexpr u32 StyleBlendOpacity = 4;   ///< mesclagem e opacidade
+    static constexpr u32 StyleTransform = 8;      ///< mover e transformar (sem a opacidade)
+    static constexpr u32 StyleText = 16;          ///< fonte, tamanho, alinhamento, espaçamento
+    static constexpr u32 StyleVolume = 32;        ///< volume, pan e fades (vídeo, áudio)
+    static constexpr u32 StyleEffects = 64;       ///< os outros efeitos
+    static constexpr u32 StyleSpeed = 128;        ///< velocidade (vídeo, áudio, grupo)
+    /// O que o estilo copiado (`copy_style`) tem para colar, pelo tipo da camada
+    /// copiada. 0 = nada copiado.
+    [[nodiscard]] u32 copied_style_parts() noexcept;
+    /// Cola só as `parts` pedidas nas camadas destravadas, num passo de desfazer.
+    /// Parte que não serve ao tipo de destino é pulada. Devolve quantas mudaram.
+    u32 paste_style_parts(const u64* ids, u32 count, u32 parts) noexcept;
+    /// Modos de visão da prévia (coluna à direita do preview). NUNCA entram no
+    /// export. `selectionView`: 0 normal, 1 só as escolhidas (as outras não são
+    /// desenhadas; sem ids = normal), 2 as escolhidas com opacidade 0,5 fixa (as
+    /// outras normais). `pixelPreview`: a composição na resolução dela e a saída
+    /// por vizinho mais próximo. Mudar redesenha (o quadro guardado é descartado).
+    void set_preview_view(u32 selectionView, const u64* ids, u32 count, bool pixelPreview) noexcept;
+    /// O que vale agora: modo (bits 0..7), pixels (bit 8) e quantos ids (bits 16+).
+    [[nodiscard]] u32 preview_view_mode() noexcept;
+    static constexpr u32 kOmegaViewMaxIds = 64;
 
     // --- Marcas e batidas -------------------------------------------------------
     /// Liga/desliga a marca da pessoa no frame (toggle). true = ficou marcada.
@@ -2353,6 +2615,11 @@ private:
     std::unique_ptr<CommandQueue> commandQueue_;
     std::unique_ptr<Project>      project_;
     std::vector<CompositionId>    compStack_;   ///< caminho da principal até a aberta
+    // Omega chrome (área 02): modos de visão da prévia (EngineOmegaChrome.cpp; sob modelMutex_).
+    u32 omegaViewMode_ = 0;              ///< 0 normal, 1 só as escolhidas, 2 escolhidas a 50 %
+    bool omegaPixelPreview_ = false;
+    std::vector<u64> omegaViewIds_;      ///< ids empacotados, ordenados
+    void apply_omega_view_locked(RenderSettings& rs) const noexcept;
     std::unordered_map<u64, std::shared_ptr<const scene3d::HdriPixels>> hdris_;
     std::unordered_map<u64, std::shared_ptr<const CubeLut>> cubeLuts_;
     struct CameraTrackJob;
@@ -2653,6 +2920,13 @@ private:
     void log_export_profile() noexcept;
     /// Âncora da camada de texto no centro da caixa atual (depois de editar).
     void recenter_text(Layer& l) noexcept;
+
+    // Omega painel: (área 04) a camada de partida do arrasto de velocidade
+    // (src/engine/EngineOmegaLayer.cpp; sob modelMutex_).
+    struct OmegaLayerState;
+    struct OmegaLayerStateDeleter { void operator()(OmegaLayerState* s) const noexcept; };
+    std::unique_ptr<OmegaLayerState, OmegaLayerStateDeleter> omegaLayer_;
+    [[nodiscard]] OmegaLayerState& omega_layer_state() noexcept;
 
     // --- AureaHyper (src/engine/EngineHyper.cpp) -----------------------------
     struct HyperState;

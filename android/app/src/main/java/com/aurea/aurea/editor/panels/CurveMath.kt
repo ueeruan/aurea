@@ -174,3 +174,84 @@ internal fun quickTypeEase(type: CurveQuickType, current: Ease): Ease {
         CurveQuickType.Bounce -> if (same) current else DefaultBounce
     }
 }
+
+// =============================================================================
+// Omega painel (área 04, P1-11): o editor de curva no layout da referência —
+// grupos (Curvas · Saltos e oscilações · Degraus) e as 4 vagas de cada grupo,
+// e a alça arrastada de forma RELATIVA (posição de partida + deslocamento).
+// =============================================================================
+
+/** Os grupos da coluna da direita (ids `curve.category.<tag>`; iguais no iOS). */
+internal enum class CurveCategory(val tag: String) { Curves("curves"), Bounces("bounces"), Steps("steps") }
+
+/** Uma vaga da coluna de presets: o nome (recurso) e o easing que ela aplica. */
+internal class CurveSlot(val name: Int, val ease: Ease)
+
+/**
+ * As 4 vagas de cada grupo. "Oscilar" (Saltos) e "Degraus elásticos" (Degraus)
+ * dependem de curvas novas no motor (P2-14): até lá a vaga fica vazia (nula).
+ * "Passar do ponto" e "Manter" são extras do AUREA no grupo mais próximo.
+ */
+internal fun curveSlots(c: CurveCategory): List<CurveSlot?> = when (c) {
+    CurveCategory.Curves -> listOf(
+        CurveSlot(com.aurea.aurea.R.string.panel_linear, Ease(Interp.LINEAR, 0f, 0f, 1f, 1f)),
+        CurveSlot(com.aurea.aurea.R.string.pn_ease_in, Ease(Interp.BEZIER, 0.42f, 0f, 1f, 1f)),
+        CurveSlot(com.aurea.aurea.R.string.pn_ease_out, Ease(Interp.BEZIER, 0f, 0f, 0.58f, 1f)),
+        CurveSlot(com.aurea.aurea.R.string.pn_ease_in_out, Ease(Interp.BEZIER, 0.42f, 0f, 0.58f, 1f)),
+    )
+    CurveCategory.Bounces -> listOf(
+        CurveSlot(com.aurea.aurea.R.string.pn_textpreset_bounce, DefaultBounce),
+        CurveSlot(com.aurea.aurea.R.string.pn_textpreset_elastic, Ease(Interp.ELASTIC, 0f, 0f, 1f, 1f).elastic()),
+        CurveSlot(com.aurea.aurea.R.string.curve_type_overshoot, Ease(Interp.OVERSHOOT, 0f, 0f, 1f, 1f).overshoot()),
+        null,
+    )
+    CurveCategory.Steps -> listOf(
+        CurveSlot(com.aurea.aurea.R.string.pn_curve_steps4, Ease(Interp.STEPS, 0f, 0f, 1f, 1f)),
+        CurveSlot(com.aurea.aurea.R.string.pn_ease_hold, Ease(Interp.HOLD, 0f, 0f, 1f, 1f)),
+        null,
+        null,
+    )
+}
+
+/** O grupo que contém a curva do trecho (o grupo ativo da coluna). */
+internal fun curveCategoryOf(e: Ease): CurveCategory = when (e.interp) {
+    Interp.BOUNCE, Interp.ELASTIC, Interp.OVERSHOOT -> CurveCategory.Bounces
+    Interp.STEPS, Interp.HOLD -> CurveCategory.Steps
+    else -> CurveCategory.Curves
+}
+
+/**
+ * A vaga acesa: só em curvas que não são bézier (como na referência) — a reta,
+ * os saltos e os degraus acendem pelo tipo; a bézier livre não acende nenhuma.
+ */
+internal fun curveSlotActive(current: Ease, slot: Ease): Boolean =
+    !current.isBezier && slot.interp == current.interp
+
+/**
+ * Tocar no grupo aplica a 1ª vaga dele; tocar no grupo que já está ativo não
+ * muda a curva (os parâmetros ficam).
+ */
+internal fun curveCategoryEase(c: CurveCategory, current: Ease): Ease? {
+    if (curveCategoryOf(current) == c) return null
+    return curveSlots(c).first()?.ease
+}
+
+/**
+ * A alça arrastada de forma RELATIVA (referência): a posição de partida
+ * ([x0], [y0]) mais o deslocamento do dedo ([dx], [dy] px) no gráfico de
+ * [width]×[height] px com a faixa vertical [lo]..[hi]. x fica em 0..1; y em
+ * −2..3 com [overshoot] ligado, ou em 0..1 sem ele; encaixa em 0 e 1 a menos
+ * de [snapPx].
+ */
+internal fun dragHandle(
+    x0: Float, y0: Float, dx: Float, dy: Float, width: Float, height: Float,
+    lo: Float, hi: Float, snapPx: Float, overshoot: Boolean,
+): FloatArray {
+    val w = max(1f, width)
+    val h = max(1f, height)
+    val span = if (hi - lo > 1e-3f) hi - lo else 1e-3f
+    val x = snapUnit((x0 + dx / w).coerceIn(0f, 1f), snapPx / w)
+    val raw = y0 - dy / h * span
+    val y = snapUnit(if (overshoot) raw.coerceIn(EASE_Y_MIN, EASE_Y_MAX) else raw.coerceIn(0f, 1f), snapPx / h * span)
+    return floatArrayOf(x, y)
+}

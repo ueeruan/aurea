@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega home (área 01): barra superior, dock, gaveta, aba Projetos, Presets, folha Novo projeto e Sobre. -->
+    <string name="om_home_account">Akun</string>
+    <string name="om_home_action_export">Ekspor</string>
+    <string name="om_home_empty_body">Ketuk %1$s untuk membuat proyek pertama Anda.</string>
+    <string name="om_home_my_projects">Proyek saya</string>
+    <string name="om_home_sort_current">Urutan: %1$s</string>
+    <string name="om_home_my_presets">Preset saya</string>
+    <string name="om_home_presets_empty">Anda belum menyimpan preset. Di editor, simpan satu dari panel preset lapisan.</string>
+    <string name="om_home_preset_builtin">Bawaan AUREA</string>
+    <string name="om_home_preset_menu">Menu preset</string>
+    <string name="om_home_preset_delete_q">Hapus preset “%1$s”?</string>
+    <string name="om_home_preset_name_taken">Preset dengan nama itu sudah ada.</string>
+    <string name="om_drawer_support">Dukungan</string>
+    <string name="om_drawer_light_preview">Pratinjau ringan</string>
+    <string name="om_drawer_light_preview_note">Editor terbuka dengan pratinjau 1/2: mengedit lebih lancar; ekspor tetap berkualitas penuh.</string>
+    <string name="om_new_frame_size">Ukuran bingkai</string>
+    <string name="om_new_keep_ratio">Pertahankan rasio</string>
+    <string name="om_new_clear_name">Hapus nama</string>
+    <string name="om_new_bg_light_grey">Abu-abu muda</string>
+    <string name="om_new_bg_green">Hijau</string>
+    <string name="om_new_bg_blue">Biru</string>
+    <string name="om_new_over_limit">(melebihi batas)</string>
+    <string name="om_about_version">Versi</string>
+    <string name="om_about_build">Build</string>
+    <string name="om_about_device">Perangkat</string>
+    <string name="om_about_chipset">Prosesor</string>
+    <string name="om_about_system">Sistem</string>
+    <string name="om_about_memory">Memori</string>
+    <string name="om_about_storage">Penyimpanan</string>
+    <string name="om_about_storage_value">%1$s kosong dari %2$s</string>
+    <string name="om_about_export_max">Ekspor maksimum</string>
+    <string name="om_about_languages">Bahasa</string>
+    <string name="om_about_copied">Info disalin</string>
+    <string name="om_about_copy_hint">Ketuk tabel untuk menyalinnya (berguna saat melaporkan masalah).</string>
+    <string name="om_about_cores">%1$d inti</string>
+</resources>

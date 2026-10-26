@@ -29,6 +29,9 @@
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/GestureMath.hpp"
+// Omega aparência: ímã dos gestos e código de cor (contas puras).
+#include "aurea/core/ColorCode.hpp"
+#include "aurea/core/SnapMath.hpp"
 #include "aurea/core/Trackball.hpp"
 #include "aurea/timeline/CanvasFit.hpp"
 #include "aurea/export/BitratePolicy.hpp"
@@ -157,6 +160,7 @@ NSString* const AureaEffectCategory   = @"category";
 NSString* const AureaEffectEnabled    = @"enabled";
 NSString* const AureaEffectParamCount = @"paramCount";
 NSString* const AureaEffectKnown      = @"known";
+NSString* const AureaEffectRole       = @"role";   // Omega aparência: decoração de Borda e sombra (≠ 0)
 
 NSString* const AureaParamIndex      = @"index";
 NSString* const AureaParamType       = @"type";
@@ -177,6 +181,12 @@ NSString* const AureaParamSectionLabel  = @"sectionLabel";
 NSString* const AureaParamSectionToggle = @"sectionToggle";
 NSString* const AureaParamSectionOpen   = @"sectionOpen";
 NSString* const AureaParamTip           = @"tip";
+// Omega efeitos (área 07, P0-1): apresentação da linha.
+NSString* const AureaParamControl       = @"control";
+NSString* const AureaParamStep          = @"step";
+NSString* const AureaParamOrigin        = @"origin";
+NSString* const AureaParamEnumStyle     = @"enumStyle";
+NSString* const AureaParamRowFlags      = @"rowFlags";
 
 NSString* const AureaExportRunning     = @"running";
 NSString* const AureaExportFinished    = @"finished";
@@ -297,6 +307,7 @@ NSDictionary<NSString*, id>* effect_row_dict(const aurea::bridge::LayerEffectRow
         AureaEffectEnabled:    @(e.enabled != 0),
         AureaEffectParamCount: @(e.paramCount),
         AureaEffectKnown:      @(e.known != 0),
+        AureaEffectRole:       @(e.role),
     };
 }
 
@@ -337,6 +348,12 @@ NSDictionary<NSString*, id>* param_row_dict(const aurea::bridge::EffectParamRow&
         AureaParamSectionToggle: @(p.sectionToggle),
         AureaParamSectionOpen:   @((p.sectionFlags & aurea::bridge::kEffectSectionOpen) != 0),
         AureaParamTip:           slice(blob, p.tipOffset, p.tipLength),
+        // Omega efeitos (P0-1): apresentação resolvida pelo motor.
+        AureaParamControl:       @(p.control),
+        AureaParamStep:          @(std::isfinite(p.step) && p.step > 0.0f ? p.step : 0.0f),
+        AureaParamOrigin:        @(std::isfinite(p.origin) ? p.origin : 0.0f),
+        AureaParamEnumStyle:     @(p.enumStyle),
+        AureaParamRowFlags:      @(p.rowFlags),
     };
 }
 
@@ -1632,6 +1649,25 @@ bool aurea_ios_hyper_npu_available() noexcept { return g_hyperNpuAvailable.load(
     (void)e->paste_effects(ids.data(), static_cast<aurea::u32>(ids.size()));
 }
 
+// Omega efeitos (área 07, P0-1): duplicar e colar configurações do efeito.
+- (int64_t)duplicateEffect:(uint32_t)effectId inLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return -1;
+    [self flush];
+    const aurea::u32 id = e->duplicate_effect(static_cast<aurea::u64>(layerId), effectId);
+    return id == aurea::kInvalidIndex ? -1 : static_cast<int64_t>(id);
+}
+- (BOOL)pasteEffectSettings:(uint32_t)effectId inLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return NO;
+    [self flush];
+    return e->paste_effect_settings(static_cast<aurea::u64>(layerId), effectId) ? YES : NO;
+}
+- (uint32_t)clipboardEffectType {
+    auto* e = self.engine;
+    return e ? e->clipboard_effect_type() : 0;
+}
+
 - (void)copyStyle:(long long)layerId {
     if (auto* e = self.engine) (void)e->copy_style(static_cast<aurea::u64>(layerId));
 }
@@ -1715,10 +1751,12 @@ bool aurea_ios_hyper_npu_available() noexcept { return g_hyperNpuAvailable.load(
 // =============================================================================
 namespace {
 NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font) {
+    // Omega conteúdo (área 06): importada, categoria e escritas (bits) para o navegador de fontes.
     return @{ @"family": [NSString stringWithUTF8String:font.family.c_str()] ?: @"",
               @"style": [NSString stringWithUTF8String:font.style.c_str()] ?: @"",
               @"weight": @(font.weight), @"italic": @(font.italic),
-              @"path": [NSString stringWithUTF8String:font.path.c_str()] ?: @"" };
+              @"path": [NSString stringWithUTF8String:font.path.c_str()] ?: @"",
+              @"imported": @(font.imported), @"category": @(static_cast<unsigned>(font.category)), @"scripts": @(font.scripts) };
 }
 }
 
@@ -1850,6 +1888,23 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 }
 - (uint32_t)queryClipTimeActions:(long long)layerId frame:(int64_t)frame {
     auto* e = self.engine; return e ? e->query_clip_time_actions(layerId, frame) : 0;
+}
+// Omega timeline (área 03, P1-8): alça de velocidade.
+- (BOOL)stretchLayerSpan:(long long)layerId start:(int64_t)start end:(int64_t)end {
+    auto* e = self.engine; return e && e->stretch_layer_span(static_cast<aurea::u64>(layerId), start, end);
+}
+// Omega painel: (área 04) painel da camada — EngineOmegaLayer.cpp.
+- (uint32_t)queryLayerPanel:(long long)layerId frame:(int64_t)frame {
+    auto* e = self.engine; return e ? e->query_layer_panel(static_cast<aurea::u64>(layerId), frame) : 0;
+}
+- (BOOL)moveLayerToPlayhead:(long long)layerId frame:(int64_t)frame alignEnd:(BOOL)alignEnd {
+    auto* e = self.engine; return e && e->move_layer_to_playhead(static_cast<aurea::u64>(layerId), frame, alignEnd == YES);
+}
+- (BOOL)retimeLayerToPlayhead:(long long)layerId edge:(uint32_t)edge frame:(int64_t)frame {
+    auto* e = self.engine; return e && e->retime_layer_to_playhead(static_cast<aurea::u64>(layerId), edge, frame);
+}
+- (BOOL)setLayerSpeedBaked:(long long)layerId speed:(float)speed {
+    auto* e = self.engine; return e && e->set_layer_speed_baked(static_cast<aurea::u64>(layerId), speed);
 }
 - (BOOL)trimComposition:(int64_t)frame { auto* e = self.engine; return e && e->trim_composition(frame); }
 
@@ -2985,6 +3040,100 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     if (!e || !e->query_shape_params(layerId, values, aurea::Engine::kShapeParamFloats)) return @[];
     return floats_to_array(values, aurea::Engine::kShapeParamFloats);
 }
+// --- Omega aparência (área 05) -----------------------------------------------------
+- (int)decorationAdd:(long long)layerId role:(int)role {
+    auto* e = self.engine;
+    if (!e || role < 0) return -1;
+    const aurea::u32 id = e->decoration_add(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(role));
+    return id == aurea::kInvalidIndex ? -1 : static_cast<int>(id);
+}
+- (BOOL)decorationMove:(long long)layerId effect:(uint32_t)effectId slot:(uint32_t)slot {
+    auto* e = self.engine; return e && e->decoration_move(static_cast<aurea::u64>(layerId), effectId, slot);
+}
+- (BOOL)decorationSetShadowOffset:(long long)layerId effect:(uint32_t)effectId dx:(float)dx dy:(float)dy {
+    auto* e = self.engine; return e && e->decoration_set_shadow_offset(static_cast<aurea::u64>(layerId), effectId, dx, dy);
+}
+- (NSArray<NSNumber*>*)decorationShadowOffset:(long long)layerId effect:(uint32_t)effectId {
+    auto* e = self.engine;
+    float dx = 0.0f, dy = 0.0f;
+    if (!e || !e->decoration_shadow_offset(static_cast<aurea::u64>(layerId), effectId, dx, dy)) return @[];
+    return @[@(dx), @(dy)];
+}
+- (NSArray<NSNumber*>*)shapeFill:(long long)layerId {
+    auto* e = self.engine;
+    float values[aurea::Engine::kShapeFillFloats]{};
+    if (!e || !e->query_shape_fill(static_cast<aurea::u64>(layerId), values, aurea::Engine::kShapeFillFloats)) return @[];
+    return floats_to_array(values, aurea::Engine::kShapeFillFloats);
+}
+- (BOOL)setShapeFillMode:(long long)layerId mode:(int)mode {
+    auto* e = self.engine; return e && mode >= 0 && e->set_shape_fill_mode(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(mode));
+}
+- (BOOL)setShapeGradientType:(long long)layerId type:(int)type {
+    auto* e = self.engine; return e && type >= 0 && e->set_shape_gradient_type(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(type));
+}
+- (BOOL)setShapeFillValue:(long long)layerId group:(int)group values:(NSArray<NSNumber*>*)values {
+    auto* e = self.engine;
+    if (!e || group < 0 || values.count > 4) return NO;
+    float v[4]{};
+    for (NSUInteger i = 0; i < values.count; ++i) v[i] = values[i].floatValue;
+    return e->set_shape_fill_value(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(group), v, static_cast<aurea::u32>(values.count));
+}
+- (BOOL)toggleShapeFillKey:(long long)layerId group:(int)group {
+    auto* e = self.engine; return e && group >= 0 && e->toggle_shape_fill_key(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(group));
+}
+- (NSArray<NSNumber*>*)snapTargets:(long long)layerId axis:(int)axis {
+    auto* e = self.engine;
+    if (!e || axis < 0) return @[];
+    constexpr aurea::u32 kCap = 512;
+    std::vector<float> values(kCap), guides(kCap);
+    const aurea::u32 n = e->query_snap_targets(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(axis), values.data(), guides.data(), kCap);
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:n * 2];
+    for (aurea::u32 i = 0; i < n; ++i) { [out addObject:@(values[i])]; [out addObject:@(guides[i])]; }
+    return out;
+}
+- (NSArray<NSNumber*>*)snapValueFromFinger:(NSArray<NSNumber*>*)targets plateau:(float)plateau finger:(float)finger {
+    std::vector<float> t(targets.count);
+    for (NSUInteger i = 0; i < targets.count; ++i) t[i] = targets[i].floatValue;
+    aurea::i32 active = -1;
+    const float v = aurea::snap::value_from_finger(t.data(), static_cast<aurea::u32>(t.size()), plateau, finger, &active);
+    return @[@(v), @(active)];
+}
+- (float)snapFingerFromValue:(NSArray<NSNumber*>*)targets plateau:(float)plateau value:(float)value {
+    std::vector<float> t(targets.count);
+    for (NSUInteger i = 0; i < targets.count; ++i) t[i] = targets[i].floatValue;
+    return aurea::snap::finger_from_value(t.data(), static_cast<aurea::u32>(t.size()), plateau, value);
+}
+- (NSArray<NSNumber*>*)dialSnap:(float)accumDeg {
+    bool snapped = false;
+    const float v = aurea::snap::dial_snap(accumDeg, &snapped);
+    return @[@(v), @(snapped ? 1.0f : 0.0f)];
+}
+- (NSArray<NSNumber*>*)hueSnap:(float)hueDeg {
+    bool snapped = false;
+    const float v = aurea::snap::hue_snap(hueDeg, &snapped);
+    return @[@(v), @(snapped ? 1.0f : 0.0f)];
+}
+- (float)hueTouchStart:(float)currentDeg touch:(float)touchDeg { return aurea::snap::hue_touch_start(currentDeg, touchDeg); }
+- (float)padAcceleration:(float)smoothedSpeed { return aurea::snap::pad_acceleration(smoothedSpeed); }
+- (int)nudgeSide:(float)x y:(float)y width:(float)width height:(float)height {
+    return static_cast<int>(aurea::snap::nudge_side(x, y, width, height));
+}
+- (NSArray<NSNumber*>*)parseColorCode:(NSString*)text {
+    const char* chars = text.UTF8String;
+    float rgba[4]{};
+    if (!chars || !aurea::color_code::parse(std::string_view(chars), rgba)) return @[];
+    return @[@(rgba[0]), @(rgba[1]), @(rgba[2]), @(rgba[3])];
+}
+- (NSString*)formatColorCode:(float)r g:(float)g b:(float)b a:(float)a withAlpha:(BOOL)withAlpha {
+    const float rgba[4] = {r, g, b, a};
+    char text[16]{};
+    (void)aurea::color_code::format(rgba, withAlpha == YES, text, sizeof(text));
+    return [NSString stringWithUTF8String:text] ?: @"";
+}
+- (BOOL)colorWantsDarkText:(float)r g:(float)g b:(float)b a:(float)a {
+    const float rgba[4] = {r, g, b, a};
+    return aurea::color_code::wants_dark_text(rgba);
+}
 - (NSArray<NSNumber*>*)particleParams:(long long)layerId {
     auto* e = self.engine;
     constexpr auto count = static_cast<aurea::u32>(aurea::ParticleParam::Count);
@@ -3534,8 +3683,11 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
         NSMutableArray* paths = [NSMutableArray array];
         NSMutableArray* pathKeyCounts = [NSMutableArray array];
         for (const auto& p : g.paths) [pathKeyCounts addObject:@(p.keys.size())];
+        // Omega conteúdo (área 06): contorno FURO (menu de contornos do Editar pontos).
+        NSMutableArray* pathExclude = [NSMutableArray array];
+        for (const auto& p : g.paths) [pathExclude addObject:@(p.exclude)];
         for (const auto& p : g.paths) [paths addObject:@[@(static_cast<u32>(p.kind)), @(p.reversed), @(p.center.x), @(p.center.y), @(p.size.x), @(p.size.y), @(p.roundness), @(p.points), @(p.outerRadius), @(p.innerRadius), @(p.outerRoundness), @(p.innerRoundness), @(p.rotation)]];
-        [groups addObject:@{@"id": @(index), @"name": to_ns(g.name), @"visible": @(g.visible), @"merge": @(g.merge), @"params": floats_to_array(params, aurea::Engine::kVectorParamFloats), @"pathKeyCounts": pathKeyCounts,
+        [groups addObject:@{@"id": @(index), @"name": to_ns(g.name), @"visible": @(g.visible), @"merge": @(g.merge), @"params": floats_to_array(params, aurea::Engine::kVectorParamFloats), @"pathKeyCounts": pathKeyCounts, @"pathExclude": pathExclude,
             @"fillEnabled": @(g.fill.enabled), @"fillRule": @(g.fill.rule), @"fill": paint(g.fill.paint),
             @"strokeEnabled": @(g.stroke.enabled), @"stroke": paint(g.stroke.paint), @"cap": @(g.stroke.cap), @"join": @(g.stroke.join), @"miter": @(g.stroke.miterLimit), @"taperStart": @(g.stroke.taperStart), @"taperEnd": @(g.stroke.taperEnd), @"taperEase": @(g.stroke.taperEase), @"dashes": floats_to_array(g.stroke.dashes.data(), static_cast<u32>(g.stroke.dashes.size())),
             @"trimEnabled": @(g.trim.enabled), @"trimMode": @(g.trim.mode), @"repeatEnabled": @(g.repeater.enabled), @"repeatAbove": @(g.repeater.above), @"repeatAnchor": @[@(g.repeater.anchor.x), @(g.repeater.anchor.y)], @"anchor": @[@(g.anchor.x), @(g.anchor.y)], @"paths": paths}];
@@ -3615,6 +3767,54 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (long long)addFreehand:(long long)layerId points:(NSArray<NSNumber*>*)points error:(float)error {
     auto* e = self.engine; if (!e || points.count % 2) return -1; std::vector<float> v; for (NSNumber* n in points) v.push_back(n.floatValue);
     const auto result = e->add_freehand_path(layerId, v.data(), v.size(), error); return result.ok() ? static_cast<long long>(*result) : -1;
+}
+// Omega conteúdo (área 06).
+- (long long)addDrawingLayer {
+    auto* e = self.engine; if (!e) return -1;
+    const auto r = e->add_drawing_layer(); return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code());
+}
+- (long long)addDrawingStroke:(long long)layerId tool:(uint32_t)tool color:(NSArray<NSNumber*>*)rgba width:(float)width points:(NSArray<NSNumber*>*)points {
+    auto* e = self.engine; if (!e || points.count < 3 || points.count % 3) return -1;
+    std::vector<float> v; v.reserve(points.count); for (NSNumber* n in points) v.push_back(n.floatValue);
+    std::vector<float> c; for (NSNumber* n in rgba) c.push_back(n.floatValue);
+    const auto r = e->add_drawing_stroke(static_cast<u64>(layerId), tool, c.size() >= 4 ? c.data() : nullptr, width, v.data(), v.size());
+    return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code());
+}
+- (uint32_t)vectorLayerFlags:(long long)layerId { auto* e = self.engine; return e ? e->vector_layer_flags(static_cast<u64>(layerId)) : 0; }
+- (int32_t)editVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path op:(uint32_t)op args:(NSArray<NSNumber*>*)args continuing:(BOOL)continuing {
+    auto* e = self.engine; if (!e) return -1;
+    std::vector<float> v; for (NSNumber* n in args) v.push_back(n.floatValue);
+    return e->edit_vector_path(static_cast<u64>(layerId), group, path, static_cast<aurea::Engine::PathOp>(op), v.empty() ? nullptr : v.data(),
+                               static_cast<aurea::u32>(v.size()), continuing);
+}
+- (BOOL)dragTextBoxWidth:(long long)layerId dx:(float)dx dy:(float)dy continuing:(BOOL)continuing {
+    auto* e = self.engine; return e && e->drag_text_box_width(static_cast<u64>(layerId), dx, dy, continuing);
+}
+- (BOOL)resizeShapeHandle:(long long)layerId handle:(uint32_t)handle du:(float)du dv:(float)dv keepRatio:(BOOL)keepRatio fromCenter:(BOOL)fromCenter continuing:(BOOL)continuing {
+    auto* e = self.engine; return e && e->resize_shape_handle(static_cast<u64>(layerId), handle, du, dv, keepRatio, fromCenter, continuing);
+}
+- (BOOL)removeImportedFont:(NSString*)path { auto* e = self.engine; return e && path && e->remove_imported_font(to_std(path)); }
+- (BOOL)clearVectorPathKeys:(long long)layerId group:(uint32_t)group path:(uint32_t)path {
+    auto* e = self.engine; std::vector<float> at; std::vector<float> data; std::string names; aurea::VectorData doc;
+    if (!e || !e->vector_path_at(layerId, group, path, at) || at.size() < 9) return NO;
+    if (!e->vector_document(layerId, data, names) || !aurea::vector::decode_document(data.data(), data.size(), names, doc)) return NO;
+    if (group >= doc.groups.size() || path >= doc.groups[group].paths.size()) return NO;
+    const usize count = at[8] < 0.f ? 0 : static_cast<usize>(at[8]);
+    if (at.size() != 9 + count * 6) return NO;
+    auto& p = doc.groups[group].paths[path];
+    if (p.keys.empty()) return YES;
+    // A forma que está na tela agora vira a forma parada.
+    p.kind = aurea::VectorPathKind::Free;
+    p.path.closed = at[7] > 0.5f;
+    p.path.v.clear();
+    for (usize i = 0; i < count; ++i) {
+        const float* q = &at[9 + i * 6];
+        aurea::BezierVertex v; v.p = {q[0], q[1]}; v.in = {q[2], q[3]}; v.out = {q[4], q[5]};
+        p.path.v.push_back(v);
+    }
+    p.keys.clear();
+    aurea::vector::encode_document(doc, data, names);
+    return e->set_vector_document(layerId, data.data(), data.size(), names, false);
 }
 - (long long)importSVG:(NSString*)text name:(NSString*)name { auto* e = self.engine; if (!e) return -1; const auto r = e->import_svg(to_std(text), name.UTF8String); return r.ok() ? static_cast<long long>(*r) : -1; }
 - (long long)importPSD:(NSString*)path name:(NSString*)name { auto* e = self.engine; if (!e) return -1; const auto r=e->import_psd(to_std(path),name.UTF8String); return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code()); }
@@ -4449,8 +4649,56 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (uint32_t)exportBitrateBps:(uint32_t)width height:(uint32_t)height fps:(double)fps
                        codec:(AureaExportCodec)codec quality:(uint32_t)quality
                   customMbps:(uint32_t)customMbps {
-    return aurea::export_video_bitrate_bps(width, height, fps, static_cast<aurea::ExportCodec>(codec),
-                                           static_cast<aurea::ExportQuality>(std::min<uint32_t>(quality, 2u)), customMbps);
+    // Omega adicionar (área 08, P1-9): `quality` 0..2 = fichas antigas; 20..100 = porcentagem.
+    return aurea::export_video_bitrate_bps_code(width, height, fps, static_cast<aurea::ExportCodec>(codec),
+                                                std::min<uint32_t>(quality, aurea::kExportQualityPercentMax), customMbps);
+}
+
+// --- Omega adicionar (área 08): fps da exportação, lote, grupo vazio, projeto -----
++ (uint32_t)exportFpsOption:(uint32_t)fps100 option:(uint32_t)option {
+    return aurea::export_fps_option(fps100, option);
+}
+
+- (void)beginImportBatch {
+    if (auto* e = self.engine) e->begin_import_batch();
+}
+
+- (int)endImportBatch:(NSArray<NSNumber*>*)layerIds placement:(uint32_t)placement {
+    auto* e = self.engine;
+    if (!e) return -static_cast<int>(aurea::Errc::InvalidState);
+    std::vector<aurea::u64> ids;
+    ids.reserve(layerIds.count);
+    for (NSNumber* n in layerIds) ids.push_back(static_cast<aurea::u64>(n.longLongValue));
+    const auto result = e->end_import_batch(ids.data(), static_cast<aurea::u32>(ids.size()),
+        placement == 1 ? aurea::Engine::MediaBatchPlacement::Sequence : aurea::Engine::MediaBatchPlacement::SameStart);
+    return result.ok() ? static_cast<int>(*result) : -static_cast<int>(result.status().code());
+}
+
+- (int)applyImportTiming:(long long)layerId durationFrames:(int64_t)durationFrames
+              sourceInUs:(int64_t)sourceInUs sourceOutUs:(int64_t)sourceOutUs {
+    auto* e = self.engine;
+    if (!e) return static_cast<int>(aurea::Errc::InvalidState);
+    return static_cast<int>(e->apply_import_timing(static_cast<aurea::u64>(layerId), durationFrames, sourceInUs, sourceOutUs).raw());
+}
+
+- (long long)addEmptyGroup:(NSString*)name {
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    const std::string label = to_std(name);
+    const auto result = e->add_empty_group(label.empty() ? nullptr : label.c_str());
+    return result.ok() ? static_cast<long long>(*result) : -static_cast<long long>(result.status().code());
+}
+
+- (long long)insertProjectAsLayer:(NSString*)path name:(NSString*)name {
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    const std::string file = to_std(path), label = to_std(name);
+    const auto result = e->insert_project_as_layer(file.c_str(), label.empty() ? nullptr : label.c_str());
+    if (!result.ok()) {
+        _lastImportError = to_ns(std::string(result.status().message()));
+        return -static_cast<long long>(result.status().code());
+    }
+    return static_cast<long long>(*result);
 }
 
 - (BOOL)startExportTo:(NSString*)path codec:(AureaExportCodec)codec
@@ -4488,7 +4736,8 @@ static aurea::ExportSettings video_export_settings(AureaExportCodec codec, uint3
     settings.audioBitrateKbps = audioBitrateKbps;
     settings.aiUpscale = aiUpscale;
     settings.trimToContent = trimToContent != NO;
-    settings.quality = std::min<uint32_t>(quality, 2u);
+    // Omega adicionar (área 08, P1-9): 0..2 = fichas antigas; 20..100 = porcentagem (BitratePolicy.hpp).
+    settings.quality = std::min<uint32_t>(quality, aurea::kExportQualityPercentMax);
     // O degrau da escada de tentativas (export/ExportAttempts.hpp); 0..2 = o encoder de antes.
     settings.safeMode = std::min<uint32_t>(safeMode, aurea::kExportAttemptMax);
     settings.container = 0;   // MP4, o mesmo do Android
@@ -4669,6 +4918,63 @@ static aurea::ImageExportSettings AureaImageSettings(uint32_t format, uint32_t s
 
 + (void)setHyperNpuAvailable:(BOOL)available {
     g_hyperNpuAvailable.store(available == YES, std::memory_order_release);
+}
+
+// Omega chrome (área 02): moldura do editor (EngineOmegaChrome.cpp).
+static std::vector<aurea::u64> omega_chrome_ids(NSArray<NSNumber*>* list) {
+    std::vector<aurea::u64> ids;
+    ids.reserve(list.count);
+    for (NSNumber* n in list) ids.push_back(static_cast<aurea::u64>(n.longLongValue));
+    return ids;
+}
+
+- (NSArray<NSString*>*)compositionTrail {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const std::string trail = e->composition_trail();
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    std::string part;
+    for (const char c : trail) {
+        if (c == '\x1F') { [out addObject:to_ns(part)]; part.clear(); }
+        else part.push_back(c);
+    }
+    [out addObject:to_ns(part)];
+    return out;
+}
+
+- (nullable NSNumber*)transportNavigation:(long long)layerId compositionFrame:(long long)compositionFrame
+        direction:(int32_t)direction {
+    auto* e = self.engine;
+    aurea::i64 target = 0;
+    if (!e || !e->query_transport_navigation(static_cast<aurea::u64>(layerId),
+            static_cast<aurea::i64>(compositionFrame), direction, target)) return nil;
+    return @(target);
+}
+
+- (uint32_t)multiTimeActions:(NSArray<NSNumber*>*)ids frame:(long long)frame {
+    auto* e = self.engine;
+    if (!e) return 0;
+    const auto v = omega_chrome_ids(ids);
+    return e->query_multi_time_actions(v.data(), static_cast<aurea::u32>(v.size()), static_cast<aurea::i64>(frame));
+}
+
+- (uint32_t)copiedStyleParts {
+    auto* e = self.engine;
+    return e ? e->copied_style_parts() : 0;
+}
+
+- (uint32_t)pasteStyleParts:(NSArray<NSNumber*>*)ids parts:(uint32_t)parts {
+    auto* e = self.engine;
+    if (!e) return 0;
+    const auto v = omega_chrome_ids(ids);
+    return e->paste_style_parts(v.data(), static_cast<aurea::u32>(v.size()), parts);
+}
+
+- (void)setPreviewView:(uint32_t)mode ids:(NSArray<NSNumber*>*)ids pixel:(BOOL)pixel {
+    auto* e = self.engine;
+    if (!e) return;
+    const auto v = omega_chrome_ids(ids);
+    e->set_preview_view(mode, v.data(), static_cast<aurea::u32>(v.size()), pixel == YES);
 }
 
 @end

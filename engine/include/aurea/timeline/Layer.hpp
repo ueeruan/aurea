@@ -298,6 +298,16 @@ struct ShapeData {
     f32  shaft = 0.44f;        ///< haste da seta (fração da altura)
     f32  amplitude = 1.0f;     ///< amplitude da onda (0..1 da folga)
     f32  seed = 0.0f;          ///< variante do blob
+    // --- Omega aparência (P1-4, timeline v51): preenchimento em degradê. As
+    // cores são sRGB reto (como fillColor); as pontas são RELATIVAS à caixa da
+    // forma (0..1, origem no canto superior esquerdo). Animáveis pelas trilhas
+    // ShapeParam 32.. (timeline/ShapeFill.hpp). Projeto antigo: cor sólida.
+    u8   fillKind = 0;         ///< 0 cor sólida (fillColor), 1 degradê
+    u8   gradType = 0;         ///< 0 linear, 1 radial, 2 angular
+    Vec4 gradColor0{1.0f, 1.0f, 1.0f, 1.0f};
+    Vec4 gradColor1{0.0f, 0.0f, 0.0f, 1.0f};
+    Vec2 gradStart{0.0f, 0.5f};
+    Vec2 gradEnd{1.0f, 0.5f};
 };
 
 struct CameraData {

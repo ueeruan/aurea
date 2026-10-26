@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega painel (área 04): painel da camada, velocidade, volume, curva e presets. -->
+    <string name="om_lp_border_shadow">Borde y sombra</string>
+    <string name="om_lp_move_transform">Mover y transformar</string>
+    <string name="om_lp_edit_points">Editar puntos</string>
+    <string name="om_lp_edit_drawing">Editar dibujo</string>
+    <string name="om_lp_edit_group">Editar grupo</string>
+    <string name="om_lp_camera_options">Opciones de cámara</string>
+    <string name="om_lp_light_options">Opciones de luz</string>
+    <string name="om_lp_edit_particles">Editar partículas</string>
+    <string name="om_lp_audio">Volumen y audio</string>
+    <string name="om_lp_opens_panel">abre el panel</string>
+    <string name="om_lp_move_start_to_playhead">Mover la capa para que empiece en el cabezal</string>
+    <string name="om_lp_move_end_to_playhead">Mover la capa para que termine en el cabezal</string>
+    <string name="om_lp_retime_extend_start">Alargar el inicio hasta el cabezal (cambia la velocidad)</string>
+    <string name="om_lp_retime_shorten_start">Acortar el inicio hasta el cabezal (cambia la velocidad)</string>
+    <string name="om_lp_retime_shorten_end">Acortar el final hasta el cabezal (cambia la velocidad)</string>
+    <string name="om_lp_retime_extend_end">Alargar el final hasta el cabezal (cambia la velocidad)</string>
+    <string name="om_lp_speed_slower">Más lento</string>
+    <string name="om_lp_speed_faster">Más rápido</string>
+    <string name="om_lp_speed_close">Cerrar velocidad</string>
+    <string name="om_lp_speed_tab_curve">Curva de tiempo</string>
+    <string name="om_lp_speed_tab_options">Opciones</string>
+    <string name="om_lp_speed_constant_hint">La animación de la capa sigue la velocidad y la duración cambia con ella.</string>
+    <string name="om_lp_speed_keyed">Esta capa tiene velocidad animada o curva de tiempo.</string>
+    <string name="om_lp_speed_remap_on">La reasignación de tiempo está activa: ajústala en la pestaña Curva de tiempo.</string>
+    <string name="om_lp_volume_close">Cerrar volumen</string>
+    <string name="om_lp_volume_tab_fades">Fundidos</string>
+    <string name="om_lp_missing_media_title">Medio no encontrado</string>
+    <string name="om_lp_missing_media">El medio original de esta capa falta o se movió.</string>
+    <string name="om_presets_empty_title">Aún no hay presets</string>
+    <string name="om_presets_empty_body">Guarda las propiedades y los fotogramas clave de una capa como preset para volver a usarlos.</string>
+    <string name="om_presets_empty_browse">Ver presets</string>
+    <string name="om_curve_cat_curves">Curvas</string>
+    <string name="om_curve_cat_bounces">Rebotes y oscilaciones</string>
+    <string name="om_curve_cat_steps">Escalones</string>
+    <string name="om_curve_reverse">Invertir la curva</string>
+    <string name="om_curve_paste_all">Pegar la curva en todos los fotogramas clave</string>
+    <string name="om_curve_overshoot_on">Permitir sobrepaso</string>
+    <string name="om_curve_overshoot_off">Desactivar sobrepaso</string>
+    <string name="om_curve_prev">Tramo anterior</string>
+    <string name="om_curve_next">Tramo siguiente</string>
+    <string name="om_curve_no_segment">Lleva el cabezal entre dos fotogramas clave</string>
+    <string name="om_curve_saved">Curvas guardadas</string>
+</resources>

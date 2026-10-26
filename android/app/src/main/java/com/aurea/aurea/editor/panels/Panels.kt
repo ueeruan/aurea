@@ -17,6 +17,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.LayoutDirection
+import com.aurea.aurea.ui.ds.MenuEntry
+import kotlinx.coroutines.launch
 import com.aurea.aurea.R
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.ColorPickerSheet
@@ -53,6 +62,12 @@ enum class EditorPanel {
     AiVideo,       // Aurea AI: gerar vídeo remoto (MiniMax H3) e trazer para a timeline
     Filters,       // 0.3.0, modo de edição: looks prontos com intensidade (ColorToolsPanels.kt)
     Adjust,        // 0.3.0, modo de edição: ajustes de cor, HSL, curvas, rodas, scopes
+    // Omega conteúdo (área 06): editor de desenho e o modo Editar pontos (no fim: o ordinal fica salvo).
+    Drawing,       // caneta, pincel, preencher e borracha numa camada de desenho
+    EditPoints,    // três colunas: ações · trackpad · faixa de pontos
+    // Omega aparência (área 05).
+    BorderShadow,  // Borda e sombra: traço, bordas (decorações) e sombra
+    Camera,        // Opções da câmera: visão, desfoque de foco, névoa
 }
 
 /**
@@ -81,7 +96,10 @@ fun PanelContent(
     LaunchedEffect(panel) { if (panel != EditorPanel.Curve) returnTo = panel }
     // A aba de Transformar sobe até aqui porque o TÍTULO a escreve
     // ("Transformar · Escala"); corpo e título não podem discordar.
-    var transformTab by rememberSaveable { mutableStateOf(TransformTab.Mover) }
+    var transformTab by rememberSaveable { mutableStateOf(PanelRequests.takeTransformTab() ?: TransformTab.Mover) }
+    // Omega painel: (área 04) "Opções da câmera" do painel da camada pede a aba Lente.
+    val requestedTab = PanelRequests.transformTab
+    LaunchedEffect(requestedTab) { PanelRequests.takeTransformTab()?.let { transformTab = it } }
 
     val close by rememberUpdatedState(onClose)
     val open by rememberUpdatedState(onOpenPanel)
@@ -115,7 +133,32 @@ fun PanelContent(
         panelSectionTitle(store, panel)
     }
 
-    Column(modifier.fillMaxSize().background(AureaColors.EditorPanel)) {
+    // Omega painel: (área 04, P1-10) o painel de propriedade entra por cima do
+    // painel da camada: x +100 dp → 0 em 100 ms com fade de 25 ms. A curva não
+    // anima (como na referência). Com "remover animações" do sistema, só o fade.
+    val reduceMotion = com.aurea.aurea.effects.rememberReduceMotion()
+    // Começam já na posição de partida: o 1º quadro não pisca o painel no lugar.
+    val slide = remember { Animatable(if (panel == EditorPanel.Curve || reduceMotion) 0f else 100f) }
+    val fade = remember { Animatable(if (panel == EditorPanel.Curve) 1f else 0f) }
+    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == LayoutDirection.Rtl
+    LaunchedEffect(panel) {
+        if (panel == EditorPanel.Curve) { slide.snapTo(0f); fade.snapTo(1f); return@LaunchedEffect }
+        slide.snapTo(if (reduceMotion) 0f else 100f)
+        fade.snapTo(0f)
+        launch { fade.animateTo(1f, tween(25)) }
+        slide.animateTo(0f, tween(100, easing = FastOutSlowInEasing))
+    }
+    Column(
+        modifier
+            .fillMaxSize()
+            .clipToBounds()
+            .graphicsLayer {
+                val dir = if (rtl) -1f else 1f
+                translationX = slide.value * density * dir
+                alpha = fade.value
+            }
+            .background(AureaColors.EditorPanel),
+    ) {
         // Com camada escolhida, o título da seção mora na barra de cima
         // (SectionTopBar, redesenho 2026-09-29); o cabeçalho próprio só fica
         // para o painel aberto sem camada (Aurea AI, legendas).
@@ -150,6 +193,12 @@ fun PanelContent(
                     EditorPanel.ShapeEdit -> ShapeEditPanel(env)
                     EditorPanel.Filters -> FiltersPanel(env)
                     EditorPanel.Adjust -> AdjustPanel(env)
+                    // Omega conteúdo (área 06).
+                    EditorPanel.Drawing -> com.aurea.aurea.editor.DrawingPanel(env)
+                    EditorPanel.EditPoints -> com.aurea.aurea.editor.EditPointsPanel(env)
+                    // Omega aparência (área 05).
+                    EditorPanel.BorderShadow -> BorderShadowPanel(env)
+                    EditorPanel.Camera -> CameraOptionsPanel(env)
                 }
             }
         }
@@ -158,16 +207,52 @@ fun PanelContent(
     keypad?.let { r -> NumericKeypadSheet(r, onDismiss = { keypad = null }) }
     color?.let { r ->
         DisposableEffect(r) { onDispose { r.finish() } }
-        ColorPickerSheet(
-            initial = r.initial,
-            pickFromPreview = { store.captureBitmap(720) },
-            previewIdentity = Triple(store.projectGeneration, panel, r),
-            onChange = r.onChange,
-            onDone = {
-                color = null
+        // Omega aparência (P0-5/P1-8): com âncora, o balão com o seletor embutido; sem,
+        // o seletor em tela cheia. O `ColorPickerSheet` antigo fica só de reserva.
+        androidx.compose.runtime.key(r) {
+            ColorRequestHost(store, panel, r, onClose = {
+                if (color === r) color = null
                 r.finish()
-            },
-        )
+            })
+        }
+    }
+}
+
+// =============================================================================
+// Omega painel (área 04): pedidos ao painel aberto, ações da barra (P0-6) e
+// "remover animações" do sistema (P1-10).
+// =============================================================================
+
+/** Pedidos de fora para o painel que vai abrir (ex.: "Opções da câmera" → aba Lente). */
+internal object PanelRequests {
+    var transformTab by mutableStateOf<TransformTab?>(null)
+
+    /** Lê e limpa o pedido de aba de Transformar. */
+    fun takeTransformTab(): TransformTab? = transformTab?.also { transformTab = null }
+}
+
+/**
+ * As ações que o painel aberto publica na barra de cima (`PanelBar` da
+ * seção): o ⋮ ([more], menu ancorado) e um [trailing] à direita do título. O
+ * painel publica com [PublishBarActions]; a barra lê daqui (EditorScreen).
+ */
+internal object PanelBarActions {
+    var more by mutableStateOf<List<MenuEntry>?>(null)
+    var trailing by mutableStateOf<(@Composable RowScope.() -> Unit)?>(null)
+}
+
+/** Publica as ações da barra enquanto o painel estiver na tela (some ao sair). */
+@Composable
+internal fun PublishBarActions(more: List<MenuEntry>?, trailing: (@Composable RowScope.() -> Unit)? = null) {
+    androidx.compose.runtime.SideEffect {
+        PanelBarActions.more = more
+        PanelBarActions.trailing = trailing
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            PanelBarActions.more = null
+            PanelBarActions.trailing = null
+        }
     }
 }
 
@@ -201,4 +286,10 @@ internal fun panelSectionTitle(store: EditorStore, panel: EditorPanel): String =
     EditorPanel.AiVideo -> stringResource(R.string.panel_ai_video)
     EditorPanel.Filters -> stringResource(R.string.grade_title_filters)
     EditorPanel.Adjust -> stringResource(R.string.grade_title_adjust)
+    // Omega conteúdo (área 06).
+    EditorPanel.Drawing -> stringResource(R.string.om_draw_title)
+    EditorPanel.EditPoints -> stringResource(R.string.om_pts_title)
+    // Omega aparência (área 05).
+    EditorPanel.BorderShadow -> stringResource(R.string.om_ap_bs_title)
+    EditorPanel.Camera -> stringResource(R.string.om_ap_cam_title)
 }

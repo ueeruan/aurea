@@ -11,7 +11,8 @@
 //            transform (pos x/y, âncora x/y, escala x/y, giro, opacidade),
 //            preencher (liga, regra, tinta),
 //            contorno (liga, largura, ponta, junta, miter, desloc. do traço,
-//                      nº de traços, traços…, tinta, [v2] afinar início/fim/suavidade),
+//                      nº de traços, traços…, tinta, [v2] afinar início/fim/suavidade,
+//                      [v3] nº do perfil de largura, perfil…, composição do grupo),
 //            aparar (liga, início, fim, deslocamento, modo),
 //            repetidor (liga, cópias, desloc., âncora x/y, posição x/y,
 //                       escala, giro, opac. inicial/final, por cima),
@@ -20,7 +21,8 @@
 //            parada… (posição, rgba)
 //   caminho: tipo, invertido, centro x/y, tamanho x/y, arredondar, pontas,
 //            raio externo/interno, arredondar externo/interno, giro,
-//            bezier, nº de keyframes, keyframe… (quadro, ease, bezier)
+//            [v3] furo, bezier, nº de keyframes, keyframe… (quadro, ease, bezier)
+//   [v3] fim do doc: camada de desenho (Omega conteúdo, área 06)
 //   bezier : fechado, n, n × (p x/y, in x/y, out x/y)
 // =============================================================================
 #include "aurea/vector/Vector.hpp"
@@ -30,7 +32,7 @@
 
 namespace aurea::vector {
 namespace {
-constexpr f32 kDocVersion = 2.0f;   // v2: afinar do contorno
+constexpr f32 kDocVersion = 3.0f;   // v2: afinar do contorno; v3: perfil, apagar, furo, desenho (Omega)
 
 struct In {
     const f32* d;
@@ -110,6 +112,10 @@ void encode_document(const VectorData& data, std::vector<f32>& o, std::string& n
         o.insert(o.end(), s.dashes.begin(), s.dashes.end());
         put_paint(s.paint, o);
         o.insert(o.end(), {s.taperStart, s.taperEnd, s.taperEase});
+        // v3 (Omega conteúdo): perfil de largura do pincel e composição do grupo.
+        o.push_back(static_cast<f32>(s.widthProfile.size()));
+        o.insert(o.end(), s.widthProfile.begin(), s.widthProfile.end());
+        o.push_back(static_cast<f32>(g.composite));
         const VectorTrim& t = g.trim;
         o.insert(o.end(), {t.enabled ? 1.0f : 0.0f, t.start, t.end, t.offset, static_cast<f32>(t.mode)});
         const VectorRepeater& r = g.repeater;
@@ -119,6 +125,7 @@ void encode_document(const VectorData& data, std::vector<f32>& o, std::string& n
         for (const VectorPath& p : g.paths) {
             o.insert(o.end(), {static_cast<f32>(p.kind), p.reversed ? 1.0f : 0.0f, p.center.x, p.center.y, p.size.x, p.size.y, p.roundness,
                                p.points, p.outerRadius, p.innerRadius, p.outerRoundness, p.innerRoundness, p.rotation});
+            o.push_back(p.exclude ? 1.0f : 0.0f);   // v3: furo
             encode_path(p.path, o);
             o.push_back(static_cast<f32>(p.keys.size()));
             for (const PathKey& k : p.keys) {
@@ -128,6 +135,7 @@ void encode_document(const VectorData& data, std::vector<f32>& o, std::string& n
             }
         }
     }
+    o.push_back(data.drawing ? 1.0f : 0.0f);   // v3: camada de desenho
 }
 
 bool decode_document(const f32* data, usize count, const std::string& names, VectorData& out) {
@@ -172,6 +180,12 @@ bool decode_document(const f32* data, usize count, const std::string& names, Vec
             s.taperEnd = std::clamp(in.f(), 0.0f, 100.0f);
             s.taperEase = std::clamp(in.f(), 0.0f, 100.0f);
         }
+        if (version >= 3.0f) {
+            const u32 np = in.count(4096);
+            s.widthProfile.resize(np);
+            for (f32& x : s.widthProfile) x = std::clamp(in.f(), 0.0f, 1.0f);
+            g.composite = in.u(1);
+        }
         VectorTrim& t = g.trim;
         t.enabled = in.b();
         t.start = in.f();
@@ -203,6 +217,7 @@ bool decode_document(const f32* data, usize count, const std::string& names, Vec
             p.outerRoundness = in.f();
             p.innerRoundness = in.f();
             p.rotation = in.f();
+            if (version >= 3.0f) p.exclude = in.b();
             if (!in.ok || !decode_path(data, count, pos, p.path)) return false;
             const u32 nk = in.count(100000);
             p.keys.resize(nk);
@@ -214,6 +229,7 @@ bool decode_document(const f32* data, usize count, const std::string& names, Vec
             std::stable_sort(p.keys.begin(), p.keys.end(), [](const PathKey& a, const PathKey& b) { return a.frame < b.frame; });
         }
     }
+    if (version >= 3.0f && in.ok) d.drawing = in.b();
     if (!in.ok) return false;
     out = std::move(d);
     return true;

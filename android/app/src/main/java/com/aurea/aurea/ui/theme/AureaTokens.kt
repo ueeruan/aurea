@@ -165,6 +165,295 @@ object AureaColors {
     val EffectPreviewDisc = Color(0xFFFF4D2D)
     val BlendThumbBottom = Color(0xFFFF8A3D)   // miniatura da mescla: disco de baixo
     val BlendThumbTop = Color(0xFF3D9BFF)      // miniatura da mescla: disco de cima
+
+    // --- Omega fundação: papéis claros (fora do editor; ver AureaLightRoles) ----
+    // Claros no Omega, escuros nos outros temas. Home, gaveta, Novo projeto,
+    // exportação, diálogos e menus popup pintam só com estes.
+    val LightIsLight: Boolean get() = palette.light.isLight
+    val LightBackground: Color get() = palette.light.background
+    val LightSheet: Color get() = palette.light.sheet
+    val LightSurface: Color get() = palette.light.surface
+    val LightDialog: Color get() = palette.light.dialog
+    val LightSurfaceAlt: Color get() = palette.light.surfaceAlt
+    val LightText: Color get() = palette.light.text
+    val LightTextMuted: Color get() = palette.light.textMuted
+    val LightTextFaint: Color get() = palette.light.textFaint
+    val LightDivider: Color get() = palette.light.divider
+    val LightInk: Color get() = palette.light.ink
+    val LightOnInk: Color get() = palette.light.onInk
+    val LightAccentInk: Color get() = palette.light.accentInk
+    val LightDanger: Color get() = palette.light.danger
+    val LightShadow: Color get() = palette.light.shadow
+
+    // --- Omega home: papéis só da Home (ver AureaHomeRoles) -------------------
+    val HomeDrawer: Color get() = palette.home.drawer
+    val HomeThumb: Color get() = palette.home.thumb
+    val HomeSelectionBar: Color get() = palette.home.selectionBar
+    val HomeOnSelectionBar: Color get() = palette.home.onSelectionBar
+    val HomeMenuScrim: Color get() = palette.home.menuScrim
+    val HomeCover: Color get() = palette.home.cover
+    val HomeAvatar: Color get() = palette.home.avatar
+    val HomeOnAvatar: Color get() = palette.home.onAvatar
+    val HomePillSelected: Color get() = palette.home.pillSelected
+    val HomeOnPillSelected: Color get() = palette.home.onPillSelected
+    val HomePillUnselected: Color get() = palette.home.pillUnselected
+    val HomeOnPillUnselected: Color get() = palette.home.onPillUnselected
+    val HomePillPressed: Color get() = palette.home.pillPressed
+    val HomeOnPillPressed: Color get() = palette.home.onPillPressed
+    val HomeShadowSoft: Color get() = palette.home.shadowSoft
+    val HomeShadowStrong: Color get() = palette.home.shadowStrong
+    val HomeBadge: Color get() = palette.home.badge
+    val HomeOnBadge: Color get() = palette.home.onBadge
+
+    // --- Omega fundação: moldura dos painéis de propriedade (F5, PanelFrame) ----
+    /** Fundo da moldura e das colunas (A9 da referência). */
+    val PanelFrameBackground: Color get() = palette.editorPanel
+    /** Véu do conteúdo central: branco 10 % sobre a moldura. */
+    val PanelFrameContent = Color(0x1AFFFFFF)
+    /** Divisórias de 0,7 dp e fundo da aba ativa (A11). */
+    val PanelFrameDivider: Color get() = palette.background
+    /** Barra do painel de propriedade, mais clara que a da camada (S8). */
+    val PanelBar: Color get() = palette.border
+
+    // --- Omega adicionar (área 08): painel de adicionar, navegadores e exportação ---
+    // Derivados dos tons que todo tema já tem (valem para os 7 temas sem campo novo).
+    /** Fundo do painel de adicionar e dos navegadores (A9). */
+    val AddPanel: Color get() = palette.editorPanel
+    /** Prévia do navegador, divisores e células apertadas (A11). */
+    val AddPanelDeep: Color get() = palette.background
+    /** Fundo da miniatura sem imagem e das células de ação (S8). */
+    val AddTile: Color get() = palette.border
+    /** Barra de controle do navegador de mídia (S7). */
+    val AddControlBar: Color get() = palette.chipHigh
+    /** Véu leve sobre miniaturas (#11000000). */
+    val AddScrimSoft = Color(0x11000000)
+    /** Barra "+" do cartão de áudio (#32000000). */
+    val AddScrimBar = Color(0x32000000)
+    /** Faixa de título do cartão de preset/elemento: preto 27 %. */
+    val AddTitleScrim = Color(0x45000000)
+    /** Chip do nome na prévia: preto 40 %. */
+    val AddChipScrim = Color(0x66000000)
+    /** Selo "NOVO" (amarelo) e o texto escuro dele. */
+    val AddNewBadge = Color(0xFFFFCD4B)
+    val AddOnNewBadge = Color(0xFF1F2238)
+    /** Página "Exportar e compartilhar" (clara no Omega, D1). */
+    val ExportPage: Color get() = palette.light.sheet
+    val ExportCard: Color get() = palette.light.surface
+    val ExportText: Color get() = palette.light.text
+    val ExportHint: Color get() = palette.light.textMuted
+    val ExportLine: Color get() = palette.light.divider
+    val ExportPrimary: Color get() = palette.light.ink
+    val ExportOnPrimary: Color get() = palette.light.onInk
+    /** Seta e ⓘ das linhas (#a4a4a4 no Omega). */
+    val ExportAction: Color get() = palette.light.textFaint
+    /** Página do resultado (azul-marinho HT) e os botões dela (S9). */
+    val ExportResult: Color get() = if (palette.light.isLight) palette.light.ink else palette.background
+    val ExportResultButton: Color get() = palette.chipHigh
+    /** Véu do progresso sobre a página (50 %). */
+    val ExportScrim = Color(0x80000000)
+
+    // Omega painel: (área 04) papéis do painel da camada da referência ----------
+    /** Fundo do painel da camada (A9). */
+    val LayerPanel: Color get() = palette.editorPanel
+    /** Pílula do trio de tempo e cartão do painel embutido (S8). */
+    val LayerPanelButton: Color get() = palette.border
+    /** Botão pressionado (A11). */
+    val LayerPanelPressed: Color get() = palette.background
+    /** Corpo dos painéis embutidos de velocidade e volume (A10). */
+    val LayerPanelBody: Color get() = palette.surface
+    /** Botões de retempo (S9). */
+    val LayerPanelRetime: Color get() = palette.chipHigh
+    /** Ícone e rótulo desabilitados (S1). */
+    val LayerPanelDisabled: Color get() = palette.tickStrong
+    /** Caixa de valor dos painéis embutidos (branco 5 %). */
+    val LayerPanelValueBox = Color(0x0DFFFFFF)
+    /** Fundo do gráfico do editor de curva (P10). */
+    val CurveGraphBackground: Color get() = palette.curveGraph
+    /** Coluna de presets e grupos do editor de curva (S9). */
+    val CurveColumn: Color get() = palette.chipHigh
+
+    // --- Omega efeitos (área 07): papéis do painel de efeitos e do navegador ----
+    // Ver [AureaFxRoles]: os valores da referência no Omega, os tons do tema nos outros.
+    val FxPanel: Color get() = palette.fx.panel
+    val FxListSurface: Color get() = palette.fx.listSurface
+    val FxLowSurface: Color get() = palette.fx.lowSurface
+    val FxSunken: Color get() = palette.fx.sunken
+    val FxDarkest: Color get() = palette.fx.darkest
+    val FxSearch: Color get() = palette.fx.search
+    val FxField: Color get() = palette.fx.field
+    val FxSegment: Color get() = palette.fx.segment
+    val FxSegmentOn: Color get() = palette.fx.segmentOn
+    val FxLabel: Color get() = palette.fx.label
+    val FxValueVeil: Color get() = palette.fx.valueVeil
+    val FxAxisX: Color get() = palette.fx.axisX
+    val FxAxisZ: Color get() = palette.fx.axisZ
+    val FxNeedle: Color get() = palette.fx.needle
+    val FxTick: Color get() = palette.fx.tick
+    val FxTrack: Color get() = palette.fx.track
+    val FxTrackDisabled: Color get() = palette.fx.trackDisabled
+    val FxTipText: Color get() = palette.fx.tipText
+    val FxDisabledText: Color get() = palette.fx.disabledText
+    val FxColorText: Color get() = palette.fx.colorText
+    val FxAxisLabel: Color get() = palette.fx.axisLabel
+    val FxListIcon: Color get() = palette.fx.listIcon
+    val FxTextSecondary: Color get() = palette.fx.textSecondary
+    val FxScrim: Color get() = palette.fx.scrim
+
+    // --- Omega conteúdo (área 06): editores de texto, fontes, desenho e pontos --
+    // Ver [AureaContentRoles]: os valores da referência no Omega, os tons do tema nos outros.
+    val ContentStyleBar: Color get() = palette.content.styleBar
+    val ContentStyleButton: Color get() = palette.content.styleButton
+    val ContentInputStrip: Color get() = palette.content.inputStrip
+    val ContentEditPanel: Color get() = palette.content.editPanel
+    val ContentBrowser: Color get() = palette.content.browser
+    val ContentBrowserLine: Color get() = palette.content.browserLine
+    val ContentDrawer: Color get() = palette.content.drawer
+    val ContentDrawerHeader: Color get() = palette.content.drawerHeader
+    val ContentTrackpad: Color get() = palette.content.trackpad
+    val ContentGuide: Color get() = palette.content.guide
+    val ContentStrongLine: Color get() = palette.content.strongLine
+    val ContentPointMarker: Color get() = palette.content.pointMarker
+    val ContentHint: Color get() = palette.content.hint
+    val ContentValuePill: Color get() = palette.content.valuePill
+}
+
+/**
+ * Omega conteúdo (área 06): os PAPÉIS dos editores de conteúdo (modo de texto,
+ * navegador de fontes, desenho e Editar pontos; nomes entre «» em
+ * `build/reference/am-omega-20261026/areas/06-content-editors.md`). No Omega
+ * valem os tons da referência; nos outros seis temas cada papel cai no tom que o
+ * tema já tem ([mappedFrom]). Par exato de `AureaContentRoles` do Theme.swift.
+ */
+data class AureaContentRoles(
+    /** «barra de ferramentas mais escura» (K2): a barra de estilo do modo de texto. */
+    val styleBar: Color,
+    /** «botão de estilo»: as peças da barra de estilo e o corpo dos popups. */
+    val styleButton: Color,
+    /** «superfície mais escura» (A1): a faixa de entrada do texto. */
+    val inputStrip: Color,
+    /** «fundo do painel de edição» (A3): o painel grande do modo de texto. */
+    val editPanel: Color,
+    /** «superfície do navegador» (S10): o navegador de fontes em tela cheia. */
+    val browser: Color,
+    /** «linha fina» (branco 10 %): fio da barra e borda da célula do navegador. */
+    val browserLine: Color,
+    /** «fundo do painel» (A9) e «superfície elevada» (A2): a gaveta de filtros e o cabeçalho dela. */
+    val drawer: Color,
+    val drawerHeader: Color,
+    /** «superfície elevada» (S10): o trackpad do Editar pontos. */
+    val trackpad: Color,
+    /** «texto secundário» (P6): o texto-guia do trackpad. */
+    val guide: Color,
+    /** «linha forte» (A11): divisórias de 0,7 das colunas do desenho e dos pontos. */
+    val strongLine: Color,
+    /** Marcador da faixa de pontos (o escolhido usa o destaque). */
+    val pointMarker: Color,
+    /** «texto terciário»: dica do campo de texto. */
+    val hint: Color,
+    /** Pílula do valor (espessura do desenho). */
+    val valuePill: Color,
+) {
+    companion object {
+        /** Omega: os valores da referência (colors-default.tsv / layouts lidos). */
+        val Omega = AureaContentRoles(
+            styleBar = Color(0xFF0F1418), styleButton = Color(0xFF2A2F36), inputStrip = Color(0xFF191C25),
+            editPanel = Color(0xFF242636), browser = Color(0xFF262A3C), browserLine = Color(0x1AFFFFFF),
+            drawer = Color(0xFF202332), drawerHeader = Color(0xFF1E2239), trackpad = Color(0xFF262A3C),
+            guide = Color(0xFF9D9FA5), strongLine = Color(0xFF141620), pointMarker = Color(0xFF767A88),
+            hint = Color(0x30FFFFFF), valuePill = Color(0xFF262A3C),
+        )
+
+        /** Temas escuros: cada papel no tom que o tema já tem. */
+        fun mappedFrom(p: AureaPalette) = AureaContentRoles(
+            styleBar = p.stage, styleButton = p.chip, inputStrip = p.surface,
+            editPanel = p.editorPanelHigh, browser = p.editorPanel, browserLine = p.border,
+            drawer = p.surfaceHigh, drawerHeader = p.surface, trackpad = p.editorRowPill,
+            guide = p.muted, strongLine = p.background, pointMarker = p.subtle,
+            hint = p.subtle, valuePill = p.editorRowPill,
+        )
+    }
+}
+
+/**
+ * Omega efeitos (área 07): os PAPÉIS do painel de efeitos, das linhas de
+ * parâmetro e do navegador de efeitos (nomes entre «» em `build/reference/
+ * am-omega-20261026/areas/07-effects.md`). No Omega valem os tons da referência;
+ * nos outros seis temas cada papel cai no tom que o tema já tem ([mappedFrom]).
+ * Par exato de `AureaFxRoles` do Theme.swift (mesmos nomes e valores).
+ */
+data class AureaFxRoles(
+    /** «painel» (A9): fundo do painel de efeitos. */
+    val panel: Color,
+    /** «superfície de lista» (S9): linha do efeito, cabeçalho e corpo dos controles, navegador. */
+    val listSurface: Color,
+    /** «superfície baixa» (S10): "+ Adicionar efeito", faixa da seção, recomendados. */
+    val lowSurface: Color,
+    /** «afundado» (A11): rótulo ativo, caixa pressionada, suspenso. */
+    val sunken: Color,
+    /** «mais escuro» (A12): grade de categorias, folha de detalhe, borda das etiquetas. */
+    val darkest: Color,
+    /** «busca» (S8): fundo da busca do navegador. */
+    val search: Color,
+    /** «campo» (S6): campo da busca, linha de variação. */
+    val field: Color,
+    /** «segmento» (P11) e «segmento ativo» (P10) da escolha segmentada. */
+    val segment: Color,
+    val segmentOn: Color,
+    /** «rótulo» (P11 a 30 %): fundo do rótulo do parâmetro. */
+    val label: Color,
+    /** «véu 20 %»: fundo da caixa de valor. */
+    val valueVeil: Color,
+    /** «eixo X» (C1) e «eixo Z» (L3_A); o Y usa o texto. */
+    val axisX: Color,
+    val axisZ: Color,
+    /** «agulha» da régua (C1). */
+    val needle: Color,
+    /** «risco» da régua (D1); o risco maior usa o texto. */
+    val tick: Color,
+    /** «trilho» do slider (P3) e o preenchimento desabilitado. */
+    val track: Color,
+    val trackDisabled: Color,
+    /** «texto de dica» (S2) e «texto desabilitado» (S1). */
+    val tipText: Color,
+    val disabledText: Color,
+    /** «texto de cor» (P6): o "R G B" da linha de cor. */
+    val colorText: Color,
+    /** «rótulo de eixo» (P3): X:/Y: e as letras das caixas. */
+    val axisLabel: Color,
+    /** «ícone de lista»: ⋮ e 🗑 do cabeçalho dos controles. */
+    val listIcon: Color,
+    /** «texto secundário» (P5): nome em inglês no navegador. */
+    val textSecondary: Color,
+    /** Véu da folha de detalhe (preto 30 %). */
+    val scrim: Color,
+) {
+    companion object {
+        /** Omega: os valores da referência (colors-default.tsv). */
+        val Omega = AureaFxRoles(
+            panel = Color(0xFF202332), listSurface = Color(0xFF333750), lowSurface = Color(0xFF262A3C),
+            sunken = Color(0xFF141620), darkest = Color(0xFF0C0D13), search = Color(0xFF292D40),
+            field = Color(0xFF3B3F54), segment = Color(0xFF3D4260), segmentOn = Color(0xFF474D70),
+            label = Color(0x4D3D4260), valueVeil = Color(0x33000000),
+            axisX = Color(0xFF69FC97), axisZ = Color(0xFF48C3F5), needle = Color(0xFF69FC97),
+            tick = Color(0xFFBDBDBD), track = Color(0xFFA9ABB4), trackDisabled = Color(0xFF4F5264),
+            tipText = Color(0xFF767A88), disabledText = Color(0xFF818390), colorText = Color(0xFF9D9FA5),
+            axisLabel = Color(0xFFA9ABB4), listIcon = Color(0xFFEAEBED), textSecondary = Color(0xFF8C8E93),
+            scrim = Color(0x4D000000),
+        )
+
+        /** Temas escuros: cada papel no tom que o tema já tem. */
+        fun mappedFrom(p: AureaPalette) = AureaFxRoles(
+            panel = p.editorPanel, listSurface = p.chipHigh, lowSurface = p.editorRowPill,
+            sunken = p.background, darkest = p.stage, search = p.border,
+            field = p.chip, segment = p.chip, segmentOn = p.chipHigh,
+            label = p.chip, valueVeil = Color(0x33000000),
+            axisX = p.keyframe, axisZ = p.accent, needle = p.accent,
+            tick = p.tickStrong, track = p.muted, trackDisabled = p.chipHigh,
+            tipText = p.subtle, disabledText = p.subtle, colorText = p.muted,
+            axisLabel = p.muted, listIcon = Color(0xFFF7F9FB), textSecondary = p.muted,
+            scrim = Color(0x4D000000),
+        )
+    }
 }
 
 /**
@@ -210,7 +499,31 @@ data class AureaPalette(
     val editorGlyphBox: Color = chipHigh,
     /** Ícone e texto sobre a cor de marca (`Brand`/`Action`). */
     val onBrand: Color = Color(0xFFF7F9FB),
+    // Omega fundação: papéis das telas claras. Nulo = derivados dos tons
+    // escuros deste tema ([AureaLightRoles.mappedFrom]); só o Omega é claro.
+    val lightRoles: AureaLightRoles? = null,
+    // Omega timeline (área 03): cabeçalho da linha, aba do tempo atual e fundo
+    // da linha arrastada. Os outros temas derivam dos tons que já têm.
+    val timelineHeader: Color = editorRowPill,
+    val timelineTimeTab: Color = editorRowPill,
+    val timelineDragRow: Color = chipHigh,
+    // Omega home: papéis só da Home (miniatura, pílulas, barra de seleção...).
+    // Nulo = derivados dos tons deste tema ([AureaHomeRoles.mappedFrom]).
+    val homeRoles: AureaHomeRoles? = null,
+    // Omega painel: (área 04) fundo do gráfico do editor de curva (P10 da
+    // referência). Os outros temas derivam do campo alto que já têm.
+    val curveGraph: Color = chipHigh,
 ) {
+    // Omega fundação: os papéis claros em uso (ver [AureaLightRoles]).
+    val light: AureaLightRoles = lightRoles ?: AureaLightRoles.mappedFrom(this)
+    // Omega efeitos (área 07): papéis do painel de efeitos. Só o Omega usa os da
+    // referência; os outros temas derivam dos tons que já têm ([AureaFxRoles]).
+    val fx: AureaFxRoles = if (id == "omega") AureaFxRoles.Omega else AureaFxRoles.mappedFrom(this)
+    // Omega conteúdo (área 06): papéis dos editores de conteúdo ([AureaContentRoles]).
+    val content: AureaContentRoles = if (id == "omega") AureaContentRoles.Omega else AureaContentRoles.mappedFrom(this)
+    // Omega home: os papéis da Home em uso (ver [AureaHomeRoles]).
+    val home: AureaHomeRoles = homeRoles ?: AureaHomeRoles.mappedFrom(this)
+
     companion object {
         /**
          * Omega (versão de teste 0.3.2): a tela de edição segue a referência de
@@ -254,6 +567,15 @@ data class AureaPalette(
             editorRowPill = Color(0xFF262A3C),
             editorGlyphBox = Color(0xFF333750),
             onBrand = Color(0xFF131313),
+            lightRoles = AureaLightRoles.Omega,
+            // Omega timeline (área 03).
+            timelineHeader = Color(0xFF2C313F),
+            timelineTimeTab = Color(0xFF282C3F),
+            timelineDragRow = Color(0xFF484B5B),
+            // Omega home.
+            homeRoles = AureaHomeRoles.Omega,
+            // Omega painel: (área 04) gráfico do editor de curva.
+            curveGraph = Color(0xFF474D70),
         )
         val Aurea = AureaPalette(
             id = "aurea",
@@ -448,6 +770,189 @@ data class AureaPalette(
         )
         val all = listOf(Omega, Aurea, Midnight, Graphite, Emerald, Amethyst, Sunset)
         fun of(id: String?): AureaPalette = all.firstOrNull { it.id == id } ?: Omega
+    }
+}
+
+// =============================================================================
+// Omega fundação: PAPÉIS CLAROS (telas fora do editor)
+//
+// A referência é clara fora do editor: Home, gaveta, folha "Novo projeto",
+// página de exportação, diálogos e menus popup. Essas telas pintam SÓ com estes
+// papéis (acessores `AureaColors.Light*`). No Omega os valores são claros; nos
+// outros seis temas cada papel cai no tom escuro que o tema já tem (texto
+// claro), então a mesma tela funciona em qualquer tema sem `if`.
+// Par exato de `AureaLightRoles` em Theme.swift (mesmos nomes e valores).
+//
+// De onde vêm (análises 01, 02 e 08): background = homeBackground; sheet =
+// homeSheet/exportPage (W4); surface = homeSurface/exportCard/menus (W1);
+// dialog = dialogoClaro (W5); surfaceAlt = drawerGroup (G1); text =
+// homeText/exportText/textoDialogo (HT); textMuted = exportHint (P5);
+// textFaint = homeHint/dica (P3); divider = drawerDivider/exportLine/
+// fioDialogo (G3); ink + onInk = segmentActive/exportPrimary (HT + Y1).
+// =============================================================================
+data class AureaLightRoles(
+    /** Verdadeiro só quando os papéis são claros (ícones da barra de status escuros). */
+    val isLight: Boolean,
+    /** Fundo da página: abas da Home, gaveta, cabeçalhos. */
+    val background: Color,
+    /** Folha/página agrupada: "Novo projeto", página de exportação. */
+    val sheet: Color,
+    /** Superfície: cartões, menus popup, caixas suspensas, campos, barra de abas. */
+    val surface: Color,
+    /** Fundo dos diálogos. */
+    val dialog: Color,
+    /** Superfície alternativa: grupo da gaveta, linha pressionada ou escolhida. */
+    val surfaceAlt: Color,
+    /** Texto e ícone principais. */
+    val text: Color,
+    /** Texto secundário: rótulo, sublinha, valor à direita. */
+    val textMuted: Color,
+    /** Dica, placeholder e texto desabilitado. */
+    val textFaint: Color,
+    /** Fio divisório (0,5–1 dp). */
+    val divider: Color,
+    /** Preenchimento forte: segmento ativo, botão principal (Exportar). */
+    val ink: Color,
+    /** Texto e ícone sobre [ink]. */
+    val onInk: Color,
+    /** Destaque legível sobre as superfícies claras: botão positivo, ✓, barra da linha escolhida. */
+    val accentInk: Color,
+    /** Ação destrutiva sobre as superfícies claras. */
+    val danger: Color,
+    /** Sombra de cartões e menus. */
+    val shadow: Color,
+) {
+    companion object {
+        /**
+         * Omega: os valores da referência. [accentInk] é um verde escuro (4,9:1
+         * sobre o diálogo) em vez do menta puro, ilegível sobre branco (1,3:1).
+         */
+        val Omega = AureaLightRoles(
+            isLight = true,
+            background = Color(0xFFF6F6F6),
+            sheet = Color(0xFFEDEEF0),
+            surface = Color(0xFFFFFFFF),
+            dialog = Color(0xFFF5F5F8),
+            surfaceAlt = Color(0xFFEAEAEC),
+            text = Color(0xFF1E2239),
+            textMuted = Color(0xFF8C8E93),
+            textFaint = Color(0xFFA9ABB4),
+            divider = Color(0xFFD8D8D8),
+            ink = Color(0xFF1E2239),
+            onInk = Color(0xFF00FFA8),
+            accentInk = Color(0xFF007A50),
+            danger = Color(0xFFC62828),
+            shadow = Color(0x261E2239),
+        )
+
+        /** Temas escuros: cada papel no tom escuro que o tema já tem. */
+        fun mappedFrom(p: AureaPalette) = AureaLightRoles(
+            isLight = false,
+            background = p.background,
+            sheet = p.surface,
+            surface = p.surfaceHigh,
+            dialog = p.surfaceHigh,
+            surfaceAlt = p.chip,
+            text = Color(0xFFF7F9FB),
+            textMuted = p.muted,
+            textFaint = p.subtle,
+            divider = p.border,
+            ink = p.brand,
+            onInk = p.onBrand,
+            accentInk = p.accent,
+            danger = Color(0xFFFF453A),
+            shadow = Color(0x73000000),
+        )
+    }
+}
+
+// =============================================================================
+// Omega home: PAPÉIS SÓ DA HOME (área 01)
+//
+// O que a Home da referência pinta e que os papéis claros comuns não cobrem:
+// fundo da gaveta, miniatura, barra de seleção, véu do menu rápido, cobertura
+// atrás da folha, avatar sem login, pílulas das subabas (cores confirmadas pelo
+// REA em `MAIN_TAB_SELECTED/UNSELECTED`), sombras de 5 % e 20 % e o selo de
+// duração. Claros no Omega; nos outros temas, os tons escuros que o tema já
+// tem. Par exato de `AureaHomeRoles` em Theme.swift (mesmos nomes e valores).
+// =============================================================================
+data class AureaHomeRoles(
+    /** Fundo da gaveta de ajustes. */
+    val drawer: Color,
+    /** Fundo da miniatura do projeto (antes da imagem). */
+    val thumb: Color,
+    /** Barra inferior do modo de seleção. */
+    val selectionBar: Color,
+    /** Ícone e rótulo sobre [selectionBar]. */
+    val onSelectionBar: Color,
+    /** Véu claro atrás do menu rápido do projeto. */
+    val menuScrim: Color,
+    /** Cobertura atrás da folha "Novo projeto" e da gaveta. */
+    val cover: Color,
+    /** Avatar sem login. */
+    val avatar: Color,
+    /** Pessoa/inicial sobre [avatar]. */
+    val onAvatar: Color,
+    /** Pílula de subaba escolhida (fundo e texto). */
+    val pillSelected: Color,
+    val onPillSelected: Color,
+    /** Pílula não escolhida (fundo e texto). */
+    val pillUnselected: Color,
+    val onPillUnselected: Color,
+    /** Pílula não escolhida enquanto pressionada (fundo e texto). */
+    val pillPressed: Color,
+    val onPillPressed: Color,
+    /** Sombra suave (cartões, menu rápido) e forte (pílula ativa, ordenação). */
+    val shadowSoft: Color,
+    val shadowStrong: Color,
+    /** Selo de duração sobre a miniatura (fundo e texto). */
+    val badge: Color,
+    val onBadge: Color,
+) {
+    companion object {
+        /** Omega: os valores da referência (cores das pílulas lidas pelo REA). */
+        val Omega = AureaHomeRoles(
+            drawer = Color(0xFFFAFAFA),
+            thumb = Color(0xFFD5D5D5),
+            selectionBar = Color(0xFF43486B),
+            onSelectionBar = Color(0xFFFFFFFF),
+            menuScrim = Color(0xCCEDEDED),
+            cover = Color(0xB3000000),
+            avatar = Color(0xFF626575),
+            onAvatar = Color(0xFFFFFFFF),
+            pillSelected = Color(0xFF1F2238),
+            onPillSelected = Color(0xFFFFFFFF),
+            pillUnselected = Color(0xFFFFFFFF),
+            onPillUnselected = Color(0xFF8D8D8D),
+            pillPressed = Color(0xFFE9ECFF),
+            onPillPressed = Color(0xFF1F2238),
+            shadowSoft = Color(0x0C1F2238),
+            shadowStrong = Color(0x331F2238),
+            badge = Color(0xFF1E2239),
+            onBadge = Color(0xFFFFFFFF),
+        )
+
+        /** Temas escuros: cada papel no tom escuro que o tema já tem. */
+        fun mappedFrom(p: AureaPalette) = AureaHomeRoles(
+            drawer = p.surface,
+            thumb = p.chip,
+            selectionBar = p.chipHigh,
+            onSelectionBar = Color(0xFFF7F9FB),
+            menuScrim = p.background.copy(alpha = 0.8f),
+            cover = Color(0xB3000000),
+            avatar = p.chipHigh,
+            onAvatar = Color(0xFFF7F9FB),
+            pillSelected = p.brand,
+            onPillSelected = p.onBrand,
+            pillUnselected = p.surfaceHigh,
+            onPillUnselected = p.muted,
+            pillPressed = p.chip,
+            onPillPressed = Color(0xFFF7F9FB),
+            shadowSoft = Color(0x26000000),
+            shadowStrong = Color(0x59000000),
+            badge = Color(0xB3000000),
+            onBadge = Color(0xFFFFFFFF),
+        )
     }
 }
 
@@ -799,6 +1304,64 @@ object AureaTimeline {
     val ClipIcon = 12.dp
     val Playhead = 1.dp
     val PlayheadKnob = 8.dp
+
+    // --- Omega 0.3.2 (área 03): papéis da timeline ------------------------------
+    // Valores medidos na referência (build/reference/am-omega-20261026/areas/03-timeline.md
+    // §4, "Papéis de cor"); os do tema vêm da paleta. Desenho e nomes são do AUREA.
+    /** Pílula do cabeçalho da linha (fora da seleção múltipla). */
+    val OmegaHeader: Color get() = AureaColors.palette.timelineHeader
+    /** Fundo da aba do tempo atual na régua. */
+    val OmegaTimeTab: Color get() = AureaColors.palette.timelineTimeTab
+    /** Fundo da linha que está sendo reordenada. */
+    val OmegaDragRow: Color get() = AureaColors.palette.timelineDragRow
+    /** Traço de 0,5 dp da pílula do cabeçalho (branco 10 %). */
+    val OmegaHeaderBorder = Color(0x1AFFFFFF)
+    /** Tiques da régua (branco 15 %). */
+    val OmegaTick = Color(0x26FFFFFF)
+    /** As três barrinhas da alça ≡ da linha e a sombra delas. */
+    val OmegaGrip = Color(0x4DFFFFFF)
+    val OmegaGripShadow = Color(0xB31B1F32)
+    /** Marcadores da régua, pela aparência (índice mod 4). */
+    val Bookmarks = listOf(Color(0xFFF16586), Color(0xFFFAD3A5), Color(0xFF4BE29D), Color(0xFF3C8CE7))
+    /** Fundo da linha da câmera principal (vermelho 10 %). */
+    val MainCameraRow = Color(0x1AD13665)
+    /** Rótulo do clipe sobre o degradê (preto) e sobre o áudio (branco). */
+    val ClipLabel = Color(0xFF000000)
+    val ClipLabelOnAudio = Color(0xFFFFFFFF)
+    /** Forma de onda do clipe. */
+    val ClipWave = Color(0xFFEAEAEA)
+    /** Zebra de quadros (branco 16/255). */
+    val ClipZebra = Color(0x10FFFFFF)
+    /** Sombra leve do cartão e a sombra do clipe levantado. */
+    val ClipShadow = Color(0x40000000)
+    val ClipLiftShadow = Color(0x4D000000)
+    /** Losango em edição: branco com traço preto; dos outros parâmetros: branco 160/255. */
+    val KeyFill = Color(0xFFFFFFFF)
+    val KeyStroke = Color(0xFF000000)
+    val KeyAlt = Color(0xA0FFFFFF)
+    val KeyAltStroke = Color(0xFFFFFFFF)
+    /** Losango de baixo quando só parte dos parâmetros tem keyframe no instante. */
+    val KeyPartial = Color(0xFF9D9FA5)
+    /** Alças de corte e de velocidade do modo foco (o alfa varia com o gesto). */
+    val TrimGrip = Color(0xFFFFFFFF)
+
+    /**
+     * Par do degradê do clipe por tipo (início, fim). Os sete primeiros são os
+     * da referência; 3D, partículas, ajuste e luz só existem no AUREA.
+     */
+    fun clipGradient(type: LayerType): Pair<Color, Color> = when (type) {
+        LayerType.Video, LayerType.Image -> Color(0xFF48C3F5) to Color(0xFF156AE0)
+        LayerType.Shape -> Color(0xFF52CCBC) to Color(0xFF46A8D6)
+        LayerType.Group -> Color(0xFFF16586) to Color(0xFFF66A28)
+        LayerType.Text -> Color(0xFFFAD961) to Color(0xFFF89436)
+        LayerType.Audio -> Color(0xFF5236D1) to Color(0xFFAF62D6)
+        LayerType.Camera -> Color(0xFFD13665) to Color(0xFFAA214A)
+        LayerType.Null -> Color(0xFFBDC3CE) to Color(0xFFA2AEC6)
+        LayerType.Model3D -> Color(0xFF7ED9A0) to Color(0xFF2FA36B)
+        LayerType.Particles -> Color(0xFFE07BD8) to Color(0xFF9B4FD9)
+        LayerType.Adjustment -> Color(0xFF8E9BB8) to Color(0xFF5D6A8A)
+        LayerType.Light -> Color(0xFFB8F0FF) to Color(0xFF5EC8E8)
+    }
 }
 
 /** Fundo escuro, faixa sólida, texto claro e forma de onda de um tipo de clipe. */

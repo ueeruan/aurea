@@ -262,70 +262,22 @@ internal fun MenuItemRow(
 internal data class PopupItem(val label: String, val checked: Boolean, val onClick: () -> Unit)
 
 /**
- * O menu flutuante do DS (§5.12), no lugar do `PopupMenuButton` Material que
- * a A.01 usava no chip de resolução (bug 14): abaixo da âncora se couber,
- * alinhado pela direita, preso a 8 dp das bordas.
+ * Omega chrome (área 02, P0-7/P1-1): o menu flutuante da casca agora É o menu
+ * ancorado da fundação (`ui/ds/AnchoredMenu.kt`): 250 × linhas de 40, até 8
+ * linhas visíveis, abaixo da âncora pela borda de início, claro como os outros
+ * menus. A opção vigente leva a barra de 4 dp. Quem chama continua igual (a
+ * âncora é o layout pai, como antes).
  */
 @Composable
 internal fun ShellPopupMenu(items: List<PopupItem>, onDismiss: () -> Unit, width: Dp = 250.dp) {
-    val density = LocalDensity.current
-    val provider = remember(density) {
-        with(density) { MenuPositionProvider(8.dp.roundToPx(), 4.dp.roundToPx()) }
-    }
-    Popup(popupPositionProvider = provider, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
-        Column(
-            Modifier
-                .width(width)
-                .clip(RoundedCornerShape(8.dp))
-                .background(AureaColors.Pill)
-                .padding(vertical = 4.dp),
-        ) {
-            items.forEach { item ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(40.dp)
-                        .tocavel(shrink = 1f, haptic = true) {
-                            onDismiss()
-                            item.onClick()
-                        },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        Modifier
-                            .size(4.dp, 24.dp)
-                            .background(if (item.checked) AureaColors.Accent else Color.Transparent),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        item.label,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = if (item.checked) AureaColors.Accent else AureaColors.Text)),
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                }
-            }
-        }
-    }
-}
-
-private class MenuPositionProvider(private val margin: Int, private val gap: Int) : PopupPositionProvider {
-    override fun calculatePosition(
-        anchorBounds: IntRect,
-        windowSize: IntSize,
-        layoutDirection: LayoutDirection,
-        popupContentSize: IntSize,
-    ): IntOffset {
-        // Alinha pela borda de FIM da âncora: direita em LTR, esquerda em RTL.
-        val edge = if (layoutDirection == LayoutDirection.Rtl) anchorBounds.left else anchorBounds.right - popupContentSize.width
-        val x = edge
-            .coerceIn(margin, (windowSize.width - popupContentSize.width - margin).coerceAtLeast(margin))
-        var y = anchorBounds.bottom + gap
-        if (y + popupContentSize.height > windowSize.height - margin) y = anchorBounds.top - gap - popupContentSize.height
-        return IntOffset(x, y.coerceAtLeast(margin))
-    }
+    com.aurea.aurea.ui.ds.AnchoredMenu(
+        expanded = true,
+        onDismiss = onDismiss,
+        width = width,
+        entries = items.map { item ->
+            com.aurea.aurea.ui.ds.MenuEntry.Item(item.label, selected = item.checked, onClick = item.onClick)
+        },
+    )
 }
 
 // =============================================================================
@@ -397,31 +349,19 @@ internal fun GoToTimeDialog(initialSeconds: String, fps: Float, onSeek: (Int) ->
         onConfirm = confirm,
         onDismiss = onDismiss,
         extra = {
-            Box(
-                Modifier
-                    .padding(top = 12.dp)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(AureaColors.Stage)
-                    .padding(horizontal = 8.dp, vertical = 7.dp),
-            ) {
-                if (text.isEmpty()) {
-                    Text(stringResource(R.string.editor_segundos_ou_mm_ss_ms), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
-                }
-                BasicTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    singleLine = true,
-                    textStyle = AureaType.Base.merge(TextStyle(fontSize = 15.sp)).merge(AureaType.Tabular),
-                    cursorBrush = SolidColor(AureaColors.Accent),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(onGo = {
-                        onDismiss()
-                        confirm()
-                    }),
-                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
-                )
-            }
+            // Omega fundação: o campo do diálogo claro (F4).
+            com.aurea.aurea.ui.ds.AureaDialogField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = stringResource(R.string.editor_segundos_ou_mm_ss_ms),
+                textStyle = AureaType.Tabular,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = {
+                    onDismiss()
+                    confirm()
+                }),
+                focusRequester = focus,
+            )
         },
     )
 }

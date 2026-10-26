@@ -99,17 +99,13 @@ struct VectorPanel: View {
     }
     @ViewBuilder private var shapeTab: some View {
         if !path.isEmpty {
-            HStack(spacing: 6) {
-                pointTool(0, "panel_selecionar")
-                pointTool(1, "panel_adicionar_ponto")
-                pointTool(2, "panel_remover_ponto", enabled: !free || pointCount > 0)
-                pointTool(3, "panel_canto_suave", enabled: !free || pointCount > 1)
-                VectorPointTool(kind: 4, label: AureaText.t(model.editingMask?.closed == true ? "panel_abrir_caminho" : "panel_fechar_caminho"), selected: false,
-                                enabled: free && pointCount >= 2, closed: model.editingMask?.closed == true) {
-                    if let mask = model.editingMask { model.setMaskPoints(mask.points, closed: !mask.closed); refresh() }
-                }
-            }.padding(.leading, 4).padding(.top, 4).padding(.bottom, 6)
-            hint(model.vectorEditingPoints ? "panel_editando_pontos_palco_toque_concluir_palco" : (free ? "panel_escolha_ferramenta_toque_palco_editar_pontos" : "panel_ferramentas_pontos_transformam_forma_pronta_caminho"))
+            // Omega conteúdo (área 06, P0-5): os pontos se editam no modo Editar pontos (três
+            // colunas, regras do motor); as ferramentas de ponto antigas saíram daqui.
+            VectorAction("om_pts_title", detail: free ? "om_pts_open_hint" : "panel_ferramentas_pontos_transformam_forma_pronta_caminho") {
+                EditPointsState.shared.reset(); model.openPanel(.editPoints)
+            }
+            .accessibilityIdentifier("vector.editPoints")
+            .padding(.top, 4).padding(.bottom, 6)
             if free {
                 PropertyCustomRow(AureaText.t("panel_forma_animada"), selected: selected == -2, onSelect: { selected = -2 }) {
                     let counts = group["pathKeyCounts"] as? [NSNumber] ?? []
@@ -356,11 +352,12 @@ struct VectorPanel: View {
     }
     private func addPath(_ kind: Int) {
         let created = model.engine.addVectorPath(id, group: model.vectorGroup, kind: UInt32(kind))
-        if created >= 0 { model.vectorPath = UInt32(created); if kind == 0 { model.vectorPointTool = 1; model.vectorEditingPoints = true; model.maskDrawing = true } }; refresh()
+        // Omega conteúdo (área 06, P0-5): caminho livre novo abre o Editar pontos.
+        if created >= 0 { model.vectorPath = UInt32(created); if kind == 0 { EditPointsState.shared.reset(); model.openPanel(.editPoints) } }; refresh()
     }
     private func addGroup(_ kind: Int) {
         let created = model.engine.addVectorGroup(id, kind: UInt32(kind))
-        if created >= 0 { model.vectorGroup = UInt32(created); model.vectorPath = 0; if kind == 0 { model.vectorPointTool = 1; model.vectorEditingPoints = true; model.maskDrawing = true } }; refresh()
+        if created >= 0 { model.vectorGroup = UInt32(created); model.vectorPath = 0; if kind == 0 { EditPointsState.shared.reset(); model.openPanel(.editPoints) } }; refresh()
     }
 }
 

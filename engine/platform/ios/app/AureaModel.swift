@@ -145,7 +145,12 @@ struct EffectItem: Identifiable, Equatable {
     var enabled: Bool
     var paramCount: UInt32
     var known: Bool
+    /// Omega aparência: 0 efeito comum; 2 borda, 3 sombra (decorações de Borda e sombra, fora da lista de Efeitos).
+    var role: UInt32 = 0
     var id: UInt32 { effectId }
+    var isDecoration: Bool { role != 0 }
+    static let roleBorder: UInt32 = 2
+    static let roleShadow: UInt32 = 3
 }
 
 struct EffectParamItem: Identifiable, Equatable {
@@ -173,9 +178,37 @@ struct EffectParamItem: Identifiable, Equatable {
     var sectionOpen: Bool = true
     /// Dica (ⓘ, só leitura) mostrada acima da linha; vazia = sem dica.
     var tip: String = ""
+    // Omega efeitos (área 07, P0-1): apresentação resolvida pelo motor
+    // (`FxParamControl`; par do `EffectParam` do EnginePods.kt).
+    /// Controle da linha (0 = sem controle numérico).
+    var control: Int = 0
+    /// Valor por risco da régua, na unidade do motor (0 = sem régua).
+    var step: Float = 0
+    /// Origem do preenchimento do slider.
+    var origin: Float = 0
+    /// 1 segmentado, 2 suspenso (0 = não é escolha).
+    var enumStyle: Int = 0
+    /// Bit 0 = habilitado, bit 1 = disco de matiz. Linha antiga: habilitada.
+    var rowFlags: UInt32 = 1
+    var enabled: Bool { rowFlags & 1 != 0 }
     var id: UInt32 { index }
 
     var scalar: Float { value.first ?? 0 }
+}
+
+/// Omega efeitos (área 07, P0-1): espelho de `aurea::ParamControl`/`EnumStyle`
+/// (mesmos números do `ParamControl` do EnginePods.kt).
+enum FxParamControl {
+    static let auto = 0
+    static let slider = 1
+    static let ruler = 2
+    static let point = 3
+    static let xyz = 4
+    static let orientation = 5
+    static let hueDisc = 6
+
+    static let enumSegmented = 1
+    static let enumDropdown = 2
 }
 
 /// Botão de um aviso: o rótulo e o que ele faz (uma vez).
@@ -213,8 +246,9 @@ struct ExportOptions: Equatable {
     var codec: AureaExportCodec = .h264
     var shortSide: UInt32 = 1080
     var bitrateMbps: UInt32 = 0   // 0 = automático pela qualidade (BitratePolicy do motor)
-    /// 0 Baixa, 1 Normal, 2 Alta.
-    var quality: UInt32 = 1
+    /// Omega adicionar (área 08, P1-9): porcentagem 20..100 (o controle da página);
+    /// 0, 1, 2 = as fichas antigas (Baixa, Normal, Alta). O motor converte em fator.
+    var quality: UInt32 = 60
     var audioBitrateKbps: UInt32 = 192
     var aiUpscale: UInt32 = 0
     var trimToContent = true
@@ -450,7 +484,8 @@ final class AureaModel: ObservableObject {
         // opções): a geometria não muda no meio do gesto. Escolhendo keyframes, a
         // timeline fica alta (sem barra). Igual ao EditorScreen.kt.
         let timelineOnly = !selection.isEmpty && selection == timelineOnlySelection
-        if showAddLayer { return selection.isEmpty || (timelineOnly && !timelineKeySelectMode) ? .addBar : .none }
+        // Omega adicionar (área 08, P0-1): o conteúdo embutido acima da barra (.adding).
+        if showAddLayer { return selection.isEmpty || (timelineOnly && !timelineKeySelectMode) ? .adding : .none }
         // O painel da Aurea AI CRIA a camada: abre sem nada selecionado (igual ao Android).
         if panel == .aiVideo || panel == .captions { return .panel }
         if selection.isEmpty { return .addBar }
@@ -618,6 +653,10 @@ final class AureaModel: ObservableObject {
         toast = skipped > 0 ? AureaText.t("am_import_done_skipped", mapped, skipped, saved) : AureaText.t("am_import_done", mapped, saved)
     }
     @Published var text3DFontSheet: Text3DFontRequest?
+    // Omega conteúdo (área 06, P0-1): o diálogo "Editar texto" virou o MODO DE
+    // TEXTO (faixa de entrada no painel grande + barra de estilo no topo; cada
+    // letra vai na hora para a camada, uma rajada de 1 s por passo de desfazer).
+    // Os nomes antigos continuam como atalhos do modo. Par do EditorStore.kt.
     struct TextContentRequest: Identifiable {
         let id: Int64
         let presentationID = UUID()
@@ -626,31 +665,164 @@ final class AureaModel: ObservableObject {
         let selectAll: Bool
         var alignment: Int = 0
     }
-    @Published var textContentRequest: TextContentRequest?
-
-    func openTextContentEditor(selectAll: Bool = false) {
-        guard let id = primarySelection, selectedLayer?.locked != true else { return }
-        if status.playing != 0 { playPause() }
-        showAddLayer = false
-        let recipe = engine.text3D(forLayer: id) ?? [:]
-        let is3D = !recipe.isEmpty
-        guard let content = (is3D ? recipe : (engine.text(forLayer: id) ?? [:]))["content"] as? String else { return }
-        textContentRequest = TextContentRequest(id: id, content: content, is3D: is3D, selectAll: selectAll,
-            alignment: (engine.text(forLayer: id)?["alignment"] as? NSNumber)?.intValue ?? 0)
+    /// Camada no modo de texto (nil = fora do modo).
+    @Published private(set) var textEditLayer: Int64?
+    /// O modo abriu com o texto todo escolhido (texto recém-criado).
+    @Published private(set) var textEditSelectAll = false
+    /// O modo está na camada escolhida agora (barra de estilo + painel grande)?
+    var textModeActive: Bool { textEditLayer != nil && textEditLayer == primarySelection }
+    /// O modo visto como o pedido antigo do diálogo (compatibilidade); pôr nil sai do modo.
+    var textContentRequest: TextContentRequest? {
+        get {
+            guard let id = textEditLayer else { return nil }
+            let recipe = engine.text3D(forLayer: id) ?? [:]
+            let info = recipe.isEmpty ? (engine.text(forLayer: id) ?? [:]) : recipe
+            return TextContentRequest(id: id, content: info["content"] as? String ?? "", is3D: !recipe.isEmpty,
+                                      selectAll: textEditSelectAll, alignment: (info["alignment"] as? NSNumber)?.intValue ?? 0)
+        }
+        set { if newValue == nil { finishTextTyping(); textEditLayer = nil; textEditSelectAll = false } }
     }
 
-    func commitTextContent(_ request: TextContentRequest, content: String) -> Bool {
-        guard textContentRequest?.presentationID == request.presentationID,
-              layers.contains(where: { $0.id == request.id && !$0.locked }) else { return false }
-        if content != request.content {
-            if request.is3D {
-                guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      engine.setText3D(forLayer: request.id, property: "content", stringValue: content, numberValue: 0) else { return false }
-            } else { engine.setText(request.id, content: content) }
+    func openTextContentEditor(selectAll: Bool = false) { openTextEdit(selectAll: selectAll) }
+
+    /// Entra no modo de texto na camada escolhida (texto 2D ou 3D).
+    @discardableResult
+    func openTextEdit(selectAll: Bool = false) -> Bool {
+        guard let id = primarySelection else { return false }
+        if selectedLayer?.locked == true { toast = AureaText.t("editor_camada_bloqueada"); return false }
+        guard engine.text3D(forLayer: id) != nil || engine.text(forLayer: id) != nil else { return false }
+        if status.playing != 0 { playPause() }
+        showAddLayer = false
+        finishTextTyping()
+        TextModeState.shared.popup = .none
+        textEditSelectAll = selectAll
+        textEditLayer = id
+        return true
+    }
+
+    /// Sai do modo de texto: a rajada de digitação fecha (o texto já está no motor).
+    func closeTextEdit() {
+        guard textEditLayer != nil else { return }
+        finishTextTyping()
+        TextModeState.shared.popup = .none
+        textEditLayer = nil
+        textEditSelectAll = false
+        refreshModel(force: true)
+    }
+
+    private var textTypingOpen = false
+    private var textTypingClose: DispatchWorkItem?
+    /// Uma rajada de digitação está aberta (a faixa não troca o texto por fora).
+    var textTyping: Bool { textTypingOpen }
+    private func finishTextTyping() {
+        textTypingClose?.cancel(); textTypingClose = nil
+        if textTypingOpen { textTypingOpen = false; endGesture() }
+    }
+
+    /// Uma letra a mais (ou a menos) no modo de texto: vai direto para a camada.
+    /// Um passo de desfazer por rajada (fecha 1 s depois da última tecla).
+    func typeText(_ content: String) {
+        guard let id = textEditLayer, primarySelection == id, selectedLayer?.locked != true else { return }
+        let is3D = engine.text3D(forLayer: id) != nil
+        // Texto 3D vazio continua proibido: o último conteúdo válido fica.
+        if is3D && content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return }
+        if !textTypingOpen { textTypingOpen = true; beginGesture("digitar texto") }
+        if is3D { _ = engine.setText3D(forLayer: id, property: "content", stringValue: content, numberValue: 0) }
+        else { engine.setText(id, content: content) }
+        textTypingClose?.cancel()
+        let close = DispatchWorkItem { [weak self] in self?.finishTextTyping() }
+        textTypingClose = close
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: close)
+        refreshModel(force: true)
+    }
+
+    /// Alinhamento seguinte do ciclo E → C → D (barra de estilo do modo de texto).
+    func cycleTextAlignment() {
+        guard let id = primarySelection, selectedLayer?.locked != true else { return }
+        if let recipe = engine.text3D(forLayer: id) {
+            let a = (recipe["alignment"] as? NSNumber)?.intValue ?? 0
+            _ = engine.setText3D(forLayer: id, property: "alignment", stringValue: nil, numberValue: Float((a + 1) % 3))
+        } else {
+            let a = (engine.text(forLayer: id)?["alignment"] as? NSNumber)?.intValue ?? 0
+            engine.setText(id, alignment: UInt32((a + 1) % 3))
         }
-        textContentRequest = nil
+        refreshModel(force: true)
+    }
+
+    /// Fonte escolhida no modo de texto ou no navegador (2D: a família; 3D: o arquivo).
+    func applyFontAnywhere(_ font: ContentFontItem?) {
+        guard let id = primarySelection, selectedLayer?.locked != true else { return }
+        if engine.text3D(forLayer: id) != nil {
+            _ = engine.setText3D(forLayer: id, property: "fontPath", stringValue: font?.path ?? "", numberValue: 0)
+        } else {
+            let path = font?.path ?? ""
+            let ok = engine.setTextFont(forLayer: id, family: font?.family ?? "", weight: font?.weight ?? 400, italic: font?.italic ?? false,
+                                        path: (font?.imported == true || path.hasPrefix(AureaPaths.documents.path)) ? path : "")
+            if !ok { toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte"); return }
+        }
+        refreshModel(force: true)
+    }
+
+    /// Apaga uma fonte importada (arquivo + lista); os textos com ela voltam à fonte padrão.
+    func removeImportedFont(_ font: ContentFontItem) -> Bool {
+        guard font.imported, engine.removeImportedFont(font.path) else { return false }
+        FontLibrary.shared.reload(engine)
         refreshModel(force: true)
         return true
+    }
+
+    // Omega conteúdo (área 06, P0-4/P0-5/P1-8): desenho e Editar pontos.
+    /// A camada escolhida é de DESENHO (Engine::vector_layer_flags bit 2)?
+    var isDrawingLayer: Bool {
+        guard let id = primarySelection, selectedLayer?.kind == 5 else { return false }
+        return engine.vectorLayerFlags(id) & 2 != 0
+    }
+    /// Sobe a cada mudança dos editores de conteúdo (o palco e a faixa redesenham).
+    @Published var contentRevision = 0
+
+    /// "Mão livre": camada de desenho nova, escolhida, e o editor de desenho.
+    func startDrawing() {
+        if status.playing != 0 { playPause() }
+        let id = engine.addDrawingLayer()
+        guard id >= 0 else { toast = AureaText.t("ios_drawing_add_failed"); return }
+        vectorGroup = 0; vectorPath = 0
+        selection = [id]; engine.selectLayers([NSNumber(value: id)]); showAddLayer = false
+        syncAfterEdit()
+        openPanel(.drawing)
+    }
+
+    /// O traço do editor de desenho (x, y em px da composição e a pressão): um grupo novo, um passo de desfazer.
+    @discardableResult
+    func commitDrawingStroke(tool: Int, rgba: [Float], width: Float, points: [Float]) -> Bool {
+        guard let id = primarySelection, points.count >= 3 else { return false }
+        let added = engine.addDrawingStroke(id, tool: UInt32(max(0, tool)), color: rgba.map { NSNumber(value: $0) }, width: width,
+                                            points: points.map { NSNumber(value: $0) })
+        contentRevision &+= 1
+        refreshModel(force: true)
+        return added >= 0
+    }
+
+    /// Operação de ponto do Editar pontos (Engine::PathOp) no contorno escolhido. Índice ou −1.
+    @discardableResult
+    func editVectorPath(_ op: UInt32, _ args: [Float], continuing: Bool = false) -> Int32 {
+        guard let id = primarySelection else { return -1 }
+        if status.playing != 0 { playPause() }
+        let r = engine.editVectorPath(id, group: vectorGroup, path: vectorPath, op: op, args: args.map { NSNumber(value: $0) }, continuing: continuing)
+        contentRevision &+= 1
+        if continuing { refreshSelectedLayer(); invalidatePreview() } else { refreshModel(force: true) }
+        return r
+    }
+
+    /// Troca o contorno do Editar pontos (mesmo grupo).
+    func chooseContour(_ index: Int) {
+        vectorPath = UInt32(max(0, index))
+        contentRevision &+= 1
+    }
+
+    /// Alça de largura da caixa de texto (dx, dy em px da composição): a regra por alinhamento é do motor.
+    func dragTextBoxWidth(dx: Float, dy: Float, continuing: Bool) {
+        guard let id = primarySelection, engine.dragTextBoxWidth(id, dx: dx, dy: dy, continuing: continuing) else { return }
+        if continuing { refreshSelectedLayer(); invalidatePreview() } else { refreshModel(force: true) }
     }
     @Published var presetDialog: PresetDialogRequest?
     @Published var curveReturnPanel: PanelKind = .none
@@ -691,6 +863,31 @@ final class AureaModel: ObservableObject {
         }
     }
 
+    // Omega efeitos (área 07, P0-5): menu ⋮ do efeito. Par do EditorStore.kt
+    // (`duplicateEffect`, `pasteEffectSettings`, `clipboardEffectType`).
+    /// Duplica o efeito no FIM da pilha (um desfazer) e avisa; devolve o id novo.
+    @discardableResult
+    func duplicateEffect(_ effectId: UInt32) -> UInt32? {
+        guard let layer = primarySelection, selectedLayer?.locked != true else { return nil }
+        let id = engine.duplicateEffect(effectId, inLayer: layer)
+        refreshSelectedLayer()
+        guard id >= 0 else { return nil }
+        toast = AureaText.t("om_fx_effect_duplicated")
+        return UInt32(id)
+    }
+    /// Cola as configurações do efeito copiado (mesmo tipo) neste efeito; um desfazer.
+    @discardableResult
+    func pasteEffectSettings(_ effectId: UInt32) -> Bool {
+        guard let layer = primarySelection, selectedLayer?.locked != true else { return false }
+        let ok = engine.pasteEffectSettings(effectId, inLayer: layer)
+        refreshSelectedLayer()
+        if let selected = selectedEffectId { loadParams(layerId: layer, effectId: selected) }
+        if ok { toast = AureaText.t("om_fx_settings_pasted") }
+        return ok
+    }
+    /// Tipo do efeito na área de transferência quando ela guarda UM só (0 = vazia ou vários).
+    var clipboardEffectType: UInt32 { engine.clipboardEffectType }
+
     // --- Modelo em memória (o que a timeline e os painéis desenham) ---------
     @Published private(set) var layers: [LayerItem] = []
     @Published private(set) var captionTracks: [NativeCaptionTrack] = []
@@ -700,6 +897,24 @@ final class AureaModel: ObservableObject {
     @Published private(set) var effectCatalog: [EffectCatalogItem] = []
     @Published private(set) var effects: [EffectItem] = []
     @Published private(set) var effectParams: [EffectParamItem] = []
+    // Omega aparência (área 05) — os métodos estão em AppearanceModel.swift.
+    /// Decorações de Borda e sombra da camada escolhida (bordas na ordem, depois a sombra).
+    @Published private(set) var decorations: [EffectItem] = []
+    /// Preenchimento da forma no cabeçote (24 valores; Engine::query_shape_fill). Vazio fora de forma SDF.
+    @Published private(set) var shapeFill: [Float] = []
+    /// Linhas-guia do ímã no palco (px da composição).
+    @Published var snapGuideX: Float?
+    @Published var snapGuideY: Float?
+    /// Conta-gotas ao vivo no palco (P1-1).
+    @Published var eyedropper: EyedropperRequest?
+    /// Trajetória da posição no palco (P1-3), ligada pelo painel Mover.
+    @Published var showMotionPath = false
+    /// Releitura do preenchimento (chamada por refreshSelectedLayer).
+    func refreshShapeFill(_ layerId: Int64?) {
+        let next: [Float]
+        if let layerId, selectedLayer?.kind == 5 { next = engine.shapeFill(layerId).map(\.floatValue) } else { next = [] }
+        if next != shapeFill { shapeFill = next }
+    }
     /// Detalhe da camada escolhida (transform avaliado no playhead).
     @Published private(set) var detail: [String: Any] = [:]
     @Published private(set) var masks: [MaskItem] = []
@@ -824,7 +1039,11 @@ final class AureaModel: ObservableObject {
 
     enum Screen { case home, editor, hyper }
     /// `filters`/`adjust` (0.3.0): as telas próprias do modo de edição (EditModeView.swift).
-    enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, clipEdit, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo, filters, adjust }
+    enum PanelKind { case none, dock, transform, text, effects, layer3D, exportPanel, appearance, speed, clipEdit, audio, shape, shapeEdit, mask, textAnimation, curve, presets, particles, tracking, captions, vector, aiVideo, filters, adjust,
+        // Omega aparência (área 05): Borda e sombra e Opções da câmera.
+        borderShadow, camera,
+        // Omega conteúdo (área 06): o editor de desenho e o Editar pontos.
+        drawing, editPoints }
     @Published var curveProperty: UInt32 = 0
     @Published var timelineFocus: [TimelineTrack]? = nil
     /// Keyframes escolhidos na timeline (várias trilhas de UMA camada; ações em
@@ -1030,6 +1249,9 @@ final class AureaModel: ObservableObject {
                     case "text-3d": addText3D(content: AureaText.t("panel_texto"), depth: 0.25); textContentRequest = nil; panel = .layer3D
                     case "text-edit-2d": addText()
                     case "text-edit-3d": addText3D(content: AureaText.t("panel_texto"), depth: 0.25)
+                    // Omega conteúdo (área 06): o editor de desenho e o Editar pontos.
+                    case "content-drawing": startDrawing()
+                    case "content-points": addVector(0)
                     case "curve-null": addNull(threeD: true); panel = .transform
                     case "transform-expression":
                         addText(); textContentRequest = nil
@@ -1993,6 +2215,8 @@ final class AureaModel: ObservableObject {
         guard !preRenderPreparing else { return }
         guard let layerId = primarySelection, started else {
             if !effects.isEmpty { effects = [] }
+            if !decorations.isEmpty { decorations = [] }   // Omega aparência
+            if !shapeFill.isEmpty { shapeFill = [] }
             if !effectParams.isEmpty { effectParams = [] }
             if !detail.isEmpty { detail = [:] }
             if !cameraLens.isEmpty { cameraLens = [] }
@@ -2005,14 +2229,20 @@ final class AureaModel: ObservableObject {
                        name: row["name"] as? String ?? "",
                        enabled: row["enabled"] as? Bool ?? true,
                        paramCount: (row["paramCount"] as? NSNumber)?.uint32Value ?? 0,
-                       known: row["known"] as? Bool ?? true)
+                       known: row["known"] as? Bool ?? true,
+                       role: (row["role"] as? NSNumber)?.uint32Value ?? 0)
         }
-          if nextEffects != effects { effects = nextEffects }
+          // Omega aparência: as decorações de Borda e sombra ficam fora da lista de Efeitos.
+          let common = nextEffects.filter { !$0.isDecoration }
+          let decor = nextEffects.filter { $0.isDecoration }
+          if common != effects { effects = common }
+          if decor != decorations { decorations = decor }
         }
         let nextDetail = engine.layerDetail(layerId) ?? [:]
         if !NSDictionary(dictionary: nextDetail).isEqual(to: detail) { detail = nextDetail }
         let nextLens: [Float] = selectedLayer?.kind == 8 ? engine.cameraLens(layerId).map(\.floatValue) : []
         if nextLens != cameraLens { cameraLens = nextLens }
+        refreshShapeFill(layerId)   // Omega aparência
         // Pose do rig 3D (0.1.8): ossos do modelo escolhido na Cena 3D.
         let nextBones: [Float] = sceneEditor && selectedLayer?.kind == 10 ? engine.modelBones(layerId).map(\.floatValue) : []
         if nextBones != poseBones { poseBones = nextBones }
@@ -2059,7 +2289,13 @@ final class AureaModel: ObservableObject {
                                    sectionLabel: fxLocalizedSection(typeId, ordinal: section, label: row["sectionLabel"] as? String ?? ""),
                                    sectionToggle: (row["sectionToggle"] as? NSNumber)?.intValue ?? -1,
                                    sectionOpen: (row["sectionOpen"] as? NSNumber)?.boolValue ?? true,
-                                   tip: fxLocalizedTip(typeId, index: Int(index), tip: row["tip"] as? String ?? ""))
+                                   tip: fxLocalizedTip(typeId, index: Int(index), tip: row["tip"] as? String ?? ""),
+                                   // Omega efeitos (P0-1): apresentação resolvida pelo motor.
+                                   control: (row["control"] as? NSNumber)?.intValue ?? 0,
+                                   step: (row["step"] as? NSNumber)?.floatValue ?? 0,
+                                   origin: (row["origin"] as? NSNumber)?.floatValue ?? 0,
+                                   enumStyle: (row["enumStyle"] as? NSNumber)?.intValue ?? 0,
+                                   rowFlags: (row["rowFlags"] as? NSNumber)?.uint32Value ?? 1)
         }
         if nextParams != effectParams { effectParams = nextParams }
     }
@@ -2475,6 +2711,8 @@ final class AureaModel: ObservableObject {
 
     /// Same back order as EditorScreen.shellBack on Android.
     func editorBack() {
+        // Omega conteúdo (área 06): o modo de texto sai primeiro.
+        if textEditLayer != nil { closeTextEdit(); return }
         if showAddLayer { showAddLayer = false }
         else if fullscreen { fullscreen = false }
         else if panel != .none && panel != .dock { panel = .none }
@@ -2945,6 +3183,149 @@ final class AureaModel: ObservableObject {
                 }
                 if let layeredError { self.toast = AureaModel.layeredImportError(gif: layeredError.0, code: layeredError.1) }
                 else if failed > 0 { self.toast = AureaText.t("msg_nao_consegui_ler_esse_arquivo") }
+            }
+        }
+    }
+
+    // =========================================================================
+    // Omega adicionar (área 08): os navegadores em tela cheia, o lote do
+    // navegador de mídia (duração e corte num passo de desfazer), o áudio da
+    // biblioteca do app, o grupo vazio e o projeto como camada. As regras são
+    // do motor (EngineOmegaAdd.cpp); par do EditorStore (Android).
+    // =========================================================================
+    /// "Ver tudo" da mídia (MediaBrowserView.swift), do áudio (AudioBrowserView.swift) e dos presets.
+    @Published var omegaMediaBrowser = false
+    @Published var omegaAudioBrowser = false
+    @Published var omegaPresetsBrowser = false
+
+    /// Uma mídia escolhida no navegador (arquivo já exportado do Fotos), com a
+    /// duração (imagem, quadros) ou o corte (vídeo, µs).
+    struct OmegaMediaPick {
+        let url: URL
+        let video: Bool
+        var durationFrames: Int64 = 0
+        var trimInUs: Int64 = 0
+        var trimOutUs: Int64 = 0
+    }
+
+    /// O "Adicionar" do navegador de mídia (P1-2): uma mídia por vez dentro de UM
+    /// lote do motor — duração, corte e arranjo (`placement` 0 = mesmo início,
+    /// 1 = em sequência, na ordem de `picks`) num passo de desfazer só.
+    func importMediaPicks(_ picks: [OmegaMediaPick], placement: UInt32) {
+        guard !picks.isEmpty, !importingMedia else { return }
+        importingMedia = true
+        operationMessage = AureaText.t("ios_importing_media")
+        pause()
+        let importer = engine
+        mediaQueue.async { [weak self] in
+            importer.beginImportBatch()
+            var imported: [Int64] = [], failures = 0
+            for pick in picks {
+                let destination = AureaPaths.mediaDestination(for: pick.url.lastPathComponent)
+                do {
+                    try AureaPaths.copyImport(pick.url, to: destination)
+                    let name = pick.url.deletingPathExtension().lastPathComponent
+                    let ext = pick.url.pathExtension.lowercased()
+                    let layered = !pick.video && (ext == "gif" || ext == "psd")
+                    let result = pick.video ? importer.importVideo(destination.path, name: name)
+                        : ext == "gif" ? importer.importGIF(destination.path, name: name)
+                        : ext == "psd" ? importer.importPSD(destination.path, name: name)
+                        : importer.importImageFile(destination.path, name: name)
+                    if layered { try? FileManager.default.removeItem(at: destination) }
+                    if result >= 0 {
+                        // Duração e corte no MESMO passo (o lote está aberto).
+                        if !layered && (pick.durationFrames > 0 || pick.trimOutUs > pick.trimInUs) {
+                            _ = importer.applyImportTiming(result, durationFrames: pick.video ? 0 : pick.durationFrames,
+                                                           sourceInUs: pick.video ? pick.trimInUs : 0, sourceOutUs: pick.video ? pick.trimOutUs : 0)
+                        }
+                        imported.append(result)
+                    } else {
+                        failures += 1
+                        if !layered { try? FileManager.default.removeItem(at: destination) }
+                    }
+                } catch { failures += 1 }
+            }
+            // Fecha o passo de desfazer mesmo se algo falhou no meio.
+            _ = importer.endImportBatch(imported.map { NSNumber(value: $0) }, placement: placement)
+            let ids = imported, failed = failures
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                if !ids.isEmpty {
+                    self.engine.selectLayers(ids.map { NSNumber(value: $0) })
+                    self.selection = Set(ids)
+                    self.refreshModel(force: true)
+                    _ = self.saveProject(writeThumbnail: false)
+                }
+                if failed > 0 { self.toast = AureaText.t("msg_nao_consegui_ler_esse_arquivo") }
+            }
+        }
+    }
+
+    /// Áudio da biblioteca do app (já em Documents/Media): entra direto, sem cópia.
+    func importAudioSource(_ url: URL, name: String) {
+        guard !importingMedia else { return }
+        guard FileManager.default.fileExists(atPath: url.path) else { toast = AureaText.t("msg_nao_consegui_ler_esse_arquivo"); return }
+        importingMedia = true
+        operationMessage = AureaText.t("ios_importing_media")
+        pause()
+        let importer = engine
+        mediaQueue.async { [weak self] in
+            let result = importer.importAudio(url.path, name: name)
+            let raw = importer.lastImportError
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                if result < 0 {
+                    self.toast = raw.isEmpty ? AureaText.t("ios_import_failed_code", String(-result)) : AureaEngineText.sentence(raw, code: Int(-result))
+                    return
+                }
+                self.engine.selectLayers([NSNumber(value: result)]); self.selection = [result]
+                self.refreshModel(force: true)
+                _ = self.saveProject(writeThumbnail: false)
+            }
+        }
+    }
+
+    /// O "Salvar" do resultado (P0-11): a gravação automática em Fotos falhou ou
+    /// foi negada — tenta de novo (a sequência .zip fica em Arquivos).
+    func retrySaveExportToPhotos() {
+        guard let url = exportedURL, !exporting, !exportPublishing, exportedKind != .sequence else { return }
+        publishExportToPhotos(url)
+    }
+
+    /// "Grupo vazio" (P1-5): uma composição vazia como camada, no cabeçote.
+    func addEmptyGroup(_ name: String) {
+        if status.playing != 0 { pause() }
+        let id = engine.addEmptyGroup(name)
+        if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }
+        else { toast = AureaText.t("ios_error_code", String(-id)) }
+        showAddLayer = false
+        syncAfterEdit()
+    }
+
+    /// "Elemento/Projeto" (P1-6): outro projeto como camada de grupo, no cabeçote.
+    func insertProjectAsLayer(_ url: URL, title: String) {
+        if url.path == projectURL?.path { toast = AureaText.t("om_add_project_self"); return }
+        guard !importingMedia else { return }
+        importingMedia = true
+        operationMessage = AureaText.t("ios_importing_media")
+        pause()
+        let importer = engine
+        mediaQueue.async { [weak self] in
+            let result = importer.insertProjectAsLayer(url.path, name: title)
+            let raw = importer.lastImportError
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.importingMedia = false
+                if result < 0 {
+                    let reason = raw.isEmpty ? AureaText.t("ios_error_code", String(-result)) : AureaEngineText.sentence(raw, code: Int(-result))
+                    self.toast = AureaText.t("om_add_project_failed", reason)
+                    return
+                }
+                self.engine.selectLayers([NSNumber(value: result)]); self.selection = [result]
+                self.refreshModel(force: true)
+                _ = self.saveProject(writeThumbnail: false)
             }
         }
     }
@@ -3938,6 +4319,51 @@ final class AureaModel: ObservableObject {
         add()
     }
 
+    // Omega efeitos (navegador): adicionar o efeito JÁ com uma variação. Par do
+    // EditorStore.kt (`addEffectWithPreset`).
+    /// Adiciona o efeito `type` às camadas escolhidas (destravadas) e aplica a
+    /// variação `preset` (índice em `engine.effectPresets(type)`) no efeito NOVO de
+    /// cada uma, tudo num passo de desfazer. `preset` < 0 = só o efeito.
+    /// O motor pode aplicar o "adicionar" no quadro seguinte: o grupo de desfazer
+    /// fica aberto até o efeito novo aparecer (≤ ~1 s) e o preset entrar.
+    func addEffectWithPreset(_ type: UInt32, preset: Int) {
+        let targets = layers.filter { selection.contains($0.id) && !$0.locked }.map(\.id)
+        guard preset >= 0, started, !targets.isEmpty, !HyperEffectGate.locked(typeId: type) else {
+            addCatalogEffect(type, layers: targets.isEmpty ? Array(selection) : targets)
+            return
+        }
+        var before: [Int64: [UInt32]] = [:]
+        for layer in targets { before[layer] = omegaEffectIds(ofType: type, layer: layer) }
+        beginGesture("adicionar efeito")
+        addCatalogEffect(type, layers: targets)
+        omegaApplyPresetWhenAdded(type, preset: preset, targets: targets, before: before, tries: 0)
+    }
+
+    /// Os efeitos do tipo `type` na camada, na ordem da pilha (leitura direta do motor).
+    private func omegaEffectIds(ofType type: UInt32, layer: Int64) -> [UInt32] {
+        engine.effects(forLayer: layer).compactMap { row in
+            (row["typeId"] as? NSNumber)?.uint32Value == type ? (row["effectId"] as? NSNumber)?.uint32Value : nil
+        }
+    }
+
+    private func omegaApplyPresetWhenAdded(_ type: UInt32, preset: Int, targets: [Int64], before: [Int64: [UInt32]], tries: Int) {
+        var fresh: [(layer: Int64, effect: UInt32)] = []
+        for layer in targets {
+            let known = Set(before[layer] ?? [])
+            if let effect = omegaEffectIds(ofType: type, layer: layer).last(where: { !known.contains($0) }) {
+                fresh.append((layer: layer, effect: effect))
+            }
+        }
+        if fresh.count < targets.count && tries < 60 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
+                self?.omegaApplyPresetWhenAdded(type, preset: preset, targets: targets, before: before, tries: tries + 1)
+            }
+            return
+        }
+        for item in fresh { _ = engine.applyEffectPreset(UInt32(preset), effect: item.effect, forLayer: item.layer) }
+        endGesture()
+    }
+
     func detectBeats() {
         guard started, !importingMedia, let layer = selectedLayer, layer.kind == 1 || layer.kind == 3 else {
             toast = AureaText.t("msg_escolha_uma_camada_de_audio_ou"); return
@@ -4015,9 +4441,16 @@ final class AureaModel: ObservableObject {
     }
 
     func addVector(_ preset: UInt32, freehand: Bool = false) {
+        // Omega conteúdo (área 06, P0-4/P0-5): "Mão livre" cria a camada de DESENHO e abre
+        // o editor de desenho; o caminho livre abre o Editar pontos (as ferramentas antigas saíram).
+        if freehand && preset == 0 { startDrawing(); return }
         let id = engine.addVector(preset)
         guard id >= 0 else { toast = AureaText.t("ios_vector_create_failed"); return }
         selection = [id]; engine.selectLayers([NSNumber(value: id)]); showAddLayer = false
+        if preset == 0 {
+            syncAfterEdit(); vectorGroup = 0; vectorPath = 0; EditPointsState.shared.reset(); openPanel(.editPoints)
+            return
+        }
         syncAfterEdit(); openPanel(.vector); maskDrawing = preset == 0; vectorFreehand = freehand
     }
 
@@ -5177,6 +5610,35 @@ final class AureaModel: ObservableObject {
         seek(toFrame: next)
     }
 
+    // Omega timeline (área 03) -----------------------------------------------------
+    /// Marcador anterior ao cabeçote (sem dar a volta); false = não há. Régua e VoiceOver.
+    @discardableResult func seekToPreviousMarker() -> Bool {
+        guard let target = markerFrames.last(where: { $0 < status.playhead }) else { return false }
+        seek(toFrame: target)
+        return true
+    }
+    /// Marcador seguinte ao cabeçote (sem dar a volta); false = não há.
+    @discardableResult func seekToFollowingMarker() -> Bool {
+        guard let target = markerFrames.first(where: { $0 > status.playhead }) else { return false }
+        seek(toFrame: target)
+        return true
+    }
+    /// Camadas com as trilhas de keyframes abertas na timeline. Na Omega a pílula
+    /// seleciona a camada; as trilhas abrem pelo ⋮ da camada (decisão D-1).
+    @Published var timelineExpandedLayers: Set<Int64> = []
+    func toggleTimelineTracks(_ layer: Int64) {
+        if timelineExpandedLayers.contains(layer) { timelineExpandedLayers.remove(layer) } else { timelineExpandedLayers.insert(layer) }
+    }
+    /// Barra de informação do gesto da timeline (mover, aparar, keyframe): pares
+    /// rótulo–valor na ordem; nil = sem barra (par do `timelineInfo` do Android).
+    @Published var timelineInfo: [TimelineInfoItem]? = nil
+    /// Alça de velocidade do foco (P1-8): estica a camada mantendo o trecho da fonte.
+    @discardableResult func stretchLayerSpan(_ layer: Int64, start: Int64, end: Int64) -> Bool {
+        let ok = engine.stretchLayerSpan(layer, start: start, end: end)
+        if ok { refreshModel(force: true) }
+        return ok
+    }
+
     // --- Obturador / desfoque de movimento da composição ---------------------
     var motionBlurControls: MotionBlurControls { MotionBlurControls(engine.motionBlurSettings()) }
     var compMotionBlur: Bool { motionBlurControls.enabled }
@@ -5487,6 +5949,56 @@ final class AureaModel: ObservableObject {
         refreshModel(force: true)
         return changed
     }
+
+    // Omega painel: (área 04) painel da camada — as regras moram no motor
+    // (EngineOmegaLayer.cpp); aqui só chama e relê (par do EditorStore.kt).
+    /// Bits do painel da camada com o cabeçote atual (`LayerPanelBits`).
+    func layerPanelBits(_ layerId: Int64) -> UInt32 { engine.queryLayerPanel(layerId, frame: status.playhead) }
+
+    /// Move a camada inteira para começar (ou, com `alignEnd`, terminar) no cabeçote.
+    @discardableResult func moveLayerToPlayhead(_ layerId: Int64, alignEnd: Bool) -> Bool {
+        let changed = engine.moveLayerToPlayhead(layerId, frame: status.playhead, alignEnd: alignEnd)
+        refreshModel(force: true)
+        return changed
+    }
+
+    /// Retempo: 0 esticar início, 1 encurtar início, 2 encurtar fim, 3 esticar fim (muda a velocidade).
+    @discardableResult func retimeLayerToPlayhead(_ layerId: Int64, edge: UInt32) -> Bool {
+        let changed = engine.retimeLayerToPlayhead(layerId, edge: edge, frame: status.playhead)
+        if changed { unaliasThumbs(layerId) }
+        refreshModel(force: true)
+        return changed
+    }
+
+    /// Velocidade constante nas camadas sem fonte: a animação da camada é reescalada no motor.
+    @discardableResult func setLayerSpeedBaked(_ speed: Float) -> Bool {
+        guard let id = primarySelection else { return false }
+        let changed = engine.setLayerSpeedBaked(id, speed: speed.clamped(to: 0.05...16))
+        refreshModel(force: true)
+        return changed
+    }
+
+    /// ◆ segurado (P1-9): apaga TODAS as chaves da trilha, num passo de desfazer.
+    func deleteAllKeyframes(_ layerId: Int64, property: UInt32) {
+        let keys = (keyframes[layerId] ?? []).filter { $0.property == property && $0.effectIndex == .max }
+        guard !keys.isEmpty else { return }
+        beginGesture("apagar keyframes")
+        mutate { core in for key in keys { core.deleteKeyframe(forLayer: layerId, property: property, time: key.time) } }
+        endGesture()
+    }
+
+    /// A velocidade embutida do grupo está aberta: a timeline mostra as alças de velocidade.
+    @Published var layerSpeedPopout = false
+    /// Alças de velocidade na timeline (painel Velocidade ou a velocidade embutida do grupo).
+    var speedHandlesActive: Bool { panel == .speed || layerSpeedPopout }
+    /// Camadas cuja mídia ausente já foi avisada nesta sessão (o aviso sai uma vez).
+    var layerPanelWarnedMissing = Set<Int64>()
+    /// A última camada que entrou com animação (voltar de um painel não anima de novo).
+    var layerPanelLastShown: Int64 = 0
+    /// P0-6: o ⋮ que o painel aberto publica na barra da seção (`PanelBar.moreEntries`;
+    /// par do `PanelBarActions.more` do Android). Nil = sem ⋮. O painel publica no
+    /// `onAppear` e limpa no `onDisappear`; a barra da seção (ToolbarView) lê daqui.
+    @Published var panelBarMore: (() -> [MenuEntry])? = nil
 
     func editClipTime(_ operation: UInt32, amount: Int64, previous: Int64 = 0, next: Int64 = 0) {
         guard let id = primarySelection else { return }
@@ -6403,4 +6915,71 @@ enum DeviceMemoryClass {
 enum AureaUiMode {
     static let composition: UInt32 = 0
     static let edit: UInt32 = 1
+}
+
+// MARK: - Omega chrome (área 02): moldura do editor (EngineOmegaChrome.cpp)
+// Par das funções do bloco "Omega chrome" do EditorStore.kt. Mesmo arquivo da
+// classe: o relógio pendente do cabeçote (privado) fica ao alcance.
+extension AureaModel {
+    /// Trilha de grupos: os nomes das composições abertas, da principal até a atual.
+    func compositionTrail() -> [String] { engine.compositionTrail() }
+
+    /// Setas do transporte (referência): o começo, o último quadro, os
+    /// marcadores e, com camada escolhida, o início, o fim e os keyframes dela.
+    func stepTransportEdges(_ direction: Int) {
+        guard let target = engine.transportNavigation(primarySelection ?? 0, compositionFrame: status.playhead,
+                                                      direction: Int32(clamping: direction)) else { return }
+        let frame = target.int64Value
+        guard engine.seekTimelineEvent(frame) else { return }
+        pendingPlayhead = frame
+        pendingPlayheadUntil = ProcessInfo.processInfo.systemUptime + 2
+        status.playhead = frame
+        playheadClock.frame = frame
+        if primarySelection != nil { refreshSelectedLayer() }
+    }
+
+    /// Barra inferior da seleção múltipla: 0 cortes, 1 todas depois do cabeçote, 2 todas antes.
+    var multiTimeVariant: UInt32 {
+        guard !selection.isEmpty else { return 0 }
+        return engine.multiTimeActions(selection.map { NSNumber(value: $0) }, frame: status.playhead)
+    }
+
+    /// Estende o início (ou o fim) das escolhidas destravadas até o cabeçote, num passo de desfazer.
+    func extendSelectionToPlayhead(start: Bool) {
+        let targets = layers.filter { selection.contains($0.id) && !$0.locked }.map(\.id)
+        guard !targets.isEmpty else { return }
+        if status.playing != 0 { playPause() }
+        beginGesture(start ? "estender inicio" : "estender fim")
+        for id in targets { _ = engine.editClipTime(id, operation: start ? 8 : 9, amount: status.playhead, previous: 0, next: 0) }
+        endGesture()
+        refreshModel(force: true)
+    }
+
+    /// "Copiar camada (com estilo)": com UMA escolhida, o estilo dela também vai para colar estilo.
+    func copyLayersWithStyle() {
+        let ids = layers.filter { selection.contains($0.id) }.map { NSNumber(value: $0.id) }
+        guard !ids.isEmpty else { return }
+        if ids.count == 1 { engine.copyStyle(ids[0].int64Value) }
+        engine.copyLayers(ids)
+        toast = ids.count == 1 ? AureaText.t("msg_camada_copiada") : AureaText.t("msg_camadas_copiadas", String(ids.count))
+    }
+
+    /// As partes do estilo copiado (bits de `Engine::Style*`; 0 = nada).
+    var copiedStyleParts: UInt32 { engine.copiedStyleParts() }
+
+    /// Cola só as partes pedidas do estilo copiado (um passo de desfazer).
+    func pasteStyleParts(_ parts: UInt32) {
+        let ids = layers.filter { selection.contains($0.id) }.map { NSNumber(value: $0.id) }
+        guard !ids.isEmpty, parts != 0 else { return }
+        if status.playing != 0 { playPause() }
+        let n = engine.pasteStyleParts(ids, parts: parts)
+        refreshModel(force: true)
+        if n > 0 { toast = AureaText.t("msg_estilo_colado") }
+    }
+
+    /// Modos de visão da prévia: 0 normal, 1 só as escolhidas, 2 escolhidas a 50 %; pixels reais. Nunca no export.
+    func setPreviewView(mode: UInt32, pixel: Bool) {
+        let ids = mode != 0 ? selection.map { NSNumber(value: $0) } : []
+        engine.setPreviewView(mode, ids: ids, pixel: pixel)
+    }
 }

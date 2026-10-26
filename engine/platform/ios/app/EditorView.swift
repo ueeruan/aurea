@@ -21,9 +21,8 @@ import UIKit
 struct EditorView: View {
     @EnvironmentObject private var model: AureaModel
     @StateObject private var shell = ShellPresentation()
-    /// A altura do palco escolhida arrastando a divisa (0 = automática), guardada no aparelho.
-    @AppStorage("editor.previewHeight") private var previewPreference: Double = 0
-    @State private var dividerStart: CGFloat?
+    // Omega conteúdo (área 06): o navegador de fontes das Opções de texto e da UI Edição.
+    @ObservedObject private var fontBrowser = FontBrowserRequest.shared
     var body: some View {
         GeometryReader { geometry in
             let wide = !model.fullscreen && model.panel != .curve && EditorLayout.isWide(geometry.size.width, geometry.size.height)
@@ -31,9 +30,12 @@ struct EditorView: View {
             let aspect: CGFloat = model.compositionHeight > 0 ? CGFloat(model.compositionWidth) / CGFloat(model.compositionHeight) : 0
             // Fora da tela cheia o palco tem 8 pt de margem de cada lado.
             let sideMargin: CGFloat = model.fullscreen ? 0 : EditorLayout.previewSideMargin
-            let metrics = EditorLayout.solve(total: geometry.size.height, content: model.sheetContent, fullscreen: model.fullscreen,
-                                             width: max(0, geometry.size.width - sideMargin * 2), aspect: aspect, preferred: CGFloat(previewPreference),
-                                             dockRows: model.sheetContent == .dock ? DockView.tileRows(model) : 2,
+            // Omega fundação (F6): prévia fixa e zona inferior de 280; sem divisa no retrato (D2).
+            // Omega chrome (área 02, P0-4): com a seleção múltipla a timeline fica com a zona
+            // inteira e a barra inferior flutua por cima dela (sem o painel de lote).
+            let metrics = EditorLayout.solve(total: geometry.size.height, content: model.sheetContent == .batch ? .none : model.sheetContent, fullscreen: model.fullscreen,
+                                             width: max(0, geometry.size.width - sideMargin * 2), aspect: aspect,
+                                             dockRows: 2,  // Omega painel: (área 04) a zona da camada tem a altura do painel (200)
                                              fontScale: UIFont.preferredFont(forTextStyle: .body).pointSize / 17)
             Group {
                 if model.sceneEditor {
@@ -47,15 +49,18 @@ struct EditorView: View {
                         HStack(spacing: 0) {
                             VStack(spacing: 0) {
                                 PreviewStage(height: max(96, geometry.size.height - EditorLayout.topBar - EditorLayout.transport - EditorLayout.strip - EditorLayout.wideTimeline(geometry.size.height)
-                                                         - (model.sheetContent == .addBar ? StageDim.addBar : 0)))
+                                                         - (model.sheetContent == .addBar || model.sheetContent == .adding ? StageDim.addBar : 0)))
                                     .padding(.horizontal, sideMargin)
                                 if EditorLayout.strip > 0 { Rectangle().fill(AureaColors.editorCanvas).frame(height: EditorLayout.strip) }
                                 TransportView().frame(height: EditorLayout.transport)
                                 TimelineView(timecodeStyle: model.selection.count == 1 ? .box : .underline).frame(height: EditorLayout.wideTimeline(geometry.size.height))
                                 // A barra de adicionar na base da coluna do palco.
-                                if model.sheetContent == .addBar { ShellAddBar().frame(height: StageDim.addBar) }
+                                // Omega adicionar (área 08): também com o adicionar aberto.
+                                if model.sheetContent == .addBar || model.sheetContent == .adding { ShellAddBar().frame(height: StageDim.addBar) }
                             }.frame(maxWidth: .infinity)
-                            ContextSheet(metrics: metrics).frame(width: sideWidth, height: max(1, geometry.size.height - EditorLayout.topBar))
+                            // Omega conteúdo (área 06, P0-1): no modo de texto, o painel grande com a faixa de entrada.
+                            if model.textModeActive { TextEditPanel().frame(width: sideWidth, height: max(1, geometry.size.height - EditorLayout.topBar)) }
+                            else { ContextSheet(metrics: metrics).frame(width: sideWidth, height: max(1, geometry.size.height - EditorLayout.topBar)) }
                         }
                     }
                 } else {
@@ -63,59 +68,73 @@ struct EditorView: View {
                         if !model.fullscreen { TopBarView(height: metrics.topBar) }
                         PreviewStage(height: max(0, metrics.preview - (model.fullscreen ? StageDim.fullscreenTimeBar : 0)))
                             .padding(.horizontal, sideMargin)
+                            // Omega adicionar (área 08, P0-1): adicionar aberto, tocar no palco fecha.
+                            .overlay { if model.sheetContent == .adding { Color.clear.contentShape(Rectangle()).onTapGesture { model.showAddLayer = false } } }
                         if model.fullscreen {
                             FullscreenTimeBar()
                             TransportView().frame(height: metrics.transport)
+                        } else if model.textModeActive {
+                            // Omega conteúdo (área 06, P0-1): o MODO DE TEXTO — o painel grande (faixa de
+                            // entrada de 60) ocupa o transporte e a zona inferior; a prévia não muda.
+                            TextEditPanel().frame(height: metrics.transport + metrics.zone)
                         } else {
-                            // A divisa palco/transporte: arrastar na vertical no transporte
-                            // (fora dos botões) troca palco por timeline; toque duplo volta à
-                            // altura automática. A faixa de 8 saiu (strip 0) — o gesto ficou.
-                            VStack(spacing: 0) {
-                                if metrics.strip > 0 {
-                                    Rectangle().fill(AureaColors.editorCanvas).frame(height: metrics.strip)
-                                        .overlay(Capsule().fill(AureaColors.muted.opacity(0.55)).frame(width: 36, height: 3))
-                                }
-                                TransportView().frame(height: metrics.transport)
-                            }
-                            .contentShape(Rectangle())
-                            // `.contain` antes do identificador: sem ele o id da divisa
-                            // sobrescrevia o dos botões do transporte (ex.: `transport.duplicate`).
-                            .accessibilityElement(children: .contain)
-                            .accessibilityIdentifier("editor.previewDivider")
-                            .simultaneousGesture(DragGesture(minimumDistance: 8, coordinateSpace: .global)
-                                .onChanged { value in
-                                    if dividerStart == nil {
-                                        guard abs(value.translation.height) > abs(value.translation.width) else { return }
-                                        dividerStart = metrics.preview
+                            TransportView().frame(height: metrics.transport)
+                            // Omega fundação (F6): a zona inferior fixa (280). Sem camada, a
+                            // timeline (210) e a barra de adicionar (70) empilhadas; com camada,
+                            // a timeline ocupa a zona e o painel de 200 fica POR CIMA dela
+                            // (sobram 80: régua + uma linha). A prévia não muda de altura.
+                            ZStack(alignment: .bottom) {
+                                VStack(spacing: 0) {
+                                    if metrics.timeline > 0 { TimelineView(compactDock: true, timecodeStyle: model.selection.count == 1 ? .box : .underline).frame(height: metrics.timeline) }
+                                    if !metrics.overlay && metrics.sheet > 0 {
+                                        if model.sheetContent == .addBar || model.sheetContent == .adding { ShellAddBar().frame(height: metrics.sheet) }
+                                        else { ContextSheet(metrics: metrics).frame(height: metrics.sheet) }
                                     }
-                                    guard let start = dividerStart else { return }
-                                    previewPreference = Double((start + value.translation.height)
-                                        .clamped(to: EditorLayout.previewMin...EditorLayout.maxPreview(geometry.size.height)))
                                 }
-                                .onEnded { _ in dividerStart = nil })
-                            .simultaneousGesture(TapGesture(count: 2).onEnded { previewPreference = 0 })
-                        }
-                        if metrics.timeline > 0 { TimelineView(compactDock: true, timecodeStyle: model.selection.count == 1 ? .box : .underline).frame(height: metrics.timeline) }
-                        if metrics.sheet > 0 {
-                            if model.sheetContent == .addBar { ShellAddBar().frame(height: metrics.sheet) }
-                            else { ContextSheet(metrics: metrics).frame(height: metrics.sheet) }
+                                .frame(height: metrics.zone, alignment: .top)
+                                if model.sheetContent == .adding {
+                                    // Omega adicionar (área 08, P0-1): o conteúdo do botão aberto (193)
+                                    // por cima da timeline, encostado na barra de adicionar, que fica.
+                                    AddPanelView().frame(height: EditorLayout.addContent(metrics))
+                                        .contentShape(Rectangle()).padding(.bottom, metrics.sheet)
+                                }
+                                if metrics.overlay && metrics.sheet > 0 {
+                                    // O painel por cima segura o toque: nada passa para a timeline embaixo.
+                                    ContextSheet(metrics: metrics).frame(height: metrics.sheet).contentShape(Rectangle())
+                                }
+                                // Omega chrome (área 02, P0-4): a barra inferior flutuante da seleção múltipla.
+                                if model.sheetContent == .batch && !RealCameraState.shared.painting(model) { MultiSelectBottomBar().keepLtr() }
+                            }
+                            .frame(height: metrics.zone)
                         }
                     }
                 }
             }
+            // Omega conteúdo (área 06, P0-3): os popups da barra de estilo do modo de texto.
+            .overlay(alignment: .top) {
+                if !model.sceneEditor && model.uiMode != AureaUiMode.edit && !model.fullscreen {
+                    TextStylePopupLayer(top: wide ? EditorLayout.topBar : metrics.topBar)
+                }
+            }
             .background(AureaColors.editorCanvas.ignoresSafeArea())
         }
+        // Omega conteúdo (área 06, P0-1): no modo de texto o teclado não encolhe o editor
+        // (a prévia fica); a faixa de entrada sobe sozinha (TextEditPanel).
+        .ignoresSafeArea(model.textModeActive ? .keyboard : [], edges: .bottom)
         .fullScreenCover(isPresented: $model.showExport) { ExportView() }
         .fullScreenCover(item: $model.effectSearch) { request in
             // A tela "Adicionar efeito" (ou só a busca): EffectsBrowser.swift.
             EffectAddSheet(request: request, close: { model.effectSearch = nil })
                 .environmentObject(model)
         }
-        .overlay {
-            if let request = model.textContentRequest {
-                TextContentEditor(request: request).environmentObject(model).id(request.presentationID)
-            }
-        }
+        // Omega conteúdo (área 06, P2-15): o navegador de fontes pedido pelas Opções de texto e pela UI Edição.
+        .background(Color.clear.fullScreenCover(isPresented: $fontBrowser.open) {
+            FontBrowserView(onPick: { f in
+                model.applyFontAnywhere(f)
+                FontPrefs.shared.recordUse(f)
+                fontBrowser.open = false
+            }, onDismiss: { fontBrowser.open = false }).environmentObject(model)
+        })
         .sheet(item: $model.markerEditingFrame) { marker in
             MarkerEditorSheet(frame: marker.frame, color: marker.color, label: marker.label, isNew: marker.isNew)
                 .environmentObject(model)
@@ -129,7 +148,14 @@ struct EditorView: View {
                 }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_voltar_editor")).padding(10)
             }
         }
-        .overlay { if model.showAddLayer && !model.sceneEditor { ShellAddCategoryDialog() } }
+        // Omega adicionar (área 08, P0-1): o adicionar é embutido acima da barra; só a
+        // interface de Edição (sem a barra) segue com a janela.
+        .overlay { if model.showAddLayer && !model.sceneEditor && model.uiMode == AureaUiMode.edit { ShellAddCategoryDialog() } }
+        // Omega adicionar (área 08, P1-1/P1-3/P0-6): os "Ver tudo" em tela cheia (um por fundo:
+        // várias apresentações no mesmo nó o SwiftUI ignora).
+        .background(Color.clear.fullScreenCover(isPresented: $model.omegaMediaBrowser) { MediaBrowserView().environmentObject(model) })
+        .background(Color.clear.fullScreenCover(isPresented: $model.omegaAudioBrowser) { AudioBrowserView().environmentObject(model) })
+        .background(Color.clear.fullScreenCover(isPresented: $model.omegaPresetsBrowser) { PresetsBrowserView().environmentObject(model) })
         // Gravar voz: o painel por cima da timeline, com o palco à vista (VoiceRecorder.swift).
         .overlay { if shell.voiceRecorder { VoiceRecorderOverlay() } }
         .overlay { ShellOverlayHost() }
@@ -312,6 +338,10 @@ private struct ModelOptimizePrompt: ViewModifier {
             PreviewMetalView(compositionSize: compositionSize, interactive: !model.fullscreen && !model.rawPlayback)
                 .overlay { if !model.fullscreen && !model.rawPlayback { StageOverlay().allowsHitTesting(false) } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { StageInteractionOverlay().allowsHitTesting(false) } }
+                // Omega efeitos (área 07, P1-2): parâmetro de efeito ATIVO — arrasto relativo em
+                // qualquer lugar do preview e o guia "deslize para ajustar" (SaberStage.swift).
+                // Fica abaixo das alças das ferramentas (rig, malha, fantoche, sabre, ponto, roto).
+                .overlay { if !model.fullscreen && !model.rawPlayback { EffectParamDragOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RigStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { MeshWarpStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { PuppetStageOverlay() } }
@@ -319,6 +349,8 @@ private struct ModelOptimizePrompt: ViewModifier {
                 // Ponto de efeito ativo (parâmetro tocado no cartão): a alça dele (SaberStage.swift).
                 .overlay { if !model.fullscreen && !model.rawPlayback { EffectPointStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RotoPaintStageOverlay() } }
+                // Omega conteúdo (área 06): desenho, Editar pontos e a alça de largura da caixa de texto.
+                .overlay { if !model.fullscreen && !model.rawPlayback { OmegaContentStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { RealCameraStageOverlay() } }
                 .overlay { if !model.fullscreen && !model.rawPlayback { Shape3DPartOverlay() } }
             if model.panel == .tracking && model.cameraTrackerVisible && !model.cameraFeatures.isEmpty && model.pointPick == nil { CameraTrackingOverlay() }
@@ -387,10 +419,13 @@ private struct ModelOptimizePrompt: ViewModifier {
                 .padding(.horizontal, 64).padding(.bottom, 8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
-            // Zoom da vista: "250 %" só com a prévia ampliada; tocar volta a 100 %.
-            StageZoomChip().padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-            // Lupa da prévia no canto sup-esq (redesenho 2026-09-29), nos dois estados.
-            if !model.rawPlayback { StageZoomCornerButton().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading) }
+            // Omega chrome (área 02, P1-2): o botão de modo zoom do canvas e o rótulo
+            // "NN%" no canto sup-esq (o chip "250 %" saiu: o 100 % mora no número da
+            // coluna de modos) e a coluna de modos presa à direita (P0-5).
+            if !model.rawPlayback && !model.fullscreen {
+                CanvasZoomMode().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                ViewModeColumn(width: ViewModeState.columnWidth(UIScreen.main.bounds.width))
+            }
         }.frame(height: height).clipped()
         // O palco não espelha em árabe: preview, gizmos, alças, rig e os
         // botões/selos dos cantos ficam onde estão no LTR (par do KeepLtr do stage).
@@ -510,6 +545,8 @@ private struct ShellStageBanner: View {
             context.stroke(Path(CGRect(x: origin.x, y: origin.y, width: CGFloat(model.compositionWidth) * fit,
                                        height: CGFloat(model.compositionHeight) * fit)),
                            with: .color(.white.opacity(0.16)), lineWidth: 1)
+            // Omega conteúdo (área 06): desenho e Editar pontos tomam o palco (OmegaContent.swift).
+            if DrawingStage.active(model) || EditPointsStage.active(model) { return }
             if model.sceneEditor {
                 let lines = model.engine.sceneGuides().map(\.floatValue)
                 for i in stride(from: 0, to: lines.count, by: 5) {
@@ -731,13 +768,22 @@ struct ContextSheet: View {
                 // Real Camera ligada: os controles saem da prévia e ficam aqui.
                 RealCameraPanelView()
             } else if model.showAddLayer {
-                AddLayerSheet()
+                // Omega adicionar (área 08, P0-1): no largo, o conteúdo do botão aberto na
+                // folha da direita (um painel só; antes duplicava com a janela).
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    AddPanelView().frame(height: EditorLayout.addContentHeight)
+                }
             } else if model.selection.count > 1 && model.panel != .aiVideo && model.panel != .captions {
                 BatchToolsView()
             } else {
+            // Omega painel: (área 04, P1-10) o painel de propriedade entra por cima do
+            // painel da camada (x +100 → 0 em 100 ms, fade de 25 ms); a curva não anima.
+            Group {
             switch model.panel {
             case .none, .dock:
-                DockView()
+                // Omega painel: (área 04) o painel da camada da referência (LayerPanelView.swift).
+                LayerPanelView()
             case .transform:
                 TransformView()
             case .text:
@@ -757,7 +803,8 @@ struct ContextSheet: View {
             case .audio:
                 AudioPanel()
             case .shape:
-                ShapePanel()
+                // Omega aparência (P0-3): Cor e preenchimento na moldura comum (ColorFillPanel.swift).
+                ColorFillPanel()
             case .shapeEdit:
                 ShapePanel(geometry: true)
             case .mask:
@@ -782,7 +829,19 @@ struct ContextSheet: View {
                 EditFiltersView()
             case .adjust:
                 EditAdjustView()
+            // Omega aparência (área 05).
+            case .borderShadow:
+                BorderShadowPanel()
+            case .camera:
+                CameraOptionsPanel()
+            // Omega conteúdo (área 06): o editor de desenho e o Editar pontos.
+            case .drawing:
+                DrawingPanelView()
+            case .editPoints:
+                EditPointsPanelView()
             }
+            }
+            .modifier(PanelEntrance(panel: model.panel))
             }
         }
         .background(AureaColors.editorPanel)
@@ -907,326 +966,8 @@ private struct BatchToolsView: View {
     private func pause() { if model.status.playing != 0 { model.playPause() } }
 }
 
-private struct DockView: View {
-    @EnvironmentObject private var model: AureaModel
-
-    fileprivate enum Section: String {
-        // Máscara, rastreio de câmera e legendas automáticas viraram EFEITOS
-        // (seletor de efeitos); os presets de vídeo/imagem saíram. Os presets de
-        // TEXTO voltaram (2026-10-03): ficha só no texto 2D/3D.
-        case enterGroup, mask, color, shape, vector, editText, text, text3DOptions, particles, audio, mute, speed, move, rig, blend, environment, presets, effects
-        var label: String {
-            switch self {
-            case .enterGroup: return "editor_entrar_grupo"
-            case .mask: return "panel_mascara_recorte"
-            case .color: return "sh_dock_color_fill"
-            case .shape: return "sh_dock_edit_shape"
-            case .vector: return "sh_dock_edit_vector"
-            case .editText: return "sh_dock_edit_text"
-            case .text, .text3DOptions: return "text_options"
-            case .particles: return "sh_dock_particles"
-            case .audio: return "sh_add_tab_audio"
-            case .mute: return "editor_mute_audio"
-            case .speed: return "editor_velocidade"
-            case .move: return "sh_dock_transform"
-            case .rig: return "fx_name_puppet"
-            case .blend: return "sh_dock_opacity_blend"
-            case .environment: return "sh_dock_environment"
-            case .presets: return "sh_dock_presets"
-            case .effects: return "sh_dock_effects"
-            }
-        }
-        /// Short visible action; accessibility continues to use the full label.
-        var shortLabel: String {
-            switch self {
-            case .mask: return "sh_dock_mask"
-            case .move: return "gizmo_tool_move"
-            case .blend: return "panel_misturar"
-            default: return label
-            }
-        }
-        var glyph: Character {
-            switch self {
-            case .enterGroup: return CupertinoGlyph.ArrowDownRightSquare
-            case .mask: return CupertinoGlyph.Crop
-            case .color: return CupertinoGlyph.Paintbrush
-            case .shape: return ShellGlyph.SliderHorizontalBelowRectangle
-            case .vector: return CupertinoGlyph.PencilOutline
-            case .editText: return CupertinoGlyph.Textformat
-            case .text, .text3DOptions: return ShellGlyph.SliderHorizontalBelowRectangle
-            case .particles, .effects: return CupertinoGlyph.Sparkles
-            case .audio: return CupertinoGlyph.Speaker2
-            case .mute: return CupertinoGlyph.SpeakerSlash
-            case .speed: return CupertinoGlyph.Speedometer
-            case .move: return CupertinoGlyph.Move
-            case .rig: return CupertinoGlyph.PersonCropCircle
-            case .blend: return CupertinoGlyph.CircleLefthalfFill
-            case .environment: return CupertinoGlyph.Lightbulb
-            case .presets: return CupertinoGlyph.WandStars
-            }
-        }
-        var panel: AureaModel.PanelKind {
-            switch self {
-            case .enterGroup: return .transform
-            case .mask: return .mask
-            case .color: return .shape
-            case .shape: return .shapeEdit
-            case .vector: return .vector
-            case .editText, .text: return .text
-            case .text3DOptions: return .layer3D
-            case .particles: return .particles
-            case .audio, .mute: return .audio
-            case .speed: return .speed
-            case .move, .rig: return .transform   // rig: não abre painel (RigStage.swift)
-            case .blend: return .appearance
-            case .environment: return .layer3D
-            case .presets: return .presets
-            case .effects: return .effects
-            }
-        }
-    }
-    private var hasAudio: Bool { ((model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0) & 4 != 0 }
-    private var muted: Bool { ((model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0) & 1 != 0 }
-    /// As fichas do TIPO, enxutas e na ordem de uso (par do `sectionsFor` do
-    /// Android): o que é próprio do tipo primeiro, depois Transformar, Efeitos e
-    /// Opacidade/mesclagem. Aparar e dividir moram na fileira rápida;
-    /// som e velocidade ficam visíveis na mídia; as operações raras ficam no ⋯.
-    private var sections: [Section] {
-        let tools = Self.sections(model).filter { $0 != .mute && $0 != .speed }
-        guard model.selectedLayer?.kind == 1 else { return tools }
-        let primary: [Section] = [.move, .effects, .blend, .audio]
-        return primary.filter { tools.contains($0) } + tools.filter { !primary.contains($0) }
-    }
-    fileprivate static func sections(_ model: AureaModel) -> [Section] {
-        guard let layer = model.selectedLayer else { return [] }
-        let hasAudio = ((model.detail["audioFlags"] as? NSNumber)?.uint32Value ?? 0) & 4 != 0
-        let media: [Section] = layer.kind == 3 ? [.mute, .speed]
-            : layer.kind == 1 ? (hasAudio ? [.mute, .speed] : [.speed]) : []
-        if layer.adjustment || layer.kind == 7 { return [.effects, .blend] }
-        if EditorTimelineRefresh.enabled && layer.kind == 12 { return [.enterGroup, .move, .mask, .effects, .blend] }
-        if EditorTimelineRefresh.enabled && ![3, 6, 8, 9, 10].contains(layer.kind) {
-            let edit: Section? = layer.kind == 5 ? (model.isVectorLayer ? .vector : .shape)
-                : layer.kind == 4 ? .editText : layer.kind == 11 ? .particles : nil
-            let content: [Section] = layer.kind == 4 ? [.editText, .text]
-                : layer.kind == 5 && !model.isVectorLayer ? [.shape, .color] : (edit.map { [$0] } ?? [])
-            return media + content + [.move, .mask, .effects, .blend] +
-                (layer.kind == 1 && hasAudio ? [.audio] : []) + (layer.kind == 4 ? [.presets] : [])
-        }
-        // Frequent actions stay before the horizontally scrollable extras.
-        let common: [Section] = [.move, .effects, .blend]
-        switch layer.kind {
-        case 5: return model.isVectorLayer ? [Section.vector] + common : [Section.shape] + common + [Section.color]
-        case 4: return [Section.editText, Section.text] + common + [Section.presets]
-        case 1: return media + common + (hasAudio ? [.audio] : [])
-        case 2: return common + [Section.rig]
-        case 12: return common
-        case 3: return media + [.audio, .effects]
-        case 10: return (model.engine.text3D(forLayer: layer.id) ?? [:]).isEmpty
-            ? [.move, .environment, .effects, .blend]
-            : [Section.editText, Section.text3DOptions] + common + [Section.presets]
-        case 8: return [.move, .environment]
-        case 11: return [Section.particles] + common
-        case 9: return layer.effectCount > 0 ? common : [.move]
-        case 6: return [.move]
-        default: return []
-        }
-    }
-    /// Três cortes contextuais e uma fileira rolável de ferramentas.
-    fileprivate static func tileRows(_ model: AureaModel) -> Int { 2 }
-
-    var body: some View {
-        if let layer = model.selectedLayer {
-            // Superfície compacta, com rolagem quando a área disponível é curta.
-            let fontScale = UIFont.preferredFont(forTextStyle: .body).pointSize / 17
-            let timeActions = model.engine.queryClipTimeActions(layer.id, frame: model.status.playhead)
-            ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    if layer.kind == 1 || layer.kind == 3 {
-                        dockSquare { quickAction(CupertinoGlyph.Speedometer, "editor_velocidade") { model.openPanel(.speed) } }
-                    }
-                    HStack(spacing: 0) {
-                        trimAction(.start, timeActions & 8 != 0 ? "editor_extend_start_to_playhead" : "editor_aparar_inicio_cabecote") {
-                            if timeActions & 8 != 0 { extendEdit(layer, start: true) }
-                            else { timeEdit(layer) { if !model.trimStart(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
-                        }
-                        dockDivider
-                        trimAction(.split, "editor_dividir_cabecote") { timeEdit(layer) { model.splitAtPlayhead([layer.id]) } }
-                        dockDivider
-                        trimAction(.end, timeActions & 16 != 0 ? "editor_extend_end_to_playhead" : "editor_aparar_fim_cabecote") {
-                            if timeActions & 16 != 0 { extendEdit(layer, start: false) }
-                            else { timeEdit(layer) { if !model.trimEnd(layer.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } } }
-                        }
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
-                    if layer.kind == 3 || hasAudio {
-                        dockSquare { quickAction(muted ? CupertinoGlyph.SpeakerSlash : CupertinoGlyph.Speaker2,
-                            muted ? "editor_unmute_audio" : "editor_mute_audio", tint: muted ? AureaColors.accent : AureaColors.text) {
-                            guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
-                            let next = !muted
-                            model.mutate { $0.setLayer(layer.id, audioMuted: next) }
-                            model.refreshModel(force: true)
-                        } }
-                    }
-                }.frame(height: EditorLayout.dockQuick)
-                HStack(spacing: 0) {
-                    layerTimeAction(CupertinoGlyph.ArrowLeftToLine, "panel_inicio", "panel_inicio", "timeline.layer.start") { model.seek(toFrame: Int64(layer.startFrame)) }
-                    layerTimeAction(CupertinoGlyph.ArrowRightToLine, "panel_fim", "panel_fim", "timeline.layer.end") { model.seek(toFrame: Int64(max(layer.startFrame, layer.endFrame - 1))) }
-                    layerTimeAction(CupertinoGlyph.ChevronRight, "timeline_starts_at_playhead", "timeline_starts_at_playhead", "timeline.layer.starts-at-playhead", enabled: !layer.locked) { model.arrangeLayerTimes(5) }
-                    layerTimeAction(CupertinoGlyph.ChevronLeft, "timeline_ends_at_playhead", "timeline_ends_at_playhead", "timeline.layer.ends-at-playhead", enabled: !layer.locked) { model.arrangeLayerTimes(6) }
-                }.frame(height: EditorLayout.dockQuick)
-                    .background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
-                GeometryReader { geometry in
-                    let gap: CGFloat = EditorTimelineRefresh.enabled ? 4 : 8
-                    let minimum = CGFloat(EditorTimelineRefresh.enabled ? 60 : 76) + 28 * (min(max(fontScale, 1), 2) - 1)
-                    let available = geometry.size.width - (EditorTimelineRefresh.enabled ? 49 + gap : 0)
-                    let fitted = (available - gap * CGFloat(max(0, sections.count - 1))) / CGFloat(max(1, sections.count))
-                    let toolWidth = min(max(fitted, minimum), 160)
-                    ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(spacing: gap) {
-                        if EditorTimelineRefresh.enabled {
-                            Button { model.clearSelection() } label: {
-                                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 20, color: AureaColors.text)
-                                    .frame(width: 48, height: EditorLayout.dockTileHeight(fontScale: fontScale))
-                            }.buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_limpar_selecao"))
-                                .accessibilityIdentifier("trial.layer.deselect")
-                            dockDivider
-                        }
-                        ForEach(sections, id: \.rawValue) { section in
-                            sectionTile(section, width: toolWidth, fontScale: fontScale)
-                        }
-                    }
-                    }
-                    .id(layer.id)
-                    .accessibilityIdentifier("dock.tools")
-                }
-                .frame(height: EditorLayout.dockTileHeight(fontScale: fontScale))
-            }
-            .padding(.horizontal, 8).padding(.top, 4).padding(.bottom, 8)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(EditorTimelineRefresh.enabled ? AureaColors.editorCanvas : StageInk.dockSheet, in: DockSheetShape(radius: 12))
-            .padding(.top, 4)
-        } else {
-            Text(AureaText.t("editor_toque_num_objeto_tela_editar"))
-                .font(.aurea(size: 12.5)).foregroundStyle(AureaColors.muted).lineLimit(1)
-                .frame(maxWidth: .infinity, maxHeight: .infinity).padding(.horizontal, 16)
-                .background(AureaColors.editorPanel)
-        }
-    }
-
-    private func sectionTile(_ section: Section, width: CGFloat, fontScale: CGFloat) -> some View {
-        let isMute = section == .mute
-        let title = isMute && muted ? "editor_unmute_audio" : section.label
-        return Button {
-            if isMute {
-                guard let layer = model.selectedLayer else { return }
-                guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
-                let next = !muted
-                model.mutate { $0.setLayer(layer.id, audioMuted: next) }
-                model.refreshModel(force: true)
-            }
-            else if section == .enterGroup, let layer = model.selectedLayer { model.openGroup(layer.id) }
-            else if section == .editText { model.openTextContentEditor() }
-            // O antigo Rig abre o Fantoche (pinos); o rig gravado continua desenhando.
-            else if section == .rig { model.openPuppetTool() }
-            else { model.openPanel(section.panel) }
-        } label: {
-            VStack(spacing: 4) {
-                if section == .move {
-                    MaterialGlyph("rounded.OpenWith", size: 20, color: StageInk.dockTileIcon)
-                } else {
-                    CupertinoGlyph.text(isMute && !muted ? CupertinoGlyph.Speaker2 : section.glyph,
-                        size: 20, color: isMute && muted ? AureaColors.accent : StageInk.dockTileIcon)
-                }
-                Text(AureaText.t(isMute ? title : section.shortLabel))
-                    .font(.aurea(size: 12 * min(max(fontScale, 1), 2)))
-                    .foregroundStyle(StageInk.dockTileContent).lineLimit(2).multilineTextAlignment(.center)
-            }
-            .padding(.horizontal, 6).padding(.vertical, 4).frame(width: width, height: EditorLayout.dockTileHeight(fontScale: fontScale))
-            .background(EditorTimelineRefresh.enabled ? AureaColors.editorCanvas : StageInk.dockSheet, in: RoundedRectangle(cornerRadius: 10))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
-        }.buttonStyle(.plain)
-            .accessibilityLabel(AureaText.t(title))
-            .accessibilityValue(isMute ? AureaText.t(muted ? "panel_mudo" : "editor_audio_enabled") : "")
-            .accessibilityIdentifier("dock.tool.\(section.rawValue)")
-    }
-
-
-    /// Quadrado da fileira rápida para uma ferramenta sozinha (velocidade, mudo, grupo).
-    private func dockSquare<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .frame(width: EditorLayout.dockQuick, height: EditorLayout.dockQuick)
-            .background(StageInk.dockRow, in: RoundedRectangle(cornerRadius: 10))
-    }
-    private var dockDivider: some View {
-        Rectangle().fill(AureaColors.border).frame(width: 1, height: 20)
-    }
-
-    private func layerTimeAction(_ glyph: Character, _ title: String, _ description: String, _ id: String,
-                                 enabled: Bool = true, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 0) {
-                CupertinoGlyph.text(glyph, size: 19, color: enabled ? AureaColors.text : StageInk.dockDisabled)
-                Text(AureaText.t(title)).font(.aurea(size: 10)).lineLimit(2).multilineTextAlignment(.center)
-                    .foregroundStyle(enabled ? AureaColors.text : StageInk.dockDisabled)
-            }.frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
-        }.buttonStyle(.plain).disabled(!enabled)
-            .accessibilityLabel(AureaText.t(description)).accessibilityIdentifier(id)
-    }
-
-    private func extendEdit(_ layer: LayerItem, start: Bool) {
-        guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
-        if model.status.playing != 0 { model.playPause() }
-        let changed = model.extendToPlayhead(layer.id, start: start)
-        if !changed { model.toast = AureaText.t("timeline_cut_failed") }
-    }
-    private func timeEdit(_ layer: LayerItem, action: () -> Void) {
-        guard !layer.locked else { model.toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar"); return }
-        guard model.status.playhead > Int64(layer.startFrame), model.status.playhead < Int64(layer.endFrame) else { model.toast = AureaText.t("sh_playhead_into_layer"); return }
-        if model.status.playing != 0 { model.playPause() }
-        action()
-    }
-    /// Os três colchetes da fileira de tempo (desenho próprio, no jeito do AM;
-    /// mesma geometria do `DockTrimTool` do Android).
-    private enum TrimGlyph { case start, split, end }
-    private func trimAction(_ kind: TrimGlyph, _ key: String, action: @escaping () -> Void) -> some View {
-        VStack(spacing: 0) {
-        Canvas { context, size in
-            let u = size.width / 24
-            let stroke = 1.8 * u
-            func bracket(_ outer: CGFloat, _ inner: CGFloat, dashed: Bool) {
-                var path = Path()
-                path.move(to: CGPoint(x: outer * u, y: 6 * u)); path.addLine(to: CGPoint(x: inner * u, y: 6 * u))
-                path.addLine(to: CGPoint(x: inner * u, y: 18 * u)); path.addLine(to: CGPoint(x: outer * u, y: 18 * u))
-                context.stroke(path, with: .color(AureaColors.text),
-                               style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round, dash: dashed ? [2.2 * u, 2.0 * u] : []))
-            }
-            bracket(3, 9, dashed: kind == .start)
-            bracket(21, 15, dashed: kind == .end)
-            var mid = Path()
-            mid.move(to: CGPoint(x: 12 * u, y: 3.5 * u)); mid.addLine(to: CGPoint(x: 12 * u, y: 20.5 * u))
-            context.stroke(mid, with: .color(AureaColors.text), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
-        }
-        .frame(width: 22, height: 22)
-        Text(AureaText.t(kind == .start ? "timeline_cut_left" : kind == .end ? "timeline_cut_right" : "dock_short_split"))
-            .font(.aurea(size: 10)).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
-        .onTapGesture(perform: action)
-        .accessibilityIdentifier(kind == .start ? "timeline.cut.start" : kind == .end ? "timeline.cut.end" : "timeline.cut.split")
-        .accessibilityElement().accessibilityLabel(AureaText.t(key)).accessibilityAddTraits(.isButton)
-    }
-    /// Só o ícone, como na fileira de tempo do editor antigo; a descrição
-    /// completa fica no leitor de tela.
-    private func quickAction(_ glyph: Character, _ key: String, size: CGFloat = 19, tint: Color = AureaColors.text,
-                             hold: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
-        CupertinoGlyph.text(glyph, size: size, color: tint)
-            .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
-            .onTapGesture(perform: action).onLongPressGesture(minimumDuration: 0.45) { hold?() }
-            .accessibilityLabel(AureaText.t(key)).accessibilityAddTraits(.isButton)
-    }
-}
+// Omega painel: (área 04) a doca de fichas (`DockView`) saiu; o painel da camada
+// mora em LayerPanelView.swift.
 
 // TextPanel.kt: live content, selection spans, and the in-panel font browser.
 private struct TextPanelView: View {
@@ -1258,7 +999,8 @@ private struct TextPanelView: View {
                                 alignment: (model.engine.text(forLayer: layerId)?["alignment"] as? NSNumber)?.intValue ?? 0) { _ in }
                         }.frame(minHeight: 56).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
                         if selection.length > 0 { spanTools.padding(.top, 6) }
-                        Button { dismissEditing(); fonts = model.engine.availableFonts(); showingFonts = true } label: {
+                        // Omega conteúdo (área 06, P0-2): o navegador de fontes em tela cheia.
+                        Button { dismissEditing(); FontBrowserRequest.shared.open = true } label: {
                             HStack(spacing: 0) {
                                 Text(AureaText.t("panel_fonte")).font(.aurea(size: 13)).foregroundStyle(AureaColors.text)
                                 Spacer()
@@ -1520,59 +1262,8 @@ private enum NativeFontPreview {
     }
 }
 
-private struct TextContentEditor: View {
-    @EnvironmentObject private var model: AureaModel
-    let request: AureaModel.TextContentRequest
-    @State private var content: String
-    @State private var selection: NSRange
-    @State private var editing = false
-    @State private var failed = false
-    @State private var inputHeight: CGFloat = 96
-    init(request: AureaModel.TextContentRequest) {
-        self.request = request
-        _content = State(initialValue: request.content)
-        let length = (request.content as NSString).length
-        _selection = State(initialValue: NSRange(location: request.selectAll ? 0 : length, length: request.selectAll ? length : 0))
-    }
-    private var valid: Bool { !request.is3D || !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    var body: some View {
-        AureaBottomOverlay(modal: true, onDismiss: dismiss, fixedFooter: AnyView(actions),
-                           accessibilityID: "text.content.sheet") {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(AureaText.t("sh_dock_edit_text")).font(.aurea(size: 18, weight: .semibold))
-                NativeTextInput(text: $content, selection: $selection, editing: $editing,
-                                autoFocus: true, selectAllOnFocus: request.selectAll, scrollable: true, alignment: request.alignment,
-                                onContentHeight: { inputHeight = AureaSheetLayout.textInputHeight(content: $0) }) { _ in failed = false }
-                    .frame(height: inputHeight)
-                    .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
-                    .accessibilityIdentifier("text.content.input")
-                if !valid { Text(AureaText.t("text_content_3d_required")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
-                if failed { Text(AureaText.t("text_content_save_failed")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted) }
-            }
-            .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 8)
-            .foregroundStyle(AureaColors.text).tint(AureaColors.accent)
-        }
-    }
-    private var actions: some View {
-        HStack(spacing: 12) {
-            Button(action: dismiss) {
-                Text(AureaText.t("common_cancel"))
-                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityIdentifier("text.content.cancel")
-            Button {
-                failed = !model.commitTextContent(request, content: content)
-            } label: {
-                Text(AureaText.t("editor_concluir"))
-                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-            }.buttonStyle(.plain).disabled(!valid).accessibilityIdentifier("text.content.done")
-        }.font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.accent)
-            .padding(.horizontal, 18).padding(.top, 4).padding(.bottom, 12)
-    }
-    private func dismiss() {
-        guard model.textContentRequest?.presentationID == request.presentationID else { return }
-        model.textContentRequest = nil
-    }
-}
+// Omega conteúdo (área 06, P0-1): o diálogo "Editar texto" (TextContentEditor) saiu;
+// o MODO DE TEXTO mora em TextEditModeView.swift.
 
 private final class FocusedContentTextView: UITextView {
     var wantsInitialFocus = false
@@ -2301,6 +1992,20 @@ enum ShellAddCategories {
     static let textPresets = 8
     /// Ordem na barra: a do Android, com os presets de texto logo depois do Texto.
     static let order = [0, 1, 2, 3, textPresets, 4, 5, 6, 7]
+    /// Omega adicionar (área 08, P0-12): o nome do `AddTab` do Android para o índice (ids iguais).
+    static func name(_ index: Int) -> String {
+        switch index {
+        case 0: return "Shape"
+        case 1: return "Media"
+        case 2: return "Audio"
+        case 3: return "Text"
+        case textPresets: return "TextPresets"
+        case 4: return "Element"
+        case 5: return "Model3D"
+        case 6: return "Draw"
+        default: return "Vector"
+        }
+    }
     static let all: [(String, Character)] = [
         ("sh_add_tab_shape", ShellGlyph.SquareOnCircle), ("sh_add_tab_media", CupertinoGlyph.PhotoOnRectangle),
         ("sh_add_tab_audio", CupertinoGlyph.MusicNote2), ("sh_add_tab_text", CupertinoGlyph.Textformat),
@@ -2322,7 +2027,8 @@ enum ShellAddCategories {
     var body: some View {
         GeometryReader { geometry in
             let count = CGFloat(ShellAddCategories.all.count)
-            let fits = geometry.size.width / count >= StageDim.addBarItem
+            // Omega adicionar (área 08, P0-12): o mesmo limiar do Android, (largura − 8)/9 ≥ 56.
+            let fits = (geometry.size.width - 8) / count >= 56
             let slot = fits ? geometry.size.width / count : StageDim.addBarItem
             let side = min(StageDim.addBarItem, geometry.size.height)
             ScrollView(.horizontal, showsIndicators: false) {
@@ -2352,7 +2058,9 @@ enum ShellAddCategories {
             .contentShape(Rectangle())
         }.buttonStyle(.plain)
             .accessibilityLabel(AureaText.t(ShellAddCategories.all[index].0))
-            .accessibilityIdentifier("aurea.add.category.\(index)")
+            .accessibilityAddTraits(on ? .isSelected : [])
+            // Omega adicionar (área 08, P0-12): o mesmo id do Android (`addBar.<AddTab>`).
+            .accessibilityIdentifier("addBar.\(ShellAddCategories.name(index))")
     }
     private func open(_ index: Int) {
         // Texto tem uma peça só (legendas viraram efeito): o toque já cria o texto.
@@ -2360,6 +2068,18 @@ enum ShellAddCategories {
             model.openAddLayer()   // pausa e fecha o painel aberto, como as outras categorias
             model.showAddLayer = false
             model.addText()
+            return
+        }
+        // Omega adicionar (área 08, P0-7): Desenho age na hora (o desenho livre).
+        if index == 6 {
+            model.openAddLayer()
+            model.showAddLayer = false
+            model.addVector(0, freehand: true)
+            return
+        }
+        // Omega adicionar (P0-1): tocar no botão aceso fecha o painel.
+        if model.showAddLayer && shell.addCategory == index {
+            model.showAddLayer = false
             return
         }
         shell.addCategory = index

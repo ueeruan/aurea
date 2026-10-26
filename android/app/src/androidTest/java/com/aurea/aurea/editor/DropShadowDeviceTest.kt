@@ -137,7 +137,8 @@ class DropShadowDeviceTest {
             if (compose.onAllNodesWithTag("effects.toggle.$shadow.5").fetchSemanticsNodes().isEmpty()) {
                 compose.onNodeWithTag(header).performClick()
             }
-            stack.performScrollToNode(hasTestTag("effects.toggle.$shadow.5"))
+            // Omega (área 07): os controles abrem SOBRE a lista; o corpo rola por dentro.
+            compose.onNodeWithTag("effects.settings.body").performScrollToNode(hasTestTag("effects.toggle.$shadow.5"))
             toggle.performScrollTo().assertContentDescriptionEquals(context.getString(R.string.fxo_shadow_only)).assertIsOff()
             diagnostic("before-toggle")
             toggle.performClick()

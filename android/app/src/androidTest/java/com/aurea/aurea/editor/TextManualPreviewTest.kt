@@ -46,7 +46,9 @@ class TextManualPreviewTest {
         }
         compose.waitUntil(5000) { store.effects.size == 1 }
         val effect = store.effects.single().effectId
-        compose.onNodeWithTag("dock.tool.Effects").performScrollTo().performClick()
+        compose.onNodeWithTag("layer.panel.effects").performClick()
+        // Omega (área 07): a lista nasce fechada; a linha abre os controles.
+        compose.onNodeWithTag("effects.expand.${com.aurea.aurea.effects.effectCardId(effectTypeId("aurea.text.transform"))}").performClick()
         compose.waitUntil(5000) { store.paramOf(effect, 9) != null }
 
         fun image(name: String): DoubleArray {
@@ -64,7 +66,8 @@ class TextManualPreviewTest {
             bitmap.recycle()
             return doubleArrayOf(mass, if(mass>0) moment/mass else 0.0)
         }
-        val row=compose.onNodeWithTag("effects.param.$effect.5.0")
+        // Deslocamento (5) é um ponto: régua do eixo escolhido (X), dedo para a direita diminui.
+        val row=compose.onNodeWithTag("effects.vector.$effect.5.ruler")
         row.performScrollTo()
         val before=image("before")
         assertTrue("visible red text", before[0]>1000)
@@ -76,6 +79,14 @@ class TextManualPreviewTest {
         val moved=image("offset")
         assertTrue("dragging offset updates the actual preview",abs(moved[1]-before[1])>8)
 
+        // Variação de opacidade (9): faixa −100..100 vira SLIDER no motor (valor
+        // absoluto na posição do dedo): arrastar até a ponta esquerda.
+        if (store.paramOf(effect,9)!!.control == com.aurea.aurea.engine.ParamControl.SLIDER) {
+            compose.onNodeWithTag("effects.slider.$effect.9").performScrollTo().performTouchInput {
+                down(center); moveTo(Offset(width*.02f,center.y),250); up()
+            }
+            compose.waitUntil(5000) { store.paramOf(effect,9)!!.value[0] <= -70f }
+        }
         repeat(12) {
             if (store.paramOf(effect,9)!!.value[0] > -70f) {
                 val previous=store.paramOf(effect,9)!!.value[0]

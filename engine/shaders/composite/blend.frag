@@ -35,6 +35,15 @@
 //  Darken, Lighten, Difference, Subtract) usam o valor linear inteiro.
 //  Luminância dos não separáveis: Rec.709 linear (o espaço de trabalho), não
 //  os pesos 0.3/0.59/0.11 do W3C (que são para sRGB com gama).
+//
+//  Omega aparência (P1-5), os cinco modos que entraram em 2026-10-26:
+//    24 Cor mais escura  B(b,s) = lum(s) < lum(b) ? s : b   (cor inteira; HDR ok)
+//    25 Cor mais clara   B(b,s) = lum(s) > lum(b) ? s : b
+//    26 Luz linear       B = clamp(b + 2s − 1, 0, 1)
+//    27 Luz pontual      B = s ≤ ½ ? min(b, 2s) : max(b, 2s − 1)
+//    28 Sobreposição suave (definição do AUREA; a da referência não foi
+//       comprovada): B = (1 − 2s)·b² + 2s·b — a "luz suave" contínua (Pegtop):
+//       s = 0 → b², s = ½ → b, s = 1 → b·(2 − b), sem quebra em ½.
 // =============================================================================
 #include "../common/bindings.glsl"
 
@@ -57,7 +66,10 @@ const int kAdd = 1, kSubtract = 2, kMultiply = 3, kScreen = 4, kOverlay = 5, kDa
           // Os quatro do editor antigo (ver BlendMode em Types.hpp).
           kDivide = 18, kVividLight = 19, kLinearDodge = 20, kLinearBurn = 21,
           // Máscara do Alight Motion: recorte Porter-Duff do fundo pela camada.
-          kMask = 22, kExclude = 23, kAdjustMix = 100;
+          kMask = 22, kExclude = 23,
+          // Omega aparência (P1-5).
+          kDarkerColor = 24, kLighterColor = 25, kLinearLight = 26, kPinLight = 27, kSoftOverlay = 28,
+          kAdjustMix = 100;
 
 const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
 
@@ -144,6 +156,9 @@ vec3 blend(int mode, vec3 b, vec3 s) {
         case kDifference:  return abs(b - s);
         case kLinearDodge: return min(b + s, vec3(1.0));       // o Add preso em 1
         case kLinearBurn:  return max(b + s - 1.0, vec3(0.0)); // o inverso do Linear Dodge
+        // Omega aparência: escolhem a cor INTEIRA pela luminância (sem misturar canais).
+        case kDarkerColor:  return lum(s) < lum(b) ? s : b;
+        case kLighterColor: return lum(s) > lum(b) ? s : b;
         default: break;
     }
     b = clamp(b, 0.0, 1.0);
@@ -162,6 +177,10 @@ vec3 blend(int mode, vec3 b, vec3 s) {
         case kSaturation: return set_lum(set_sat(b, sat(s)), lum(b));
         case kColor:      return set_lum(s, lum(b));
         case kLuminosity: return set_lum(b, lum(s));
+        // Omega aparência (P1-5).
+        case kLinearLight: return clamp(b + 2.0 * s - 1.0, 0.0, 1.0);
+        case kPinLight:    return mix(max(b, 2.0 * s - 1.0), min(b, 2.0 * s), lessThanEqual(s, vec3(0.5)));
+        case kSoftOverlay: return (1.0 - 2.0 * s) * b * b + 2.0 * s * b;
         default:          return s;   // modo desconhecido: Normal
     }
 }

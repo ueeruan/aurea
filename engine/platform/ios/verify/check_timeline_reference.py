@@ -37,7 +37,8 @@ for refreshed in [true, false] {
     let m = TimelineMetrics()
     if refreshed {
         check(near(m.rowsTop, 42) && near(m.row, 28) && near(m.bar, 23), "reference row geometry")
-        check(near(m.barTop, 2.5) && near(m.headerColumn, 70) && near(m.barRadius, 1.5), "reference inset and header")
+        // Omega 0.3.2 (área 03): cabeçalho visível de 62 e cartão com cantos de 3.
+        check(near(m.barTop, 2.5) && near(m.headerColumn, 62) && near(m.barRadius, 3), "reference inset and header")
     }
     for compact in [true, false] {
         // Same coordinates as the reported screenshot: decorative cap starts

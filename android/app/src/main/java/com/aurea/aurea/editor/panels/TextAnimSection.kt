@@ -1,6 +1,7 @@
 package com.aurea.aurea.editor.panels
 
 import androidx.annotation.StringRes
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -119,7 +120,9 @@ internal fun TextAnimSection(env: PanelEnv, showAnimatorEffect: Boolean = true) 
     ) {
         TextPresets.forEachIndexed { i, name -> AnimChip(stringResource(name), false) { store.applyTextPreset(i) } }
     }
-    list.forEachIndexed { index, v -> AnimatorCard(env, index, v) }
+    // Omega conteúdo (área 06, P1-11): os animadores em LISTA (linha de 37 dp que
+    // abre os ajustes a partir dela em 200 ms) e "+ Adicionar animador" no fim.
+    AnimatorList(env, list)
     Spacer(Modifier.height(4.dp))
     if (showAnimatorEffect) TextButton(modifier = Modifier.testTag("text.animator.add"), onClick = {
             store.addEffectAndFocus(effectTypeId("aurea.text.animator")); env.onOpenPanel(EditorPanel.Effects)
@@ -129,19 +132,164 @@ internal fun TextAnimSection(env: PanelEnv, showAnimatorEffect: Boolean = true) 
     }) { Text(stringResource(R.string.text_transform_add)) }
 }
 
+/**
+ * Omega conteúdo (área 06, P1-11): a LISTA de animadores. Cada um é uma linha de
+ * 37 dp (▸, ícone, nome e o que ele mexe); tocar abre os ajustes a partir da
+ * linha (200 ms) com cabeçalho ▾ · ícone · nome · ⋯ (duplicar, subir, descer) ·
+ * 🗑. O último item é "+ Adicionar animador", que abre a lista dos tipos.
+ */
+@Composable
+private fun AnimatorList(env: PanelEnv, list: List<FloatArray>) {
+    val store = env.store
+    var open by remember(store.primary) { mutableStateOf(-1) }
+    var adding by remember { mutableStateOf(false) }
+    val listLabel = stringResource(R.string.om_anim_list_cd)
+    Column(Modifier.fillMaxWidth().testTag("anim.list").semantics { contentDescription = listLabel }) {
+        list.forEachIndexed { index, v ->
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.5.dp / 2)
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(AureaColors.FxListSurface)
+                    .animateContentSize(androidx.compose.animation.core.tween(200)),
+            ) {
+                if (open == index) {
+                    AnimatorHeader(env, index, v, list.size, onCollapse = { open = -1 }, onMoved = { open = it })
+                    AnimatorCard(env, index, v)
+                } else {
+                    AnimatorRow(index, v) { open = index }
+                }
+            }
+        }
+        Box {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(37.dp)
+                    .padding(vertical = 2.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(AureaColors.FxLowSurface)
+                    .testTag("anim.add")
+                    .tocavel(shrink = 1f) { adding = true }
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.Plus, 16.dp, AureaColors.Text)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.la_add), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            }
+            com.aurea.aurea.ui.ds.AnchoredMenu(
+                expanded = adding,
+                onDismiss = { adding = false },
+                width = 300.dp,
+                tag = "anim.add.menu",
+                entries = addAnimatorEntries(env) { open = it },
+            )
+        }
+    }
+}
+
+/** A linha fechada: ▸ (alfa 0,3), ícone do tipo, o nome e o que ele mexe. */
+@Composable
+private fun AnimatorRow(index: Int, v: FloatArray, onOpen: () -> Unit) {
+    val props = v[1].toInt()
+    val name = stringResource(R.string.edt_animation_n, index + 1)
+    val what = AnimProps.filter { props and it.bit != 0 }.map { stringResource(it.label) }.joinToString(", ")
+    val label = stringResource(R.string.om_anim_item_cd, index + 1, what)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(37.dp)
+            .testTag("anim.item.$index")
+            .semantics { contentDescription = label }
+            .tocavel(shrink = 1f, onClick = onOpen)
+            .padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.ArrowtriangleRightFill, 18.dp, AureaColors.Text.copy(alpha = 0.3f))
+        Spacer(Modifier.width(4.dp))
+        com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.Textformat, 18.dp,
+            if (v[0] > 0.5f) AureaColors.Text else AureaColors.Muted)
+        Spacer(Modifier.width(8.dp))
+        Text(name, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600)))
+        Spacer(Modifier.width(8.dp))
+        Text(what, modifier = Modifier.weight(1f), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)))
+    }
+}
+
+/** Cabeçalho do animador aberto: ▾ · ícone · nome · ⋯ · 🗑 (36 dp). */
+@Composable
+private fun AnimatorHeader(env: PanelEnv, index: Int, v: FloatArray, count: Int, onCollapse: () -> Unit, onMoved: (Int) -> Unit) {
+    val store = env.store
+    var more by remember { mutableStateOf(false) }
+    val collapse = stringResource(R.string.om_anim_collapse_cd)
+    val remove = stringResource(R.string.panel_remover)
+    Row(Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(36.dp).semantics { contentDescription = collapse }.tocavel(shrink = 1f, onClick = onCollapse), contentAlignment = Alignment.Center) {
+            com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.ArrowtriangleDownFill, 16.dp, AureaColors.Text)
+        }
+        com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.Textformat, 18.dp, AureaColors.Text)
+        Spacer(Modifier.width(8.dp))
+        Text(stringResource(R.string.edt_animation_n, index + 1), modifier = Modifier.weight(1f),
+            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
+        AureaToggle(checked = v[0] > 0.5f, onCheckedChange = { store.setTextAnimatorValues(index, mapOf(0 to if (it) 1f else 0f)) })
+        Box {
+            Box(Modifier.size(36.dp).testTag("anim.item.$index.more").semantics { contentDescription = "⋯" }.tocavel(shrink = 1f) { more = true },
+                contentAlignment = Alignment.Center) {
+                com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.Ellipsis, 18.dp, AureaColors.FxListIcon)
+            }
+            com.aurea.aurea.ui.ds.AnchoredMenu(
+                expanded = more, onDismiss = { more = false }, alignEnd = true, tag = "anim.item.$index.menu",
+                entries = listOf(
+                    com.aurea.aurea.ui.ds.MenuEntry.Item(stringResource(R.string.om_anim_duplicate), glyph = com.aurea.aurea.ui.theme.CupertinoGlyph.PlusSquareOnSquare,
+                        tag = "anim.item.$index.duplicate") { store.duplicateTextAnimator(index); onMoved(index + 1) },
+                    com.aurea.aurea.ui.ds.MenuEntry.Item(stringResource(R.string.panel_mover_cima), glyph = com.aurea.aurea.ui.theme.CupertinoGlyph.ArrowUp,
+                        enabled = index > 0) { store.moveTextAnimator(index, index - 1); onMoved(index - 1) },
+                    com.aurea.aurea.ui.ds.MenuEntry.Item(stringResource(R.string.panel_mover_baixo), glyph = com.aurea.aurea.ui.theme.CupertinoGlyph.ArrowDown,
+                        enabled = index < count - 1) { store.moveTextAnimator(index, index + 1); onMoved(index + 1) },
+                ),
+            )
+        }
+        Box(Modifier.size(36.dp).testTag("anim.item.$index.delete").semantics { contentDescription = remove }
+            .tocavel(shrink = 1f) { store.removeTextAnimator(index); onCollapse() }, contentAlignment = Alignment.Center) {
+            com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.Trash, 18.dp, AureaColors.FxListIcon)
+        }
+    }
+}
+
+/** Os tipos do "+ Adicionar animador": de texto (por propriedade), de camada e os efeitos de movimento. */
+@Composable
+private fun addAnimatorEntries(env: PanelEnv, onAdded: (Int) -> Unit): List<com.aurea.aurea.ui.ds.MenuEntry> {
+    val store = env.store
+    val entries = ArrayList<com.aurea.aurea.ui.ds.MenuEntry>()
+    entries += com.aurea.aurea.ui.ds.MenuEntry.Header(stringResource(R.string.text_animator_add))
+    AnimProps.forEach { p ->
+        entries += com.aurea.aurea.ui.ds.MenuEntry.Item(stringResource(p.label), glyph = com.aurea.aurea.ui.theme.CupertinoGlyph.Textformat) {
+            store.addTextAnimator(p.bit)
+            onAdded(store.textAnimators.size - 1)
+        }
+    }
+    entries += com.aurea.aurea.ui.ds.MenuEntry.Divider
+    entries += com.aurea.aurea.ui.ds.MenuEntry.Item(stringResource(R.string.la_animators), glyph = com.aurea.aurea.ui.theme.CupertinoGlyph.Move) { env.onOpenAnimators() }
+    listOf(
+        "aurea.motion.oscillate.cycles" to R.string.fx_name_oscillate, "aurea.motion.swing" to R.string.fx_name_swing,
+        "aurea.motion.wiggle" to R.string.fx_name_wiggle, "aurea.motion.twitch" to R.string.fx_name_twitch,
+    ).forEach { (id, label) ->
+        entries += com.aurea.aurea.ui.ds.MenuEntry.Item(stringResource(label), glyph = com.aurea.aurea.ui.theme.CupertinoGlyph.Sparkles) {
+            store.addEffectAndFocus(effectTypeId(id)); env.onOpenPanel(EditorPanel.Effects)
+        }
+    }
+    return entries
+}
+
+/** O corpo do animador aberto (os ajustes de sempre). */
 @Composable
 private fun AnimatorCard(env: PanelEnv, index: Int, v: FloatArray) {
     val store = env.store
     val props = v[1].toInt()
-    Spacer(Modifier.height(8.dp))
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip.copy(alpha = 0.45f)).padding(8.dp)) {
-        Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.edt_animation_n, index + 1), modifier = Modifier.weight(1f),
-                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
-            AnimChip(stringResource(R.string.panel_remover), false) { store.removeTextAnimator(index) }
-            Spacer(Modifier.width(8.dp))
-            AureaToggle(checked = v[0] > 0.5f, onCheckedChange = { store.setTextAnimatorValues(index, mapOf(0 to if (it) 1f else 0f)) })
-        }
+    Column(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
         ChipRow(stringResource(R.string.panel_anima_cada), listOf(stringResource(R.string.panel_letra), stringResource(R.string.panel_palavra), stringResource(R.string.panel_linha)), v[2].toInt()) { store.setTextAnimatorValues(index, mapOf(2 to it.toFloat())) }
         ChipRow(stringResource(R.string.panel_escolhe), listOf(stringResource(R.string.panel_ordem), stringResource(R.string.panel_sorteado), stringResource(R.string.ios_range_ae)), v[3].toInt()) { store.setTextAnimatorValues(index, mapOf(3 to it.toFloat())) }
         if (v[3].toInt() != 1) {

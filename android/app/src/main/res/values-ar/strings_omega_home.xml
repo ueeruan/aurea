@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega home (área 01): barra superior, dock, gaveta, aba Projetos, Presets, folha Novo projeto e Sobre. -->
+    <string name="om_home_account">الحساب</string>
+    <string name="om_home_action_export">تصدير</string>
+    <string name="om_home_empty_body">اضغط على %1$s لإنشاء مشروعك الأول.</string>
+    <string name="om_home_my_projects">مشاريعي</string>
+    <string name="om_home_sort_current">الترتيب: %1$s</string>
+    <string name="om_home_my_presets">إعداداتي المسبقة</string>
+    <string name="om_home_presets_empty">لم تحفظ أي إعداد مسبق بعد. في المحرر، احفظ واحدًا من لوحة الإعدادات المسبقة للطبقة.</string>
+    <string name="om_home_preset_builtin">مدمج في AUREA</string>
+    <string name="om_home_preset_menu">قائمة الإعداد المسبق</string>
+    <string name="om_home_preset_delete_q">هل تريد حذف الإعداد المسبق «%1$s»؟</string>
+    <string name="om_home_preset_name_taken">يوجد إعداد مسبق بهذا الاسم بالفعل.</string>
+    <string name="om_drawer_support">الدعم</string>
+    <string name="om_drawer_light_preview">معاينة خفيفة</string>
+    <string name="om_drawer_light_preview_note">يفتح المحرر بمعاينة 1/2: تحرير أكثر سلاسة، ويبقى التصدير بالجودة الكاملة.</string>
+    <string name="om_new_frame_size">حجم الإطار</string>
+    <string name="om_new_keep_ratio">الحفاظ على النسبة</string>
+    <string name="om_new_clear_name">مسح الاسم</string>
+    <string name="om_new_bg_light_grey">رمادي فاتح</string>
+    <string name="om_new_bg_green">أخضر</string>
+    <string name="om_new_bg_blue">أزرق</string>
+    <string name="om_new_over_limit">(فوق الحد)</string>
+    <string name="om_about_version">الإصدار</string>
+    <string name="om_about_build">البناء</string>
+    <string name="om_about_device">الجهاز</string>
+    <string name="om_about_chipset">المعالج</string>
+    <string name="om_about_system">النظام</string>
+    <string name="om_about_memory">الذاكرة</string>
+    <string name="om_about_storage">التخزين</string>
+    <string name="om_about_storage_value">%1$s متاحة من %2$s</string>
+    <string name="om_about_export_max">أقصى تصدير</string>
+    <string name="om_about_languages">اللغات</string>
+    <string name="om_about_copied">تم نسخ المعلومات</string>
+    <string name="om_about_copy_hint">اضغط على الجدول لنسخه (مفيد عند الإبلاغ عن مشكلة).</string>
+    <string name="om_about_cores">%1$d نوى</string>
+</resources>

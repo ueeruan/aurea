@@ -6538,6 +6538,10 @@ struct BlendRef {
                 const f32 eb = srgb_encode(b), es = srgb_encode(s);
                 return srgb_decode(std::clamp(eb + es - 2 * eb * es, 0.0f, 1.0f));
             }
+            // Omega aparência (P1-5): as fórmulas do cabeçalho do blend.frag.
+            case BlendMode::LinearLight: return std::clamp(b + 2 * s - 1, 0.0f, 1.0f);
+            case BlendMode::PinLight: return s <= 0.5f ? std::min(b, 2 * s) : std::max(b, 2 * s - 1);
+            case BlendMode::SoftOverlay: return (1 - 2 * s) * b * b + 2 * s * b;
             default: return s;
         }
     }
@@ -6548,6 +6552,9 @@ struct BlendRef {
             case BlendMode::Saturation: return set_lum(set_sat(c01(b), sat(c01(s))), lum(c01(b)));
             case BlendMode::Color: return set_lum(c01(s), lum(c01(b)));
             case BlendMode::Luminosity: return set_lum(c01(b), lum(c01(s)));
+            // Omega aparência: a cor inteira de menor/maior luminância (sem prender).
+            case BlendMode::DarkerColor: return lum(s) < lum(b) ? s : b;
+            case BlendMode::LighterColor: return lum(s) > lum(b) ? s : b;
             default: return Vec3{ch(m, b.x, s.x), ch(m, b.y, s.y), ch(m, b.z, s.z)};
         }
     }
@@ -6559,7 +6566,11 @@ const char* blend_name(BlendMode m) {
     static const char* const k[] = {"Normal", "Add", "Subtract", "Multiply", "Screen", "Overlay", "Darken", "Lighten",
                                     "ColorDodge", "ColorBurn", "HardLight", "SoftLight", "Difference", "Exclusion",
                                     "Hue", "Saturation", "Color", "Luminosity",
-                                    "Divide", "VividLight", "LinearDodge", "LinearBurn"};
+                                    "Divide", "VividLight", "LinearDodge", "LinearBurn",
+                                    // Omega aparência: Mask/Exclude (recorte, testados à parte) e os cinco novos.
+                                    "Mask", "Exclude", "DarkerColor", "LighterColor", "LinearLight", "PinLight",
+                                    "SoftOverlay"};
+    static_assert(std::size(k) == static_cast<usize>(kLastBlendMode) + 1, "um nome por BlendMode");
     return k[static_cast<u16>(m)];
 }
 
@@ -6579,8 +6590,11 @@ AUREA_TEST(Gpu, EveryBlendModeMatchesTheFormulaPixelForPixel) {
     for (const auto& pc : pairs) {
         const Vec3 cb = lin3(pc[0], pc[1], pc[2]);
         const Vec3 cs = lin3(pc[3], pc[4], pc[5]);
-        for (u16 mi = 0; mi <= static_cast<u16>(BlendMode::LinearBurn); ++mi) {
+        // Omega aparência: vai até o último modo; Máscara/Excluir recortam o
+        // fundo (não são uma fórmula de cor) e têm teste próprio (MaskBlendGpu.inl).
+        for (u16 mi = 0; mi <= static_cast<u16>(kLastBlendMode); ++mi) {
             const BlendMode m = static_cast<BlendMode>(mi);
+            if (m == BlendMode::Mask || m == BlendMode::Exclude) continue;
             Scene s(64, 64);
             s.solid(64, 64, Vec4{pc[0], pc[1], pc[2], 1}, 32, 32);
             // Camada de cima só no quadrado central (32×32): o canto mostra que
@@ -6612,7 +6626,53 @@ AUREA_TEST(Gpu, EveryBlendModeMatchesTheFormulaPixelForPixel) {
         }
     }
     std::printf("    %u modos x 2 pares, pior erro %.5f (%.2f/255) em %s ",
-                static_cast<u32>(BlendMode::LinearBurn) + 1u, worst, worst * 255.0f, blend_name(worstMode));
+                static_cast<u32>(kLastBlendMode) - 1u, worst, worst * 255.0f, blend_name(worstMode));
+}
+
+// Omega aparência (área 05): a inclinação chega ao quadro (P0-6) e o
+// preenchimento em degradê pinta do início ao fim (P1-4).
+AUREA_TEST(Gpu, OmegaSkewShearsTheRenderedLayer) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 64);
+    const LayerId sq = s.solid(20, 20, Vec4{1, 1, 1, 1}, 32, 32);   // pivô no centro
+    s.comp->layer(sq)->transform.skewX = 45.0f;   // "Inclinação X": cisalha na VERTICAL (LayerSkew.hpp)
+    const FloatImage img = s.render();
+    // Coluna da direita (x ≈ 41) desce 0,785 × 9 ≈ 7 px; a da esquerda (x ≈ 23) sobe.
+    AUREA_CHECK(img.v(41, 47).x > 0.9f);
+    AUREA_CHECK(img.v(41, 24).x < 0.1f);
+    AUREA_CHECK(img.v(23, 17).x > 0.9f);
+    AUREA_CHECK(img.v(23, 40).x < 0.1f);
+    // O centro (o pivô) não anda.
+    AUREA_CHECK(img.v(32, 32).x > 0.9f);
+}
+
+AUREA_TEST(Gpu, OmegaLinearGradientFillGoesFromStartToEnd) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 16);
+    const LayerId bar = s.solid(64, 16, Vec4{1, 1, 1, 1}, 32, 8);
+    ShapeData& sh = s.comp->layer(bar)->shape;
+    sh.fillKind = 1;   // degradê (o retângulo deixa o caminho do "clear")
+    sh.gradType = 0;   // linear
+    sh.gradColor0 = Vec4{1, 0, 0, 1};
+    sh.gradColor1 = Vec4{0, 0, 1, 1};
+    sh.gradStart = Vec2{0.0f, 0.5f};
+    sh.gradEnd = Vec2{1.0f, 0.5f};
+    const FloatImage img = s.render();
+    // Mistura na cor linear: t = (x + 0,5) / 64.
+    for (const u32 x : {2u, 32u, 61u}) {
+        const f32 t = (static_cast<f32>(x) + 0.5f) / 64.0f;
+        const Vec4 got = img.v(x, 8);
+        AUREA_CHECK_NEAR(got.x, 1.0f - t, 0.03f);
+        AUREA_CHECK_NEAR(got.z, t, 0.03f);
+        AUREA_CHECK_NEAR(got.y, 0.0f, 0.01f);
+    }
+    // Radial a partir do centro: o centro é a cor do início, o canto passa da ponta (cor do fim).
+    sh.gradType = 1;
+    sh.gradStart = Vec2{0.5f, 0.5f};
+    sh.gradEnd = Vec2{0.75f, 0.5f};
+    const FloatImage radial = s.render();
+    AUREA_CHECK(radial.v(32, 8).x > 0.85f);
+    AUREA_CHECK(radial.v(1, 1).z > 0.95f);
 }
 
 AUREA_TEST(Gpu, ExclusionOverAnImageGradientMatchesTheFormula) {

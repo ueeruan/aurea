@@ -2,22 +2,148 @@
 import SwiftUI
 import UIKit
 import PhotosUI
+import AVFoundation
+
+// =============================================================================
+// Omega chrome (área 02): glifos, papéis de cor e popups ancorados da moldura
+// =============================================================================
+
+/// Glifos do CupertinoIcons.ttf que a moldura usa (conferidos na fonte; os
+/// mesmos codepoints do `ShellGlyph` do Android).
+enum OmegaGlyph {
+    /// Sair para os projetos (seta saindo da caixa para a esquerda).
+    static let exitBox: Character = "\u{F90C}"
+    /// ⋮ (menu da camada).
+    static let ellipsisVertical: Character = "\u{F8DA}"
+    /// Lupa com + (modo zoom do canvas).
+    static let zoomIn: Character = "\u{F8AC}"
+    /// Painel lateral à direita (abre e fecha a coluna de modos).
+    static let sidebarRight: Character = "\u{F7D7}"
+    /// «« (o primeiro item da trilha de grupos).
+    static let chevronLeft2: Character = "\u{F5DA}"
+    /// Grade de quadradinhos (pixels reais).
+    static let pixelGrid: Character = "\u{F808}"
+    /// Destaque da camada escolhida: normal e só ela (cheio).
+    static let soloOff: Character = "\u{F7DF}"
+    static let soloOn: Character = "\u{F7E0}"
+    /// Levar uma ponta até o cabeçote (barra inferior da seleção).
+    static let arrowLeftSquare: Character = "\u{F505}"
+    static let arrowRightSquare: Character = "\u{F512}"
+}
+
+/// Os papéis da moldura da referência, todos pelos tokens da paleta (no Omega:
+/// A10 barra, A9 camada, S9 coluna, S10 trilha). Par do `OmegaChrome` do Android.
+enum OmegaChrome {
+    /// Barras do projeto e de reprodução (A10).
+    static var bar: Color { AureaColors.surface }
+    /// Barra da camada escolhida (A9).
+    static var layerBar: Color { AureaColors.surfaceHigh }
+    /// Coluna de modos, barra inferior da seleção e o girador da grade (S9).
+    static var column: Color { AureaColors.chipHigh }
+    /// O primeiro item da trilha de grupos (S10).
+    static var trailRoot: Color { AureaColors.editorRowPill }
+    /// Caixa do zoom na coluna (A10).
+    static var zoomChip: Color { AureaColors.surface }
+    /// Texto secundário (P5).
+    static var secondary: Color { AureaColors.muted }
+}
+
+/// Um popup preso a um retângulo da tela (espaço global), desenhado por cima de
+/// tudo pela camada do `AureaPopupPresenter` (a do menu ancorado da fundação):
+/// abaixo da âncora pela borda de início, ou à esquerda dela centrado na vertical.
+enum OmegaPopup {
+    enum Placement { case below, leftCentered }
+
+    @MainActor @discardableResult
+    static func present<Content: View>(anchor: CGRect, placement: Placement, owner: UUID = UUID(),
+                                       onDismiss: @escaping () -> Void, @ViewBuilder content: @escaping () -> Content) -> UUID {
+        let presenter = AureaPopupPresenter.shared
+        presenter.present(owner: owner, onDismiss: onDismiss) {
+            OmegaPopupOverlay(anchor: anchor, placement: placement,
+                              dismiss: { presenter.dismiss(owner: owner, notify: true) }) { content() }
+        }
+        return owner
+    }
+
+    /// Fecha sem avisar o dono (quem chama já sabe).
+    @MainActor static func dismiss(_ owner: UUID) { AureaPopupPresenter.shared.dismiss(owner: owner, notify: false) }
+}
+
+private struct OmegaPopupSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
+}
+
+/// A janela do popup: toque fora fecha; o conteúdo fica onde a regra manda.
+private struct OmegaPopupOverlay<Content: View>: View {
+    let anchor: CGRect
+    let placement: OmegaPopup.Placement
+    let dismiss: () -> Void
+    @ViewBuilder let content: () -> Content
+    @Environment(\.layoutDirection) private var direction
+    @State private var size: CGSize = .zero
+
+    var body: some View {
+        GeometryReader { geometry in
+            let origin = geometry.frame(in: .global).origin
+            let window = geometry.size
+            let a = anchor.offsetBy(dx: -origin.x, dy: -origin.y)
+            let margin = AnchoredMenuMetrics.screenMargin
+            let position: CGPoint = {
+                switch placement {
+                case .below:
+                    return CGPoint(
+                        x: AnchoredMenuPosition.x(anchorLeft: a.minX, anchorRight: a.maxX, windowWidth: window.width,
+                                                  popupWidth: size.width, rtl: direction == .rightToLeft, alignEnd: false, margin: margin),
+                        y: AnchoredMenuPosition.y(anchorTop: a.minY, anchorBottom: a.maxY, windowHeight: window.height,
+                                                  popupHeight: size.height, margin: margin, gap: AnchoredMenuMetrics.anchorGap))
+                case .leftCentered:
+                    let x = direction == .rightToLeft ? a.maxX + 6 : a.minX - 6 - size.width
+                    let y = a.midY - size.height / 2
+                    return CGPoint(x: min(max(x, margin), max(margin, window.width - size.width - margin)),
+                                   y: min(max(y, margin), max(margin, window.height - size.height - margin)))
+                }
+            }()
+            ZStack(alignment: .topLeading) {
+                Color.clear.contentShape(Rectangle()).onTapGesture(perform: dismiss).accessibilityHidden(true)
+                content()
+                    .environment(\.layoutDirection, direction)
+                    .fixedSize()
+                    .background(GeometryReader { panel in Color.clear.preference(key: OmegaPopupSizeKey.self, value: panel.size) })
+                    .accessibilityAction(.escape, dismiss)
+                    .offset(x: position.x, y: position.y)
+                    .opacity(size.height > 8 ? 1 : 0)
+            }
+            .environment(\.layoutDirection, .leftToRight)
+        }
+        .ignoresSafeArea()
+        .onPreferenceChange(OmegaPopupSizeKey.self) { size = $0 }
+    }
+}
 
 struct TopBarView: View {
     var height: CGFloat = EditorLayout.topBar
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
+    @ObservedObject private var requests = OmegaChromeRequests.shared
     private var layer: LayerItem? { model.selectedLayer }
     private var ids: [NSNumber] { model.selection.map { NSNumber(value: $0) } }
     private var count: Int { model.selection.count }
-    /// `›` da barra de seleção: a segunda fileira de ações.
-    @State private var batchMore = false
+    /// Omega chrome (área 02, P0-4): o `›` da barra de seleção troca a fileira pela de alinhamento na tela.
+    @State private var aligning = false
+    /// Omega chrome (área 02, P1-1): o ⋮ da camada é um menu ancorado; o seletor de "Substituir mídia" mora aqui.
+    @State private var layerMenu = false
+    @State private var replaceTarget: LayerRef?
+    /// A barra da camada entra descendo da borda de cima em 100 ms (a `action_bar_show` da referência).
+    @State private var layerEnter: CGFloat = 0
     private var parent: Int64 { (model.detail["parentId"] as? NSNumber)?.int64Value ?? 0 }
 
     var body: some View {
         Group {
             // Segurar uma camada liga a seleção: a barra das ações de grupo já com 1 (BatchTopBar.kt).
-            if count >= 2 || (count >= 1 && model.timelineLayerSelectMode) { batchBar }
+            // Omega conteúdo (área 06, P0-1): no modo de texto, a barra de estilo no lugar da barra.
+            if model.textModeActive { TextStyleBar() }
+            else if count >= 2 || (count >= 1 && model.timelineLayerSelectMode) { batchBar }
             // Seção da camada aberta (redesenho 2026-09-29): `‹` + título centrado (SectionTopBar.kt).
             else if layer != nil, let title = sectionTitle { sectionBar(title) }
             else if let layer { layerBar(layer) }
@@ -25,9 +151,31 @@ struct TopBarView: View {
         }
         .frame(height: height)
         .background(AureaColors.editorCanvas)
-        // Abertos pelo menu da engrenagem (ShellOverlayHost) ou pela lupa das barras.
+        .clipped()
+        // A busca de ferramentas (lupa dos Ajustes ou do Copiar e colar) e o teste de desempenho.
         .sheet(isPresented: $shell.performanceTest) { PerformanceTestPanel() }
         .sheet(isPresented: $shell.commandSearch) { CommandSearchView().environmentObject(model).environmentObject(shell) }
+        .sheet(item: $replaceTarget) { target in
+            ShellMediaPicker(selectionLimit: 1, filter: .any(of: [.images, .videos])) { items in
+                replaceTarget = nil
+                if let (url, video) = items.first { model.replaceMedia(layer: target.id, url: url, video: video) }
+            }
+        }
+        // Omega chrome: pedidos do painel de Ajustes, que mora na raiz do app (fora da casca).
+        .onChange(of: requests.commandSearch) { on in
+            guard on else { return }
+            requests.commandSearch = false; shell.commandSearch = true
+        }
+        .onChange(of: requests.performanceTest) { on in
+            guard on else { return }
+            requests.performanceTest = false; shell.performanceTest = true
+        }
+        .onChange(of: requests.aeImport) { on in
+            guard on else { return }
+            requests.aeImport = false
+            let shell = shell
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { shell.addPicker = .aeImport }
+        }
     }
 
     /// Título da seção aberta da camada (par do `panelSectionTitle` do Android);
@@ -56,28 +204,24 @@ struct TopBarView: View {
         case .aiVideo: return AureaText.t("panel_ai_video")
         case .filters: return AureaText.t("grade_title_filters")
         case .adjust: return AureaText.t("grade_title_adjust")
+        // Omega aparência (área 05).
+        case .borderShadow: return AureaText.t("om_ap_bs_title")
+        case .camera: return AureaText.t("om_ap_cam_title")
+        // Omega conteúdo (área 06).
+        case .drawing: return AureaText.t("om_draw_title")
+        case .editPoints: return AureaText.t("om_pts_title")
         }
     }
 
-    /// A BARRA DA SEÇÃO (Efeitos.dc.html, par do SectionTopBar.kt): só `‹` + o
-    /// título centrado (17 pt, negrito) no fundo #1E2636. O `‹` fecha a seção e
-    /// volta às ferramentas da camada (a doca), onde moram nome, vincular, lixeira e `⋯`.
+    /// A BARRA DA SEÇÃO (par do SectionTopBar.kt): a barra do painel de
+    /// propriedade da referência (`PanelBar`, Omega fundação F5) — `‹` + o
+    /// título À ESQUERDA; as áreas põem ações à direita (`trailing`). O `‹`
+    /// fecha a seção e volta às ferramentas da camada.
     private func sectionBar(_ title: String) -> some View {
-        ZStack {
-            Color(red: 0x1E / 255, green: 0x26 / 255, blue: 0x36 / 255)
-            Text(title)
-                .font(.aurea(size: 17, weight: .bold))
-                .foregroundStyle(AureaColors.text)
-                .lineLimit(1).truncationMode(.tail)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 56)
-            HStack(spacing: 0) {
-                ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("pn_back_to_layer_tools"), size: 24, width: 44, height: 44) { model.panel = .none }
-                Spacer(minLength: 0)
-            }.padding(.leading, 6)
+        PanelBar(title: title, onBack: { model.panel = .none }, tag: "editor.sectionBar") {
+            // Omega conteúdo (área 06, P0-6): o segmento do Editar pontos e as chaves do Editar forma.
+            ContentSectionTrailing(panel: model.panel)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("editor.sectionBar")
     }
 
     private func searchButton(tint: Color = AureaColors.text) -> some View {
@@ -88,178 +232,560 @@ struct TopBarView: View {
             .buttonStyle(.plain).accessibilityLabel(AureaText.t("edt_cmd_search_desc")).accessibilityIdentifier("commandSearchOpen")
     }
 
-    /// Barra do PROJETO (nada escolhido), redesenho 2026-09-29: ‹ · nome · ⚙ · exportar.
-    /// Selecionar camada, buscar, o menu ⋮, os ajustes e o teste de desempenho
-    /// moram no menu da engrenagem (seção "Projeto" e as de sempre abaixo).
+    /// Barra do PROJETO (referência `activity_edit_navbar`), fundo A10: sair · título ·
+    /// ⚙ · compartilhar. O ⚙ abre os Ajustes DIRETO (o menu da engrenagem saiu; o que
+    /// era dele mora em "Mais do AUREA" e no Copiar e colar). Dentro de grupo: a
+    /// trilha de grupos e o ⚙ do grupo (sair, título e compartilhar somem).
     private var projectBar: some View {
-        HStack(spacing: 6) {
-            if model.engine.precompDepth > 0 {
-                ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("editor_voltar_composicao_principal"), size: 24, width: 44, height: 44) { model.editorBack() }
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(AureaText.t("editor_editando_grupo")).font(.aurea(size: 11)).foregroundStyle(AureaColors.accent)
-                    Text(model.composition["name"] as? String ?? model.projectName).font(.aurea(size: 17, weight: .bold)).lineLimit(1).truncationMode(.tail)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("editor_projetos"), size: 24, width: 44, height: 44) { model.editorBack() }
-                ShellInlineName(name: model.projectName, placeholder: AureaText.t("edt_untitled"), limit: 320, size: 17, weight: .bold) { model.renameCurrentProject(to: $0) }
-            }
-            ShellBarButton(glyph: CupertinoGlyph.Gear, description: AureaText.t("editor_ajustes_projeto_mais"), size: 22, width: 44, height: 44) { open(.timelineMenu) }
-                .accessibilityIdentifier("editor.projectMenu")
-            Button { model.openExport() } label: {
-                CupertinoGlyph.text(CupertinoGlyph.SquareArrowUp, size: 22, color: AureaColors.onAccent)
-                    .frame(width: 46, height: 46)
-                    .background(AureaColors.accent, in: RoundedRectangle(cornerRadius: 8))
-                    .contentShape(Rectangle())
-            }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t("editor_exportar"))
-        }.padding(.leading, 6).padding(.trailing, 10)
-    }
-    private func layerBar(_ row: LayerItem) -> some View {
-        GeometryReader { geometry in
         HStack(spacing: 0) {
-            ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("editor_voltar_tirar_selecao"), width: 44) { model.editorBack() }
+            if model.engine.precompDepth > 0 {
+                groupTrail
+                ShellBarButton(glyph: CupertinoGlyph.Gear, description: AureaText.t("om_tb_group_settings"), width: 40, height: EditorLayout.topBar) { openSettings() }
+                    .accessibilityIdentifier("editor.topbar.groupSettings")
+            } else {
+                ShellBarButton(glyph: OmegaGlyph.exitBox, description: AureaText.t("om_tb_exit"), width: 40, height: EditorLayout.topBar) { model.editorBack() }
+                    .accessibilityIdentifier("editor.topbar.exit")
+                ShellInlineName(name: model.projectName, placeholder: AureaText.t("edt_untitled"), limit: 320) { model.renameCurrentProject(to: $0) }
+                    .accessibilityIdentifier("editor.topbar.title")
+                ShellBarButton(glyph: CupertinoGlyph.Gear, description: AureaText.t("editor_ajustes_projeto"), width: 40, height: EditorLayout.topBar) { openSettings() }
+                    .accessibilityIdentifier("editor.projectMenu")
+                ShellBarButton(glyph: CupertinoGlyph.SquareArrowUp, description: AureaText.t("om_tb_share"), width: 40, height: EditorLayout.topBar) { model.openExport() }
+                    .accessibilityIdentifier("editor.export")
+            }
+        }
+        .frame(maxHeight: .infinity)
+        .background(OmegaChrome.bar)
+    }
+
+    private func openSettings() {
+        if model.status.playing != 0 { model.playPause() }
+        model.showProjectSettings = true
+    }
+
+    /// A trilha de grupos: [projeto] › [grupo] › … › [atual]. O primeiro item tem o
+    /// «« e fundo S10; os do meio, pílula S9; o último, só o texto. Tocar no item i
+    /// sobe n−i−1 níveis. Rola até o fim.
+    private var groupTrail: some View {
+        let depth = Int(model.engine.precompDepth)
+        var names = model.compositionTrail()
+        if names.count != depth + 1 {
+            names = Array(repeating: "", count: depth + 1)
+            names[depth] = model.composition["name"] as? String ?? ""
+        }
+        names[0] = model.projectName
+        let total = names.count
+        return ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2.5) {
+                    ForEach(Array(names.enumerated()), id: \.offset) { index, raw in
+                        trailItem(index, raw, total: total).id(index)
+                    }
+                }
+                .padding(.leading, 6)
+                .frame(maxHeight: .infinity)
+            }
+            .onAppear { proxy.scrollTo(total - 1, anchor: .trailing) }
+            .onChange(of: total) { n in proxy.scrollTo(n - 1, anchor: .trailing) }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func trailItem(_ index: Int, _ raw: String, total: Int) -> some View {
+        let last = index == total - 1
+        let label = raw.isEmpty ? (index == 0 ? AureaText.t("edt_untitled") : "…") : raw
+        return HStack(spacing: 2.5) {
+            if index > 0 { CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 12, color: OmegaChrome.secondary).mirrorsInRtl() }
+            Button {
+                model.showAddLayer = false
+                for _ in 0..<(total - index - 1) { model.editorBack() }
+            } label: {
+                HStack(spacing: 3) {
+                    if index == 0 { CupertinoGlyph.text(OmegaGlyph.chevronLeft2, size: 13, color: AureaColors.text).mirrorsInRtl() }
+                    Text(label).font(.aurea(size: 14, weight: .medium)).foregroundStyle(AureaColors.text)
+                        .lineLimit(1).truncationMode(.tail).frame(maxWidth: 100)
+                }
+                .padding(.horizontal, 6).padding(.vertical, 3).frame(minHeight: 30)
+                .background(last ? Color.clear : index == 0 ? OmegaChrome.trailRoot : OmegaChrome.column, in: RoundedRectangle(cornerRadius: 5))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle(shrink: 1))
+            .disabled(last)
+            .accessibilityLabel(AureaText.t("om_tb_trail_item", label))
+            .accessibilityIdentifier("editor.trail.\(index)")
+        }
+    }
+
+    /// Barra da CAMADA (`fragment_element_actionbar`), fundo A9: ‹ · nome · vínculo ·
+    /// 🗑 · ⋮. O vínculo some em camada de áudio; a lixeira apaga sem perguntar (um
+    /// desfazer); o ⋮ abre o menu da camada ancorado nele. 3D e desfoque de
+    /// movimento passaram ao ⋮; duplicar, ao Copiar e colar; a lupa, aos Ajustes.
+    private func layerBar(_ row: LayerItem) -> some View {
+        HStack(spacing: 0) {
+            ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("editor_voltar_tirar_selecao"), size: 20, width: 40, height: EditorLayout.topBar) { model.editorBack() }
+                .accessibilityIdentifier("layer.back")
             ShellInlineName(name: row.name, placeholder: AureaText.t("ios_unnamed_layer"), enabled: !row.locked) { value in
                 model.mutate { $0.setLayer(row.id, name: value) }; model.refreshModel(force: true)
             }
             .id(row.id)
-            if EditorTimelineRefresh.enabled {
-                // Secondary controls can scroll; delete and the layer menu stay fixed.
-                ScrollView(.horizontal, showsIndicators: true) {
-                HStack(spacing: 0) {
-                if row.kind != 3 {
-                    let intrinsic = [8, 9, 10].contains(row.kind)
-                    let threeD = row.threeD || intrinsic
-                    let motion = ((model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0) & 2 != 0
-                    ShellBarButton(glyph: CupertinoGlyph.Cube, description: AureaText.t("sh_add_tab_3d"), width: 48,
-                                   tint: threeD ? AureaColors.accent : AureaColors.text) {
-                        _ = model.engine.setLayer3D(!threeD, forLayer: row.id); model.refreshModel(force: true)
-                    }.disabled(row.locked || intrinsic).accessibilityValue(AureaText.t(threeD ? "common_on" : "common_off"))
-                        .accessibilityIdentifier("trial.layer.3d")
-                    ShellBarButton(glyph: CupertinoGlyph.MotionBlur, description: AureaText.t("editor_desfoque_movimento"), width: 48,
-                                   tint: motion ? AureaColors.accent : AureaColors.text) {
-                        model.engine.setMotionBlur(!motion, forLayer: row.id); model.refreshModel(force: true)
-                    }.disabled(row.locked).accessibilityValue(AureaText.t(motion ? "common_on" : "common_off"))
-                        .accessibilityIdentifier("trial.layer.motionBlur")
-                }
-                searchButton()
-                linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44)
-                }.fixedSize(horizontal: true, vertical: false)
-                }.frame(width: max(48, min(184, geometry.size.width - 220)))
-            } else {
-            // Esconder/mostrar a caixa da seleção no preview (ela tampa o que está por baixo).
-            ShellBarButton(glyph: model.hideSelectionBox ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Square,
-                           description: AureaText.t(model.hideSelectionBox ? "editor_mostrar_caixa_selecao" : "editor_esconder_caixa_selecao"),
-                           size: 19, width: 44, tint: model.hideSelectionBox ? AureaColors.accent : AureaColors.text) { model.hideSelectionBox.toggle() }
-                .accessibilityIdentifier("stage.selectionBox")
-            searchButton()
-            linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 44)
+            .accessibilityIdentifier("layer.name")
+            if row.kind != 3 {
+                linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 40)
             }
-            ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada"), size: 19, width: 44) { duplicateSelection() }
-                .accessibilityIdentifier("layer.duplicate")
-            ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 48) { removeSelection() }
-                .disabled(row.locked).accessibilityIdentifier("layer.delete")
-            Button { open(.layerMenu) } label: { MaterialGlyph("filled.MoreHoriz", size: 22, color: AureaColors.text).frame(width: 44, height: 44) }
-                .buttonStyle(.plain).accessibilityLabel(AureaText.t("editor_mais_acoes_camada"))
-        }.padding(.trailing, 4).frame(height: geometry.size.height)
+            ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 40, height: EditorLayout.topBar,
+                           enabled: !row.locked) { removeSelection() }
+                .accessibilityIdentifier("layer.delete")
+            ShellBarButton(glyph: OmegaGlyph.ellipsisVertical, description: AureaText.t("editor_mais_acoes_camada"), size: 20, width: 40, height: EditorLayout.topBar) {
+                if model.status.playing != 0 { model.playPause() }
+                layerMenu = true
+            }
+            .accessibilityIdentifier("layer.menu")
+            .aureaAnchoredMenu(isPresented: $layerMenu, alignEnd: true, tag: "layer.menu.popup") { [rowId = row.id] in
+                // Lê a camada AGORA: uma alternância redesenha com o estado novo.
+                guard let fresh = model.layers.first(where: { $0.id == rowId }) else { return [] }
+                return layerMenuEntries(fresh)
+            }
+        }
+        .frame(maxHeight: .infinity)
+        .background(OmegaChrome.layerBar)
+        .offset(y: layerEnter)
+        .onAppear {
+            layerEnter = -EditorLayout.topBar
+            withAnimation(.easeOut(duration: 0.1)) { layerEnter = 0 }
         }
     }
-    /// Seleção de camadas (segurar uma camada): ✕ · "N camadas selecionadas" e, no
-    /// canto superior direito, as ações de grupo à vista — Agrupar · Agrupar e
-    /// mascarar · Agrupar e excluir · Apagar · ›. O `›` troca a fileira pelas
-    /// outras ações. Mascarar/excluir seguem a regra do motor (≥ 2 camadas
-    /// visuais destravadas); fora dela o botão fica apagado e o toque explica.
+
+    /// As linhas do ⋮ da camada: as mesmas da antiga folha, na mesma ordem (o
+    /// conteúdo é do painel da camada), mais "Camada 3D", que saiu da barra.
+    private func layerMenuEntries(_ row: LayerItem) -> [MenuEntry] {
+        let ids = [NSNumber(value: row.id)]
+        let index = model.layers.firstIndex(where: { $0.id == row.id }) ?? 0
+        let inside = model.status.playhead > Int64(row.startFrame) && model.status.playhead < Int64(row.endFrame)
+        let refresh: () -> Void = { model.refreshModel(force: true) }
+        var out: [MenuEntry] = [.header(AureaText.t("editor_camada"))]
+        if row.kind == 1 || row.kind == 3 {
+            out.append(.item(AureaText.t("editor_velocidade"), glyph: CupertinoGlyph.Speedometer) { model.openPanel(.speed) })
+        }
+        out.append(.item(AureaText.t(row.locked ? "editor_desbloquear_camada" : "editor_bloquear_camada"),
+                         glyph: row.locked ? ShellGlyph.LockOpenFill : CupertinoGlyph.LockFill,
+                         sublabel: AureaText.t(row.locked ? "editor_volta_aceitar_movimento_edicao" : "editor_nao_aceita_movimento_corte_nem_edicao"),
+                         keepOpen: true) { model.mutate { $0.setLayer(row.id, locked: !row.locked) }; refresh() })
+        out.append(.item(AureaText.t(row.visible ? "editor_ocultar_camada" : "editor_mostrar_camada"),
+                         glyph: row.visible ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Eye, keepOpen: true) {
+            model.mutate { $0.setLayer(row.id, visible: !row.visible) }; refresh()
+        })
+        // Omega timeline (área 03, D-1): as trilhas de keyframes da camada (antes pela pílula).
+        out.append(.item(AureaText.t(model.timelineExpandedLayers.contains(row.id) ? "om_tl_hide_tracks" : "om_tl_show_tracks"),
+                         glyph: CupertinoGlyph.Rhombus) { model.toggleTimelineTracks(row.id) })
+        out.append(.item(AureaText.t("editor_solo"), glyph: CupertinoGlyph.Speaker2, sublabel: AureaText.t("editor_alguma_camada_solo_previa_som_so"),
+                         checked: row.solo, keepOpen: true) { model.mutate { $0.setLayer(row.id, solo: !row.solo) }; refresh() })
+        // Omega chrome (área 02, P0-3): "Camada 3D" saiu da barra da camada e mora aqui.
+        if row.kind != 3 {
+            let intrinsic = [8, 9, 10].contains(row.kind)
+            let threeD = row.threeD || intrinsic
+            out.append(.item(AureaText.t("sh_add_tab_3d"), glyph: CupertinoGlyph.Cube, checked: threeD, enabled: !row.locked && !intrinsic,
+                             keepOpen: true, tag: "layer.menu.threeD") {
+                _ = model.engine.setLayer3D(!threeD, forLayer: row.id); refresh()
+            })
+        }
+        // Linha Magnética: só em trecho com FONTE (vídeo, imagem, áudio ou pré-composição).
+        if row.kind == 1 || row.kind == 2 || row.kind == 3 || row.kind == 12 {
+            out.append(.item(AureaText.t("editor_linha_magnetica"), glyph: CupertinoGlyph.Link, sublabel: AureaText.t("editor_linha_magnetica_detalhe"),
+                             checked: row.magnetic, keepOpen: true) { model.setLayerMagneticTrack(row.id, !row.magnetic) })
+        }
+        if row.kind != 3 {
+            out.append(.item(AureaText.t("editor_camada_ajuste"), glyph: CupertinoGlyph.SliderHorizontal3,
+                             sublabel: AureaText.t("editor_efeitos_desta_camada_valem_todas_baixo"), checked: row.adjustment, keepOpen: true) {
+                model.mutate { $0.setLayer(row.id, adjustment: !row.adjustment) }; refresh()
+            })
+            if row.adjustment {
+                // Camadas afetadas: todas abaixo → só a logo abaixo → só as escolhidas.
+                let scope = model.engine.adjustmentScope(row.id)
+                out.append(.item(AureaText.t("la_affected") + " · " + AureaText.t(scope == 1 ? "la_affected_below" : scope == 2 ? "la_affected_chosen" : "la_affected_all"),
+                                 glyph: CupertinoGlyph.SliderHorizontal3,
+                                 sublabel: AureaText.t(scope == 2 ? "la_affected_chosen_hint" : "la_affected_hint"), keepOpen: true) {
+                    model.engine.setAdjustmentScope((scope + 1) % 3, forLayer: row.id); refresh()
+                })
+                if scope == 2 {
+                    let below = Array(model.layers.dropFirst(index + 1)).filter { $0.kind != 3 }
+                    let chosen = Set(model.engine.adjustmentTargets(row.id).map(\.int64Value))
+                    if below.isEmpty { out.append(.item(AureaText.t("la_affected_none_below"), glyph: CupertinoGlyph.SliderHorizontal3, enabled: false)) }
+                    for b in below {
+                        out.append(.item(b.name, glyph: CupertinoGlyph.SliderHorizontal3, checked: chosen.contains(b.id), keepOpen: true) {
+                            model.engine.setAdjustmentTarget(b.id, on: !chosen.contains(b.id), forLayer: row.id); refresh()
+                        })
+                    }
+                }
+            }
+            out.append(.item(AureaText.t("editor_guia_nao_exporta"), glyph: CupertinoGlyph.Grid, sublabel: AureaText.t("editor_aparece_aqui_editor_fica_fora_video"),
+                             checked: row.guide, keepOpen: true) { model.mutate { $0.setLayer(row.id, guide: !row.guide) }; refresh() })
+        }
+        out.append(.item(AureaText.t("editor_duplicar"), glyph: CupertinoGlyph.PlusSquareOnSquare) { model.engine.duplicateLayers(ids); refresh() })
+        out.append(.item(AureaText.t("editor_puxar_cabecote"), glyph: CupertinoGlyph.ArrowDownToLine, enabled: !row.locked) {
+            if model.status.playing != 0 { model.playPause() }; model.moveToPlayhead(row.id)
+        })
+        out.append(.item(AureaText.t("editor_copiar_camada"), glyph: CupertinoGlyph.DocOnDoc) { model.engine.copyLayers(ids) })
+        out.append(.item(AureaText.t("editor_colar_camada_cabecote"), glyph: CupertinoGlyph.DocOnClipboard, enabled: model.engine.clipboardState & 1 != 0) {
+            model.engine.pasteLayers(model.status.playhead); refresh()
+        })
+        out.append(.item(AureaText.t("editor_copiar_estilo"), glyph: CupertinoGlyph.Paintbrush) { model.engine.copyStyle(row.id) })
+        out.append(.item(AureaText.t("editor_colar_estilo"), glyph: ShellGlyph.PaintbrushFill, enabled: model.engine.clipboardState & 2 != 0) {
+            model.engine.pasteStyle(ids); refresh()
+        })
+        out.append(.item(AureaText.t("editor_trazer_frente"), glyph: CupertinoGlyph.ArrowUpToLine, enabled: index > 0) {
+            model.reorderLayer(row.id, displayIndex: index - 1)
+        })
+        out.append(.item(AureaText.t("editor_enviar_tras"), glyph: CupertinoGlyph.ArrowDownToLine, enabled: index < model.layers.count - 1) {
+            model.reorderLayer(row.id, displayIndex: index + 1)
+        })
+        // Etiqueta: "sem" e as doze cores, numa fileira de ícones.
+        out.append(.header(AureaText.t("editor_etiqueta")))
+        var cells = [MenuIconCell(label: AureaText.t("editor_nenhum"), glyph: ShellGlyph.Nosign) {
+            model.mutate { $0.setLayer(row.id, label: 0) }; refresh()
+        }]
+        for (i, color) in AureaColors.labelPalette.enumerated() {
+            cells.append(MenuIconCell(label: AureaText.t("editor_etiqueta") + " \(i + 1)", swatch: color) {
+                model.mutate { $0.setLayer(row.id, label: UInt32(i + 1)) }; refresh()
+            })
+        }
+        out.append(.icons(cells, selectedIndex: Int(row.label), keepOpen: true, tag: "layer.menu.labels"))
+        if row.kind != 3 {
+            out.append(.header(AureaText.t("editor_grupo")))
+            if row.clipToBelow || row.clipCandidate {
+                out.append(.item(AureaText.t(row.clipToBelow ? "editor_liberar_mascara_recorte" : "editor_criar_mascara_recorte"),
+                                 glyph: CupertinoGlyph.ArrowDownRightSquare, sublabel: AureaText.t("editor_mascara_recorte_detalhe"), tag: "layer.clipMask") {
+                    model.setLayerClipToBelow(row.id, !row.clipToBelow)
+                })
+            }
+            if row.kind == 12 {
+                out.append(.item(AureaText.t("editor_entrar_grupo"), glyph: CupertinoGlyph.ArrowDownRightSquare) { model.openGroup(row.id) })
+                out.append(.item(AureaText.t("editor_desagrupar"), glyph: ShellGlyph.SquareSplit2x2) { model.ungroup(row.id) })
+                let through = model.engine.groupCameraPassThrough(row.id) == 1
+                out.append(.item(AureaText.t("la_group_camera"), glyph: CupertinoGlyph.Camera, sublabel: AureaText.t("la_group_camera_hint"),
+                                 checked: through, keepOpen: true) {
+                    if model.engine.setGroupCameraPassThrough(!through, forLayer: row.id) {
+                        model.toast = AureaText.t(through ? "app_group_camera_sealed" : "app_group_camera_reaches")
+                    }
+                    refresh()
+                })
+            } else {
+                out.append(.item(AureaText.t("editor_converter_grupo"), glyph: CupertinoGlyph.RectangleStack) { model.groupSelection() })
+            }
+            let acceptsLights = model.engine.layerAcceptsLights(row.id)
+            if acceptsLights >= 0 {
+                out.append(.item(AureaText.t("la_accepts_lights"), glyph: CupertinoGlyph.Lightbulb, sublabel: AureaText.t("la_accepts_lights_hint"),
+                                 checked: acceptsLights == 1, keepOpen: true) {
+                    _ = model.engine.setLayerAcceptsLights(acceptsLights != 1, forLayer: row.id); refresh()
+                })
+            }
+            // Pôr esta camada num grupo que já existe aqui / tirar do grupo aberto.
+            for group in model.layers where group.kind == 12 && group.id != row.id {
+                out.append(.item(AureaText.t("la_add_to_group") + " · " + group.name, glyph: CupertinoGlyph.RectangleStack) {
+                    let why = model.engine.addLayers([NSNumber(value: row.id)], toGroup: group.id)
+                    if !why.isEmpty { model.toast = AureaText.t("app_group_add_failed", AureaEngineText.reason(why)) }
+                    refresh()
+                })
+            }
+            if model.engine.precompDepth > 0 {
+                out.append(.item(AureaText.t("la_remove_from_group"), glyph: CupertinoGlyph.ArrowUturnLeft) {
+                    let why = model.engine.removeLayerFromGroup(row.id)
+                    if !why.isEmpty { model.toast = AureaText.t("app_group_remove_failed", AureaEngineText.reason(why)) }
+                    refresh()
+                })
+            }
+        }
+        if row.kind == 1 || row.kind == 2 || row.kind == 3 {
+            out.append(.header(AureaText.t("sh_menu_media")))
+            if row.kind == 1 || row.kind == 2 {
+                out.append(.item(AureaText.t("layer_replace_media"), glyph: CupertinoGlyph.Arrow2Squarepath, sublabel: AureaText.t("layer_replace_media_detail"),
+                                 enabled: !row.locked) { replaceTarget = LayerRef(id: row.id) })
+            }
+            let path = model.layerSourcePath(row.id)
+            out.append(.item(AureaText.t("media_info_title"), glyph: CupertinoGlyph.InfoCircle, tag: "layer.menu.mediaInfo") {
+                AureaPopupPresenter.shared.presentDialog { close in MediaInfoDialogView(path: path, onDismiss: close) }
+            })
+            if row.kind == 1 {
+                out.append(.item(AureaText.t("editor_extrair_audio"), glyph: CupertinoGlyph.MusicNote2, sublabel: AureaText.t("editor_som_vira_camada_propria_video_fica")) {
+                    _ = model.engine.extractAudio(fromLayer: row.id); refresh()
+                })
+            }
+        }
+        out.append(.header(AureaText.t("editor_movimento")))
+        let timeFlags = (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0
+        out.append(.item(AureaText.t("editor_desfoque_movimento"), glyph: CupertinoGlyph.MotionBlur,
+                         sublabel: AureaText.t("editor_borra_direcao_movimento_obturador_nas_configuracoes"), checked: timeFlags & 2 != 0,
+                         tag: "layer.menu.motionBlur") {
+            model.mutate { $0.setMotionBlur(timeFlags & 2 == 0, forLayer: row.id) }; refresh()
+        })
+        if row.kind == 1 {
+            out.append(.item(AureaText.t("editor_desfoque_movimento_video"), glyph: CupertinoGlyph.MotionBlur,
+                             sublabel: AureaText.t("editor_borra_mexe_dentro_video_pelos_vetores"), checked: timeFlags & 32 != 0) {
+                model.mutate { $0.setVectorBlur(forLayer: row.id, amount: timeFlags & 32 == 0 ? 1 : 0) }; refresh()
+            })
+        }
+        // 0.3.1: preset .ffx nesta camada / script .jsx com ela em comp.selectedLayers.
+        out.append(.item(AureaText.t("ae_import_menu"), glyph: CupertinoGlyph.SquareStack3dUp, sublabel: AureaText.t("ae_import_layer_detail"),
+                         enabled: !row.locked, tag: "layer.aeImport") { OmegaChromeRequests.shared.aeImport = true })
+        if row.kind == 1 || row.kind == 3 {
+            out.append(.header(AureaText.t("editor_tempo")))
+            out.append(.item(AureaText.t("i18n_clip_modes"), glyph: CupertinoGlyph.Scissors) { model.openPanel(.clipEdit) })
+        }
+        if row.kind == 1 {
+            out.append(.item(AureaText.t("sh_menu_freeze_frame"), glyph: ShellGlyph.Snow, enabled: inside) {
+                let created = model.engine.freezeFrame(forLayer: row.id, frame: Int32(clamping: model.status.playhead), hold: Int32(max(1, model.compositionFps * 3)))
+                refresh()
+                if created >= 0 { model.select(layerId: created) }
+            })
+            out.append(.header(AureaText.t("editor_rastreio")))
+            out.append(.item(AureaText.t("dock2_tracking_tools"), glyph: ShellGlyph.Viewfinder, sublabel: AureaText.t("dock2_tracking_tools_detail")) {
+                model.select(layerId: row.id); model.cameraTrackerVisible = false; model.openPanel(.tracking)
+            })
+            out.append(.item(AureaText.t("editor_rastrear_ponto"), glyph: ShellGlyph.Viewfinder, sublabel: AureaText.t("editor_cria_nulo_segue_ponto_ligue_outras")) {
+                model.select(layerId: row.id); model.openPanel(.tracking); model.beginPointPick(stabilize: false)
+            })
+            out.append(.item(AureaText.t("editor_estabilizar_pelo_ponto"), glyph: ShellGlyph.Viewfinder, sublabel: AureaText.t("editor_move_video_ponto_ficar_parado_tela")) {
+                model.select(layerId: row.id); model.openPanel(.tracking); model.beginPointPick(stabilize: true)
+            })
+        }
+        return out
+    }
+
+    /// Seleção de camadas (`activity_edit_selectbar`), fundo de destaque, a partir
+    /// de 1 camada: ✕ · "N camadas selecionadas" · Agrupar · Agrupar e mascarar ·
+    /// Agrupar e excluir · 🗑 · ›. O `›` troca a fileira pela de ALINHAMENTO NA
+    /// TELA: ‹ + 6 alinhamentos + 2 distribuições, todos do mesmo tamanho. As outras
+    /// ações (escolher uma, desagrupar, duplicar, vincular) moram no Copiar e colar.
     private var batchBar: some View {
         let ink = AureaColors.onAccent
         let canMask = count >= 2 && model.engine.canGroupAndMask(ids)
         let dim = ink.opacity(0.38)
+        let three = count >= 3
         func finish() { model.changeTimelineLayerSelectMode(false) }
         return HStack(spacing: 0) {
-            ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_cancelar_selecao"), size: 18, width: 44, tint: ink) {
+            ShellBarButton(glyph: CupertinoGlyph.Xmark, description: AureaText.t("editor_cancelar_selecao"), size: 18, width: 40, height: EditorLayout.topBar, tint: ink) {
                 model.clearSelection(); finish()
             }.accessibilityIdentifier("batch.cancel")
-            Text(count >= 2 ? AureaText.t("ios_layers_selected_n", count) : AureaText.t("batch_one_layer_selected"))
-                .font(.aurea(size: 13, weight: .bold)).foregroundStyle(ink)
-                .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-            Group {
-                if !batchMore {
-                    HStack(spacing: 0) {
-                        ShellBarButton(glyph: ShellGlyph.FolderBadgePlus, description: AureaText.t("editor_agrupar"), size: 19, tint: ink) {
-                            model.groupSelection(); finish()
-                        }.accessibilityIdentifier("batch.group")
-                        ShellBarButton(glyph: CupertinoGlyph.CircleLefthalfFill, description: AureaText.t("batch_group_mask_a11y"), size: 19, tint: canMask ? ink : dim) {
-                            if canMask { model.groupAndMaskSelection() } else { model.toast = AureaText.t("batch_need_two_visual") }
-                        }.accessibilityIdentifier("batch.groupMask")
-                        ShellBarButton(glyph: CupertinoGlyph.MinusCircle, description: AureaText.t("batch_group_exclude_a11y"), size: 19, tint: canMask ? ink : dim) {
-                            if canMask { model.groupAndMaskSelection(exclude: true) } else { model.toast = AureaText.t("batch_need_two_visual") }
-                        }.accessibilityIdentifier("batch.groupExclude")
-                        ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_selecao"), size: 19, tint: ink) {
-                            removeSelection(); finish()
-                        }.accessibilityIdentifier("batch.delete")
-                        ShellBarButton(glyph: CupertinoGlyph.ChevronRight, description: AureaText.t("batch_more_actions"), size: 17, width: 36, tint: ink) {
-                            withAnimation(.easeOut(duration: 0.2)) { batchMore = true }
-                        }.accessibilityIdentifier("batch.more")
-                    }.transition(.move(edge: .leading).combined(with: .opacity))
-                } else {
-                    HStack(spacing: 0) {
-                        ShellBarButton(glyph: CupertinoGlyph.ChevronLeft, description: AureaText.t("batch_group_actions"), size: 17, width: 36, tint: ink) {
-                            withAnimation(.easeOut(duration: 0.2)) { batchMore = false }
-                        }.accessibilityIdentifier("batch.less")
-                        // Ficar com UMA só: a lista troca o lote por ela num toque.
-                        pickLayerButton(tint: ink, width: 40)
-                        searchButton(tint: ink)
-                        linkMenuButton(tint: ink)
-                        if model.layers.contains(where: { model.selection.contains($0.id) && $0.kind == 12 }) {
-                            ShellBarButton(glyph: ShellGlyph.SquareSplit2x2, description: AureaText.t("editor_desagrupar"), size: 19, tint: ink) {
-                                for row in model.layers where model.selection.contains(row.id) && row.kind == 12 { model.ungroup(row.id) }
+            GeometryReader { geometry in
+                let cell = max(1, geometry.size.width / 9)
+                ZStack {
+                    if !aligning {
+                        HStack(spacing: 0) {
+                            Text(AureaText.plural("om_layers_selected", count))
+                                .font(.aurea(size: 13, weight: .bold)).foregroundStyle(ink)
+                                .lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
+                            ShellBarButton(glyph: ShellGlyph.FolderBadgePlus, description: AureaText.t("editor_agrupar"), size: 19, width: 40, height: EditorLayout.topBar, tint: ink) {
+                                model.groupSelection(); finish()
+                            }.accessibilityIdentifier("batch.group")
+                            ShellBarButton(glyph: CupertinoGlyph.CircleLefthalfFill, description: AureaText.t("batch_group_mask_a11y"), size: 19, width: 40, height: EditorLayout.topBar,
+                                           tint: canMask ? ink : dim) {
+                                if canMask { model.groupAndMaskSelection() } else { model.toast = AureaText.t("batch_need_two_visual") }
+                            }.accessibilityIdentifier("batch.groupMask")
+                            ShellBarButton(glyph: CupertinoGlyph.MinusCircle, description: AureaText.t("batch_group_exclude_a11y"), size: 19, width: 40, height: EditorLayout.topBar,
+                                           tint: canMask ? ink : dim) {
+                                if canMask { model.groupAndMaskSelection(exclude: true) } else { model.toast = AureaText.t("batch_need_two_visual") }
+                            }.accessibilityIdentifier("batch.groupExclude")
+                            ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_selecao"), size: 19, width: 40, height: EditorLayout.topBar, tint: ink) {
+                                removeSelection(); finish()
+                            }.accessibilityIdentifier("batch.delete")
+                            ShellBarButton(glyph: CupertinoGlyph.ChevronRight, description: AureaText.t("om_sel_align"), size: 17, width: 40, height: EditorLayout.topBar, tint: ink) {
+                                withAnimation(.easeIn(duration: 0.2)) { aligning = true }
+                            }.accessibilityIdentifier("batch.align")
+                        }
+                        .transition(.asymmetric(insertion: .offset(x: -geometry.size.width / 2), removal: .opacity))
+                    } else {
+                        HStack(spacing: 0) {
+                            alignCell(CupertinoGlyph.ChevronLeft, "batch_group_actions", "batch.align.back", ink, cell, size: 17) {
+                                withAnimation(.easeOut(duration: 0.2)) { aligning = false }
+                            }
+                            alignCell(CupertinoGlyph.ArrowLeftToLine, "editor_alinhar_esquerda_tela", "batch.align.left", ink, cell) { OmegaBatchLayout.align(model, edge: 0) }
+                            alignCell(CupertinoGlyph.ArrowLeftRight, "editor_centralizar_horizontal", "batch.align.hcenter", ink, cell) { OmegaBatchLayout.align(model, edge: 1) }
+                            alignCell(CupertinoGlyph.ArrowRightToLine, "editor_alinhar_direita_tela", "batch.align.right", ink, cell) { OmegaBatchLayout.align(model, edge: 2) }
+                            alignCell(CupertinoGlyph.ArrowUpToLine, "editor_alinhar_topo_tela", "batch.align.top", ink, cell) { OmegaBatchLayout.align(model, edge: 3) }
+                            alignCell(CupertinoGlyph.ArrowUpArrowDown, "editor_centralizar_vertical", "batch.align.vcenter", ink, cell) { OmegaBatchLayout.align(model, edge: 4) }
+                            alignCell(CupertinoGlyph.ArrowDownToLine, "editor_alinhar_base_tela", "batch.align.bottom", ink, cell) { OmegaBatchLayout.align(model, edge: 5) }
+                            alignCell(CupertinoGlyph.ArrowUpDownSquare, "editor_distribuir_vertical_vaos_iguais", "batch.align.distV", three ? ink : dim, cell) {
+                                if three { OmegaBatchLayout.distribute(model, horizontal: false) } else { model.toast = AureaText.t("om_sel_need_three") }
+                            }
+                            alignCell(CupertinoGlyph.ArrowLeftRightSquare, "editor_distribuir_horizontal_vaos_iguais", "batch.align.distH", three ? ink : dim, cell) {
+                                if three { OmegaBatchLayout.distribute(model, horizontal: true) } else { model.toast = AureaText.t("om_sel_need_three") }
                             }
                         }
-                        ShellBarButton(glyph: CupertinoGlyph.PlusSquareOnSquare, description: AureaText.t("editor_duplicar_camada"), size: 19, tint: ink) { duplicateSelection() }
-                        ShellBarButton(glyph: model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
-                                       description: AureaText.t(model.status.playing != 0 ? "editor_pausar" : "editor_reproduzir"), size: 20, tint: ink) { model.playPause() }
-                    }.transition(.move(edge: .trailing).combined(with: .opacity))
+                        // Entrar no alinhamento: de +50 % da largura; voltar: de −50 %.
+                        .transition(.asymmetric(insertion: .offset(x: geometry.size.width / 2), removal: .opacity))
+                    }
                 }
+                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .leading)
             }
-        }.padding(.trailing, 2).background(AureaColors.accent)
+            .clipped()
+        }
+        .frame(maxHeight: .infinity)
+        .background(AureaColors.accent)
     }
-    /// Duplicar à vista (pedido da beta): a(s) camada(s) escolhida(s), um desfazer.
-    private func duplicateSelection() {
-        let ids = model.layers.filter { model.selection.contains($0.id) }.map { NSNumber(value: $0.id) }
-        guard !ids.isEmpty else { return }
-        model.engine.duplicateLayers(ids); model.refreshModel(force: true)
+
+    private func alignCell(_ glyph: Character, _ key: String, _ tag: String, _ tint: Color, _ width: CGFloat, size: CGFloat = 18,
+                           action: @escaping () -> Void) -> some View {
+        ShellBarButton(glyph: glyph, description: AureaText.t(key), size: size, width: width, height: EditorLayout.topBar, tint: tint, action: action)
+            .accessibilityIdentifier(tag)
     }
-    private func pickLayerButton(tint: Color, width: CGFloat) -> some View {
-        ShellBarButton(glyph: CupertinoGlyph.RectangleStack, description: AureaText.t("editor_selecionar_uma_camada"), size: 19, width: width, tint: tint) { open(.searchLayers) }
-            .accessibilityIdentifier("layerPicker.open")
-    }
+
     private func linkMenuButton(tint: Color, width: CGFloat = 40) -> some View {
         GeometryReader { bounds in
-            ShellBarButton(glyph: count == 1 && parent != 0 ? CupertinoGlyph.LinkCircleFill : CupertinoGlyph.Link,
-                description: AureaText.t(parent != 0 ? "editor_vinculada_outra_camada_trocar" : "editor_vincular_outra_camada"), size: 20, width: width, tint: tint) {
+            ShellBarButton(glyph: parent != 0 ? CupertinoGlyph.LinkCircleFill : CupertinoGlyph.Link,
+                description: AureaText.t(parent != 0 ? "editor_vinculada_outra_camada_trocar" : "editor_vincular_outra_camada"), size: 20, width: width,
+                height: EditorLayout.topBar, tint: tint) {
                 if model.status.playing != 0 { model.playPause() }
                 shell.linkIds = Array(model.selection); shell.linkAnchor = bounds.frame(in: .global)
-            }.accessibilityIdentifier("link.open")
-        }.frame(width: width, height: 44)
-    }
-    private func open(_ value: ShellSheet) {
-        if model.status.playing != 0 { model.playPause() }
-        if value == .projectSettings { model.showProjectSettings = true } else { shell.sheet = value }
-    }
-    private func act(_ action: () -> Void) { shell.sheet = nil; action() }
-    private func link(_ id: Int64) {
-        if model.status.playing != 0 { model.playPause() }
-        model.setParentMany(Array(model.selection), parent: id)
+            }.accessibilityIdentifier("layer.parent")
+        }.frame(width: width, height: EditorLayout.topBar)
     }
     private func removeSelection() {
         model.deleteSelectedLayers()
     }
 }
 
+/// Alinhar e distribuir na tela (as contas do antigo painel de lote, iguais ao
+/// `LayerOps` do Android): pelos limites de cada camada, um passo de desfazer.
+@MainActor enum OmegaBatchLayout {
+    private struct Box {
+        let id: Int64
+        let x: Float, y: Float, left: Float, top: Float, right: Float, bottom: Float
+    }
+    private static func boxes(_ model: AureaModel) -> [Box] {
+        model.layers.filter { model.selection.contains($0.id) && !$0.locked }.compactMap { row in
+            guard let detail = model.queryDetail(row.id), let b = StageGeom.bounds(detail) else { return nil }
+            let pos = StageGeom.floats(detail["position"])
+            guard pos.count >= 2 else { return nil }
+            return Box(id: row.id, x: pos[0], y: pos[1], left: b.0, top: b.1, right: b.2, bottom: b.3)
+        }
+    }
+    /// 0 esquerda · 1 centro H · 2 direita · 3 topo · 4 centro V · 5 base.
+    static func align(_ model: AureaModel, edge: Int) {
+        let w = Float(model.compositionWidth), h = Float(model.compositionHeight)
+        let moves: [(Int64, Float, Float)] = boxes(model).map { box in
+            var x = box.x, y = box.y
+            switch edge {
+            case 0: x -= box.left
+            case 1: x += w / 2 - (box.left + box.right) / 2
+            case 2: x += w - box.right
+            case 3: y -= box.top
+            case 4: y += h / 2 - (box.top + box.bottom) / 2
+            default: y += h - box.bottom
+            }
+            return (box.id, x, y)
+        }
+        apply(model, moves, label: "alinhar")
+    }
+    static func distribute(_ model: AureaModel, horizontal: Bool) {
+        let items = boxes(model).sorted { horizontal ? $0.left < $1.left : $0.top < $1.top }
+        guard let first = items.first, let last = items.last, items.count >= 3 else { return }
+        let span = horizontal ? last.right - first.left : last.bottom - first.top
+        let sizes = items.reduce(Float(0)) { $0 + (horizontal ? $1.right - $1.left : $1.bottom - $1.top) }
+        let gap = (span - sizes) / Float(items.count - 1)
+        var cursor = horizontal ? first.left : first.top
+        let moves: [(Int64, Float, Float)] = items.map { box in
+            let delta = cursor - (horizontal ? box.left : box.top)
+            cursor += (horizontal ? box.right - box.left : box.bottom - box.top) + gap
+            return (box.id, box.x + (horizontal ? delta : 0), box.y + (horizontal ? 0 : delta))
+        }
+        apply(model, moves, label: "distribuir")
+    }
+    private static func apply(_ model: AureaModel, _ moves: [(Int64, Float, Float)], label: String) {
+        guard !moves.isEmpty else { return }
+        if model.status.playing != 0 { model.playPause() }
+        model.beginGesture(label)
+        for move in moves { model.setTransform2(0, move.1, 1, move.2, layer: move.0) }
+        model.endGesture()
+    }
+}
+
+/// Barra inferior flutuante da seleção (`activity_edit_select_bottomvar`), par da
+/// `MultiSelectBottomBar` do Android: 42 pt, margens de 6, fundo S9 com raio 5,
+/// por cima da timeline. À esquerda (120 pt) a variante pelo cabeçote (regra do
+/// motor): cruza as escolhidas = aparar início · dividir · aparar fim; todas
+/// depois = estender/levar o início; todas antes = estender/levar o fim. À
+/// direita: alinhar inícios · distribuir no tempo · alinhar fins.
+struct MultiSelectBottomBar: View {
+    @EnvironmentObject private var model: AureaModel
+
+    var body: some View {
+        let variant = model.multiTimeVariant
+        HStack(spacing: 0) {
+            HStack(spacing: 0) {
+                switch variant {
+                case 1:
+                    cell(CupertinoGlyph.ArrowLeftToLine, "om_sel_extend_start", "batch.bottom.extendStart") { model.extendSelectionToPlayhead(start: true) }
+                    cell(OmegaGlyph.arrowLeftSquare, "om_sel_move_start", "batch.bottom.moveStart") { model.arrangeLayerTimes(5) }
+                case 2:
+                    cell(CupertinoGlyph.ArrowRightToLine, "om_sel_extend_end", "batch.bottom.extendEnd") { model.extendSelectionToPlayhead(start: false) }
+                    cell(OmegaGlyph.arrowRightSquare, "om_sel_move_end", "batch.bottom.moveEnd") { model.arrangeLayerTimes(6) }
+                default:
+                    cell(CupertinoGlyph.ArrowRightToLine, "editor_aparar_inicio_cabecote", "batch.bottom.trimStart") { trim(start: true) }
+                    cell(CupertinoGlyph.Scissors, "editor_dividir_cabecote", "batch.bottom.split") { split() }
+                    cell(CupertinoGlyph.ArrowLeftToLine, "editor_aparar_fim_cabecote", "batch.bottom.trimEnd") { trim(start: false) }
+                }
+            }
+            .frame(width: 120)
+            Spacer(minLength: 0)
+            vectorCell("automirrored.rounded.FormatAlignLeft", "editor_alinhar_inicios", "batch.bottom.alignStarts") { model.arrangeLayerTimes(0) }
+            vectorCell("rounded.Stairs", "om_sel_distribute_time", "batch.bottom.distributeTime") { model.arrangeLayerTimes(3) }
+            vectorCell("automirrored.rounded.FormatAlignRight", "editor_alinhar_fins", "batch.bottom.alignEnds") { model.arrangeLayerTimes(2) }
+        }
+        .frame(height: 42)
+        .background(OmegaChrome.column, in: RoundedRectangle(cornerRadius: 5))
+        .padding(.horizontal, 6).padding(.bottom, 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("batch.bottom")
+    }
+
+    private func cell(_ glyph: Character, _ key: String, _ tag: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            CupertinoGlyph.text(glyph, size: 19, color: AureaColors.text).frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .accessibilityLabel(AureaText.t(key))
+        .accessibilityIdentifier(tag)
+    }
+
+    private func vectorCell(_ name: String, _ key: String, _ tag: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            MaterialGlyph(name, size: 20, color: AureaColors.text).frame(width: 40, height: 42).contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .accessibilityLabel(AureaText.t(key))
+        .accessibilityIdentifier(tag)
+    }
+
+    private var selected: [LayerItem] { model.layers.filter { model.selection.contains($0.id) } }
+    private var timeTargets: [LayerItem] {
+        selected.filter { !$0.locked && model.status.playhead > Int64($0.startFrame) && model.status.playhead < Int64($0.endFrame) }
+    }
+    private func trim(start: Bool) {
+        let targets = timeTargets
+        guard !targets.isEmpty else {
+            model.toast = AureaText.t(!selected.isEmpty && selected.allSatisfy(\.locked) ? "sh_layers_locked_unlock_to_edit" : "editor_leve_cabecote_dentro_camadas")
+            return
+        }
+        if model.status.playing != 0 { model.playPause() }
+        model.beginGesture(start ? "aparar início" : "aparar fim")
+        for row in targets {
+            if start { model.trimStart(row.id, at: model.status.playhead) } else { model.trimEnd(row.id, at: model.status.playhead) }
+        }
+        model.endGesture()
+    }
+    private func split() {
+        guard !timeTargets.isEmpty else { model.toast = AureaText.t("editor_leve_cabecote_dentro_camadas"); return }
+        if model.status.playing != 0 { model.playPause() }
+        model.splitAtPlayhead(timeTargets.map(\.id))
+    }
+}
+
+/// Nome editável ali mesmo (`SettingEditText` da referência): tocar vira campo,
+/// SEM caixa de fundo — só o cursor no destaque e o ✕ no fim, que APAGA o texto
+/// (não cancela). Done ou perder o foco confirma; vazio não vale.
 private struct ShellInlineName: View {
     let name: String
     let placeholder: String
     var limit = Int.max
     var enabled = true
-    var size: CGFloat = 14
-    var weight: Font.Weight = .semibold
     let rename: (String) -> Void
     @State private var editing = false
     @State private var value = ""
@@ -267,19 +793,31 @@ private struct ShellInlineName: View {
     var body: some View {
         Group {
             if editing {
-                TextField(placeholder, text: $value).textInputAutocapitalization(.sentences)
-                    .focused($focused).submitLabel(.done).onSubmit(commit)
-                    .padding(.horizontal, 8).padding(.vertical, 6).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
-                    .padding(.trailing, 6).onAppear { focused = true }
-                    .onChange(of: focused) { hasFocus in if !hasFocus { commit() } }
-                    .onChange(of: value) { new in if new.count > limit { value = String(new.prefix(limit)) } }
+                HStack(spacing: 0) {
+                    TextField(placeholder, text: $value).textInputAutocapitalization(.sentences)
+                        .foregroundStyle(AureaColors.text).tint(AureaColors.accent)
+                        .focused($focused).submitLabel(.done).onSubmit(commit)
+                        .padding(.horizontal, 4)
+                        .onAppear { focused = true }
+                        .onChange(of: focused) { hasFocus in if !hasFocus { commit() } }
+                        .onChange(of: value) { new in if new.count > limit { value = String(new.prefix(limit)) } }
+                    if !value.isEmpty {
+                        Button { value = "" } label: {
+                            CupertinoGlyph.text(CupertinoGlyph.XmarkCircleFill, size: 16, color: OmegaChrome.secondary)
+                                .frame(width: 36, height: 40).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(AureaText.t("om_field_clear"))
+                        .accessibilityIdentifier("field.clear")
+                    }
+                }
             } else {
-                Text(name.isEmpty ? placeholder : name).foregroundStyle(name.isEmpty ? StageInk.white40 : AureaColors.text)
+                Text(name.isEmpty ? placeholder : name).foregroundStyle(name.isEmpty ? OmegaChrome.secondary : AureaColors.text)
                     .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12).contentShape(Rectangle())
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12).padding(.horizontal, 4).contentShape(Rectangle())
                     .onTapGesture { if enabled { value = name; editing = true } }
             }
-        }.font(.aurea(size: size, weight: weight)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+        }.font(.aurea(size: 14, weight: .medium)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
     }
     private func commit() {
         guard editing else { return }; editing = false
@@ -288,15 +826,21 @@ private struct ShellInlineName: View {
     }
 }
 
-/// Transporte de 48 pt, com marcador ao lado do play.
-/// Grade, resolução e marca | tempo | camadas, desfazer e refazer.
+/// Omega chrome (área 02, P0-5): a barra de reprodução da referência — 46 pt, 7
+/// células de largura igual: ↶ · ↷ · ⇤ · ▶ · ⇥ · Copiar e colar · painel. As
+/// setas vão ao evento estrito mais próximo (o começo, o último quadro, os
+/// marcadores e, com camada, o início, o fim e os keyframes dela), sem toque
+/// longo. A grade foi para a coluna de modos; a resolução da prévia, para os
+/// Ajustes; marcar o instante, para o relógio da timeline; "Selecionar uma
+/// camada", para o Copiar e colar.
 struct TransportView: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
+    @ObservedObject private var modes = ViewModeState.shared
     var body: some View {
         Group {
             if model.stageManipulating { StageInfoBar() } else { buttons }
-        }.frame(height: EditorLayout.transport).background(AureaColors.editorCanvas)
+        }.frame(height: EditorLayout.transport).background(OmegaChrome.bar)
         // Transporte em LTR mesmo em árabe (par do KeepLtr do Android): início
         // à esquerda, fim à direita, e os ícones (desfazer/refazer inclusive)
         // na mesma ordem e sentido da timeline logo abaixo.
@@ -305,86 +849,32 @@ struct TransportView: View {
 
     private var buttons: some View {
         GeometryReader { geometry in
-        // Nove botões em três grupos (ferramentas | tempo | edição); em telas
-        // estreitas o alvo encolhe junto, nunca some um botão.
-        let side = min(40, (geometry.size.width - 24) / 9)
-        HStack(spacing: 0) {
-            HStack(spacing: 0) { gridButton(side); resolutionButton(side); markerButton(side) }
-            Spacer(minLength: 0)
-            HStack(spacing: 0) { startButton(side); playButton(side); endButton(side) }
-            Spacer(minLength: 0)
-            HStack(spacing: 0) { layersButton(side); undoButton(side); redoButton(side) }
-        }.padding(.horizontal, 4).frame(height: EditorLayout.transport)
+            let side = max(1, geometry.size.width / 7)
+            let h = EditorLayout.transport
+            HStack(spacing: 0) {
+                ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), size: 20, width: side, height: h,
+                               enabled: model.status.canUndo != 0, disabledTint: AureaColors.transportDisabled) { model.undo() }
+                    .accessibilityIdentifier("transport.undo")
+                ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), size: 20, width: side, height: h,
+                               enabled: model.status.canRedo != 0, disabledTint: AureaColors.transportDisabled) { model.redo() }
+                    .accessibilityIdentifier("transport.redo")
+                ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t("om_tr_previous"), size: 20, width: side, height: h) {
+                    model.stepTransportEdges(-1)
+                }.accessibilityIdentifier("transport.previous")
+                PreRenderPlayControl(side: side)
+                ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t("om_tr_next"), size: 20, width: side, height: h) {
+                    model.stepTransportEdges(1)
+                }.accessibilityIdentifier("transport.next")
+                CopyPasteButton(side: side)
+                ShellBarButton(glyph: modes.camera ? CupertinoGlyph.CameraViewfinder : OmegaGlyph.sidebarRight, description: AureaText.t("om_tr_view_modes"),
+                               size: 20, width: side, height: h, tint: modes.columnOpen ? AureaColors.accent : AureaColors.text) {
+                    modes.columnOpen.toggle()
+                }
+                .accessibilityValue(AureaText.t(modes.columnOpen ? "common_on" : "common_off"))
+                .accessibilityIdentifier("transport.viewModes")
+            }
+            .frame(height: h)
         }
-    }
-
-    private var previewLabel: String {
-        if model.rawPlayback { return "RAW" }
-        if model.status.previewAuto != 0 { return "Auto" }
-        let n = max(1, model.status.previewNumerator), d = max(1, model.status.previewDenominator)
-        return n == d ? "Full" : "\(n)/\(d)"
-    }
-    private func gridButton(_ side: CGFloat) -> some View {
-        ShellBarButton(glyph: CupertinoGlyph.Grid, description: AureaText.t("editor_grade_tercos"), size: 18, width: side, height: 48,
-                       tint: shell.showGrid ? AureaColors.accent : AureaColors.text) { shell.showGrid.toggle() }
-            .accessibilityIdentifier("transport.grid")
-    }
-    private func resolutionButton(_ side: CGFloat) -> some View {
-        Text(previewLabel).font(.aurea(size: 11)).foregroundStyle(AureaColors.text)
-            .lineLimit(1).minimumScaleFactor(0.7)
-            .frame(width: max(1, side - 6), height: 26)
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(AureaColors.border, lineWidth: 1))
-            // "Otimizar vídeos pesados": o fio de progresso da versão leve em geração.
-            .modifier(ProxyChipBar())
-            .frame(width: side, height: 48)
-            .overlay { GeometryReader { bounds in
-                Color.clear.contentShape(Rectangle())
-                    .onTapGesture { shell.resolutionAnchor = bounds.frame(in: .global) }
-                    .onLongPressGesture(minimumDuration: 0.5) { model.toggleHud() }
-            }}
-            .accessibilityLabel(AureaText.t("editor_resolucao_previa_segure_diagnostico"))
-            .modifier(ProxyChipAccessibility())
-            .accessibilityAddTraits(.isButton)
-            .accessibilityIdentifier("transport.resolution")
-    }
-    private func layersButton(_ side: CGFloat) -> some View {
-        ShellBarButton(glyph: CupertinoGlyph.RectangleStack, description: AureaText.t("editor_selecionar_uma_camada"), size: 18, width: side, height: 48) {
-            shell.sheet = .searchLayers
-        }
-            .accessibilityIdentifier("transport.layers")
-    }
-
-    private func undoButton(_ side: CGFloat) -> some View {
-        ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), size: 20, width: side, height: 48,
-                       enabled: model.status.canUndo != 0, disabledTint: AureaColors.transportDisabled) { model.undo() }
-    }
-    private func redoButton(_ side: CGFloat) -> some View {
-        ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), size: 20, width: side, height: 48,
-                       enabled: model.status.canRedo != 0, disabledTint: AureaColors.transportDisabled) { model.redo() }
-    }
-    /// Tocar navega por marcas/keyframes; segurar vai ao início.
-    private func startButton(_ side: CGFloat) -> some View {
-        ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t("editor_ir_inicio_segure_anterior"), size: 20, width: side, height: 48,
-                       onLongPress: { model.seek(toFrame: 0) }, action: { model.stepTransport(-1) })
-            .accessibilityIdentifier("transport.previous")
-    }
-    /// Tocar navega por marcas/keyframes; segurar vai ao fim.
-    private func endButton(_ side: CGFloat) -> some View {
-        ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t("editor_ir_fim_segure_proximo"), size: 20, width: side, height: 48,
-                       onLongPress: { model.seek(toFrame: model.compositionDuration) }, action: { model.stepTransport(1) })
-            .accessibilityIdentifier("transport.next")
-    }
-    private func playButton(_ side: CGFloat) -> some View {
-        PreRenderPlayControl(side: side)
-    }
-    /// Marcar o instante atual continua acessível durante a reprodução.
-    private func markerButton(_ side: CGFloat) -> some View {
-        let marked = model.markerFrames.contains(model.status.playhead)
-        return ShellBarButton(glyph: marked ? ShellGlyph.BookmarkSolid : CupertinoGlyph.Bookmark,
-                              description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"), size: 18, width: side, height: 48,
-                              tint: marked ? AureaColors.accent : AureaColors.text,
-                              onLongPress: { model.editMarkerAtPlayhead() }, action: { model.toggleMarkerAt(model.status.playhead) })
-            .accessibilityIdentifier("transport.marker")
     }
 }
 
@@ -417,7 +907,7 @@ private struct PreRenderPlayControl: View {
                             .stroke(AureaColors.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                             .frame(width: 30, height: 30).rotationEffect(.degrees(-90)).allowsHitTesting(false)
                     }
-                }.frame(width: side, height: 48).contentShape(Rectangle())
+                }.frame(width: side, height: EditorLayout.transport).contentShape(Rectangle())
                 if model.looping {
                     CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent)
                         .padding(.trailing, 6).padding(.bottom, 7).allowsHitTesting(false)
@@ -474,24 +964,40 @@ private struct PreRenderPlayControl: View {
     }
 }
 
+/// Omega chrome (área 02, P1-4): a barra de informações no lugar da de reprodução
+/// enquanto um dedo manipula algo no palco — modo texto, até 6 pares em 3
+/// colunas: rótulo 12 a 50 % e valor 12. (A timeline mostra o tempo do arrasto
+/// dela na própria faixa: área 03.)
 private struct StageInfoBar: View {
     @EnvironmentObject private var model: AureaModel
     var body: some View {
         let position = StageGeom.floats(model.detail["position"])
         let scale = StageGeom.floats(model.detail["scale"])
         let rotation = StageGeom.floats(model.detail["rotation"])
-        HStack(spacing: 0) {
-            pair("X", String(Int((position.first ?? 0).rounded())))
-            pair("Y", String(Int((position.count > 1 ? position[1] : 0).rounded())))
-            pair(AureaText.t("editor_escala"), "\(Int(((scale.first ?? 1) * 100).rounded()))%")
-            pair(AureaText.t("editor_rotacao"), String(format: "%.1f°", rotation.count > 2 ? rotation[2] : 0).replacingOccurrences(of: ".", with: ","))
-        }.padding(.horizontal, 12).frame(height: EditorLayout.transport).background(AureaColors.editorCanvas)
-    }
-    private func pair(_ label: String, _ value: String) -> some View {
+        let pairs: [(String, String)] = [
+            ("X", String(Int((position.first ?? 0).rounded()))),
+            ("Y", String(Int((position.count > 1 ? position[1] : 0).rounded()))),
+            (AureaText.t("editor_escala"), "\(Int(((scale.first ?? 1) * 100).rounded()))%"),
+            (AureaText.t("editor_rotacao"), String(format: "%.1f°", rotation.count > 2 ? rotation[2] : 0).replacingOccurrences(of: ".", with: ",")),
+        ]
+        let lines = stride(from: 0, to: min(6, pairs.count), by: 3).map { Array(pairs[$0..<min($0 + 3, pairs.count)]) }
         VStack(spacing: 0) {
-            Text(label).font(.aurea(size: 10.5)).foregroundStyle(StageInk.white40)
-            Text(value).font(.aurea(size: 13, weight: .semibold)).monospacedDigit().foregroundStyle(AureaColors.text)
-        }.lineLimit(1).frame(maxWidth: .infinity)
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                HStack(spacing: 0) {
+                    ForEach(Array(line.enumerated()), id: \.offset) { _, pair in
+                        HStack(spacing: 6) {
+                            Text(pair.0).foregroundStyle(AureaColors.text.opacity(0.5))
+                            Text(pair.1).monospacedDigit().foregroundStyle(AureaColors.text)
+                        }.font(.aurea(size: 12)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    ForEach(0..<(3 - line.count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity) }
+                }.frame(maxHeight: .infinity)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 4)
+        .frame(height: EditorLayout.transport).background(OmegaChrome.bar)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("transport.info")
     }
 }
 
@@ -536,32 +1042,382 @@ struct FullscreenTimeBar: View {
     }
 }
 
-private struct CopyPasteMenu: View {
+/// Omega chrome (área 02, P0-6/P1-3): o 6º botão do transporte e o popup dele
+/// (`layer_copy_paste_menu_popup`), ancorado no botão. Itens na ordem da
+/// referência: selecionar todas (ou limpar, com todas escolhidas) · duplicar ·
+/// salvar preset · copiar (com estilo, quando é uma) · colar · colar estilo ›.
+/// Depois de um fio, "Mais do AUREA": selecionar uma camada, escolher várias,
+/// busca de ferramentas, efeitos, keyframes e animação e, com várias
+/// escolhidas, ajustar/preencher a tela, desagrupar e vincular.
+private struct CopyPasteButton: View {
     @EnvironmentObject private var model: AureaModel
-    let dismiss: () -> Void
-    private var ids: [NSNumber] { model.selection.map { NSNumber(value: $0) } }
+    @EnvironmentObject private var shell: ShellPresentation
+    let side: CGFloat
+    @State private var menu = false
+    @State private var anchor: CGRect = .zero
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ShellMenuSection("editor_copiar_colar")
-            ShellMenuRow(CupertinoGlyph.DocOnDoc, "editor_copiar_camada", enabled: !ids.isEmpty) { act { model.engine.copyLayers(ids) } }
-            ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_colar_camada_cabecote", enabled: model.engine.clipboardState & 1 != 0) { act { model.engine.pasteLayers(model.status.playhead); model.refreshModel(force: true) } }
-            ShellMenuRow(CupertinoGlyph.PlusSquareOnSquare, "editor_duplicar_camada", enabled: !ids.isEmpty) { act { model.engine.duplicateLayers(ids); model.refreshModel(force: true) } }
-            ShellMenuRow(CupertinoGlyph.CheckmarkSquare, "editor_selecionar_todas_camadas", enabled: model.layers.count >= 2) { act { model.selectAll() } }
-            ShellMenuRow(CupertinoGlyph.Square, "editor_limpar_selecao") { act { model.clearSelection() } }
-            ShellMenuSection("editor_estilo_efeitos")
-            ShellMenuRow(CupertinoGlyph.Paintbrush, "editor_copiar_estilo", enabled: !ids.isEmpty) { act { if let id = model.primarySelection { model.engine.copyStyle(id) } } }
-            ShellMenuRow(ShellGlyph.PaintbrushFill, "editor_colar_estilo", enabled: !ids.isEmpty && model.engine.clipboardState & 2 != 0, detail: "editor_mesclagem_opacidade_efeitos_cores") { act { model.engine.pasteStyle(ids); model.refreshModel(force: true) } }
-            ShellMenuRow(CupertinoGlyph.Sparkles, "editor_copiar_efeitos", enabled: !ids.isEmpty) { act { if let id = model.primarySelection { model.engine.copyEffects(id) } } }
-            ShellMenuRow(CupertinoGlyph.WandStars, "editor_colar_efeitos", enabled: !ids.isEmpty && model.engine.clipboardState & 4 != 0) { act { model.engine.pasteEffects(ids); model.refreshModel(force: true) } }
-            ShellMenuSection("editor_keyframes")
-            ShellMenuRow(CupertinoGlyph.DocOnDoc, "editor_copiar_keyframes_cabecote", enabled: !ids.isEmpty) { act { if let id = model.primarySelection { model.engine.copyKeyframes(id, atFrame: Int32(clamping: model.status.playhead)) } } }
-            ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_colar_keyframes_cabecote", enabled: !ids.isEmpty && model.engine.clipboardState & 8 != 0) { act { model.engine.pasteKeyframes(ids, atFrame: Int32(clamping: model.status.playhead)); model.refreshModel(force: true) } }
-            ShellMenuRow(CupertinoGlyph.DocOnDoc, "editor_copiar_animacao", enabled: !ids.isEmpty, detail: "editor_copiar_animacao_detalhe") { act { model.copyAnimation() } }
-            ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_colar_animacao", enabled: !ids.isEmpty && model.engine.clipboardState & 8 != 0) { act { model.engine.pasteKeyframes(ids, atFrame: Int32(clamping: model.status.playhead)); model.refreshModel(force: true) } }
-            ShellMenuRow(CupertinoGlyph.WandStars, "editor_otimizar_keyframes", enabled: !ids.isEmpty, detail: "editor_otimizar_keyframes_detalhe") { act { model.optimizeKeyframes() } }
+        ShellBarButton(glyph: CupertinoGlyph.DocOnClipboard, description: AureaText.t("om_tr_copy_paste"), size: 20, width: side, height: EditorLayout.transport) {
+            if model.status.playing != 0 { model.playPause() }
+            menu = true
+        }
+        .accessibilityIdentifier("transport.copyPaste")
+        .background(GeometryReader { g in
+            Color.clear
+                .onAppear { anchor = g.frame(in: .global) }
+                .onChange(of: g.frame(in: .global)) { anchor = $0 }
+        })
+        .aureaAnchoredMenu(isPresented: $menu, tag: "copyPaste.menu") { entries() }
+    }
+
+    private func entries() -> [MenuEntry] {
+        let ids = model.layers.filter { model.selection.contains($0.id) }.map { NSNumber(value: $0.id) }
+        let count = ids.count
+        let total = model.layers.count
+        let clip = model.engine.clipboardState
+        let primary = model.primarySelection
+        let refresh: () -> Void = { model.refreshModel(force: true) }
+        var out: [MenuEntry] = []
+        if total > 0 && count == total {
+            out.append(.item(AureaText.t("editor_limpar_selecao"), glyph: CupertinoGlyph.Square, tag: "copyPaste.clearSelection") { model.clearSelection() })
+        } else {
+            out.append(.item(AureaText.t("editor_selecionar_todas_camadas"), glyph: CupertinoGlyph.CheckmarkSquare, enabled: total > 0,
+                             tag: "copyPaste.selectAll") { model.selectAll() })
+        }
+        out.append(.item(AureaText.plural("om_cp_duplicate", max(1, count)), glyph: CupertinoGlyph.PlusSquareOnSquare, enabled: count > 0,
+                         tag: "copyPaste.duplicate") { model.engine.duplicateLayers(ids); refresh() })
+        out.append(.item(AureaText.t("om_cp_save_preset"), glyph: CupertinoGlyph.SquareStack3dUp, enabled: count == 1,
+                         tag: "copyPaste.savePreset") { model.openPanel(.presets) })
+        out.append(.item(AureaText.plural("om_cp_copy", max(1, count)), glyph: CupertinoGlyph.DocOnDoc,
+                         sublabel: count == 1 ? AureaText.t("om_cp_with_style") : nil, enabled: count > 0,
+                         tag: "copyPaste.copy") { model.copyLayersWithStyle() })
+        out.append(.item(AureaText.plural("om_cp_paste", 1), glyph: CupertinoGlyph.DocOnClipboard, enabled: clip & 1 != 0,
+                         tag: "copyPaste.paste") { model.engine.pasteLayers(model.status.playhead); refresh() })
+        out.append(.item(AureaText.t("om_cp_paste_style_more"), glyph: ShellGlyph.PaintbrushFill, chevron: true,
+                         enabled: count > 0 && clip & 2 != 0, tag: "copyPaste.pasteStyle") { presentPasteStyle() })
+        // Mais do AUREA (o que a referência não tem), depois de um fio.
+        out.append(.divider)
+        out.append(.header(AureaText.t("om_settings_more")))
+        out.append(.item(AureaText.t("editor_selecionar_uma_camada"), glyph: CupertinoGlyph.RectangleStack, enabled: total > 0,
+                         tag: "copyPaste.more.pickLayer") { presentPicker() })
+        out.append(.item(AureaText.t("edt_tl_pick_layers"), glyph: CupertinoGlyph.CheckmarkSquare, sublabel: AureaText.t("edt_tl_pick_layers_detail"),
+                         checked: model.timelineLayerSelectMode, enabled: total > 0, tag: "copyPaste.more.pickMode") {
+            model.changeTimelineLayerSelectMode(!model.timelineLayerSelectMode)
+        })
+        out.append(.item(AureaText.t("edt_cmd_search_desc"), glyph: CupertinoGlyph.Search, tag: "commandSearchOpen") { shell.commandSearch = true })
+        out.append(.item(AureaText.t("editor_copiar_efeitos"), glyph: CupertinoGlyph.Sparkles, enabled: primary != nil,
+                         tag: "copyPaste.more.copyEffects") { if let id = primary { model.engine.copyEffects(id) } })
+        out.append(.item(AureaText.t("editor_colar_efeitos"), glyph: CupertinoGlyph.WandStars, enabled: count > 0 && clip & 4 != 0,
+                         tag: "copyPaste.more.pasteEffects") { model.engine.pasteEffects(ids); refresh() })
+        out.append(.item(AureaText.t("editor_copiar_keyframes_cabecote"), glyph: CupertinoGlyph.DocOnDoc, enabled: primary != nil,
+                         tag: "copyPaste.more.copyKeys") {
+            if let id = primary { model.engine.copyKeyframes(id, atFrame: Int32(clamping: model.status.playhead)) }
+        })
+        out.append(.item(AureaText.t("editor_colar_keyframes_cabecote"), glyph: CupertinoGlyph.DocOnClipboard, enabled: count > 0 && clip & 8 != 0,
+                         tag: "copyPaste.more.pasteKeys") {
+            model.engine.pasteKeyframes(ids, atFrame: Int32(clamping: model.status.playhead)); refresh()
+        })
+        out.append(.item(AureaText.t("editor_copiar_animacao"), glyph: CupertinoGlyph.DocOnDoc, sublabel: AureaText.t("editor_copiar_animacao_detalhe"),
+                         enabled: primary != nil, tag: "copyPaste.more.copyAnimation") { model.copyAnimation() })
+        out.append(.item(AureaText.t("editor_otimizar_keyframes"), glyph: CupertinoGlyph.WandStars, sublabel: AureaText.t("editor_otimizar_keyframes_detalhe"),
+                         enabled: primary != nil, tag: "copyPaste.more.optimizeKeys") { model.optimizeKeyframes() })
+        if count >= 2 {
+            let chosen = ids.map(\.int64Value)
+            out.append(.item(AureaText.t("editor_ajustar_tela"), glyph: CupertinoGlyph.FullscreenExit, tag: "copyPaste.more.fit") {
+                if model.status.playing != 0 { model.playPause() }; model.fitToCanvas(chosen, fill: false)
+            })
+            out.append(.item(AureaText.t("editor_preencher_tela"), glyph: CupertinoGlyph.Fullscreen, tag: "copyPaste.more.fill") {
+                if model.status.playing != 0 { model.playPause() }; model.fitToCanvas(chosen, fill: true)
+            })
+            let groups = model.layers.filter { model.selection.contains($0.id) && $0.kind == 12 }.map(\.id)
+            if !groups.isEmpty {
+                out.append(.item(AureaText.t("editor_desagrupar"), glyph: ShellGlyph.SquareSplit2x2, tag: "copyPaste.more.ungroup") {
+                    for group in groups { model.ungroup(group) }
+                })
+            }
+            out.append(.item(AureaText.t("om_cp_link_selected"), glyph: CupertinoGlyph.Link, tag: "copyPaste.more.link") {
+                if model.status.playing != 0 { model.playPause() }
+                shell.linkIds = Array(model.selection); shell.linkAnchor = anchor
+            })
+        }
+        return out
+    }
+
+    private func presentPasteStyle() {
+        let owner = UUID()
+        let model = self.model
+        OmegaPopup.present(anchor: anchor, placement: .below, owner: owner, onDismiss: {}) {
+            PasteStylePage(model: model) { OmegaPopup.dismiss(owner) }
         }
     }
-    private func act(_ action: () -> Void) { dismiss(); action() }
+
+    private func presentPicker() {
+        let owner = UUID()
+        let model = self.model
+        OmegaPopup.present(anchor: anchor, placement: .below, owner: owner, onDismiss: {}) {
+            LayerPickerPopupView { OmegaPopup.dismiss(owner) }.environmentObject(model)
+        }
+    }
+}
+
+/// A subpágina "Colar estilo": duas fileiras de botões de 58 pt (cor e
+/// preenchimento · borda e sombra · mesclagem e opacidade / mover e transformar ·
+/// texto · volume · efeitos · velocidade). Habilitado = a parte existe no estilo
+/// copiado; aceso = escolhido. Ao escolher, o título mostra o nome por 1 s.
+/// Colar aplica só as escolhidas (um passo de desfazer).
+private struct PasteStylePage: View {
+    @ObservedObject var model: AureaModel
+    let close: () -> Void
+    @State private var available: UInt32 = 0
+    @State private var chosen: UInt32 = 0
+    @State private var flash: String?
+    @State private var flashToken = 0
+    @State private var enter: CGFloat = 0.5
+    private var colors: MenuColors { MenuColors.of(.light) }
+    private static let rowA: [(UInt32, Character, String, String)] = [
+        (1, CupertinoGlyph.DropFill, "om_ps_color_fill", "pasteStyle.colorFill"),
+        (2, CupertinoGlyph.SquareOnSquare, "om_ps_border_shadow", "pasteStyle.borderShadow"),
+        (4, CupertinoGlyph.CircleLefthalfFill, "om_ps_blend", "pasteStyle.blend"),
+    ]
+    private static let rowB: [(UInt32, Character, String, String)] = [
+        (8, CupertinoGlyph.Move, "om_ps_transform", "pasteStyle.transform"),
+        (16, CupertinoGlyph.Textformat, "om_ps_text", "pasteStyle.text"),
+        (32, CupertinoGlyph.Speaker2, "om_ps_volume", "pasteStyle.volume"),
+        (64, CupertinoGlyph.Sparkles, "om_ps_effects", "pasteStyle.effects"),
+        (128, CupertinoGlyph.Speedometer, "om_ps_speed", "pasteStyle.speed"),
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Button(action: close) {
+                    CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 16, color: colors.text).mirrorsInRtl()
+                        .frame(width: 40, height: 40).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(AureaText.t("om_menu_back"))
+                .accessibilityIdentifier("pasteStyle.back")
+                Text(flash ?? AureaText.t("om_cp_paste_style_more")).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(colors.text)
+                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).padding(.trailing, 12)
+            }.frame(height: 40)
+            colors.divider.frame(height: 1)
+            partRow(Self.rowA)
+            partRow(Self.rowB.filter { $0.0 != 32 || available & 32 != 0 })
+            colors.divider.frame(height: 1)
+            HStack(spacing: 0) {
+                Button {
+                    let parts = chosen
+                    close()
+                    model.pasteStyleParts(parts)
+                } label: {
+                    Text(AureaText.t("om_ps_paste")).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(colors.accent)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .disabled(chosen == 0)
+                .opacity(chosen == 0 ? AnchoredMenuMetrics.disabledAlpha : 1)
+                .accessibilityIdentifier("pasteStyle.paste")
+                colors.divider.frame(width: 1)
+                Button(action: close) {
+                    Text(AureaText.t("common_cancel")).font(.aurea(size: 15)).foregroundStyle(colors.text)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityIdentifier("pasteStyle.cancel")
+            }.frame(height: 46)
+        }
+        .frame(width: AnchoredMenuMetrics.width)
+        .background(colors.background, in: RoundedRectangle(cornerRadius: AnchoredMenuMetrics.radius))
+        .overlay(RoundedRectangle(cornerRadius: AnchoredMenuMetrics.radius).stroke(colors.divider, lineWidth: 0.5))
+        .clipShape(RoundedRectangle(cornerRadius: AnchoredMenuMetrics.radius))
+        .offset(x: enter * AnchoredMenuMetrics.width)
+        .accessibilityIdentifier("pasteStyle.page")
+        .onAppear {
+            available = model.copiedStyleParts
+            chosen = available
+            // Entra deslizando meia largura com repique (250 ms).
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { enter = 0 }
+        }
+    }
+
+    private func partRow(_ parts: [(UInt32, Character, String, String)]) -> some View {
+        HStack(spacing: 0) {
+            ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+                let enabled = available & part.0 != 0
+                let on = enabled && chosen & part.0 != 0
+                Button {
+                    chosen ^= part.0
+                    if chosen & part.0 != 0 { showFlash(AureaText.t(part.2)) }
+                } label: {
+                    CupertinoGlyph.text(part.1, size: 20, color: on ? AureaColors.onAccent : colors.text)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(on ? AureaColors.accent : colors.pressed, in: RoundedRectangle(cornerRadius: 6))
+                        .padding(3).contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .disabled(!enabled)
+                .opacity(enabled ? 1 : AnchoredMenuMetrics.disabledAlpha)
+                .accessibilityLabel(AureaText.t(part.2))
+                .accessibilityAddTraits(on ? .isSelected : [])
+                .accessibilityIdentifier(part.3)
+            }
+        }
+        .padding(.horizontal, 4).padding(.vertical, 3)
+        .frame(height: 58)
+    }
+
+    private func showFlash(_ text: String) {
+        flashToken &+= 1
+        let mine = flashToken
+        flash = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { if mine == flashToken { flash = nil } }
+    }
+}
+
+/// "Selecionar uma camada…" como popup ancorado (no Copiar e colar), com a busca
+/// no topo quando há 7 camadas ou mais. Tocar numa escolhe SÓ ela e fecha.
+private struct LayerPickerPopupView: View {
+    @EnvironmentObject private var model: AureaModel
+    let close: () -> Void
+    @State private var search = ""
+    private var colors: MenuColors { MenuColors.of(.light) }
+    private var hits: [LayerItem] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.layers.filter { row in
+            query.isEmpty || row.name.localizedCaseInsensitiveContains(query)
+                || (row.kind == 4 && (model.engine.text(forLayer: row.id)?["content"] as? String ?? "").localizedCaseInsensitiveContains(query))
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(AureaText.t("editor_selecionar_uma_camada")).font(.aurea(size: 11)).foregroundStyle(colors.muted)
+                .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 4)
+            if model.layers.count >= 7 || !search.isEmpty {
+                TextField(AureaText.t("editor_nome_ou_texto_camada"), text: $search).font(.aurea(size: 14)).foregroundStyle(colors.text).tint(colors.accent)
+                    .padding(.horizontal, 10).padding(.vertical, 9)
+                    .background(colors.pressed, in: RoundedRectangle(cornerRadius: 6))
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .accessibilityIdentifier("layerPicker.search")
+            }
+            if !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && hits.isEmpty {
+                Text(AureaText.t("sh_menu_no_layer_matches", search.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    .font(.aurea(size: 13)).foregroundStyle(colors.muted).padding(.horizontal, 14).padding(.vertical, 10)
+            }
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(hits) { row in
+                        Button {
+                            close()
+                            model.select(layerId: row.id, additive: false)
+                        } label: {
+                            HStack(spacing: 10) {
+                                ShellLayerThumbnail(row: row, size: 32)
+                                Text(row.name.isEmpty ? AureaText.t("editor_camada") : row.name).font(.aurea(size: 14)).foregroundStyle(colors.text)
+                                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                                if row.label > 0 && Int(row.label) <= AureaColors.labelPalette.count {
+                                    Circle().fill(AureaColors.labelPalette[Int(row.label) - 1]).frame(width: 10, height: 10)
+                                }
+                                if row.selected { CupertinoGlyph.text(CupertinoGlyph.CheckmarkAlt, size: 16, color: colors.accent) }
+                            }
+                            .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 48)
+                            .background(row.selected ? colors.pressed : Color.clear)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(AureaPressStyle(shrink: 1))
+                        .accessibilityLabel(row.name)
+                        .accessibilityIdentifier("layerPicker.row.\(row.id)")
+                    }
+                }
+            }
+            .frame(maxHeight: 360)
+        }
+        .padding(.vertical, AnchoredMenuMetrics.verticalPadding)
+        .frame(width: AnchoredMenuMetrics.width)
+        .background(colors.background, in: RoundedRectangle(cornerRadius: AnchoredMenuMetrics.radius))
+        .overlay(RoundedRectangle(cornerRadius: AnchoredMenuMetrics.radius).stroke(colors.divider, lineWidth: 0.5))
+        .clipShape(RoundedRectangle(cornerRadius: AnchoredMenuMetrics.radius))
+        .accessibilityIdentifier("layerPicker.popup")
+    }
+}
+
+/// Omega chrome (área 02, P2-4): "Informações da mídia" como o diálogo claro da
+/// referência: Nome · Dimensões · Taxa de quadros · Duração · Formato · Tamanho ·
+/// Taxa de amostragem, e depois os extras do AUREA (codecs, canais, HDR). O que
+/// não se aplica ao tipo some (imagem sem taxa, duração e amostragem).
+struct MediaInfoDialogView: View {
+    let path: String
+    let onDismiss: () -> Void
+    @State private var rows: [(String, String)]?
+    @State private var loaded = false
+
+    var body: some View {
+        AureaDialog(title: AureaText.t("media_info_title"),
+                    actions: [DialogAction(AureaText.t("common_ok"), role: .positive, tag: "mediaInfo.ok")],
+                    onDismiss: onDismiss, tag: "mediaInfo.dialog",
+                    content: AnyView(table))
+            .task {
+                rows = await Self.load(path)
+                loaded = true
+            }
+    }
+
+    private var table: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if loaded, let rows {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    HStack(alignment: .firstTextBaseline, spacing: 16) {
+                        Text(AureaText.t(row.0))
+                        Spacer(minLength: 8)
+                        Text(row.1).multilineTextAlignment(.trailing)
+                    }.font(.aurea(size: 14)).foregroundStyle(AureaColors.lightText)
+                }
+            } else if loaded {
+                Text(AureaText.t("media_info_unreadable")).font(.aurea(size: 14)).foregroundStyle(AureaColors.lightText)
+            }
+        }.padding(.horizontal, 10)
+    }
+
+    /// As linhas do `MediaInfoProbe` na ordem da referência, com a duração em
+    /// relógio (hhh:mm:ss.ttt no vídeo, hhh:mm:ss no áudio) e o formato.
+    private static func load(_ path: String) async -> [(String, String)]? {
+        guard let probe = await MediaInfoProbe.read(path) else { return nil }
+        var by: [String: String] = [:]
+        for (key, value) in probe where by[key] == nil { by[key] = value }
+        let url = path.hasPrefix("file://") ? (URL(string: path) ?? URL(fileURLWithPath: path)) : URL(fileURLWithPath: path)
+        let image = by["media_info_duration"] == nil && by["media_info_audio_codec"] == nil
+        let audioOnly = by["media_info_resolution"] == nil && by["media_info_audio_codec"] != nil
+        var out: [(String, String)] = []
+        out.append(("om_mi_name", by["media_info_file"] ?? url.lastPathComponent))
+        if !audioOnly, let size = by["media_info_resolution"] { out.append(("om_mi_dimensions", size)) }
+        if !image, let fps = by["media_info_fps"] { out.append(("media_info_fps", fps)) }
+        if !image, by["media_info_duration"] != nil {
+            if let seconds = try? await AVURLAsset(url: url).load(.duration).seconds, seconds.isFinite, seconds > 0 {
+                out.append(("media_info_duration", clock(seconds, millis: !audioOnly)))
+            } else if let duration = by["media_info_duration"] {
+                out.append(("media_info_duration", duration))
+            }
+        }
+        let format = url.pathExtension.uppercased()
+        if !format.isEmpty { out.append(("om_mi_format", format)) }
+        if let size = by["media_info_size"] { out.append(("media_info_size", size)) }
+        var channels = ""
+        if !image, let rate = by["media_info_sample_rate"] {
+            let parts = rate.components(separatedBy: " · ")
+            out.append(("media_info_sample_rate", parts.first ?? rate))
+            if parts.count > 1 { channels = " · " + parts[1] }
+        }
+        // Extras do AUREA.
+        if let codec = by["media_info_video_codec"] { out.append(("media_info_video_codec", codec)) }
+        if let codec = by["media_info_audio_codec"] { out.append(("media_info_audio_codec", codec + channels)) }
+        if let hdr = by["media_info_hdr"] { out.append(("media_info_hdr", hdr)) }
+        return out
+    }
+
+    private static func clock(_ seconds: Double, millis: Bool) -> String {
+        let totalMs = Int((seconds * 1000).rounded())
+        let h = totalMs / 3_600_000, m = (totalMs / 60_000) % 60, s = (totalMs / 1000) % 60, ms = totalMs % 1000
+        return millis ? String(format: "%d:%02d:%02d.%03d", h, m, s, ms) : String(format: "%d:%02d:%02d", h, m, s)
+    }
 }
 
 private struct ShellMenuHeightKey: PreferenceKey {
@@ -644,17 +1500,17 @@ private struct ShellMenuRow: View {
 }
 
 // One editor-sized host for bottom sheets, dialogs and anchored shell popups.
+// Omega chrome (área 02): o ⋮ da camada e o Copiar e colar são menus ancorados
+// nos próprios botões (AnchoredMenu.swift); o menu da engrenagem saiu (o ⚙ abre
+// os Ajustes direto). Aqui ficam os diálogos, a lista "Selecionar uma camada"
+// da busca de ferramentas e o popup de pai.
 @MainActor struct ShellOverlayHost: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     @State private var search = ""
-    @State private var linkHeight: CGFloat = 420
+    @State private var linkHeight: CGFloat = 330
     @FocusState private var searchFocused: Bool
-    /// "Substituir mídia" / "Informações da mídia" (ProjectTransfer.swift).
-    @State private var replaceTarget: LayerRef?
-    @State private var infoTarget: LayerRef?
     private var layer: LayerItem? { model.selectedLayer }
-    private var ids: [NSNumber] { model.selection.map { NSNumber(value: $0) } }
     private var searchHits: [LayerItem] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         return model.layers.filter { row in
@@ -672,303 +1528,44 @@ private struct ShellMenuRow: View {
                         }, onDismiss: dismiss)
                     case .goToTime: ShellTimeDialog(initial: shell.timeInput, onDismiss: dismiss)
                     case .projectSettings: EmptyView()
+                    case .layerMenu, .copyPaste:
+                        Color.clear.onAppear { shell.sheet = nil }
+                    case .timelineMenu:
+                        Color.clear.onAppear { shell.sheet = nil; model.showProjectSettings = true }
                     default:
                         StageInk.menuScrim.ignoresSafeArea().onTapGesture(perform: dismiss)
-                        ShellMenu(maxHeight: geometry.size.height * (sheet == .searchLayers ? 0.7 : 0.8), bottomInset: geometry.safeAreaInsets.bottom, onDismiss: dismiss) {
-                            switch sheet {
-                            case .layerMenu: layerMenu
-                            case .timelineMenu: timelineMenu
-                            case .copyPaste: CopyPasteMenu(dismiss: dismiss)
-                            case .searchLayers: searchMenu
-                            default: EmptyView()
-                            }
+                        ShellMenu(maxHeight: geometry.size.height * 0.7, bottomInset: geometry.safeAreaInsets.bottom, onDismiss: dismiss) {
+                            searchMenu
                         }.id(sheet).frame(maxHeight: .infinity, alignment: .bottom).ignoresSafeArea(edges: .bottom)
                     }
                 }
                 if let anchor = shell.linkAnchor {
                     Color.clear.contentShape(Rectangle()).ignoresSafeArea().onTapGesture { shell.linkAnchor = nil }
-                    let size = CGSize(width: max(1, min(300, geometry.size.width - 16)), height: min(420, min(geometry.size.height - 16, linkHeight)))
-                    let pos = popupPosition(anchor, size, geometry, gap: 0, flip: false)
-                    ShellLinkPopup(ids: shell.linkIds, dismiss: { shell.linkAnchor = nil }, onHeight: { linkHeight = $0 }).frame(width: size.width, height: size.height).offset(x: pos.x, y: pos.y)
-                }
-                if let anchor = shell.resolutionAnchor {
-                    Color.clear.contentShape(Rectangle()).ignoresSafeArea().onTapGesture { shell.resolutionAnchor = nil }
-                    let pos = popupPosition(anchor, CGSize(width: 220, height: 252), geometry, gap: 4, flip: true)
-                    resolutionPopup.frame(width: 220).offset(x: pos.x, y: pos.y)
+                    let size = CGSize(width: min(AnchoredMenuMetrics.width, max(1, geometry.size.width - 16)),
+                                      height: min(AnchoredMenuMetrics.maxHeight, min(geometry.size.height - 16, linkHeight)))
+                    let pos = popupPosition(anchor, size, geometry)
+                    ShellLinkPopup(ids: shell.linkIds, dismiss: { shell.linkAnchor = nil }, onHeight: { linkHeight = $0 })
+                        .frame(width: size.width, height: size.height).offset(x: pos.x, y: pos.y)
                 }
             }.onChange(of: shell.sheet) { sheet in if sheet == .searchLayers { search = "" } }
         }
-        .allowsHitTesting(shell.sheet != nil || shell.linkAnchor != nil || shell.resolutionAnchor != nil)
-        .sheet(item: $replaceTarget) { target in
-            ShellMediaPicker(selectionLimit: 1, filter: .any(of: [.images, .videos])) { items in
-                replaceTarget = nil
-                if let (url, video) = items.first { model.replaceMedia(layer: target.id, url: url, video: video) }
-            }
-        }
-        .sheet(item: $infoTarget) { target in MediaInfoSheetView(path: model.layerSourcePath(target.id)) }
+        .allowsHitTesting(shell.sheet != nil || shell.linkAnchor != nil)
     }
-    private func popupPosition(_ anchor: CGRect, _ size: CGSize, _ geometry: GeometryProxy, gap: CGFloat, flip: Bool) -> CGPoint {
+    /// Abaixo da âncora, pela borda de INÍCIO (a regra do menu ancorado); para cima se não couber.
+    private func popupPosition(_ anchor: CGRect, _ size: CGSize, _ geometry: GeometryProxy) -> CGPoint {
         let origin = geometry.frame(in: .global).origin
-        let x = (anchor.maxX - origin.x - size.width).clamped(to: 8...max(8, geometry.size.width - size.width - 8))
-        var y = anchor.maxY - origin.y + gap
-        if y + size.height > geometry.size.height - 8 { y = flip ? anchor.minY - origin.y - gap - size.height : geometry.size.height - size.height - 8 }
-        return CGPoint(x: x, y: max(8, y))
-    }
-    private var resolutionPopup: some View {
-        VStack(spacing: 0) {
-            // Informativo ("Otimizando 42%"), só enquanto a versão leve é gerada.
-            ProxyMenuStatus()
-            // Teste de reprodução crua (texto fixo, sem tradução): só no build
-            // Debug — é o que a CI de gestos usa. Na App Store/Play não aparece.
-            #if DEBUG
-            Button(model.rawPlayback ? AureaText.t("ios_raw_back_to_compositor") : "AUREA RAW PLAYBACK TEST") {
-                shell.resolutionAnchor = nil; model.toggleRawPlayback()
-            }.font(.aurea(size: 11)).padding(8).accessibilityIdentifier("rawPlaybackToggle")
-            #endif
-            ForEach(Array(["AUTO", AureaText.t("i18n_preview_full"), "1/2", "1/4", "1/8"].enumerated()), id: \.offset) { index, name in
-                let denominator: UInt32 = [1, 1, 2, 4, 8][index]
-                let on = index == 0 ? model.status.previewAuto != 0 : model.status.previewAuto == 0 && model.status.previewDenominator == denominator
-                Button {
-                    shell.resolutionAnchor = nil; model.setPreviewScale(num: 1, den: denominator, auto: index == 0)
-                } label: {
-                    HStack(spacing: 10) {
-                        Rectangle().fill(on ? AureaColors.accent : Color.clear).frame(width: 4, height: 24)
-                        Text(name).font(.aurea(size: 13)).foregroundStyle(on ? AureaColors.accent : AureaColors.text).frame(maxWidth: .infinity, alignment: .leading)
-                    }.padding(.trailing, 10).frame(height: 40)
-                }.buttonStyle(AureaPressStyle(shrink: 1))
-            }
-        }.padding(.vertical, 4).background(AureaColors.pill, in: RoundedRectangle(cornerRadius: 8))
+        let a = anchor.offsetBy(dx: -origin.x, dy: -origin.y)
+        return CGPoint(
+            x: AnchoredMenuPosition.x(anchorLeft: a.minX, anchorRight: a.maxX, windowWidth: geometry.size.width, popupWidth: size.width,
+                                      rtl: false, alignEnd: false, margin: AnchoredMenuMetrics.screenMargin),
+            y: AnchoredMenuPosition.y(anchorTop: a.minY, anchorBottom: a.maxY, windowHeight: geometry.size.height, popupHeight: size.height,
+                                      margin: AnchoredMenuMetrics.screenMargin, gap: AnchoredMenuMetrics.anchorGap))
     }
     private func dismiss() { shell.dismiss(); UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
     private func act(_ action: () -> Void) { dismiss(); action() }
-    private func removeSelection() {
-        model.deleteSelectedLayers()
-    }
-    @ViewBuilder private var layerMenu: some View {
-        if let row = layer {
-            let index = model.layers.firstIndex(where: { $0.id == row.id }) ?? 0
-            let inside = model.status.playhead > Int64(row.startFrame) && model.status.playhead < Int64(row.endFrame)
-            ShellMenuSection("editor_camada")
-            // Sem o que já está à vista (nada duas vezes): renomear é o nome no
-            // topo, excluir é a lixeira do topo, aparar/dividir moram na doca.
-            // Velocidade e ações de grupo ficam neste menu contextual.
-            if row.kind == 1 || row.kind == 3 {
-                ShellMenuRow(CupertinoGlyph.Speedometer, "editor_velocidade") { act { model.openPanel(.speed) } }
-            }
-            ShellMenuRow(row.locked ? ShellGlyph.LockOpenFill : CupertinoGlyph.LockFill, row.locked ? "editor_desbloquear_camada" : "editor_bloquear_camada",
-                         detail: row.locked ? "editor_volta_aceitar_movimento_edicao" : "editor_nao_aceita_movimento_corte_nem_edicao") { model.mutate { $0.setLayer(row.id, locked: !row.locked) }; model.refreshModel(force: true) }
-            ShellMenuRow(row.visible ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Eye, row.visible ? "editor_ocultar_camada" : "editor_mostrar_camada") { model.mutate { $0.setLayer(row.id, visible: !row.visible) }; model.refreshModel(force: true) }
-            ShellMenuRow(CupertinoGlyph.Speaker2, "editor_solo", checked: row.solo, detail: "editor_alguma_camada_solo_previa_som_so") { model.mutate { $0.setLayer(row.id, solo: !row.solo) }; model.refreshModel(force: true) }
-            // Linha Magnética: só em trecho com FONTE (vídeo, imagem, áudio ou
-            // pré-composição). Texto, forma, nulo, ajuste, câmera e partículas
-            // são composição, não montagem.
-            if row.kind == 1 || row.kind == 2 || row.kind == 3 || row.kind == 12 {
-                ShellMenuRow(CupertinoGlyph.Link, "editor_linha_magnetica", checked: row.magnetic,
-                             detail: "editor_linha_magnetica_detalhe") { act { model.setLayerMagneticTrack(row.id, !row.magnetic) } }
-            }
-            if row.kind != 3 {
-                ShellMenuRow(CupertinoGlyph.SliderHorizontal3, "editor_camada_ajuste", checked: row.adjustment, detail: "editor_efeitos_desta_camada_valem_todas_baixo") { model.mutate { $0.setLayer(row.id, adjustment: !row.adjustment) }; model.refreshModel(force: true) }
-                if row.adjustment {
-                    // Camadas afetadas: todas abaixo → só a logo abaixo (um grupo conta
-                    // como uma) → só as escolhidas (a lista marcada do app antigo).
-                    let scope = model.engine.adjustmentScope(row.id)
-                    ShellMenuRow(CupertinoGlyph.SliderHorizontal3, "la_affected",
-                                 title: AureaText.t("la_affected") + " · " + AureaText.t(scope == 1 ? "la_affected_below" : scope == 2 ? "la_affected_chosen" : "la_affected_all"),
-                                 detail: scope == 2 ? "la_affected_chosen_hint" : "la_affected_hint") { model.engine.setAdjustmentScope((scope + 1) % 3, forLayer: row.id); model.refreshModel(force: true) }
-                    if scope == 2 {
-                        let below = Array(model.layers.dropFirst(index + 1)).filter { $0.kind != 3 }
-                        let chosen = Set(model.engine.adjustmentTargets(row.id).map(\.int64Value))
-                        if below.isEmpty { ShellMenuRow(CupertinoGlyph.SliderHorizontal3, "la_affected_none_below", enabled: false) {} }
-                        ForEach(below) { b in
-                            ShellMenuRow(CupertinoGlyph.SliderHorizontal3, "la_affected_chosen", title: b.name, checked: chosen.contains(b.id)) {
-                                model.engine.setAdjustmentTarget(b.id, on: !chosen.contains(b.id), forLayer: row.id); model.refreshModel(force: true)
-                            }
-                        }
-                    }
-                }
-                ShellMenuRow(CupertinoGlyph.Grid, "editor_guia_nao_exporta", checked: row.guide, detail: "editor_aparece_aqui_editor_fica_fora_video") { model.mutate { $0.setLayer(row.id, guide: !row.guide) }; model.refreshModel(force: true) }
-            }
-            ShellMenuRow(CupertinoGlyph.PlusSquareOnSquare, "editor_duplicar") { act { model.engine.duplicateLayers(ids); model.refreshModel(force: true) } }
-            // Puxar para o cabeçote saiu da fileira rápida (igual à do AM) e mora aqui.
-            ShellMenuRow(CupertinoGlyph.ArrowDownToLine, "editor_puxar_cabecote", enabled: !row.locked) {
-                act { if model.status.playing != 0 { model.playPause() }; model.moveToPlayhead(row.id) }
-            }
-            ShellMenuRow(CupertinoGlyph.DocOnDoc, "editor_copiar_camada") { act { model.engine.copyLayers(ids) } }
-            ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_colar_camada_cabecote", enabled: model.engine.clipboardState & 1 != 0) { act { model.engine.pasteLayers(model.status.playhead); model.refreshModel(force: true) } }
-            ShellMenuRow(CupertinoGlyph.Paintbrush, "editor_copiar_estilo") { act { model.engine.copyStyle(row.id) } }
-            ShellMenuRow(ShellGlyph.PaintbrushFill, "editor_colar_estilo", enabled: model.engine.clipboardState & 2 != 0) { act { model.engine.pasteStyle(ids); model.refreshModel(force: true) } }
-            ShellMenuRow(CupertinoGlyph.ArrowUpToLine, "editor_trazer_frente", enabled: index > 0) { act { model.reorderLayer(row.id, displayIndex: index - 1) } }
-            ShellMenuRow(CupertinoGlyph.ArrowDownToLine, "editor_enviar_tras", enabled: index < model.layers.count - 1) { act { model.reorderLayer(row.id, displayIndex: index + 1) } }
-            ShellMenuSection("editor_etiqueta")
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 2), count: 8), spacing: 2) {
-                ForEach(0...AureaColors.labelPalette.count, id: \.self) { label in
-                    Button { model.mutate { $0.setLayer(row.id, label: UInt32(label)) }; model.refreshModel(force: true) } label: {
-                        ZStack {
-                            if label == 0 { Circle().stroke(AureaColors.muted, lineWidth: 1.5); CupertinoGlyph.text(ShellGlyph.Nosign, size: 14, color: AureaColors.muted) }
-                            else { Circle().fill(AureaColors.labelPalette[label - 1]) }
-                        }.frame(width: 24, height: 24).frame(width: 34, height: 34)
-                            .overlay { if row.label == UInt32(label) { Circle().stroke(AureaColors.accent, lineWidth: 2) } }
-                    }.buttonStyle(.plain)
-                }
-            }.padding(.horizontal, 14).padding(.vertical, 4)
-            if row.kind != 3 {
-                ShellMenuSection("editor_grupo")
-                // Máscara de recorte: só quando a camada pode ser recortada pela de
-                // baixo (o motor decide: camada visual com base visual abaixo) ou já
-                // está recortada. Liberar solta também a cadeia logo acima.
-                if row.clipToBelow || row.clipCandidate {
-                    ShellMenuRow(CupertinoGlyph.ArrowDownRightSquare, row.clipToBelow ? "editor_liberar_mascara_recorte" : "editor_criar_mascara_recorte",
-                                 detail: "editor_mascara_recorte_detalhe") { act { model.setLayerClipToBelow(row.id, !row.clipToBelow) } }
-                        .accessibilityIdentifier("layer.clipMask")
-                }
-                if row.kind == 12 {
-                    ShellMenuRow(CupertinoGlyph.ArrowDownRightSquare, "editor_entrar_grupo") { act { model.openGroup(row.id) } }
-                    ShellMenuRow(ShellGlyph.SquareSplit2x2, "editor_desagrupar") { act { model.ungroup(row.id) } }
-                    let through = model.engine.groupCameraPassThrough(row.id) == 1
-                    ShellMenuRow(CupertinoGlyph.Camera, "la_group_camera", checked: through, detail: "la_group_camera_hint") {
-                        if model.engine.setGroupCameraPassThrough(!through, forLayer: row.id) {
-                            model.toast = AureaText.t(through ? "app_group_camera_sealed" : "app_group_camera_reaches")
-                        }
-                        model.refreshModel(force: true)
-                    }
-                } else { ShellMenuRow(CupertinoGlyph.RectangleStack, "editor_converter_grupo") { act { model.groupSelection() } } }
-                let acceptsLights = model.engine.layerAcceptsLights(row.id)
-                if acceptsLights >= 0 {
-                    ShellMenuRow(CupertinoGlyph.Lightbulb, "la_accepts_lights", checked: acceptsLights == 1, detail: "la_accepts_lights_hint") {
-                        _ = model.engine.setLayerAcceptsLights(acceptsLights != 1, forLayer: row.id)
-                        model.refreshModel(force: true)
-                    }
-                }
-                // Pôr esta camada num grupo que já existe aqui / tirar do grupo aberto.
-                ForEach(model.layers.filter { $0.kind == 12 && $0.id != row.id }) { group in
-                    ShellMenuRow(CupertinoGlyph.RectangleStack, "la_add_to_group", title: AureaText.t("la_add_to_group") + " · " + group.name) {
-                        act {
-                            let why = model.engine.addLayers([NSNumber(value: row.id)], toGroup: group.id)
-                            if !why.isEmpty { model.toast = AureaText.t("app_group_add_failed", AureaEngineText.reason(why)) }
-                            model.refreshModel(force: true)
-                        }
-                    }
-                }
-                if model.engine.precompDepth > 0 {
-                    ShellMenuRow(CupertinoGlyph.ArrowUturnLeft, "la_remove_from_group") {
-                        act {
-                            let why = model.engine.removeLayerFromGroup(row.id)
-                            if !why.isEmpty { model.toast = AureaText.t("app_group_remove_failed", AureaEngineText.reason(why)) }
-                            model.refreshModel(force: true)
-                        }
-                    }
-                }
-            }
-            if row.kind == 1 || row.kind == 2 || row.kind == 3 {
-                ShellMenuSection("sh_menu_media")
-                if row.kind == 1 || row.kind == 2 {
-                    ShellMenuRow(CupertinoGlyph.Arrow2Squarepath, "layer_replace_media", enabled: !row.locked,
-                                 detail: "layer_replace_media_detail") { act { replaceTarget = LayerRef(id: row.id) } }
-                }
-                ShellMenuRow(CupertinoGlyph.InfoCircle, "media_info_title") { act { infoTarget = LayerRef(id: row.id) } }
-                if row.kind == 1 {
-                    ShellMenuRow(CupertinoGlyph.MusicNote2, "editor_extrair_audio", detail: "editor_som_vira_camada_propria_video_fica") { act { _ = model.engine.extractAudio(fromLayer: row.id); model.refreshModel(force: true) } }
-                }
-            }
-            ShellMenuSection("editor_movimento")
-            let timeFlags = (model.detail["timeFlags"] as? NSNumber)?.uint32Value ?? 0
-            ShellMenuRow(CupertinoGlyph.MotionBlur, "editor_desfoque_movimento", checked: timeFlags & 2 != 0,
-                         detail: "editor_borra_direcao_movimento_obturador_nas_configuracoes") {
-                act { model.mutate { $0.setMotionBlur(timeFlags & 2 == 0, forLayer: row.id) }; model.refreshModel(force: true) }
-            }
-            if row.kind == 1 {
-                ShellMenuRow(CupertinoGlyph.MotionBlur, "editor_desfoque_movimento_video", checked: timeFlags & 32 != 0,
-                             detail: "editor_borra_mexe_dentro_video_pelos_vetores") {
-                    act { model.mutate { $0.setVectorBlur(forLayer: row.id, amount: timeFlags & 32 == 0 ? 1 : 0) }; model.refreshModel(force: true) }
-                }
-            }
-            // 0.3.1 (Menus.kt): preset .ffx nesta camada / script .jsx com ela em comp.selectedLayers.
-            ShellMenuRow(CupertinoGlyph.SquareStack3dUp, "ae_import_menu", enabled: !row.locked, detail: "ae_import_layer_detail") {
-                act { openAeImport() }
-            }.accessibilityIdentifier("layer.aeImport")
-            if row.kind == 1 || row.kind == 3 {
-                ShellMenuSection("editor_tempo")
-                ShellMenuRow(CupertinoGlyph.Scissors, "i18n_clip_modes") { act { model.openPanel(.clipEdit) } }
-            }
-            if row.kind == 1 {
-                ShellMenuRow(ShellGlyph.Snow, "sh_menu_freeze_frame", enabled: inside) { act { let created = model.engine.freezeFrame(forLayer: row.id, frame: Int32(clamping: model.status.playhead), hold: Int32(max(1, model.compositionFps * 3))); model.refreshModel(force: true); if created >= 0 { model.select(layerId: created) } } }
-                // Rastreio de PONTO e estabilização (o rastreio de câmera virou efeito).
-                ShellMenuSection("editor_rastreio")
-                // O painel inteiro (ponto, planar, cantos, estabilizador) sem já pedir o ponto.
-                ShellMenuRow(ShellGlyph.Viewfinder, "dock2_tracking_tools", detail: "dock2_tracking_tools_detail") { act { model.select(layerId: row.id); model.cameraTrackerVisible = false; model.openPanel(.tracking) } }
-                ShellMenuRow(ShellGlyph.Viewfinder, "editor_rastrear_ponto", detail: "editor_cria_nulo_segue_ponto_ligue_outras") { act { model.select(layerId: row.id); model.openPanel(.tracking); model.beginPointPick(stabilize: false) } }
-                ShellMenuRow(ShellGlyph.Viewfinder, "editor_estabilizar_pelo_ponto", detail: "editor_move_video_ponto_ficar_parado_tela") { act { model.select(layerId: row.id); model.openPanel(.tracking); model.beginPointPick(stabilize: true) } }
-            }
-        }
-    }
-    /// Menu da ENGRENAGEM da barra do projeto: a seção "Projeto" nova primeiro
-    /// (ajustes, busca, copiar/colar, marca, lupa, aparar), depois o de sempre.
-    @ViewBuilder private var timelineMenu: some View {
-        projectMenuSection
-        ShellMenuSection("sh_menu_selection")
-        ShellMenuRow(CupertinoGlyph.CheckmarkSquare, "editor_selecionar_todas_camadas", enabled: model.layers.count >= 2) { act { model.selectAll() } }
-        ShellMenuRow(CupertinoGlyph.RectangleStack, "edt_tl_pick_layers", enabled: !model.layers.isEmpty, checked: model.timelineLayerSelectMode, detail: "edt_tl_pick_layers_detail") { act { model.changeTimelineLayerSelectMode(!model.timelineLayerSelectMode) } }
-        ShellMenuRow(CupertinoGlyph.Square, "editor_limpar_selecao") { act { model.clearSelection() } }
-        ShellMenuRow(CupertinoGlyph.RectangleStack, "editor_selecionar_uma_camada", enabled: !model.layers.isEmpty) { shell.sheet = .searchLayers }
-        ShellMenuSection("editor_reproducao_previa")
-        ShellMenuRow(CupertinoGlyph.Repeat, "editor_reproducao_loop", checked: model.looping) { act { model.setLooping(!model.looping) } }
-        ShellMenuRow(CupertinoGlyph.Fullscreen, model.fullscreen ? "editor_sair_tela_cheia" : "editor_tela_cheia") { act { model.fullscreen.toggle() } }
-        ShellMenuRow(CupertinoGlyph.MotionBlur, "editor_desfoque_movimento_composicao", checked: model.compMotionBlur, detail: "editor_camadas_desfoque_movimento_so_borram_isto") { model.setCompositionMotionBlur(!model.compMotionBlur) }
-        if model.compMotionBlur {
-            ShellMenuRow(CupertinoGlyph.CircleLefthalfFill, "sh_menu_shutter", title: AureaText.t("sh_menu_shutter", String(Int(model.shutterAngle))), detail: "editor_toque_trocar_90_180_270_360") {
-                model.changeShutterAngle([Float(90), 180, 270, 360].first(where: { $0 > model.shutterAngle }) ?? 90)
-            }
-        }
-        ShellMenuRow(ShellGlyph.WaveformPathEcg, "editor_diagnostico_tela", checked: model.hudVisible, detail: "editor_quadros_segundo_tempos_gpu_memoria_decodificador") { model.toggleHud() }
-        ShellMenuSection("editor_edicao")
-        ShellMenuRow(CupertinoGlyph.Link, "editor_edicao", title: "Snapping", checked: model.snapping) { act { model.snapping.toggle() } }
-        ShellMenuRow(CupertinoGlyph.SuitDiamond, "editor_keyframes_todas_camadas", checked: model.showAllKeyframes, detail: "editor_keyframes_todas_camadas_detalhe") { act { model.showAllKeyframes.toggle() } }
-        ShellMenuRow(CupertinoGlyph.Link, "editor_timeline_magnetica_modo_edicao", checked: model.editMode, detail: "editor_aparar_empurra_camadas_seguintes_excluir_fecha") { act { model.toggleEditMode() } }
-        ShellMenuRow(ShellGlyph.ScissorsAlt, "editor_remover_espacos_vazios") { act { model.removeGaps() } }
-        ShellMenuSection("editor_marcas_ritmo")
-        // Editar a marca do cabeçote (o segurar do antigo botão da marca); tocar a
-        // régua em cima de uma marca também abre o editor dela.
-        ShellMenuRow(CupertinoGlyph.Pencil, "marker_edit", enabled: model.markerFrames.contains(model.status.playhead)) { act { model.editMarkerAtPlayhead() } }
-        ShellMenuRow(ShellGlyph.BookmarkSolid, "editor_ir_proxima_marca", enabled: !model.markerFrames.isEmpty) { act { model.seekToNextMarker() } }
-        ShellMenuSection("editor_mais")
-        ShellMenuRow(CupertinoGlyph.RectangleStack, "editor_agrupar_camadas_escolhidas", enabled: !model.selection.isEmpty) { act { model.groupSelection() } }
-        ShellMenuRow(CupertinoGlyph.Crop, "editor_group_mask", enabled: model.selection.count >= 2, detail: "editor_group_mask_hint") { act { model.groupAndMaskSelection() } }
-        ShellMenuRow(CupertinoGlyph.CircleLefthalfFill, "editor_group_exclude", enabled: model.selection.count >= 2, detail: "editor_group_exclude_hint") { act { model.groupAndMaskSelection(exclude: true) } }
-        ShellMenuRow(CupertinoGlyph.Speedometer, "ios_perf_test_a11y") { act { shell.performanceTest = true } }
-    }
-    /// A seção "Projeto" do menu da engrenagem (o que saiu da barra do topo e do transporte).
-    @ViewBuilder private var projectMenuSection: some View {
-        let marked: Bool = model.markerFrames.contains(model.status.playhead)
-        let zoomLock: Bool = StageViewZoom.shared.zoomLock
-        ShellMenuSection("editor_projeto_cbe9")
-        // Interface do projeto (0.2.5): a Composição é esta; a Edição é a de montagem. Primeiro
-        // item do menu (Menus.kt, 0.2.7): no fim, a "timeline magnética" era confundida com ela.
-        ShellMenuRow(CupertinoGlyph.RectangleStack, "ui_mode_switch_to_edit", detail: "ui_mode_edit_hint") { act { model.setUiMode(AureaUiMode.edit) } }
-        ShellMenuRow(CupertinoGlyph.Gear, "editor_ajustes_projeto") { act { pause(); model.showProjectSettings = true } }
-        // 0.3.0 (Menus.kt): preset .ffx / script .jsx do After Effects; o seletor abre pela raiz
-        // (AddLayerPickers) depois que a folha fecha. 0.3.1: sem camada escolhida, o preset
-        // entra numa camada nova (texto ou sólido do tamanho da composição), como no AE.
-        ShellMenuRow(CupertinoGlyph.SquareStack3dUp, "ae_import_menu",
-                     detail: model.primarySelection != nil ? "ae_import_layer_detail" : "ae_import_new_layer_detail") {
-            act { openAeImport() }
-        }.accessibilityIdentifier("menu.ae_import")
-        ShellMenuRow(CupertinoGlyph.Search, "edt_cmd_search_desc") { act { pause(); shell.commandSearch = true } }
-            .accessibilityIdentifier("commandSearchOpen")
-        ShellMenuRow(CupertinoGlyph.DocOnClipboard, "editor_copiar_colar") { shell.sheet = .copyPaste }
-        ShellMenuRow(marked ? ShellGlyph.BookmarkSolid : CupertinoGlyph.Bookmark, "editor_marcar_ou_desmarcar_este_instante", checked: marked) { act { model.toggleMarkerAt(model.status.playhead) } }
-        ShellMenuRow(CupertinoGlyph.Search, zoomLock ? "stage_zoom_view_on" : "stage_zoom_view_off", checked: zoomLock, symbol: "plus.magnifyingglass") { act { StageViewZoom.shared.zoomLock.toggle() } }
-        ShellMenuRow(ShellGlyph.ScissorsAlt, "editor_aparar_projeto_cabecote", enabled: model.status.playhead > 0) { act { model.trimProjectAtPlayhead() } }
-    }
-    private func pause() { if model.status.playing != 0 { model.playPause() } }
-    /// O seletor do AE abre pela raiz (AddLayerPickers) depois que a folha fecha.
-    private func openAeImport() {
-        pause()
-        let shell = shell
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { shell.addPicker = .aeImport }
-    }
-    /// SELECIONAR UMA CAMADA (Menus.kt SearchLayersSheet): todas as camadas
-    /// (miniatura ou selo do tipo + nome); tocar escolhe SÓ ela e fecha. A busca
-    /// só aparece com muitas camadas e o teclado não abre sozinho.
+    /// SELECIONAR UMA CAMADA em folha: o caminho da busca de ferramentas (sem botão
+    /// por perto para ancorar; no editor ela abre ancorada no Copiar e colar).
+    /// Todas as camadas (miniatura ou selo do tipo + nome); tocar escolhe SÓ ela.
     @ViewBuilder private var searchMenu: some View {
         ShellMenuSection("editor_selecionar_uma_camada")
         if model.layers.count >= 7 || !search.isEmpty {
@@ -1002,21 +1599,27 @@ private struct ShellTimeDialog: View {
     @State private var text = ""
     @FocusState private var focused: Bool
     var body: some View {
+        // Omega fundação (F4): o campo do diálogo claro.
         AureaAlert(title: AureaText.t("editor_ir_tempo"), confirmLabel: AureaText.t("editor_ir"), onConfirm: seek, onDismiss: onDismiss, extra: AnyView(
-            TextField(AureaText.t("editor_segundos_ou_mm_ss_ms"), text: $text).font(.aurea(size: 15)).monospacedDigit().foregroundStyle(AureaColors.text).tint(AureaColors.accent)
-                .focused($focused).submitLabel(.go).onSubmit { onDismiss(); seek() }
-                .padding(.horizontal, 8).padding(.vertical, 7).background(AureaColors.stage, in: RoundedRectangle(cornerRadius: 7)).padding(.top, 12)
+            AureaDialogField(text: $text, placeholder: AureaText.t("editor_segundos_ou_mm_ss_ms"), monospacedDigits: true,
+                             submitLabel: .go, focus: $focused) { onDismiss(); seek() }
         )).onAppear { text = initial; focused = true }
     }
     private func seek() { if let frame = ShellClock.parseToFrame(text, Float(model.compositionFps)) { model.seek(toFrame: frame) } }
 }
 
+/// Omega chrome (área 02, P1-1): o popup de pai (`layer_parent_menu_popup`).
+/// "Nenhum" no topo (destacado quando sem pai), um fio e todas as camadas que
+/// não são áudio, da frente para o fundo: faixa da etiqueta, miniatura, nome e,
+/// só no pai atual, o ícone de vínculo com fundo de destaque. A própria camada
+/// fica sublinhada; ela e as descendentes (fariam ciclo) aparecem apagadas e
+/// sem toque. Rola até a camada atual. "Novo nulo" (extra do AUREA) no fim.
 private struct ShellLinkPopup: View {
     @EnvironmentObject private var model: AureaModel
     let ids: [Int64]
     let dismiss: () -> Void
     let onHeight: (CGFloat) -> Void
-    private var candidates: [LayerItem] { model.parentCandidatesForAll(ids) }
+    private var colors: MenuColors { MenuColors.of(.light) }
     private var current: Int64 {
         let parents = Set(model.layers.filter { ids.contains($0.id) }.map { row -> Int64 in
             (model.engine.layerDetail(row.id)?["parentId"] as? NSNumber)?.int64Value ?? 0
@@ -1024,16 +1627,37 @@ private struct ShellLinkPopup: View {
         return parents.count == 1 ? parents.first! : -1
     }
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                newNullRow
-                row(AureaText.t("editor_nenhum"), id: 0, bold: true) { CupertinoGlyph.text(ShellGlyph.Nosign, size: 22).frame(width: 44, height: 44) }
-                ForEach(candidates) { layer in row(layer.name, id: layer.id) { ShellLayerThumbnail(row: layer) } }
-                if candidates.isEmpty { Text(AureaText.t("editor_nenhuma_outra_camada_seguir_crie_nulo")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.horizontal, 16).padding(.vertical, 12) }
-            }.background(GeometryReader { bounds in Color.clear.preference(key: ShellMenuHeightKey.self, value: bounds.size.height) })
-        }.onPreferenceChange(ShellMenuHeightKey.self, perform: onHeight)
-            .background(AureaColors.pill, in: RoundedRectangle(cornerRadius: 12)).clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(AureaColors.border, lineWidth: 1))
+        let candidates = Set(model.parentCandidatesForAll(ids).map(\.id))
+        let visual = model.layers.filter { $0.kind != 3 }
+        let now = current
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    row(AureaText.t("editor_nenhum"), id: 0, strip: .clear, current: now == 0, tag: "parent.none") {
+                        CupertinoGlyph.text(ShellGlyph.Nosign, size: 18, color: colors.text)
+                    }
+                    colors.divider.frame(height: 1)
+                    ForEach(visual) { layer in
+                        row(layer.name.isEmpty ? AureaText.t("editor_camada") : layer.name, id: layer.id,
+                            strip: layer.label > 0 && Int(layer.label) <= AureaColors.labelPalette.count ? AureaColors.labelPalette[Int(layer.label) - 1] : .clear,
+                            current: now == layer.id, blank: layer.name.isEmpty, isSelf: ids.contains(layer.id),
+                            enabled: candidates.contains(layer.id), tag: "parent.row.\(layer.id)") {
+                            ShellLayerThumbnail(row: layer, size: 32)
+                        }.id(layer.id)
+                    }
+                    colors.divider.frame(height: 1).padding(.vertical, 4)
+                    newNullRow
+                }
+                .padding(.vertical, AnchoredMenuMetrics.verticalPadding)
+                .background(GeometryReader { bounds in Color.clear.preference(key: ShellMenuHeightKey.self, value: bounds.size.height) })
+            }
+            .onAppear { if let first = ids.first { proxy.scrollTo(first, anchor: .center) } }
+        }
+        .onPreferenceChange(ShellMenuHeightKey.self, perform: onHeight)
+        .background(colors.background, in: RoundedRectangle(cornerRadius: AnchoredMenuMetrics.radius))
+        .clipShape(RoundedRectangle(cornerRadius: AnchoredMenuMetrics.radius))
+        .overlay(RoundedRectangle(cornerRadius: AnchoredMenuMetrics.radius).stroke(colors.divider, lineWidth: 0.5))
+        .accessibilityIdentifier("parent.menu")
     }
     /// "Novo nulo": cria o nulo no centro das escolhidas e vincula todas a ele.
     private var newNullRow: some View {
@@ -1041,38 +1665,48 @@ private struct ShellLinkPopup: View {
         return Button {
             dismiss(); model.parentSelectionToNewNull(ids)
         } label: {
-            HStack(spacing: 14) {
+            HStack(spacing: 6) {
                 ZStack {
                     type.color
-                    CupertinoGlyph.text(type.glyph, size: 20, color: .white)
-                }.frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
-                Text(AureaText.t("editor_vincular_novo_nulo")).font(.aurea(size: 15, weight: .bold)).foregroundStyle(AureaColors.text)
+                    CupertinoGlyph.text(type.glyph, size: 16, color: .white)
+                }.frame(width: 28, height: 28).clipShape(RoundedRectangle(cornerRadius: 5)).frame(width: 40, height: 40)
+                Text(AureaText.t("editor_vincular_novo_nulo")).font(.aurea(size: 14)).foregroundStyle(colors.text)
                     .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-            }.padding(.horizontal, 12).frame(maxWidth: .infinity, minHeight: 56).contentShape(Rectangle())
-        }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t("editor_vincular_novo_nulo")).accessibilityIdentifier("link.newNull")
+            }.padding(.leading, 4).padding(.trailing, 12).frame(maxWidth: .infinity, minHeight: AnchoredMenuMetrics.rowHeight).contentShape(Rectangle())
+        }.buttonStyle(AureaPressStyle(shrink: 1)).accessibilityLabel(AureaText.t("editor_vincular_novo_nulo")).accessibilityIdentifier("parent.newNull")
     }
-    /// A LINHA INTEIRA é o alvo (56 pt, largura toda). Sem `contentShape`, o
-    /// fundo `Color.clear` das camadas não escolhidas não recebia toque: só a
-    /// miniatura e as letras do nome vinculavam (o "3 a 5 toques" do beta).
-    private func row<Thumb: View>(_ title: String, id: Int64, bold: Bool = false, @ViewBuilder thumb: () -> Thumb) -> some View {
+    /// A LINHA INTEIRA é o alvo (40 pt, largura toda).
+    private func row<Thumb: View>(_ title: String, id: Int64, strip: Color, current: Bool, blank: Bool = false, isSelf: Bool = false,
+                                  enabled: Bool = true, tag: String, @ViewBuilder thumb: () -> Thumb) -> some View {
         Button {
-            let previous = current; dismiss(); if previous != id { model.setParentMany(ids, parent: id) }
+            let previous = self.current; dismiss(); if previous != id { model.setParentMany(ids, parent: id) }
         } label: {
-            HStack(spacing: 14) {
-                thumb()
-                Text(title).font(.aurea(size: 15, weight: bold ? .bold : .medium)).foregroundStyle(current == id ? AureaColors.accent : AureaColors.text).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                if current == id { CupertinoGlyph.text(CupertinoGlyph.CheckmarkAlt, size: 16, color: AureaColors.accent) }
-            }.padding(.horizontal, 12).frame(maxWidth: .infinity, minHeight: 56).background(current == id ? AureaColors.accentDim : bold ? AureaColors.chip : Color.clear)
-                .contentShape(Rectangle())
+            HStack(spacing: 0) {
+                strip.frame(width: 4).frame(maxHeight: .infinity)
+                thumb().frame(width: 40, height: 40)
+                Text(title).underline(isSelf).font(.aurea(size: 14)).foregroundStyle(blank ? colors.muted : colors.text)
+                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 6)
+                if current {
+                    CupertinoGlyph.text(CupertinoGlyph.Link, size: 18, color: colors.accent).frame(width: 40, height: 40)
+                } else {
+                    Color.clear.frame(width: 12, height: 1)
+                }
+            }
+            .frame(maxWidth: .infinity).frame(height: AnchoredMenuMetrics.rowHeight)
+            .background(current ? colors.pressed : Color.clear)
+            .contentShape(Rectangle())
         }.buttonStyle(AureaPressStyle(shrink: 1))
-            .accessibilityLabel(title).accessibilityAddTraits(current == id ? .isSelected : [])
-            .accessibilityIdentifier("link.row.\(id)")
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : AnchoredMenuMetrics.disabledAlpha)
+            .accessibilityLabel(title).accessibilityAddTraits(current ? .isSelected : [])
+            .accessibilityIdentifier(tag)
     }
 }
 
 @MainActor private struct ShellLayerThumbnail: View {
     @EnvironmentObject private var model: AureaModel
     let row: LayerItem
+    var size: CGFloat = 44
     @State private var image: UIImage?
     @State private var cache = TimelineThumbStrip()
     private var type: TimelineLayerType { TimelineLayerType.of(row.kind) }
@@ -1080,14 +1714,14 @@ private struct ShellLinkPopup: View {
         ZStack {
             type.color
             if let image { Image(uiImage: image).resizable().scaledToFill() }
-            else { CupertinoGlyph.text(type.glyph, size: 20, color: .white) }
-        }.frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
+            else { CupertinoGlyph.text(type.glyph, size: size * 0.45, color: .white) }
+        }.frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: size < 40 ? 5 : 6))
             .onAppear(perform: load).onChange(of: model.status.thumbnailGeneration) { _ in load() }
     }
     private func load() {
         guard row.kind == 1 || row.kind == 2 else { return }
         let fps = Float(model.compositionFps), bucket = Thumbs.bucketOf(Double(row.offsetFrames), Float(model.compositionFps))
         let frame = row.kind == 2 ? row.startFrame : Int32(clamping: Int64(Thumbs.requestLocalFrame(bucket, fps)) + Int64(row.startFrame) - Int64(row.offsetFrames))
-        image = cache.get(model, layer: row.id, bucket: bucket, timelineFrame: frame, heightPx: Int((44 * UIScreen.main.scale).clamped(to: 16...256)), generation: model.status.thumbnailGeneration)
+        image = cache.get(model, layer: row.id, bucket: bucket, timelineFrame: frame, heightPx: Int((size * UIScreen.main.scale).clamped(to: 16...256)), generation: model.status.thumbnailGeneration)
     }
 }

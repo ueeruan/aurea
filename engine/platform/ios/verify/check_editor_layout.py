@@ -56,18 +56,37 @@ check(EditorLayout.isWide(844, 390), "celular deitado (≥ 600) é largo")
 check(EditorLayout.isWide(560, 320), "celular deitado usa folha lateral")
 check(!EditorLayout.isWide(1000, 1000), "janela quadrada fica empilhada")
 check(EditorLayout.dockQuick >= 44 && EditorLayout.dockTile >= 44, "doca preserva alvos de toque")
-let compactDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false, width: 375, aspect: 9.0 / 16.0)
-let largeDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false, width: 375, aspect: 9.0 / 16.0, fontScale: 2)
-let phoneDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false, width: 375, aspect: 9.0 / 16.0, fontScale: 1.3)
-check(near(phoneDock.sheet, EditorLayout.dockHeight(rows: 2, fontScale: 1.3)), "doca cabe com fonte 130%")
-check(compactDock.sheet <= 200, "doca padrão deve ser compacta")
-check(largeDock.sheet > compactDock.sheet && largeDock.timeline >= EditorLayout.timelineMin, "fonte grande ganha espaço mantendo timeline")
-let batch = EditorLayout.solve(total: 780, content: .batch, fullscreen: false)
-check(near(batch.sheet, 132), "seleção múltipla ocupa só as duas fileiras de ícones")
+// Omega fundação (F6): topo 42, transporte 46, zona fixa de 280 e a prévia igual em todos os estados.
+check(near(EditorLayout.topBar, 42) && near(EditorLayout.transport, 46), "barras da referência")
+check(near(EditorLayout.bottomZone(), 280) && near(EditorLayout.layerPanel(), 200), "zona de 280 com painel de 200")
+let contents: [SheetContent] = [.none, .addBar, .dock, .panel, .curve, .batch, .adding, .hint]
+for h in [CGFloat(640), 700, 760, 780, 844, 900, 960] {
+    for content in contents {
+        let m = EditorLayout.solve(total: h, content: content, fullscreen: false, width: 375, aspect: 9.0 / 16.0)
+        check(near(m.preview, h - 368), "\(h) \(content): prévia \(m.preview) deveria ser H - 368")
+        check(near(m.total, h), "\(h) \(content): soma \(m.total)")
+        check(near(m.zone, 280), "\(h) \(content): zona \(m.zone)")
+    }
+    let bar = EditorLayout.solve(total: h, content: .addBar, fullscreen: false)
+    check(!bar.overlay && near(bar.timeline, 210) && near(bar.sheet, 70), "sem camada: timeline 210 + barra 70")
+    // Omega adicionar (área 08, P0-1): adicionando, a barra fica e o conteúdo de 193 fica por cima da timeline.
+    let adding = EditorLayout.solve(total: h, content: .adding, fullscreen: false)
+    check(!adding.overlay && near(adding.timeline, 210) && near(adding.sheet, 70) && near(EditorLayout.addContent(adding), 193),
+          "adicionando: timeline 210 + barra 70, conteúdo de 193 por cima")
+    for content in [SheetContent.dock, .panel, .curve] {
+        let m = EditorLayout.solve(total: h, content: content, fullscreen: false)
+        check(m.overlay && near(m.timeline, 280) && near(m.sheet, 200) && near(m.visibleTimeline, 80),
+              "\(content): painel de 200 por cima, 80 de timeline à vista")
+    }
+    let batch = EditorLayout.solve(total: h, content: .batch, fullscreen: false)
+    check(near(batch.sheet, 132) && near(batch.timeline, 148), "seleção múltipla empilhada dentro da zona")
+}
+let bigFont = EditorLayout.solve(total: 900, content: .panel, fullscreen: false, fontScale: 1.5)
+check(near(bigFont.sheet, 220) && near(bigFont.timeline, 300) && near(bigFont.preview, 900 - 388), "fonte 150 %: painel 220, zona 300")
 let oneRowDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false, dockRows: 1)
-check(near(oneRowDock.sheet, EditorLayout.dockHeight(rows: 1)), "doca usa cortes e uma fileira de ferramentas")
+let twoRowDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false)
+check(near(oneRowDock.sheet, EditorLayout.dockHeight(rows: 1)) && near(oneRowDock.preview, twoRowDock.preview), "doca de uma fileira não mexe na prévia")
 
-let contents: [SheetContent] = [.none, .addBar, .dock, .panel, .curve, .batch, .adding]
 for (w, h) in portraitTablets {
     for content in contents {
         let aspects: [CGFloat] = [0, 9.0 / 16.0, 16.0 / 9.0, 1]
@@ -78,12 +97,8 @@ for (w, h) in portraitTablets {
             check(near(m.topBar, EditorLayout.topBar), "\(label): topo \(m.topBar)")
             check(near(m.transport, EditorLayout.transport), "\(label): transporte \(m.transport)")
             check(m.preview >= EditorLayout.previewMin, "\(label): palco \(m.preview)")
-            check(m.timeline >= EditorLayout.timelineMin, "\(label): timeline \(m.timeline)")
-            if content != .none { check(m.sheet > 0, "\(label): folha \(m.sheet)") }
-            var sum: CGFloat = m.topBar + m.preview
-            sum += m.strip + m.transport
-            sum += m.timeline + m.sheet
-            check(near(sum, h), "\(label): zonas somam \(sum), tela \(h)")
+            check(near(m.zone, 280), "\(label): zona \(m.zone)")
+            check(near(m.total, h), "\(label): zonas somam \(m.total), tela \(h)")
         }
     }
     // Deitado: a coluna do palco e a folha lateral cabem.
@@ -99,9 +114,9 @@ for height in [CGFloat(240), 320, 480, 640, 960] {
     for scale in [CGFloat(1), 1.3, 2] {
         for content in contents {
             let m = EditorLayout.solve(total: height, content: content, fullscreen: false, width: 320, aspect: 16.0 / 9.0, fontScale: scale)
-            let sum = m.topBar + m.preview + m.strip + m.transport + m.timeline + m.sheet
-            check(near(sum, height), "tela curta \(height), fonte \(scale): soma \(sum)")
-            check(m.preview >= 0 && m.timeline >= 0 && m.sheet >= 0, "altura negativa em \(height)")
+            check(near(m.total, height), "tela curta \(height), fonte \(scale): soma \(m.total)")
+            check(m.preview > 0 && m.timeline >= 0 && m.sheet >= 0, "altura negativa em \(height)")
+            if m.overlay { check(m.sheet <= m.timeline, "painel maior que a zona em \(height)") }
         }
     }
 }

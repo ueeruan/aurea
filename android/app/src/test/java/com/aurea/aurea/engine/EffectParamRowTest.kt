@@ -28,9 +28,32 @@ class EffectParamRowTest {
 
     private val emptyBlob: ByteBuffer = ByteBuffer.allocate(0)
 
+    /** Omega efeitos (P0-1): a apresentação mora em +136..+159 (linha de 160 bytes). */
     @Test
-    fun rowIs136BytesWithTheTypedRangeAfterTheId() {
-        assertEquals(136, EffectParam.ROW_BYTES)
+    fun omegaRowCarriesControlStepOriginStyleAndFlags() {
+        assertEquals(160, EffectParam.ROW_BYTES)
+        val b = row(-1f, 1f, -1f, 1f, 0f)
+        b.putInt(136, ParamControl.SLIDER)
+        b.putFloat(140, 0.01f)
+        b.putFloat(144, 0f)
+        b.putInt(148, 0)
+        b.putInt(152, 0)                  // desabilitada
+        val p = EffectParam.read(b, 0, emptyBlob)
+        assertEquals(ParamControl.SLIDER, p.control)
+        assertEquals(0.01f, p.step)
+        assertEquals(0f, p.origin)
+        assertEquals(false, p.enabled)
+        // Passo não finito ou negativo vira 0 (sem régua); flag 1 = habilitada.
+        b.putFloat(140, Float.NaN)
+        b.putInt(152, EffectParam.ROW_ENABLED or EffectParam.ROW_HUE_DISC)
+        val q = EffectParam.read(b, 0, emptyBlob)
+        assertEquals(0f, q.step)
+        assertEquals(true, q.enabled)
+    }
+
+    @Test
+    fun rowIs160BytesWithTheTypedRangeAfterTheId() {
+        assertEquals(160, EffectParam.ROW_BYTES)
         val p = EffectParam.read(row(0f, 500f, 0f, 3000f, 1200f), 0, emptyBlob)
         assertEquals(3, p.index)
         assertEquals(0f, p.min)

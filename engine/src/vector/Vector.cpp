@@ -461,6 +461,14 @@ f32 taper_factor(const StrokeTaper& t, f32 u) noexcept {
     const f32 a = std::clamp(t.start, 0.0f, 1.0f), b = std::clamp(t.end, 0.0f, 1.0f);
     if (a > 1e-4f && u < a) f = std::min(f, ramp(u / a));
     if (b > 1e-4f && u > 1.0f - b) f = std::min(f, ramp((1.0f - u) / b));
+    // Omega conteúdo (área 06): o perfil do pincel (pressão), linear entre amostras.
+    if (t.profile && t.profile->size() >= 2) {
+        const std::vector<f32>& p = *t.profile;
+        const f32 x = std::clamp(u, 0.0f, 1.0f) * static_cast<f32>(p.size() - 1);
+        const usize i = std::min(static_cast<usize>(x), p.size() - 2);
+        const f32 k = x - static_cast<f32>(i);
+        f *= std::clamp(p[i] + (p[i + 1] - p[i]) * k, 0.0f, 1.0f);
+    }
     return f;
 }
 
@@ -698,7 +706,8 @@ void stroke_drawn(const VectorStroke& st, f32 tol, const std::vector<DrawnLine>&
             k = (k + 1) % pat.size();
         }
     }
-    const StrokeTaper taper{st.taperStart * 0.01f, st.taperEnd * 0.01f, st.taperEase * 0.01f};
+    const StrokeTaper taper{st.taperStart * 0.01f, st.taperEnd * 0.01f, st.taperEase * 0.01f,
+                            st.widthProfile.empty() ? nullptr : &st.widthProfile};   // Omega conteúdo: pincel
     stroke_to_rings(lines, st.width, st.cap, st.join, st.miterLimit, tol, out, taper, &ranges);
 }
 } // namespace
@@ -781,8 +790,12 @@ bool group_strokes(const VectorGroup& g) noexcept {
 }
 
 /// Os caminhos do grupo no quadro: achatados, mesclados e aparados (espaço do grupo).
-void group_lines(const VectorGroup& g, f64 frame, f32 tol, std::vector<Contour>& lines) {
+/// Omega conteúdo (área 06): com `holes`, os caminhos marcados como FURO
+/// (`VectorPath::exclude`) saem à parte — recortam o preenchimento e ganham
+/// contorno, sem entrar na mesclagem nem no aparar.
+void group_lines(const VectorGroup& g, f64 frame, f32 tol, std::vector<Contour>& lines, std::vector<Contour>* holes = nullptr) {
     lines.clear();
+    if (holes) holes->clear();
     std::vector<std::vector<Contour>> sets;
     for (const VectorPath& vp : g.paths) {
         const BezierPath b = path_at(vp, frame);
@@ -790,6 +803,10 @@ void group_lines(const VectorGroup& g, f64 frame, f32 tol, std::vector<Contour>&
         Contour c;
         flatten(b, tol, c);
         if (c.pts.empty()) continue;
+        if (vp.exclude && holes) {
+            holes->push_back(std::move(c));
+            continue;
+        }
         if (g.merge != 0) {
             if (c.pts.size() >= 3) sets.push_back({c});
         } else {
@@ -807,7 +824,8 @@ void group_lines(const VectorGroup& g, f64 frame, f32 tol, std::vector<Contour>&
 /// Preenchimento e contorno a partir das linhas do grupo. `draw` = a fração
 /// do Progresso do desenho deste grupo: o contorno sai dos pedaços já
 /// desenhados e o preenchimento (das linhas inteiras) ganha `fillAlpha`.
-void group_paint(const VectorGroup& g, f32 tol, std::vector<Contour> lines, const DrawProgress* draw, GroupGeometry& out) {
+void group_paint(const VectorGroup& g, f32 tol, std::vector<Contour> lines, const DrawProgress* draw, GroupGeometry& out,
+                 const std::vector<Contour>* holes = nullptr) {
     out.fill.clear();
     out.stroke.clear();
     out.drawn.clear();
@@ -831,13 +849,28 @@ void group_paint(const VectorGroup& g, f32 tol, std::vector<Contour> lines, cons
         for (const Contour& c : lines) if (c.pts.size() >= 3) closed.push_back(c);
         // Depois da mesclagem os anéis já saem limpos; a regra continua valendo.
         resolve_fill(closed, g.merge != 0 ? FillRule::NonZero : rule, out.fill);
+        // Omega conteúdo (área 06): os furos recortam o preenchimento.
+        if (holes && !holes->empty() && !out.fill.empty()) {
+            std::vector<Contour> cut;
+            for (const Contour& c : *holes) if (c.pts.size() >= 3) cut.push_back(c);
+            if (!cut.empty()) {
+                std::vector<Contour> holeRings, rest;
+                resolve_fill(cut, FillRule::NonZero, holeRings);
+                if (!holeRings.empty()) {
+                    boolean_op({out.fill, holeRings}, FillRule::NonZero, BoolOp::Subtract, rest);
+                    out.fill = std::move(rest);
+                }
+            }
+        }
     }
     if (stroke && cut) {
         stroke_drawn(g.stroke, tol, pieces, out.stroke);
     } else if (stroke) {
         std::vector<Contour> s = lines;
+        if (holes) s.insert(s.end(), holes->begin(), holes->end());   // Omega conteúdo: o furo tem contorno
         if (!g.stroke.dashes.empty()) dash(s, g.stroke.dashes, g.stroke.dashOffset);
-        const StrokeTaper taper{g.stroke.taperStart * 0.01f, g.stroke.taperEnd * 0.01f, g.stroke.taperEase * 0.01f};
+        const StrokeTaper taper{g.stroke.taperStart * 0.01f, g.stroke.taperEnd * 0.01f, g.stroke.taperEase * 0.01f,
+                                g.stroke.widthProfile.empty() ? nullptr : &g.stroke.widthProfile};   // Omega conteúdo: pincel
         stroke_to_rings(s, g.stroke.width, g.stroke.cap, g.stroke.join, g.stroke.miterLimit, tol, out.stroke, taper);
     }
     out.lines = std::move(lines);
@@ -845,9 +878,9 @@ void group_paint(const VectorGroup& g, f32 tol, std::vector<Contour> lines, cons
 } // namespace
 
 void group_geometry(const VectorGroup& g, f64 frame, f32 tol, GroupGeometry& out, const DrawProgress* draw) {
-    std::vector<Contour> lines;
-    group_lines(g, frame, tol, lines);
-    group_paint(g, tol, std::move(lines), draw, out);
+    std::vector<Contour> lines, holes;
+    group_lines(g, frame, tol, lines, &holes);
+    group_paint(g, tol, std::move(lines), draw, out, &holes);
 }
 
 // =============================================================================
@@ -1065,6 +1098,7 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         u32 copies = 1;
         f32 lastAlpha = 1.0f;
         std::vector<Contour> lines;
+        std::vector<Contour> holes;   // Omega conteúdo: furos (VectorPath::exclude)
     };
     std::vector<Prepared> list;
     list.reserve(groups.size());
@@ -1083,7 +1117,7 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         }
         // Tolerância: 0,2 texel na maior escala que o grupo chega a ter.
         p.tol = 0.2f / (dens * std::max(1e-3f, p.G.max_scale() * repScale));
-        group_lines(g, frame, p.tol, p.lines);
+        group_lines(g, frame, p.tol, p.lines, &p.holes);
         list.push_back(std::move(p));
     }
     // Progresso do desenho: a fração de cada grupo pelo comprimento dele na
@@ -1096,6 +1130,56 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
             if (group_strokes(*list[i].g) || group_fills(*list[i].g)) lengths[i] = length_under(list[i].lines, list[i].G);
         group_amounts(lengths, progress, amounts);
     }
+    // Omega conteúdo (área 06): com um grupo de APAGAR (a borracha do desenho)
+    // as peças são guardadas e emitidas no fim — cada grupo de apagar tira a
+    // forma dele da geometria dos grupos anteriores, aqui na CPU. Vale igual na
+    // prévia, na exportação e em qualquer backend (que só recebe triângulos).
+    // Sem grupo de apagar, a emissão é a de sempre (imediata).
+    const bool erasing = std::any_of(list.begin(), list.end(), [](const Prepared& p) { return p.g->composite == kVectorCompositeErase; });
+    struct Piece {
+        std::vector<Contour> rings;
+        Affine2 M{};
+        f32 paint = 0.0f, alpha = 0.0f;
+        Vec2 mn{0, 0}, mx{0, 0};
+    };
+    std::vector<Piece> pieces;
+    auto bounds = [](const std::vector<Contour>& rings, const Affine2& M, Vec2& mn, Vec2& mx) {
+        bool any = false;
+        for (const Contour& c : rings) {
+            for (Vec2 q : c.pts) {
+                const Vec2 t = M.apply(q);
+                if (!any) { mn = mx = t; any = true; continue; }
+                mn = Vec2{std::min(mn.x, t.x), std::min(mn.y, t.y)};
+                mx = Vec2{std::max(mx.x, t.x), std::max(mx.y, t.y)};
+            }
+        }
+        return any;
+    };
+    auto put = [&](const std::vector<Contour>& rings, const Affine2& M, f32 paint, f32 alpha) {
+        if (rings.empty() || alpha <= 0.0f) return;
+        if (!erasing) { emit_rings(em, rings, M, paint, alpha, aa); return; }
+        Piece pc;
+        pc.rings = rings;
+        pc.M = M;
+        pc.paint = paint;
+        pc.alpha = alpha;
+        if (bounds(pc.rings, M, pc.mn, pc.mx)) pieces.push_back(std::move(pc));
+    };
+    auto erase = [&](const std::vector<Contour>& shape, const Affine2& E) {
+        Vec2 emn{0, 0}, emx{0, 0};
+        if (!bounds(shape, E, emn, emx)) return;
+        for (Piece& pc : pieces) {
+            if (pc.rings.empty() || pc.mx.x < emn.x || pc.mn.x > emx.x || pc.mx.y < emn.y || pc.mn.y > emx.y) continue;
+            // A forma da borracha no espaço da peça (o degradê da peça não muda).
+            const Affine2 T = pc.M.inverse() * E;
+            std::vector<Contour> local = shape;
+            for (Contour& c : local) for (Vec2& q : c.pts) q = T.apply(q);
+            std::vector<Contour> rest;
+            boolean_op({pc.rings, local}, FillRule::NonZero, BoolOp::Subtract, rest);
+            pc.rings = std::move(rest);
+            if (!bounds(pc.rings, pc.M, pc.mn, pc.mx)) pc.rings.clear();
+        }
+    };
     for (usize gi = 0; gi < list.size(); ++gi) {
         Prepared& prep = list[gi];
         const VectorGroup& g = *prep.g;
@@ -1105,16 +1189,24 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         DrawProgress mine = progress;
         if (drawing) mine.amount = amounts[gi];
         GroupGeometry geo;
-        group_paint(g, prep.tol, std::move(prep.lines), drawing ? &mine : nullptr, geo);
+        group_paint(g, prep.tol, std::move(prep.lines), drawing ? &mine : nullptr, geo, &prep.holes);
         if (geo.fill.empty() && geo.stroke.empty()) continue;
+        if (g.composite == kVectorCompositeErase) {
+            // Apagar: a forma inteira do grupo (preenchimento + contorno) sai dos de baixo.
+            std::vector<Contour> shape = geo.fill;
+            shape.insert(shape.end(), geo.stroke.begin(), geo.stroke.end());
+            if (!g.repeater.enabled) { erase(shape, G); continue; }
+            for (u32 k = 0; k < copies; ++k) erase(shape, G * repeater_matrix(g.repeater, static_cast<f32>(k) + g.repeater.offset));
+            continue;
+        }
         const f32 fillPaint = static_cast<f32>(out.paints.size() / kPaintVec4);
         encode_paint(g.fill.paint, out.paints);
         const f32 strokePaint = static_cast<f32>(out.paints.size() / kPaintVec4);
         encode_paint(g.stroke.paint, out.paints);
         const f32 gop = std::clamp(g.opacity * 0.01f, 0.0f, 1.0f);
         auto draw_copy = [&](const Affine2& M, f32 alpha) {
-            emit_rings(em, geo.fill, M, fillPaint, alpha * geo.fillAlpha, aa);
-            emit_rings(em, geo.stroke, M, strokePaint, alpha, aa);
+            put(geo.fill, M, fillPaint, alpha * geo.fillAlpha);
+            put(geo.stroke, M, strokePaint, alpha);
         };
         if (!g.repeater.enabled) {
             draw_copy(G, gop);
@@ -1131,6 +1223,7 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         if (R.above) for (u32 k = 0; k < copies; ++k) copy(k);
         else for (u32 k = copies; k-- > 0;) copy(k);
     }
+    for (const Piece& pc : pieces) emit_rings(em, pc.rings, pc.M, pc.paint, pc.alpha, aa);
 }
 
 bool bounds_of(const std::vector<VectorGroup>& groups, f64 frame, Vec2& mn, Vec2& mx) {
@@ -1207,6 +1300,7 @@ u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame, const DrawPr
             H.u(static_cast<u64>(p.kind)); H.u(p.reversed);
             H.v2(p.center); H.v2(p.size); H.f(p.roundness); H.f(p.points); H.f(p.outerRadius); H.f(p.innerRadius);
             H.f(p.outerRoundness); H.f(p.innerRoundness); H.f(p.rotation);
+            H.u(p.exclude);   // Omega conteúdo: furo
             H.path(p.path);
             H.u(p.keys.size());
             for (const PathKey& k : p.keys) { H.u(static_cast<u64>(k.frame)); H.u(k.ease); H.path(k.path); }
@@ -1222,6 +1316,10 @@ u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame, const DrawPr
         const VectorStroke& s = g.stroke;
         H.u(s.enabled); H.paint(s.paint); H.f(s.width); H.u(s.cap); H.u(s.join); H.f(s.miterLimit); H.f(s.dashOffset);
         H.f(s.taperStart); H.f(s.taperEnd); H.f(s.taperEase);
+        // Omega conteúdo: perfil do pincel e apagar.
+        H.u(s.widthProfile.size());
+        for (f32 w : s.widthProfile) H.f(w);
+        H.u(g.composite);
         H.u(s.dashes.size());
         for (f32 d : s.dashes) H.f(d);
         const VectorTrim& t = g.trim;

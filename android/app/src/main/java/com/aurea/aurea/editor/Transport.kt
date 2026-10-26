@@ -1,86 +1,108 @@
 package com.aurea.aurea.editor
 
-import com.aurea.aurea.ui.i18n.KeepLtr
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.border
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.onClick
-import androidx.compose.ui.semantics.onLongClick
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.foundation.layout.size
-import com.aurea.aurea.ui.theme.tocavel
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import com.aurea.aurea.R
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material.icons.rounded.ZoomIn
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import com.aurea.aurea.R
+import com.aurea.aurea.editor.panels.EditorPanel
 import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.ui.ds.AnchoredMenu
+import com.aurea.aurea.ui.ds.AnchoredMenuDefaults
+import com.aurea.aurea.ui.ds.AureaSurfaceTone
+import com.aurea.aurea.ui.ds.MenuColors
+import com.aurea.aurea.ui.ds.MenuEntry
+import com.aurea.aurea.ui.i18n.KeepLtr
+import com.aurea.aurea.ui.i18n.LocaleDirection
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
+import com.aurea.aurea.ui.theme.LayerType
+import com.aurea.aurea.ui.theme.tocavel
+import kotlinx.coroutines.delay
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 // =============================================================================
-// Transporte de 48 dp, com marcador ao lado do play.
+// Omega chrome (área 02, P0-5): a barra de reprodução da referência — 46 dp,
+// 7 botões de peso igual: ↶ · ↷ · ⇤ · ▶ · ⇥ · Copiar e colar · painel.
 // =============================================================================
 
 /**
- * Grade · resolução · marca | ⇤ ▶ ⇥ | camadas · ↶ ↷.
- * Tocar ⇤/⇥ busca a marca ou o keyframe da camada ativa mais próximo;
- * sem camada ativa busca só marcas. Segurar vai ao início/fim.
- * Os três grupos seguem a referência do usuário com os glifos do AUREA.
- * Enquanto um dedo manipula algo no palco, a barra vira a de informações.
+ * Desfazer · refazer · evento anterior · play · próximo evento · Copiar e
+ * colar (popup) · painel (abre e fecha a coluna de modos à direita da prévia).
+ * As setas vão ao evento estrito mais próximo: o começo, o último quadro, os
+ * marcadores e, com camada escolhida, o início, o fim e os keyframes dela (sem
+ * toque longo). A grade foi para a coluna; a resolução da prévia, para os
+ * Ajustes (seção "Prévia"); marcar o instante, para o relógio da timeline;
+ * "Selecionar uma camada", para o Copiar e colar. Enquanto um dedo manipula
+ * algo no palco, a barra vira a de informações.
  */
 @Composable
 internal fun TransportBar(store: EditorStore, ui: EditorUi) {
@@ -98,159 +120,62 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
     val canUndo by remember { derivedStateOf { store.project.canUndo } }
     val canRedo by remember { derivedStateOf { store.project.canRedo } }
     val h = ShellDims.Transport
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-    // Nove botões em três grupos (ferramentas | tempo | edição); em telas
-    // estreitas o alvo encolhe junto, nunca some um botão.
-    val side = minOf(40.dp, (maxWidth - 24.dp) / 9)
     Row(
         Modifier
             .fillMaxWidth()
             .height(h)
-            .background(AureaColors.EditorCanvas)
-            .padding(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .background(OmegaChrome.Bar),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ChromeButton(
-                CupertinoGlyph.Grid, stringResource(R.string.editor_grade_tercos),
-                onClick = { ui.showGrid = !ui.showGrid },
-                size = 18.dp, width = side, height = h,
-                tint = if (ui.showGrid) AureaColors.Accent else AureaColors.Text,
-                modifier = Modifier.testTag("transport.grid"),
-            )
-            PreviewResolutionButton(store, side)
-            val marked = store.playhead in store.markers.frames
-            ChromeButton(
-                if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
-                stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
-                onClick = { store.toggleMarker() }, onLongClick = { store.editMarkerAtPlayhead() },
-                tint = if (marked) AureaColors.Accent else AureaColors.Text,
-                size = 18.dp, width = side, height = h,
-                modifier = Modifier.testTag("transport.marker"),
-            )
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ChromeButton(
-                CupertinoGlyph.BackwardEnd,
-                stringResource(R.string.editor_ir_inicio_segure_anterior),
-                onClick = { store.stepTransport(-1) },
-                size = 20.dp, width = side, height = h,
-                onLongClick = { store.seek(0) },
-                modifier = Modifier.testTag("transport.previous"),
-            )
-            PlayButton(store, side)
-            ChromeButton(
-                CupertinoGlyph.ForwardEnd,
-                stringResource(R.string.editor_ir_fim_segure_proximo),
-                onClick = { store.stepTransport(1) },
-                size = 20.dp, width = side, height = h,
-                onLongClick = { store.seek(store.project.durationFrames) },
-                modifier = Modifier.testTag("transport.next"),
-            )
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ChromeButton(
-                CupertinoGlyph.RectangleStack, stringResource(R.string.editor_selecionar_uma_camada),
-                onClick = { openSheet(store, ui, ShellSheet.SearchLayers) },
-                size = 18.dp, width = side, height = h,
-                modifier = Modifier.testTag("transport.layers"),
-            )
-            ChromeButton(
-                CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.editor_desfazer),
-                onClick = if (canUndo) ({ store.undo() }) else null,
-                size = 20.dp, width = side, height = h,
-                tint = if (canUndo) AureaColors.Text else AureaColors.EditorIconDisabled,
-            )
-            ChromeButton(
-                CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer),
-                onClick = if (canRedo) ({ store.redo() }) else null,
-                size = 20.dp, width = side, height = h,
-                tint = if (canRedo) AureaColors.Text else AureaColors.EditorIconDisabled,
-            )
-        }
-    }
-    }
-}
-
-/** Qualidade da prévia na barra; não altera a exportação. Segurar abre o HUD. */
-@Composable
-private fun PreviewResolutionButton(store: EditorStore, side: androidx.compose.ui.unit.Dp) {
-    var open by remember { mutableStateOf(false) }
-    val label = if (store.rawPlayback) "RAW" else when (val l = store.preview.scaleLabel) {
-        "FULL" -> "Full"
-        "AUTO" -> "Auto"
-        else -> l
-    }
-    // A reprodução RAW é ferramenta de teste (texto fixo em inglês, sem
-    // tradução): só no build de depuração e no uiTest, que herda dele. O HUD
-    // (toque longo) é recurso de usuário — também está no menu "Diagnóstico na tela".
-    val testeRaw = com.aurea.aurea.BuildConfig.DEBUG
-    val chipDescription = stringResource(R.string.editor_resolucao_previa_segure_diagnostico)
-    // "Otimizar vídeos pesados" (0.2.5): enquanto o motor gera a versão leve,
-    // um fio de progresso no chip da prévia — e o estado falado pelo leitor.
-    val proxy = store.proxies.summary
-    val optimizing = proxy.generating > 0
-    val proxyState = when {
-        optimizing -> stringResource(R.string.proxy_optimizing_description, proxy.percent)
-        proxy.busy -> stringResource(R.string.proxy_queued)
-        else -> ""
-    }
-    Box(Modifier.width(side).height(ShellDims.Transport)) {
-        Box(
-            Modifier
-                .fillMaxWidth().height(ShellDims.Transport)
-                .testTag("transport.resolution")
-                .semantics {
-                    contentDescription = chipDescription
-                    if (proxyState.isNotEmpty()) stateDescription = proxyState
-                }
-                .tocavel(haptic = true, onLongClick = { store.toggleHud() }) { open = true },
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(
-                Modifier.padding(horizontal = 3.dp).fillMaxWidth().height(26.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .border(1.dp, AureaColors.Border, RoundedCornerShape(4.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Text)))
-                if (optimizing) Box(
-                    Modifier.align(Alignment.BottomStart).fillMaxWidth(proxy.progress.coerceIn(0.05f, 1f))
-                        .height(2.dp).background(AureaColors.Accent),
-                )
-            }
-        }
-        if (open) com.aurea.aurea.ui.i18n.LocaleDirection {
-            val current = store.preview.scaleLabel
-            ShellPopupMenu(
-                items = listOfNotNull(
-                    // Informativo: tocar só fecha o menu.
-                    if (optimizing) PopupItem(stringResource(R.string.proxy_optimizing, proxy.percent), false) {} else null,
-                    // Teste de reprodução crua: só depuração. `store.rawPlayback`
-                    // ligado (impossível no release) ainda mostra a volta.
-                    if (testeRaw || store.rawPlayback) PopupItem(if (store.rawPlayback) stringResource(R.string.edt_back_to_compositor) else "AUREA RAW PLAYBACK TEST", store.rawPlayback) { store.toggleRawPlayback() } else null,
-                    PopupItem("AUTO", current == "AUTO") { store.setPreviewScale(true) },
-                    PopupItem(stringResource(R.string.i18n_preview_full), current == "FULL") { store.setPreviewScale(false, 1, 1) },
-                    PopupItem("1/2", current == "1/2") { store.setPreviewScale(false, 1, 2) },
-                    PopupItem("1/4", current == "1/4") { store.setPreviewScale(false, 1, 4) },
-                    PopupItem("1/8", current == "1/8") { store.setPreviewScale(false, 1, 8) },
-                ),
-                onDismiss = { open = false },
-                width = 160.dp,
-            )
-        }
+        ChromeButton(
+            CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.editor_desfazer),
+            onClick = if (canUndo) ({ store.undo() }) else null,
+            modifier = Modifier.weight(1f).testTag("transport.undo"), size = 20.dp, height = h,
+            tint = if (canUndo) AureaColors.Text else AureaColors.EditorIconDisabled,
+        )
+        ChromeButton(
+            CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer),
+            onClick = if (canRedo) ({ store.redo() }) else null,
+            modifier = Modifier.weight(1f).testTag("transport.redo"), size = 20.dp, height = h,
+            tint = if (canRedo) AureaColors.Text else AureaColors.EditorIconDisabled,
+        )
+        ChromeButton(
+            CupertinoGlyph.BackwardEnd, stringResource(R.string.om_tr_previous),
+            onClick = { store.stepTransportEdges(-1) },
+            modifier = Modifier.weight(1f).testTag("transport.previous"), size = 20.dp, height = h,
+        )
+        PlayButton(store, Modifier.weight(1f))
+        ChromeButton(
+            CupertinoGlyph.ForwardEnd, stringResource(R.string.om_tr_next),
+            onClick = { store.stepTransportEdges(1) },
+            modifier = Modifier.weight(1f).testTag("transport.next"), size = 20.dp, height = h,
+        )
+        CopyPasteButton(store, ui, Modifier.weight(1f).height(h))
+        val open = ViewModes.columnOpen
+        val viewModes = stringResource(R.string.om_tr_view_modes)
+        val onLabel = stringResource(R.string.common_on)
+        val offLabel = stringResource(R.string.common_off)
+        ChromeButton(
+            if (ViewModes.camera) CupertinoGlyph.CameraViewfinder else ShellGlyph.SidebarRight,
+            viewModes,
+            onClick = { ViewModes.columnOpen = !ViewModes.columnOpen },
+            modifier = Modifier
+                .weight(1f)
+                .testTag("transport.viewModes")
+                .semantics { stateDescription = if (open) onLabel else offLabel },
+            size = 20.dp, height = h,
+            tint = if (open) AureaColors.Accent else AureaColors.Text,
+        )
     }
 }
 
 /**
- * Play/pausa (ícone 22, altura de toque 48). Com repetição ligada o play fica em
- * destaque e ganha o selinho do laço — a A.01 usava `acao`, sem contraste
- * sobre o cromo (bug 27).
+ * Play/pausa (ícone 22, a célula inteira é o alvo). Segurar parado liga ou
+ * desliga a repetição (o play fica em destaque e ganha o selinho do laço);
+ * segurar e arrastar de lado pré-renderiza para aquele lado.
  */
 @Composable
-private fun PlayButton(store: EditorStore, side: androidx.compose.ui.unit.Dp = 48.dp) {
+private fun PlayButton(store: EditorStore, modifier: Modifier = Modifier) {
     val playing = store.playing || store.preview.buffering
     val loop = store.looping
     val haptic = LocalHapticFeedback.current
@@ -272,7 +197,7 @@ private fun PlayButton(store: EditorStore, side: androidx.compose.ui.unit.Dp = 4
         else -> ""
     }
     Box(
-        Modifier.size(side, ShellDims.Transport).testTag("transport.play")
+        modifier.height(ShellDims.Transport).testTag("transport.play")
             .alpha(if (pressed) 0.65f else 1f)
             .semantics {
                 role = Role.Button
@@ -349,48 +274,62 @@ private fun PlayButton(store: EditorStore, side: androidx.compose.ui.unit.Dp = 4
             }
         }
         if (loop) {
-            CupertinoIcon(
-                CupertinoGlyph.Repeat,
-                11.dp,
-                AureaColors.Accent,
-                Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 8.dp),
-            )
+            // O selinho do laço, no canto do ícone (não da célula, que é larga).
+            Box(Modifier.size(34.dp)) {
+                CupertinoIcon(
+                    CupertinoGlyph.Repeat,
+                    11.dp,
+                    AureaColors.Accent,
+                    Modifier.align(Alignment.BottomEnd),
+                )
+            }
         }
     }
 }
 
 /**
- * A barra de informações: o número que está mudando fica onde o olho já
- * está (X, Y, escala, rotação da camada sob o dedo).
+ * Omega chrome (área 02, P1-4): a barra de informações no lugar da de
+ * reprodução enquanto um dedo manipula algo no palco — modo texto, até 6 pares
+ * em 3 colunas: rótulo 12 sp a 50 % e valor 12 sp. (A timeline mostra o tempo
+ * do arrasto dela na própria faixa: área 03.)
  */
 @Composable
 private fun InfoBar(store: EditorStore) {
     val d = store.detail
-    Row(
+    val pairs = if (d == null) emptyList() else listOf(
+        "X" to d.position[0].roundToInt().toString(),
+        "Y" to d.position[1].roundToInt().toString(),
+        stringResource(R.string.editor_escala) to "${(d.scale[0] * 100f).roundToInt()}%",
+        stringResource(R.string.editor_rotacao) to "${"%.1f".format(java.util.Locale.ROOT, d.rotation[2]).replace('.', ',')}°",
+    )
+    Column(
         Modifier
             .fillMaxWidth()
             .height(ShellDims.Transport)
-            .background(AureaColors.EditorCanvas)
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .background(OmegaChrome.Bar)
+            .testTag("transport.info")
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
     ) {
-        if (d == null) return@Row
-        InfoPair("X", d.position[0].roundToInt().toString())
-        InfoPair("Y", d.position[1].roundToInt().toString())
-        InfoPair(stringResource(R.string.editor_escala), "${(d.scale[0] * 100f).roundToInt()}%")
-        InfoPair(stringResource(R.string.editor_rotacao), "${"%.1f".format(java.util.Locale.ROOT, d.rotation[2]).replace('.', ',')}°")
+        pairs.take(6).chunked(3).forEach { line ->
+            Row(Modifier.fillMaxWidth().weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                line.forEach { (label, value) -> InfoPair(label, value) }
+                repeat(3 - line.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
     }
 }
 
 @Composable
-private fun androidx.compose.foundation.layout.RowScope.InfoPair(label: String, value: String) {
-    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 10.5.sp, color = ShellColors.White40)))
+private fun RowScope.InfoPair(label: String, value: String) {
+    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text.copy(alpha = 0.5f))))
+        Spacer(Modifier.width(6.dp))
         Text(
             value,
             maxLines = 1,
             overflow = TextOverflow.Clip,
-            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600)).merge(AureaType.Tabular),
+            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)).merge(AureaType.Tabular),
         )
     }
 }
@@ -481,48 +420,298 @@ private fun FullscreenTimeBarContent(store: EditorStore) {
 }
 
 // =============================================================================
-// Folha "Copiar e colar"
+// Omega chrome (área 02, P0-6/P1-3): popup "Copiar e colar" (`layer_copy_paste_menu_popup`)
 // =============================================================================
 
+/**
+ * O 6º botão do transporte e o popup dele, ancorado no botão. Itens na ordem
+ * da referência: selecionar todas (ou limpar a seleção, com todas escolhidas) ·
+ * duplicar · salvar preset · copiar (com estilo, quando é uma) · colar ·
+ * colar estilo ›. Depois de um fio, o grupo "Mais do AUREA": selecionar uma
+ * camada, modo de escolher várias, efeitos, keyframes e animação e, com
+ * várias escolhidas, ajustar/preencher a tela, desagrupar e vincular.
+ */
 @Composable
-internal fun CopyPasteSheet(store: EditorStore, onDismiss: () -> Unit) {
-    val primary = store.primary
-    val count = store.layers.size
-    fun act(block: () -> Unit): () -> Unit = {
-        onDismiss()
-        block()
+private fun CopyPasteButton(store: EditorStore, ui: EditorUi, modifier: Modifier) {
+    var menu by remember { mutableStateOf(false) }
+    var pasteStyle by remember { mutableStateOf(false) }
+    var picker by remember { mutableStateOf(false) }
+    var linking by remember { mutableStateOf(false) }
+    Box(modifier) {
+        ChromeButton(
+            CupertinoGlyph.DocOnClipboard, stringResource(R.string.om_tr_copy_paste),
+            onClick = {
+                if (store.playing) store.pause()
+                menu = true
+            },
+            modifier = Modifier.matchParentSize().testTag("transport.copyPaste"), size = 20.dp, height = ShellDims.Transport,
+        )
+        LocaleDirection {
+            if (menu) {
+                AnchoredMenu(
+                    expanded = true,
+                    onDismiss = { menu = false },
+                    entries = copyPasteEntries(
+                        store, ui,
+                        onPasteStyle = { pasteStyle = true },
+                        onPick = { picker = true },
+                        onLink = { linking = true },
+                    ),
+                    tag = "copyPaste.menu",
+                )
+            }
+            if (pasteStyle) PasteStylePage(store) { pasteStyle = false }
+            if (picker) LayerPickerPopup(store) { picker = false }
+            if (linking) LinkMenu(store, store.selection.toList()) { linking = false }
+        }
     }
-    ShellMenuSheet(onDismiss) {
-        MenuSection(stringResource(R.string.editor_copiar_colar))
-        val clip = store.clipboard
-        MenuItemRow(CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_camada), if (primary != null) act { store.copyLayers() } else null)
-        MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_colar_camada_cabecote), if (clip and 1 != 0) act { store.pasteLayers() } else null)
-        MenuItemRow(
-            CupertinoGlyph.PlusSquareOnSquare,
-            stringResource(R.string.editor_duplicar_camada),
-            if (primary != null) act { store.duplicateLayers(listOf(primary)) } else null,
-        )
-        MenuItemRow(CupertinoGlyph.CheckmarkSquare, stringResource(R.string.editor_selecionar_todas_camadas), if (count >= 2) act { store.selectAll() } else null)
-        MenuItemRow(CupertinoGlyph.Square, stringResource(R.string.editor_limpar_selecao), act { store.clearSelection() })
-        MenuSection(stringResource(R.string.editor_estilo_efeitos))
-        MenuItemRow(CupertinoGlyph.Paintbrush, stringResource(R.string.editor_copiar_estilo), if (primary != null) act { store.copyStyle() } else null)
-        MenuItemRow(
-            ShellGlyph.PaintbrushFill, stringResource(R.string.editor_colar_estilo), if (primary != null && clip and 2 != 0) act { store.pasteStyle() } else null,
-            detail = stringResource(R.string.editor_mesclagem_opacidade_efeitos_cores),
-        )
-        MenuItemRow(CupertinoGlyph.Sparkles, stringResource(R.string.editor_copiar_efeitos), if (primary != null) act { store.copyEffects() } else null)
-        MenuItemRow(CupertinoGlyph.WandStars, stringResource(R.string.editor_colar_efeitos), if (primary != null && clip and 4 != 0) act { store.pasteEffects() } else null)
-        MenuSection(stringResource(R.string.editor_keyframes))
-        MenuItemRow(CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_keyframes_cabecote), if (primary != null) act { store.copyKeyframes() } else null)
-        MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_colar_keyframes_cabecote), if (primary != null && clip and 8 != 0) act { store.pasteKeyframes() } else null)
-        MenuItemRow(
-            CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_animacao), if (primary != null) act { store.copyAnimation() } else null,
-            detail = stringResource(R.string.editor_copiar_animacao_detalhe),
-        )
-        MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_colar_animacao), if (primary != null && clip and 8 != 0) act { store.pasteKeyframes() } else null)
-        MenuItemRow(
-            CupertinoGlyph.WandStars, stringResource(R.string.editor_otimizar_keyframes), if (primary != null) act { store.optimizeKeyframes() } else null,
-            detail = stringResource(R.string.editor_otimizar_keyframes_detalhe),
-        )
+}
+
+@Composable
+private fun copyPasteEntries(
+    store: EditorStore,
+    ui: EditorUi,
+    onPasteStyle: () -> Unit,
+    onPick: () -> Unit,
+    onLink: () -> Unit,
+): List<MenuEntry> {
+    val selection = store.selection
+    val count = selection.size
+    val total = store.layers.size
+    val clip = store.clipboard
+    val primary = store.primary
+    val out = mutableListOf<MenuEntry>()
+    out += if (total > 0 && count == total) {
+        MenuEntry.Item(stringResource(R.string.editor_limpar_selecao), glyph = CupertinoGlyph.Square, tag = "copyPaste.clearSelection") {
+            store.clearSelection()
+        }
+    } else {
+        MenuEntry.Item(
+            stringResource(R.string.editor_selecionar_todas_camadas), glyph = CupertinoGlyph.CheckmarkSquare,
+            enabled = total > 0, tag = "copyPaste.selectAll",
+        ) { store.selectAll() }
+    }
+    out += MenuEntry.Item(
+        pluralStringResource(R.plurals.om_cp_duplicate, max(1, count), count),
+        glyph = CupertinoGlyph.PlusSquareOnSquare, enabled = count > 0, tag = "copyPaste.duplicate",
+    ) { store.duplicateLayers() }
+    out += MenuEntry.Item(
+        stringResource(R.string.om_cp_save_preset), glyph = CupertinoGlyph.SquareStack3dUp,
+        enabled = count == 1, tag = "copyPaste.savePreset",
+    ) { openPanel(store, ui, EditorPanel.Presets) }
+    out += MenuEntry.Item(
+        pluralStringResource(R.plurals.om_cp_copy, max(1, count), count),
+        glyph = CupertinoGlyph.DocOnDoc,
+        sublabel = if (count == 1) stringResource(R.string.om_cp_with_style) else null,
+        enabled = count > 0, tag = "copyPaste.copy",
+    ) { store.copyLayersWithStyle() }
+    out += MenuEntry.Item(
+        pluralStringResource(R.plurals.om_cp_paste, 1, 1),
+        glyph = CupertinoGlyph.DocOnClipboard, enabled = clip and 1 != 0, tag = "copyPaste.paste",
+    ) { store.pasteLayers() }
+    out += MenuEntry.Item(
+        stringResource(R.string.om_cp_paste_style_more),
+        glyph = ShellGlyph.PaintbrushFill, chevron = true,
+        enabled = count > 0 && clip and 2 != 0, tag = "copyPaste.pasteStyle",
+    ) { onPasteStyle() }
+
+    // Mais do AUREA (o que a referência não tem), depois de um fio.
+    out += MenuEntry.Divider
+    out += MenuEntry.Header(stringResource(R.string.om_settings_more))
+    out += MenuEntry.Item(
+        stringResource(R.string.editor_selecionar_uma_camada), glyph = CupertinoGlyph.RectangleStack,
+        enabled = total > 0, tag = "copyPaste.more.pickLayer",
+    ) { onPick() }
+    out += MenuEntry.Item(
+        stringResource(R.string.edt_tl_pick_layers), glyph = CupertinoGlyph.CheckmarkSquare,
+        sublabel = stringResource(R.string.edt_tl_pick_layers_detail),
+        checked = store.layerSelectMode, enabled = total > 0, tag = "copyPaste.more.pickMode",
+    ) { store.changeLayerSelectMode(!store.layerSelectMode) }
+    out += MenuEntry.Item(
+        stringResource(R.string.edt_cmd_search_desc), glyph = CupertinoGlyph.Search, tag = "commandSearchOpen",
+    ) { openSheet(store, ui, ShellSheet.CommandSearch) }
+    out += MenuEntry.Item(
+        stringResource(R.string.editor_copiar_efeitos), glyph = CupertinoGlyph.Sparkles,
+        enabled = primary != null, tag = "copyPaste.more.copyEffects",
+    ) { store.copyEffects() }
+    out += MenuEntry.Item(
+        stringResource(R.string.editor_colar_efeitos), glyph = CupertinoGlyph.WandStars,
+        enabled = count > 0 && clip and 4 != 0, tag = "copyPaste.more.pasteEffects",
+    ) { store.pasteEffects() }
+    out += MenuEntry.Item(
+        stringResource(R.string.editor_copiar_keyframes_cabecote), glyph = CupertinoGlyph.DocOnDoc,
+        enabled = primary != null, tag = "copyPaste.more.copyKeys",
+    ) { store.copyKeyframes() }
+    out += MenuEntry.Item(
+        stringResource(R.string.editor_colar_keyframes_cabecote), glyph = CupertinoGlyph.DocOnClipboard,
+        enabled = count > 0 && clip and 8 != 0, tag = "copyPaste.more.pasteKeys",
+    ) { store.pasteKeyframes() }
+    out += MenuEntry.Item(
+        stringResource(R.string.editor_copiar_animacao), glyph = CupertinoGlyph.DocOnDoc,
+        sublabel = stringResource(R.string.editor_copiar_animacao_detalhe),
+        enabled = primary != null, tag = "copyPaste.more.copyAnimation",
+    ) { store.copyAnimation() }
+    out += MenuEntry.Item(
+        stringResource(R.string.editor_otimizar_keyframes), glyph = CupertinoGlyph.WandStars,
+        sublabel = stringResource(R.string.editor_otimizar_keyframes_detalhe),
+        enabled = primary != null, tag = "copyPaste.more.optimizeKeys",
+    ) { store.optimizeKeyframes() }
+    if (count >= 2) {
+        out += MenuEntry.Item(
+            stringResource(R.string.editor_ajustar_tela), glyph = CupertinoGlyph.FullscreenExit, tag = "copyPaste.more.fit",
+        ) { LayerOps.fitToCanvas(store, store.selection, fill = false) }
+        out += MenuEntry.Item(
+            stringResource(R.string.editor_preencher_tela), glyph = CupertinoGlyph.Fullscreen, tag = "copyPaste.more.fill",
+        ) { LayerOps.fitToCanvas(store, store.selection, fill = true) }
+        val groups = store.layers.filter { it.id in selection && it.kind == LayerType.Group.kind }.map { it.id }
+        if (groups.isNotEmpty()) {
+            out += MenuEntry.Item(stringResource(R.string.editor_desagrupar), glyph = ShellGlyph.SquareSplit2x2, tag = "copyPaste.more.ungroup") {
+                groups.forEach { store.ungroupPrecomp(it) }
+            }
+        }
+        out += MenuEntry.Item(
+            stringResource(R.string.om_cp_link_selected), glyph = CupertinoGlyph.Link, tag = "copyPaste.more.link",
+        ) {
+            if (store.playing) store.pause()
+            onLink()
+        }
+    }
+    return out
+}
+
+/** As partes do "Colar estilo" (bits de `Engine::Style*`), na ordem das duas fileiras da referência. */
+private data class StylePart(val bit: Int, val glyph: Char, val label: Int, val tag: String)
+
+private val StyleRowA = listOf(
+    StylePart(1, CupertinoGlyph.DropFill, R.string.om_ps_color_fill, "pasteStyle.colorFill"),
+    StylePart(2, CupertinoGlyph.SquareOnSquare, R.string.om_ps_border_shadow, "pasteStyle.borderShadow"),
+    StylePart(4, CupertinoGlyph.CircleLefthalfFill, R.string.om_ps_blend, "pasteStyle.blend"),
+)
+private val StyleRowB = listOf(
+    StylePart(8, CupertinoGlyph.Move, R.string.om_ps_transform, "pasteStyle.transform"),
+    StylePart(16, CupertinoGlyph.Textformat, R.string.om_ps_text, "pasteStyle.text"),
+    StylePart(32, CupertinoGlyph.Speaker2, R.string.om_ps_volume, "pasteStyle.volume"),
+    StylePart(64, CupertinoGlyph.Sparkles, R.string.om_ps_effects, "pasteStyle.effects"),
+    StylePart(128, CupertinoGlyph.Speedometer, R.string.om_ps_speed, "pasteStyle.speed"),
+)
+
+/** O repique da subpágina (o `OvershootInterpolator` da referência). */
+private val PageOvershoot = CubicBezierEasing(0.34f, 1.4f, 0.64f, 1f)
+
+/**
+ * A subpágina "Colar estilo": duas fileiras de botões de 58 dp (cor e
+ * preenchimento · borda e sombra · mesclagem e opacidade / mover e transformar ·
+ * texto · volume · efeitos · velocidade). Habilitado = a parte existe no estilo
+ * copiado; aceso = escolhido. Ao trocar, o título mostra o nome da parte por 1 s.
+ * Colar aplica só as escolhidas (um passo de desfazer).
+ */
+@Composable
+private fun PasteStylePage(store: EditorStore, onDismiss: () -> Unit) {
+    val density = LocalDensity.current
+    val provider = remember(density) {
+        with(density) { AnchorPopupPosition(AnchoredMenuDefaults.ScreenMargin.roundToPx(), AnchoredMenuDefaults.AnchorGap.roundToPx()) }
+    }
+    val colors = MenuColors.of(AureaSurfaceTone.Light)
+    val available = remember { store.copiedStyleParts() }
+    var chosen by remember { mutableIntStateOf(available) }
+    var flash by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(flash) {
+        if (flash != null) {
+            delay(1000)
+            flash = null
+        }
+    }
+    val enter = remember { Animatable(0.5f) }
+    LaunchedEffect(Unit) { enter.animateTo(0f, tween(250, easing = PageOvershoot)) }
+    val title = stringResource(R.string.om_cp_paste_style_more)
+    val back = stringResource(R.string.om_menu_back)
+    Popup(popupPositionProvider = provider, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+        Column(
+            Modifier
+                .width(AnchoredMenuDefaults.Width)
+                .graphicsLayer { translationX = enter.value * size.width }
+                .clip(RoundedCornerShape(AnchoredMenuDefaults.Radius))
+                .background(colors.background)
+                .testTag("pasteStyle.page"),
+        ) {
+            Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(40.dp, 40.dp)
+                        .testTag("pasteStyle.back")
+                        .semantics { contentDescription = back }
+                        .tocavel(shrink = 1f, onClick = onDismiss),
+                    contentAlignment = Alignment.Center,
+                ) { CupertinoIcon(CupertinoGlyph.ChevronLeft, 16.dp, colors.text) }
+                Text(
+                    flash ?: title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = colors.text)),
+                    modifier = Modifier.weight(1f).padding(end = 12.dp),
+                )
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.divider))
+            listOf(StyleRowA, StyleRowB.filter { it.bit != 32 || available and 32 != 0 }).forEach { row ->
+                Row(Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 4.dp, vertical = 3.dp)) {
+                    row.forEach { part ->
+                        val label = stringResource(part.label)
+                        val enabled = available and part.bit != 0
+                        val on = enabled && chosen and part.bit != 0
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .padding(3.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (on) AureaColors.Accent else colors.pressed)
+                                .testTag(part.tag)
+                                .semantics {
+                                    contentDescription = label
+                                    selected = on
+                                    if (!enabled) disabled()
+                                }
+                                .tocavel(enabled = enabled, shrink = 1f, haptic = true) {
+                                    chosen = chosen xor part.bit
+                                    if (chosen and part.bit != 0) flash = label
+                                }
+                                .alpha(if (enabled) 1f else AnchoredMenuDefaults.DISABLED_ALPHA),
+                            contentAlignment = Alignment.Center,
+                        ) { CupertinoIcon(part.glyph, 20.dp, if (on) AureaColors.OnAccent else colors.text) }
+                    }
+                }
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.divider))
+            Row(Modifier.fillMaxWidth().height(46.dp)) {
+                val paste = stringResource(R.string.om_ps_paste)
+                Text(
+                    paste,
+                    textAlign = TextAlign.Center,
+                    style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, fontWeight = FontWeight.W600, color = colors.accent)),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .testTag("pasteStyle.paste")
+                        .alpha(if (chosen != 0) 1f else AnchoredMenuDefaults.DISABLED_ALPHA)
+                        .tocavel(enabled = chosen != 0, shrink = 1f, haptic = true) {
+                            onDismiss()
+                            store.pasteStyleParts(chosen)
+                        }
+                        .padding(top = 13.dp),
+                )
+                Box(Modifier.width(1.dp).fillMaxHeight().background(colors.divider))
+                Text(
+                    stringResource(R.string.common_cancel),
+                    textAlign = TextAlign.Center,
+                    style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = colors.text)),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .testTag("pasteStyle.cancel")
+                        .tocavel(shrink = 1f, onClick = onDismiss)
+                        .padding(top = 13.dp),
+                )
+            }
+        }
     }
 }

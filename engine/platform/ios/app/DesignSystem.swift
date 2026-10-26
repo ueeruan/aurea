@@ -1484,3 +1484,967 @@ extension CupertinoGlyph {
 func aureaTracking(_ value: CGFloat) -> CGFloat {
     AureaText.language.resolved == .ar ? 0 : value
 }
+
+// =============================================================================
+// Omega fundação · F3: CAIXA SUSPENSA (a da folha "Novo projeto" da referência)
+//
+// Caixa de 180 × 45, raio 8, valor à esquerda e ⌄ à direita; o toque abre o
+// menu ancorado (AnchoredMenu.swift) com a LARGURA DA CAIXA, a opção vigente
+// marcada com a barra de 4. Par do `AureaDropdown` do `ui/ds/Dropdown.kt`.
+//
+//   AureaDropdown(value: "1080p", tag: "newProject.resolution",
+//                 accessibilityLabel: AureaText.t("editor_resolucao")) {
+//       sizes.map { s in .item(s.label, selected: s == current) { pick(s) } }
+//   }
+// =============================================================================
+
+enum AureaDropdownMetrics {
+    static let width: CGFloat = 180
+    static let height: CGFloat = 45
+    static let radius: CGFloat = 8
+}
+
+/// Caixa suspensa. `width` nil = a largura que o pai der. `tone`: `.light`
+/// (página clara) ou `.editor` (painel escuro do editor). `swatch`: amostra de
+/// cor antes do valor (`.clear` = xadrez, fundo transparente). `tag` = id da
+/// caixa; o menu recebe "\(tag).menu".
+struct AureaDropdown: View {
+    private let value: String
+    private let width: CGFloat?
+    private let tone: AureaSurfaceTone
+    private let swatch: Color?
+    private let enabled: Bool
+    private let tag: String?
+    private let label: String?
+    private let entries: () -> [MenuEntry]
+    @State private var open = false
+
+    init(value: String, width: CGFloat? = AureaDropdownMetrics.width, tone: AureaSurfaceTone = .light,
+         swatch: Color? = nil, enabled: Bool = true, tag: String? = nil, accessibilityLabel: String? = nil,
+         entries: @escaping () -> [MenuEntry]) {
+        self.value = value; self.width = width; self.tone = tone; self.swatch = swatch
+        self.enabled = enabled; self.tag = tag; self.label = accessibilityLabel; self.entries = entries
+    }
+
+    var body: some View {
+        let light = tone == .light
+        let box = light ? AureaColors.lightSurface : AureaColors.chip
+        let ink = light ? AureaColors.lightText : AureaColors.text
+        let muted = light ? AureaColors.lightTextMuted : AureaColors.muted
+        let line = light ? AureaColors.lightDivider : AureaColors.border
+        Button { open = true } label: {
+            HStack(spacing: 0) {
+                if let swatch {
+                    AureaColorSwatch(color: swatch).clipShape(RoundedRectangle(cornerRadius: 5)).frame(width: 22, height: 22)
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(line, lineWidth: 1)).padding(.trailing, 10)
+                }
+                Text(value).font(.aurea(size: 15, weight: .medium)).foregroundStyle(ink).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronDown, size: 14, color: muted).padding(.leading, 6)
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity)
+            .frame(height: AureaDropdownMetrics.height)
+            .background(box, in: RoundedRectangle(cornerRadius: AureaDropdownMetrics.radius))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : AnchoredMenuMetrics.disabledAlpha)
+        .frame(width: width)
+        .aureaAnchoredMenu(isPresented: $open, matchAnchorWidth: true, tone: tone,
+                           tag: tag.map { "\($0).menu" }, entries: entries)
+        .accessibilityLabel(label ?? value)
+        .accessibilityValue(value)
+        .modifier(OptionalIdentifier(tag: tag))
+    }
+}
+
+// =============================================================================
+// Omega fundação · F5: MOLDURA COMUM DOS PAINÉIS DE PROPRIEDADE
+// (`fragment_settings_base` + `fragment_setting_actionbar` da referência)
+//
+// Par de `PanelFrame`/`PanelBar` do `editor/panels/PanelChrome.kt` (mesmos ids):
+// coluna esquerda de 60 com 4 células que repartem a altura (‹ · ◆± · Curva ·
+// ⋯, e o "=" do AUREA entre Curva e ⋯ quando há), conteúdo no centro rolando por
+// dentro, coluna direita com até 4 abas de ícone (só com 2 ou mais), divisórias
+// de 0,7, altura de 200 (dada por quem hospeda). Segurar ◆ com keyframe no
+// quadro pede "apagar todos os keyframes"; Curva com menos de 2 keyframes avisa.
+//
+//   PanelFrame(rail: PanelRail(onBack: close, keyframeLook: look, onKeyframe: toggle,
+//                              onDeleteAllKeyframes: deleteAll, onCurve: openCurve, curveReady: ready),
+//              tabs: [PanelTab(id: "move", label: …, glyph: …, alt: PanelTab(id: "pivot", label: …, glyph: …)),
+//                     PanelTab(id: "scale", label: …, glyph: …)],
+//              selectedTab: tab, onTab: { tab = $0 }) {
+//       // conteúdo da aba
+//   }
+// =============================================================================
+
+enum PanelFrameMetrics {
+    static let height: CGFloat = 200
+    static let railWidth: CGFloat = 60
+    static let divider: CGFloat = 0.7
+    static let tabInset: CGFloat = 4
+    static let tabRadius: CGFloat = 5
+    static let disabledAlpha: Double = 0.15
+    static let maxTabs = 4
+}
+
+/// Uma aba de ícone da coluna direita. `id` é o que `onTab` devolve. `alt`: a
+/// aba irmã — tocar de novo na aba ativa troca para ela e o toque seguinte
+/// volta. Ícone: `glyph` (CupertinoGlyph) ou `icon` (SF Symbol ou "material:Nome").
+struct PanelTab {
+    let id: String
+    let label: String
+    var glyph: Character? = nil
+    var icon: String? = nil
+    private let altBox: [PanelTab]
+    var alt: PanelTab? { altBox.first }
+
+    init(id: String, label: String, glyph: Character? = nil, icon: String? = nil, alt: PanelTab? = nil) {
+        self.id = id; self.label = label; self.glyph = glyph; self.icon = icon
+        self.altBox = alt.map { [$0] } ?? []
+    }
+}
+
+/// O que a coluna esquerda faz (par do `PanelRail` do Kotlin).
+/// - `onKeyframe` nil = o painel não tem parâmetro com keyframe: ◆ e Curva a 15 %, sem toque.
+/// - `onDeleteAllKeyframes`: segurar ◆ com keyframe no quadro pede confirmação e chama isto.
+/// - `onCurve` + `curveReady`: com menos de 2 keyframes o toque mostra o aviso.
+/// - `onExpression`: a célula "=" (extra do AUREA), só quando não nil.
+/// - `moreEntries` (menu ancorado) ou `onMore`: o ⋯; os dois nil = sem ⋯.
+/// - `supportsAnimation` falso: painel sem animação — só o ‹.
+struct PanelRail {
+    let onBack: () -> Void
+    var keyframeLook: KeyframeLook = .none
+    var onKeyframe: (() -> Void)? = nil
+    var onDeleteAllKeyframes: (() -> Void)? = nil
+    var onCurve: (() -> Void)? = nil
+    var curveReady: Bool = false
+    var expression: ExpressionLook = .none
+    var onExpression: (() -> Void)? = nil
+    var moreEntries: (() -> [MenuEntry])? = nil
+    var onMore: (() -> Void)? = nil
+    var moreActive: Bool = false
+    var supportsAnimation: Bool = true
+    // Omega efeitos (área 07): o ⋯ a 15 % e sem toque (o ⋯ da lista de efeitos
+    // fica inativo com os controles de um efeito abertos, como na referência).
+    var moreEnabled: Bool = true
+}
+
+/// A moldura comum dos painéis de propriedade.
+struct PanelFrame<Content: View>: View {
+    private let rail: PanelRail
+    private let tabs: [PanelTab]
+    private let selectedTab: String?
+    private let onTab: (String) -> Void
+    private let scrollContent: Bool
+    private let content: () -> Content
+    @State private var moreOpen = false
+
+    /// - `tabs`: no máximo 4; com 0 ou 1 a coluna direita não existe.
+    /// - `selectedTab`: o `PanelTab.id` ativo (ou o id da `alt` dele).
+    /// - `scrollContent`: o conteúdo rola por dentro (padrão); falso para listas próprias.
+    init(rail: PanelRail, tabs: [PanelTab] = [], selectedTab: String? = nil, onTab: @escaping (String) -> Void = { _ in },
+         scrollContent: Bool = true, @ViewBuilder content: @escaping () -> Content) {
+        self.rail = rail; self.tabs = tabs; self.selectedTab = selectedTab; self.onTab = onTab
+        self.scrollContent = scrollContent; self.content = content
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            leftRail
+            divider
+            Group {
+                if scrollContent {
+                    ScrollView(.vertical) { content().frame(maxWidth: .infinity, alignment: .topLeading) }
+                } else {
+                    content()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(AureaColors.panelFrameContent)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("panel.content")
+            if tabs.count >= 2 {
+                divider
+                rightRail
+            }
+        }
+        .background(AureaColors.panelFrameBackground)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("panel.frame")
+    }
+
+    private var divider: some View {
+        Rectangle().fill(AureaColors.panelFrameDivider).frame(width: PanelFrameMetrics.divider).frame(maxHeight: .infinity)
+    }
+
+    private var leftRail: some View {
+        VStack(spacing: 0) {
+            cell("panel.rail.back", label: AureaText.t("panel_voltar_ferramentas"), enabled: true, action: rail.onBack) {
+                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 22).mirrorsInRtl()
+            }
+            if rail.supportsAnimation {
+                cell("panel.rail.keyframe",
+                     label: AureaText.t(rail.keyframeLook == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui"),
+                     enabled: rail.onKeyframe != nil, action: rail.onKeyframe,
+                     longAction: rail.keyframeLook == .keyHere && rail.onDeleteAllKeyframes != nil ? askDeleteAll : nil) {
+                    KeyframeDiamondIcon(look: rail.keyframeLook, enabled: true)
+                }
+                cell("panel.rail.curve", label: AureaText.t("panel_editar_curva_propriedade"), enabled: rail.onCurve != nil,
+                     action: rail.onCurve.map { openCurve in { if rail.curveReady { openCurve() } else { curveWarning() } } }) {
+                    CurveRailIcon(enabled: true, animated: rail.keyframeLook != .none)
+                }
+                if let onExpression = rail.onExpression {
+                    cell("panel.rail.expression",
+                         label: AureaText.t(rail.expression == .none ? "panel_adicionar_expressao" : "panel_editar_expressao"),
+                         enabled: true, action: onExpression) {
+                        Text("=").font(.aurea(size: 22, weight: .bold))
+                            .foregroundStyle(rail.expression == .none ? AureaColors.text : expressionColor(rail.expression))
+                    }
+                }
+                if let entries = rail.moreEntries {
+                    cell("panel.rail.more", label: AureaText.t("editor_mais"), enabled: rail.moreEnabled, action: { moreOpen = true }) {
+                        CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 24, color: rail.moreActive ? AureaColors.accent : AureaColors.text)
+                    }
+                    .aureaAnchoredMenu(isPresented: $moreOpen, tag: "panel.rail.more.menu", entries: entries)
+                } else if let onMore = rail.onMore {
+                    cell("panel.rail.more", label: AureaText.t("editor_mais"), enabled: rail.moreEnabled, action: onMore) {
+                        CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 24, color: rail.moreActive ? AureaColors.accent : AureaColors.text)
+                    }
+                } else {
+                    Color.clear.frame(maxHeight: .infinity)
+                }
+            } else {
+                Color.clear.frame(maxHeight: .infinity)
+                Color.clear.frame(maxHeight: .infinity)
+                Color.clear.frame(maxHeight: .infinity)
+            }
+        }
+        .frame(width: PanelFrameMetrics.railWidth)
+        .frame(maxHeight: .infinity)
+    }
+
+    /// Uma célula da coluna esquerda: reparte a altura com as outras.
+    @ViewBuilder
+    private func cell<Icon: View>(_ id: String, label: String, enabled: Bool, action: (() -> Void)?,
+                                  longAction: (() -> Void)? = nil, @ViewBuilder icon: () -> Icon) -> some View {
+        let face = icon()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .opacity(enabled ? 1 : PanelFrameMetrics.disabledAlpha)
+        if let action, enabled {
+            if let longAction {
+                // ◆: toque marca/tira; segurar pede "apagar todos".
+                face
+                    .onTapGesture(perform: action)
+                    .onLongPressGesture(minimumDuration: 0.5, perform: longAction)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(label)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction(.default, action)
+                    .accessibilityAction(named: AureaText.t("om_panel_delete_all_keyframes_q"), longAction)
+                    .accessibilityIdentifier(id)
+            } else {
+                Button(action: action) { face }
+                    .buttonStyle(AureaPressStyle(shrink: 1))
+                    .accessibilityLabel(label)
+                    .accessibilityIdentifier(id)
+            }
+        } else {
+            face
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(label)
+                .accessibilityAddTraits(.isButton)
+                .disabled(true)
+                .accessibilityIdentifier(id)
+        }
+    }
+
+    private var rightRail: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(tabs.prefix(PanelFrameMetrics.maxTabs).enumerated()), id: \.offset) { index, tab in
+                let altOn = tab.alt.map { selectedTab == $0.id } ?? false
+                let on = selectedTab == tab.id || altOn
+                let shown = altOn ? (tab.alt ?? tab) : tab
+                let tint = on ? AureaColors.accent : AureaColors.text
+                Button {
+                    if let alt = tab.alt, selectedTab == tab.id { onTab(alt.id) } else { onTab(tab.id) }
+                } label: {
+                    tabIcon(shown, tint: tint)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(on ? AureaColors.panelFrameDivider : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: PanelFrameMetrics.tabRadius))
+                        .padding(PanelFrameMetrics.tabInset)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityLabel(shown.label)
+                .accessibilityAddTraits(on ? .isSelected : [])
+                .accessibilityIdentifier("panel.tab.\(index)")
+            }
+        }
+        .frame(width: PanelFrameMetrics.railWidth)
+        .frame(maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func tabIcon(_ tab: PanelTab, tint: Color) -> some View {
+        if let glyph = tab.glyph {
+            CupertinoGlyph.text(glyph, size: 22, color: tint)
+        } else if let icon = tab.icon, icon.hasPrefix("material:") {
+            MaterialGlyph(String(icon.dropFirst(9)), size: 22, color: tint)
+        } else if let icon = tab.icon {
+            Image(systemName: icon).font(.aurea(size: 20, weight: .medium)).foregroundStyle(tint)
+        }
+    }
+
+    private func askDeleteAll() {
+        guard let delete = rail.onDeleteAllKeyframes else { return }
+        AureaPopupPresenter.shared.presentDialog { close in
+            AureaAlert(title: AureaText.t("om_panel_delete_all_keyframes_q"), confirmLabel: AureaText.t("panel_apagar"),
+                       destructive: true, onConfirm: delete, onDismiss: close)
+        }
+    }
+
+    private func curveWarning() {
+        AureaPopupPresenter.shared.presentDialog { close in
+            AureaAlert(title: AureaText.t("om_panel_keyframes_needed"), message: AureaText.t("pn_curve_need_two_keys"),
+                       showCancel: false, onConfirm: {}, onDismiss: close)
+        }
+    }
+}
+
+/// A BARRA DO PAINEL DE PROPRIEDADE (P0-6 da área 04 / P0-6 da área 06): fundo
+/// `panelBar`, ‹ de 44 e o título À ESQUERDA, com reticências; `trailing` à
+/// direita e um ⋮ opcional (`moreEntries`, menu ancorado). Altura = a da barra
+/// superior (42). Ids: `panel.bar.back`, `panel.bar.title`, `panel.bar.more`.
+struct PanelBar<Trailing: View>: View {
+    private let title: String
+    private let onBack: () -> Void
+    private let tag: String?
+    private let moreEntries: (() -> [MenuEntry])?
+    private let trailing: () -> Trailing
+    @State private var moreOpen = false
+
+    init(title: String, onBack: @escaping () -> Void, tag: String? = nil, moreEntries: (() -> [MenuEntry])? = nil,
+         @ViewBuilder trailing: @escaping () -> Trailing) {
+        self.title = title; self.onBack = onBack; self.tag = tag; self.moreEntries = moreEntries; self.trailing = trailing
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: onBack) {
+                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 22).mirrorsInRtl()
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(AureaPressStyle(shrink: 1))
+            .accessibilityLabel(AureaText.t("pn_back_to_layer_tools"))
+            .accessibilityIdentifier("panel.bar.back")
+            Text(title)
+                .font(.aurea(size: 15, weight: .semibold))
+                .foregroundStyle(AureaColors.text)
+                .lineLimit(1).truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("panel.bar.title")
+            trailing()
+            if let moreEntries {
+                Button { moreOpen = true } label: {
+                    CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 22)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityLabel(AureaText.t("editor_mais"))
+                .accessibilityIdentifier("panel.bar.more")
+                .aureaAnchoredMenu(isPresented: $moreOpen, alignEnd: true, tag: "panel.bar.more.menu", entries: moreEntries)
+            } else {
+                Spacer().frame(width: 6)
+            }
+        }
+        .frame(height: EditorLayout.topBar)
+        .frame(maxWidth: .infinity)
+        .background(AureaColors.panelBar)
+        .accessibilityElement(children: .contain)
+        .modifier(OptionalIdentifier(tag: tag))
+    }
+}
+
+extension PanelBar where Trailing == EmptyView {
+    init(title: String, onBack: @escaping () -> Void, tag: String? = nil, moreEntries: (() -> [MenuEntry])? = nil) {
+        self.init(title: title, onBack: onBack, tag: tag, moreEntries: moreEntries) { EmptyView() }
+    }
+}
+
+// =============================================================================
+// Omega efeitos (área 07): CONTROLES DE PARÂMETRO da referência
+// (`effect_setting_*`, `AlightSlider`, `ValueSpinner`) — par dos `FxParamLabel`,
+// `FxValueBox`, `AureaSlider`, `FxRuler` e `FxSegmented` do PropertyControls.kt.
+// Só o painel de efeitos usa; `PropertyRow`/`TickRuler`/`ParamRowLabel` ficam
+// como estão para os outros painéis. A CONTA mora em `FxParamMath`
+// (EffectsHuman.swift); as cores, nos papéis `AureaColors.fx*`.
+// =============================================================================
+
+/// Losango 9×8 do rótulo (só com keyframe): cheio = marca no cabeçote.
+private struct FxKeyIndicator: View {
+    let filled: Bool
+    let color: Color
+    var body: some View {
+        Canvas { context, size in
+            var diamond = Path()
+            diamond.move(to: CGPoint(x: size.width / 2, y: 0.5))
+            diamond.addLine(to: CGPoint(x: size.width - 0.5, y: size.height / 2))
+            diamond.addLine(to: CGPoint(x: size.width / 2, y: size.height - 0.5))
+            diamond.addLine(to: CGPoint(x: 0.5, y: size.height / 2))
+            diamond.closeSubpath()
+            if filled { context.fill(diamond, with: .color(color)) }
+            else { context.stroke(diamond, with: .color(color), lineWidth: 1) }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// O RÓTULO da linha (`propertyLabel`): 75 × (alt − 6), raio 4, fundo `fxLabel`
+/// (pressionado ou ativo: `fxSunken`), texto 8–12 em até 2 linhas, centralizado:
+/// `text` normal, `accent` ativo, `fxDisabledText` desabilitado (sem toque). ◆ 9×8
+/// no canto superior esquerdo SÓ com keyframe; o "=" da expressão (extra do AUREA).
+struct FxParamLabel: View {
+    let label: String
+    var height: CGFloat = FxParamMath.ROW_RULER - 12
+    var width: CGFloat = FxParamMath.LABEL_W
+    var active = false
+    var enabled = true
+    var keyframe: KeyframeLook = .none
+    var expression: ExpressionLook = .none
+    var onTap: (() -> Void)? = nil
+    var onLongPress: (() -> Void)? = nil
+    @State private var pressed = false
+
+    var body: some View {
+        let lit = enabled && (active || pressed)
+        let ink: Color = !enabled ? AureaColors.fxDisabledText : active ? AureaColors.accent : AureaColors.text
+        return Text(label)
+            .font(.aurea(size: 12))
+            .minimumScaleFactor(8.0 / 12.0)
+            .lineLimit(2)
+            .multilineTextAlignment(.center)
+            .foregroundStyle(ink)
+            .padding(3)
+            .frame(width: width, height: height)
+            .background(lit ? AureaColors.fxSunken : AureaColors.fxLabel, in: RoundedRectangle(cornerRadius: 4))
+            .overlay(alignment: .topLeading) {
+                if keyframe != .none {
+                    FxKeyIndicator(filled: keyframe == .keyHere,
+                                   color: active && enabled ? AureaColors.accent : AureaColors.text.opacity(0.5))
+                        .frame(width: 9, height: 8).offset(x: -1, y: -1)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if expression != .none { ExpressionBadge(look: expression).offset(x: 1, y: -2) }
+            }
+            // A linha inteira responde (38 de altura nas linhas baixas).
+            .contentShape(Rectangle().inset(by: -FxParamMath.LABEL_MARGIN))
+            .onTapGesture { if enabled { onTap?() } }
+            .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 10, perform: {
+                if enabled { onLongPress?() }
+            }, onPressingChanged: { down in pressed = down && enabled && onTap != nil })
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAddTraits(active ? .isSelected : [])
+            .accessibilityAction { if enabled { onTap?() } }
+    }
+}
+
+/// A CAIXA DE VALOR: 56 × (alt − 6), raio 4, véu preto de 20 %, número 8–14
+/// alinhado ao fim, sempre LTR; `aux` é a linha auxiliar acima ("N× +" das voltas
+/// de um ângulo, 8–10 em `fxDisabledText`). Tocar abre o teclado (quem chama).
+struct FxValueBox: View {
+    let text: String
+    var height: CGFloat = FxParamMath.ROW_RULER - 12
+    var width: CGFloat = FxParamMath.VALUE_W
+    var aux: String? = nil
+    var enabled = true
+    var onTap: (() -> Void)? = nil
+    @State private var pressed = false
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            if let aux, !aux.isEmpty {
+                Text(aux)
+                    .font(.aurea(size: 10).monospacedDigit())
+                    .minimumScaleFactor(0.8)
+                    .lineLimit(1)
+                    .foregroundStyle(AureaColors.fxDisabledText)
+            }
+            Text(text)
+                .font(.aurea(size: 14).monospacedDigit())
+                .minimumScaleFactor(8.0 / 14.0)
+                .lineLimit(1)
+                .foregroundStyle(enabled ? AureaColors.text : AureaColors.fxDisabledText)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .padding(.horizontal, 6)
+        .frame(width: width, height: height)
+        .background(pressed && enabled && onTap != nil ? AureaColors.fxSunken : AureaColors.fxValueVeil,
+                    in: RoundedRectangle(cornerRadius: 4))
+        .keepLtr()
+        .contentShape(Rectangle())
+        .onTapGesture { if enabled { onTap?() } }
+        .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 10, perform: {},
+                            onPressingChanged: { down in pressed = down })
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel((aux.map { $0 + " " } ?? "") + text)
+        .accessibilityAddTraits(onTap != nil && enabled ? .isButton : [])
+        .accessibilityAction { if enabled { onTap?() } }
+    }
+}
+
+/// O SLIDER da referência (`AlightSlider`): trilho de 2,5 com ponta redonda em
+/// `fxTrack`; preenchimento `accent` da ORIGEM até o polegar (bipolar quando a
+/// origem está no meio; `fxTrackDisabled` desabilitado); polegar de 18 em `text`;
+/// 10 pt de pista parada em cada valor de encaixe (o padrão). O toque parado não
+/// muda nada; passou de ½ touch slop, o valor vai para a posição do dedo
+/// (absoluto), quantizado em `step`. Um passo de desfazer por arrasto (quem chama
+/// abre em `onBegin` e fecha em `onEnd`). Valores na unidade MOSTRADA.
+struct AureaSlider: View {
+    let value: Float
+    let min: Float
+    let max: Float
+    var origin: Float? = nil
+    var step: Float = 0
+    var snaps: [Float] = []
+    var enabled = true
+    var identifier: String? = nil
+    var accessibilityLabel = ""
+    var accessibilityValue = ""
+    let onBegin: () -> Void
+    let onValue: (Float) -> Void
+    let onEnd: () -> Void
+
+    @State private var active = false
+    @State private var live: Float = 0
+    @State private var direction = 0
+    @GestureState private var held = false
+
+    private static let thumb: CGFloat = 18
+    private var shown: Float { active ? live : value }
+    private var snapPx: Float { Float(FxParamMath.SLIDER_SNAP_DP) }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let track = Swift.max(1, geometry.size.width - AureaSlider.thumb)
+            Canvas { context, size in draw(context, size: size, track: track) }
+                .contentShape(Rectangle())
+                .simultaneousGesture(drag(track: track), including: enabled ? .all : .none)
+        }
+        .keepLtr()
+        .onChange(of: held) { down in if !down { finish() } }
+        .onChange(of: enabled) { on in if !on { finish() } }
+        .onDisappear { finish() }
+        .accessibilityElement()
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityAdjustableAction { move in
+            let unit: Float = step > 0 ? step : (max - min) / 20
+            let delta: Float = move == .increment ? unit : move == .decrement ? -unit : 0
+            guard enabled, delta != 0, unit.isFinite else { return }
+            onBegin(); onValue(Swift.min(Swift.max(value + delta, min), max)); onEnd()
+        }
+        .modifier(OptionalIdentifier(tag: identifier))
+    }
+
+    private func x(_ v: Float, track: CGFloat) -> CGFloat {
+        AureaSlider.thumb / 2 + CGFloat(FxParamMath.sliderX(value: v, width: Float(track), min: min, max: max,
+                                                             snaps: snaps, snapPx: snapPx))
+    }
+
+    private func draw(_ context: GraphicsContext, size: CGSize, track: CGFloat) {
+        let r = AureaSlider.thumb / 2
+        let cy = size.height / 2
+        let round = StrokeStyle(lineWidth: 2.5, lineCap: .round)
+        var line = Path()
+        line.move(to: CGPoint(x: r, y: cy))
+        line.addLine(to: CGPoint(x: r + track, y: cy))
+        context.stroke(line, with: .color(AureaColors.fxTrack), style: round)
+        let o = origin.flatMap { $0.isFinite ? $0 : nil } ?? min
+        let xo = x(Swift.min(Swift.max(o, min), max), track: track)
+        let xv = x(shown, track: track)
+        if abs(xv - xo) > 0.5 {
+            var fill = Path()
+            fill.move(to: CGPoint(x: xo, y: cy))
+            fill.addLine(to: CGPoint(x: xv, y: cy))
+            context.stroke(fill, with: .color(enabled ? AureaColors.accent : AureaColors.fxTrackDisabled), style: round)
+        }
+        context.fill(Path(ellipseIn: CGRect(x: xv - r, y: cy - r, width: 2 * r, height: 2 * r)),
+                     with: .color(enabled ? AureaColors.text : AureaColors.fxDisabledText))
+    }
+
+    private func drag(track: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: FxParamMath.TOUCH_SLOP * FxParamMath.SLIDER_SLOP_FRACTION)
+            .updating($held) { _, state, _ in state = true }
+            .onChanged { g in
+                if direction == 0 { direction = abs(g.translation.width) >= abs(g.translation.height) ? 1 : -1 }
+                guard direction == 1 else { return }
+                if !active { live = value; active = true; onBegin() }
+                let v = FxParamMath.sliderValueAt(x: Float(g.location.x - AureaSlider.thumb / 2), width: Float(track),
+                                                  min: min, max: max, step: step, snaps: snaps, snapPx: snapPx)
+                if v.isFinite && v != live { live = v; onValue(v) }
+            }
+            .onEnded { _ in finish() }
+    }
+
+    private func finish() {
+        direction = 0
+        if active { active = false; onEnd() }
+    }
+}
+
+/// Uma régua por vez arremessa; enquanto isso, o toque numa outra é ignorado
+/// (referência `K52.Rw`). Só a thread principal mexe aqui.
+enum FxRulerFling {
+    static var owner: UUID?
+}
+
+/// A RÉGUA da referência (`ValueSpinner`): risco a cada 5,5 pt com 0,5 de largura
+/// em `fxTick`, a cada 5 riscos em `text`; alfa triangular até as bordas; padding
+/// vertical de 8; agulha de 1,5 na altura toda (`needle`: `fxNeedle` ou a cor do
+/// eixo ativo); riscos de encaixe (padrão e 0) com 1,25 px e alfa (α+1)/2.
+/// 1 risco = `step` (unidade mostrada) e o valor anda de risco em risco
+/// (`snapToTick`). O gesto começa depois de ¾ do touch slop (vertical acima do
+/// slop é da rolagem); dedo para a esquerda aumenta; arremesso acima de 300 pt/s
+/// com a desaceleração do `UIScrollView` (0,998/ms), parando na ponta da faixa;
+/// prende na faixa (estendida até o valor de partida); vibração leve ao cruzar um
+/// encaixe; dois dedos = 1/10 (controle fino do AUREA). Tocar durante o próprio
+/// arremesso o para e continua o MESMO gesto; enquanto OUTRA régua arremessa, o
+/// toque aqui é ignorado. Um passo de desfazer por gesto, arremesso incluído.
+/// Mesmo comportamento do `FxRuler` do EffectsControls.kt.
+struct FxRuler: View {
+    let value: Float
+    let step: Float
+    let min: Float
+    let max: Float
+    var snaps: [Float] = []
+    var needle: Color = AureaColors.fxNeedle
+    var enabled = true
+    var identifier: String? = nil
+    var accessibilityLabel = ""
+    var accessibilityValue = ""
+    let onBegin: () -> Void
+    let onValue: (Float) -> Void
+    let onEnd: () -> Void
+
+    @Environment(\.displayScale) private var displayScale
+    @State private var token = UUID()
+    /// Passo de desfazer aberto (arrastando ou arremessando): a fita mostra `live`.
+    @State private var dragging = false
+    @State private var live: Float = 0
+    @State private var start: Float = 0
+    @State private var walked: CGFloat = 0
+    @State private var lastX: CGFloat = 0
+    /// 0 = esperando o slop, 1 = arrastando, −1 = não é desta régua.
+    @State private var phase = 0
+    @State private var gain: CGFloat = 1
+    /// Amostras do dedo: x = instante (s), y = deslocamento horizontal (pt).
+    @State private var samples: [CGPoint] = []
+    @State private var fling: Task<Void, Never>?
+    @State private var haptic = UIImpactFeedbackGenerator(style: .light)
+    @GestureState private var held = false
+
+    private var shown: Float { dragging ? live : value }
+    private var tickStep: Float { step > 0 && step.isFinite ? step : 1 }
+    private var spacing: CGFloat { FxParamMath.TICK_SPACING }
+    private var snapsInRange: [Float] {
+        let a = Swift.min(min, max), b = Swift.max(min, max)
+        return snaps.filter { $0.isFinite && $0 >= a && $0 <= b }
+    }
+
+    var body: some View {
+        Canvas { context, size in draw(context, size: size) }
+            .contentShape(Rectangle())
+            .simultaneousGesture(drag, including: enabled ? .all : .none)
+            .keepLtr()
+            .onChange(of: held) { down in
+                // O fim normal passa pelo `onEnded` (que pode arremessar); aqui só o
+                // cancelamento (a rolagem levou o toque), depois dele.
+                if !down {
+                    DispatchQueue.main.async {
+                        phase = 0
+                        if fling == nil { finish() }
+                    }
+                }
+            }
+            .onChange(of: enabled) { on in if !on { stopFling(); finish() } }
+            .onAppear { FxTouchCounter.shared.install() }
+            .onDisappear { stopFling(); finish() }
+            .accessibilityElement()
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityValue(accessibilityValue)
+            .accessibilityAdjustableAction { move in
+                let unit = tickStep * Float(FxParamMath.MAJOR_EVERY)
+                let delta: Float = move == .increment ? unit : move == .decrement ? -unit : 0
+                guard enabled, delta != 0 else { return }
+                let a = Swift.min(min, max, value), b = Swift.max(min, max, value)
+                onBegin(); onValue(Swift.min(Swift.max(value + delta, a), b)); onEnd()
+            }
+            .modifier(OptionalIdentifier(tag: identifier))
+    }
+
+    private func draw(_ context: GraphicsContext, size: CGSize) {
+        let top: CGFloat = 8
+        let bottom = size.height - 8
+        let center = size.width / 2
+        guard bottom > top, center > 0 else { return }
+        let v = Double(shown.isFinite ? shown : 0)
+        let ticks = v / Double(tickStep)
+        let whole = floor(ticks)
+        let fraction = CGFloat(ticks - whole)
+        let reach = Int(center / spacing) + 2
+        for j in -reach...reach {
+            let x = center + (CGFloat(j) - fraction) * spacing
+            let alpha = 1 - abs(x - center) / center
+            if alpha <= 0 { continue }
+            let index = whole + Double(j)
+            let major = index.truncatingRemainder(dividingBy: Double(FxParamMath.MAJOR_EVERY)) == 0
+            var line = Path()
+            line.move(to: CGPoint(x: x, y: top))
+            line.addLine(to: CGPoint(x: x, y: bottom))
+            context.stroke(line, with: .color((major ? AureaColors.text : AureaColors.fxTick).opacity(Double(alpha))), lineWidth: 0.5)
+        }
+        // Riscos de encaixe (padrão e zero): 1,25 px, opacidade reforçada.
+        for s in snapsInRange {
+            let x = center + CGFloat((Double(s) - v) / Double(tickStep)) * spacing
+            let alpha = 1 - abs(x - center) / center
+            if alpha <= 0 { continue }
+            var line = Path()
+            line.move(to: CGPoint(x: x, y: top))
+            line.addLine(to: CGPoint(x: x, y: bottom))
+            context.stroke(line, with: .color(AureaColors.text.opacity(Double((alpha + 1) / 2))),
+                           lineWidth: 1.25 / Swift.max(displayScale, 1))
+        }
+        var needleLine = Path()
+        needleLine.move(to: CGPoint(x: center, y: 0))
+        needleLine.addLine(to: CGPoint(x: center, y: size.height))
+        context.stroke(needleLine, with: .color(enabled ? needle : AureaColors.fxDisabledText), lineWidth: 1.5)
+    }
+
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .updating($held) { _, state, _ in state = true }
+            .onChanged { g in changed(g) }
+            .onEnded { g in ended(g) }
+    }
+
+    private func changed(_ g: DragGesture.Value) {
+        if phase < 0 { return }
+        let dx = g.translation.width
+        let dy = g.translation.height
+        if phase == 0 {
+            if dx == 0 && dy == 0 {
+                // O dedo desceu: outra régua arremessando = este gesto é ignorado;
+                // a própria arremessando = parar o arremesso já é gesto.
+                if let owner = FxRulerFling.owner, owner != token { phase = -1; return }
+                if let task = fling {
+                    task.cancel()
+                    fling = nil
+                    if FxRulerFling.owner == token { FxRulerFling.owner = nil }
+                    if dragging {
+                        phase = 1
+                        start = live
+                        walked = 0
+                        lastX = 0
+                        samples = []
+                    }
+                }
+                return
+            }
+            // Vertical (acima do slop) é da rolagem da lista.
+            if abs(dy) > FxParamMath.TOUCH_SLOP && abs(dy) > abs(dx) { phase = -1; return }
+            if abs(dx) <= FxParamMath.TOUCH_SLOP * FxParamMath.RULER_SLOP_FRACTION { return }
+            if let owner = FxRulerFling.owner, owner != token { phase = -1; return }
+            phase = 1
+            lastX = dx
+            walked = 0
+            samples = []
+            if !dragging {
+                dragging = true
+                live = value.isFinite ? value : 0
+                haptic.prepare()
+                onBegin()
+            }
+            start = live
+            return
+        }
+        let delta = dx - lastX
+        lastX = dx
+        gain = FxTouchCounter.shared.count >= 2 ? CGFloat(FxParamRowMath.twoFingerGain) : 1
+        samples.append(CGPoint(x: g.time.timeIntervalSinceReferenceDate, y: dx))
+        if samples.count > 8 { samples.removeFirst(samples.count - 8) }
+        if delta != 0 {
+            walked -= delta * gain   // dedo para a esquerda aumenta
+            apply(FxParamMath.rulerValueAfter(start: start, scrolledPx: Float(walked), spacingPx: Float(spacing), step: tickStep))
+        }
+    }
+
+    private func ended(_ g: DragGesture.Value) {
+        defer { phase = 0 }
+        guard phase == 1, dragging else { return }
+        let speed = velocity(at: g.time.timeIntervalSinceReferenceDate)
+        if abs(speed) > FxParamMath.FLING_MIN_PX_S { startFling(-speed * gain) } else { finish() }
+    }
+
+    /// Velocidade do dedo (pt/s) nos últimos 100 ms; parado antes de soltar = 0.
+    private func velocity(at end: TimeInterval) -> CGFloat {
+        let recent = samples.filter { end - Double($0.x) <= 0.1 }
+        guard let first = recent.first, let last = recent.last, last.x > first.x, end - Double(last.x) < 0.05 else { return 0 }
+        return (last.y - first.y) / (last.x - first.x)
+    }
+
+    /// O valor anda de risco em risco, preso na faixa estendida até a partida.
+    private func apply(_ raw: Float) {
+        let (lo, hi) = FxParamRowMath.dragBounds(min: min, max: max, from: start)
+        let next = FxParamMath.limitRange(FxParamMath.snapToTick(raw, step: tickStep), min: lo, max: hi)
+        guard next.isFinite, next != live else { return }
+        if FxParamMath.crossedSnap(from: live, to: next, snaps: snapsInRange) { haptic.impactOccurred(intensity: 0.2) }
+        live = next
+        onValue(next)
+    }
+
+    /// Fecha o passo de desfazer (fim do arrasto ou do arremesso).
+    private func finish() {
+        guard dragging else { return }
+        dragging = false
+        onEnd()
+    }
+
+    private func startFling(_ speed: CGFloat) {
+        FxRulerFling.owner = token
+        fling = Task { @MainActor in
+            // UIScrollView.DecelerationRate.normal: a velocidade cai 0,2 % por ms.
+            let rate = 0.998
+            var velocity = Double(speed) / 1000
+            var last = Date()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 16_000_000)
+                if Task.isCancelled { break }
+                let now = Date()
+                let dt = Swift.max(1, now.timeIntervalSince(last) * 1000)
+                last = now
+                let decay = pow(rate, dt)
+                let move = CGFloat(velocity * (decay - 1) / log(rate))
+                velocity *= decay
+                walked += move
+                let before = live
+                apply(FxParamMath.rulerValueAfter(start: start, scrolledPx: Float(walked), spacingPx: Float(spacing), step: tickStep))
+                // Chegou à ponta da faixa: para (limitRange).
+                if live == before && move != 0 {
+                    let (lo, hi) = FxParamRowMath.dragBounds(min: min, max: max, from: start)
+                    if live <= lo || live >= hi { break }
+                }
+                if abs(velocity) < 0.02 { break }
+            }
+            if !Task.isCancelled {
+                fling = nil
+                if FxRulerFling.owner == token { FxRulerFling.owner = nil }
+                finish()
+            }
+        }
+    }
+
+    /// Para o arremesso (sumiu, desabilitou) e fecha o passo dele.
+    private func stopFling() {
+        guard let task = fling else { return }
+        task.cancel()
+        fling = nil
+        if FxRulerFling.owner == token { FxRulerFling.owner = nil }
+        finish()
+    }
+}
+
+
+/// A ESCOLHA SEGMENTADA (`effect_setting_selector`, RADIO): grupo de raio 5 com
+/// botões iguais de 27,5 em `fxSegment` (vigente `fxSegmentOn`), texto `text`
+/// (vigente `accent`, desabilitado `fxDisabledText`), uma linha com reticências.
+/// `selected` −1 = nenhum marcado (a "Variação"). Ids `<id>` e `<id>.<k>`.
+struct FxSegmented: View {
+    let options: [String]
+    let selected: Int
+    var enabled = true
+    var identifier: String? = nil
+    var label = ""
+    let onSelect: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 1) {
+            ForEach(Array(options.enumerated()), id: \.offset) { k, option in
+                let on = k == selected
+                Button { onSelect(k) } label: {
+                    Text(option)
+                        .font(.aurea(size: 12))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(!enabled ? AureaColors.fxDisabledText : on ? AureaColors.accent : AureaColors.text)
+                        .padding(.horizontal, 4)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 27.5)
+                        .background(on ? AureaColors.fxSegmentOn : AureaColors.fxSegment)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .disabled(!enabled)
+                .accessibilityLabel(label.isEmpty ? option : label + " · " + option)
+                .accessibilityAddTraits(on ? .isSelected : [])
+                .modifier(OptionalIdentifier(tag: identifier.map { "\($0).\(k)" }))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .accessibilityElement(children: .contain)
+        .modifier(OptionalIdentifier(tag: identifier))
+    }
+}
+
+/// A ESCOLHA SUSPENSA (estilo DROPDOWN): caixa de raio 5 em `fxSunken` com inset
+/// 4, a opção vigente e ▾ no destaque; o toque abre o menu ancorado com as opções
+/// (a vigente marcada). Ids `<tag>` (caixa), `<tag>.menu` e `<tag>.<k>`.
+struct FxDropdownBox: View {
+    let text: String
+    let options: [String]
+    let selected: Int
+    var enabled = true
+    var tag: String? = nil
+    var label = ""
+    let onPick: (Int) -> Void
+    @State private var open = false
+
+    var body: some View {
+        let ink = enabled ? AureaColors.accent : AureaColors.fxDisabledText
+        return Button { open = true } label: {
+            HStack(spacing: 6) {
+                Text(text)
+                    .font(.aurea(size: 13))
+                    .foregroundStyle(ink)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronDown, size: 12, color: ink)
+            }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity)
+            .frame(height: 30)
+            .background(AureaColors.fxSunken, in: RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .disabled(!enabled)
+        .aureaAnchoredMenu(isPresented: $open, matchAnchorWidth: true, tag: tag.map { "\($0).menu" }) {
+            options.enumerated().map { (index, option) -> MenuEntry in
+                .item(option, selected: index == selected, tag: tag.map { "\($0).\(index)" }) { onPick(index) }
+            }
+        }
+        .accessibilityLabel(label.isEmpty ? text : label)
+        .accessibilityValue(text)
+        .modifier(OptionalIdentifier(tag: tag))
+        .padding(4)
+    }
+}

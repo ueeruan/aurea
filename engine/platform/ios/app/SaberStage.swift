@@ -213,20 +213,81 @@ private func saberToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)? 
 // (cartão aberto e o ponto escolhido por toque): o palco 3D continua seco no
 // resto do tempo. Mesma geometria do Saber (homografia da caixa da camada).
 // =============================================================================
+// Omega efeitos (área 07, P1-2): o parâmetro ATIVO no preview. Tocar no rótulo
+// de um Point/Xyz/Orientação no painel o ativa: o guia "deslize para ajustar"
+// aparece no centro do preview e QUALQUER arrasto no preview ajusta o valor de
+// forma relativa (`EffectParamDragOverlay`); a alça do ponto em fração da camada
+// fica como marcador (arrastar nela continua absoluto). Toque sem arrasto no
+// preview, fechar os controles ou trocar de efeito desativa.
 @MainActor final class EffectPointStageState: ObservableObject {
     static let shared = EffectPointStageState()
 
-    @Published var layer: Int64 = 0
-    @Published var effect: UInt32 = 0
-    @Published var param: Int32 = -1
+    /// Camada, efeito e índice do parâmetro ativo (−1 = nenhum).
+    @Published private(set) var layer: Int64 = 0
+    @Published private(set) var effect: UInt32 = 0
+    @Published private(set) var param: Int32 = -1
+    /// O controle do parâmetro ativo (`FxParamControl.point/xyz/orientation`).
+    @Published private(set) var control = 0
     @Published var revision = 0
+    /// O guia: nome do parâmetro, tempos e um contador que muda a cada exibição.
+    @Published private(set) var guideLabel = ""
+    @Published private(set) var guide: FxParamMath.Guide = .short
+    @Published private(set) var guideToken = 0
+    /// O último guia já mostrado (o overlay recriado não repete o mesmo).
+    var guideShown = 0
 
-    func show(_ layerId: Int64, effect effectId: UInt32, param index: UInt32) {
+    var active: Bool { param >= 0 }
+
+    /// Ativa o parâmetro; `guide` não nulo mostra o guia de novo.
+    func activate(_ layerId: Int64, effect effectId: UInt32, param index: UInt32, control kind: Int,
+                  label: String, guide timing: FxParamMath.Guide?) {
         if layer != layerId { layer = layerId }
         if effect != effectId { effect = effectId }
         if param != Int32(index) { param = Int32(index) }
+        if control != kind { control = kind }
+        if guideLabel != label { guideLabel = label }
+        if let timing { guide = timing; guideToken += 1 }
     }
-    func hide() { if param != -1 { param = -1 } }
+    /// Sai do modo e apaga o guia que ainda estivesse na tela.
+    func deactivate() {
+        if param != -1 { param = -1 }
+        if !guideLabel.isEmpty { guideLabel = "" }
+    }
+    func isActive(_ layerId: Int64?, effect effectId: UInt32, param index: UInt32) -> Bool {
+        param >= 0 && layerId == layer && effect == effectId && UInt32(param) == index
+    }
+}
+
+/// Parâmetro que pode ser ativado no preview: ponto 2D/3D visível (par do
+/// `effectParamDraggable` do EffectPointStage.kt).
+func fxEffectParamDraggable(type: Int, flags: UInt32) -> Bool {
+    (type == fxParamPoint2D || type == fxParamPoint3D) && flags & 16 == 0
+}
+
+/// Escreve um parâmetro de efeito (escalar ou vetor) num comando só; com a
+/// trilha animada, keyframe no cabeçote só nos componentes `changed` (o mesmo
+/// contrato do `writeVector` do painel). Quem chama abre/fecha o passo de desfazer.
+@MainActor func fxWriteEffectParam(_ model: AureaModel, layer: Int64, effect: UInt32, param: EffectParamItem,
+                                   values: [Float], changed: [Int]) {
+    let count = Swift.min(fxComponentCount(Int(param.type)), 4)
+    guard count > 0, model.selectedLayer?.locked != true, param.flags & 16 == 0 else { return }
+    var vector = Array((param.value + [0, 0, 0, 1]).prefix(4))
+    for component in changed where component >= 0 && component < count && component < values.count {
+        guard values[component].isFinite else { return }
+        vector[component] = values[component]
+    }
+    if param.animated {
+        for component in changed where component >= 0 && component < count {
+            model.engine.keyParameter(layer, property: 31, effect: effect, param: param.index * 4 + UInt32(component),
+                                      time: model.localPlayhead, value: vector[component])
+        }
+    } else if count == 1 {
+        model.engine.setEffect(effect, forLayer: layer, paramIndex: param.index, value: vector[0])
+    } else {
+        model.engine.setEffectColor(effect, forLayer: layer, paramIndex: param.index,
+                                    r: vector[0], g: vector[1], b: vector[2], a: vector[3])
+    }
+    model.commitPendingCommands()
 }
 
 /// A alça do ponto ativo. Só ela recebe toque: fora dela, o palco segue normal.
@@ -255,12 +316,13 @@ private func saberToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)? 
 
     /// (ponto em fração da camada, nome do parâmetro), ou nil fora do modo.
     private func activePoint() -> (uv: CGPoint, label: String)? {
-        guard point.param >= 0, model.selection.count == 1, model.primarySelection == point.layer,
-              let l = model.selectedLayer, !l.locked else { return nil }
+        // Omega efeitos (P1-2): o marcador do parâmetro ATIVO (a orientação não tem ponto).
+        guard point.param >= 0, point.control != FxParamControl.orientation, model.selection.count == 1,
+              model.primarySelection == point.layer, let l = model.selectedLayer, !l.locked else { return nil }
         _ = point.revision
         _ = model.status.playhead
         guard let row = model.effectParams.first(where: { $0.index == UInt32(point.param) }), model.selectedEffectId == point.effect,
-              fxStagePointEligible(type: Int(row.type), flags: row.flags), row.value.count >= 2,
+              fxStagePointEligible(type: Int(row.type), flags: row.flags), row.enabled, row.value.count >= 2,
               row.value[0].isFinite, row.value[1].isFinite else { return nil }
         // O Saber (núcleo único) já desenha os dois pontos dele.
         if saber.effect >= 0, UInt32(truncatingIfNeeded: saber.effect) == point.effect,
@@ -336,5 +398,185 @@ private func saberToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)? 
         guard dragging else { return }
         dragging = false
         model.endGesture()
+    }
+}
+
+// =============================================================================
+// Omega efeitos (área 07, P1-2): ARRASTO RELATIVO no preview com o parâmetro
+// ativo. Fica ABAIXO das alças das ferramentas (rig, malha, fantoche, sabre, a
+// alça do ponto, roto), que continuam com prioridade; acima do resto do palco.
+// - Ponto em fração da camada (`kParamRelative`): o valor segue o dedo (a
+//   diferença das posições do dedo, convertidas para a camada).
+// - Outros pontos e XYZ (dois primeiros componentes): Δ px de tela × passo.
+// - Orientação: trackball (`FxParamMath.trackball`), posições normalizadas.
+// Um passo de desfazer por gesto. Toque sem arrasto desativa o parâmetro.
+// =============================================================================
+@MainActor struct EffectParamDragOverlay: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var point = EffectPointStageState.shared
+    @ObservedObject private var viewZoom = StageViewZoom.shared
+    @Environment(\.displayScale) private var displayScale
+    @State private var dragging = false
+    @State private var startValues: [Float] = []
+    @State private var liveValues: [Float] = []
+    @State private var startUv: CGPoint?
+    @State private var last: CGPoint = .zero
+
+    var body: some View {
+        if let row = activeRow() {
+            GeometryReader { geo in
+                ZStack {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                            .onChanged { value in changed(value, row: row, size: geo.size) }
+                            .onEnded { _ in ended() })
+                        .accessibilityHidden(true)
+                    EffectParamGuide()
+                        .allowsHitTesting(false)
+                }
+            }
+            .onDisappear { if dragging { dragging = false; model.endGesture() } }
+        }
+    }
+
+    /// O parâmetro ativo, quando o palco pode editá-lo.
+    private func activeRow() -> EffectParamItem? {
+        guard point.active, model.selection.count == 1, model.primarySelection == point.layer,
+              let layer = model.selectedLayer, !layer.locked, model.selectedEffectId == point.effect,
+              let row = model.effectParams.first(where: { $0.index == UInt32(point.param) }),
+              row.enabled, fxEffectParamDraggable(type: Int(row.type), flags: row.flags) else { return nil }
+        return row
+    }
+
+    private func changed(_ value: DragGesture.Value, row: EffectParamItem, size: CGSize) {
+        if !dragging {
+            guard hypot(value.translation.width, value.translation.height) >= FxParamMath.TOUCH_SLOP else { return }
+            dragging = true
+            model.beginGesture("ajustar " + row.label)
+            startValues = Array((row.value + [0, 0, 0, 1]).prefix(4))
+            liveValues = startValues
+            last = value.startLocation
+            startUv = uv(value.startLocation, size: size)
+        }
+        guard let layer = model.primarySelection else { return }
+        let control = FxParamMath.controlFor(row.control, Int(row.type))
+        let typedMin = Swift.min(row.hardMin, row.minValue)
+        let typedMax = Swift.max(row.hardMax, row.maxValue)
+        func bounded(_ v: Float, _ component: Int) -> Float {
+            let (lo, hi) = FxParamRowMath.dragBounds(min: typedMin, max: typedMax, from: startValues[component])
+            return Swift.min(Swift.max(v, lo), hi)
+        }
+        var next = liveValues
+        var changedComponents: [Int] = [0, 1]
+        if control == FxParamControl.orientation && Int(row.type) == fxParamPoint3D {
+            // Trackball entre a posição anterior e a atual, normalizadas em [−1, 1]
+            // na composição (centro = 0).
+            guard let a = normalized(last, size: size), let b = normalized(value.location, size: size) else { return }
+            let turned = FxParamMath.trackball(alpha: next[0], beta: next[1], gamma: next[2], x0: a.x, y0: a.y, x1: b.x, y1: b.y)
+            for component in 0..<3 { next[component] = bounded(turned[component], component) }
+            changedComponents = [0, 1, 2]
+        } else if row.flags & 8 != 0, let from = startUv, let now = uv(value.location, size: size) {
+            // Em fração da camada: segue o dedo.
+            next[0] = bounded(startValues[0] + Float(now.x - from.x), 0)
+            next[1] = bounded(startValues[1] + Float(now.y - from.y), 1)
+        } else {
+            // Referência: valor + (dx, dy em px de tela) × passo do motor.
+            let step: Float = row.step > 0 && row.step.isFinite ? row.step : 1
+            let dx = Float(value.translation.width * displayScale)
+            let dy = Float(value.translation.height * displayScale)
+            next[0] = bounded(startValues[0] + dx * step, 0)
+            next[1] = bounded(startValues[1] + dy * step, 1)
+        }
+        last = value.location
+        guard next != liveValues else { return }
+        liveValues = next
+        fxWriteEffectParam(model, layer: layer, effect: point.effect, param: row, values: next, changed: changedComponents)
+        model.loadParams(layerId: layer, effectId: point.effect)
+        point.revision += 1
+    }
+
+    private func ended() {
+        if dragging {
+            dragging = false
+            model.endGesture()
+        } else {
+            // Toque sem arrasto: sai do modo e não faz mais nada.
+            point.deactivate()
+        }
+        startUv = nil
+    }
+
+    /// Posição na tela → composição normalizada em [−1, 1] (para o trackball).
+    private func normalized(_ location: CGPoint, size: CGSize) -> (x: Float, y: Float)? {
+        let w = CGFloat(model.compositionWidth), h = CGFloat(model.compositionHeight)
+        let placed = StageZoomMath.fit(size: size, composition: CGSize(width: w, height: h), zoom: viewZoom.zoom, pan: viewZoom.pan)
+        guard placed.scale > 0, w > 0, h > 0 else { return nil }
+        let cx = (location.x - placed.origin.x) / placed.scale
+        let cy = (location.y - placed.origin.y) / placed.scale
+        return (Float(cx / w * 2 - 1), Float(cy / h * 2 - 1))
+    }
+
+    /// Posição na tela → fração da camada (a mesma homografia da alça).
+    private func uv(_ location: CGPoint, size: CGSize) -> CGPoint? {
+        let placed = StageZoomMath.fit(size: size,
+                                       composition: CGSize(width: CGFloat(model.compositionWidth), height: CGFloat(model.compositionHeight)),
+                                       zoom: viewZoom.zoom, pan: viewZoom.pan)
+        guard placed.scale > 0, let c = corners(),
+              let uv = saberToUv(c, Float((location.x - placed.origin.x) / placed.scale), Float((location.y - placed.origin.y) / placed.scale)),
+              uv.0.isFinite, uv.1.isFinite else { return nil }
+        return CGPoint(x: CGFloat(uv.0), y: CGFloat(uv.1))
+    }
+
+    /// Cantos da caixa da camada na composição; a camada de ajuste cobre a composição.
+    private func corners() -> [Float]? {
+        if model.selectedLayer?.adjustment == true {
+            let w = Float(model.compositionWidth), h = Float(model.compositionHeight)
+            return [0, 0, w, 0, w, h, 0, h]
+        }
+        var c: [Float] = []
+        return StageGeom.corners(model.detail, &c) && c.count == 8 ? c : nil
+    }
+}
+
+/// O GUIA "deslize para ajustar" no centro do preview: glifo de deslizar, o
+/// texto (10, `text`) e o nome do parâmetro (10 negrito, `accent`); entra, espera
+/// e sai nos tempos de `FxParamMath.Guide` (curto; longo no 1º efeito da camada).
+private struct EffectParamGuide: View {
+    @ObservedObject private var point = EffectPointStageState.shared
+    @State private var alpha: Double = 0
+
+    var body: some View {
+        let text = AureaText.t("om_fx_swipe_to_adjust")
+        VStack(spacing: 2) {
+            CupertinoGlyph.text(CupertinoGlyph.ArrowLeftRight, size: 22, color: AureaColors.text)
+            Text(text)
+                .font(.aurea(size: 10))
+                .foregroundStyle(AureaColors.text)
+                .multilineTextAlignment(.center)
+            Text(point.guideLabel)
+                .font(.aurea(size: 10, weight: .bold))
+                .foregroundStyle(AureaColors.accent)
+                .lineLimit(1)
+        }
+        .frame(width: 100)
+        .opacity(point.guideLabel.isEmpty ? 0 : alpha)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text + " · " + point.guideLabel)
+        .accessibilityHidden(alpha <= 0 || point.guideLabel.isEmpty)
+        .accessibilityIdentifier("stage.effect.guide")
+        .task(id: point.guideToken) { await run() }
+    }
+
+    private func run() async {
+        let token = point.guideToken
+        guard token > 0, token != point.guideShown else { return }
+        point.guideShown = token
+        let timing = point.guide
+        alpha = 0
+        withAnimation(.linear(duration: Double(timing.fadeIn) / 1000)) { alpha = 1 }
+        try? await Task.sleep(nanoseconds: UInt64(timing.fadeIn + timing.hold) * 1_000_000)
+        guard !Task.isCancelled else { return }
+        withAnimation(.linear(duration: Double(timing.fadeOut) / 1000)) { alpha = 0 }
     }
 }

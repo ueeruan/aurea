@@ -21,6 +21,20 @@ class CameraLensTest {
         assertEquals("f/2.8", CameraLens.formatAperture(2.8f))
     }
 
+    // Omega aparência (P1-6): ângulo de visão e zoom (aba Visão / Escala da câmera).
+    @Test fun viewAngleAndZoomRoundTripThroughTheFocal() {
+        assertEquals(12f, CameraLens.focalFromFov(90f), 0.01f)
+        assertEquals(50f, CameraLens.fovFromFocal(CameraLens.focalFromFov(50f)), 0.01f)
+        assertEquals(0f, CameraLens.focalFromFov(0f), 0f)
+        assertEquals(0f, CameraLens.focalFromFov(180f), 0f)
+        assertEquals(1f, CameraLens.zoomFromFocal(CameraLens.focalFromFov(CameraLens.DEFAULT_FOV)), 1e-4f)
+        assertEquals(2f, CameraLens.zoomFromFocal(CameraLens.focalFromZoom(2f)), 1e-4f)
+        // A faixa do motor (4–1200 mm) prende o zoom e dá a faixa do ângulo.
+        assertEquals(CameraLens.KEYPAD_MAX_MM, CameraLens.focalFromZoom(1000f), 0f)
+        assertEquals(CameraLens.KEYPAD_MIN_MM, CameraLens.focalFromZoom(0.001f), 0f)
+        assertTrue(CameraLens.MIN_FOV < 1.2f && CameraLens.MAX_FOV > 143f && CameraLens.MAX_FOV < 144f)
+    }
+
     @Test fun presetsAreAscendingAndMatchWithHalfMillimeterSlack() {
         val p = CameraLens.PRESETS_MM
         assertTrue(p.toList() == p.sorted())

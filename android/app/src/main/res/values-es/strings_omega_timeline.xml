@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Omega 0.3.2, área 03 (timeline). Textos próprios do AUREA. -->
+    <string name="om_tl_show_tracks">Mostrar pistas de fotogramas clave</string>
+    <string name="om_tl_hide_tracks">Ocultar pistas de fotogramas clave</string>
+    <string name="om_tl_toggle_selection">Añadir o quitar de la selección</string>
+    <string name="om_tl_move_up">Mover arriba</string>
+    <string name="om_tl_move_down">Mover abajo</string>
+    <string name="om_tl_info_start">Inicio</string>
+    <string name="om_tl_info_offset">Desplazamiento</string>
+    <string name="om_tl_info_in">Entrada</string>
+    <string name="om_tl_info_end">Fin</string>
+    <string name="om_tl_info_out">Salida</string>
+    <string name="om_tl_info_duration">Duración</string>
+    <string name="om_tl_info_change">Cambio</string>
+    <string name="om_tl_info_key">Fotograma clave</string>
+    <string name="om_tl_trim_start_a11y">Recortar el inicio de %1$s</string>
+    <string name="om_tl_trim_end_a11y">Recortar el final de %1$s</string>
+    <string name="om_tl_speed_handle_a11y">Cambiar la velocidad de %1$s por la duración</string>
+    <string name="om_tl_frame_earlier">Un fotograma antes</string>
+    <string name="om_tl_frame_later">Un fotograma después</string>
+    <string name="om_tl_marker_hint">Toca el reloj para marcar este instante. Mantén pulsado para ponerle nombre al marcador.</string>
+    <string name="om_tl_prev_marker">Marcador anterior</string>
+    <string name="om_tl_next_marker">Siguiente marcador</string>
+    <string name="om_tl_time_options">Opciones del instante</string>
+    <string name="om_tl_ruler">Regla de la línea de tiempo</string>
+    <string name="om_tl_current_time">Tiempo actual</string>
+    <string name="om_tl_hidden">Oculta</string>
+    <string name="om_tl_visible">Visible</string>
+</resources>

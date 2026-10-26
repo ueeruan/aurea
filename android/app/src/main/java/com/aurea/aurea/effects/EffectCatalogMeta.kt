@@ -688,6 +688,156 @@ fun effectGroupLabelRes(group: EffectGroup): Int = when (group) {
     EffectGroup.Other -> R.string.fxui_group_other
 }
 
+// --- Omega efeitos (navegador, P2-4): ETIQUETAS do catálogo --------------------
+//
+// Ids estáveis (testTag `effects.search.tag.<id>`, `effects.detail.tag.<id>`) e
+// rótulo `om_fxtag_<id>` nos 7 idiomas. A etiqueta vem de três fontes: a
+// categoria do motor, o grupo da tela e uma tabela por CHAVE de efeito (o que
+// mais ele faz). A mesma tabela está no iOS (EffectsBrowser.swift,
+// `fxEffectTags`). Quando o motor ganhar `tags` por efeito, esta tabela sai.
+
+/** As etiquetas, na ordem em que aparecem (sugestões da busca e fichas do detalhe). */
+val EffectTagIds: List<String> = listOf(
+    "glitch", "glow", "blur", "color", "retro", "distort", "transition", "3d", "text", "mask",
+    "noise", "light", "repeat", "motion", "stylize", "time", "audio", "particles", "outline", "shadow",
+)
+
+/** O rótulo traduzido de uma etiqueta. */
+@StringRes
+fun effectTagLabelRes(tag: String): Int? = when (tag) {
+    "glitch" -> R.string.om_fxtag_glitch
+    "glow" -> R.string.om_fxtag_glow
+    "blur" -> R.string.om_fxtag_blur
+    "color" -> R.string.om_fxtag_color
+    "retro" -> R.string.om_fxtag_retro
+    "distort" -> R.string.om_fxtag_distort
+    "transition" -> R.string.om_fxtag_transition
+    "3d" -> R.string.om_fxtag_3d
+    "text" -> R.string.om_fxtag_text
+    "mask" -> R.string.om_fxtag_mask
+    "noise" -> R.string.om_fxtag_noise
+    "light" -> R.string.om_fxtag_light
+    "repeat" -> R.string.om_fxtag_repeat
+    "motion" -> R.string.om_fxtag_motion
+    "stylize" -> R.string.om_fxtag_stylize
+    "time" -> R.string.om_fxtag_time
+    "audio" -> R.string.om_fxtag_audio
+    "particles" -> R.string.om_fxtag_particles
+    "outline" -> R.string.om_fxtag_outline
+    "shadow" -> R.string.om_fxtag_shadow
+    else -> null
+}
+
+/** Categoria do motor (normalizada) → etiqueta. */
+private val TagByCategory: Map<String, String> = buildMap {
+    listOf("cor", "color", "colour").forEach { put(it, "color") }
+    listOf("luz", "light", "glow e luz").forEach { put(it, "light") }
+    listOf("desfoque", "blur").forEach { put(it, "blur") }
+    listOf("distorcer", "distort", "distorcao").forEach { put(it, "distort") }
+    put("glitch", "glitch")
+    listOf("estilizar", "stylize", "stylise").forEach { put(it, "stylize") }
+    listOf("ruido", "noise").forEach { put(it, "noise") }
+    listOf("tempo", "time").forEach { put(it, "time") }
+    listOf("transicao", "transition").forEach { put(it, "transition") }
+    listOf("recorte", "keying", "key", "mascara", "matte").forEach { put(it, "mask") }
+    listOf("texto", "text").forEach { put(it, "text") }
+    put("3d", "3d")
+    listOf("audio", "som", "sound").forEach { put(it, "audio") }
+    listOf("desenho", "drawing", "contorno", "edge").forEach { put(it, "outline") }
+    listOf("transform", "transformar", "movimento", "motion", "rastreio", "tracking").forEach { put(it, "motion") }
+    listOf("repetir", "repeat", "pattern").forEach { put(it, "repeat") }
+}
+
+/** Grupo da tela → etiqueta (os grupos que dizem o que o efeito é). */
+private val TagByGroup: Map<EffectGroup, String> = mapOf(
+    EffectGroup.DrawEdge to "outline", EffectGroup.Blur to "blur", EffectGroup.Distort to "distort",
+    EffectGroup.ThreeD to "3d", EffectGroup.Motion to "motion", EffectGroup.Repeat to "repeat",
+    EffectGroup.Matte to "mask", EffectGroup.Text to "text", EffectGroup.Stylize to "stylize",
+    EffectGroup.Glitch to "glitch", EffectGroup.Time to "time", EffectGroup.Audio to "audio",
+)
+
+/** O que mais cada efeito faz, pela chave estável (o `typeId` é o FNV dela). */
+private val TagByKey: Map<Int, List<String>> by lazy {
+    val table = mapOf(
+        "retro" to listOf(
+            "aurea.glitch.vhs", "aurea.glitch.uni_vhs", "aurea.stylize.crt_emulator", "aurea.stylize.film_damage",
+            "aurea.stylize.scanlines", "aurea.stylize.jpeg_damage", "aurea.stylize.eight_bit", "aurea.stylize.pix_dither",
+            "aurea.time.low_fps", "aurea.stylize.grain", "aurea.stylize.halftone", "aurea.transition.burn_film",
+            "aurea.stylize.pixel_encoder", "aurea.time.posterize",
+        ),
+        "glow" to listOf(
+            "aurea.light.glow", "aurea.light.deep_glow", "aurea.light.glow_scan", "aurea.light.saber",
+            "aurea.light.light_burst", "aurea.light.halation", "aurea.light.rays", "aurea.light.sweep",
+        ),
+        "light" to listOf(
+            "aurea.light.spotlight", "aurea.light.lens_flare", "aurea.generate.aurora", "aurea.light.saber",
+            "aurea.light.light_burst", "aurea.color.exposure",
+        ),
+        "noise" to listOf(
+            "aurea.generate.fractal_noise", "aurea.stylize.grain", "aurea.stylize.film_damage",
+            "aurea.transition.noise_dissolve", "aurea.stylize.scatter", "aurea.distort.turbulence",
+        ),
+        "particles" to listOf(
+            "aurea.generate.particular", "aurea.transition.disintegrate", "aurea.stylize.ball_grid",
+            "aurea.stylize.star_field", "aurea.stylize.scatter", "aurea.generate.constellation", "aurea.3d.shatter",
+        ),
+        "shadow" to listOf("aurea.stylize.drop_shadow", "aurea.distort.slant", "aurea.stylize.bevel_alpha"),
+        "outline" to listOf(
+            "aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.find_edges", "aurea.3d.stroke",
+            "aurea.draw.drawing_progress", "aurea.light.saber",
+        ),
+        "3d" to listOf(
+            "aurea.distort.sphere_wrap", "aurea.distort.cylinder_wrap", "aurea.generate.raster_extrude",
+            "aurea.3d.part_transform", "aurea.3d.part_hide", "aurea.3d.part_texture", "aurea.3d.shatter",
+            "aurea.3d.stroke", "aurea.shape3d.layout", "aurea.generate.aurora", "aurea.generate.constellation",
+            "aurea.ai.depth_map", EffectTool.CameraTrack.key,
+        ),
+        "transition" to listOf(
+            "aurea.transition.luma_dissolve", "aurea.distort.ripple_dissolve", "aurea.glitch.dissolve_shake",
+            "aurea.transition.disintegrate", "aurea.transition.noise_dissolve",
+        ),
+        "text" to listOf("aurea.text.animator", "aurea.text.transform", EffectTool.Captions.key),
+        "mask" to listOf(
+            EffectTool.Mask.key, "aurea.key.chroma", "aurea.key.luma", "aurea.key.matte_refine", "aurea.key.rotobrush",
+            "aurea.utility.copy_background", "aurea.transform.crop", "aurea.ai.depth_map",
+        ),
+        "motion" to listOf(
+            "aurea.distort.shake", "aurea.time.flow_motion_blur", "aurea.blur.directional", EffectTool.CameraTrack.key,
+            "aurea.motion.swing", "aurea.motion.wiggle", "aurea.motion.twitch", "aurea.motion.oscillate.cycles",
+        ),
+        "repeat" to listOf("aurea.pattern.checkerboard", "aurea.pattern.hexagonal", "aurea.stylize.mosaic"),
+        "color" to listOf("aurea.time.warp_rgb", "aurea.color.color_offset", "aurea.color.threshold_rgb", "aurea.color.rgb_split", "aurea.color.grade"),
+        "distort" to listOf("aurea.glitch.datamosh", "aurea.distort.displacement_map"),
+        "glitch" to listOf(
+            "aurea.stylize.pixel_sort", "aurea.stylize.jpeg_damage", "aurea.color.rgb_split", "aurea.stylize.pixel_encoder",
+            "aurea.glitch.video_glitch", "aurea.glitch.datamosh", "aurea.time.random_edits",
+        ),
+        "time" to listOf("aurea.time.echo", "aurea.time.wide_time", "aurea.enhance.video"),
+        "audio" to listOf(
+            "aurea.generate.audio_spectrum", "aurea.generate.audio_waveform", "aurea.generate.spectrum_analyzer",
+            AudioFxKeys.Tone,
+        ),
+        "blur" to listOf("aurea.time.flow_motion_blur", "aurea.blur.vector_blur"),
+        "stylize" to listOf("aurea.stylize.holomatrix", "aurea.stylize.vignette"),
+    )
+    val out = HashMap<Int, MutableList<String>>()
+    table.forEach { (tag, keys) -> keys.forEach { out.getOrPut(effectTypeId(it)) { ArrayList() } += tag } }
+    out
+}
+
+/**
+ * As etiquetas de um efeito (ou ferramenta), na ordem de [EffectTagIds]: a da
+ * categoria do motor, a do grupo da tela e as da tabela por chave. Efeito novo
+ * sem nada na tabela ainda ganha a da categoria e a do grupo.
+ */
+fun effectTags(entry: EffectCatalogEntry): List<String> {
+    val found = HashSet<String>()
+    TagByCategory[normalizeSearch(entry.category)]?.let { found += it }
+    TagByGroup[effectGroupOf(entry)]?.let { found += it }
+    TagByKey[entry.typeId]?.let { found += it }
+    return EffectTagIds.filter { it in found }
+}
+
 /** O glifo do ladrilho quando o grupo não tem prévia (Texto, 3D, Áudio). */
 fun effectGroupGlyph(group: EffectGroup): Char = when (group) {
     EffectGroup.ColorLight -> CupertinoGlyph.Sparkles

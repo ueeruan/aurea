@@ -112,8 +112,17 @@ internal fun TextPanel(env: PanelEnv) {
         }
         Spacer(Modifier.height(10.dp))
         val font by remember(store) { derivedStateOf { store.textFont } }
+        // Omega conteúdo (área 06, P0-2): "Fonte ›" abre o navegador de fontes em tela cheia.
+        var fontBrowser by remember { mutableStateOf(false) }
+        if (fontBrowser) {
+            com.aurea.aurea.editor.FontBrowserDialog(store, onPick = { f ->
+                store.applyFontAnywhere(f)
+                com.aurea.aurea.editor.FontPrefs.recordUse(f)
+                fontBrowser = false
+            }, onDismiss = { fontBrowser = false })
+        }
         Row(
-            Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(10.dp)).tocavel(onClick = { env.onOpenPanel(EditorPanel.Font) }),
+            Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(10.dp)).testTag("text.options.font").tocavel(onClick = { fontBrowser = true }),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(stringResource(R.string.panel_fonte), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))

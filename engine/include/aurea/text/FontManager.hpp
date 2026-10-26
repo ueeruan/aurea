@@ -34,6 +34,20 @@ struct FontEntry {
     u16 weight = 400;         ///< 100..900 (OS/2)
     bool italic = false;
     bool imported = false;
+    /// Omega conteúdo (área 06): categoria do navegador de fontes (FontCategory)
+    /// e as escritas que a face cobre (bits FontScript), lidas do OS/2, do
+    /// `post` e, sem faixas Unicode no OS/2, do `cmap`.
+    u8  category = 0;
+    u32 scripts = 0;
+};
+
+/// Categoria da face (FontEntry::category).
+enum FontCategory : u8 { kFontSans = 0, kFontSerif = 1, kFontDisplay = 2, kFontHandwriting = 3, kFontMono = 4 };
+/// Escritas (FontEntry::scripts, bits).
+enum FontScript : u32 {
+    kScriptLatin = 1u << 0, kScriptGreek = 1u << 1, kScriptCyrillic = 1u << 2, kScriptHebrew = 1u << 3,
+    kScriptArabic = 1u << 4, kScriptThai = 1u << 5, kScriptKorean = 1u << 6, kScriptJapanese = 1u << 7,
+    kScriptChinese = 1u << 8, kScriptDevanagari = 1u << 9,
 };
 
 /// Lê família, estilo, peso e itálico de um TTF/OTF/TTC (1ª face) sem
@@ -63,6 +77,11 @@ public:
     [[nodiscard]] std::vector<FontEntry> list();
     /// Registra um arquivo de fonte (importado). Nulo se não for fonte.
     [[nodiscard]] const FontEntry* add_file(const std::string& path, bool imported);
+    /// Omega conteúdo (área 06): tira uma fonte IMPORTADA da lista e do cache e
+    /// apaga o arquivo. Falso se o caminho não é de uma importada.
+    bool remove_imported(const std::string& path);
+    /// Caminho guardado na camada ("docs:…") → caminho real (o resolvedor).
+    [[nodiscard]] std::string resolve(const std::string& stored);
 
     /// Fonte de uma camada de texto (caminho → família/peso/itálico → padrão).
     [[nodiscard]] std::shared_ptr<const Font> font_for(const TextData& t);

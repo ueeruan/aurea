@@ -267,6 +267,15 @@ internal fun sharedRows(rows: List<RowModel>): List<RowModel> {
 
 private val SEGMENT_ORDER = compareBy<RowModel>({ it.start }, { it.end }, { it.id })
 
+/**
+ * Omega (área 03, P0-1): a apresentação é UMA camada por linha, na ordem de
+ * desenho (a de cima primeiro), como na referência. O motor continua com o
+ * `trackId` e o ripple magnético; nada no arquivo muda. Fora da Omega, as
+ * fileiras por LINHA de antes ([sharedRows]).
+ */
+internal fun timelineLayerRows(rows: List<RowModel>, perLayer: Boolean): List<RowModel> =
+    if (perLayer) rows else sharedRows(rows)
+
 /** O resumo de uma fileira compartilhada: a pílula acende se algum trecho aparece e trava se todos travam. */
 private fun sharedRow(line: Int, segs: Array<RowModel>): RowModel {
     val head = segs[0]
@@ -298,13 +307,14 @@ private fun sharedRow(line: Int, segs: Array<RowModel>): RowModel {
  * camada dona; as fileiras de uma linha (inclusive a de baixo, de trechos que
  * se sobrepõem) andam juntas; o resto é a própria camada.
  */
-internal fun timelineGroupKeys(rows: List<RowModel>): LongArray {
+internal fun timelineGroupKeys(rows: List<RowModel>, byLine: Boolean = true): LongArray {
     val keys = LongArray(rows.size)
     for (i in rows.indices) {
         val r = rows[i]
         keys[i] = when {
             r.track != null && i > 0 -> keys[i - 1]
-            r.line != 0 -> LINE_KEY_BASE + r.line
+            // Omega (área 03, P0-1): uma camada por linha; cada fileira anda sozinha.
+            byLine && r.line != 0 -> LINE_KEY_BASE + r.line
             else -> r.id
         }
     }

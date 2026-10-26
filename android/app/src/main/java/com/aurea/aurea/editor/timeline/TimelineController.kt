@@ -11,7 +11,9 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.hapticfeedback.HapticFeedback
@@ -54,14 +56,25 @@ internal class TimelineController(
     val state: TimelineState,
     private val scope: CoroutineScope,
 ) {
-    var metrics = TimelineMetrics(1f)
+    /** Estado: as linhas derivadas dependem do ramo (Omega = `referenceTrial`). */
+    var metrics by mutableStateOf(TimelineMetrics(1f))
 
     init { LaneNames.app = store.getApplication<Application>() }
     var onEmptyTap: () -> Unit = {}
+    /** Omega (P1-3): segurar o tempo atual abre o menu ancorado na aba (a casca o mostra). */
+    var onTimeMenu: () -> Unit = { store.openMarkerEditor(store.playhead) }
     var onKeyframeTap: (Long, KeyframeRow) -> Unit = { _, _ -> }
     var onTrackTap: (Long, Int, Int, Int) -> Unit = { _, _, _, _ -> }
-    /** Camadas com as trilhas abertas: VÁRIAS de uma vez, cada uma com o seu ▸/▾ na calha. */
-    val expandedLayers = mutableStateOf<Set<Long>>(emptySet())
+    /**
+     * Camadas com as trilhas abertas: VÁRIAS de uma vez, cada uma com o seu ▸/▾
+     * na calha. Omega (área 03, D-1): moram no store — o ⋮ da camada abre e fecha.
+     */
+    val expandedLayers = StoreBackedSet({ store.timelineExpandedLayers }, { store.timelineExpandedLayers = it })
+    /**
+     * Omega 0.3.2 (área 03): a timeline da referência — o ramo `referenceTrial`
+     * das métricas (ativo no app; os testes de coordenadas do ramo antigo seguem nele).
+     */
+    private val omega: Boolean get() = metrics.referenceTrial
     /** Trilhas de grupo (Posição, Escala...) abertas nos eixos. */
     val openGroups = mutableStateOf<Set<LaneGroupKey>>(emptySet())
     var haptics: HapticFeedback? = null
@@ -96,7 +109,9 @@ internal class TimelineController(
                 store.keyframes[row.id].orEmpty(), focus, row.instants)
         }
         // Uma fileira por LINHA: refeita só quando as linhas por camada mudam.
-        val base = if (sharedInput === perLayer) sharedResult else sharedRows(perLayer).also {
+        // Omega (P0-1): uma camada por linha, sem mudar o motor (`trackId` fica).
+        val base = if (omega) timelineLayerRows(perLayer, perLayer = true)
+        else if (sharedInput === perLayer) sharedResult else sharedRows(perLayer).also {
             sharedInput = perLayer
             sharedResult = it
         }
@@ -157,6 +172,11 @@ internal class TimelineController(
      */
     private fun compactRow(list: List<RowModel>): RowModel? {
         val p = primaryId.value
+        // Omega (P0-1/P1-7): o foco mostra SÓ a linha da camada escolhida.
+        if (omega) {
+            for (i in list.indices) if (list[i].track == null && list[i].id == p) return list[i]
+            return null
+        }
         for (i in list.indices) if (list[i].segment(p) != null) return list[i]
         return null
     }
@@ -307,12 +327,18 @@ internal class TimelineController(
         )
     }
 
-    /** Alças de aparar: só no trecho que é a ÚNICA escolha. */
-    private fun handlesOn(s: RowModel) = s.track == null && selectionSize() == 1 && isSelected(s.id) && !s.locked
+    /** Alças de aparar: só no trecho que é a ÚNICA escolha (Omega: só no foco, P1-7). */
+    private fun handlesOn(s: RowModel) = s.track == null && selectionSize() == 1 && isSelected(s.id) && !s.locked &&
+        (!omega || state.compact)
 
     private fun hitAt(p: Offset): Hit {
         val hit = Hit()
         val m = metrics
+        // Omega (P1-3): a zona do tempo atual fica por cima da régua.
+        if (omega && omegaCurrentTimeHit(m, p.x, p.y, centerX())) {
+            hit.kind = HitKind.CURRENT_TIME
+            return hit
+        }
         if (p.y < m.rowsTop) {
             hit.kind = HitKind.RULER
             return hit
@@ -424,6 +450,8 @@ internal class TimelineController(
     private enum class Phase { TAP, DRAG, PINCH, LONG_PRESS, SLOW, CANCEL }
 
     private suspend fun AwaitPointerEventScope.gesture(down: PointerInputChange, stoppedFling: Boolean) {
+        // Omega 0.3.2 (área 03): os gestos da referência (P1-1..P1-7).
+        if (omega) return omegaGesture(down, stoppedFling)
         val hit = hitAt(down.position)
         val tracker = VelocityTracker()
         tracker.addPointerInputChange(down)
@@ -489,6 +517,17 @@ internal class TimelineController(
         state.dragKeyLayer = 0L
         state.dragKeyFrame = Snap.NONE
         gestureLimit = GestureLimit.NONE
+        // Omega (área 03): o clipe desce, a régua sai do realce, a barra de info some.
+        if (state.movingIds.isNotEmpty()) state.movingIds = LongArray(0)
+        state.moveOrigStart = Snap.NONE
+        state.moveOrigEnd = Snap.NONE
+        state.moveNewStart = Snap.NONE
+        state.moveNewEnd = Snap.NONE
+        state.handleState = 0
+        state.stretchId = 0L
+        state.stretchStart = Snap.NONE
+        state.stretchEnd = Snap.NONE
+        if (store.timelineInfo != null) store.timelineInfo = null
         if (flingJob == null) releaseView()
     }
 
@@ -511,8 +550,35 @@ internal class TimelineController(
         val previous = if (project == fadeProject) fadeKnown else null
         fadeProject = project
         fadeKnown = sorted
+        // Omega (P1-9): o fade é da linha que SAI do foco, não da camada nova.
+        if (omega) return
         for (id in RowFade.born(previous, sorted)) bornAt[id] = nowNanos
         if (bornAt.isNotEmpty()) requestRedraw()
+    }
+
+    /** A camada que está no foco (fileira compacta) agora; [NO_ID] fora dele. */
+    private var focusedLayer = NO_ID
+    private var wasCompact = false
+
+    /**
+     * Omega (P1-9): ao voltar do foco para a visão geral, a linha da camada que
+     * estava em foco surge com o fade de 600 ms (exceto vídeo, como na referência).
+     */
+    fun noteCompact(compact: Boolean, primary: Long?, nowNanos: Long) {
+        if (!omega) return
+        if (compact) {
+            // A seleção some antes de a timeline sair do foco: guarda a última que esteve nele.
+            if (primary != null) focusedLayer = primary
+        } else if (wasCompact) {
+            val id = focusedLayer
+            focusedLayer = NO_ID
+            val row = if (id == NO_ID) null else rowById(id)
+            if (row != null && row.type != com.aurea.aurea.ui.theme.LayerType.Video) {
+                bornAt[id] = nowNanos
+                requestRedraw()
+            }
+        }
+        wasCompact = compact
     }
 
     /**
@@ -626,6 +692,8 @@ internal class TimelineController(
                 if (store.keySelectMode && store.keySelection?.layer == r.id) return
                 if (r.track != null) onTrackTap(r.id, r.track.property, r.track.effect, r.track.param) else selectTap(r)
             }
+            // Só a Omega acerta o tempo atual (omegaTap).
+            HitKind.CURRENT_TIME -> {}
         }
     }
 
@@ -718,9 +786,295 @@ internal class TimelineController(
             tracker.addPointerInputChange(ch)
             if ((ch.position - down.position).getDistance() > slop) {
                 ch.consume()
-                return drag(hit, down, ch.position, tracker)
+                return if (omega) omegaDrag(hit, down, ch.position, tracker) else drag(hit, down, ch.position, tracker)
             }
         }
+    }
+
+    // =========================================================================
+    // Omega 0.3.2 (área 03): gestos da referência
+    // =========================================================================
+    /** Toque no olho há pouco: um toque logo depois não sai do foco (janela de 200 ms). */
+    private var eyeToggledAt = 0L
+
+    /** "Seleção múltipla" da referência: o modo de escolher várias, ou 2+ escolhidas. */
+    private fun multiActive() = omegaMultiSelection(store.layerSelectMode, selectionSize())
+
+    /**
+     * O mesmo laço do gesto de sempre, com o prazo do toque longo POR ALVO
+     * ([OmegaHold]): no foco, alça e corpo em 25 % do toque longo do sistema e
+     * losango em 90 %; na visão geral, cabeçalho, clipe e losango em 95 %; o
+     * fundo da linha e a alça ≡ (reordenar) e o tempo atual, o toque longo inteiro.
+     */
+    private suspend fun AwaitPointerEventScope.omegaGesture(down: PointerInputChange, stoppedFling: Boolean) {
+        val hit = hitAt(down.position)
+        val compact = state.compact
+        val tracker = VelocityTracker()
+        tracker.addPointerInputChange(down)
+        val slop = viewConfiguration.touchSlop
+        val holdMs = OmegaHold.millis(viewConfiguration.longPressTimeoutMillis, hit.kind, compact)
+        // Alça do foco tocada: 30 % até o prazo (25 % do toque longo) virar corte.
+        if (compact && (hit.kind == HitKind.TRIM_START || hit.kind == HitKind.TRIM_END)) state.handleState = 1
+        var phase = Phase.CANCEL
+        var slopAt = down.position
+        val stillness = Press.Stillness(metrics.holdJitter)
+        stillness.down(down.position.x, down.position.y, down.uptimeMillis)
+        var last = down.position
+        val finished = withTimeoutOrNull(holdMs) {
+            while (true) {
+                val ev = awaitPointerEvent()
+                if (pressedCount(ev) >= 2) {
+                    phase = Phase.PINCH
+                    break
+                }
+                val ch = changeOf(ev, down.id)
+                if (ch == null) {
+                    phase = Phase.CANCEL
+                    break
+                }
+                if (!ch.pressed) {
+                    ch.consume()
+                    phase = if ((ch.position - down.position).getDistance() <= slop) Phase.TAP else Phase.CANCEL
+                    break
+                }
+                tracker.addPointerInputChange(ch)
+                last = ch.position
+                stillness.move(ch.position.x, ch.position.y, ch.uptimeMillis)
+                if ((ch.position - down.position).getDistance() > slop) {
+                    ch.consume()
+                    slopAt = ch.position
+                    phase = Phase.DRAG
+                    break
+                }
+            }
+        }
+        if (finished == null) {
+            val deadline = down.uptimeMillis + holdMs
+            phase = if (stillness.quietFor(deadline, OmegaHold.quietMs(holdMs))) Phase.LONG_PRESS else Phase.SLOW
+        }
+        if (phase != Phase.LONG_PRESS && state.handleState == 1) state.handleState = 0
+        when (phase) {
+            Phase.TAP -> if (!stoppedFling) omegaTap(hit, down.position)
+            Phase.DRAG -> omegaDrag(hit, down, slopAt, tracker)
+            Phase.PINCH -> pinch()
+            Phase.LONG_PRESS -> omegaHold(hit, down, last, tracker, stoppedFling)
+            Phase.SLOW -> awaitSlop(hit, down, tracker)
+            Phase.CANCEL -> {}
+        }
+    }
+
+    /**
+     * Toques curtos da Omega (P1-1, P1-2, P1-3). No foco, qualquer toque fora do
+     * olho, de um losango e do tempo atual sai do foco (`onEmptyTap`).
+     */
+    private fun omegaTap(hit: Hit, p: Offset) {
+        val r = hit.row
+        val compact = state.compact
+        when (hit.kind) {
+            HitKind.CURRENT_TIME -> {
+                tick()
+                store.toggleMarker()
+                return
+            }
+            HitKind.RULER -> {
+                omegaRulerTap(p.x)
+                return
+            }
+            HitKind.HEADER_EYE -> if (r != null) {
+                light()
+                // Com a seleção múltipla o olho some: o toque ali soma/tira a camada.
+                if (!compact && r.track == null && multiActive() && selectionSize() > 0) store.toggleLayerPick(r.id)
+                else {
+                    setRowVisible(r, !r.visible)
+                    eyeToggledAt = System.currentTimeMillis()
+                }
+                return
+            }
+            HitKind.KEYFRAME -> if (r != null) {
+                // No modo de escolher camadas o losango do resumo é parte do clipe.
+                if (store.layerSelectMode && r.track == null && !store.keySelectMode) store.toggleLayerPick(r.id)
+                else keyframeTap(r, hit.keyIndex)
+                return
+            }
+            else -> {}
+        }
+        if (compact) {
+            // Referência: no foco o toque curto sai dele (exceto logo depois do olho).
+            if (System.currentTimeMillis() - eyeToggledAt < EYE_GRACE_MS) return
+            store.clearSelectedKeyframe()
+            onEmptyTap()
+            return
+        }
+        when (hit.kind) {
+            HitKind.HEADER -> if (r != null) {
+                val track = r.track
+                if (track != null) {
+                    // ▸/▾ da trilha de GRUPO: mostra/esconde as trilhas por eixo.
+                    if (track.group) {
+                        tick()
+                        val key = LaneGroupKey(r.id, track)
+                        val open = openGroups.value
+                        openGroups.value = if (key in open) open - key else open + key
+                    }
+                } else if (multiActive()) {
+                    // Com seleção múltipla: põe ou tira a camada.
+                    tick()
+                    store.toggleLayerPick(r.id)
+                } else {
+                    // Sem ela: escolhe a camada, que entra em foco.
+                    tick()
+                    pauseIfPlaying()
+                    store.select(r.id)
+                }
+            }
+            HitKind.BODY, HitKind.TRIM_START, HitKind.TRIM_END -> if (r != null) {
+                if (store.keySelectMode && store.keySelection?.layer == r.id) return
+                if (r.track != null) onTrackTap(r.id, r.track.property, r.track.effect, r.track.param) else selectTap(r)
+            }
+            HitKind.NONE -> {
+                store.clearSelectedKeyframe()
+                // Com a seleção múltipla, o vazio a limpa; sem ela, a casca decide.
+                if (store.layerSelectMode) {
+                    store.clearSelection()
+                    store.changeLayerSelectMode(false)
+                } else {
+                    onEmptyTap()
+                }
+            }
+            else -> {}
+        }
+    }
+
+    /**
+     * Régua (P1-2): perto de um marcador (21 dp) vai até ele; senão, na metade
+     * direita vai ao próximo e na esquerda ao anterior. Não busca o quadro tocado
+     * (o scrub é o arrasto). Depois, o mesmo que tocar no vazio.
+     */
+    private fun omegaRulerTap(x: Float) {
+        val frames = store.markers.frames
+        val target = MarkerNav.target(frames, x, state.width.toFloat(), store.playhead, metrics.omegaMarkerNear) { xOf(it) }
+        if (target != Snap.NONE) {
+            tick()
+            pauseIfPlaying()
+            store.seek(target)
+        }
+        if (store.layerSelectMode) return
+        onEmptyTap()
+    }
+
+    /** Arrasto antes do prazo (P1-4): eixo a 45°, tempo com inércia; a pilha rola. */
+    private suspend fun AwaitPointerEventScope.omegaDrag(hit: Hit, down: PointerInputChange, slopAt: Offset, tracker: VelocityTracker) {
+        val d = slopAt - down.position
+        val horizontal = Press.horizontal(d.x, d.y)
+        val r = hit.row
+        when {
+            r != null && store.layerSelectMode && hit.kind == HitKind.HEADER && r.track == null && !state.compact && !horizontal ->
+                sweepSelect(down.id, slopAt, r)
+            // Trilha de propriedade aberta (só do AUREA): o losango anda direto, como antes.
+            r != null && r.track != null && hit.kind == HitKind.KEYFRAME && Press.timeEdit(d.x, d.y) -> keyframeDrag(r, hit.keyIndex, down)
+            boxStarts(hit) -> boxSelect(down)
+            horizontal -> scrub(down.id, slopAt, tracker)
+            !state.compact -> scroll(down.id, slopAt, tracker)
+            else -> consumeUntilUp()
+        }
+    }
+
+    /** O toque longo da Omega começa uma linha a reordenar? (fundo da linha ou alça ≡, na visão geral). */
+    private fun omegaReorders(hit: Hit, p: Offset): Boolean {
+        val lane = hit.lane ?: return false
+        if (state.compact || lane.track != null || multiActive()) return false
+        return hit.kind == HitKind.NONE || p.x >= state.width - metrics.omegaGripZone
+    }
+
+    /** Toque longo aceito (prazo por alvo): o que a referência faz em cada lugar. */
+    private suspend fun AwaitPointerEventScope.omegaHold(
+        hit: Hit,
+        down: PointerInputChange,
+        holdAt: Offset,
+        tracker: VelocityTracker,
+        stoppedFling: Boolean,
+    ) {
+        val compact = state.compact
+        if (hit.kind == HitKind.CURRENT_TIME) {
+            // P1-3: o menu ancorado na aba do tempo (editar ou excluir o marcador do quadro).
+            heavy()
+            pauseIfPlaying()
+            onTimeMenu()
+            return consumeUntilUp()
+        }
+        val lane = hit.lane
+        if (lane != null && omegaReorders(hit, down.position)) return reorderDrag(lane, hit.rowIndex, down, grabbed = null)
+        val r = hit.row ?: return awaitSlop(hit, down, tracker)
+        when {
+            compact && r.track == null && (hit.kind == HitKind.TRIM_START || hit.kind == HitKind.TRIM_END) -> {
+                light()
+                if (state.speedHandles) speedDrag(r, hit.kind == HitKind.TRIM_START, down)
+                else trimDrag(r, hit.kind == HitKind.TRIM_START, down)
+            }
+            hit.kind == HitKind.KEYFRAME -> {
+                light()
+                keyframeDrag(r, hit.keyIndex, down)
+            }
+            compact && r.track == null && hit.kind == HitKind.BODY -> {
+                heavy()
+                omegaLiftAndMove(r, down, holdAt)
+            }
+            !compact && r.track == null && hit.kind == HitKind.HEADER -> omegaHoldHeader(r, down)
+            !compact && r.track == null && hit.kind == HitKind.BODY -> {
+                if (stoppedFling) return awaitSlop(hit, down, tracker)
+                // Levantar (P1-5): com a seleção múltipla, levanta todas as escolhidas.
+                heavy()
+                omegaLiftAndMove(r, down, holdAt)
+            }
+            else -> awaitSlop(hit, down, tracker)
+        }
+    }
+
+    /**
+     * O clipe sobe na hora (pulso e sombra); o arrasto, só no tempo, leva ele —
+     * com a seleção múltipla, todas as escolhidas. Soltar sem mover não faz nada
+     * e um segundo dedo vira pinça (nada é escolhido antes de o dedo andar).
+     */
+    private suspend fun AwaitPointerEventScope.omegaLiftAndMove(r: RowModel, down: PointerInputChange, holdAt: Offset) {
+        state.movingIds = if (isSelected(r.id) && multi()) selectedIds.value.copyOf() else longArrayOf(r.id)
+        state.liftStartNanos = System.nanoTime()
+        requestRedraw()
+        while (true) {
+            val ev = awaitPointerEvent()
+            if (pressedCount(ev) >= 2) {
+                state.movingIds = LongArray(0)
+                return pinch()
+            }
+            val ch = changeOf(ev, down.id)
+            if (ch == null || !ch.pressed) {
+                ch?.consume()
+                state.movingIds = LongArray(0)
+                return
+            }
+            consumeAll(ev)
+            if ((ch.position - holdAt).getDistance() < metrics.axisSlop) continue
+            pauseIfPlaying()
+            if (!isSelected(r.id)) store.select(r.id, additive = multiActive(), openOptions = false)
+            return moveDrag(rowById(r.id) ?: r, down)
+        }
+    }
+
+    /**
+     * Segurar o cabeçalho (P1-1; a decisão A.01 cede à referência): põe a camada
+     * na seleção múltipla (ou tira), com háptico, e sem soltar o dedo a varredura
+     * vertical pelos cabeçalhos soma cada camada por onde passa. Travar continua
+     * no menu da camada.
+     */
+    private suspend fun AwaitPointerEventScope.omegaHoldHeader(r: RowModel, down: PointerInputChange) {
+        heavy()
+        pauseIfPlaying()
+        if (!store.layerSelectMode) {
+            if (!(selectionSize() == 1 && isSelected(r.id))) store.select(r.id, openOptions = false)
+            store.changeLayerSelectMode(true)
+        } else {
+            store.toggleLayerPick(r.id)
+        }
+        sweepSelect(down.id, down.position, r, firstDone = true)
     }
 
     /**
@@ -842,7 +1196,7 @@ internal class TimelineController(
      * Varredura do modo "Selecionar várias camadas": cada camada sob o dedo (na
      * coluna das pílulas) entra na seleção uma vez, com um toque háptico curto.
      */
-    private suspend fun AwaitPointerEventScope.sweepSelect(id: PointerId, start: Offset, first: RowModel) {
+    private suspend fun AwaitPointerEventScope.sweepSelect(id: PointerId, start: Offset, first: RowModel, firstDone: Boolean = false) {
         val seen = HashSet<Long>()
         fun visit(r: RowModel?) {
             if (r == null || r.track != null || !seen.add(r.id)) return
@@ -851,7 +1205,8 @@ internal class TimelineController(
                 tick()
             }
         }
-        visit(first)
+        // Omega (P1-1): a 1ª camada já entrou (ou saiu) no toque longo; a varredura segue dali.
+        if (firstDone) seen.add(first.id) else visit(first)
         visit(hitAt(start).row)
         while (true) {
             val ev = awaitPointerEvent()
@@ -899,9 +1254,43 @@ internal class TimelineController(
             val ch = changeOf(ev, id)
             // Soltou: o tempo fica onde o dedo parou (sem inércia — o dono
             // pediu; o quadro escolhido é o que estava sob o cabeçote).
-            if (ch == null || !ch.pressed) return
+            // Omega (P1-4): a referência tem inércia no eixo do tempo também.
+            if (ch == null || !ch.pressed) {
+                if (omega && ch != null) {
+                    tracker.addPointerInputChange(ch)
+                    startScrubFling(tracker.calculateVelocity().x, ppf)
+                }
+                return
+            }
+            if (omega) tracker.addPointerInputChange(ch)
             ch.consume()
             holdView(view0 - (ch.position.x - start.x) / ppf)
+        }
+    }
+
+    /**
+     * Omega (P1-4): inércia do scrub com o mesmo decaimento da rolagem. O scrub
+     * do motor fica aberto até a inércia parar e fecha num passo; um dedo que
+     * pousa para a inércia (e esse toque só para, não escolhe).
+     */
+    private fun startScrubFling(vx: Float, ppf: Float) {
+        if (abs(vx) < metrics.flingMin || !(ppf > 0f)) return
+        val decay = splineBasedDecay<Float>(Density(metrics.density))
+        val start = view()
+        val job = scope.launch {
+            AnimationState(0f, -vx).animateDecay(decay) {
+                val before = view()
+                holdView(start + value / ppf)
+                // Bateu no começo da composição (ou no fim da navegação): para.
+                if (view() == before && abs(velocity) > 0f && abs(value) > 0f) cancelAnimation()
+            }
+        }
+        flingJob = job
+        job.invokeOnCompletion {
+            if (flingJob === job) {
+                flingJob = null
+                releaseView()
+            }
         }
     }
 
@@ -995,6 +1384,20 @@ internal class TimelineController(
         val starts = IntArray(groupIds.size)
         val ends = IntArray(groupIds.size)
         var sent = 0
+        // Omega (P1-5): o clipe sobe (pulso + sombra), a régua realça os tiques
+        // do início e do fim e a barra de info mostra o início e o deslocamento.
+        if (omega) {
+            // O pulso começou no toque longo (omegaLiftAndMove); só recomeça se não houve.
+            if (state.movingIds.isEmpty()) state.liftStartNanos = System.nanoTime()
+            state.movingIds = groupIds.copyOf()
+            state.handleState = 3
+            state.moveOrigStart = r.start
+            state.moveOrigEnd = r.end
+            state.moveNewStart = r.start
+            state.moveNewEnd = r.end
+            omegaMoveInfo(minStart, 0)
+            requestRedraw()
+        }
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = (frameAt(p.x) + grab).toFrame()
             if (store.snapping) Snap.span(targets, desired, length, playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble(), out)
@@ -1009,9 +1412,54 @@ internal class TimelineController(
                 }
                 store.setLayerRanges(groupIds, starts, ends)
                 sent = delta
+                if (omega) {
+                    state.moveNewStart = r.start + delta
+                    state.moveNewEnd = r.end + delta
+                    omegaMoveInfo(minStart + delta, delta)
+                }
             }
             setGuide(if (target == out[0]) out[1] else Snap.NONE)
         }
+    }
+
+    // --- Omega: barra de info (P1-5 / P1-7) --------------------------------------------
+    private fun text(id: Int): String = AppText.get(store.getApplication<Application>(), id)
+    private fun tc(frame: Int): String = Timecode.format(frame, fps)
+    private fun signed(delta: Int): String = (if (delta < 0) "−" else "+") + Timecode.format(abs(delta), fps)
+
+    /** Mover: `[Início] mm:ss:ff  [Deslocamento] +mm:ss:ff` (o menor início do lote). */
+    private fun omegaMoveInfo(start: Int, delta: Int) {
+        store.timelineInfo = listOf(
+            text(R.string.om_tl_info_start) to tc(start),
+            text(R.string.om_tl_info_offset) to signed(delta),
+        )
+    }
+
+    /** Aparar: Início, Entrada, Fim, Saída, Duração e Mudança. */
+    private fun omegaTrimInfo(r: RowModel, originalDuration: Int) {
+        val duration = r.end - r.start
+        store.timelineInfo = listOf(
+            text(R.string.om_tl_info_start) to tc(r.start),
+            text(R.string.om_tl_info_in) to tc(r.offset),
+            text(R.string.om_tl_info_end) to tc(r.end),
+            text(R.string.om_tl_info_out) to tc(r.offset + duration),
+            text(R.string.om_tl_info_duration) to tc(duration),
+            text(R.string.om_tl_info_change) to signed(duration - originalDuration),
+        )
+    }
+
+    /** Losango no arrasto: `mm:ss:ff (xx,x %)` dentro do clipe e o deslocamento. */
+    private fun omegaKeyInfo(r: RowModel, frame: Int, origin: Int) {
+        val span = (r.end - r.start).coerceAtLeast(1)
+        val pct = ((frame - r.start).toDouble() / span * 100.0).coerceIn(0.0, 100.0)
+        val percent = java.text.NumberFormat.getNumberInstance().apply {
+            minimumFractionDigits = 1
+            maximumFractionDigits = 1
+        }.format(pct)
+        store.timelineInfo = listOf(
+            text(R.string.om_tl_info_key) to "${tc(frame)} ($percent %)",
+            text(R.string.om_tl_info_offset) to signed(frame - origin),
+        )
     }
 
     // --- Reordenar a linha magnética -----------------------------------------------------
@@ -1053,7 +1501,14 @@ internal class TimelineController(
         // Modo Edição: aparar o começo não move a camada — conta o que já foi.
         val magnetic = start && (store.editMode || r.magnetic)
         var applied = 0
+        // Omega (P1-7): a alça arrastada fica a 50 % e a barra de info mostra os seis campos.
+        val originalDuration = r.end - r.start
+        if (omega) {
+            state.handleState = 2
+            omegaTrimInfo(r, originalDuration)
+        }
         dragLoop(down.id, down.position, horizontal = true) { p ->
+            if (omega) rowById(id)?.let { omegaTrimInfo(it, originalDuration) }
             val desired = frameAt(p.x) + grab
             val snapped = if (store.snapping) Snap.nearest(targets, desired, playheadFrame(), (metrics.snapClip / pxPerFrame()).toDouble()) else Snap.NONE
             val target = GestureLimit.clampFrame(max(0, if (snapped != Snap.NONE) snapped else desired.toFrame()), captureGestureLimit())
@@ -1073,6 +1528,44 @@ internal class TimelineController(
             }
             setGuide(snapped)
         }
+    }
+
+    // --- Omega: alça de velocidade (P1-8) -----------------------------------------------
+    /**
+     * Com o painel Velocidade aberto, as alças do foco esticam a velocidade:
+     * arrastar mostra a largura nova (prévia) e soltar estica a camada no motor
+     * — a velocidade muda e o trecho da fonte fica —, num passo de desfazer.
+     */
+    private suspend fun AwaitPointerEventScope.speedDrag(r: RowModel, start: Boolean, down: PointerInputChange) {
+        if (r.locked) {
+            store.showToast(AppText.get(store.getApplication<Application>(), R.string.editor_camada_bloqueada_desbloqueie_editar))
+            return consumeUntilUp()
+        }
+        pauseIfPlaying()
+        val grab = (if (start) r.start else r.end) - frameAt(down.position.x)
+        val duration0 = r.end - r.start
+        state.handleState = 2
+        state.stretchId = r.id
+        state.stretchStart = r.start
+        state.stretchEnd = r.end
+        omegaSpeedInfo(duration0, duration0)
+        val released = dragLoop(down.id, down.position, horizontal = true) { p ->
+            val edge = GestureLimit.clampFrame(max(0, (frameAt(p.x) + grab).toFrame()), captureGestureLimit())
+            if (start) state.stretchStart = edge.coerceAtMost(r.end - 1)
+            else state.stretchEnd = edge.coerceAtLeast(r.start + 1)
+            omegaSpeedInfo(duration0, state.stretchEnd - state.stretchStart)
+        }
+        val newStart = state.stretchStart
+        val newEnd = state.stretchEnd
+        if (released && (newStart != r.start || newEnd != r.end) && store.stretchLayerSpan(r.id, newStart, newEnd)) light()
+    }
+
+    /** Velocidade pela duração: `[Duração] mm:ss:ff  [Mudança] ±mm:ss:ff`. */
+    private fun omegaSpeedInfo(oldDuration: Int, newDuration: Int) {
+        store.timelineInfo = listOf(
+            text(R.string.om_tl_info_duration) to tc(newDuration),
+            text(R.string.om_tl_info_change) to signed(newDuration - oldDuration),
+        )
     }
 
     // --- Arrastar losango -----------------------------------------------------------------
@@ -1106,6 +1599,7 @@ internal class TimelineController(
         store.selectKeyframe(r.id, keys.first())
         state.dragKeyLayer = r.id
         state.dragKeyFrame = current
+        if (omega) omegaKeyInfo(r, current, origin)
         dragLoop(down.id, down.position, horizontal = true) { p ->
             val desired = frameAt(p.x) + grab
             // O cabeçote no instante de origem (o toque no losango o levou até lá) não segura o arrasto.
@@ -1121,6 +1615,7 @@ internal class TimelineController(
                     current = t
                     store.selectKeyframe(r.id, keys.first().copy(time = to))
                     state.dragKeyFrame = t
+                    if (omega) omegaKeyInfo(r, t, origin)
                     frameTick()
                 }
             }
@@ -1230,7 +1725,9 @@ internal class TimelineController(
         }
         heavy()
         pauseIfPlaying()
-        if (grabbed != null) {
+        if (omega) {
+            // Omega (P1-6): reordenar pelo fundo da linha ou pela alça ≡ não mexe na seleção.
+        } else if (grabbed != null) {
             if (!isSelected(grabbed.id)) store.select(grabbed.id, openOptions = false)
         } else {
             var any = false
@@ -1310,7 +1807,7 @@ internal class TimelineController(
      * passo de desfazer. Uma camada sozinha manda o MESMO comando de sempre.
      */
     private fun commitReorder(list: List<RowModel>, source: Int, target: Int): Boolean {
-        val keys = timelineGroupKeys(list)
+        val keys = timelineGroupKeys(list, byLine = !omega)
         if (source !in keys.indices || target !in keys.indices) return false
         val from = keys[source]
         val to = keys[target]
@@ -1396,14 +1893,21 @@ internal class TimelineController(
 
     private fun updateAutoScroll(p: Offset) {
         val m = metrics
-        autoDirX = if (autoHorizontal) {
+        autoDirX = if (autoHorizontal && omega) {
+            // Omega (P1-5): 38 dp das bordas, 1× ao entrar até 5× na borda (120 dp/s × fator).
+            val end = state.width.toFloat()
+            OmegaScroll.edgeFactor(p.x, autoOrigin.x, 0f, end, AutoScroll.zone(m.autoEdge, end), m.autoIntent)
+        } else if (autoHorizontal) {
             val start = m.headerColumn
             val end = state.width.toFloat()
             AutoScroll.speed(p.x, autoOrigin.x, start, end, AutoScroll.zone(m.autoEdge, end - start), m.autoIntent)
         } else {
             0f
         }
-        autoDirY = if (autoVertical && !state.compact) {
+        autoDirY = if (autoVertical && !state.compact && omega && state.reorderSource >= 0) {
+            // Omega (P1-6): faixas próprias do reordenar (em cima até rowsTop + 19 dp).
+            OmegaScroll.reorderFactor(p.y, state.height.toFloat(), m.rowsTop, m.autoEdge)
+        } else if (autoVertical && !state.compact) {
             val start = m.rowsTop
             val end = state.height.toFloat()
             AutoScroll.speed(p.y, autoOrigin.y, start, end, AutoScroll.zone(m.autoEdge, end - start), m.autoIntent)
@@ -1596,5 +2100,14 @@ internal class TimelineController(
         /** Toque longo de 500 ms (a spec fixa; o padrão do Android é 400). */
         const val LONG_PRESS_MS = 500L
         private const val AUTO_FIT_MARGIN_DP = 32f
+        /** Omega (P1-7): depois do olho, um toque nestes ms não sai do foco. */
+        private const val EYE_GRACE_MS = 200L
     }
+}
+
+/** Um conjunto que mora no store, lido e escrito como `MutableState.value`. */
+internal class StoreBackedSet(private val read: () -> Set<Long>, private val write: (Set<Long>) -> Unit) {
+    var value: Set<Long>
+        get() = read()
+        set(v) = write(v)
 }

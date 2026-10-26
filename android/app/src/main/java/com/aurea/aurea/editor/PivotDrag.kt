@@ -30,6 +30,9 @@ internal object PivotMath {
         scale: FloatArray,
         threeD: Boolean,
         depthFollowsWidth: Boolean,
+        // Omega aparência: a inclinação (graus, [X, Y]) entra na matriz do motor
+        // (`T·R·S·K·T(−âncora)`, core/LayerSkew.hpp); nulo = sem inclinação.
+        skewDeg: FloatArray? = null,
     ): FloatArray? {
         val s = effectiveScale(scale, threeD, depthFollowsWidth)
         // Rᵀ·Δ (R é ortonormal), depois ÷ S.
@@ -44,6 +47,17 @@ internal object PivotMath {
             out[i] /= s[i]
         }
         if (!threeD) out[2] = 0f
+        // Omega aparência: depois de S⁻¹, K⁻¹ (K = [[1, kx], [ky, 1]]).
+        val kx = skewFactor(skewDeg, 1)
+        val ky = skewFactor(skewDeg, 0)
+        if (kx != 0f || ky != 0f) {
+            val det = 1f - kx * ky
+            if (abs(det) < 1e-6f) return null
+            val ax = (out[0] - kx * out[1]) / det
+            val ay = (out[1] - ky * out[0]) / det
+            out[0] = ax
+            out[1] = ay
+        }
         return out
     }
 
@@ -56,11 +70,16 @@ internal object PivotMath {
         threeD: Boolean,
         depthFollowsWidth: Boolean,
         p: FloatArray,
+        skewDeg: FloatArray? = null,   // Omega aparência: inclinação [X, Y] em graus
     ): FloatArray {
         val s = effectiveScale(scale, threeD, depthFollowsWidth)
         val r = rotation(rotationDeg, threeD)
-        val vx = (p[0] - anchor[0]) * s[0]
-        val vy = (p[1] - anchor[1]) * s[1]
+        val qx = p[0] - anchor[0]
+        val qy = p[1] - anchor[1]
+        val kx = skewFactor(skewDeg, 1)
+        val ky = skewFactor(skewDeg, 0)
+        val vx = (qx + kx * qy) * s[0]
+        val vy = (ky * qx + qy) * s[1]
         val vz = if (threeD) (p[2] - anchor[2]) * s[2] else 0f
         val pz = if (threeD) position[2] else 0f
         return floatArrayOf(
@@ -68,6 +87,16 @@ internal object PivotMath {
             position[1] + r[3] * vx + r[4] * vy + r[5] * vz,
             pz + r[6] * vx + r[7] * vy + r[8] * vz,
         )
+    }
+
+    /**
+     * Omega aparência: fator de cisalhamento do motor (`skew_factor`, core/LayerSkew.hpp):
+     * os graus gravados em radianos, sem `tan`. Eixos trocados como no render:
+     * a Inclinação X ([index] 0) é o `ky` (vertical) e a Y ([index] 1) o `kx`.
+     */
+    private fun skewFactor(skewDeg: FloatArray?, index: Int): Float {
+        val v = skewDeg?.getOrNull(index) ?: return 0f
+        return if (v.isFinite()) Math.toRadians(v.toDouble()).toFloat() else 0f
     }
 
     private fun effectiveScale(scale: FloatArray, threeD: Boolean, depthFollowsWidth: Boolean): FloatArray {
@@ -110,6 +139,8 @@ internal class PivotDragSession(private val store: EditorStore, d: LayerDetail, 
     private val anchor0 = FloatArray(3) { d.anchor.getOrElse(it) { 0f } }
     private val rot = FloatArray(3) { d.rotation.getOrElse(it) { 0f } }
     private val scale = FloatArray(3) { d.scale.getOrElse(it) { 1f } }
+    // Omega aparência: a inclinação também desloca o pivô (matriz do motor).
+    private val skew = FloatArray(2) { d.skew.getOrElse(it) { 0f } }
     val threeD = d.kind in 8..10 || d.flags and com.aurea.aurea.engine.PodLayout.FLAG_THREE_D != 0
     private val depthFollowsWidth = d.kind != 8 && d.kind != 9
     val startX = pivotCompX
@@ -121,7 +152,7 @@ internal class PivotDragSession(private val store: EditorStore, d: LayerDetail, 
         detail.compToParent(compX, compY, pt)
         val dx = pt[0] - p0[0]
         val dy = pt[1] - p0[1]
-        val da = PivotMath.anchorDelta(dx, dy, rot, scale, threeD, depthFollowsWidth) ?: return
+        val da = PivotMath.anchorDelta(dx, dy, rot, scale, threeD, depthFollowsWidth, skew) ?: return
         store.setPivot(
             floatArrayOf(anchor0[0] + da[0], anchor0[1] + da[1], anchor0[2] + da[2]),
             floatArrayOf(pos0[0] + dx, pos0[1] + dy, pos0[2]),

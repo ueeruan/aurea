@@ -54,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.runtime.rememberUpdatedState
@@ -119,6 +120,14 @@ internal class EditorUi {
     /** Alça pega (0 = giro, 1..3 = escala; −1 = nenhuma): cresce 5 → 6 dp. */
     var grabbedHandle by mutableIntStateOf(-1)
 
+    // Omega adicionar (área 08): os navegadores em tela cheia ("Ver tudo").
+    /** Navegador de mídia (MediaBrowser.kt). */
+    var mediaBrowser by mutableStateOf(false)
+    /** Navegador de áudio (AudioBrowser.kt). */
+    var audioBrowser by mutableStateOf(false)
+    /** "Ver tudo" dos presets: o seletor completo de presets de texto. */
+    var presetsBrowser by mutableStateOf(false)
+
     companion object {
         // Sobrevive à rotação: painel, adicionar e tela cheia voltam como estavam.
         val Saver = listSaver<EditorUi, Int>(
@@ -150,6 +159,18 @@ internal fun openAdd(store: EditorStore, ui: EditorUi, tab: AddTab = AddTab.Shap
         if (store.addText() >= 0) ui.adding = false
         return
     }
+    // Omega adicionar (área 08, P0-7): Desenho age na hora, como o desenho livre
+    // da referência — o palco passa a receber traços, sem painel no meio.
+    if (tab == AddTab.Draw) {
+        ui.adding = false
+        store.chooseVectorTool(2)
+        return
+    }
+    // Omega adicionar (P0-1): tocar no botão aceso da barra fecha o painel.
+    if (ui.adding && ui.addTab == tab) {
+        ui.adding = false
+        return
+    }
     ui.addTab = tab
     ui.adding = true
 }
@@ -167,6 +188,8 @@ internal fun openSheet(store: EditorStore, ui: EditorUi, sheet: ShellSheet) {
  */
 internal fun shellBack(store: EditorStore, ui: EditorUi) {
     when {
+        // Omega conteúdo (área 06): o Voltar sai do modo de texto (o texto já está salvo).
+        store.textEditLayer != null -> store.closeTextEdit()
         store.sceneEditor -> store.exitSceneEditor()
         ui.adding -> ui.adding = false
         ui.fullscreen -> ui.fullscreen = false
@@ -198,6 +221,8 @@ fun EditorScreen(store: EditorStore) {
     }
     val ui = rememberSaveable(saver = EditorUi.Saver) { EditorUi() }
     StagePrefs.load(androidx.compose.ui.platform.LocalContext.current)
+    // Omega conteúdo (área 06): preferências do aparelho dos editores (forma, desenho).
+    ContentPrefs.load(androidx.compose.ui.platform.LocalContext.current)
     val selectionSize by remember { derivedStateOf { store.selection.size } }
     val hasLayers by remember { derivedStateOf { store.layers.isNotEmpty() } }
 
@@ -206,6 +231,22 @@ fun EditorScreen(store: EditorStore) {
     // camada nova do store.
     LaunchedEffect(selectionSize) {
         if (selectionSize != 1) ui.panel = null
+    }
+    // Omega conteúdo (área 06, P0-7): o editor que a camada recém-criada pede
+    // (desenho, Editar pontos) abre aqui; trocar de camada sai do modo de texto.
+    val contentRequest = store.contentEditorRequest
+    LaunchedEffect(contentRequest, store.primary) {
+        val request = contentRequest ?: return@LaunchedEffect
+        if (store.primary == null) return@LaunchedEffect
+        store.contentEditorRequest = null
+        openPanel(store, ui, when (request) {
+            EditorStore.ContentEditorRequest.Drawing -> EditorPanel.Drawing
+            EditorStore.ContentEditorRequest.EditPoints -> EditorPanel.EditPoints
+        })
+    }
+    LaunchedEffect(store.primary, selectionSize) {
+        val editing = store.textEditLayer
+        if (editing != null && (store.primary != editing || selectionSize != 1)) store.closeTextEdit()
     }
     ImmersiveMode(ui.fullscreen)
     BackHandler { shellBack(store, ui) }
@@ -241,7 +282,8 @@ fun EditorScreen(store: EditorStore) {
     val timelineOnly = store.selection.isNotEmpty() && store.selection == store.timelineOnlySelection
     val addBarState = selectionSize == 0 || (timelineOnly && !store.keySelectMode)
     val content = when {
-        ui.adding && addBarState -> SheetContent.AddBar
+        // Omega adicionar (área 08, P0-1): o conteúdo embutido acima da barra.
+        ui.adding && addBarState -> SheetContent.Adding
         ui.adding -> SheetContent.None
         // O painel da Aurea AI CRIA a camada: abrir sem nada selecionado é o
         // caso normal do projeto novo, então ele não passa pelo portão do
@@ -262,10 +304,8 @@ fun EditorScreen(store: EditorStore) {
         movableContentOf { modifier: Modifier -> PreviewStage(store, ui, modifier) }
     }
 
-    // A altura do palco que a pessoa escolheu arrastando a divisa (0 = automática),
-    // guardada no aparelho.
-    val previewPrefs = androidx.compose.ui.platform.LocalContext.current.let { context -> remember { context.getSharedPreferences(PREVIEW_PREFS, android.content.Context.MODE_PRIVATE) } }
-    val previewPreference = remember { mutableFloatStateOf(previewPrefs.getFloat(PREVIEW_HEIGHT_KEY, 0f)) }
+    // Omega fundação (F6): sem a divisa arrastável no retrato (D2) — a prévia é
+    // fixa e a zona inferior tem 280 dp (EditorLayout.solve).
     Box(Modifier.fillMaxSize().background(AureaColors.EditorCanvas)) {
         Column(Modifier.fillMaxSize()) {
             // As barras do sistema são tratadas UMA vez, aqui: a de status no
@@ -283,7 +323,9 @@ fun EditorScreen(store: EditorStore) {
                 val wide = !ui.fullscreen && ui.panel != EditorPanel.Curve && EditorLayout.isWide(w, h)
                 val sheetWidth = EditorLayout.wideSheetWidth(w)
                 val aspect = if (store.project.width > 0 && store.project.height > 0) store.project.width.toFloat() / store.project.height else 0f
-                val m = EditorLayout.solve(h, content, ui.fullscreen, w, aspect, previewPreference.floatValue,
+                // Omega chrome (área 02, P0-4): com a seleção múltipla a timeline fica com a
+                // zona inteira e a barra inferior flutua por cima dela (sem painel de lote).
+                val m = EditorLayout.solve(h, if (content == SheetContent.Batch) SheetContent.None else content, ui.fullscreen, w, aspect,
                     dockRows = if (content == SheetContent.Dock) dockTileRowCount(store) else 2,
                     fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale)
                 if (store.sceneEditor) {
@@ -294,17 +336,24 @@ fun EditorScreen(store: EditorStore) {
                 } else if (wide) {
                     WideEditor(store, ui, content, h, sheetWidth, stage)
                 } else {
-                    NarrowEditor(store, ui, content, m, stage, EditorLayout.maxPreview(h),
-                        onPreviewResize = { previewPreference.floatValue = it },
-                        onPreviewCommit = { previewPrefs.edit().putFloat(PREVIEW_HEIGHT_KEY, previewPreference.floatValue).apply() },
-                        onPreviewReset = {
-                            previewPreference.floatValue = 0f
-                            previewPrefs.edit().remove(PREVIEW_HEIGHT_KEY).apply()
-                        })
+                    NarrowEditor(store, ui, content, m, stage)
                 }
 
-                // Adicionar continua na barra fixa de categorias.
-                if (ui.adding && !store.sceneEditor) AddLayerOverlay(store, ui)
+                // Omega adicionar (área 08, P0-1): o adicionar é embutido acima da barra
+                // (NarrowEditor/WideEditor). Só a interface de Edição, que não tem a
+                // barra, segue com a janela.
+                if (ui.adding && !store.sceneEditor && store.uiMode == com.aurea.aurea.state.UI_MODE_EDIT) AddLayerOverlay(store, ui)
+                // Adicionar aberto: tocar no palco fecha (o palco não recebe o toque).
+                if (ui.adding && content == SheetContent.Adding && !wide && !ui.fullscreen && !store.sceneEditor &&
+                    store.uiMode != com.aurea.aurea.state.UI_MODE_EDIT) {
+                    Box(
+                        Modifier
+                            .padding(top = m.topBar.dp)
+                            .fillMaxWidth()
+                            .height(m.preview.dp)
+                            .pointerInput(Unit) { detectTapGestures { ui.adding = false } },
+                    )
+                }
                 // Gravar voz: o painel por cima da timeline, com o palco à vista
                 // (também na cena 3D, cujo adicionar tem a mesma aba Áudio).
                 if (ui.voice) VoiceRecorderOverlay(store) { ui.voice = false }
@@ -331,12 +380,17 @@ fun EditorScreen(store: EditorStore) {
     }
 
     ShellSheets(store, ui)
-    store.textContentRequest?.let { request ->
-        TextContentDialog(request, onSave = { store.commitTextContent(request, it) }, onDismiss = store::dismissTextContentEditor)
-    }
+    // Omega painel: (área 04, P1-12) o cartão "ainda não há presets" do painel da camada.
+    LayerPresetsEmptyDialog(store, ui)
     if (ui.effectsBrowser) EffectsBrowserSheet(store, onOpenPanel = { openPanel(store, ui, it) }) { ui.effectsBrowser = false }
     store.expressionTarget?.let { com.aurea.aurea.editor.panels.ExpressionSheet(store, it) }
-    if (ui.exporting) ExportScreen(store) { ui.exporting = false }
+    // Omega adicionar (área 08, P2-4): o "Fundo" das sub-páginas leva aos ajustes do projeto.
+    if (ui.exporting) ExportScreen(store, onOpenProjectSettings = { ui.exporting = false; openSheet(store, ui, ShellSheet.ProjectSettings) }) { ui.exporting = false }
+    // Omega adicionar (área 08, P1-1/P1-3/P0-6): os "Ver tudo" em tela cheia.
+    // Adicionar algo fecha o navegador e o painel de adicionar.
+    if (ui.mediaBrowser) MediaBrowser(store, onAdded = { ui.adding = false }) { ui.mediaBrowser = false }
+    if (ui.audioBrowser) AudioBrowser(store, onAdded = { ui.adding = false }) { ui.audioBrowser = false }
+    if (ui.presetsBrowser) TextPresetsBrowser(store, onAdded = { ui.adding = false }) { ui.presetsBrowser = false }
 }
 
 @Composable
@@ -346,13 +400,10 @@ private fun NarrowEditor(
     content: SheetContent,
     m: EditorMetrics,
     stage: @Composable (Modifier) -> Unit,
-    maxPreview: Float,
-    onPreviewResize: (Float) -> Unit,
-    onPreviewCommit: () -> Unit,
-    onPreviewReset: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().background(AureaColors.EditorCanvas)) {
-        if (!ui.fullscreen) Box(Modifier.fillMaxWidth().height(m.topBar.dp)) { TopBarHost(store, ui) }
+        // Omega conteúdo (área 06): os popups da barra de estilo descem por cima do palco.
+        if (!ui.fullscreen) Box(Modifier.fillMaxWidth().height(m.topBar.dp).zIndex(if (store.textEditLayer != null) 2f else 0f)) { TopBarHost(store, ui) }
         val previewH = if (ui.fullscreen) (m.preview - ShellDims.FullscreenTimeBar.value).coerceAtLeast(0f) else m.preview
         // O palco e a timeline NÃO espelham em árabe: o quadro 0 fica à
         // esquerda e o tempo anda para a direita em qualquer idioma.
@@ -367,45 +418,60 @@ private fun NarrowEditor(
         if (ui.fullscreen) {
             FullscreenTimeBar(store)
             TransportBar(store, ui)
+        } else if (store.textEditLayer != null) {
+            // Omega conteúdo (área 06, P0-1): o modo de texto ocupa o painel grande,
+            // do transporte até o fim (a faixa de entrada no topo dele).
+            TextEditPanel(store, Modifier.fillMaxWidth().height((m.strip + m.transport + m.zone).dp))
         } else {
-            // A divisa palco/transporte: arrastar na vertical no transporte (fora
-            // dos botões) troca palco por timeline; toque duplo volta à altura
-            // automática. A faixa de 8 dp saiu no redesenho (a divisa é o transporte).
-            val preview by rememberUpdatedState(m.preview)
-            val max by rememberUpdatedState(maxPreview)
-            val resize by rememberUpdatedState(onPreviewResize)
-            val commit by rememberUpdatedState(onPreviewCommit)
-            val reset by rememberUpdatedState(onPreviewReset)
-            Column(
-                Modifier.fillMaxWidth().testTag("editor.previewDivider")
-                    .pointerInput(Unit) {
-                        var start = 0f
-                        var travel = 0f
-                        detectVerticalDragGestures(
-                            onDragStart = { start = preview; travel = 0f },
-                            onDragEnd = { commit() },
-                            onDragCancel = { commit() },
-                            onVerticalDrag = { change, dy ->
-                                change.consume()
-                                travel += dy / density
-                                resize((start + travel).coerceIn(EditorLayout.PREVIEW_MIN, max))
-                            },
-                        )
-                    }
-                    .pointerInput(Unit) { detectTapGestures(onDoubleTap = { reset() }) },
-            ) {
-                TransportBar(store, ui)
-            }
+            // Omega fundação (F6): sem divisa arrastável no retrato (D2).
+            TransportBar(store, ui)
         }
-        if (!ui.fullscreen) {
+        if (!ui.fullscreen && store.textEditLayer == null) {
             // Camada escolhida (doca aberta): a timeline vira a fileira única dela,
             // como com painel aberto — as setas trocam de camada e tocar na barra
             // volta à timeline inteira. O ícone do tipo abre as trilhas da camada
             // (e a timeline fica inteira enquanto estão abertas); arrastar só rola.
-            KeepLtr { TimelineHost(store, ui, Modifier.fillMaxWidth().height(m.timeline.dp), compactDock = content == SheetContent.Dock) }
-            // Real Camera ligada: os controles dela ocupam a área de painéis.
-            if (content != SheetContent.None || realCameraShowing(store)) {
-                ContextArea(store, ui, content, Modifier.fillMaxWidth().height(m.sheet.dp))
+            //
+            // Omega fundação (F6): a zona inferior fixa (280 dp). Sem camada, a
+            // timeline (210) e a barra de adicionar (70) empilhadas; com camada, a
+            // timeline ocupa a zona e o painel de 200 fica POR CIMA dela (sobram
+            // 80 dp: régua + uma linha). A prévia não muda de altura.
+            Box(Modifier.fillMaxWidth().height(m.zone.dp)) {
+                Column(Modifier.fillMaxSize()) {
+                    KeepLtr { TimelineHost(store, ui, Modifier.fillMaxWidth().height(m.timeline.dp), compactDock = content == SheetContent.Dock) }
+                    // Real Camera ligada: os controles dela ocupam a área de painéis.
+                    if (!m.overlay && content != SheetContent.Batch && (content != SheetContent.None || realCameraShowing(store))) {
+                        ContextArea(store, ui, content, Modifier.fillMaxWidth().height(m.sheet.dp))
+                    }
+                }
+                // Omega chrome (área 02, P0-4): a barra inferior flutuante da seleção múltipla.
+                if (content == SheetContent.Batch && !realCameraShowing(store)) {
+                    KeepLtr { MultiSelectBottomBar(store, Modifier.align(Alignment.BottomCenter)) }
+                }
+                if (m.overlay) {
+                    ContextArea(
+                        store, ui, content,
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(m.sheet.dp)
+                            // O painel por cima segura o toque: nada passa para a timeline embaixo.
+                            .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } },
+                    )
+                }
+                // Omega adicionar (área 08, P0-1): o conteúdo do botão aberto (193 dp)
+                // por cima da timeline, encostado na barra de adicionar, que fica.
+                if (content == SheetContent.Adding) {
+                    AddLayerPanel(
+                        store, ui,
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = m.sheet.dp)
+                            .fillMaxWidth()
+                            .height(EditorLayout.addContent(m).dp)
+                            .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } },
+                    )
+                }
             }
         }
     }
@@ -421,7 +487,8 @@ private fun WideEditor(
     stage: @Composable (Modifier) -> Unit,
 ) {
     Column(Modifier.fillMaxSize().background(AureaColors.EditorCanvas)) {
-        TopBarHost(store, ui)
+        // Omega conteúdo (área 06): os popups da barra de estilo descem por cima do palco.
+        Box(Modifier.fillMaxWidth().zIndex(if (store.textEditLayer != null) 2f else 0f)) { TopBarHost(store, ui) }
         Row(Modifier.weight(1f).fillMaxWidth()) {
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 // Palco e timeline em LTR mesmo em árabe (ver `KeepLtr`).
@@ -431,12 +498,25 @@ private fun WideEditor(
                     TimelineHost(store, ui, Modifier.fillMaxWidth().height(EditorLayout.wideTimeline(totalHeight).dp))
                 }
                 // A barra de adicionar na base da coluna do palco.
-                if (content == SheetContent.AddBar) AddBar(store, ui, Modifier.fillMaxWidth().height(ShellDims.AddBar))
+                // Omega adicionar (área 08): também com o adicionar aberto.
+                if (content == SheetContent.AddBar || content == SheetContent.Adding) AddBar(store, ui, Modifier.fillMaxWidth().height(ShellDims.AddBar))
             }
             // No largo a folha fica sempre à direita; sem nada escolhido ela
             // mostra a dica do palco.
-            val c = if (content == SheetContent.None || content == SheetContent.AddBar) SheetContent.Hint else content
-            ContextArea(store, ui, c, Modifier.width(sheetWidth.dp).fillMaxHeight())
+            if (store.textEditLayer != null) {
+                // Omega conteúdo (área 06, P0-1): no layout largo o painel grande do
+                // modo de texto fica na folha da direita.
+                TextEditPanel(store, Modifier.width(sheetWidth.dp).fillMaxHeight())
+            } else if (content == SheetContent.Adding) {
+                // Omega adicionar (área 08, P0-1): o conteúdo do botão aberto na folha
+                // da direita (um painel só: nada de janela por cima).
+                Box(Modifier.width(sheetWidth.dp).fillMaxHeight().background(AureaColors.AddPanel), contentAlignment = Alignment.BottomCenter) {
+                    AddLayerPanel(store, ui, Modifier.fillMaxWidth().height(EditorLayout.ADD_CONTENT.dp))
+                }
+            } else {
+                val c = if (content == SheetContent.None || content == SheetContent.AddBar) SheetContent.Hint else content
+                ContextArea(store, ui, c, Modifier.width(sheetWidth.dp).fillMaxHeight())
+            }
         }
     }
 }
@@ -449,17 +529,22 @@ private fun TopBarHost(store: EditorStore, ui: EditorUi) {
     val id = primary
     val section = ui.panel
     when {
+        // Omega conteúdo (área 06, P0-1): no modo de texto, a barra de estilo.
+        store.textEditLayer != null && id != null -> TextStyleBar(store)
         // Segurar uma camada liga a seleção: a barra das ações de grupo já com 1.
         size >= 2 || (size >= 1 && store.layerSelectMode) -> BatchTopBar(store, ui)
         // Seção da camada aberta (redesenho 2026-09-29): `‹` + título centrado.
-        id != null && section != null -> SectionTopBar(store, section, onBack = { ui.panel = null })
+        id != null && section != null -> SectionTopBar(
+            store, section, onBack = { ui.panel = null },
+            // Omega painel: (área 04, P0-6) o ⋮ e o trailing que o painel aberto publica.
+            moreEntries = com.aurea.aurea.editor.panels.PanelBarActions.more,
+            trailing = { com.aurea.aurea.editor.panels.PanelBarActions.trailing?.invoke(this) },
+        )
         id != null -> LayerTopBar(store, ui, id)
         else -> ProjectTopBar(store, ui)
     }
 }
 
-private const val PREVIEW_PREFS = "aurea.editor.layout"
-private const val PREVIEW_HEIGHT_KEY = "preview_height_dp"
 
 @Composable
 private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, compactDock: Boolean = false) {
@@ -479,6 +564,10 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
         // Redesenho 2026-09-29 (Efeitos.dc.html): uma camada escolhida = relógio
         // em caixa (e cabeçote em destaque); sem seleção, o sublinhado.
         timecodeStyle = if (store.selection.size == 1) TimecodeStyle.Box else TimecodeStyle.Underline,
+        // Omega timeline (área 03, P1-8): com o painel Velocidade, as alças do foco esticam a velocidade.
+        speedHandles = ui.panel == EditorPanel.Speed ||
+            // Omega painel: (área 04) a velocidade embutida do grupo também mostra as alças.
+            LayerPanelState.speedPopout,
         onEmptyTap = {
             // Tocar no vazio: com painel aberto só fecha o painel; adicionando,
             // fecha o adicionar; senão desseleciona.
@@ -538,7 +627,8 @@ private fun onKeyframeTapped(store: EditorStore, ui: EditorUi, layer: Long, key:
  */
 @Composable
 private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent, modifier: Modifier) {
-    if (content == SheetContent.AddBar) {
+    // Omega adicionar (área 08, P0-1): adicionando, a barra continua no lugar.
+    if (content == SheetContent.AddBar || content == SheetContent.Adding) {
         AddBar(store, ui, modifier)
         return
     }
@@ -571,7 +661,8 @@ private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent,
                 SheetContent.Batch -> MultiSelectionPanel(store, ui)
                 SheetContent.Dock -> {
                     val id by remember { derivedStateOf { store.primary } }
-                    id?.let { LayerToolsDock(store, ui, it) }
+                    // Omega painel: (área 04) o painel da camada da referência (LayerPanel.kt).
+                    id?.let { LayerPanel(store, ui, it) }
                 }
                 else -> StageHint()
             }
@@ -612,10 +703,11 @@ private fun BusyOverlay(store: EditorStore) {
 private fun ShellSheets(store: EditorStore, ui: EditorUi) {
     val dismiss = { ui.sheet = null }
     when (ui.sheet) {
-        ShellSheet.LayerMenu -> LayerMenuSheet(store, ui, dismiss)
-        ShellSheet.TimelineMenu -> TimelineMenuSheet(store, ui, dismiss)
-        ShellSheet.ProjectSettings -> ProjectSettingsSheet(store, dismiss)
-        ShellSheet.CopyPaste -> CopyPasteSheet(store, dismiss)
+        // Omega chrome (área 02, P0-6/P1-1): o ⋮ da camada e o Copiar e colar são
+        // menus ancorados nos próprios botões; o menu da engrenagem saiu (o ⚙ abre
+        // os Ajustes direto, e o que era dele mora em "Mais do AUREA").
+        ShellSheet.LayerMenu, ShellSheet.CopyPaste -> LaunchedEffect(Unit) { ui.sheet = null }
+        ShellSheet.TimelineMenu, ShellSheet.ProjectSettings -> ProjectSettingsSheet(store, ui, dismiss)
         ShellSheet.SearchLayers -> SearchLayersSheet(store, dismiss)
         ShellSheet.CommandSearch -> CommandSearchSheet(store, ui, dismiss)
         ShellSheet.GoToTime -> {

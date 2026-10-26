@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega painel (área 04): painel da camada, velocidade, volume, curva e presets. -->
+    <string name="om_lp_border_shadow">Garis tepi dan bayangan</string>
+    <string name="om_lp_move_transform">Pindah dan ubah</string>
+    <string name="om_lp_edit_points">Edit titik</string>
+    <string name="om_lp_edit_drawing">Edit gambar</string>
+    <string name="om_lp_edit_group">Edit grup</string>
+    <string name="om_lp_camera_options">Opsi kamera</string>
+    <string name="om_lp_light_options">Opsi cahaya</string>
+    <string name="om_lp_edit_particles">Edit partikel</string>
+    <string name="om_lp_audio">Volume dan audio</string>
+    <string name="om_lp_opens_panel">membuka panel</string>
+    <string name="om_lp_move_start_to_playhead">Pindahkan lapisan agar mulai di playhead</string>
+    <string name="om_lp_move_end_to_playhead">Pindahkan lapisan agar berakhir di playhead</string>
+    <string name="om_lp_retime_extend_start">Rentangkan awal hingga playhead (mengubah kecepatan)</string>
+    <string name="om_lp_retime_shorten_start">Persingkat awal hingga playhead (mengubah kecepatan)</string>
+    <string name="om_lp_retime_shorten_end">Persingkat akhir hingga playhead (mengubah kecepatan)</string>
+    <string name="om_lp_retime_extend_end">Rentangkan akhir hingga playhead (mengubah kecepatan)</string>
+    <string name="om_lp_speed_slower">Lebih lambat</string>
+    <string name="om_lp_speed_faster">Lebih cepat</string>
+    <string name="om_lp_speed_close">Tutup kecepatan</string>
+    <string name="om_lp_speed_tab_curve">Kurva waktu</string>
+    <string name="om_lp_speed_tab_options">Opsi</string>
+    <string name="om_lp_speed_constant_hint">Animasi lapisan mengikuti kecepatan dan durasinya ikut berubah.</string>
+    <string name="om_lp_speed_keyed">Lapisan ini memiliki kecepatan beranimasi atau kurva waktu.</string>
+    <string name="om_lp_speed_remap_on">Pemetaan ulang waktu aktif: atur di tab Kurva waktu.</string>
+    <string name="om_lp_volume_close">Tutup volume</string>
+    <string name="om_lp_volume_tab_fades">Fade</string>
+    <string name="om_lp_missing_media_title">Media tidak ditemukan</string>
+    <string name="om_lp_missing_media">Media asli lapisan ini hilang atau dipindahkan.</string>
+    <string name="om_presets_empty_title">Belum ada preset</string>
+    <string name="om_presets_empty_body">Simpan properti dan keyframe lapisan sebagai preset untuk dipakai lagi.</string>
+    <string name="om_presets_empty_browse">Lihat preset</string>
+    <string name="om_curve_cat_curves">Kurva</string>
+    <string name="om_curve_cat_bounces">Pantulan dan gelombang</string>
+    <string name="om_curve_cat_steps">Tangga</string>
+    <string name="om_curve_reverse">Balik kurva</string>
+    <string name="om_curve_paste_all">Tempel kurva ke semua keyframe</string>
+    <string name="om_curve_overshoot_on">Izinkan overshoot</string>
+    <string name="om_curve_overshoot_off">Nonaktifkan overshoot</string>
+    <string name="om_curve_prev">Segmen sebelumnya</string>
+    <string name="om_curve_next">Segmen berikutnya</string>
+    <string name="om_curve_no_segment">Pindahkan playhead di antara dua keyframe</string>
+    <string name="om_curve_saved">Kurva tersimpan</string>
+</resources>

@@ -2,20 +2,22 @@ package com.aurea.aurea.editor
 
 import android.app.Application
 import android.graphics.Bitmap
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.platform.app.InstrumentationRegistry
-import com.aurea.aurea.editor.panels.EditorPanel
-import com.aurea.aurea.editor.panels.PanelContent
 import com.aurea.aurea.editor.panels.effectTypeId
+import com.aurea.aurea.effects.EffectAddSheet
+import com.aurea.aurea.effects.EffectRef
 import com.aurea.aurea.effects.EffectTool
 import com.aurea.aurea.effects.effectCardId
 import com.aurea.aurea.state.EditorStore
@@ -27,11 +29,14 @@ import org.junit.Test
 import java.io.File
 
 /**
- * O navegador de efeitos e a pilha compacta no painel Efeitos de produção:
- * camada sem nada abre a tela cheia (destaques, recentes/favoritos, ladrilhos);
- * ladrilho abre o grupo; um toque adiciona; segurar favorita;
- * as ferramentas-efeito (legendas, máscara) abrem o painel delas e aparecem na
- * pilha quando a camada as usa.
+ * O navegador de efeitos da Omega (área 07, P0-6), com o editor de produção por
+ * baixo: grade → DETALHE → a variação adiciona; a ferramenta-efeito (Legendas)
+ * abre a ferramenta pelo detalhe; Recentes adiciona com um toque e o toque longo
+ * abre o detalhe; a estrela do detalhe favorita; efeito + preset é UM passo de
+ * desfazer; a busca tem etiquetas (fichas) e acha em qualquer idioma.
+ *
+ * O navegador é aberto direto (`EffectAddSheet`), sem passar pelo painel
+ * Efeitos, que tem o próprio teste.
  */
 class EffectsAddSheetTest {
     @get:Rule val compose = createComposeRule()
@@ -48,22 +53,29 @@ class EffectsAddSheetTest {
         bitmap.recycle()
     }
 
-    @Test fun addSheetGroupsToolsAndCompactStack() {
+    private fun exists(tag: String) = compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
+
+    private fun tagPrefix(prefix: String) = SemanticsMatcher("testTag começa com $prefix") {
+        it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith(prefix) == true
+    }
+
+    @Test fun browserDetailVariationsRecentsFavoritesAndSearch() {
         assertTrue(context.packageName.endsWith(".uitest"))
-        var showPanel by mutableStateOf(false)
-        var opened by mutableStateOf<EditorPanel?>(null)
+        var showBrowser by mutableStateOf(false)
+        var opened by mutableStateOf<EffectTool?>(null)
         compose.setContent {
             store = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
             AureaTheme {
-                // O editor de produção roda por baixo (é ele que faz o motor aplicar
-                // os comandos a cada quadro); o painel Efeitos fica embaixo, por cima.
-                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
+                // O editor de produção roda por baixo (é ele que faz o motor aplicar os comandos).
+                Box(Modifier.fillMaxSize()) {
                     EditorScreen(store)
-                    if (showPanel) androidx.compose.foundation.layout.Box(
-                        androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.45f),
-                    ) {
-                        PanelContent(store, EditorPanel.Effects, onClose = {}, onOpenPanel = { opened = it }, onOpenEffectsBrowser = {})
-                    }
+                    if (showBrowser) EffectAddSheet(
+                        store = store,
+                        layerHasAudio = false,
+                        onPick = { e -> showBrowser = false; store.addEffect(e.typeId) },
+                        onTool = { tool -> showBrowser = false; opened = tool },
+                        onDismiss = { showBrowser = false },
+                    )
                 }
             }
         }
@@ -72,84 +84,121 @@ class EffectsAddSheetTest {
         compose.waitUntil(15000) { store.project.title == "AUREA · Efeitos" && !store.projectOperationBusy }
         compose.runOnIdle { store.select(store.engineForStress.addText("AUREA")) }
         compose.waitUntil(10000) { store.textDetail != null && store.layers.size == 1 }
-
-        // Camada sem nada: o navegador abre sozinho, com ✕, 🔍, destaques, recentes e ladrilhos.
-        compose.runOnIdle { showPanel = true }
-        compose.waitUntil(5000) { compose.onAllNodesWithTag("effects.close").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("effects.search").assertIsDisplayed()
-        compose.onNodeWithTag("effects.featured").assertIsDisplayed()
-        compose.onNodeWithTag("effects.quick").assertIsDisplayed()
-        compose.onNodeWithTag("effects.quick.recent").assertIsSelected()
+        compose.runOnIdle {
+            store.effectPrefs.clearRecents()
+            store.effectPrefs.favoriteRefs.toList().forEach { store.effectPrefs.toggleFavorite(it) }
+            store.effectPrefs.updateQuickPage(0)
+        }
         val captions = effectCardId(EffectTool.Captions.typeId)
         val vhsId = effectTypeId("aurea.glitch.vhs")
         val vhs = effectCardId(vhsId)
-        compose.runOnIdle { if (store.effectPrefs.isFavorite(vhsId)) store.effectPrefs.toggleFavorite(vhsId) }
+
+        // Início: ✕ · título · 🔍, Recomendados e categorias; sem recentes nem favoritos a faixa some.
+        compose.runOnIdle { showBrowser = true }
+        compose.waitUntil(5000) { exists("effects.close") }
+        compose.onNodeWithTag("effects.search").assertIsDisplayed()
+        compose.onNodeWithTag("effects.featured").assertIsDisplayed()
+        compose.onNodeWithTag("effects.quick").assertDoesNotExist()
         capture("fx-add-home")
 
-        // Ladrilho "Texto": as legendas automáticas moram ali; o toque abre o painel delas.
+        // Categoria Texto: dentro dela não há 🔍; o cartão das Legendas abre o DETALHE,
+        // e a linha do efeito base abre a ferramenta.
         compose.onNodeWithTag("effects.home").performScrollToNode(hasTestTag("effects.category.text"))
         compose.onNodeWithTag("effects.category.text").performClick()
         compose.onNodeWithTag("effects.back").assertIsDisplayed()
+        compose.onNodeWithTag("effects.search").assertDoesNotExist()
+        compose.onNodeWithTag("effects.category.prev").assertIsDisplayed()
         compose.onNodeWithTag("effects.grid").performScrollToNode(hasTestTag("effects.card.$captions"))
-        compose.onNodeWithTag("effects.card.$captions").assertIsDisplayed()
-        capture("fx-add-text")
         compose.onNodeWithTag("effects.card.$captions").performClick()
-        compose.waitUntil(5000) { opened == EditorPanel.Captions }
+        compose.waitUntil(5000) { exists("effects.detail.variant.$captions") }
+        capture("fx-detail-captions")
+        compose.onNodeWithTag("effects.detail.variant.$captions").performScrollTo().performClick()
+        compose.waitUntil(5000) { opened == EffectTool.Captions }
         compose.onNodeWithTag("effects.close").assertDoesNotExist()
-        compose.onNodeWithTag("effects.back").assertDoesNotExist()
 
-        // "+ Adicionar efeito" → Glitch → segurar VHS favorita → a estrela mostra; um toque adiciona.
-        compose.onNodeWithTag("aurea.effects.stack").performScrollToNode(hasTestTag("aurea.effects.add")); compose.onNodeWithTag("aurea.effects.add").performClick()
-        compose.waitUntil(5000) { compose.onAllNodesWithTag("effects.close").fetchSemanticsNodes().isNotEmpty() }
-        // O recente (a ferramenta tocada) aparece na página de Recentes.
+        // Reaberto: a ferramenta está em Recentes.
+        compose.runOnIdle { showBrowser = true }
+        compose.waitUntil(5000) { exists("effects.close") }
         compose.onNodeWithTag("effects.recent.$captions").assertIsDisplayed()
+
+        // Glitch → VHS → detalhe → a estrela favorita o efeito base; ✕ fecha o detalhe.
         compose.onNodeWithTag("effects.home").performScrollToNode(hasTestTag("effects.category.glitch"))
         compose.onNodeWithTag("effects.category.glitch").performClick()
-        compose.onNodeWithTag("effects.back").assertIsDisplayed()
         compose.onNodeWithTag("effects.grid").performScrollToNode(hasTestTag("effects.card.$vhs"))
-        compose.onNodeWithTag("effects.card.$vhs").performTouchInput { longClick() }
+        compose.onNodeWithTag("effects.card.$vhs").performClick()
+        compose.waitUntil(5000) { exists("effects.detail.favorite.$vhs") }
+        compose.onNodeWithTag("effects.detail.favorite.$vhs").performScrollTo().performClick()
         compose.runOnIdle { assertTrue(store.effectPrefs.isFavorite(vhsId)) }
-        capture("fx-add-glitch")
+        capture("fx-detail-vhs")
+        compose.onNodeWithTag("effects.detail.close").performClick()
+        compose.waitUntil(5000) { !exists("effects.detail") }
         compose.onNodeWithTag("effects.back").performClick()
-        compose.onNodeWithTag("effects.quick.favorites").performClick()
-        compose.waitUntil(5000) { compose.onAllNodesWithTag("effects.favorite.$vhs").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("effects.quick.favorites").assertIsSelected()
+
+        // Favoritos: a página depois de Recentes. Toque longo abre o detalhe; toque adiciona e fecha.
+        compose.onNodeWithTag("effects.home").performScrollToNode(hasTestTag("effects.quick"))
+        if (!exists("effects.favorite.$vhs")) compose.onNodeWithTag("effects.quick").performTouchInput { swipeLeft() }
+        compose.waitUntil(5000) { exists("effects.favorite.$vhs") }
+        compose.onNodeWithTag("effects.quick.page.1").assertIsSelected()
+        compose.onNodeWithTag("effects.favorite.$vhs").performTouchInput { longClick() }
+        compose.waitUntil(5000) { exists("effects.detail") }
+        compose.onNodeWithTag("effects.detail.close").performClick()
+        compose.waitUntil(5000) { !exists("effects.detail") }
         capture("fx-add-favorites")
         compose.onNodeWithTag("effects.favorite.$vhs").performClick()
-        compose.waitUntil(5000) { store.effects.size == 1 }
-        compose.waitUntil(5000) { compose.onAllNodesWithTag("effects.more.$vhs").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(5000) { store.effects.any { it.typeId == vhsId } }
         compose.onNodeWithTag("effects.close").assertDoesNotExist()
-        compose.onNodeWithTag("effects.remove.$vhs").assertIsDisplayed()
 
-        // Máscara na camada: o cartão da ferramenta aparece no topo da pilha e reabre o painel.
-        compose.runOnIdle { store.addMaskPreset(0) }
-        compose.waitUntil(5000) { (store.masks?.masks?.size ?: 0) == 1 }
-        compose.onNodeWithTag("aurea.effects.stack").performScrollToIndex(0)
-        compose.waitUntil(5000) { compose.onAllNodesWithTag("effects.tool.mask").fetchSemanticsNodes().isNotEmpty() }
-        capture("fx-stack")
-        compose.runOnIdle { opened = null }
-        compose.onNodeWithTag("effects.tool.mask").performClick()
-        compose.waitUntil(5000) { opened == EditorPanel.Mask }
+        // Variação: Movimento → Tremor (Twitch) → detalhe → 1º preset. Adiciona com o
+        // preset, grava "efeito/preset" nos recentes e desfaz num passo só.
+        val twitchId = effectTypeId("aurea.motion.twitch")
+        val twitch = effectCardId(twitchId)
+        compose.runOnIdle { showBrowser = true }
+        compose.waitUntil(5000) { exists("effects.close") }
+        // O VHS já está na camada: sai dos Recomendados.
+        compose.onNodeWithTag("effects.featured.$vhs").assertDoesNotExist()
+        compose.onNodeWithTag("effects.home").performScrollToNode(hasTestTag("effects.category.motion"))
+        compose.onNodeWithTag("effects.category.motion").performClick()
+        compose.onNodeWithTag("effects.grid").performScrollToNode(hasTestTag("effects.card.$twitch"))
+        compose.onNodeWithTag("effects.card.$twitch").performClick()
+        compose.waitUntil(5000) { exists("effects.detail.variant.$twitch.0") }
+        capture("fx-detail-variations")
+        val before = store.effects.size
+        compose.onNodeWithTag("effects.detail.variant.$twitch.0").performScrollTo().performClick()
+        compose.waitUntil(8000) { store.effects.any { it.typeId == twitchId } }
+        compose.runOnIdle { assertEquals(EffectRef(twitchId, 0), store.effectPrefs.recentRefs.first()) }
+        compose.waitForIdle()
+        Thread.sleep(1500)   // o preset entra no quadro seguinte do motor e o grupo de desfazer fecha
+        compose.runOnIdle { store.undo() }
+        compose.waitUntil(8000) { store.effects.none { it.typeId == twitchId } && store.effects.size == before }
 
-        // Busca em qualquer idioma acha a ferramenta pelo sinônimo.
-        compose.onNodeWithTag("aurea.effects.stack").performScrollToNode(hasTestTag("aurea.effects.add")); compose.onNodeWithTag("aurea.effects.add").performClick()
+        // Busca: vazia mostra as etiquetas; a etiqueta vira ficha e filtra; ✕ limpa tudo.
+        compose.runOnIdle { showBrowser = true }
+        compose.waitUntil(5000) { exists("effects.close") }
         compose.onNodeWithTag("effects.search").performClick()
+        compose.waitUntil(5000) { exists("effects.search.tag.glitch") }
+        capture("fx-search-tags")
+        compose.onNodeWithTag("effects.search.tag.glitch").performScrollTo().performClick()
+        compose.waitUntil(5000) { exists("effects.search.chip.glitch") }
+        compose.onNodeWithTag("effects.search.results").performScrollToNode(hasTestTag("effects.result.$vhs"))
+        compose.onNodeWithTag("effects.search.clear").performClick()
+        compose.waitUntil(5000) { !exists("effects.search.chip.glitch") && exists("effects.search.tag.glitch") }
+        // Em qualquer idioma: "subtitles" acha as Legendas automáticas.
         compose.onNodeWithTag("effects.search.field").performTextInput("subtitles")
-        compose.waitUntil(5000) { compose.onAllNodesWithTag("effects.result.$captions").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(5000) { exists("effects.result.$captions") }
         compose.onNodeWithTag("effects.search.field").performTextReplacement("zzzz-no-such-effect")
-        compose.waitUntil(5000) { compose.onAllNodesWithTag("effects.result.$captions").fetchSemanticsNodes().isEmpty() }
-        compose.onNodeWithTag("effects.search.field").performTextReplacement("subtitles")
-        compose.waitUntil(5000) { compose.onAllNodesWithTag("effects.result.$captions").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(5000) { !exists("effects.result.$captions") }
         capture("fx-search")
-        compose.runOnIdle { assertEquals(1, store.effects.size) }
-        compose.onNodeWithTag("effects.search.field").performImeAction()
         compose.onNodeWithTag("effects.search.back").performClick()
-        // Destaques: o cartão grande também adiciona com um toque.
-        val pixelId = effectTypeId("aurea.stylize.pixel_encoder")
-        val pixel = effectCardId(pixelId)
-        compose.onNodeWithTag("effects.featured").performScrollToNode(hasTestTag("effects.featured.$pixel"))
-        compose.onNodeWithTag("effects.featured.$pixel").performClick()
-        compose.waitUntil(5000) { store.effects.size == 2 && store.effects.any { it.typeId == pixelId } }
-        compose.onNodeWithTag("effects.close").assertDoesNotExist()
+
+        // Recomendado → detalhe; a etiqueta do detalhe abre a busca com a ficha.
+        compose.onAllNodes(tagPrefix("effects.featured.")).onFirst().performClick()
+        compose.waitUntil(5000) { exists("effects.detail") }
+        compose.onAllNodes(tagPrefix("effects.detail.tag.")).onFirst().performClick()
+        compose.waitUntil(5000) { compose.onAllNodes(tagPrefix("effects.search.chip.")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("effects.detail").assertDoesNotExist()
+        compose.onNodeWithTag("effects.search.back").performClick()
+        compose.onNodeWithTag("effects.close").performClick()
+        compose.waitUntil(5000) { !exists("effects.close") }
+        compose.runOnIdle { assertEquals(1, store.effects.count { it.typeId == vhsId }) }
     }
 }

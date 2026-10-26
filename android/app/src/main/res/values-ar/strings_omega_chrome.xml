@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Omega 0.3.2, área 02 (moldura do editor). Textos próprios do AUREA. -->
+    <string name="om_tb_exit">العودة إلى المشاريع</string>
+    <string name="om_tb_share">المشاركة والتصدير</string>
+    <string name="om_tb_group_settings">إعدادات المجموعة</string>
+    <string name="om_tb_trail_item">الانتقال إلى %1$s</string>
+    <string name="om_sel_align">محاذاة على الشاشة</string>
+    <string name="om_sel_need_three">اختر 3 طبقات أو أكثر للتوزيع</string>
+    <string name="om_sel_extend_start">مدّ البداية حتى رأس التشغيل</string>
+    <string name="om_sel_move_start">نقل البداية إلى رأس التشغيل</string>
+    <string name="om_sel_extend_end">مدّ النهاية حتى رأس التشغيل</string>
+    <string name="om_sel_move_end">نقل النهاية إلى رأس التشغيل</string>
+    <string name="om_sel_distribute_time">التوزيع على الزمن</string>
+    <string name="om_tr_previous">الانتقال إلى الحدث السابق</string>
+    <string name="om_tr_next">الانتقال إلى الحدث التالي</string>
+    <string name="om_tr_copy_paste">النسخ واللصق</string>
+    <string name="om_tr_view_modes">أوضاع العرض</string>
+    <string name="om_vm_pixel">البكسلات الفعلية</string>
+    <string name="om_vm_grid">الشبكة</string>
+    <string name="om_vm_grid_spacing">تباعد الشبكة</string>
+    <string name="om_vm_solo">تمييز الطبقة المختارة</string>
+    <string name="om_vm_solo_off">عادي</string>
+    <string name="om_vm_solo_only">الطبقة المختارة فقط</string>
+    <string name="om_vm_solo_dim" formatted="false">الطبقة المختارة بنسبة 50%</string>
+    <string name="om_vm_camera">العرض عبر الكاميرا النشطة</string>
+    <string name="om_vm_camera_unavailable">غير متاح بعد في هذا الإصدار التجريبي</string>
+    <string name="om_vm_zoom_in">تكبير</string>
+    <string name="om_vm_zoom_out">تصغير</string>
+    <string name="om_cp_save_preset">حفظ إعداد مسبق</string>
+    <string name="om_cp_with_style">(مع النمط)</string>
+    <string name="om_cp_paste_style_more">لصق النمط</string>
+    <string name="om_cp_link_selected">ربط المختارة…</string>
+    <string name="om_ps_color_fill">لصق اللون والتعبئة</string>
+    <string name="om_ps_border_shadow">لصق الحدود والظل</string>
+    <string name="om_ps_blend">لصق المزج والعتامة</string>
+    <string name="om_ps_transform">لصق التحريك والتحويل</string>
+    <string name="om_ps_text">لصق نمط النص</string>
+    <string name="om_ps_volume">لصق مستوى الصوت</string>
+    <string name="om_ps_effects">لصق التأثيرات</string>
+    <string name="om_ps_speed">لصق السرعة</string>
+    <string name="om_ps_paste">لصق</string>
+    <string name="om_settings_more">المزيد في AUREA</string>
+    <string name="om_settings_preview">المعاينة</string>
+    <string name="om_settings_editing">التحرير</string>
+    <string name="om_settings_import">الاستيراد</string>
+    <string name="om_settings_preview_quality">جودة المعاينة</string>
+    <string name="om_gs_size">عرض المجموعة وارتفاعها</string>
+    <string name="om_mi_name">الاسم</string>
+    <string name="om_mi_dimensions">الأبعاد (ع × ط)</string>
+    <string name="om_mi_format">الصيغة</string>
+    <plurals name="om_layers_selected">
+        <item quantity="zero">%d طبقة محددة</item>
+        <item quantity="one">طبقة واحدة محددة</item>
+        <item quantity="two">طبقتان محددتان</item>
+        <item quantity="few">%d طبقات محددة</item>
+        <item quantity="many">%d طبقة محددة</item>
+        <item quantity="other">%d طبقة محددة</item>
+    </plurals>
+    <plurals name="om_cp_duplicate">
+        <item quantity="zero">تكرار %d طبقة</item>
+        <item quantity="one">تكرار الطبقة</item>
+        <item quantity="two">تكرار طبقتين</item>
+        <item quantity="few">تكرار %d طبقات</item>
+        <item quantity="many">تكرار %d طبقة</item>
+        <item quantity="other">تكرار %d طبقة</item>
+    </plurals>
+    <plurals name="om_cp_copy">
+        <item quantity="zero">نسخ %d طبقة</item>
+        <item quantity="one">نسخ الطبقة</item>
+        <item quantity="two">نسخ طبقتين</item>
+        <item quantity="few">نسخ %d طبقات</item>
+        <item quantity="many">نسخ %d طبقة</item>
+        <item quantity="other">نسخ %d طبقة</item>
+    </plurals>
+    <plurals name="om_cp_paste">
+        <item quantity="zero">لصق %d طبقة</item>
+        <item quantity="one">لصق الطبقة</item>
+        <item quantity="two">لصق طبقتين</item>
+        <item quantity="few">لصق %d طبقات</item>
+        <item quantity="many">لصق %d طبقة</item>
+        <item quantity="other">لصق %d طبقة</item>
+    </plurals>
+</resources>

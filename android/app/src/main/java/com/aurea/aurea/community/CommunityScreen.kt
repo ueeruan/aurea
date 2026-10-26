@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,10 +44,22 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Omega home · P1-4: a aba Início (D1) e o Perfil (D2) com o casco da
+ * referência — clara (papéis claros, componentes Material no claro), puxar
+ * para atualizar no lugar do botão, o estado sem rede centralizado e o
+ * indicador central enquanto carrega sem itens. O conteúdo social não muda.
+ */
 @Composable
 internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileMode: Boolean,
     suppliedApi: CommunityApi? = null) {
+    com.aurea.aurea.home.HomeMaterial { CommunityScreenContent(store, conta, profileMode, suppliedApi) }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, profileMode: Boolean,
+    suppliedApi: CommunityApi?) {
     val context = LocalContext.current
     val token = conta.sessao()?.token.orEmpty()
     val api = remember(token, suppliedApi) { suppliedApi ?: CommunityApi(token) }
@@ -76,7 +89,10 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
     // Moderação: alvo da denúncia (tipo, id) e perfil esperando a confirmação do bloqueio.
     var reporting by remember { mutableStateOf<Pair<String, String>?>(null) }
     var blocking by remember { mutableStateOf<CommunityProfile?>(null) }
-    fun failure(e: Exception) { error = context.getString(when ((e as? CommunityFailure)?.code) {
+    // Omega home: sem rede (IOException do cliente) = o estado sem rede da referência.
+    var offline by remember(api) { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
+    fun failure(e: Exception) { offline = e is java.io.IOException && e !is CommunityFailure; error = context.getString(when ((e as? CommunityFailure)?.code) {
         "username_taken" -> R.string.social_username_taken
         "profile_required" -> R.string.social_profile_required
         "invalid_profile" -> R.string.social_profile_hint
@@ -88,8 +104,8 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
     fun work(action: suspend () -> Unit) {
         if (busy) return
         scope.launch { busy = true; error = null
-            try { action() } catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e) }
-            finally { if (scope.isActive) busy = false }
+            try { action(); offline = false } catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e) }
+            finally { if (scope.isActive) { busy = false; refreshing = false } }
         }
     }
     suspend fun loadFeed(more: Boolean = false) {
@@ -118,7 +134,7 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
     }
     LaunchedEffect(api, profileMode) {
         profile = null; search = ""; feed = emptyList(); busy = true
-        try { refresh() } catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e) }
+        try { refresh(); offline = false } catch (e: CancellationException) { throw e } catch (e: Exception) { failure(e) }
         finally { if (currentCoroutineContext().isActive) busy = false }
     }
     LaunchedEffect(api, profileMode, search) {
@@ -129,18 +145,40 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
     }
     val nestedProfile = profile != null && (!profileMode || profile?.id != me?.id)
     BackHandler(nestedProfile && !busy) { work { profile = if (profileMode) me else null; loadFeed() } }
-    Column(Modifier.fillMaxSize().background(AureaColors.Background).testTag("social.screen")) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.fillMaxSize().background(AureaColors.LightBackground).testTag("social.screen")) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             if (nestedProfile) TextButton(enabled = !busy, onClick = { work { profile = if (profileMode) me else null; loadFeed() } }) { Text("‹", fontSize = 28.sp) }
-            Text(stringResource(if (profile != null) R.string.social_profile else R.string.social_community), style = AureaType.ScreenTitle, modifier = Modifier.weight(1f))
-            TextButton(enabled = !busy, onClick = { work { refresh() } }) { Text(stringResource(R.string.social_refresh)) }
+            Text(stringResource(if (profile != null) R.string.social_profile else R.string.social_community), style = LTitle, modifier = Modifier.weight(1f))
         }
-        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = AureaColors.Accent)
-        error?.let { Text(it, color = AureaColors.Danger, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).testTag("social.error")) }
-        LazyColumn(Modifier.weight(1f).testTag("social.feed"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Com itens na tela, uma barra fina; sem itens, o indicador fica no meio (abaixo).
+        if (busy && !refreshing && feed.isNotEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth(), color = AureaColors.LightAccentInk)
+        if (!offline) error?.let { Text(it, color = AureaColors.LightDanger, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).testTag("social.error")) }
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = { refreshing = true; work { refresh() } },
+            modifier = Modifier.weight(1f).fillMaxWidth().testTag("home.feed.refresh"),
+        ) {
+        if (offline && feed.isEmpty() && !busy) {
+            // Sem rede e sem conteúdo: ícone + texto centralizados (puxar tenta de novo).
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp).testTag("home.feed.offline"),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                CupertinoIcon(CupertinoGlyph.ExclamationmarkTriangle, 48.dp, AureaColors.LightTextMuted)
+                Spacer(Modifier.height(15.dp))
+                Text(stringResource(R.string.conta_erro_rede), style = AureaType.of(12f, FontWeight.Bold, 0f, AureaColors.LightText),
+                    textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 300.dp))
+            }
+        } else if (busy && feed.isEmpty() && !refreshing) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = AureaColors.LightAccentInk, modifier = Modifier.testTag("home.feed.loading"))
+            }
+        } else
+        LazyColumn(Modifier.fillMaxSize().testTag("social.feed"), contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 69.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val p = profile
             if (p == null) {
-                item("intro") { Text(stringResource(R.string.social_intro), color = AureaColors.Muted, style = AureaType.BodySmall) }
+                item("intro") { Text(stringResource(R.string.social_intro), color = AureaColors.LightTextMuted, style = LSmall) }
                 item("search") { OutlinedTextField(search, { search = it.take(25) }, label = { Text(stringResource(R.string.social_search)) }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("social.search")) }
                 items(results, key = { "search-${it.id}" }) { result -> CommunityAuthor(result, api, Modifier.fillMaxWidth().clickable(enabled = !busy) { showProfile(result.id) }) }
                 item("filters") {
@@ -153,16 +191,16 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
                 }
             } else {
                 item("profile") {
-                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(AureaColors.Surface).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(AureaColors.LightSurface).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         CommunityAuthor(p, api, large = true)
-                        if (p.bio.isNotBlank()) Text(p.bio, style = AureaType.Body)
+                        if (p.bio.isNotBlank()) Text(p.bio, style = LBody)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             TextButton(enabled = !busy, onClick = { listPeople("followers") }) { Text("${p.followers} " + stringResource(R.string.social_followers)) }
                             TextButton(enabled = !busy, onClick = { listPeople("following") }) { Text("${p.following} " + stringResource(R.string.social_following)) }
                         }
                         if (p.id == me?.id) Button(onClick = { edit = true }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("social.edit")) { Text(stringResource(R.string.social_edit_profile)) }
                         // Bloqueado: o servidor já desfez o seguir e esconde o conteúdo dos dois lados.
-                        else if (p.blocked) Text(stringResource(R.string.mod_blocked_note), color = AureaColors.Muted, style = AureaType.BodySmall, modifier = Modifier.testTag("social.blocked"))
+                        else if (p.blocked) Text(stringResource(R.string.mod_blocked_note), color = AureaColors.LightTextMuted, style = LSmall, modifier = Modifier.testTag("social.blocked"))
                         else Button(enabled = !busy, onClick = { work {
                             profile = withContext(Dispatchers.IO) { api.request("/profiles/${p.id}/follow", if (p.followed) "DELETE" else "PUT") }.getJSONObject("profile").profile()
                         } }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(if (p.followed) R.string.social_unfollow else R.string.social_follow)) }
@@ -183,7 +221,7 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
                 Button(onClick = { if (me?.username.isNullOrBlank()) edit = true else composing = true }, enabled = me != null && !busy,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("social.compose")) { Text(stringResource(R.string.social_create_post)) }
             }
-            if (!busy && feed.isEmpty()) item("empty") { Text(stringResource(R.string.social_empty), color = AureaColors.Muted, modifier = Modifier.padding(vertical = 24.dp)) }
+            if (!busy && feed.isEmpty()) item("empty") { Text(stringResource(R.string.social_empty), color = AureaColors.LightTextMuted, modifier = Modifier.padding(vertical = 24.dp)) }
             items(feed, key = { it.id }) { post ->
                 CommunityPostCard(post, api, busy, me?.id == post.author.id, canVerify,
                     onProfile = { showProfile(post.author.id) }, onComments = { commentsFor = post }, onDelete = { deleting = post },
@@ -211,13 +249,14 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
             }
             if (cursor != null) item("more") { TextButton(enabled = !busy, onClick = { work { loadFeed(true) } }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.social_more)) } }
         }
+        }
     }
     if (edit && me != null) CommunityEditProfile(me!!, api, onError = ::failure,
         onDismiss = { edit = false }, onSaved = { me = it; if (profileMode || profile?.id == it.id) profile = it; edit = false })
     if (composing) CommunityCompose(store, api, onError = ::failure, onDismiss = { composing = false }, onPosted = { composing = false; work { refresh() } })
     commentsFor?.let { post -> CommunityComments(post, me?.id, canVerify, api, ::failure, { commentsFor = null; work { loadFeed() } }, { id -> commentsFor = null; showProfile(id) },
         onReport = { c -> reporting = "comment" to c.id }) }
-    if (legacy) ModalBottomSheet(onDismissRequest = { legacy = false }, containerColor = AureaColors.Background) { Box(Modifier.fillMaxHeight(.88f)) { CommunityPresetsTab() } }
+    if (legacy) ModalBottomSheet(onDismissRequest = { legacy = false }, containerColor = AureaColors.LightBackground) { Box(Modifier.fillMaxHeight(.88f)) { CommunityPresetsTab() } }
     if (verifying && profile != null) AlertDialog(onDismissRequest = { verifying = false }, title = { Text(stringResource(R.string.social_verification)) }, text = {
         Column { for ((badge, label) in badgeOptions) TextButton(enabled = !busy, onClick = { val id = profile!!.id; verifying = false; work {
             profile = withContext(Dispatchers.IO) { api.request("/profiles/$id/verification", "PUT", JSONObject().put("verification", badge)) }.getJSONObject("profile").profile(); loadFeed()
@@ -226,8 +265,8 @@ internal fun CommunityScreen(store: EditorStore, conta: ContaViewModel, profileM
     deleting?.let { post -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text(stringResource(R.string.social_delete_post)) },
         text = { Text(post.body.take(160)) }, confirmButton = { TextButton(onClick = { deleting = null; work { withContext(Dispatchers.IO) { api.request("/posts/${post.id}", "DELETE") }; loadFeed() } }) { Text(stringResource(R.string.social_delete)) } },
         dismissButton = { TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.editor_fechar)) } }) }
-    people?.let { type -> ModalBottomSheet(onDismissRequest = { people = null }, containerColor = AureaColors.Background) {
-        Text(stringResource(if (type == "followers") R.string.social_followers else R.string.social_following), style = AureaType.ScreenTitle, modifier = Modifier.padding(20.dp))
+    people?.let { type -> ModalBottomSheet(onDismissRequest = { people = null }, containerColor = AureaColors.LightBackground) {
+        Text(stringResource(if (type == "followers") R.string.social_followers else R.string.social_following), style = LTitle, modifier = Modifier.padding(20.dp))
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 500.dp), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             items(peopleList, key = { it.id }) { p -> CommunityAuthor(p, api, Modifier.fillMaxWidth().clickable(enabled = !busy) { people = null; showProfile(p.id) }) }
             if (peopleList.isEmpty()) item { Text(stringResource(R.string.social_empty)) }
@@ -256,43 +295,43 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
 @Composable private fun CommunityAuthor(p: CommunityProfile, api: CommunityApi, modifier: Modifier = Modifier, large: Boolean = false) {
     val photo by produceState<Bitmap?>(null, p.avatar) { value = p.avatar?.let { withContext(Dispatchers.IO) { runCatching { api.avatar(it) }.getOrNull() } } }
     Row(modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(Modifier.size(if (large) 64.dp else 44.dp).clip(CircleShape).background(AureaColors.Accent.copy(alpha = .14f)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(if (large) 64.dp else 44.dp).clip(CircleShape).background(AureaColors.LightAccentInk.copy(alpha = .14f)), contentAlignment = Alignment.Center) {
             if (photo != null) Image(photo!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            else Text((p.name.ifBlank { p.username }).take(1).uppercase().ifBlank { "A" }, color = AureaColors.Accent, fontSize = if (large) 26.sp else 18.sp, fontWeight = FontWeight.Bold)
+            else Text((p.name.ifBlank { p.username }).take(1).uppercase().ifBlank { "A" }, color = AureaColors.LightAccentInk, fontSize = if (large) 26.sp else 18.sp, fontWeight = FontWeight.Bold)
         }
         Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) { Text(p.name.ifBlank { stringResource(R.string.social_profile) }, style = AureaType.Body, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false)); CommunityBadge(p.verification) }
-            Text(if (p.username.isEmpty()) stringResource(R.string.social_profile_required) else "@${p.username}", color = AureaColors.Muted, style = AureaType.BodySmall)
+            Row(verticalAlignment = Alignment.CenterVertically) { Text(p.name.ifBlank { stringResource(R.string.social_profile) }, style = LBody, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false)); CommunityBadge(p.verification) }
+            Text(if (p.username.isEmpty()) stringResource(R.string.social_profile_required) else "@${p.username}", color = AureaColors.LightTextMuted, style = LSmall)
         }
     }
 }
 @Composable private fun CommunityPostCard(post: CommunityPost, api: CommunityApi, busy: Boolean, owned: Boolean, canModerate: Boolean,
     onProfile: () -> Unit, onComments: () -> Unit, onDelete: () -> Unit, onReport: () -> Unit, onLike: () -> Unit, onDownload: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(AureaColors.Surface).padding(16.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(AureaColors.LightSurface).padding(16.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         CommunityAuthor(post.author, api, Modifier.fillMaxWidth().clickable(enabled = !busy, onClick = onProfile))
-        Text(android.text.format.DateUtils.getRelativeTimeSpanString(post.createdAt).toString(), style = AureaType.Note, color = AureaColors.Muted)
-        if (post.body.isNotEmpty()) Text(post.body, style = AureaType.Body)
+        Text(android.text.format.DateUtils.getRelativeTimeSpanString(post.createdAt).toString(), style = LNote, color = AureaColors.LightTextMuted)
+        if (post.body.isNotEmpty()) Text(post.body, style = LBody)
         post.asset?.let { a -> OutlinedButton(enabled = !busy, onClick = onDownload, modifier = Modifier.fillMaxWidth()) {
-            CupertinoIcon(if (a.kind == "project") CupertinoGlyph.RectangleStack else CupertinoGlyph.Sparkles, 22.dp, AureaColors.Accent)
-            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) { Text(a.name, maxLines = 2); Text("${a.bytes / 1024} KB", style = AureaType.Note) }
+            CupertinoIcon(if (a.kind == "project") CupertinoGlyph.RectangleStack else CupertinoGlyph.Sparkles, 22.dp, AureaColors.LightAccentInk)
+            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) { Text(a.name, maxLines = 2); Text("${a.bytes / 1024} KB", style = LNote) }
             Text(stringResource(R.string.social_download))
         } }
         Row(verticalAlignment = Alignment.CenterVertically) {
             val likeLabel = "${post.likes} " + stringResource(R.string.social_likes)
-            TextButton(enabled = !busy, onClick = onLike, modifier = Modifier.testTag("social.like.${post.id}").semantics { contentDescription = likeLabel }) { Text(if (post.liked) "♥" else "♡", color = if (post.liked) AureaColors.Accent else AureaColors.Muted, fontSize = 22.sp); Text(" ${post.likes}") }
+            TextButton(enabled = !busy, onClick = onLike, modifier = Modifier.testTag("social.like.${post.id}").semantics { contentDescription = likeLabel }) { Text(if (post.liked) "♥" else "♡", color = if (post.liked) AureaColors.LightAccentInk else AureaColors.LightTextMuted, fontSize = 22.sp); Text(" ${post.likes}") }
             TextButton(enabled = !busy, onClick = onComments) { Text("${post.comments} " + stringResource(R.string.social_comments)) }
             Spacer(Modifier.weight(1f))
-            if (owned) IconButton(enabled = !busy, onClick = onDelete) { val label = stringResource(R.string.social_delete_post); Box(Modifier.semantics { contentDescription = label }) { CupertinoIcon(CupertinoGlyph.Trash, 19.dp, AureaColors.Muted) } }
+            if (owned) IconButton(enabled = !busy, onClick = onDelete) { val label = stringResource(R.string.social_delete_post); Box(Modifier.semantics { contentDescription = label }) { CupertinoIcon(CupertinoGlyph.Trash, 19.dp, AureaColors.LightTextMuted) } }
             // De outra pessoa: denunciar; o admin também remove (mesma confirmação do excluir).
             else Box {
                 var menu by remember { mutableStateOf(false) }; val label = stringResource(R.string.mod_more_actions)
                 IconButton(enabled = !busy, onClick = { menu = true }, modifier = Modifier.testTag("social.more.${post.id}").semantics { contentDescription = label }) {
-                    CupertinoIcon(CupertinoGlyph.Ellipsis, 19.dp, AureaColors.Muted) }
+                    CupertinoIcon(CupertinoGlyph.Ellipsis, 19.dp, AureaColors.LightTextMuted) }
                 DropdownMenu(menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.mod_report)) }, onClick = { menu = false; onReport() },
-                        leadingIcon = { CupertinoIcon(CupertinoGlyph.Flag, 17.dp, AureaColors.Muted) }, modifier = Modifier.testTag("social.report.${post.id}"))
-                    if (canModerate) DropdownMenuItem(text = { Text(stringResource(R.string.mod_remove), color = AureaColors.Danger) }, onClick = { menu = false; onDelete() },
-                        leadingIcon = { CupertinoIcon(CupertinoGlyph.Trash, 17.dp, AureaColors.Danger) }, modifier = Modifier.testTag("social.remove.${post.id}"))
+                        leadingIcon = { CupertinoIcon(CupertinoGlyph.Flag, 17.dp, AureaColors.LightTextMuted) }, modifier = Modifier.testTag("social.report.${post.id}"))
+                    if (canModerate) DropdownMenuItem(text = { Text(stringResource(R.string.mod_remove), color = AureaColors.LightDanger) }, onClick = { menu = false; onDelete() },
+                        leadingIcon = { CupertinoIcon(CupertinoGlyph.Trash, 17.dp, AureaColors.LightDanger) }, modifier = Modifier.testTag("social.remove.${post.id}"))
                 }
             }
         }
@@ -314,18 +353,18 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
             } } catch (e: Exception) { error = context.getString(R.string.social_error) } finally { busy = false }
         }
     }
-    ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, containerColor = AureaColors.Background) {
+    ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, containerColor = AureaColors.LightBackground) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.social_edit_profile), style = AureaType.ScreenTitle)
+            Text(stringResource(R.string.social_edit_profile), style = LTitle)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 photo?.let { Image(it.asImageBitmap(), null, Modifier.size(64.dp).clip(CircleShape), contentScale = ContentScale.Crop) }
                 TextButton(enabled = !busy, onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text(stringResource(R.string.social_photo)) }
             }
             OutlinedTextField(username, { username = it.take(24) }, singleLine = true, label = { Text(stringResource(R.string.social_username)) }, modifier = Modifier.fillMaxWidth().testTag("social.username"))
-            Text(stringResource(R.string.social_profile_hint), style = AureaType.Note, color = AureaColors.Muted)
+            Text(stringResource(R.string.social_profile_hint), style = LNote, color = AureaColors.LightTextMuted)
             OutlinedTextField(name, { name = it.take(50) }, singleLine = true, label = { Text(stringResource(R.string.social_name)) }, modifier = Modifier.fillMaxWidth().testTag("social.name"))
             OutlinedTextField(bio, { bio = it.take(240) }, label = { Text(stringResource(R.string.social_bio)) }, supportingText = { Text("${bio.length}/240") }, modifier = Modifier.fillMaxWidth())
-            error?.let { Text(it, color = AureaColors.Danger) }
+            error?.let { Text(it, color = AureaColors.LightDanger) }
             Button(enabled = !busy && username.matches(Regex("[a-zA-Z0-9_]{3,24}")) && name.isNotBlank(), modifier = Modifier.fillMaxWidth().testTag("social.save"), onClick = {
                 scope.launch { busy = true; error = null
                     try {
@@ -351,14 +390,14 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
     var picker by remember { mutableStateOf<String?>(null) }; var busy by remember { mutableStateOf(false) }; var error by remember { mutableStateOf<String?>(null) }
     val files = remember { mutableListOf<File>() }
     DisposableEffect(Unit) { onDispose { files.forEach { it.delete() } } }
-    ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, containerColor = AureaColors.Background) {
+    ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, containerColor = AureaColors.LightBackground) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.social_create_post), style = AureaType.ScreenTitle)
+            Text(stringResource(R.string.social_create_post), style = LTitle)
             OutlinedTextField(body, { body = it.take(2000) }, label = { Text(stringResource(R.string.social_post_hint)) }, minLines = 3, maxLines = 6, modifier = Modifier.fillMaxWidth().testTag("social.post.body"))
             Row { TextButton(enabled = !busy, onClick = { picker = "preset" }) { Text(stringResource(R.string.social_attach_preset)) }; TextButton(enabled = !busy, onClick = { picker = "project" }) { Text(stringResource(R.string.social_attach_project)) } }
             selected?.let { item -> Row(verticalAlignment = Alignment.CenterVertically) { Text(item.first.name, Modifier.weight(1f)); TextButton(enabled = !busy, onClick = { selected = null }) { Text(stringResource(R.string.social_remove)) } } }
-            Text(stringResource(R.string.social_file_limit), style = AureaType.Note, color = AureaColors.Muted)
-            error?.let { Text(it, color = AureaColors.Danger) }
+            Text(stringResource(R.string.social_file_limit), style = LNote, color = AureaColors.LightTextMuted)
+            error?.let { Text(it, color = AureaColors.LightDanger) }
             Button(enabled = !busy && (body.isNotBlank() || selected != null), modifier = Modifier.fillMaxWidth().testTag("social.publish"), onClick = {
                 scope.launch { busy = true; error = null
                     try { withContext(Dispatchers.IO) {
@@ -414,19 +453,19 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
     fun work(action: suspend () -> Unit) { if (!busy) scope.launch { busy = true; error = false
         try { action() } catch (e: CancellationException) { throw e } catch (e: Exception) { error = true } finally { busy = false } } }
     LaunchedEffect(post.id) { work { load() } }
-    ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, containerColor = AureaColors.Background) {
+    ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, containerColor = AureaColors.LightBackground) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.9f).imePadding().padding(horizontal = 20.dp)) {
-            Text(stringResource(R.string.social_comments), style = AureaType.ScreenTitle)
+            Text(stringResource(R.string.social_comments), style = LTitle)
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (error) TextButton(onClick = { work { load() } }) { Text(stringResource(R.string.social_error)) }
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 16.dp)) {
-                if (items.isEmpty() && !busy) item { Text(stringResource(R.string.social_no_comments), color = AureaColors.Muted) }
+                if (items.isEmpty() && !busy) item { Text(stringResource(R.string.social_no_comments), color = AureaColors.LightTextMuted) }
                 items(items, key = { it.id }) { c -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     CommunityAuthor(c.author, api, Modifier.fillMaxWidth().clickable(enabled = !busy) { onProfile(c.author.id) }); Text(c.body)
                     if (c.author.id == ownId) TextButton(enabled = !busy, onClick = { work { withContext(Dispatchers.IO) { api.request("/comments/${c.id}", "DELETE") }; load() } }) { Text(stringResource(R.string.social_delete)) }
                     else Row {
-                        TextButton(enabled = !busy, onClick = { onReport(c) }, modifier = Modifier.testTag("social.comment.report.${c.id}")) { Text(stringResource(R.string.mod_report), color = AureaColors.Muted) }
-                        if (canModerate) TextButton(enabled = !busy, onClick = { removing = c }, modifier = Modifier.testTag("social.comment.remove.${c.id}")) { Text(stringResource(R.string.mod_remove), color = AureaColors.Danger) }
+                        TextButton(enabled = !busy, onClick = { onReport(c) }, modifier = Modifier.testTag("social.comment.report.${c.id}")) { Text(stringResource(R.string.mod_report), color = AureaColors.LightTextMuted) }
+                        if (canModerate) TextButton(enabled = !busy, onClick = { removing = c }, modifier = Modifier.testTag("social.comment.remove.${c.id}")) { Text(stringResource(R.string.mod_remove), color = AureaColors.LightDanger) }
                     }
                 } }
                 if (cursor != null) item { TextButton(enabled = !busy, onClick = { work { load(true) } }) { Text(stringResource(R.string.social_more)) } }
@@ -446,3 +485,9 @@ private val badgeOptions = listOf("blue" to R.string.social_badge_blue, "green" 
             work { withContext(Dispatchers.IO) { api.request("/comments/${c.id}", "DELETE") }; load() } }) { Text(stringResource(R.string.social_delete)) } },
         dismissButton = { TextButton(onClick = { removing = null }) { Text(stringResource(R.string.editor_fechar)) } }) }
 }
+
+// Omega home: os estilos do social nos papéis claros (escuros nos outros temas).
+private val LTitle get() = AureaType.ScreenTitle.copy(color = AureaColors.LightText)
+private val LBody get() = AureaType.Body.copy(color = AureaColors.LightText)
+private val LSmall get() = AureaType.BodySmall.copy(color = AureaColors.LightTextMuted)
+private val LNote get() = AureaType.Note.copy(color = AureaColors.LightTextMuted)

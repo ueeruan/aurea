@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega painel (área 04): painel da camada, velocidade, volume, curva e presets. -->
+    <string name="om_lp_border_shadow">Borda e sombra</string>
+    <string name="om_lp_move_transform">Mover e transformar</string>
+    <string name="om_lp_edit_points">Editar pontos</string>
+    <string name="om_lp_edit_drawing">Editar desenho</string>
+    <string name="om_lp_edit_group">Editar grupo</string>
+    <string name="om_lp_camera_options">Opções da câmera</string>
+    <string name="om_lp_light_options">Opções da luz</string>
+    <string name="om_lp_edit_particles">Editar partículas</string>
+    <string name="om_lp_audio">Volume e áudio</string>
+    <string name="om_lp_opens_panel">abre o painel</string>
+    <string name="om_lp_move_start_to_playhead">Mover a camada para começar no cabeçote</string>
+    <string name="om_lp_move_end_to_playhead">Mover a camada para terminar no cabeçote</string>
+    <string name="om_lp_retime_extend_start">Alongar o início até o cabeçote (muda a velocidade)</string>
+    <string name="om_lp_retime_shorten_start">Encurtar o início até o cabeçote (muda a velocidade)</string>
+    <string name="om_lp_retime_shorten_end">Encurtar o fim até o cabeçote (muda a velocidade)</string>
+    <string name="om_lp_retime_extend_end">Alongar o fim até o cabeçote (muda a velocidade)</string>
+    <string name="om_lp_speed_slower">Mais lento</string>
+    <string name="om_lp_speed_faster">Mais rápido</string>
+    <string name="om_lp_speed_close">Fechar a velocidade</string>
+    <string name="om_lp_speed_tab_curve">Curva de tempo</string>
+    <string name="om_lp_speed_tab_options">Opções</string>
+    <string name="om_lp_speed_constant_hint">A animação da camada acompanha a velocidade e a duração muda junto.</string>
+    <string name="om_lp_speed_keyed">Esta camada tem velocidade animada ou curva de tempo.</string>
+    <string name="om_lp_speed_remap_on">Remapear tempo está ligado: ajuste na aba Curva de tempo.</string>
+    <string name="om_lp_volume_close">Fechar o volume</string>
+    <string name="om_lp_volume_tab_fades">Suavizar</string>
+    <string name="om_lp_missing_media_title">Mídia não encontrada</string>
+    <string name="om_lp_missing_media">A mídia original desta camada sumiu ou mudou de lugar.</string>
+    <string name="om_presets_empty_title">Ainda não há presets</string>
+    <string name="om_presets_empty_body">Salve as propriedades e os keyframes de uma camada como preset para usar de novo.</string>
+    <string name="om_presets_empty_browse">Ver presets</string>
+    <string name="om_curve_cat_curves">Curvas</string>
+    <string name="om_curve_cat_bounces">Saltos e oscilações</string>
+    <string name="om_curve_cat_steps">Degraus</string>
+    <string name="om_curve_reverse">Inverter a curva</string>
+    <string name="om_curve_paste_all">Colar a curva em todos os keyframes</string>
+    <string name="om_curve_overshoot_on">Permitir passar do ponto</string>
+    <string name="om_curve_overshoot_off">Não passar do ponto</string>
+    <string name="om_curve_prev">Trecho anterior</string>
+    <string name="om_curve_next">Próximo trecho</string>
+    <string name="om_curve_no_segment">Leve o cabeçote para entre dois keyframes</string>
+    <string name="om_curve_saved">Curvas salvas</string>
+</resources>

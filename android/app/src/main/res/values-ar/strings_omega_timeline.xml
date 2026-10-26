@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Omega 0.3.2, área 03 (timeline). Textos próprios do AUREA. -->
+    <string name="om_tl_show_tracks">إظهار مسارات الإطارات المفتاحية</string>
+    <string name="om_tl_hide_tracks">إخفاء مسارات الإطارات المفتاحية</string>
+    <string name="om_tl_toggle_selection">إضافة إلى التحديد أو إزالة منه</string>
+    <string name="om_tl_move_up">نقل لأعلى</string>
+    <string name="om_tl_move_down">نقل لأسفل</string>
+    <string name="om_tl_info_start">البداية</string>
+    <string name="om_tl_info_offset">الإزاحة</string>
+    <string name="om_tl_info_in">الدخول</string>
+    <string name="om_tl_info_end">النهاية</string>
+    <string name="om_tl_info_out">الخروج</string>
+    <string name="om_tl_info_duration">المدة</string>
+    <string name="om_tl_info_change">التغيير</string>
+    <string name="om_tl_info_key">إطار مفتاحي</string>
+    <string name="om_tl_trim_start_a11y">قص بداية %1$s</string>
+    <string name="om_tl_trim_end_a11y">قص نهاية %1$s</string>
+    <string name="om_tl_speed_handle_a11y">تغيير سرعة %1$s عبر المدة</string>
+    <string name="om_tl_frame_earlier">إطار واحد أبكر</string>
+    <string name="om_tl_frame_later">إطار واحد لاحقًا</string>
+    <string name="om_tl_marker_hint">اضغط على الساعة لتمييز هذه اللحظة. اضغط مطولًا لتسمية العلامة.</string>
+    <string name="om_tl_prev_marker">العلامة السابقة</string>
+    <string name="om_tl_next_marker">العلامة التالية</string>
+    <string name="om_tl_time_options">خيارات اللحظة</string>
+    <string name="om_tl_ruler">مسطرة الخط الزمني</string>
+    <string name="om_tl_current_time">الوقت الحالي</string>
+    <string name="om_tl_hidden">مخفية</string>
+    <string name="om_tl_visible">ظاهرة</string>
+</resources>

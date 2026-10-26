@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -110,9 +111,16 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
     BoxWithConstraints(Modifier.fillMaxSize().background(EditColors.Canvas)) {
         val total = maxHeight
         Column(Modifier.fillMaxSize()) {
-            if (!ui.fullscreen) EditTopBar(store, ui)
+            // Omega conteúdo (área 06, P2-15): o modo de texto também na Edição —
+            // a barra de estilo no topo e o painel grande embaixo do palco.
+            val texting = store.textEditLayer != null && !ui.fullscreen
+            if (texting) Box(Modifier.fillMaxWidth().height(52.dp).zIndex(2f)) { TextStyleBar(store) }
+            else if (!ui.fullscreen) EditTopBar(store, ui)
             val previewH = if (ui.fullscreen) total - 52.dp else (total * 0.40f).coerceIn(160.dp, 560.dp)
             KeepLtr { stage(Modifier.fillMaxWidth().height(previewH).background(EditColors.Preview)) }
+            if (texting) {
+                TextEditPanel(store, Modifier.fillMaxWidth().weight(1f))
+            } else {
             EditPlayBar(store, ui)
             if (!ui.fullscreen) {
                 val panel = ui.panel
@@ -133,9 +141,18 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
                     }
                 }
             }
+            }
         }
     }
     cut?.let { (a, b) -> CutTransitionSheet(store, a, b) { cut = null } }
+    // Omega conteúdo (área 06, P2-15): "Fonte" do Dock abre o navegador de fontes.
+    if (FontBrowserRequest.open) {
+        FontBrowserDialog(store, onPick = { f ->
+            store.applyFontAnywhere(f)
+            FontPrefs.recordUse(f)
+            FontBrowserRequest.open = false
+        }, onDismiss = { FontBrowserRequest.open = false })
+    }
 }
 
 /** Os tipos de transição do motor (0 nenhuma … 5 girar), na ordem dos botões. */
@@ -486,8 +503,10 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                     }
                 }
                 EditDockLevel.TextClip -> listOf(
-                    EditDockItem("editText", CupertinoGlyph.Pencil, R.string.edit_clip_edit_text) { panel(EditorPanel.Text) },
-                    EditDockItem("font", CupertinoGlyph.Textformat, R.string.edit_clip_font) { panel(EditorPanel.Font) },
+                    // Omega conteúdo (área 06, P2-15): "Editar texto" abre o MODO DE TEXTO
+                    // (dá para mudar as palavras) e "Fonte" o navegador de fontes.
+                    EditDockItem("editText", CupertinoGlyph.Pencil, R.string.edit_clip_edit_text) { store.openTextEdit() },
+                    EditDockItem("font", CupertinoGlyph.Textformat, R.string.edit_clip_font) { FontBrowserRequest.open = true },
                     EditDockItem("animations", CupertinoGlyph.WandStars, R.string.edit_clip_animations) { panel(EditorPanel.Presets) },
                     EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_clip_effects) { effects() },
                     EditDockItem("transform", CupertinoGlyph.Move, R.string.edit_clip_transform) { panel(EditorPanel.Transform) },
@@ -503,7 +522,17 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                     EditDockItem("duplicate", CupertinoGlyph.PlusSquareOnSquare, R.string.edit_clip_duplicate) { store.duplicateLayers() },
                     EditDockItem("delete", CupertinoGlyph.Trash, R.string.edit_clip_delete) { store.deleteLayers() },
                 )
-                EditDockLevel.OtherClip -> listOf(
+                EditDockLevel.OtherClip -> buildList {
+                    // Omega conteúdo (área 06, P2-15): forma → Editar forma; vetor →
+                    // Editar pontos; desenho → o editor de desenho.
+                    if (clip?.kind == com.aurea.aurea.ui.theme.LayerType.Shape.kind) {
+                        when {
+                            store.isDrawingLayer -> add(EditDockItem("editDrawing", CupertinoGlyph.Scribble, R.string.om_draw_title) { panel(EditorPanel.Drawing) })
+                            store.isVectorLayer -> add(EditDockItem("editPoints", CupertinoGlyph.PencilOutline, R.string.om_pts_title) { panel(EditorPanel.EditPoints) })
+                            else -> add(EditDockItem("editShape", ShellGlyph.SliderHorizontalBelowRectangle, R.string.sh_dock_edit_shape) { panel(EditorPanel.ShapeEdit) })
+                        }
+                    }
+                    addAll(listOf(
                     EditDockItem("effects", CupertinoGlyph.Sparkles, R.string.edit_clip_effects) { effects() },
                     EditDockItem("filters", CupertinoGlyph.ColorFilter, R.string.edit_dock_filters) { clipColor(EditorPanel.Filters) },
                     EditDockItem("adjust", CupertinoGlyph.SliderHorizontal3, R.string.edit_dock_adjust) { clipColor(EditorPanel.Adjust) },
@@ -513,7 +542,8 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                     EditDockItem("split", CupertinoGlyph.Scissors, R.string.edit_clip_split) { store.splitAtPlayhead() },
                     EditDockItem("duplicate", CupertinoGlyph.PlusSquareOnSquare, R.string.edit_clip_duplicate) { store.duplicateLayers() },
                     EditDockItem("delete", CupertinoGlyph.Trash, R.string.edit_clip_delete) { store.deleteLayers() },
-                )
+                    ))
+                }
             }
         }
         EditActions(addMedia, itemsFor)

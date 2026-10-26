@@ -43,15 +43,20 @@ class StaggerLayersTest {
         compose.onNodeWithTag("stagger_step").assertDoesNotExist()
         compose.onNodeWithTag("stagger_layers").assertDoesNotExist()
         compose.onNodeWithTag("stagger_keys").assertDoesNotExist()
-        val batch = compose.onNodeWithTag("timeline.batch.tools").fetchSemanticsNode().boundsInRoot
+        // Omega chrome (área 02, P0-4): o lote é a barra inferior flutuante de 42 dp.
+        val batch = compose.onNodeWithTag("batch.bottom").fetchSemanticsNode().boundsInRoot
         val density = context.resources.displayMetrics.density
-        assertTrue("Only the two icon rows should occupy the batch panel", batch.height / density <= 132.1f)
+        assertTrue("The floating selection bar is 42 dp tall", batch.height / density <= 42.1f)
         compose.runOnIdle { store.clearSelection() }
         compose.onNodeWithTag("addBar.Audio").assertIsDisplayed().performClick()
-        val audio = compose.onNodeWithTag("editor.addPanel").fetchSemanticsNode().boundsInRoot
-        // Quatro fichas (música, Gravar voz, som de vídeo, marca): duas fileiras de 80 dp.
-        assertTrue("Audio must end below its two card rows", audio.height / density <= 243f)
-        assertTrue("All cards and the close button must fit", audio.height / density >= 228f)
+        val audio = compose.onNodeWithTag("add.panel").fetchSemanticsNode().boundsInRoot
+        // Omega adicionar (área 08, P0-1/P0-4): o conteúdo embutido de 193 dp, logo
+        // acima da barra de adicionar (que fica): a faixa de áudio em 2 fileiras.
+        assertTrue("The add content is the reference's 193 dp", kotlin.math.abs(audio.height / density - 193f) <= 1f)
+        val bar = compose.onNodeWithTag("editor.addBar").fetchSemanticsNode().boundsInRoot
+        // (o nó da barra começa depois do respiro de 6 dp no alto dela)
+        assertTrue("The add content sits right above the add bar", kotlin.math.abs(audio.bottom - bar.top) <= 8 * density)
+        compose.onNodeWithTag("add.voice").assertExists()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.uiAutomation.executeShellCommand("screencap -p /sdcard/Download/aurea-compact-audio.png").use {
             android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()

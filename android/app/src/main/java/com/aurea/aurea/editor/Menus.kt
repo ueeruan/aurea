@@ -5,364 +5,369 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import com.aurea.aurea.R
-import androidx.compose.material.icons.rounded.ZoomIn
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import com.aurea.aurea.R
 import com.aurea.aurea.editor.panels.EditorPanel
-import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.engine.LayerRow
-import com.aurea.aurea.ui.ds.AureaNamePrompt
-import com.aurea.aurea.ui.ds.ColorPickerSheet
+import com.aurea.aurea.state.EditorStore
+import com.aurea.aurea.ui.ds.AnchoredMenu
+import com.aurea.aurea.ui.ds.AnchoredMenuDefaults
+import com.aurea.aurea.ui.ds.AureaSurfaceTone
+import com.aurea.aurea.ui.ds.MenuColors
+import com.aurea.aurea.ui.ds.MenuEntry
+import com.aurea.aurea.ui.ds.MenuIconCell
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
-import java.util.Locale
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.roundToInt
 
 // =============================================================================
-// ⋮ da camada — `menuDaCamada` (folha)
+// ⋮ da camada — menu ancorado (Omega chrome, área 02 P1-1)
 // =============================================================================
 
 /**
- * Tudo o que se faz com UMA camada, com rótulo (A.01): camada, etiqueta,
- * recorte e grupo, na composição, mídia, tempo e o resto. O que o motor
- * novo já faz está ligado; o que ele não faz não aparece.
+ * O menu da camada, ancorado no ⋮ da barra da camada (o layout pai). Só o
+ * RECIPIENTE mudou (folha → popup da referência): itens e ordem continuam os do
+ * painel da camada. Alternâncias (travar, ocultar, solo, ajuste, guia, 3D)
+ * redesenham no lugar sem fechar. O seletor de "Substituir mídia" e o diálogo
+ * de "Informações da mídia" moram aqui, vivos enquanto a camada está escolhida.
  */
 @Composable
-internal fun LayerMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> Unit) {
-    if (store.selection.size > 1) {
-        GroupSelectionSheet(store, onDismiss)
-        return
+internal fun LayerMenu(store: EditorStore, ui: EditorUi, id: Long, expanded: Boolean, onDismiss: () -> Unit) {
+    val replacePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        if (uri != null) store.replaceMedia(id, uri)
     }
-    val id = store.primary
+    var showInfo by remember(id) { mutableStateOf(false) }
+    if (showInfo) MediaInfoDialog(store, id) { showInfo = false }
+    if (!expanded) return
     val index = store.layers.indexOfFirst { it.id == id }
     val row = store.layers.getOrNull(index)
-    if (id == null || row == null) {
-        onDismissLater(onDismiss)
+    if (row == null) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { onDismiss() }
         return
     }
+    val entries = layerMenuEntries(
+        store, ui, row, index,
+        onReplace = { replacePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
+        onInfo = { showInfo = true },
+    )
+    AnchoredMenu(expanded = true, onDismiss = onDismiss, entries = entries, alignEnd = true, tag = "layer.menu.popup")
+}
+
+/** As linhas do ⋮ da camada (as mesmas da antiga folha, na mesma ordem, + "Camada 3D"). */
+@Composable
+private fun layerMenuEntries(
+    store: EditorStore,
+    ui: EditorUi,
+    row: LayerRow,
+    index: Int,
+    onReplace: () -> Unit,
+    onInfo: () -> Unit,
+): List<MenuEntry> {
+    val id = row.id
     val type = LayerType.of(row.kind)
     val visual = type != LayerType.Audio
     val media = type == LayerType.Video || type == LayerType.Image
     val t = store.playhead
     val inside = t > row.startFrame && t < row.endFrame
-    fun act(block: () -> Unit): () -> Unit = {
-        onDismiss()
-        block()
-    }
-    // "Substituir mídia" abre o seletor SEM fechar a folha (o retorno do
-    // seletor precisa deste lançador vivo); o retorno troca e fecha.
-    val replacePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
-        if (uri != null) store.replaceMedia(id, uri)
-        onDismiss()
-    }
-    var showInfo by remember { mutableStateOf(false) }
-    if (showInfo) {
-        MediaInfoSheet(store, id) { showInfo = false; onDismiss() }
-        return
-    }
-
-    ShellMenuSheet(onDismiss) {
-        MenuSection(stringResource(R.string.editor_camada))
-        // Sem o que já está à vista (nada duas vezes): renomear é o nome no
-        // topo, excluir é a lixeira do topo, aparar/dividir moram na doca.
-        // Velocidade e ações de grupo ficam neste menu contextual.
-        if (type == LayerType.Video || type == LayerType.Audio) {
-            MenuItemRow(CupertinoGlyph.Speedometer, stringResource(R.string.editor_velocidade), act { openPanel(store, ui, EditorPanel.Speed) })
+    val out = mutableListOf<MenuEntry>()
+    out += MenuEntry.Header(stringResource(R.string.editor_camada))
+    if (type == LayerType.Video || type == LayerType.Audio) {
+        out += MenuEntry.Item(stringResource(R.string.editor_velocidade), glyph = CupertinoGlyph.Speedometer) {
+            openPanel(store, ui, EditorPanel.Speed)
         }
-        // O cadeado não fecha a folha: o rótulo troca na hora.
-        MenuItemRow(
-            if (row.locked) ShellGlyph.LockOpenFill else CupertinoGlyph.LockFill,
-            if (row.locked) stringResource(R.string.editor_desbloquear_camada) else stringResource(R.string.editor_bloquear_camada),
-            { store.setLayerLocked(id, !row.locked) },
-            detail = if (row.locked) stringResource(R.string.editor_volta_aceitar_movimento_edicao) else stringResource(R.string.editor_nao_aceita_movimento_corte_nem_edicao),
-        )
-        MenuItemRow(
-            if (row.visible) CupertinoGlyph.EyeSlash else CupertinoGlyph.Eye,
-            if (row.visible) stringResource(R.string.editor_ocultar_camada) else stringResource(R.string.editor_mostrar_camada),
-            { store.setLayerVisible(id, !row.visible) },
-        )
-        // Solo, ajuste e guia não fecham a folha: o visto troca na hora.
-        MenuItemRow(
-            CupertinoGlyph.Speaker2,
-            stringResource(R.string.editor_solo),
-            { store.setLayerSolo(id, !row.solo) },
-            checked = row.solo,
-            detail = stringResource(R.string.editor_alguma_camada_solo_previa_som_so),
-        )
-        // Linha Magnética: só faz sentido em trecho com FONTE (vídeo, áudio ou
-        // pré-composição) — é o que se corta e se arrasta em sequência. Não
-        // aparece em texto, forma, nulo, ajuste, câmera ou partículas, que são
-        // composição, não montagem.
-        val clip = media || type == LayerType.Audio || type == LayerType.Group
-        if (clip) {
-            MenuItemRow(
-                CupertinoGlyph.Link,
-                stringResource(R.string.editor_linha_magnetica),
-                { store.setLayerMagneticTrack(id, !row.magnetic) },
-                checked = row.magnetic,
-                detail = stringResource(R.string.editor_linha_magnetica_detalhe),
-            )
-        }
-        if (visual) {
-            MenuItemRow(
-                CupertinoGlyph.SliderHorizontal3,
-                stringResource(R.string.editor_camada_ajuste),
-                { store.setLayerAdjustment(id, !row.adjustment) },
-                checked = row.adjustment,
-                detail = stringResource(R.string.editor_efeitos_desta_camada_valem_todas_baixo),
-            )
-            if (row.adjustment) {
-                // Camadas afetadas: todas abaixo → só a logo abaixo (um grupo conta
-                // como uma) → só as escolhidas (a lista marcada do app antigo).
-                val scope = store.adjustmentScope
-                MenuItemRow(
-                    CupertinoGlyph.SliderHorizontal3,
-                    stringResource(R.string.la_affected) + " · " + stringResource(when (scope) {
+    }
+    // Alternâncias: o rótulo troca na hora (o menu fica aberto).
+    out += MenuEntry.Item(
+        stringResource(if (row.locked) R.string.editor_desbloquear_camada else R.string.editor_bloquear_camada),
+        glyph = if (row.locked) ShellGlyph.LockOpenFill else CupertinoGlyph.LockFill,
+        sublabel = stringResource(if (row.locked) R.string.editor_volta_aceitar_movimento_edicao else R.string.editor_nao_aceita_movimento_corte_nem_edicao),
+        keepOpen = true,
+    ) { store.setLayerLocked(id, !row.locked) }
+    out += MenuEntry.Item(
+        stringResource(if (row.visible) R.string.editor_ocultar_camada else R.string.editor_mostrar_camada),
+        glyph = if (row.visible) CupertinoGlyph.EyeSlash else CupertinoGlyph.Eye,
+        keepOpen = true,
+    ) { store.setLayerVisible(id, !row.visible) }
+    // Omega timeline (área 03, D-1): as trilhas de keyframes da camada (antes pela pílula).
+    out += MenuEntry.Item(
+        stringResource(if (id in store.timelineExpandedLayers) R.string.om_tl_hide_tracks else R.string.om_tl_show_tracks),
+        glyph = CupertinoGlyph.Rhombus,
+    ) { store.toggleTimelineTracks(id) }
+    out += MenuEntry.Item(
+        stringResource(R.string.editor_solo),
+        glyph = CupertinoGlyph.Speaker2,
+        sublabel = stringResource(R.string.editor_alguma_camada_solo_previa_som_so),
+        checked = row.solo,
+        keepOpen = true,
+    ) { store.setLayerSolo(id, !row.solo) }
+    // Omega chrome (área 02, P0-3): "Camada 3D" saiu da barra da camada e mora aqui.
+    if (visual) {
+        val intrinsic = row.kind in 8..10
+        val threeD = row.isThreeD || intrinsic
+        out += MenuEntry.Item(
+            stringResource(R.string.sh_add_tab_3d),
+            glyph = CupertinoGlyph.Cube,
+            checked = threeD,
+            enabled = !row.locked && !intrinsic,
+            keepOpen = true,
+            tag = "layer.menu.threeD",
+        ) { store.changeLayer3D(!threeD) }
+    }
+    // Linha Magnética: só em trecho com FONTE (vídeo, áudio ou pré-composição).
+    if (media || type == LayerType.Audio || type == LayerType.Group) {
+        out += MenuEntry.Item(
+            stringResource(R.string.editor_linha_magnetica),
+            glyph = CupertinoGlyph.Link,
+            sublabel = stringResource(R.string.editor_linha_magnetica_detalhe),
+            checked = row.magnetic,
+            keepOpen = true,
+        ) { store.setLayerMagneticTrack(id, !row.magnetic) }
+    }
+    if (visual) {
+        out += MenuEntry.Item(
+            stringResource(R.string.editor_camada_ajuste),
+            glyph = CupertinoGlyph.SliderHorizontal3,
+            sublabel = stringResource(R.string.editor_efeitos_desta_camada_valem_todas_baixo),
+            checked = row.adjustment,
+            keepOpen = true,
+        ) { store.setLayerAdjustment(id, !row.adjustment) }
+        if (row.adjustment) {
+            // Camadas afetadas: todas abaixo → só a logo abaixo → só as escolhidas.
+            val scope = store.adjustmentScope
+            out += MenuEntry.Item(
+                stringResource(R.string.la_affected) + " · " + stringResource(
+                    when (scope) {
                         1 -> R.string.la_affected_below
                         2 -> R.string.la_affected_chosen
                         else -> R.string.la_affected_all
-                    }),
-                    { store.changeAdjustmentScope((scope + 1) % 3) },
-                    detail = stringResource(if (scope == 2) R.string.la_affected_chosen_hint else R.string.la_affected_hint),
-                )
-                if (scope == 2) {
-                    val below = store.layers.drop(index + 1).filter { LayerType.of(it.kind) != LayerType.Audio }
-                    if (below.isEmpty()) {
-                        MenuItemRow(CupertinoGlyph.SliderHorizontal3, stringResource(R.string.la_affected_none_below), null)
-                    }
-                    below.forEach { b ->
-                        MenuItemRow(
-                            CupertinoGlyph.SliderHorizontal3,
-                            b.name,
-                            { store.toggleAdjustmentTarget(b.id) },
-                            checked = b.id in store.adjustmentTargets,
-                        )
+                    },
+                ),
+                glyph = CupertinoGlyph.SliderHorizontal3,
+                sublabel = stringResource(if (scope == 2) R.string.la_affected_chosen_hint else R.string.la_affected_hint),
+                keepOpen = true,
+            ) { store.changeAdjustmentScope((scope + 1) % 3) }
+            if (scope == 2) {
+                val below = store.layers.drop(index + 1).filter { LayerType.of(it.kind) != LayerType.Audio }
+                if (below.isEmpty()) {
+                    out += MenuEntry.Item(stringResource(R.string.la_affected_none_below), glyph = CupertinoGlyph.SliderHorizontal3, enabled = false)
+                }
+                below.forEach { b ->
+                    out += MenuEntry.Item(b.name, glyph = CupertinoGlyph.SliderHorizontal3, checked = b.id in store.adjustmentTargets, keepOpen = true) {
+                        store.toggleAdjustmentTarget(b.id)
                     }
                 }
             }
-            MenuItemRow(
-                CupertinoGlyph.Grid,
-                stringResource(R.string.editor_guia_nao_exporta),
-                { store.setLayerGuide(id, !row.guide) },
-                checked = row.guide,
-                detail = stringResource(R.string.editor_aparece_aqui_editor_fica_fora_video),
-            )
         }
-        MenuItemRow(CupertinoGlyph.PlusSquareOnSquare, stringResource(R.string.editor_duplicar), act { store.duplicateLayers(listOf(id)) })
-        // Puxar para o cabeçote saiu da fileira rápida (que ficou igual à do AM:
-        // aparar início | dividir | aparar fim) e mora aqui.
-        MenuItemRow(CupertinoGlyph.ArrowDownToLine, stringResource(R.string.editor_puxar_cabecote), if (row.locked) null else act {
-            if (store.playing) store.pause()
-            store.moveToPlayhead(id)
-        })
-        MenuItemRow(CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_camada), act { store.copyLayers(listOf(id)) })
-        MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_colar_camada_cabecote), if (store.clipboard and 1 != 0) act { store.pasteLayers() } else null)
-        MenuItemRow(CupertinoGlyph.Paintbrush, stringResource(R.string.editor_copiar_estilo), act { store.select(id); store.copyStyle() })
-        MenuItemRow(ShellGlyph.PaintbrushFill, stringResource(R.string.editor_colar_estilo), if (store.clipboard and 2 != 0) act { store.pasteStyle(listOf(id)) } else null)
-        MenuItemRow(CupertinoGlyph.ArrowUpToLine, stringResource(R.string.editor_trazer_frente), if (index > 0) act { store.reorderLayer(id, index - 1) } else null)
-        MenuItemRow(
-            CupertinoGlyph.ArrowDownToLine,
-            stringResource(R.string.editor_enviar_tras),
-            if (index < store.layers.size - 1) act { store.reorderLayer(id, index + 1) } else null,
-        )
+        out += MenuEntry.Item(
+            stringResource(R.string.editor_guia_nao_exporta),
+            glyph = CupertinoGlyph.Grid,
+            sublabel = stringResource(R.string.editor_aparece_aqui_editor_fica_fora_video),
+            checked = row.guide,
+            keepOpen = true,
+        ) { store.setLayerGuide(id, !row.guide) }
+    }
+    out += MenuEntry.Item(stringResource(R.string.editor_duplicar), glyph = CupertinoGlyph.PlusSquareOnSquare) { store.duplicateLayers(listOf(id)) }
+    out += MenuEntry.Item(stringResource(R.string.editor_puxar_cabecote), glyph = CupertinoGlyph.ArrowDownToLine, enabled = !row.locked) {
+        if (store.playing) store.pause()
+        store.moveToPlayhead(id)
+    }
+    out += MenuEntry.Item(stringResource(R.string.editor_copiar_camada), glyph = CupertinoGlyph.DocOnDoc) { store.copyLayers(listOf(id)) }
+    out += MenuEntry.Item(stringResource(R.string.editor_colar_camada_cabecote), glyph = CupertinoGlyph.DocOnClipboard, enabled = store.clipboard and 1 != 0) {
+        store.pasteLayers()
+    }
+    out += MenuEntry.Item(stringResource(R.string.editor_copiar_estilo), glyph = CupertinoGlyph.Paintbrush) {
+        store.select(id)
+        store.copyStyle()
+    }
+    out += MenuEntry.Item(stringResource(R.string.editor_colar_estilo), glyph = ShellGlyph.PaintbrushFill, enabled = store.clipboard and 2 != 0) {
+        store.pasteStyle(listOf(id))
+    }
+    out += MenuEntry.Item(stringResource(R.string.editor_trazer_frente), glyph = CupertinoGlyph.ArrowUpToLine, enabled = index > 0) {
+        store.reorderLayer(id, index - 1)
+    }
+    out += MenuEntry.Item(stringResource(R.string.editor_enviar_tras), glyph = CupertinoGlyph.ArrowDownToLine, enabled = index < store.layers.size - 1) {
+        store.reorderLayer(id, index + 1)
+    }
 
-        MenuSection(stringResource(R.string.editor_etiqueta))
-        LabelRow(row.label) { store.setLayerLabel(id, it) }
+    // Etiqueta: "sem" e as doze cores, numa fileira de ícones.
+    out += MenuEntry.Header(stringResource(R.string.editor_etiqueta))
+    val labelName = stringResource(R.string.editor_etiqueta)
+    val none = stringResource(R.string.editor_nenhum)
+    out += MenuEntry.IconRow(
+        cells = listOf(MenuIconCell(none, glyph = ShellGlyph.Nosign) { store.setLayerLabel(id, 0) }) +
+            ShellColors.LabelPalette.mapIndexed { i, color ->
+                MenuIconCell("$labelName ${i + 1}", swatch = color) { store.setLayerLabel(id, i + 1) }
+            },
+        selectedIndex = row.label,
+        keepOpen = true,
+        tag = "layer.menu.labels",
+    )
 
-        if (visual) {
-            MenuSection(stringResource(R.string.editor_grupo))
-            // Máscara de recorte: só quando a camada pode ser recortada pela de
-            // baixo (o motor decide: camada visual com base visual abaixo) ou já
-            // está recortada. Liberar solta também a cadeia logo acima.
-            if (row.clipToBelow || row.clipCandidate) {
-                MenuItemRow(
-                    CupertinoGlyph.ArrowDownRightSquare,
-                    stringResource(if (row.clipToBelow) R.string.editor_liberar_mascara_recorte else R.string.editor_criar_mascara_recorte),
-                    act { store.setLayerClipToBelow(id, !row.clipToBelow) },
-                    detail = stringResource(R.string.editor_mascara_recorte_detalhe),
-                    tag = "layer.clipMask",
-                )
-            }
-            if (type != LayerType.Group) {
-                MenuItemRow(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_converter_grupo), act { store.precompose(listOf(id)) })
-            } else {
-                MenuItemRow(CupertinoGlyph.ArrowDownRightSquare, stringResource(R.string.editor_entrar_grupo), act { store.openPrecomp(id) })
-                MenuItemRow(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), act { store.ungroupPrecomp(id) })
-                MenuItemRow(
-                    CupertinoGlyph.Camera,
-                    stringResource(R.string.la_group_camera),
-                    { store.changeGroupCameraPassThrough(store.groupCameraPassThrough != 1) },
-                    checked = store.groupCameraPassThrough == 1,
-                    detail = stringResource(R.string.la_group_camera_hint),
-                )
-            }
-            if (store.layerAcceptsLights >= 0) {
-                MenuItemRow(
-                    CupertinoGlyph.Lightbulb,
-                    stringResource(R.string.la_accepts_lights),
-                    { store.changeLayerAcceptsLights(store.layerAcceptsLights != 1) },
-                    checked = store.layerAcceptsLights == 1,
-                    detail = stringResource(R.string.la_accepts_lights_hint),
-                )
-            }
-            // Pôr esta camada num grupo que já existe aqui / tirar do grupo aberto.
-            val addToGroup = stringResource(R.string.la_add_to_group)
-            store.layers.filter { it.id != id && LayerType.of(it.kind) == LayerType.Group }.forEach { g ->
-                MenuItemRow(CupertinoGlyph.RectangleStack, "$addToGroup · ${g.name}", act { store.addToGroup(g.id, listOf(id)) })
-            }
-            if (store.precompDepth > 0) {
-                MenuItemRow(CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.la_remove_from_group), act { store.removeFromGroup(id) })
-            }
+    if (visual) {
+        out += MenuEntry.Header(stringResource(R.string.editor_grupo))
+        if (row.clipToBelow || row.clipCandidate) {
+            out += MenuEntry.Item(
+                stringResource(if (row.clipToBelow) R.string.editor_liberar_mascara_recorte else R.string.editor_criar_mascara_recorte),
+                glyph = CupertinoGlyph.ArrowDownRightSquare,
+                sublabel = stringResource(R.string.editor_mascara_recorte_detalhe),
+                tag = "layer.clipMask",
+            ) { store.setLayerClipToBelow(id, !row.clipToBelow) }
         }
-        if (media || type == LayerType.Audio) {
-            MenuSection(stringResource(R.string.sh_menu_media))
-            if (media) {
-                MenuItemRow(
-                    CupertinoGlyph.Arrow2Squarepath,
-                    stringResource(R.string.layer_replace_media),
-                    if (row.locked) null else ({ replacePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }),
-                    detail = stringResource(R.string.layer_replace_media_detail),
-                )
-            }
-            MenuItemRow(CupertinoGlyph.InfoCircle, stringResource(R.string.media_info_title), { showInfo = true })
-            if (type == LayerType.Video) {
-                MenuItemRow(
-                    CupertinoGlyph.MusicNote2,
-                    stringResource(R.string.editor_extrair_audio),
-                    act { store.extractAudio(id) },
-                    detail = stringResource(R.string.editor_som_vira_camada_propria_video_fica),
-                )
-            }
+        if (type != LayerType.Group) {
+            out += MenuEntry.Item(stringResource(R.string.editor_converter_grupo), glyph = CupertinoGlyph.RectangleStack) { store.precompose(listOf(id)) }
+        } else {
+            out += MenuEntry.Item(stringResource(R.string.editor_entrar_grupo), glyph = CupertinoGlyph.ArrowDownRightSquare) { store.openPrecomp(id) }
+            out += MenuEntry.Item(stringResource(R.string.editor_desagrupar), glyph = ShellGlyph.SquareSplit2x2) { store.ungroupPrecomp(id) }
+            out += MenuEntry.Item(
+                stringResource(R.string.la_group_camera),
+                glyph = CupertinoGlyph.Camera,
+                sublabel = stringResource(R.string.la_group_camera_hint),
+                checked = store.groupCameraPassThrough == 1,
+                keepOpen = true,
+            ) { store.changeGroupCameraPassThrough(store.groupCameraPassThrough != 1) }
         }
-
-        MenuSection(stringResource(R.string.editor_movimento))
-        MenuItemRow(
-            CupertinoGlyph.MotionBlur,
-            stringResource(R.string.editor_desfoque_movimento),
-            act { store.setLayerMotionBlur(id, !(store.detail?.motionBlur ?: false)) },
-            checked = store.detail?.motionBlur == true,
-            detail = stringResource(R.string.editor_borra_direcao_movimento_obturador_nas_configuracoes),
-        )
-        if (type == LayerType.Video) {
-            MenuItemRow(
-                CupertinoGlyph.MotionBlur,
-                stringResource(R.string.editor_desfoque_movimento_video),
-                act { store.setVectorBlur(id, !(store.detail?.vectorBlur ?: false)) },
-                checked = store.detail?.vectorBlur == true,
-                detail = stringResource(R.string.editor_borra_mexe_dentro_video_pelos_vetores),
-            )
+        if (store.layerAcceptsLights >= 0) {
+            out += MenuEntry.Item(
+                stringResource(R.string.la_accepts_lights),
+                glyph = CupertinoGlyph.Lightbulb,
+                sublabel = stringResource(R.string.la_accepts_lights_hint),
+                checked = store.layerAcceptsLights == 1,
+                keepOpen = true,
+            ) { store.changeLayerAcceptsLights(store.layerAcceptsLights != 1) }
         }
-        // 0.3.1: preset .ffx nesta camada / script .jsx com ela em comp.selectedLayers.
-        MenuItemRow(
-            CupertinoGlyph.SquareStack3dUp,
-            stringResource(R.string.ae_import_menu),
-            if (row.locked) null else act { store.requestAeImport() },
-            detail = stringResource(R.string.ae_import_layer_detail),
-            tag = "layer.aeImport",
-        )
-
-        if (type == LayerType.Video || type == LayerType.Audio) {
-            MenuSection(stringResource(R.string.editor_tempo))
-            MenuItemRow(CupertinoGlyph.Scissors, stringResource(R.string.i18n_clip_modes), act { openPanel(store, ui, EditorPanel.ClipEdit) })
+        val addToGroup = stringResource(R.string.la_add_to_group)
+        store.layers.filter { it.id != id && LayerType.of(it.kind) == LayerType.Group }.forEach { g ->
+            out += MenuEntry.Item("$addToGroup · ${g.name}", glyph = CupertinoGlyph.RectangleStack) { store.addToGroup(g.id, listOf(id)) }
         }
-        if (type == LayerType.Video) {
-            MenuItemRow(ShellGlyph.Snow, stringResource(R.string.sh_menu_freeze_frame), if (inside) act { store.freezeFrame(id) } else null)
-            // Rastreio de PONTO e estabilização (o rastreio de câmera virou efeito).
-            MenuSection(stringResource(R.string.editor_rastreio))
-            // O painel inteiro (ponto, planar, cantos, estabilizador) sem já pedir o ponto.
-            MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.dock2_tracking_tools), act { store.select(id); store.cameraTrackerVisible = false; openPanel(store, ui, EditorPanel.Tracking) },
-                detail = stringResource(R.string.dock2_tracking_tools_detail))
-            MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_rastrear_ponto), act { store.select(id); openPanel(store, ui, EditorPanel.Tracking); store.beginPointPick(false) },
-                detail = stringResource(R.string.editor_cria_nulo_segue_ponto_ligue_outras))
-            MenuItemRow(ShellGlyph.Viewfinder, stringResource(R.string.editor_estabilizar_pelo_ponto), act { store.select(id); openPanel(store, ui, EditorPanel.Tracking); store.beginPointPick(true) },
-                detail = stringResource(R.string.editor_move_video_ponto_ficar_parado_tela))
+        if (store.precompDepth > 0) {
+            out += MenuEntry.Item(stringResource(R.string.la_remove_from_group), glyph = CupertinoGlyph.ArrowUturnLeft) { store.removeFromGroup(id) }
         }
     }
-}
+    if (media || type == LayerType.Audio) {
+        out += MenuEntry.Header(stringResource(R.string.sh_menu_media))
+        if (media) {
+            out += MenuEntry.Item(
+                stringResource(R.string.layer_replace_media),
+                glyph = CupertinoGlyph.Arrow2Squarepath,
+                sublabel = stringResource(R.string.layer_replace_media_detail),
+                enabled = !row.locked,
+            ) { onReplace() }
+        }
+        out += MenuEntry.Item(stringResource(R.string.media_info_title), glyph = CupertinoGlyph.InfoCircle, tag = "layer.menu.mediaInfo") { onInfo() }
+        if (type == LayerType.Video) {
+            out += MenuEntry.Item(
+                stringResource(R.string.editor_extrair_audio),
+                glyph = CupertinoGlyph.MusicNote2,
+                sublabel = stringResource(R.string.editor_som_vira_camada_propria_video_fica),
+            ) { store.extractAudio(id) }
+        }
+    }
 
-/**
- * A linha de etiquetas: "sem" e as doze cores (círculos 24 num alvo de 34).
- * `current` é a etiqueta da camada (0 = nenhuma, i = `LabelPalette[i - 1]`),
- * marcada com o anel de destaque.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun LabelRow(current: Int, onPick: (Int) -> Unit) {
-    FlowRow(
-        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Box(
-            Modifier.size(34.dp)
-                .then(if (current == 0) Modifier.border(2.dp, AureaColors.Accent, CircleShape) else Modifier)
-                .tocavel(haptic = true, onClick = { onPick(0) }),
-            contentAlignment = Alignment.Center,
+    out += MenuEntry.Header(stringResource(R.string.editor_movimento))
+    out += MenuEntry.Item(
+        stringResource(R.string.editor_desfoque_movimento),
+        glyph = CupertinoGlyph.MotionBlur,
+        sublabel = stringResource(R.string.editor_borra_direcao_movimento_obturador_nas_configuracoes),
+        checked = store.detail?.motionBlur == true,
+        tag = "layer.menu.motionBlur",
+    ) { store.setLayerMotionBlur(id, !(store.detail?.motionBlur ?: false)) }
+    if (type == LayerType.Video) {
+        out += MenuEntry.Item(
+            stringResource(R.string.editor_desfoque_movimento_video),
+            glyph = CupertinoGlyph.MotionBlur,
+            sublabel = stringResource(R.string.editor_borra_mexe_dentro_video_pelos_vetores),
+            checked = store.detail?.vectorBlur == true,
+        ) { store.setVectorBlur(id, !(store.detail?.vectorBlur ?: false)) }
+    }
+    // 0.3.1: preset .ffx nesta camada / script .jsx com ela em comp.selectedLayers.
+    out += MenuEntry.Item(
+        stringResource(R.string.ae_import_menu),
+        glyph = CupertinoGlyph.SquareStack3dUp,
+        sublabel = stringResource(R.string.ae_import_layer_detail),
+        enabled = !row.locked,
+        tag = "layer.aeImport",
+    ) { store.requestAeImport() }
+
+    if (type == LayerType.Video || type == LayerType.Audio) {
+        out += MenuEntry.Header(stringResource(R.string.editor_tempo))
+        out += MenuEntry.Item(stringResource(R.string.i18n_clip_modes), glyph = CupertinoGlyph.Scissors) { openPanel(store, ui, EditorPanel.ClipEdit) }
+    }
+    if (type == LayerType.Video) {
+        out += MenuEntry.Item(stringResource(R.string.sh_menu_freeze_frame), glyph = ShellGlyph.Snow, enabled = inside) { store.freezeFrame(id) }
+        out += MenuEntry.Header(stringResource(R.string.editor_rastreio))
+        out += MenuEntry.Item(
+            stringResource(R.string.dock2_tracking_tools),
+            glyph = ShellGlyph.Viewfinder,
+            sublabel = stringResource(R.string.dock2_tracking_tools_detail),
         ) {
-            Box(
-                Modifier.size(24.dp).border(1.5.dp, AureaColors.Muted, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                CupertinoIcon(ShellGlyph.Nosign, 14.dp, AureaColors.Muted)
-            }
+            store.select(id)
+            store.cameraTrackerVisible = false
+            openPanel(store, ui, EditorPanel.Tracking)
         }
-        ShellColors.LabelPalette.forEachIndexed { i, color ->
-            Box(
-                Modifier.size(34.dp)
-                    .then(if (current == i + 1) Modifier.border(2.dp, AureaColors.Accent, CircleShape) else Modifier)
-                    .tocavel(haptic = true, onClick = { onPick(i + 1) }),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(Modifier.size(24.dp).background(color, CircleShape))
-            }
+        out += MenuEntry.Item(
+            stringResource(R.string.editor_rastrear_ponto),
+            glyph = ShellGlyph.Viewfinder,
+            sublabel = stringResource(R.string.editor_cria_nulo_segue_ponto_ligue_outras),
+        ) {
+            store.select(id)
+            openPanel(store, ui, EditorPanel.Tracking)
+            store.beginPointPick(false)
+        }
+        out += MenuEntry.Item(
+            stringResource(R.string.editor_estabilizar_pelo_ponto),
+            glyph = ShellGlyph.Viewfinder,
+            sublabel = stringResource(R.string.editor_move_video_ponto_ficar_parado_tela),
+        ) {
+            store.select(id)
+            openPanel(store, ui, EditorPanel.Tracking)
+            store.beginPointPick(true)
         }
     }
+    return out
 }
+
+// =============================================================================
+// Selecionar uma camada
+// =============================================================================
 
 /**
  * Linhas do "Selecionar uma camada": sem busca, TODAS as camadas na ordem da
@@ -379,10 +384,112 @@ internal fun layerPickerRows(layers: List<LayerRow>, query: String, hits: List<L
 internal const val LAYER_PICKER_SEARCH_FROM = 7
 
 /**
- * SELECIONAR UMA CAMADA: a lista das camadas do projeto (miniatura ou selo do
- * tipo + nome). Tocar numa escolhe SÓ ela (a seleção anterior sai) e fecha a
- * folha. Com muitas camadas, a busca do motor filtra por nome ou texto; o
- * teclado não abre sozinho, para a lista ficar à vista.
+ * Omega chrome (área 02, P1-1): "Selecionar uma camada…" como popup ancorado
+ * (no Copiar e colar do transporte), com a busca no topo quando há 7 camadas
+ * ou mais. Tocar numa escolhe SÓ ela e fecha.
+ */
+@Composable
+internal fun LayerPickerPopup(store: EditorStore, onDismiss: () -> Unit) {
+    val density = LocalDensity.current
+    val provider = remember(density) {
+        with(density) { AnchorPopupPosition(AnchoredMenuDefaults.ScreenMargin.roundToPx(), AnchoredMenuDefaults.AnchorGap.roundToPx()) }
+    }
+    val colors = MenuColors.of(AureaSurfaceTone.Light)
+    var query by remember { mutableStateOf("") }
+    val hits = remember(query, store.layers) { store.searchLayers(query) }
+    val rows = layerPickerRows(store.layers, query, hits)
+    Popup(popupPositionProvider = provider, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+        Column(
+            Modifier
+                .width(AnchoredMenuDefaults.Width)
+                .heightIn(max = 420.dp)
+                .clip(RoundedCornerShape(AnchoredMenuDefaults.Radius))
+                .background(colors.background)
+                .testTag("layerPicker.popup")
+                .padding(vertical = AnchoredMenuDefaults.VerticalPadding),
+        ) {
+            Text(
+                stringResource(R.string.editor_selecionar_uma_camada),
+                style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = colors.muted)),
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 4.dp),
+            )
+            if (store.layers.size >= LAYER_PICKER_SEARCH_FROM || query.isNotEmpty()) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .heightIn(min = 36.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(colors.pressed)
+                        .padding(horizontal = 10.dp, vertical = 9.dp),
+                ) {
+                    BasicTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = colors.text)),
+                        cursorBrush = SolidColor(colors.accent),
+                        modifier = Modifier.fillMaxWidth().testTag("layerPicker.search"),
+                    )
+                    if (query.isEmpty()) {
+                        Text(stringResource(R.string.editor_nome_ou_texto_camada), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = colors.muted)))
+                    }
+                }
+            }
+            if (query.isNotBlank() && rows.isEmpty()) {
+                Text(
+                    stringResource(R.string.sh_menu_no_layer_matches, query.trim()),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = colors.muted)),
+                )
+            }
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                rows.forEach { row ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("layerPicker.row.${row.id}")
+                            .background(if (row.selected) colors.pressed else androidx.compose.ui.graphics.Color.Transparent)
+                            .semantics {
+                                contentDescription = row.name
+                                selected = row.selected
+                            }
+                            .tocavel(shrink = 1f, haptic = true) {
+                                onDismiss()
+                                store.select(row.id)
+                            }
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        LayerThumb(store, row, 32.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            row.name.ifBlank { stringResource(R.string.editor_camada) },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                            style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = colors.text)),
+                        )
+                        val label = row.label
+                        if (label in 1..ShellColors.LabelPalette.size) {
+                            Spacer(Modifier.width(8.dp))
+                            Box(Modifier.size(10.dp).background(ShellColors.LabelPalette[label - 1], CircleShape))
+                        }
+                        if (row.selected) {
+                            Spacer(Modifier.width(8.dp))
+                            CupertinoIcon(CupertinoGlyph.CheckmarkAlt, 16.dp, colors.accent)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * SELECIONAR UMA CAMADA em folha: o caminho da busca de ferramentas (sem botão
+ * por perto para ancorar). Tocar numa escolhe SÓ ela e fecha a folha.
  */
 @Composable
 internal fun SearchLayersSheet(store: EditorStore, onDismiss: () -> Unit) {
@@ -446,160 +553,6 @@ internal fun SearchLayersSheet(store: EditorStore, onDismiss: () -> Unit) {
     }
 }
 
-/** Fecha a folha fora da composição (a camada sumiu enquanto ela abria). */
-@Composable
-private fun onDismissLater(onDismiss: () -> Unit) {
-    androidx.compose.runtime.LaunchedEffect(Unit) { onDismiss() }
-}
-
-// =============================================================================
-// ⋮ da linha do tempo — `menuDaTimeline` (folha)
-// =============================================================================
-
-/**
- * O que vale para o projeto inteiro ou para a linha do tempo: seleção,
- * reprodução, modo de prévia, miniatura, marcas, cronômetro, agrupar e guia.
- */
-@Composable
-internal fun TimelineMenuSheet(store: EditorStore, ui: EditorUi, onDismiss: () -> Unit) {
-    val count = store.layers.size
-    val now = ShellTime.short(store.playhead, store.project.fps)
-    fun act(block: () -> Unit): () -> Unit = {
-        onDismiss()
-        block()
-    }
-    ShellMenuSheet(onDismiss, maxHeightFraction = 0.78f) {
-        // Redesenho 2026-09-29: a engrenagem do topo abre este menu, e o que
-        // morava no topo e no transporte antigos (ajustes, busca, copiar e
-        // colar, marcador, lupa) fica aqui em cima — nada se perdeu.
-        MenuSection(stringResource(R.string.editor_projeto_cbe9))
-        // Interface do projeto (0.2.5): a Composição é esta; a Edição é a de
-        // montagem (trilha principal, como o CapCut). Primeiro item do menu
-        // (0.2.7): ficava no fim e a "timeline magnética" era confundida com ela.
-        MenuItemRow(
-            CupertinoGlyph.RectangleStack,
-            stringResource(R.string.ui_mode_switch_to_edit),
-            act { store.setUiMode(com.aurea.aurea.state.UI_MODE_EDIT) },
-            detail = stringResource(R.string.ui_mode_edit_hint),
-        )
-        MenuItemRow(CupertinoGlyph.GearAltFill, stringResource(R.string.editor_ajustes_projeto), act { ui.sheet = ShellSheet.ProjectSettings })
-        // 0.3.0: preset .ffx / script .jsx do After Effects. 0.3.1: o seletor mora no
-        // AureaApp (o menu fecha já); sem camada escolhida o preset cria uma, como no AE.
-        MenuItemRow(
-            CupertinoGlyph.SquareStack3dUp,
-            stringResource(R.string.ae_import_menu),
-            act { store.requestAeImport() },
-            detail = stringResource(if (store.primary != null) R.string.ae_import_layer_detail else R.string.ae_import_new_layer_detail),
-            tag = "menu.aeImport",
-        )
-        MenuItemRow(CupertinoGlyph.Search, stringResource(R.string.edt_cmd_search_desc), act { ui.sheet = ShellSheet.CommandSearch })
-        MenuItemRow(CupertinoGlyph.DocOnClipboard, stringResource(R.string.editor_copiar_colar), act { ui.sheet = ShellSheet.CopyPaste })
-        val marked = store.markers.frames.binarySearch(store.playhead) >= 0
-        MenuItemRow(CupertinoGlyph.Bookmark, stringResource(R.string.editor_marcar_ou_desmarcar_este_instante), act { store.toggleMarker() }, checked = marked)
-        MenuItemRow(
-            CupertinoGlyph.Search,
-            stringResource(R.string.stage_zoom_view_off),
-            { StageView.zoomLock = !StageView.zoomLock },
-            checked = StageView.zoomLock,
-            icon = androidx.compose.material.icons.Icons.Rounded.ZoomIn,
-        )
-
-        MenuSection(stringResource(R.string.sh_menu_selection))
-        MenuItemRow(CupertinoGlyph.CheckmarkSquare, stringResource(R.string.editor_selecionar_todas_camadas), if (count >= 2) act { store.selectAll() } else null)
-        MenuItemRow(
-            CupertinoGlyph.RectangleStack,
-            stringResource(R.string.edt_tl_pick_layers),
-            if (count > 0) act { store.changeLayerSelectMode(!store.layerSelectMode) } else null,
-            checked = store.layerSelectMode,
-            detail = stringResource(R.string.edt_tl_pick_layers_detail),
-        )
-        MenuItemRow(CupertinoGlyph.Square, stringResource(R.string.editor_limpar_selecao), act { store.clearSelection() })
-        MenuItemRow(CupertinoGlyph.RectangleStack, stringResource(R.string.editor_selecionar_uma_camada), if (count > 0) act { ui.sheet = ShellSheet.SearchLayers } else null)
-
-        MenuSection(stringResource(R.string.editor_reproducao_previa))
-        MenuItemRow(CupertinoGlyph.Repeat, stringResource(R.string.editor_reproducao_loop), act { store.setLoop(!store.looping) }, checked = store.looping)
-        MenuItemRow(
-            CupertinoGlyph.Fullscreen,
-            if (ui.fullscreen) stringResource(R.string.editor_sair_tela_cheia) else stringResource(R.string.editor_tela_cheia),
-            act { ui.fullscreen = !ui.fullscreen },
-        )
-        MenuItemRow(
-            CupertinoGlyph.MotionBlur,
-            stringResource(R.string.editor_desfoque_movimento_composicao),
-            { store.setCompositionMotionBlur(!store.compMotionBlur) },
-            checked = store.compMotionBlur,
-            detail = stringResource(R.string.editor_camadas_desfoque_movimento_so_borram_isto),
-        )
-        if (store.compMotionBlur) {
-            val shutter = store.shutterAngle.roundToInt()
-            MenuItemRow(
-                CupertinoGlyph.CircleLefthalfFill,
-                stringResource(R.string.sh_menu_shutter, shutter),
-                {
-                    val next = ShutterOptions.firstOrNull { it > shutter } ?: ShutterOptions.first()
-                    store.changeShutterAngle(next.toFloat())
-                },
-                detail = stringResource(R.string.editor_toque_trocar_90_180_270_360),
-            )
-        }
-        MenuItemRow(
-            ShellGlyph.WaveformPathEcg,
-            stringResource(R.string.editor_diagnostico_tela),
-            { store.toggleHud() },
-            checked = store.hudVisible,
-            detail = stringResource(R.string.editor_quadros_segundo_tempos_gpu_memoria_decodificador),
-        )
-
-        MenuSection(stringResource(R.string.editor_edicao))
-        MenuItemRow(
-            CupertinoGlyph.Link, stringResource(R.string.i18n_snapping),
-            act { store.snapping = !store.snapping },
-            checked = store.snapping,
-        )
-        MenuItemRow(
-            CupertinoGlyph.SuitDiamond,
-            stringResource(R.string.editor_keyframes_todas_camadas),
-            act { store.toggleShowAllKeyframes() },
-            checked = store.showAllKeyframes,
-            detail = stringResource(R.string.editor_keyframes_todas_camadas_detalhe),
-        )
-        MenuItemRow(
-            CupertinoGlyph.Link,
-            stringResource(R.string.editor_timeline_magnetica_modo_edicao),
-            act { store.toggleEditMode() },
-            checked = store.editMode,
-            detail = stringResource(R.string.editor_aparar_empurra_camadas_seguintes_excluir_fecha),
-        )
-        MenuItemRow(ShellGlyph.ScissorsAlt, stringResource(R.string.editor_remover_espacos_vazios), act { store.removeGaps() })
-
-        MenuSection(stringResource(R.string.editor_projeto_cbe9))
-        MenuItemRow(
-            ShellGlyph.ScissorsAlt,
-            stringResource(R.string.editor_aparar_projeto_cabecote),
-            if (store.playhead > 0) act { store.trimProjectAtPlayhead() } else null,
-            detail = stringResource(R.string.sh_menu_cut_after, now),
-        )
-
-        MenuSection(stringResource(R.string.editor_marcas_ritmo))
-        // Marcar/desmarcar subiu para a seção "Projeto"; aqui fica editar a marca
-        // do cabeçote (o que o toque longo do marcador antigo do transporte fazia).
-        MenuItemRow(CupertinoGlyph.Pencil, stringResource(R.string.marker_edit), if (marked) act { store.editMarkerAtPlayhead() } else null)
-        MenuItemRow(ShellGlyph.BookmarkSolid, stringResource(R.string.editor_ir_proxima_marca), if (store.markers.size > 0) act { store.seekToNextMarker() } else null)
-
-        MenuSection(stringResource(R.string.editor_mais))
-        MenuItemRow(
-            CupertinoGlyph.RectangleStack, stringResource(R.string.editor_agrupar_camadas_escolhidas),
-            if (store.selection.isNotEmpty()) act { store.precompose() } else null,
-        )
-        MenuItemRow(CupertinoGlyph.Crop, stringResource(R.string.editor_group_mask),
-            if (store.selection.size >= 2) act { store.groupAndMask(false) } else null,
-            detail = stringResource(R.string.editor_group_mask_hint))
-        MenuItemRow(CupertinoGlyph.Crop, stringResource(R.string.editor_group_exclude),
-            if (store.selection.size >= 2) act { store.groupAndMask(true) } else null,
-            detail = stringResource(R.string.editor_group_exclude_hint))
-    }
-}
-
 /** Group commands use the shared engine's stacking order, regardless of tap order. */
 @Composable
 internal fun GroupSelectionSheet(store: EditorStore, onDismiss: () -> Unit) {
@@ -616,5 +569,3 @@ internal fun GroupSelectionSheet(store: EditorStore, onDismiss: () -> Unit) {
             detail = stringResource(R.string.editor_group_exclude_hint))
     }
 }
-
-private val ShutterOptions = listOf(90, 180, 270, 360)

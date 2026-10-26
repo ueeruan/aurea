@@ -36,6 +36,20 @@ class TransformKeyPropertiesTest {
         assertArrayEquals(intArrayOf(6, 7, 8), transformKeyProperties(TransformTab.Girar, true, 1))
         assertArrayEquals(intArrayOf(8), transformKeyProperties(TransformTab.Girar, false, 0))
     }
+    // Omega aparência (P0-2): Inclinar crava SkewX/SkewY; as faces que saíram voltam para Mover.
+    @Test fun skewFaceKeysBothSkewTracksAndRetiredFacesFallBackToMove() {
+        assertArrayEquals(intArrayOf(13, 14), transformKeyProperties(TransformTab.Inclinar, false))
+        assertArrayEquals(intArrayOf(13, 14), transformKeyProperties(TransformTab.Inclinar, true))
+        assertEquals(TransformTab.Mover, visibleTransformFace(TransformTab.Opacidade, false))
+        assertEquals(TransformTab.Mover, visibleTransformFace(TransformTab.Lente, true))
+        assertEquals(TransformTab.Mover, visibleTransformFace(TransformTab.Inclinar, true))
+        assertEquals(TransformTab.Inclinar, visibleTransformFace(TransformTab.Inclinar, false))
+        assertEquals(TransformTab.Pivo, visibleTransformFace(TransformTab.Pivo, true))
+        assertEquals(TransformTab.Inclinar, TransformTab.byId("skew"))
+        assertEquals(TransformTab.Pivo, TransformTab.byId("pivot"))
+        assertEquals(null, TransformTab.byId("nada"))
+    }
+
     @Test fun planarLayersKeepPlanarPositionScaleAndAnchor() {
         assertArrayEquals(intArrayOf(0, 1), transformKeyProperties(TransformTab.Mover, false))
         assertArrayEquals(intArrayOf(3, 4), transformKeyProperties(TransformTab.Escalar, false))

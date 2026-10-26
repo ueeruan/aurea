@@ -26,13 +26,6 @@ class EffectPickerLogicTest {
     private val catalog = listOf(gaussian, lens, glow, vhs, reverb, toneByKey, toneByName)
 
     @Test
-    fun opensOnTheStackOnlyWhenTheLayerHasEffects() {
-        assertEquals(EffectsTab.Add, initialEffectsTab(0))
-        assertEquals(EffectsTab.Applied, initialEffectsTab(1))
-        assertEquals(EffectsTab.Applied, initialEffectsTab(7))
-    }
-
-    @Test
     fun categoryIdsAreStableSlugsWithoutAccents() {
         assertEquals("controles_de_expressao", effectCategoryId("Controles de expressão"))
         assertEquals("audio", effectCategoryId("Áudio"))
@@ -274,7 +267,7 @@ class EffectPickerLogicTest {
     fun groupRowKeysNeverCollideWithTheFixedHomeKeys() {
         // Regressão 0.3.0: com um plugin instalado, a linha que começava no grupo
         // "plugins" usava a chave "plugins", a mesma da porta, e o app fechava.
-        val fixed = setOf("destaques", "rapidos", "titulo-categorias", PLUGIN_DOOR_KEY)
+        val fixed = setOf("destaques", "recomendados", "rapidos", "titulo-categorias", PLUGIN_DOOR_KEY)
         val rows = EffectGroup.entries.chunked(2) + EffectGroup.entries.chunked(1) +
             EffectGroup.entries.drop(1).chunked(2)
         val keys = rows.map(::groupRowKey)
@@ -295,5 +288,199 @@ class EffectPickerLogicTest {
         // Ladrilho largo: usa a largura toda da metade e corta em altura.
         val wide = effectOnlyCrop(320, 200, 2f)
         assertEquals(161, wide[0]); assertEquals(159, wide[2]); assertTrue(wide[3] < 200)
+    }
+
+    // --- Omega efeitos (navegador, P0-6) ------------------------------------------
+
+    @Test
+    fun groupOrderIsTheReferenceThenAureaExtrasThenOther() {
+        assertEquals(
+            listOf(
+                "color_light", "draw_edge", "blur", "distort", "procedural", "3d", "motion", "repeat", "matte",
+                "visibility", "text", "stylize", "glitch", "time", "audio", "utility", "plugins", "other",
+            ),
+            EffectGroup.entries.map { it.id },
+        )
+        val captions = toolCatalogEntry(EffectTool.Captions, "Legendas")
+        val groups = groupEntries(listOf(vhs, captions, glow)).map { it.first }
+        assertEquals(listOf(EffectGroup.ColorLight, EffectGroup.Text, EffectGroup.Glitch), groups)
+    }
+
+    @Test
+    fun recommendedStartFromTheCurationSkipAppliedAndFillWithNewOnes() {
+        val deep = fx("aurea.light.deep_glow", "Deep Glow", "Luz")
+        val chroma = fx("aurea.key.chroma", "Chroma key", "Recorte")
+        val captions = toolCatalogEntry(EffectTool.Captions, "Legendas")
+        val fresh = EffectCatalogEntry(typeId = effectTypeId("aurea.stylize.novo"), effectClass = 0, paramCount = 0,
+            name = "Novo", category = "Estilizar", flags = 1)
+        val all = listOf(gaussian, vhs, deep, fresh, chroma, captions)
+        // Curadoria na ordem dela (chroma, deep, vhs, legendas), sem o VHS que a camada já tem, e o novo no fim.
+        assertEquals(listOf(chroma, deep, captions, fresh), recommendedEffects(all, layerKind = 4, applied = listOf(vhs.typeId)))
+        assertEquals(listOf(chroma, deep), recommendedEffects(all, layerKind = 4, applied = listOf(vhs.typeId), max = 2))
+        assertEquals(6, recommendedEffects(all + (1..9).map {
+            EffectCatalogEntry(typeId = effectTypeId("t.novo.$it"), effectClass = 0, paramCount = 0, name = "N$it", category = "Cor", flags = 1)
+        }, layerKind = 4, applied = emptyList()).size)
+    }
+
+    @Test
+    fun recommendedFollowTheLayer() {
+        val newAudio = EffectCatalogEntry(typeId = effectTypeId("aurea.audio.novo"), effectClass = 0, paramCount = 0,
+            name = "Eco novo", category = "Áudio", flags = 1)
+        val extrusion = EffectCatalogEntry(typeId = effectTypeId("aurea.generate.raster_extrude"), effectClass = 0, paramCount = 0,
+            name = "Extrusão", category = "Gerar", flags = 1)
+        val all = listOf(vhs, newAudio, extrusion)
+        assertEquals(listOf(vhs), recommendedEffects(all, layerKind = 3, applied = emptyList(), layerHasAudio = false))
+        assertEquals(listOf(vhs, newAudio, extrusion), recommendedEffects(all, layerKind = 1, applied = emptyList(), layerHasAudio = true))
+    }
+
+    @Test
+    fun favoritesPageAndGridColumnsFollowTheScreenWidth() {
+        assertEquals(8, favoritesPerPage(360f))
+        assertEquals(10, favoritesPerPage(411f))
+        assertEquals(2, favoritesPerPage(10f))
+        assertEquals(3, categoryGridColumns(360f))
+        assertEquals(3, categoryGridColumns(411f))
+        assertEquals(5, categoryGridColumns(600f))
+        assertEquals(1, categoryGridColumns(100f))
+    }
+
+    @Test
+    fun quickPagesPutRecentsFirstThenFavoritesInPages() {
+        val pages = quickPages(listOf(1, 2), (10..19).toList(), perPage = 8)
+        assertEquals(listOf(true, false, false), pages.map { it.first })
+        assertEquals(listOf(1, 2), pages[0].second)
+        assertEquals((10..17).toList(), pages[1].second)
+        assertEquals(listOf(18, 19), pages[2].second)
+        assertTrue(quickPages(emptyList<Int>(), emptyList(), 8).isEmpty())
+        assertEquals(listOf(false), quickPages(emptyList(), listOf(1), 8).map { it.first })
+        // Recentes: no máximo 8 (e nunca mais do que cabe numa página).
+        assertEquals(8, quickPages((1..12).toList(), emptyList(), 10)[0].second.size)
+        assertEquals(6, quickPages((1..12).toList(), emptyList(), 6)[0].second.size)
+        // A página enche por coluna, como a referência.
+        assertEquals(listOf(0 to 0, 0 to 1, 1 to 0, 1 to 1), (0..3).map(::quickCell))
+    }
+
+    @Test
+    fun presetCodesAreTwoDigits() {
+        assertEquals("01", presetCode(0))
+        assertEquals("10", presetCode(9))
+        assertEquals("", presetCode(-1))
+    }
+
+    @Test
+    fun effectRefsReadOldIntegersUnsignedIdsAndVariations() {
+        assertEquals(EffectRef(12), parseEffectRef("12"))
+        assertEquals(EffectRef(-5), parseEffectRef("-5"))
+        assertEquals(EffectRef(-5), parseEffectRef("4294967291"))
+        assertEquals(EffectRef(12, 3), parseEffectRef(" 12/3 "))
+        assertEquals(null, parseEffectRef("12/x"))
+        assertEquals(null, parseEffectRef("12/-1"))
+        assertEquals(null, parseEffectRef("x"))
+        assertEquals(null, parseEffectRef(""))
+        assertEquals(null, parseEffectRef("4294967296"))
+        // A chave gravada usa o typeId sem sinal (igual ao iOS e ao id do cartão).
+        assertEquals("4294967291", EffectRef(-5).key)
+        assertEquals("4294967291/2", EffectRef(-5, 2).key)
+        assertEquals(effectCardId(-5), EffectRef(-5).key)
+    }
+
+    @Test
+    fun oldPreferencesMigrateAndNewOnesRoundTrip() {
+        // Recentes antigos ("12,-5,7"): viram o efeito base, na mesma ordem.
+        assertEquals(listOf(EffectRef(12), EffectRef(-5), EffectRef(7)), parseEffectRefs("12,-5,7"))
+        assertEquals(listOf(EffectRef(12), EffectRef(-5, 1)), parseEffectRefs("12,-5/1,,x,12"))
+        assertTrue(parseEffectRefs(null).isEmpty())
+        val list = listOf(EffectRef(-5, 2), EffectRef(700), EffectRef(3, 0))
+        assertEquals(list, parseEffectRefs(formatEffectRefs(list)))
+        // Favoritos antigos (conjunto de inteiros com sinal) + os novos.
+        assertEquals(setOf(EffectRef(7), EffectRef(7, 2), EffectRef(-9)), parseEffectRefSet(listOf("7", "7/2", "-9", "lixo")))
+    }
+
+    @Test
+    fun recentAndFavoriteRefsMoveAndToggle() {
+        val a = EffectRef(1); val b = EffectRef(1, 0); val c = EffectRef(2)
+        assertEquals(listOf(b, a), pushRecentRef(listOf(a, b), b, 8))
+        assertEquals(listOf(c, a), pushRecentRef(listOf(a, b), c, 2))
+        val on = toggleFavoriteRef(setOf(a), b)
+        assertEquals(setOf(a, b), on)
+        assertEquals(setOf(b), toggleFavoriteRef(on, a))
+    }
+
+    @Test
+    fun quickItemsDropWhatTheLayerDoesNotOfferAndVanishedVariations() {
+        val presets: (Int) -> Int = { if (it == gaussian.typeId) 2 else 0 }
+        val silent = pickableEffects(catalog, layerHasAudio = false)
+        val recents = listOf(EffectRef(glow.typeId), EffectRef(12345), EffectRef(gaussian.typeId, 1), EffectRef(gaussian.typeId, 5), EffectRef(reverb.typeId))
+        assertEquals(listOf(QuickItem(glow), QuickItem(gaussian, 1)), recentItems(recents, silent, presets))
+        val favorites = setOf(EffectRef(vhs.typeId), EffectRef(gaussian.typeId, 1), EffectRef(gaussian.typeId), EffectRef(gaussian.typeId, 0), EffectRef(lens.typeId, 3))
+        // Ordem do catálogo; dentro do efeito, a base e depois as variações.
+        assertEquals(
+            listOf(QuickItem(gaussian), QuickItem(gaussian, 0), QuickItem(gaussian, 1), QuickItem(vhs)),
+            favoriteItems(favorites, catalog, presets),
+        )
+    }
+
+    @Test
+    fun referenceScoreWeighsTagNameEnglishAndDescription() {
+        assertEquals(3, searchMatch("len", "len"))
+        assertEquals(2, searchMatch("lente", "len"))
+        assertEquals(1, searchMatch("olho de lente", "len"))
+        assertEquals(0, searchMatch("azul", "len"))
+        val f = EffectScoreFields(listOf("Glitch", "Retrô"), "VHS", "VHS", "Fita analógica gasta")
+        assertEquals(21, effectSearchScore(f, "glitch"))
+        assertEquals(21, effectSearchScore(f, "RETRÔ"))
+        assertEquals(14, effectSearchScore(f, "retr"))
+        assertEquals(15, effectSearchScore(f, "vhs"))
+        assertEquals(1, effectSearchScore(f, "analog"))
+        assertEquals(0, effectSearchScore(null, "vhs"))
+    }
+
+    @Test
+    fun searchAddsTheReferenceScoreToTheAureaRank() {
+        val signal = fx("aurea.glitch.signal", "Signal", "Glitch")
+        val d = mapOf(
+            vhs.typeId to effectSearchDoc(listOf("VHS"), listOf("Glitch")),
+            signal.typeId to effectSearchDoc(listOf("Signal"), listOf("Glitch")),
+        )
+        // Os dois só têm "glitch" na categoria: sem pontos, vale a ordem do catálogo.
+        assertEquals(listOf(signal, vhs), searchEffects(listOf(signal, vhs), d, "glitch"))
+        // Com a etiqueta "glitch" só no VHS, ele sobe.
+        val fields = mapOf(
+            vhs.typeId to EffectScoreFields(listOf("glitch"), "VHS", "VHS", ""),
+            signal.typeId to EffectScoreFields(emptyList(), "Signal", "Signal", ""),
+        )
+        assertEquals(listOf(vhs, signal), searchEffects(listOf(signal, vhs), d, "glitch", fields))
+    }
+
+    @Test
+    fun tagChipsFilterAndMatchingTagsFollowWhatIsTyped() {
+        val tags = mapOf(vhs.typeId to listOf("glitch", "retro"), glow.typeId to listOf("glow", "light"))
+        val list = listOf(vhs, glow, gaussian)
+        assertEquals(list, effectsWithTags(list, emptyList()) { tags[it.typeId].orEmpty() })
+        assertEquals(listOf(vhs), effectsWithTags(list, listOf("retro")) { tags[it.typeId].orEmpty() })
+        assertTrue(effectsWithTags(list, listOf("retro", "glow")) { tags[it.typeId].orEmpty() }.isEmpty())
+        val labels = linkedMapOf("glow" to "Brilho", "blur" to "Desfoque", "light" to "Luz", "color" to "Cor de luz")
+        assertEquals(listOf("glow"), matchingTags(labels, "BRI"))
+        // Começa com o texto antes de só conter.
+        assertEquals(listOf("light", "color"), matchingTags(labels, "luz"))
+        assertEquals(listOf("color"), matchingTags(labels, "luz", exclude = listOf("light")))
+        assertTrue(matchingTags(labels, " ").isEmpty())
+    }
+
+    @Test
+    fun categoryGridIsAlphabeticalInTheAppLanguage() {
+        val names = listOf("Zoom", "água", "Brilho", "Árvore", "brilho alto")
+        assertEquals(listOf("água", "Árvore", "Brilho", "brilho alto", "Zoom"), sortedByName(names, java.util.Locale("pt", "BR")) { it })
+    }
+
+    @Test
+    fun effectTagsComeFromCategoryGroupAndKey() {
+        assertEquals(20, EffectTagIds.toSet().size)
+        EffectTagIds.forEach { assertTrue("sem rótulo: $it", effectTagLabelRes(it) != null) }
+        assertEquals(listOf("glitch", "retro"), effectTags(vhs))
+        assertEquals(listOf("text"), effectTags(toolCatalogEntry(EffectTool.Captions, "Legendas")))
+        assertEquals(listOf("stylize", "outline", "shadow"), effectTags(fx("aurea.stylize.drop_shadow", "Sombra", "Estilizar")))
+        assertEquals(listOf("blur"), effectTags(gaussian))
+        assertTrue(effectTags(fx("t.x", "X", "Categoria nova")).isEmpty())
     }
 }

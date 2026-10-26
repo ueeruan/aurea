@@ -59,7 +59,7 @@ class TextPath027DeviceTest {
         compose.waitUntil(5000) { store.masks?.masks?.isNotEmpty() == true }
         val maskId = store.masks!!.masks.first().id
         // …até virar o caminho dele, pela tela.
-        compose.onNodeWithTag("dock.tool.TextOptions").performScrollTo().performClick()
+        compose.onNodeWithTag("layer.panel.colorFill").performClick()
         // A fileira de chips rola na horizontal: primeiro o painel desce até ela.
         compose.onNodeWithTag("text.path.sources").performScrollTo()
         compose.onNodeWithTag("text.path.mask.0").performClick()

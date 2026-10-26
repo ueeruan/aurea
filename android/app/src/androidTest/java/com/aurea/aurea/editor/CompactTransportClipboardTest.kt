@@ -21,10 +21,13 @@ class CompactTransportClipboardTest {
     @get:Rule val compose = createComposeRule()
     private lateinit var store: EditorStore
 
-    @Test fun markerStaysNextToPlayOnTinyPhone() = checkPermanentMarker(320)
-    @Test fun markerStaysNextToPlayOnCompactPhone() = checkPermanentMarker(360)
+    // Omega chrome (área 02, P0-5): o transporte da referência tem 7 células de
+    // peso igual — ↶ ↷ ⇤ ▶ ⇥ · Copiar e colar · painel. Marcar o instante foi
+    // para o relógio da timeline (área 03); grade, resolução e camadas saíram.
+    @Test fun sevenCellTransportOnTinyPhone() = checkTransport(320)
+    @Test fun sevenCellTransportOnCompactPhone() = checkTransport(360)
 
-    private fun checkPermanentMarker(width: Int) {
+    private fun checkTransport(width: Int) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertTrue(context.packageName.endsWith(".uitest"))
         compose.setContent {
@@ -32,34 +35,37 @@ class CompactTransportClipboardTest {
             AureaTheme { Box(Modifier.width(width.dp)) { EditorScreen(store) } }
         }
         compose.waitUntil(30000) { ::store.isInitialized && store.engineReady }
-        compose.runOnIdle { store.newProject(320, 180, 30f, "Permanent beat button") }
-        compose.waitUntil(10000) { store.project.title == "Permanent beat button" }
+        compose.runOnIdle { store.newProject(320, 180, 30f, "Seven cell transport") }
+        compose.waitUntil(10000) { store.project.title == "Seven cell transport" }
         compose.runOnIdle { store.addShape(0); store.seek(12) }
         compose.waitUntil(10000) { store.layers.size == 1 && store.playhead == 12 }
-        // Compact transport keeps all nine controls visible. Compose expands the
-        // clickable touch area vertically to 48dp even when the visual box shrinks.
-        val marker = compose.onNodeWithTag("transport.marker").assertIsDisplayed()
-        val play = compose.onNodeWithTag("transport.play").assertIsDisplayed()
-        assertTrue(marker.fetchSemanticsNode().boundsInRoot.right <= play.fetchSemanticsNode().boundsInRoot.left + 1)
-        marker.performTouchInput { click(androidx.compose.ui.geometry.Offset(center.x, -2f)) }
+        compose.runOnIdle { store.toggleMarker() }
         compose.waitUntil(5000) { 12 in store.markers.frames }
-        // Keep Compose synchronization from waiting until the natural playback
-        // end before checking a control pressed during playback.
-        compose.mainClock.autoAdvance = false
-        play.performClick()
-        compose.waitUntil(15000) { store.playing && store.playhead > 15 }
-        marker.assertIsDisplayed().performClick()
-        compose.waitUntil(5000) { store.markers.frames.size == 2 }
-        InstrumentationRegistry.getInstrumentation().runOnMainSync { assertTrue("Marking a beat must not pause playback", store.playing) }
-        play.performClick()
-        compose.waitUntil(5000) { !store.playing }
-        compose.mainClock.autoAdvance = true
-        compose.runOnIdle { store.seek(0) }
+        val tags = listOf(
+            "transport.undo", "transport.redo", "transport.previous", "transport.play",
+            "transport.next", "transport.copyPaste", "transport.viewModes",
+        )
+        val bounds = tags.map { compose.onNodeWithTag(it).assertIsDisplayed().fetchSemanticsNode().boundsInRoot }
+        for (i in 1 until bounds.size) assertTrue(tags[i], bounds[i - 1].right <= bounds[i].left + 1)
+        for (gone in listOf("transport.grid", "transport.resolution", "transport.layers", "transport.marker")) {
+            compose.onNodeWithTag(gone).assertDoesNotExist()
+        }
+        // ⇤ / ⇥: o começo, os marcadores e o último quadro (sem toque longo).
+        compose.runOnIdle { store.clearSelection(); store.seek(0) }
+        compose.waitUntil(5000) { store.playhead == 0 }
         compose.onNodeWithTag("transport.next").performClick()
         compose.waitUntil(5000) { store.playhead == 12 }
-        compose.onNodeWithTag("transport.grid").assertIsDisplayed()
-        compose.onNodeWithTag("transport.resolution").assertIsDisplayed()
-        compose.onNodeWithTag("transport.layers").assertIsDisplayed()
+        compose.onNodeWithTag("transport.previous").performClick()
+        compose.waitUntil(5000) { store.playhead == 0 }
+        // O último botão abre e fecha a coluna de modos à direita da prévia.
+        compose.onNodeWithTag("transport.viewModes").performClick()
+        compose.onNodeWithTag("viewmode.column").assertIsDisplayed()
+        compose.onNodeWithTag("viewmode.zoomIn").performClick()
+        compose.waitUntil(3000) { StageView.zoom == 1.5f }
+        compose.onNodeWithTag("viewmode.zoomLabel").performClick()
+        compose.waitUntil(3000) { StageView.zoom == 1f }
+        compose.onNodeWithTag("transport.viewModes").performClick()
+        compose.waitUntil(3000) { compose.onAllNodesWithTag("viewmode.column").fetchSemanticsNodes().isEmpty() }
     }
 
     @Test fun compactMenuCopiesPastesAndOneUndoRestoresLayers() {

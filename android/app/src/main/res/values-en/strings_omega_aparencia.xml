@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.2 Omega aparência (área 05): mesclagem, transformar, cor e preenchimento,
+         borda e sombra, câmera e seletor de cor. Gerado por gen_strings_aparencia.py. -->
+
+    <!-- Mesclagem e opacidade (P0-1, P1-5) -->
+    <string name="om_ap_blend_darker_color">Darker color</string>
+    <string name="om_ap_blend_lighter_color">Lighter color</string>
+    <string name="om_ap_blend_linear_light">Linear light</string>
+    <string name="om_ap_blend_pin_light">Pin light</string>
+    <string name="om_ap_blend_soft_overlay">Soft overlay</string>
+    <string name="om_ap_blend_about">About blending</string>
+    <string name="om_ap_blend_category">%1$s category</string>
+
+    <!-- Mover e transformar (P0-2) -->
+    <string name="om_ap_tf_move">Move</string>
+    <string name="om_ap_tf_pivot">Pivot</string>
+    <string name="om_ap_tf_rotate">Rotate</string>
+    <string name="om_ap_tf_scale">Scale</string>
+    <string name="om_ap_tf_skew">Skew</string>
+    <string name="om_ap_tf_move_hint">Slide here to move the layer</string>
+    <string name="om_ap_tf_depth_hint">Slide here to adjust depth</string>
+    <string name="om_ap_tf_pivot_hint">Slide here to move the pivot point</string>
+    <string name="om_ap_tf_skew_x">Skew X</string>
+    <string name="om_ap_tf_skew_y">Skew Y</string>
+    <string name="om_ap_tf_width">Width</string>
+    <string name="om_ap_tf_height">Height</string>
+    <string name="om_ap_tf_link">Keep proportions</string>
+    <string name="om_ap_tf_camera_scale">Camera: zoom %1$s, angle %2$s°</string>
+    <string name="om_ap_tf_dial">Rotation dial</string>
+    <string name="om_ap_tf_turns">%1$d turns</string>
+    <string name="om_ap_tf_reset_position">Reset position</string>
+    <string name="om_ap_tf_reset_pivot">Reset pivot</string>
+    <string name="om_ap_tf_reset_rotation">Reset rotation</string>
+    <string name="om_ap_tf_reset_scale">Reset scale</string>
+    <string name="om_ap_tf_reset_skew">Reset skew</string>
+    <string name="om_ap_tf_reset_all">Reset transform</string>
+    <string name="om_ap_tf_snap">Snap to other layers</string>
+    <string name="om_ap_tf_accelerate">Accelerate trackpad</string>
+    <string name="om_ap_tf_nudge">Tap the edges to move 1 px</string>
+    <string name="om_ap_tf_motion_path">Motion path</string>
+    <string name="om_ap_tf_axis">%1$s axis</string>
+
+    <!-- Cor e preenchimento (P0-3, P1-4) -->
+    <string name="om_ap_fill_none">No fill</string>
+    <string name="om_ap_fill_color">Color</string>
+    <string name="om_ap_fill_gradient">Gradient</string>
+    <string name="om_ap_fill_media">Media</string>
+    <string name="om_ap_fill_original">Original</string>
+    <string name="om_ap_fill_original_hint">The original colors live in the Vector panel</string>
+    <string name="om_ap_fill_grad_linear">Linear</string>
+    <string name="om_ap_fill_grad_radial">Radial</string>
+    <string name="om_ap_fill_grad_sweep">Sweep</string>
+    <string name="om_ap_fill_grad_start">Start color</string>
+    <string name="om_ap_fill_grad_end">End color</string>
+    <string name="om_ap_fill_grad_handles">Drag the gradient ends on the stage</string>
+
+    <!-- Borda e sombra (P0-4, P1-9) -->
+    <string name="om_ap_bs_title">Border &amp; shadow</string>
+    <string name="om_ap_bs_stroke">Stroke</string>
+    <string name="om_ap_bs_borders">Borders</string>
+    <string name="om_ap_bs_shadow">Shadow</string>
+    <string name="om_ap_bs_add_border">Add border</string>
+    <string name="om_ap_bs_border">Border</string>
+    <string name="om_ap_bs_border_n">Border %1$d</string>
+    <string name="om_ap_bs_delete_border">Delete border</string>
+    <string name="om_ap_bs_reorder">Drag to reorder</string>
+    <string name="om_ap_bs_direction">Direction</string>
+    <string name="om_ap_bs_inside">Inside</string>
+    <string name="om_ap_bs_center">Center</string>
+    <string name="om_ap_bs_outside">Outside</string>
+    <string name="om_ap_bs_color">Color</string>
+    <string name="om_ap_bs_size">Size</string>
+    <string name="om_ap_bs_alpha">Alpha</string>
+    <string name="om_ap_bs_offset">Offset</string>
+    <string name="om_ap_bs_width">Stroke width</string>
+    <string name="om_ap_bs_px">%1$s px</string>
+    <string name="om_ap_bs_stroke_unavailable">Stroke is for shapes and text. Use Borders on this layer.</string>
+
+    <!-- Câmera (P1-6) -->
+    <string name="om_ap_cam_title">Camera options</string>
+    <string name="om_ap_cam_view">View</string>
+    <string name="om_ap_cam_focus">Focus blur</string>
+    <string name="om_ap_cam_fog">Fog</string>
+    <string name="om_ap_cam_view_title">Camera view</string>
+    <string name="om_ap_cam_view_angle">View angle</string>
+    <string name="om_ap_cam_zoom">Zoom</string>
+    <string name="om_ap_cam_perspective">Perspective</string>
+    <string name="om_ap_cam_parallel">Parallel</string>
+    <string name="om_ap_cam_parallel_soon">Parallel camera isn\'t available yet</string>
+    <string name="om_ap_cam_fog_soon">Camera fog isn\'t available yet. Use the composition fog in Project settings.</string>
+    <string name="om_ap_cam_tip">To look through the camera, turn on camera view beside the stage.</string>
+    <string name="om_ap_cam_focus_on">Focus blur on</string>
+
+    <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
+    <string name="om_ap_cp_eyedropper">Eyedropper</string>
+    <string name="om_ap_cp_eyedropper_hint">Drag on the stage to pick a color</string>
+    <string name="om_ap_cp_fine">Fine picker</string>
+    <string name="om_ap_cp_full">More colors</string>
+    <string name="om_ap_cp_unavailable">Transparent color not available here</string>
+    <string name="om_ap_cp_add">Save to palette</string>
+    <string name="om_ap_cp_copy_code">Copy color code</string>
+    <string name="om_ap_cp_paste_code">Paste color code</string>
+    <string name="om_ap_cp_code_copied">Color code copied</string>
+    <string name="om_ap_cp_code">Color code %1$s</string>
+    <string name="om_ap_cp_wheel">Wheel</string>
+    <string name="om_ap_cp_rgb">RGB</string>
+    <string name="om_ap_cp_done">Done</string>
+    <string name="om_ap_cp_current">Current</string>
+    <string name="om_ap_cp_new">New</string>
+    <string name="om_ap_cp_hue">Hue</string>
+    <string name="om_ap_cp_saturation">Saturation</string>
+    <string name="om_ap_cp_brightness">Brightness</string>
+    <string name="om_ap_cp_alpha">Alpha</string>
+    <string name="om_ap_cp_red">Red</string>
+    <string name="om_ap_cp_green">Green</string>
+    <string name="om_ap_cp_blue">Blue</string>
+    <string name="om_ap_cp_alpha_toggle">Show or hide alpha</string>
+    <string name="om_ap_cp_trash">Drop here to delete</string>
+    <string name="om_ap_cp_swatch">Swatch %1$s</string>
+    <string name="om_ap_cp_palette">Palette</string>
+</resources>

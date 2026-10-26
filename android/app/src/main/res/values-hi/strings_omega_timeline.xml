@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Omega 0.3.2, área 03 (timeline). Textos próprios do AUREA. -->
+    <string name="om_tl_show_tracks">कीफ़्रेम ट्रैक दिखाएँ</string>
+    <string name="om_tl_hide_tracks">कीफ़्रेम ट्रैक छिपाएँ</string>
+    <string name="om_tl_toggle_selection">चयन में जोड़ें या हटाएँ</string>
+    <string name="om_tl_move_up">ऊपर ले जाएँ</string>
+    <string name="om_tl_move_down">नीचे ले जाएँ</string>
+    <string name="om_tl_info_start">शुरुआत</string>
+    <string name="om_tl_info_offset">खिसकाव</string>
+    <string name="om_tl_info_in">इन</string>
+    <string name="om_tl_info_end">अंत</string>
+    <string name="om_tl_info_out">आउट</string>
+    <string name="om_tl_info_duration">अवधि</string>
+    <string name="om_tl_info_change">बदलाव</string>
+    <string name="om_tl_info_key">कीफ़्रेम</string>
+    <string name="om_tl_trim_start_a11y">%1$s की शुरुआत ट्रिम करें</string>
+    <string name="om_tl_trim_end_a11y">%1$s का अंत ट्रिम करें</string>
+    <string name="om_tl_speed_handle_a11y">अवधि से %1$s की गति बदलें</string>
+    <string name="om_tl_frame_earlier">एक फ़्रेम पहले</string>
+    <string name="om_tl_frame_later">एक फ़्रेम बाद</string>
+    <string name="om_tl_marker_hint">इस पल को चिह्नित करने के लिए घड़ी पर टैप करें। मार्कर को नाम देने के लिए दबाकर रखें।</string>
+    <string name="om_tl_prev_marker">पिछला मार्कर</string>
+    <string name="om_tl_next_marker">अगला मार्कर</string>
+    <string name="om_tl_time_options">समय विकल्प</string>
+    <string name="om_tl_ruler">टाइमलाइन रूलर</string>
+    <string name="om_tl_current_time">वर्तमान समय</string>
+    <string name="om_tl_hidden">छिपी हुई</string>
+    <string name="om_tl_visible">दिखाई दे रही</string>
+</resources>

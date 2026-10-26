@@ -70,7 +70,7 @@ class TrimControlsRegressionTest {
         compose.onNodeWithTag("timeline.extend.end").assertDoesNotExist()
         compose.onNodeWithTag("timeline.showAllLayers").assertIsDisplayed().performClick()
         compose.onNodeWithTag("timeline.showAllLayers").performClick()
-        compose.onNodeWithTag("timeline.cut.start").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("timeline.cut.start").assertIsDisplayed()
         compose.onNodeWithTag("timeline.cut.end").assertIsDisplayed()
         compose.onNodeWithTag("timeline.cut.start").performClick()
         compose.waitUntil(10000) { store.layers.first { it.id==id }.startFrame == 45 }
@@ -83,17 +83,17 @@ class TrimControlsRegressionTest {
         // The fixture has 60 source frames. Extend within its available handles.
         compose.runOnIdle { store.trimStart(id, 30); store.trimEnd(id, 50); store.seek(10) }
         compose.waitUntil(5000) { store.playhead == 10 && store.layers.first { it.id == id }.endFrame == 50 }
+        // Omega painel: cabeçote antes do clipe = o par ◀ Mover · ▶ Esticar o início.
         compose.onNodeWithTag("timeline.cut.start").assertDoesNotExist()
         compose.onNodeWithTag("timeline.cut.split").assertDoesNotExist()
-        compose.onNodeWithTag("timeline.extend.end").assertDoesNotExist()
         compose.runOnIdle { store.setLayerMagneticTrack(id, true) }
-        compose.onNodeWithTag("timeline.extend.start").performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithTag("layer.panel.timeRight").assertIsDisplayed().performClick()
         compose.waitUntil(5000) { store.layers.first { it.id == id }.startFrame == 10 }
         compose.runOnIdle { assertEquals(50, store.layers.first { it.id == id }.endFrame); store.undo(); store.seek(58) }
         compose.waitUntil(5000) { store.playhead == 58 && store.layers.first { it.id == id }.startFrame == 30 }
-        compose.onNodeWithTag("timeline.extend.start").assertDoesNotExist()
+        // Cabeçote depois do clipe = ◀ Esticar o fim · ▶ Mover.
         compose.onNodeWithTag("timeline.cut.end").assertDoesNotExist()
-        compose.onNodeWithTag("timeline.extend.end").performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithTag("layer.panel.timeLeft").assertIsDisplayed().performClick()
         compose.waitUntil(5000) { store.layers.first { it.id == id }.endFrame == 58 }
         compose.runOnIdle { assertEquals(30, store.layers.first { it.id == id }.startFrame); store.undo(); store.seek(40) }
         compose.waitUntil(5000) { store.playhead == 40 && store.layers.first { it.id == id }.endFrame == 50 }

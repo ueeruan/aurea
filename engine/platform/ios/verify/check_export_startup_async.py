@@ -112,6 +112,7 @@ if not compiler:
 else:
     harness = r'''import Foundation
 enum AureaExportCodec { case h264, hevc }
+struct HyperJobRequest: Equatable { var source: String; var recipe: [Double]; var output: URL }
 OPTIONS
 KIND
 TOKEN

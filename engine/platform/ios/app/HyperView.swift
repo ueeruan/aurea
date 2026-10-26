@@ -576,7 +576,7 @@ struct HyperLockedSheet: View {
 private struct HyperMeterPanel: View {
     let startedAt: Date
     var body: some View {
-        TimelineView(.periodic(from: startedAt, by: 0.2)) { context in
+        SwiftUI.TimelineView(.periodic(from: startedAt, by: 0.2)) { context in
             let elapsed = context.date.timeIntervalSince(startedAt)
             VStack(alignment: .leading, spacing: 0) {
                 Text(AureaText.t("hyper_meter_title")).font(.aurea(size: 15, weight: .semibold))

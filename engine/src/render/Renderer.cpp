@@ -4225,9 +4225,13 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 i64 duplicateWantUs = -1;
                 if (flowFx.retime && flowFx.replaceDuplicates && streamInfo.fps > 0.0) {
                     const f64 srcFps = streamInfo.fps;
-                    const i64 lastUs = dur > 0 ? last_source_timestamp(streamInfo, src->frame_duration_us())
-                                               : std::numeric_limits<i64>::max() / 4;
-                    const i64 lastIndex = static_cast<i64>(std::floor(static_cast<f64>(lastUs) * srcFps / 1e6 + 1e-3));
+                    // O índice do ÚLTIMO quadro da grade (0.3.2, Moto g52): com tempos
+                    // precisos last_source_timestamp devolve duração − 1 µs, e o piso
+                    // com folga dava o quadro N (que não existe) — o Hyper Motion
+                    // esperava a assinatura dele e o export parava no fim do clipe.
+                    const i64 lastIndex = dur > 0
+                        ? static_cast<i64>(std::max(0.0, std::ceil(static_cast<f64>(dur) * srcFps / 1e6 - 1e-6) - 1.0))
+                        : std::numeric_limits<i64>::max() / 4;
                     const f64 pos = std::clamp(srcFrameF / fps * srcFps, 0.0, static_cast<f64>(lastIndex));
                     const i64 base = static_cast<i64>(std::floor(pos + 1e-3));
                     auto usOf = [&](i64 i) { return static_cast<i64>(std::llround(static_cast<f64>(i) * 1e6 / srcFps)); };

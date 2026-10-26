@@ -14,8 +14,8 @@ Novidades da 0.3.3 BETA:
 • Cor e preenchimento com degradê, conta-gotas e paleta própria
 • Borda e sombra, 5 modos de mesclagem novos e inclinação
 • Texto ao vivo, navegador de fontes, desenho livre e edição de pontos
-• Plugins agora podem criar painéis, abas e scripts
 • Ícones mais nítidos e Home renovada
+Na 0.3.4: o novo sistema de plugins, com painéis, abas e scripts!
 Obrigado a hanszx_ pela colaboração na interface!
 ```
 
@@ -29,8 +29,8 @@ New in 0.3.3 BETA:
 • Color & fill with gradients, eyedropper and your own palette
 • Border & shadow, 5 new blend modes and skew
 • Live text, font browser, freehand drawing and point editing
-• Plugins can now add panels, tabs and scripts
 • Crisper icons and a refreshed Home
+Coming in 0.3.4: the new plugin system, with panels, tabs and scripts!
 Thanks to hanszx_ for collaborating on the interface!
 ```
 
@@ -103,8 +103,11 @@ Thanks to hanszx_ for collaborating on the interface!
 - **Duplicar efeito**, **Colar configurações** e copiar todos os efeitos.
 - Navegador com recomendados, recentes e favoritos, categorias, busca e detalhe com variações.
 
-### Plugins v2
-- (preencher com o relatório final do agente de plugins)
+### Vem na 0.3.4: o novo sistema de plugins
+- Plugins vão poder criar **painéis e abas novas** na interface, rodar **scripts** com uma API
+  de projeto, camadas, keyframes e efeitos no estilo dos scripts do After Effects, e usar
+  **APIs externas** que a pessoa autorizar na instalação. Os plugins de efeito atuais
+  continuam funcionando como hoje.
 
 ### Home
 - Barra de cima nova, dock com Início, Perfil, criar, Projetos e Presets, e **gaveta de

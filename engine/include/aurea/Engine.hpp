@@ -1603,7 +1603,7 @@ public:
     /// Preset de efeitos com SÓ o efeito `effectId` (id estável da instância
     /// na camada) e os keyframes dele. Vazio = camada ou efeito não existe.
     [[nodiscard]] std::string save_effect_preset(u64 layerId, u32 effectId, const std::string& name) noexcept;
-    /// Converte um XML do Alight Motion (projeto, elemento ou preset
+    /// Converte um XML de projeto da referência (projeto, elemento ou preset
     /// compartilhado; também o pacote .zip/.amproj) num preset de EFEITOS do
     /// Aurea (formato de project/Presets.hpp, pronto para `apply_preset`).
     /// Vazio = nada aproveitável (`report.error` diz o porquê); o que ficou de
@@ -1675,7 +1675,7 @@ public:
     /// abrindo espaço e a fita fechando em seguida — reordenar os cortes
     /// arrastando. Só vale em linha magnética, em trecho com fonte e destravado.
     bool reorder_clip(u64 layerId, i64 targetFrame) noexcept;
-    /// Arrasto VERTICAL de UM trecho (como no Alight Motion: cada fileira é
+    /// Arrasto VERTICAL de UM trecho (como na referência: cada fileira é
     /// uma camada) — só ele anda, nunca a linha inteira. Um passo de desfazer.
     /// `mode` 0 = fileira própria logo ACIMA da fileira de `anchorId` (acima do
     /// trecho mais alto da linha dele); `anchorId` 0 = no fundo da pilha.

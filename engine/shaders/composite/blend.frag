@@ -65,7 +65,7 @@ const int kAdd = 1, kSubtract = 2, kMultiply = 3, kScreen = 4, kOverlay = 5, kDa
           kExclusion = 13, kHue = 14, kSaturation = 15, kColor = 16, kLuminosity = 17,
           // Os quatro do editor antigo (ver BlendMode em Types.hpp).
           kDivide = 18, kVividLight = 19, kLinearDodge = 20, kLinearBurn = 21,
-          // Máscara do Alight Motion: recorte Porter-Duff do fundo pela camada.
+          // Máscara da referência: recorte Porter-Duff do fundo pela camada.
           kMask = 22, kExclude = 23,
           // Omega aparência (P1-5).
           kDarkerColor = 24, kLighterColor = 25, kLinearLight = 26, kPinLight = 27, kSoftOverlay = 28,

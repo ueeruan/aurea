@@ -1447,7 +1447,7 @@ enum EditorLayout {
     static func addContent(_ m: EditorMetrics) -> CGFloat { min(addContentHeight, m.timeline) }
     // 0.3.3 barra: altura nominal do bloco da grade do "+" (par de `ADD_BAR_GRID_HEIGHT`):
     // margem 4 + bloco 7 + cartão 8 + 2 fileiras de (ladrilho 46 + 4 + nome 15) + 6 + 8 + 7 + 4.
-    static let addBarGridHeight: CGFloat = 4 + 7 + 8 + 2 * (46 + 4 + 15) + 6 + 8 + 7 + 4
+    static let addBarGridHeight: CGFloat = 174 // = 4 + 7 + 8 + 2 × (46 + 4 + 15) + 6 + 8 + 7 + 4
     /// Doca da camada, compacta (EditorLayout.kt `DOCK`): fileira rápida de
     /// ícones e fichas baixas; a altura é a do conteúdo.
     static let dockQuick: CGFloat = 48

@@ -521,9 +521,9 @@ final class VoiceRecorderController: ObservableObject {
             HStack(spacing: 10) {
                 pill("common_cancel", fill: AureaColors.chip, id: "voice.cancel") { closePanel() }
                 if denied {
-                    pill("voice_open_settings", fill: AureaColors.action, id: "voice.permission.settings") { recorder.openSettings() }
+                    pill("voice_open_settings", fill: AureaColors.action, ink: AureaColors.onAction, id: "voice.permission.settings") { recorder.openSettings() }
                 } else {
-                    pill("voice_permission_allow", fill: AureaColors.action, id: "voice.permission.allow") { recorder.requestPermission() }
+                    pill("voice_permission_allow", fill: AureaColors.action, ink: AureaColors.onAction, id: "voice.permission.allow") { recorder.requestPermission() }
                 }
             }
             .padding(.top, 8)
@@ -531,11 +531,11 @@ final class VoiceRecorderController: ObservableObject {
         .padding(.vertical, 8)
     }
 
-    private func pill(_ key: String, fill: Color, id: String, action: @escaping () -> Void) -> some View {
+    private func pill(_ key: String, fill: Color, ink: Color = AureaColors.text, id: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(AureaText.t(key))
                 .font(.aurea(size: 14, weight: .semibold))
-                .foregroundStyle(AureaColors.text)
+                .foregroundStyle(ink)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .padding(.horizontal, 14)

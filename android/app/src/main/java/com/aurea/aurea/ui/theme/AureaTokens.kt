@@ -44,7 +44,7 @@ object AureaColors {
      * inteiro na hora, sem reiniciar. Só os tons de fundo, superfície e a cor
      * de destaque mudam; estados (erro, aviso, sucesso) e o texto ficam.
      */
-    var palette by mutableStateOf(AureaPalette.Aurea)
+    var palette by mutableStateOf(AureaPalette.Omega)
     // --- Marca ---------------------------------------------------------------
     val BrandDeep: Color get() = palette.brandDeep
     val Brand: Color get() = palette.brand          // preenchimento de ação (Exportar, "+")
@@ -75,7 +75,8 @@ object AureaColors {
     val EditorPanelHigh: Color get() = palette.editorPanelHigh
     val Pill: Color get() = palette.pill
     val Action: Color get() = Brand
-    val OnAction = Text
+    /** Conteúdo sobre [Action]: branco nos temas escuros; escuro no Omega, cujo destaque é claro. */
+    val OnAction: Color get() = palette.onBrand
     val ActionDim: Color get() = palette.actionDim
     val Selection: Color get() = BrandDeep
     val SelectionText: Color get() = Keyframe
@@ -207,8 +208,53 @@ data class AureaPalette(
     val editorBarLine: Color = border,
     val editorRowPill: Color = chip,
     val editorGlyphBox: Color = chipHigh,
+    /** Ícone e texto sobre a cor de marca (`Brand`/`Action`). */
+    val onBrand: Color = Color(0xFFF7F9FB),
 ) {
     companion object {
+        /**
+         * Omega (versão de teste 0.3.2): a tela de edição segue a referência de
+         * mercado estudada em `build/reference/am-omega-20261026/` — fundos
+         * azul-marinho em camadas e um único destaque verde-menta. Só os papéis
+         * vêm de lá; os nomes e o resto do sistema continuam os do Aurea.
+         */
+        val Omega = AureaPalette(
+            id = "omega",
+            brandDeep = Color(0xFF0F5042),
+            brand = Color(0xFF00FFA8),
+            accent = Color(0xFF00FFA8),
+            keyframe = Color(0xFF00FFA8),
+            background = Color(0xFF141620),
+            surface = Color(0xFF191B27),
+            surfaceHigh = Color(0xFF202332),
+            chip = Color(0xFF2B2E3C),
+            chipHigh = Color(0xFF333750),
+            border = Color(0xFF292D40),
+            muted = Color(0xFFA3A5B0),
+            subtle = Color(0xFF767A88),
+            onAccent = Color(0xFF131313),
+            accentDim = Color(0xFF0F5042),
+            keyframeDim = Color(0xFF0F5042),
+            stage = Color(0xFF0C0D13),
+            hairline = Color(0xB8292D40),
+            editorTopBar = Color(0xFF141620),
+            editorPanel = Color(0xFF202332),
+            editorPanelHigh = Color(0xFF2B2E3C),
+            pill = Color(0xFF202332),
+            actionDim = Color(0xFF0F5042),
+            statusBarVeil = Color(0xFF0C0D13),
+            systemBarVeil = Color(0xFF0C0D13),
+            tickWeak = Color(0xFF494C5A),
+            tickStrong = Color(0xFF818390),
+            railModeFill = Color(0xFF2B2E3C),
+            fieldFilled = Color(0xFF2A2F36),
+            editorCanvas = Color(0xFF141620),
+            editorBar = Color(0xFF202332),
+            editorBarLine = Color(0xFF292D40),
+            editorRowPill = Color(0xFF262A3C),
+            editorGlyphBox = Color(0xFF333750),
+            onBrand = Color(0xFF131313),
+        )
         val Aurea = AureaPalette(
             id = "aurea",
             brandDeep = Color(0xFF123A63),
@@ -400,8 +446,8 @@ data class AureaPalette(
             railModeFill = Color(0xFF271E17),
             fieldFilled = Color(0xFF2E251E),
         )
-        val all = listOf(Aurea, Midnight, Graphite, Emerald, Amethyst, Sunset)
-        fun of(id: String?): AureaPalette = all.firstOrNull { it.id == id } ?: Aurea
+        val all = listOf(Omega, Aurea, Midnight, Graphite, Emerald, Amethyst, Sunset)
+        fun of(id: String?): AureaPalette = all.firstOrNull { it.id == id } ?: Omega
     }
 }
 

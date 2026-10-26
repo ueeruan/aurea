@@ -589,9 +589,9 @@ private fun VoicePermission(blocked: Boolean, onAllow: () -> Unit, onSettings: (
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             VoicePill(stringResource(R.string.common_cancel), AureaColors.Chip, AureaColors.Text, "voice.cancel", Modifier.weight(1f), onCancel)
             if (blocked) {
-                VoicePill(stringResource(R.string.voice_open_settings), AureaColors.Action, AureaColors.Text, "voice.permission.settings", Modifier.weight(1f), onSettings)
+                VoicePill(stringResource(R.string.voice_open_settings), AureaColors.Action, AureaColors.OnAction, "voice.permission.settings", Modifier.weight(1f), onSettings)
             } else {
-                VoicePill(stringResource(R.string.voice_permission_allow), AureaColors.Action, AureaColors.Text, "voice.permission.allow", Modifier.weight(1f), onAllow)
+                VoicePill(stringResource(R.string.voice_permission_allow), AureaColors.Action, AureaColors.OnAction, "voice.permission.allow", Modifier.weight(1f), onAllow)
             }
         }
     }

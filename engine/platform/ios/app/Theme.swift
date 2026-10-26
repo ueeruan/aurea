@@ -77,11 +77,20 @@ struct AureaPalette: Identifiable {
     var editorRowPillOverride: Color? = nil
     /// Quadradinho de 22 pt do glifo dentro da pílula.
     var editorGlyphBoxOverride: Color? = nil
+    /// Ícone e texto sobre a cor de marca (`brand`/`action`): branco nos temas
+    /// escuros, escuro no Omega, cujo destaque é claro.
+    var onBrandOverride: Color? = nil
     var editorCanvas: Color { editorCanvasOverride ?? editorPanelHigh }
     var editorBar: Color { editorBarOverride ?? surfaceHigh }
     var editorBarLine: Color { editorBarLineOverride ?? border }
     var editorRowPill: Color { editorRowPillOverride ?? chip }
     var editorGlyphBox: Color { editorGlyphBoxOverride ?? chipHigh }
+    /// Omega (versão de teste 0.3.2): a tela de edição segue a referência de mercado
+    /// estudada em `build/reference/am-omega-20261026/` — fundos azul-marinho em
+    /// camadas e um único destaque verde-menta. Mesmos valores do Android.
+    static let omega = AureaPalette(id: "omega", brandDeep: Color(hex: 0xFF0F5042), brand: Color(hex: 0xFF00FFA8), accent: Color(hex: 0xFF00FFA8), keyframe: Color(hex: 0xFF00FFA8), background: Color(hex: 0xFF141620), surface: Color(hex: 0xFF191B27), surfaceHigh: Color(hex: 0xFF202332), chip: Color(hex: 0xFF2B2E3C), chipHigh: Color(hex: 0xFF333750), border: Color(hex: 0xFF292D40), muted: Color(hex: 0xFFA3A5B0), subtle: Color(hex: 0xFF767A88), onAccent: Color(hex: 0xFF131313), accentDim: Color(hex: 0xFF0F5042), keyframeDim: Color(hex: 0xFF0F5042), stage: Color(hex: 0xFF0C0D13), hairline: Color(hex: 0xB8292D40), editorTopBar: Color(hex: 0xFF141620), editorPanel: Color(hex: 0xFF202332), editorPanelHigh: Color(hex: 0xFF2B2E3C), pill: Color(hex: 0xFF202332), actionDim: Color(hex: 0xFF0F5042), statusBarVeil: Color(hex: 0xFF0C0D13), systemBarVeil: Color(hex: 0xFF0C0D13), tickWeak: Color(hex: 0xFF494C5A), tickStrong: Color(hex: 0xFF818390), railModeFill: Color(hex: 0xFF2B2E3C), fieldFilled: Color(hex: 0xFF2A2F36),
+                                    editorCanvasOverride: Color(hex: 0xFF141620), editorBarOverride: Color(hex: 0xFF202332), editorBarLineOverride: Color(hex: 0xFF292D40),
+                                    editorRowPillOverride: Color(hex: 0xFF262A3C), editorGlyphBoxOverride: Color(hex: 0xFF333750), onBrandOverride: Color(hex: 0xFF131313))
     static let aurea = AureaPalette(id: "aurea", brandDeep: Color(hex: 0xFF123A63), brand: Color(hex: 0xFF245D8C), accent: Color(hex: 0xFF6FAED9), keyframe: Color(hex: 0xFFA9D3EC), background: Color(hex: 0xFF0F141A), surface: Color(hex: 0xFF151C24), surfaceHigh: Color(hex: 0xFF1B2530), chip: Color(hex: 0xFF212D3A), chipHigh: Color(hex: 0xFF323D49), border: Color(hex: 0xFF273442), muted: Color(hex: 0xFFAAB6C3), subtle: Color(hex: 0xFF7C8A99), onAccent: Color(hex: 0xFF0B1117), accentDim: Color(hex: 0xFF1D3A55), keyframeDim: Color(hex: 0xFF22405A), stage: Color(hex: 0xFF0A0E13), hairline: Color(hex: 0xB8273442), editorTopBar: Color(hex: 0xFF0F141A), editorPanel: Color(hex: 0xFF0F141A), editorPanelHigh: Color(hex: 0xFF151C24), pill: Color(hex: 0xFF1B2530), actionDim: Color(hex: 0xFF16304A), statusBarVeil: Color(hex: 0xFF070A0E), systemBarVeil: Color(hex: 0xFF0B0F13), tickWeak: Color(hex: 0xFF43516A), tickStrong: Color(hex: 0xFF7485A3), railModeFill: Color(hex: 0xFF1E222D), fieldFilled: Color(hex: 0xFF272B33),
                                     editorCanvasOverride: Color(hex: 0xFF161C2A), editorBarOverride: Color(hex: 0xFF1B2330), editorBarLineOverride: Color(hex: 0xFF2A3444),
                                     editorRowPillOverride: Color(hex: 0xFF222B3B), editorGlyphBoxOverride: Color(hex: 0xFF2E3B4E))
@@ -90,8 +99,8 @@ struct AureaPalette: Identifiable {
     static let emerald = AureaPalette(id: "emerald", brandDeep: Color(hex: 0xFF0F4A3A), brand: Color(hex: 0xFF1C7A5E), accent: Color(hex: 0xFF5BD6A8), keyframe: Color(hex: 0xFFA6ECD2), background: Color(hex: 0xFF0B1411), surface: Color(hex: 0xFF111D19), surfaceHigh: Color(hex: 0xFF172722), chip: Color(hex: 0xFF1D302A), chipHigh: Color(hex: 0xFF2C403A), border: Color(hex: 0xFF223A33), muted: Color(hex: 0xFFA6BDB5), subtle: Color(hex: 0xFF789088), onAccent: Color(hex: 0xFF06110D), accentDim: Color(hex: 0xFF163A30), keyframeDim: Color(hex: 0xFF1D4539), stage: Color(hex: 0xFF080F0C), hairline: Color(hex: 0xB8223A33), editorTopBar: Color(hex: 0xFF0B1411), editorPanel: Color(hex: 0xFF0B1411), editorPanelHigh: Color(hex: 0xFF111D19), pill: Color(hex: 0xFF172722), actionDim: Color(hex: 0xFF123326), statusBarVeil: Color(hex: 0xFF060B09), systemBarVeil: Color(hex: 0xFF09100D), tickWeak: Color(hex: 0xFF3B5249), tickStrong: Color(hex: 0xFF6C8C80), railModeFill: Color(hex: 0xFF18251F), fieldFilled: Color(hex: 0xFF1F2B27))
     static let amethyst = AureaPalette(id: "amethyst", brandDeep: Color(hex: 0xFF3A2470), brand: Color(hex: 0xFF6246B8), accent: Color(hex: 0xFFB9A2FF), keyframe: Color(hex: 0xFFDCCFFF), background: Color(hex: 0xFF110E19), surface: Color(hex: 0xFF181423), surfaceHigh: Color(hex: 0xFF201B2E), chip: Color(hex: 0xFF282238), chipHigh: Color(hex: 0xFF383049), border: Color(hex: 0xFF2F2842), muted: Color(hex: 0xFFB5ADC6), subtle: Color(hex: 0xFF877E99), onAccent: Color(hex: 0xFF0D0A14), accentDim: Color(hex: 0xFF2C2248), keyframeDim: Color(hex: 0xFF362B55), stage: Color(hex: 0xFF0C0A12), hairline: Color(hex: 0xB82F2842), editorTopBar: Color(hex: 0xFF110E19), editorPanel: Color(hex: 0xFF110E19), editorPanelHigh: Color(hex: 0xFF181423), pill: Color(hex: 0xFF201B2E), actionDim: Color(hex: 0xFF261E42), statusBarVeil: Color(hex: 0xFF08070C), systemBarVeil: Color(hex: 0xFF0D0B13), tickWeak: Color(hex: 0xFF4A4260), tickStrong: Color(hex: 0xFF7D7399), railModeFill: Color(hex: 0xFF211C2D), fieldFilled: Color(hex: 0xFF272233))
     static let sunset = AureaPalette(id: "sunset", brandDeep: Color(hex: 0xFF6A3212), brand: Color(hex: 0xFFB45A1E), accent: Color(hex: 0xFFFFB060), keyframe: Color(hex: 0xFFFFD6A8), background: Color(hex: 0xFF15100C), surface: Color(hex: 0xFF1E1712), surfaceHigh: Color(hex: 0xFF281F18), chip: Color(hex: 0xFF30251D), chipHigh: Color(hex: 0xFF40342B), border: Color(hex: 0xFF3A2C22), muted: Color(hex: 0xFFC4B4A6), subtle: Color(hex: 0xFF96867A), onAccent: Color(hex: 0xFF140C06), accentDim: Color(hex: 0xFF45280F), keyframeDim: Color(hex: 0xFF4E3218), stage: Color(hex: 0xFF100C09), hairline: Color(hex: 0xB83A2C22), editorTopBar: Color(hex: 0xFF15100C), editorPanel: Color(hex: 0xFF15100C), editorPanelHigh: Color(hex: 0xFF1E1712), pill: Color(hex: 0xFF281F18), actionDim: Color(hex: 0xFF3E230D), statusBarVeil: Color(hex: 0xFF0B0806), systemBarVeil: Color(hex: 0xFF110D0A), tickWeak: Color(hex: 0xFF5A4838), tickStrong: Color(hex: 0xFF907A66), railModeFill: Color(hex: 0xFF271E17), fieldFilled: Color(hex: 0xFF2E251E))
-    static let all: [AureaPalette] = [aurea, midnight, graphite, emerald, amethyst, sunset]
-    static func of(_ id: String?) -> AureaPalette { all.first { $0.id == id } ?? aurea }
+    static let all: [AureaPalette] = [omega, aurea, midnight, graphite, emerald, amethyst, sunset]
+    static func of(_ id: String?) -> AureaPalette { all.first { $0.id == id } ?? omega }
 }
 
 /// O tema em uso. Trocar exige reconstruir as telas (o modelo muda `themeId`,
@@ -151,7 +160,7 @@ enum AureaColors {
     /// Fundo atrás do quadro da prévia.
     static let previewBackdrop = Color(hex: 0x0B0F16)
     static var action: Color { brand }
-    static let onAction        = text
+    static var onAction: Color { AureaTheme.palette.onBrand }
     static var actionDim: Color { AureaTheme.palette.actionDim }
     static var selection: Color { brandDeep }
     static var selectionText: Color { keyframe }
@@ -257,7 +266,7 @@ enum AureaColors {
     static var EditorTopBar: Color { editorTopBar }
     static var EditorPanel: Color { editorPanel }
     static var EditorPanelHigh: Color { editorPanelHigh }
-    static let OnAction = onAction
+    static var OnAction: Color { onAction }
     static var Pill: Color { pill }
     static var Action: Color { action }
     static var ActionDim: Color { actionDim }

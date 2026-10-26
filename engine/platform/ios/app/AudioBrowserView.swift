@@ -446,7 +446,7 @@ private struct TrackRow: View {
                         CupertinoGlyph.text(playing ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill, size: 18, color: AureaColors.onImage)
                         if playing {
                             // O anel de progresso, atualizado a cada ~15 ms.
-                            TimelineView(.periodic(from: .now, by: 0.015)) { _ in
+                            SwiftUI.TimelineView(.periodic(from: .now, by: 0.015)) { _ in
                                 Circle().trim(from: 0, to: preview.progress)
                                     .stroke(AureaColors.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                                     .rotationEffect(.degrees(-90)).frame(width: 40, height: 40)

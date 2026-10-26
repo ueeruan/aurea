@@ -3313,7 +3313,7 @@ final class AureaModel: ObservableObject {
         pause()
         let importer = engine
         mediaQueue.async { [weak self] in
-            let result = importer.insertProjectAsLayer(url.path, name: title)
+            let result = importer.insertProject(asLayer: url.path, name: title)
             let raw = importer.lastImportError
             DispatchQueue.main.async {
                 guard let self else { return }

@@ -652,7 +652,7 @@ private struct TextPresetStripView: View {
 private struct PresetMotionThumb: View {
     let preset: UInt32?
     var body: some View {
-        TimelineView(.animation) { context in
+        SwiftUI.TimelineView(.animation) { context in
             let phase = CGFloat(context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.4) / 2.4)
             HStack(spacing: 0) {
                 ForEach(Array("Aa".enumerated()), id: \.offset) { index, glyph in

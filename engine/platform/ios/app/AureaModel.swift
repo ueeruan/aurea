@@ -6032,7 +6032,7 @@ final class AureaModel: ObservableObject {
         mutate { engine in
             if live { engine.pause() }
             for row in targets {
-                if live { engine.splitLayerAtPlayhead(row.id) } else { engine.splitLayer(row.id, atFrame: frame) }
+                if live { engine.splitLayer(atPlayhead: row.id) } else { engine.splitLayer(row.id, atFrame: frame) }
             }
         }
         if live, status.playing != 0 { playheadStaleAfterPause = true; status.playing = 0; followPlayback(false) }

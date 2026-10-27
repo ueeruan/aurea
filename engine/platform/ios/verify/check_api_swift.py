@@ -64,6 +64,10 @@ def objc_method_names(header):
     for match in re.findall(r"@property\s*\([^)]*\)\s*[A-Za-z0-9_<>*\s]*?\b([A-Za-z_][A-Za-z0-9_]*)\s*;",
                             strip_comments(header)):
         names.add(match)
+    # Propriedades de bloco: `@property (...) Tipo (^nome)(args);`
+    for match in re.findall(r"@property\s*\([^)]*\)[^;]*?\(\^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)",
+                            strip_comments(header)):
+        names.add(match)
     return names
 
 

@@ -4859,6 +4859,12 @@ AUREA_JNI jboolean AUREA_FN(nativeMakeVectorPathEditable)(JNIEnv*, jclass, jlong
                ? JNI_TRUE : JNI_FALSE;
 }
 
+// Bugs 0.3.4 (bug 11): "Converter em contorno" (EngineOmegaOutline.cpp).
+AUREA_JNI jboolean AUREA_FN(nativeConvertShapeToOutline)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.convert_shape_to_outline(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jfloatArray AUREA_FN(nativeQueryVectorParams)(JNIEnv* env, jclass, jlong handle, jlong layer, jint group) {
     NativeContext* c = ctx_of(handle);
     if (!c || group < 0) return nullptr;
@@ -5121,6 +5127,25 @@ AUREA_JNI jlong AUREA_FN(nativeCreateGrid)(JNIEnv* env,jclass,jlong handle,jlong
     const auto n=env->GetArrayLength(ids);if(n<1||n>512)return -1;
     std::vector<jlong> values(n);env->GetLongArrayRegion(ids,0,n,values.data());
     std::vector<u64> selected(values.begin(),values.end());return result_id(c->engine.create_grid(selected.data(),static_cast<u32>(n)));
+}
+// Omega grid (0.3.5): a grade "controlada por" um nulo.
+AUREA_JNI jboolean AUREA_FN(nativeIsGridController)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.is_grid_controller(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI jlong AUREA_FN(nativeGridControlNull)(JNIEnv*, jclass, jlong handle, jlong grid) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jlong>(c->engine.grid_control_null(static_cast<u64>(grid))) : 0;
+}
+AUREA_JNI jint AUREA_FN(nativeSetGridControlNull)(JNIEnv*, jclass, jlong handle, jlong grid, jlong nullId) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.set_grid_control_null(static_cast<u64>(grid), static_cast<u64>(nullId))) : 4;
+}
+AUREA_JNI jlong AUREA_FN(nativeCreateGridControlNull)(JNIEnv* env, jclass, jlong handle, jlong grid, jstring name) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const auto n = to_string(env, name);
+    return result_id(c->engine.create_grid_control_null(static_cast<u64>(grid), n.c_str()));
 }
 
 AUREA_JNI jboolean AUREA_FN(nativeSetTextPath)(JNIEnv*, jclass, jlong handle, jlong layer, jlong pathLayer, jfloat offset, jboolean perpendicular, jboolean reverse) {

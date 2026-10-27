@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (bugs da 0.3.4, área 3D/gráfico/contorno): dica da Cena 3D com a regra nova de seleção. -->
+    <string name="om_scene_hint_035">Коснитесь объекта, чтобы выбрать, и ещё раз, чтобы снять выбор · Без выбора: 1 палец вращает вид, щипок приближает · Выбран: перетаскивание перемещает, щипок меняет масштаб · Двойной тап центрирует</string>
+    <!-- Bug 11: "Converter em contorno" no ⋮ da camada (forma viva → vetor). -->
+    <string name="om_convert_outline_035">Преобразовать в контур</string>
+    <string name="om_convert_outline_detail_035">Становится вектором с той же формой, цветом и обводкой — можно править по точкам</string>
+    <string name="om_convert_outline_failed_035">Не удалось преобразовать эту фигуру в контур</string>
+</resources>

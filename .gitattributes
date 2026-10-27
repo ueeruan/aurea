@@ -14,3 +14,6 @@
 *.jks binary
 *.apk binary
 *.aab binary
+# Projeto e pacote de projeto do AUREA (fixtures dos testes do motor).
+*.aurea binary
+*.aureaproj binary

@@ -8,7 +8,9 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/project/FileIO.hpp"
+#include "aurea/project/Project.hpp"
 #include "aurea/project/ProjectPackage.hpp"
+#include "aurea/timeline/Composition.hpp"
 #include "aurea/project/Serialization.hpp"
 #include "aurea/export/ImageEncode.hpp"
 
@@ -536,4 +538,135 @@ AUREA_TEST(ModelArchive, InvalidNamesAndCorruptPayloadLeaveNoPartialDirectory) {
     write_text(s8(root / "keep.txt"), "existing user data");
     AUREA_CHECK(package::extract_model_archive(archive, s8(root), files).code() == Errc::AlreadyExists);
     AUREA_CHECK(read_text(s8(root / "keep.txt")) == "existing user data");
+}
+
+// =============================================================================
+// Bugs 0.3.4 (importar projeto): o arquivo do projeto exportado pela versão
+// anterior abre na atual. `data/legacy-032/projeto-032-v50.aurea` foi gravado
+// pelo motor da 0.3.2 (timeline v50; câmera 3D, luz pontual, texto e uma
+// imagem) e `Projeto 0.3.2.aureaproj` é esse projeto empacotado como o
+// ZipWriter da 0.3.2 grava (entradas "stored": mídia, project.aurea,
+// manifest.txt — o escritor não mudou desde 7ce8822f).
+// =============================================================================
+namespace {
+u32 count_kind(Project& p, LayerKind kind) {
+    u32 n = 0;
+    p.timeline().for_each_composition([&](CompositionId, Composition& c) {
+        c.layers().for_each([&](LayerId, Layer& l) { if (l.kind == kind) ++n; });
+    });
+    return n;
+}
+} // namespace
+
+AUREA_TEST(ProjectPackage, PackageFromVersion032OpensWithMediaRelinked) {
+    const fs::path dir = scratch("legado_032");
+    const std::string data = std::string(AUREA_TEST_DATA_DIR) + "/legacy-032";
+    const std::string pkg = data + "/Projeto 0.3.2.aureaproj";
+    const std::string legacy = data + "/projeto-032-v50.aurea";
+
+    // A fixture é mesmo do formato antigo (o teste não pode passar à toa).
+    {
+        Project p;
+        LoadReport report;
+        AUREA_CHECK(ProjectSerializer::load(p, legacy, LoadOptions{}, &report, nullptr).ok());
+        AUREA_CHECK_EQ(report.timelineVersion, 50u);
+        AUREA_CHECK(report.olderFormat && !report.partial);
+    }
+
+    const std::string out = s8(dir / "importado.aurea");
+    const std::string mediaDir = s8(dir / "midia");
+    package::ImportResult in;
+    const Status s = package::read_package(pkg, out, mediaDir, in);
+    if (!s.ok()) std::printf("pacote 0.3.2: erro %u (%.*s)\n", unsigned(s.code()), int(s.message().size()), s.message().data());
+    AUREA_CHECK(s.ok());
+    AUREA_CHECK(in.title == "Projeto 0.3.2" && in.appVersion == "0.3.2");
+    AUREA_CHECK_EQ(in.relinked, 1u);
+    AUREA_CHECK_EQ(in.missing, 0u);
+
+    Project p;
+    LoadReport report;
+    AUREA_CHECK(ProjectSerializer::load(p, out, LoadOptions{}, &report, nullptr).ok());
+    AUREA_CHECK(!report.partial);
+    // Religar a mídia regrava o projeto no formato atual, com tudo dentro.
+    AUREA_CHECK_EQ(report.timelineVersion, kTimelineSectionVersion);
+    AUREA_CHECK(count_kind(p, LayerKind::Camera) >= 1u);
+    AUREA_CHECK(count_kind(p, LayerKind::Light) >= 1u);
+    AUREA_CHECK(count_kind(p, LayerKind::Image) >= 1u);   // a fixture tem câmera, luz e imagem (sem texto)
+    bool relinked = false;
+    p.for_each_asset([&](AssetId, const Asset& a) {
+        if (a.kind == AssetKind::Image && a.sourcePath.find("midia") != std::string::npos) relinked = fs::exists(fs::u8path(a.sourcePath));
+    });
+    AUREA_CHECK(relinked);
+
+    // O `.aurea` solto da 0.3.2 também entra (byte a byte, sem regravar).
+    const std::string loose = s8(dir / "solto.aurea");
+    package::ImportResult in2;
+    AUREA_CHECK(package::read_package(legacy, loose, s8(dir / "midia_solto"), in2).ok());
+    AUREA_CHECK_EQ(in2.missing, 1u);
+    Project p2;
+    LoadReport report2;
+    AUREA_CHECK(ProjectSerializer::load(p2, loose, LoadOptions{}, &report2, nullptr).ok());
+    AUREA_CHECK_EQ(report2.timelineVersion, 50u);
+    AUREA_CHECK(count_kind(p2, LayerKind::Camera) >= 1u);
+
+    // Projetos ainda mais antigos (v44, v30) empacotados pelo mesmo escritor.
+    int k = 0;
+    for (const std::string& old : {std::string(AUREA_TEST_DATA_DIR) + "/../import-silent.aurea",
+                                   std::string(AUREA_TEST_DATA_DIR) + "/manual-editing/manual-editing.aurea"}) {
+        const std::string oldPkg = s8(dir / ("antigo" + std::to_string(k) + ".aureaproj"));
+        AUREA_CHECK(package::write_package(old, oldPkg, "Antigo", "0.2", {}, nullptr).ok());
+        package::ImportResult r3;
+        AUREA_CHECK(package::read_package(oldPkg, s8(dir / ("antigo" + std::to_string(k) + ".aurea")),
+                                          s8(dir / ("midia_antigo" + std::to_string(k))), r3).ok());
+        ++k;
+    }
+}
+
+AUREA_TEST(ProjectPackage, RecompressedPackageFromAnotherProgramStillOpens) {
+    const fs::path dir = scratch("recompactado");
+    const std::string legacy = std::string(AUREA_TEST_DATA_DIR) + "/legacy-032/projeto-032-v50.aurea";
+    const std::string aurea = read_text(legacy);
+    AUREA_CHECK(!aurea.empty());
+    const std::string png = std::string("\x89PNG\r\n\x1a\n", 8) + std::string(64, '\x42');   // só os bytes: a importação não decodifica
+
+    // Descompactado e compactado de novo: pasta por cima, "deflate", "\r\n" no
+    // manifesto e o lixo do macOS ao lado.
+    const std::string manifest = "aurea-project 1\r\ntitle Recompactado\r\napp 0.3.3\r\n"
+                                 "media media/001-camreg_padrao.png\t./camreg_padrao.png\r\n";
+    const std::string pkg = s8(dir / "Recompactado.zip");
+    write_text(pkg, model_zip({{"Recompactado/media/001-camreg_padrao.png", png, true},
+                               {"Recompactado/project.aurea", aurea, true},
+                               {"Recompactado/manifest.txt", manifest, true},
+                               {"__MACOSX/Recompactado/._project.aurea", "x", false}}));
+    package::ImportResult in;
+    const Status s = package::read_package(pkg, s8(dir / "a.aurea"), s8(dir / "midia_a"), in);
+    if (!s.ok()) std::printf("recompactado: erro %u (%.*s)\n", unsigned(s.code()), int(s.message().size()), s.message().data());
+    AUREA_CHECK(s.ok());
+    AUREA_CHECK(in.title == "Recompactado" && in.appVersion == "0.3.3");
+    AUREA_CHECK_EQ(in.relinked, 1u);
+    AUREA_CHECK(read_text(s8(dir / "midia_a" / "camreg_padrao.png")) == png);
+
+    // Um `.aurea` compactado sozinho (sem manifesto): o projeto, sem mídia.
+    const std::string zipped = s8(dir / "so-o-projeto.zip");
+    write_text(zipped, model_zip({{"Meu projeto.aurea", aurea, true}}));
+    package::ImportResult in2;
+    AUREA_CHECK(package::read_package(zipped, s8(dir / "b.aurea"), s8(dir / "midia_b"), in2).ok());
+    AUREA_CHECK(in2.title.empty());
+    AUREA_CHECK_EQ(in2.missing, 1u);
+
+    // Dois `.aurea` sem manifesto: não dá para saber qual é o projeto.
+    const std::string two = s8(dir / "dois.zip");
+    write_text(two, model_zip({{"a.aurea", aurea, false}, {"b.aurea", aurea, false}}));
+    package::ImportResult in3;
+    AUREA_CHECK(package::read_package(two, s8(dir / "c.aurea"), s8(dir / "midia_c"), in3).code() == Errc::UnsupportedFormat);
+    AUREA_CHECK(!fs::exists(dir / "c.aurea"));
+
+    // Deflate danificado: erro limpo, nada fica para trás.
+    std::string bad = model_zip({{"project.aurea", aurea, true}, {"manifest.txt", "aurea-project 1\n", true}});
+    bad[30 + 13 + 6] = static_cast<char>(bad[30 + 13 + 6] ^ 0x5A);   // no meio do deflate de project.aurea
+    const std::string badPath = s8(dir / "ruim.aureaproj");
+    write_text(badPath, bad);
+    package::ImportResult in4;
+    AUREA_CHECK(!package::read_package(badPath, s8(dir / "d.aurea"), s8(dir / "midia_d"), in4).ok());
+    AUREA_CHECK(!fs::exists(dir / "d.aurea"));
 }

@@ -41,6 +41,9 @@
 #include <cstring>
 #include <limits>
 #include <new>
+#include <functional>
+#include <unordered_map>
+#include <vector>
 
 namespace aurea {
 namespace {
@@ -334,7 +337,9 @@ bool under_layering_camera(const Composition& comp, const Layer& l, FrameIndex t
 bool wants_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept {
     if (under_layering_camera(comp, l, time)) return true;
     const Layer* p = &l;
-    for (u32 depth = 0; p && depth < 17; ++depth) {
+    // Omega grid: a cadeia de pais não tem teto; o limite só corta um ciclo.
+    const u32 chainLimit = std::max(comp.layers().count(), comp.order().size()) + 1;
+    for (u32 depth = 0; p && depth <= chainLimit; ++depth) {
         if (p->threeD) return true;
         const FrameIndex local = p->local_time(time);
         auto s = [&](TrackProperty prop, f32 fallback) noexcept {
@@ -406,16 +411,71 @@ Mat4 parenting_basis(const Layer& child, Mat4 parent, f64 local, f32* continuous
     return parent;
 }
 
-Mat4 world_chain_frac(const Composition& comp, const Layer& l, f64 time, bool threeD, f64 parentTime) noexcept {
-    const Layer* chain[17]{};
-    u32 count = 0;
-    for (const Layer* p = &l; p && count < 17; p = p->parent.valid() ? comp.layer(p->parent) : nullptr) {
-        // Projects normally reject cycles on edit/load; retain a finite fallback.
-        bool cycle = false;
-        for (u32 i = 0; i < count; ++i) cycle |= chain[i] == p;
-        if (cycle) break;
-        chain[count++] = p;
+// Omega grid (0.3.5): cache do mundo dos PAIS durante um quadro.
+// A cadeia de pais não tem mais teto (nulo → nulo → …, grade dentro de grade):
+// sem cache, N camadas sob uma cadeia de profundidade D custariam N × D
+// matrizes por quadro. Com o `WorldMatrixCacheScope` aberto (Renderer::prepare,
+// preview e export), o mundo de cada pai é calculado uma vez por (composição,
+// camada, instante, 2D/3D) e o quadro custa N + D. Fora do escopo (edições,
+// consultas da UI, testes) não há cache: o modelo pode mudar entre chamadas.
+// Só os pais vão para o cache (ponteiros da composição, nunca cópias) e só
+// cadeias sem "Parenting Helper" abaixo da raiz (a conta simples).
+struct WorldCacheKey {
+    const Composition* comp;
+    const Layer* layer;
+    f64 time;
+    bool threeD;
+    bool operator==(const WorldCacheKey& o) const noexcept {
+        return comp == o.comp && layer == o.layer && time == o.time && threeD == o.threeD;
     }
+};
+struct WorldCacheHash {
+    usize operator()(const WorldCacheKey& k) const noexcept {
+        usize h = std::hash<const void*>{}(k.comp);
+        auto mix = [&h](usize v) { h ^= v + static_cast<usize>(0x9e3779b9u) + (h << 6) + (h >> 2); };
+        mix(std::hash<const void*>{}(k.layer));
+        mix(std::hash<f64>{}(k.time));
+        mix(k.threeD ? 1u : 0u);
+        return h;
+    }
+};
+struct WorldCache {
+    std::unordered_map<WorldCacheKey, Mat4, WorldCacheHash> worlds;
+};
+thread_local WorldCache* tWorldCache = nullptr;
+
+/// Abre o cache do quadro na thread (aninhável: o de fora vale para os de dentro).
+class WorldMatrixCacheScope {
+public:
+    WorldMatrixCacheScope() noexcept {
+        if (tWorldCache) return;
+        owned_ = new (std::nothrow) WorldCache;
+        tWorldCache = owned_;
+    }
+    ~WorldMatrixCacheScope() {
+        if (!owned_) return;
+        tWorldCache = nullptr;
+        delete owned_;
+    }
+    WorldMatrixCacheScope(const WorldMatrixCacheScope&) = delete;
+    WorldMatrixCacheScope& operator=(const WorldMatrixCacheScope&) = delete;
+private:
+    WorldCache* owned_ = nullptr;
+};
+
+/// A cadeia (camada, pai, avô, …) sem teto: 24 no lugar, o resto no heap.
+struct LayerChain {
+    const Layer* inl[24]{};
+    std::vector<const Layer*> more;
+    u32 n = 0;
+    void push(const Layer* p) { if (n < 24) inl[n] = p; else more.push_back(p); ++n; }
+    const Layer* operator[](u32 i) const noexcept { return i < 24 ? inl[i] : more[i - 24]; }
+    bool contains(const Layer* p) const noexcept { for (u32 i = 0; i < n; ++i) if ((*this)[i] == p) return true; return false; }
+    void clear() noexcept { n = 0; more.clear(); }
+};
+
+Mat4 world_chain_frac(const Composition& comp, const Layer& l, f64 time, bool threeD, f64 parentTime) noexcept {
+    auto parentOf = [&](const Layer* p) -> const Layer* { return p->parent.valid() ? comp.layer(p->parent) : nullptr; };
     auto ownMatrix = [&](const Layer& node) {
         const f64 local = (&node == &l ? time : parentTime) - static_cast<f64>(node.start.value) + static_cast<f64>(node.offset.value);
         const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
@@ -423,17 +483,49 @@ Mat4 world_chain_frac(const Composition& comp, const Layer& l, f64 time, bool th
         const Mat4 bound = node.hasParentBasis ? node.parentBasis * own : own;
         return grid::evaluate(comp,node,&node == &l ? time : parentTime).matrix * bound;
     };
-    bool helper = false;
-    for (u32 i = 0; i + 1 < count; ++i)
-        for (const auto& effect : chain[i]->effects)
-            helper |= effect.enabled && effect.type == effect_type_id(effect_keys::kParentingHelper);
-    if (!helper) {
-        Mat4 plain = ownMatrix(l);
-        for (u32 i = 1; i < count; ++i) plain = ownMatrix(*chain[i]) * plain;
-        return plain;
+    auto hasHelper = [](const Layer& node) {
+        for (const auto& effect : node.effects)
+            if (effect.enabled && effect.type == effect_type_id(effect_keys::kParentingHelper)) return true;
+        return false;
+    };
+    // Projects normally reject cycles on edit/load; retain a finite fallback
+    // (the chain stops at the first repeated layer). Without a cycle the chain
+    // has at most as many layers as the composition.
+    auto collectAll = [&](LayerChain& chain) {
+        chain.clear();
+        for (const Layer* p = &l; p && !chain.contains(p); p = parentOf(p)) chain.push(p);
+    };
+    WorldCache* cache = tWorldCache;
+    const u32 limit = std::max(comp.layers().count(), comp.order().size()) + 1;
+    LayerChain chain;
+    const Mat4* top = nullptr;   // mundo já pronto do primeiro pai fora de `chain`
+    bool cyclic = false;
+    for (const Layer* p = &l; p; p = parentOf(p)) {
+        if (chain.n > limit) { cyclic = true; break; }
+        if (cache && chain.n > 0) {
+            const auto it = cache->worlds.find(WorldCacheKey{&comp, p, parentTime, threeD});
+            if (it != cache->worlds.end()) { top = &it->second; break; }
+        }
+        chain.push(p);
     }
+    if (cyclic) { collectAll(chain); top = nullptr; cache = nullptr; }
+    // Parenting Helper em qualquer nó abaixo da raiz muda a conta. Um pai do
+    // cache só entrou lá sem Helper dele até abaixo da raiz.
+    bool helper = false;
+    const u32 checked = top ? chain.n : (chain.n ? chain.n - 1 : 0);
+    for (u32 i = 0; i < checked; ++i) helper |= hasHelper(*chain[i]);
+    if (!helper) {
+        Mat4 world = top ? *top : Mat4::identity();
+        for (u32 i = chain.n; i-- > 1;) {   // os pais, da raiz para baixo
+            world = world * ownMatrix(*chain[i]);
+            if (cache) cache->worlds.emplace(WorldCacheKey{&comp, chain[i], parentTime, threeD}, world);
+        }
+        return world * ownMatrix(l);
+    }
+    if (top) collectAll(chain);   // a conta do Helper precisa da cadeia inteira
     Mat4 world;
     f32 continuousZ = 0.f;
+    u32 count = chain.n;
     while (count) {
         const Layer& node = *chain[--count];
         const f64 local = (&node == &l ? time : parentTime) - static_cast<f64>(node.start.value) + static_cast<f64>(node.offset.value);
@@ -2149,6 +2241,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                        void* imageCtx, const RenderSettings& settings, u64 frameNumber,
                        i32 playDirection, DecodeMode decodeMode, f32 speed, FrameSnapshot& out) {
     if (previewGraph_.active) return;
+    // Omega grid: o mundo de cada pai uma vez por quadro (cadeias sem teto).
+    const WorldMatrixCacheScope worldCacheScope;
     frameNumber_ = frameNumber;
     // O espectro de áudio (EffectResources) precisa saber DE QUE composição,
     // projeto e instante o planejamento é — dentro de uma pré-composição, os
@@ -9579,7 +9673,18 @@ bool Renderer::signatures_match(const FrameSignature& a, const FrameSignature& b
 void Renderer::collect_resources(u64 frameNumber) noexcept {
     // Recursos persistentes de layers que sumiram. Checado a cada 2 s — não
     // há pressa, e varrer mapas a cada frame é custo sem ganho.
-    if (frameNumber % 120 != 0) return;
+    // Omega exportação (bug 12): era `frameNumber % 120 != 0`. O contador é o do
+    // BACKEND, que avança mais de 1 por quadro de saída quando o quadro abre
+    // quadros extras (lotes de motion blur 3D, segmentos do grafo, cenas
+    // encenadas). Com passo par e início ímpar (ou qualquer passo que nunca cai
+    // num múltiplo de 120) a varredura NUNCA rodava no export inteiro: espectros
+    // e mapas de profundidade (uma textura por quadro), TimeSlice, fluxo e as
+    // cópias lineares cresciam até o sistema matar o app no meio do export. O
+    // passo depende do teto de amostras do aparelho (8/16/32) — daí "só em alguns
+    // aparelhos". Agora: a cada 120 quadros do backend desde a última varredura.
+    // Mesmas regras de idade; só libera o que não é usado há 240+ quadros.
+    if (!resource_sweep_due(frameNumber, lastCollectFrame_)) return;
+    lastCollectFrame_ = frameNumber;
     {
         // TimeSlice: faixas de instantes que não aparecem há 4 s.
         std::lock_guard<std::mutex> sl(sliceMutex_);

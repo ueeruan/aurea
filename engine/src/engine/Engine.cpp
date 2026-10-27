@@ -16362,6 +16362,20 @@ void Engine::image_export_thread_main() noexcept {
     }
     for (u32 i = 0; i < ctx.frames && result.ok(); ++i) {
         if (cancelled()) { result = Errc::Cancelled; break; }
+        // Omega exportação (bug 12): o aviso de memória do sistema (trim_memory)
+        // também vale para GIF e sequência — antes só o vídeo (export_thread_main)
+        // soltava o renderizador do export. Aqui o quadro anterior já foi lido da
+        // GPU (read_texture esperou o fence): nada do renderizador está em uso.
+        if (const u8 trim = exportTrimRequest_.exchange(0, std::memory_order_acq_rel);
+            trim && ctx.offline && !ctx.preRenderMode) {
+            std::lock_guard<std::mutex> rl(renderMutex_);
+            if (gpu_) {
+                gpu_->wait_idle();
+                const u32 textures = ctx.offline->compositor().trim_memory(trim, ~0ull);
+                gpu_->wait_idle();
+                AUREA_LOG_INFO("export imagem: aviso de memoria no quadro %u; renderizador soltou %u texturas", i, textures);
+            }
+        }
         const u32 sourceFrame = ctx.preRenderMode && ctx.preRenderDirection < 0 ? ctx.frames - 1 - i : i;
         // Tempo de SAÍDA → quadro da composição (como no vídeo). O PNG é o
         // quadro do playhead.
@@ -17011,7 +17025,12 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 if (!comp || !comp->layer(parent)) return Errc::NotFound;
                 if (parent == cmd.layer_parent.layer) return Errc::InvalidArgument;
                 LayerId cursor = parent;
-                for (u32 depth = 0; depth < kMaxNestingDepth * 4 && cursor.valid(); ++depth) {
+                // Omega grid: cadeia de pais sem teto (nulo → nulo → …). O teto
+                // antigo (32) deixava fechar um ciclo numa cadeia mais funda; um
+                // caminho com mais passos do que camadas só existe com ciclo.
+                const u32 chainLimit = std::max(comp->layers().count(), comp->order().size()) + 1;
+                for (u32 depth = 0; cursor.valid(); ++depth) {
+                    if (depth > chainLimit) return Errc::InvalidArgument;
                     if (cursor == cmd.layer_parent.layer) return Errc::InvalidArgument;
                     const Layer* p = comp->layer(cursor);
                     if (!p) break;

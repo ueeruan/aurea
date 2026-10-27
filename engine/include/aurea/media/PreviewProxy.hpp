@@ -99,6 +99,11 @@ bool proxy_frame_nv12(const DecodedFrame& frame, u32 width, u32 height,
                       std::vector<u8>& pixels);
 std::unique_ptr<VideoDecoderBackend> proxy_decoder(std::unique_ptr<VideoDecoderBackend> decoder,
                                                  std::shared_ptr<const PreviewProxy> proxy);
+/// Bugs 0.3.4 ("prévia em 1/4 verde e congelada"): o quadro decodificado do
+/// proxy é o mesmo da fonte? (média R'G'B' em 4×4 células da miniatura; o verde
+/// de YUV zerado ou um quadro de outro instante não passa). A geração confere o
+/// arquivo pronto com esta regra antes de servir (PreviewProxy.cpp).
+[[nodiscard]] bool proxy_signature_matches(const DecodedFrame& source, const DecodedFrame& proxy) noexcept;
 
 class PreviewProxyService {
 public:

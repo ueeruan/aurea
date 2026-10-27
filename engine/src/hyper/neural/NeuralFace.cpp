@@ -448,10 +448,10 @@ u32 face_stage_restored(const HyperStage& stage) noexcept {
     return 0;
 }
 
-bool face_available(const DeviceProfile& p) noexcept {
-    // 64 bits, modelo baixado e conferido, RAM que comporte ~450 MB de pico.
-    if (kAddressSpace32 || !p.abi64) return false;
-    if (p.freeRamBytes && p.freeRamBytes < (1536ull << 20)) return false;
+bool face_available(const DeviceProfile&) noexcept {
+    // 0.3.4 (bugs-034, hyper): sem restrição de aparelho (32 bits e RAM ficam
+    // por conta e risco da pessoa; a tela avisa). Só o modelo baixado e
+    // conferido decide. O orçamento de memória do processamento continua.
     return ondemand_model_ready("gfpgan-v1.4");
 }
 

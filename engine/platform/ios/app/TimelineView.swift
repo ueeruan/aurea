@@ -2451,7 +2451,7 @@ private struct TimelineGestureSurface: UIViewRepresentable {
     }
 }
 
-/// ARGB → Color (sRGB), para os pares do degradê (`ClipColors`).
+/// ARGB → Color (sRGB), para a cor do cartão (`ClipColors.solid`).
 private func omegaColor(_ argb: UInt32) -> Color {
     Color(.sRGB, red: Double((argb >> 16) & 0xFF) / 255, green: Double((argb >> 8) & 0xFF) / 255,
           blue: Double(argb & 0xFF) / 255, opacity: Double((argb >> 24) & 0xFF) / 255)
@@ -3043,11 +3043,8 @@ extension TimelineView {
                 bar.translateBy(x: -rect.midX, y: -rect.midY)
             }
             bar.clip(to: shape)
-            // 1. Degradê do retângulo INTEIRO do clipe (não anda com a rolagem).
-            let pair = AureaTimeline.clipGradient(row.type)
-            let grad = ClipColors.vary(pair.0, pair.1, id: row.id)
-            bar.fill(Path(rect), with: .linearGradient(Gradient(colors: [omegaColor(grad.0), omegaColor(grad.1)]),
-                                                       startPoint: CGPoint(x: x0, y: top), endPoint: CGPoint(x: max(x1, x0 + 1), y: top)))
+            // 1. 0.3.4 (bugs-034, cores): cor SÓLIDA do tipo, um pouco dessaturada (ClipColors.solid).
+            bar.fill(Path(rect), with: .color(omegaColor(ClipColors.solid(row.type.argb))))
             // 2. Zebra de quadros.
             omegaZebra(&bar, startFrame: startF, top: top, left: left, right: right, width: width)
             // 3. Tira de miniaturas, sem véu nem divisórias.
@@ -3059,6 +3056,13 @@ extension TimelineView {
             }
             // 4. Onda de 1 pt.
             omegaWave(&bar, row: row, top: top, x0: x0, x1: x1, width: width)
+            // 0.3.4 (bugs-034, cores): realce sutil no topo do cartão (brilho que some até 45 % da
+            // altura e um fio de 1), por cima das miniaturas e da onda.
+            let sheenDepth = m.bar * AureaTimeline.clipSheenDepth
+            bar.fill(Path(CGRect(x: left, y: top, width: right - left, height: sheenDepth)),
+                     with: .linearGradient(Gradient(colors: [AureaTimeline.clipSheen, AureaTimeline.clipSheen.opacity(0)]),
+                                           startPoint: CGPoint(x: left, y: top), endPoint: CGPoint(x: left, y: top + sheenDepth)))
+            bar.fill(Path(CGRect(x: left, y: top, width: right - left, height: m.omegaSheenLine)), with: .color(AureaTimeline.clipSheenLine))
             // 5. Triângulo da etiqueta no canto de cima à esquerda (catetos de meia barra).
             if row.label > 0 && Int(row.label) <= AureaColors.labelPalette.count {
                 var tri = Path()
@@ -3147,9 +3151,11 @@ extension TimelineView {
         guard bucket > 0 else { return }
         let fitted = omegaText.fitted(row.id, name: row.name, bucket: bucket, width: CGFloat(bucket) * 12)
         guard !fitted.isEmpty else { return }
-        let color: Color = row.type == .audio ? AureaTimeline.clipLabelOnAudio : AureaTimeline.clipLabel
-        let text = context.resolve(Text(fitted).font(.aurea(size: 11, weight: .medium)).foregroundColor(color))
-        context.draw(text, at: CGPoint(x: x0 + m.omegaLabelInset, y: top + m.bar / 2), anchor: .leading)
+        // 0.3.4 (bugs-034, cores): branco em todos os tipos, com sombra curta (legível sobre as miniaturas).
+        var label = context
+        label.addFilter(.shadow(color: AureaTimeline.clipLabelShadow, radius: m.omegaLabelShadow / 2, x: 0, y: m.omegaShadow))
+        let text = label.resolve(Text(fitted).font(.aurea(size: 11, weight: .medium)).foregroundColor(AureaTimeline.clipLabel))
+        label.draw(text, at: CGPoint(x: x0 + m.omegaLabelInset, y: top + m.bar / 2), anchor: .leading)
     }
 
     /// Losango dos outros parâmetros (e de toda camada fora de edição): branco a 160/255, traço de 0,5.

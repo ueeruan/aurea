@@ -1341,9 +1341,14 @@ enum AureaTimeline {
     static let bookmarks: [Color] = [Color(hex: 0xFFF16586), Color(hex: 0xFFFAD3A5), Color(hex: 0xFF4BE29D), Color(hex: 0xFF3C8CE7)]
     /// Fundo da linha da câmera principal (vermelho 10 %).
     static let mainCameraRow = Color(hex: 0x1AD13665)
-    /// Rótulo do clipe (preto; branco no áudio), onda e zebra de quadros.
-    static let clipLabel = Color(hex: 0xFF000000)
-    static let clipLabelOnAudio = Color(hex: 0xFFFFFFFF)
+    /// 0.3.4 (bugs-034, cores): rótulo do clipe em branco sobre a cor sólida do tipo
+    /// (`ClipColors.solid`), com uma sombra curta preta a 50 %; onda e zebra de quadros.
+    static let clipLabel = Color(hex: 0xFFFFFFFF)
+    static let clipLabelShadow = Color(hex: 0x80000000)
+    /// Realce no topo do cartão: brilho branco 14 % que some em `clipSheenDepth` da altura, e fio branco 20 %.
+    static let clipSheen = Color(hex: 0x24FFFFFF)
+    static let clipSheenLine = Color(hex: 0x33FFFFFF)
+    static let clipSheenDepth: CGFloat = 0.45
     static let clipWave = Color(hex: 0xFFEAEAEA)
     static let clipZebra = Color(hex: 0x10FFFFFF)
     /// Sombra leve do cartão e a do clipe levantado.
@@ -1357,24 +1362,6 @@ enum AureaTimeline {
     static let keyPartial = Color(hex: 0xFF9D9FA5)
     /// Alças de corte e de velocidade do modo foco (o alfa varia com o gesto).
     static let trimGrip = Color(hex: 0xFFFFFFFF)
-
-    /// Par do degradê do clipe por tipo (início, fim), em ARGB. Os sete primeiros
-    /// são os da referência; 3D, partículas, ajuste e luz só existem no AUREA.
-    static func clipGradient(_ type: TimelineLayerType) -> (UInt32, UInt32) {
-        switch type {
-        case .video, .image: return (0xFF48C3F5, 0xFF156AE0)
-        case .shape: return (0xFF52CCBC, 0xFF46A8D6)
-        case .group: return (0xFFF16586, 0xFFF66A28)
-        case .text: return (0xFFFAD961, 0xFFF89436)
-        case .audio: return (0xFF5236D1, 0xFFAF62D6)
-        case .camera: return (0xFFD13665, 0xFFAA214A)
-        case .null: return (0xFFBDC3CE, 0xFFA2AEC6)
-        case .model3D: return (0xFF7ED9A0, 0xFF2FA36B)
-        case .particles: return (0xFFE07BD8, 0xFF9B4FD9)
-        case .adjustment: return (0xFF8E9BB8, 0xFF5D6A8A)
-        case .light: return (0xFFB8F0FF, 0xFF5EC8E8)
-        }
-    }
 }
 
 /// Fundo escuro, faixa sólida, texto claro e forma de onda de um tipo de clipe.

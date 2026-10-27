@@ -1216,9 +1216,16 @@ object AureaTimeline {
     val Bookmarks = listOf(Color(0xFFF16586), Color(0xFFFAD3A5), Color(0xFF4BE29D), Color(0xFF3C8CE7))
     /** Fundo da linha da câmera principal (vermelho 10 %). */
     val MainCameraRow = Color(0x1AD13665)
-    /** Rótulo do clipe sobre o degradê (preto) e sobre o áudio (branco). */
-    val ClipLabel = Color(0xFF000000)
-    val ClipLabelOnAudio = Color(0xFFFFFFFF)
+    /**
+     * 0.3.4 (bugs-034, cores): rótulo do clipe em branco sobre a cor sólida do tipo
+     * (`ClipColors.solid`), com uma sombra curta preta a 50 %.
+     */
+    val ClipLabel = Color(0xFFFFFFFF)
+    val ClipLabelShadow = Color(0x80000000)
+    /** Realce no topo do cartão: brilho branco 14 % que some em [ClipSheenDepth] da altura, e fio branco 20 %. */
+    val ClipSheen = Color(0x24FFFFFF)
+    val ClipSheenLine = Color(0x33FFFFFF)
+    const val ClipSheenDepth = 0.45f
     /** Forma de onda do clipe. */
     val ClipWave = Color(0xFFEAEAEA)
     /** Zebra de quadros (branco 16/255). */
@@ -1235,24 +1242,6 @@ object AureaTimeline {
     val KeyPartial = Color(0xFF9D9FA5)
     /** Alças de corte e de velocidade do modo foco (o alfa varia com o gesto). */
     val TrimGrip = Color(0xFFFFFFFF)
-
-    /**
-     * Par do degradê do clipe por tipo (início, fim). Os sete primeiros são os
-     * da referência; 3D, partículas, ajuste e luz só existem no AUREA.
-     */
-    fun clipGradient(type: LayerType): Pair<Color, Color> = when (type) {
-        LayerType.Video, LayerType.Image -> Color(0xFF48C3F5) to Color(0xFF156AE0)
-        LayerType.Shape -> Color(0xFF52CCBC) to Color(0xFF46A8D6)
-        LayerType.Group -> Color(0xFFF16586) to Color(0xFFF66A28)
-        LayerType.Text -> Color(0xFFFAD961) to Color(0xFFF89436)
-        LayerType.Audio -> Color(0xFF5236D1) to Color(0xFFAF62D6)
-        LayerType.Camera -> Color(0xFFD13665) to Color(0xFFAA214A)
-        LayerType.Null -> Color(0xFFBDC3CE) to Color(0xFFA2AEC6)
-        LayerType.Model3D -> Color(0xFF7ED9A0) to Color(0xFF2FA36B)
-        LayerType.Particles -> Color(0xFFE07BD8) to Color(0xFF9B4FD9)
-        LayerType.Adjustment -> Color(0xFF8E9BB8) to Color(0xFF5D6A8A)
-        LayerType.Light -> Color(0xFFB8F0FF) to Color(0xFF5EC8E8)
-    }
 }
 
 /** Fundo escuro, faixa sólida, texto claro e forma de onda de um tipo de clipe. */

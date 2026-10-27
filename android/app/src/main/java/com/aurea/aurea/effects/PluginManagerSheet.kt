@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -75,7 +76,9 @@ internal fun PluginManagerSheet(store: EditorStore, onDismiss: () -> Unit) {
                 Text(stringResource(R.string.plug_empty), modifier = Modifier.padding(vertical = 8.dp),
                     style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
             }
-            store.plugins.forEach { p -> PluginRow(p, tag) { removing = p } }
+            // Bugs 0.3.4 (bug 3): cada linha com a sua chave "plugin:<id>" (estado dos
+            // interruptores fica com o plugin certo quando outro entra ou sai).
+            store.plugins.forEach { p -> key(pluginItemKey(p.id)) { PluginRow(p, tag) { removing = p } } }
             // 0.3.4 plugins: consentimento, console e alertas dos scripts.
             PluginOverlays(store)
             Text(stringResource(R.string.plug_safety), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))

@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.ContentObserver
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -14,7 +13,6 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -46,7 +44,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -236,19 +233,70 @@ internal fun mediaDuration(ms: Long): String {
     else String.format(Locale.ROOT, "%d:%02d", s / 60, s % 60)
 }
 
+// =============================================================================
+// Bugs 0.3.4 (seleção de mídia): só o último pedido vence; áudio pelos arquivos
+// =============================================================================
+
+/** Um valor carregado e a chave (a mídia) a que ele pertence. */
+internal data class LoadedFor<T>(val key: Any?, val value: T?) {
+    /** O valor só vale para a SUA chave: o de outra mídia nunca aparece. */
+    fun valueFor(current: Any?): T? = if (key == current) value else null
+}
+
+/**
+ * Carrega fora da thread principal um valor que pertence a UMA chave (a mídia
+ * em foco). Trocou a chave: o pedido anterior é cancelado e o resultado
+ * guardado leva a chave junto, então o de outra mídia nunca é mostrado —
+ * antes o `produceState` mantinha a mídia ANTERIOR na prévia até a nova chegar
+ * (e numa troca rápida parecia sempre "uma atrás").
+ */
+@Composable
+internal fun <T : Any> rememberLoaded(key: Any?, load: () -> T?): T? {
+    var loaded by remember { mutableStateOf(LoadedFor<T>(Unit, null)) }
+    LaunchedEffect(key) {
+        val value = withContext(Dispatchers.IO) { runCatching { load() }.getOrNull() }
+        loaded = LoadedFor(key, value)
+    }
+    return loaded.valueFor(key)
+}
+
+/**
+ * O que a pessoa escolheu em "Outros arquivos e nuvem" da faixa de mídia:
+ * fotos, vídeos E áudio (o seletor de documentos do sistema não precisa de
+ * `READ_MEDIA_AUDIO`, que a 0.3.3 decidiu não pedir). O áudio vira camada de
+ * áudio; o resto segue como antes.
+ */
+internal object PickedMedia {
+    enum class Kind { Image, Video, Audio }
+
+    /** Tipos do seletor de documentos (SAF). */
+    val PICKER_TYPES = arrayOf("image/*", "video/*", "audio/*", "application/ogg")
+
+    /** Extensões de áudio: alguns provedores marcam M4A como `video/mp4` ou mandam `application/octet-stream`. */
+    val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "m4b", "aac", "wav", "wave", "aif", "aiff", "aifc", "caf", "flac", "ogg", "oga", "opus", "amr", "3ga", "wma", "mka")
+
+    fun kind(mime: String?, displayName: String): Kind {
+        val ext = displayName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        if (ext in AUDIO_EXTENSIONS) return Kind.Audio
+        val type = mime?.lowercase(Locale.ROOT).orEmpty()
+        return when {
+            type.startsWith("audio/") || type == "application/ogg" -> Kind.Audio
+            type.startsWith("video/") -> Kind.Video
+            else -> Kind.Image
+        }
+    }
+}
+
 /** Miniatura do MediaStore (256 px), carregada fora da thread principal. */
 @Suppress("DEPRECATION")
 @Composable
 internal fun MediaThumb(uri: Uri, video: Boolean, modifier: Modifier = Modifier, sizePx: Int = 256) {
     val context = LocalContext.current
-    val bitmap by produceState<Bitmap?>(null, uri, sizePx) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                if (Build.VERSION.SDK_INT >= 29) context.contentResolver.loadThumbnail(uri, android.util.Size(sizePx, sizePx), null)
-                else if (video) MediaStore.Video.Thumbnails.getThumbnail(context.contentResolver, ContentUris.parseId(uri), MediaStore.Video.Thumbnails.MINI_KIND, null)
-                else MediaStore.Images.Thumbnails.getThumbnail(context.contentResolver, ContentUris.parseId(uri), MediaStore.Images.Thumbnails.MINI_KIND, null)
-            }.getOrNull()
-        }
+    // Bugs 0.3.4: a capa de um álbum que mudou não mostra a miniatura antiga.
+    val bitmap = rememberLoaded(uri to sizePx) {
+        if (Build.VERSION.SDK_INT >= 29) context.contentResolver.loadThumbnail(uri, android.util.Size(sizePx, sizePx), null)
+        else if (video) MediaStore.Video.Thumbnails.getThumbnail(context.contentResolver, ContentUris.parseId(uri), MediaStore.Video.Thumbnails.MINI_KIND, null)
+        else MediaStore.Images.Thumbnails.getThumbnail(context.contentResolver, ContentUris.parseId(uri), MediaStore.Images.Thumbnails.MINI_KIND, null)
     }
     Box(modifier.background(AureaColors.AddTile)) {
         bitmap?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
@@ -286,7 +334,10 @@ internal fun MediaStrip(store: EditorStore, ui: EditorUi, close: () -> Unit) {
     val full = remember(revision) { context.galleryFull(false) || context.galleryFull(true) }
     val partial = remember(revision) { context.galleryPartial() }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { revision++ }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
+    // Bugs 0.3.4: "Outros arquivos e nuvem" abre o seletor de documentos com
+    // fotos, vídeos E áudio (antes o seletor de fotos: MP3/M4A/WAV não
+    // apareciam). Sem permissão de áudio; o store faz do áudio camada de áudio.
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
         if (uris.isNotEmpty()) { store.importMediaBatch(uris); close() }
     }
     // 0.3.0: sequência de imagens (renders do Blender etc.) pela pasta ou pelos quadros.
@@ -387,7 +438,7 @@ internal fun MediaStrip(store: EditorStore, ui: EditorUi, close: () -> Unit) {
                     // Extras do AUREA, no fim da faixa.
                     item(key = "files") {
                         StripIconCell(cell, stringResource(R.string.gallery_files), CupertinoGlyph.Folder, "add.media.files") {
-                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                            picker.launch(PickedMedia.PICKER_TYPES)
                         }
                     }
                     item(key = "sequence") {

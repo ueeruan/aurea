@@ -224,8 +224,10 @@ struct ProjectSettingsPanel: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity).background(OmegaChrome.column)
                 .clipShape(TopCorners())
+                // O painel inteiro é alvo de toque: o toque no vazio dele não chega ao véu.
+                // Bug 6b (0.3.5): sem o `.onTapGesture {}` que ficava aqui — um toque de
+                // ANCESTRAL disputa o toque com os botões e caixas de dentro da rolagem.
                 .contentShape(Rectangle())
-                .onTapGesture {}
                 .offset(y: enter * bounds.size.height)
                 .accessibilityIdentifier("projectSettings")
             }
@@ -417,7 +419,8 @@ struct ProjectSettingsPanel: View {
     private func menuItems(_ key: String) -> [MenuEntry] {
         if key == "res" {
             return resolutions.map { side, label -> MenuEntry in
-                .item(label, selected: shortest == side) { let size = sizeFor(side, ratio: ratio); setSize(size.0, size.1) }
+                // Bug 6b (0.3.5): ids das opções (= Android).
+                .item(label, selected: shortest == side, tag: "projectSettings.resolution.\(side)") { let size = sizeFor(side, ratio: ratio); setSize(size.0, size.1) }
             }
         }
         if key == "fps" {

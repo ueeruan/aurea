@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (grade): a grade "controlada por" um nulo (nulo de controle, vínculo sem teto). -->
+    <string name="om_grid_controlled_by">Controlado por</string>
+    <string name="om_grid_controlled_none">Ninguno</string>
+    <string name="om_grid_nulls_header">Nulos</string>
+    <string name="om_grid_create_control_null">Crear nulo de control</string>
+    <string name="om_grid_control_null_name">Control de la cuadrícula</string>
+    <string name="om_grid_controlled_hint">Mover, girar o escalar el nulo lleva toda la cuadrícula consigo, alrededor de su punto de anclaje.</string>
+    <string name="om_grid_linked">La cuadrícula ahora sigue al nulo elegido.</string>
+    <string name="om_grid_unlinked">La cuadrícula ya no sigue al nulo.</string>
+    <string name="om_grid_link_cycle">Ese nulo ya sigue a esta cuadrícula: el vínculo cerraría un ciclo. Elige otro nulo.</string>
+    <string name="om_grid_link_failed">No se pudo vincular la cuadrícula a ese nulo.</string>
+    <string name="om_grid_link_locked">La cuadrícula está bloqueada. Desbloquéala para cambiar el control.</string>
+    <string name="om_grid_control_null_created">Nulo de control creado en el centro de la cuadrícula. Mueve, gira o escala el nulo.</string>
+</resources>

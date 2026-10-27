@@ -662,6 +662,14 @@ public:
     /// camada vetorial nova; senão entra como grupo novo nela. Devolve a camada.
     [[nodiscard]] Result<u64> add_freehand_path(u64 layerId, const f32* xy, usize count, f32 error) noexcept;
 
+    // --- Bugs 0.3.4 (bug 11; EngineOmegaOutline.cpp) -----------------------------
+    /// "Converter em contorno": a forma VIVA (SDF) vira camada vetorial com a
+    /// mesma silhueta (no cabeçote), preenchimento e contorno, editável ponto a
+    /// ponto. Mantém id, transform, tempo, efeitos e máscaras; tira as trilhas
+    /// da forma. Falso: não é forma viva, está travada ou não há silhueta.
+    /// Um passo de desfazer.
+    bool convert_shape_to_outline(u64 layerId) noexcept;
+
     // --- Omega conteúdo (área 06; EngineOmegaContent.cpp) -------------------------
     /// Camada de DESENHO vazia (vetorial com `VectorData::drawing`), do cabeçote
     /// até o fim, no centro. Um passo de desfazer. Devolve o id.
@@ -719,6 +727,22 @@ public:
     /// composição. GIF de um quadro só vira imagem do mesmo jeito.
     [[nodiscard]] Result<u64> import_gif(const std::string& path, const char* name) noexcept;
     [[nodiscard]] Result<u64> create_grid(const u64* ids, u32 count) noexcept;
+    // Omega grid (0.3.5): a grade "controlada por" um nulo. A camada
+    // controladora da grade vira filha do nulo (com a compensação do vincular:
+    // nada pula na tela) e dali em diante a grade inteira segue a posição, a
+    // rotação X/Y/Z, a escala e a âncora do nulo — e de toda a cadeia de pais
+    // dele, sem teto de profundidade — no preview e no export.
+    /// A camada é a controladora de uma grade?
+    [[nodiscard]] bool is_grid_controller(u64 layerId) noexcept;
+    /// O nulo que controla a grade (0 = nenhum).
+    [[nodiscard]] u64 grid_control_null(u64 gridId) noexcept;
+    /// Vincula a grade ao nulo (`nullId` 0 = desvincular). Um passo de
+    /// desfazer. Devolve `grid::kLink*` (0 = ok; 3 = fecharia um ciclo).
+    i32 set_grid_control_null(u64 gridId, u64 nullId) noexcept;
+    /// "Criar nulo de controle": um nulo 3D no centro da grade (o centro dos
+    /// elementos no mundo), já vinculado. Um passo de desfazer. `name` = o
+    /// nome da camada nova (a UI manda o texto no idioma dela).
+    [[nodiscard]] Result<u64> create_grid_control_null(u64 gridId, const char* name) noexcept;
     [[nodiscard]] std::string foreground_model_directory() const { return config_.documentsDirectory + "/ai/rotobrush"; }
     /// Texto no caminho: camada-guia vetorial (0 = desliga), margem inicial,
     /// perpendicular, invertido.

@@ -12,6 +12,7 @@ import SwiftUI
 import UIKit
 import Photos
 import AVFoundation
+import UniformTypeIdentifiers
 
 // MARK: - A biblioteca de fotos (fotos e vídeos juntos, álbuns)
 
@@ -130,23 +131,64 @@ func omegaDuration(_ seconds: Double) -> String {
     return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
 }
 
+// MARK: - Bugs 0.3.4 (seleção de mídia): só o último pedido vence; áudio pelos arquivos
+
+/// Uma imagem carregada e a mídia a que ela pertence.
+struct OmegaLoadedImage {
+    let id: String
+    let image: UIImage
+}
+
+/// O que a pessoa escolheu em "Outros arquivos e nuvem" da faixa de mídia:
+/// fotos, vídeos E áudio (Arquivos). O áudio vira camada de áudio. Par de
+/// `PickedMedia` (MediaGallery.kt), com as mesmas extensões.
+enum OmegaPickedMedia {
+    enum Kind { case image, video, audio }
+    /// Alguns provedores não marcam M4A/OGG/OPUS como áudio: a extensão vence.
+    static let audioExtensions: Set<String> = ["mp3", "m4a", "m4b", "aac", "wav", "wave", "aif", "aiff", "aifc", "caf", "flac",
+                                               "ogg", "oga", "opus", "amr", "3ga", "wma", "mka"]
+    static var types: [UTType] { [.image, .movie, .audio] }
+    static func kind(_ url: URL) -> Kind {
+        let ext = url.pathExtension.lowercased()
+        if audioExtensions.contains(ext) { return .audio }
+        if let type = UTType(filenameExtension: ext) {
+            if type.conforms(to: .audio) { return .audio }
+            if type.conforms(to: .movie) || type.conforms(to: .video) { return .video }
+        }
+        return .image
+    }
+}
+
 /// Miniatura do Fotos (cantos retos, véu leve).
+/// Bugs 0.3.4: a grade identifica as células pela posição; trocar de álbum
+/// deixava a miniatura da mídia ANTERIOR (o pedido era só no `onAppear`). Agora
+/// a imagem leva a mídia junto, o pedido velho é cancelado e ignorado.
 struct OmegaAssetThumb: View {
     let asset: PHAsset
     var size: CGFloat = 256
-    @State private var image: UIImage?
+    @State private var loaded: OmegaLoadedImage?
+    @State private var wanted = ""
     @State private var request = PHInvalidImageRequestID
     var body: some View {
+        let image = loaded?.id == asset.localIdentifier ? loaded?.image : nil
         AureaColors.addTile
             .overlay { if let image { Image(uiImage: image).resizable().scaledToFill() } }
             .overlay { AureaColors.addScrimSoft }
             .clipped()
-            .onAppear {
-                let options = PHImageRequestOptions(); options.isNetworkAccessAllowed = true; options.resizeMode = .fast
-                request = PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: size, height: size), contentMode: .aspectFill,
-                                                                options: options) { result, _ in DispatchQueue.main.async { image = result } }
-            }
+            .onAppear { load(asset) }
+            // O valor novo vem no parâmetro: o `asset` capturado aqui é o anterior.
+            .onChange(of: asset) { load($0) }
             .onDisappear { PHImageManager.default().cancelImageRequest(request) }
+    }
+    private func load(_ target: PHAsset) {
+        PHImageManager.default().cancelImageRequest(request)
+        let id = target.localIdentifier
+        wanted = id
+        let options = PHImageRequestOptions(); options.isNetworkAccessAllowed = true; options.resizeMode = .fast
+        request = PHImageManager.default().requestImage(for: target, targetSize: CGSize(width: size, height: size), contentMode: .aspectFill,
+                                                        options: options) { result, _ in
+            DispatchQueue.main.async { if wanted == id, let result { loaded = OmegaLoadedImage(id: id, image: result) } }
+        }
     }
 }
 
@@ -235,8 +277,10 @@ struct MediaStripView: View {
                                     .multilineTextAlignment(.center).frame(width: 200, height: cell)
                             }
                             // Extras do AUREA, no fim da faixa.
+                            // Bugs 0.3.4: Arquivos com fotos, vídeos E áudio (antes o seletor de
+                            // fotos: MP3/M4A/WAV não apareciam). O áudio vira camada de áudio.
                             StripActionCell(cell: cell, label: AureaText.t("gallery_files"), glyph: CupertinoGlyph.Folder, tag: "add.media.files") {
-                                omegaRequestPicker(model, shell, .gallery)
+                                omegaRequestPicker(model, shell, .mediaFiles)
                             }
                             StripActionCell(cell: cell, label: AureaText.t("seq_title"), glyph: CupertinoGlyph.SquareStack3dUp, tag: "add.media.sequence") {
                                 // A escolha pasta × quadros mora na raiz (AddLayerPickers). Corrige o
@@ -427,7 +471,9 @@ struct MediaBrowserView: View {
                     if let asset = focused {
                         let height = max(0, previewFull - min(collapsed, previewFull))
                         if height > 0.5 {
+                            // Bugs 0.3.4: uma prévia por mídia (estado e pedidos novos a cada foco).
                             OmegaMediaPreview(asset: asset, trim: trims[asset.localIdentifier], chip: $chip)
+                                .id(asset.localIdentifier)
                                 .frame(height: height).clipped()
                         }
                         controlBar(asset, previewFull: previewFull)
@@ -715,6 +761,9 @@ private struct OmegaMediaPreview: View {
     @State private var player: AVPlayer?
     @State private var playing = false
     @State private var observer: Any?
+    /// Bugs 0.3.4: a mídia do último pedido; resposta de outra é ignorada.
+    @State private var wanted = ""
+    @State private var request = PHInvalidImageRequestID
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -748,22 +797,27 @@ private struct OmegaMediaPreview: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("media.preview")
-        .onAppear(perform: load)
-        .onChange(of: asset) { _ in stop(); player = nil; image = nil; load() }
-        .onDisappear { stop() }
+        .onAppear { load(asset) }
+        // Bugs 0.3.4 (prévia uma mídia atrás): no `onChange` de um parâmetro o
+        // `asset` capturado é o ANTERIOR — o carregamento pedia e mostrava a mídia
+        // velha. A nova vem no parâmetro; a view também tem `.id` por mídia.
+        .onChange(of: asset) { newAsset in stop(); player = nil; image = nil; load(newAsset) }
+        .onDisappear { stop(); PHImageManager.default().cancelImageRequest(request) }
     }
 
-    private func load() {
-        let target = asset
-        if asset.mediaType == .video {
+    private func load(_ target: PHAsset) {
+        PHImageManager.default().cancelImageRequest(request)
+        let id = target.localIdentifier
+        wanted = id
+        if target.mediaType == .video {
             let options = PHVideoRequestOptions(); options.isNetworkAccessAllowed = true
-            PHImageManager.default().requestPlayerItem(forVideo: asset, options: options) { item, _ in
-                DispatchQueue.main.async { if target == asset, let item { player = AVPlayer(playerItem: item); seekToStart() } }
+            request = PHImageManager.default().requestPlayerItem(forVideo: target, options: options) { item, _ in
+                DispatchQueue.main.async { if wanted == id, let item { player = AVPlayer(playerItem: item); seekToStart() } }
             }
         } else {
             let options = PHImageRequestOptions(); options.isNetworkAccessAllowed = true; options.deliveryMode = .highQualityFormat
-            PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 1280, height: 1280), contentMode: .aspectFit, options: options) { result, _ in
-                DispatchQueue.main.async { if target == asset { image = result } }
+            request = PHImageManager.default().requestImage(for: target, targetSize: CGSize(width: 1280, height: 1280), contentMode: .aspectFit, options: options) { result, _ in
+                DispatchQueue.main.async { if wanted == id { image = result } }
             }
         }
     }
@@ -893,6 +947,8 @@ private struct OmegaTrimBar: View {
     @Binding var trim: OmegaTrim
     @State private var frames: [UIImage] = []
     @State private var dragBase: OmegaTrim?
+    /// Bugs 0.3.4: o vídeo do último pedido; a tira de outro é ignorada.
+    @State private var wanted = ""
 
     var body: some View {
         GeometryReader { geometry in
@@ -920,8 +976,9 @@ private struct OmegaTrimBar: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(AureaText.t("om_media_trim"))
         .accessibilityIdentifier("media.trim")
-        .onAppear(perform: loadFrames)
-        .onChange(of: asset) { _ in frames = []; loadFrames() }
+        .onAppear { loadFrames(asset) }
+        // Bugs 0.3.4: o vídeo novo vem no parâmetro (o `asset` capturado é o anterior).
+        .onChange(of: asset) { newAsset in frames = []; dragBase = nil; loadFrames(newAsset) }
     }
 
     private func handle(start: Bool, x: CGFloat, width: CGFloat, duration: Double) -> some View {
@@ -946,10 +1003,11 @@ private struct OmegaTrimBar: View {
             .accessibilityIdentifier(start ? "media.trim.start" : "media.trim.end")
     }
 
-    private func loadFrames() {
-        let target = asset
+    private func loadFrames(_ target: PHAsset) {
+        let id = target.localIdentifier
+        wanted = id
         let options = PHVideoRequestOptions(); options.isNetworkAccessAllowed = true
-        PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
+        PHImageManager.default().requestAVAsset(forVideo: target, options: options) { avAsset, _, _ in
             guard let avAsset else { return }
             let generator = AVAssetImageGenerator(asset: avAsset)
             generator.appliesPreferredTrackTransform = true
@@ -960,7 +1018,7 @@ private struct OmegaTrimBar: View {
                 let time = CMTime(seconds: duration * Double(i) / 8, preferredTimescale: 600)
                 if let cg = try? generator.copyCGImage(at: time, actualTime: nil) { images.append(UIImage(cgImage: cg)) }
             }
-            DispatchQueue.main.async { if target == asset { frames = images } }
+            DispatchQueue.main.async { if wanted == id { frames = images } }
         }
     }
 }

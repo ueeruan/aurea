@@ -139,6 +139,49 @@
             <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.content</string></array>
             <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>mtl</string></array></dict>
         </dict>
+        <!-- Bugs 0.3.4 (importar projeto): o arquivo do projeto que chegou
+             como .pjf em alguns aparelhos. O motor reconhece pelo conteúdo. -->
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.aurea.import.pjf</string>
+            <key>UTTypeDescription</key><string>AUREA project file</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>pjf</string></array></dict>
+        </dict>
+    </array>
+
+    <!-- Bugs 0.3.4 (importar projeto): os tipos do AUREA. Sem eles, tocar num
+         .aureaproj no app Arquivos, no AirDrop ou num mensageiro não oferecia o
+         AUREA, e o arquivo chegava sem dono. O app recebe pelo `onOpenURL`
+         (AureaApp.swift) e importa como projeto NOVO. -->
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.aurea.project-package</string>
+            <key>UTTypeDescription</key><string>AUREA project file</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.content</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>aureaproj</string></array><key>public.mime-type</key><string>application/x-aurea-project</string></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.aurea.project</string>
+            <key>UTTypeDescription</key><string>AUREA project</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.content</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>aurea</string></array></dict>
+        </dict>
+    </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key><string>AUREA project file</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
+            <key>LSHandlerRank</key><string>Owner</string>
+            <key>LSItemContentTypes</key><array><string>com.aurea.project-package</string><string>com.aurea.project</string></array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key><string>AUREA project file (.pjf)</string>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>LSItemContentTypes</key><array><string>com.aurea.import.pjf</string></array>
+        </dict>
     </array>
 
     <!-- ANÚNCIOS (Unity LevelPlay + Unity Ads; consentimento pelo UMP do Google).

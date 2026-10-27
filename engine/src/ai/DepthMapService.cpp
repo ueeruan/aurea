@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <new>
 #include <system_error>
 
@@ -90,6 +91,8 @@ u32 DepthMapService::activity_state() noexcept {
 
 void DepthMapService::report_failure(const char* reason) noexcept {
     lastJobFailed_.store(true, std::memory_order_relaxed);
+    // Os chamadores são as faltas de memória e o worker que não nasceu.
+    lastFailure_.store(std::strstr(reason, "memoria") ? kFailMemory : kFailGeneric, std::memory_order_relaxed);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         ++stats_.failures;
@@ -99,7 +102,15 @@ void DepthMapService::report_failure(const char* reason) noexcept {
 
 bool DepthMapService::ensure_model_locked() {
     if (foregroundMode_ ? foreground_.loaded() : estimator_.loaded()) return true;
-    if (modelFailed_) return false;
+    if (modelFailed_) {
+        // Bugs 0.3.4: sem pedido do usuário não tenta a cada quadro; com um
+        // traço novo ou "Propagar clipe" (retry_failed), tenta de novo.
+        if (!retryModel_.exchange(false, std::memory_order_relaxed)) {
+            lastFailure_.store(kFailModel, std::memory_order_relaxed);
+            return false;
+        }
+        modelFailed_ = false;
+    }
     const Status s = foregroundMode_ ? foreground_.load() : estimator_.load(DepthEstimator::Backend::Auto);
     std::lock_guard<std::mutex> lock(mutex_);
     stats_.modelLoaded = s.ok();
@@ -108,6 +119,7 @@ bool DepthMapService::ensure_model_locked() {
         // Não tenta de novo a cada quadro: só depois de `clear` (outro projeto).
         modelFailed_ = true;
         lastJobFailed_.store(true, std::memory_order_relaxed);
+        lastFailure_.store(s.code() == Errc::OutOfMemory ? kFailMemory : kFailModel, std::memory_order_relaxed);
         ++stats_.failures;
         AUREA_LOG_WARN("%s: modelo nao carregou (%s)", foregroundMode_ ? "Rotobrush" : "profundidade", s.message().data());
     }
@@ -128,6 +140,7 @@ DepthMapPtr DepthMapService::run_pixels_locked(u64 key, const u8* pixels, u32 wi
         ++stats_.failures;
         if (s.code() != Errc::Cancelled) {
             lastJobFailed_.store(true, std::memory_order_relaxed);
+            lastFailure_.store(s.code() == Errc::OutOfMemory ? kFailMemory : kFailGeneric, std::memory_order_relaxed);
             AUREA_LOG_WARN("profundidade: inferencia falhou (%s)", s.message().data());
         }
         return nullptr;
@@ -324,18 +337,35 @@ bool DepthMapService::decode_locked(const Job& job, FrameRef& frame) {
         decoderAsset_ = job.sourceKey;
         decoderFactory_ = job.factory;
         decoderPts_ = -1;
-        if (!decoder_) return false;
+        if (!decoder_) {
+            decoderAsset_ = 0;   // bugs 0.3.4: o próximo pedido tenta abrir de novo
+            lastFailure_.store(kFailDecode, std::memory_order_relaxed);
+            return false;
+        }
     }
+    // Bugs 0.3.4 (Rotobrush que não inicia): um decoder que deu erro (codec do
+    // aparelho tomado por outro, estado de erro do MediaCodec) era reaproveitado
+    // para sempre e todo pedido seguinte falhava — "Pinte mais um traço ou
+    // propague de novo" nunca funcionava. Erro do decoder = fechar; o próximo
+    // pedido abre outro.
+    auto drop_decoder = [&] {
+        decoder_.reset();
+        decoderAsset_ = 0;
+        decoderFactory_ = nullptr;
+        decoderPts_ = -1;
+        lastFailure_.store(kFailDecode, std::memory_order_relaxed);
+    };
     VideoDecoderBackend& dec = *decoder_;
     const i64 half = std::max<i64>(1, job.frameUs / 2);
     const i64 deliverFrom = job.targetUs - half;
     const bool forward = decoderPts_ >= 0 && deliverFrom > decoderPts_
                       && job.targetUs - decoderPts_ <= std::max<i64>(dec.keyframe_interval_us(), 4 * job.frameUs);
     if (!forward) {
-        if (!dec.seek_to_keyframe(job.targetUs).ok()) return false;
+        if (!dec.seek_to_keyframe(job.targetUs).ok()) { drop_decoder(); return false; }
         decoderPts_ = -1;
     }
     frame = FrameRef{};
+    bool broken = true;   // sem quadro e sem fim de arquivo: o decoder não serve
     // Um GOP longo no máximo: um decoder que nunca chega ao alvo não prende o worker.
     for (u32 i = 0; i < 1200 && !frame; ++i) {
         if (cancel_.load(std::memory_order_relaxed)) return false;
@@ -343,10 +373,12 @@ bool DepthMapService::decode_locked(const Job& job, FrameRef& frame) {
         bool eos = false;
         if (!dec.next_frame(deliverFrom, frame, pts, eos).ok()) break;
         decoderPts_ = pts;
-        if (eos && !frame) break;
+        if (eos && !frame) { broken = false; break; }
     }
     if (!frame) {
         decoderPts_ = -1;   // a posição é desconhecida: o próximo pedido faz seek
+        if (broken) drop_decoder();
+        else lastFailure_.store(kFailDecode, std::memory_order_relaxed);
         return false;
     }
     return true;
@@ -535,6 +567,8 @@ void DepthMapService::clear() noexcept {
     std::lock_guard<std::mutex> work(work_);
     modelFailed_ = false;
     lastJobFailed_.store(false, std::memory_order_relaxed);
+    lastFailure_.store(kFailNone, std::memory_order_relaxed);
+    retryModel_.store(false, std::memory_order_relaxed);
     { std::lock_guard<std::mutex> queue(queueMutex_); hasActive_ = false; }
     cancel_.store(false, std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(mutex_);

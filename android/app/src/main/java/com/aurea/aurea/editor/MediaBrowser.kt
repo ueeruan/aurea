@@ -56,7 +56,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -401,7 +401,9 @@ private fun BarIcon(glyph: Char, description: String, tag: String, modifier: Mod
 private fun Preview(item: MediaItem, trim: Trim?, modifier: Modifier, onInfo: () -> Unit) {
     var chip by remember(item.uri) { mutableStateOf(true) }
     Box(modifier.background(AureaColors.Stage).clip(RoundedCornerShape(0.dp)).testTag("media.preview")) {
-        if (item.video) VideoPreview(item, trim, Modifier.fillMaxSize()) { chip = !chip }
+        // Bugs 0.3.4: um VideoView por mídia (antes o mesmo era reaproveitado e
+        // ficava com o quadro do vídeo anterior até o novo preparar).
+        if (item.video) key(item.uri) { VideoPreview(item, trim, Modifier.fillMaxSize()) { chip = !chip } }
         else {
             Box(Modifier.fillMaxSize().tocavel(shrink = 1f) { chip = !chip }) { PreviewImage(item, Modifier.fillMaxSize()) }
         }
@@ -431,13 +433,14 @@ private fun Preview(item: MediaItem, trim: Trim?, modifier: Modifier, onInfo: ()
 @Composable
 private fun PreviewImage(item: MediaItem, modifier: Modifier) {
     val context = LocalContext.current
-    val bitmap by produceState<Bitmap?>(null, item.uri) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                if (Build.VERSION.SDK_INT >= 29) context.contentResolver.loadThumbnail(item.uri, android.util.Size(1280, 1280), null)
-                else android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, item.uri)
-            }.getOrNull()
-        }
+    // Bugs 0.3.4 (prévia uma mídia atrás): o `produceState` deixava a foto
+    // ANTERIOR na tela até a nova carregar. Agora o resultado é da mídia em
+    // foco ou nada; o pedido de uma mídia que perdeu o foco é cancelado.
+    val bitmap = rememberLoaded(item.uri) {
+        if (Build.VERSION.SDK_INT >= 29) context.contentResolver.loadThumbnail(item.uri, android.util.Size(1280, 1280), null)
+        else if (item.video) android.provider.MediaStore.Video.Thumbnails.getThumbnail(context.contentResolver,
+            android.content.ContentUris.parseId(item.uri), android.provider.MediaStore.Video.Thumbnails.MINI_KIND, null)
+        else android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, item.uri)
     }
     Box(modifier, contentAlignment = Alignment.Center) {
         bitmap?.let { Image(it.asImageBitmap(), item.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
@@ -449,8 +452,10 @@ private fun PreviewImage(item: MediaItem, modifier: Modifier) {
 private fun VideoPreview(item: MediaItem, trim: Trim?, modifier: Modifier, onTapImage: () -> Unit) {
     var view by remember { mutableStateOf<VideoView?>(null) }
     var playing by remember(item.uri) { mutableStateOf(false) }
+    var prepared by remember(item.uri) { mutableStateOf(false) }
     val startMs = ((trim?.inUs ?: 0L) / 1000).toInt()
     val endMs = trim?.let { (it.outUs / 1000).toInt() } ?: Int.MAX_VALUE
+    val latestStartMs by androidx.compose.runtime.rememberUpdatedState(startMs)
     LaunchedEffect(playing, startMs, endMs) {
         val v = view ?: return@LaunchedEffect
         if (!playing) { runCatching { v.pause() }; return@LaunchedEffect }
@@ -469,10 +474,17 @@ private fun VideoPreview(item: MediaItem, trim: Trim?, modifier: Modifier, onTap
     val playLabel = stringResource(if (playing) R.string.editor_pausar else R.string.editor_reproduzir)
     Box(modifier, contentAlignment = Alignment.Center) {
         AndroidView(
-            factory = { ctx -> VideoView(ctx).also { v -> v.setOnPreparedListener { mp -> mp.setVolume(1f, 1f); v.seekTo(startMs) }; view = v } },
-            update = { v -> if (v.tag != item.uri) { v.tag = item.uri; playing = false; v.setVideoURI(item.uri) } },
+            factory = { ctx ->
+                VideoView(ctx).also { v ->
+                    v.setOnPreparedListener { mp -> mp.setVolume(1f, 1f); v.seekTo(latestStartMs); prepared = true }
+                    view = v
+                }
+            },
+            update = { v -> if (v.tag != item.uri) { v.tag = item.uri; playing = false; prepared = false; v.setVideoURI(item.uri) } },
             modifier = Modifier.fillMaxSize(),
         )
+        // Até o vídeo DESTA mídia preparar, a miniatura dela (nunca a anterior).
+        if (!prepared) PreviewImage(item, Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().tocavel(shrink = 1f, onClick = onTapImage))
         if (!playing) {
             Box(
@@ -561,7 +573,8 @@ private fun rulerTime(frames: Long, fps: Double): String {
 private fun TrimBar(item: MediaItem, trim: Trim?, onTrim: (Trim) -> Unit) {
     val context = LocalContext.current
     val durationUs = item.durationMs * 1000
-    val frames by produceState<List<Bitmap>>(emptyList(), item.uri) { value = withContext(Dispatchers.IO) { videoFrames(context, item.uri, durationUs, 8) } }
+    // Bugs 0.3.4: a tira é do vídeo em foco (antes ficava a do anterior até a nova carregar).
+    val frames = rememberLoaded(item.uri) { videoFrames(context, item.uri, durationUs, 8) }.orEmpty()
     val label = stringResource(R.string.om_media_trim)
     val startLabel = stringResource(R.string.om_media_trim_start)
     val endLabel = stringResource(R.string.om_media_trim_end)

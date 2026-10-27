@@ -1,5 +1,6 @@
 package com.aurea.aurea.editor.timeline
 
+import androidx.compose.ui.graphics.toArgb
 import com.aurea.aurea.ui.theme.LayerType
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -32,25 +33,29 @@ class TimelineOmegaTest {
         assertEquals(1, timelineGroupKeys(omega).toSet().size)
     }
 
-    @Test fun `P0-4 degrade estavel por id, igual ao iOS`() {
-        val a = 0xFF48C3F5.toInt()
-        val b = 0xFF156AE0.toInt()
-        assertArrayEquals(intArrayOf(0xFF39AAEF.toInt(), 0xFF298DE8.toInt()), ClipColors.vary(a, b, 1L))
-        assertArrayEquals(intArrayOf(0xFF2B90E9.toInt(), 0xFF2483E6.toInt()), ClipColors.vary(a, b, 2L))
-        assertArrayEquals(intArrayOf(0xFF48C3F5.toInt(), 0xFF3AABEF.toInt()), ClipColors.vary(a, b, 7L))
-        assertArrayEquals(intArrayOf(0xFF41B6F2.toInt(), 0xFF40B4F2.toInt()), ClipColors.vary(a, b, 123456789012L))
-        assertArrayEquals(intArrayOf(0xFF2B90E9.toInt(), 0xFF329BEC.toInt()), ClipColors.vary(a, b, -5L))
-        // Mesmo id = mesmo par; vizinhas do mesmo tipo ficam diferentes.
-        assertArrayEquals(ClipColors.vary(a, b, 42L), ClipColors.vary(a, b, 42L))
-        assertFalse(ClipColors.vary(a, b, 1L).contentEquals(ClipColors.vary(a, b, 2L)))
-        // A conta é a da referência: (191·id mod 7, 773·id mod 31).
-        for (id in listOf(0L, 1L, 6L, 30L, 31L, 999L, -1L)) {
-            val k = ClipColors.steps(id)
-            assertEquals(Math.floorMod(191L * id, 7L).toInt(), k[0])
-            assertEquals(Math.floorMod(773L * id, 31L).toInt(), k[1])
+    @Test fun `034 cor solida do tipo, sem degrade nem variacao por id, igual ao iOS`() {
+        // A cor do cartão sai da cor do tipo: 1/5 dessaturada e 1/8 mais escura (os mesmos números do iOS).
+        assertEquals(0xFF5D4CAF.toInt(), ClipColors.solid(LayerType.Video.color.toArgb()))
+        assertEquals(0xFF3D60AB.toInt(), ClipColors.solid(LayerType.Image.color.toArgb()))
+        assertEquals(0xFF28757A.toInt(), ClipColors.solid(LayerType.Audio.color.toArgb()))
+        assertEquals(0xFF916C26.toInt(), ClipColors.solid(LayerType.Text.color.toArgb()))
+        assertEquals(0xFF347B51.toInt(), ClipColors.solid(LayerType.Shape.color.toArgb()))
+        assertEquals(0xFF8E4068.toInt(), ClipColors.solid(LayerType.Particles.color.toArgb()))
+        // Opaca mesmo que a base venha sem alfa; cinza continua cinza.
+        assertEquals(0xFF5D4CAF.toInt(), ClipColors.solid(0x006A52E0))
+        assertEquals(0xFF707070.toInt(), ClipColors.solid(0xFF808080.toInt()))
+        // Rótulo branco legível em todos os tipos (contraste WCAG ≥ 4,5).
+        for (type in LayerType.entries) {
+            val c = ClipColors.solid(type.color.toArgb())
+            assertTrue("contraste do rótulo em $type", contrastWithWhite(c) >= 4.5)
         }
-        assertEquals(a, ClipColors.mix(a, b, 0, 7))
-        assertEquals(b, ClipColors.mix(a, b, 7, 7))
+        assertEquals(0xFF000000.toInt() or 0x808080, ClipColors.mix(0xFF000000.toInt(), 0xFFFFFFFF.toInt(), 1, 2))
+    }
+
+    private fun contrastWithWhite(argb: Int): Double {
+        fun lin(v: Int): Double { val c = v / 255.0; return if (c <= 0.04045) c / 12.92 else Math.pow((c + 0.055) / 1.055, 2.4) }
+        val l = 0.2126 * lin((argb ushr 16) and 0xFF) + 0.7152 * lin((argb ushr 8) and 0xFF) + 0.0722 * lin(argb and 0xFF)
+        return 1.05 / (l + 0.05)
     }
 
     @Test fun `P1-3 cor do marcador - o motor guarda R no byte baixo`() {

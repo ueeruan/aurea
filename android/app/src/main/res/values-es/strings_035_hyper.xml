@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (bugs da 0.3.4, AureaHyper sem restrição de aparelho): caminho sem rede para os ajustes e o aviso de risco. -->
+    <string name="hyper035_path_unavailable">No disponible para estos ajustes</string>
+    <string name="hyper035_risk_warning">En teléfonos más débiles, esta opción puede ir muy lenta o cerrar la app. Úsala bajo tu propio riesgo.</string>
+    <string name="hyper035_time_unknown">Tiempo desconocido en este dispositivo</string>
+</resources>

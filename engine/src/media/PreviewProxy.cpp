@@ -1,6 +1,7 @@
 #include "aurea/media/PreviewProxy.hpp"
 #include "aurea/media/MediaManager.hpp"
 #include "aurea/media/ImageSequence.hpp"
+#include "aurea/media/ThumbnailService.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/core/Log.hpp"
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <sstream>
 
@@ -22,11 +24,15 @@ constexpr u32 kTagAvc1 = 0x61766331u, kTagHvc1 = 0x68766331u, kTagHev1 = 0x68657
               kTagAv01 = 0x61763031u, kTagVp09 = 0x76703039u;
 
 std::string fingerprint(const Asset& a, u32 target, const std::string& identity = {}) {
+    // "v4" (bugs 0.3.4, "prévia em 1/4 deixa o clipe verde e congelado"): a
+    // prévia reduzida passa a usar o proxy, e só o 1º quadro do arquivo era
+    // conferido pelo encoder. Os arquivos sem a conferência do fim da geração
+    // (verify_proxy_file) são refeitos.
     // "v3" (0.2.7): refaz as mídias otimizadas da 0.2.6 (relatos de vídeo verde;
     // um arquivo ruim no cache era reaproveitado para sempre).
     // "v2" (0.2.5): GOP curto e dizimação acima de 60 fps. Arquivos do formato
     // anterior (GOP de 1 s, tamanho por classe) não são reaproveitados.
-    std::string input = a.sourcePath + ':' + std::to_string(a.contentHash) + ':' + std::to_string(a.fileSizeBytes) + ':' + std::to_string(target) + ":v3";
+    std::string input = a.sourcePath + ':' + std::to_string(a.contentHash) + ':' + std::to_string(a.fileSizeBytes) + ':' + std::to_string(target) + ":v4";
     input += ':' + identity;
     u64 h = 1469598103934665603ull;
     for (unsigned char c : input) { h ^= c; h *= 1099511628211ull; }
@@ -165,6 +171,106 @@ std::shared_ptr<PreviewProxy> read_manifest(const std::string& path) {
         p->times.push_back(time); p->durations.push_back(duration);
     }
     return p;
+}
+
+// -----------------------------------------------------------------------------
+// Bugs 0.3.4 ("prévia em 1/4 deixa o clipe verde e congelado"): a assinatura
+// grossa de um quadro (média R'G'B' em 4×4 células da miniatura, a mesma
+// conversão de cor das miniaturas para a fonte e para o proxy). O proxy pronto
+// é decodificado de volta antes de servir: um arquivo verde (Y=U=V=0) ou parado
+// num quadro não vira a prévia.
+// -----------------------------------------------------------------------------
+struct ProxySignature {
+    bool ok = false;
+    f32 cell[4 * 4 * 3]{};
+};
+
+ProxySignature proxy_signature(const DecodedFrame& f) {
+    ProxySignature s;
+    ThumbnailService::Image img;
+    if (!frame_to_thumbnail(f, 32, img) || img.width < 4 || img.height < 4
+        || img.rgba.size() < static_cast<usize>(img.width) * img.height * 4) return s;
+    for (u32 gy = 0; gy < 4; ++gy) for (u32 gx = 0; gx < 4; ++gx) {
+        const u32 x0 = gx * img.width / 4, x1 = (gx + 1) * img.width / 4;
+        const u32 y0 = gy * img.height / 4, y1 = (gy + 1) * img.height / 4;
+        f64 sum[3] = {0, 0, 0};
+        u32 n = 0;
+        for (u32 y = y0; y < y1; ++y) for (u32 x = x0; x < x1; ++x, ++n) {
+            const u8* p = img.rgba.data() + (static_cast<usize>(y) * img.width + x) * 4;
+            sum[0] += p[0]; sum[1] += p[1]; sum[2] += p[2];
+        }
+        for (u32 c = 0; c < 3; ++c) s.cell[(gy * 4 + gx) * 3 + c] = n ? static_cast<f32>(sum[c] / n) : 0.0f;
+    }
+    s.ok = true;
+    return s;
+}
+
+/// Diferença média (0..255) entre duas assinaturas.
+f32 proxy_signature_distance(const ProxySignature& a, const ProxySignature& b) {
+    f64 d = 0;
+    for (u32 i = 0; i < 4 * 4 * 3; ++i) d += std::fabs(static_cast<f64>(a.cell[i]) - b.cell[i]);
+    return static_cast<f32>(d / (4 * 4 * 3));
+}
+
+/// Acima disto o quadro do proxy não é o da fonte (a compressão a ~0,1 bit por
+/// pixel fica bem abaixo; o verde chapado de YUV zerado passa de 60).
+constexpr f32 kProxySignatureTolerance = 28.0f;
+
+struct ProxyReference { usize index = 0; ProxySignature signature; };
+} // namespace
+
+// Sem try: o motor do Android compila sem exceções (-fno-exceptions); as contas
+// de assinatura não lançam.
+bool proxy_signature_matches(const DecodedFrame& source, const DecodedFrame& proxy) noexcept {
+    const ProxySignature a = proxy_signature(source), b = proxy_signature(proxy);
+    if (!a.ok || !b.ok) return false;
+    return proxy_signature_distance(a, b) <= kProxySignatureTolerance;
+}
+
+namespace {
+/// Decodifica de volta o proxy recém-gravado (`path`, ainda o parcial) e confere
+/// os quadros de referência. Falso = arquivo que não serve como prévia.
+bool verify_proxy_file(VideoSourceFactory* media, const Asset& source, const std::string& path,
+                       const std::shared_ptr<PreviewProxy>& proxy, const std::vector<ProxyReference>& refs,
+                       i64 nominalUs, const std::function<bool()>& cancelled) {
+    if (refs.empty()) return true;   // fonte sem miniatura (formato raro): nada a comparar
+    Asset decodeAsset = source;
+    decodeAsset.sourcePath = path;
+    decodeAsset.video.width = proxy->width; decodeAsset.video.height = proxy->height;
+    decodeAsset.profile.bitDepth = 8;
+    // Decoder de software (CPU, sem disputar o codec do aparelho com a prévia).
+    auto decoder = proxy_decoder(media->open_video(decodeAsset, MediaPriority::ExportSoftwareDecode), proxy);
+    if (!decoder) { AUREA_LOG_WARN("proxy: conferencia sem decoder"); return false; }
+    for (const ProxyReference& ref : refs) {
+        if (cancelled()) return false;
+        const i64 t = proxy->times[ref.index];
+        const i64 half = std::max<i64>(1, std::min(proxy->durations[ref.index], nominalUs) / 2);
+        if (!decoder->seek_to_keyframe(t).ok()) { AUREA_LOG_WARN("proxy: conferencia sem seek"); return false; }
+        FrameRef frame;
+        i64 pts = 0;
+        bool eos = false;
+        for (u32 i = 0; i < 1200 && !frame; ++i) {
+            if (!decoder->next_frame(t - half, frame, pts, eos).ok()) break;
+            if (eos && !frame) break;
+        }
+        if (!frame) {
+            AUREA_LOG_WARN("proxy: quadro %zu nao decodifica de volta", ref.index);
+            return false;
+        }
+        if (!frame.get()->prepare_cpu_planes()) continue;   // sem planos na CPU: não dá para julgar
+        const ProxySignature got = proxy_signature(*frame.get());
+        if (!got.ok) continue;
+        // O instante não é exigido (um deslocamento de B-quadros do contêiner não
+        // pode recusar todo proxy); o conteúdo é: o quadro verde ou o quadro
+        // parado de outro instante fica longe da assinatura da fonte.
+        const f32 distance = proxy_signature_distance(ref.signature, got);
+        if (distance > kProxySignatureTolerance) {
+            AUREA_LOG_WARN("proxy: quadro %zu diferente da fonte (pts %lld/%lld, diferenca %.1f)", ref.index,
+                           static_cast<long long>(pts), static_cast<long long>(t), distance);
+            return false;
+        }
+    }
+    return true;
 }
 } // namespace
 
@@ -654,6 +760,8 @@ std::shared_ptr<PreviewProxy> PreviewProxyService::generate(const Request& reque
     const std::string partial = path + ".partial.mp4";
     std::unique_ptr<ExportSink> sink;
     std::vector<u8> pixels, pendingPixels;
+    std::vector<ProxyReference> references;   // bugs 0.3.4: conferência do arquivo pronto
+    ProxyReference lastReference;
     u32 empty = 0;
     bool eos = false, success = false;
     i64 lastPts = std::numeric_limits<i64>::min(), lastEnd = 0;
@@ -711,6 +819,20 @@ std::shared_ptr<PreviewProxy> PreviewProxyService::generate(const Request& reque
             AUREA_LOG_INFO("proxy: gerando %ux%u a %.2f fps (fonte %.2f fps)", result->width, result->height, result->fps, result->original.fps);
         }
         if (frame->color != result->original.color || !proxy_frame_nv12(*frame.get(), result->width, result->height, pixels)) break;
+        {
+            // Bugs 0.3.4: assinaturas da fonte para conferir o arquivo no fim —
+            // o 1º quadro, o último índice potência de 2 (meio a fim) e o último.
+            const usize index = result->times.size();
+            const bool keep = index == 0 || (index & (index - 1)) == 0;
+            ProxySignature sig = proxy_signature(*frame.get());
+            if (sig.ok) {
+                if (keep) {
+                    if (references.size() < 2) references.push_back({index, sig});
+                    else references[1] = {index, sig};
+                }
+                lastReference = {index, sig};
+            }
+        }
         if (!result->times.empty()) {
             result->durations.back() = pts - result->times.back();
             if (!sink->write_video_timed(pendingPixels.data(), result->width,
@@ -738,6 +860,17 @@ std::shared_ptr<PreviewProxy> PreviewProxyService::generate(const Request& reque
             result->times.back() - result->times.front(), result->durations.back()).ok() && sink->finish().ok();
         const u64 size = fs::file_size(fs::u8path(partial), ec);
         success = success && !ec && size > 0 && write_manifest(*result, path + ".pts.tmp");
+        if (success) {
+            // Bugs 0.3.4 ("prévia em 1/4 deixa o clipe verde e congelado"): o
+            // arquivo decodifica de volta com o conteúdo da fonte? Verde (YUV
+            // zerado) ou quadro parado = Failed (a prévia fica no original).
+            decoder.reset();   // o codec da fonte sai antes de abrir o do proxy
+            std::vector<ProxyReference> refs = references;
+            if (lastReference.signature.ok && (refs.empty() || refs.back().index != lastReference.index)) refs.push_back(lastReference);
+            success = verify_proxy_file(media_, request.asset, partial, result, refs, nominalUs,
+                                        [&] { return cancelled(request.generation); });
+            if (!success) AUREA_LOG_WARN("proxy: arquivo recusado na conferencia (%ux%u)", result->width, result->height);
+        }
         if (success) {
             const u64 metadataBytes = fs::file_size(fs::u8path(path + ".pts.tmp"), ec);
             success = !ec && make_room(size + metadataBytes, partial);

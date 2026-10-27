@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.toArgb
@@ -1530,13 +1531,8 @@ internal class TimelinePainter(
                 barClip.addRoundRect(rectF, radius, radius, android.graphics.Path.Direction.CW)
                 canvas.save()
                 canvas.clipPath(barClip)
-                // 1. Degradê horizontal do retângulo INTEIRO do clipe (não anda com a rolagem).
-                val pair = AureaTimeline.clipGradient(r.type)
-                val grad = ClipColors.vary(pair.first.toArgb(), pair.second.toArgb(), r.id)
-                drawRect(
-                    Brush.horizontalGradient(listOf(Color(grad[0]), Color(grad[1])), startX = x0, endX = max(x1, x0 + 1f)),
-                    Offset(left, top), Size(right - left, m.bar),
-                )
+                // 1. 0.3.4 (bugs-034, cores): cor SÓLIDA do tipo, um pouco dessaturada (ClipColors.solid).
+                drawRect(Color(ClipColors.solid(r.type.color.toArgb())), Offset(left, top), Size(right - left, m.bar))
                 // 2. Zebra de quadros.
                 omegaZebra(startF, top, left, right, view, ppf, cx)
                 // 3. Tira de miniaturas, sem véu nem divisórias.
@@ -1544,6 +1540,13 @@ internal class TimelinePainter(
                 if (r.hasThumbs) drawThumbs(canvas, r, top, x0, x1, w, view, ppf, cx, fps, cache, generation, dividers = false)
                 // 4. Onda de 1 dp.
                 if (r.type == LayerType.Audio || r.type == LayerType.Video) omegaWave(canvas, r, top, x0, x1, w, view, ppf, cx)
+                // 0.3.4 (bugs-034, cores): realce sutil no topo do cartão (brilho que some até 45 % da
+                // altura e um fio de 1 dp), por cima das miniaturas e da onda.
+                drawRect(
+                    Brush.verticalGradient(listOf(AureaTimeline.ClipSheen, Color.Transparent), startY = top, endY = top + m.bar * AureaTimeline.ClipSheenDepth),
+                    Offset(left, top), Size(right - left, m.bar * AureaTimeline.ClipSheenDepth),
+                )
+                drawRect(AureaTimeline.ClipSheenLine, Offset(left, top), Size(right - left, m.omegaSheenLine))
                 // 5. Triângulo da etiqueta no canto de cima à esquerda (catetos de meia barra).
                 val tag = ShellColors.LabelPalette.getOrNull(r.label - 1)
                 if (tag != null) {
@@ -1646,8 +1649,12 @@ internal class TimelinePainter(
         val avail = (x1 - x0) - 2f * m.omegaLabelInset
         if (avail < NAME_MIN_DP * m.density) return
         val layout = omegaNameLayout(r, avail) ?: return
-        val color = if (r.type == LayerType.Audio) AureaTimeline.ClipLabelOnAudio else AureaTimeline.ClipLabel
-        drawText(layout, color = color, topLeft = Offset(x0 + m.omegaLabelInset, top + m.bar / 2f - layout.size.height / 2f))
+        // 0.3.4 (bugs-034, cores): branco em todos os tipos, com sombra curta (legível sobre as miniaturas).
+        drawText(
+            layout, color = AureaTimeline.ClipLabel,
+            topLeft = Offset(x0 + m.omegaLabelInset, top + m.bar / 2f - layout.size.height / 2f),
+            shadow = Shadow(AureaTimeline.ClipLabelShadow, Offset(0f, m.omegaShadow), m.omegaLabelShadow),
+        )
     }
 
     /** Nome com reticências no MEIO na largura disponível (em degraus de 12 dp). */

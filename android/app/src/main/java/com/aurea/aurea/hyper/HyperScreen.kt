@@ -106,7 +106,7 @@ import kotlin.math.roundToInt
 //    2: hyper.receita.<id> · hyper.receita.<id>.<variante> · hyper.ajustar ·
 //       hyper.ajuste.<campo> · hyper.continuar
 //    3: hyper.medidor · hyper.medir · hyper.previa · hyper.previa.divisor ·
-//       hyper.caminho.<turbo|lite|max> · hyper.comecar
+//       hyper.caminho.<turbo|lite|max> · hyper.aviso.risco · hyper.comecar
 //    4: hyper.etapa.<passo> · hyper.progresso · hyper.cancelar ·
 //       hyper.tentar · hyper.voltar.previa
 // =============================================================================
@@ -540,6 +540,12 @@ private fun PreviewStep(flow: HyperFlow) {
         PathRow(flow, p)
         Spacer(Modifier.height(8.dp))
     }
+    // 0.3.4 (bugs-034, hyper): Lite/Max liberados em qualquer aparelho, com o aviso em vez do bloqueio.
+    if (HyperPathRules.risky(flow.path, flow.profile)) {
+        Text(stringResource(R.string.hyper035_risk_warning), style = AureaType.of(13f, FontWeight.W600, color = AureaColors.Warning),
+            modifier = Modifier.testTag("hyper.aviso.risco"))
+        Spacer(Modifier.height(8.dp))
+    }
     flow.estimate?.takeIf { it.outputWidth > 0 }?.let { e ->
         Text(stringResource(R.string.hyper_output, "${e.outputWidth} × ${e.outputHeight}", fpsText(e.outputFps)), style = muted)
     }
@@ -553,7 +559,7 @@ private fun PreviewStep(flow: HyperFlow) {
     }
     ErrorBox(flow.error)
     Spacer(Modifier.height(10.dp))
-    val canStart = !flow.measuring && !flow.estimating && !flow.checkingConfig && flow.estimate?.available(flow.path) != false
+    val canStart = !flow.measuring && !flow.estimating && !flow.checkingConfig
     HyperButton(stringResource(R.string.hyper_start), "hyper.comecar", enabled = canStart) { flow.start() }
 }
 
@@ -655,12 +661,9 @@ private fun PathRow(flow: HyperFlow, p: HyperPath) {
     val name = stringResource(pathName(p))
     val detail = when {
         flow.estimating || estimate == null -> stringResource(R.string.hyper_estimating)
-        block != HyperPathBlock.None -> stringResource(when (block) {
-            HyperPathBlock.NotMeasured -> R.string.hyper_block_not_measured
-            HyperPathBlock.Needs64Bit -> R.string.hyper_block_32bit
-            HyperPathBlock.NoGpuBackend -> R.string.hyper_block_no_gpu
-            else -> R.string.hyper_block_unavailable
-        })
+        // 0.3.4 (bugs-034, hyper): sem motivo de aparelho; só "estes ajustes não têm rede".
+        block != HyperPathBlock.None -> stringResource(R.string.hyper035_path_unavailable)
+        !estimate.available(p) -> stringResource(R.string.hyper035_time_unknown)
         else -> stringResource(R.string.hyper_estimate_time, timeText(estimate.secondsFor(p)))
     }
     val suggested = flow.profile?.defaultPath == p

@@ -71,6 +71,9 @@ bool Renderer::roto_propagate(const Project& project, const Composition& comp, c
     const Asset* asset = project.asset(layer.source);
     if (!asset || !asset->has_video()) return false;
     if (!foreground_) foreground_ = std::make_unique<ai::DepthMapService>(true);
+    // Bugs 0.3.4: "Propagar clipe" é pedido explícito — a rede que não carregou
+    // antes tenta de novo (antes só depois de trocar de projeto).
+    foreground_->retry_failed();
     if (!roto_) {
         roto_ = std::make_shared<ai::RotoService>();
         roto_->set_max_bytes(lowMemoryDevice_ ? ai::RotoService::kLowMemoryMaxBytes : ai::RotoService::kMaxBytes);
@@ -351,7 +354,11 @@ bool Renderer::roto_status(const Project& project, const Composition& comp, cons
     out8[6] = last - first + 1;
     if (!roto_) return true;   // traços sem serviço ainda: nada calculado
     const auto p = roto_->progress();
-    if (p.track == track) { out8[0] = p.done; out8[1] = p.total; out8[2] = p.running ? 1 : 0; out8[3] = p.failed ? 1 : 0; }
+    // Bugs 0.3.4: [3] leva o motivo da falha (≠ 0 continua sendo "falhou").
+    if (p.track == track) {
+        out8[0] = p.done; out8[1] = p.total; out8[2] = p.running ? 1 : 0;
+        out8[3] = p.failed ? std::max<i64>(1, static_cast<i64>(p.reason)) : 0;
+    }
     // Com Refinar borda, "pronto" é o refinado também.
     const u64 refineKey = ai::roto_instance_refine(instance).hash();
     out8[4] = roto_->ready(track, strokes, sourceFrame, refineKey) ? 1 : 0;

@@ -357,7 +357,9 @@ internal fun EffectDetailOverlay(
                     pager,
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.Top,
-                    key = { entries[it].typeId },
+                    // Bugs 0.3.4 (bug 3): a lista do detalhe é fixa enquanto ele está
+                    // aberto; o índice na chave impede repetição mesmo com typeId repetido.
+                    key = { effectItemKey(entries[it].typeId) + "@" + it },
                 ) { page ->
                     DetailPage(
                         store, entries[page], page, entries.size, active = pager.currentPage == page,

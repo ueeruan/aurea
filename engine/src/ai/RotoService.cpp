@@ -184,15 +184,21 @@ DepthMapPtr RotoService::raw(const Source& source, i64 frame, RotoImagePtr* imag
                                                 image, source.refineMaxSide);
     }
     const usize n = static_cast<usize>(kSize) * kSize;
-    if (!map || map->disparity.size() != n || map->foregroundRgb.size() != n * 3) return nullptr;
+    if (!map || map->disparity.size() != n || map->foregroundRgb.size() != n * 3) {
+        // Bugs 0.3.4: o motivo (rede, decoder, memória) vai para o status.
+        lastFailure_.store(source.fg ? std::max<u32>(1u, source.fg->last_failure()) : 1u, std::memory_order_relaxed);
+        return nullptr;
+    }
     return map;
 }
 
 RotoImagePtr RotoService::frame_image(const Source& source, i64 frame) {
     if (!source.factory) return source.imageFrame;
     if (!source.fg) return nullptr;
-    return source.fg->source_video_frame(source.factory, source.asset, source.sourceKey, frame, source.fps,
-                                         source.refineMaxSide);
+    RotoImagePtr image = source.fg->source_video_frame(source.factory, source.asset, source.sourceKey, frame, source.fps,
+                                                       source.refineMaxSide);
+    if (!image) lastFailure_.store(std::max<u32>(1u, source.fg->last_failure()), std::memory_order_relaxed);
+    return image;
 }
 
 RotoService::Result RotoService::compute_impl(u64 track, const RotoStrokes& strokes, const Source& source, i64 frame,
@@ -324,6 +330,7 @@ RotoService::Result RotoService::compute_impl(u64 track, const RotoStrokes& stro
     return {std::make_shared<const std::vector<f32>>(std::move(matte)), prevRefined};
 } catch (const std::bad_alloc&) {
     AUREA_LOG_WARN("Roto: memoria insuficiente");
+    lastFailure_.store(DepthMapService::kFailMemory, std::memory_order_relaxed);
     return {};
 }
 
@@ -431,6 +438,7 @@ void RotoService::thread_main() noexcept {
         const std::vector<i64> bases = roto_bases(job->strokes);
         const i64 base = bases.empty() ? job->first : std::clamp(bases.front(), job->first, job->last);
         i64 done = 0;
+        lastFailure_.store(0, std::memory_order_relaxed);
         auto serveFocus = [&] {
             std::unique_ptr<Job> focus;
             { std::lock_guard<std::mutex> lock(queueMutex_); focus = std::move(focus_); }
@@ -457,6 +465,7 @@ void RotoService::thread_main() noexcept {
             if (generation_.load(std::memory_order_relaxed) == gen) {
                 progress_.running = false;
                 progress_.failed = !ok;
+                progress_.reason = ok ? 0u : std::max<u32>(1u, lastFailure_.load(std::memory_order_relaxed));
             }
         }
         serveFocus();

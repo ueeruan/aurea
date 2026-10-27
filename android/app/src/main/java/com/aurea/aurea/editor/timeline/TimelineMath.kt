@@ -614,11 +614,12 @@ internal object GestureLimit {
 // =============================================================================
 
 /**
- * Degradê do cartão do clipe. Cada tipo tem um par (A, B); a camada ganha uma
- * variação ESTÁVEL pelo id, para vizinhas do mesmo tipo ficarem diferentes e a
- * mesma camada ter sempre a mesma cor: c0 = mix(A, B, (191·id mod 7)/7),
- * c1 = mix(A, B, (773·id mod 31)/31) e o degradê vai de c0 a mix(c0, c1, ½).
- * Conta inteira (sem ponto flutuante), igual no iOS.
+ * 0.3.4 (bugs-034, cores): cor do cartão do clipe, identidade própria do AUREA.
+ * Cor SÓLIDA do tipo (`LayerType.color`, a mesma da lista de camadas), um pouco
+ * dessaturada (1/5 rumo ao cinza de mesma luma) e escurecida 1/8, para o rótulo
+ * branco ficar legível (contraste ≥ 4,5 em todos os tipos). Sem degradê e sem
+ * variação por id: a mesma camada tem a cor do tipo dela. Conta inteira, igual
+ * no iOS (`ClipColors.solid`).
  */
 internal object ClipColors {
     /** Interpolação por canal ARGB, `num/den` de [a] para [b], arredondada. */
@@ -635,20 +636,20 @@ internal object ClipColors {
         return out
     }
 
-    private fun floorMod(v: Long, m: Long): Long = ((v % m) + m) % m
+    /** Luma inteira (Rec. 601, arredondada) de uma cor ARGB. */
+    fun luma(argb: Int): Int {
+        val r = (argb ushr 16) and 0xFF
+        val g = (argb ushr 8) and 0xFF
+        val b = argb and 0xFF
+        return (r * 299 + g * 587 + b * 114 + 500) / 1000
+    }
 
-    /** Índices da variação: (191·id mod 7, 773·id mod 31), sem estourar o Long. */
-    fun steps(id: Long): IntArray = intArrayOf(
-        floorMod(2L * floorMod(id, 7L), 7L).toInt(),      // 191 ≡ 2 (mod 7)
-        floorMod(29L * floorMod(id, 31L), 31L).toInt(),   // 773 ≡ 29 (mod 31)
-    )
-
-    /** (início, fim) do degradê da camada [id] a partir do par do tipo, em ARGB. */
-    fun vary(a: Int, b: Int, id: Long): IntArray {
-        val k = steps(id)
-        val c0 = mix(a, b, k[0], 7)
-        val c1 = mix(a, b, k[1], 31)
-        return intArrayOf(c0, mix(c0, c1, 1, 2))
+    /** Cor do cartão a partir da cor do tipo [base] (ARGB): 1/5 dessaturada, 1/8 mais escura, opaca. */
+    fun solid(base: Int): Int {
+        val y = luma(base)
+        val gray = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
+        val muted = mix(base or (0xFF shl 24), gray, 1, 5)
+        return mix(muted, 0xFF000000.toInt(), 1, 8)
     }
 }
 

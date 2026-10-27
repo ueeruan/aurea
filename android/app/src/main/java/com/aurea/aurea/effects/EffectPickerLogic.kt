@@ -189,15 +189,72 @@ fun groupEntries(sorted: List<EffectCatalogEntry>): List<Pair<EffectGroup, List<
     return EffectGroup.entries.mapNotNull { g -> byGroup[g]?.takeIf { it.isNotEmpty() }?.let { g to it } }
 }
 
+// --- Chaves das listas preguiçosas (bugs 0.3.4, bug 3) -------------------------
+//
+// Toda chave de LazyColumn/LazyRow/LazyVerticalGrid do navegador de efeitos leva
+// o PREFIXO do tipo de item ("section:", "header:", "category:", "action:",
+// "effect:", "tag:", "empty:", "plugin:"): um id cru de um tipo (o grupo
+// "plugins", um typeId, uma etiqueta) nunca bate com o de outro. Chave repetida
+// derruba o app ("Key … was already used", SubcomposeLayout).
+
 /** Chave fixa da porta "Gerenciar plugins" no fim da tela inicial do navegador. */
-const val PLUGIN_DOOR_KEY = "porta-plugins"
+const val PLUGIN_DOOR_KEY = "action:manage-plugins"
+
+/** Faixa de recomendados da tela inicial. */
+const val HOME_RECOMMENDED_KEY = "section:recommended"
+
+/** Faixa Recentes/Favoritos da tela inicial. */
+const val HOME_QUICK_KEY = "section:quick"
+
+/** O título (só acessibilidade) das categorias na tela inicial. */
+const val HOME_CATEGORIES_HEADER_KEY = "header:categories"
+
+/** A linha "nada aqui" de uma grade ou da busca. */
+const val EMPTY_ITEM_KEY = "empty:message"
 
 /**
  * Chave de uma linha de ladrilhos na tela inicial. Prefixada para nunca colidir
  * com as chaves fixas da lista (destaques, rápidos, porta dos plugins): o id cru
  * do grupo "plugins" batia com a chave da porta e o Compose derrubava o app.
  */
-fun groupRowKey(row: List<EffectGroup>): String = "linha-grupos:" + row.joinToString(",") { it.id }
+fun groupRowKey(row: List<EffectGroup>): String = "category:" + row.joinToString(",") { it.id }
+
+/** Chave de um efeito (cartão, recomendado, resultado da busca): o typeId sem sinal. */
+fun effectItemKey(typeId: Int): String = "effect:" + Integer.toUnsignedString(typeId)
+
+/** Chave de uma etiqueta sugerida na busca. */
+fun tagItemKey(tag: String): String = "tag:$tag"
+
+/** Chave da linha de um plugin instalado (gerenciador de plugins). */
+fun pluginItemKey(id: String): String = "plugin:$id"
+
+/**
+ * Um efeito por `typeId`, na ordem recebida. O catálogo do motor não repete
+ * tipos, mas um plugin cuja chave cai no mesmo hash de outra entrada (ou de uma
+ * ferramenta-efeito) repetiria o cartão e a chave da grade: fica a primeira.
+ */
+fun distinctEffects(entries: List<EffectCatalogEntry>): List<EffectCatalogEntry> = entries.distinctBy { it.typeId }
+
+/** Um item da tela inicial do navegador, na ordem em que aparece, com a sua chave. */
+sealed class BrowserHomeRow(val key: String) {
+    data object Recommended : BrowserHomeRow(HOME_RECOMMENDED_KEY)
+    data object Quick : BrowserHomeRow(HOME_QUICK_KEY)
+    data object CategoriesHeader : BrowserHomeRow(HOME_CATEGORIES_HEADER_KEY)
+    class Categories(val groups: List<EffectGroup>) : BrowserHomeRow(groupRowKey(groups))
+    data object PluginDoor : BrowserHomeRow(PLUGIN_DOOR_KEY)
+}
+
+/**
+ * Os itens da tela inicial: recomendados e rápidos (se houver), o título das
+ * categorias, as linhas de 2 ladrilhos e a porta dos plugins, sempre no fim.
+ */
+fun browserHomeRows(hasRecommended: Boolean, hasQuick: Boolean, groups: List<EffectGroup>): List<BrowserHomeRow> = buildList {
+    if (hasRecommended) add(BrowserHomeRow.Recommended)
+    if (hasQuick) add(BrowserHomeRow.Quick)
+    add(BrowserHomeRow.CategoriesHeader)
+    groups.distinct().chunked(2).forEach { add(BrowserHomeRow.Categories(it)) }
+    add(BrowserHomeRow.PluginDoor)
+}
 
 /** O efeito cuja prévia (escurecida) vira o fundo do ladrilho do grupo. */
 private val GroupBannerKeys: Map<EffectGroup, String> = mapOf(

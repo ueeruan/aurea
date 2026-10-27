@@ -449,6 +449,30 @@ AUREA_TEST(ImageEncode, TransparentBackgroundChoiceRoundTripsAndPlansAlpha) {
     AUREA_CHECK_EQ(root->background().a, 1.0f);
 }
 
+// Omega exportação (bug 12 da 0.3.4): a varredura dos caches por quadro do
+// renderizador tem de rodar também quando o contador do backend anda de k em k
+// (motion blur 3D em lotes abre quadros extras a cada quadro exportado). Com a
+// regra antiga (`frameNumber % 120 == 0`), passo 2 começando ímpar nunca varria.
+#include "aurea/render/Renderer.hpp"
+AUREA_TEST(ImageEncode, RendererCacheSweepRunsForAnyBackendFrameStep) {
+    for (u64 step : {1ull, 2ull, 3ull, 7ull, 16ull, 33ull}) {
+        for (u64 start : {1ull, 5ull, 121ull}) {
+            u64 last = 0, sweeps = 0, frame = start;
+            for (u32 i = 0; i < 2000; ++i, frame += step) {
+                if (Renderer::resource_sweep_due(frame, last)) { last = frame; ++sweeps; }
+            }
+            // ~uma varredura a cada 120 quadros do backend (nunca zero num export longo).
+            const u64 span = 2000 * step;
+            AUREA_CHECK(sweeps >= span / (120 + step) - 1);
+            AUREA_CHECK(sweeps <= span / 120 + 1);
+        }
+    }
+    // Contador que voltou (GPU recriada): varre de novo em vez de esperar o antigo.
+    AUREA_CHECK(Renderer::resource_sweep_due(10, 50'000));
+    AUREA_CHECK(!Renderer::resource_sweep_due(130, 50));
+    AUREA_CHECK(Renderer::resource_sweep_due(170, 50));
+}
+
 // =============================================================================
 // Motor inteiro (GPU): o quadro renderizado vira PNG/ZIP/GIF de verdade
 // =============================================================================

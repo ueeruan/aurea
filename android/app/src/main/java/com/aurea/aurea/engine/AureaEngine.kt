@@ -2000,6 +2000,8 @@ class AureaEngine private constructor() {
     fun addVectorPath(layer: Long, group: Int, kind: Int, bez: FloatArray?): Int = nativeAddVectorPath(nativeHandle, layer, group, kind, bez)
     fun removeVectorPath(layer: Long, group: Int, path: Int): Boolean = nativeRemoveVectorPath(nativeHandle, layer, group, path)
     fun makeVectorPathEditable(layer: Long, group: Int, path: Int): Boolean = nativeMakeVectorPathEditable(nativeHandle, layer, group, path)
+    /** Bugs 0.3.4 (bug 11): forma viva → camada vetorial com a mesma silhueta (um desfazer). */
+    fun convertShapeToOutline(layer: Long): Boolean = nativeConvertShapeToOutline(nativeHandle, layer)
     /** Valores animáveis do grupo no cabeçote + bits animados + bits com keyframe. */
     fun queryVectorParams(layer: Long, group: Int): FloatArray? = nativeQueryVectorParams(nativeHandle, layer, group)
     fun queryShapeParams(layer: Long): FloatArray? = nativeQueryShapeParams(nativeHandle, layer)
@@ -2017,6 +2019,19 @@ class AureaEngine private constructor() {
     fun importGif(path: String, name: String): Long = nativeWork.run(-5L) { nativeImportGif(nativeHandle, path, name) }
     fun foregroundModelDirectory(): String = nativeWork.run("") { nativeForegroundModelDirectory(nativeHandle) }
     fun createGrid(ids: LongArray): Long = nativeCreateGrid(nativeHandle, ids)
+    // Omega grid (0.3.5): a grade "controlada por" um nulo (Engine::set_grid_control_null).
+    /** A camada é a controladora de uma grade? */
+    fun isGridController(layer: Long): Boolean = nativeIsGridController(nativeHandle, layer)
+    /** O nulo que controla a grade (0 = nenhum). */
+    fun gridControlNull(grid: Long): Long = nativeGridControlNull(nativeHandle, grid)
+    /** Vincula (0 = desvincular). Devolve um [GridLink] (0 = ok, 3 = fecharia um ciclo). */
+    fun setGridControlNull(grid: Long, nullId: Long): Int = nativeSetGridControlNull(nativeHandle, grid, nullId)
+    /** Nulo 3D novo no centro da grade, já vinculado. Id ≥ 0 ou −Errc. */
+    fun createGridControlNull(grid: Long, name: String): Long = nativeCreateGridControlNull(nativeHandle, grid, name)
+    private external fun nativeIsGridController(handle: Long, layer: Long): Boolean
+    private external fun nativeGridControlNull(handle: Long, grid: Long): Long
+    private external fun nativeSetGridControlNull(handle: Long, grid: Long, nullId: Long): Int
+    private external fun nativeCreateGridControlNull(handle: Long, grid: Long, name: String): Long
     private external fun nativeForegroundModelDirectory(handle: Long): String
     private external fun nativeCreateGrid(handle: Long, ids: LongArray): Long
     private external fun nativeImportPsd(handle: Long, path: String, name: String): Long
@@ -2045,6 +2060,7 @@ class AureaEngine private constructor() {
     private external fun nativeAddVectorPath(handle: Long, layer: Long, group: Int, kind: Int, bez: FloatArray?): Int
     private external fun nativeRemoveVectorPath(handle: Long, layer: Long, group: Int, path: Int): Boolean
     private external fun nativeMakeVectorPathEditable(handle: Long, layer: Long, group: Int, path: Int): Boolean
+    private external fun nativeConvertShapeToOutline(handle: Long, layer: Long): Boolean
     private external fun nativeQueryShapeParams(handle: Long, layer: Long): FloatArray?
     private external fun nativeSetShapeParamAnim(handle: Long, layer: Long, param: Int, value: Float, continuing: Boolean): Boolean
     private external fun nativeToggleShapeParamKey(handle: Long, layer: Long, param: Int): Boolean

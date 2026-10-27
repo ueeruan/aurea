@@ -167,4 +167,34 @@ class OmegaAddExportTest {
         compose.onNodeWithTag("export.settings.background").assertIsDisplayed()
         capture("export-gif-settings")
     }
+
+    /**
+     * Omega exportação (bug 1 da 0.3.4: "quadro, sequência e ZIP saem como MP4"):
+     * cada item da lista, escolhido pelo toque e exportado pelo botão da página,
+     * termina no formato dele (o do exportador e a extensão do arquivo).
+     */
+    @Test fun eachExportOptionProducesItsOwnFileType() {
+        launch("AUREA · Omega export kinds")
+        compose.runOnIdle { store.addShape(0) }
+        compose.waitUntil(5000) { store.layers.size == 1 }
+        compose.runOnIdle { store.clearSelection() }
+        for ((tag, format) in listOf("frame" to com.aurea.aurea.state.ExportFormat.Frame,
+                "sequence" to com.aurea.aurea.state.ExportFormat.Sequence, "gif" to com.aurea.aurea.state.ExportFormat.Gif)) {
+            compose.onNodeWithTag("editor.export").performClick()
+            compose.onNodeWithTag("export.option.$tag").performScrollTo().performClick()
+            compose.onNodeWithTag("export.go").performClick()
+            compose.waitUntil(180_000) {
+                store.exporter.state.phase.let { it == com.aurea.aurea.state.ExportPhase.Done || it == com.aurea.aurea.state.ExportPhase.Failed }
+            }
+            val state = store.exporter.state
+            assertEquals("$tag: ${state.message}", com.aurea.aurea.state.ExportPhase.Done, state.phase)
+            assertEquals(tag, format, state.format)
+            assertTrue(tag, store.exporter.suggestedName().endsWith("." + format.extension))
+            val mime = state.outputUri?.let { context.contentResolver.getType(it) }
+            assertTrue("$tag: $mime", mime == null || mime == format.mime)
+            capture("export-done-$tag")
+            compose.onNodeWithTag("export.result.close").performClick()
+            compose.waitUntil(5000) { compose.onAllNodesWithTag("export.result").fetchSemanticsNodes().isEmpty() }
+        }
+    }
 }

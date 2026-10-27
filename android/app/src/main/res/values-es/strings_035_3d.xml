@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (bugs da 0.3.4, área 3D/gráfico/contorno): dica da Cena 3D com a regra nova de seleção. -->
+    <string name="om_scene_hint_035">Toca un objeto para elegirlo y otra vez para soltarlo · Sin selección: 1 dedo orbita, pellizca para acercar · Elegido: arrastra para mover, pellizca para escalar · Doble toque recentra</string>
+    <!-- Bug 11: "Converter em contorno" no ⋮ da camada (forma viva → vetor). -->
+    <string name="om_convert_outline_035">Convertir en contorno</string>
+    <string name="om_convert_outline_detail_035">Se vuelve vector con la misma forma, color y trazo, para editar punto a punto</string>
+    <string name="om_convert_outline_failed_035">No se pudo convertir esta forma en contorno</string>
+</resources>

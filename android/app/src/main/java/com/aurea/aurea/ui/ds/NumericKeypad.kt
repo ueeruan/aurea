@@ -368,6 +368,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
                         .weight(1f)
                         .clip(RoundedCornerShape(8.dp))
                         .background(AureaColors.Chip)
+                        .testTag("numeric.keypad.cancel")   // Bug 6b (0.3.5): id = iOS
                         .tocavel(shrink = 1f) { sheet.dismiss() }
                         .padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center,
@@ -382,6 +383,7 @@ fun NumericKeypadSheet(request: KeypadRequest, onDismiss: () -> Unit) {
                         .weight(1f)
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (ok) AureaColors.Accent else AureaColors.ChipHigh)
+                        .testTag("numeric.keypad.confirm")   // Bug 6b (0.3.5): id = iOS
                         .tocavel(enabled = ok, shrink = 1f) {
                             if (multi) request.onConfirmFields?.invoke(values) else clamped?.let(request.onConfirm)
                             sheet.dismiss()

@@ -967,11 +967,43 @@ private fun activeAt(d: LayerDetail, frame: Int) = frame >= d.startFrame && fram
 private object SceneTap { var at = 0L; var x = 0f; var y = 0f }
 
 /**
- * Cena 3D "seca": tudo com o dedo na própria tela, sem sliders nem campos.
- * - 1 dedo NO objeto: escolhe e gira; as setas continuam editando um eixo só.
- * - 1 dedo no vazio: gira a vista em volta da cena. Toque no vazio: solta
+ * Bugs 0.3.4 (bug 9): quem fica com o gesto na Cena 3D. Sem nada escolhido os
+ * gestos são SEMPRE da câmera da cena (1 dedo orbita, pinça aproxima), mesmo
+ * com o dedo em cima de um objeto — tocar (sem arrastar) é que escolhe. Com
+ * algo escolhido vale o de antes: o objeto sob o dedo anda, a pinça escala e
+ * torce o escolhido (a lupa do canto devolve a pinça à câmera). Tocar de novo
+ * no objeto JÁ escolhido solta a seleção e a câmera volta. Par do iOS:
+ * `sceneEvent` no PreviewMetalView.swift (mesma regra).
+ */
+internal object SceneGestureRules {
+    const val TAP_SELECT = 1
+    const val TAP_DESELECT = 2
+    const val TAP_EMPTY = 3
+
+    /** O objeto que 1 dedo arrasta; nulo = o dedo orbita a câmera da cena. */
+    fun dragTarget(hasSelection: Boolean, picked: Long?): Long? = if (hasSelection) picked else null
+
+    /** A pinça edita o escolhido? Falso = aproxima/afasta a câmera da cena. */
+    fun pinchEditsObject(hasSelection: Boolean, editable: Boolean, zoomLock: Boolean): Boolean =
+        hasSelection && editable && !zoomLock
+
+    /** Toque parado: escolher o objeto, soltar o já escolhido ou toque no vazio. */
+    fun tap(primary: Long?, selectionSize: Int, picked: Long?): Int = when {
+        picked == null -> TAP_EMPTY
+        primary == picked && selectionSize == 1 -> TAP_DESELECT
+        else -> TAP_SELECT
+    }
+}
+
+/**
+ * Cena 3D "seca": tudo com o dedo na própria tela, sem sliders nem campos
+ * (regras em [SceneGestureRules]).
+ * - Sem seleção: 1 dedo orbita a vista (mesmo sobre um objeto), a pinça
+ *   aproxima. Tocar num objeto escolhe.
+ * - Com seleção: 1 dedo NO objeto o move (as setas continuam editando um eixo
+ *   só); no vazio orbita. 2 dedos: a pinça escala e torce o escolhido.
+ * - Tocar de novo no objeto escolhido solta a seleção. Toque no vazio: solta
  *   a seleção; toque duplo no vazio: vista inicial.
- * - 2 dedos: movem o objeto; a pinça escala e torce. Sem seleção, amplia a vista.
  * Só a vista de navegação muda com a órbita — o export não. Cada arrasto de
  * objeto é UM passo de desfazer.
  */
@@ -986,7 +1018,10 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sce
     val degPerPx = 0.35f / 1.dp.toPx()
     val picked = store.scenePick(m.cx(down.position.x), m.cy(down.position.y), 36.dp.toPx() / m.fit)
         ?: store.primary?.takeIf { store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind, LayerType.Light.kind) }
-    var mode = 0            // 0 pendente, 1 órbita, 2 objeto, 3 pinça
+    // Bug 9 (0.3.4): a seleção NO TOQUE decide se o gesto é do objeto ou da câmera.
+    val hasSelection = store.selection.isNotEmpty()
+    val dragTarget = SceneGestureRules.dragTarget(hasSelection, picked)
+    var mode = 0            // 0 pendente, 1 órbita, 2 objeto, 3 pinça da vista, 4 pinça do objeto
     var last = down.position
     var span0 = 1f
     var distance0 = store.sceneDistance
@@ -1004,9 +1039,10 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sce
                 val span = hypot(a.x - b.x, a.y - b.y).coerceAtLeast(1f)
                 if (mode != 3 && mode != 4) {
                     edit.end()
-                    if (store.primary == null && picked != null) store.select(picked)
-                    val d = store.detail
-                    if (d != null && !d.locked && store.previewGestureBasis(d.id) != null) {
+                    // Bug 9: sem seleção a pinça é da câmera (não escolhe o objeto sob os dedos).
+                    val d = store.detail?.takeIf { store.selection.isNotEmpty() }
+                    if (d != null && SceneGestureRules.pinchEditsObject(hasSelection,
+                            !d.locked && store.previewGestureBasis(d.id) != null, StageView.zoomLock)) {
                         mode = 4; edit.startPinch(d, a.x, a.y, b.x, b.y)
                     } else { mode = 3; span0 = span; distance0 = store.sceneDistance }
                 } else if (mode == 4) {
@@ -1021,8 +1057,8 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sce
             val c = e.changes.firstOrNull { it.id == down.id } ?: break
             if (mode == 0 && hypot(c.position.x - down.position.x, c.position.y - down.position.y) > slop) {
                 moved = true
-                if (picked != null) {
-                    if (store.primary != picked || store.selection.size != 1) store.select(picked)
+                if (dragTarget != null) {
+                    if (store.primary != dragTarget || store.selection.size != 1) store.select(dragTarget)
                     val d = store.detail
                     if (d == null || d.locked) break
                     edit.startMove(d, down.position.x, down.position.y)
@@ -1044,12 +1080,18 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sce
         edit.end()
     }
     if (moved) return
-    if (picked != null) {
-        if (store.primary != picked || store.selection.size != 1) {
-            store.select(picked)
+    when (SceneGestureRules.tap(store.primary, store.selection.size, picked)) {
+        SceneGestureRules.TAP_SELECT -> {
+            store.select(picked ?: return)
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            return
         }
-        return
+        // Bug 9: o 2º toque no escolhido solta a seleção e a câmera volta.
+        SceneGestureRules.TAP_DESELECT -> {
+            store.clearSelection()
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            return
+        }
     }
     val now = down.uptimeMillis
     val again = now - SceneTap.at < 320L && hypot(down.position.x - SceneTap.x, down.position.y - SceneTap.y) < 48.dp.toPx()

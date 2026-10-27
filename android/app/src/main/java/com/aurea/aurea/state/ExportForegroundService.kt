@@ -47,7 +47,12 @@ class ExportForegroundService : Service() {
             else -> 0
         }
         val started = runCatching {
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(this, percent = -1), type)
+            // 0.3.5: a chamada da plataforma, direto. O ServiceCompat desta versão do
+            // androidx não conhece o mediaProcessing (API 35) e mandava o tipo 0, que o
+            // Android 14+ recusa ("FGS with type none"): o export seguia sem o serviço e
+            // o sistema podia matá-lo no meio (bug 12).
+            if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification(this, percent = -1), type)
+            else startForeground(NOTIFICATION_ID, notification(this, percent = -1))
         }
         if (started.isFailure) {
             // Android 12+ recusa começar de segundo plano: o export segue, só

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (grade): a grade "controlada por" um nulo (nulo de controle, vínculo sem teto). -->
+    <string name="om_grid_controlled_by">Dikendalikan oleh</string>
+    <string name="om_grid_controlled_none">Tidak ada</string>
+    <string name="om_grid_nulls_header">Null</string>
+    <string name="om_grid_create_control_null">Buat null kendali</string>
+    <string name="om_grid_control_null_name">Kendali grid</string>
+    <string name="om_grid_controlled_hint">Menggeser, memutar, atau menskalakan null akan membawa seluruh grid, di sekitar titik jangkarnya.</string>
+    <string name="om_grid_linked">Grid sekarang mengikuti null yang dipilih.</string>
+    <string name="om_grid_unlinked">Grid tidak lagi mengikuti null.</string>
+    <string name="om_grid_link_cycle">Null itu sudah mengikuti grid ini: tautan akan membentuk siklus. Pilih null lain.</string>
+    <string name="om_grid_link_failed">Tidak dapat menautkan grid ke null itu.</string>
+    <string name="om_grid_link_locked">Grid terkunci. Buka kuncinya untuk mengubah kendali.</string>
+    <string name="om_grid_control_null_created">Null kendali dibuat di tengah grid. Geser, putar, atau skalakan null.</string>
+</resources>

@@ -257,8 +257,8 @@ struct HomeView: View {
     @State private var confirmDelete = false
     @State private var showAbout = false
     @State private var importing = false
-    /// "Importar arquivo do projeto" e "Relatar um problema" (ProjectTransfer.swift).
-    @State private var importingProjectFile = false
+    /// "Relatar um problema" (ProjectTransfer.swift). "Importar arquivo do
+    /// projeto" não tem estado aqui: abre pelo UIKit (`pickProjectFile`).
     @State private var reportingProblem = false
     @State private var projectsSearching = false
     /// Projetos marcados (o modo de seleção da aba Projetos).
@@ -307,11 +307,6 @@ struct HomeView: View {
             }
         }
         .onChange(of: conta.logado) { if $0 { showAccount = false } }
-        // O .aureaproj não tem tipo registrado: qualquer arquivo; o motor diz se é projeto.
-        .fileImporter(isPresented: $importingProjectFile, allowedContentTypes: [.data, .item]) { result in
-            guard case .success(let url) = result else { return }
-            model.importProjectFile(url) { library.refresh() }
-        }
         .sheet(isPresented: $reportingProblem) {
             ReportProblemView(sessao: conta.sessao()) { model.toast = $0 }
         }
@@ -444,7 +439,7 @@ struct HomeView: View {
         }
         HomeSettingsDrawer(model: model, defaults: defaults,
                            onImportMedia: { closeDrawer(); importing = true },
-                           onImportProject: { closeDrawer(); importingProjectFile = true },
+                           onImportProject: { closeDrawer(); pickProjectFile() },
                            onHyper: { closeDrawer(); model.openHyper() },
                            onAbout: { closeDrawer(); showAbout = true },
                            onSupport: { closeDrawer(); reportingProblem = true })
@@ -487,6 +482,25 @@ struct HomeView: View {
 
     private func closeDrawer() {
         withAnimation(.easeOut(duration: 0.25)) { drawerOpen = false; drawerDrag = 0 }
+    }
+
+    /// Bugs 0.3.4 (importar projeto): "Importar arquivo do projeto" abre o
+    /// seletor do UIKit pelo controlador do topo (DocumentImportPicker), como
+    /// os outros seletores de arquivo do app. O `.fileImporter` preso à raiz da
+    /// Home (ao lado das folhas, das capas e das camadas de diálogo, com a
+    /// gaveta fechando no mesmo toque) não apresentava nada no iPhone: tocar
+    /// em "Arquivos" não fazia nada. Qualquer nome serve (.aureaproj, .aurea,
+    /// um zip): o motor reconhece o projeto pelo conteúdo.
+    private func pickProjectFile() {
+        let model = self.model
+        let library = self.library
+        // Depois da gaveta sair (0,25 s): o seletor não sobe por cima da animação.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            DocumentImportPicker.present(types: ProjectFileTypes.picker) { urls in
+                guard let url = urls?.first else { return }
+                model.importProjectFile(url) { library.refresh() }
+            }
+        }
     }
 
     // MARK: conta (P0-4)
@@ -2345,4 +2359,21 @@ struct UiModeChoice: View {
         .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier(id)
     }
+}
+
+// =============================================================================
+// Bugs 0.3.4 (importar projeto): os tipos do arquivo do projeto, declarados no
+// Info.plist (UTExportedTypeDeclarations / UTImportedTypeDeclarations) para o
+// seletor não deixar o arquivo cinza e o sistema oferecer o AUREA ao tocar
+// num .aureaproj (Arquivos, AirDrop, mensageiros — AureaApp.onOpenURL).
+// =============================================================================
+enum ProjectFileTypes {
+    /// Pacote do projeto (`.aureaproj`): o projeto e, se quiser, a mídia.
+    static let package = UTType(exportedAs: "com.aurea.project-package", conformingTo: .data)
+    /// O projeto solto (`.aurea`).
+    static let project = UTType(exportedAs: "com.aurea.project", conformingTo: .data)
+    /// `.pjf`: o nome com que o arquivo do projeto chegou em alguns aparelhos.
+    static let legacyPackage = UTType(importedAs: "com.aurea.import.pjf", conformingTo: .data)
+    /// O seletor mostra também zip e qualquer arquivo: o motor reconhece pelo conteúdo.
+    static let picker: [UTType] = [package, project, legacyPackage, .zip, .data, .item]
 }

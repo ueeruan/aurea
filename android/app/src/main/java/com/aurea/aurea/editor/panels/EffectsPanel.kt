@@ -1414,6 +1414,8 @@ private const val SPECIAL_MESH = 4
 private const val SPECIAL_PUPPET = 5
 private const val SPECIAL_SABER = 6
 private const val SPECIAL_EQ = 7
+// Omega grid (0.3.5): "Controlado por" (nulo de controle) no topo do efeito da grade.
+private const val SPECIAL_GRID = 8
 
 /**
  * O CORPO, na ordem do P0-3: 1) ferramentas do efeito especial; 2) "Variação"
@@ -1430,6 +1432,7 @@ private fun fxBodyItems(store: EditorStore, effectId: Int, typeId: Int, visible:
     if (typeId == effectTypeId("aurea.distort.mesh_warp")) add(FxBody.Special(SPECIAL_MESH))
     if (typeId == effectTypeId("aurea.distort.puppet")) add(FxBody.Special(SPECIAL_PUPPET))
     if (typeId == effectTypeId("aurea.light.saber")) add(FxBody.Special(SPECIAL_SABER))
+    if (typeId == effectTypeId("aurea.layout.grid_builder")) add(FxBody.Special(SPECIAL_GRID))   // Omega grid
     if (visible.isEmpty()) {
         add(FxBody.Notice(R.string.panel_este_efeito_nao_tem_ajustes))
         return@buildList
@@ -1537,7 +1540,9 @@ private fun FxSettingsOverlay(
         val slots by remember(store, id) { derivedStateOf { store.effectParams[id]?.map { ParamSlot.of(it) } ?: emptyList() } }
         val visible = slots.filter { !it.hidden }
         val bodyItems = if (effect.known) remember(visible, effect.typeId, advancedOpen) {
-            fxBodyItems(store, id, effect.typeId, visible, advancedOpen)
+            // Bugs 0.3.4 (bug 3): um parâmetro listado em dois lugares do layout não
+            // pode repetir a chave da LazyColumn (o app fechava).
+            fxBodyItems(store, id, effect.typeId, visible, advancedOpen).distinctBy { it.key }
         } else {
             listOf(FxBody.Notice(R.string.panel_este_efeito_saiu_catalogo_ele_nao))
         }
@@ -1635,6 +1640,7 @@ private fun FxSpecialTools(env: PanelEnv, effect: LayerEffect, what: Int, meshSe
             SPECIAL_PUPPET -> com.aurea.aurea.editor.PuppetCardTools(store, id)
             SPECIAL_SABER -> com.aurea.aurea.editor.SaberCardTools(store, id)
             SPECIAL_EQ -> EqResponseGraph(env, id)
+            SPECIAL_GRID -> GridControlRow(store)   // Omega grid
         }
     }
 }

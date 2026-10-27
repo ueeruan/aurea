@@ -142,6 +142,8 @@ struct PreviewMetalView: UIViewRepresentable {
         // Cena 3D: 0 pendente, 1 órbita, 2 objeto, 3 pinça.
         private var sceneMode = 0
         private var scenePicked: Int64?
+        /// Bug 9 (0.3.4): havia seleção no toque? Sem ela o gesto é da câmera da cena.
+        private var sceneHadSelection = false
         private var sceneLast = CGPoint.zero
         private var sceneSpan: CGFloat = 1
         private var sceneDistance0: Float = 3
@@ -577,6 +579,7 @@ struct PreviewMetalView: UIViewRepresentable {
                 else if !model.sceneEditor && startResize(at: first.position, view: view) { stageMode = .resize }
                 else if model.sceneEditor {
                     stageMode = .scene; sceneMode = 0; sceneLast = first.position
+                    sceneHadSelection = !model.selection.isEmpty
                     scenePicked = model.scenePick(compositionPoint(first.position, view: view), radius: 36 * scaleFactor(view))
                     if scenePicked == nil, let selected = model.selectedLayer, [6,8].contains(selected.kind) { scenePicked = selected.id }
                 }
@@ -939,16 +942,22 @@ struct PreviewMetalView: UIViewRepresentable {
             let local = localPosition(next, affine: moveAffine)
             beginEdit("mover"); model.setTransform2(0, local.x, 1, local.y, layer: id)
         }
-        /// Cena 3D "seca": tudo com o dedo na tela (par do `sceneGesture` do
-        /// Android). No objeto: 1 dedo gira, 2 movem e a pinça escala/torce.
-        /// Vazio: 1 dedo gira a vista; toque solta a seleção; toque duplo recentra.
-        /// Sem seleção, a pinça aproxima a vista. Um arrasto de
-        /// objeto = UM passo de desfazer; a órbita é só da prévia.
+        /// Cena 3D "seca": tudo com o dedo na tela (par do `sceneGesture` e do
+        /// `SceneGestureRules` do Android, bug 9 da 0.3.4).
+        /// Sem seleção: 1 dedo orbita a vista (mesmo sobre um objeto), a pinça
+        /// aproxima; tocar num objeto escolhe. Com seleção: 1 dedo no objeto o
+        /// move, no vazio orbita; a pinça escala/torce o escolhido (a lupa do
+        /// canto devolve a pinça à câmera). Tocar de novo no objeto escolhido
+        /// solta a seleção; toque no vazio solta; toque duplo recentra. Um
+        /// arrasto de objeto = UM passo de desfazer; a órbita é só da prévia.
         private func sceneEvent(_ pressed: [StageTouchPoint], view: UIView) {
             if pressed.isEmpty {
                 guard sceneMode == 0 else { return }
                 if let picked = scenePicked {
-                    if model.primarySelection != picked || model.selection.count != 1 {
+                    if model.primarySelection == picked && model.selection.count == 1 {
+                        // Bug 9: o 2º toque no escolhido solta a seleção e a câmera volta.
+                        model.clearSelection(); snapFeedback.selectionChanged()
+                    } else {
                         model.select(layerId: picked, additive: false); snapFeedback.selectionChanged()
                     }
                     return
@@ -964,8 +973,9 @@ struct PreviewMetalView: UIViewRepresentable {
                 let span = max(1, hypot(a.x - b.x, a.y - b.y))
                 if sceneMode != 3 && sceneMode != 4 {
                     finishStageEdit()
-                    if model.primarySelection == nil, let picked = scenePicked { model.select(layerId: picked, additive: false) }
-                    if editableSelection(), let id = model.primarySelection, !model.engine.previewGestureBasis(id).isEmpty {
+                    // Bug 9: sem seleção a pinça é da câmera (não escolhe o objeto sob os dedos).
+                    if sceneHadSelection, !StageViewZoom.shared.zoomLock, editableSelection(), let id = model.primarySelection,
+                       !model.engine.previewGestureBasis(id).isEmpty {
                         sceneMode = 4; startLayerPinch(pressed[0], pressed[1], view: view)
                     } else { sceneMode = 3; sceneSpan = span; sceneDistance0 = model.sceneDistance }
                 } else if sceneMode == 4 {
@@ -978,7 +988,8 @@ struct PreviewMetalView: UIViewRepresentable {
             if sceneMode == 3 || sceneMode == 4 { return }   // sobrou um dedo da pinça: nada
             guard let first = pressed.first(where: { $0.id == stageFinger }) else { return }
             if sceneMode == 0 && hypot(first.position.x - stageDown.x, first.position.y - stageDown.y) > 12 {
-                if let picked = scenePicked {
+                // Bug 9: sem seleção no toque, arrastar orbita (mesmo sobre um objeto).
+                if sceneHadSelection, let picked = scenePicked {
                     if model.primarySelection != picked || model.selection.count != 1 { model.select(layerId: picked, additive: false) }
                     guard editableSelection() else { return }
                     keepTransform(); previewBasis = model.engine.previewGestureBasis(picked)

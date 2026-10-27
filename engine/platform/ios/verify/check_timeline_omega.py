@@ -32,16 +32,17 @@ var failures = 0
 func check(_ ok: Bool, _ message: String) {
     if !ok { failures += 1; print("FAILED: " + message) }
 }
-// P0-4: degradê estável por id (os mesmos números do Android).
-let a: UInt32 = 0xFF48C3F5, b: UInt32 = 0xFF156AE0
-func same(_ p: (UInt32, UInt32), _ q: (UInt32, UInt32)) -> Bool { p.0 == q.0 && p.1 == q.1 }
-check(same(ClipColors.vary(a, b, id: 1), (0xFF39AAEF, 0xFF298DE8)), "vary id 1")
-check(same(ClipColors.vary(a, b, id: 2), (0xFF2B90E9, 0xFF2483E6)), "vary id 2")
-check(same(ClipColors.vary(a, b, id: 7), (0xFF48C3F5, 0xFF3AABEF)), "vary id 7")
-check(same(ClipColors.vary(a, b, id: 123456789012), (0xFF41B6F2, 0xFF40B4F2)), "vary id grande")
-check(same(ClipColors.vary(a, b, id: -5), (0xFF2B90E9, 0xFF329BEC)), "vary id negativo")
-check(!same(ClipColors.vary(a, b, id: 1), ClipColors.vary(a, b, id: 2)), "vizinhas diferentes")
-check(ClipColors.mix(a, b, 0, 7) == a && ClipColors.mix(a, b, 7, 7) == b, "mix nas pontas")
+// 0.3.4 (bugs-034, cores): cor sólida do tipo, 1/5 dessaturada e 1/8 mais escura
+// (os mesmos números do TimelineOmegaTest do Android).
+check(ClipColors.solid(0xFF6A52E0) == 0xFF5D4CAF, "solid vídeo")
+check(ClipColors.solid(0xFF3D6FD9) == 0xFF3D60AB, "solid imagem")
+check(ClipColors.solid(0xFF1F8C93) == 0xFF28757A, "solid áudio")
+check(ClipColors.solid(0xFFB07A16) == 0xFF916C26, "solid texto")
+check(ClipColors.solid(0xFF2E9459) == 0xFF347B51, "solid forma")
+check(ClipColors.solid(0xFFB0417A) == 0xFF8E4068, "solid partículas")
+check(ClipColors.solid(0x006A52E0) == 0xFF5D4CAF, "solid opaca")
+check(ClipColors.solid(0xFF808080) == 0xFF707070, "solid cinza")
+check(ClipColors.mix(0xFF000000, 0xFFFFFFFF, 1, 2) == 0xFF808080, "mix ao meio")
 // P1-3: cor do marcador (o motor guarda R no byte baixo).
 check(MarkerColors.unpack(0xFFF7C34F) == 0xFF4FC3F7, "padrão do motor é #4FC3F7")
 check(MarkerColors.pack(0xFFF16586) == 0xFF8665F1, "rosa empacotado")
@@ -115,7 +116,8 @@ def main() -> int:
             and view.index("omegaRows(&context, size: size, now: now)") < view.index("omegaRuler(&context, size: size)"),
         "P0-2 sem sobra embaixo": "var bottomPad: CGFloat { dp(reference ? 0 : 24) }" in model,
         "P0-3 cabeçalho de 62": "static let omegaHeaderColumn: CGFloat = 62" in theme,
-        "P0-4 degradê por id": "ClipColors.vary(pair.0, pair.1, id: row.id)" in view,
+        "034 cor sólida do tipo": "ClipColors.solid(row.type.argb)" in view
+            and "ClipColors.vary" not in view and "clipGradient" not in theme,
         "P0-5 passo em potência de 2": "OmegaRuler.frameStep(pps: pps, fps: fps)" in view,
         # 0.3.3 recursos: o marcador antigo (0.3.2) voltou — triângulo + nome na régua,
         # sem a zona de toque do relógio, cor pela correção da área 03 (`display`).

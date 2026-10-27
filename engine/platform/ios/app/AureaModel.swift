@@ -3147,6 +3147,9 @@ final class AureaModel: ObservableObject {
         mediaQueue.async { [weak self] in
             defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
             var imported: [Int64] = [], failures = 0, layeredFailure: (Bool, Int64)?
+            // Omega bugs-034 mídia: áudio escolhido na seleção de mídia vira camada de áudio
+            // (fora da "Camada" da Edição); a falha diz a frase do motor, como o "Música ou som".
+            var audioIds: Set<Int64> = [], audioFailure: String?
             for (url, video) in items {
                 let destination = AureaPaths.mediaDestination(for: url.lastPathComponent)
                 do {
@@ -3156,32 +3159,39 @@ final class AureaModel: ObservableObject {
                     // PSD chega com as camadas — antes os dois viravam uma imagem parada. O motor lê
                     // o arquivo inteiro na importação, então a cópia sai depois.
                     let ext = url.pathExtension.lowercased()
-                    let layered = !video && (ext == "gif" || ext == "psd")
-                    let result = video ? importer.importVideo(destination.path, name: name)
+                    let audio = !video && OmegaPickedMedia.kind(url) == .audio
+                    let layered = !video && !audio && (ext == "gif" || ext == "psd")
+                    let result = audio ? importer.importAudio(destination.path, name: name)
+                        : video ? importer.importVideo(destination.path, name: name)
                         : ext == "gif" ? importer.importGIF(destination.path, name: name)
                         : ext == "psd" ? importer.importPSD(destination.path, name: name)
                         : importer.importImageFile(destination.path, name: name)
                     if layered { try? FileManager.default.removeItem(at: destination) }
-                    if result >= 0 { imported.append(result) }
+                    if result >= 0 { imported.append(result); if audio { audioIds.insert(result) } }
                     else {
                         failures += 1
                         if layered { layeredFailure = (ext == "gif", -result) }
                         else { try? FileManager.default.removeItem(at: destination) }
+                        if audio {
+                            let raw = importer.lastImportError
+                            audioFailure = raw.isEmpty ? AureaText.t("ios_import_failed_code", String(-result)) : AureaEngineText.sentence(raw, code: Int(-result))
+                        }
                     }
                 } catch { failures += 1 }
             }
-            let ids = imported, failed = failures, layeredError = layeredFailure
+            let ids = imported, failed = failures, layeredError = layeredFailure, audioOnly = audioIds, audioError = audioFailure
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.importingMedia = false
                 if !ids.isEmpty {
-                    if asOverlay { self.engine.run { e in ids.forEach { _ = e.moveClipToOverlay($0, atFrame: overlayFrame) } } }
+                    if asOverlay { self.engine.run { e in ids.forEach { if !audioOnly.contains($0) { _ = e.moveClipToOverlay($0, atFrame: overlayFrame) } } } }
                     self.engine.selectLayers(ids.map { NSNumber(value: $0) })
                     self.selection = Set(ids)
                     self.refreshModel(force: true)
                     _ = self.saveProject(writeThumbnail: false)
                 }
                 if let layeredError { self.toast = AureaModel.layeredImportError(gif: layeredError.0, code: layeredError.1) }
+                else if let audioError { self.toast = audioError }
                 else if failed > 0 { self.toast = AureaText.t("msg_nao_consegui_ler_esse_arquivo") }
             }
         }
@@ -4320,6 +4330,29 @@ final class AureaModel: ObservableObject {
         openPanel(.effects)
     }
 
+    // Omega grid (0.3.5): a grade "controlada por" um nulo (o mesmo do Android,
+    // EditorStore.setGridControlNull). A regra (vínculo, compensação, ciclo) é do motor.
+    func isGridController(_ layerId: Int64) -> Bool { engine.isGridController(layerId) }
+
+    /// "Controlado por": vincula a grade ao nulo (0 = Nenhum). Um passo de desfazer.
+    func setGridControlNull(_ gridId: Int64, nullId: Int64) {
+        let code = engine.setGridControlNull(gridId, nullId: nullId)
+        refreshModel(force: true)
+        switch code {
+        case GridLink.ok: toast = AureaText.t(nullId != 0 ? "om_grid_linked" : "om_grid_unlinked")
+        case GridLink.cycle: toast = AureaText.t("om_grid_link_cycle")
+        case GridLink.locked: toast = AureaText.t("om_grid_link_locked")
+        default: toast = AureaText.t("om_grid_link_failed")
+        }
+    }
+
+    /// "Criar nulo de controle": nulo 3D no centro da grade, já vinculado; a grade continua escolhida.
+    func createGridControlNull(_ gridId: Int64) {
+        let id = engine.createGridControlNull(gridId, name: AureaText.t("om_grid_control_null_name"))
+        refreshModel(force: true)
+        toast = AureaText.t(id < 0 ? "om_grid_link_failed" : "om_grid_control_null_created")
+    }
+
     func addCatalogEffect(_ type: UInt32, layers ids: [Int64]) {
         guard !ids.isEmpty else { return }
         if HyperEffectGate.locked(typeId: type) { toast = AureaText.t("hyper_effect_locked"); return }
@@ -4455,6 +4488,24 @@ final class AureaModel: ObservableObject {
         syncAfterEdit()
         if id >= 0 && openEditor { openTextContentEditor(selectAll: true) }
         return Int64(id)
+    }
+
+    // Bugs 0.3.4 (bug 11): "Converter em contorno" do ⋮ da camada (par do EditorStore.kt).
+    /// A camada é uma forma VIVA (SDF, não vetorial) que pode virar contorno?
+    func canConvertToOutline(_ layerId: Int64) -> Bool {
+        guard let d = queryDetail(layerId), let kind = d["kind"] as? NSNumber,
+              let shape = d["shapeTypePoints"] as? NSNumber else { return false }
+        return kind.uint32Value == 5 && (shape.uint32Value & 0xFFFF) != 11
+    }
+    /// Forma viva → camada vetorial com a mesma silhueta (um desfazer); abre o Editar pontos.
+    func convertShapeToOutline(_ layerId: Int64) {
+        guard canConvertToOutline(layerId), layers.first(where: { $0.id == layerId })?.locked != true else { return }
+        if status.playing != 0 { playPause() }
+        guard engine.convertShapeToOutline(layerId) else {
+            toast = AureaText.t("om_convert_outline_failed_035"); refreshModel(force: true); return
+        }
+        selection = [layerId]; engine.selectLayers([NSNumber(value: layerId)])
+        syncAfterEdit(); vectorGroup = 0; vectorPath = 0; EditPointsState.shared.reset(); openPanel(.editPoints)
     }
 
     func addVector(_ preset: UInt32, freehand: Bool = false) {
@@ -4830,6 +4881,8 @@ final class AureaModel: ObservableObject {
         ProblemReport.beginExportDiagnostics(previous: engine.exportDiagnostics())
         if options.kind == .video { startExportDiagnosticsTimer() }
         exportedKind = options.kind
+        // Omega exportação (bug 1 da 0.3.4): o tipo pedido fica no log do app.
+        NSLog("AureaExport: start kind=%ld engineCode=%u", options.kind.rawValue, options.kind.engineCode)
         let base = projectName.isEmpty ? "Aurea" : projectName
         var url = AureaPaths.documents.appendingPathComponent("\(base).\(options.kind.fileExtension)")
         var counter = 1

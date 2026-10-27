@@ -108,6 +108,15 @@ public:
     /// 0 idle, 1 working/queued, 2 last requested job failed. Not model readiness.
     [[nodiscard]] u32 activity_state() noexcept;
 
+    // Bugs 0.3.4 (Rotobrush que não inicia): o motivo da última falha e um
+    // pedido explícito de nova tentativa. A rede que não carregou não tentava
+    // de novo até trocar de projeto, e "propague de novo" nunca funcionava.
+    enum Failure : u32 { kFailNone = 0, kFailGeneric = 1, kFailModel = 2, kFailDecode = 3, kFailMemory = 4 };
+    [[nodiscard]] u32 last_failure() const noexcept { return lastFailure_.load(std::memory_order_relaxed); }
+    /// Ação do usuário (traço, Propagar clipe): a próxima chamada volta a
+    /// carregar a rede que falhou. Não espera o worker (só um sinal).
+    void retry_failed() noexcept { retryModel_.store(true, std::memory_order_relaxed); }
+
     static constexpr usize kMaxCached = 48;          ///< ~12 MB de mapas
     static constexpr usize kMaxPending = 16;          ///< bounded fair queue, one latest job per source
     static constexpr u32 kIdleReleaseMs = 30'000;    ///< rede ociosa sai da memória
@@ -174,6 +183,8 @@ private:
     std::thread thread_;
     std::atomic<bool> cancel_{false};
     std::atomic<bool> lastJobFailed_{false};
+    std::atomic<u32> lastFailure_{0};        ///< Failure (bugs 0.3.4)
+    std::atomic<bool> retryModel_{false};    ///< retry_failed (bugs 0.3.4)
     void (*readyFn_)(void*) = nullptr;
     void* readyCtx_ = nullptr;
 };

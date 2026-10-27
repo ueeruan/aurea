@@ -202,6 +202,30 @@ AUREA_TEST(HyperNeural, RegistryHasEveryLiteAndMaxStage) {
     AUREA_CHECK_EQ(r.all().size(), static_cast<usize>(10));
 }
 
+// 0.3.4 (bugs-034, hyper): nenhum caminho depende do aparelho. A Face só
+// depende do modelo baixado; 32 bits e pouca RAM não a tiram mais do registro.
+AUREA_TEST(HyperNeural, NoStageIsRefusedByDeviceTraits) {
+    StageRegistry r;
+    register_neural_stages(r);
+    DeviceProfile weak = cpu_profile();
+    weak.measured = true;
+    weak.abi64 = false;
+    weak.freeRamBytes = 300ull << 20;
+    weak.vulkan = weak.vulkanFp16 = weak.gles3 = weak.npu = false;
+    weak.liteMsPerTile = 5000.0f;
+    const i32 g = static_cast<i32>(UpscaleMode::General), a = static_cast<i32>(UpscaleMode::Anime);
+    for (Path path : {Path::Lite, Path::Max}) {
+        AUREA_CHECK(r.find(StageKind::Upscale, path, g, weak) != nullptr);
+        AUREA_CHECK(r.find(StageKind::Upscale, path, a, weak) != nullptr);
+        AUREA_CHECK(r.find(StageKind::Clean, path, -1, weak) != nullptr);
+        AUREA_CHECK(r.find(StageKind::Motion, path, -1, weak) != nullptr);
+    }
+    DeviceProfile strong = cpu_profile();
+    strong.freeRamBytes = 8ull << 30;
+    AUREA_CHECK(neural::face_available(weak) == neural::face_available(strong));
+    AUREA_CHECK(neural::face_available(weak) == ondemand_model_ready("gfpgan-v1.4"));
+}
+
 AUREA_TEST(HyperNeural, MeterChecksReferenceTileOnCpuAndVulkan) {
     DeviceProfile p = cpu_profile();
     p.vulkan = true;   // o medidor tenta; recusa sozinho se o host não tiver

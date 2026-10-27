@@ -69,7 +69,12 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
     val currentHandles by rememberUpdatedState(handles)
     val curves = remember(group, revision) { group.map { t -> curveKeys(t) { easeOf(store, layer, it) } } }
     val currentGroup by rememberUpdatedState(group)
-    val groupId = remember(group) { group.joinToString { "${it[0].property}:${it[0].effectIndex}:${it[0].paramIndex}" } }
+    // Bugs 0.3.4 (bug 10): a identidade do GRUPO sem a ordem (a trilha escolhida vai
+    // por último em `group`). Trocar a trilha editável dentro do grupo (tocar num
+    // ponto do X com o Y escolhido) não reinicia o gesto, a janela nem a seleção:
+    // o dedo segue arrastando o ponto tocado.
+    val groupKey = remember(group) { group.map { "${it[0].property}:${it[0].effectIndex}:${it[0].paramIndex}" }.sorted().joinToString() }
+    val currentFirst by rememberUpdatedState(first)
     val fullFrom = group.minOf { it.first().time }
     val fullTo = max(fullFrom + 1, group.maxOf { it.last().time })
     fun fit(): GraphViewport {
@@ -86,7 +91,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
         val timeMargin = max(1f, (fullTo.toLong() - fullFrom).toFloat() * 0.06f)
         return GraphViewport(fullFrom - timeMargin, fullTo + timeMargin, low - margin, high + margin)
     }
-    var view by remember(layer, groupId, speed) { mutableStateOf(fit()) }
+    var view by remember(layer, groupKey, speed) { mutableStateOf(fit()) }
     val from = floor(view.from).toInt()
     val to = max(from + 1, ceil(view.to).toInt())
     var widthPx by remember { mutableIntStateOf(0) }
@@ -100,7 +105,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
     // Nunca no meio de um arrasto (como no iOS): a janela pulando movia na tela
     // TODAS as outras bolinhas enquanto o dedo levava uma.
     var dragging by remember { mutableStateOf(false) }
-    LaunchedEffect(layer, groupId) {
+    LaunchedEffect(layer, groupKey) {
         snapshotFlow { store.detail?.localPlayhead }.collect { frame ->
             if (!dragging && frame != null && (frame < view.from || frame > view.to)) {
                 val half = view.duration / 2f
@@ -109,8 +114,8 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
         }
     }
     val currentTrack by rememberUpdatedState(track)
-    var multi by remember(layer, first.property, first.effectIndex, first.paramIndex) { mutableStateOf(false) }
-    var picked by remember(layer, first.property, first.effectIndex, first.paramIndex) { mutableStateOf(emptySet<Int>()) }
+    var multi by remember(layer, groupKey) { mutableStateOf(false) }
+    var picked by remember(layer, groupKey) { mutableStateOf(emptySet<Int>()) }
     LaunchedEffect(track) { picked = picked.intersect(track.map { it.time }.toSet()) }
     val selected = store.selectedKeyframe?.second?.time
     Column(Modifier.fillMaxSize()) {
@@ -136,7 +141,7 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
             TextButton(onClick = { store.pasteKeyframes(listOf(layer)) }) { Text(stringResource(R.string.common_paste), fontSize = 11.sp) }
             TextButton(onClick = { if (store.editSelectedKeys(layer, track.filter { it.time in picked }, 0, true)) picked = emptySet() }, enabled = picked.isNotEmpty()) { Text(stringResource(R.string.common_delete), fontSize = 11.sp) }
         }
-        Canvas(Modifier.weight(1f).fillMaxWidth().clipToBounds().onSizeChanged { widthPx = it.width }.testTag("curve.trackGraph").pointerInput(layer, first.property, first.effectIndex, first.paramIndex, speed) {
+        Canvas(Modifier.weight(1f).fillMaxWidth().clipToBounds().onSizeChanged { widthPx = it.width }.testTag("curve.trackGraph").pointerInput(layer, groupKey, speed) {
             awaitEachGesture {
                 val down = awaitFirstDown()
                 down.consume()
@@ -152,15 +157,21 @@ internal fun TrackGraph(store: EditorStore, layer: Long, track: List<KeyframeRow
                 var key = if (speed) null else currentTrack.minByOrNull { (point(it) - down.position).getDistanceSquared() }
                     ?.takeIf { (point(it) - down.position).getDistanceSquared() <= radius * radius }
                 if (key != null) store.selectKeyframe(layer, key)
-                // Losango de uma trilha IRMÃ: tocar troca a trilha editável (sem arrastar).
+                // Losango de uma trilha IRMÃ: tocar troca a trilha editável. Bug 10
+                // (0.3.4): e o mesmo dedo já arrasta o ponto tocado (antes era preciso
+                // soltar e tocar de novo). Na seleção múltipla, só troca (como antes).
                 if (key == null && handle == null && !speed) {
-                    val sibling = currentGroup.flatten().filter { !it.sameTrack(first) }
+                    val editable = currentFirst
+                    val sibling = currentGroup.flatten().filter { !it.sameTrack(editable) }
                         .minByOrNull { (point(it) - down.position).getDistanceSquared() }
                         ?.takeIf { (point(it) - down.position).getDistanceSquared() <= radius * radius }
                     if (sibling != null) {
                         store.selectKeyframe(layer, sibling)
-                        do { val e = awaitPointerEvent(); e.changes.forEach { it.consume() } } while (e.changes.any { it.pressed })
-                        return@awaitEachGesture
+                        if (multi) {
+                            do { val e = awaitPointerEvent(); e.changes.forEach { it.consume() } } while (e.changes.any { it.pressed })
+                            return@awaitEachGesture
+                        }
+                        key = sibling
                     }
                 }
                 val originalGroup = key?.let { store.graphKeyGroup(layer, it) }.orEmpty()

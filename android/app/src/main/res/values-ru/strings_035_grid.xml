@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (grade): a grade "controlada por" um nulo (nulo de controle, vínculo sem teto). -->
+    <string name="om_grid_controlled_by">Управляется</string>
+    <string name="om_grid_controlled_none">Нет</string>
+    <string name="om_grid_nulls_header">Нули</string>
+    <string name="om_grid_create_control_null">Создать управляющий нуль</string>
+    <string name="om_grid_control_null_name">Управление сеткой</string>
+    <string name="om_grid_controlled_hint">Перемещение, поворот или масштаб нуля переносят всю сетку вокруг его опорной точки.</string>
+    <string name="om_grid_linked">Сетка теперь следует за выбранным нулём.</string>
+    <string name="om_grid_unlinked">Сетка больше не следует за нулём.</string>
+    <string name="om_grid_link_cycle">Этот нуль уже следует за этой сеткой: связь замкнула бы цикл. Выберите другой нуль.</string>
+    <string name="om_grid_link_failed">Не удалось связать сетку с этим нулём.</string>
+    <string name="om_grid_link_locked">Сетка заблокирована. Разблокируйте её, чтобы сменить управление.</string>
+    <string name="om_grid_control_null_created">Управляющий нуль создан в центре сетки. Перемещайте, вращайте или масштабируйте нуль.</string>
+</resources>

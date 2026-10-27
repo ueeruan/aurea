@@ -1527,7 +1527,7 @@ enum AureaDropdownMetrics {
 /// Caixa suspensa. `width` nil = a largura que o pai der. `tone`: `.light`
 /// (página clara) ou `.editor` (painel escuro do editor). `swatch`: amostra de
 /// cor antes do valor (`.clear` = xadrez, fundo transparente). `tag` = id da
-/// caixa; o menu recebe "\(tag).menu".
+/// caixa. Bug 6b (0.3.5): o menu é o nativo (`Menu`); cada linha leva o `tag` dela.
 struct AureaDropdown: View {
     private let value: String
     private let width: CGFloat?
@@ -1537,7 +1537,6 @@ struct AureaDropdown: View {
     private let tag: String?
     private let label: String?
     private let entries: () -> [MenuEntry]
-    @State private var open = false
 
     init(value: String, width: CGFloat? = AureaDropdownMetrics.width, tone: AureaSurfaceTone = .light,
          swatch: Color? = nil, enabled: Bool = true, tag: String? = nil, accessibilityLabel: String? = nil,
@@ -1552,7 +1551,14 @@ struct AureaDropdown: View {
         let ink = light ? AureaColors.lightText : AureaColors.text
         let muted = light ? AureaColors.lightTextMuted : AureaColors.muted
         let line = light ? AureaColors.lightDivider : AureaColors.border
-        Button { aureaReopenMenu($open) } label: {
+        // Bug 6b (0.3.5): a caixa abre o MENU NATIVO do SwiftUI (`Menu`), com a caixa
+        // igual. O menu ancorado numa janela própria (AnchoredMenu.swift) não abria
+        // para os testadores dentro das folhas (Novo projeto, Ajustes do projeto) nem
+        // depois da correção da 0.3.4; o `Menu` do sistema abre por cima de qualquer
+        // folha, dentro de ScrollView, e grava a opção pela ação da própria linha.
+        Menu {
+            AureaDropdownMenuItems(entries: entries())
+        } label: {
             HStack(spacing: 0) {
                 if let swatch {
                     AureaColorSwatch(color: swatch).clipShape(RoundedRectangle(cornerRadius: 5)).frame(width: 22, height: 22)
@@ -1568,15 +1574,63 @@ struct AureaDropdown: View {
             .background(box, in: RoundedRectangle(cornerRadius: AureaDropdownMetrics.radius))
             .contentShape(Rectangle())
         }
-        .buttonStyle(AureaPressStyle(shrink: 1))
+        // A ordem das linhas é a da lista, também quando o menu abre para cima.
+        .menuOrder(.fixed)
         .disabled(!enabled)
         .opacity(enabled ? 1 : AnchoredMenuMetrics.disabledAlpha)
         .frame(width: width)
-        .aureaAnchoredMenu(isPresented: $open, matchAnchorWidth: true, tone: tone,
-                           tag: tag.map { "\($0).menu" }, entries: entries)
         .accessibilityLabel(label ?? value)
         .accessibilityValue(value)
         .modifier(OptionalIdentifier(tag: tag))
+    }
+}
+
+/// Bug 6b (0.3.5): as linhas do `MenuEntry` no menu nativo da caixa suspensa.
+/// A opção vigente (`selected`/`checked`) sai marcada pelo próprio sistema (um
+/// `Toggle` ligado no menu); tocar numa linha chama a ação dela (`onClick`), que
+/// grava o valor no estado da tela (a folha mostra o novo valor na caixa).
+/// Subpágina = submenu; título = seção; fileira de ícones = uma linha por célula.
+struct AureaDropdownMenuItems: View {
+    let entries: [MenuEntry]
+
+    var body: some View {
+        ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+            switch entry {
+            case .row(let item):
+                AureaDropdownMenuRow(item: item)
+            case .iconRow(let cells, let selectedIndex, _, _):
+                ForEach(Array(cells.enumerated()), id: \.offset) { index, cell in
+                    Toggle(isOn: Binding(get: { index == selectedIndex }, set: { _ in cell.onClick() })) { Text(cell.label) }
+                        .modifier(OptionalIdentifier(tag: cell.tag))
+                }
+            case .heading(let title, _):
+                Text(title)
+            case .divider:
+                Divider()
+            }
+        }
+    }
+}
+
+private struct AureaDropdownMenuRow: View {
+    let item: MenuItem
+
+    var body: some View {
+        if let submenu = item.submenu {
+            Menu { AureaDropdownMenuItems(entries: submenu) } label: { Text(item.label) }
+                .disabled(!item.enabled)
+        } else {
+            Toggle(isOn: Binding(get: { item.selected || item.checked }, set: { _ in item.onClick() })) {
+                if let sublabel = item.sublabel {
+                    Text(item.label)
+                    Text(sublabel)
+                } else {
+                    Text(item.label)
+                }
+            }
+            .disabled(!item.enabled)
+            .modifier(OptionalIdentifier(tag: item.tag))
+        }
     }
 }
 
@@ -2260,6 +2314,15 @@ struct FxRuler: View {
     @State private var fling: Task<Void, Never>?
     @State private var haptic = UIImpactFeedbackGenerator(style: .light)
     @GestureState private var held = false
+    /// Bugs 0.3.4 (bug 6a): o arrasto só começa no toque (distância 0) enquanto
+    /// ESTA régua arremessa (tocar a para e continua o mesmo gesto). Parada, ele
+    /// espera 4 pt como o `AureaSlider`: um arrasto de distância 0 é reconhecido no
+    /// toque e, dentro do ScrollView do corpo, tirava a rolagem vertical do painel.
+    /// Só muda entre gestos (armado ao arremessar, desarmado no fim do gesto).
+    @State private var catchArmed = false
+    private var dragStartDistance: CGFloat {
+        catchArmed ? 0 : FxParamMath.TOUCH_SLOP * FxParamMath.SLIDER_SLOP_FRACTION
+    }
 
     private var shown: Float { dragging ? live : value }
     private var tickStep: Float { step > 0 && step.isFinite ? step : 1 }
@@ -2281,6 +2344,7 @@ struct FxRuler: View {
                     DispatchQueue.main.async {
                         phase = 0
                         if fling == nil { finish() }
+                        catchArmed = fling != nil
                     }
                 }
             }
@@ -2339,7 +2403,7 @@ struct FxRuler: View {
     }
 
     private var drag: some Gesture {
-        DragGesture(minimumDistance: 0)
+        DragGesture(minimumDistance: dragStartDistance)
             .updating($held) { _, state, _ in state = true }
             .onChanged { g in changed(g) }
             .onEnded { g in ended(g) }
@@ -2397,7 +2461,7 @@ struct FxRuler: View {
     }
 
     private func ended(_ g: DragGesture.Value) {
-        defer { phase = 0 }
+        defer { phase = 0; catchArmed = fling != nil }
         guard phase == 1, dragging else { return }
         let speed = velocity(at: g.time.timeIntervalSinceReferenceDate)
         if abs(speed) > FxParamMath.FLING_MIN_PX_S { startFling(-speed * gain) } else { finish() }
@@ -2429,6 +2493,7 @@ struct FxRuler: View {
 
     private func startFling(_ speed: CGFloat) {
         FxRulerFling.owner = token
+        catchArmed = true
         fling = Task { @MainActor in
             // UIScrollView.DecelerationRate.normal: a velocidade cai 0,2 % por ms.
             let rate = 0.998
@@ -2457,6 +2522,8 @@ struct FxRuler: View {
                 fling = nil
                 if FxRulerFling.owner == token { FxRulerFling.owner = nil }
                 finish()
+                // Sem dedo na régua: volta a esperar os 4 pt (com dedo, o fim do gesto desarma).
+                if phase == 0 { catchArmed = false }
             }
         }
     }
@@ -2467,6 +2534,7 @@ struct FxRuler: View {
         task.cancel()
         fling = nil
         if FxRulerFling.owner == token { FxRulerFling.owner = nil }
+        catchArmed = false
         finish()
     }
 }

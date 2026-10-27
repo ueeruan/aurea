@@ -145,6 +145,9 @@ bool Engine::roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 rad
     strokes.push_back(std::move(stroke));
     ai::roto_encode(strokes, *curve);
     project_->mark_dirty();
+    // Bugs 0.3.4: o aviso de falha manda "pintar mais um traço"; o traço é o
+    // pedido do usuário para a rede que não carregou tentar de novo.
+    if (auto* fg = renderer_.foreground_service()) fg->retry_failed();
     // "Atualizar outros quadros": depois de uma propagação, o traço novo refaz
     // os quadros que dependem dele.
     if (auto* roto = renderer_.roto_service(); roto && roto->progress().total > 0 && l->kind == LayerKind::Video)
@@ -175,6 +178,7 @@ bool Engine::roto_undo_stroke(u64 layerId, u32 effectId) noexcept try {
     strokes.erase(strokes.begin() + static_cast<std::ptrdiff_t>(at));
     ai::roto_encode(strokes, *curve);
     project_->mark_dirty();
+    if (auto* fg = renderer_.foreground_service()) fg->retry_failed();   // bugs 0.3.4 (ver roto_add_stroke)
     if (auto* roto = renderer_.roto_service(); roto && roto->progress().total > 0 && l->kind == LayerKind::Video && !strokes.empty())
         (void)renderer_.roto_propagate(*project_, *comp, *l, *e, &media_);
     request_render();
@@ -219,7 +223,8 @@ bool Engine::roto_progress(i64* out4) noexcept {
     auto* roto = renderer_.roto_service();
     if (!roto) return false;
     const auto p = roto->progress();
-    out4[0] = p.done; out4[1] = p.total; out4[2] = p.running ? 1 : 0; out4[3] = p.failed ? 1 : 0;
+    out4[0] = p.done; out4[1] = p.total; out4[2] = p.running ? 1 : 0;
+    out4[3] = p.failed ? std::max<i64>(1, static_cast<i64>(p.reason)) : 0;   // bugs 0.3.4: o motivo
     return p.total > 0;
 }
 

@@ -493,6 +493,15 @@ struct TopBarView: View {
                     model.setLayerClipToBelow(row.id, !row.clipToBelow)
                 })
             }
+            // Bugs 0.3.4 (bug 11): "Converter em contorno" — a forma viva vira vetor
+            // (mesma silhueta, cor e traço) e abre o Editar pontos (par do Menus.kt).
+            if row.kind == 5 && model.canConvertToOutline(row.id) {
+                out.append(.item(AureaText.t("om_convert_outline_035"), glyph: CupertinoGlyph.PencilOutline,
+                                 sublabel: AureaText.t("om_convert_outline_detail_035"), enabled: !row.locked,
+                                 tag: "layer.menu.convertOutline") {
+                    model.convertShapeToOutline(row.id)
+                })
+            }
             if row.kind == 12 {
                 out.append(.item(AureaText.t("editor_entrar_grupo"), glyph: CupertinoGlyph.ArrowDownRightSquare) { model.openGroup(row.id) })
                 out.append(.item(AureaText.t("editor_desagrupar"), glyph: ShellGlyph.SquareSplit2x2) { model.ungroup(row.id) })

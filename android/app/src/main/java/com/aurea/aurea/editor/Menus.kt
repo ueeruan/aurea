@@ -109,6 +109,7 @@ private fun layerMenuEntries(
     val t = store.playhead
     val inside = t > row.startFrame && t < row.endFrame
     val out = mutableListOf<MenuEntry>()
+    val convertFailed = stringResource(R.string.om_convert_outline_failed_035)   // bugs 0.3.4 (bug 11)
     out += MenuEntry.Header(stringResource(R.string.editor_camada))
     if (type == LayerType.Video || type == LayerType.Audio) {
         out += MenuEntry.Item(stringResource(R.string.editor_velocidade), glyph = CupertinoGlyph.Speedometer) {
@@ -265,6 +266,21 @@ private fun layerMenuEntries(
                 sublabel = stringResource(R.string.editor_mascara_recorte_detalhe),
                 tag = "layer.clipMask",
             ) { store.setLayerClipToBelow(id, !row.clipToBelow) }
+        }
+        // Bugs 0.3.4 (bug 11): "Converter em contorno" — a forma viva vira vetor
+        // (mesma silhueta, cor e traço) e abre o Editar pontos.
+        if (type == LayerType.Shape && store.canConvertToOutline(id)) {
+            out += MenuEntry.Item(
+                stringResource(R.string.om_convert_outline_035),
+                glyph = CupertinoGlyph.PencilOutline,
+                sublabel = stringResource(R.string.om_convert_outline_detail_035),
+                enabled = !row.locked,
+                tag = "layer.menu.convertOutline",
+            ) {
+                if (store.primary != id) store.select(id)
+                if (store.convertShapeToOutline(id)) openPanel(store, ui, EditorPanel.EditPoints)
+                else store.showToast(convertFailed)
+            }
         }
         if (type != LayerType.Group) {
             out += MenuEntry.Item(stringResource(R.string.editor_converter_grupo), glyph = CupertinoGlyph.RectangleStack) { store.precompose(listOf(id)) }

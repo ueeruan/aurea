@@ -1042,6 +1042,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)setVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path values:(NSArray<NSNumber*>*)values continuing:(BOOL)continuing;
 - (BOOL)keyVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path;
 - (BOOL)makeVectorPathEditable:(long long)layerId group:(uint32_t)group path:(uint32_t)path NS_SWIFT_NAME(makeVectorPathEditable(_:group:path:));
+/// Bugs 0.3.4 (bug 11): "Converter em contorno" — forma viva vira camada vetorial (EngineOmegaOutline.cpp).
+- (BOOL)convertShapeToOutline:(long long)layerId NS_SWIFT_NAME(convertShapeToOutline(_:));
 - (BOOL)toggleVectorPathKey:(long long)layerId group:(uint32_t)group path:(uint32_t)path NS_SWIFT_NAME(toggleVectorPathKey(_:group:path:));
 - (BOOL)setVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param value:(float)value;
 - (BOOL)keyVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param;
@@ -1074,6 +1076,15 @@ NS_SWIFT_NAME(AureaEngine)
 - (long long)importGIF:(NSString*)path name:(NSString*)name;
 - (NSString*)foregroundModelDirectory;
 - (long long)createGrid:(NSArray<NSNumber*>*)layers;
+// Omega grid (0.3.5): a grade "controlada por" um nulo (AureaEngine.kt `setGridControlNull` e família).
+/// A camada é a controladora de uma grade?
+- (BOOL)isGridController:(long long)layerId;
+/// O nulo que controla a grade (0 = nenhum).
+- (long long)gridControlNull:(long long)gridId;
+/// Vincula (0 = desvincular). 0 = ok, 1 não é grade, 2 não é nulo, 3 fecharia um ciclo, 4 bloqueada, 5 falhou.
+- (int)setGridControlNull:(long long)gridId nullId:(long long)nullId;
+/// Nulo 3D novo no centro da grade, já vinculado. Id ou −código.
+- (long long)createGridControlNull:(long long)gridId name:(NSString*)name;
 - (NSArray<NSNumber*>*)textPath:(long long)layerId;
 - (BOOL)setTextPath:(long long)layerId target:(long long)target offset:(float)offset perpendicular:(BOOL)perpendicular reversed:(BOOL)reversed;
 /// Texto no caminho completo (0.2.7, AureaEngine.kt `queryTextPath`): [guia, margem inicial,

@@ -139,6 +139,40 @@
                 <data android:scheme="content"/>
                 <data android:mimeType="application/x-aurea-project"/>
             </intent-filter>
+            <!-- Bugs 0.3.4 (importar projeto): o arquivo do projeto (.aureaproj;
+                 .pjf em alguns aparelhos) chega dos gerenciadores de arquivos e
+                 dos mensageiros como application/octet-stream — ninguém conhece
+                 o MIME acima, e o AUREA nem aparecia em "Abrir com". Por nome
+                 (quando a URI tem o nome) e pelo MIME genérico; MainActivity
+                 importa como projeto NOVO e o motor recusa o que não for
+                 projeto. O pathPattern do Android não volta atrás: um ponto a
+                 mais no nome pede um padrão a mais. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:scheme="content"/>
+                <data android:host="*"/>
+                <data android:mimeType="*/*"/>
+                <data android:pathPattern=".*\\.aureaproj"/>
+                <data android:pathPattern=".*\\..*\\.aureaproj"/>
+                <data android:pathPattern=".*\\..*\\..*\\.aureaproj"/>
+                <data android:pathPattern=".*\\.pjf"/>
+                <data android:pathPattern=".*\\..*\\.pjf"/>
+            </intent-filter>
+            <!-- Só o MIME (sem esquema: content: entra implícito). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/octet-stream"/>
+                <data android:mimeType="application/x-aurea-project"/>
+            </intent-filter>
+            <!-- "Compartilhar" para o AUREA (a URI vem em EXTRA_STREAM, sem dado). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/octet-stream"/>
+                <data android:mimeType="application/x-aurea-project"/>
+            </intent-filter>
         </activity>
         <service
             android:name=".state.ExportForegroundService"

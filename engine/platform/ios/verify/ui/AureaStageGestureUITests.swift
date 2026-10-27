@@ -52,9 +52,11 @@ import UIKit
     }
 
     // 0.3.4 (relato do iPhone 13): na folha "Novo projeto" a caixa de fps ficava
-    // cinza no toque e não abria nada. Abre a caixa, o menu APARECE por cima da
-    // folha, escolhe outra taxa, o valor muda; fecha por fora e abre de novo
-    // (a caixa não pode morrer depois do primeiro uso).
+    // cinza no toque e não abria nada; na 0.3.4 os testadores ainda viam isso
+    // (bug 6b). Bug 6b (0.3.5): a caixa abre o menu NATIVO. Toca a caixa com um
+    // toque de dedo, a opção aparece por cima da folha, escolhe outra taxa, o
+    // valor muda; abre de novo e troca outra vez (a caixa não morre); o mesmo
+    // com a resolução; e o projeto criado sai com a taxa e a resolução escolhidas.
     func testNewProjectFpsDropdownOpensOverTheSheetAndChangesTheValue() throws {
         try launchHome()
         let create = app.buttons["home.create"].firstMatch
@@ -65,39 +67,32 @@ import UIKit
         try bringIntoView(fps, scrolling: element("newProject.sheet"))
         let before = fps.value as? String ?? ""
         let target = before.hasPrefix("24 ") ? 60 : 24
+        let other = target == 24 ? 60 : 24
 
-        fps.tap()
-        XCTAssertTrue(element("newProject.fps.menu").waitForExistence(timeout: 5), "The fps menu did not appear over the sheet")
-        let option = element("newProject.fps.\(target)")
-        XCTAssertTrue(option.waitForExistence(timeout: 5)); XCTAssertTrue(option.isHittable)
-        option.tap()
-        XCTAssertTrue(waitGone(element("newProject.fps.menu")))
+        try choose(fps, option: "newProject.fps.\(target)", label: "\(target) fps")
         XCTAssertTrue(waitForValue(fps, prefix: "\(target) "), "The fps box kept \(fps.value as? String ?? "nil")")
 
-        // Abre de novo, fecha tocando fora e abre outra vez: a caixa continua viva.
-        fps.tap()
-        XCTAssertTrue(element("newProject.fps.menu").waitForExistence(timeout: 5))
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).tap()
-        XCTAssertTrue(waitGone(element("newProject.fps.menu")))
-        fps.tap()
-        XCTAssertTrue(element("newProject.fps.menu").waitForExistence(timeout: 5), "The fps box died after the first use")
-        element("newProject.fps.\(target == 24 ? 60 : 24)").tap()
-        XCTAssertTrue(waitForValue(fps, prefix: "\(target == 24 ? 60 : 24) "))
+        // Abre de novo e troca outra vez: a caixa continua viva depois do primeiro uso.
+        try choose(fps, option: "newProject.fps.\(other)", label: "\(other) fps")
+        XCTAssertTrue(waitForValue(fps, prefix: "\(other) "), "The fps box died after the first use")
 
-        // A resolução usa a mesma caixa.
+        // A resolução usa a mesma caixa (16:9 escolhido: a folha pode lembrar a Livre).
+        let wide = element("newProject.aspect.16x9")
+        XCTAssertTrue(wide.waitForExistence(timeout: 5)); wide.tap()
         let resolution = element("newProject.resolution")
-        if resolution.exists {
-            try bringIntoView(resolution, scrolling: element("newProject.sheet"))
-            resolution.tap()
-            XCTAssertTrue(element("newProject.resolution.menu").waitForExistence(timeout: 5))
-            element("newProject.resolution.720").tap()
-            XCTAssertTrue(waitForValue(resolution, prefix: "720p"))
-        }
+        XCTAssertTrue(resolution.waitForExistence(timeout: 5), "16:9 shows the resolution box, not the free size")
+        try bringIntoView(resolution, scrolling: element("newProject.sheet"))
+        let target720 = (resolution.value as? String ?? "").hasPrefix("720p") ? 1080 : 720
+        try choose(resolution, option: "newProject.resolution.\(target720)", label: "\(target720)p")
+        XCTAssertTrue(waitForValue(resolution, prefix: "\(target720)p"), "The resolution box kept \(resolution.value as? String ?? "nil")")
+        let frameText = target720 == 720 ? "1280 × 720" : "1920 × 1080"
+        XCTAssertTrue(app.staticTexts[frameText].firstMatch.waitForExistence(timeout: 3), "The frame size under Resolution did not follow")
     }
 
-    // 0.3.4: o mesmo defeito nos Ajustes do projeto (painel do editor).
+    // 0.3.4: o mesmo defeito nos Ajustes do projeto (painel do editor). Bug 6b
+    // (0.3.5): fps e resolução mudam a composição de verdade (sonda do motor).
     func testProjectSettingsFpsDropdownOpensAndChangesTheCompositionRate() throws {
-        _ = try launch("transform")
+        let initial = try launch("transform")
         let gear = app.buttons["editor.projectMenu"].firstMatch
         XCTAssertTrue(gear.waitForExistence(timeout: 5))
         gear.tap()
@@ -106,20 +101,83 @@ import UIKit
         try bringIntoView(fps, scrolling: element("projectSettings"))
         let before = fps.value as? String ?? ""
         let target = before.hasPrefix("60 ") ? 24 : 60
+        let other = target == 60 ? 24 : 60
 
-        fps.tap()
-        XCTAssertTrue(element("projectSettings.fps.menu").waitForExistence(timeout: 5), "The fps menu did not appear in project settings")
-        let option = element("projectSettings.fps.\(target)")
-        XCTAssertTrue(option.waitForExistence(timeout: 5)); XCTAssertTrue(option.isHittable)
-        option.tap()
-        XCTAssertTrue(waitGone(element("projectSettings.fps.menu")))
+        try choose(fps, option: "projectSettings.fps.\(target)", label: "\(target) fps")
         XCTAssertTrue(waitForValue(fps, prefix: "\(target) "), "The project fps stayed \(fps.value as? String ?? "nil")")
 
         // E abre de novo depois do primeiro uso.
-        fps.tap()
-        XCTAssertTrue(element("projectSettings.fps.menu").waitForExistence(timeout: 5), "The fps box died after the first use")
-        element("projectSettings.fps.\(target == 60 ? 24 : 60)").tap()
-        XCTAssertTrue(waitForValue(fps, prefix: "\(target == 60 ? 24 : 60) "))
+        try choose(fps, option: "projectSettings.fps.\(other)", label: "\(other) fps")
+        XCTAssertTrue(waitForValue(fps, prefix: "\(other) "), "The fps box died after the first use")
+
+        // A resolução (lado menor) muda o tamanho da composição no motor.
+        let resolution = element("projectSettings.resolution")
+        try bringIntoView(resolution, scrolling: element("projectSettings"))
+        let short = min(initial.compositionWidth, initial.compositionHeight)
+        let side = abs(short - 720) < 1 ? 1080 : 720
+        try choose(resolution, option: "projectSettings.resolution.\(side)", label: "\(side)p")
+        _ = try awaitSnapshot("Project settings resolution reaches the core") {
+            abs(min($0.compositionWidth, $0.compositionHeight) - Double(side)) < 1
+        }
+    }
+
+    // Bug 6b (0.3.5): "rotação e X/Y/Z não respondem ao toque". Toques de DEDO
+    // (o dedo fica 150–180 ms na tela): o campo X abre o teclado e grava; a roda
+    // de rotação abre o teclado com um toque parado (antes só valia até 100 ms)
+    // e grava o ângulo. Par do `FieldsRespondToTouchTest` do Android.
+    func testTransformXFieldAndRotationDialRespondToAFingerTap() throws {
+        _ = try launch("transform")
+        let x = element("transform.position.x")
+        XCTAssertTrue(x.waitForExistence(timeout: 5)); XCTAssertTrue(x.isHittable)
+        x.press(forDuration: 0.15)
+        let confirm = element("numeric.keypad.confirm")
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "A finger tap on X did not open the keypad")
+        key("5").tap(); key("0").tap()
+        confirm.tap()
+        _ = try awaitSnapshot("X typed on the keypad reaches the core") { abs($0.detail.position[0] - 50) < 0.01 }
+        XCTAssertTrue(waitGone(confirm))
+
+        // Segurar o campo também digita (o soltar não abre outro teclado por cima).
+        x.press(forDuration: 0.8)
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Holding X did not open the keypad")
+        element("numeric.keypad.cancel").tap()
+        XCTAssertTrue(waitGone(confirm))
+
+        // Girar (2ª aba) e a roda: toque parado de 180 ms.
+        let rotate = element("panel.tab.1")   // Girar (o `transform.tab.rotate` é só um id por cima, sem toque)
+        XCTAssertTrue(rotate.waitForExistence(timeout: 5)); rotate.tap()
+        let dial = element("transform.rotation.dial")
+        XCTAssertTrue(dial.waitForExistence(timeout: 5)); XCTAssertTrue(dial.isHittable)
+        dial.press(forDuration: 0.18)
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "A finger tap on the rotation dial did not open the keypad")
+        key("4").tap(); key("5").tap()
+        confirm.tap()
+        _ = try awaitSnapshot("The dial keypad angle reaches the core") { abs($0.detail.rotation[2] - 45) < 0.01 }
+    }
+
+    /// Uma tecla do teclado numérico (dentro da rolagem dele, não um "5" qualquer da tela).
+    private func key(_ label: String) -> XCUIElement {
+        element("numeric.keypad.scroll").buttons[label].firstMatch
+    }
+
+    /// Bug 6b (0.3.5): abre a caixa suspensa (menu nativo) com um toque de dedo e
+    /// toca na opção — pelo id, ou pelo texto da linha quando o sistema não leva o
+    /// id para o item do menu.
+    private func choose(_ box: XCUIElement, option id: String, label: String) throws {
+        box.press(forDuration: 0.12)
+        var option = element(id)
+        if !option.waitForExistence(timeout: 2) {
+            option = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (identifier BEGINSWITH %@)", label, box.identifier))
+                .firstMatch
+        }
+        guard option.waitForExistence(timeout: 5) else {
+            XCTFail("The menu of \(box.identifier) did not show \(label)")
+            throw ProbeError.missing
+        }
+        XCTAssertTrue(option.isHittable, "\(label) is behind the sheet")
+        option.tap()
+        XCTAssertTrue(waitGone(option), "The menu of \(box.identifier) did not close after picking \(label)")
     }
 
     /// A Home do app de verdade (cena DEBUG "home": inglês, sem notas de versão nem boas-vindas).
@@ -451,6 +509,33 @@ import UIKit
     }
     func testTextVideoWithTextExportsAt1080p() throws {
         try assertTextExport("video-text-export")
+    }
+    /// Omega exportação (bug 1 da 0.3.4: "quadro e sequência saem como MP4"): o
+    /// item escolhido na lista termina no formato dele (título do resultado).
+    func testFrameAndSequenceExportKeepTheChosenType() throws {
+        _ = try launch("video-text-export")
+        let back = app.buttons["Back (clear the selection)"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
+        for (item, title) in [("frame", "Image ready"), ("sequence", "Sequence ready")] {
+            let openExport = app.buttons["Export"].firstMatch
+            XCTAssertTrue(openExport.waitForExistence(timeout: 5)); openExport.tap()
+            let option = app.buttons["export.option.\(item)"].firstMatch
+            XCTAssertTrue(option.waitForExistence(timeout: 5)); option.tap()
+            let start = app.buttons["export.go"].firstMatch
+            XCTAssertTrue(start.waitForExistence(timeout: 5)); start.tap()
+            let ready = app.descendants(matching: .any)["export.result"].firstMatch
+            let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"].firstMatch
+            let deadline = Date().addingTimeInterval(300)
+            while !ready.exists && Date() < deadline {
+                if allow.exists { allow.tap() }
+                _ = ready.waitForExistence(timeout: 2)
+            }
+            XCTAssertTrue(ready.exists, "\(item): the export never reached the done screen")
+            XCTAssertTrue(app.staticTexts[title].exists, "\(item): the result is not \(title)")
+            XCTAssertFalse(app.staticTexts["Video ready"].exists, "\(item) came out as a video")
+            let close = app.buttons["export.result.close"].firstMatch
+            XCTAssertTrue(close.waitForExistence(timeout: 5)); close.tap()
+        }
     }
     private func assertTextExport(_ scene: String) throws {
         let snapshot = try launch(scene)

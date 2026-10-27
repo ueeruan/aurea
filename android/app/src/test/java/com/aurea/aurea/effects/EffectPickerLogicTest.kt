@@ -267,7 +267,7 @@ class EffectPickerLogicTest {
     fun groupRowKeysNeverCollideWithTheFixedHomeKeys() {
         // Regressão 0.3.0: com um plugin instalado, a linha que começava no grupo
         // "plugins" usava a chave "plugins", a mesma da porta, e o app fechava.
-        val fixed = setOf("destaques", "recomendados", "rapidos", "titulo-categorias", PLUGIN_DOOR_KEY)
+        val fixed = setOf(HOME_RECOMMENDED_KEY, HOME_QUICK_KEY, HOME_CATEGORIES_HEADER_KEY, EMPTY_ITEM_KEY, PLUGIN_DOOR_KEY, "plugins")
         val rows = EffectGroup.entries.chunked(2) + EffectGroup.entries.chunked(1) +
             EffectGroup.entries.drop(1).chunked(2)
         val keys = rows.map(::groupRowKey)
@@ -278,6 +278,47 @@ class EffectPickerLogicTest {
             val k = layout.map(::groupRowKey)
             assertEquals(k.size, k.toSet().size)
         }
+    }
+
+    /** Bugs 0.3.4 (bug 3): monta a tela inicial e as grades com 1 e com 2 plugins instalados. */
+    @Test
+    fun browserListKeysAreUniqueWithOneAndTwoPlugins() {
+        val pluginA = fx("plugin.aurea_test.a", "Plugin A", "Plugins")
+        val pluginB = fx("plugin.aurea_test.b", "Plugin B", "Plugins")
+        val captions = toolCatalogEntry(EffectTool.Captions, "Legendas")
+        listOf(listOf(pluginA), listOf(pluginA, pluginB)).forEach { plugins ->
+            // O catálogo pode chegar com uma entrada repetida (mesmo typeId): fica uma.
+            val sorted = distinctEffects(catalog + captions + plugins + plugins.first())
+            assertEquals(sorted.size, sorted.map { it.typeId }.toSet().size)
+            val groups = groupEntries(sorted)
+            assertTrue(groups.any { it.first == EffectGroup.Plugins && it.second.size == plugins.size })
+            for (recommended in listOf(true, false)) for (quick in listOf(true, false)) {
+                val rows = browserHomeRows(recommended, quick, groups.map { it.first })
+                val keys = rows.map { it.key }
+                assertEquals("chave repetida na tela inicial: $keys", keys.size, keys.toSet().size)
+                assertTrue(keys.none { it == "plugins" })
+                assertEquals(PLUGIN_DOOR_KEY, keys.last())
+                // Toda chave tem prefixo de tipo.
+                assertTrue(keys.all { it.substringBefore(':') in setOf("section", "header", "category", "action") })
+                // Todo grupo aparece numa linha, uma vez.
+                val shown = rows.filterIsInstance<BrowserHomeRow.Categories>().flatMap { it.groups }
+                assertEquals(groups.map { it.first }, shown)
+            }
+            // A grade de cada categoria (com a linha "vazio") e a busca: chaves únicas.
+            groups.forEach { (_, entries) ->
+                val keys = listOf(EMPTY_ITEM_KEY) + entries.map { effectItemKey(it.typeId) }
+                assertEquals(keys.size, keys.toSet().size)
+            }
+            val pluginKeys = plugins.map { pluginItemKey("aurea_test." + it.name) }
+            assertEquals(pluginKeys.size, pluginKeys.toSet().size)
+        }
+        // As famílias de chave não se cruzam: o grupo "plugins", a porta e um plugin chamado "plugins".
+        val mixed = listOf(groupRowKey(listOf(EffectGroup.Plugins)), PLUGIN_DOOR_KEY, pluginItemKey("plugins"),
+            tagItemKey("plugins"), effectItemKey(effectTypeId("plugins")), EMPTY_ITEM_KEY)
+        assertEquals(mixed.size, mixed.toSet().size)
+        // Grupo repetido por engano não repete a linha.
+        val dup = browserHomeRows(false, false, listOf(EffectGroup.Plugins, EffectGroup.Plugins)).map { it.key }
+        assertEquals(dup.size, dup.toSet().size)
     }
 
     @Test

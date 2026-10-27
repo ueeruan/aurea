@@ -665,9 +665,10 @@ enum GestureLimit {
 //  "Omega" de TimelineMath.kt; os mesmos números (verify/check_timeline_omega.py).
 // =============================================================================
 
-/// Degradê do cartão do clipe: variação ESTÁVEL por id (mesma conta inteira do
-/// Android): c0 = mix(A, B, (191·id mod 7)/7), c1 = mix(A, B, (773·id mod 31)/31)
-/// e o degradê vai de c0 a mix(c0, c1, ½).
+/// 0.3.4 (bugs-034, cores): cor do cartão do clipe, identidade própria do AUREA
+/// (par do `ClipColors` do Android, a mesma conta inteira). Cor SÓLIDA do tipo
+/// (`TimelineLayerType.argb`), 1/5 dessaturada rumo ao cinza de mesma luma e 1/8
+/// mais escura, para o rótulo branco ficar legível. Sem degradê e sem variação por id.
 enum ClipColors {
     /// Interpolação por canal ARGB, `num/den` de `a` para `b`, arredondada.
     static func mix(_ a: UInt32, _ b: UInt32, _ num: Int, _ den: Int) -> UInt32 {
@@ -682,18 +683,18 @@ enum ClipColors {
         return out
     }
 
-    private static func floorMod(_ v: Int64, _ m: Int64) -> Int64 { ((v % m) + m) % m }
-
-    /// Índices da variação: (191·id mod 7, 773·id mod 31), sem estourar o Int64.
-    static func steps(_ id: Int64) -> (Int, Int) {
-        (Int(floorMod(2 * floorMod(id, 7), 7)), Int(floorMod(29 * floorMod(id, 31), 31)))
+    /// Luma inteira (Rec. 601, arredondada) de uma cor ARGB.
+    static func luma(_ argb: UInt32) -> UInt32 {
+        let r = Int((argb >> 16) & 0xFF), g = Int((argb >> 8) & 0xFF), b = Int(argb & 0xFF)
+        return UInt32((r * 299 + g * 587 + b * 114 + 500) / 1000)
     }
 
-    /// (início, fim) do degradê da camada `id` a partir do par do tipo, em ARGB.
-    static func vary(_ a: UInt32, _ b: UInt32, id: Int64) -> (UInt32, UInt32) {
-        let k = steps(id)
-        let c0 = mix(a, b, k.0, 7), c1 = mix(a, b, k.1, 31)
-        return (c0, mix(c0, c1, 1, 2))
+    /// Cor do cartão a partir da cor do tipo `base` (ARGB): 1/5 dessaturada, 1/8 mais escura, opaca.
+    static func solid(_ base: UInt32) -> UInt32 {
+        let y = luma(base)
+        let gray: UInt32 = 0xFF00_0000 | (y << 16) | (y << 8) | y
+        let muted = mix(base | 0xFF00_0000, gray, 1, 5)
+        return mix(muted, 0xFF00_0000, 1, 8)
     }
 }
 

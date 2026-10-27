@@ -100,7 +100,7 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             AnimatedVisibility(hint, enter = fadeIn(), exit = fadeOut()) {
-                Text(stringResource(R.string.scene_hint), color = AureaColors.Text, fontSize = 12.sp, textAlign = TextAlign.Center,
+                Text(stringResource(R.string.om_scene_hint_035), color = AureaColors.Text, fontSize = 12.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 24.dp).background(ShellColors.FloatingDark, RoundedCornerShape(12.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp))
             }

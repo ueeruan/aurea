@@ -62,7 +62,7 @@ import kotlin.math.sin
 //     `campo`) e "N×" voltas acima (0,2 × raio, texto-2);
 //   • giro RELATIVO ao ângulo do dedo em volta do centro; ímã a cada 45° com
 //     zona de 2° pela ponte (`AureaEngine.dialSnap`, a mesma conta do iOS), com
-//     háptico ao grudar; toque curto (< tapTimeout) abre o teclado (°);
+//     háptico ao grudar; toque parado (< toque longo, bug 6b) abre o teclado (°);
 //   • um passo de desfazer por gesto (quem chama abre/fecha).
 // =============================================================================
 
@@ -177,7 +177,11 @@ internal fun RotationDial(
             }
             .pointerInput(enabled) {
                 if (!enabled) return@pointerInput
-                val tapMs = android.view.ViewConfiguration.getTapTimeout().toLong()
+                // Bug 6b (0.3.5): o toque que abre o teclado valia só até o `tapTimeout`
+                // (100 ms); um toque normal de dedo dura 100–200 ms e a roda "não
+                // respondia". Vale agora o toque inteiro até o toque longo (≈ 500 ms),
+                // parado (sem passar do slop); arrasto continua girando.
+                val tapMs = viewConfiguration.longPressTimeoutMillis
                 val dead = 12.dp.toPx()
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -194,7 +198,7 @@ internal fun RotationDial(
                             val event = awaitPointerEvent()
                             val change = event.changes.firstOrNull { it.id == pointer } ?: break
                             if (!change.pressed) {
-                                if (!dragging && !change.isConsumed && change.uptimeMillis - down.uptimeMillis < tapMs) tap()
+                                if (!dragging && !change.isConsumed && isDialTap(change.uptimeMillis - down.uptimeMillis, tapMs)) tap()
                                 break
                             }
                             total += change.position - change.previousPosition
@@ -281,6 +285,13 @@ internal fun RotationDial(
         drawCircle(AureaColors.Text, handleR, h)
     }
 }
+
+/**
+ * Bug 6b (0.3.5): o toque parado na roda que abre o teclado. Vale até o prazo do
+ * toque longo ([limitMs], `longPressTimeoutMillis`), não o `tapTimeout` de 100 ms,
+ * que perdia a maioria dos toques de dedo. Par do `TransformDial.tapTime` do iOS.
+ */
+internal fun isDialTap(durationMs: Long, limitMs: Long): Boolean = durationMs in 0L until limitMs
 
 /** Ângulo (°) do vetor na tela: 0 no alto, horário positivo. */
 private fun angleOf(v: Offset): Float = Math.toDegrees(atan2(v.x.toDouble(), -v.y.toDouble())).toFloat()

@@ -258,10 +258,12 @@ private struct AddLayerPickers: ViewModifier {
     private func presentFilePicker(_ kind: ShellAddPicker) {
         let project = pickerProject
         let model = self.model
-        let multiple = kind == .model || kind == .modelTextures || kind == .sequenceFiles
+        let multiple = kind == .model || kind == .modelTextures || kind == .sequenceFiles || kind == .mediaFiles
         DocumentImportPicker.present(types: Self.fileTypes(kind), multiple: multiple, asCopy: kind != .sequenceFolder) { urls in
             guard project == model.projectGeneration, let urls, let url = urls.first else { return }
             switch kind {
+            // Omega bugs-034 mídia: fotos, vídeos e áudio do Arquivos; o áudio vira camada de áudio no lote.
+            case .mediaFiles: model.importMediaBatch(urls.map { ($0, OmegaPickedMedia.kind($0) == .video) })
             // Seleção múltipla/pasta: o FBX/OBJ/glTF vem com as texturas, o .bin e o .mtl.
             case .model: model.importModelFiles(urls: urls)
             case .modelTextures: model.importModelTextures(urls: urls)
@@ -284,6 +286,8 @@ private struct AddLayerPickers: ViewModifier {
         case .model: return DocumentImportPicker.modelTypes
         // .mtl (texto), .bin e texturas: alguns provedores não marcam public.data.
         case .modelTextures: return DocumentImportPicker.modelTypes + [.image, .text]
+        // Omega bugs-034 mídia.
+        case .mediaFiles: return OmegaPickedMedia.types
         default: return [.audio, .movie, .data]
         }
     }
@@ -1862,7 +1866,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                 }.padding(.horizontal, 8).padding(.top, 6)
                 Spacer()
                 if hint {
-                    Text(AureaText.t("scene_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.text)
+                    Text(AureaText.t("om_scene_hint_035")).font(.aurea(size: 12)).foregroundStyle(AureaColors.text)
                         .multilineTextAlignment(.center).padding(.horizontal, 12).padding(.vertical, 8)
                         .background(StageInk.floatingDark, in: RoundedRectangle(cornerRadius: 12))
                         .padding(.horizontal, 24).padding(.bottom, 8).transition(.opacity).allowsHitTesting(false)

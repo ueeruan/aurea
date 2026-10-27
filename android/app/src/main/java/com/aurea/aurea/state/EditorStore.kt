@@ -1986,6 +1986,25 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    // Bugs 0.3.4 (bug 11): "Converter em contorno" do ⋮ da camada.
+    /** A camada é uma forma VIVA (SDF, não vetorial) que pode virar contorno? */
+    fun canConvertToOutline(layer: Long): Boolean {
+        val d = queryDetail(layer) ?: return false
+        return d.kind == com.aurea.aurea.ui.theme.LayerType.Shape.kind && (d.shapeTypePoints and 0xFFFF) != VECTOR_SHAPE_TYPE
+    }
+    /** Forma viva → camada vetorial com a mesma silhueta (um desfazer). Verdadeiro = converteu. */
+    fun convertShapeToOutline(layer: Long): Boolean {
+        if (!canConvertToOutline(layer) || queryDetail(layer)?.locked != false) return false
+        if (playing) pause()
+        val ok = engine.convertShapeToOutline(layer)
+        if (ok) {
+            vectorGroup = 0
+            vectorPath = 0
+        }
+        refreshNow()
+        return ok
+    }
+
     // --- Rig 2D (camada de imagem) — o palco em editor/RigStage.kt ------------
     /** Muda a cada edição do rig: o overlay do palco lê para redesenhar. */
     var rigRevision by mutableIntStateOf(0)
@@ -2099,6 +2118,31 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = engine.createGrid(selection.toLongArray())
         if (id < 0) { showToast(appText(R.string.grid_pick_layers)); return }
         refreshNow(); select(id)
+    }
+
+    // Omega grid (0.3.5): a grade "controlada por" um nulo. A regra (vínculo,
+    // compensação, ciclo) é do motor; aqui só o pedido e o aviso.
+    /** A camada é a controladora de uma grade (leva o efeito da grade)? */
+    fun isGridController(layer: Long): Boolean = engine.isGridController(layer)
+
+    /** "Controlado por": vincula a grade ao nulo (0 = Nenhum). Um passo de desfazer. */
+    fun setGridControlNull(grid: Long, nullId: Long) {
+        val code = engine.setGridControlNull(grid, nullId)
+        refreshNow()
+        val message = when (code) {
+            GridLink.OK -> if (nullId != 0L) R.string.om_grid_linked else R.string.om_grid_unlinked
+            GridLink.CYCLE -> R.string.om_grid_link_cycle
+            GridLink.LOCKED -> R.string.om_grid_link_locked
+            else -> R.string.om_grid_link_failed
+        }
+        showToast(appText(message))
+    }
+
+    /** "Criar nulo de controle": nulo 3D no centro da grade, já vinculado; a grade continua escolhida. */
+    fun createGridControlNull(grid: Long) {
+        val id = engine.createGridControlNull(grid, appText(R.string.om_grid_control_null_name))
+        refreshNow()
+        showToast(appText(if (id < 0) R.string.om_grid_link_failed else R.string.om_grid_control_null_created))
     }
 
     fun importPsd(uri: Uri) = importLayeredFile(uri, gif = false)
@@ -4261,26 +4305,32 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val app = getApplication<Application>()
         val requested = uris.distinct()
         val imported = mutableListOf<Long>()
+        // Omega bugs-034 mídia: áudio escolhido na seleção de mídia vira camada de áudio (fora da "Camada" da Edição).
+        val audioIds = mutableSetOf<Long>()
         busyMessage = appText(R.string.ios_importing_media)
         pause()
         launchImport {
             try {
                 for ((index, uri) in requested.withIndex()) {
                     busyMessage = "${appText(R.string.ios_importing_media)} ${index + 1}/${requested.size}"
+                    var audio = false
                     try {
                         val id = withContext(Dispatchers.IO) {
                             val source = durableSource(uri)
                             val display = displayName(uri) ?: uri.lastPathSegment.orEmpty()
                             val mime = app.contentResolver.getType(uri) ?: android.webkit.MimeTypeMap.getSingleton()
                                 .getMimeTypeFromExtension(display.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT))
-                            val video = mime?.startsWith("video/") == true
+                            val kind = com.aurea.aurea.editor.PickedMedia.kind(mime, display)
+                            audio = kind == com.aurea.aurea.editor.PickedMedia.Kind.Audio
+                            val video = kind == com.aurea.aurea.editor.PickedMedia.Kind.Video
                             val name = display.ifEmpty { appText(if (video) R.string.target_video else R.string.target_image) }
                             val ext = display.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
                             // 0.2.7: GIF toca (quadros numa pré-composição) e PSD
                             // chega com as camadas — antes os dois viravam uma imagem parada.
                             val gif = mime == "image/gif" || ext == "gif"
                             val psd = ext == "psd" || mime == "image/vnd.adobe.photoshop"
-                            if (gif || psd) importLayeredNow(uri, gif)
+                            if (audio) engine.importAudio(source, display.substringBeforeLast('.').ifEmpty { appText(R.string.target_audio) })
+                            else if (gif || psd) importLayeredNow(uri, gif)
                             else if (video) engine.importVideo(source, name)
                             else {
                                 val orientation = AureaEngine.exifOrientation(app, uri)
@@ -4292,8 +4342,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                                 } finally { bmp.recycle() }
                             }
                         }
-                        if (id >= 0) imported.add(id)
-                        else errorMessage = appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                        if (id >= 0) { imported.add(id); if (audio) audioIds.add(id) }
+                        else errorMessage = when {
+                            // Omega bugs-034 mídia: a mesma frase do "Música ou som".
+                            audio && -id == ERRC_UNSUPPORTED_FORMAT -> appText(R.string.app_audio_unreadable)
+                            audio -> appText(R.string.app_audio_import_failed, humanError((-id).toInt()))
+                            else -> appText(R.string.msg_nao_consegui_ler_esse_arquivo)
+                        }
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (failure: Exception) {
                         Log.w(TAG, "batch media item failed", failure)
@@ -4301,7 +4356,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 // "Camada" da Edição: cada mídia numa linha própria, no cabeçote.
-                if (asOverlay) imported.forEach { engine.moveClipToOverlay(it, overlayFrame) }
+                if (asOverlay) imported.forEach { if (it !in audioIds) engine.moveClipToOverlay(it, overlayFrame) }
                 refreshNow()
                 if (imported.isNotEmpty()) {
                     selection = imported.toCollection(LinkedHashSet())
@@ -7551,7 +7606,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return rows.filterIndexed { i, _ ->
             var cur = i
             var steps = 0
-            while (cur >= 0 && cur < rows.size && steps < 64) {
+            // Omega grid: cadeia de pais sem teto (o limite só corta um ciclo).
+            while (cur >= 0 && cur < rows.size && steps <= rows.size) {
                 if (cur == self) return@filterIndexed false
                 cur = rows[cur].parentIndex
                 steps++

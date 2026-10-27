@@ -208,26 +208,33 @@ struct HyperJobInfo: Equatable {
     func path(_ s: HyperStep) -> HyperPath { s.rawValue < paths.count ? paths[s.rawValue] : .auto }
 }
 
-/// Por que um caminho não está disponível (a tela explica, não só desliga).
-enum HyperPathBlock { case none, notMeasured, needs64Bit, noGpuBackend, unavailable
+/// Por que um caminho não está disponível (par do `HyperPathBlock` do Android). 0.3.4
+/// (bugs-034, hyper): sem motivo de APARELHO (32 bits, GPU, medição): todo caminho vale
+/// em qualquer celular, por conta e risco da pessoa (`HyperPathRules.risky`). Só sobra o
+/// motivo dos AJUSTES: nenhuma etapa pedida tem rede nesse caminho (igual em todo aparelho).
+enum HyperPathBlock { case none, unavailable
     var key: String {
         switch self {
         case .none: return ""
-        case .notMeasured: return "hyper_block_not_measured"
-        case .needs64Bit: return "hyper_block_32bit"
-        case .noGpuBackend: return "hyper_block_no_gpu"
-        case .unavailable: return "hyper_block_unavailable"
+        case .unavailable: return "hyper035_path_unavailable"
         }
     }
 }
 
 enum HyperPathRules {
+    /// A decisão é do motor (Estimate < 0 = nenhuma rede para estes ajustes); o perfil não bloqueia.
     static func block(_ path: HyperPath, estimate: HyperEstimate?, profile: HyperDeviceProfile?) -> HyperPathBlock {
-        if let estimate, estimate.available(path) { return .none }
-        guard let profile, profile.measured else { return path == .turbo ? .unavailable : .notMeasured }
-        if path == .max && !profile.abi64 { return .needs64Bit }
-        if path != .turbo && !profile.vulkan && !profile.npu && !profile.gles3 { return .noGpuBackend }
-        return .unavailable
+        // 0.3.5: nenhum caminho é bloqueado (par do Android); sem estimativa a tela
+        // diz "tempo desconhecido" e a pessoa escolhe assim mesmo.
+        return .none
+    }
+    /// O aviso "por sua conta e risco": Lite/Max mais pesado que o sugerido pelo aparelho,
+    /// ou num aparelho ainda não medido. Só avisa; não desliga nada.
+    static func risky(_ path: HyperPath, profile: HyperDeviceProfile?) -> Bool {
+        guard path == .lite || path == .max else { return false }
+        guard let profile, profile.measured else { return true }
+        let suggested: HyperPath = profile.defaultPath == .auto ? .turbo : profile.defaultPath
+        return path.rawValue > suggested.rawValue
     }
     static func initial(estimate: HyperEstimate?, profile: HyperDeviceProfile?) -> HyperPath {
         let suggested = profile.map { $0.defaultPath == .auto ? .turbo : $0.defaultPath } ?? .turbo
@@ -659,7 +666,7 @@ final class HyperFlow: ObservableObject {
     }
 
     func select(_ p: HyperPath) {
-        guard estimate?.available(p) != false, path != p else { return }
+        guard path != p else { return }   // 0.3.5: a estimativa não bloqueia a escolha
         path = p
         refreshPreview()
     }
@@ -727,7 +734,7 @@ final class HyperFlow: ObservableObject {
 
     private func startNow(resume output: URL?) {
         guard let s = source, !model.exporting, !finishing, !recipe.identity else { return }
-        if output == nil, estimate?.available(path) == false { return }
+        // 0.3.5: iniciar nunca é bloqueado pela estimativa; se faltar algo, o trabalho mostra o erro.
         try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
         let stamp = Int(Date().timeIntervalSince1970)
         let base = String(s.name.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0 == " " || $0 == "-" || $0 == "_" })

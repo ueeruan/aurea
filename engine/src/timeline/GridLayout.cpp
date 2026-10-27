@@ -1,5 +1,6 @@
 #include "aurea/timeline/GridLayout.hpp"
 #include "aurea/vector/Vector.hpp"
+#include <algorithm>
 #include <cmath>
 namespace aurea::grid {
 void declare_parameters(ParameterRegistry& p) {
@@ -107,5 +108,27 @@ Placement evaluate(const Composition& comp,const Layer& child,f64 frame) {
     out.opacity=1+(p(23)*.01f-1)*influence;
     out.matrix=Mat4::translation(pos)*Mat4::from_quat(Quat::from_euler_zyx(0,0,rotation))*Mat4::scale(Vec3{scale,scale,scale});
     return out;
+}
+}
+// Omega grid (0.3.5): nulo de controle da grade e a proteção contra ciclos.
+namespace aurea::grid {
+bool is_controller(const Layer& l) noexcept {
+    for(const auto& e:l.effects)if(e.type==effect_type_id(kController))return true;
+    return false;
+}
+bool would_cycle(const Composition& comp,LayerId child,LayerId parent) noexcept {
+    if(!parent.valid())return false;
+    if(parent==child)return true;
+    // Sem teto fixo: um caminho com mais passos do que camadas só existe com
+    // um ciclo que já estava lá (projeto corrompido) — também recusa.
+    const u64 limit=static_cast<u64>(std::max(comp.layers().count(),comp.order().size()))+1;
+    u64 steps=0;
+    for(LayerId cursor=parent;cursor.valid();++steps){
+        if(cursor==child||steps>limit)return true;
+        const Layer* p=comp.layer(cursor);
+        if(!p)return false;
+        cursor=p->parent;
+    }
+    return false;
 }
 }

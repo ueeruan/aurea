@@ -192,6 +192,43 @@ class MainActivity : ComponentActivity() {
                 AureaAdsManager.onAppLoaded(this@MainActivity, trabalhando())
             }
         }
+        // Bugs 0.3.4 (importar projeto): aberto por um arquivo do projeto.
+        if (savedInstanceState == null) importProjectFileFrom(intent)
+    }
+
+    // Bugs 0.3.4 (importar projeto): com o app já aberto (singleTask), o
+    // arquivo chega aqui.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        importProjectFileFrom(intent)
+    }
+
+    /**
+     * Bugs 0.3.4 (importar projeto): "Abrir com" / "Compartilhar" um arquivo do
+     * projeto (.aureaproj, .aurea, .pjf) entra como projeto NOVO, pelo mesmo
+     * caminho de "Importar arquivo do projeto" (o motor diz se é projeto).
+     * Antes o filtro do manifesto só conhecia um MIME que ninguém manda e a
+     * Activity nem olhava a URI: o arquivo "não importava".
+     */
+    private fun importProjectFileFrom(intent: Intent?) {
+        val uri = projectFileUri(intent) ?: return
+        lifecycleScope.launch {
+            snapshotFlow { store.engineReady }.first { it }
+            store.importProjectFile(uri)
+        }
+    }
+
+    private fun projectFileUri(intent: Intent?): Uri? {
+        if (intent == null) return null
+        val uri = when (intent.action) {
+            Intent.ACTION_VIEW -> intent.data
+            Intent.ACTION_SEND ->
+                if (android.os.Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                else @Suppress("DEPRECATION") intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            else -> null
+        } ?: return null
+        return uri.takeIf { it.scheme == android.content.ContentResolver.SCHEME_CONTENT }
     }
 
     /** No editor, exportando ou na tela de conta: nenhum App Open. */

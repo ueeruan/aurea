@@ -245,6 +245,9 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f, va
     /** Sombra do cartão (0,5 dp) e a do clipe levantado (8 dp). */
     val omegaShadow = dp(0.5f)
     val omegaLiftShadow = dp(8f)
+    /** 0.3.4 (bugs-034, cores): fio do realce no topo do cartão (1 dp) e desfoque da sombra do rótulo (1,5 dp). */
+    val omegaSheenLine = dp(1f)
+    val omegaLabelShadow = dp(1.5f)
     /** Alças do foco: pílula de 26 × barra com a ponta de fora redonda. */
     val omegaHandle = dp(26f)
     val omegaHandleChevron = dp(5f)

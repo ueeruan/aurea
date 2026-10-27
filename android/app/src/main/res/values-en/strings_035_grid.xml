@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (grade): a grade "controlada por" um nulo (nulo de controle, vínculo sem teto). -->
+    <string name="om_grid_controlled_by">Controlled by</string>
+    <string name="om_grid_controlled_none">None</string>
+    <string name="om_grid_nulls_header">Nulls</string>
+    <string name="om_grid_create_control_null">Create control null</string>
+    <string name="om_grid_control_null_name">Grid control</string>
+    <string name="om_grid_controlled_hint">Moving, rotating or scaling the null takes the whole grid along, around its anchor point.</string>
+    <string name="om_grid_linked">The grid now follows the chosen null.</string>
+    <string name="om_grid_unlinked">The grid no longer follows the null.</string>
+    <string name="om_grid_link_cycle">That null already follows this grid: linking would close a loop. Pick another null.</string>
+    <string name="om_grid_link_failed">Could not link the grid to that null.</string>
+    <string name="om_grid_link_locked">The grid is locked. Unlock it to change the control.</string>
+    <string name="om_grid_control_null_created">Control null created at the center of the grid. Move, rotate or scale the null.</string>
+</resources>

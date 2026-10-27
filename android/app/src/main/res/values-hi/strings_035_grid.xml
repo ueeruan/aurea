@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (grade): a grade "controlada por" um nulo (nulo de controle, vínculo sem teto). -->
+    <string name="om_grid_controlled_by">इससे नियंत्रित</string>
+    <string name="om_grid_controlled_none">कोई नहीं</string>
+    <string name="om_grid_nulls_header">नल</string>
+    <string name="om_grid_create_control_null">नियंत्रण नल बनाएँ</string>
+    <string name="om_grid_control_null_name">ग्रिड नियंत्रण</string>
+    <string name="om_grid_controlled_hint">नल को खिसकाने, घुमाने या स्केल करने से पूरा ग्रिड उसके एंकर बिंदु के चारों ओर साथ चलता है।</string>
+    <string name="om_grid_linked">ग्रिड अब चुने गए नल का अनुसरण करता है।</string>
+    <string name="om_grid_unlinked">ग्रिड अब नल का अनुसरण नहीं करता।</string>
+    <string name="om_grid_link_cycle">यह नल पहले से इस ग्रिड का अनुसरण करता है: लिंक करने से चक्र बन जाएगा। कोई दूसरा नल चुनें।</string>
+    <string name="om_grid_link_failed">ग्रिड को इस नल से लिंक नहीं किया जा सका।</string>
+    <string name="om_grid_link_locked">ग्रिड लॉक है। नियंत्रण बदलने के लिए इसे अनलॉक करें।</string>
+    <string name="om_grid_control_null_created">ग्रिड के केंद्र में नियंत्रण नल बनाया गया। नल को खिसकाएँ, घुमाएँ या स्केल करें।</string>
+</resources>

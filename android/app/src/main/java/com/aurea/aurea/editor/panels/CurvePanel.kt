@@ -604,22 +604,9 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
             }
             // O gráfico é tempo × valor: não espelha em árabe (ver `KeepLtr`).
             KeepLtr {
-                Box(Modifier.weight(1f).fillMaxWidth()) {
-                    if (graphMode != 0) {
-                        TrackGraph(store, layer, track, graphMode == 2)
-                    } else {
-                        CurveGraph(
-                            ease = ease,
-                            samples = samples,
-                            progress = progress,
-                            overshoot = CurveSettings.overshoot,
-                            onBegin = { store.beginGesture("curva") },
-                            onChange = { applyEase(store, layer, start, it) },
-                            onEnd = { store.endGesture() },
-                        )
-                    }
+                val segmentBar: @Composable (Modifier) -> Unit = { barModifier ->
                     CurveSegmentBar(
-                        modifier = Modifier.align(Alignment.BottomCenter),
+                        modifier = barModifier,
                         before = before,
                         after = after,
                         label = if (graphMode == 0) {
@@ -629,6 +616,30 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                         onPower = { setCurve("força da curva", nextPower(ease)) },
                         onJump = { jump(it) },
                     )
+                }
+                Column(Modifier.weight(1f).fillMaxWidth()) {
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        if (graphMode != 0) {
+                            TrackGraph(store, layer, track, graphMode == 2)
+                        } else {
+                            CurveGraph(
+                                ease = ease,
+                                samples = samples,
+                                progress = progress,
+                                overshoot = CurveSettings.overshoot,
+                                onBegin = { store.beginGesture("curva") },
+                                onChange = { applyEase(store, layer, start, it) },
+                                onEnd = { store.endGesture() },
+                            )
+                        }
+                        // Curva (0..1 com folga): a faixa fica por cima da base do gráfico.
+                        if (graphMode == 0) segmentBar(Modifier.align(Alignment.BottomCenter))
+                    }
+                    // Bugs 0.3.4 (bug 10): no gráfico de Valor/Velocidade a faixa ◀ ▶ ficava
+                    // POR CIMA dos últimos ~30 dp do gráfico (e da legenda): os pontos de
+                    // valor baixo caíam embaixo dela e o toque ia para as setas/rótulo.
+                    // Aqui ela fica ABAIXO do gráfico (como antes da interface nova).
+                    if (graphMode != 0) segmentBar(Modifier)
                 }
             }
         }

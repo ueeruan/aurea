@@ -285,7 +285,9 @@ enum ShellAddPicker: Equatable {
     case sequenceFolder, sequenceFiles
     /// 0.3.0: preset .ffx ou script .jsx do After Effects.
     case aeImport
-    var isFile: Bool { self == .audioFile || self == .model || self == .svg || self == .psd || self == .modelTextures || self == .sequenceFolder || self == .sequenceFiles || self == .aeImport }
+    // Omega bugs-034 mídia: "Outros arquivos e nuvem" da faixa de mídia (fotos, vídeos e áudio pelo Arquivos).
+    case mediaFiles
+    var isFile: Bool { self == .audioFile || self == .model || self == .svg || self == .psd || self == .modelTextures || self == .sequenceFolder || self == .sequenceFiles || self == .aeImport || self == .mediaFiles }
 }
 
 enum ShellStageGeometry {

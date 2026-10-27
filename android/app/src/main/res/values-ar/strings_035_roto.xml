@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (bugs da 0.3.4, Rotobrush que não inicia): o aviso de falha da propagação diz o motivo. -->
+    <string name="om_roto_failed_model">لم يتم تحميل نموذج القص: ذاكرة الهاتف غير كافية. أغلق التطبيقات الأخرى ثم اضغط «تتبع المقطع كله» مرة أخرى.</string>
+    <string name="om_roto_failed_decode">تعذّرت قراءة إطارات هذا الفيديو الآن. أوقف التشغيل مؤقتًا ثم اضغط «تتبع المقطع كله» مرة أخرى.</string>
+</resources>

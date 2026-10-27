@@ -294,7 +294,7 @@ class HyperFlow internal constructor(
     }
 
     fun selectPath(p: HyperPath) {
-        if (estimate?.available(p) == false) return
+        // 0.3.5: escolher nunca é bloqueado pela estimativa (todo aparelho pode tentar).
         if (path == p) return
         path = p
         refreshPreview()
@@ -363,7 +363,7 @@ class HyperFlow internal constructor(
     private fun startNow(resumeOutput: File?) {
         val s = source ?: return
         if (exporter.busy || finishing || recipe.identity) return
-        if (resumeOutput == null && estimate?.available(path) == false) return
+        // 0.3.5: iniciar nunca é bloqueado pela estimativa; se faltar algo, o trabalho mostra o erro.
         val dir = File(app.filesDir, "projetos/hyper").apply { mkdirs() }
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())
         val base = s.name.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().take(60).ifBlank { "Aurea" }

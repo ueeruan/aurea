@@ -92,16 +92,39 @@ class HyperGateTest {
         assertTrue(HyperRecipe().identity)
     }
 
-    @Test fun unavailablePathsExplainWhy() {
+    @Test fun pathsAreNeverBlockedByTheDevice() {
+        // 0.3.4 (bugs-034, hyper): 32 bits, sem GPU ou sem medição não bloqueiam mais.
+        val all = HyperEstimate(doubleArrayOf(12.0, 12.0, 30.0, 90.0))
+        val p32 = HyperDeviceProfile(measured = true, abi64 = false, defaultPath = HyperPath.Turbo)
+        val noGpu = HyperDeviceProfile(measured = true, abi64 = true)
+        val unmeasured = HyperDeviceProfile(measured = false)
+        for (profile in listOf(p32, noGpu, unmeasured, null))
+            for (path in HyperPath.Choices) assertEquals(HyperPathBlock.None, HyperPathRules.block(path, all, profile))
+        // Só os AJUSTES tiram um caminho (nenhuma rede para eles), e igual em todo aparelho.
         val e = HyperEstimate(doubleArrayOf(-1.0, 12.0, -1.0, -1.0))
-        val p32 = HyperDeviceProfile(measured = true, abi64 = false, vulkan = true, defaultPath = HyperPath.Lite)
         assertEquals(HyperPathBlock.None, HyperPathRules.block(HyperPath.Turbo, e, p32))
-        assertEquals(HyperPathBlock.Needs64Bit, HyperPathRules.block(HyperPath.Max, e, p32))
-        assertEquals(HyperPathBlock.NotMeasured, HyperPathRules.block(HyperPath.Lite, e, HyperDeviceProfile(measured = false)))
-        assertEquals(HyperPathBlock.NoGpuBackend, HyperPathRules.block(HyperPath.Lite, e, HyperDeviceProfile(measured = true, abi64 = true)))
-        // Sugerido indisponível → o primeiro disponível.
-        assertEquals(HyperPath.Turbo, HyperPathRules.initial(e, p32))
+        assertEquals(HyperPathBlock.None, HyperPathRules.block(HyperPath.Max, e, p32))   // 0.3.5: sem estimativa também não bloqueia
+        assertEquals(HyperPathRules.block(HyperPath.Lite, e, p32), HyperPathRules.block(HyperPath.Lite, e, HyperDeviceProfile(measured = true, abi64 = true, vulkan = true)))
+        assertEquals(HyperPathBlock.None, HyperPathRules.block(HyperPath.Lite, null, p32))
+        // A recomendação continua escolhendo o padrão; sugerido indisponível → o primeiro disponível.
+        assertEquals(HyperPath.Turbo, HyperPathRules.initial(all, p32))
+        assertEquals(HyperPath.Turbo, HyperPathRules.initial(e, HyperDeviceProfile(measured = true, defaultPath = HyperPath.Lite)))
         assertEquals(HyperPath.Turbo, HyperPathRules.initial(HyperEstimate(doubleArrayOf(-1.0, 1.0, 2.0, 3.0)), null))
+    }
+
+    @Test fun heavierPathThanSuggestedShowsTheRiskWarning() {
+        val lite = HyperDeviceProfile(measured = true, abi64 = true, defaultPath = HyperPath.Lite)
+        assertFalse(HyperPathRules.risky(HyperPath.Turbo, lite))
+        assertFalse(HyperPathRules.risky(HyperPath.Lite, lite))
+        assertTrue(HyperPathRules.risky(HyperPath.Max, lite))
+        val weak = HyperDeviceProfile(measured = true, abi64 = false, defaultPath = HyperPath.Turbo)
+        assertTrue(HyperPathRules.risky(HyperPath.Lite, weak))
+        assertTrue(HyperPathRules.risky(HyperPath.Max, weak))
+        // Sem medição: Lite/Max avisam; Turbo nunca.
+        assertTrue(HyperPathRules.risky(HyperPath.Lite, null))
+        assertTrue(HyperPathRules.risky(HyperPath.Max, HyperDeviceProfile(measured = false)))
+        assertFalse(HyperPathRules.risky(HyperPath.Turbo, null))
+        assertFalse(HyperPathRules.risky(HyperPath.Max, HyperDeviceProfile(measured = true, defaultPath = HyperPath.Max)))
     }
 
     @Test fun bridgePayloadsDecode() {

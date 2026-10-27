@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (bugs da 0.3.4, Rotobrush que não inicia): o aviso de falha da propagação diz o motivo. -->
+    <string name="om_roto_failed_model">The cutout model did not load: the phone is low on memory. Close other apps and tap Track whole clip again.</string>
+    <string name="om_roto_failed_decode">The frames of this video could not be read right now. Pause playback and tap Track whole clip again.</string>
+</resources>

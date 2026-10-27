@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (grade): a grade "controlada por" um nulo (nulo de controle, vínculo sem teto). -->
+    <string name="om_grid_controlled_by">يتحكم بها</string>
+    <string name="om_grid_controlled_none">لا شيء</string>
+    <string name="om_grid_nulls_header">العناصر الفارغة</string>
+    <string name="om_grid_create_control_null">إنشاء عنصر فارغ للتحكم</string>
+    <string name="om_grid_control_null_name">التحكم في الشبكة</string>
+    <string name="om_grid_controlled_hint">تحريك العنصر الفارغ أو تدويره أو تغيير حجمه ينقل الشبكة كلها معه حول نقطة الارتكاز الخاصة به.</string>
+    <string name="om_grid_linked">الشبكة تتبع الآن العنصر الفارغ المختار.</string>
+    <string name="om_grid_unlinked">الشبكة لم تعد تتبع العنصر الفارغ.</string>
+    <string name="om_grid_link_cycle">هذا العنصر الفارغ يتبع هذه الشبكة بالفعل: الربط سيغلق حلقة. اختر عنصرًا فارغًا آخر.</string>
+    <string name="om_grid_link_failed">تعذّر ربط الشبكة بهذا العنصر الفارغ.</string>
+    <string name="om_grid_link_locked">الشبكة مقفلة. ألغِ القفل لتغيير التحكم.</string>
+    <string name="om_grid_control_null_created">تم إنشاء عنصر فارغ للتحكم في مركز الشبكة. حرّكه أو دوّره أو غيّر حجمه.</string>
+</resources>

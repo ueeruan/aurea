@@ -645,8 +645,10 @@ struct CaptionsPanel: View {
                 }.padding(.horizontal, 18).padding(.vertical, 10)
             }
         }.foregroundStyle(AureaColors.text).background(AureaColors.editorPanel)
-        .onAppear { open(); loadOptions() }
-        .onChange(of: id) { _ in open() }
+        .onAppear { loadOptions() }
+        // 0.3.5: `.task(id:)` roda ao aparecer e a cada troca de camada com a view NOVA;
+        // o `onChange(of: id) { _ in open() }` lia o `id`/`path` antigos (legendas da camada anterior).
+        .task(id: id) { open() }
         .onChange(of: model.status.modelRevision) { _ in captionCount = Int(model.engine.captionCount(id)) }
         .onChange(of: language) { CaptionLanguages.save($0) }
         .onChange(of: quality) { notice = nil; WhisperQuality.save($0) }

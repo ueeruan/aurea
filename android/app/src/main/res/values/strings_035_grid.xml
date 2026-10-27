@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (grade): a grade "controlada por" um nulo (nulo de controle, vínculo sem teto). -->
+    <string name="om_grid_controlled_by">Controlado por</string>
+    <string name="om_grid_controlled_none">Nenhum</string>
+    <string name="om_grid_nulls_header">Nulos</string>
+    <string name="om_grid_create_control_null">Criar nulo de controle</string>
+    <string name="om_grid_control_null_name">Controle da grade</string>
+    <string name="om_grid_controlled_hint">Mover, girar ou escalar o nulo leva a grade inteira junto, em volta do ponto de ancoragem dele.</string>
+    <string name="om_grid_linked">A grade agora segue o nulo escolhido.</string>
+    <string name="om_grid_unlinked">A grade não segue mais o nulo.</string>
+    <string name="om_grid_link_cycle">Esse nulo já segue esta grade: o vínculo fecharia um ciclo. Escolha outro nulo.</string>
+    <string name="om_grid_link_failed">Não foi possível vincular a grade a esse nulo.</string>
+    <string name="om_grid_link_locked">A grade está bloqueada. Desbloqueie para mudar o controle.</string>
+    <string name="om_grid_control_null_created">Nulo de controle criado no centro da grade. Mova, gire ou escale o nulo.</string>
+</resources>

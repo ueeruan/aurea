@@ -9,7 +9,7 @@
 //   hyper.bloqueado · hyper.bloqueado.entrar · hyper.bloqueado.verificar
 //   1: hyper.escolher.galeria · hyper.escolher.gravar · hyper.retomar(.continuar/.descartar) · hyper.erro
 //   2: hyper.receita.<id> · hyper.receita.<id>.<variante> · hyper.ajustar · hyper.ajuste.<campo> · hyper.continuar
-//   3: hyper.medidor · hyper.medir · hyper.previa · hyper.previa.divisor · hyper.caminho.<turbo|lite|max> · hyper.comecar
+//   3: hyper.medidor · hyper.medir · hyper.previa · hyper.previa.divisor · hyper.caminho.<turbo|lite|max> · hyper.aviso.risco · hyper.comecar
 //   4: hyper.etapa.<passo> · hyper.progresso · hyper.cancelar · hyper.tentar · hyper.voltar.previa
 import AVFoundation
 import PhotosUI
@@ -465,6 +465,12 @@ struct HyperLockedSheet: View {
                 pathRow(p)
                 Spacer().frame(height: 8)
             }
+            // 0.3.4 (bugs-034, hyper): Lite/Max liberados em qualquer aparelho, com o aviso em vez do bloqueio.
+            if HyperPathRules.risky(flow.path, profile: flow.profile) {
+                Text(AureaText.t("hyper035_risk_warning")).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.warning)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("hyper.aviso.risco")
+                Spacer().frame(height: 8)
+            }
             if let e = flow.estimate, e.outputWidth > 0 {
                 Text(AureaText.t("hyper_output", "\(e.outputWidth) × \(e.outputHeight)", hyperFps(e.outputFps)))
                     .font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
@@ -480,7 +486,7 @@ struct HyperLockedSheet: View {
             HyperErrorBox(message: flow.error)
             Spacer().frame(height: 10)
             HyperButton(title: AureaText.t("hyper_start"), id: "hyper.comecar",
-                        enabled: !flow.measuring && !flow.estimating && !flow.checkingConfig && flow.estimate?.available(flow.path) != false) { flow.start() }
+                        enabled: !flow.measuring && !flow.estimating && !flow.checkingConfig) { flow.start() }
         }
     }
 
@@ -542,6 +548,7 @@ struct HyperLockedSheet: View {
         let detail: String = {
             if flow.estimating || flow.estimate == nil { return AureaText.t("hyper_estimating") }
             if block != .none { return AureaText.t(block.key) }
+            if let e = flow.estimate, !e.available(p) { return AureaText.t("hyper035_time_unknown") }
             return AureaText.t("hyper_estimate_time", hyperTime(flow.estimate?.secondsFor(p) ?? 0))
         }()
         return Button { flow.select(p) } label: {

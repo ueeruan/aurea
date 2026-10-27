@@ -4,6 +4,15 @@
 // composição para a camada, guarda no efeito e refaz os recortes.
 import SwiftUI
 
+/// O aviso de falha pelo motivo do motor (Renderer::roto_status [3]).
+func rotoFailedKey(_ reason: Int64) -> String {
+    switch reason {
+    case 2, 4: return "om_roto_failed_model"
+    case 3: return "om_roto_failed_decode"
+    default: return "roto_failed"
+    }
+}
+
 @MainActor final class RotoPaintState: ObservableObject {
     static let shared = RotoPaintState()
 
@@ -158,8 +167,10 @@ import SwiftUI
                             .foregroundStyle(AureaColors.muted)
                             .accessibilityIdentifier("fx.roto.clip")
                     }
+                    // Bugs 0.3.4: status[3] traz o motivo (2 rede/4 memória,
+                    // 3 leitura do vídeo); o aviso diz o que fazer para cada um.
                     if roto.status[3] != 0 && roto.status[2] == 0 {
-                        Text(AureaText.t("roto_failed"))
+                        Text(AureaText.t(rotoFailedKey(roto.status[3])))
                             .font(.system(size: 11.5))
                             .foregroundStyle(AureaColors.danger)
                             .fixedSize(horizontal: false, vertical: true)

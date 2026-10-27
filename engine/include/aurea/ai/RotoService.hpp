@@ -68,6 +68,8 @@ public:
         i64 total = 0;
         bool running = false;
         bool failed = false;
+        /// Bugs 0.3.4: por que falhou (DepthMapService::Failure; 0 = não falhou).
+        u32 reason = 0;
     };
 
     RotoService() = default;
@@ -154,6 +156,7 @@ private:
     std::thread thread_;
     std::atomic<u64> generation_{0};
     std::atomic<u64> computed_{0};
+    std::atomic<u32> lastFailure_{0};   ///< bugs 0.3.4: motivo da última falha de um quadro
     Progress progress_{};
     void (*readyFn_)(void*) = nullptr;
     void* readyCtx_ = nullptr;

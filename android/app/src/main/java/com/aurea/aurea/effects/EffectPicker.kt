@@ -223,7 +223,8 @@ private fun EffectBrowserBody(
             (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.transform")) &&
                 (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.animator"))
         }
-        val all = effects + pickableTools(kind).map { toolCatalogEntry(it, toolNames.getValue(it)) }
+        // Bugs 0.3.4 (bug 3): um efeito por typeId (a chave das grades é o typeId).
+        val all = distinctEffects(effects + pickableTools(kind).map { toolCatalogEntry(it, toolNames.getValue(it)) })
         arrangeCatalog(all, effectCategories(all))
     }
     val locale = LocalConfiguration.current.locales[0]
@@ -405,41 +406,62 @@ private fun BrowserHome(
     // Só Recentes à vista: uma página de Favoritos com o convite da estrela.
     val hint = favorites.isEmpty() && recents.isNotEmpty()
     val categoriesLabel = stringResource(R.string.fx_browser_categories)
+    // Bugs 0.3.4 (bug 3): os itens e as chaves vêm de browserHomeRows (testada na JVM),
+    // todas com prefixo por tipo ("section:", "header:", "category:", "action:").
+    val byGroup = remember(groups) { groups.toMap() }
+    val rows = remember(recommended.isNotEmpty(), pages.isNotEmpty(), groups) {
+        browserHomeRows(recommended.isNotEmpty(), pages.isNotEmpty(), groups.map { it.first })
+    }
     LazyColumn(state = state, modifier = Modifier.fillMaxSize().testTag("effects.home")) {
-        if (recommended.isNotEmpty()) item(key = "recomendados") { RecommendedBand(store, recommended, previewsOn, onDetail) }
-        if (pages.isNotEmpty()) item(key = "rapidos") { QuickBand(store, pages, perPage, hint, previewsOn, onAdd, onDetail) }
-        item(key = "titulo-categorias") {
-            Spacer(Modifier.height(0.dp).semantics { contentDescription = categoriesLabel; heading() })
-        }
-        // A chave da linha leva prefixo: com um plugin instalado o grupo "plugins" pode abrir
-        // uma linha e colidir com a porta fixa abaixo ("Key was already used" fechava o app).
-        items(groups.chunked(2), key = { row -> groupRowKey(row.map { it.first }) }) { row ->
-            Row(
-                Modifier.fillMaxWidth().background(AureaColors.FxDarkest).padding(bottom = 1.dp),
-                horizontalArrangement = Arrangement.spacedBy(1.dp),
-            ) {
-                row.forEach { (g, entries) -> GroupTile(store, g, entries, previewsOn, Modifier.weight(1f)) { onGroup(g) } }
-                if (row.size == 1) Spacer(Modifier.weight(1f))
+        items(rows, key = { it.key }) { homeRow ->
+            when (homeRow) {
+                BrowserHomeRow.Recommended -> RecommendedBand(store, recommended, previewsOn, onDetail)
+                BrowserHomeRow.Quick -> QuickBand(store, pages, perPage, hint, previewsOn, onAdd, onDetail)
+                BrowserHomeRow.CategoriesHeader ->
+                    Spacer(Modifier.height(0.dp).semantics { contentDescription = categoriesLabel; heading() })
+                is BrowserHomeRow.Categories -> CategoryRow(store, homeRow.groups, byGroup, previewsOn, onGroup)
+                // 0.3.0: a porta dos plugins fica sempre à vista (a categoria só aparece com um instalado).
+                BrowserHomeRow.PluginDoor -> PluginDoor(onPlugins)
             }
         }
-        // 0.3.0: a porta dos plugins fica sempre à vista (a categoria só aparece com um instalado).
-        item(key = PLUGIN_DOOR_KEY) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 52.dp)
-                    .background(AureaColors.FxListSurface)
-                    .testTag("effects.plugins")
-                    .tocavel(shrink = 1f, onClick = onPlugins)
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CupertinoIcon(CupertinoGlyph.SquareStack3dUp, 20.dp, AureaColors.Accent)
-                Spacer(Modifier.width(10.dp))
-                Text(stringResource(R.string.plug_manage), modifier = Modifier.weight(1f), style = AureaType.of(14f, color = AureaColors.Text))
-                CupertinoIcon(CupertinoGlyph.ChevronRight, 14.dp, AureaColors.FxTextSecondary)
-            }
-        }
+    }
+}
+
+/** Uma linha de 2 ladrilhos de categoria (fundo «mais escuro», espaço de 1). */
+@Composable
+private fun CategoryRow(
+    store: EditorStore,
+    row: List<EffectGroup>,
+    byGroup: Map<EffectGroup, List<EffectCatalogEntry>>,
+    previewsOn: Boolean,
+    onGroup: (EffectGroup) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().background(AureaColors.FxDarkest).padding(bottom = 1.dp),
+        horizontalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        row.forEach { g -> GroupTile(store, g, byGroup[g].orEmpty(), previewsOn, Modifier.weight(1f)) { onGroup(g) } }
+        if (row.size == 1) Spacer(Modifier.weight(1f))
+    }
+}
+
+/** A porta "Gerenciar plugins" (`effects.plugins`), no fim da tela inicial. */
+@Composable
+private fun PluginDoor(onPlugins: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .background(AureaColors.FxListSurface)
+            .testTag("effects.plugins")
+            .tocavel(shrink = 1f, onClick = onPlugins)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CupertinoIcon(CupertinoGlyph.SquareStack3dUp, 20.dp, AureaColors.Accent)
+        Spacer(Modifier.width(10.dp))
+        Text(stringResource(R.string.plug_manage), modifier = Modifier.weight(1f), style = AureaType.of(14f, color = AureaColors.Text))
+        CupertinoIcon(CupertinoGlyph.ChevronRight, 14.dp, AureaColors.FxTextSecondary)
     }
 }
 
@@ -471,7 +493,7 @@ private fun RecommendedBand(
             horizontalArrangement = Arrangement.spacedBy(7.5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            itemsIndexed(entries, key = { _, e -> e.typeId }) { i, e ->
+            itemsIndexed(entries, key = { _, e -> effectItemKey(e.typeId) }) { i, e ->
                 RecommendedItem(e, store.effectPreviews, previewsOn) { onDetail(entries, i) }
             }
         }
@@ -715,10 +737,10 @@ private fun GroupGrid(
             contentPadding = PaddingValues(start = 15.dp, end = 15.dp, top = 4.dp, bottom = 8.dp),
             modifier = Modifier.fillMaxWidth().weight(1f).testTag("effects.grid"),
         ) {
-            if (entries.isEmpty()) item(key = "vazio", span = { GridItemSpan(maxLineSpan) }) {
+            if (entries.isEmpty()) item(key = EMPTY_ITEM_KEY, span = { GridItemSpan(maxLineSpan) }) {
                 EmptyLine(stringResource(R.string.effect_empty_category))
             }
-            itemsIndexed(entries, key = { _, e -> e.typeId }) { i, e ->
+            itemsIndexed(entries, key = { _, e -> effectItemKey(e.typeId) }) { i, e ->
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                     GridCard(e, store.effectPreviews, previewsOn) { onDetail(entries, i) }
                 }
@@ -988,12 +1010,12 @@ private fun SearchPane(
                     contentPadding = PaddingValues(horizontal = 15.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    items(matching, key = { it }) { tag -> SearchTagChip(tag, tagLabels[tag] ?: tag) { addChip(tag) } }
+                    items(matching.distinct(), key = { tagItemKey(it) }) { tag -> SearchTagChip(tag, tagLabels[tag] ?: tag) { addChip(tag) } }
                 }
             }
             LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("effects.search.results")) {
-                if (results.isEmpty()) item(key = "vazio") { EmptyLine(stringResource(R.string.effect_empty_search)) }
-                itemsIndexed(results, key = { _, e -> e.typeId }) { i, e ->
+                if (results.isEmpty()) item(key = EMPTY_ITEM_KEY) { EmptyLine(stringResource(R.string.effect_empty_search)) }
+                itemsIndexed(results, key = { _, e -> effectItemKey(e.typeId) }) { i, e ->
                     ResultRow(e, index.english[e.typeId], store.effectPreviews, previewsOn) {
                         keyboard?.hide()
                         onDetail(results, i)

@@ -710,11 +710,15 @@ struct NativeCurvePanel: View {
                                     onChange: { apply($0, to: segment.start); model.refreshModel(force: true) },
                                     onEnd: { model.endGesture() })
                                     .id("\(layer):\(segment.id)")
+                                segmentNavigation(segment)
                             } else {
                                 NativeTrackGraph(layer: layer, keys: track, speed: graphMode == 2)
                             }
-                            segmentNavigation(segment)
                         }
+                        // Bugs 0.3.4 (bug 10): no gráfico de Valor/Velocidade a faixa ◀ ▶
+                        // ficava POR CIMA da base do gráfico e tomava o toque dos pontos de
+                        // valor baixo. Aqui ela fica ABAIXO dele (par do CurvePanel.kt).
+                        if graphMode != 0 { segmentNavigation(segment) }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(AureaColors.curveGraphBackground)
@@ -2136,6 +2140,12 @@ private struct NativeTrackGraph: View {
         guard let first = keys.first else { return "" }
         return "\(layer):\(first.property):\(first.effectIndex):\(first.paramIndex):\(speed)"
     }
+    /// Bugs 0.3.4 (bug 10): o GRUPO (X/Y/Z, componentes) sem a ordem. Trocar a
+    /// trilha editável dentro dele (tocar num ponto do X com o Y escolhido) não
+    /// reinicia o arrasto, a janela nem a seleção (par do `groupKey` do TrackGraph.kt).
+    private var groupSignature: String {
+        "\(layer):\(speed):" + group.map { "\($0[0].property):\($0[0].effectIndex):\($0[0].paramIndex)" }.sorted().joined(separator: ",")
+    }
     /// O grupo inteiro (X/Y/Z, componentes) com a trilha escolhida por último.
     private var group: [[KeyframeItem]] {
         guard let first = keys.first else { return [] }
@@ -2292,7 +2302,9 @@ private struct NativeTrackGraph: View {
             }.font(.aurea(size: 10)).foregroundStyle(AureaColors.muted).keepLtr()
         }
         .onAppear { fit() }
-        .onChange(of: signature) { _ in finish(); multi = false; picked.removeAll(); fit() }
+        .onChange(of: groupSignature) { _ in finish(); multi = false; picked.removeAll(); fit() }
+        // Outra trilha do MESMO grupo: só redesenha (a escolhida passa a ser a de cima).
+        .onChange(of: signature) { _ in reload() }
         .onChange(of: viewport) { _ in reload() }
         // O cabeçote saiu da janela (scrub, play, outro trecho): a janela vai atrás dele.
         .onChange(of: model.localPlayhead) { frame in
@@ -2341,6 +2353,27 @@ private struct NativeTrackGraph: View {
                     if d <= distance { nearest = key; distance = d }
                 }
             }
+            // Losango de uma trilha IRMÃ: tocar troca a trilha editável. Bug 10
+            // (0.3.4): e o mesmo dedo já arrasta o ponto tocado (antes era preciso
+            // soltar e tocar de novo). Na seleção múltipla, só troca (como antes).
+            if nearest == nil && !speed, let first = keys.first {
+                var sibling: KeyframeItem?
+                var best = CGFloat(28 * 28)
+                for key in group.flatMap({ $0 }) where !curveSameTrack(key, first) {
+                    let p = point(Double(key.time), Double(key.value), size, viewport)
+                    let dx = p.x - value.startLocation.x, dy = p.y - value.startLocation.y
+                    if dx * dx + dy * dy <= best { sibling = key; best = dx * dx + dy * dy }
+                }
+                if let sibling {
+                    model.curveProperty = sibling.property; model.curveEffect = sibling.effectIndex
+                    model.curveParam = sibling.paramIndex; model.curveSelectedTime = sibling.time
+                    if multi {
+                        drag = GraphDrag(initial: viewport, key: nil, picked: true)
+                        return
+                    }
+                    nearest = sibling
+                }
+            }
             drag = GraphDrag(initial: viewport, key: nearest, currentTime: nearest?.time ?? 0,
                 previous: nearest.flatMap { selected in keys.last(where: { $0.time < selected.time })?.time },
                 next: nearest.flatMap { selected in keys.first(where: { $0.time > selected.time })?.time })
@@ -2357,22 +2390,6 @@ private struct NativeTrackGraph: View {
                     let dx = p.x-value.startLocation.x, dy = p.y-value.startLocation.y
                     let d = dx*dx+dy*dy
                     if d <= distance { drag?.handle = handle; distance = d }
-                }
-            }
-            // Losango de uma trilha IRMÃ: tocar troca a trilha editável (sem arrastar).
-            if nearest == nil && !speed, let first = keys.first {
-                var sibling: KeyframeItem?
-                var best = CGFloat(28 * 28)
-                for key in group.flatMap({ $0 }) where !curveSameTrack(key, first) {
-                    let p = point(Double(key.time), Double(key.value), size, viewport)
-                    let dx = p.x - value.startLocation.x, dy = p.y - value.startLocation.y
-                    if dx * dx + dy * dy <= best { sibling = key; best = dx * dx + dy * dy }
-                }
-                if let sibling {
-                    drag?.picked = true
-                    model.curveProperty = sibling.property; model.curveEffect = sibling.effectIndex
-                    model.curveParam = sibling.paramIndex; model.curveSelectedTime = sibling.time
-                    return
                 }
             }
             if multi, let nearest { drag?.group = picked.contains(nearest.time) ? keys.filter { picked.contains($0.time) } : [nearest] }

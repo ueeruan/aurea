@@ -3916,6 +3916,8 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 }
 - (BOOL)keyVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path { auto* e = self.engine; return e && e->ensure_vector_path_key(layerId, group, path); }
 - (BOOL)makeVectorPathEditable:(long long)layerId group:(uint32_t)group path:(uint32_t)path { auto* e = self.engine; return e && e->make_vector_path_editable(layerId, group, path); }
+// Bugs 0.3.4 (bug 11): converter em contorno (EngineOmegaOutline.cpp).
+- (BOOL)convertShapeToOutline:(long long)layerId { auto* e = self.engine; return e && e->convert_shape_to_outline(static_cast<aurea::u64>(layerId)); }
 - (BOOL)toggleVectorPathKey:(long long)layerId group:(uint32_t)group path:(uint32_t)path { auto* e = self.engine; return e && e->toggle_vector_path_key(layerId, group, path); }
 - (BOOL)setVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param value:(float)value { auto* e = self.engine; return e && e->set_vector_param(layerId, group, param, value, false); }
 - (BOOL)keyVectorParam:(long long)layerId group:(uint32_t)group param:(uint32_t)param { auto* e = self.engine; return e && e->ensure_vector_param_key(layerId, group, param); }
@@ -3977,6 +3979,19 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (long long)importGIF:(NSString*)path name:(NSString*)name { auto* e = self.engine; if (!e) return -1; const auto r=e->import_gif(to_std(path),name.UTF8String); return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code()); }
 - (NSString*)foregroundModelDirectory { auto* e=self.engine;return e?to_ns(e->foreground_model_directory()):@""; }
 - (long long)createGrid:(NSArray<NSNumber*>*)layers { auto* e=self.engine;if(!e)return -1;std::vector<aurea::u64> ids;for(NSNumber* v in layers)ids.push_back(v.unsignedLongLongValue);const auto r=e->create_grid(ids.data(),static_cast<aurea::u32>(ids.size()));return r.ok()?static_cast<long long>(*r):-static_cast<long long>(r.status().code()); }
+// Omega grid (0.3.5): a grade "controlada por" um nulo.
+- (BOOL)isGridController:(long long)layerId { auto* e=self.engine; return e && e->is_grid_controller(static_cast<aurea::u64>(layerId)) ? YES : NO; }
+- (long long)gridControlNull:(long long)gridId { auto* e=self.engine; return e ? static_cast<long long>(e->grid_control_null(static_cast<aurea::u64>(gridId))) : 0; }
+- (int)setGridControlNull:(long long)gridId nullId:(long long)nullId {
+    auto* e=self.engine; if(!e) return 4;
+    return static_cast<int>(e->set_grid_control_null(static_cast<aurea::u64>(gridId), static_cast<aurea::u64>(nullId)));
+}
+- (long long)createGridControlNull:(long long)gridId name:(NSString*)name {
+    auto* e=self.engine; if(!e) return -1;
+    const std::string n=to_std(name);
+    const auto r=e->create_grid_control_null(static_cast<aurea::u64>(gridId), n.c_str());
+    return r.ok()?static_cast<long long>(*r):-static_cast<long long>(r.status().code());
+}
 - (NSArray<NSNumber*>*)textPath:(long long)layerId {
     auto* e = self.engine; u64 target = 0; float offset = 0; bool perpendicular = false, reverse = false;
     if (!e || !e->query_text_path(layerId, target, offset, perpendicular, reverse)) return @[];

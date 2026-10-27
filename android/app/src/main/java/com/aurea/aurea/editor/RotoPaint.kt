@@ -65,6 +65,14 @@ object RotoPaint {
     var live by mutableStateOf<List<Offset>>(emptyList())
 }
 
+/** O aviso de falha pelo motivo do motor (Renderer::roto_status [3]). */
+@androidx.annotation.StringRes
+internal fun rotoFailedText(reason: Long): Int = when (reason) {
+    2L, 4L -> R.string.om_roto_failed_model
+    3L -> R.string.om_roto_failed_decode
+    else -> R.string.roto_failed
+}
+
 fun rotoPaintActive(store: EditorStore): Boolean = RotoPaint.session?.let { it.layer == store.primary } == true
 
 private fun rotoEnd(store: EditorStore) {
@@ -174,8 +182,10 @@ fun RotoPaintControls(store: EditorStore, effectId: Int, view: Int) {
                 stringResource(R.string.roto_clip_status, status[7].toInt(), status[8].toInt()),
                 Modifier.padding(top = 2.dp).testTag("fx.roto.clip"), style = muted,
             )
+            // Bugs 0.3.4: status[3] traz o motivo (2 rede/4 memória, 3 leitura do
+            // vídeo); o aviso diz o que fazer para cada um.
             if (status[3] != 0L && status[2] == 0L) Text(
-                stringResource(R.string.roto_failed), Modifier.padding(top = 2.dp).testTag("fx.roto.failed"),
+                stringResource(rotoFailedText(status[3])), Modifier.padding(top = 2.dp).testTag("fx.roto.failed"),
                 style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Danger)),
             )
         }

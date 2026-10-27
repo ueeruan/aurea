@@ -389,6 +389,20 @@ func fxGroupEntries(_ sorted: [EffectCatalogItem]) -> [(group: FxEffectGroup, en
     }
 }
 
+/// Bugs 0.3.4 (bug 3, par de `distinctEffects` no Android): um efeito por `typeId`,
+/// na ordem recebida. Os `ForEach` das grades, dos recomendados e da busca usam o
+/// typeId como identidade; repetido, o SwiftUI mistura as células.
+func fxDistinctEffects(_ entries: [EffectCatalogItem]) -> [EffectCatalogItem] {
+    var seen = Set<UInt32>()
+    return entries.filter { seen.insert($0.typeId).inserted }
+}
+
+/// Os grupos sem repetir, na ordem recebida (identidade dos ladrilhos da tela inicial).
+func fxUniqueGroups(_ groups: [FxEffectGroup]) -> [FxEffectGroup] {
+    var seen = Set<FxEffectGroup>()
+    return groups.filter { seen.insert($0).inserted }
+}
+
 /// Os grupos do navegador: dentro de cada um, ordem ALFABÉTICA pelo nome mostrado.
 func fxSortedGroups(_ sorted: [EffectCatalogItem]) -> [(group: FxEffectGroup, entries: [EffectCatalogItem])] {
     fxGroupEntries(sorted).map { item in (group: item.group, entries: fxSortedByName(item.entries) { fxPickerEntryName($0) }) }
@@ -947,7 +961,7 @@ struct EffectAddSheet: View {
         ZStack {
             browser
             if searching {
-                FxSearchPane(sorted: request.sorted, chips: $searchChips, onDetail: openDetail,
+                FxSearchPane(sorted: fxDistinctEffects(request.sorted), chips: $searchChips, onDetail: openDetail,
                              onClose: { if request.browse { searching = false } else { close() } })
                     .id(searchEpoch)
             }
@@ -998,7 +1012,8 @@ struct EffectAddSheet: View {
     }
 
     private var browser: some View {
-        let sorted = request.sorted
+        // Bugs 0.3.4 (bug 3): um efeito por typeId (identidade dos ForEach das grades).
+        let sorted = fxDistinctEffects(request.sorted)
         let groups = fxSortedGroups(sorted)
         let group = groups.first { $0.group.id == groupId }
         return VStack(spacing: 0) {
@@ -1114,9 +1129,11 @@ private struct FxBrowserHome: View {
     /// Categorias: 2 colunas, espaço de 1, fundo «mais escuro», ladrilhos de 65.
     private var categories: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 1), GridItem(.flexible(), spacing: 1)], spacing: 1) {
-            ForEach(groups.indices, id: \.self) { index in
-                FxGroupTile(group: groups[index].group, entries: groups[index].entries, store: store) {
-                    onGroup(groups[index].group)
+            // Bugs 0.3.4 (bug 3): identidade pelo GRUPO ("category:<id>"), não pela
+            // posição: instalar um plugin insere o grupo Plugins e deslocava os índices.
+            ForEach(fxUniqueGroups(groups.map { $0.group }), id: \.self) { group in
+                FxGroupTile(group: group, entries: groups.first { $0.group == group }?.entries ?? [], store: store) {
+                    onGroup(group)
                 }
             }
         }
@@ -1867,7 +1884,9 @@ private struct FxDetailOverlay: View {
     private func detailPanel(height: CGFloat, bottomInset: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             TabView(selection: $page) {
-                ForEach(Array(entries.enumerated()), id: \.element.typeId) { index, entry in
+                // Bugs 0.3.4 (bug 3): a lista do detalhe é fixa; a posição como identidade
+                // (como o "@índice" da chave do pager no Android) nunca repete.
+                ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
                     FxDetailPage(entry: entry, index: index, count: entries.count, active: page == index, variants: variants,
                                  prefs: prefs, onAdd: onAdd, onTag: onTag, bottomInset: bottomInset)
                         .tag(index)

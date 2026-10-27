@@ -82,6 +82,9 @@ struct ImportResult {
 ///   CorruptData         o projeto dentro não abre (ou o pacote está cortado)
 ///   IoError / StorageFull  arquivo ilegível / sem espaço
 /// Em qualquer erro nada fica para trás (projeto e mídia extraída saem).
+/// Também aceita (bugs 0.3.4) o pacote recompactado por outro programa:
+/// entradas "deflate", tudo dentro de uma pasta por cima, ou um zip com um
+/// `.aurea` só (sem manifesto). O nome do arquivo não importa: o conteúdo diz.
 [[nodiscard]] Status read_package(const std::string& packagePath, const std::string& projectOut,
                                   const std::string& mediaDir, ImportResult& out) noexcept;
 

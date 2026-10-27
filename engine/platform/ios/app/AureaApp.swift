@@ -54,6 +54,11 @@ struct AureaApp: App {
                 .onChange(of: conta.logado) { dentro in
                     CrashReporter.shared.enviarPendentes(sessao: dentro ? conta.sessao() : nil)
                 }
+                // Bugs 0.3.4 (importar projeto): um arquivo do projeto aberto de
+                // fora (Arquivos, AirDrop, mensageiro, "Abrir com") entra como
+                // projeto NOVO — o mesmo caminho de "Importar arquivo do projeto".
+                // Antes o app não declarava os tipos e nada chegava aqui.
+                .onOpenURL { url in openProjectFileFromOutside(url) }
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active { AureaAds.start() }   // anúncios: uma vez (o manager ignora as repetidas)
@@ -76,6 +81,23 @@ struct AureaApp: App {
                 model.enterInactive()
             @unknown default: break
             }
+        }
+    }
+
+    /// Bugs 0.3.4 (importar projeto): o arquivo recebido de outro app.
+    private func openProjectFileFromOutside(_ url: URL) {
+        guard url.isFileURL else { return }
+        let documents = AureaPaths.documents.standardizedFileURL
+        let file = url.standardizedFileURL
+        // Um `.aurea` da própria pasta do AUREA (tocado no app Arquivos) já
+        // está na lista de projetos: importar faria uma cópia.
+        if file.pathExtension.lowercased() == "aurea" && file.deletingLastPathComponent().path == documents.path { return }
+        // O que o sistema copiou para Documents/Inbox sai depois de importado.
+        let inbox = file.path.hasPrefix(documents.appendingPathComponent("Inbox", isDirectory: true).path + "/")
+        let model = self.model
+        model.importProjectFile(url) {
+            model.refreshProjectList()
+            if inbox { try? FileManager.default.removeItem(at: url) }
         }
     }
 }

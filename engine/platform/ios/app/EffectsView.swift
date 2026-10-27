@@ -1038,6 +1038,8 @@ struct EffectsView: View {
             PuppetCardTools(effectId: effect.effectId).padding(.horizontal, 6).padding(.vertical, 4)
         }
         if type == fxEffectTypeId("aurea.light.saber") { SaberCardTools(effectId: effect.effectId) }
+        // Omega grid (0.3.5): "Controlado por" (nulo de controle) no topo do efeito da grade.
+        if type == fxEffectTypeId("aurea.layout.grid_builder") { GridControlRow() }
     }
 
     /// "Variação" (o antigo `EffectPresetRow`) como SELETOR: sem opção marcada;
@@ -2397,5 +2399,113 @@ struct FxTipRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(AureaText.t("fxui_a11y_tip", text))
         .accessibilityIdentifier("effects.tip.\(effectId).\(index)")
+    }
+}
+
+
+// =============================================================================
+// Omega grid (0.3.5): "Controlado por" no painel da grade
+//
+// No topo dos controles do efeito da grade (a camada controladora): a caixa
+// suspensa da interface nova (AureaDropdown) com Nenhum, os nulos da composição
+// e "Criar nulo de controle". Vincular faz a grade inteira seguir o nulo
+// (posição, rotação X/Y/Z, escala, âncora) e a cadeia de pais dele, sem teto;
+// a regra e a recusa do ciclo são do motor (Engine::set_grid_control_null).
+// Par do Android: GridControlRow.kt + state/GridControl.kt. Ids `grid.control`,
+// `grid.control.none`, `grid.control.null.<id>`, `grid.control.create`.
+// =============================================================================
+
+/// Respostas de `setGridControlNull` (= `grid::kLink*` do motor; `GridLink` do Kotlin).
+enum GridLink {
+    static let ok: Int32 = 0
+    static let notGrid: Int32 = 1
+    static let notNull: Int32 = 2
+    static let cycle: Int32 = 3
+    static let locked: Int32 = 4
+    static let failed: Int32 = 5
+}
+
+/// Uma camada como o seletor precisa (`GridNode` do Kotlin).
+struct GridNode: Equatable {
+    let id: Int64
+    let kind: UInt32
+    let name: String
+    let parentIndex: Int32
+}
+
+/// O pai vigente (0 = Nenhum) e os nulos que podem controlar a grade
+/// (`gridControlChoices` do Kotlin): os nulos menos a própria grade. Os que
+/// seguem a grade continuam na lista; o motor recusa o ciclo e a UI explica.
+struct GridControlChoices: Equatable {
+    let current: Int64
+    let currentName: String?
+    let nulls: [GridNode]
+
+    static let nullKind: UInt32 = 6
+
+    init(nodes: [GridNode], grid: Int64) {
+        let parent = nodes.firstIndex { $0.id == grid }.flatMap { index -> GridNode? in
+            let p = Int(nodes[index].parentIndex)
+            return p >= 0 && p < nodes.count ? nodes[p] : nil
+        }
+        current = parent?.id ?? 0
+        currentName = parent?.name
+        nulls = nodes.filter { $0.kind == GridControlChoices.nullKind && $0.id != grid }
+    }
+}
+
+@MainActor struct GridControlRow: View {
+    @EnvironmentObject private var model: AureaModel
+
+    var body: some View {
+        if let grid = model.primarySelection {
+            let choices = GridControlChoices(
+                nodes: model.layers.map { GridNode(id: $0.id, kind: $0.kind, name: $0.name, parentIndex: $0.parentIndex) },
+                grid: grid)
+            let locked = model.layers.first { $0.id == grid }?.locked ?? false
+            let none = AureaText.t("om_grid_controlled_none")
+            let header = AureaText.t("om_grid_nulls_header")
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    Text(AureaText.t("om_grid_controlled_by"))
+                        .font(.aurea(size: 14)).foregroundStyle(AureaColors.text).lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8)
+                    AureaDropdown(value: choices.currentName.map { $0.isEmpty ? header : $0 } ?? none,
+                                  width: nil, tone: .editor, enabled: !locked, tag: "grid.control",
+                                  accessibilityLabel: AureaText.t("om_grid_controlled_by")) {
+                        entries(grid: grid, choices: choices, none: none, header: header)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .layoutPriority(1)
+                }
+                .frame(minHeight: 48)
+                FxBodyNotice(text: AureaText.t("om_grid_controlled_hint"))
+            }
+            .padding(.horizontal, 2).padding(.vertical, 2)
+        }
+    }
+
+    private func entries(grid: Int64, choices: GridControlChoices, none: String, header: String) -> [MenuEntry] {
+        var list: [MenuEntry] = [
+            .item(none, selected: choices.current == 0, tag: "grid.control.none") {
+                if choices.current != 0 { model.setGridControlNull(grid, nullId: 0) }
+            },
+        ]
+        if !choices.nulls.isEmpty {
+            list.append(.divider)
+            list.append(.header(header))
+            for node in choices.nulls {
+                list.append(.item(node.name.isEmpty ? header : node.name, glyph: CupertinoGlyph.SmallcircleCircle,
+                                  selected: node.id == choices.current, tag: "grid.control.null.\(node.id)") {
+                    if node.id != choices.current { model.setGridControlNull(grid, nullId: node.id) }
+                })
+            }
+        }
+        list.append(.divider)
+        list.append(.item(AureaText.t("om_grid_create_control_null"), glyph: CupertinoGlyph.Plus, tag: "grid.control.create") {
+            model.createGridControlNull(grid)
+        })
+        return list
     }
 }

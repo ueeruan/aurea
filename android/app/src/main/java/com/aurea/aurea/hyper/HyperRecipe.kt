@@ -162,20 +162,32 @@ enum class HyperStepState { Waiting, Running, Done, Skipped;
     companion object { fun of(code: Int): HyperStepState = entries.getOrElse(code) { Waiting } }
 }
 
-/** Por que um caminho não está disponível (a tela explica, não só desliga). */
-enum class HyperPathBlock { None, NotMeasured, Needs64Bit, NoGpuBackend, Unavailable }
+/**
+ * Por que um caminho não está disponível. 0.3.4 (bugs-034, hyper): sem motivo
+ * de APARELHO (32 bits, GPU, medição): todo caminho vale em qualquer celular,
+ * por conta e risco da pessoa ([HyperPathRules.risky]). Só sobra o motivo dos
+ * AJUSTES: nenhuma etapa pedida tem rede nesse caminho (igual em todo aparelho).
+ */
+enum class HyperPathBlock { None, Unavailable }
 
 object HyperPathRules {
+    /** A decisão é do motor (Estimate < 0 = nenhuma rede para estes ajustes); o perfil não bloqueia. */
+    @Suppress("UNUSED_PARAMETER")
+    // 0.3.5: nenhum caminho é bloqueado. Sem estimativa do motor (vídeo que não
+    // deu para medir, rede ainda não baixada) a tela diz "tempo desconhecido" e a
+    // pessoa escolhe assim mesmo — se algo faltar, o trabalho mostra o erro.
+    fun block(path: HyperPath, estimate: HyperEstimate?, profile: HyperDeviceProfile?): HyperPathBlock = HyperPathBlock.None
+
     /**
-     * O motivo de um caminho indisponível, pelo que o perfil diz. A decisão de
-     * estar ou não disponível é do motor (Estimate < 0); isto só escolhe a frase.
+     * O aviso "por sua conta e risco": um caminho com rede (Lite/Max) mais pesado
+     * que o sugerido pelo aparelho, ou num aparelho que ainda não foi medido.
+     * Só avisa; não desliga nada.
      */
-    fun block(path: HyperPath, estimate: HyperEstimate?, profile: HyperDeviceProfile?): HyperPathBlock {
-        if (estimate != null && estimate.available(path)) return HyperPathBlock.None
-        if (profile == null || !profile.measured) return if (path == HyperPath.Turbo) HyperPathBlock.Unavailable else HyperPathBlock.NotMeasured
-        if (path == HyperPath.Max && !profile.abi64) return HyperPathBlock.Needs64Bit
-        if (path != HyperPath.Turbo && !profile.vulkan && !profile.npu && !profile.gles3) return HyperPathBlock.NoGpuBackend
-        return HyperPathBlock.Unavailable
+    fun risky(path: HyperPath, profile: HyperDeviceProfile?): Boolean {
+        if (path != HyperPath.Lite && path != HyperPath.Max) return false
+        if (profile == null || !profile.measured) return true
+        val suggested = profile.defaultPath.takeIf { it != HyperPath.Auto } ?: HyperPath.Turbo
+        return path.code > suggested.code
     }
 
     /** O caminho que a tela pré-seleciona: o sugerido pelo aparelho, se disponível; senão o primeiro disponível. */

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.5 (bugs da 0.3.4, Rotobrush que não inicia): o aviso de falha da propagação diz o motivo. -->
+    <string name="om_roto_failed_model">O modelo de recorte não carregou: falta memória no aparelho. Feche outros apps e toque em Propagar clipe de novo.</string>
+    <string name="om_roto_failed_decode">Não deu para ler os quadros deste vídeo agora. Pause a reprodução e toque em Propagar clipe de novo.</string>
+</resources>

@@ -182,6 +182,9 @@ AUREA_TEST(PreviewProxy, OriginalSourceLeasesOverlapMoveAndPreserveOtherPauses) 
         bool probe(const char* path, MediaProbe& out) override { test::SyntheticFactory f(config); return f.probe(path, out); }
         std::unique_ptr<VideoDecoderBackend> open_video(const Asset& asset, MediaPriority priority) override {
             if (priority == MediaPriority::Thumbnail) ++generated;
+            // A conferência do proxy pronto (bugs-034) relê o arquivo por software:
+            // não é a prévia usando o proxy.
+            else if (priority == MediaPriority::ExportSoftwareDecode) {}
             else if (asset.sourcePath == "lease-original") ++originals;
             else ++proxies;
             auto c = config;
@@ -677,6 +680,168 @@ AUREA_TEST(PreviewProxy, EngineStartsProxyRightAfterImportWithoutRendering) {
     AUREA_CHECK(e.clear_proxy_cache() > 0);
     AUREA_CHECK_EQ(e.proxy_cache_bytes(), 0ull);
     e.shutdown();
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+// =============================================================================
+//  Bugs 0.3.4: "Prévia com qualidade em 1/4 deixa o clipe verde e congelado".
+//  A escala 1/2, 1/4 ou 1/8 liga a prévia reduzida, que troca a fonte pelo
+//  proxy de edição. Um proxy que decodifica verde (Y=U=V=0) ou parado num
+//  quadro era servido assim mesmo (só o 1º quadro era conferido, pelo encoder).
+//  Agora o arquivo pronto é decodificado de volta e conferido com a fonte.
+// =============================================================================
+namespace {
+/// O proxy "ruim" do aparelho: quadros NV12 zerados (verde chapado) e, com
+/// `frozen`, sempre o conteúdo do quadro 0 (o clipe parado).
+class BadProxyDecoder final : public VideoDecoderBackend {
+public:
+    BadProxyDecoder(const test::SyntheticConfig& c, bool frozen) : cfg_(c), frozen_(frozen), inner_(c) {
+        info_ = inner_.info();
+    }
+    const VideoStreamInfo& info() const noexcept override { return info_; }
+    Status seek_to_keyframe(i64 us) noexcept override { return inner_.seek_to_keyframe(frozen_ ? 0 : us); }
+    Status next_frame(i64 from, FrameRef& out, i64& pts, bool& eos) noexcept override {
+        if (frozen_) {
+            // O mesmo quadro 0, com o carimbo que o pedido espera.
+            FrameRef first; i64 p0 = 0; bool e0 = false;
+            (void)inner_.seek_to_keyframe(0);
+            const Status s = inner_.next_frame(-1, first, p0, e0);
+            if (!s.ok() || !first) return s;
+            first->ptsUs = pts = std::max<i64>(0, from + 1);
+            eos = false;
+            out = std::move(first);
+            return OkStatus;
+        }
+        const Status s = inner_.next_frame(from, out, pts, eos);
+        if (s.ok() && out) {
+            auto* f = static_cast<test::SyntheticFrame*>(out.get());
+            std::fill(f->y.begin(), f->y.end(), u8{0});
+            std::fill(f->uv.begin(), f->uv.end(), u8{0});
+        }
+        return s;
+    }
+private:
+    test::SyntheticConfig cfg_;
+    bool frozen_ = false;
+    test::SyntheticDecoder inner_;
+    VideoStreamInfo info_;
+};
+
+/// Fonte FrameGray (cada quadro tem seu cinza); o proxy decodifica bom, verde ou parado.
+struct BadProxyFactory final : VideoSourceFactory {
+    enum class Proxy { Good, Green, Frozen };
+    test::SyntheticConfig config;
+    std::atomic<Proxy> proxy{Proxy::Good};
+    std::atomic<u32> verifications{0};
+    BadProxyFactory() {
+        config.width = 64; config.height = 36; config.frameCount = 12; config.gop = 4;
+        config.pattern = test::SyntheticPattern::FrameGray;
+    }
+    bool probe(const char* path, MediaProbe& out) override {
+        test::SyntheticConfig c = config;
+        const std::string p = path ? path : "";
+        if (p.size() > 4 && p.compare(p.size() - 4, 4, ".mp4") == 0) { c.width = 32; c.height = 18; }
+        test::SyntheticFactory f(c);
+        return f.probe(path, out);
+    }
+    std::unique_ptr<VideoDecoderBackend> open_video(const Asset& asset, MediaPriority priority) override {
+        auto c = config;
+        c.width = asset.video.width; c.height = asset.video.height;
+        const std::string p = asset.sourcePath;
+        const bool proxyFile = p.size() > 4 && p.compare(p.size() - 4, 4, ".mp4") == 0;
+        if (priority == MediaPriority::ExportSoftwareDecode) ++verifications;
+        if (proxyFile && proxy.load() != Proxy::Good) return std::make_unique<BadProxyDecoder>(c, proxy.load() == Proxy::Frozen);
+        return std::make_unique<test::SyntheticDecoder>(c);
+    }
+};
+
+/// Quadro `index` decodificado de um decoder (seek + andar até ele).
+FrameRef decoded_frame(VideoDecoderBackend& d, i64 us) {
+    FrameRef f; i64 pts = 0; bool eos = false;
+    if (!d.seek_to_keyframe(us).ok()) return f;
+    for (int i = 0; i < 64 && !f; ++i) if (!d.next_frame(us - 1000, f, pts, eos).ok() || (eos && !f)) break;
+    return f;
+}
+} // namespace
+
+AUREA_TEST(PreviewProxy, Bugs034SignatureRejectsGreenAndFrozenFrames) {
+    test::SyntheticConfig c; c.width = 64; c.height = 36; c.frameCount = 12; c.gop = 4;
+    c.pattern = test::SyntheticPattern::FrameGray;
+    test::SyntheticDecoder source(c);
+    test::SyntheticDecoder same(c);
+    BadProxyDecoder green(c, false), frozen(c, true);
+    const FrameRef f8 = decoded_frame(source, source.pts_of(8));
+    const FrameRef s8 = decoded_frame(same, same.pts_of(8));
+    const FrameRef g8 = decoded_frame(green, source.pts_of(8));
+    const FrameRef z8 = decoded_frame(frozen, source.pts_of(8));
+    AUREA_CHECK(f8 && s8 && g8 && z8);
+    if (!f8 || !s8 || !g8 || !z8) return;
+    AUREA_CHECK(proxy_signature_matches(*f8.get(), *s8.get()));      // o mesmo quadro passa
+    AUREA_CHECK(!proxy_signature_matches(*f8.get(), *g8.get()));     // verde (YUV zerado) não
+    AUREA_CHECK(!proxy_signature_matches(*f8.get(), *z8.get()));     // o quadro 0 no lugar do 8 não
+}
+
+AUREA_TEST(PreviewProxy, Bugs034QuarterPreviewNeverServesAGreenOrFrozenProxy) {
+    // A prévia em 1/4 (prévia reduzida): proxy verde ou parado fica Failed e a
+    // camada continua no original — cor certa e quadros andando.
+    for (const auto kind : {BadProxyFactory::Proxy::Green, BadProxyFactory::Proxy::Frozen}) {
+        BadProxyFactory factory;
+        factory.proxy = kind;
+        const auto dir = proxy_dir(kind == BadProxyFactory::Proxy::Green ? "q-green" : "q-frozen");
+        MediaManager manager; manager.set_factory(&factory);
+        ProxyThresholds t; t.heavyPixels = 64 * 36; t.alwaysPixels = 32 * 18;   // em escala: o "1080p" comum
+        manager.proxies().set_thresholds(t);
+        manager.proxies().configure(&factory, proxy_test_sink, nullptr, dir.generic_string());
+        manager.proxies().set_policy(18);
+        manager.proxies().set_reduced_preview(true);   // o que ViewportSetPreviewScale 1/4 faz
+        Asset a = video_asset("quarter-a");
+        a.video.frameCount = FrameIndex{12};
+        (void)manager.proxies().request(a);
+        AUREA_CHECK(wait_for_ms([&] { return manager.proxies().status(a).state == ProxyState::Failed; }, 6000));
+        AUREA_CHECK(!manager.proxies().request(a));
+        AUREA_CHECK(factory.verifications.load() >= 1u);
+        VideoSource* s = nullptr;
+        (void)wait_for_ms([&] { return (s = manager.source_for(LayerId{0, 1}, AssetId{0, 1}, a, 1, false)) != nullptr; }, 3000);
+        AUREA_CHECK(s != nullptr);
+        if (s) {
+            AUREA_CHECK_EQ(s->info().display_width(), 64u);   // o original, não o proxy
+            u8 previous = 0;
+            for (u32 i : {1u, 5u, 9u}) {
+                const i64 us = static_cast<i64>(std::llround(i * 1e6 / 30.0));
+                s->request({us, DecodeMode::Still, 0, 1.f});
+                AUREA_CHECK(s->wait_for(us, 3000));
+                bool exact = false;
+                const FrameRef f = s->frame_for(us, &exact, 0);
+                AUREA_CHECK(f && f->planes[0] && f->planes[1]);
+                if (!f || !f->planes[0] || !f->planes[1]) continue;
+                // Cor: croma neutro (o verde de YUV zerado teria Cb = Cr = 0).
+                AUREA_CHECK_EQ(f->planes[1][0], u8{128});
+                AUREA_CHECK_EQ(f->planes[1][1], u8{128});
+                // Avanço: cada quadro tem o seu cinza.
+                AUREA_CHECK_EQ(f->planes[0][0], test::frame_gray_code(i));
+                AUREA_CHECK(f->planes[0][0] != previous);
+                previous = f->planes[0][0];
+            }
+        }
+        manager.close_all(); manager.proxies().stop();
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    }
+    // Proxy bom: passa na conferência e serve a prévia reduzida.
+    BadProxyFactory factory;
+    const auto dir = proxy_dir("q-good");
+    PreviewProxyService service;
+    ProxyThresholds t; t.heavyPixels = 64 * 36; t.alwaysPixels = 32 * 18;
+    service.set_thresholds(t);
+    service.configure(&factory, proxy_test_sink, nullptr, dir.generic_string());
+    service.set_policy(18);
+    service.set_reduced_preview(true);
+    Asset a = video_asset("quarter-good");
+    a.video.frameCount = FrameIndex{12};
+    AUREA_CHECK(wait_for_ms([&] { return !!service.request(a); }, 6000));
+    AUREA_CHECK(service.status(a).state == ProxyState::Ready);
+    service.stop();
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
 }

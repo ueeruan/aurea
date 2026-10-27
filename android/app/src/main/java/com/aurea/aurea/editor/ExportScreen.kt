@@ -205,9 +205,15 @@ internal fun ExportScreen(store: EditorStore, onOpenProjectSettings: (() -> Unit
         }
     }
     val opts = options.copy(format = item.format ?: ExportFormat.Video)
+    // 0.3.5 (bug 1): as opções são lidas do ESTADO na hora do toque. Os lambdas
+    // abaixo podem ser memorizados pelo compilador do Compose com o `opts` da
+    // primeira composição (Vídeo): escolher "Quadro atual", "Sequência" ou GIF
+    // mudava a tela, mas o botão Exportar ainda mandava o vídeo.
+    val currentOpts = { options.copy(format = item.format ?: ExportFormat.Video) }
     val startExport = {
-        exporter.plannedSeconds = if (compFps > 0) store.exportDuration(opts.trimToContent) / compFps else 0.0
-        exporter.start(store.project.title, compW, compH, compFps, opts)
+        val chosen = currentOpts()
+        exporter.plannedSeconds = if (compFps > 0) store.exportDuration(chosen.trimToContent) / compFps else 0.0
+        exporter.start(store.project.title, compW, compH, compFps, chosen)
     }
     // Android 8–9: a galeria só vê o que está na pasta PÚBLICA (Filmes/Aurea),
     // e lá só se escreve com WRITE_EXTERNAL_STORAGE. Negada, o export segue e
@@ -236,6 +242,7 @@ internal fun ExportScreen(store: EditorStore, onOpenProjectSettings: (() -> Unit
             packageTarget.launch(store.projectFileName(path))
             return
         }
+        val opts = currentOpts()
         val frames = store.exportDuration(opts.trimToContent)
         val seconds = if (compFps > 0) frames / compFps else 0.0
         precheck = when {

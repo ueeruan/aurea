@@ -659,6 +659,15 @@ public:
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
 
+    // Omega exportação (bug 12): a varredura dos caches por quadro (espectros,
+    // profundidade, TimeSlice, fluxo, LUTs, cópias lineares) roda a cada 120
+    // quadros do BACKEND desde a última — não quando o número é múltiplo de 120,
+    // que um contador que pula de k em k (motion blur 3D em lotes) nunca acerta.
+    // Contador que voltou (GPU recriada) varre de novo.
+    [[nodiscard]] static constexpr bool resource_sweep_due(u64 frameNumber, u64 lastSweep) noexcept {
+        return frameNumber < lastSweep || frameNumber - lastSweep >= 120;
+    }
+
     /// Cria shaders, samplers e PRÉ-AQUECE todos os pipelines embutidos.
     [[nodiscard]] Status initialize(GPUBackend& backend, const EffectRegistry& effects) noexcept;
     void shutdown() noexcept;
@@ -884,7 +893,8 @@ public:
                         const EffectInstance& instance, MediaManager* media) noexcept;
     /// Estado do Roto DESTA trilha (camada + instância), para a UI:
     /// out[0] quadros propagados, [1] total da propagação, [2] propagando (0/1),
-    /// [3] falhou (0/1), [4] recorte do quadro `sourceFrame` pronto (0/1),
+    /// [3] falhou (0 = não; senão o motivo, DepthMapService::Failure: 1 geral,
+    /// 2 rede, 3 leitura do vídeo, 4 memória), [4] recorte do quadro `sourceFrame` pronto (0/1),
     /// [5] quadros do clipe já com recorte válido, [6] quadros do clipe,
     /// [7] há traços (0/1). Falso = camada sem Rotobrush com traços.
     bool roto_status(const Project& project, const Composition& comp, const Layer& layer,
@@ -1443,6 +1453,9 @@ private:
     u32 framesRendered_ = 0;
     u64 frameNumber_ = 0;
     u64 renderFrameNumber_ = 0;   ///< quadro do backend em render() (buffers extras do Particular)
+    // Omega exportação (bug 12): quadro do backend da última varredura de
+    // collect_resources (a cada 120 quadros do backend, não "múltiplo de 120").
+    u64 lastCollectFrame_ = 0;
     bool lastZeroCopy_ = false;
     u64 videoPlaneUploadBytes_ = 0;
     f32 videoUploadMs_ = 0;

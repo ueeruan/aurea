@@ -253,6 +253,9 @@ struct TimelineMetrics {
     var omegaWave: CGFloat { dp(1) }
     var omegaShadow: CGFloat { dp(0.5) }
     var omegaLiftShadow: CGFloat { dp(8) }
+    /// 0.3.4 (bugs-034, cores): fio do realce no topo do cartão (1) e desfoque da sombra do rótulo (1,5).
+    var omegaSheenLine: CGFloat { dp(1) }
+    var omegaLabelShadow: CGFloat { dp(1.5) }
     /// Alças do foco: pílula de 26 × barra com a ponta de fora redonda.
     var omegaHandle: CGFloat { dp(26) }
     var omegaHandleChevron: CGFloat { dp(5) }
@@ -268,20 +271,24 @@ enum TimelineLayerType: Int, CaseIterable {
     /// O `kind` do motor (LayerRow.kind).
     var kind: Int { rawValue + 1 }
 
-    var color: Color {
+    var color: Color { Color(hex: argb) }
+
+    /// A cor do tipo em ARGB opaco (a mesma de `LayerType.color` no Android); o cartão
+    /// da timeline parte dela (`ClipColors.solid`).
+    var argb: UInt32 {
         switch self {
-        case .video:      return Color(hex: 0x6A52E0)
-        case .image:      return Color(hex: 0x3D6FD9)
-        case .audio:      return Color(hex: 0x1F8C93)
-        case .text:       return Color(hex: 0xB07A16)
-        case .shape:      return Color(hex: 0x2E9459)
-        case .null:       return Color(hex: 0x444C5C)
-        case .adjustment: return Color(hex: 0x5A4A7A)
-        case .camera:     return Color(hex: 0x2A7B9B)
-        case .light:      return Color(hex: 0xC06A24)
-        case .model3D:    return Color(hex: 0xC06A24)
-        case .particles:  return Color(hex: 0xB0417A)
-        case .group:      return Color(hex: 0x4C5566)
+        case .video:      return 0xFF6A52E0
+        case .image:      return 0xFF3D6FD9
+        case .audio:      return 0xFF1F8C93
+        case .text:       return 0xFFB07A16
+        case .shape:      return 0xFF2E9459
+        case .null:       return 0xFF444C5C
+        case .adjustment: return 0xFF5A4A7A
+        case .camera:     return 0xFF2A7B9B
+        case .light:      return 0xFFC06A24
+        case .model3D:    return 0xFFC06A24
+        case .particles:  return 0xFFB0417A
+        case .group:      return 0xFF4C5566
         }
     }
 

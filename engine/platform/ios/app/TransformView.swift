@@ -39,6 +39,9 @@ struct TransformView: View {
     /// Toque-empurrão: quando o dedo desceu e se o toque virou arrasto do trackpad.
     @State private var tapDown: Date?
     @State private var padTouchDragged = false
+    /// Bug 6b (0.3.5): quando o último arrasto do trackpad começou. Um arrasto que
+    /// começa sobre um campo não abre o teclado ao soltar (ver `TransformPillButton`).
+    @State private var padBeganAt: Date?
     /// Marcas de encaixe das réguas de Escala (larguras/alturas das outras camadas, px).
     @State private var scaleMarksW: [Float] = []
     @State private var scaleMarksH: [Float] = []
@@ -473,6 +476,7 @@ struct TransformView: View {
         }
         pad = state
         padTouchDragged = true
+        padBeganAt = Date()
         beginGesture()
     }
 
@@ -1134,21 +1138,29 @@ struct TransformView: View {
                            description: String, identifier: String, onLongPress: (() -> Void)? = nil,
                            onTap: @escaping () -> Void) -> some View {
         let isLocked = locked
-        return VStack(spacing: PanelMetrics.fieldLabelGap) {
-            Text(text).font(.aurea(size: PanelMetrics.fieldValue, weight: .semibold).monospacedDigit())
-                .foregroundStyle(isLocked ? AureaColors.muted : tint)
-                .lineLimit(1).minimumScaleFactor(PanelMetrics.fieldValueMin / PanelMetrics.fieldValue).padding(.horizontal, 4)
-                .frame(width: PanelMetrics.fieldWidth)
-                .frame(minHeight: PanelMetrics.fieldHeight)
-                .background(TransformPillShape(corners: corners).fill(AureaColors.chip))
-            Text(label).font(.aurea(size: PanelMetrics.fieldLabel)).foregroundStyle(AureaColors.muted)
-                .lineLimit(1).minimumScaleFactor(0.7).frame(width: PanelMetrics.fieldWidth)
+        // Bug 6b (0.3.5): o toque é um `Button` (o toque mais confiável do SwiftUI,
+        // também dentro de ScrollView e com o arrasto simultâneo do trackpad); antes
+        // era `LongPressGesture.exclusively(before: TapGesture)`, que perdia toques.
+        return TransformPillButton(
+            // Arrasto do trackpad que começou depois de o dedo pousar no campo: não é toque.
+            dragged: { start in (padBeganAt ?? .distantPast) >= start },
+            onLongPress: { if !isLocked { (onLongPress ?? onTap)() } },
+            onTap: { if !isLocked { onTap() } }
+        ) {
+            VStack(spacing: PanelMetrics.fieldLabelGap) {
+                Text(text).font(.aurea(size: PanelMetrics.fieldValue, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(isLocked ? AureaColors.muted : tint)
+                    .lineLimit(1).minimumScaleFactor(PanelMetrics.fieldValueMin / PanelMetrics.fieldValue).padding(.horizontal, 4)
+                    .frame(width: PanelMetrics.fieldWidth)
+                    .frame(minHeight: PanelMetrics.fieldHeight)
+                    .background(TransformPillShape(corners: corners).fill(AureaColors.chip))
+                Text(label).font(.aurea(size: PanelMetrics.fieldLabel)).foregroundStyle(AureaColors.muted)
+                    .lineLimit(1).minimumScaleFactor(0.7).frame(width: PanelMetrics.fieldWidth)
+            }
+            .frame(width: PanelMetrics.fieldWidth)
+            .frame(minHeight: PanelMetrics.touch, alignment: .top)
+            .contentShape(Rectangle())
         }
-        .frame(width: PanelMetrics.fieldWidth)
-        .frame(minHeight: PanelMetrics.touch, alignment: .top)
-        .contentShape(Rectangle())
-        .gesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in if !isLocked { (onLongPress ?? onTap)() } }
-            .exclusively(before: TapGesture().onEnded { _ in if !isLocked { onTap() } }))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(description)
         .accessibilityValue(text)
@@ -1410,6 +1422,9 @@ struct TransformPadState {
     static let plateauPixels: Float = 25
     /// Toque curto (toque-empurrão e toque da roda): o `tapTimeout` do Android.
     static let tapTime: TimeInterval = 0.1
+    /// Bug 6b (0.3.5): o prazo do toque longo (o `longPressTimeout` do Android):
+    /// até aqui o toque parado na roda abre o teclado; segurar um campo digita.
+    static let holdTime: TimeInterval = 0.5
     /// Toque-empurrão: o dedo anda menos que isto (pt).
     static let tapSlop: CGFloat = 20
     var finger = SIMD3<Float>(0, 0, 0)
@@ -1424,6 +1439,68 @@ struct TransformPadState {
     var guidesY: [Float] = []
     var activeX = -1
     var activeY = -1
+}
+
+/// Bug 6b (0.3.5): o toque e o "segurar" de um campo da pílula (X/Y/Z, eixos da
+/// roda, Largura/Altura, Inclinação). O toque é um `Button` — dispara ao soltar,
+/// funciona dentro de ScrollView e convive com o arrasto simultâneo do trackpad.
+/// O "segurar" sai do próprio aperto do botão (`isPressed` do estilo): 0,45 s
+/// apertado dispara `onLongPress`, e o soltar seguinte não repete como toque.
+/// `dragged(início)`: o trackpad começou um arrasto depois de o dedo pousar aqui —
+/// então nem toque nem "segurar" (arrastar começando no campo move a camada).
+private struct TransformPillButton<Label: View>: View {
+    /// O "segurar" dos campos (o mesmo 0,45 s de antes).
+    static var holdTime: TimeInterval { 0.45 }
+    let dragged: (Date) -> Bool
+    let onLongPress: () -> Void
+    let onTap: () -> Void
+    let label: Label
+    @State private var pressStart: Date?
+    @State private var holdTask: DispatchWorkItem?
+    @State private var longFired = false
+
+    init(dragged: @escaping (Date) -> Bool, onLongPress: @escaping () -> Void, onTap: @escaping () -> Void,
+         @ViewBuilder label: () -> Label) {
+        self.dragged = dragged; self.onLongPress = onLongPress; self.onTap = onTap; self.label = label()
+    }
+
+    var body: some View {
+        Button {
+            // Sem aperto visto (toque rapidíssimo): nada a descontar.
+            let start = pressStart ?? .distantFuture
+            let skip = longFired || dragged(start)
+            longFired = false; pressStart = nil
+            if !skip { onTap() }
+        } label: { label }
+        .buttonStyle(TransformPillPressStyle { pressed in
+            holdTask?.cancel(); holdTask = nil
+            guard pressed else {
+                // O soltar chega antes ou junto da ação; um aperto cancelado (o dedo
+                // saiu) não pode deixar um início velho para o próximo toque.
+                let ended = pressStart
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { if pressStart == ended { pressStart = nil } }
+                return
+            }
+            let start = Date()
+            pressStart = start
+            longFired = false
+            let task = DispatchWorkItem {
+                guard !dragged(start) else { return }
+                longFired = true
+                onLongPress()
+            }
+            holdTask = task
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.holdTime, execute: task)
+        })
+    }
+}
+
+/// Sem efeito visual (o campo continua igual); só avisa quando o aperto começa e termina.
+private struct TransformPillPressStyle: ButtonStyle {
+    let onPressed: (Bool) -> Void
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.onChange(of: configuration.isPressed) { onPressed($0) }
+    }
 }
 
 /// Quais cantos da pílula arredondam (X|Y: só os de fora).
@@ -1569,8 +1646,10 @@ struct TransformDial: View {
     static let limit: Float = 3_600_000
     static let knob: CGFloat = 35
     static let track: CGFloat = 2.5
-    /// Toque curto (abre o teclado): o `tapTimeout` do Android (100 ms).
-    static let tapTime: TimeInterval = TransformPadState.tapTime
+    /// Bug 6b (0.3.5): o toque parado que abre o teclado vale até o prazo do toque
+    /// longo (0,5 s), não os 100 ms do toque-empurrão — um toque de dedo dura
+    /// 100–200 ms e a roda "não respondia". Par do `isDialTap` do RotationDial.kt.
+    static let tapTime: TimeInterval = TransformPadState.holdTime
 
     @State private var touching = false
     @State private var moved = false

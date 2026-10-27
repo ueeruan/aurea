@@ -258,6 +258,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineOmegaAdd.cpp
     src/engine/EngineOmegaAppearance.cpp
     src/engine/EngineOmegaChrome.cpp
+    src/engine/EngineOmegaOutline.cpp   # bugs 0.3.4: converter em contorno
     src/engine/EnginePluginsV2.cpp   # 0.3.4 plugins
     src/engine/EngineImageSequence.cpp
     src/engine/EngineProxy.cpp
@@ -409,6 +410,7 @@ set(AUREA_IMPORT_BOUNDARIES
     src/engine/EngineOmegaAdd.cpp
     src/engine/EngineOmegaAppearance.cpp
     src/engine/EngineOmegaChrome.cpp
+    src/engine/EngineOmegaOutline.cpp
     # 0.3.4 plugins: o interpretador usa exceções por dentro (throw do script,
     # limites); as fronteiras públicas dele e do runtime nunca lançam.
     src/engine/EnginePluginsV2.cpp

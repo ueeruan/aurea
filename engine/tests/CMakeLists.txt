@@ -71,6 +71,7 @@ add_executable(aurea_tests
     test_omega_layer.cpp
     test_omega_effects.cpp
     test_omega_add.cpp
+    test_omega_outline.cpp
     test_beats.cpp
     test_edit.cpp
     test_ui_mode.cpp

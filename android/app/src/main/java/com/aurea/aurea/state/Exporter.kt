@@ -329,6 +329,9 @@ class Exporter internal constructor(
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.ROOT).format(Date())
         val base = title.ifBlank { "Aurea" }.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().ifBlank { "Aurea" }
         val file = File(dir, "$base $stamp.${options.format.extension}")
+        // Omega exportação (bug 1 da 0.3.4): o tipo pedido fica no log — o relato
+        // "quadro/sequência saem como MP4" se confere no logcat do aparelho.
+        android.util.Log.i("AureaExport", "Export start: format=${options.format} engineCode=${options.format.engineCode} file=${file.name}")
         if (options.format != ExportFormat.Video) {
             startImage(dir, file, options)
             return

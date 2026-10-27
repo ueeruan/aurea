@@ -231,7 +231,8 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
                                 tag = "projectSettings.resolution",
                                 contentDescription = stringResource(R.string.editor_resolucao),
                                 entries = Resolutions.map { (short, label) ->
-                                    MenuEntry.Item(label, selected = short == shortSide) {
+                                    // Bug 6b (0.3.5): ids das opções (= iOS), para o teste de interface.
+                                    MenuEntry.Item(label, selected = short == shortSide, tag = "projectSettings.resolution.$short") {
                                         val c = comp ?: return@Item
                                         val (nw, nh) = sizeFor(short, if (aspect > 0f) aspect else 16f / 9f)
                                         if (c.fits(nw, nh)) store.setCompositionSize(nw, nh)

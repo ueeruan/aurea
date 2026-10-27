@@ -354,8 +354,41 @@ Status seek_entry(std::FILE* f, const ZipEntry& e, bool allowDeflate = false) {
     return OkStatus;
 }
 
-/// Copia a entrada para `dest` conferindo o CRC. Só "stored".
+// Bugs 0.3.4 (importar projeto): o AUREA grava o pacote "stored", mas um
+// pacote descompactado e compactado de novo por outro programa (o "Comprimir"
+// do app Arquivos, o zip do computador, alguns gerenciadores de arquivos) vem
+// em "deflate" — continua sendo o mesmo projeto. A entrada comprimida é lida
+// inteira na memória, com o mesmo teto do zip de modelo 3D.
+constexpr u64 kInflateScratchLimit = kAddressSpace32 ? 64ull << 20 : 256ull << 20;
+
+Status inflate_entry(std::FILE* f, const ZipEntry& e, std::vector<u8>& out) {
+    if (static_cast<u64>(e.size) + e.compressed > kInflateScratchLimit)
+        return Status{Errc::BudgetExceeded, "entrada comprimida grande demais"};
+    if (const Status s = seek_entry(f, e, true); !s.ok()) return s;
+    if (e.compressed == 0) return Status{Errc::CorruptData, "entrada do pacote"};
+    std::vector<u8> compressed(e.compressed);
+    if (std::fread(compressed.data(), 1, compressed.size(), f) != compressed.size()) return Status{Errc::CorruptData, "pacote cortado"};
+    out.assign(std::max<u32>(e.size, 1u), u8{0});
+    ufbx_inflate_input source{};
+    source.total_size = source.data_size = compressed.size();
+    source.data = compressed.data();
+    source.no_header = source.no_checksum = true;   // o ZIP traz o CRC, não o envelope zlib
+    ufbx_inflate_retain retain{};
+    const ptrdiff_t got = ufbx_inflate(out.data(), out.size(), &source, &retain);
+    if (got != static_cast<ptrdiff_t>(e.size)) return Status{Errc::CorruptData, "entrada do pacote"};
+    out.resize(e.size);
+    if (crc_update(0, out.data(), out.size()) != e.crc) return Status{Errc::ChecksumMismatch, "pacote danificado"};
+    return OkStatus;
+}
+
+/// Copia a entrada para `dest` conferindo o CRC. "stored" em pedaços;
+/// "deflate" (pacote recompactado) pela memória, com teto.
 Status extract(std::FILE* f, const ZipEntry& e, const std::string& dest) {
+    if (e.method == 8) {
+        std::vector<u8> data;
+        if (const Status s = inflate_entry(f, e, data); !s.ok()) return s;
+        return fileio::write_atomic(dest, data.data(), data.size());
+    }
     if (const Status s = seek_entry(f, e); !s.ok()) return s;
     File out(fileio::open_file(dest, "wb"));
     if (!out.f) return Status{Errc::IoError, "destino"};
@@ -383,7 +416,13 @@ Status extract(std::FILE* f, const ZipEntry& e, const std::string& dest) {
 }
 
 Status read_entry_text(std::FILE* f, const ZipEntry& e, std::string& out) {
-    if (e.method != 0 || e.size > (1u << 20)) return Status{Errc::UnsupportedFormat, "manifesto"};
+    if ((e.method != 0 && e.method != 8) || e.size > (1u << 20)) return Status{Errc::UnsupportedFormat, "manifesto"};
+    if (e.method == 8) {   // pacote recompactado (ver inflate_entry)
+        std::vector<u8> data;
+        if (const Status s = inflate_entry(f, e, data); !s.ok()) return s;
+        out.assign(reinterpret_cast<const char*>(data.data()), data.size());
+        return OkStatus;
+    }
     if (const Status s = seek_entry(f, e); !s.ok()) return s;
     out.resize(e.size);
     if (e.size && std::fread(out.data(), 1, e.size, f) != e.size) return Status{Errc::CorruptData, "manifesto"};
@@ -637,9 +676,46 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
     };
     const ZipEntry* manifestEntry = find(kManifestEntry);
     const ZipEntry* projectEntry = find(kProjectEntry);
-    if (!manifestEntry || !projectEntry) return Status{Errc::UnsupportedFormat, "nao e um projeto do Aurea"};
-    std::string manifest;
-    if (const Status s = read_entry_text(f.f, *manifestEntry, manifest); !s.ok()) return s;
+    // Bugs 0.3.4 (importar projeto): o pacote descompactado e compactado de
+    // novo ganha uma pasta por cima ("Meu projeto/manifest.txt"). É o mesmo
+    // pacote: as entradas valem a partir dessa pasta (`root`).
+    std::string root;
+    if (!manifestEntry || !projectEntry) {
+        manifestEntry = projectEntry = nullptr;
+        const std::string tail = std::string("/") + kManifestEntry;
+        for (const ZipEntry& e : entries) {
+            const std::string& n = e.name;
+            if (n.size() <= tail.size() || n.compare(n.size() - tail.size(), tail.size(), tail) != 0) continue;
+            const std::string prefix = n.substr(0, n.size() - std::strlen(kManifestEntry));
+            if (prefix.find('/') != prefix.size() - 1 || prefix.rfind("__MACOSX/", 0) == 0 || prefix.rfind("._", 0) == 0) continue;
+            if (const ZipEntry* p = find(prefix + kProjectEntry)) {
+                root = prefix;
+                manifestEntry = &e;
+                projectEntry = p;
+                break;
+            }
+        }
+    }
+    // Um `.aurea` compactado sozinho (sem manifesto): o próprio projeto, sem mídia.
+    if (!projectEntry) {
+        u32 candidates = 0;
+        for (const ZipEntry& e : entries) {
+            const std::string& n = e.name;
+            const usize slash = n.find_last_of('/');
+            const std::string base = slash == std::string::npos ? n : n.substr(slash + 1);
+            if (n.rfind("__MACOSX/", 0) == 0 || base.rfind("._", 0) == 0 || base.size() <= 6) continue;
+            std::string ext = base.substr(base.size() - 6);
+            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (ext != ".aurea") continue;
+            projectEntry = &e;
+            ++candidates;
+        }
+        if (candidates != 1) return Status{Errc::UnsupportedFormat, "nao e um projeto do Aurea"};
+    }
+    std::string manifest = "aurea-project 1";   // sem manifesto: pacote da versão 1, sem mídia
+    if (manifestEntry) {
+        if (const Status s = read_entry_text(f.f, *manifestEntry, manifest); !s.ok()) return s;
+    }
 
     // Primeira linha: "aurea-project <versão>".
     std::vector<std::pair<std::string, std::string>> mediaLines;   // entrada → caminho gravado
@@ -649,8 +725,10 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
         while (pos <= manifest.size()) {
             usize nl = manifest.find('\n', pos);
             if (nl == std::string::npos) nl = manifest.size();
-            const std::string line = manifest.substr(pos, nl - pos);
+            std::string line = manifest.substr(pos, nl - pos);
             pos = nl + 1;
+            // Manifesto que passou por um editor/conversor de texto ("\r\n"): mesma linha.
+            if (!line.empty() && line.back() == '\r') line.pop_back();
             if (first) {
                 first = false;
                 constexpr const char* kHead = "aurea-project ";
@@ -712,7 +790,7 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
         if (ec) { rollback(); return Status{Errc::IoError, "pasta de midia"}; }
     }
     for (const auto& [entryName, stored] : mediaLines) {
-        const ZipEntry* e = find(entryName);
+        const ZipEntry* e = find(root + entryName);   // `root`: pasta por cima (pacote recompactado)
         if (!e || entryName.rfind("media/", 0) != 0) continue;
         std::string name = safe_file_name(entryName.substr(6));
         // "NNN-" do pacote sai: o arquivo volta com o nome que a pessoa conhece.
@@ -738,6 +816,9 @@ Status read_package(const std::string& packagePath, const std::string& projectOu
         if (dest.empty()) { rollback(); return Status{Errc::AlreadyExists, "nenhum nome de midia disponivel"}; }
         if (const Status s = extract(f.f, *e, dest); !s.ok()) {
             fileio::remove_file(dest);
+            // Mídia comprimida grande demais para a memória (pacote recompactado):
+            // fica de fora e conta como ausente ("Substituir mídia" depois).
+            if (s.code() == Errc::BudgetExceeded && e->method == 8) continue;
             rollback();
             return s;
         }

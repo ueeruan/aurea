@@ -53,10 +53,15 @@ struct EditModeView: View {
             if !model.fullscreen {
                 if model.panel != .none && model.panel != .dock {
                     // Painel aberto: a linha do tempo encolhe e o painel da Composição sobe.
-                    EditTimelineView(compact: true, onAddMedia: addMedia, onAddAudio: { level = .audio }, onTransition: { cut = EditCut(outgoing: $0, incoming: $1) }).frame(height: 112)
+                    // 0.3.6: o painel vai até o teto (`EditorLayout.panelMax`); numa tela alta o
+                    // que passa dele fica com a linha do tempo (112 no mínimo). Par do Android.
+                    let panelH = min(max(0, height - 52 - previewH - 48 - 112),
+                                     EditorLayout.panelMax(fontScale: UIFont.preferredFont(forTextStyle: .body).pointSize / 17))
+                    EditTimelineView(compact: true, onAddMedia: addMedia, onAddAudio: { level = .audio }, onTransition: { cut = EditCut(outgoing: $0, incoming: $1) })
+                        .frame(minHeight: 112, maxHeight: .infinity)
                         .environment(\.layoutDirection, .leftToRight)
                     ContextSheet(metrics: EditorMetrics(topBar: 0, preview: 0, strip: 0, transport: 0, timeline: 0, sheet: 0))
-                        .frame(maxHeight: .infinity)
+                        .frame(height: panelH)
                 } else {
                     EditTimelineView(compact: false, onAddMedia: addMedia, onAddAudio: { level = .audio }, onTransition: { cut = EditCut(outgoing: $0, incoming: $1) }).frame(maxHeight: .infinity)
                         .environment(\.layoutDirection, .leftToRight)
@@ -436,6 +441,8 @@ private struct EditTimelineBody: View {
     @State private var scrubStart: Int64?
     @State private var scrollY: CGFloat = 0
     @State private var scrollStart: CGFloat?
+    /// 0.3.6: o eixo do arrasto, decidido uma vez por gesto (true = tempo, false = fileiras).
+    @State private var scrubHorizontal: Bool?
     @State private var thumbs = TimelineThumbStrip()
     /// Onda do som por corte (par do EditWaveCache em EditTimeline.kt).
     @State private var waves = EditWaveCache()
@@ -450,13 +457,18 @@ private struct EditTimelineBody: View {
             let centerX = geometry.size.width / 2
             let rows = editRows(model.layers, anchor: model.mainTrackAnchor)
             let hasAudio = rows.contains { $0.audio }
+            // 0.3.6: a rolagem vertical vai só até a última fileira encostar embaixo (sem
+            // teto o arrasto levava as fileiras para fora da tela: "o clipe some").
+            let maxScroll = maxScrollY(rows: rows, hasAudio: hasAudio, height: geometry.size.height)
+            let shownScroll = min(max(0, scrollY), maxScroll)
             // Orçamento de miniaturas por quadro (o resto chega nos próximos).
             let _ = thumbs.beginFrame(48)
             ZStack(alignment: .topLeading) {
                 Color.clear.contentShape(Rectangle())
                     .onTapGesture { model.clearSelection() }
                 ruler(playhead: playhead, fps: fps, centerX: centerX, width: geometry.size.width)
-                rowsLayer(rows: rows, hasAudio: hasAudio, playhead: playhead, pxPerFrame: pxPerFrame, centerX: centerX, width: geometry.size.width)
+                rowsLayer(rows: rows, hasAudio: hasAudio, playhead: playhead, pxPerFrame: pxPerFrame, centerX: centerX, width: geometry.size.width,
+                          scroll: shownScroll)
                 // O cabeçote fixo no meio.
                 Rectangle().fill(Color.white).frame(width: 2).frame(maxHeight: .infinity).offset(x: centerX - 1)
                     .allowsHitTesting(false)
@@ -467,7 +479,11 @@ private struct EditTimelineBody: View {
             .clipped()
             // Arrastar em qualquer ponto (também em cima de um corte) anda no tempo;
             // os gestos dos cortes (alças, segurar e arrastar) têm prioridade.
-            .gesture(scrubGesture(fps: fps, pxPerFrame: pxPerFrame))
+            .gesture(scrubGesture(fps: fps, pxPerFrame: pxPerFrame, maxScroll: maxScroll))
+            // 0.3.6: o corte escolhido rola para dentro da vista (com o painel aberto a
+            // linha do tempo encolhe e a fileira dele ficava escondida atrás do painel).
+            .onChange(of: model.primarySelection) { _ in revealSelected(rows: rows, hasAudio: hasAudio, height: geometry.size.height) }
+            .onChange(of: geometry.size.height) { h in revealSelected(rows: rows, hasAudio: hasAudio, height: h) }
             .simultaneousGesture(MagnificationGesture()
                 .onChanged { scale in
                     if zoomStart == nil { zoomStart = pxPerSecond }
@@ -481,22 +497,54 @@ private struct EditTimelineBody: View {
         .accessibilityIdentifier("edit.timeline")
     }
 
-    private func scrubGesture(fps: Double, pxPerFrame: CGFloat) -> some Gesture {
+    private func scrubGesture(fps: Double, pxPerFrame: CGFloat, maxScroll: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
                 if scrubStart == nil {
-                    scrubStart = clock.frame; scrollStart = scrollY
-                    if model.status.playing != 0 { model.pause() }
+                    scrubStart = clock.frame; scrollStart = min(max(0, scrollY), maxScroll)
+                    // 0.3.6: o eixo fica o do começo do gesto (de lado = tempo, de pé = fileiras).
+                    scrubHorizontal = abs(value.translation.width) >= abs(value.translation.height)
+                    if scrubHorizontal == true && model.status.playing != 0 { model.pause() }
                 }
-                if abs(value.translation.width) >= abs(value.translation.height) {
+                if scrubHorizontal ?? true {
                     let frames = Int64((-value.translation.width / max(pxPerFrame, 0.0001)).rounded())
                     let target = min(max(0, (scrubStart ?? 0) + frames), model.compositionDuration)
                     if target != clock.frame { model.seek(toFrame: target) }
                 } else {
-                    scrollY = max(0, (scrollStart ?? 0) - value.translation.height)
+                    scrollY = min(max(0, (scrollStart ?? 0) - value.translation.height), maxScroll)
                 }
             }
-            .onEnded { _ in scrubStart = nil; scrollStart = nil }
+            .onEnded { _ in scrubStart = nil; scrollStart = nil; scrubHorizontal = nil }
+    }
+
+    /// 0.3.6: onde cada fileira fica sem rolagem e onde o conteúdo termina (a mesma
+    /// conta do desenho; par do `EditRowLayout` do Android).
+    private func rowLayout(rows: [EditRow], hasAudio: Bool) -> (tops: [CGFloat], heights: [CGFloat], bottom: CGFloat) {
+        let layout = rowOffsets(rows: rows, hasAudio: hasAudio, top: rulerH + 8)
+        let heights = rows.map { $0.main ? mainH : rowH }
+        var bottom = rulerH + 8 + (rows.contains(where: \.main) ? 0 : mainH + gap)
+        if let last = layout.rows.indices.last { bottom = layout.rows[last] + heights[last] + gap }
+        if let lane = layout.audioLane, !compact { bottom = max(bottom, lane + rowH + gap) }
+        return (layout.rows, heights, bottom - gap + 12)
+    }
+
+    /// O teto da rolagem: a última fileira encosta embaixo (nunca negativo).
+    private func maxScrollY(rows: [EditRow], hasAudio: Bool, height: CGFloat) -> CGFloat {
+        guard height > 0 else { return 0 }
+        return max(0, rowLayout(rows: rows, hasAudio: hasAudio).bottom - height)
+    }
+
+    private func revealSelected(rows: [EditRow], hasAudio: Bool, height: CGFloat) {
+        guard height > 0, let id = model.primarySelection,
+              let index = rows.firstIndex(where: { $0.clips.contains { $0.id == id } }) else { return }
+        let layout = rowLayout(rows: rows, hasAudio: hasAudio)
+        let rowsTop = rulerH + 8
+        let top = layout.tops[index] - rowsTop, bottom = top + layout.heights[index]
+        let limit = maxScrollY(rows: rows, hasAudio: hasAudio, height: height)
+        let current = min(max(0, scrollY), limit)
+        let viewport = TimelineReveal.viewport(height: height, rowsTop: rowsTop, obscured: 0)
+        let target = min(max(0, TimelineReveal.target(top: top, bottom: bottom, scroll: current, viewport: viewport)), limit)
+        if target != current { scrollY = target }
     }
 
     private func ruler(playhead: Int64, fps: Double, centerX: CGFloat, width: CGFloat) -> some View {
@@ -519,8 +567,9 @@ private struct EditTimelineBody: View {
     }
 
     @ViewBuilder
-    private func rowsLayer(rows: [EditRow], hasAudio: Bool, playhead: Int64, pxPerFrame: CGFloat, centerX: CGFloat, width: CGFloat) -> some View {
-        let top = rulerH + 8 - scrollY
+    private func rowsLayer(rows: [EditRow], hasAudio: Bool, playhead: Int64, pxPerFrame: CGFloat, centerX: CGFloat, width: CGFloat,
+                           scroll: CGFloat) -> some View {
+        let top = rulerH + 8 - scroll
         let layout = rowOffsets(rows: rows, hasAudio: hasAudio, top: top)
         ZStack(alignment: .topLeading) {
             if !rows.contains(where: \.main) {

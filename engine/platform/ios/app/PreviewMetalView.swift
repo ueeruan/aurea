@@ -136,7 +136,7 @@ struct PreviewMetalView: UIViewRepresentable {
         private var pinchThreeD = false
         private var pinchTracker = StagePinchTracker()
         private var pinchLayer: Int64?
-        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, resize, scene, pivot, view, viewPan, rigPose }
+        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, resize, scene, pivot, view, viewPan, rigPose, rigFix, rigIk }
         // Face Pivô aberta: o arrasto move o pivô (PivotDragSession).
         private var pivotSession: PivotDragSession?
         // Cena 3D: 0 pendente, 1 órbita, 2 objeto, 3 pinça.
@@ -528,6 +528,37 @@ struct PreviewMetalView: UIViewRepresentable {
             if !rigBegan { model.beginGesture("posar osso"); rigBegan = true }
             model.dragPoseBone(dx: dx, dy: dy, twist: 0)
         }
+        // AutoRig 3D (0.3.6): junta canônica arrastada / controlador IK em curso.
+        private var rigFixBone = -1
+        private var rigIkHit: (Int, Bool)?
+        /// Corrigir esqueleto: arrasta a junta (o desenho segue `rigFixDrag`); ao soltar, o
+        /// motor refaz os pesos. IK: arrasta alvo/polo no plano da vista (um passo de desfazer).
+        private func autoRigStageEvent(_ pressed: [StageTouchPoint], view: UIView) {
+            if pressed.isEmpty {
+                if stageMode == .rigFix {
+                    model.rigFixDrag = nil
+                    if rigMoved && rigFixBone >= 0 { model.moveHumanoidJoint(rigFixBone, x: rigLast.x, y: rigLast.y) }
+                } else if rigBegan { model.endGesture(); model.endPoseGesture() }
+                rigFixBone = -1; rigIkHit = nil
+                stageFinger = nil; stageMode = .idle
+                return
+            }
+            guard let finger = pressed.first(where: { $0.id == stageFinger }) ?? pressed.first else { return }
+            if !rigMoved && hypot(finger.position.x - stageDown.x, finger.position.y - stageDown.y) < 8 { return }
+            let point = compositionPoint(finger.position, view: view)
+            rigMoved = true
+            if stageMode == .rigFix {
+                rigLast = point
+                model.rigFixDrag = (rigFixBone, point)
+                return
+            }
+            guard let hit = rigIkHit else { return }
+            let dx = point.x - rigLast.x, dy = point.y - rigLast.y
+            rigLast = point
+            if dx == 0 && dy == 0 { return }
+            if !rigBegan { model.beginGesture("IK"); rigBegan = true }
+            model.dragHumanoidIk(hit.0, pole: hit.1, dx: dx, dy: dy)
+        }
         /// Tipo da camada no toque: a regra de profundidade do motor (Z de conteúdo acompanha X).
         private var startKind: Int32 = 0
         private var previewBasis: [NSNumber] = []
@@ -565,6 +596,20 @@ struct PreviewMetalView: UIViewRepresentable {
                 if model.pivotStageActive && editableSelection(), let pivot = PivotDragSession.pivotPoint(model),
                    let session = PivotDragSession(model: model, pivot: pivot) {
                     pivotSession = session; stageMode = .pivot; return
+                }
+                // AutoRig 3D (0.3.6, RigPoseStage.kt): junta canônica (Corrigir esqueleto) e alvo/polo do IK antes do osso.
+                if model.rigFixActive {
+                    let bone = model.pickFixJoint(compositionPoint(first.position, view: view), reach: 36 * scaleFactor(view))
+                    if bone >= 0 {
+                        stageMode = .rigFix; rigFixBone = bone; rigMoved = false
+                        rigLast = compositionPoint(first.position, view: view)
+                        return
+                    }
+                }
+                if model.rigPoseActive, let hit = model.pickIkHandle(compositionPoint(first.position, view: view), reach: 36 * scaleFactor(view)) {
+                    stageMode = .rigIk; rigIkHit = hit; rigMoved = false; rigBegan = false
+                    rigLast = compositionPoint(first.position, view: view)
+                    return
                 }
                 // Pose do rig (RigPoseStage.kt): junta perto do dedo ou osso escolhido = gira o osso.
                 let poseNear = model.rigPoseActive ? model.pickPoseBone(compositionPoint(first.position, view: view), reach: 36 * scaleFactor(view)) : -1
@@ -612,6 +657,10 @@ struct PreviewMetalView: UIViewRepresentable {
             }
             if stageMode == .rigPose {
                 rigPoseEvent(pressed, view: view)
+                return
+            }
+            if stageMode == .rigFix || stageMode == .rigIk {
+                autoRigStageEvent(pressed, view: view)
                 return
             }
             if stageMode == .scene {

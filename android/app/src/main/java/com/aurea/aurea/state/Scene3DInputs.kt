@@ -16,6 +16,23 @@ import com.aurea.aurea.R
 internal fun <T> text3dAfterRefresh(pending: Boolean, pendingLayer: Long, current: Long?, local: T?, fromEngine: () -> T?): T? =
     if (pending && local != null && current != null && pendingLayer == current) local else fromEngine()
 
+/**
+ * Bug 0.3.6 ("as configurações do texto 3D não mudam neste projeto"): o motor
+ * recusava a edição (camada bloqueada, memória do projeto cheia, fonte, letras)
+ * e a tela só voltava ao valor antigo, sem dizer nada. Errc da última edição
+ * (Engine::last_text3d_status) → frase. Nulo = aplicada ou cancelada (sem aviso).
+ * O mesmo mapa existe no iOS (Panel3DView.text3DFailureKey).
+ */
+internal fun text3dErrorMessage(code: Int): Int? = when (code) {
+    0, 25 -> null                                                   // Ok, Cancelled
+    5 -> R.string.editor_camada_bloqueada_desbloqueie_editar        // InvalidState: camada bloqueada
+    8, 9 -> R.string.t3d036_err_memory                              // OutOfMemory, BudgetExceeded
+    6 -> R.string.t3d036_err_font                                   // NotSupported: nenhuma fonte
+    2 -> R.string.t3d036_err_geometry                               // OutOfRange: malha não sai
+    17 -> R.string.msg_nao_foi_possivel_importar_a_imagem           // UnsupportedFormat: textura
+    else -> R.string.t3d036_err_generic
+}
+
 /** Extensões que o seletor de ambiente aceita (o motor reconhece pelo conteúdo). */
 internal val HDRI_FILE_EXTENSIONS = setOf("hdr", "hdri", "pic", "exr", "jpg", "jpeg", "png", "zip")
 

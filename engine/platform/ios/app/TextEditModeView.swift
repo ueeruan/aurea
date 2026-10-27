@@ -27,9 +27,19 @@ enum TextPopup { case none, font, size, color }
     func toggle(_ p: TextPopup) { popup = popup == p ? .none : p }
 }
 
-/// Os 25 tamanhos do popup (a régua fina continua nas Opções de texto).
+/// Os tamanhos do popup (a régua fina continua nas Opções de texto). 0.3.6: iam só
+/// até 144 px; agora seguem até o teto do motor (`max`), e o número ao lado aceita
+/// qualquer valor digitado (par do TextMode.kt).
 enum TextSizeSteps {
-    static let values: [Int] = [5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 112, 144]
+    static let values: [Int] = [5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 112, 144,
+                                192, 256, 320, 400, 512, 640, 800, 1000, 1300, 1600, 2000]
+    /// O maior tamanho de texto (px): o mesmo teto do motor (`TextSetSize`, 1…2000).
+    static let max: Float = 2000
+    /// O tamanho digitado (aceita vírgula), preso a 1…`max`; nil se não for número.
+    static func parse(_ text: String) -> Float? {
+        guard let v = Float(text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")), v.isFinite else { return nil }
+        return Swift.min(Swift.max(v, 1), max)
+    }
     /// O passo mais perto de um tamanho (px).
     static func nearest(_ size: Float) -> Int {
         var best = 0
@@ -280,17 +290,60 @@ private struct FontMiniPopup: View {
     }
 }
 
-/// Popup do tamanho: régua de 25 passos; um arraste = um passo de desfazer.
+/// Popup do tamanho: régua de passos; um arraste = um passo de desfazer. 0.3.6: e o
+/// número, para digitar qualquer valor até `TextSizeSteps.max` (par do TextMode.kt).
 private struct SizePopup: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var library = FontLibrary.shared
     @State private var dragging = false
+    @State private var typed = ""
+    @FocusState private var typing: Bool
 
     var body: some View {
         let size = TextModeInfo(model, fonts: library.items).size
+        HStack(spacing: 10) {
+            slider(size: size)
+            TextField("", text: $typed)
+                // Teclado de números com a tecla de retorno (o decimalPad não tem como confirmar).
+                .keyboardType(.numbersAndPunctuation)
+                .multilineTextAlignment(.center)
+                .font(.aurea(size: 13).monospacedDigit())
+                .foregroundStyle(AureaColors.text)
+                .focused($typing)
+                .submitLabel(.done)
+                // Confirmar tira o foco; aplicar fica num lugar só (a perda do foco).
+                .onSubmit { typing = false }
+                .frame(width: 64, height: 32)
+                .background(AureaColors.fxTrack, in: RoundedRectangle(cornerRadius: 6))
+                .accessibilityLabel(AureaText.t("panel_tamanho_texto"))
+                .accessibilityIdentifier("text.size.field")
+                .onAppear { typed = "\(Int(size.rounded()))" }
+                .onChange(of: Int(size.rounded())) { value in if !typing { typed = "\(value)" } }
+                .onChange(of: typing) { focused in if !focused { applyTyped(size) } }
+        }
+        .padding(.leading, 16).padding(.trailing, 8)
+        .frame(height: 44)
+        .frame(maxWidth: .infinity)
+        .background(AureaColors.contentStyleButton)
+        .onDisappear { if dragging { dragging = false; model.endGesture() } }
+    }
+
+    /// Aplica o número digitado num passo de desfazer; sem número, volta ao atual.
+    private func applyTyped(_ size: Float) {
+        if let id = model.primarySelection, let value = TextSizeSteps.parse(typed), Int(value.rounded()) != Int(size.rounded()) {
+            model.beginGesture("tamanho do texto")
+            model.engine.setText(id, size: value); model.refreshModel(force: true)
+            model.endGesture()
+            typed = "\(Int(value.rounded()))"
+        } else {
+            typed = "\(Int(size.rounded()))"
+        }
+    }
+
+    private func slider(size: Float) -> some View {
         let index = TextSizeSteps.nearest(size)
         let frac = CGFloat(index) / CGFloat(TextSizeSteps.values.count - 1)
-        GeometryReader { geo in
+        return GeometryReader { geo in
             let w = geo.size.width
             ZStack(alignment: .leading) {
                 Capsule().fill(AureaColors.fxTrack).frame(height: 3)
@@ -311,10 +364,6 @@ private struct SizePopup: View {
                     if dragging { dragging = false; model.endGesture() }
                 })
         }
-        .padding(.horizontal, 16)
-        .frame(height: 44)
-        .frame(maxWidth: .infinity)
-        .background(AureaColors.contentStyleButton)
         .accessibilityElement()
         .accessibilityLabel(AureaText.t("om_txm_size_cd", Int(size.rounded())))
         .accessibilityAdjustableAction { direction in
@@ -323,7 +372,6 @@ private struct SizePopup: View {
             model.engine.setText(id, size: Float(TextSizeSteps.values[next])); model.refreshModel(force: true)
         }
         .accessibilityIdentifier("text.size.slider")
-        .onDisappear { if dragging { dragging = false; model.endGesture() } }
     }
 }
 

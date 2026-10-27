@@ -88,6 +88,14 @@ internal object EditorLayout {
     /** O painel cresce com a fonte do sistema: 200 em 1×, 240 em 2×. */
     fun layerPanel(fontScale: Float = 1f): Float = LAYER_PANEL + 40f * (fontScale.coerceIn(1f, 2f) - 1f)
 
+    /**
+     * 0.3.6: o teto dos painéis de propriedade. Com a divisa no alto (ou a Edição numa
+     * tela alta) o painel ocupava a zona inteira — 600 dp e mais para meia dúzia de
+     * linhas. Passando disso, a timeline fica com o resto. Cresce com a fonte.
+     */
+    const val PANEL_MAX = 360f
+    fun panelMax(fontScale: Float = 1f): Float = PANEL_MAX + 60f * (fontScale.coerceIn(1f, 2f) - 1f)
+
     // 0.3.4 painéis: o painel de propriedade sobe até logo abaixo da linha em foco.
     /** Régua da timeline (`TimelineMetrics.rowsTop`): 42 em 1×, +14 por 1× de fonte. */
     const val FOCUS_RULER = 42f
@@ -196,7 +204,8 @@ internal object EditorLayout {
             // 0.3.4 painéis: o painel de propriedade ocupa a zona inteira até logo abaixo
             // da linha em foco (régua + linha + folga), também com a divisa no alto:
             // nada de 200 fixo com um vazio de timeline por cima.
-            SheetContent.Panel, SheetContent.Curve -> over(zone)
+            // 0.3.6: até [panelMax]; o que passa disso fica com a timeline.
+            SheetContent.Panel, SheetContent.Curve -> over(min(zone, panelMax(fontScale)))
         }
     }
 

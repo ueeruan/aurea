@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mocap_title">Motion Capture (BETA)</string>
+    <string name="mocap_intro">Ubah video seseorang menjadi animasi karakter. Analisis berjalan di perangkat, tanpa internet.</string>
+    <string name="mocap_need_rig">Model ini belum punya kerangka humanoid. Buat dengan AutoRig 3D (karakter dalam pose T) lalu kembali ke sini.</string>
+    <string name="mocap_need_map">Cocokkan tulang file di Perbaiki kerangka, di atas, untuk memakai Motion Capture.</string>
+    <string name="mocap_autorig">AutoRig 3D</string>
+    <string name="mocap_import">Impor video</string>
+    <string name="mocap_import_hint">Dari galeri. Satu orang, seluruh tubuh terlihat, kamera diam.</string>
+    <string name="mocap_record">Rekam gerakan</string>
+    <string name="mocap_record_hint">Membuka kamera perangkat.</string>
+    <string name="mocap_reduced">Mode ringan (lebih cepat, lebih sedikit detail)</string>
+    <string name="mocap_analyze">Analisis gerakan</string>
+    <string name="mocap_analyzing">Menganalisis gerakan… %1$d%%</string>
+    <string name="mocap_cancel">Batal</string>
+    <string name="mocap_summary">%1$d bingkai · %2$.1f dtk</string>
+    <string name="mocap_preview">Pratinjau animasi</string>
+    <string name="mocap_intensity">Intensitas</string>
+    <string name="mocap_smoothing">Penghalusan</string>
+    <string name="mocap_speed">Kecepatan</string>
+    <string name="mocap_yaw">Perataan</string>
+    <string name="mocap_floor">Tinggi lantai</string>
+    <string name="mocap_foot_lock">Kunci kaki ke lantai</string>
+    <string name="mocap_apply">Terapkan ke timeline</string>
+    <string name="mocap_apply_hint">Menjadi keyframe tulang yang bisa diedit mulai dari playhead. Urungkan membatalkan semuanya sekaligus.</string>
+    <string name="mocap_applied">%1$d keyframe tulang dibuat</string>
+    <string name="mocap_new_video">Video lain</string>
+    <string name="mocap_low_conf">Keyakinan rendah: %1$s. Bagian ini tersembunyi atau kurang jelas, jadi gerakannya diperkirakan.</string>
+    <string name="mocap_limb_torso">badan</string>
+    <string name="mocap_limb_head">kepala</string>
+    <string name="mocap_limb_left_arm">lengan kiri</string>
+    <string name="mocap_limb_right_arm">lengan kanan</string>
+    <string name="mocap_limb_left_leg">kaki kiri</string>
+    <string name="mocap_limb_right_leg">kaki kanan</string>
+    <string name="mocap_err_no_person">Tidak ada orang di video.</string>
+    <string name="mocap_err_video">Video ini tidak bisa dibaca.</string>
+    <string name="mocap_err_apply">Keyframe tidak bisa disimpan. Apakah lapisan terkunci?</string>
+    <string name="mocap_camera_denied">Tidak ada akses kamera.</string>
+    <string name="mocap_limits">Perkiraan: video biasa tidak punya kedalaman nyata. Jari dan wajah tidak ditangkap.</string>
+</resources>

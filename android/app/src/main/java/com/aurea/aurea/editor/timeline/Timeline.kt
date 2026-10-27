@@ -95,6 +95,8 @@ fun Timeline(
     timecodeStyle: TimecodeStyle = TimecodeStyle.Underline,
     /** Omega (área 03, P1-8): painel Velocidade aberto — as alças do foco esticam a velocidade. */
     speedHandles: Boolean = false,
+    /** 0.3.6: a base da timeline coberta pelo painel por cima (doca, painel, adicionar). */
+    obscuredBottom: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
     val density = LocalDensity.current
     val referenceTrial = com.aurea.aurea.editor.EditorTimelineRefresh.enabled
@@ -133,6 +135,7 @@ fun Timeline(
         state.compactByDock = shownCompact && !compact
         state.timecodeBox = timecodeStyle == TimecodeStyle.Box
         state.speedHandles = speedHandles
+        state.obscuredBottom = obscuredBottom.value * density.density
     }
     // Omega (P1-9): a linha que sai do foco volta com o fade de 600 ms.
     LaunchedEffect(controller) {
@@ -144,10 +147,11 @@ fun Timeline(
     // Saiu da tela no meio de um gesto: scrub e passo de desfazer fecham em par.
     DisposableEffect(controller) { onDispose { controller.dispose() } }
     LaunchedEffect(controller) {
-        snapshotFlow { controller.revealKey() }.collect { controller.reveal() }
+        // 0.3.6: também quando o painel por cima muda de altura (a doca abre depois da escolha).
+        snapshotFlow { Triple(controller.revealKey(), state.obscuredBottom, state.height) }.collect { controller.reveal() }
     }
     LaunchedEffect(controller) {
-        snapshotFlow { Triple(store.project.path, store.project.durationFrames, state.width) }
+        snapshotFlow { Triple(store.project.path, store.project.durationFrames, state.width to state.height) }
             .collect { controller.autoFit() }
     }
     // Camada adicionada: a fileira nova entra com fade (RowFade). A lista é a

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.6 (env3d): новое 3D-окружение (разделы), вкладка «Рендер», раздел «Объект» и текстура материала (файл или таймлайн). -->
+<resources>
+    <string name="env3d_tab_render">Рендер</string>
+    <string name="env3d_section_sky">Небо и фон</string>
+    <string name="env3d_sky_hint">Студия или 360° изображение вокруг сцены. Освещает все 3D-объекты проекта и отражается в них.</string>
+    <string name="env3d_hdr_image">HDR-изображение</string>
+    <string name="env3d_section_light">Окружающий свет</string>
+    <string name="env3d_section_floor">Пол и тень</string>
+    <string name="env3d_floor_hint">Без пола, видимый пол или только тень объектов на том, что позади них.</string>
+    <string name="env3d_render_hint">Действуют на всю 3D-сцену проекта: чёткость, итоговый цвет и свечение.</string>
+    <string name="env3d_section_object">Объект</string>
+    <string name="env3d_texture">Текстура</string>
+    <string name="env3d_texture_original">Из модели</string>
+    <string name="env3d_texture_image">Изображение</string>
+    <string name="env3d_texture_from_file">Файл</string>
+    <string name="env3d_texture_from_timeline">Таймлайн</string>
+    <string name="env3d_texture_remove">Убрать</string>
+    <string name="env3d_texture_layer_title">Текстура из таймлайна</string>
+    <string name="env3d_texture_layer_hint">Слой рендерится на материал в каждом кадре. Скройте слой (глаз), чтобы он был виден только на объекте.</string>
+    <string name="env3d_texture_no_layers">Ни один слой этой композиции не может стать текстурой. Используйте видео, изображение, текст, фигуру или композицию (2D).</string>
+    <string name="env3d_texture_layer_value">Слой: %1$s</string>
+    <string name="env3d_texture_error">Не удалось использовать эту текстуру.</string>
+    <string name="env3d_texture_desc">Текстура материала %1$d</string>
+    <string name="env3d_layer_unnamed">Слой без имени</string>
+</resources>

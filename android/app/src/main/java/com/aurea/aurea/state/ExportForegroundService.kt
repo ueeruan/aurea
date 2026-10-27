@@ -72,6 +72,27 @@ class ExportForegroundService : Service() {
         return START_NOT_STICKY
     }
 
+    /**
+     * 0.3.6: Android 15+ limita `mediaProcessing` (e `dataSync`) a 6 h por dia
+     * em segundo plano. Passado o limite o sistema chama isto e, se o serviço
+     * não sair em poucos segundos, encerra o app com erro — o export morria sem
+     * aviso. Aqui o serviço sai na hora (o que o sistema exige) e avisa: o
+     * export continua enquanto o sistema deixar, o motor mantém o checkpoint, e
+     * se o processo for encerrado a próxima exportação continua de onde parou.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "foreground service timeout (type $fgsType); leaving foreground and warning the user")
+        timedOut = true
+        release()
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        running = false
+        runCatching {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(TIMEOUT_NOTIFICATION_ID, timeoutNotification(this))
+        }
+        stopSelf()
+    }
+
     override fun onDestroy() {
         release()
         super.onDestroy()
@@ -86,16 +107,24 @@ class ExportForegroundService : Service() {
         private const val TAG = "AureaExportService"
         private const val CHANNEL = "aurea_export"
         private const val NOTIFICATION_ID = 0x3202
+        private const val TIMEOUT_NOTIFICATION_ID = 0x3203
         private const val ACTION_STOP = "com.aurea.aurea.export.STOP"
         /** Teto do wake lock: um export nunca segura a CPU além disto. */
         private const val MAX_WAKE_MS = 6L * 60 * 60 * 1000
         @Volatile private var running = false
         @Volatile private var lastPercent = -2
+        /** 0.3.6: o sistema esgotou o tempo do serviço neste export (onTimeout). */
+        @Volatile var timedOut = false
+            private set
 
         /** O export começou (chamado com o app na frente). */
         fun start(context: Context) {
             val app = context.applicationContext
             lastPercent = -2
+            timedOut = false
+            runCatching {
+                (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(TIMEOUT_NOTIFICATION_ID)
+            }
             runCatching {
                 androidx.core.content.ContextCompat.startForegroundService(app, Intent(app, ExportForegroundService::class.java))
                 running = true
@@ -124,15 +153,35 @@ class ExportForegroundService : Service() {
                 .onFailure { runCatching { app.stopService(Intent(app, ExportForegroundService::class.java)) } }
         }
 
-        private fun notification(context: Context, percent: Int): Notification {
+        /** 0.3.6: aviso (não fixo) de que o sistema tirou o export do primeiro plano. */
+        private fun timeoutNotification(context: Context): Notification {
+            ensureChannel(context)
+            val text = context.getString(R.string.export036_timeout_text)
+            return NotificationCompat.Builder(context, CHANNEL)
+                .setSmallIcon(R.drawable.ic_launcher_monochrome)
+                .setContentTitle(context.getString(R.string.export036_timeout_title))
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setAutoCancel(true)
+                .setContentIntent(openApp(context))
+                .build()
+        }
+
+        private fun ensureChannel(context: Context) {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (Build.VERSION.SDK_INT >= 26 && manager.getNotificationChannel(CHANNEL) == null) {
                 manager.createNotificationChannel(NotificationChannel(CHANNEL,
                     context.getString(R.string.export_service_channel), NotificationManager.IMPORTANCE_LOW))
             }
-            val open = PendingIntent.getActivity(context, 0,
-                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        }
+
+        private fun openApp(context: Context): PendingIntent = PendingIntent.getActivity(context, 0,
+            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        private fun notification(context: Context, percent: Int): Notification {
+            ensureChannel(context)
+            val open = openApp(context)
             return NotificationCompat.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_launcher_monochrome)
                 .setContentTitle(context.getString(R.string.export_service_title))

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="export036_timeout_title">एक्सपोर्ट अग्रभूमि से बाहर हो गया</string>
+    <string name="export036_timeout_text">Android ने बैकग्राउंड में एक्सपोर्ट का समय सीमित कर दिया है। इसे पूरा करने के लिए Aurea खोलें; अगर सिस्टम ऐप बंद कर दे, तो अगला एक्सपोर्ट वहीं से जारी रहेगा जहाँ यह रुका था।</string>
+    <string name="export036_timeout_notice">Android ने बैकग्राउंड समय सीमित कर दिया है: एक्सपोर्ट पूरा होने तक Aurea खुला रखें।</string>
+</resources>

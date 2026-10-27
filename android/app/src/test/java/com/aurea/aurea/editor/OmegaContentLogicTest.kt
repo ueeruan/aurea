@@ -52,9 +52,9 @@ class OmegaContentLogicTest {
     }
 
     @Test fun sizeAndWidthSteps() {
-        assertEquals(25, TextSizeSteps.size)
+        assertEquals(36, TextSizeSteps.size)
         assertEquals(72, TextSizeSteps[nearestSizeStep(72f)])
-        assertEquals(144, TextSizeSteps[nearestSizeStep(900f)])
+        assertEquals(2000, TextSizeSteps[nearestSizeStep(5000f)])
         assertEquals(5, TextSizeSteps[nearestSizeStep(1f)])
         assertEquals(42, DrawWidthSteps.size)
         for (i in 1 until DrawWidthSteps.size) assertTrue(DrawWidthSteps[i] > DrawWidthSteps[i - 1])

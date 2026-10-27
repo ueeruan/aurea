@@ -1581,6 +1581,7 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         if (auto found = texturedCopies.find(cacheKey)) return *found;
         auto& mat = copy_material(source);
         mat.tex[0] = swap.texture;
+        mat.graphBase = FGTexture{};   // a troca por parte vence a textura do material
         mat.samp[0] = swapSampler_;
         const f32 repeat = std::isfinite(swap.repeat) && swap.repeat > 0.0f ? swap.repeat : 1.0f;
         mat.factors.baseColorTex.offset = Vec2{0.0f, 0.0f};
@@ -1588,6 +1589,29 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         mat.factors.baseColorTex.rotation = 0.0f;
         mat.factors.baseColorTex.texCoord = 0;
         mat.factors.baseColor.x = mat.factors.baseColor.y = mat.factors.baseColor.z = 1.0f;
+        texturedCopies.emplace(cacheKey, &mat);
+        return &mat;
+    };
+    // 0.3.6 TEXTURA DO MATERIAL: imagem (TextureHandle) ou a camada da
+    // composição já desenhada neste quadro (FGTexture, ligada no passe). UV do
+    // próprio modelo, sem a transformação do mapa antigo. Uma cópia por
+    // (material, textura, cor mantida).
+    auto material_textured = [&](const GpuMaterial* source, const SceneMaterialTexture& t) -> const GpuMaterial* {
+        const bool layer = t.layerImage.valid();
+        if (!layer && !t.texture.valid()) return source;
+        const u64 key = (layer ? (0x8000000000000000ull | t.layerImage.index) : t.texture.id * 1099511628211ull)
+                      ^ (t.keepColor ? 0x4000000000000000ull : 0ull) ^ 0x2000000000000000ull;
+        const auto cacheKey = std::make_pair(source, key);
+        if (auto found = texturedCopies.find(cacheKey)) return *found;
+        auto& mat = copy_material(source);
+        mat.tex[0] = layer ? TextureHandle{} : t.texture;
+        mat.graphBase = layer ? t.layerImage : FGTexture{};
+        mat.samp[0] = swapSampler_;
+        mat.factors.baseColorTex.offset = Vec2{0.0f, 0.0f};
+        mat.factors.baseColorTex.scale = Vec2{1.0f, 1.0f};
+        mat.factors.baseColorTex.rotation = 0.0f;
+        mat.factors.baseColorTex.texCoord = 0;
+        if (!t.keepColor) mat.factors.baseColor.x = mat.factors.baseColor.y = mat.factors.baseColor.z = 1.0f;
         texturedCopies.emplace(cacheKey, &mat);
         return &mat;
     };
@@ -2051,6 +2075,8 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                 const auto& primitive = inst.asset->meshes[mi].primitives[primIndex];
                 const i32 materialIndex = nodes[n].material_for(primitive);
                 const GpuMaterial* mat = material_for(inst, *gm, materialIndex);
+                for (const SceneMaterialTexture& own : inst.materialTextures)
+                    if (materialIndex >= 0 && own.material == static_cast<u32>(materialIndex)) { mat = material_textured(mat, own); break; }
                 for (const SceneNodeTexture& swap : inst.nodeTextures)
                     if (swap.node == n) { mat = textured(mat, swap); break; }
                 mat = faded(mat, nodeAlpha);
@@ -2563,6 +2589,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
                     c.bind_texture(k, has ? d.material->tex[k] : fallback[k],
                                    has && d.material->samp[k].valid() ? d.material->samp[k] : SamplerHandle{cap.linearSampler});
                 }
+                // 0.3.6: cor de base vinda de uma camada desenhada neste quadro.
+                if (d.material->graphBase.valid())
+                    c.bind_texture(0, pc.texture(d.material->graphBase),
+                                   d.material->samp[0].valid() ? d.material->samp[0] : SamplerHandle{cap.linearSampler});
                 // O ambiente é o DESTE objeto (v22): sem ambiente próprio é o do
                 // grupo, como sempre foi.
                 const EnvSlot* e = d.env ? d.env : &cap.sceneEnv;
@@ -2630,6 +2660,16 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
     const FGTexture depth1x = depthOut ? (msaa ? depthResolved : depth) : FGTexture{};
     if (outDepth) *outDepth = depth1x;
     if (shadowTex.valid()) graph.read(pbrPass, shadowTex);
+    // 0.3.6: as camadas que cobrem materiais (desenhadas antes, neste grafo).
+    {
+        std::vector<FGTexture> layerReads;
+        for (const SceneInstance& inst : frame.instances)
+            for (const SceneMaterialTexture& own : inst.materialTextures)
+                if (own.layerImage.valid() && std::find(layerReads.begin(), layerReads.end(), own.layerImage) == layerReads.end()) {
+                    layerReads.push_back(own.layerImage);
+                    graph.read(pbrPass, own.layerImage);
+                }
+    }
     ground_reads(graph, pbrPass, groundDraw);   // chão
     for (u32 k = 0; k < planeCount; ++k) {
         graph.read(pbrPass, planeList[k].texture);

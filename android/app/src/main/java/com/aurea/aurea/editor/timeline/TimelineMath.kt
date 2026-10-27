@@ -771,6 +771,42 @@ internal object OmegaRuler {
         HALF -> 12f
         else -> 5f
     }
+
+    /**
+     * 0.3.6: os tiques de QUADRO do segundo [sec], contados do começo dele (o passo
+     * em potência de 2 corria solto pela régua e caía colado no tique do segundo
+     * ou do meio segundo: marcas sobrepostas). Fica de fora o quadro a menos de
+     * [MIN_TICK_DP] de um tique de segundo ou de meio segundo.
+     */
+    inline fun frameTicks(sec: Long, fps: Float, pps: Float, out: (Long) -> Unit) {
+        val ppfDp = pps / TimeAxis.safeFps(fps)
+        if (!(ppfDp > 0f) || !ppfDp.isFinite()) return
+        val step = frameStep(pps, fps).toLong()
+        val first = frameOf(sec.toDouble(), fps)
+        val half = frameOf(sec + 0.5, fps)
+        val next = frameOf(sec + 1.0, fps)
+        val gap = MIN_TICK_DP / ppfDp.toDouble() - 1e-6
+        var k = first + step
+        while (k < next) {
+            if ((k - first) >= gap && abs(k - half) >= gap && (next - k) >= gap && tickClass(k, fps) == FRAME) out(k)
+            k += step
+        }
+    }
+}
+
+/** 0.3.6: revelar a fileira escolhida na parte da timeline que o painel por cima não cobre. */
+internal object TimelineReveal {
+    /** A altura à vista das fileiras: a timeline menos a régua e a parte coberta embaixo. */
+    fun viewport(height: Float, rowsTop: Float, obscured: Float): Float =
+        height - rowsTop - obscured.coerceAtLeast(0f)
+
+    /** A rolagem que deixa `[top, bottom]` à vista (fileira mais alta que a vista: o topo). */
+    fun target(top: Float, bottom: Float, scroll: Float, viewport: Float): Float = when {
+        viewport <= 0f -> scroll
+        top < scroll -> top
+        bottom > scroll + viewport -> if (bottom - top > viewport) top else bottom - viewport
+        else -> scroll
+    }
 }
 
 /** Auto-rolagem da Omega (referência: 120 dp/s × fator, a cada quadro). */

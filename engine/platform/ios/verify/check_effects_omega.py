@@ -161,6 +161,8 @@ check(!fxStagePointEligible(type: fxParamFloat, flags: 1 | 8) && !fxStagePointEl
 check(!fxSwipeCommits(dx: -100, width: 400, minimum: 96) && fxSwipeCommits(dx: -140, width: 400, minimum: 96), "35 %")
 check(!fxSwipeCommits(dx: 200, width: 400, minimum: 96), "direita não apaga")
 check(!fxSwipeCommits(dx: -60, width: 100, minimum: 96) && fxSwipeCommits(dx: -96, width: 100, minimum: 96), "mínimo")
+check(fxSwipeIsHorizontal(dx: -12, dy: 3) && fxSwipeIsHorizontal(dx: 12, dy: -3), "deslizar horizontal")
+check(!fxSwipeIsHorizontal(dx: -3, dy: 12) && !fxSwipeIsHorizontal(dx: -8, dy: 8) && !fxSwipeIsHorizontal(dx: .nan, dy: 0), "vertical fica com a rolagem")
 if failures > 0 { exit(1) }
 print("check_effects_omega: FxParamMath e fxEffectLayout Swift = FxParamMathTest/EffectSectionsTest (JVM) OK")
 '''
@@ -195,7 +197,7 @@ def main() -> int:
         "P0-2 ⋯ inativo com os controles abertos": "moreEnabled: openId == nil" in view,
         "P0-2 só o 1º efeito de camada vazia abre": "FxParamMath.opensAfterAdd(previousCount: seen.count" in view,
         "P0-2 decorações fora da lista": "fxShownInEffectList($0)" in view and "!e.isDecoration" in human,
-        "P0-2 toque longo de 0,4 s reordena": "LongPressGesture(minimumDuration: 0.4)" in view,
+        "P0-2 toque longo de 0,4 s reordena": "LongPressGesture(minimumDuration: 0.4" in view,
         "P0-3 abertura de 200 ms acelera-desacelera": "timingCurve(0.42, 0, 0.58, 1, duration: Double(FxParamMath.OPEN_MS)" in view,
         "P0-3 recorte + deslocamento": ".mask(alignment: .top)" in view and "overlayFrom * (1 - overlayProgress)" in view,
         "P0-4 controles da referência": all(n in design for n in ("struct FxParamLabel", "struct FxValueBox",
@@ -241,6 +243,7 @@ def main() -> int:
         block(human, "func fxClosedSection("),
         block(human, "func fxStagePointEligible("),
         block(human, "func fxSwipeCommits("),
+        block(human, "func fxSwipeIsHorizontal("),
         CASES,
     ])
     with tempfile.TemporaryDirectory() as temporary:

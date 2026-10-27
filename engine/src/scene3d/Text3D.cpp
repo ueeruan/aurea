@@ -194,11 +194,42 @@ bool decode_text3d(const std::string& src, Text3DSpec& out) {
         read_material(head, "m1", s.side);
         read_material(head, "m2", s.bevelMat);
     }
-    s.depth = std::clamp(s.depth, 0.0f, 10.0f);
-    s.alignment = std::min(s.alignment, 2u);
-    s.bevelSegments = std::clamp(s.bevelSegments, 1u, 8u);
+    // Receita antiga ou gravada com um valor inválido ("d=nan", segmentos 0):
+    // a mesma faixa que a edição usa, para a malha sair e a UI ler números sãos.
+    sanitize_text3d(s);
     out = std::move(s);
     return true;
+}
+
+void sanitize_text3d(Text3DSpec& s) noexcept {
+    auto unit = [](f32 v, f32 fallback) { return std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : fallback; };
+    auto range = [](f32 v, f32 lo, f32 hi, f32 fallback) { return std::isfinite(v) ? std::clamp(v, lo, hi) : fallback; };
+    auto material = [&](Text3DMaterial& m) {
+        m.color = Vec4{unit(m.color.x, 1.0f), unit(m.color.y, 1.0f), unit(m.color.z, 1.0f), unit(m.color.w, 1.0f)};
+        m.metallic = unit(m.metallic, 0.0f);
+        m.roughness = unit(m.roughness, 0.35f);
+        m.specular = unit(m.specular, 1.0f);
+        m.occlusion = unit(m.occlusion, 1.0f);
+        m.emissive = Vec3{unit(m.emissive.x, 0.0f), unit(m.emissive.y, 0.0f), unit(m.emissive.z, 0.0f)};
+        m.emissiveStrength = range(m.emissiveStrength, 0.0f, 100.0f, 1.0f);
+    };
+    s.depth = range(s.depth, 0.0f, 10.0f, 0.25f);
+    s.alignment = std::min(s.alignment, 2u);
+    s.bevelWidth = range(s.bevelWidth, 0.0f, 0.5f, 0.02f);
+    s.bevelDepth = range(s.bevelDepth, 0.0f, 0.5f, 0.02f);
+    s.bevelSegments = std::clamp(s.bevelSegments, 1u, 8u);
+    s.bevelRoundness = unit(s.bevelRoundness, 1.0f);
+    Text3DMaterial front = s.front_material();
+    material(front);
+    s.color = front.color; s.metallic = front.metallic; s.roughness = front.roughness; s.specular = front.specular;
+    s.occlusion = front.occlusion; s.emissive = front.emissive; s.emissiveStrength = front.emissiveStrength;
+    material(s.side);
+    material(s.bevelMat);
+    s.animation = std::min(s.animation, 4u);
+    s.animationDuration = range(s.animationDuration, 0.2f, 30.0f, 2.0f);
+    s.animationStagger = range(s.animationStagger, 0.0f, 1.0f, 0.12f);
+    s.animationAmount = range(s.animationAmount, 0.0f, 2.0f, 0.3f);
+    s.surfaceFinish = std::min(s.surfaceFinish, 4u);
 }
 
 std::shared_ptr<const text::Font> text3d_font(const Text3DSpec& spec) {

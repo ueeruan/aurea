@@ -1734,7 +1734,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (text3dPending && text3dPendingLayer != 0L && text3dPendingLayer != id) {
             typingHandler.removeCallbacks(applyText3d)
             text3dPending = false
-            text3d?.takeIf { it.content.isNotBlank() }?.let { engine.setText3d(text3dPendingLayer, it.content, it.toFields(), it.fontPath) }
+            text3d?.takeIf { it.content.isNotBlank() }?.let { reportText3D(engine.setText3d(text3dPendingLayer, it.content, it.toFields(), it.fontPath)) }
         }
         text3d = text3dAfterRefresh(text3dPending, text3dPendingLayer, id, text3d) {
             if (id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind) {
@@ -2448,6 +2448,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     // 0.3.4 plugins: painéis, scripts e consentimento (effects/PluginRuntime.kt)
     // usam o mesmo motor. Depois de um script mexer no projeto, relê já.
     internal val pluginEngine: AureaEngine get() = engine
+    // 0.3.6 Motion Capture (mocap/MocapFlow.kt): o mesmo motor; depois de gravar
+    // as keys ou ligar a prévia, relê já.
+    internal val mocapEngine: AureaEngine get() = engine
+    internal fun afterMocap() = refreshNow()
     internal fun afterPluginScript() = refreshNow()
     internal fun afterPluginInstall() {
         refreshPlugins()
@@ -2610,6 +2614,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
         } else null
         if (poseBones == null) { rigPoseMode = false; poseBone = -1 }
+        refreshHumanoid(id)
     }
 
     fun setRigPose(on: Boolean) {
@@ -2624,7 +2629,10 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         if (poseBone < 0) return
         val continuing = gestureDepth > 0 && poseGestureSent
-        if (engine.dragBone(id, poseBone, dx, dy, twist, continuing) && gestureDepth > 0) poseGestureSent = true
+        // 0.3.6: "Mover" desloca o osso (o quadril) no plano da vista em vez de girar.
+        val sent = if (poseMove && twist == 0f) engine.dragBoneTranslate(id, poseBone, dx, dy, continuing)
+                   else engine.dragBone(id, poseBone, dx, dy, twist, continuing)
+        if (sent && gestureDepth > 0) poseGestureSent = true
         refreshDetail()
     }
 
@@ -2643,6 +2651,142 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         engine.resetBonePose(id, if (all) -1 else poseBone)
         thumbnails.unalias(id)
+        refreshNow()
+    }
+
+    // --- AutoRig 3D (0.3.6 BETA) — Engine::humanoid_* / autorig_* (rig/AutoRig.hpp) -------
+    // Par do iOS: AureaModel.swift (bloco "AutoRig 3D"). O motor faz a detecção, os pesos,
+    // o IK e as keys; aqui só o estado da tela e o acompanhamento do trabalho assíncrono.
+    /** 0 sem esqueleto, 1 esqueleto não humanoide, 2 rig compatível, 3 AutoRig. */
+    var humanoidStatus by mutableIntStateOf(0)
+        private set
+    /** Trabalho do AutoRig: 0 parado, 1 processando, 2 pronto, 3 falhou, 4 cancelado. */
+    var autoRigState by mutableIntStateOf(0)
+        private set
+    var autoRigProgress by mutableFloatStateOf(0f)
+        private set
+    /** "Corrigir esqueleto": a Cena 3D mostra as 17 juntas canônicas. */
+    var rigFixMode by mutableStateOf(false)
+        private set
+    /** Juntas canônicas (`query_humanoid_joints`, HUMANOID_JOINT_FLOATS por osso). */
+    var humanoidJoints by mutableStateOf<FloatArray?>(null)
+        private set
+    /** Controladores IK (`query_humanoid_ik`, HUMANOID_IK_FLOATS por membro). */
+    var humanoidIk by mutableStateOf<FloatArray?>(null)
+        private set
+    /** Osso escolhido no modo de pose desloca em vez de girar (o quadril). */
+    var poseMove by mutableStateOf(false)
+        private set
+    private var autoRigJob: kotlinx.coroutines.Job? = null
+
+    private fun refreshHumanoid(id: Long?) {
+        val model = id != null && detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind
+        humanoidStatus = if (model && id != null) engine.humanoidStatus(id).coerceAtLeast(0) else 0
+        fun query(f: (FloatArray?) -> Int): FloatArray? {
+            val need = f(null)
+            if (need <= 0) return null
+            val out = FloatArray(need)
+            return if (f(out) == need) out else null
+        }
+        val joints = if (model && id != null && humanoidStatus >= 1) query { engine.queryHumanoidJoints(id, it) } else null
+        if (joints == null || humanoidJoints?.contentEquals(joints) != true) humanoidJoints = joints
+        val ik = if (model && id != null && humanoidStatus >= 2) query { engine.queryHumanoidIk(id, it) } else null
+        if (ik == null || humanoidIk?.contentEquals(ik) != true) humanoidIk = ik
+        if (humanoidJoints == null) rigFixMode = false
+    }
+
+    private fun autoRigError(code: Int): String = appText(when (code) {
+        1 -> R.string.rig3d_err_1; 2 -> R.string.rig3d_err_2; 3 -> R.string.rig3d_err_3; 4 -> R.string.rig3d_err_4
+        5 -> R.string.rig3d_err_5; 6 -> R.string.rig3d_err_6; 7 -> R.string.rig3d_err_7; 8 -> R.string.rig3d_err_8
+        else -> R.string.rig3d_err_9
+    })
+
+    /** Acompanha o trabalho do motor até acabar (progresso real; cancelar no meio). */
+    private fun watchAutoRig() {
+        autoRigJob?.cancel()
+        autoRigState = 1
+        autoRigProgress = 0f
+        autoRigJob = viewModelScope.launch {
+            while (true) {
+                val p = engine.autoRigProgress()
+                autoRigProgress = p[1].coerceIn(0f, 1f)
+                val state = p[0].toInt()
+                if (state != 1) {
+                    autoRigState = state
+                    when (state) {
+                        2 -> showToast(appText(R.string.rig3d_done))
+                        3 -> errorMessage = autoRigError(p[2].toInt())
+                        4 -> showToast(appText(R.string.rig3d_err_5))
+                    }
+                    primary?.let { thumbnails.unalias(it) }
+                    refreshNow()
+                    break
+                }
+                kotlinx.coroutines.delay(120)
+            }
+        }
+    }
+
+    /** "AutoRig 3D" nas opções da camada 3D. */
+    fun startAutoRig() {
+        val id = primary ?: return
+        if (autoRigState == 1) return
+        if (engine.autoRigStart(id)) watchAutoRig() else {
+            val p = engine.autoRigProgress()
+            errorMessage = autoRigError(p[2].toInt())
+        }
+    }
+
+    fun cancelAutoRig() {
+        engine.autoRigCancel()
+    }
+
+    /** Liga "Corrigir esqueleto" (sai do modo de pose). */
+    fun setRigFix(on: Boolean) {
+        rigFixMode = on && humanoidJoints != null
+        if (rigFixMode) { setRigPose(false); if (!sceneEditor) enterSceneEditor() }
+    }
+
+    /** AutoRig: a junta solta no ponto (px da composição) — recalcula os pesos. */
+    fun moveHumanoidJoint(bone: Int, x: Float, y: Float) {
+        val id = primary ?: return
+        if (autoRigState == 1) return
+        if (engine.humanoidMoveJoint(id, bone, x, y)) watchAutoRig()
+    }
+
+    /** Rig importado: o osso canônico passa a ser o nó [node] (−1 = nenhum). */
+    fun assignHumanoidBone(bone: Int, node: Int) {
+        val id = primary ?: return
+        if (engine.humanoidAssignBone(id, bone, node)) { thumbnails.unalias(id); refreshNow() }
+    }
+
+    fun modelNodeName(node: Int): String = primary?.let { engine.modelNodeName(it, node) } ?: ""
+
+    /** "Animar ossos": abre a Cena 3D no modo de pose, com o osso escolhido. */
+    fun animateBones(node: Int = -1) {
+        if (!sceneEditor) enterSceneEditor()
+        rigFixMode = false
+        setRigPose(true)
+        if (node >= 0 && rigPoseMode) choosePoseBone(node)
+    }
+
+    fun choosePoseMove(on: Boolean) { poseMove = on }
+
+    fun setHumanoidIk(limb: Int, on: Boolean) {
+        val id = primary ?: return
+        if (engine.humanoidSetIk(id, limb, on)) { thumbnails.unalias(id); refreshNow() }
+    }
+
+    fun dragHumanoidIk(limb: Int, pole: Boolean, dx: Float, dy: Float) {
+        val id = primary ?: return
+        val continuing = gestureDepth > 0 && poseGestureSent
+        if (engine.dragHumanoidIk(id, limb, pole, dx, dy, continuing) && gestureDepth > 0) poseGestureSent = true
+        refreshDetail()
+    }
+
+    fun toggleHumanoidIkKey(limb: Int) {
+        val id = primary ?: return
+        if (engine.toggleHumanoidIkKey(id, limb) < 0) showToast(appText(R.string.shape3d_key_outside))
         refreshNow()
     }
 
@@ -2882,6 +3026,52 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     fun hasText3DTexture(): Boolean = primary?.let { engine.queryText3dTexture(it).isNotEmpty() } ?: false
 
+    // --- 0.3.6 Textura do material (Engine::set_material_texture_*) -----------------------
+    /** O que cobre o material [material] do objeto 3D escolhido: tipo (0 nada, 1 imagem, 2 camada) e nome. */
+    fun materialTexture(material: Int): Pair<Int, String> {
+        val id = primary ?: return 0 to ""
+        val out = LongArray(2)
+        val name = engine.queryMaterialTexture(id, material, out)
+        return out[0].toInt() to name
+    }
+
+    /** As camadas que podem virar textura deste objeto (id, nome), de cima para baixo. */
+    fun materialTextureLayers(): List<Pair<Long, String>> {
+        val id = primary ?: return emptyList()
+        val names = layers.associate { it.id to it.name }
+        return engine.materialTextureLayers(id).map { it to (names[it] ?: "") }
+    }
+
+    /** Cobre o material com uma imagem do aparelho (um passo de desfazer). */
+    fun setMaterialTextureImage(material: Int, uri: Uri) {
+        if (!acceptsImport()) return
+        val id = primary ?: return
+        busyMessage = appText(R.string.app_importing_image)
+        launchImport launch@{
+            val ok = withContext(Dispatchers.IO) {
+                val file = saveShapeImage(uri) ?: return@withContext false
+                engine.setMaterialTextureImage(id, material, file.absolutePath)
+            }
+            busyMessage = null
+            if (!ok) errorMessage = appText(R.string.env3d_texture_error)
+            refreshNow()
+        }
+    }
+
+    /** Cobre o material com a camada [source] da composição (renderizada a cada quadro). */
+    fun setMaterialTextureLayer(material: Int, source: Long) {
+        val id = primary ?: return
+        if (!engine.setMaterialTextureLayer(id, material, source)) errorMessage = appText(R.string.env3d_texture_error)
+        refreshNow()
+    }
+
+    /** Volta à textura do arquivo. */
+    fun clearMaterialTexture(material: Int) {
+        val id = primary ?: return
+        engine.clearMaterialTexture(id, material)
+        refreshNow()
+    }
+
     private fun saveShapeImage(uri: Uri): File? = try {
         val app = getApplication<Application>()
         var bmp = AureaEngine.decodeBitmapRgba(app, uri, 2048) ?: throw IllegalStateException("imagem ilegivel")
@@ -2984,7 +3174,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (text3dPending) text3d?.let { pushText3D(id, it) }
         typingHandler.removeCallbacks(closeTyping)
         closeTyping.run()
-        engine.applyText3dPreset(id, preset.ordinal)
+        reportText3D(engine.applyText3dPreset(id, preset.ordinal))
         refreshNow()
     }
 
@@ -3004,8 +3194,22 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     private fun pushText3D(id: Long, info: Text3DInfo) {
         text3dPending = false
         if (info.content.isBlank()) return
-        engine.setText3d(id, info.content, info.toFields(), info.fontPath)
+        reportText3D(engine.setText3d(id, info.content, info.toFields(), info.fontPath))
         refreshNow()
+    }
+
+    /** Já avisou desta sequência de recusas (o arrasto manda uma a cada 90 ms). */
+    private var text3dFailureShown = false
+
+    /**
+     * Bug 0.3.6: a edição recusada pelo motor só fazia o painel voltar ao valor
+     * antigo. Agora diz o motivo (camada bloqueada, memória, fonte, letras) uma
+     * vez por sequência; a próxima edição aceita libera o aviso de novo.
+     */
+    private fun reportText3D(applied: Boolean) {
+        if (applied) { text3dFailureShown = false; return }
+        if (text3dFailureShown) return
+        text3dErrorMessage(engine.lastText3dStatus())?.let { errorMessage = appText(it); text3dFailureShown = true }
     }
 
     /** Sombras do objeto 3D selecionado: projeta / recebe. */
@@ -3431,7 +3635,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Divide as camadas escolhidas no playhead (as que o cobrem). */
     fun splitAtPlayhead(ids: Collection<Long> = selection) {
         val t = playhead
-        val targets = layers.filter { it.id in ids && t > it.startFrame && t < it.endFrame }
+        // 0.3.6 (keys, item 4): TOCANDO, `playhead` vem quadros atrás do motor: o
+        // corte caía à esquerda de onde o cabeçote parava e, logo depois do começo
+        // do clipe, nem acontecia (o filtro abaixo o descartava). Aí o lote pausa
+        // e divide no quadro em que a prévia parou (`splitLayerAtPlayhead`, lido
+        // pelo motor); a folga deixa o motor decidir quem o cabeçote cobre.
+        // Parado, segue o quadro explícito de sempre.
+        val live = playing
+        val slack = if (live) LIVE_SPLIT_SLACK else 0
+        val targets = layers.filter { it.id in ids && t + slack > it.startFrame && t < it.endFrame + slack }
         if (targets.isEmpty() || destroyed || !ready) return
         pendingSplit = PendingSplit(layers.mapTo(HashSet()) { it.id }, targets, t)
         // Sem a releitura imediata do `group`: o corte só vale no próximo quadro do
@@ -3440,8 +3652,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         // novo quando a revisão mudava. O laço de estado volta ao vsync e relê uma
         // vez, quando a revisão do modelo mudar.
         engine.beginCommandBatch()
+        if (live) batch.pause()
         batch.beginUndoGroup("dividir")
-        targets.forEach { batch.splitLayer(it.id, t) }
+        targets.forEach { if (live) batch.splitLayerAtPlayhead(it.id) else batch.splitLayer(it.id, t) }
         batch.endUndoGroup()
         engine.submitCommands()
         wakeStatusLoop()
@@ -3510,6 +3723,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     fun trimStart(layer: Long, newStart: Int): Boolean {
         val changed = engine.editClipTime(layer, 0, newStart.toLong())
+        refreshNow()
+        return changed
+    }
+
+    /**
+     * Aparar início/fim no cabeçote (trio do painel da camada). [live] = estava
+     * tocando: o motor usa o quadro em que a prévia parou (`kEditAtPlayhead`),
+     * não o `playhead` daqui, que vem quadros atrás durante a reprodução.
+     */
+    fun trimToPlayhead(layer: Long, start: Boolean, live: Boolean): Boolean {
+        val amount = if (live) com.aurea.aurea.engine.EDIT_AT_PLAYHEAD else playhead.toLong()
+        val changed = engine.editClipTime(layer, if (start) 0 else 1, amount)
         refreshNow()
         return changed
     }
@@ -9055,6 +9280,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val OPEN_GUARD_MS = 5_000L
         /** `kInvalidIndex` do C++: keyframe que não é de efeito. */
         const val NO_EFFECT = -1
+        /** Dividir TOCANDO: quadros de atraso do cabeçote lido aqui que ainda contam (o motor decide). */
+        const val LIVE_SPLIT_SLACK = 8
         /** Índices de `LayerSetCameraParam` (ver Command.hpp). */
         const val CAMERA_LENS_FOCAL = 0
         const val CAMERA_LENS_DOF = 1

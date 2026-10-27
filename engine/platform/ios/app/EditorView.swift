@@ -115,13 +115,29 @@ struct EditorView: View {
                             // (sobram 80: régua + uma linha). A prévia não muda de altura.
                             ZStack(alignment: .bottom) {
                                 VStack(spacing: 0) {
-                                    if metrics.timeline > 0 { TimelineView(compactDock: true, timecodeStyle: model.selection.count == 1 ? .box : .underline).frame(height: metrics.timeline) }
+                                    // 0.3.6: o que o painel por cima (doca/painel) ou o adicionar cobre embaixo.
+                                    if metrics.timeline > 0 {
+                                        TimelineView(compactDock: true,
+                                                     obscuredBottom: metrics.overlay ? metrics.obscuredTimeline
+                                                        : model.sheetContent == .adding ? EditorLayout.addContent(metrics) : 0,
+                                                     timecodeStyle: model.selection.count == 1 ? .box : .underline).frame(height: metrics.timeline)
+                                    }
                                     if !metrics.overlay && metrics.sheet > 0 {
                                         if model.sheetContent == .addBar || model.sheetContent == .adding { ShellAddBar().frame(height: metrics.sheet) }
                                         else { ContextSheet(metrics: metrics).frame(height: metrics.sheet) }
                                     }
                                 }
                                 .frame(height: metrics.zone, alignment: .top)
+                                if model.sheetContent == .adding {
+                                    // 0.3.6: com o adicionar aberto, o pedaço da timeline (régua) à vista só
+                                    // FECHA o adicionar: o toque é consumido inteiro e não puxa a régua nem
+                                    // leva o cabeçote (par do `editor.adding.dismiss` do Android).
+                                    Color.clear.contentShape(Rectangle())
+                                        .frame(height: metrics.timeline)
+                                        .gesture(DragGesture(minimumDistance: 0).onEnded { _ in model.showAddLayer = false })
+                                        .accessibilityHidden(true)
+                                        .frame(maxHeight: .infinity, alignment: .top)
+                                }
                                 if model.sheetContent == .adding {
                                     // Omega adicionar (área 08, P0-1): o conteúdo do botão aberto (193)
                                     // por cima da timeline, encostado na barra de adicionar, que fica.
@@ -594,7 +610,30 @@ private struct ShellStageBanner: View {
                     let color: Color = lines[i + 4] == 1 ? .yellow : lines[i + 4] == 2 ? .cyan : .gray.opacity(0.22)
                     context.stroke(line, with: .color(color), lineWidth: 1)
                 }
-                if model.rigPoseActive {
+                if model.rigFixActive {
+                    // AutoRig 3D (0.3.6, RigPoseStage.kt `drawRigFixOverlay`): as 17 juntas canônicas.
+                    let j = model.humanoidJoints, f = AureaModel.humanoidJointFloats, drag = model.rigFixDrag
+                    let count = j.count / f
+                    func at(_ b: Int) -> CGPoint? {
+                        guard j[b * f] >= 0, j[b * f + 3] > 0.5 else { return nil }
+                        if let drag, drag.0 == b { return screen(drag.1.x, drag.1.y) }
+                        return screen(j[b * f + 1], j[b * f + 2])
+                    }
+                    for b in 0..<count {
+                        let p = Int(j[b * f + 7])
+                        guard p >= 0, p < count, let a = at(p), let c = at(b) else { continue }
+                        var line = Path(); line.move(to: a); line.addLine(to: c)
+                        context.stroke(line, with: .color(StageInk.outlineUnder), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        context.stroke(line, with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    }
+                    for b in 0..<count {
+                        guard let c = at(b) else { continue }
+                        let on = drag?.0 == b
+                        let r: CGFloat = on ? 8 : 5.5
+                        circle(&context, c, r + 1.5, StageInk.outlineUnder)
+                        circle(&context, c, r, on ? AureaColors.accent : Color(red: 1, green: 0.8, blue: 0.33))
+                    }
+                } else if model.rigPoseActive {
                     // Pose do rig (RigPoseStage.kt): juntas e ossos no lugar do gizmo.
                     let b = model.poseBones, f = AureaModel.boneFloats, chosen = model.poseBone
                     let count = b.count / f
@@ -617,6 +656,26 @@ private struct ShellStageBanner: View {
                             context.stroke(Path(ellipseIn: CGRect(x: c.x - r - 4, y: c.y - r - 4, width: (r + 4) * 2, height: (r + 4) * 2)),
                                            with: .color(AureaColors.accent), lineWidth: 2)
                         }
+                    }
+                    // AutoRig 3D (0.3.6): alvo (quadrado) e polo (losango) dos membros com IK.
+                    let ik = model.humanoidIk, g = AureaModel.humanoidIkFloats
+                    let ikColor = Color(red: 0.33, green: 0.8, blue: 1)
+                    for limb in 0..<(ik.count / g) where ik[limb * g] > 0.5 {
+                        let o = limb * g
+                        let t = screen(ik[o + 1], ik[o + 2]), p = screen(ik[o + 3], ik[o + 4])
+                        var link = Path(); link.move(to: t); link.addLine(to: p)
+                        context.stroke(link, with: .color(.white.opacity(0.35)), lineWidth: 1)
+                        let s: CGFloat = 7
+                        context.fill(Path(CGRect(x: t.x - s - 1.5, y: t.y - s - 1.5, width: 2 * s + 3, height: 2 * s + 3)), with: .color(StageInk.outlineUnder))
+                        context.fill(Path(CGRect(x: t.x - s, y: t.y - s, width: 2 * s, height: 2 * s)), with: .color(ikColor))
+                        if ik[o + 5] > 0.5 {
+                            context.stroke(Path(ellipseIn: CGRect(x: t.x - s - 5, y: t.y - s - 5, width: (s + 5) * 2, height: (s + 5) * 2)),
+                                           with: .color(AureaColors.accent), lineWidth: 2)
+                        }
+                        var diamond = Path()
+                        diamond.move(to: CGPoint(x: p.x, y: p.y - s)); diamond.addLine(to: CGPoint(x: p.x + s, y: p.y))
+                        diamond.addLine(to: CGPoint(x: p.x, y: p.y + s)); diamond.addLine(to: CGPoint(x: p.x - s, y: p.y)); diamond.closeSubpath()
+                        context.fill(diamond, with: .color(ikColor.opacity(0.8)))
                     }
                 } else if TrackballOverlay.draw(&context, model: model, screen: screen) {
                     // Ferramenta Girar: o trackball no lugar das setas.
@@ -1893,6 +1952,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                     ScrollView(.horizontal, showsIndicators: false) { pillRow.padding(.horizontal, 12) }
                 }.padding(.bottom, model.rigPoseMode ? 8 : 12)
                 if model.rigPoseMode && !model.poseBones.isEmpty { rigPoseBar }
+                if model.rigFixMode && !model.humanoidJoints.isEmpty { rigFixBar }
             }
         }
         .frame(height: height)
@@ -1950,10 +2010,29 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                     if chosen { Button { model.togglePoseKey(all: false) } label: { pill(CupertinoGlyph.SuitDiamond, AureaText.t("rig_key_bone")) }.buttonStyle(.plain) }
                     Button { model.togglePoseKey(all: true) } label: { pill(CupertinoGlyph.SuitDiamond, AureaText.t("rig_key_all")) }.buttonStyle(.plain)
                     if chosen { Button { model.resetPose(all: false) } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("rig_reset_bone")) }.buttonStyle(.plain) }
+                    // 0.3.6: "Mover" desloca o osso escolhido (o quadril) em vez de girar.
+                    if chosen {
+                        Button { model.poseMove.toggle() } label: { pill(model.poseMove ? CupertinoGlyph.CheckmarkAlt : CupertinoGlyph.Move, AureaText.t("rig3d_move")) }
+                            .buttonStyle(.plain).accessibilityAddTraits(model.poseMove ? [.isSelected] : [])
+                    }
                     Button { model.resetPose(all: true) } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("rig_reset_all")) }.buttonStyle(.plain)
                     Button { model.setRigPose(false) } label: { pill(CupertinoGlyph.CheckmarkAlt, AureaText.t("rig_done")) }.buttonStyle(.plain)
                 }.padding(.horizontal, 12)
             }
+        }.padding(.bottom, 12)
+    }
+    /// Barra do Corrigir esqueleto (RigFixBar do SceneLayoutWorkspace.kt): dica, progresso dos pesos e concluir.
+    private var rigFixBar: some View {
+        let working = model.autoRigState == 1
+        let text = working ? AureaText.t("rig3d_working", min(100, max(0, Int(model.autoRigProgress * 100)))) : AureaText.t("rig3d_fix_hint")
+        return VStack(spacing: 8) {
+            Text(text).font(.aurea(size: 12)).foregroundStyle(AureaColors.text)
+                .multilineTextAlignment(.center).padding(.horizontal, 12).padding(.vertical, 8)
+                .background(StageInk.floatingDark, in: RoundedRectangle(cornerRadius: 12)).padding(.horizontal, 24)
+            HStack(spacing: 8) {
+                if working { Button { model.cancelAutoRig() } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("rig3d_cancel")) }.buttonStyle(.plain) }
+                Button { model.setRigFix(false) } label: { pill(CupertinoGlyph.CheckmarkAlt, AureaText.t("rig_done")) }.buttonStyle(.plain)
+            }.padding(.horizontal, 12)
         }.padding(.bottom, 12)
     }
     private func roundButton(_ glyph: Character, _ key: String, _ action: @escaping () -> Void) -> some View {

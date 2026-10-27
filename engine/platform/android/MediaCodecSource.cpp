@@ -211,12 +211,10 @@ f64 frame_rate_of(AMediaExtractor* ex, AMediaFormat* f) {
     AMediaExtractor_seekTo(ex, 0, AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
     if (t.size() < 3) return 30.0;
     std::sort(t.begin(), t.end());   // ordem de decode ≠ ordem de exibição (quadros B)
-    std::vector<i64> d;
-    for (size_t i = 1; i < t.size(); ++i) if (t[i] > t[i - 1]) d.push_back(t[i] - t[i - 1]);
-    if (d.empty()) return 30.0;
-    std::nth_element(d.begin(), d.begin() + static_cast<long>(d.size() / 2), d.end());
-    const i64 med = d[d.size() / 2];
-    return med > 0 ? 1e6 / static_cast<f64>(med) : 30.0;
+    // 0.3.6: MKV/WebM têm carimbos em ms (60 fps = 16/17/17 ms): a média dos
+    // intervalos regulares, não a mediana (que dava 58,8 fps).
+    const f64 fps = media::frame_rate_from_sorted_times(t.data(), t.size());
+    return fps > 0.0 ? fps : 30.0;
 }
 
 /// Maior instante de amostra a partir do último quadro-chave antes de

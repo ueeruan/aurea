@@ -56,6 +56,10 @@ struct GpuMaterial {
     Material factors;                  ///< cópia dos fatores (o asset é imutável)
     TextureHandle tex[5]{};            ///< base, mr, normal, oclusão, emissiva
     SamplerHandle samp[5]{};
+    /// 0.3.6 textura do material vinda da timeline: a cor de base é esta
+    /// imagem do GRAFO deste quadro (a camada desenhada antes da cena), no
+    /// lugar de `tex[0]`. Só nas cópias por instância; o asset não tem.
+    FGTexture graphBase{};
 };
 
 /// Os buffers e texturas de UM asset na GPU.
@@ -151,6 +155,22 @@ struct SceneNodeTexture {
     f32 repeat = 1.0f;
 };
 
+/// TEXTURA DO MATERIAL (0.3.6, MaterialOverride::textureImage/textureLayer):
+/// a cor de base de UM material do objeto vira uma imagem (`texture`, sRGB
+/// com mips, dona do Renderer) ou uma camada da composição (`sourceLayer`),
+/// que o Renderer desenha antes da cena neste quadro (`layerImage`). Sem
+/// `layerImage` válida (camada fora do quadro, ou num ciclo recusado) o
+/// material fica com o mapa do arquivo.
+struct SceneMaterialTexture {
+    u32 material = 0;
+    TextureHandle texture{};
+    u64 sourceLayer = 0;
+    FGTexture layerImage{};
+    /// Cor ajustada à mão (máscara RGB do ajuste): tinge a textura. Sem ela
+    /// a cor de base vira branca (a imagem aparece com as cores dela).
+    bool keepColor = false;
+};
+
 struct SceneInstance {
     /// Rigid exposure samples share immutable pose/material state. Only the
     /// transform and camera vary; a dense static glTF is never copied K times.
@@ -177,6 +197,9 @@ struct SceneInstance {
     /// Texturas trocadas por nó (efeito "Trocar textura 3D"). Fica na
     /// instância (não na pose): vale também com a pose compartilhada.
     std::vector<SceneNodeTexture> nodeTextures;
+    /// Texturas trocadas por material (0.3.6). Também na instância: vale com a
+    /// pose compartilhada e nos sub-quadros do desfoque.
+    std::vector<SceneMaterialTexture> materialTextures;
     bool castShadows = true;
     /// 0.3.1 (eixo Z do modelo 3D com efeito): cópia de RECORTE de um objeto de
     /// outro grupo 3D — grava só a profundidade (cor e alfa 0), sem sombra. O
@@ -366,6 +389,14 @@ struct SceneFrame {
     /// (0 no quadro base).
     f64 subFrame = 0.0;
 };
+
+/// A cena usa um material coberto por CAMADA (0.3.6)? Ela precisa da imagem
+/// da camada no MESMO grafo: não entra nas etapas 3D separadas da captura.
+[[nodiscard]] inline bool scene_uses_layer_textures(const SceneFrame& f) noexcept {
+    for (const SceneInstance& inst : f.instances)
+        for (const SceneMaterialTexture& t : inst.materialTextures) if (t.sourceLayer) return true;
+    return false;
+}
 
 /// Desenho instanciado translúcido no passe da cena (partículas 3D, 8.2):
 /// testa a profundidade de modelos e planos e NÃO escreve nela — partícula

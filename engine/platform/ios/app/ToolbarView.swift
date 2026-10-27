@@ -896,13 +896,18 @@ struct TransportView: View {
     private var buttons: some View {
         GeometryReader { geometry in
             // 0.3.3 recursos: 8 células (o marcador da 0.3.2 voltou, depois do ⇥).
+            // 0.3.6: ⇤ ▶ ⇥ no CENTRO (antes o ▶ era a 4ª de 8 células iguais, fora do
+            // meio): o grupo do meio tem 3 células de 1/8 e os dois lados a mesma largura —
+            // ↶ ↷ dividem a da esquerda; marcador, Copiar e colar e painel, a da direita.
             let side = max(1, geometry.size.width / 8)
+            let sideGroup = max(0, (geometry.size.width - 3 * side) / 2)
+            let left = max(1, sideGroup / 2), right = max(1, sideGroup / 3)
             let h = EditorLayout.transport
             HStack(spacing: 0) {
-                ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), size: 20, width: side, height: h,
+                ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), size: 20, width: left, height: h,
                                enabled: model.status.canUndo != 0, disabledTint: AureaColors.transportDisabled) { model.undo() }
                     .accessibilityIdentifier("transport.undo")
-                ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), size: 20, width: side, height: h,
+                ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), size: 20, width: left, height: h,
                                enabled: model.status.canRedo != 0, disabledTint: AureaColors.transportDisabled) { model.redo() }
                     .accessibilityIdentifier("transport.redo")
                 // 0.3.3 recursos: segurar ⇤ vai ao início e ⇥ ao fim (como na 0.3.2).
@@ -920,13 +925,13 @@ struct TransportView: View {
                 // (nome, quadro e cor). Par do Android.
                 let marked = model.markerFrames.contains(model.status.playhead)
                 ShellBarButton(glyph: marked ? ShellGlyph.BookmarkSolid : CupertinoGlyph.Bookmark,
-                               description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"), size: 18, width: side, height: h,
+                               description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"), size: 18, width: right, height: h,
                                tint: marked ? AureaColors.accent : AureaColors.text,
                                onLongPress: { model.editMarkerAtPlayhead() }, action: { model.toggleMarkerAt(model.status.playhead) })
                     .accessibilityIdentifier("transport.marker")
-                CopyPasteButton(side: side)
+                CopyPasteButton(side: right)
                 ShellBarButton(glyph: modes.camera ? CupertinoGlyph.CameraViewfinder : OmegaGlyph.sidebarRight, description: AureaText.t("om_tr_view_modes"),
-                               size: 20, width: side, height: h, tint: modes.columnOpen ? AureaColors.accent : AureaColors.text) {
+                               size: 20, width: right, height: h, tint: modes.columnOpen ? AureaColors.accent : AureaColors.text) {
                     modes.columnOpen.toggle()
                 }
                 .accessibilityValue(AureaText.t(modes.columnOpen ? "common_on" : "common_off"))

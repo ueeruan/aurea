@@ -46,4 +46,17 @@ class Scene3DInputsTest {
         assertEquals(R.string.msg_hdri_err_too_large, hdriErrorMessage(9L))
         assertNull(hdriErrorMessage(27L))
     }
+
+    /** 0.3.6: a edição de texto 3D recusada diz o motivo (Errc de Engine::last_text3d_status). */
+    @Test
+    fun refusedText3DEditsExplainWhy() {
+        assertNull(text3dErrorMessage(0))      // aplicada
+        assertNull(text3dErrorMessage(25))     // cancelada (projeto trocou no meio)
+        assertEquals(R.string.editor_camada_bloqueada_desbloqueie_editar, text3dErrorMessage(5))
+        assertEquals(R.string.t3d036_err_memory, text3dErrorMessage(9))
+        assertEquals(R.string.t3d036_err_memory, text3dErrorMessage(8))
+        assertEquals(R.string.t3d036_err_font, text3dErrorMessage(6))
+        assertEquals(R.string.t3d036_err_geometry, text3dErrorMessage(2))
+        assertEquals(R.string.t3d036_err_generic, text3dErrorMessage(1))
+    }
 }

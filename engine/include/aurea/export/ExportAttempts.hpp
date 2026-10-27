@@ -64,18 +64,38 @@ struct ExportAttemptPlan {
     bool noUpscale = false;  ///< sem upscale na GPU
     u32 blurCap = 0;         ///< teto de amostras de motion blur por quadro (0 = o do projeto; 1 = sem desfoque)
     u32 gpuStep = 0;         ///< degrau de custo 3D (0 = cheio; Renderer::set_export_gpu_step)
+    /// 0.3.6: tamanho no formato que todo encoder aceita (lado maior múltiplo
+    /// de 16, menor par — export_frame_size), em vez do nativo exato.
+    bool align16 = false;
 };
 
 [[nodiscard]] constexpr ExportAttemptPlan export_attempt_plan(u32 attempt) noexcept {
     switch (attempt) {
-        case 0: return {0, false, 0, 0.0, false, 0, 0};
-        case 1: return {1, true, 0, 60.0, false, 32, 0};
-        case 2: return {2, true, 0, 60.0, false, 16, 1};
-        case 3: return {1, true, 720, 30.0, true, 16, 1};
-        case 4: return {2, true, 720, 30.0, true, 8, 2};
-        case 5: return {2, true, 480, 30.0, true, 4, 3};
-        default: return {2, true, 480, 30.0, true, 1, 4};
+        case 0: return {0, false, 0, 0.0, false, 0, 0, false};
+        case 1: return {1, true, 0, 60.0, false, 32, 0, true};
+        case 2: return {2, true, 0, 60.0, false, 16, 1, true};
+        case 3: return {1, true, 720, 30.0, true, 16, 1, true};
+        case 4: return {2, true, 720, 30.0, true, 8, 2, true};
+        case 5: return {2, true, 480, 30.0, true, 4, 3, true};
+        default: return {2, true, 480, 30.0, true, 1, 4, true};
     }
+}
+
+/// 0.3.6 ("erro de codec" no export): o tamanho do vídeo de um degrau.
+/// Degrau 0 mantém o nativo exato quando ele é par (export_frame_size_v2).
+/// Composição com lado ÍMPAR (vídeo recortado, tela gravada, tamanho livre)
+/// não tem tamanho nativo 4:2:0: antes o motor recusava ("dimensões pares"),
+/// a escada lia isso como falta de memória e pulava direto para 720p. Agora
+/// ela sai no tamanho alinhado mais próximo (lado maior múltiplo de 16, menor
+/// par), como os degraus de compatibilidade (`align16`) sempre fazem — um
+/// passo de 16 que todo encoder de aparelho aceita.
+[[nodiscard]] inline ExportFrameSize export_attempt_frame_size(u32 compW, u32 compH, u32 wantShort,
+                                                               bool align16) noexcept {
+    if (!align16) {
+        const ExportFrameSize native = export_frame_size_v2(compW, compH, wantShort);
+        if (native.width && native.height) return native;
+    }
+    return export_frame_size(compW, compH, wantShort);
 }
 
 /// O lado menor que o degrau usa (`requested` 0 = o da composição, desconhecido).

@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
@@ -99,8 +100,23 @@ internal object TextModeState {
     var draftBlank by mutableStateOf(false)
 }
 
-/** Os 25 tamanhos do popup (a régua fina continua nas Opções de texto). */
-internal val TextSizeSteps = intArrayOf(5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 112, 144)
+/**
+ * Os tamanhos do popup (a régua fina continua nas Opções de texto). 0.3.6: iam só
+ * até 144 px — pouco num vídeo 1080p/4K ("não dá para aumentar mais o texto");
+ * agora seguem até o teto do motor ([TEXT_SIZE_MAX]), e o número ao lado aceita
+ * qualquer valor digitado.
+ */
+internal val TextSizeSteps = intArrayOf(
+    5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 112, 144,
+    192, 256, 320, 400, 512, 640, 800, 1000, 1300, 1600, 2000,
+)
+
+/** 0.3.6: o maior tamanho de texto (px): o mesmo teto do motor (`TextSetSize`, 1…2000). */
+internal const val TEXT_SIZE_MAX = 2000f
+
+/** O tamanho digitado (aceita vírgula), preso a 1…[TEXT_SIZE_MAX]; null se não for número. */
+internal fun parseTextSize(text: String): Float? =
+    text.trim().replace(',', '.').toFloatOrNull()?.takeIf { it.isFinite() }?.coerceIn(1f, TEXT_SIZE_MAX)
 
 /** O passo mais perto de um tamanho (px). */
 internal fun nearestSizeStep(size: Float): Int {
@@ -321,15 +337,18 @@ private fun MiniFontItem(index: Int, f: EditorStore.FontItem?, header: Int, on: 
     }
 }
 
-/** Popup do tamanho: régua de 25 passos; um arraste = um passo de desfazer. */
+/** Popup do tamanho: régua de passos; um arraste = um passo de desfazer. 0.3.6: e o número, para digitar. */
 @Composable
 private fun SizePopup(store: EditorStore) {
     val currentSize = store.textDetail?.size ?: 72f
     val index = nearestSizeStep(currentSize)
     val label = stringResource(R.string.om_txm_size_cd, currentSize.roundToInt())
-    Box(Modifier.fillMaxWidth().height(40.dp).background(AureaColors.ContentStyleButton).padding(horizontal = 16.dp)) {
+    Row(
+        Modifier.fillMaxWidth().height(40.dp).background(AureaColors.ContentStyleButton).padding(start = 16.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         BoxWithConstraints(
-            Modifier.fillMaxSize().testTag("text.size.slider").semantics { contentDescription = label }
+            Modifier.weight(1f).fillMaxHeight().testTag("text.size.slider").semantics { contentDescription = label }
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown()
@@ -357,7 +376,58 @@ private fun SizePopup(store: EditorStore) {
             Box(Modifier.align(Alignment.CenterStart).width(w * frac).height(3.dp).clip(RoundedCornerShape(2.dp)).background(AureaColors.Accent))
             Box(Modifier.align(Alignment.CenterStart).offset(x = w * frac - 9.dp).size(18.dp).clip(RoundedCornerShape(9.dp)).background(AureaColors.Accent))
         }
+        Spacer(Modifier.width(10.dp))
+        SizeField(store, currentSize)
     }
+}
+
+/**
+ * 0.3.6: o tamanho em número, para digitar qualquer valor até [TEXT_SIZE_MAX] (a régua
+ * vai de passo em passo). Enter/✓ aplica num passo de desfazer; sair sem número volta.
+ */
+@Composable
+private fun SizeField(store: EditorStore, size: Float) {
+    val shown = size.roundToInt().toString()
+    var field by remember { mutableStateOf(TextFieldValue(shown)) }
+    var focused by remember { mutableStateOf(false) }
+    // Fora da edição o campo segue o tamanho da camada (régua, desfazer).
+    LaunchedEffect(shown, focused) { if (!focused) field = TextFieldValue(shown) }
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    val label = stringResource(R.string.panel_tamanho_texto)
+    fun apply() {
+        val value = parseTextSize(field.text)
+        if (value != null && value.roundToInt() != size.roundToInt()) {
+            store.beginGesture("tamanho do texto")
+            store.setTextSize(value)
+            store.endGesture()
+        }
+        field = TextFieldValue((value ?: size).roundToInt().toString())
+    }
+    BasicTextField(
+        value = field,
+        onValueChange = { next -> field = next.copy(text = next.text.filter { it.isDigit() || it == ',' || it == '.' }.take(6)) },
+        singleLine = true,
+        textStyle = TextStyle(color = AureaColors.Text, fontSize = 13.sp, textAlign = TextAlign.Center, fontFeatureSettings = "tnum"),
+        cursorBrush = SolidColor(AureaColors.Accent),
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+            keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal,
+            imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+        ),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.clearFocus() }),
+        modifier = Modifier
+            .width(64.dp)
+            .height(32.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(AureaColors.FxTrack)
+            .testTag("text.size.field")
+            .semantics { contentDescription = label }
+            .onFocusChanged { state ->
+                if (focused && !state.isFocused) apply()
+                focused = state.isFocused
+                if (state.isFocused) field = field.copy(selection = TextRange(0, field.text.length))
+            },
+        decorationBox = { inner -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { inner() } },
+    )
 }
 
 /** Popup da cor: o seletor compacto, preso à direita. */

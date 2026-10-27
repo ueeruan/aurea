@@ -52,12 +52,20 @@ struct EffectsView: View {
     @State private var dragStart = 0
     @State private var dragOrder: [UInt32]?
     @GestureState private var reorderHeld = false
+    /// 0.3.6 (iOS, rolagem): a linha erguida pelo toque longo. O toque que solta
+    /// esse mesmo dedo não abre os controles (com o gesto simultâneo, o toque
+    /// simples também chega ao soltar).
+    @State private var liftedTap: UInt32?
     @State private var rowFrames: [UInt32: CGRect] = [:]
     // Deslizar para apagar: a linha sob o dedo, o deslocamento lógico (negativo =
     // para o início da linha) e o eixo travado (0 indeciso, 1 horizontal, 2 vertical).
     @State private var swipeId: UInt32?
     @State private var swipeOffset: CGFloat = 0
     @State private var swipeAxis = 0
+    /// 0.3.6 (sidebar): o dedo ainda no deslizar. Quando a rolagem toma o toque o
+    /// SwiftUI cancela o DragGesture SEM `onEnded` (o efeito nunca saía); o fim do
+    /// estado do gesto decide do mesmo jeito (como `reorderHeld`).
+    @GestureState private var swipeHeld = false
     // A sobreposição dos controles (P0-3).
     @State private var overlayId: UInt32?
     @State private var overlayProgress: CGFloat = 0
@@ -189,6 +197,7 @@ struct EffectsView: View {
         .onChange(of: puppet.selected) { _ in updateTimelineFocus() }
         .onChange(of: puppet.revision) { _ in updateTimelineFocus() }
         .onChange(of: reorderHeld) { held in if !held { finishReorder() } }
+        .onChange(of: swipeHeld) { held in if !held, let id = swipeId { settleSwipe(id) } }
         .onChange(of: model.effects.map(\.effectId)) { ids in effectsChanged(ids) }
         .task(id: pendingPick) {
             // Render lento não é recusa: depois de 3 s relê o modelo e libera
@@ -413,7 +422,7 @@ struct EffectsView: View {
     }
 
     private func tapRow(_ effect: EffectItem) {
-        guard overlayId == nil, dragId == nil else { return }
+        guard overlayId == nil, dragId == nil, liftedTap != effect.effectId else { return }
         if !effect.known { confirmUnknown(effect); return }
         open(effect.effectId, animated: true)
     }
@@ -557,7 +566,12 @@ struct EffectsView: View {
             .frame(height: FxParamMath.ROW_LIST)
             .contentShape(Rectangle())
             .onTapGesture { tapRow(effect) }
-            .gesture(reorderGesture(effect), including: canReorder ? .all : .subviews)
+            // 0.3.6 (iOS, rolagem): SIMULTÂNEO. Como `.gesture` (exclusivo) ele cobria
+            // quase toda a largura de cada linha e, no iOS 18+ (gestos do SwiftUI
+            // viraram reconhecedores do UIKit), o pan do ScrollView da lista esperava
+            // por ele: a lista não rolava começando em cima de uma linha. Erguido, o
+            // `scrollDisabled(dragId != nil)` da lista segura a rolagem.
+            .simultaneousGesture(reorderGesture(effect), including: canReorder ? .all : .subviews)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(AureaText.t("fxui_a11y_expand", name))
             .accessibilityValue([effect.enabled ? "" : AureaText.t("fxui_effect_off"), badge].filter { !$0.isEmpty }.joined(separator: ", "))
@@ -582,7 +596,15 @@ struct EffectsView: View {
                 .contentShape(Rectangle())
                 .highPriorityGesture(DragGesture(minimumDistance: 4, coordinateSpace: .global)
                     .updating($reorderHeld) { _, state, _ in state = true }
-                    .onChanged { value in reorder(effect, translation: value.translation.height) }
+                    .onChanged { value in
+                        // 0.3.6 (sidebar): o ≡ só ergue no arrasto VERTICAL. O deslizar para a
+                        // esquerda costuma começar aqui (canto direito) e o ≡ o tomava.
+                        if dragId == nil {
+                            if swipeId == effect.effectId && swipeAxis == 1 { return }
+                            if fxSwipeIsHorizontal(dx: value.translation.width, dy: value.translation.height) { return }
+                        }
+                        reorder(effect, translation: value.translation.height)
+                    }
                     .onEnded { _ in finishReorder() }, including: canReorder ? .all : .none)
                 .accessibilityLabel(AureaText.t("fxui_a11y_drag", name))
                 .accessibilityIdentifier("effects.grip." + id)
@@ -613,9 +635,11 @@ struct EffectsView: View {
 
     /// TOQUE LONGO (0,4 s) em qualquer ponto da linha ergue e arrasta para
     /// reordenar (`ItemTouchHelper` da referência). Andar antes solta o gesto para
-    /// a rolagem ou para o deslizar.
+    /// a rolagem ou para o deslizar: 0.3.6, o dedo que anda 4 pt (o slop das
+    /// réguas) já está rolando e o toque longo falha, para não erguer a linha no
+    /// meio de uma rolagem lenta (com o gesto simultâneo, os dois correm juntos).
     private func reorderGesture(_ effect: EffectItem) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.4)
+        LongPressGesture(minimumDuration: 0.4, maximumDistance: FxParamMath.TOUCH_SLOP * FxParamMath.SLIDER_SLOP_FRACTION)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
             .updating($reorderHeld) { value, state, _ in
                 if case .second(true, _) = value { state = true }
@@ -636,6 +660,7 @@ struct EffectsView: View {
             dragStart = dragOrder?.firstIndex(of: effect.effectId) ?? 0
             dragOffset = 0
             swipeId = nil; swipeOffset = 0; swipeAxis = 0
+            liftedTap = effect.effectId
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
         guard dragId == effect.effectId, var order = dragOrder, let current = order.firstIndex(of: effect.effectId) else { return }
@@ -650,6 +675,10 @@ struct EffectsView: View {
     }
 
     private func finishReorder() {
+        // O toque simples do mesmo dedo chega junto do soltar (antes ou depois daqui).
+        if let lifted = liftedTap {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { if liftedTap == lifted && dragId == nil { liftedTap = nil } }
+        }
         guard let id = dragId else { return }
         let order = dragOrder
         dragId = nil; dragOrder = nil; dragOffset = 0
@@ -676,28 +705,32 @@ struct EffectsView: View {
             content().offset(x: active ? swipeOffset : 0)
         }
         .simultaneousGesture(DragGesture(minimumDistance: 12, coordinateSpace: .global)
+            .updating($swipeHeld) { _, state, _ in state = true }
             .onChanged { value in swipeChanged(effect, value, enabled: enabled) }
-            .onEnded { value in swipeEnded(effect, value) }, including: enabled ? .all : .subviews)
+            .onEnded { _ in settleSwipe(effect.effectId) }, including: enabled ? .all : .subviews)
         .accessibilityHint(enabled ? AureaText.t("fxui_a11y_swipe_delete") : "")
     }
     private func swipeChanged(_ effect: EffectItem, _ value: DragGesture.Value, enabled: Bool) {
         guard enabled, dragId == nil else { return }
         if swipeId != effect.effectId { swipeId = effect.effectId; swipeOffset = 0; swipeAxis = 0 }
         let dx = value.translation.width, dy = value.translation.height
-        // Trava o eixo no primeiro movimento: vertical é a rolagem da lista.
-        if swipeAxis == 0 { swipeAxis = abs(dx) > abs(dy) ? 1 : 2 }
+        // Trava o eixo no primeiro movimento: vertical é a rolagem da lista
+        // (0.3.6: a mesma regra do Android, `fxSwipeIsHorizontal`).
+        if swipeAxis == 0 { swipeAxis = fxSwipeIsHorizontal(dx: dx, dy: dy) ? 1 : 2 }
         guard swipeAxis == 1 else { return }
         // Tela em árabe: o "para o início da linha" é para a direita.
         let logical = layoutDirection == .rightToLeft ? -dx : dx
         let width = rowFrames[effect.effectId]?.width ?? 0
         swipeOffset = Swift.min(0, Swift.max(-width, logical))
     }
-    private func swipeEnded(_ effect: EffectItem, _ value: DragGesture.Value) {
-        guard swipeId == effect.effectId else { return }
-        let width = rowFrames[effect.effectId]?.width ?? 0
+    /// Soltar (`onEnded`) ou gesto cancelado pela rolagem (`swipeHeld` volta a falso):
+    /// passou do limite, apaga com "Desfazer"; senão volta. Só uma vez por deslizar.
+    private func settleSwipe(_ effectId: UInt32) {
+        guard swipeId == effectId else { return }
+        let width = rowFrames[effectId]?.width ?? 0
         if swipeAxis == 1 && dragId == nil && fxSwipeCommits(dx: swipeOffset, width: width, minimum: 96) {
             withAnimation(.easeOut(duration: 0.16)) { swipeOffset = -width }
-            model.removeEffectWithUndo(effect.effectId)
+            model.removeEffectWithUndo(effectId)
             swipeId = nil; swipeOffset = 0; swipeAxis = 0
         } else {
             withAnimation(.easeOut(duration: 0.2)) { swipeOffset = 0 }

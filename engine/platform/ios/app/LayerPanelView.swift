@@ -262,7 +262,7 @@ struct LayerPanelView: View {
                     }
                 } else {
                     timeButton(.trimStart, "editor_aparar_inicio_cabecote", "timeline.cut.start") {
-                        insideEdit(l, locked) { if !model.trimStart(l.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } }
+                        insideEdit(l, locked) { if !model.trimToPlayhead(l.id, start: true) { model.toast = AureaText.t("timeline_cut_failed") } }
                     }
                     rowDivider
                     timeButton(.split, "editor_dividir_cabecote", "timeline.cut.split") {
@@ -270,7 +270,7 @@ struct LayerPanelView: View {
                     }
                     rowDivider
                     timeButton(.trimEnd, "editor_aparar_fim_cabecote", "timeline.cut.end") {
-                        insideEdit(l, locked) { if !model.trimEnd(l.id, at: model.status.playhead) { model.toast = AureaText.t("timeline_cut_failed") } }
+                        insideEdit(l, locked) { if !model.trimToPlayhead(l.id, start: false) { model.toast = AureaText.t("timeline_cut_failed") } }
                     }
                 }
             }

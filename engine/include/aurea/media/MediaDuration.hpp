@@ -26,4 +26,30 @@ namespace aurea::media {
     return declaredUs > actual + slack ? actual : declaredUs;
 }
 
+/// 0.3.6: taxa de quadros pelos instantes das primeiras amostras, já em ordem
+/// crescente (`count` itens). 0 = não deu para medir (quem chama usa 30).
+/// Com intervalos todos perto da mediana (±1,5 ms: arredondamento do
+/// contêiner), vale a MÉDIA — Matroska grava em milissegundos e um 60 fps sai
+/// 16/17/17 ms: a mediana dava 17 ms = 58,8 fps. Com intervalos variados (VFR,
+/// um buraco), a mediana, como antes.
+[[nodiscard]] inline f64 frame_rate_from_sorted_times(const i64* times, usize count) noexcept {
+    if (!times || count < 3) return 0.0;
+    i64 diffs[64];
+    usize n = 0;
+    for (usize i = 1; i < count && n < 64; ++i)
+        if (times[i] > times[i - 1]) diffs[n++] = times[i] - times[i - 1];
+    if (n == 0) return 0.0;
+    i64 sorted[64];
+    for (usize i = 0; i < n; ++i) sorted[i] = diffs[i];
+    std::sort(sorted, sorted + n);
+    const i64 median = sorted[n / 2];
+    if (median <= 0) return 0.0;
+    if (n >= 2 && sorted[0] >= median - 1500 && sorted[n - 1] <= median + 1500) {
+        i64 sum = 0;
+        for (usize i = 0; i < n; ++i) sum += diffs[i];
+        return 1e6 * static_cast<f64>(n) / static_cast<f64>(sum);
+    }
+    return 1e6 / static_cast<f64>(median);
+}
+
 } // namespace aurea::media

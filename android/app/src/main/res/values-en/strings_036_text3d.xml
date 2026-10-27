@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="t3d036_err_memory">This project is out of memory for images and models, so the 3D text could not be rebuilt. Remove media you don\'t use, or save and reopen the project.</string>
+    <string name="t3d036_err_font">This 3D text\'s font is not on this device and no other font is available. Choose another font.</string>
+    <string name="t3d036_err_geometry">The 3D text could not be built with this change: the text has no visible letters, or too many letters to animate one by one (up to 256).</string>
+    <string name="t3d036_err_generic">Could not apply the change to the 3D text.</string>
+</resources>

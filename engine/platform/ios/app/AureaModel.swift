@@ -727,7 +727,7 @@ final class AureaModel: ObservableObject {
         // Texto 3D vazio continua proibido: o último conteúdo válido fica.
         if is3D && content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return }
         if !textTypingOpen { textTypingOpen = true; beginGesture("digitar texto") }
-        if is3D { _ = engine.setText3D(forLayer: id, property: "content", stringValue: content, numberValue: 0) }
+        if is3D { reportText3D(engine.setText3D(forLayer: id, property: "content", stringValue: content, numberValue: 0)) }
         else { engine.setText(id, content: content) }
         textTypingClose?.cancel()
         let close = DispatchWorkItem { [weak self] in self?.finishTextTyping() }
@@ -741,7 +741,7 @@ final class AureaModel: ObservableObject {
         guard let id = primarySelection, selectedLayer?.locked != true else { return }
         if let recipe = engine.text3D(forLayer: id) {
             let a = (recipe["alignment"] as? NSNumber)?.intValue ?? 0
-            _ = engine.setText3D(forLayer: id, property: "alignment", stringValue: nil, numberValue: Float((a + 1) % 3))
+            reportText3D(engine.setText3D(forLayer: id, property: "alignment", stringValue: nil, numberValue: Float((a + 1) % 3)))
         } else {
             let a = (engine.text(forLayer: id)?["alignment"] as? NSNumber)?.intValue ?? 0
             engine.setText(id, alignment: UInt32((a + 1) % 3))
@@ -753,7 +753,7 @@ final class AureaModel: ObservableObject {
     func applyFontAnywhere(_ font: ContentFontItem?) {
         guard let id = primarySelection, selectedLayer?.locked != true else { return }
         if engine.text3D(forLayer: id) != nil {
-            _ = engine.setText3D(forLayer: id, property: "fontPath", stringValue: font?.path ?? "", numberValue: 0)
+            reportText3D(engine.setText3D(forLayer: id, property: "fontPath", stringValue: font?.path ?? "", numberValue: 0))
         } else {
             let path = font?.path ?? ""
             let ok = engine.setTextFont(forLayer: id, family: font?.family ?? "", weight: font?.weight ?? 400, italic: font?.italic ?? false,
@@ -1057,6 +1057,15 @@ final class AureaModel: ObservableObject {
     @Published private(set) var timelineLayerSelectMode = false
     private var pendingPlayhead: Int64?
     private var pendingPlayheadUntil: TimeInterval = 0
+    /// 0.3.6 (keys, item 4): pausou vindo da reprodução e o `status.playhead`
+    /// ainda é o da leitura de antes (o laço lê a 5 Hz: vem quadros atrás). Corte
+    /// e aparar "no cabeçote" usam então o quadro do motor (`kEditAtPlayhead`).
+    /// Some na primeira leitura do motor já parado.
+    private var playheadStaleAfterPause = false
+    /// Tocando (ou recém-pausado): o cabeçote lido aqui está atrasado.
+    var playheadIsStale: Bool { status.playing != 0 || playheadStaleAfterPause }
+    /// Dividir tocando: quadros de atraso do cabeçote lido aqui que ainda contam (o motor decide).
+    static let liveSplitSlack: Int64 = 8
     enum ProjectSort: String, CaseIterable, Identifiable {
         case recent, name, longest, size
         var id: String { rawValue }
@@ -2035,6 +2044,7 @@ final class AureaModel: ObservableObject {
         let nativePlayhead = out.playhead
         let playheadChanged = nativePlayhead != lastEnginePlayhead
         lastEnginePlayhead = nativePlayhead
+        if out.playing == 0 { playheadStaleAfterPause = false }
         refreshPreviewBufferRanges(revision: out.modelRevision)
         updatePreRenderProgress()
         if let pending = pendingPlayhead {
@@ -2247,6 +2257,7 @@ final class AureaModel: ObservableObject {
         let nextBones: [Float] = sceneEditor && selectedLayer?.kind == 10 ? engine.modelBones(layerId).map(\.floatValue) : []
         if nextBones != poseBones { poseBones = nextBones }
         if poseBones.isEmpty && (rigPoseMode || poseBone >= 0) { rigPoseMode = false; poseBone = -1 }
+        refreshHumanoid(layerId)   // AutoRig 3D (0.3.6)
         if panel == .mask || panel == .vector { refreshMasks() }
         if let effectId = selectedEffectId {
             loadParams(layerId: layerId, effectId: effectId)
@@ -2388,6 +2399,7 @@ final class AureaModel: ObservableObject {
     func playPause() {
         pendingPlayhead = nil
         engine.run { $0.togglePlayback() }
+        if status.playing != 0 { playheadStaleAfterPause = true }
         status.playing = status.playing == 0 ? 1 : 0
         followPlayback(status.playing != 0)
     }
@@ -2404,6 +2416,7 @@ final class AureaModel: ObservableObject {
     func pause() {
         pendingPlayhead = nil
         engine.run { $0.pause() }
+        if status.playing != 0 { playheadStaleAfterPause = true }
         status.playing = 0
         followPlayback(false)
     }
@@ -2722,7 +2735,9 @@ final class AureaModel: ObservableObject {
     }
 
     func editorBackFromTimeline() {
-        if panel != .none && panel != .dock { panel = .none }
+        // 0.3.6: adicionando, o toque na timeline só fecha o adicionar (par do Android).
+        if showAddLayer { showAddLayer = false }
+        else if panel != .none && panel != .dock { panel = .none }
         else { clearSelection() }
     }
 
@@ -3440,6 +3455,37 @@ final class AureaModel: ObservableObject {
         case 8, 9: return AureaText.t("msg_hdri_err_too_large")
         default: return nil
         }
+    }
+
+    /// Bug 0.3.6 ("as configurações do texto 3D não mudam neste projeto"): a
+    /// edição recusada pelo motor só fazia o painel voltar ao valor antigo. Errc
+    /// de Engine::last_text3d_status → chave da frase; nil = aplicada/cancelada.
+    /// A mesma tabela de text3dErrorMessage (Scene3DInputs.kt) no Android.
+    static func text3DFailureKey(code: Int32) -> String? {
+        switch code {
+        case 0, 25: return nil                                           // Ok, Cancelled
+        case 5: return "editor_camada_bloqueada_desbloqueie_editar"      // camada bloqueada
+        case 8, 9: return "t3d036_err_memory"                            // memória do projeto
+        case 6: return "t3d036_err_font"                                 // nenhuma fonte
+        case 2: return "t3d036_err_geometry"                             // malha não sai
+        case 17: return "msg_nao_foi_possivel_importar_a_imagem"         // textura
+        default: return "t3d036_err_generic"
+        }
+    }
+
+    /// Já avisou desta sequência de recusas (o arrasto manda uma a cada 90 ms).
+    private var text3DFailureShown = false
+
+    /// Resultado de uma edição de texto 3D: avisa o motivo uma vez por
+    /// sequência de recusas; a próxima aceita libera o aviso. Devolve `applied`.
+    @discardableResult
+    func reportText3D(_ applied: Bool) -> Bool {
+        if applied { text3DFailureShown = false; return true }
+        if !text3DFailureShown, let key = AureaModel.text3DFailureKey(code: engine.lastText3DStatus()) {
+            toast = AureaText.t(key)
+            text3DFailureShown = true
+        }
+        return false
     }
 
     /// "Importar texturas": a layer do modelo e os arquivos que ele referencia e não achou (só o nome).
@@ -4539,6 +4585,20 @@ final class AureaModel: ObservableObject {
     @Published var poseBone: Int32 = -1
     /// O arrasto de osso em curso já abriu o passo de desfazer (o resto vai junto).
     var poseGestureSent = false
+    /// AutoRig 3D (0.3.6 BETA): 0 sem esqueleto, 1 não humanoide, 2 rig compatível, 3 AutoRig.
+    @Published var humanoidStatus = 0
+    /// Trabalho do AutoRig: 0 parado, 1 processando, 2 pronto, 3 falhou, 4 cancelado.
+    @Published var autoRigState = 0
+    @Published var autoRigProgress: Float = 0
+    var autoRigTask: Task<Void, Never>?
+    /// "Corrigir esqueleto" (17 juntas canônicas na Cena 3D) e os controladores IK.
+    @Published var rigFixMode = false
+    @Published var humanoidJoints: [Float] = []
+    @Published var humanoidIk: [Float] = []
+    /// Osso escolhido no modo de pose desloca em vez de girar (o quadril).
+    @Published var poseMove = false
+    /// Junta canônica sendo arrastada no Corrigir esqueleto (osso, ponto em px da composição).
+    @Published var rigFixDrag: (Int, SIMD2<Float>)?
     @Published var sceneYaw: Float = -30
     @Published var scenePitch: Float = 20
     @Published var sceneDistance: Float = 3
@@ -5957,10 +6017,25 @@ final class AureaModel: ObservableObject {
     /// Divide as camadas escolhidas no cabeçote (as que o cobrem).
     func splitAtPlayhead(_ ids: [Int64]) {
         let frame = Int32(clamping: status.playhead)
-        let targets = layers.filter { ids.contains($0.id) && frame > $0.startFrame && frame < $0.endFrame }
+        // 0.3.6 (keys, item 4): tocando (ou recém-pausado), `status.playhead` vem
+        // quadros atrás: o corte caía à esquerda de onde o cabeçote parava e, logo
+        // depois do começo do clipe, nem acontecia. Aí o lote pausa e divide no
+        // quadro em que a prévia parou (lido pelo motor); a folga deixa o motor
+        // decidir quem o cabeçote cobre. Parado, o quadro explícito de sempre.
+        let live = playheadIsStale
+        let slack: Int64 = live ? Self.liveSplitSlack : 0
+        let targets = layers.filter {
+            ids.contains($0.id) && Int64(frame) + slack > Int64($0.startFrame) && Int64(frame) < Int64($0.endFrame) + slack
+        }
         guard !targets.isEmpty, started else { return }
         pendingSplit = (Set(layers.map(\.id)), targets, frame)
-        mutate { engine in for row in targets { engine.splitLayer(row.id, atFrame: frame) } }
+        mutate { engine in
+            if live { engine.pause() }
+            for row in targets {
+                if live { engine.splitLayerAtPlayhead(row.id) } else { engine.splitLayer(row.id, atFrame: frame) }
+            }
+        }
+        if live, status.playing != 0 { playheadStaleAfterPause = true; status.playing = 0; followPlayback(false) }
         // Sem `refreshModel(force:)` aqui: o corte só vale no próximo quadro do
         // motor, e a releitura imediata lia o modelo VELHO (camadas, keyframes e
         // composição inteiros pela ponte, logo quando o corte invalida o cache
@@ -6018,6 +6093,14 @@ final class AureaModel: ObservableObject {
         let changed = engine.editClipTime(layerId, operation: 1, amount: frame, previous: 0, next: 0)
         refreshModel(force: true)
         return changed
+    }
+
+    /// Aparar início/fim no cabeçote (trio do painel da camada). Tocando ou
+    /// recém-pausado, o motor usa o quadro em que a prévia parou
+    /// (`kEditAtPlayhead`), não o `status.playhead`, que vem quadros atrás.
+    @discardableResult func trimToPlayhead(_ layerId: Int64, start: Bool) -> Bool {
+        let amount = playheadIsStale ? AureaEngine.editAtPlayhead : status.playhead
+        return start ? trimStart(layerId, at: amount) : trimEnd(layerId, at: amount)
     }
 
     // Omega painel: (área 04) painel da camada — as regras moram no motor
@@ -6849,7 +6932,11 @@ extension AureaModel {
     /// Dedo na cena: gira o osso escolhido (px da composição; twist em graus).
     func dragPoseBone(dx: Float, dy: Float, twist: Float) {
         guard let id = primarySelection, poseBone >= 0 else { return }
-        if engine.dragBone(id, node: poseBone, dx: dx, dy: dy, twist: twist, continuing: poseGestureSent) { poseGestureSent = true }
+        // 0.3.6: "Mover" desloca o osso (o quadril) no plano da vista em vez de girar.
+        let sent = poseMove && twist == 0
+            ? engine.dragBoneTranslate(id, node: poseBone, dx: dx, dy: dy, continuing: poseGestureSent)
+            : engine.dragBone(id, node: poseBone, dx: dx, dy: dy, twist: twist, continuing: poseGestureSent)
+        if sent { poseGestureSent = true }
         refreshSelectedLayer(refreshEffectStack: false)
     }
     func endPoseGesture() { poseGestureSent = false }
@@ -6864,6 +6951,132 @@ extension AureaModel {
         guard let id = primarySelection else { return }
         _ = engine.resetBonePose(id, node: all ? -1 : poseBone)
         unaliasThumbs(id)
+        refreshModel(force: true)
+    }
+
+    // MARK: AutoRig 3D (0.3.6 BETA) — EditorStore.kt (bloco "AutoRig 3D")
+    /// Floats por osso canônico de `Engine::query_humanoid_joints` e por membro de `query_humanoid_ik`.
+    static let humanoidJointFloats = 8
+    static let humanoidIkFloats = 7
+    /// Nomes (chaves de texto) dos 17 ossos canônicos, na ordem de `rig::HumanoidBone`.
+    static let humanoidBoneKeys = ["rig3d_bone_hips", "rig3d_bone_spine", "rig3d_bone_chest", "rig3d_bone_neck", "rig3d_bone_head",
+        "rig3d_bone_left_upper_arm", "rig3d_bone_left_lower_arm", "rig3d_bone_left_hand",
+        "rig3d_bone_right_upper_arm", "rig3d_bone_right_lower_arm", "rig3d_bone_right_hand",
+        "rig3d_bone_left_upper_leg", "rig3d_bone_left_lower_leg", "rig3d_bone_left_foot",
+        "rig3d_bone_right_upper_leg", "rig3d_bone_right_lower_leg", "rig3d_bone_right_foot"]
+    func refreshHumanoid(_ layerId: Int64?) {
+        let model = layerId != nil && selectedLayer?.kind == 10
+        let status = model ? max(0, Int(engine.humanoidStatus(layerId!))) : 0
+        if status != humanoidStatus { humanoidStatus = status }
+        let joints: [Float] = model && status >= 1 ? engine.humanoidJoints(layerId!).map(\.floatValue) : []
+        if joints != humanoidJoints { humanoidJoints = joints }
+        let ik: [Float] = model && status >= 2 ? engine.humanoidIk(layerId!).map(\.floatValue) : []
+        if ik != humanoidIk { humanoidIk = ik }
+        if humanoidJoints.isEmpty && rigFixMode { rigFixMode = false }
+    }
+    private func autoRigErrorText(_ code: Int) -> String {
+        AureaText.t((1...8).contains(code) ? "rig3d_err_\(code)" : "rig3d_err_9")
+    }
+    /// Acompanha o trabalho do motor até acabar (progresso real; cancelar no meio).
+    private func watchAutoRig() {
+        autoRigTask?.cancel()
+        autoRigState = 1
+        autoRigProgress = 0
+        autoRigTask = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled {
+                let p = self.engine.autoRigProgress().map(\.floatValue)
+                self.autoRigProgress = min(1, max(0, p.count > 1 ? p[1] : 0))
+                let state = p.isEmpty ? 0 : Int(p[0])
+                if state != 1 {
+                    self.autoRigState = state
+                    switch state {
+                    case 2: self.toast = AureaText.t("rig3d_done")
+                    case 3: self.toast = self.autoRigErrorText(p.count > 2 ? Int(p[2]) : 9)
+                    case 4: self.toast = AureaText.t("rig3d_err_5")
+                    default: break
+                    }
+                    if let id = self.primarySelection { self.unaliasThumbs(id) }
+                    self.refreshModel(force: true)
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 120_000_000)
+            }
+        }
+    }
+    /// "AutoRig 3D" nas opções da camada 3D.
+    func startAutoRig() {
+        guard let id = primarySelection, autoRigState != 1 else { return }
+        if engine.autoRigStart(id) { watchAutoRig() } else {
+            let p = engine.autoRigProgress().map(\.floatValue)
+            toast = autoRigErrorText(p.count > 2 ? Int(p[2]) : 9)
+        }
+    }
+    func cancelAutoRig() { engine.autoRigCancel() }
+    var rigFixActive: Bool { sceneEditor && rigFixMode && selection.count == 1 && !humanoidJoints.isEmpty }
+    /// Liga "Corrigir esqueleto" (sai do modo de pose).
+    func setRigFix(_ on: Bool) {
+        if on && !sceneEditor { enterSceneEditor() }
+        rigFixMode = on && !humanoidJoints.isEmpty
+        if rigFixMode { setRigPose(false) }
+    }
+    /// AutoRig: a junta solta no ponto (px da composição) — recalcula os pesos.
+    func moveHumanoidJoint(_ bone: Int, x: Float, y: Float) {
+        guard let id = primarySelection, autoRigState != 1 else { return }
+        if engine.humanoidMoveJoint(id, bone: Int32(bone), x: x, y: y) { watchAutoRig() }
+    }
+    /// Rig importado: o osso canônico passa a ser o nó `node` (−1 = nenhum).
+    func assignHumanoidBone(_ bone: Int, node: Int32) {
+        guard let id = primarySelection else { return }
+        if engine.humanoidAssignBone(id, bone: Int32(bone), node: node) { unaliasThumbs(id); refreshModel(force: true) }
+    }
+    func modelNodeName(_ node: Int32) -> String {
+        guard let id = primarySelection else { return "" }
+        return engine.modelNodeName(id, node: node)
+    }
+    /// "Animar ossos": abre a Cena 3D no modo de pose, com o osso escolhido.
+    func animateBones(_ node: Int32 = -1) {
+        if !sceneEditor { enterSceneEditor() }
+        rigFixMode = false
+        refreshModel(force: true)
+        setRigPose(true)
+        if node >= 0 && rigPoseMode { choosePoseBone(node) }
+    }
+    /// Junta canônica mais perto (px da composição) dentro de `reach`, ou −1.
+    func pickFixJoint(_ point: SIMD2<Float>, reach: Float) -> Int {
+        var best = reach, hit = -1
+        let f = Self.humanoidJointFloats
+        for b in 0..<(humanoidJoints.count / f) where humanoidJoints[b * f] >= 0 && humanoidJoints[b * f + 3] > 0.5 {
+            let d = hypot(point.x - humanoidJoints[b * f + 1], point.y - humanoidJoints[b * f + 2])
+            if d < best { best = d; hit = b }
+        }
+        return hit
+    }
+    /// Controlador IK perto (px da composição): (membro, é o polo) ou nil.
+    func pickIkHandle(_ point: SIMD2<Float>, reach: Float) -> (Int, Bool)? {
+        var best = reach
+        var hit: (Int, Bool)?
+        let f = Self.humanoidIkFloats
+        for limb in 0..<(humanoidIk.count / f) where humanoidIk[limb * f] > 0.5 {
+            let o = limb * f
+            let dt = hypot(point.x - humanoidIk[o + 1], point.y - humanoidIk[o + 2])
+            if dt < best { best = dt; hit = (limb, false) }
+            let dp = hypot(point.x - humanoidIk[o + 3], point.y - humanoidIk[o + 4])
+            if dp < best { best = dp; hit = (limb, true) }
+        }
+        return hit
+    }
+    func setHumanoidIk(_ limb: Int, on: Bool) {
+        guard let id = primarySelection else { return }
+        if engine.humanoidSetIk(id, limb: Int32(limb), on: on) { unaliasThumbs(id); refreshModel(force: true) }
+    }
+    func dragHumanoidIk(_ limb: Int, pole: Bool, dx: Float, dy: Float) {
+        guard let id = primarySelection else { return }
+        if engine.dragHumanoidIk(id, limb: Int32(limb), pole: pole, dx: dx, dy: dy, continuing: poseGestureSent) { poseGestureSent = true }
+        refreshSelectedLayer(refreshEffectStack: false)
+    }
+    func toggleHumanoidIkKey(_ limb: Int) {
+        guard let id = primarySelection else { return }
+        if engine.toggleHumanoidIkKey(id, limb: Int32(limb)) < 0 { toast = AureaText.t("shape3d_key_outside") }
         refreshModel(force: true)
     }
 
@@ -6930,7 +7143,9 @@ extension AureaModel {
         setShapePartImage(id, part: 0, url: url, effect: effect)
     }
 
-    func setShapePartImage(_ id: Int64, part: Int, url: URL, textTexture: Bool = false, effect: UInt32? = nil) {
+    /// `material`: 0.3.6 textura do MATERIAL do objeto 3D (Engine::set_material_texture_image).
+    func setShapePartImage(_ id: Int64, part: Int, url: URL, textTexture: Bool = false, effect: UInt32? = nil,
+                           material: UInt32? = nil) {
         guard !importingMedia else { toast = AureaText.t("ios_importing_media"); return }
         importingMedia = true
         operationMessage = AureaText.t("ios_importing_media")
@@ -6956,6 +7171,7 @@ extension AureaModel {
             }
             let ok = path.map { file in
                 if let effect { return engine.setEffectImage(file, effect: effect, forLayer: id) }
+                if let material { return engine.setMaterialTextureImage(id, material: material, path: file) }
                 return textTexture ? engine.setText3D(forLayer: id, property: "texturePath", stringValue: file, numberValue: 0)
                     : engine.setShape3DPartStyle(id, part: Int32(part), color: nil, image: file)
             } ?? false

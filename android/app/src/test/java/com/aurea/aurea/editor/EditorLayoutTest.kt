@@ -71,11 +71,26 @@ class EditorLayoutTest {
                 val m = EditorLayout.solve(h, content, false, preferred = pref, fontScale = font)
                 val label = "$h $font $pref $content"
                 assertTrue(label, m.overlay)
-                assertEquals(label, EditorLayout.timelineFocus(font), m.visibleTimeline, 0.01f)
+                // 0.3.6: até o teto do painel; passando dele, a timeline fica com o resto.
+                assertEquals(label, maxOf(EditorLayout.timelineFocus(font), m.zone - EditorLayout.panelMax(font)), m.visibleTimeline, 0.01f)
                 assertTrue(label, m.sheet >= EditorLayout.layerPanel(font) - 0.01f)
+                assertTrue(label, m.sheet <= EditorLayout.panelMax(font) + 0.01f)
                 assertEquals(label, h, m.total, 0.01f)
             }
         }
+    }
+
+    // 0.3.6: com a divisa no alto o painel não passa do teto (era a zona inteira).
+    @Test fun tallZonesCapThePanelAndGiveTheRestToTheTimeline() {
+        val h = 960f
+        val m = EditorLayout.solve(h, SheetContent.Panel, false, preferred = 120f)
+        assertTrue(m.overlay)
+        assertEquals(EditorLayout.panelMax(), m.sheet, 0.01f)
+        assertEquals(m.zone - EditorLayout.panelMax(), m.visibleTimeline, 0.01f)
+        assertTrue(m.visibleTimeline > EditorLayout.timelineFocus())
+        assertEquals(h, m.total, 0.01f)
+        // Na zona padrão nada muda: 200 + 80.
+        assertEquals(200f, EditorLayout.solve(h, SheetContent.Panel, false).sheet, 0.01f)
     }
 
     @Test fun dividerLowersTheTimelineButPanelsGetTheWholeZone() {

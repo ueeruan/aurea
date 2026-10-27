@@ -80,6 +80,9 @@ struct TimelineView: View {
     /// Camada escolhida com a doca aberta (layout de celular): a timeline vira a
     /// fileira única dela, como com painel aberto (EditorScreen.kt `compactDock`).
     var compactDock = false
+    /// 0.3.6: a base da timeline coberta pelo painel por cima (doca, painel, adicionar):
+    /// a camada escolhida rola para ficar à vista acima dele (par do `obscuredBottom` do Android).
+    var obscuredBottom: CGFloat = 0
     @State private var showAllLayers = false
     /// Estilo do relógio sobre o cabeçote (o mesmo parâmetro do Android).
     var timecodeStyle: TimecodeStyle = .underline
@@ -272,7 +275,27 @@ struct TimelineView: View {
         TimeAxis.frameAt(x: x, view: viewFrame, pxPerFrame: ppf, centerX: width / 2)
     }
     private func maxScroll(_ height: CGFloat) -> CGFloat {
-        compact ? 0 : max(0, rowTop(rows.count) + m.bottomPad - (height - m.rowsTop))
+        // 0.3.6: a parte coberta pelo painel por cima não conta como vista.
+        compact ? 0 : max(0, rowTop(rows.count) + m.bottomPad - (height - m.rowsTop - max(0, obscuredBottom)))
+    }
+
+    /// 0.3.6: o zoom inicial do projeto (ajustar à duração) só com a timeline JÁ
+    /// medida. Com a largura ainda 0 (primeiro passe do layout logo depois de abrir
+    /// o projeto) o ajuste dava o zoom mínimo e os clipes sumiam; a medida chega
+    /// pelo `onChange(of: size)`. Devolve se o zoom ficou decidido.
+    @discardableResult
+    private func initialZoom(size: CGSize) -> Bool {
+        if let saved = TimelineViewMemory.state[memoryKey] {
+            pps = saved.pps; scrollY = min(saved.scrollY, maxScroll(size.height))
+            // Nasceu já compacta (painel aberto): a rolagem da lista fica guardada para a volta.
+            if compact { compactSavedScroll = saved.scrollY }
+            return true
+        }
+        guard size.width > 0, size.height > 0 else { return false }
+        let seconds = CGFloat(model.compositionDuration) / CGFloat(fps)
+        if seconds >= Zoom.autoFitMinSeconds { pps = Zoom.autoFit(availableDp: size.width - 32, seconds: seconds) }
+        TimelineViewMemory.state[memoryKey] = (pps, scrollY)
+        return true
     }
 
     var body: some View {
@@ -364,15 +387,7 @@ struct TimelineView: View {
                 // A timeline some e volta (painel, doca, rotação): o zoom e a
                 // rolagem do projeto voltam como estavam. Ajustar à duração só
                 // na PRIMEIRA vez de cada projeto (par do Android).
-                if let saved = TimelineViewMemory.state[memoryKey] {
-                    pps = saved.pps; scrollY = min(saved.scrollY, maxScroll(size.height))
-                    // Nasceu já compacta (painel aberto): a rolagem da lista fica guardada para a volta.
-                    if compact { compactSavedScroll = saved.scrollY }
-                } else {
-                    let seconds = CGFloat(model.compositionDuration) / CGFloat(fps)
-                    if seconds >= Zoom.autoFitMinSeconds { pps = Zoom.autoFit(availableDp: size.width - 32, seconds: seconds) }
-                    TimelineViewMemory.state[memoryKey] = (pps, scrollY)
-                }
+                initialZoom(size: size)
                 haptics.prepare()
                 refreshMarkers()
                 refreshMedia(size: size)
@@ -396,8 +411,15 @@ struct TimelineView: View {
             .onChange(of: scrollY) { _ in mediaNeedsRefresh = true }
             .onChange(of: pps) { _ in mediaNeedsRefresh = true }
             .onChange(of: heldView) { _ in mediaNeedsRefresh = true }
-            .onChange(of: size) { _ in scrollY = min(scrollY, maxScroll(size.height)); mediaNeedsRefresh = true }
+            .onChange(of: size) { next in
+                // 0.3.6: a primeira medida de verdade decide o zoom inicial (ver `initialZoom`).
+                if TimelineViewMemory.state[memoryKey] == nil { initialZoom(size: next) }
+                scrollY = min(scrollY, maxScroll(next.height)); mediaNeedsRefresh = true
+                revealSelection(size: next)
+            }
             .onChange(of: model.primarySelection) { _ in revealSelection(size: size); mediaNeedsRefresh = true }
+            // 0.3.6: a doca/painel abre depois da escolha: a camada sobe para cima dele.
+            .onChange(of: obscuredBottom) { _ in revealSelection(size: size) }
             .onChange(of: model.curveSelectedTime) { time in
                 if !model.timelineKeyDragActive, let time, let id = model.primarySelection, let row = segmentRow(id) {
                     selectedKey = (id, Keyframes.toTimeline(time, row.start, row.offset),
@@ -1349,7 +1371,42 @@ struct TimelineView: View {
     }
     /// O que o dedo pegou: o TRECHO (na pílula de uma fileira compartilhada, a
     /// fileira); `index` do resultado é a fileira inteira sob o dedo.
+    /// 0.3.6 (keys, item 2): o losango da camada escolhida tem alvo de 44 pt na
+    /// vertical (`keyReachV` × 2; a linha tem 28). Toque na régua, no vazio ou no
+    /// corpo da vizinha, mas perto do losango, vai para ele — antes a régua
+    /// buscava, o vazio saía do foco e a vizinha era escolhida. Alça, cabeçalho
+    /// e losango da própria linha continuam na frente. Par do Android.
     private func hit(_ point: CGPoint, width: CGFloat) -> (TimelineRow?, TimelineHit) {
+        let found = rowHit(point, width: width)
+        guard [TimelineHit.Kind.ruler, .none, .body].contains(found.1.kind) else { return found }
+        return nearKeyHit(point, width: width) ?? found
+    }
+    /// Losango de uma linha de camada (não trilha) com o centro a até `keyReachV` do dedo.
+    private func nearKeyHit(_ point: CGPoint, width: CGFloat) -> (TimelineRow?, TimelineHit)? {
+        guard point.x >= m.headerColumn else { return nil }
+        let current = rows
+        guard !current.isEmpty else { return nil }
+        let scroll: CGFloat = compact ? 0 : scrollY
+        let center = rowIndex(point.y - m.rowsTop + scroll)
+        var best: (TimelineRow?, TimelineHit)?
+        var bestDy = CGFloat.greatestFiniteMagnitude
+        for j in (center - 1)...(center + 1) where current.indices.contains(j) {
+            let row = current[j]
+            guard row.track == nil else { continue }   // trilhas abertas: laneHit
+            let dy = abs(point.y - (m.rowsTop + rowTop(j) - scroll + m.barTop + m.diamondCyNormal))
+            guard dy <= m.keyReachV, dy < bestDy else { continue }
+            for segment in row.shared ?? [row] {
+                var result = hitSegment(segment, x: point.x, y: m.diamondCyNormal, width: width)
+                guard result.kind == .key else { continue }
+                result.index = j
+                best = (segment, result)
+                bestDy = dy
+                break
+            }
+        }
+        return best
+    }
+    private func rowHit(_ point: CGPoint, width: CGFloat) -> (TimelineRow?, TimelineHit) {
         // 0.3.3 recursos: o marcador antigo voltou — o relógio é parte da régua
         // (tocar não marca, segurar não abre menu); marca-se pelo botão do
         // transporte, pela âncora do palco ou pelo menu (como na 0.3.2).
@@ -2261,9 +2318,11 @@ struct TimelineView: View {
     private func revealSelection(size: CGSize) {
         guard !compact, gesture == nil, let id = model.primarySelection, let index = rows.firstIndex(where: { $0.segment(id) != nil }) else { return }
         let top = rowTop(index), bottom = top + rowHeight(rows[index])
-        let visibleHeight = max(0, size.height - m.rowsTop)
-        if top < scrollY { scrollY = top }
-        else if bottom > scrollY + visibleHeight { scrollY = min(maxScroll(size.height), max(0, bottom - visibleHeight)) }
+        // 0.3.6: a vista é o que fica ACIMA do painel por cima (doca, painel, adicionar).
+        let visibleHeight = TimelineReveal.viewport(height: size.height, rowsTop: m.rowsTop, obscured: obscuredBottom)
+        guard visibleHeight > 0 else { return }
+        let target = TimelineReveal.target(top: top, bottom: bottom, scroll: scrollY, viewport: visibleHeight)
+        if target != scrollY { scrollY = min(maxScroll(size.height), max(0, target)) }
     }
 }
 
@@ -2499,13 +2558,24 @@ extension TimelineView {
         // Toque que só PAROU uma inércia não é toque (igual ao Android).
         let stoppedScroll = abs(scrollVelocity) > 1
         scrollVelocity = 0
-        if endScrubFling() || stoppedScroll { return }
+        let stoppedFling = endScrubFling()
         let (row, touched) = hit(point, width: width)
+        // 0.3.6 (keys): exceto no losango — ali o alvo é claro (o toque "não
+        // pegava" logo depois de rolar). Par do Android.
+        if (stoppedFling || stoppedScroll) && touched.kind != .key { return }
         switch touched.kind {
         case .currentTime:
             model.toggleMarkerAt(model.status.playhead)
             return
         case .ruler:
+            // 0.3.6: com a barra da camada ou um painel aberto por cima (foco), o toque
+            // na régua é o de SAIR: fecha como o resto do foco e não leva o cabeçote.
+            if compact {
+                if ProcessInfo.processInfo.systemUptime - eyeToggledAt < 0.2 { return }
+                selectedKey = nil
+                model.editorBackFromTimeline()
+                return
+            }
             // 0.3.3 recursos: a régua da 0.3.2 — leva o cabeçote ao instante do dedo;
             // em cima de uma marca (12 pt) vai até ela e abre o editor (nome, quadro, cor).
             let target = Int64(max(0, timelineFrame(frame(point.x, width: width))))
@@ -3249,8 +3319,8 @@ extension TimelineView {
                     for key in row.keysAt[i] { seen.insert(TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)) }
                     distinct = seen.count
                 }
-                let stacked = focusCount >= 2 && (distinct >= 2 || distinct < focusCount)
-                omegaEditKey(&context, x: xa, cy: cy, h: editH, highlighted: highlighted, dragging: dragging, stacked: stacked, partial: stacked && distinct < focusCount)
+                let stacked = KeyEmphasis.stacked(focusCount: focusCount, distinctKeyed: distinct)
+                omegaEditKey(&context, x: xa, cy: cy, h: editH, highlighted: highlighted, dragging: dragging, stacked: stacked, partial: stacked)
             } else {
                 omegaKeyPill(&context, xa: xa, xb: x(Double(row.instants[j]), width: width), cy: cy, h: editing ? editH : altH, editing: editing)
                 guard editing else { continue }
@@ -3410,13 +3480,13 @@ extension TimelineView {
         if secStep == 1 && pps / 2 >= OmegaRuler.minTickDp && sec1 >= sec0 {
             for k in sec0...sec1 { tick(&halves, OmegaRuler.frameOf(Double(k) + 0.5, fps: fps), OmegaRuler.height(OmegaRuler.halfTick)) }
         }
-        if secStep == 1 && Double(step) < f / 2 {
-            var frameIndex = (fFirst / step) * step
-            while frameIndex <= fLast {
-                if OmegaRuler.tickClass(frameIndex, fps: fps) == OmegaRuler.frameTick {
+        if secStep == 1 && Double(step) < f / 2 && sec1 >= sec0 {
+            // 0.3.6: contados do começo de cada segundo e longe dos tiques maiores
+            // (o passo solto caía colado no do segundo/meio segundo).
+            for sec in sec0...sec1 {
+                for frameIndex in OmegaRuler.frameTicks(second: sec, fps: fps, pps: pps) where frameIndex >= fFirst && frameIndex <= fLast {
                     tick(&frames, frameIndex, OmegaRuler.height(OmegaRuler.frameTick))
                 }
-                frameIndex += step
             }
         }
         context.stroke(frames, with: .color(AureaTimeline.omegaTick), lineWidth: m.omegaTick)

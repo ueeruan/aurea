@@ -563,6 +563,13 @@ enum KeyEmphasis {
         return all.filter { !marked.contains($0) }
     }
 
+    /// Losango "empilhado" (dois sobrepostos, o de baixo parcial): só quando o
+    /// instante tem chave em PARTE das `focusCount` trilhas do painel (ex.:
+    /// Posição X sem Y). Com todas é UM losango — antes bastavam 2 trilhas
+    /// distintas e o ◆ do Mover (X+Y) aparecia como dois keyframes sobrepostos,
+    /// também ao entrar no Transformar (0.3.6, keys itens 1 e 3).
+    static func stacked(focusCount: Int, distinctKeyed: Int) -> Bool { focusCount >= 2 && distinctKeyed < focusCount }
+
     /// Escolhido (âmbar) > na seleção da timeline (azul) > sob o cabeçote (destaque) > branco.
     static func tone(chosen: Bool, picked: Bool, underPlayhead: Bool) -> Tone {
         if chosen { return .chosen }
@@ -794,6 +801,45 @@ enum OmegaRuler {
     /// Altura do tique da classe (pt).
     static func height(_ tickClass: Int) -> CGFloat {
         tickClass == secondTick ? 18 : tickClass == halfTick ? 12 : 5
+    }
+
+    /// 0.3.6: os tiques de QUADRO do segundo `second`, contados do começo dele (o
+    /// passo em potência de 2 corria solto e caía colado no tique do segundo ou do
+    /// meio segundo: marcas sobrepostas). Fica de fora o quadro a menos de
+    /// `minTickDp` de um tique de segundo ou de meio segundo. Par do Android.
+    static func frameTicks(second: Int64, fps: Float, pps: CGFloat) -> [Int64] {
+        let ppfDp = Double(pps) / Double(TimeAxis.safeFps(fps))
+        guard ppfDp > 0, ppfDp.isFinite else { return [] }
+        let step = Int64(frameStep(pps: pps, fps: fps))
+        let first = frameOf(Double(second), fps: fps)
+        let half = frameOf(Double(second) + 0.5, fps: fps)
+        let next = frameOf(Double(second) + 1, fps: fps)
+        let gap = Double(minTickDp) / ppfDp - 1e-6
+        var out: [Int64] = []
+        var k = first + step
+        while k < next {
+            if Double(k - first) >= gap && Double(abs(k - half)) >= gap && Double(next - k) >= gap
+                && tickClass(k, fps: fps) == frameTick { out.append(k) }
+            k += step
+        }
+        return out
+    }
+}
+
+/// 0.3.6: revelar a fileira escolhida na parte da timeline que o painel por cima
+/// não cobre (par do `TimelineReveal` do Android).
+enum TimelineReveal {
+    /// A altura à vista das fileiras: a timeline menos a régua e a parte coberta embaixo.
+    static func viewport(height: CGFloat, rowsTop: CGFloat, obscured: CGFloat) -> CGFloat {
+        height - rowsTop - max(0, obscured)
+    }
+
+    /// A rolagem que deixa `[top, bottom]` à vista (fileira mais alta que a vista: o topo).
+    static func target(top: CGFloat, bottom: CGFloat, scroll: CGFloat, viewport: CGFloat) -> CGFloat {
+        if viewport <= 0 { return scroll }
+        if top < scroll { return top }
+        if bottom > scroll + viewport { return bottom - top > viewport ? top : bottom - viewport }
+        return scroll
     }
 }
 

@@ -250,6 +250,12 @@ set(AUREA_CORE_SOURCES
     src/engine/EnginePuppet.cpp
     src/engine/EngineShape3D.cpp
     src/engine/EngineRigPose.cpp
+    src/engine/EngineMocap.cpp   # 0.3.6 Motion Capture (BETA)
+    src/rig/Mocap.cpp            # 0.3.6 Motion Capture (BETA): solver
+    src/engine/EngineAutoRig.cpp # 0.3.6 AutoRig 3D (BETA)
+    src/rig/Humanoid.cpp         # 0.3.6 esqueleto humanoide canonico
+    src/rig/AutoRig.cpp          # 0.3.6 AutoRig 3D: deteccao + pesos
+    src/rig/Ik.cpp               # 0.3.6 IK de dois ossos
     src/engine/EngineMedia.cpp
     src/engine/EngineOmegaTimeline.cpp
     src/engine/EngineOmegaLayer.cpp

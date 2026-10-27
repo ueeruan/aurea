@@ -6,6 +6,8 @@
     <!-- AureaHyper (0.3.2): "Gravar agora" — a câmera do sistema grava aqui
          (cache do app); o vídeo é copiado para o app logo depois. -->
     <cache-path name="hyper_capture" path="hyper-capture/"/>
+    <!-- 0.3.6 Motion Capture: "Gravar movimento" (câmera do sistema, cache do app). -->
+    <cache-path name="mocap_capture" path="mocap-capture/"/>
     <!-- Android 8–9 com permissão: pasta pública (GalleryPublish). -->
     <external-path name="public_video" path="Movies/Aurea/"/>
     <external-path name="public_images" path="Pictures/Aurea/"/>

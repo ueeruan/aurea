@@ -839,6 +839,8 @@ class AureaEngine private constructor() {
     fun addText3d(content: String, fields: FloatArray, fontPath: String = ""): Long = nativeAddText3d(nativeHandle, content, fields, fontPath)
     fun setText3d(layer: Long, content: String, fields: FloatArray, fontPath: String = ""): Boolean =
         nativeSetText3d(nativeHandle, layer, content, fields, fontPath)
+    /** Errc da última edição de texto 3D (0 = aplicada): por que um setText3d voltou falso. */
+    fun lastText3dStatus(): Int = nativeLastText3dStatus(nativeHandle)
     fun queryText3dFont(layer: Long): String = nativeQueryText3dFont(nativeHandle, layer) ?: ""
     fun queryText3dTexture(layer: Long): String = nativeQueryText3dTexture(nativeHandle, layer) ?: ""
     fun setText3dTexture(layer: Long, path: String): Boolean = nativeSetText3dTexture(nativeHandle, layer, path)
@@ -869,6 +871,28 @@ class AureaEngine private constructor() {
     /** A bola de um material pronto do texto 3D (0..6). */
     fun text3dPresetPreview(preset: Int, size: Int): IntArray? =
         nativeWork.run<IntArray?>(null) { nativeText3DPresetPreview(nativeHandle, preset, size) }
+
+    // --- 0.3.6 Textura do material (Engine::set_material_texture_*, EngineMedia.cpp) ----------
+    /** Cobre o material com a imagem do arquivo [path] (um passo de desfazer). */
+    fun setMaterialTextureImage(layer: Long, material: Int, path: String): Boolean =
+        nativeWork.run(false) { nativeSetMaterialTextureImage(nativeHandle, layer, material, path) }
+    /** Cobre o material com a camada [source] da composição (renderizada a cada quadro). */
+    fun setMaterialTextureLayer(layer: Long, material: Int, source: Long): Boolean =
+        nativeWork.run(false) { nativeSetMaterialTextureLayer(nativeHandle, layer, material, source) }
+    /** Volta ao mapa do arquivo. */
+    fun clearMaterialTexture(layer: Long, material: Int): Boolean =
+        nativeWork.run(false) { nativeClearMaterialTexture(nativeHandle, layer, material) }
+    /** out[0] = 0 nada, 1 imagem, 2 camada; out[1] = asset/camada. Devolve o nome do arquivo ou da camada. */
+    fun queryMaterialTexture(layer: Long, material: Int, out: LongArray): String =
+        nativeWork.run("") { nativeQueryMaterialTexture(nativeHandle, layer, material, out) ?: "" }
+    /** As camadas que podem cobrir um material deste objeto (de cima para baixo). */
+    fun materialTextureLayers(layer: Long): LongArray =
+        nativeWork.run(LongArray(0)) { nativeMaterialTextureLayers(nativeHandle, layer) ?: LongArray(0) }
+    private external fun nativeSetMaterialTextureImage(handle: Long, layer: Long, material: Int, path: String): Boolean
+    private external fun nativeSetMaterialTextureLayer(handle: Long, layer: Long, material: Int, source: Long): Boolean
+    private external fun nativeClearMaterialTexture(handle: Long, layer: Long, material: Int): Boolean
+    private external fun nativeQueryMaterialTexture(handle: Long, layer: Long, material: Int, out: LongArray): String?
+    private external fun nativeMaterialTextureLayers(handle: Long, layer: Long): LongArray?
 
     // --- Formas 3D (Engine::add_shape3d e família) -----------------------------------------
     /** Nova camada de forma 3D ([kind] = Shape3DKind 0..9). Id da camada, ou −Errc. */
@@ -1191,6 +1215,41 @@ class AureaEngine private constructor() {
     /** Keyframe do osso no cabeçote (node −1 = todos): 1 marcou, 0 tirou, −1 fora da camada. */
     fun toggleBoneKey(layer: Long, node: Int): Int = nativeToggleBoneKey(nativeHandle, layer, node)
     fun resetBonePose(layer: Long, node: Int): Boolean = nativeResetBonePose(nativeHandle, layer, node)
+    // AutoRig 3D (0.3.6 BETA) — Engine::humanoid_* / autorig_* (rig/AutoRig.hpp).
+    /** 0 sem esqueleto, 1 esqueleto não humanoide, 2 rig compatível, 3 AutoRig; −1 sem motor. */
+    fun humanoidStatus(layer: Long): Int = nativeHumanoidStatus(nativeHandle, layer)
+    /** Começa o AutoRig (thread do motor); acompanhe com [autoRigProgress]. */
+    fun autoRigStart(layer: Long): Boolean = nativeAutoRigStart(nativeHandle, layer)
+    /** [0] estado (0 parado, 1 processando, 2 pronto, 3 falhou, 4 cancelado), [1] progresso 0..1, [2] erro. */
+    fun autoRigProgress(): FloatArray = FloatArray(3).also { nativeAutoRigProgress(nativeHandle, it) }
+    fun autoRigCancel() = nativeAutoRigCancel(nativeHandle)
+    /** HUMANOID_JOINT_FLOATS por osso canônico (17); array curto devolve o tamanho pedido. */
+    fun queryHumanoidJoints(layer: Long, out: FloatArray?): Int = nativeQueryHumanoidJoints(nativeHandle, layer, out)
+    fun humanoidMoveJoint(layer: Long, bone: Int, x: Float, y: Float): Boolean = nativeHumanoidMoveJoint(nativeHandle, layer, bone, x, y)
+    fun humanoidAssignBone(layer: Long, bone: Int, node: Int): Boolean = nativeHumanoidAssignBone(nativeHandle, layer, bone, node)
+    fun modelNodeName(layer: Long, node: Int): String = nativeModelNodeName(nativeHandle, layer, node) ?: ""
+    fun dragBoneTranslate(layer: Long, node: Int, dx: Float, dy: Float, continuing: Boolean): Boolean =
+        nativeDragBoneTranslate(nativeHandle, layer, node, dx, dy, continuing)
+    fun humanoidSetIk(layer: Long, limb: Int, on: Boolean): Boolean = nativeHumanoidSetIk(nativeHandle, layer, limb, on)
+    /** HUMANOID_IK_FLOATS por membro (4): ligado, alvo x/y, polo x/y, key no cabeçote, peso. */
+    fun queryHumanoidIk(layer: Long, out: FloatArray?): Int = nativeQueryHumanoidIk(nativeHandle, layer, out)
+    fun dragHumanoidIk(layer: Long, limb: Int, pole: Boolean, dx: Float, dy: Float, continuing: Boolean): Boolean =
+        nativeDragHumanoidIk(nativeHandle, layer, limb, pole, dx, dy, continuing)
+    fun toggleHumanoidIkKey(layer: Long, limb: Int): Int = nativeToggleHumanoidIkKey(nativeHandle, layer, limb)
+    // Motion Capture (0.3.6 BETA) — Engine::mocap_* (rig/Mocap.hpp).
+    /** humanoid_status da camada (2/3 = rig pronto; 0/1 = oferecer AutoRig) ou −1. */
+    fun mocapBegin(layer: Long): Int = nativeMocapBegin(nativeHandle, layer)
+    /** [MOCAP_FRAME_FLOATS] por quadro: tempo, tem 3D, 33 × (x, y, z, confiança). */
+    fun mocapPushFrames(data: FloatArray, frames: Int, aspect: Float): Boolean = nativeMocapPushFrames(nativeHandle, data, frames, aspect)
+    /** Bloqueia (chame fora da main). [intensidade, suavização, velocidade, giro°, chão, foot lock, IK mãos, quadril]. */
+    fun mocapAnalyze(params: FloatArray): Boolean = nativeMocapAnalyze(nativeHandle, params)
+    fun mocapCancel() = nativeMocapCancel(nativeHandle)
+    fun mocapProgress(): Float = nativeMocapProgress(nativeHandle)
+    /** 12 floats: quadros, duração, 3D, aviso, incerteza ×6 (tronco, cabeça, braços, pernas), pé preso, interpolado. */
+    fun mocapReport(): FloatArray = FloatArray(12).also { nativeMocapReport(nativeHandle, it) }
+    fun mocapPreview(on: Boolean): Boolean = nativeMocapPreview(nativeHandle, on)
+    fun mocapApply(): Int = nativeMocapApply(nativeHandle)
+    fun mocapEnd() = nativeMocapEnd(nativeHandle)
     fun addModelCameras(layer: Long): Int = nativeAddModelCameras(nativeHandle, layer)
     /** Ao contrário: espelha a curva de tempo no clipe (liga o remapeamento se preciso). */
     fun reverseTimeRemap(layer: Long): Boolean = nativeReverseTimeRemap(nativeHandle, layer)
@@ -1807,6 +1866,28 @@ class AureaEngine private constructor() {
     private external fun nativeDragBone(handle: Long, layer: Long, node: Int, dx: Float, dy: Float, twist: Float, continuing: Boolean): Boolean
     private external fun nativeToggleBoneKey(handle: Long, layer: Long, node: Int): Int
     private external fun nativeResetBonePose(handle: Long, layer: Long, node: Int): Boolean
+    private external fun nativeHumanoidStatus(handle: Long, layer: Long): Int
+    private external fun nativeAutoRigStart(handle: Long, layer: Long): Boolean
+    private external fun nativeAutoRigProgress(handle: Long, out: FloatArray)
+    private external fun nativeAutoRigCancel(handle: Long)
+    private external fun nativeQueryHumanoidJoints(handle: Long, layer: Long, out: FloatArray?): Int
+    private external fun nativeHumanoidMoveJoint(handle: Long, layer: Long, bone: Int, x: Float, y: Float): Boolean
+    private external fun nativeHumanoidAssignBone(handle: Long, layer: Long, bone: Int, node: Int): Boolean
+    private external fun nativeModelNodeName(handle: Long, layer: Long, node: Int): String?
+    private external fun nativeDragBoneTranslate(handle: Long, layer: Long, node: Int, dx: Float, dy: Float, continuing: Boolean): Boolean
+    private external fun nativeHumanoidSetIk(handle: Long, layer: Long, limb: Int, on: Boolean): Boolean
+    private external fun nativeQueryHumanoidIk(handle: Long, layer: Long, out: FloatArray?): Int
+    private external fun nativeDragHumanoidIk(handle: Long, layer: Long, limb: Int, pole: Boolean, dx: Float, dy: Float, continuing: Boolean): Boolean
+    private external fun nativeToggleHumanoidIkKey(handle: Long, layer: Long, limb: Int): Int
+    private external fun nativeMocapBegin(handle: Long, layer: Long): Int
+    private external fun nativeMocapPushFrames(handle: Long, data: FloatArray, frames: Int, aspect: Float): Boolean
+    private external fun nativeMocapAnalyze(handle: Long, params: FloatArray?): Boolean
+    private external fun nativeMocapCancel(handle: Long)
+    private external fun nativeMocapProgress(handle: Long): Float
+    private external fun nativeMocapReport(handle: Long, out: FloatArray): Int
+    private external fun nativeMocapPreview(handle: Long, on: Boolean): Boolean
+    private external fun nativeMocapApply(handle: Long): Int
+    private external fun nativeMocapEnd(handle: Long)
     private external fun nativeAddModelCameras(handle: Long, layer: Long): Int
     private external fun nativeReverseTimeRemap(handle: Long, layer: Long): Boolean
     private external fun nativeSetKeepPitch(handle: Long, layer: Long, on: Boolean): Boolean
@@ -1816,6 +1897,7 @@ class AureaEngine private constructor() {
     private external fun nativeAddText3d(handle: Long, content: String, fields: FloatArray, fontPath: String): Long
     private external fun nativeSetText3d(handle: Long, layer: Long, content: String, fields: FloatArray, fontPath: String): Boolean
     private external fun nativeSetText3dTexture(handle: Long, layer: Long, path: String): Boolean
+    private external fun nativeLastText3dStatus(handle: Long): Int
     private external fun nativeQueryText3dTexture(handle: Long, layer: Long): String?
     private external fun nativeApplyText3dPreset(handle: Long, layer: Long, preset: Int): Boolean
     private external fun nativeQueryText3dFont(handle: Long, layer: Long): String?

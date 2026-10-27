@@ -120,6 +120,8 @@ add_executable(aurea_tests
     test_model_probe.cpp
     test_layer_anim.cpp
     test_rig.cpp
+    test_mocap.cpp        # 0.3.6 Motion Capture (BETA)
+    test_autorig.cpp      # 0.3.6 AutoRig 3D (BETA)
     test_shape3d.cpp
     test_shape3d_split.cpp
     test_plugins.cpp

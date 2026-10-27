@@ -101,6 +101,10 @@ inline constexpr const char* kText3DScheme = "aurea-text3d:";
 
 [[nodiscard]] std::string encode_text3d(const Text3DSpec& spec);
 [[nodiscard]] bool decode_text3d(const std::string& source, Text3DSpec& out);
+/// Traz cada campo da receita para a faixa que a malha aceita; NaN/inf voltam
+/// ao padrão. Usado ao ler a receita (projeto antigo/corrompido) e antes de
+/// gerar a malha de uma edição (as pontes não validam o que a UI manda).
+void sanitize_text3d(Text3DSpec& spec) noexcept;
 [[nodiscard]] std::shared_ptr<const text::Font> text3d_font(const Text3DSpec& spec);
 /// Shared material recipes for both mobile UIs; content, font and animation are preserved.
 [[nodiscard]] bool apply_text3d_material_preset(Text3DSpec& spec, u32 preset) noexcept;

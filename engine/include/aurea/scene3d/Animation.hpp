@@ -39,6 +39,8 @@ struct BoneOffset {
     i32 node = -1;
     Quat rotation = Quat::identity();
     Vec3 euler{0.0f, 0.0f, 0.0f};
+    /// 0.3.6: translação extra no espaço do PAI (params 3..5; o quadril).
+    Vec3 translation{0.0f, 0.0f, 0.0f};
 };
 
 /// Tempo local da layer (s) → tempo do clipe, em laço. Clipe sem duração → 0.

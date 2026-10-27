@@ -467,6 +467,11 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setLayer:(long long)layerId guide:(BOOL)on;
 - (void)setLayerOrder:(long long)layerId newIndex:(uint32_t)newIndex;
 - (void)splitLayer:(long long)layerId atFrame:(int32_t)frame;
+/// Divide no quadro que a prévia mostra quando o motor aplica o comando
+/// (`kEditAtPlayhead`): com `pause` antes, é onde a reprodução parou.
+- (void)splitLayerAtPlayhead:(long long)layerId;
+/// `kEditAtPlayhead` para o `amount` de `editClipTime` (ops 0 e 1).
+@property(class, nonatomic, readonly) int64_t editAtPlayhead;
 - (void)deleteLayers:(NSArray<NSNumber*>*)layerIds;
 - (void)duplicateLayers:(NSArray<NSNumber*>*)layerIds;
 - (void)rippleDeleteLayers:(NSArray<NSNumber*>*)layerIds;
@@ -574,6 +579,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString*)colorLutName:(long long)layer effect:(uint32_t)effect;
 - (nullable NSDictionary<NSString*, id>*)text3DForLayer:(long long)layerId NS_SWIFT_NAME(text3D(forLayer:));
 - (BOOL)setText3DForLayer:(long long)layerId property:(NSString*)property stringValue:(nullable NSString*)stringValue numberValue:(float)numberValue NS_SWIFT_NAME(setText3D(forLayer:property:stringValue:numberValue:));
+/// Errc da última edição de texto 3D (0 = aplicada): o motivo de um setText3D NO (0.3.6).
+- (int32_t)lastText3DStatus;
 - (void)setText:(long long)layerId content:(NSString*)content;
 - (void)setText:(long long)layerId size:(float)size;
 - (void)setText:(long long)layerId colorR:(float)r g:(float)g b:(float)b a:(float)a;
@@ -1029,6 +1036,37 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)dragBone:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy twist:(float)twist continuing:(BOOL)continuing;
 - (int32_t)toggleBoneKey:(long long)layerId node:(int32_t)node;
 - (BOOL)resetBonePose:(long long)layerId node:(int32_t)node;
+/// AutoRig 3D (0.3.6 BETA) — Engine::humanoid_* / autorig_* (rig/AutoRig.hpp).
+/// 0 sem esqueleto, 1 esqueleto não humanoide, 2 rig compatível, 3 AutoRig.
+- (int32_t)humanoidStatus:(long long)layerId NS_SWIFT_NAME(humanoidStatus(_:));
+- (BOOL)autoRigStart:(long long)layerId NS_SWIFT_NAME(autoRigStart(_:));
+/// [estado (0 parado, 1 processando, 2 pronto, 3 falhou, 4 cancelado), progresso 0..1, erro].
+- (NSArray<NSNumber*>*)autoRigProgress;
+- (void)autoRigCancel;
+/// 8 floats por osso canônico (Engine::query_humanoid_joints).
+- (NSArray<NSNumber*>*)humanoidJoints:(long long)layerId NS_SWIFT_NAME(humanoidJoints(_:));
+- (BOOL)humanoidMoveJoint:(long long)layerId bone:(int32_t)bone x:(float)x y:(float)y NS_SWIFT_NAME(humanoidMoveJoint(_:bone:x:y:));
+- (BOOL)humanoidAssignBone:(long long)layerId bone:(int32_t)bone node:(int32_t)node NS_SWIFT_NAME(humanoidAssignBone(_:bone:node:));
+- (NSString*)modelNodeName:(long long)layerId node:(int32_t)node NS_SWIFT_NAME(modelNodeName(_:node:));
+- (BOOL)dragBoneTranslate:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy continuing:(BOOL)continuing NS_SWIFT_NAME(dragBoneTranslate(_:node:dx:dy:continuing:));
+- (BOOL)humanoidSetIk:(long long)layerId limb:(int32_t)limb on:(BOOL)on NS_SWIFT_NAME(humanoidSetIk(_:limb:on:));
+/// 7 floats por membro (Engine::query_humanoid_ik).
+- (NSArray<NSNumber*>*)humanoidIk:(long long)layerId NS_SWIFT_NAME(humanoidIk(_:));
+- (BOOL)dragHumanoidIk:(long long)layerId limb:(int32_t)limb pole:(BOOL)pole dx:(float)dx dy:(float)dy continuing:(BOOL)continuing NS_SWIFT_NAME(dragHumanoidIk(_:limb:pole:dx:dy:continuing:));
+- (int32_t)toggleHumanoidIkKey:(long long)layerId limb:(int32_t)limb NS_SWIFT_NAME(toggleHumanoidIkKey(_:limb:));
+/// Motion Capture (0.3.6 BETA) — Engine::mocap_* (rig/Mocap.hpp). Quadros em
+/// NSData de floats: 134 por quadro (tempo, tem 3D, 33 × x, y, z, confiança).
+- (int32_t)mocapBegin:(long long)layerId NS_SWIFT_NAME(mocapBegin(_:));
+- (BOOL)mocapPushFrames:(NSData*)data frames:(int32_t)frames aspect:(float)aspect NS_SWIFT_NAME(mocapPushFrames(_:frames:aspect:));
+/// Bloqueia (chame fora da main): [intensidade, suavização, velocidade, giro°, chão, foot lock, IK mãos, quadril].
+- (BOOL)mocapAnalyze:(NSArray<NSNumber*>*)params NS_SWIFT_NAME(mocapAnalyze(_:));
+- (void)mocapCancel;
+- (float)mocapProgress;
+/// 12 floats: quadros, duração, 3D, aviso, incerteza ×6, pé preso, interpolado.
+- (NSArray<NSNumber*>*)mocapReport;
+- (BOOL)mocapPreview:(BOOL)on NS_SWIFT_NAME(mocapPreview(_:));
+- (int32_t)mocapApply;
+- (void)mocapEnd;
 - (uint32_t)addModelCameras:(long long)layerId;
 - (long long)addVector:(uint32_t)preset;
 - (NSArray<NSDictionary<NSString*, id>*>*)vectorGroups:(long long)layerId;
@@ -1114,6 +1152,15 @@ NS_SWIFT_NAME(AureaEngine)
 - (nullable NSData*)materialPreview:(long long)layerId material:(uint32_t)material size:(uint32_t)size;
 /// A bola de um material pronto do texto 3D (0..6), no mesmo formato.
 - (nullable NSData*)text3DPresetPreview:(uint32_t)preset size:(uint32_t)size;
+/// 0.3.6 Textura do material (EngineMedia.cpp): cobre o material com uma imagem
+/// (arquivo) ou com uma camada da composição; cada troca é um passo de desfazer.
+- (BOOL)setMaterialTextureImage:(long long)layerId material:(uint32_t)material path:(NSString*)path;
+- (BOOL)setMaterialTextureLayer:(long long)layerId material:(uint32_t)material source:(long long)source;
+- (BOOL)clearMaterialTexture:(long long)layerId material:(uint32_t)material;
+/// @{@"kind": 0 nada / 1 imagem / 2 camada, @"ref": asset ou camada, @"name": nome}.
+- (NSDictionary<NSString*, id>*)materialTexture:(long long)layerId material:(uint32_t)material;
+/// As camadas que podem cobrir um material deste objeto (de cima para baixo).
+- (NSArray<NSNumber*>*)materialTextureLayers:(long long)layerId;
 - (int64_t)removeGaps;
 /// 0/1 trim absoluto, 2 slip, 3/4 roll, 5 slide; 6 move ao quadro absoluto.
 - (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next;

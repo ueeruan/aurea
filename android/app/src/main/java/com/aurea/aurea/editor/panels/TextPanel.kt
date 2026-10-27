@@ -132,7 +132,8 @@ internal fun TextPanel(env: PanelEnv) {
             )
             Text("  ›", style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
         }
-        TextRuler(env, stringResource(R.string.panel_tamanho), { store.textDetail?.size ?: 72f }, "${td.size.roundToInt()} px", 0.5f, 4f, 1000f, stringResource(R.string.panel_tamanho_texto)) {
+        TextRuler(env, stringResource(R.string.panel_tamanho), { store.textDetail?.size ?: 72f }, "${td.size.roundToInt()} px", 0.5f, 4f, com.aurea.aurea.editor.TEXT_SIZE_MAX, stringResource(R.string.panel_tamanho_texto)) {
+            // 0.3.6: até o teto do motor (era 1000; o teclado numérico também).
             store.setTextSize(it)
         }
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {

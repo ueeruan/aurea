@@ -1,14 +1,13 @@
 package com.aurea.aurea.editor.panels
 
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,11 +26,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -61,7 +64,9 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.max
 
 // =============================================================================
@@ -132,6 +137,14 @@ internal fun stagePointEligible(type: Int, flags: Int): Boolean =
  */
 internal fun fxSwipeCommits(dx: Float, width: Float, minPx: Float): Boolean =
     dx < 0f && -dx >= max(minPx, width * 0.35f)
+
+/**
+ * 0.3.6 (sidebar): o deslizar só toma o dedo quando o movimento, ao passar da
+ * folga do toque, é mais horizontal que vertical (o mesmo eixo travado do iOS).
+ * Vertical (ou empate) fica com a rolagem da lista. Par: `fxSwipeIsHorizontal` (Swift).
+ */
+internal fun fxSwipeIsHorizontal(dx: Float, dy: Float): Boolean =
+    dx.isFinite() && dy.isFinite() && abs(dx) > abs(dy)
 
 /** A curva padrão do Android (AccelerateDecelerate): `cos((t + 1)π)/2 + 0,5`. Seta da seção e abertura dos controles. */
 internal val FxAccelDecel = Easing { t -> (kotlin.math.cos((t + 1.0) * Math.PI) / 2.0 + 0.5).toFloat() }
@@ -247,6 +260,14 @@ internal fun FxTipRow(effectId: Int, index: Int, text: String) {
  * ([fxSwipeCommits]); antes do limite, solta e volta. Atrás da linha aparece a
  * faixa vermelha com 🗑 (Omega: na forma da linha de 37 dp, raio 5). O leitor de
  * tela ganha a mesma ação ("Remover …") sem o gesto.
+ *
+ * 0.3.6 (sidebar): o `draggable` horizontal tomava o dedo assim que o X passava
+ * da folga, mesmo num arrasto quase vertical, e o deslocamento andava por
+ * corrotinas soltas (`snapTo` a cada delta) que podiam cancelar a animação final
+ * antes do `onDelete`. Agora é um gesto próprio: só toma o dedo se, ao passar da
+ * folga, o movimento é mais horizontal que vertical ([fxSwipeIsHorizontal]) e
+ * ninguém por dentro (≡ ou toque longo de reordenar) consumiu; vertical fica com a
+ * rolagem da lista. O deslocamento é estado simples e a decisão sai no soltar.
  */
 @Composable
 internal fun FxSwipeToDelete(
@@ -258,16 +279,15 @@ internal fun FxSwipeToDelete(
     content: @Composable () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val offset = remember { Animatable(0f) }
+    // Deslocamento LÓGICO (≤ 0 = para o início da linha); em RTL a tela espelha.
+    var offset by remember { mutableFloatStateOf(0f) }
+    val settle = remember { arrayOfNulls<Job>(1) }
     var width by remember { mutableFloatStateOf(0f) }
     val minPx = with(LocalDensity.current) { 96.dp.toPx() }
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val hint = stringResource(R.string.fxui_a11y_swipe_delete)
-    val state = rememberDraggableState { delta ->
-        // Só para a esquerda (a direita é limitada a 0); em RTL a tela espelha o gesto.
-        val d = if (rtl) -delta else delta
-        scope.launch { offset.snapTo((offset.value + d).coerceIn(-width, 0f)) }
-    }
+    val active by rememberUpdatedState(enabled)
+    val delete by rememberUpdatedState(onDelete)
     Box(
         modifier
             .onSizeChanged { width = it.width.toFloat() }
@@ -276,7 +296,7 @@ internal fun FxSwipeToDelete(
                 stateDescription = hint
             },
     ) {
-        if (offset.value < 0f) {
+        if (offset < 0f) {
             Row(
                 Modifier.matchParentSize().clip(shape).background(AureaColors.Danger),
                 horizontalArrangement = Arrangement.End,
@@ -287,21 +307,47 @@ internal fun FxSwipeToDelete(
         }
         Box(
             Modifier
-                .graphicsLayer { translationX = if (rtl) -offset.value else offset.value }
-                .draggable(
-                    state = state,
-                    orientation = Orientation.Horizontal,
-                    enabled = enabled,
-                    onDragStopped = {
-                        if (fxSwipeCommits(offset.value, width, minPx)) {
-                            offset.animateTo(-width, tween(160))
-                            onDelete()
-                            offset.snapTo(0f)
-                        } else {
-                            offset.animateTo(0f, tween(200))
+                .graphicsLayer { translationX = if (rtl) -offset else offset }
+                .pointerInput(rtl) {
+                    awaitEachGesture {
+                        // Passe Main: os filhos (≡, toque longo, olho) veem antes.
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        if (!active) return@awaitEachGesture
+                        val slop = viewConfiguration.touchSlop
+                        var total = Offset.Zero
+                        var claimed = false
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            if (!claimed) {
+                                // Um filho já tomou o dedo (reordenar): não é nosso.
+                                if (change.isConsumed) return@awaitEachGesture
+                                total += change.positionChange()
+                                if (total.getDistance() < slop) continue
+                                // Vertical: a rolagem da lista; nada consumido.
+                                if (!fxSwipeIsHorizontal(total.x, total.y)) return@awaitEachGesture
+                                claimed = true
+                                settle[0]?.cancel()
+                            }
+                            val dx = change.positionChange().x
+                            change.consume()
+                            offset = (offset + if (rtl) -dx else dx).coerceIn(-width, 0f)
                         }
-                    },
-                ),
+                        if (claimed) {
+                            val commit = active && fxSwipeCommits(offset, width, minPx)
+                            settle[0] = scope.launch {
+                                if (commit) {
+                                    animate(offset, -width, animationSpec = tween(160)) { v, _ -> offset = v }
+                                    delete()
+                                    offset = 0f
+                                } else {
+                                    animate(offset, 0f, animationSpec = tween(200)) { v, _ -> offset = v }
+                                }
+                            }
+                        }
+                    }
+                },
         ) { content() }
     }
 }

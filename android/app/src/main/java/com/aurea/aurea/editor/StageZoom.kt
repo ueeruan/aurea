@@ -358,7 +358,13 @@ internal fun ViewModeColumn(store: EditorStore, width: Dp, modifier: Modifier) {
     val hasCamera = store.layers.any { it.kind == LayerType.Camera.kind }
     val onLabel = stringResource(R.string.common_on)
     val offLabel = stringResource(R.string.common_off)
-    Column(
+    // 0.3.6 (sidebar): o "segura o toque" era um pointerInput na PRÓPRIA coluna,
+    // pai das células: consumia todo movimento no passe Main depois delas, e o
+    // clique (combinedClickable) cancela quando vê o movimento consumido no passe
+    // Final. No aparelho o dedo sempre treme um pouco: nenhuma célula (grade,
+    // pixels, solo, caixa, + / − / 100 %) respondia. Agora quem segura é um fundo
+    // IRMÃO atrás das células: só pega o toque nas folgas e nunca cancela o clique.
+    Box(
         modifier
             .width(width)
             .fillMaxHeight()
@@ -366,8 +372,12 @@ internal fun ViewModeColumn(store: EditorStore, width: Dp, modifier: Modifier) {
                 // Da metade de baixo até a coluna inteira.
                 clipRect(top = size.height * 0.5f * (1f - progress)) { this@drawWithContent.drawContent() }
             }
+            .testTag("viewmode.column"),
+    ) {
+    Box(
+        Modifier
+            .matchParentSize()
             .background(OmegaChrome.Column)
-            .testTag("viewmode.column")
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -379,6 +389,9 @@ internal fun ViewModeColumn(store: EditorStore, width: Dp, modifier: Modifier) {
                     }
                 }
             },
+    )
+    Column(
+        Modifier.fillMaxWidth().fillMaxHeight(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         ViewModeCell(
@@ -457,6 +470,7 @@ internal fun ViewModeColumn(store: EditorStore, width: Dp, modifier: Modifier) {
             modifier = Modifier.weight(1f),
         ) {}
         ZoomStepsCell(store)
+    }
     }
 }
 

@@ -32,6 +32,7 @@
 #include "aurea/project/ProjectPackage.hpp"
 #include "aurea/export/ExportSink.hpp"
 #include "aurea/export/ImageEncode.hpp"
+#include "aurea/rig/AutoRig.hpp"
 #include "aurea/scene3d/Importer.hpp"
 #include "aurea/scene3d/ModelBudget.hpp"
 #include "aurea/scene3d/Text3D.hpp"
@@ -804,6 +805,85 @@ public:
     i32 toggle_bone_key(u64 layerId, i32 node) noexcept;
     /// Volta o osso (node < 0 = todos) à pose do arquivo: apaga as trilhas.
     bool reset_bone_pose(u64 layerId, i32 node) noexcept;
+    // --- AutoRig 3D / esqueleto humanoide (0.3.6 BETA) — rig/Humanoid.hpp ---
+    /// 0 sem esqueleto · 1 esqueleto do arquivo não humanoide · 2 rig
+    /// compatível (importado, mapeado por nome) · 3 AutoRig do Aurea.
+    [[nodiscard]] i32 humanoid_status(u64 layerId) noexcept;
+    /// Mapa + repouso do rig humanoide da camada (false = nenhum usável).
+    bool query_humanoid(u64 layerId, rig::HumanoidRig& out) noexcept;
+    /// AutoRig assíncrono (JobSystem): detecta o corpo em T-pose, cria os 17
+    /// ossos, a skin e os pesos. Ao terminar, a camada passa a usar o modelo
+    /// com rig (um passo de desfazer). Falha com motivo em autorig_progress.
+    bool autorig_start(u64 layerId) noexcept;
+    struct AutoRigProgress {
+        i32 state = 0;          ///< 0 parado, 1 processando, 2 pronto, 3 falhou, 4 cancelado
+        f32 progress = 0.0f;    ///< 0..1
+        i32 error = 0;          ///< rig::AutoRigError
+        u64 layer = 0;
+    };
+    [[nodiscard]] AutoRigProgress autorig_progress() noexcept;
+    void autorig_cancel() noexcept;
+    /// Juntas canônicas na tela (Corrigir esqueleto), kRigJointFloats por osso
+    /// canônico (17): [0] nó (−1 ausente), [1..2] tela (px da composição),
+    /// [3] na frente da câmera, [4..6] posição de repouso no modelo, [7] pai canônico.
+    static constexpr u32 kHumanoidJointFloats = 8;
+    u32 query_humanoid_joints(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// AutoRig: move a junta para o ponto da tela (plano da vista pela junta) e
+    /// recalcula os pesos (assíncrono, autorig_progress). Um passo de desfazer.
+    bool humanoid_move_joint(u64 layerId, u32 bone, f32 compX, f32 compY) noexcept;
+    /// Rig importado: reatribui o osso canônico ao nó (−1 = sem). Desfazer.
+    bool humanoid_assign_bone(u64 layerId, u32 bone, i32 node) noexcept;
+    /// Nome do nó do modelo (para a lista de ossos do rig importado).
+    [[nodiscard]] std::string model_node_name(u64 layerId, i32 node) noexcept;
+    /// Grava keys de osso em lote (mocap): UMA ação de desfazer. Com
+    /// clearFrom ≤ clearTo, apaga antes as keys dos mesmos nós no intervalo
+    /// (quadros locais). Rotações nos params 0..2; translação (3..5) opcional.
+    Status set_bone_keys(u64 layerId, const rig::BoneKey* keys, usize count, const char* undoLabel,
+                         i64 clearFrom = 0, i64 clearTo = -1) noexcept;
+    /// Dedo na cena com o quadril em "mover": desloca o osso no plano da vista
+    /// (params 3..5). Mesma regra de key do drag_bone.
+    bool drag_bone_translate(u64 layerId, u32 node, f32 dxPx, f32 dyPx, bool continuing) noexcept;
+    /// IK de dois ossos (limb 0 braço esq., 1 braço dir., 2 perna esq., 3 perna
+    /// dir.). Ligar põe o alvo na mão/pé de agora e o polo à frente do
+    /// cotovelo / joelho; desligar apaga as trilhas do controlador.
+    bool humanoid_set_ik(u64 layerId, u32 limb, bool on) noexcept;
+    /// Controladores IK na tela, kHumanoidIkFloats por membro (4): [0] ligado,
+    /// [1..2] alvo na tela, [3..4] polo na tela, [5] key no cabeçote, [6] peso.
+    static constexpr u32 kHumanoidIkFloats = 7;
+    u32 query_humanoid_ik(u64 layerId, f32* out, u32 capacity) noexcept;
+    /// Arrasta o alvo (pole=false) ou o polo do IK no plano da vista.
+    bool drag_humanoid_ik(u64 layerId, u32 limb, bool pole, f32 dxPx, f32 dyPx, bool continuing) noexcept;
+    /// Marca/tira key do controlador no cabeçote (1 marcou, 0 tirou, −1 erro).
+    i32 toggle_humanoid_ik_key(u64 layerId, u32 limb) noexcept;
+    // --- Motion Capture (0.3.6 BETA) — rig/Mocap.hpp (EngineMocap.cpp) ---
+    /// Uma sessão por motor. As plataformas detectam a pose no aparelho e
+    /// mandam os quadros; o motor resolve, mostra a prévia e grava as keys.
+    /// Abrir: devolve humanoid_status (2/3 = pronto; 0/1 = sem rig compatível,
+    /// a UI oferece o AutoRig 3D) ou −1 (camada inválida). Troca a sessão anterior.
+    i32 mocap_begin(u64 layerId) noexcept;
+    /// Quadros detectados em lote: rig::kMocapFrameFloats por quadro;
+    /// aspect = largura/altura dos quadros analisados.
+    bool mocap_push_frames(const f32* data, u32 frames, f32 aspect) noexcept;
+    /// Parâmetros (kMocapParams floats): intensidade, suavização, velocidade,
+    /// giro °, altura do chão, foot lock, IK das mãos, mover o quadril.
+    static constexpr u32 kMocapParams = 8;
+    /// Resolve tudo com os parâmetros (bloqueia: chame fora da main; cancelável
+    /// com mocap_cancel, progresso em mocap_progress). Atualiza a prévia ligada.
+    bool mocap_analyze(const f32* params, u32 count) noexcept;
+    void mocap_cancel() noexcept;
+    [[nodiscard]] f32 mocap_progress() noexcept;
+    /// Relatório (kMocapReportFloats): quadros, duração s, tem 3D, aviso de
+    /// baixa confiança, fração incerta por membro ×6 (tronco, cabeça, braço
+    /// esq., braço dir., perna esq., perna dir.), pé preso, interpolado.
+    static constexpr u32 kMocapReportFloats = 12;
+    u32 mocap_report(f32* out, u32 capacity) noexcept;
+    /// Prévia: o personagem toca a captura no preview sem gravar keys.
+    bool mocap_preview(bool on) noexcept;
+    /// Grava as keys (BonePose, com redução) numa ação de desfazer. Devolve
+    /// quantas keys entraram (−1 = falhou).
+    i32 mocap_apply() noexcept;
+    /// Fecha a sessão (tira a prévia).
+    void mocap_end() noexcept;
     u32 add_model_cameras(u64 layer) noexcept;
     /// Põe um efeito de PARTE (Animar parte 3D, Esconder partes 3D, Trocar
     /// textura 3D) na camada 3D já apontando para a parte `part` (0 = a 1ª;
@@ -1521,6 +1601,23 @@ public:
     /// thread principal: a trava do modelo só cobre a cópia dos fatores; a
     /// bola é calculada na CPU, fora dela, e guardada num cache por receita.
     bool material_preview(u64 layerId, u32 material, u32 size, std::vector<u8>& outRgba) noexcept;
+
+    /// TEXTURA DO MATERIAL (0.3.6, v52): a imagem de cor do material
+    /// `material` do objeto 3D (modelo importado ou forma 3D) trocada por uma
+    /// IMAGEM (arquivo) ou por uma CAMADA da mesma composição, renderizada a
+    /// cada quadro (MaterialOverride::textureImage/textureLayer). Cada troca é
+    /// um passo de desfazer. A camada passa por material_texture_source_ok
+    /// (nunca o próprio objeto nem o que mora na cena 3D). API em EngineMedia.cpp.
+    Status set_material_texture_image(u64 layerId, u32 material, const char* path) noexcept;
+    Status set_material_texture_layer(u64 layerId, u32 material, u64 sourceLayer) noexcept;
+    Status clear_material_texture(u64 layerId, u32 material) noexcept;
+    /// 0 = o mapa do arquivo, 1 = imagem, 2 = camada. `outRef` = asset/camada
+    /// empacotados; `outName` = nome do arquivo ou da camada.
+    u32 query_material_texture(u64 layerId, u32 material, u64* outRef = nullptr,
+                               std::string* outName = nullptr) noexcept;
+    /// As camadas da composição que podem cobrir um material deste objeto, na
+    /// ordem da pilha (de cima para baixo).
+    std::vector<u64> material_texture_layers(u64 layerId) noexcept;
     /// A bola de um material pronto do texto 3D (0..6, a mesma ordem de
     /// apply_text3d_material_preset). Não depende do projeto.
     bool text3d_preset_preview(u32 preset, u32 size, std::vector<u8>& outRgba) noexcept;
@@ -1948,6 +2045,10 @@ public:
     Status set_text3d_texture(u64 layerId, const std::string& path) noexcept;
     /// Receita do texto 3D da camada (falso = não é texto 3D).
     bool query_text3d(u64 layerId, scene3d::Text3DSpec& out) noexcept;
+    /// Errc da última edição de texto 3D (set_text3d e quem passa por ela;
+    /// 0 = aplicada). As pontes devolvem só sim/não: a UI lê o motivo daqui
+    /// para dizer por que as configurações não mudaram (bug 0.3.6).
+    [[nodiscard]] i32 last_text3d_status() const noexcept { return lastText3dStatus_.load(std::memory_order_relaxed); }
 
     // --- Formas 3D (scene3d/Shape3D.hpp; API em EngineShape3D.cpp) --------------
     /// Nova camada com a forma `kind` (Shape3DKind), centrada, uma cor por
@@ -2264,6 +2365,17 @@ private:
     /// Acquire BEFORE modelMutex_; slow imports must not overlap their peaks.
     std::recursive_mutex sourceImportMutex_;
     Status ensure_text3d_layout(Layer& layer) noexcept; // modelMutex_ held; caller owns undo.
+    Status set_text3d_impl(u64 layerId, const scene3d::Text3DSpec& spec) noexcept;
+    std::atomic<i32> lastText3dStatus_{0};
+    /// Cada edição de texto 3D guarda uma malha nova e a anterior fica para o
+    /// desfazer. Sem espaço: solta as malhas de texto 3D que nenhuma camada (nem
+    /// a área de transferência) usa — a receita continua no asset e
+    /// restore_text3d_models_locked as refaz se o desfazer/refazer religar.
+    /// modelMutex_ held. Devolve quantas soltou.
+    u32 release_unused_text3d_models_locked() noexcept;
+    /// Refaz da receita a malha de texto 3D que uma camada usa e que não está
+    /// em memória (solta acima). modelMutex_ held.
+    void restore_text3d_models_locked() noexcept;
     [[nodiscard]] bool supports_text_animation(const Layer& layer) const noexcept;
     /// Camada de forma 3D (receita aurea-shape3d:). As partes já são nós
     /// próprios: não há preparo como o ensure_text3d_layout. modelMutex_ held.
@@ -2694,6 +2806,17 @@ private:
     struct MotionTrackJob;
     std::shared_ptr<MotionTrackJob> motionTrack_;
     void join_motion_track() noexcept;
+    // 0.3.6 AutoRig 3D (EngineAutoRig.cpp): um trabalho por vez, thread própria.
+    struct AutoRigJob;
+    std::shared_ptr<AutoRigJob> autoRig_;
+    void join_autorig() noexcept;
+    bool start_autorig_job(u64 layerId, const rig::AutoRigJoints* edit) noexcept;
+    // 0.3.6 Motion Capture (EngineMocap.cpp): a sessão tem trava e atômicos próprios.
+    struct MocapSession;
+    std::mutex mocapMutex_;                       ///< só o ponteiro (nunca segurado no solver)
+    std::shared_ptr<MocapSession> mocap_;
+    [[nodiscard]] std::shared_ptr<MocapSession> mocap_session() noexcept;
+    void set_mocap_preview(u64 layerId, std::shared_ptr<const rig::MocapPreview> preview) noexcept;
     static std::shared_ptr<const scene3d::HdriPixels> hdri_lookup(void* self, AssetId id);
     static std::shared_ptr<const CubeLut> cube_lookup(void* self, AssetId id);
     struct ClipboardMedia {

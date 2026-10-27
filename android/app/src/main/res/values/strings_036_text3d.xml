@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.6 (texto 3D): por que a edição do texto 3D não foi aplicada (antes o painel só voltava ao valor antigo). -->
+    <string name="t3d036_err_memory">A memória de imagens e modelos deste projeto acabou: o texto 3D não pôde ser refeito. Remova mídias que não usa ou salve e reabra o projeto.</string>
+    <string name="t3d036_err_font">A fonte deste texto 3D não está neste aparelho e não há outra disponível. Escolha outra fonte.</string>
+    <string name="t3d036_err_geometry">O texto 3D não pôde ser gerado com essa mudança: texto sem letras visíveis ou com letras demais para animar uma a uma (até 256).</string>
+    <string name="t3d036_err_generic">Não foi possível aplicar a mudança no texto 3D.</string>
+</resources>

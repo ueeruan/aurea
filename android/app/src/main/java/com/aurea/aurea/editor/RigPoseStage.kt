@@ -122,3 +122,148 @@ internal suspend fun AwaitPointerEventScope.rigPoseGesture(store: EditorStore, m
     // Toque no vazio: solta o osso (o dedo volta a orbitar a cena).
     if (!moved && near < 0) store.choosePoseBone(-1)
 }
+
+// =============================================================================
+// AutoRig 3D (0.3.6 BETA): "Corrigir esqueleto" e os controladores IK no palco.
+// Par do iOS: RigStage.swift (bloco "AutoRig 3D").
+// =============================================================================
+
+/** Corrigir esqueleto ligado na Cena 3D (as 17 juntas canônicas). */
+internal fun rigFixActive(store: EditorStore): Boolean =
+    store.sceneEditor && store.rigFixMode && store.selection.size == 1 && store.humanoidJoints != null
+
+/** Junta arrastada agora (osso canônico + ponto em px do palco), para o desenho. */
+private val fixDrag = androidx.compose.runtime.mutableStateOf<Triple<Int, Float, Float>?>(null)
+
+internal fun DrawScope.drawRigFixOverlay(store: EditorStore, m: StageMapper) {
+    val j = store.humanoidJoints ?: return
+    val f = com.aurea.aurea.editor.panels.HUMANOID_JOINT_FLOATS
+    val count = j.size / f
+    val drag = fixDrag.value
+    fun at(b: Int): Offset? {
+        val o = b * f
+        if (j[o] < 0f || j[o + 3] < .5f) return null
+        if (drag != null && drag.first == b) return Offset(drag.second, drag.third)
+        return Offset(m.sx(j[o + 1]), m.sy(j[o + 2]))
+    }
+    for (b in 0 until count) {
+        val p = j[b * f + 7].toInt()
+        if (p < 0) continue
+        val a = at(p) ?: continue
+        val c = at(b) ?: continue
+        drawLine(ShellColors.OutlineUnder, a, c, 4.dp.toPx(), StrokeCap.Round)
+        drawLine(Color.White.copy(alpha = .85f), a, c, 2.dp.toPx(), StrokeCap.Round)
+    }
+    for (b in 0 until count) {
+        val c = at(b) ?: continue
+        val on = drag?.first == b
+        val r = (if (on) 8.dp else 5.5.dp).toPx()
+        drawCircle(ShellColors.OutlineUnder, r + 1.5.dp.toPx(), c)
+        drawCircle(if (on) AureaColors.Accent else Color(0xFFFFCC55), r, c)
+    }
+}
+
+/** Junta canônica mais perto do dedo (até [reach] px), ou −1. */
+internal fun pickFixJoint(store: EditorStore, m: StageMapper, x: Float, y: Float, reach: Float): Int {
+    val j = store.humanoidJoints ?: return -1
+    val f = com.aurea.aurea.editor.panels.HUMANOID_JOINT_FLOATS
+    var best = reach
+    var hit = -1
+    for (b in 0 until j.size / f) {
+        val o = b * f
+        if (j[o] < 0f || j[o + 3] < .5f) continue
+        val d = hypot(x - m.sx(j[o + 1]), y - m.sy(j[o + 2]))
+        if (d < best) { best = d; hit = b }
+    }
+    return hit
+}
+
+/** Arrasta a junta; ao soltar, o motor refaz os pesos (assíncrono, com progresso). */
+internal suspend fun AwaitPointerEventScope.rigFixGesture(store: EditorStore, m: StageMapper, down: PointerInputChange, slop: Float) {
+    down.consume()
+    val bone = pickFixJoint(store, m, down.position.x, down.position.y, 36.dp.toPx())
+    if (bone < 0) return
+    var moved = false
+    var last = down.position
+    try {
+        while (true) {
+            val e = awaitPointerEvent()
+            e.changes.forEach { it.consume() }
+            val c = e.changes.firstOrNull { it.id == down.id } ?: break
+            if (!c.pressed) break
+            if (!moved && hypot(c.position.x - down.position.x, c.position.y - down.position.y) < slop) continue
+            moved = true
+            last = c.position
+            fixDrag.value = Triple(bone, last.x, last.y)
+        }
+    } finally {
+        fixDrag.value = null
+    }
+    if (moved) store.moveHumanoidJoint(bone, m.cx(last.x), m.cy(last.y))
+}
+
+/** Alvo (quadrado) e polo (losango) dos membros com IK ligado. */
+internal fun DrawScope.drawRigIkHandles(store: EditorStore, m: StageMapper) {
+    val ik = store.humanoidIk ?: return
+    val f = com.aurea.aurea.editor.panels.HUMANOID_IK_FLOATS
+    for (limb in 0 until ik.size / f) {
+        val o = limb * f
+        if (ik[o] < .5f) continue
+        val t = Offset(m.sx(ik[o + 1]), m.sy(ik[o + 2]))
+        val p = Offset(m.sx(ik[o + 3]), m.sy(ik[o + 4]))
+        val s = 7.dp.toPx()
+        drawLine(Color.White.copy(alpha = .35f), t, p, 1.dp.toPx())
+        drawRect(ShellColors.OutlineUnder, Offset(t.x - s - 1.5f, t.y - s - 1.5f), androidx.compose.ui.geometry.Size(2 * s + 3f, 2 * s + 3f))
+        drawRect(Color(0xFF55CCFF), Offset(t.x - s, t.y - s), androidx.compose.ui.geometry.Size(2 * s, 2 * s))
+        if (ik[o + 5] > .5f) drawCircle(AureaColors.Accent, s + 5.dp.toPx(), t, style = Stroke(2.dp.toPx()))
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(p.x, p.y - s); lineTo(p.x + s, p.y); lineTo(p.x, p.y + s); lineTo(p.x - s, p.y); close()
+        }
+        drawPath(path, Color(0xFF55CCFF).copy(alpha = .8f))
+    }
+}
+
+/** Controlador IK perto do dedo: (membro, é o polo) ou nulo. */
+internal fun pickIkHandle(store: EditorStore, m: StageMapper, x: Float, y: Float, reach: Float): Pair<Int, Boolean>? {
+    val ik = store.humanoidIk ?: return null
+    val f = com.aurea.aurea.editor.panels.HUMANOID_IK_FLOATS
+    var best = reach
+    var hit: Pair<Int, Boolean>? = null
+    for (limb in 0 until ik.size / f) {
+        val o = limb * f
+        if (ik[o] < .5f) continue
+        val dt = hypot(x - m.sx(ik[o + 1]), y - m.sy(ik[o + 2]))
+        if (dt < best) { best = dt; hit = limb to false }
+        val dp = hypot(x - m.sx(ik[o + 3]), y - m.sy(ik[o + 4]))
+        if (dp < best) { best = dp; hit = limb to true }
+    }
+    return hit
+}
+
+/** Arrasta o alvo/polo do IK no plano da vista. Um gesto = um passo de desfazer. */
+internal suspend fun AwaitPointerEventScope.rigIkGesture(store: EditorStore, m: StageMapper, down: PointerInputChange, slop: Float) {
+    down.consume()
+    val hit = pickIkHandle(store, m, down.position.x, down.position.y, 36.dp.toPx()) ?: return
+    var moved = false
+    var began = false
+    var last = down.position
+    try {
+        while (true) {
+            val e = awaitPointerEvent()
+            e.changes.forEach { it.consume() }
+            val c = e.changes.firstOrNull { it.id == down.id } ?: break
+            if (!c.pressed) break
+            if (!moved && hypot(c.position.x - down.position.x, c.position.y - down.position.y) < slop) continue
+            if (!moved) last = down.position
+            moved = true
+            val dx = (c.position.x - last.x) / m.fit
+            val dy = (c.position.y - last.y) / m.fit
+            last = c.position
+            if (dx == 0f && dy == 0f) continue
+            if (!began) { store.beginGesture("IK"); began = true }
+            store.dragHumanoidIk(hit.first, hit.second, dx, dy)
+        }
+    } finally {
+        if (began) { store.endGesture(); store.endPoseGesture() }
+    }
+}

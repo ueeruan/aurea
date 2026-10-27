@@ -63,12 +63,15 @@ import com.aurea.aurea.ui.theme.tocavel
 /**
  * PAINEL 3D (texto 3D, forma 3D, modelo importado e câmera), em poucas ABAS:
  *
- *  - Ambiente (a 1ª nos objetos; retorno de beta 12/10/2026: "só o básico"):
- *    LUZ (uma fonte: estúdio ou imagem HDR; intensidade, giro e sombras),
- *    FUNDO e CHÃO; qualidade, tone map, exposição e bloom em "Avançado", fechado.
+ *  - Ambiente (a 1ª nos objetos; 0.3.6 refeito em seções — Scene3DEnvironment.kt):
+ *    Céu e fundo (estúdio ou HDRI, fundo 360°), Luz ambiente (intensidade,
+ *    giro, exposição) e Chão e sombra. Só o que é de ambiente.
+ *  - Render (0.3.6): qualidade, tone map e bloom da cena 3D inteira.
  *  - Material: materiais prontos (amostras), cor, metálico e rugosidade; a
  *    superfície e o resto ficam em "Avançado", fechado. Forma 3D: cor por
- *    parte. Modelo: os materiais do arquivo.
+ *    parte. Modelo: os materiais do arquivo, cada um com a TEXTURA (arquivo ou
+ *    camada da timeline). Seção Objeto: sombras e interior (eram do ambiente).
+ *  - Câmera e luz: só Ambiente e Render (a cena, não um objeto).
  *  - Partes (forma 3D e modelo): escolher a parte e pôr um EFEITO nela —
  *    Animar parte 3D, Esconder partes 3D, Trocar textura 3D — como o Text 3D
  *    Layout faz no texto. Os ajustes e keyframes ficam no painel de Efeitos.
@@ -82,13 +85,17 @@ import com.aurea.aurea.ui.theme.tocavel
 internal fun Element3DPanel(env: PanelEnv) {
     val store = env.store
     val t3 by remember(store) { derivedStateOf { store.text3d } }
-    val camera = store.detail?.kind == 8
+    // Câmera (8) e luz (9) não são objetos: só a cena (ambiente e render).
+    val camera = store.detail?.kind == 8 || store.detail?.kind == 9
     val shape = if (camera) null else store.shape3d
     val text = if (camera) null else t3
     val tabs = when {
-        camera -> listOf(Tab3D.Light)
-        text != null -> listOf(Tab3D.Material, Tab3D.Shape, Tab3D.Light, Tab3D.Anim)
-        else -> listOf(Tab3D.Light, Tab3D.Material, Tab3D.Parts)
+        camera -> listOf(Tab3D.Light, Tab3D.Render)
+        text != null -> listOf(Tab3D.Material, Tab3D.Shape, Tab3D.Light, Tab3D.Anim, Tab3D.Render)
+        // 0.3.6: modelo importado ganha a aba Esqueleto (AutoRig 3D, ossos, IK, Motion Capture).
+        shape == null && store.detail?.kind == com.aurea.aurea.ui.theme.LayerType.Model3D.kind ->
+            listOf(Tab3D.Light, Tab3D.Material, Tab3D.Parts, Tab3D.Rig, Tab3D.Render)
+        else -> listOf(Tab3D.Light, Tab3D.Material, Tab3D.Parts, Tab3D.Render)
     }
     var chosen by rememberSaveable { mutableIntStateOf(-1) }
     val tab = tabs.firstOrNull { it.ordinal == chosen } ?: tabs.first()
@@ -104,18 +111,31 @@ internal fun Element3DPanel(env: PanelEnv) {
                 Tab3D.Material -> {
                     when {
                         text != null -> Text3DMaterialTab(env, text)
-                        shape != null -> Shape3DSection(env, shape, Shape3DPage.Material)
+                        shape != null -> {
+                            Shape3DSection(env, shape, Shape3DPage.Material)
+                            // 0.3.6: a parte escolhida pode vir de uma camada da timeline
+                            // (a imagem do arquivo continua na linha "Imagem" acima).
+                            val part = store.shapePartOf(store.primary)
+                            if (part >= 0) {
+                                val c = shape.colors.getOrNull(part) ?: floatArrayOf(1f, 1f, 1f, 1f)
+                                MaterialTextureRow(env, part, Color(c[0], c[1], c[2]), allowFile = false)
+                            }
+                        }
                         else -> {
                             KitTitle(stringResource(R.string.panel_material))
                             ImportedMaterialSection(env)
                         }
                     }
+                    // 0.3.6: Objeto — projeta/recebe sombra (saíram do Ambiente) e o interior.
+                    ObjectShadowSection(store)
                     InteriorToggle(store)
                 }
                 Tab3D.Shape -> if (text != null) Text3DShapeTab(env, text)
-                Tab3D.Light -> LightSceneTab(env, objectSettings = !camera)
+                Tab3D.Light -> Environment3DTab(env)
+                Tab3D.Render -> Render3DTab(env)
                 Tab3D.Anim -> if (text != null) AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() }
                 Tab3D.Parts -> PartsTab(env, shape)
+                Tab3D.Rig -> Rig3DTab(env)
             }
         }
     }
@@ -128,6 +148,8 @@ internal enum class Tab3D(val label: Int) {
     Light(R.string.sh_dock_environment),
     Anim(R.string.ui3d_tab_anim),
     Parts(R.string.shape3d_parts),
+    Rig(R.string.rig3d_tab),
+    Render(R.string.env3d_tab_render),
 }
 
 /**
@@ -472,145 +494,9 @@ private fun ImportedMaterialSection(env: PanelEnv) {
                 modifier = Modifier.testTag("panel3d.material.$id")) { selected = id }
         }
     }
+    // 0.3.6: a TEXTURA do material escolhido, direto aqui (arquivo ou timeline).
+    MaterialTextureRow(env, index, Color(current[2].coerceIn(0f, 1f), current[3].coerceIn(0f, 1f), current[4].coerceIn(0f, 1f)))
+    Spacer(Modifier.height(6.dp))
     AureaPropertyPanel(store, "material", current.copyOfRange(2, 8), index,
         onOpenCurve = { env.onOpenPanel(EditorPanel.Curve) })
-}
-
-// --- Luz e cena -----------------------------------------------------------------
-
-/** Estúdios da fonte de luz, na ordem dos ids do motor (StudioEnvironment.hpp: 0 neutro … 4 cromado). */
-private val StudioLights = listOf(
-    R.string.scene031_light_neutral, R.string.scene_dark, R.string.scene_product, R.string.scene_sky, R.string.scene_chrome,
-)
-
-/** Operadores de tone map do 3D, na ordem do motor (0 PBR Neutral … 5 ACES). */
-private val ToneMaps = listOf(
-    R.string.scene031_tonemap_neutral, R.string.scene031_tonemap_agx, R.string.scene031_tonemap_agx_punchy,
-    R.string.scene031_tonemap_agx_golden, R.string.scene031_tonemap_uchimura, R.string.scene031_tonemap_aces,
-)
-
-/**
- * AMBIENTE (retorno de beta 12/10/2026: "só o básico"): LUZ, FUNDO e CHÃO; o
- * resto (qualidade, tone map, exposição e bloom) fica em "Avançado", fechado.
- *
- * LUZ (0.3.1): UMA fileira de fontes exclusivas — Neutro, Escuro, Produto,
- * Céu, Cromado e Imagem HDR… — e só uma acesa: a HDR quando há HDRI (ela vence
- * o estúdio no render), senão o estúdio. Escolher um estúdio tira o HDRI (a
- * ponte faz isso numa mutação só: um toque = um passo de desfazer). CHÃO: três
- * chips (sem chão, visível, só sombra). [objectSettings] = falso na câmera
- * (sem sombras de objeto). Par do iOS (Panel3DView.swift `lightSceneTab`).
- */
-@Composable
-private fun LightSceneTab(env: PanelEnv, objectSettings: Boolean) {
-    val store = env.store
-    val e by remember(store) { derivedStateOf { store.environment } }
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) { store.importHdri(uri); if (store.detail?.kind == 8) store.setEnvironmentBackground(true) }
-    }
-    val revision = store.sceneSettingsRevision
-    var settings by remember(revision) { mutableStateOf(store.sceneSettings()) }
-    var advanced by rememberSaveable { mutableStateOf(false) }
-    fun change(index: Int, value: Float) { store.setSceneSetting(index, value); settings = store.sceneSettings() }
-    val hdr = e[0] >= 0.5f
-
-    // --- Luz: uma fonte só ---
-    KitTitle(stringResource(R.string.cat_light))
-    ChipRow {
-        if (settings.size >= 8) {
-            StudioLights.forEachIndexed { i, label ->
-                val on = !hdr && settings[0].toInt() == i
-                // Tocar no estúdio já aceso não gera passo de desfazer vazio.
-                KitChip(stringResource(label), on = on, modifier = Modifier.testTag("panel3d.light.$i")) { if (!on) change(0, i.toFloat()) }
-            }
-        }
-        // Acesa, toca de novo para trocar a imagem.
-        KitChip(stringResource(R.string.scene031_light_hdr), on = hdr, modifier = Modifier.testTag("panel3d.light.hdr")) {
-            pick.launch(arrayOf("image/vnd.radiance", "image/x-exr", "application/zip", "application/octet-stream", "*/*"))
-        }
-    }
-    SceneRow(env, stringResource(R.string.panel_intensidade), e[1] * 100f, 1f, 0f, 2000f, "%", 100f, "ambiente") {
-        store.setEnvironment(it / 100f, store.environment[2])
-    }
-    SceneRow(env, stringResource(R.string.pn_env_rotate_light), e[2], 1f, -360f, 360f, "°", 0f, "ambiente") {
-        store.setEnvironment(store.environment[1], it)
-    }
-    if (objectSettings) {
-        val sh by remember(store) { derivedStateOf { store.modelShadows } }
-        sh?.let { cur ->
-            ToggleLine(stringResource(R.string.pn_t3d_cast_shadow), cur.first) { store.setModelShadows(it, cur.second) }
-            ToggleLine(stringResource(R.string.pn_t3d_receive_shadow), cur.second) { store.setModelShadows(cur.first, it) }
-        }
-    }
-    // --- Fundo ---
-    KitTitle(stringResource(R.string.fx3d_env_background))
-    ToggleLine(stringResource(R.string.environment_background), (e.getOrNull(3) ?: 0f) > .5f, store::setEnvironmentBackground)
-    if (settings.size >= 8) {
-        // --- Chão: 0 sem chão, 1 visível, 2 só sombra (compõe sobre o 2D) ---
-        KitTitle(stringResource(R.string.fx3d_env_floor))
-        val floor = settings[1].toInt()
-        ChipRow {
-            listOf(R.string.scene031_floor_off, R.string.scene031_floor_visible, R.string.scene031_floor_shadow).forEachIndexed { i, label ->
-                KitChip(stringResource(label), on = floor == i, modifier = Modifier.testTag("panel3d.floor.$i")) {
-                    if (floor != i) change(1, i.toFloat())
-                }
-            }
-        }
-        // --- Avançado (fechado): qualidade, tone map, exposição e bloom ---
-        Spacer(Modifier.height(4.dp))
-        AdvancedSection(advanced, { advanced = !advanced }) {
-            KitTitle(stringResource(R.string.scene_quality))
-            ChipRow {
-                listOf(R.string.scene_auto, R.string.scene_low, R.string.scene_medium, R.string.scene_high, R.string.scene_ultra).forEachIndexed { i, label ->
-                    val on = settings[2].toInt() == i
-                    KitChip(stringResource(label), on = on) { if (!on) change(2, i.toFloat()) }
-                }
-            }
-            KitTitle(stringResource(R.string.scene_tonemap))
-            ChipRow {
-                ToneMaps.forEachIndexed { i, label ->
-                    val on = settings[3].toInt() == i
-                    KitChip(stringResource(label), on = on) { if (!on) change(3, i.toFloat()) }
-                }
-            }
-            // Exposição: multiplicador linear (1 = 100 %).
-            SceneRow(env, stringResource(R.string.scene_exposure), settings[4] * 100f, 1f, 1f, 400f, "%", 100f, "exposicao 3D") {
-                change(4, it / 100f)
-            }
-            ToggleLine(stringResource(R.string.scene_bloom), settings[5] > 0.5f) { change(5, if (it) 1f else 0f) }
-            if (settings[5] > 0.5f) {
-                SceneRow(env, stringResource(R.string.ui3d_bloom_strength), settings[6] * 100f, 1f, 0f, 400f, "%", 60f, "bloom 3D") {
-                    change(6, it / 100f)
-                }
-                SceneRow(env, stringResource(R.string.scene031_bloom_threshold), settings[7], .05f, 0f, 8f, "", 1.25f, "bloom 3D", decimals = 2) {
-                    change(7, it)
-                }
-            }
-        }
-    }
-    Spacer(Modifier.height(8.dp))
-}
-
-/** Linha de valor da cena/ambiente: um passo de desfazer por arrasto (quando [gesture] existe). */
-@Composable
-private fun SceneRow(
-    env: PanelEnv,
-    label: String,
-    value: Float,
-    step: Float,
-    min: Float,
-    max: Float,
-    unit: String,
-    default: Float,
-    gesture: String?,
-    decimals: Int = 0,
-    onValue: (Float) -> Unit,
-) {
-    val store = env.store
-    HumanRow(
-        env, label, value, step, min, max, unit, decimals, default,
-        onStart = { if (gesture != null) store.beginGesture(gesture) },
-        onValue = onValue,
-        onEnd = { if (gesture != null) store.endGesture() },
-        onCommit = { v -> if (gesture != null) store.beginGesture(gesture); onValue(v); if (gesture != null) store.endGesture() },
-    )
 }

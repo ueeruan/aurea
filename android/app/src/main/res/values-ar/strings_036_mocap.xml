@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mocap_title">Motion Capture (BETA)</string>
+    <string name="mocap_intro">حوّل فيديو لشخص إلى تحريك للشخصية. يتم التحليل على الجهاز دون إنترنت.</string>
+    <string name="mocap_need_rig">لا يحتوي هذا النموذج على هيكل بشري بعد. أنشئ واحدًا باستخدام AutoRig 3D (الشخصية بوضعية T) ثم عُد إلى هنا.</string>
+    <string name="mocap_need_map">طابِق عظام الملف في «تصحيح الهيكل» أعلاه لاستخدام Motion Capture.</string>
+    <string name="mocap_autorig">AutoRig 3D</string>
+    <string name="mocap_import">استيراد فيديو</string>
+    <string name="mocap_import_hint">من المعرض. شخص واحد، الجسم كامل ظاهر، الكاميرا ثابتة.</string>
+    <string name="mocap_record">تسجيل الحركة</string>
+    <string name="mocap_record_hint">يفتح كاميرا الجهاز.</string>
+    <string name="mocap_reduced">الوضع المخفف (أسرع، تفاصيل أقل)</string>
+    <string name="mocap_analyze">تحليل الحركة</string>
+    <string name="mocap_analyzing">جارٍ تحليل الحركة… %1$d%%</string>
+    <string name="mocap_cancel">إلغاء</string>
+    <string name="mocap_summary">%1$d إطار · %2$.1f ث</string>
+    <string name="mocap_preview">معاينة التحريك</string>
+    <string name="mocap_intensity">الشدة</string>
+    <string name="mocap_smoothing">التنعيم</string>
+    <string name="mocap_speed">السرعة</string>
+    <string name="mocap_yaw">المحاذاة</string>
+    <string name="mocap_floor">ارتفاع الأرضية</string>
+    <string name="mocap_foot_lock">تثبيت القدمين على الأرض</string>
+    <string name="mocap_apply">تطبيق على المخطط الزمني</string>
+    <string name="mocap_apply_hint">تتحول إلى إطارات مفتاحية للعظام قابلة للتعديل من رأس التشغيل. التراجع يعيد كل شيء دفعة واحدة.</string>
+    <string name="mocap_applied">تم إنشاء %1$d إطارًا مفتاحيًا للعظام</string>
+    <string name="mocap_new_video">فيديو آخر</string>
+    <string name="mocap_low_conf">ثقة منخفضة: %1$s. كانت هذه الأجزاء مخفية أو غير واضحة، لذا حركتها تقديرية.</string>
+    <string name="mocap_limb_torso">الجذع</string>
+    <string name="mocap_limb_head">الرأس</string>
+    <string name="mocap_limb_left_arm">الذراع اليسرى</string>
+    <string name="mocap_limb_right_arm">الذراع اليمنى</string>
+    <string name="mocap_limb_left_leg">الساق اليسرى</string>
+    <string name="mocap_limb_right_leg">الساق اليمنى</string>
+    <string name="mocap_err_no_person">لم يتم العثور على شخص في الفيديو.</string>
+    <string name="mocap_err_video">تعذّرت قراءة هذا الفيديو.</string>
+    <string name="mocap_err_apply">تعذّر حفظ الإطارات المفتاحية. هل الطبقة مقفلة؟</string>
+    <string name="mocap_camera_denied">لا يوجد وصول إلى الكاميرا.</string>
+    <string name="mocap_limits">تقريب: الفيديو العادي لا يحتوي على عمق حقيقي. لا يتم التقاط الأصابع والوجه.</string>
+</resources>

@@ -123,6 +123,14 @@ internal class TimelineMetrics(val density: Float, val fontScale: Float = 1f, va
     val keyTouchHalf = dp(14f)      // alvo de 28 da A.01 (núcleo: ganha até das alças)
     /** Folga do losango até o alvo mínimo de 48 dp; cede às alças, tampa e setas. */
     val keyHitHalf = dp(24f)
+    /**
+     * 0.3.6 (keys): meia altura do alvo do losango da camada escolhida (44 dp no
+     * total; a linha tem 28). Passa da linha para a régua e para as vizinhas, mas
+     * só onde um losango responde ([TimelineController] `nearKeyHit`).
+     */
+    val keyReachV = dp(22f)
+    /** Toque num losango aceita um dedo que rola um pouco mais que o slop do sistema antes de virar scrub. */
+    val keyTapSlop = dp(12f)
     /** Histerese do arrasto de losango: o frame só troca depois de passar meio frame + isto. */
     val keyDragHysteresis = dp(3f)
     val keyGlyphHalf = dp(6f)       // desenho compacto; alvo de toque continua 48 dp

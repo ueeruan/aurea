@@ -484,7 +484,13 @@ private fun NarrowEditor(
             // 80 dp: régua + uma linha). A prévia não muda de altura.
             Box(Modifier.fillMaxWidth().height(m.zone.dp)) {
                 Column(Modifier.fillMaxSize()) {
-                    KeepLtr { TimelineHost(store, ui, Modifier.fillMaxWidth().height(m.timeline.dp), compactDock = content == SheetContent.Dock) }
+                    // 0.3.6: o que o painel por cima (doca/painel) ou o adicionar cobre embaixo.
+                    val covered = when {
+                        m.overlay -> m.obscuredTimeline
+                        content == SheetContent.Adding -> EditorLayout.addContent(m)
+                        else -> 0f
+                    }
+                    KeepLtr { TimelineHost(store, ui, Modifier.fillMaxWidth().height(m.timeline.dp), compactDock = content == SheetContent.Dock, obscuredBottom = covered) }
                     // Real Camera ligada: os controles dela ocupam a área de painéis.
                     if (!m.overlay && content != SheetContent.Batch && (content != SheetContent.None || realCameraShowing(store))) {
                         ContextArea(store, ui, content, Modifier.fillMaxWidth().height(m.sheet.dp))
@@ -510,6 +516,26 @@ private fun NarrowEditor(
                 // Omega adicionar (área 08, P0-1): o conteúdo do botão aberto (193 dp)
                 // por cima da timeline, encostado na barra de adicionar, que fica.
                 if (content == SheetContent.Adding) {
+                    // 0.3.6: com o adicionar aberto, o pedaço da timeline (régua) que fica à
+                    // vista só FECHA o adicionar: o toque é consumido inteiro e não puxa a
+                    // régua nem leva o cabeçote (antes um toque de sair arrastava o tempo).
+                    Box(
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .height(m.timeline.dp)
+                            .testTag("editor.adding.dismiss")
+                            .pointerInput(Unit) {
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false).consume()
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        event.changes.forEach { it.consume() }
+                                    } while (event.changes.any { it.pressed })
+                                    ui.adding = false
+                                }
+                            },
+                    )
                     AddLayerPanel(
                         store, ui,
                         Modifier
@@ -604,7 +630,7 @@ private const val PREVIEW_PREFS = "aurea.editor.layout"
 private const val PREVIEW_HEIGHT_KEY = "preview_height_dp"
 
 @Composable
-private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, compactDock: Boolean = false) {
+private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, compactDock: Boolean = false, obscuredBottom: Float = 0f) {
     // Modo "Selecionar keyframes": o painel fecha para a timeline voltar alta,
     // com as trilhas abertas e a barra de ações inteira.
     val selectingKeys = store.keySelectMode
@@ -635,6 +661,8 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
             }
         },
         modifier = modifier.clipToBounds(),
+        // 0.3.6: a camada escolhida fica à vista ACIMA do painel que cobre a timeline.
+        obscuredBottom = obscuredBottom.dp,
         onKeyframeTap = { layer, key -> onKeyframeTapped(store, ui, layer, key) },
         onTrackTap = { layer, property, effect, param ->
             if (store.primary != layer) store.select(layer)

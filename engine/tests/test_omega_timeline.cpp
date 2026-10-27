@@ -145,3 +145,106 @@ AUREA_TEST(OmegaTimeline, KeyedSpeedKeepsItsIntegral) {
     AUREA_CHECK_EQ(t->keys[1].time.value, static_cast<i64>(180));
     AUREA_CHECK_NEAR(r.L(r.a)->source_frame(FrameIndex{120}), before, 1e-6);
 }
+
+// =============================================================================
+//  0.3.6, área keys: keyframe no mesmo quadro e corte/aparar "no cabeçote".
+// =============================================================================
+namespace {
+
+void seek036(Engine& e, i64 frame) {
+    Command c;
+    c.type = CommandType::PlaybackSeek;
+    c.seek.time = tick_at(FrameIndex{frame}, 30.0);
+    AUREA_CHECK(e.apply_command(c).ok());
+}
+
+Status key036(Engine& e, u64 layer, TrackProperty p, i64 local, f32 value, u32 flags = 0) {
+    Command c;
+    c.type = CommandType::KeyframeInsert;
+    c.keyframe.track.layer = LayerId::unpack(layer);
+    c.keyframe.track.property = p;
+    c.keyframe.track.effectIndex = kInvalidIndex;
+    c.keyframe.track.effectParamIndex = 0;
+    c.keyframe.time = FrameIndex{local};
+    c.keyframe.value = value;
+    c.keyframe.onlyIfChanged = flags;
+    return e.apply_command(c);
+}
+
+usize keyCount036(Layer* l, TrackProperty p) {
+    const Track* t = l ? l->tracks.find(p) : nullptr;
+    return t ? t->keys.size() : 0;
+}
+
+} // namespace
+
+AUREA_TEST(OmegaTimeline, KeysAddingTheSameFrameTwiceKeepsOneKeyPerTrack) {
+    StretchRig r;
+    seek036(r.e, 20);                       // local = 20 − 0 + 60 = 80
+    // ◆ do Mover: X e Y no quadro do cabeçote (uma chave por trilha).
+    AUREA_CHECK(key036(r.e, r.a, TrackProperty::PositionX, 80, 10.0f).ok());
+    AUREA_CHECK(key036(r.e, r.a, TrackProperty::PositionY, 80, 20.0f).ok());
+    AUREA_CHECK_EQ(keyCount036(r.L(r.a), TrackProperty::PositionX), usize{3});   // 60, 80, 120
+    AUREA_CHECK_EQ(keyCount036(r.L(r.a), TrackProperty::PositionY), usize{1});
+    // O mesmo toque de novo e o gesto com Auto-Key no quadro que a prévia mostra
+    // (o mesmo 80) REGRAVAM a chave: nada de uma segunda no mesmo instante.
+    AUREA_CHECK(key036(r.e, r.a, TrackProperty::PositionX, 80, 10.0f).ok());
+    AUREA_CHECK(key036(r.e, r.a, TrackProperty::PositionX, 0, 15.0f, kAutoKeyOnlyIfChanged | kAutoKeyAtPlayhead).ok());
+    AUREA_CHECK_EQ(keyCount036(r.L(r.a), TrackProperty::PositionX), usize{3});
+    const Track* x = r.L(r.a)->tracks.find(TrackProperty::PositionX);
+    AUREA_CHECK(x != nullptr);
+    if (!x) return;
+    const u32 at = x->find_exact(FrameIndex{80});
+    AUREA_CHECK(at != kInvalidIndex);
+    if (at != kInvalidIndex) AUREA_CHECK_NEAR(x->keys[at].value, 15.0f, 1e-6f);
+    // As chaves seguem em ordem e sem tempo repetido.
+    for (usize i = 1; i < x->keys.size(); ++i) AUREA_CHECK(x->keys[i - 1].time.value < x->keys[i].time.value);
+}
+
+AUREA_TEST(OmegaTimeline, KeysSplitAtPlayheadUsesTheShownFrame) {
+    StretchRig r;
+    const f64 at25 = r.L(r.a)->source_frame(FrameIndex{25});
+    const f64 at24 = r.L(r.a)->source_frame(FrameIndex{24});
+    seek036(r.e, 25);
+    Command split;
+    split.type = CommandType::LayerSplit;
+    split.layer_split.layer = LayerId::unpack(r.a);
+    split.layer_split.at = FrameIndex{kEditAtPlayhead};
+    AUREA_CHECK(r.e.apply_command(split).ok());
+    AUREA_CHECK_EQ(r.L(r.a)->end.value, static_cast<i64>(25));
+    LayerId second;
+    const AssetId source = r.L(r.a)->source;
+    r.comp()->layers().for_each([&](LayerId id, const Layer& l) {
+        if (id != LayerId::unpack(r.a) && l.source == source && l.start.value == 25) second = id;
+    });
+    AUREA_CHECK(second.valid());
+    if (!second.valid()) return;
+    // Os dois lados mostram a MESMA fonte de antes, quadro a quadro, no corte.
+    AUREA_CHECK_NEAR(r.comp()->layer(second)->source_frame(FrameIndex{25}), at25, 1e-6);
+    AUREA_CHECK_NEAR(r.L(r.a)->source_frame(FrameIndex{24}), at24, 1e-6);
+    AUREA_CHECK_EQ(r.comp()->layer(second)->end.value, static_cast<i64>(60));
+    // Cabeçote fora do clipe: o corte "no cabeçote" é recusado (nada muda).
+    seek036(r.e, 40);
+    AUREA_CHECK(!r.e.apply_command(split).ok());
+    AUREA_CHECK_EQ(r.L(r.a)->end.value, static_cast<i64>(25));
+}
+
+AUREA_TEST(OmegaTimeline, KeysTrimAtPlayheadKeepsTheSourceWithSpeedAndOffset) {
+    StretchRig r;
+    r.L(r.a)->speed = 2.0f;                 // fonte = 60 + 2·t (deslocamento 60, 2×)
+    const f64 before = r.L(r.a)->source_frame(FrameIndex{30});
+    seek036(r.e, 10);
+    AUREA_CHECK(r.e.edit_clip_time(r.a, 0, kEditAtPlayhead));
+    AUREA_CHECK_EQ(r.L(r.a)->start.value, static_cast<i64>(10));
+    AUREA_CHECK_NEAR(r.L(r.a)->source_frame(FrameIndex{30}), before, 1e-3);
+    seek036(r.e, 40);
+    AUREA_CHECK(r.e.edit_clip_time(r.a, 1, kEditAtPlayhead));
+    AUREA_CHECK_EQ(r.L(r.a)->end.value, static_cast<i64>(40));
+    AUREA_CHECK_NEAR(r.L(r.a)->source_frame(FrameIndex{30}), before, 1e-3);
+    // Fora do clipe (antes do começo): recusado, sem virar um clipe de 1 quadro.
+    seek036(r.e, 5);
+    AUREA_CHECK(!r.e.edit_clip_time(r.a, 0, kEditAtPlayhead));
+    AUREA_CHECK(!r.e.edit_clip_time(r.a, 1, kEditAtPlayhead));
+    AUREA_CHECK_EQ(r.L(r.a)->start.value, static_cast<i64>(10));
+    AUREA_CHECK_EQ(r.L(r.a)->end.value, static_cast<i64>(40));
+}

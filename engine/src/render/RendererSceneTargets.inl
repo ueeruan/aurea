@@ -2,7 +2,10 @@
 // beside later 2D effects, rather than all shadow/MSAA/post intermediate targets.
 namespace {
 bool pure_unblurred_scene(const scene3d::SceneFrame& scene) noexcept {
-    return scene.blurFrames.empty() && scene.planeLayers.empty() && scene.particleLayers.empty();
+    // 0.3.6: material coberto por camada lê a imagem dela no MESMO grafo da
+    // composição; numa etapa separada a cena sairia com o mapa do arquivo.
+    return scene.blurFrames.empty() && scene.planeLayers.empty() && scene.particleLayers.empty()
+        && !scene3d::scene_uses_layer_textures(scene);
 }
 u32 unblurred_scene_target_count(const FrameSnapshot& snap, u32 depth) noexcept {
     u32 count = 0;

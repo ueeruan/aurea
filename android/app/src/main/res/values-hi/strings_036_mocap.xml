@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mocap_title">Motion Capture (BETA)</string>
+    <string name="mocap_intro">किसी व्यक्ति के वीडियो को कैरेक्टर एनिमेशन में बदलें। विश्लेषण डिवाइस पर ही होता है, इंटरनेट की ज़रूरत नहीं।</string>
+    <string name="mocap_need_rig">इस मॉडल में अभी ह्यूमनॉइड कंकाल नहीं है। AutoRig 3D से एक बनाएँ (T-पोज़ में कैरेक्टर) और यहाँ लौटें।</string>
+    <string name="mocap_need_map">Motion Capture इस्तेमाल करने के लिए ऊपर कंकाल ठीक करें में फ़ाइल की हड्डियाँ मिलाएँ।</string>
+    <string name="mocap_autorig">AutoRig 3D</string>
+    <string name="mocap_import">वीडियो इम्पोर्ट करें</string>
+    <string name="mocap_import_hint">गैलरी से। एक व्यक्ति, पूरा शरीर दिखे, कैमरा स्थिर।</string>
+    <string name="mocap_record">मूवमेंट रिकॉर्ड करें</string>
+    <string name="mocap_record_hint">डिवाइस का कैमरा खोलता है।</string>
+    <string name="mocap_reduced">कम मोड (तेज़, कम विवरण)</string>
+    <string name="mocap_analyze">मूवमेंट का विश्लेषण करें</string>
+    <string name="mocap_analyzing">मूवमेंट का विश्लेषण… %1$d%%</string>
+    <string name="mocap_cancel">रद्द करें</string>
+    <string name="mocap_summary">%1$d फ़्रेम · %2$.1f से.</string>
+    <string name="mocap_preview">एनिमेशन का प्रीव्यू</string>
+    <string name="mocap_intensity">तीव्रता</string>
+    <string name="mocap_smoothing">स्मूदिंग</string>
+    <string name="mocap_speed">गति</string>
+    <string name="mocap_yaw">संरेखण</string>
+    <string name="mocap_floor">फ़र्श की ऊँचाई</string>
+    <string name="mocap_foot_lock">पैरों को फ़र्श पर टिकाएँ</string>
+    <string name="mocap_apply">टाइमलाइन पर लागू करें</string>
+    <string name="mocap_apply_hint">प्लेहेड से संपादन योग्य बोन कीफ़्रेम बनते हैं। अनडू एक बार में सब वापस कर देता है।</string>
+    <string name="mocap_applied">%1$d बोन कीफ़्रेम बनाए गए</string>
+    <string name="mocap_new_video">दूसरा वीडियो</string>
+    <string name="mocap_low_conf">कम भरोसा: %1$s। ये हिस्से छिपे या धुंधले थे, इसलिए इनकी गति अनुमानित है।</string>
+    <string name="mocap_limb_torso">धड़</string>
+    <string name="mocap_limb_head">सिर</string>
+    <string name="mocap_limb_left_arm">बायाँ हाथ</string>
+    <string name="mocap_limb_right_arm">दायाँ हाथ</string>
+    <string name="mocap_limb_left_leg">बायाँ पैर</string>
+    <string name="mocap_limb_right_leg">दायाँ पैर</string>
+    <string name="mocap_err_no_person">वीडियो में कोई व्यक्ति नहीं मिला।</string>
+    <string name="mocap_err_video">यह वीडियो पढ़ा नहीं जा सका।</string>
+    <string name="mocap_err_apply">कीफ़्रेम सहेजे नहीं जा सके। क्या लेयर लॉक है?</string>
+    <string name="mocap_camera_denied">कैमरे की अनुमति नहीं है।</string>
+    <string name="mocap_limits">अनुमान: सामान्य वीडियो में असली गहराई नहीं होती। उँगलियाँ और चेहरा कैप्चर नहीं होते।</string>
+</resources>

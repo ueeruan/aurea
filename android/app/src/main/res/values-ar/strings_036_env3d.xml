@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.6 (env3d): بيئة 3D جديدة (أقسام)، تبويب العرض، قسم الكائن وخامة المادة (ملف أو الخط الزمني). -->
+<resources>
+    <string name="env3d_tab_render">العرض</string>
+    <string name="env3d_section_sky">السماء والخلفية</string>
+    <string name="env3d_sky_hint">الاستوديو أو الصورة 360° حول المشهد. تضيء كل كائنات 3D في المشروع وتنعكس عليها.</string>
+    <string name="env3d_hdr_image">صورة HDR</string>
+    <string name="env3d_section_light">الإضاءة المحيطة</string>
+    <string name="env3d_section_floor">الأرضية والظل</string>
+    <string name="env3d_floor_hint">بدون أرضية، أو أرضية ظاهرة، أو ظل الكائنات فقط فوق ما خلفها.</string>
+    <string name="env3d_render_hint">تنطبق على مشهد 3D بالكامل في المشروع: الحدة واللون النهائي والتوهج.</string>
+    <string name="env3d_section_object">الكائن</string>
+    <string name="env3d_texture">الخامة</string>
+    <string name="env3d_texture_original">من النموذج</string>
+    <string name="env3d_texture_image">صورة</string>
+    <string name="env3d_texture_from_file">ملف</string>
+    <string name="env3d_texture_from_timeline">الخط الزمني</string>
+    <string name="env3d_texture_remove">إزالة</string>
+    <string name="env3d_texture_layer_title">خامة من الخط الزمني</string>
+    <string name="env3d_texture_layer_hint">تُعرض الطبقة على المادة في كل إطار. أخفِ الطبقة (العين) لتظهر على الكائن فقط.</string>
+    <string name="env3d_texture_no_layers">لا توجد طبقة في هذا التكوين يمكن أن تصبح خامة. استخدم فيديو أو صورة أو نصًا أو شكلًا أو تكوينًا (2D).</string>
+    <string name="env3d_texture_layer_value">الطبقة: %1$s</string>
+    <string name="env3d_texture_error">تعذّر استخدام هذه الخامة.</string>
+    <string name="env3d_texture_desc">خامة المادة %1$d</string>
+    <string name="env3d_layer_unnamed">طبقة بلا اسم</string>
+</resources>

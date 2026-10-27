@@ -33,6 +33,7 @@
 #include "aurea/core/ColorCode.hpp"
 #include "aurea/core/SnapMath.hpp"
 #include "aurea/core/Trackball.hpp"
+#include "aurea/rig/Mocap.hpp"
 #include "aurea/timeline/CanvasFit.hpp"
 #include "aurea/export/BitratePolicy.hpp"
 #include "aurea/export/ExportAttempts.hpp"
@@ -1305,6 +1306,18 @@ bool aurea_ios_hyper_npu_available() noexcept { return g_hyperNpuAvailable.load(
     [self flush];
 }
 
++ (int64_t)editAtPlayhead { return aurea::kEditAtPlayhead; }
+
+- (void)splitLayerAtPlayhead:(long long)layerId {
+    // 0.3.6 (keys): o quadro em que a prévia está quando o motor aplica o corte
+    // (depois do pausar do mesmo lote), não o cabeçote lido pela interface.
+    if (auto* c = _batch.add(CommandType::LayerSplit)) {
+        c->layer_split.layer = layer_of(layerId);
+        c->layer_split.at = aurea::FrameIndex{aurea::kEditAtPlayhead};
+    }
+    [self flush];
+}
+
 - (void)deleteLayers:(NSArray<NSNumber*>*)layerIds {
     for (NSNumber* n in layerIds) {
         if (auto* c = _batch.add(CommandType::LayerDelete)) {
@@ -1840,6 +1853,11 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return e->set_text3d(static_cast<aurea::u64>(layerId), spec).ok();
 }
 
+- (int32_t)lastText3DStatus {
+    auto* e = self.engine;
+    return e ? e->last_text3d_status() : 0;
+}
+
 - (BOOL)setText3DColor:(long long)layerId region:(uint32_t)region values:(NSArray<NSNumber*>*)values {
     auto* e = self.engine; aurea::scene3d::Text3DSpec spec;
     if (!e || values.count != 4 || !e->query_text3d(layerId, spec)) return NO;
@@ -1892,6 +1910,33 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     std::vector<u8> rgba;
     if (!e || !e->text3d_preset_preview(preset, size, rgba) || rgba.empty()) return nil;
     return [NSData dataWithBytes:rgba.data() length:rgba.size()];
+}
+- (BOOL)setMaterialTextureImage:(long long)layerId material:(uint32_t)material path:(NSString*)path {
+    auto* e = self.engine;
+    return e && path && e->set_material_texture_image(static_cast<aurea::u64>(layerId), material, path.UTF8String).ok();
+}
+- (BOOL)setMaterialTextureLayer:(long long)layerId material:(uint32_t)material source:(long long)source {
+    auto* e = self.engine;
+    return e && e->set_material_texture_layer(static_cast<aurea::u64>(layerId), material, static_cast<aurea::u64>(source)).ok();
+}
+- (BOOL)clearMaterialTexture:(long long)layerId material:(uint32_t)material {
+    auto* e = self.engine;
+    return e && e->clear_material_texture(static_cast<aurea::u64>(layerId), material).ok();
+}
+- (NSDictionary<NSString*, id>*)materialTexture:(long long)layerId material:(uint32_t)material {
+    auto* e = self.engine;
+    aurea::u64 ref = 0;
+    std::string name;
+    const aurea::u32 kind = e ? e->query_material_texture(static_cast<aurea::u64>(layerId), material, &ref, &name) : 0;
+    return @{@"kind": @(kind), @"ref": @(static_cast<long long>(ref)), @"name": [NSString stringWithUTF8String:name.c_str()] ?: @""};
+}
+- (NSArray<NSNumber*>*)materialTextureLayers:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @[];
+    const std::vector<aurea::u64> ids = e->material_texture_layers(static_cast<aurea::u64>(layerId));
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:ids.size()];
+    for (aurea::u64 id : ids) [out addObject:@(static_cast<long long>(id))];
+    return out;
 }
 - (int64_t)removeGaps { auto* e = self.engine; return e ? e->remove_gaps() : 0; }
 - (BOOL)editClipTime:(long long)layerId operation:(uint32_t)operation amount:(int64_t)amount previous:(long long)previous next:(long long)next {
@@ -3811,6 +3856,94 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (BOOL)resetBonePose:(long long)layerId node:(int32_t)node {
     auto* e = self.engine; return e && e->reset_bone_pose(static_cast<aurea::u64>(layerId), node);
 }
+// ---- AutoRig 3D (0.3.6 BETA) --------------------------------------------------------
+- (int32_t)humanoidStatus:(long long)layerId {
+    auto* e = self.engine; return e ? e->humanoid_status(static_cast<aurea::u64>(layerId)) : -1;
+}
+- (BOOL)autoRigStart:(long long)layerId {
+    auto* e = self.engine; return e && e->autorig_start(static_cast<aurea::u64>(layerId));
+}
+- (NSArray<NSNumber*>*)autoRigProgress {
+    auto* e = self.engine; if (!e) return @[@0, @0, @0];
+    const auto p = e->autorig_progress();
+    return @[@(p.state), @(p.progress), @(p.error)];
+}
+- (void)autoRigCancel {
+    if (auto* e = self.engine) e->autorig_cancel();
+}
+- (NSArray<NSNumber*>*)humanoidJoints:(long long)layerId {
+    auto* e = self.engine; if (!e) return @[];
+    const auto need = e->query_humanoid_joints(static_cast<aurea::u64>(layerId), nullptr, 0);
+    if (!need) return @[];
+    std::vector<float> v(need);
+    const auto w = e->query_humanoid_joints(static_cast<aurea::u64>(layerId), v.data(), need);
+    return floats_to_array(v.data(), w);
+}
+- (BOOL)humanoidMoveJoint:(long long)layerId bone:(int32_t)bone x:(float)x y:(float)y {
+    auto* e = self.engine;
+    return e && bone >= 0 && e->humanoid_move_joint(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(bone), x, y);
+}
+- (BOOL)humanoidAssignBone:(long long)layerId bone:(int32_t)bone node:(int32_t)node {
+    auto* e = self.engine;
+    return e && bone >= 0 && e->humanoid_assign_bone(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(bone), node);
+}
+- (NSString*)modelNodeName:(long long)layerId node:(int32_t)node {
+    auto* e = self.engine; if (!e) return @"";
+    const std::string s = e->model_node_name(static_cast<aurea::u64>(layerId), node);
+    return [NSString stringWithUTF8String:s.c_str()] ?: @"";
+}
+- (BOOL)dragBoneTranslate:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    return e && node >= 0 && e->drag_bone_translate(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(node), dx, dy, continuing);
+}
+- (BOOL)humanoidSetIk:(long long)layerId limb:(int32_t)limb on:(BOOL)on {
+    auto* e = self.engine;
+    return e && limb >= 0 && e->humanoid_set_ik(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(limb), on);
+}
+- (NSArray<NSNumber*>*)humanoidIk:(long long)layerId {
+    auto* e = self.engine; if (!e) return @[];
+    const auto need = e->query_humanoid_ik(static_cast<aurea::u64>(layerId), nullptr, 0);
+    if (!need) return @[];
+    std::vector<float> v(need);
+    const auto w = e->query_humanoid_ik(static_cast<aurea::u64>(layerId), v.data(), need);
+    return floats_to_array(v.data(), w);
+}
+- (BOOL)dragHumanoidIk:(long long)layerId limb:(int32_t)limb pole:(BOOL)pole dx:(float)dx dy:(float)dy continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    return e && limb >= 0 && e->drag_humanoid_ik(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(limb), pole, dx, dy, continuing);
+}
+- (int32_t)toggleHumanoidIkKey:(long long)layerId limb:(int32_t)limb {
+    auto* e = self.engine;
+    return e && limb >= 0 ? e->toggle_humanoid_ik_key(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(limb)) : -1;
+}
+// ---- Motion Capture (0.3.6 BETA) ----------------------------------------------------
+- (int32_t)mocapBegin:(long long)layerId {
+    auto* e = self.engine; return e ? e->mocap_begin(static_cast<aurea::u64>(layerId)) : -1;
+}
+- (BOOL)mocapPushFrames:(NSData*)data frames:(int32_t)frames aspect:(float)aspect {
+    auto* e = self.engine;
+    if (!e || !data || frames <= 0) return NO;
+    const NSUInteger fit = data.length / (sizeof(float) * aurea::rig::kMocapFrameFloats);
+    const auto count = static_cast<aurea::u32>(std::min<NSUInteger>(fit, static_cast<NSUInteger>(frames)));
+    return count > 0 && e->mocap_push_frames(static_cast<const float*>(data.bytes), count, aspect);
+}
+- (BOOL)mocapAnalyze:(NSArray<NSNumber*>*)params {
+    auto* e = self.engine;
+    if (!e) return NO;
+    float p[aurea::Engine::kMocapParams]{1.0f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f};
+    for (NSUInteger i = 0; i < params.count && i < aurea::Engine::kMocapParams; ++i) p[i] = params[i].floatValue;
+    return e->mocap_analyze(p, aurea::Engine::kMocapParams);
+}
+- (void)mocapCancel { if (auto* e = self.engine) e->mocap_cancel(); }
+- (float)mocapProgress { auto* e = self.engine; return e ? e->mocap_progress() : 0.0f; }
+- (NSArray<NSNumber*>*)mocapReport {
+    float v[aurea::Engine::kMocapReportFloats]{};
+    if (auto* e = self.engine) (void)e->mocap_report(v, aurea::Engine::kMocapReportFloats);
+    return floats_to_array(v, aurea::Engine::kMocapReportFloats);
+}
+- (BOOL)mocapPreview:(BOOL)on { auto* e = self.engine; return e && e->mocap_preview(on); }
+- (int32_t)mocapApply { auto* e = self.engine; return e ? e->mocap_apply() : -1; }
+- (void)mocapEnd { if (auto* e = self.engine) e->mocap_end(); }
 - (uint32_t)modelCameraCount:(long long)layerId {
     auto* e = self.engine; return e ? e->model_camera_count(static_cast<aurea::u64>(layerId)) : 0;
 }

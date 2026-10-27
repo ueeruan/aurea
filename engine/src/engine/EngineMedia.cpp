@@ -82,6 +82,60 @@ Status Engine::import_color_lut(u64 layerId, u32 effectId, const char* path) noe
     project_->mark_dirty(); request_render(); return OkStatus;
 }
 
+namespace {
+/// A imagem do arquivo em RGBA8: o decodificador da plataforma ou, sem ele
+/// (testes no PC), PNG/JPEG pelo stb. Falso = ilegível ou fora dos limites.
+bool decode_image_file(ImageLoaderFn loader, void* context, const std::string& resolved, ImagePixels& px) {
+    bool decoded = loader && loader(resolved.c_str(), px, context);
+    if (!decoded) {
+        std::vector<u8> file;
+        if (std::FILE* f = std::fopen(resolved.c_str(), "rb")) {
+            std::fseek(f, 0, SEEK_END);
+            const long bytes = std::ftell(f);
+            std::fseek(f, 0, SEEK_SET);
+            if (bytes > 0 && bytes < (256l << 20)) {
+                file.resize(static_cast<usize>(bytes));
+                if (std::fread(file.data(), 1, file.size(), f) != file.size()) file.clear();
+            }
+            std::fclose(f);
+        }
+        int w = 0, h = 0, n = 0;
+        if (stbi_uc* data = file.empty() ? nullptr
+                          : stbi_load_from_memory(file.data(), static_cast<int>(file.size()), &w, &h, &n, 4)) {
+            if (w > 0 && h > 0) {
+                px.width = static_cast<u32>(w);
+                px.height = static_cast<u32>(h);
+                try { px.rgba.assign(data, data + static_cast<usize>(w) * static_cast<usize>(h) * 4u); }
+                catch (const std::bad_alloc&) { px.rgba.clear(); }
+                decoded = !px.rgba.empty();
+            }
+            stbi_image_free(data);
+        }
+    }
+    return decoded && px.width > 0 && px.height > 0 && px.width <= 16384 && px.height <= 16384
+        && px.rgba.size() == static_cast<usize>(px.width) * px.height * 4u;
+}
+
+/// O objeto 3D e o material `material` dele (o asset tem esse material).
+Layer* textured_model(Composition* comp, u64 layerId, u32 material,
+                      const std::unordered_map<u64, std::shared_ptr<const scene3d::SceneAsset>>& models) noexcept {
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!l || l->kind != LayerKind::Model3D) return nullptr;
+    const auto it = models.find(l->model.scene.pack());
+    if (it == models.end() || !it->second || material >= it->second->materials.size() || material >= 4096) return nullptr;
+    return l;
+}
+
+/// O ajuste do material (criado sem nenhum fator: só a textura muda).
+MaterialOverride& material_override(Layer& l, u32 material) {
+    for (MaterialOverride& over : l.model.materials) if (over.materialIndex == material) return over;
+    MaterialOverride over;
+    over.materialIndex = material;
+    l.model.materials.push_back(over);
+    return l.model.materials.back();
+}
+} // namespace
+
 Status Engine::set_effect_image(u64 layerId, u32 effectId, const char* path) noexcept {
     if (!path || !*path) return Errc::InvalidArgument;
     // Decodifica fora do lock do modelo (um JPEG grande custa dezenas de ms).
@@ -170,6 +224,127 @@ std::vector<std::string> Engine::model_part_names(u64 layerId) noexcept {
     if (it == models_.end() || !it->second) return names;
     scene3d::part_names(*it->second, names);
     return names;
+}
+
+// =============================================================================
+// TEXTURA DO MATERIAL (0.3.6, v52): a imagem de cor de um material do objeto
+// 3D vira uma imagem (arquivo) ou uma camada da composição (a cada quadro).
+// =============================================================================
+Status Engine::set_material_texture_image(u64 layerId, u32 material, const char* path) noexcept {
+    if (!path || !*path) return Errc::InvalidArgument;
+    ImagePixels px;
+    if (!decode_image_file(config_.imageLoader, config_.imageLoaderContext, resolve_asset_path(path), px))
+        return Status{Errc::InvalidArgument, "imagem ilegivel"};
+    std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* layer = textured_model(comp, layerId, material, models_);
+    if (!layer) return Errc::NotFound;
+    if (layer->locked) return Errc::InvalidState;
+    if (px.rgba.capacity() + sizeof(px) > source_asset_room_locked())
+        return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
+    history_.before_mutation(*comp, project_->timeline().current(), "textura do material");
+    Asset asset;
+    asset.kind = AssetKind::Image;
+    asset.sourcePath = store_asset_path(path);
+    asset.name = path;
+    if (const usize slash = asset.name.find_last_of("/\\"); slash != std::string::npos) asset.name.erase(0, slash + 1);
+    asset.originalFilename = asset.name;
+    asset.video.width = px.width;
+    asset.video.height = px.height;
+    const AssetId id = project_->add_asset(std::move(asset));
+    images_[id.pack()] = std::make_shared<const ImagePixels>(std::move(px));
+    MaterialOverride& over = material_override(*layer, material);
+    over.textureImage = id.pack();
+    over.textureLayer = 0;
+    bump_model_revision_locked();
+    project_->mark_dirty();
+    request_render();
+    return OkStatus;
+}
+
+Status Engine::set_material_texture_layer(u64 layerId, u32 material, u64 sourceLayer) noexcept {
+    if (!sourceLayer) return Errc::InvalidArgument;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* layer = textured_model(comp, layerId, material, models_);
+    if (!layer) return Errc::NotFound;
+    if (layer->locked) return Errc::InvalidState;
+    const LayerId source = LayerId::unpack(sourceLayer);
+    const Layer* src = comp->layer(source);
+    // Ciclo camada → ela mesma (e tudo o que mora na cena 3D): recusa.
+    if (!src || !material_texture_source_ok(LayerId::unpack(layerId), source, *src))
+        return Status{Errc::InvalidArgument, "essa camada nao pode virar textura deste objeto"};
+    for (const MaterialOverride& over : layer->model.materials)
+        if (over.materialIndex == material && over.textureLayer == sourceLayer && !over.textureImage) return OkStatus;
+    history_.before_mutation(*comp, project_->timeline().current(), "textura do material");
+    MaterialOverride& over = material_override(*layer, material);
+    over.textureLayer = sourceLayer;
+    over.textureImage = 0;
+    bump_model_revision_locked();
+    project_->mark_dirty();
+    request_render();
+    return OkStatus;
+}
+
+Status Engine::clear_material_texture(u64 layerId, u32 material) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* layer = textured_model(comp, layerId, material, models_);
+    if (!layer) return Errc::NotFound;
+    if (layer->locked) return Errc::InvalidState;
+    auto it = std::find_if(layer->model.materials.begin(), layer->model.materials.end(),
+                           [&](const MaterialOverride& over) { return over.materialIndex == material; });
+    if (it == layer->model.materials.end() || !it->has_texture()) return OkStatus;   // nada a desfazer
+    history_.before_mutation(*comp, project_->timeline().current(), "textura do material");
+    it->textureImage = it->textureLayer = 0;
+    // Sem fator ajustado nem textura, o ajuste some (o material volta a ser o do arquivo).
+    if (it->mask == 0) layer->model.materials.erase(it);
+    bump_model_revision_locked();
+    project_->mark_dirty();
+    request_render();
+    return OkStatus;
+}
+
+u32 Engine::query_material_texture(u64 layerId, u32 material, u64* outRef, std::string* outName) noexcept {
+    if (outRef) *outRef = 0;
+    if (outName) outName->clear();
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->kind != LayerKind::Model3D) return 0;
+    for (const MaterialOverride& over : layer->model.materials) {
+        if (over.materialIndex != material || !over.has_texture()) continue;
+        if (over.textureLayer) {
+            if (outRef) *outRef = over.textureLayer;
+            const Layer* src = comp->layer(LayerId::unpack(over.textureLayer));
+            if (outName && src) *outName = src->name;
+            return 2;
+        }
+        if (outRef) *outRef = over.textureImage;
+        const Asset* asset = project_->asset(AssetId::unpack(over.textureImage));
+        if (outName && asset) *outName = asset->name;
+        return 1;
+    }
+    return 0;
+}
+
+std::vector<u64> Engine::material_texture_layers(u64 layerId) noexcept {
+    std::vector<u64> out;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    if (!layer || layer->kind != LayerKind::Model3D) return out;
+    const auto order = comp->order();
+    for (u32 i = static_cast<u32>(order.size()); i-- > 0;) {
+        const LayerId id = order.at(i);
+        const Layer* src = comp->layer(id);
+        if (src && material_texture_source_ok(LayerId::unpack(layerId), id, *src)) out.push_back(id.pack());
+    }
+    return out;
 }
 
 /// Engine.cpp: câmeras do arquivo viram camadas (o passo de desfazer é de quem chama).

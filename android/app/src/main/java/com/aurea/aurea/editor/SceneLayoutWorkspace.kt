@@ -150,6 +150,7 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
                 ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.scene_recenter)) { store.resetSceneView() }
             }
             if (store.rigPoseMode && store.poseBones != null) RigPoseBar(store)
+            if (store.rigFixMode && store.humanoidJoints != null) RigFixBar(store)
         }
     }
 }
@@ -169,6 +170,9 @@ private fun RigPoseBar(store: EditorStore) {
         if (chosen) ScenePillButton(CupertinoGlyph.SuitDiamond, stringResource(R.string.rig_key_bone)) { store.togglePoseKey(false) }
         ScenePillButton(CupertinoGlyph.SuitDiamond, stringResource(R.string.rig_key_all)) { store.togglePoseKey(true) }
         if (chosen) ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.rig_reset_bone)) { store.resetPose(false) }
+        // 0.3.6: "Mover" desloca o osso escolhido (o quadril) em vez de girar.
+        if (chosen) ScenePillButton(if (store.poseMove) CupertinoGlyph.CheckmarkAlt else CupertinoGlyph.Move,
+            stringResource(R.string.rig3d_move)) { store.choosePoseMove(!store.poseMove) }
         ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.rig_reset_all)) { store.resetPose(true) }
         ScenePillButton(CupertinoGlyph.CheckmarkAlt, stringResource(R.string.rig_done)) { store.setRigPose(false) }
     }
@@ -281,3 +285,20 @@ private fun SceneNumberField(value: Float, label: String, identity: String, onEd
                 })
     }
 }
+
+/** Barra do Corrigir esqueleto (AutoRig 3D, 0.3.6): dica, progresso dos pesos e concluir. */
+@Composable
+private fun RigFixBar(store: EditorStore) {
+    val working = store.autoRigState == 1
+    val text = if (working) stringResource(R.string.rig3d_working, (store.autoRigProgress * 100f).toInt().coerceIn(0, 100))
+               else stringResource(R.string.rig3d_fix_hint)
+    Text(text, color = AureaColors.Text, fontSize = 12.sp,
+        textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp)
+            .background(ShellColors.FloatingDark, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 8.dp))
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (working) ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.rig3d_cancel)) { store.cancelAutoRig() }
+        ScenePillButton(CupertinoGlyph.CheckmarkAlt, stringResource(R.string.rig_done)) { store.setRigFix(false) }
+    }
+}
+

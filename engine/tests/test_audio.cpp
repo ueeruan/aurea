@@ -253,6 +253,78 @@ AUREA_TEST(Audio, SparseAudioTimestampsOnlyPadTheRequestedWindow) {
     AUREA_CHECK(!cache.fetch(1, std::numeric_limits<i64>::max()));
 }
 
+// 0.3.6 (MKV 2K60 com áudio ruim): Matroska grava o instante de cada pacote em
+// milissegundos, e um bloco com "lacing" entrega vários pacotes com o MESMO
+// instante. A janela tem de seguir a contagem de amostras: nada de silêncio
+// inserido nem amostras cortadas a cada pacote (estalos contínuos).
+AUREA_TEST(Audio, MatroskaMillisecondAndLacedTimestampsStayContiguous) {
+    // A regra pura primeiro.
+    AUREA_CHECK_EQ(audio::audio_chunk_tolerance(48000), 192);
+    AUREA_CHECK_EQ(audio::audio_chunk_tolerance(100), 2);
+    {
+        const auto jitter = audio::audio_chunk_join(-16, 1024, 48000, true, false);
+        AUREA_CHECK_EQ(jitter.gap, 0); AUREA_CHECK_EQ(jitter.skip, 0);
+        const auto ahead = audio::audio_chunk_join(32, 1024, 48000, true, false);
+        AUREA_CHECK_EQ(ahead.gap, 0); AUREA_CHECK_EQ(ahead.skip, 0);
+        const auto hole = audio::audio_chunk_join(1024, 1024, 48000, true, false);
+        AUREA_CHECK_EQ(hole.gap, 1024);
+        const auto overlap = audio::audio_chunk_join(-600, 1024, 48000, true, false);
+        AUREA_CHECK_EQ(overlap.skip, 600);
+        const auto laced = audio::audio_chunk_join(-3072, 1024, 48000, true, true);
+        AUREA_CHECK_EQ(laced.gap, 0); AUREA_CHECK_EQ(laced.skip, 0);
+        // Primeiro trecho depois de um seek: a regra exata de sempre.
+        const auto first = audio::audio_chunk_join(16, 1024, 48000, false, true);
+        AUREA_CHECK_EQ(first.gap, 16);
+    }
+    struct Decoder final : audio::AudioDecoderBackend {
+        audio::AudioStreamInfo stream{};
+        bool laced = false;
+        i64 packet = 0;
+        explicit Decoder(bool l) : laced(l) { stream.sampleRate = 48000; stream.channels = 2; stream.durationUs = 10'000'000; }
+        const audio::AudioStreamInfo& info() const noexcept override { return stream; }
+        Status seek(i64 us) noexcept override {
+            packet = std::max<i64>(0, us) * 48 / 1000 / 1024;
+            if (laced) packet -= packet % 4;
+            return OkStatus;
+        }
+        Status read(std::vector<f32>& out, i64& pts, bool& eos) noexcept override {
+            // Instante do bloco (4 pacotes por bloco com lacing), em ms.
+            const i64 first = (laced ? packet - packet % 4 : packet) * 1024;
+            pts = (first * 1000 + 24000) / 48000 * 1000;
+            out.resize(1024 * 2);
+            for (i64 i = 0; i < 1024; ++i)
+                out[2 * i] = out[2 * i + 1] = static_cast<f32>(0.5 * std::sin(2.0 * kTestPi * 440.0 * static_cast<f64>(packet * 1024 + i) / 48000.0));
+            eos = ++packet * 1024 >= 48000 * 10;
+            return OkStatus;
+        }
+    };
+    struct Factory final : VideoSourceFactory {
+        bool laced = false;
+        bool probe(const char*, MediaProbe&) override { return false; }
+        std::unique_ptr<VideoDecoderBackend> open_video(const Asset&, MediaPriority) override { return {}; }
+        std::unique_ptr<audio::AudioDecoderBackend> open_audio(const char*) override { return std::make_unique<Decoder>(laced); }
+    };
+    for (bool laced : {false, true}) {
+        Factory factory; factory.laced = laced;
+        audio::AudioBlockCache cache(&factory, 16ull << 20, false);
+        cache.register_asset(1, {"mkv", 10 * 48000});
+        f64 maxErr = 0.0;
+        for (i64 b = 0; b < 4; ++b) {
+            const auto block = cache.fetch(1, b);
+            AUREA_CHECK(block != nullptr);
+            if (!block) continue;
+            for (u32 n = b == 0 ? 64u : 0u; n < audio::kBlockFrames; ++n) {
+                const f64 want = 0.5 * std::sin(2.0 * kTestPi * 440.0 * static_cast<f64>(b * audio::kBlockFrames + n) / 48000.0);
+                maxErr = std::max(maxErr, std::fabs(static_cast<f64>(block->pcm[2 * n]) - want));
+            }
+        }
+        std::printf("    matroska %s: erro maximo %.2e, seeks %llu\n", laced ? "com lacing" : "em ms", maxErr,
+                    static_cast<unsigned long long>(cache.stats().seeks));
+        AUREA_CHECK(maxErr < 1e-3);
+        AUREA_CHECK_EQ(cache.stats().seeks, 1u);
+    }
+}
+
 AUREA_TEST(Audio, DiskWaveformAccountsPyramidAndCanBeReclaimed) {
     SyntheticConfig cfg = audio_cfg(48000); cfg.audioSeconds = .1;
     SyntheticFactory factory(cfg);

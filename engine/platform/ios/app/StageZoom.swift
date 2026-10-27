@@ -290,10 +290,16 @@ struct ViewModeColumn: View {
                 zoomCell.frame(height: unit * 1.8)
             }
             .frame(width: width, height: geometry.size.height)
-            .background(OmegaChrome.column)
-            // Consome o toque: nada passa para o palco embaixo.
-            .contentShape(Rectangle())
-            .onTapGesture {}
+            // Consome o toque nas folgas: nada passa para o palco embaixo.
+            // 0.3.6 (sidebar): o tap vazio ficava no PAI das células e disputava o
+            // toque com os botões (par do Android, onde o pai cancelava o clique);
+            // agora é um fundo atrás delas, que só pega o que nenhuma célula pegou.
+            .background(
+                OmegaChrome.column
+                    .contentShape(Rectangle())
+                    .onTapGesture {}
+                    .accessibilityHidden(true)
+            )
             .mask(alignment: .bottom) {
                 Rectangle().frame(height: geometry.size.height * (0.5 + 0.5 * progress))
             }

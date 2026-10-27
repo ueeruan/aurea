@@ -81,7 +81,7 @@ def main():
     # 2) Passos.
     k_size = int_array(read(KT / 'TextMode.kt'), r'TextSizeSteps = intArrayOf\((.*?)\)')
     s_size = int_array(read(APP / 'TextEditModeView.swift'), r'static let values: \[Int\] = \[(.*?)\]')
-    if k_size != s_size or not k_size or len(k_size) != 25:
+    if k_size != s_size or not k_size or len(k_size) != 36:
         problems.append('passos de tamanho divergentes: %s x %s' % (k_size, s_size))
     k_width = int_array(read(KT / 'DrawingEditor.kt'), r'DrawWidthSteps = intArrayOf\((.*?)\)')
     s_width = int_array(read(APP / 'DrawingEditorView.swift'), r'static let values: \[Int\] = \[(.*?)\]')

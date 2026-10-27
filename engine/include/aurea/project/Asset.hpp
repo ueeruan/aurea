@@ -121,6 +121,10 @@ struct Asset {
         /// 2 Leve. Gravado na seção Scene3D do projeto; reabrir aplica de novo.
         u8 importQuality = 0;
         u32 sourceTriangles = 0;   ///< do arquivo, antes da simplificação
+        /// 0.3.6 AutoRig 3D: receita do rig (rig/AutoRig.hpp, encode_*_spec).
+        /// Vazia = o modelo como veio do arquivo. Gravada na seção Rig3D;
+        /// reabrir reconstrói o esqueleto e os pesos a partir dela.
+        std::string rig;
     } model;
 
     [[nodiscard]] bool is_visual() const noexcept {

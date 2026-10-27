@@ -977,6 +977,8 @@ class Exporter internal constructor(
     private fun noticeFor(p: ExportProgress, options: ExportOptions): String {
         val lines = ArrayList<String>(4)
         if (lighterAfterClose) lines += text(R.string.export_after_system_close)
+        // 0.3.6: o Android tirou o export do primeiro plano (limite de tempo, onTimeout).
+        if (ExportForegroundService.timedOut) lines += text(R.string.export036_timeout_notice)
         if (p.resumed && resumedFromPercent >= 0) lines += text(R.string.export_resumed_from, resumedFromPercent)
         when ((p.flags ushr 8) and 15) {
             4 -> lines += text(R.string.export_v2_finalizing)

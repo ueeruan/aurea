@@ -1820,8 +1820,8 @@ internal class TimelinePainter(
                 if (dragging) dragX = xa
                 val highlighted = f == selFrame || picked?.get(i) == true || f == playheadFrame
                 val distinct = if (focusCount >= 2) distinctTracks(r.keysAt[i]) else 1
-                val stacked = focusCount >= 2 && (distinct >= 2 || distinct < focusCount)
-                omegaEditKey(xa, cy, editH, highlighted, dragging, stacked, stacked && distinct < focusCount)
+                val stacked = KeyEmphasis.stacked(focusCount, distinct)
+                omegaEditKey(xa, cy, editH, highlighted, dragging, stacked, stacked)
             } else {
                 omegaKeyPill(xa, TimeAxis.xOf(inst[j].toDouble(), view, ppf, cx), cy, if (editing) editH else altH, editing)
                 if (!editing) continue
@@ -2004,10 +2004,10 @@ internal class TimelinePainter(
             for (k in sec0..sec1) tick(omegaTicks[OmegaRuler.HALF], OmegaRuler.frameOf(k + 0.5, fps), OmegaRuler.heightDp(OmegaRuler.HALF))
         }
         if (secStep == 1 && step < fps / 2f) {
-            var f = (fFirst / step) * step
-            while (f <= fLast) {
-                if (OmegaRuler.tickClass(f, fps) == OmegaRuler.FRAME) tick(omegaTicks[OmegaRuler.FRAME], f, OmegaRuler.heightDp(OmegaRuler.FRAME))
-                f += step
+            // 0.3.6: contados do começo de cada segundo e longe dos tiques maiores
+            // (o passo solto caía colado no do segundo/meio segundo).
+            for (sec in sec0..sec1) OmegaRuler.frameTicks(sec, fps, pps) { f ->
+                if (f in fFirst..fLast) tick(omegaTicks[OmegaRuler.FRAME], f, OmegaRuler.heightDp(OmegaRuler.FRAME))
             }
         }
         for (p in omegaTicks) drawPath(p, AureaTimeline.OmegaTick, style = omegaTickStroke)

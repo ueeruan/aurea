@@ -137,6 +137,12 @@ struct TimelineMetrics {
     var keyTouchHalf: CGFloat { dp(14) }
     /// Folga do losango até o alvo mínimo de 48 pt; cede às alças, tampa e setas (par do Android).
     var keyHitHalf: CGFloat { dp(24) }
+    /// 0.3.6 (keys): meia altura do alvo do losango da camada escolhida (44 pt; a
+    /// linha tem 28). Passa para a régua e as vizinhas só onde um losango responde
+    /// (`nearKeyHit` da TimelineView). Par do Android.
+    var keyReachV: CGFloat { dp(22) }
+    /// Toque num losango aceita um dedo que rola um pouco mais antes de virar scrub.
+    var keyTapSlop: CGFloat { dp(12) }
     /// Histerese do arrasto de losango: o frame só troca depois de meio frame + isto.
     var keyDragHysteresis: CGFloat { dp(3) }
     var keyGlyphHalf: CGFloat { dp(6) }

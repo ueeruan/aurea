@@ -191,6 +191,19 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
                     if (suspended_) e.source->suspend();
                 }
             }
+            // 0.3.6: a fonte ORIGINAL da prévia não acompanha o tempo real
+            // neste aparelho (decoder lento, sem hardware para o codec): a
+            // política passa a pedir o proxy dela. Proxy, export e capturas
+            // exatas não contam.
+            if (e.source && !proxy && !finalQuality && !originalSourceLeases_ && !softwareOnly && !suspended_
+                && !e.speed.reported()) {
+                const VideoSource::Stats s = e.source->stats();
+                if (e.speed.observe(s.framesDelivered + s.framesDiscarded, s.decodeMsAvg, asset.video.fps)) {
+                    AUREA_LOG_WARN("decoder da camada lento: %.1f ms por quadro a %.2f fps", static_cast<f64>(s.decodeMsAvg),
+                                   asset.video.fps);
+                    proxies_.mark_slow_decode(asset);
+                }
+            }
             return e.failed ? nullptr : e.source.get();
         }
     }

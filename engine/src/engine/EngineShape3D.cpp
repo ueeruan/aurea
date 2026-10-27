@@ -558,6 +558,7 @@ bool Engine::material_preview(u64 layerId, u32 material, u32 size, std::vector<u
     // O asset fica seguro pelo shared_ptr depois de soltar a trava: a bola lê
     // os pixels do mapa de cor fora dela.
     std::shared_ptr<const scene3d::SceneAsset> asset;
+    std::shared_ptr<const ImagePixels> ownImage;   // 0.3.6: textura própria do material (imagem)
     scene3d::MaterialBall ball;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
@@ -576,6 +577,18 @@ bool Engine::material_preview(u64 layerId, u32 material, u32 size, std::vector<u
             const f32 overrides[6]{over.baseColor.x, over.baseColor.y, over.baseColor.z, over.baseColor.w, over.metallic, over.roughness};
             for (u32 p = 0; p < 6; ++p) if (over.mask & (1u << p)) fields[p] = overrides[p];
             mask |= over.mask;
+            // Textura do material (imagem): a bola mostra a imagem nova, com a
+            // cor branca como no render (salvo cor ajustada à mão).
+            if (over.textureImage) {
+                if (const auto px = images_.find(over.textureImage); px != images_.end() && px->second
+                    && !px->second->rgba.empty()) {
+                    ownImage = px->second;
+                    ball.image = ownImage->rgba.data();
+                    ball.imageWidth = ownImage->width;
+                    ball.imageHeight = ownImage->height;
+                    for (u32 p = 0; p < 3; ++p) if (!(over.mask & (1u << p))) fields[p] = 1.0f;
+                }
+            }
             break;
         }
         const auto local = layer->local_time(playback_.current());

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.6 (mídia/export): o Android 15+ esgotou o tempo do serviço de exportação em segundo plano (onTimeout). -->
+    <string name="export036_timeout_title">Exportação fora do primeiro plano</string>
+    <string name="export036_timeout_text">O Android limitou o tempo da exportação em segundo plano. Abra o Aurea para que ela termine; se o sistema fechar o app, a próxima exportação continua de onde parou.</string>
+    <string name="export036_timeout_notice">O Android limitou o tempo em segundo plano: mantenha o Aurea aberto até a exportação terminar.</string>
+</resources>

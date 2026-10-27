@@ -1359,3 +1359,22 @@ AUREA_TEST(MediaDuration, DeclaredDurationFarBeyondTheLastSampleIsCut) {
     AUREA_CHECK_EQ(reconcile_duration_us(8'000'000, -1, frame), i64{8'000'000});
     AUREA_CHECK_EQ(reconcile_duration_us(-5, -1, frame), i64{0});
 }
+
+// 0.3.6: MKV de 60 fps (carimbos em ms: 0, 17, 33, 50...) é 60 fps, não 58,8.
+AUREA_TEST(MediaDuration, MillisecondTimestampsKeepTheRealFrameRate) {
+    using aurea::media::frame_rate_from_sorted_times;
+    std::vector<i64> mkv60, mp4_2997, vfr;
+    for (i64 i = 0; i < 32; ++i) {
+        mkv60.push_back((i * 1000 + 30) / 60 * 1000);                 // ms arredondado
+        mp4_2997.push_back(i * 1001 * 1'000'000 / 30000);              // exato em µs
+    }
+    const f64 a = frame_rate_from_sorted_times(mkv60.data(), mkv60.size());
+    const f64 b = frame_rate_from_sorted_times(mp4_2997.data(), mp4_2997.size());
+    std::printf("    mkv 60 -> %.3f fps, mp4 29.97 -> %.3f fps\n", a, b);
+    AUREA_CHECK(std::fabs(a - 60.0) < 0.1);
+    AUREA_CHECK(std::fabs(b - 30000.0 / 1001.0) < 0.01);
+    // Taxa variável (gravador de tela com pausas): a mediana, como antes.
+    for (i64 t : {0, 33'333, 66'667, 100'000, 500'000, 533'333, 566'667}) vfr.push_back(t);
+    AUREA_CHECK(std::fabs(frame_rate_from_sorted_times(vfr.data(), vfr.size()) - 30.0) < 0.1);
+    AUREA_CHECK_EQ(frame_rate_from_sorted_times(vfr.data(), 2), 0.0);
+}

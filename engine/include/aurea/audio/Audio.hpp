@@ -113,6 +113,46 @@ void resample_to_mix(const f32* srcStereo, i64 srcFrames, f64 srcPos0, f64 step,
 void to_stereo(const f32* frame, u32 channels, f32& l, f32& r) noexcept;
 
 // =============================================================================
+// 0.3.6 (MKV com áudio ruim): emenda de trechos decodificados
+// =============================================================================
+/// Como um trecho decodificado entra na janela de PCM. `gap` > 0: silêncio
+/// antes dele (buraco de verdade no fluxo); `skip` > 0: quadros do começo do
+/// trecho que já estão na janela (sobreposição de verdade).
+struct AudioChunkJoin {
+    i64 gap = 0;
+    i64 skip = 0;
+};
+
+/// Folga de carimbo, em quadros da fonte: 4 ms (192 quadros a 48 kHz), nunca
+/// menos de 2. Matroska/WebM (e FLV) gravam o instante de cada pacote em
+/// milissegundos: um AAC de 1024 quadros a 48 kHz dura 21,333 ms e os carimbos
+/// saem 0, 21, 43, 64... — até ±1 ms (±48 quadros) do lugar exato. A folga
+/// antiga de ±2 quadros (só o arredondamento de MP4) virava, A CADA pacote,
+/// silêncio inserido ou amostras cortadas: estalos contínuos no MKV.
+[[nodiscard]] constexpr i64 audio_chunk_tolerance(u32 sampleRate) noexcept {
+    const i64 t = static_cast<i64>(sampleRate) * 4 / 1000;
+    return t < 2 ? 2 : t;
+}
+
+/// `d` = carimbo do trecho − fim do que já está na janela (quadros da fonte),
+/// `n` = quadros do trecho. `continuing` = a janela já tem trechos desta
+/// leitura (sem seek no meio); o primeiro trecho depois de um seek mantém a
+/// regra exata de ±2 quadros. `sameStampAsPrevious` = o trecho tem o MESMO
+/// carimbo do anterior (pacotes de um bloco Matroska com "lacing" saem do
+/// extrator todos com o instante do bloco): a contagem de amostras manda, o
+/// trecho é contíguo. Dentro da folga também é contíguo; fora dela, buraco
+/// vira silêncio e sobreposição é cortada (como sempre).
+[[nodiscard]] constexpr AudioChunkJoin audio_chunk_join(i64 d, i64 n, u32 sampleRate, bool continuing,
+                                                        bool sameStampAsPrevious) noexcept {
+    AudioChunkJoin j;
+    if (continuing && sameStampAsPrevious) return j;
+    const i64 tol = continuing ? audio_chunk_tolerance(sampleRate) : 2;
+    if (d > tol) j.gap = d;
+    else if (d < -tol) j.skip = -d < n ? -d : n;
+    return j;
+}
+
+// =============================================================================
 // Cache de blocos
 // =============================================================================
 struct AudioBlock {

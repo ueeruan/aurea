@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="export036_timeout_title">Ekspor keluar dari latar depan</string>
+    <string name="export036_timeout_text">Android membatasi waktu ekspor di latar belakang. Buka Aurea agar ekspor selesai; jika sistem menutup aplikasi, ekspor berikutnya melanjutkan dari titik berhenti.</string>
+    <string name="export036_timeout_notice">Android membatasi waktu di latar belakang: biarkan Aurea tetap terbuka sampai ekspor selesai.</string>
+</resources>

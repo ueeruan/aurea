@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.6 (env3d): 3D परिवेश नए सिरे से (खंड), रेंडर टैब, वस्तु खंड और मटीरियल टेक्सचर (फ़ाइल या टाइमलाइन)। -->
+<resources>
+    <string name="env3d_tab_render">रेंडर</string>
+    <string name="env3d_section_sky">आकाश और पृष्ठभूमि</string>
+    <string name="env3d_sky_hint">दृश्य के चारों ओर स्टूडियो या 360° छवि। यह प्रोजेक्ट की हर 3D वस्तु को रोशन करती है और उसमें झलकती है।</string>
+    <string name="env3d_hdr_image">HDR छवि</string>
+    <string name="env3d_section_light">परिवेश प्रकाश</string>
+    <string name="env3d_section_floor">फ़र्श और छाया</string>
+    <string name="env3d_floor_hint">कोई फ़र्श नहीं, दिखने वाला फ़र्श, या पीछे की चीज़ों पर केवल वस्तुओं की छाया।</string>
+    <string name="env3d_render_hint">ये प्रोजेक्ट के पूरे 3D दृश्य पर लागू होते हैं: तीक्ष्णता, अंतिम रंग और चमक।</string>
+    <string name="env3d_section_object">वस्तु</string>
+    <string name="env3d_texture">टेक्सचर</string>
+    <string name="env3d_texture_original">मॉडल से</string>
+    <string name="env3d_texture_image">छवि</string>
+    <string name="env3d_texture_from_file">फ़ाइल</string>
+    <string name="env3d_texture_from_timeline">टाइमलाइन</string>
+    <string name="env3d_texture_remove">हटाएँ</string>
+    <string name="env3d_texture_layer_title">टाइमलाइन से टेक्सचर</string>
+    <string name="env3d_texture_layer_hint">लेयर हर फ़्रेम में मटीरियल पर रेंडर होती है। लेयर छिपाएँ (आँख) ताकि वह सिर्फ़ वस्तु पर दिखे।</string>
+    <string name="env3d_texture_no_layers">इस कंपोज़िशन की कोई लेयर टेक्सचर नहीं बन सकती। वीडियो, छवि, टेक्स्ट, आकृति या कंपोज़िशन (2D) का उपयोग करें।</string>
+    <string name="env3d_texture_layer_value">लेयर: %1$s</string>
+    <string name="env3d_texture_error">यह टेक्सचर उपयोग नहीं हो सका।</string>
+    <string name="env3d_texture_desc">मटीरियल %1$d का टेक्सचर</string>
+    <string name="env3d_layer_unnamed">बिना नाम की लेयर</string>
+</resources>

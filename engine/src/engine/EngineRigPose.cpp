@@ -41,9 +41,8 @@ void current_pose(const Composition& comp, const Layer& l, const scene3d::SceneA
     const i32 clip = l.model.animationClip >= 0 && l.model.animationClip < static_cast<i32>(asset.animations.size())
         ? l.model.animationClip : -1;
     const f32 t = clip >= 0 ? scene3d::clip_time(asset.animations[static_cast<usize>(clip)], local / fps * l.model.timeScale) : 0.0f;
-    std::vector<scene3d::BoneOffset> offsets;
-    scene3d::bone_offsets(l, local, offsets);
-    scene3d::evaluate_pose(asset, clip, t, pose, nullptr, offsets.data(), offsets.size());
+    // 0.3.6: o mesmo caminho do renderer (rotação, translação e IK).
+    scene3d::evaluate_rig_pose(asset, l, clip, t, local, pose);
 }
 
 /// Rotação de pose do osso no tempo local (graus; 0 sem trilha).
@@ -207,7 +206,7 @@ i32 Engine::toggle_bone_key(u64 layerId, i32 node) noexcept {
     const FrameIndex local = l->local_time(now);
     bool any = false;
     for (const i32 b : bones)
-        for (u32 c = 0; c < 3; ++c) {
+        for (u32 c = 0; c < 6; ++c) {
             const Track* t = l->tracks.find(TrackProperty::BonePose, static_cast<u32>(b), c);
             any = any || (t && t->find_exact(local) != kInvalidIndex);
         }
@@ -215,8 +214,16 @@ i32 Engine::toggle_bone_key(u64 layerId, i32 node) noexcept {
     bump_model_revision_locked();
     for (const i32 b : bones) {
         const Vec3 cur = bone_euler(*l, static_cast<u32>(b), local);
-        const f32 values[3]{cur.x, cur.y, cur.z};
-        for (u32 c = 0; c < 3; ++c) {
+        f32 values[6]{cur.x, cur.y, cur.z, 0, 0, 0};
+        // 0.3.6: o osso deslocado (quadril, params 3..5) entra na mesma key.
+        u32 channels = 3;
+        for (u32 c = 3; c < 6; ++c)
+            if (const Track* t = l->tracks.find(TrackProperty::BonePose, static_cast<u32>(b), c)) {
+                channels = 6;
+                const f32 v = t->value_or(local, t->staticValue);
+                values[c] = std::isfinite(v) ? v : 0.0f;
+            }
+        for (u32 c = 0; c < channels; ++c) {
             if (any) {
                 Track* t = l->tracks.find(TrackProperty::BonePose, static_cast<u32>(b), c);
                 if (!t || t->find_exact(local) == kInvalidIndex) continue;

@@ -194,6 +194,8 @@ private:
         bool failed = false;
         u64 failedFrame = 0;   ///< quando o open falhou (nova tentativa depois de um intervalo)
         u32 failures = 0;      ///< tentativas de open que falharam nesta camada
+        /// 0.3.6: a fonte original acompanha o tempo real? (PreviewProxy.hpp)
+        DecodeSpeedMonitor speed;
     };
 
     VideoSourceFactory* factory_ = nullptr;

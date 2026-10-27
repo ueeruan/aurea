@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="export036_timeout_title">خرج التصدير من الواجهة</string>
+    <string name="export036_timeout_text">حدّ Android من مدة التصدير في الخلفية. افتح Aurea ليكتمل التصدير؛ وإذا أغلق النظام التطبيق، يتابع التصدير التالي من حيث توقف.</string>
+    <string name="export036_timeout_notice">حدّ Android من الوقت في الخلفية: أبقِ Aurea مفتوحًا حتى ينتهي التصدير.</string>
+</resources>

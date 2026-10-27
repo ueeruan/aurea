@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="t3d036_err_memory">Se agotó la memoria de imágenes y modelos de este proyecto: no se pudo rehacer el texto 3D. Quita los medios que no usas o guarda y vuelve a abrir el proyecto.</string>
+    <string name="t3d036_err_font">La fuente de este texto 3D no está en este dispositivo y no hay otra disponible. Elige otra fuente.</string>
+    <string name="t3d036_err_geometry">No se pudo generar el texto 3D con este cambio: el texto no tiene letras visibles o tiene demasiadas letras para animarlas una por una (hasta 256).</string>
+    <string name="t3d036_err_generic">No se pudo aplicar el cambio al texto 3D.</string>
+</resources>

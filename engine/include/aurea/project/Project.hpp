@@ -116,7 +116,19 @@ struct EditorSettings {
     /// dos editores de vídeo). Gravada no fim da seção do projeto: arquivo
     /// antigo, sem o byte, abre em Composição.
     u8   uiMode = 0;
+    /// 0.3.6: como estava o ímã da composição ANTES de a interface ir para a
+    /// Edição ([EditMagnetBefore]); voltar à Composição devolve esse estado (a
+    /// Edição liga o ímã e a trilha principal só para ela). 0 = não registrado
+    /// (arquivo antigo): voltar não mexe em nada. Gravado depois de `uiMode`.
+    u8   magnetBeforeEdit = 0;
 };
+
+/// Bits de `EditorSettings::magnetBeforeEdit`.
+namespace EditMagnetBefore {
+inline constexpr u8 Recorded = 1;      ///< o estado abaixo foi registrado na troca para a Edição
+inline constexpr u8 CompMagnet = 2;    ///< o modo Edição (ímã) da composição já estava ligado
+inline constexpr u8 AnyLine = 4;       ///< alguma linha já era magnética (escolha da pessoa)
+}
 
 struct ProjectMetadata {
     std::string title = "Projeto sem título";

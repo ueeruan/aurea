@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mocap_title">Motion Capture (BETA)</string>
+    <string name="mocap_intro">Turn a video of a person into character animation. Analysis runs on the device, no internet needed.</string>
+    <string name="mocap_need_rig">This model has no humanoid skeleton yet. Create one with AutoRig 3D (character in T-pose) and come back here.</string>
+    <string name="mocap_need_map">Match the file bones in Fix skeleton, above, to use Motion Capture.</string>
+    <string name="mocap_autorig">AutoRig 3D</string>
+    <string name="mocap_import">Import video</string>
+    <string name="mocap_import_hint">From the gallery. One person, full body visible, still camera.</string>
+    <string name="mocap_record">Record movement</string>
+    <string name="mocap_record_hint">Opens the device camera.</string>
+    <string name="mocap_reduced">Reduced mode (faster, less detail)</string>
+    <string name="mocap_analyze">Analyze movement</string>
+    <string name="mocap_analyzing">Analyzing movement… %1$d%%</string>
+    <string name="mocap_cancel">Cancel</string>
+    <string name="mocap_summary">%1$d frames · %2$.1f s</string>
+    <string name="mocap_preview">Preview animation</string>
+    <string name="mocap_intensity">Intensity</string>
+    <string name="mocap_smoothing">Smoothing</string>
+    <string name="mocap_speed">Speed</string>
+    <string name="mocap_yaw">Alignment</string>
+    <string name="mocap_floor">Floor height</string>
+    <string name="mocap_foot_lock">Lock feet to the floor</string>
+    <string name="mocap_apply">Apply to timeline</string>
+    <string name="mocap_apply_hint">Becomes editable bone keyframes from the playhead. Undo reverts it all at once.</string>
+    <string name="mocap_applied">%1$d bone keyframes created</string>
+    <string name="mocap_new_video">Another video</string>
+    <string name="mocap_low_conf">Low confidence: %1$s. These parts were hidden or unclear, so their movement is estimated.</string>
+    <string name="mocap_limb_torso">torso</string>
+    <string name="mocap_limb_head">head</string>
+    <string name="mocap_limb_left_arm">left arm</string>
+    <string name="mocap_limb_right_arm">right arm</string>
+    <string name="mocap_limb_left_leg">left leg</string>
+    <string name="mocap_limb_right_leg">right leg</string>
+    <string name="mocap_err_no_person">No person found in the video.</string>
+    <string name="mocap_err_video">This video could not be read.</string>
+    <string name="mocap_err_apply">The keyframes could not be written. Is the layer locked?</string>
+    <string name="mocap_camera_denied">No camera access.</string>
+    <string name="mocap_limits">Approximation: regular video has no real depth. Fingers and face are not captured.</string>
+</resources>

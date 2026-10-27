@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.6 Motion Capture (BETA): painel 3D da camada com rig (Android e iOS). -->
+    <string name="mocap_title">Motion Capture (BETA)</string>
+    <string name="mocap_intro">Transforme o vídeo de uma pessoa em animação do personagem. A análise roda no aparelho, sem internet.</string>
+    <string name="mocap_need_rig">Este modelo ainda não tem um esqueleto humanoide. Crie um com o AutoRig 3D (personagem em T-pose) e volte aqui.</string>
+    <string name="mocap_need_map">Associe os ossos do arquivo em Corrigir esqueleto, acima, para usar o Motion Capture.</string>
+    <string name="mocap_autorig">AutoRig 3D</string>
+    <string name="mocap_import">Importar vídeo</string>
+    <string name="mocap_import_hint">Da galeria. Uma pessoa, corpo inteiro visível, câmera parada.</string>
+    <string name="mocap_record">Gravar movimento</string>
+    <string name="mocap_record_hint">Abre a câmera do aparelho.</string>
+    <string name="mocap_reduced">Modo reduzido (mais rápido, menos detalhe)</string>
+    <string name="mocap_analyze">Analisar movimento</string>
+    <string name="mocap_analyzing">Analisando movimento… %1$d%%</string>
+    <string name="mocap_cancel">Cancelar</string>
+    <string name="mocap_summary">%1$d quadros · %2$.1f s</string>
+    <string name="mocap_preview">Pré-visualizar animação</string>
+    <string name="mocap_intensity">Intensidade</string>
+    <string name="mocap_smoothing">Suavização</string>
+    <string name="mocap_speed">Velocidade</string>
+    <string name="mocap_yaw">Alinhamento</string>
+    <string name="mocap_floor">Altura do chão</string>
+    <string name="mocap_foot_lock">Prender os pés no chão</string>
+    <string name="mocap_apply">Aplicar à timeline</string>
+    <string name="mocap_apply_hint">Vira keyframes de osso editáveis a partir do cabeçote. Desfazer volta tudo de uma vez.</string>
+    <string name="mocap_applied">%1$d keyframes de osso criados</string>
+    <string name="mocap_new_video">Outro vídeo</string>
+    <string name="mocap_low_conf">Baixa confiança: %1$s. Essas partes ficaram ocultas ou pouco nítidas e o movimento delas é estimado.</string>
+    <string name="mocap_limb_torso">tronco</string>
+    <string name="mocap_limb_head">cabeça</string>
+    <string name="mocap_limb_left_arm">braço esquerdo</string>
+    <string name="mocap_limb_right_arm">braço direito</string>
+    <string name="mocap_limb_left_leg">perna esquerda</string>
+    <string name="mocap_limb_right_leg">perna direita</string>
+    <string name="mocap_err_no_person">Nenhuma pessoa encontrada no vídeo.</string>
+    <string name="mocap_err_video">Não foi possível ler este vídeo.</string>
+    <string name="mocap_err_apply">Não foi possível gravar os keyframes. A camada está bloqueada?</string>
+    <string name="mocap_camera_denied">Sem acesso à câmera.</string>
+    <string name="mocap_limits">Aproximação: vídeo comum não tem profundidade real. Dedos e rosto não são capturados.</string>
+</resources>

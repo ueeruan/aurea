@@ -36,6 +36,13 @@ struct AudioBlockCache::Reader {
     std::vector<f32> raw, stereo;
     bool chunkPending = false;
     i64 pendingStart = 0;
+    /// Carimbo cru do trecho anterior (µs), para os pacotes de um mesmo bloco
+    /// Matroska que chegam com o mesmo instante (audio_chunk_join).
+    i64 lastPtsUs = std::numeric_limits<i64>::min();
+    i64 pendingPtsUs = std::numeric_limits<i64>::min();
+    u32 sameStampRun = 0;
+    /// Pacotes seguidos com o mesmo carimbo aceitos como um bloco com lacing.
+    static constexpr u32 kMaxLacedRepeats = 32;
 
     [[nodiscard]] i64 frames() const noexcept { return static_cast<i64>(buf.size() / 2); }
 
@@ -59,6 +66,8 @@ struct AudioBlockCache::Reader {
             bufValid = false;
             eos = false;
             chunkPending = false;
+            lastPtsUs = pendingPtsUs = std::numeric_limits<i64>::min();
+            sameStampRun = 0;
             ++seeks;
         }
         // Descarta o que ficou para trás (com margem para o kernel).
@@ -105,17 +114,26 @@ struct AudioBlockCache::Reader {
                 broken = true; break;
             }
             pendingStart = static_cast<i64>(std::llround(timestamp));
+            pendingPtsUs = pts;
             chunkPending = true;
             }
             const i64 chunkStart = pendingStart;
             const i64 n = static_cast<i64>(stereo.size() / 2);
             const i64 chunkEnd = chunkStart + n;
-            if (chunkEnd > furthest) {
-                furthest = chunkEnd; stagnant = 0; progressAt = monotonic_ns();
+            // 0.3.6: pacotes de um bloco Matroska com o mesmo carimbo entram em
+            // sequência pela contagem de amostras (audio_chunk_join) — isso é
+            // progresso (a janela cresce), não um decoder repetindo PCM. Com
+            // teto (um bloco tem poucos pacotes): um decoder preso no mesmo
+            // carimbo repetindo PCM ainda cai em `broken`, como antes.
+            const bool repeatStamp = bufValid && pendingPtsUs == lastPtsUs;
+            const bool sameStamp = repeatStamp && sameStampRun < kMaxLacedRepeats;
+            if (chunkEnd > furthest || sameStamp) {
+                furthest = std::max(furthest, chunkEnd); stagnant = 0; progressAt = monotonic_ns();
             } else {
                 ++stagnant;
             }
             i64 skip = 0;
+            const bool continuing = bufValid;
             if (!bufValid) {
                 // Preserve exact first-PTS alignment for decoder preroll,
                 // without retaining an arbitrarily distant timestamp origin.
@@ -124,19 +142,22 @@ struct AudioBlockCache::Reader {
             }
             {
                 const i64 d = chunkStart - (bufStart + frames());
-                // Carimbos de AAC/MP3 tremem ±1 quadro no arredondamento: isso
-                // é contíguo. Buraco de verdade vira silêncio; sobreposição é
-                // cortada.
-                if (d > 2) {
+                // Carimbo dentro da folga (AAC/MP3 ±1 quadro; Matroska em ms,
+                // ±1 ms) é contíguo. Buraco de verdade vira silêncio;
+                // sobreposição é cortada.
+                const AudioChunkJoin join = audio_chunk_join(d, n, static_cast<u32>(rate), continuing, sameStamp);
+                if (join.gap > 0) {
                     // Sparse/broken timestamps can be hours apart. Retain the
                     // decoded chunk, but allocate silence only for this block.
-                    const i64 fill = std::min(d, std::max<i64>(0, to - (bufStart + frames())));
+                    const i64 fill = std::min(join.gap, std::max<i64>(0, to - (bufStart + frames())));
                     buf.insert(buf.end(), static_cast<usize>(fill) * 2, 0.0f);
-                    if (fill < d) break;
+                    if (fill < join.gap) break;
                 }
-                else if (d < -2) skip = std::min(-d, n);
+                skip = join.skip;
             }
             buf.insert(buf.end(), stereo.begin() + skip * 2, stereo.end());
+            sameStampRun = repeatStamp ? sameStampRun + 1 : 0;
+            lastPtsUs = pendingPtsUs;
             chunkPending = false;
         }
     }
@@ -395,6 +416,10 @@ void AudioBlockCache::insert(const Key& k, std::shared_ptr<const AudioBlock> b) 
 
 void AudioBlockCache::thread_main() {
     set_current_thread_name("aurea-audio-dec");
+    // 0.3.6: o decode do som fica na faixa do decode de vídeo. Na prioridade
+    // padrão, um vídeo pesado (2K60) tomava a CPU, o bloco seguinte não ficava
+    // pronto e o mixer esvaziava o anel: estalos e buracos no som.
+    set_current_thread_priority(ThreadPriority::Decode);
     std::unique_lock<std::mutex> lock(mutex_);
     while (running_) {
         wake_.wait(lock, [this] { return !running_ || !wants_.empty(); });

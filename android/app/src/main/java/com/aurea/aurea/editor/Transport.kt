@@ -127,59 +127,81 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
             .background(OmegaChrome.Bar),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ChromeButton(
-            CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.editor_desfazer),
-            onClick = if (canUndo) ({ store.undo() }) else null,
-            modifier = Modifier.weight(1f).testTag("transport.undo"), size = 20.dp, height = h,
-            tint = if (canUndo) AureaColors.Text else AureaColors.EditorIconDisabled,
-        )
-        ChromeButton(
-            CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer),
-            onClick = if (canRedo) ({ store.redo() }) else null,
-            modifier = Modifier.weight(1f).testTag("transport.redo"), size = 20.dp, height = h,
-            tint = if (canRedo) AureaColors.Text else AureaColors.EditorIconDisabled,
-        )
-        ChromeButton(
-            // 0.3.3 recursos: segurar vai ao início (como na 0.3.2).
-            CupertinoGlyph.BackwardEnd, stringResource(R.string.r33_tr_previous_hold),
-            onClick = { store.stepTransportEdges(-1) }, onLongClick = { store.seek(0) },
-            modifier = Modifier.weight(1f).testTag("transport.previous"), size = 20.dp, height = h,
-        )
-        PlayButton(store, Modifier.weight(1f))
-        ChromeButton(
-            // 0.3.3 recursos: segurar vai ao fim (como na 0.3.2).
-            CupertinoGlyph.ForwardEnd, stringResource(R.string.r33_tr_next_hold),
-            onClick = { store.stepTransportEdges(1) }, onLongClick = { store.seek(store.project.durationFrames) },
-            modifier = Modifier.weight(1f).testTag("transport.next"), size = 20.dp, height = h,
-        )
-        // 0.3.3 recursos: o marcador da 0.3.2 volta ao transporte — tocar marca ou
-        // desmarca o instante (aceso num marcador); segurar abre o editor dele
-        // (nome, quadro e cor).
-        val marked = store.playhead in store.markers.frames
-        ChromeButton(
-            if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
-            stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
-            onClick = { store.toggleMarker() }, onLongClick = { store.editMarkerAtPlayhead() },
-            modifier = Modifier.weight(1f).testTag("transport.marker"), size = 18.dp, height = h,
-            tint = if (marked) AureaColors.Accent else AureaColors.Text,
-        )
-        CopyPasteButton(store, ui, Modifier.weight(1f).height(h))
-        val open = ViewModes.columnOpen
-        val viewModes = stringResource(R.string.om_tr_view_modes)
-        val onLabel = stringResource(R.string.common_on)
-        val offLabel = stringResource(R.string.common_off)
-        ChromeButton(
-            if (ViewModes.camera) CupertinoGlyph.CameraViewfinder else ShellGlyph.SidebarRight,
-            viewModes,
-            onClick = { ViewModes.columnOpen = !ViewModes.columnOpen },
-            modifier = Modifier
-                .weight(1f)
-                .testTag("transport.viewModes")
-                .semantics { stateDescription = if (open) onLabel else offLabel },
-            size = 20.dp, height = h,
-            tint = if (open) AureaColors.Accent else AureaColors.Text,
-        )
+        // 0.3.6: ⇤ ▶ ⇥ no CENTRO da barra. Com 8 células iguais o ▶ era a 4ª (43,75 %
+        // da largura): os dois lados agora têm o mesmo peso (TransportLayout) e as
+        // células de cada lado dividem o seu.
+        Row(Modifier.weight(TransportLayout.SIDE_WEIGHT), verticalAlignment = Alignment.CenterVertically) {
+            ChromeButton(
+                CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.editor_desfazer),
+                onClick = if (canUndo) ({ store.undo() }) else null,
+                modifier = Modifier.weight(1f).testTag("transport.undo"), size = 20.dp, height = h,
+                tint = if (canUndo) AureaColors.Text else AureaColors.EditorIconDisabled,
+            )
+            ChromeButton(
+                CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer),
+                onClick = if (canRedo) ({ store.redo() }) else null,
+                modifier = Modifier.weight(1f).testTag("transport.redo"), size = 20.dp, height = h,
+                tint = if (canRedo) AureaColors.Text else AureaColors.EditorIconDisabled,
+            )
+        }
+        Row(Modifier.weight(TransportLayout.CENTER_WEIGHT), verticalAlignment = Alignment.CenterVertically) {
+            ChromeButton(
+                // 0.3.3 recursos: segurar vai ao início (como na 0.3.2).
+                CupertinoGlyph.BackwardEnd, stringResource(R.string.r33_tr_previous_hold),
+                onClick = { store.stepTransportEdges(-1) }, onLongClick = { store.seek(0) },
+                modifier = Modifier.weight(1f).testTag("transport.previous"), size = 20.dp, height = h,
+            )
+            PlayButton(store, Modifier.weight(1f))
+            ChromeButton(
+                // 0.3.3 recursos: segurar vai ao fim (como na 0.3.2).
+                CupertinoGlyph.ForwardEnd, stringResource(R.string.r33_tr_next_hold),
+                onClick = { store.stepTransportEdges(1) }, onLongClick = { store.seek(store.project.durationFrames) },
+                modifier = Modifier.weight(1f).testTag("transport.next"), size = 20.dp, height = h,
+            )
+        }
+        Row(Modifier.weight(TransportLayout.SIDE_WEIGHT), verticalAlignment = Alignment.CenterVertically) {
+            // 0.3.3 recursos: o marcador da 0.3.2 volta ao transporte — tocar marca ou
+            // desmarca o instante (aceso num marcador); segurar abre o editor dele
+            // (nome, quadro e cor).
+            val marked = store.playhead in store.markers.frames
+            ChromeButton(
+                if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
+                stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
+                onClick = { store.toggleMarker() }, onLongClick = { store.editMarkerAtPlayhead() },
+                modifier = Modifier.weight(1f).testTag("transport.marker"), size = 18.dp, height = h,
+                tint = if (marked) AureaColors.Accent else AureaColors.Text,
+            )
+            CopyPasteButton(store, ui, Modifier.weight(1f).height(h))
+            val open = ViewModes.columnOpen
+            val viewModes = stringResource(R.string.om_tr_view_modes)
+            val onLabel = stringResource(R.string.common_on)
+            val offLabel = stringResource(R.string.common_off)
+            ChromeButton(
+                if (ViewModes.camera) CupertinoGlyph.CameraViewfinder else ShellGlyph.SidebarRight,
+                viewModes,
+                onClick = { ViewModes.columnOpen = !ViewModes.columnOpen },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("transport.viewModes")
+                    .semantics { stateDescription = if (open) onLabel else offLabel },
+                size = 20.dp, height = h,
+                tint = if (open) AureaColors.Accent else AureaColors.Text,
+            )
+        }
     }
+}
+
+/**
+ * 0.3.6: as larguras da barra de reprodução — o grupo ⇤ ▶ ⇥ no centro (3 células de
+ * 1/8 da largura, como antes) e os lados com o mesmo peso: ↶ ↷ à esquerda dividem o
+ * dela, marcador · Copiar e colar · painel à direita dividem o dela.
+ */
+internal object TransportLayout {
+    const val CENTER_WEIGHT = 3f
+    const val SIDE_WEIGHT = (8f - CENTER_WEIGHT) / 2f
+
+    /** O centro do ▶ (fração da largura): sempre o meio. */
+    fun playCenter(): Float = (SIDE_WEIGHT + CENTER_WEIGHT / 2f) / (2f * SIDE_WEIGHT + CENTER_WEIGHT)
 }
 
 /**

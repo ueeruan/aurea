@@ -46,6 +46,7 @@ extern "C" {
 #include "aurea/export/ExportCheckpoint.hpp"
 #include "aurea/hyper/Hyper.hpp"
 #include "aurea/hyper/HyperNeural.hpp"
+#include "aurea/rig/Mocap.hpp"
 #include <unistd.h>
 #include <dlfcn.h>
 #include <cmath>
@@ -2048,6 +2049,16 @@ AUREA_JNI jboolean AUREA_FN(nativeSetText3d)(JNIEnv* env, jclass, jlong handle, 
     return c->engine.set_text3d(static_cast<u64>(layer), s).ok() ? JNI_TRUE : JNI_FALSE;
 }
 
+/// Errc da última edição de texto 3D (0 = aplicada): o motivo de um setText3d falso.
+/// Números lidos em Scene3DInputs.kt (text3dErrorMessage) e AureaModel.swift (text3DFailureKey).
+static_assert(static_cast<int>(Errc::OutOfRange) == 2 && static_cast<int>(Errc::InvalidState) == 5
+              && static_cast<int>(Errc::NotSupported) == 6 && static_cast<int>(Errc::OutOfMemory) == 8
+              && static_cast<int>(Errc::BudgetExceeded) == 9 && static_cast<int>(Errc::Cancelled) == 25);
+AUREA_JNI jint AUREA_FN(nativeLastText3dStatus)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.last_text3d_status()) : 0;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeApplyText3dPreset)(JNIEnv*, jclass, jlong handle, jlong layer, jint preset) {
     NativeContext* c = ctx_of(handle);
     if (!c || preset < 0) return JNI_FALSE;
@@ -2115,6 +2126,51 @@ AUREA_JNI jboolean AUREA_FN(nativeSetModelInterior)(JNIEnv*, jclass, jlong handl
 AUREA_JNI jint AUREA_FN(nativeQueryModelInterior)(JNIEnv*, jclass, jlong handle, jlong layer) {
     NativeContext* c = ctx_of(handle);
     return c ? static_cast<jint>(c->engine.query_model_interior(static_cast<u64>(layer))) : -1;
+}
+
+// --- 0.3.6 Textura do material (EngineMedia.cpp) --------------------------------------
+AUREA_JNI jboolean AUREA_FN(nativeSetMaterialTextureImage)(JNIEnv* env, jclass, jlong handle, jlong layer, jint material, jstring path) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !path || material < 0) return JNI_FALSE;
+    const char* p = env->GetStringUTFChars(path, nullptr);
+    if (!p) return JNI_FALSE;
+    const bool ok = c->engine.set_material_texture_image(static_cast<u64>(layer), static_cast<u32>(material), p).ok();
+    env->ReleaseStringUTFChars(path, p);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetMaterialTextureLayer)(JNIEnv*, jclass, jlong handle, jlong layer, jint material, jlong source) {
+    NativeContext* c = ctx_of(handle);
+    return c && material >= 0 && c->engine.set_material_texture_layer(static_cast<u64>(layer), static_cast<u32>(material),
+                                                                       static_cast<u64>(source)).ok() ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeClearMaterialTexture)(JNIEnv*, jclass, jlong handle, jlong layer, jint material) {
+    NativeContext* c = ctx_of(handle);
+    return c && material >= 0 && c->engine.clear_material_texture(static_cast<u64>(layer), static_cast<u32>(material)).ok()
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jstring AUREA_FN(nativeQueryMaterialTexture)(JNIEnv* env, jclass, jlong handle, jlong layer, jint material, jlongArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 2 || material < 0) return nullptr;
+    u64 ref = 0;
+    std::string name;
+    const u32 kind = c->engine.query_material_texture(static_cast<u64>(layer), static_cast<u32>(material), &ref, &name);
+    const jlong v[2]{static_cast<jlong>(kind), static_cast<jlong>(ref)};
+    env->SetLongArrayRegion(out, 0, 2, v);
+    return env->NewStringUTF(name.c_str());
+}
+
+AUREA_JNI jlongArray AUREA_FN(nativeMaterialTextureLayers)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    const std::vector<u64> ids = c->engine.material_texture_layers(static_cast<u64>(layer));
+    jlongArray out = env->NewLongArray(static_cast<jsize>(ids.size()));
+    if (!out) return nullptr;
+    std::vector<jlong> v(ids.begin(), ids.end());
+    if (!v.empty()) env->SetLongArrayRegion(out, 0, static_cast<jsize>(v.size()), v.data());
+    return out;
 }
 
 namespace {
@@ -3641,6 +3697,157 @@ AUREA_JNI jint AUREA_FN(nativeToggleBoneKey)(JNIEnv*, jclass, jlong handle, jlon
 AUREA_JNI jboolean AUREA_FN(nativeResetBonePose)(JNIEnv*, jclass, jlong handle, jlong layer, jint node) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.reset_bone_pose(static_cast<u64>(layer), node) ? JNI_TRUE : JNI_FALSE;
+}
+
+// ---- AutoRig 3D (0.3.6 BETA) — Engine::humanoid_* / autorig_* -------------------------
+namespace {
+template <class Q>
+jint fill_floats(JNIEnv* env, jfloatArray out, Q query) {
+    const u32 need = query(nullptr, 0u);
+    if (!out || need == 0) return static_cast<jint>(need);
+    if (static_cast<u32>(env->GetArrayLength(out)) < need) return static_cast<jint>(need);
+    std::vector<f32> v(need);
+    const u32 w = query(v.data(), need);
+    if (w && w <= need) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(w), v.data());
+    return static_cast<jint>(w);
+}
+} // namespace
+
+AUREA_JNI jint AUREA_FN(nativeHumanoidStatus)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.humanoid_status(static_cast<u64>(layer)) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeAutoRigStart)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.autorig_start(static_cast<u64>(layer)) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// [0] estado, [1] progresso, [2] erro (rig::AutoRigError).
+AUREA_JNI void AUREA_FN(nativeAutoRigProgress)(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || env->GetArrayLength(out) < 3) return;
+    const Engine::AutoRigProgress p = c->engine.autorig_progress();
+    const f32 v[3]{static_cast<f32>(p.state), p.progress, static_cast<f32>(p.error)};
+    env->SetFloatArrayRegion(out, 0, 3, v);
+}
+
+AUREA_JNI void AUREA_FN(nativeAutoRigCancel)(JNIEnv*, jclass, jlong handle) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.autorig_cancel();
+}
+
+AUREA_JNI jint AUREA_FN(nativeQueryHumanoidJoints)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    return fill_floats(env, out, [&](f32* o, u32 cap) { return c->engine.query_humanoid_joints(static_cast<u64>(layer), o, cap); });
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeHumanoidMoveJoint)(JNIEnv*, jclass, jlong handle, jlong layer, jint bone, jfloat x, jfloat y) {
+    NativeContext* c = ctx_of(handle);
+    return c && bone >= 0 && c->engine.humanoid_move_joint(static_cast<u64>(layer), static_cast<u32>(bone), x, y) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeHumanoidAssignBone)(JNIEnv*, jclass, jlong handle, jlong layer, jint bone, jint node) {
+    NativeContext* c = ctx_of(handle);
+    return c && bone >= 0 && c->engine.humanoid_assign_bone(static_cast<u64>(layer), static_cast<u32>(bone), node) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jstring AUREA_FN(nativeModelNodeName)(JNIEnv* env, jclass, jlong handle, jlong layer, jint node) {
+    NativeContext* c = ctx_of(handle);
+    const std::string s = c ? c->engine.model_node_name(static_cast<u64>(layer), node) : std::string{};
+    return env->NewStringUTF(s.c_str());
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeDragBoneTranslate)(JNIEnv*, jclass, jlong handle, jlong layer, jint node, jfloat dx, jfloat dy,
+                                                    jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && node >= 0 && c->engine.drag_bone_translate(static_cast<u64>(layer), static_cast<u32>(node), dx, dy, continuing == JNI_TRUE)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeHumanoidSetIk)(JNIEnv*, jclass, jlong handle, jlong layer, jint limb, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && limb >= 0 && c->engine.humanoid_set_ik(static_cast<u64>(layer), static_cast<u32>(limb), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeQueryHumanoidIk)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    return fill_floats(env, out, [&](f32* o, u32 cap) { return c->engine.query_humanoid_ik(static_cast<u64>(layer), o, cap); });
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeDragHumanoidIk)(JNIEnv*, jclass, jlong handle, jlong layer, jint limb, jboolean pole, jfloat dx,
+                                                 jfloat dy, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && limb >= 0 && c->engine.drag_humanoid_ik(static_cast<u64>(layer), static_cast<u32>(limb), pole == JNI_TRUE, dx, dy,
+                                                        continuing == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeToggleHumanoidIkKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint limb) {
+    NativeContext* c = ctx_of(handle);
+    return c && limb >= 0 ? c->engine.toggle_humanoid_ik_key(static_cast<u64>(layer), static_cast<u32>(limb)) : -1;
+}
+
+// ---- Motion Capture (0.3.6 BETA) — Engine::mocap_* ----------------------------------
+AUREA_JNI jint AUREA_FN(nativeMocapBegin)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.mocap_begin(static_cast<u64>(layer)) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMocapPushFrames)(JNIEnv* env, jclass, jlong handle, jfloatArray data, jint frames, jfloat aspect) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !data || frames <= 0) return JNI_FALSE;
+    const jsize n = env->GetArrayLength(data);
+    const u32 count = std::min<u32>(static_cast<u32>(frames), static_cast<u32>(n) / rig::kMocapFrameFloats);
+    if (count == 0) return JNI_FALSE;
+    std::vector<f32> v(static_cast<usize>(count) * rig::kMocapFrameFloats);
+    env->GetFloatArrayRegion(data, 0, static_cast<jsize>(v.size()), v.data());
+    return c->engine.mocap_push_frames(v.data(), count, aspect) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMocapAnalyze)(JNIEnv* env, jclass, jlong handle, jfloatArray params) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return JNI_FALSE;
+    f32 p[Engine::kMocapParams]{1.0f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f};
+    u32 n = 0;
+    if (params) {
+        n = std::min<u32>(Engine::kMocapParams, static_cast<u32>(env->GetArrayLength(params)));
+        env->GetFloatArrayRegion(params, 0, static_cast<jsize>(n), p);
+    }
+    return c->engine.mocap_analyze(p, Engine::kMocapParams) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI void AUREA_FN(nativeMocapCancel)(JNIEnv*, jclass, jlong handle) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.mocap_cancel();
+}
+
+AUREA_JNI jfloat AUREA_FN(nativeMocapProgress)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.mocap_progress() : 0.0f;
+}
+
+AUREA_JNI jint AUREA_FN(nativeMocapReport)(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !out || static_cast<u32>(env->GetArrayLength(out)) < Engine::kMocapReportFloats)
+        return static_cast<jint>(Engine::kMocapReportFloats);
+    f32 v[Engine::kMocapReportFloats]{};
+    const u32 w = c->engine.mocap_report(v, Engine::kMocapReportFloats);
+    env->SetFloatArrayRegion(out, 0, static_cast<jsize>(Engine::kMocapReportFloats), v);
+    return static_cast<jint>(w);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMocapPreview)(JNIEnv*, jclass, jlong handle, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.mocap_preview(on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeMocapApply)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.mocap_apply() : -1;
+}
+
+AUREA_JNI void AUREA_FN(nativeMocapEnd)(JNIEnv*, jclass, jlong handle) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.mocap_end();
 }
 
 AUREA_JNI jint AUREA_FN(nativeModelCameraCount)(JNIEnv*, jclass, jlong handle, jlong layer) {

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="export036_timeout_title">La exportación salió del primer plano</string>
+    <string name="export036_timeout_text">Android limitó el tiempo de la exportación en segundo plano. Abre Aurea para que termine; si el sistema cierra la app, la próxima exportación continúa desde donde se detuvo.</string>
+    <string name="export036_timeout_notice">Android limitó el tiempo en segundo plano: mantén Aurea abierta hasta que termine la exportación.</string>
+</resources>

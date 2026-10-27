@@ -35,4 +35,20 @@ void bone_offsets(const Layer& layer, f64 local, std::vector<BoneOffset>& out);
 /// Euler da camada (graus, R = Rz·Ry·Rx) ↔ quaternion.
 [[nodiscard]] Quat bone_quat(Vec3 eulerDeg) noexcept;
 
+/// 0.3.6 — controlador IK de dois ossos (rig/Humanoid.hpp: trilhas BonePose
+/// com effectIndex = kBoneIkBase + nó da mão/pé). Alvo e polo no espaço do modelo.
+struct IkController {
+    i32 end = -1;
+    Vec3 target{0, 0, 0}, pole{0, 0, 0};
+    f32 weight = 0.0f;
+};
+void ik_controllers(const Layer& layer, f64 local, std::vector<IkController>& out);
+/// Cadeia do IK pelos pais do nó da ponta (mão → antebraço → braço).
+[[nodiscard]] bool ik_chain(const SceneAsset& asset, i32 end, i32& mid, i32& root) noexcept;
+
+/// A pose da camada: clipe + pose do usuário (rotação/translação) + IK.
+/// O MESMO caminho na prévia, no export e nas consultas da UI.
+void evaluate_rig_pose(const SceneAsset& asset, const Layer& layer, i32 clip, f32 t, f64 local, Pose& out,
+                       PoseWorkspace* workspace = nullptr);
+
 } // namespace aurea::scene3d

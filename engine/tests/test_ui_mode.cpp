@@ -74,11 +74,85 @@ AUREA_TEST(UiMode, EditTurnsTheMagnetOnAndAdoptsTheDeepestMediaLine) {
     AUREA_CHECK(!r.e.edit_mode());
     AUREA_CHECK(!r.L(video)->magneticTrack);
     AUREA_CHECK_EQ(r.e.project_ui_mode(), 1u);
-    // Voltar à Composição não desliga o ímã de quem já tem.
+    // 0.3.6: voltar à Composição devolve o ímã como estava antes da Edição (o
+    // projeto veio da Composição sem ímã): a Composição não herda o limite da
+    // trilha principal. Um passo de desfazer traz o ímã da Edição de volta.
+    AUREA_CHECK(r.e.set_project_ui_mode(1));
+    AUREA_CHECK(r.e.edit_mode());
+    AUREA_CHECK(r.e.set_project_ui_mode(0));
+    AUREA_CHECK(!r.e.edit_mode());
+    AUREA_CHECK(!r.L(video)->magneticTrack);
+    r.undo();
+    AUREA_CHECK(r.e.edit_mode());
+    AUREA_CHECK(r.L(video)->magneticTrack);
+}
+
+// 0.3.6: Composição → Edição → Composição. O vídeo da trilha principal volta a
+// andar livre no tempo na Composição (antes ficava magnético e preso no zero),
+// e entrar de novo na Edição refaz a trilha principal.
+AUREA_TEST(UiMode, CompositionRoundTripFreesTheMainTrack) {
+    UiRig r;
+    const u64 video = r.add(LayerKind::Video, "V", 0, 60);
+    const u64 text = r.add(LayerKind::Text, "T", 0, 30);
+    AUREA_CHECK(r.e.set_project_ui_mode(1));
+    AUREA_CHECK(r.L(video)->magneticTrack);
+    AUREA_CHECK(r.e.set_project_ui_mode(0));
+    AUREA_CHECK(!r.e.edit_mode());
+    AUREA_CHECK(!r.L(video)->magneticTrack);
+    AUREA_CHECK(!r.L(text)->magneticTrack);
+    // Na Composição o vídeo se move no tempo sem a regra da trilha (ripple/encosto).
+    Command move;
+    move.type = CommandType::LayerSetTimeRange;
+    move.layer_ref.layer = LayerId::unpack(video);
+    move.layer_range.start = FrameIndex{40};
+    move.layer_range.end = FrameIndex{100};
+    AUREA_CHECK(r.e.apply_command(move).ok());
+    AUREA_CHECK_EQ(r.L(video)->start.value, 40);
+    AUREA_CHECK_EQ(r.L(video)->end.value, 100);
+    // De volta à Edição: o ímã e a trilha principal voltam.
+    AUREA_CHECK(r.e.set_project_ui_mode(1));
+    AUREA_CHECK(r.e.edit_mode());
+    AUREA_CHECK(r.L(video)->magneticTrack);
+    // Pedir a mesma interface de novo não regrava o "antes".
+    AUREA_CHECK(r.e.set_project_ui_mode(1));
+    AUREA_CHECK(r.e.set_project_ui_mode(0));
+    AUREA_CHECK(!r.e.edit_mode());
+    AUREA_CHECK(!r.L(video)->magneticTrack);
+}
+
+// 0.3.6: o ímã que a pessoa já tinha na Composição continua depois da volta.
+AUREA_TEST(UiMode, OwnMagnetSurvivesTheRoundTrip) {
+    UiRig r;
+    const u64 low = r.add(LayerKind::Video, "Baixo", 0, 30);
+    const u64 high = r.add(LayerKind::Video, "Alto", 0, 30);
+    r.L(high)->magneticTrack = true;
+    r.e.set_edit_mode(true);
     AUREA_CHECK(r.e.set_project_ui_mode(1));
     AUREA_CHECK(r.e.set_project_ui_mode(0));
     AUREA_CHECK(r.e.edit_mode());
-    AUREA_CHECK(r.L(video)->magneticTrack);
+    AUREA_CHECK(r.L(high)->magneticTrack);
+    AUREA_CHECK(!r.L(low)->magneticTrack);
+}
+
+// 0.3.6: o "antes" vai no arquivo — salvo na Edição e reaberto, a volta ainda solta o ímã.
+AUREA_TEST(UiMode, MagnetBeforeEditSurvivesSaveAndLoad) {
+    UiRig r;
+    (void)r.add(LayerKind::Video, "V", 0, 60);
+    AUREA_CHECK(r.e.set_project_ui_mode(1));
+    const std::string path = temp_path("aurea_test_ui_mode_magnet.aurea");
+    AUREA_CHECK(r.e.save_project(path.c_str()).ok());
+    AUREA_CHECK(r.e.load_project(path.c_str()).ok());
+    AUREA_CHECK_EQ(r.e.project_ui_mode(), 1u);
+    AUREA_CHECK(r.e.edit_mode());
+    u32 magnetic = 0;
+    r.comp()->layers().for_each([&](LayerId, const Layer& l) { if (l.magneticTrack) ++magnetic; });
+    AUREA_CHECK_EQ(magnetic, 1u);
+    AUREA_CHECK(r.e.set_project_ui_mode(0));
+    AUREA_CHECK(!r.e.edit_mode());
+    magnetic = 0;
+    r.comp()->layers().for_each([&](LayerId, const Layer& l) { if (l.magneticTrack) ++magnetic; });
+    AUREA_CHECK_EQ(magnetic, 0u);
+    std::remove(path.c_str());
 }
 
 AUREA_TEST(UiMode, ExistingMagneticChoiceIsKept) {

@@ -31,4 +31,13 @@ class VideoExportRulesTest {
         assertEquals(0 to 0, VideoExportRules.frameSize(0, 1080, 480))
         assertEquals(4 to 2, VideoExportRules.frameSize(4, 2, 2))
     }
+
+    /** 0.3.6: lado ímpar não recusa mais ("erro de codec"); sai alinhado como o motor. */
+    @Test fun oddCompositionsExportAligned() {
+        assertEquals(1920 to 1080, VideoExportRules.frameSize(1919, 1079, 0))
+        assertEquals(1080 to 1920, VideoExportRules.frameSize(1079, 1920, 0))
+        assertEquals(848 to 480, VideoExportRules.frameSize(853, 480, 0))
+        assertEquals(1080 to 1344, VideoExportRules.alignedFrameSize(1080, 1350, 0))
+        assertEquals(1280 to 720, VideoExportRules.alignedFrameSize(1920, 1080, 720))
+    }
 }

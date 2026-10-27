@@ -398,6 +398,46 @@ AUREA_TEST(PreviewProxy, PolicyFollowsDecodeCostOnEveryDeviceTier) {
     AUREA_CHECK_EQ(proxy_stream_config(960, 540, 24.0).keyframeIntervalFrames, 12u);
 }
 
+// 0.3.6 (MKV 2K60 lento): o aparelho MEDE que não acompanha a fonte e o proxy
+// passa a ser pedido, mesmo abaixo dos limiares do arquivo.
+AUREA_TEST(PreviewProxy, SlowDecodeMeasuredOnTheDeviceRequestsAProxy) {
+    const ProxyThresholds t;
+    const Asset light = video_asset("slow-1080p60", 1920, 1080, 60.0);
+    AUREA_CHECK(!proxy_wanted(light, ProxyMode::Automatic, false, t));
+    AUREA_CHECK(proxy_wanted(light, ProxyMode::Automatic, false, t, true));
+    AUREA_CHECK(proxy_wanted(light, ProxyMode::Always, false, t, true));
+    AUREA_CHECK(!proxy_wanted(light, ProxyMode::Off, false, t, true));
+
+    // 60 fps = 16,7 ms por quadro. Três janelas de ~1 s acima de +10%: lenta.
+    DecodeSpeedMonitor slow;
+    AUREA_CHECK(!slow.observe(0, 25.0f, 60.0));       // primeira leitura: só marca
+    AUREA_CHECK(!slow.observe(30, 25.0f, 60.0));      // janela incompleta
+    AUREA_CHECK(!slow.observe(60, 25.0f, 60.0));      // 1
+    AUREA_CHECK(!slow.observe(120, 25.0f, 60.0));     // 2
+    AUREA_CHECK(slow.observe(180, 25.0f, 60.0));      // 3: reporta
+    AUREA_CHECK(slow.reported());
+    AUREA_CHECK(!slow.observe(400, 25.0f, 60.0));     // uma vez só
+
+    // Acompanha (12 ms < 16,7): nunca reporta. Uma janela boa zera a contagem.
+    DecodeSpeedMonitor fast;
+    u64 n = 0;
+    AUREA_CHECK(!fast.observe(n, 12.0f, 60.0));
+    for (int i = 0; i < 20; ++i) AUREA_CHECK(!fast.observe(n += 60, 12.0f, 60.0));
+    DecodeSpeedMonitor mixed;
+    n = 0;
+    AUREA_CHECK(!mixed.observe(n, 0.0f, 30.0));
+    for (int i = 0; i < 12; ++i)
+        AUREA_CHECK(!mixed.observe(n += 30, i % 3 == 2 ? 20.0f : 40.0f, 30.0));
+    // Fonte refeita (contador voltou): recomeça a medir.
+    DecodeSpeedMonitor reset;
+    AUREA_CHECK(!reset.observe(500, 40.0f, 30.0));
+    AUREA_CHECK(!reset.observe(530, 40.0f, 30.0));
+    AUREA_CHECK(!reset.observe(10, 40.0f, 30.0));
+    AUREA_CHECK(!reset.observe(40, 40.0f, 30.0));
+    AUREA_CHECK(!reset.observe(70, 40.0f, 30.0));
+    AUREA_CHECK(reset.observe(100, 40.0f, 30.0));
+}
+
 AUREA_TEST(PreviewProxy, DecimatorKeepsSixtyFramesPerSecond) {
     auto kept = [](f64 fps, u32 frames) {
         ProxyFrameDecimator d(fps, proxy_target_fps(fps));

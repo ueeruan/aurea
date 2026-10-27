@@ -442,7 +442,7 @@ private fun LayerTimeRow(
                     }
                     else -> {
                         TimeButton(TimeGlyph.TrimStart, R.string.editor_aparar_inicio_cabecote, "timeline.cut.start", 1f) {
-                            insideEdit(store, l, locked) { if (!store.trimStart(l.id, store.playhead)) store.toastText(R.string.timeline_cut_failed) }
+                            insideEdit(store, l, locked) { live -> if (!store.trimToPlayhead(l.id, start = true, live = live)) store.toastText(R.string.timeline_cut_failed) }
                         }
                         RowDivider()
                         TimeButton(TimeGlyph.Split, R.string.editor_dividir_cabecote, "timeline.cut.split", 1f) {
@@ -450,7 +450,7 @@ private fun LayerTimeRow(
                         }
                         RowDivider()
                         TimeButton(TimeGlyph.TrimEnd, R.string.editor_aparar_fim_cabecote, "timeline.cut.end", 1f) {
-                            insideEdit(store, l, locked) { if (!store.trimEnd(l.id, store.playhead)) store.toastText(R.string.timeline_cut_failed) }
+                            insideEdit(store, l, locked) { live -> if (!store.trimToPlayhead(l.id, start = false, live = live)) store.toastText(R.string.timeline_cut_failed) }
                         }
                     }
                 }
@@ -500,14 +500,17 @@ private fun RowScope.TimeButton(glyph: TimeGlyph, @StringRes label: Int, tag: St
 }
 
 /** Trio: só com o cabeçote estritamente dentro (nas bordas o corte não teria o que tirar). */
-private inline fun insideEdit(store: EditorStore, l: PanelLayer, locked: Boolean, action: () -> Unit) {
+private inline fun insideEdit(store: EditorStore, l: PanelLayer, locked: Boolean, action: (live: Boolean) -> Unit) {
     val t = store.playhead
     when {
         locked -> store.toastText(R.string.editor_camada_bloqueada_desbloqueie_editar)
         t <= l.start || t >= l.end -> store.toastText(R.string.sh_playhead_into_layer)
         else -> {
-            if (store.playing) store.pause()
-            action()
+            // 0.3.6 (keys, item 4): tocando, `playhead` vem atrasado — a ação
+            // usa o quadro em que o motor pausou (`kEditAtPlayhead`).
+            val live = store.playing
+            if (live) store.pause()
+            action(live)
         }
     }
 }

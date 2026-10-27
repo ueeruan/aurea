@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="export036_timeout_title">Экспорт вышел из активного режима</string>
+    <string name="export036_timeout_text">Android ограничил время экспорта в фоне. Откройте Aurea, чтобы он завершился; если система закроет приложение, следующий экспорт продолжится с места остановки.</string>
+    <string name="export036_timeout_notice">Android ограничил время работы в фоне: не закрывайте Aurea, пока экспорт не завершится.</string>
+</resources>

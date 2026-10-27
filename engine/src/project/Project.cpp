@@ -92,6 +92,9 @@ void collect_layer_assets(const Layer& l, std::vector<AssetId>& used) {
     // particle texture still lives after its original image is deleted.
     if (l.particles.textureAsset != 0) used.push_back(AssetId::unpack(l.particles.textureAsset));
     if (l.environmentAsset != 0) used.push_back(AssetId::unpack(l.environmentAsset));
+    // 0.3.6: a imagem que cobre um material do objeto 3D (textura do material).
+    for (const MaterialOverride& material : l.model.materials)
+        if (material.textureImage != 0) used.push_back(AssetId::unpack(material.textureImage));
     for (const auto& effect : l.effects) {
         if (effect.type == effect_type_id("aurea.color.cube_lut") && !effect.params.empty()) {
             const auto id = AssetId::unpack(effect.params[0].constant.ref);

@@ -53,6 +53,7 @@ enum class SectionKind : u16 {
     Particles   = 7,
     Fonts       = 8,
     Thumbnails  = 9,
+    Rig3D       = 10,   ///< 0.3.6: receita do AutoRig/mapa humanoide por asset
     _Count,
 };
 
@@ -73,7 +74,9 @@ struct SectionHeader {
 /// v51 (Omega aparência): papel das decorações dos efeitos e o preenchimento em
 /// degradê da forma (bloco no fim da camada; antes dele: efeitos comuns e cor
 /// sólida — abre igual).
-constexpr u32 kTimelineSectionVersion = 51;
+/// v52 (0.3.6): textura própria de cada material do objeto 3D (imagem do
+/// projeto ou camada da timeline). Antes dela: o mapa de cor do arquivo.
+constexpr u32 kTimelineSectionVersion = 52;
 
 /// Cabeçalho do arquivo.
 struct FileHeader {

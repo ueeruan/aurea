@@ -1853,6 +1853,13 @@ func fxSwipeCommits(dx: CGFloat, width: CGFloat, minimum: CGFloat) -> Bool {
     dx < 0 && -dx >= Swift.max(minimum, width * 0.35)
 }
 
+/// 0.3.6 (sidebar): o deslizar só toma o dedo quando o movimento é mais
+/// horizontal que vertical; vertical (ou empate) fica com a rolagem da lista.
+/// Par do `fxSwipeIsHorizontal` (EffectSections.kt).
+func fxSwipeIsHorizontal(dx: CGFloat, dy: CGFloat) -> Bool {
+    dx.isFinite && dy.isFinite && abs(dx) > abs(dy)
+}
+
 // =============================================================================
 // Categorias, descrições, alvos e custo (EffectCatalogMeta.kt)
 // =============================================================================

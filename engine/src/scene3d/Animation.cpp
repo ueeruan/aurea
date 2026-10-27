@@ -131,6 +131,7 @@ void evaluate_pose(const SceneAsset& asset, i32 clip, f32 t, Pose& out, PoseWork
         const i32 node = offsets[i].node;
         if (node < 0 || node >= static_cast<i32>(n)) continue;
         rot[static_cast<usize>(node)] = (rot[static_cast<usize>(node)] * offsets[i].rotation).normalized();
+        tr[static_cast<usize>(node)] += offsets[i].translation;
     }
     // Mundo: pais antes de filhos, a partir das raízes (mesma ordem do repouso).
     out.nodeWorld.assign(n, Mat4::identity());

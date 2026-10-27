@@ -3,6 +3,12 @@ package com.aurea.aurea.engine
 import java.nio.ByteBuffer
 
 /**
+ * `kEditAtPlayhead` (Command.hpp): no `at` do corte e no `amount` de
+ * `editClipTime` (ops 0/1), "o quadro que a prévia mostra" — lido pelo motor.
+ */
+const val EDIT_AT_PLAYHEAD: Long = -(1L shl 39)
+
+/**
  * Escrita de comandos na fila do motor.
  *
  * POR QUE OS OFFSETS ESTÃO AQUI E NÃO ESPALHADOS PELA UI:
@@ -130,6 +136,16 @@ class CommandBatch(private val engine: AureaEngine) {
     fun splitLayer(layer: Long, atFrame: Int) = emit(CommandType.LAYER_SPLIT) { b ->
         b.putHandle(Off.LAYER, layer)
         b.putLong(Off.SPLIT_AT, atFrame.toLong())
+    }
+
+    /**
+     * Divide no quadro que a prévia mostra quando o motor aplica o comando
+     * (`kEditAtPlayhead`, Command.hpp): com um `pause()` antes no mesmo lote, é
+     * o quadro em que a reprodução parou — o cabeçote lido pela UI vem atrasado.
+     */
+    fun splitLayerAtPlayhead(layer: Long) = emit(CommandType.LAYER_SPLIT) { b ->
+        b.putHandle(Off.LAYER, layer)
+        b.putLong(Off.SPLIT_AT, EDIT_AT_PLAYHEAD)
     }
 
     // =========================================================================

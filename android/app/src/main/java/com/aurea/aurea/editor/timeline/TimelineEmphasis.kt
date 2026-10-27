@@ -32,6 +32,16 @@ internal object KeyEmphasis {
     }
 
     /**
+     * Losango "empilhado" (dois sobrepostos, o de baixo na cor de parcial): só
+     * quando o instante tem chave em PARTE das [focusCount] trilhas do painel
+     * (ex.: Posição X sem Y). Com todas marcadas é UM losango. Antes bastavam 2
+     * trilhas distintas: o ◆ do Mover (X+Y) num toque aparecia como dois
+     * keyframes sobrepostos — e, ao entrar no Transformar, um keyframe que se via
+     * único fora dele "virava dois" (0.3.6, keys itens 1 e 3).
+     */
+    fun stacked(focusCount: Int, distinctKeyed: Int): Boolean = focusCount >= 2 && distinctKeyed < focusCount
+
+    /**
      * Escolhido (âmbar, o do gráfico) > na seleção da timeline (azul com anel)
      * > sob o cabeçote (destaque) > o branco de sempre.
      */

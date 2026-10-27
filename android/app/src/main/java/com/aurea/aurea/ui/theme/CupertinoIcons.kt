@@ -78,6 +78,9 @@ object AureaIconStyle {
         CupertinoGlyph.LockOpenFill to CupertinoGlyph.LockOpen,
         CupertinoGlyph.LinkCircleFill to CupertinoGlyph.LinkCircle,
         CupertinoGlyph.EyeFill to CupertinoGlyph.Eye,
+        // 0.3.6: a tesoura da fonte tem as lâminas cheias (traço grosso ao lado dos
+        // outros ícones); a de contorno da mesma fonte tem o traço fino.
+        CupertinoGlyph.Scissors to CupertinoGlyph.ScissorsAlt,
     )
 
     /** O glifo no estilo do app (ver [Outline]). */
@@ -296,6 +299,8 @@ object CupertinoGlyph {
     const val Rhombus = '\uF7C2'
     const val RhombusFill = '\uF7C3'
     const val Scissors = '\uF7C9'
+    /** A tesoura de contorno (tra\u00E7o fino): \u00E9 a que aparece no lugar de [Scissors]. */
+    const val ScissorsAlt = '\uF905'
     const val Search = '\uF4A5'
     const val SliderHorizontal3 = '\uF7DC'
     const val SmallcircleCircle = '\uF7DF'

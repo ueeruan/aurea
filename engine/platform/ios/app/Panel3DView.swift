@@ -9,9 +9,9 @@ import UniformTypeIdentifiers
 
 /// As abas do painel 3D (a ordem é a da tela; o rawValue é o mesmo do Android).
 enum Panel3DTab: Int, CaseIterable {
-    case material, shape, light, anim, parts
-    var key: String { ["ui3d_tab_material", "ui3d_tab_shape", "sh_dock_environment", "ui3d_tab_anim", "shape3d_parts"][rawValue] }
-    var id: String { ["material", "shape", "light", "anim", "parts"][rawValue] }
+    case material, shape, light, anim, parts, rig, render
+    var key: String { ["ui3d_tab_material", "ui3d_tab_shape", "sh_dock_environment", "ui3d_tab_anim", "shape3d_parts", "rig3d_tab", "env3d_tab_render"][rawValue] }
+    var id: String { ["material", "shape", "light", "anim", "parts", "rig", "render"][rawValue] }
 }
 
 struct Panel3DView: View {
@@ -27,6 +27,8 @@ struct Panel3DView: View {
     /// Mostrar interior: 1/0; −1 = não é objeto 3D (câmera).
     @State private var interior: Int32 = -1
     @ObservedObject private var thumbs = MaterialThumbStore.shared
+    /// 0.3.6: a parte escolhida da forma 3D decide qual material a Textura cobre.
+    @ObservedObject private var shapeState = Shape3DState.shared
     @State private var hdriTarget: Int64?
     @State private var pickingTextTexture = false
     @State private var pending: Text3DChange?
@@ -36,7 +38,9 @@ struct Panel3DView: View {
     @State private var gestureOpen = false
     @State private var tab: Panel3DTab?
     @State private var materialAdvanced = false
-    @State private var sceneAdvanced = false
+    /// 0.3.6 textura do material: o material que o seletor de imagem cobre
+    /// (nulo = a textura do texto 3D, o uso de antes do mesmo seletor).
+    @State private var materialTextureTarget: UInt32?
     @State private var selectedScalar: String?
     /// Parte escolhida do MODELO importado (forma 3D usa a do palco).
     @State private var modelPart = 0
@@ -51,12 +55,16 @@ struct Panel3DView: View {
     private let finishKeys = ["ui3d_finish_smooth", "ui3d_finish_brushed", "ui3d_finish_scratched",
                               "ui3d_finish_hammered", "ui3d_finish_weathered"]
 
-    private var isCamera: Bool { model.selectedLayer?.kind == 8 }
+    /// Câmera (8) e luz (9) não são objetos: só a cena (Ambiente e Render).
+    private var isCamera: Bool { model.selectedLayer?.kind == 8 || model.selectedLayer?.kind == 9 }
     private var isShape: Bool { !isCamera && !model.engine.shape3D(layerId).isEmpty }
     private var isText: Bool { !isCamera && !text3D.isEmpty }
     private var tabs: [Panel3DTab] {
-        if isCamera { return [.light] }
-        return isText ? [.material, .shape, .light, .anim] : [.light, .material, .parts]
+        if isCamera { return [.light, .render] }
+        if isText { return [.material, .shape, .light, .anim, .render] }
+        // 0.3.6: modelo importado ganha a aba Esqueleto (AutoRig 3D, ossos, IK, Motion Capture).
+        if !isShape && model.selectedLayer?.kind == 10 { return [.light, .material, .parts, .rig, .render] }
+        return [.light, .material, .parts, .render]
     }
     private var currentTab: Panel3DTab { tab.flatMap { tabs.contains($0) ? $0 : nil } ?? tabs[0] }
 
@@ -71,17 +79,31 @@ struct Panel3DView: View {
                     switch currentTab {
                     case .material:
                         if isText { textMaterialTab }
-                        else if isShape { Shape3DPanelSection(layerId: layerId, page: .material) }
+                        else if isShape {
+                            Shape3DPanelSection(layerId: layerId, page: .material)
+                            // 0.3.6: a parte escolhida pode vir de uma camada da timeline
+                            // (a imagem do arquivo continua na linha "Imagem" acima).
+                            let part = Shape3DState.shared.part(model)
+                            if part >= 0 {
+                                materialTextureRow(UInt32(part), thumb: shapePartThumb(part), fallback: AureaColors.chip, allowFile: false)
+                            }
+                        }
                         else { section("panel_material"); importedMaterialSection }
+                        // 0.3.6: Objeto — projeta/recebe sombra (saíram do Ambiente) e o interior.
+                        objectShadowSection
                         interiorToggle
                     case .shape:
                         if isText { textShapeTab }
                     case .light:
-                        lightSceneTab
+                        environmentTab
+                    case .render:
+                        renderTab
                     case .anim:
                         if isText { NativePanelChip(AureaText.t("la_animators")) { finishEditing(); model.transformTab = 6; model.openPanel(.transform) } }
                     case .parts:
                         partsTab
+                    case .rig:
+                        Rig3DSection(layerId: layerId)
                     }
                 }
                 .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 24)
@@ -96,7 +118,14 @@ struct Panel3DView: View {
         .sheet(isPresented: $pickingTextTexture) {
             ShellMediaPicker(selectionLimit: 1, filter: .images) { items in
                 pickingTextTexture = false
-                if let (url, _) = items.first { model.setShapePartImage(layerId, part: -1, url: url, textTexture: true) }
+                // 0.3.6: o mesmo seletor serve à textura do material (um `.sheet`
+                // só: dois encadeados aqui calavam um dos dois).
+                let material = materialTextureTarget
+                materialTextureTarget = nil
+                if let (url, _) = items.first {
+                    if let material { model.setShapePartImage(layerId, part: 0, url: url, material: material) }
+                    else { model.setShapePartImage(layerId, part: -1, url: url, textTexture: true) }
+                }
             }
         }
         // HDRI pelo seletor do UIKit (DocumentImportPicker, em pickHdri): o
@@ -164,7 +193,7 @@ struct Panel3DView: View {
                     // A bola de estúdio do material (o motor calcula; até chegar, a cor chapada).
                     swatchChip(presetKeys[index], swatch: presetSwatches[index], thumb: presetThumb(index)) {
                         finishEditing()
-                        _ = model.engine.applyText3DPreset(layerId, preset: UInt32(index))
+                        model.reportText3D(model.engine.applyText3DPreset(layerId, preset: UInt32(index)))
                         refresh()
                     }
                     .accessibilityIdentifier("text3d.materialPreset.\(index)")
@@ -277,104 +306,243 @@ struct Panel3DView: View {
     private let toneMapKeys = ["scene031_tonemap_neutral", "scene031_tonemap_agx", "scene031_tonemap_agx_punchy",
                                "scene031_tonemap_agx_golden", "scene031_tonemap_uchimura", "scene031_tonemap_aces"]
 
-    /// AMBIENTE (retorno de beta 12/10/2026: "só o básico"): LUZ, FUNDO e
-    /// CHÃO; o resto (qualidade, tone map, exposição e bloom) fica em
-    /// "Avançado", fechado.
+    /// 0.3.6 AMBIENTE refeito (par do Android: Scene3DEnvironment.kt
+    /// `Environment3DTab`): só o ambiente, em seções com título e respiro
+    /// (medidas de PanelMetrics) — Céu e fundo, Luz ambiente (com a exposição)
+    /// e Chão e sombra. As sombras do objeto foram para a aba Material (seção
+    /// Objeto); qualidade, tone map e bloom, para a aba Render.
     ///
-    /// LUZ (0.3.1): UMA fileira de fontes exclusivas — Neutro, Escuro,
-    /// Produto, Céu, Cromado e Imagem HDR… — e só uma acesa: a HDR quando há
-    /// HDRI (ela vence o estúdio no render), senão o estúdio. Escolher um
-    /// estúdio tira o HDRI (a ponte faz isso numa mutação só: um toque = um
-    /// passo de desfazer). CHÃO: três chips (sem chão, visível, só sombra).
-    /// Par do Android (Element3DPanel.kt `LightSceneTab`).
-    private var lightSceneTab: some View {
+    /// LUZ: uma fileira de fontes exclusivas (estúdios e "Imagem HDR…"), só uma
+    /// acesa: a HDR quando há HDRI (ela vence o estúdio), senão o estúdio.
+    /// Escolher um estúdio tira o HDRI (a ponte faz numa mutação só: um toque =
+    /// um passo de desfazer).
+    private var environmentTab: some View {
         let hdr = environment[0] >= 0.5
+        let ready = sceneSettings.count >= 8
         return VStack(alignment: .leading, spacing: 0) {
-            section("cat_light")
-            horizontal {
-                if sceneSettings.count >= 8 {
-                    ForEach(Array(studioLightKeys.enumerated()), id: \.offset) { i, key in
-                        let on = !hdr && Int(sceneSettings[0]) == i
-                        // Tocar no estúdio já aceso não gera passo de desfazer vazio.
-                        T3DChip(label: AureaText.t(key), on: on) { if !on { finishEditing(); setScene(0, Float(i)) } }
-                            .accessibilityIdentifier("panel3d.light.\(i)")
+            envSection("env3d_section_sky", hint: "env3d_sky_hint", id: "env3d.sky") {
+                AureaFlowLayout(hGap: 8, vGap: 2) {
+                    if ready {
+                        ForEach(Array(studioLightKeys.enumerated()), id: \.offset) { i, key in
+                            let on = !hdr && Int(sceneSettings[0]) == i
+                            // Tocar no estúdio já aceso não gera passo de desfazer vazio.
+                            envChoice(AureaText.t(key), on: on, id: "panel3d.light.\(i)") { if !on { finishEditing(); setScene(0, Float(i)) } }
+                        }
+                    }
+                    // Acesa, toca de novo para trocar a imagem.
+                    envChoice(AureaText.t("scene031_light_hdr"), on: hdr, id: "panel3d.light.hdr") { pickHdri(object: false) }
+                }
+                if hdr {
+                    envLine("env3d_hdr_image") {
+                        envChoice(AureaText.t("shape3d_image_change"), on: false, id: "env3d.hdr.change") { pickHdri(object: false) }
                     }
                 }
-                // Acesa, toca de novo para trocar a imagem.
-                chip("scene031_light_hdr", on: hdr) { pickHdri(object: false) }
-                    .accessibilityIdentifier("panel3d.light.hdr")
+                envToggle("environment_background", on: environment.count > 3 && environment[3] > 0.5, id: "env3d.background") {
+                    _ = model.engine.setEnvironmentBackground($0); refresh()
+                }
             }
-            sceneRow("panel_intensidade", value: environment[1] * 100, range: 0...2000, unit: "%", reset: 100, gesture: "ambiente") { value in
-                _ = model.engine.setEnvironmentIntensity(value / 100, rotation: environment[2]); refresh()
+            envSection("env3d_section_light", id: "env3d.light") {
+                sceneRow("panel_intensidade", value: environment[1] * 100, range: 0...2000, unit: "%", reset: 100, gesture: "ambiente") { value in
+                    _ = model.engine.setEnvironmentIntensity(value / 100, rotation: environment[2]); refresh()
+                }
+                sceneRow("pn_env_rotate_light", value: environment[2], range: -360...360, unit: "°", reset: 0, gesture: "ambiente") { value in
+                    _ = model.engine.setEnvironmentIntensity(environment[1], rotation: value); refresh()
+                }
+                // Exposição: multiplicador linear (1 = 100 %). É do ambiente (claro/escuro da cena).
+                if ready {
+                    sceneRow("scene_exposure", value: sceneSettings[4] * 100, range: 1...400, unit: "%", reset: 100, gesture: "exposicao 3D") { value in
+                        setScene(4, value / 100)
+                    }
+                }
             }
-            sceneRow("pn_env_rotate_light", value: environment[2], range: -360...360, unit: "°", reset: 0, gesture: "ambiente") { value in
-                _ = model.engine.setEnvironmentIntensity(environment[1], rotation: value); refresh()
+            if ready {
+                // Chão: 0 sem chão, 1 visível, 2 só sombra (compõe sobre o 2D).
+                envSection("env3d_section_floor", hint: "env3d_floor_hint", id: "env3d.floor") {
+                    let floor = Int(sceneSettings[1])
+                    AureaFlowLayout(hGap: 8, vGap: 2) {
+                        ForEach(Array(["scene031_floor_off", "scene031_floor_visible", "scene031_floor_shadow"].enumerated()), id: \.offset) { i, key in
+                            envChoice(AureaText.t(key), on: floor == i, id: "panel3d.floor.\(i)") { if floor != i { finishEditing(); setScene(1, Float(i)) } }
+                        }
+                    }
+                }
             }
-            if !isCamera && shadows.count == 2 {
-                toggleRow("pn_t3d_cast_shadow", on: shadows[0] > 0.5) { value in
+            gap(16)
+        }
+    }
+
+    /// RENDER (0.3.6): qualidade, tone map e bloom da cena 3D inteira (eram o
+    /// "Avançado" do ambiente). Par do Android: `Render3DTab`.
+    @ViewBuilder private var renderTab: some View {
+        if sceneSettings.count >= 8 {
+            VStack(alignment: .leading, spacing: 0) {
+                envSection("scene_quality", hint: "env3d_render_hint", id: "env3d.quality") {
+                    AureaFlowLayout(hGap: 8, vGap: 2) {
+                        ForEach(Array(["scene_auto", "scene_low", "scene_medium", "scene_high", "scene_ultra"].enumerated()), id: \.offset) { i, key in
+                            let on = Int(sceneSettings[2]) == i
+                            envChoice(AureaText.t(key), on: on, id: "env3d.quality.\(i)") { if !on { finishEditing(); setScene(2, Float(i)) } }
+                        }
+                    }
+                }
+                envSection("scene_tonemap", id: "env3d.tonemap") {
+                    AureaFlowLayout(hGap: 8, vGap: 2) {
+                        ForEach(Array(toneMapKeys.enumerated()), id: \.offset) { i, key in
+                            let on = Int(sceneSettings[3]) == i
+                            envChoice(AureaText.t(key), on: on, id: "env3d.tonemap.\(i)") { if !on { finishEditing(); setScene(3, Float(i)) } }
+                        }
+                    }
+                }
+                envSection("scene_bloom", id: "env3d.bloom") {
+                    envToggle("scene_bloom", on: sceneSettings[5] > 0.5, id: "env3d.bloom.switch") { value in finishEditing(); setScene(5, value ? 1 : 0) }
+                    if sceneSettings[5] > 0.5 {
+                        sceneRow("ui3d_bloom_strength", value: sceneSettings[6] * 100, range: 0...400, unit: "%", reset: 60, gesture: "bloom 3D") { value in
+                            setScene(6, value / 100)
+                        }
+                        sceneRow("scene031_bloom_threshold", value: sceneSettings[7], range: 0...8, unit: "", reset: 1.25, gesture: "bloom 3D",
+                                 step: 0.05, decimals: 2) { value in
+                            setScene(7, value)
+                        }
+                    }
+                }
+                gap(16)
+            }
+        }
+    }
+
+    /// OBJETO (aba Material, 0.3.6): projeta / recebe sombra — eram do
+    /// ambiente, mas são deste objeto. Par do Android: `ObjectShadowSection`.
+    @ViewBuilder private var objectShadowSection: some View {
+        if !isCamera && shadows.count == 2 {
+            envSection("env3d_section_object", id: "env3d.object") {
+                envToggle("pn_t3d_cast_shadow", on: shadows[0] > 0.5, id: "panel3d.shadow.cast") { value in
                     finishEditing()
                     _ = model.engine.setModelShadows(layerId, cast: value, receive: shadows[1] > 0.5)
                     refresh()
                 }
-                toggleRow("pn_t3d_receive_shadow", on: shadows[1] > 0.5) { value in
+                envToggle("pn_t3d_receive_shadow", on: shadows[1] > 0.5, id: "panel3d.shadow.receive") { value in
                     finishEditing()
                     _ = model.engine.setModelShadows(layerId, cast: shadows[0] > 0.5, receive: value)
                     refresh()
                 }
             }
-            section("fx3d_env_background")
-            toggleRow("environment_background", on: environment.count > 3 && environment[3] > 0.5) {
-                _ = model.engine.setEnvironmentBackground($0); refresh()
-            }
-            if sceneSettings.count >= 8 {
-                // --- Chão: 0 sem chão, 1 visível, 2 só sombra (compõe sobre o 2D) ---
-                section("fx3d_env_floor")
-                let floor = Int(sceneSettings[1])
-                horizontal {
-                    ForEach(Array(["scene031_floor_off", "scene031_floor_visible", "scene031_floor_shadow"].enumerated()), id: \.offset) { i, key in
-                        T3DChip(label: AureaText.t(key), on: floor == i) { if floor != i { finishEditing(); setScene(1, Float(i)) } }
-                            .accessibilityIdentifier("panel3d.floor.\(i)")
-                    }
-                }
-                // --- Avançado (fechado): qualidade, tone map, exposição e bloom ---
-                gap(4)
-                advancedHeader(open: sceneAdvanced) { sceneAdvanced.toggle() }
-                if sceneAdvanced { sceneAdvancedSection }
-            }
-            gap(8)
         }
     }
 
-    /// O "Avançado" do Ambiente (par do Android: `AdvancedSection` do `LightSceneTab`).
-    @ViewBuilder private var sceneAdvancedSection: some View {
-        section("scene_quality")
-        horizontal {
-            ForEach(Array(["scene_auto", "scene_low", "scene_medium", "scene_high", "scene_ultra"].enumerated()), id: \.offset) { i, key in
-                let on = Int(sceneSettings[2]) == i
-                T3DChip(label: AureaText.t(key), on: on) { if !on { finishEditing(); setScene(2, Float(i)) } }
+    /// TEXTURA do material `material` (0.3.6; par do Android: `MaterialTextureRow`):
+    /// a bola do motor (com a textura nova) e o que cobre o material agora — o
+    /// mapa do modelo, uma imagem ou uma camada da timeline — com Arquivo ·
+    /// Timeline · Remover. `allowFile` falso na forma 3D (a imagem do arquivo ela
+    /// já escolhe na linha "Imagem" da parte).
+    /// `thumb`: a MESMA bola das fichas acima (mesma chave e revisão no
+    /// MaterialThumbStore — revisões diferentes na mesma chave se pediriam sem fim).
+    private func materialTextureRow(_ material: UInt32, thumb: UIImage?, fallback: Color, allowFile: Bool = true) -> some View {
+        let info = model.engine.materialTexture(layerId, material: material)
+        let kind = (info["kind"] as? NSNumber)?.intValue ?? 0
+        let name = info["name"] as? String ?? ""
+        let value: String = kind == 1 ? AureaText.t("env3d_texture_image")
+            : kind == 2 ? AureaText.t("env3d_texture_layer_value", name.isEmpty ? AureaText.t("env3d_layer_unnamed") : name)
+            : AureaText.t("env3d_texture_original")
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                MaterialBallView(image: thumb, fallback: fallback, size: 44)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(AureaText.t("env3d_texture")).font(.aurea(size: PanelMetrics.label, weight: .semibold)).foregroundStyle(AureaColors.text)
+                    Text(value).font(.aurea(size: PanelMetrics.note)).foregroundStyle(kind != 0 ? AureaColors.accent : AureaColors.muted)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(minHeight: 56)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(AureaText.t("env3d_texture_desc", Int(material) + 1) + ": " + value)
+            HStack(spacing: 8) {
+                if allowFile {
+                    envChoice(AureaText.t("env3d_texture_from_file"), on: false, id: "panel3d.texture.file") {
+                        finishEditing(); materialTextureTarget = material; pickingTextTexture = true
+                    }
+                }
+                envChoice(AureaText.t("env3d_texture_from_timeline"), on: kind == 2, id: "panel3d.texture.timeline") {
+                    chooseTextureLayer(material)
+                }
+                if kind != 0 {
+                    envChoice(AureaText.t("env3d_texture_remove"), on: false, id: "panel3d.texture.remove") {
+                        finishEditing()
+                        _ = model.engine.clearMaterialTexture(layerId, material: material)
+                        refresh()
+                    }
+                }
             }
         }
-        section("scene_tonemap")
-        horizontal {
-            ForEach(Array(toneMapKeys.enumerated()), id: \.offset) { i, key in
-                let on = Int(sceneSettings[3]) == i
-                T3DChip(label: AureaText.t(key), on: on) { if !on { finishEditing(); setScene(3, Float(i)) } }
+        .padding(.top, 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("panel3d.texture.\(material)")
+    }
+
+    /// As camadas que podem cobrir o material (o motor filtra: nunca o próprio
+    /// objeto nem o que mora na cena 3D), na folha de ações.
+    private func chooseTextureLayer(_ material: UInt32) {
+        finishEditing()
+        let target = layerId
+        let ids = model.engine.materialTextureLayers(target).map(\.int64Value)
+        let names = Dictionary(model.layers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        let actions = ids.map { id in
+            SheetAction(names[id].flatMap { $0.isEmpty ? nil : $0 } ?? AureaText.t("env3d_layer_unnamed")) {
+                guard model.primarySelection == target else { return }
+                if !model.engine.setMaterialTextureLayer(target, material: material, source: id) {
+                    model.toast = AureaText.t("env3d_texture_error")
+                }
+                refresh()
             }
         }
-        // Exposição: multiplicador linear (1 = 100 %).
-        sceneRow("scene_exposure", value: sceneSettings[4] * 100, range: 1...400, unit: "%", reset: 100, gesture: "exposicao 3D") { value in
-            setScene(4, value / 100)
-        }
-        toggleRow("scene_bloom", on: sceneSettings[5] > 0.5) { value in finishEditing(); setScene(5, value ? 1 : 0) }
-        if sceneSettings[5] > 0.5 {
-            sceneRow("ui3d_bloom_strength", value: sceneSettings[6] * 100, range: 0...400, unit: "%", reset: 60, gesture: "bloom 3D") { value in
-                setScene(6, value / 100)
+        model.actionSheet = ActionSheetRequest(title: AureaText.t("env3d_texture_layer_title"),
+            message: AureaText.t(ids.isEmpty ? "env3d_texture_no_layers" : "env3d_texture_layer_hint"), actions: actions)
+    }
+
+    // --- Peças do Ambiente (medidas de PanelMetrics: título 15, rótulo 13, nota 12, chip 36/14, toque 44) ---
+
+    /// Seção com título (e dica) e respiro: um cartão por assunto.
+    private func envSection<Content: View>(_ title: String, hint: String? = nil, id: String,
+                                           @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(AureaText.t(title)).font(.aurea(size: PanelMetrics.title, weight: .bold)).foregroundStyle(AureaColors.text)
+                .accessibilityAddTraits(.isHeader)
+            if let hint {
+                Text(AureaText.t(hint)).font(.aurea(size: PanelMetrics.note)).lineSpacing(2).foregroundStyle(AureaColors.muted)
+                    .fixedSize(horizontal: false, vertical: true).padding(.top, 3)
             }
-            sceneRow("scene031_bloom_threshold", value: sceneSettings[7], range: 0...8, unit: "", reset: 1.25, gesture: "bloom 3D",
-                     step: 0.05, decimals: 2) { value in
-                setScene(7, value)
-            }
+            VStack(alignment: .leading, spacing: 0, content: content)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AureaColors.panelFrameContent, in: RoundedRectangle(cornerRadius: 14))
+                .padding(.top, 8)
         }
+        .padding(.top, 14)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(id)
+    }
+    /// Ficha de escolha: 36 de desenho, 44 de toque; "selecionado" para o VoiceOver.
+    private func envChoice(_ label: String, on: Bool, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label).font(.aurea(size: PanelMetrics.chipText, weight: on ? .semibold : .medium))
+                .foregroundStyle(on ? AureaColors.accent : AureaColors.text).lineLimit(1)
+                .padding(.horizontal, PanelMetrics.chipPad).frame(minHeight: PanelMetrics.chipHeight)
+                .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                .frame(minHeight: PanelMetrics.touch).contentShape(Rectangle())
+        }
+        .buttonStyle(AureaPressStyle(shrink: 1))
+        .accessibilityAddTraits(on ? [.isSelected] : [])
+        .accessibilityIdentifier(id)
+    }
+    /// Linha "rótulo · interruptor" de 52 (a linha toda toca).
+    private func envToggle(_ key: String, on: Bool, id: String, onChange: @escaping (Bool) -> Void) -> some View {
+        toggleRow(key, on: on, onChange: onChange).frame(minHeight: 52).accessibilityIdentifier(id)
+    }
+    /// Linha "rótulo · conteúdo à direita".
+    private func envLine<Trailing: View>(_ key: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack(spacing: 0) {
+            Text(AureaText.t(key)).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            trailing()
+        }.frame(minHeight: 52)
     }
 
     /// PARTES do objeto 3D (Element3DPanel.kt `PartsTab`): escolher a parte e
@@ -513,6 +681,16 @@ struct Panel3DView: View {
         }
         return thumbs.image(key)
     }
+    /// Bola da parte `i` da forma 3D: a mesma chave e revisão das fichas de
+    /// Shape3DPanelSection (Shape3DViews.swift), para as duas não brigarem.
+    private func shapePartThumb(_ i: Int) -> UIImage? {
+        let key = "m:\(layerId):\(i)"
+        let engine = model.engine, target = layerId
+        thumbs.request(key, revision: model.status.modelRevision) {
+            engine.materialPreview(target, material: UInt32(i), size: materialThumbSide)
+        }
+        return thumbs.image(key)
+    }
     /// MOSTRAR INTERIOR (dupla face): as faces de dentro com a mesma textura —
     /// a câmera que entra no cubo vê o lado de dentro. Ligado por padrão nas
     /// formas 3D prontas; modelo importado e texto 3D começam desligados.
@@ -605,6 +783,10 @@ struct Panel3DView: View {
                         .accessibilityIdentifier("panel3d.material.\(id)")
                 }
             }
+            // 0.3.6: a TEXTURA do material escolhido, direto aqui (arquivo ou timeline).
+            materialTextureRow(index, thumb: layerMaterialThumb(index, values: material),
+                               fallback: AureaColorSpace.color([material[2], material[3], material[4], 1]))
+            gap(6)
             AureaPropertyPanel(domain: "material", layerId: targetLayer, values: Array(material[2..<8]),
                 projectGeneration: model.projectGeneration,
                 compositionId: (model.composition[AureaCompositionId] as? NSNumber)?.uint64Value ?? 0, materialIndex: index) { changes in
@@ -623,7 +805,7 @@ struct Panel3DView: View {
 
     private func set3D(_ key: String, value: Float) {
         finishEditing()
-        _ = model.engine.setText3D(forLayer: layerId, property: key, stringValue: nil, numberValue: value)
+        model.reportText3D(model.engine.setText3D(forLayer: layerId, property: key, stringValue: nil, numberValue: value))
         refresh()
     }
     private func lazyNumber(_ key: String, _ value: Float) {
@@ -667,7 +849,7 @@ struct Panel3DView: View {
         model.text3DFontSheet = Text3DFontRequest(fonts: model.engine.availableFonts(),
                                                 current: text3D["fontPath"] as? String ?? "") { path in
             guard model.primarySelection == target else { return }
-            _ = model.engine.setText3D(forLayer: target, property: "fontPath", stringValue: path, numberValue: 0)
+            model.reportText3D(model.engine.setText3D(forLayer: target, property: "fontPath", stringValue: path, numberValue: 0))
             refresh()
         }
     }
@@ -702,12 +884,12 @@ struct Panel3DView: View {
         pending = nil
         switch change {
         case let .number(id, key, value):
-            _ = model.engine.setText3D(forLayer: id, property: key, stringValue: nil, numberValue: value)
+            model.reportText3D(model.engine.setText3D(forLayer: id, property: key, stringValue: nil, numberValue: value))
         case let .color(id, region, value):
-            _ = model.engine.setText3DColor(id, region: region, values: value.map { NSNumber(value: $0) })
+            model.reportText3D(model.engine.setText3DColor(id, region: region, values: value.map { NSNumber(value: $0) }))
         case let .content(id, content):
             if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                _ = model.engine.setText3D(forLayer: id, property: "content", stringValue: content, numberValue: 0)
+                model.reportText3D(model.engine.setText3D(forLayer: id, property: "content", stringValue: content, numberValue: 0))
             }
         }
         refresh()
@@ -752,8 +934,8 @@ struct Panel3DView: View {
                 model.toast = AureaText.t("msg_nao_deu_para_ler_essa_fonte"); return
             }
             if let target = target, model.primarySelection == target {
-                _ = model.engine.setText3D(forLayer: target, property: "fontPath",
-                                           stringValue: "docs:Media/\((font["path"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? destination.lastPathComponent)", numberValue: 0)
+                model.reportText3D(model.engine.setText3D(forLayer: target, property: "fontPath",
+                                           stringValue: "docs:Media/\((font["path"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? destination.lastPathComponent)", numberValue: 0))
                 refresh()
             }
             model.toast = AureaText.t("msg_fonte_importada", font["family"] as? String ?? "")

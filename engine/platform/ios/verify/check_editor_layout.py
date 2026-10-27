@@ -109,9 +109,11 @@ for h in [CGFloat(640), 700, 760, 780, 844, 900, 960] {
         for pref in [CGFloat(0), 120, h - 368 - 200, h - 368 + 60] {
             for content in [SheetContent.panel, .curve] {
                 let m = EditorLayout.solve(total: h, content: content, fullscreen: false, preferred: pref, fontScale: font)
-                check(m.overlay && near(m.visibleTimeline, EditorLayout.timelineFocusHeight(fontScale: font))
-                      && m.sheet >= EditorLayout.layerPanel(fontScale: font) - 0.01 && near(m.total, h),
-                      "\(h) fonte \(font) divisa \(pref) \(content): painel até logo abaixo da linha em foco")
+                // 0.3.6: até o teto do painel; passando dele, a timeline fica com o resto.
+                check(m.overlay && near(m.visibleTimeline, max(EditorLayout.timelineFocusHeight(fontScale: font), m.zone - EditorLayout.panelMax(fontScale: font)))
+                      && m.sheet >= EditorLayout.layerPanel(fontScale: font) - 0.01
+                      && m.sheet <= EditorLayout.panelMax(fontScale: font) + 0.01 && near(m.total, h),
+                      "\(h) fonte \(font) divisa \(pref) \(content): painel até logo abaixo da linha em foco, no teto")
             }
         }
     }

@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 using namespace aurea;
@@ -1306,4 +1307,177 @@ AUREA_TEST(Text3D, ChosenAndImportedFontsChangeTheMeshAndSurviveReopen) {
     AUREA_CHECK(listada);
     e.shutdown();
     fs::remove_all(docs, ec);
+}
+
+// -----------------------------------------------------------------------------
+// 0.3.6: "as configurações do texto 3D não mudam num projeto específico"
+// -----------------------------------------------------------------------------
+namespace {
+Composition* comp036(Engine& e) { return e.project()->timeline().composition(e.project()->timeline().current()); }
+std::string temp036(const char* name) { return std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "/" + name; }
+EngineConfig config036() { EngineConfig c; c.workerCount = 1; c.disableAutosave = true; return c; }
+} // namespace
+
+AUREA_TEST(Text3D036, OutOfRangeAndNanRecipeFieldsAreSanitizedOnReadAndEdit) {
+    // Receita gravada com lixo (NaN, alinhamento 7, segmentos 0, chanfro largo).
+    const std::string bad = std::string(kText3DScheme) + "v2;d=nan;a=7;c=ffffffff;bv=1nan/0.9000/2.000/0;t=AUREA";
+    Text3DSpec read;
+    AUREA_CHECK(decode_text3d(bad, read));
+    AUREA_CHECK(std::isfinite(read.depth) && std::fabs(read.depth - 0.25f) < 1e-6f);
+    AUREA_CHECK_EQ(read.alignment, 2u);
+    AUREA_CHECK(read.bevel && std::isfinite(read.bevelWidth) && read.bevelWidth <= 0.5f);
+    AUREA_CHECK(read.bevelDepth <= 0.5f && read.bevelRoundness <= 1.0f);
+    AUREA_CHECK_EQ(read.bevelSegments, 1u);
+    // O que uma ponte manda sem validar também sai são.
+    Text3DSpec sent; sent.depth = std::numeric_limits<f32>::infinity(); sent.metallic = std::nanf("");
+    sent.roughness = -3.f; sent.bevelSegments = 0; sent.color = Vec4{2.f, -1.f, std::nanf(""), 1.f};
+    sanitize_text3d(sent);
+    AUREA_CHECK(std::fabs(sent.depth - 0.25f) < 1e-6f && sent.metallic == 0.0f && sent.roughness == 0.0f);
+    AUREA_CHECK(sent.bevelSegments == 1u && sent.color.x == 1.0f && sent.color.y == 0.0f && sent.color.z == 1.0f);
+    if (!text::default_font()) return;
+    Engine e; AUREA_CHECK(e.initialize(config036()).ok()); AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const auto id = e.add_text3d(receita("AUREA")); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    Text3DSpec edit = receita("AUREA"); edit.depth = std::nanf(""); edit.bevel = true; edit.bevelSegments = 0;
+    AUREA_CHECK(e.set_text3d(*id, edit).ok());
+    AUREA_CHECK_EQ(e.last_text3d_status(), 0);
+    AUREA_CHECK(e.query_text3d(*id, read)); AUREA_CHECK(std::isfinite(read.depth) && read.bevelSegments >= 1u);
+    e.shutdown();
+}
+
+AUREA_TEST(Text3D036, LegacyV1ProjectReopensAndEveryEditApplies) {
+    if (!text::default_font()) return;
+    Engine e; AUREA_CHECK(e.initialize(config036()).ok()); AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const auto id = e.add_text3d(receita("AUREA")); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    // Projeto de versão anterior: a receita v1 (só cor/profundidade/alinhamento,
+    // sem materiais, sem letras separadas) no asset da camada.
+    Layer* l = comp036(e)->layer(LayerId::unpack(*id));
+    Asset* asset = e.project()->asset(l->model.scene); AUREA_CHECK(asset != nullptr); if (!asset) return;
+    asset->sourcePath = std::string(kText3DScheme) + "v1;d=0.2500;a=1;c=ff0000ff;t=AUREA";
+    const std::string path = temp036("aurea_teste_text3d_036_v1.aurea");
+    AUREA_CHECK(e.save_project(path.c_str()).ok()); AUREA_CHECK(e.load_project(path.c_str()).ok());
+    Text3DSpec read; if (!e.query_text3d(*id, read)) { AUREA_CHECK(false); return; }
+    AUREA_CHECK(read.color.x > 0.99f && read.color.y < 0.01f && !read.bevel);
+    auto meshOf = [&] { return e.model_asset(comp036(e)->layer(LayerId::unpack(*id))->model.scene.pack()); };
+    const auto before = meshOf(); AUREA_CHECK(before != nullptr); if (!before) return;
+    // Cada configuração do painel muda a receita E a malha.
+    Text3DSpec edit = read;
+    edit.depth = 0.9f; edit.bevel = true; edit.bevelSegments = 4; edit.color = Vec4{0, 1, 0, 1}; edit.metallic = 0.8f;
+    AUREA_CHECK(e.set_text3d(*id, edit).ok());
+    AUREA_CHECK(e.query_text3d(*id, read));
+    AUREA_CHECK(std::fabs(read.depth - 0.9f) < 1e-3f && read.bevel && read.bevelSegments == 4u);
+    AUREA_CHECK(read.color.y > 0.99f && std::fabs(read.metallic - 0.8f) < 1e-2f);
+    const auto after = meshOf(); AUREA_CHECK(after != nullptr && after != before);
+    if (after) AUREA_CHECK(after->bounds.extent().z > before->bounds.extent().z * 2.0f);
+    // E sobrevive a mais uma volta de salvar/abrir.
+    AUREA_CHECK(e.save_project(path.c_str()).ok()); AUREA_CHECK(e.load_project(path.c_str()).ok());
+    AUREA_CHECK(e.query_text3d(*id, read)); AUREA_CHECK(std::fabs(read.depth - 0.9f) < 1e-3f && read.bevel);
+    e.shutdown();
+    std::error_code ec; std::filesystem::remove(std::filesystem::u8path(path), ec);
+}
+
+AUREA_TEST(Text3D036, LegacyMergedTextWithLetterEffectStillAcceptsEdits) {
+    if (!text::default_font()) return;
+    Engine e; AUREA_CHECK(e.initialize(config036()).ok()); AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    // Mais de 256 letras: a separação por letra não cabe. Um projeto antigo
+    // guardou o Text 3D Layout com a malha inteira (versão sem a separação).
+    const std::string longText(300, 'A');
+    const auto id = e.add_text3d(receita(longText.c_str())); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    Layer* l = comp036(e)->layer(LayerId::unpack(*id));
+    EffectRegistry registry; register_builtin_effects(registry);
+    EffectInstance effect; effect.type = effect_type_id(effect_keys::kText3DLayout); effect.id = l->alloc_effect_id();
+    initialize_instance(effect, *registry.params(effect.type));
+    l->effects.push_back(effect);
+    const std::string path = temp036("aurea_teste_text3d_036_letras.aurea");
+    AUREA_CHECK(e.save_project(path.c_str()).ok()); AUREA_CHECK(e.load_project(path.c_str()).ok());
+    auto mesh = e.model_asset(comp036(e)->layer(LayerId::unpack(*id))->model.scene.pack());
+    AUREA_CHECK(mesh != nullptr && !mesh->textGlyphLayout);   // reabriu inteiro (visível)
+    Text3DSpec read; AUREA_CHECK(e.query_text3d(*id, read));
+    read.depth = 0.7f; read.color = Vec4{0, 0, 1, 1};
+    // Antes: a separação forçada falhava (256 glifos) e TODA edição era recusada.
+    AUREA_CHECK(e.set_text3d(*id, read).ok());
+    AUREA_CHECK_EQ(e.last_text3d_status(), 0);
+    AUREA_CHECK(e.query_text3d(*id, read)); AUREA_CHECK(std::fabs(read.depth - 0.7f) < 1e-3f && read.color.z > 0.99f);
+    mesh = e.model_asset(comp036(e)->layer(LayerId::unpack(*id))->model.scene.pack());
+    AUREA_CHECK(mesh != nullptr && !mesh->textGlyphLayout);
+    // Texto com as letras já separadas continua recusando ir além do limite
+    // (não junta as letras de um efeito vivo em silêncio).
+    const auto small = e.add_text3d(receita("ABC")); AUREA_CHECK(small.ok()); if (!small.ok()) return;
+    Command add; add.type = CommandType::EffectAdd; add.effect_add.layer = LayerId::unpack(*small);
+    add.effect_add.effectType = effect_type_id(effect_keys::kText3DLayout); add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(e.apply_command(add).ok());
+    Text3DSpec grow; AUREA_CHECK(e.query_text3d(*small, grow)); grow.content = longText;
+    AUREA_CHECK(!e.set_text3d(*small, grow).ok());
+    AUREA_CHECK_EQ(e.last_text3d_status(), static_cast<i32>(Errc::OutOfRange));
+    e.shutdown();
+    std::error_code ec; std::filesystem::remove(std::filesystem::u8path(path), ec);
+}
+
+AUREA_TEST(Text3D036, LayerMaterialOverrideAndKeysFollowThePanelEdit) {
+    if (!text::default_font()) return;
+    Engine e; AUREA_CHECK(e.initialize(config036()).ok()); AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    Text3DSpec spec = receita("AUREA"); spec.color = Vec4{1, 1, 1, 1}; spec.metallic = 0.0f; spec.roughness = 0.35f;
+    const auto id = e.add_text3d(spec); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    // O projeto do usuário: ajuste de material na camada (cor azul, metal 1)
+    // e rugosidade com keyframes — os dois vencem a receita no render.
+    Layer* l = comp036(e)->layer(LayerId::unpack(*id));
+    MaterialOverride over; over.materialIndex = 0; over.mask = 0x3F; over.baseColor = Vec4{0, 0, 1, 1}; over.metallic = 1.0f; over.roughness = 0.1f;
+    l->model.materials.push_back(over);
+    Track& rough = l->tracks.get_or_create(TrackProperty::MaterialParam, 0, 5);
+    rough.set(FrameIndex{0}, 0.1f); rough.set(FrameIndex{30}, 0.2f);
+    auto shown = [&](u32 field) { f32 v[8]{}; return e.query_materials(*id, v, 1) == 1 ? v[2 + field] : -1.0f; };
+    AUREA_CHECK(shown(2) > 0.99f);   // azul do ajuste, não o branco da receita
+    // Painel do texto 3D: vermelho e rugosidade 0,8 (metal não mexido).
+    spec.color = Vec4{1, 0, 0, 1}; spec.roughness = 0.8f;
+    AUREA_CHECK(e.set_text3d(*id, spec).ok());
+    AUREA_CHECK(shown(0) > 0.99f && shown(1) < 0.01f && shown(2) < 0.01f);   // a cor nova aparece
+    AUREA_CHECK(std::fabs(shown(5) - 0.8f) < 1e-3f);                         // keyframe no instante atual
+    AUREA_CHECK(std::fabs(shown(4) - 1.0f) < 1e-3f);                         // metal do ajuste continua
+    l = comp036(e)->layer(LayerId::unpack(*id));
+    const Track* kept = l->tracks.find(TrackProperty::MaterialParam, 0, 5);
+    AUREA_CHECK(kept != nullptr && kept->keys.size() == 2);                  // a animação fica
+    // Desfazer devolve o ajuste e a chave antigos.
+    Command undo; undo.type = CommandType::Undo; AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK(shown(2) > 0.99f && std::fabs(shown(5) - 0.1f) < 1e-3f);
+    e.shutdown();
+}
+
+AUREA_TEST(Text3D036, LockedLayerReportsWhyTheEditWasRefused) {
+    if (!text::default_font()) return;
+    Engine e; AUREA_CHECK(e.initialize(config036()).ok()); AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    Text3DSpec spec = receita("AUREA");
+    const auto id = e.add_text3d(spec); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    comp036(e)->layer(LayerId::unpack(*id))->locked = true;
+    spec.depth = 0.8f;
+    AUREA_CHECK(!e.set_text3d(*id, spec).ok());
+    AUREA_CHECK_EQ(e.last_text3d_status(), static_cast<i32>(Errc::InvalidState));
+    comp036(e)->layer(LayerId::unpack(*id))->locked = false;
+    AUREA_CHECK(e.set_text3d(*id, spec).ok());
+    AUREA_CHECK_EQ(e.last_text3d_status(), 0);
+    e.shutdown();
+}
+
+AUREA_TEST(Text3D036, ManyEditsInAFullProjectReleaseOldMeshesAndUndoRebuildsThem) {
+    const auto font = text::default_font(); if (!font) return;
+    Text3DSpec spec = receita("AUREA MOTION 3D 0123456789"); spec.bevel = true; spec.bevelSegments = 8;
+    auto probe = build_text3d(*font, spec); AUREA_CHECK(probe.ok()); if (!probe.ok()) return;
+    const u64 mesh = scene_asset_memory_bytes(*probe.asset);
+    // Espaço de imagens e modelos (1/3 do orçamento) para ~3,5 malhas: sem
+    // soltar as antigas, a 3ª edição era recusada ("não muda nada").
+    EngineConfig config = config036(); config.memoryBudgetBytes = std::max<u64>(3 * (mesh * 7 / 2), 3ull << 20);
+    Engine e; AUREA_CHECK(e.initialize(config).ok()); AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const auto id = e.add_text3d(spec); AUREA_CHECK(id.ok()); if (!id.ok()) return;
+    for (u32 i = 0; i < 8; ++i) {
+        spec.depth = 0.3f + 0.05f * static_cast<f32>(i + 1);
+        AUREA_CHECK(e.set_text3d(*id, spec).ok());
+        AUREA_CHECK_EQ(e.last_text3d_status(), 0);
+    }
+    Text3DSpec read; AUREA_CHECK(e.query_text3d(*id, read)); AUREA_CHECK(std::fabs(read.depth - 0.7f) < 1e-3f);
+    // Desfazer religa malhas antigas: as soltas voltam da receita.
+    Command undo; undo.type = CommandType::Undo;
+    for (u32 i = 0; i < 3; ++i) {
+        AUREA_CHECK(e.apply_command(undo).ok());
+        AUREA_CHECK(e.model_asset(comp036(e)->layer(LayerId::unpack(*id))->model.scene.pack()) != nullptr);
+    }
+    AUREA_CHECK(e.query_text3d(*id, read)); AUREA_CHECK(std::fabs(read.depth - 0.55f) < 1e-3f);
+    e.shutdown();
 }

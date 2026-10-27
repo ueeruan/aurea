@@ -27,6 +27,8 @@
 #include "aurea/vector/VectorData.hpp"
 #include "aurea/text/Captions.hpp"
 
+namespace aurea::rig { struct MocapPreview; }   // rig/Mocap.hpp (prévia do Motion Capture)
+
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -370,6 +372,13 @@ struct MaterialOverride {
     Vec4 baseColor{1.0f, 1.0f, 1.0f, 1.0f};
     f32 metallic = 1.0f;
     f32 roughness = 1.0f;
+    /// TEXTURA DO MATERIAL (0.3.6, v52): a imagem de cor deste material
+    /// trocada por uma IMAGEM do projeto (AssetId empacotado) ou por uma
+    /// CAMADA da mesma composição (LayerId empacotado), renderizada a cada
+    /// quadro. 0 = nada; as duas nunca valem juntas (a última escolha vence).
+    u64 textureImage = 0;
+    u64 textureLayer = 0;
+    [[nodiscard]] bool has_texture() const noexcept { return textureImage != 0 || textureLayer != 0; }
 };
 
 /// MOSTRAR INTERIOR (dupla face) de um objeto 3D. Gravado no projeto (v43);
@@ -401,6 +410,10 @@ struct Model3DData {
     /// Índices de LOD forçado, ou -1 para automático por tamanho na tela.
     i32     forcedLod = -1;
     std::vector<MaterialOverride> materials;
+    /// Motion Capture (0.3.6 BETA): prévia TRANSITÓRIA — o personagem toca a
+    /// captura no preview sem gravar keys (rig/Mocap.hpp). Nunca é salva; o
+    /// motor a tira ao aplicar à timeline, ao sair do painel ou ao trocar a sessão.
+    std::shared_ptr<const rig::MocapPreview> mocapPreview;
 };
 
 /// Forma do emissor (Aurea Particular). Todas amostradas em forma fechada no
@@ -977,6 +990,24 @@ struct Layer {
     f32  environmentRotation = 0.0f;          ///< graus
     bool environmentBackground = false;       ///< mostra o HDRI como fundo deste objeto
 };
+
+/// TEXTURA DO MATERIAL vinda da timeline (0.3.6): a camada `source` pode
+/// cobrir um material do objeto 3D `target`? Nunca ela mesma (o objeto se
+/// desenharia dentro de si), nem o que mora na cena 3D — modelo, câmera, luz
+/// ou camada 2D no espaço 3D: o grupo 3D leria a própria saída (ciclo) —,
+/// nem o que não tem imagem (som, nulo, ajuste). Pré-composição pode: ela
+/// desenha num alvo próprio, antes da composição que a usa.
+[[nodiscard]] inline bool material_texture_source_ok(LayerId target, LayerId source, const Layer& src) noexcept {
+    if (!source.valid() || source == target) return false;
+    if (src.threeD || src.adjustment) return false;
+    switch (src.kind) {
+        case LayerKind::Video: case LayerKind::Image: case LayerKind::Text: case LayerKind::Shape:
+        case LayerKind::ParticleSystem: case LayerKind::Composition:
+            return true;
+        default:
+            return false;
+    }
+}
 
 /// Os parâmetros da camada de partículas com os keyframes aplicados.
 ///

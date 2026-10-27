@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="t3d036_err_memory">Memori gambar dan model proyek ini habis, jadi teks 3D tidak dapat dibuat ulang. Hapus media yang tidak dipakai, atau simpan lalu buka lagi proyeknya.</string>
+    <string name="t3d036_err_font">Font teks 3D ini tidak ada di perangkat ini dan tidak ada font lain. Pilih font lain.</string>
+    <string name="t3d036_err_geometry">Teks 3D tidak dapat dibuat dengan perubahan ini: teks tidak punya huruf yang terlihat, atau hurufnya terlalu banyak untuk dianimasikan satu per satu (maksimal 256).</string>
+    <string name="t3d036_err_generic">Tidak dapat menerapkan perubahan pada teks 3D.</string>
+</resources>

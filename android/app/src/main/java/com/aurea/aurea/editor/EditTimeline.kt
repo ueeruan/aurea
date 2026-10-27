@@ -5,8 +5,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -21,8 +24,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -35,6 +40,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -82,7 +88,7 @@ private val RowGap = 6.dp
 private val HandleW = 14.dp
 
 /** Uma fileira da linha do tempo: os cortes dela e se é a trilha principal. */
-private class EditRow(val key: String, val clips: List<LayerRow>, val main: Boolean, val audio: Boolean)
+internal class EditRow(val key: String, val clips: List<LayerRow>, val main: Boolean, val audio: Boolean)
 
 /** Fileiras: a principal primeiro, depois as linhas de cima para baixo na pilha, e o áudio no fim. */
 private fun editRows(layers: List<LayerRow>, anchor: Long): List<EditRow> {
@@ -110,6 +116,8 @@ internal fun EditTimeline(
     val density = LocalDensity.current
     var pxPerSecond by remember { mutableFloatStateOf(with(density) { 72.dp.toPx() }) }
     var scrollY by remember { mutableFloatStateOf(0f) }
+    // 0.3.6: a altura medida da linha do tempo (0 até o primeiro layout).
+    var viewportH by remember { mutableIntStateOf(0) }
     val fps = store.project.fps.takeIf { it > 0f } ?: 30f
     val playhead = store.playhead
     val pxPerFrame = pxPerSecond / fps
@@ -118,6 +126,28 @@ internal fun EditTimeline(
     val timelineLabel = stringResource(R.string.edit_timeline)
     val currentPlayhead by rememberUpdatedState(playhead)
     val currentPxPerFrame by rememberUpdatedState(pxPerFrame)
+    // 0.3.6: a rolagem vertical vai só até a última fileira encostar embaixo. Antes não
+    // tinha teto e o arrasto de lado (com um pouco de vertical) levava as fileiras para
+    // fora da tela: "o clipe some" ao deslizar logo depois de abrir o projeto.
+    val layout = remember(rows, hasAudio, compact, density.density) { EditRowLayout.of(rows, hasAudio, compact, density) }
+    val maxScroll = EditRowLayout.maxScroll(layout.contentBottom, viewportH.toFloat())
+    val currentMaxScroll by rememberUpdatedState(maxScroll)
+    val shownScroll = scrollY.coerceIn(0f, maxScroll)
+    // 0.3.6: o corte escolhido rola para dentro da vista (com o painel aberto a linha do
+    // tempo encolhe e a fileira dele ficava escondida embaixo, atrás do painel).
+    val primary = store.primary
+    LaunchedEffect(primary, layout, viewportH) {
+        val id = primary ?: return@LaunchedEffect
+        if (viewportH <= 0) return@LaunchedEffect
+        val index = rows.indexOfFirst { r -> r.clips.any { it.id == id } }
+        if (index < 0) return@LaunchedEffect
+        val top = layout.rowTops[index] - layout.rowsTop
+        val bottom = top + layout.rowHeights[index]
+        val viewport = com.aurea.aurea.editor.timeline.TimelineReveal.viewport(viewportH.toFloat(), layout.rowsTop, 0f)
+        val current = scrollY.coerceIn(0f, maxScroll)
+        val target = com.aurea.aurea.editor.timeline.TimelineReveal.target(top, bottom, current, viewport).coerceIn(0f, maxScroll)
+        if (target != current) scrollY = target
+    }
     // Onda do som: uma janela por corte, pedida ao motor só quando a vista sai dela,
     // o zoom muda de degrau ou chega pedaço novo (a geração das miniaturas muda).
     val waves = remember { EditWaveCache() }
@@ -125,22 +155,58 @@ internal fun EditTimeline(
 
     BoxWithConstraints(
         modifier.background(EditColors.Canvas).clipToBounds().testTag("edit.timeline")
+            .onSizeChanged { viewportH = it.height }
             .semantics { contentDescription = timelineLabel }
             // Fundo: tocar solta a seleção; arrastar anda no tempo (e rola as
             // linhas na vertical); pinça muda a escala.
             .pointerInput(store) { detectTapGestures { store.clearSelection() } }
             .pointerInput(store) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    if (zoom != 1f) {
-                        pxPerSecond = (pxPerSecond * zoom).coerceIn(with(density) { 12.dp.toPx() }, with(density) { 640.dp.toPx() })
-                    } else {
-                        if (pan.x != 0f) {
-                            if (store.playing) store.pause()
-                            val frame = (currentPlayhead - pan.x / currentPxPerFrame).roundToInt()
-                                .coerceIn(0, store.project.durationFrames.coerceAtLeast(0))
-                            if (frame != currentPlayhead) store.seek(frame)
+                // 0.3.6: o eixo é decidido UMA vez por gesto (depois da folga do toque):
+                // de lado só anda no tempo, de pé só rola as fileiras. O tempo anda a
+                // partir do quadro em que o gesto começou (o cabeçote do motor chega
+                // atrasado; somar ao valor velho fazia o conteúdo pular).
+                val slop = viewConfiguration.touchSlop
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var axis = EditPanAxis.NONE
+                    var total = Offset.Zero
+                    var startFrame = 0
+                    var pinching = false
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        // Um corte (alça de aparar, segurar e arrastar) ficou com o gesto.
+                        if (event.changes.any { it.isConsumed }) break
+                        val pressed = event.changes.count { it.pressed }
+                        if (pressed == 0) break
+                        if (pressed >= 2) pinching = true
+                        if (pinching) {
+                            val zoom = event.calculateZoom()
+                            if (zoom != 1f) {
+                                pxPerSecond = (pxPerSecond * zoom).coerceIn(with(density) { 12.dp.toPx() }, with(density) { 640.dp.toPx() })
+                            }
+                            event.changes.forEach { it.consume() }
+                            continue
                         }
-                        scrollY = (scrollY - pan.y).coerceAtLeast(0f)
+                        val pan = event.calculatePan()
+                        total += pan
+                        if (axis == EditPanAxis.NONE && total.getDistance() > slop) {
+                            axis = EditPanAxis.of(total.x, total.y)
+                            if (axis == EditPanAxis.TIME) {
+                                if (store.playing) store.pause()
+                                startFrame = currentPlayhead
+                                total = Offset.Zero
+                            }
+                        }
+                        when (axis) {
+                            EditPanAxis.TIME -> {
+                                val frame = (startFrame - total.x / currentPxPerFrame).roundToInt()
+                                    .coerceIn(0, store.project.durationFrames.coerceAtLeast(0))
+                                if (frame != currentPlayhead) store.seek(frame)
+                            }
+                            EditPanAxis.ROWS -> scrollY = (scrollY.coerceIn(0f, currentMaxScroll) - pan.y).coerceIn(0f, currentMaxScroll)
+                            else -> {}
+                        }
+                        if (axis != EditPanAxis.NONE) event.changes.forEach { it.consume() }
                     }
                 }
             },
@@ -167,7 +233,7 @@ internal fun EditTimeline(
         val mainHpx = with(density) { MainH.toPx() }
         val rowHpx = with(density) { RowH.toPx() }
         val gapPx = with(density) { RowGap.toPx() }
-        val top = with(density) { (RulerH + 8.dp).toPx() } - scrollY
+        val top = with(density) { (RulerH + 8.dp).toPx() } - shownScroll
         var y = top
         val anchorRow = rows.firstOrNull { it.main }
         if (anchorRow == null) {
@@ -231,6 +297,58 @@ internal fun EditTimeline(
         )
         // Ímã da trilha principal, no canto (o estado do motor, um toque troca).
         MagnetToggle(store, Modifier.align(Alignment.TopStart).padding(start = 6.dp, top = 2.dp))
+    }
+}
+
+/** 0.3.6: o eixo de um arrasto de um dedo na linha do tempo da Edição, decidido uma vez. */
+internal object EditPanAxis {
+    const val NONE = 0
+    /** De lado: anda no tempo. */
+    const val TIME = 1
+    /** De pé: rola as fileiras. */
+    const val ROWS = 2
+
+    /** Mais de lado que de pé (empate = tempo, o gesto principal). */
+    fun of(dx: Float, dy: Float): Int = if (kotlin.math.abs(dx) >= kotlin.math.abs(dy)) TIME else ROWS
+}
+
+/**
+ * 0.3.6: onde cada fileira fica (sem rolagem, px a partir do topo da linha do tempo)
+ * e onde o conteúdo termina — a mesma conta do desenho, para o teto da rolagem e
+ * para trazer o corte escolhido à vista.
+ */
+internal class EditRowLayout(val rowsTop: Float, val rowTops: FloatArray, val rowHeights: FloatArray, val contentBottom: Float) {
+    companion object {
+        /** Folga embaixo da última fileira. */
+        private val BottomPad = 12.dp
+
+        fun of(rows: List<EditRow>, hasAudio: Boolean, compact: Boolean, density: androidx.compose.ui.unit.Density): EditRowLayout =
+            with(density) {
+                compute(
+                    rows.map { it.main }, hasAudio, compact,
+                    rulerTop = (RulerH + 8.dp).toPx(), main = MainH.toPx(), row = RowH.toPx(), gap = RowGap.toPx(), pad = BottomPad.toPx(),
+                )
+            }
+
+        /** A conta pura (testada na JVM): [mains] diz quais fileiras são a trilha principal. */
+        fun compute(mains: List<Boolean>, hasAudio: Boolean, compact: Boolean, rulerTop: Float, main: Float, row: Float, gap: Float, pad: Float): EditRowLayout {
+            var y = rulerTop
+            if (mains.none { it }) y += main + gap
+            val tops = FloatArray(mains.size)
+            val heights = FloatArray(mains.size)
+            mains.forEachIndexed { i, isMain ->
+                val h = if (isMain) main else row
+                tops[i] = y
+                heights[i] = h
+                y += h + gap
+                if (isMain && !hasAudio && !compact) y += row + gap
+            }
+            return EditRowLayout(rulerTop, tops, heights, y - gap + pad)
+        }
+
+        /** O teto da rolagem: a última fileira encosta embaixo (nunca negativo). */
+        fun maxScroll(contentBottom: Float, viewport: Float): Float =
+            if (viewport <= 0f) 0f else kotlin.math.max(0f, contentBottom - viewport)
     }
 }
 

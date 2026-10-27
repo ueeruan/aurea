@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mocap_title">Motion Capture (BETA)</string>
+    <string name="mocap_intro">Превратите видео с человеком в анимацию персонажа. Анализ идёт на устройстве, без интернета.</string>
+    <string name="mocap_need_rig">У этой модели пока нет гуманоидного скелета. Создайте его с AutoRig 3D (персонаж в T-позе) и вернитесь сюда.</string>
+    <string name="mocap_need_map">Сопоставьте кости файла в разделе «Исправить скелет» выше, чтобы использовать Motion Capture.</string>
+    <string name="mocap_autorig">AutoRig 3D</string>
+    <string name="mocap_import">Импорт видео</string>
+    <string name="mocap_import_hint">Из галереи. Один человек, тело видно целиком, камера неподвижна.</string>
+    <string name="mocap_record">Записать движение</string>
+    <string name="mocap_record_hint">Открывает камеру устройства.</string>
+    <string name="mocap_reduced">Упрощённый режим (быстрее, меньше деталей)</string>
+    <string name="mocap_analyze">Анализ движения</string>
+    <string name="mocap_analyzing">Анализ движения… %1$d%%</string>
+    <string name="mocap_cancel">Отмена</string>
+    <string name="mocap_summary">Кадров: %1$d · %2$.1f с</string>
+    <string name="mocap_preview">Предпросмотр анимации</string>
+    <string name="mocap_intensity">Интенсивность</string>
+    <string name="mocap_smoothing">Сглаживание</string>
+    <string name="mocap_speed">Скорость</string>
+    <string name="mocap_yaw">Выравнивание</string>
+    <string name="mocap_floor">Высота пола</string>
+    <string name="mocap_foot_lock">Закрепить стопы на полу</string>
+    <string name="mocap_apply">Применить к таймлайну</string>
+    <string name="mocap_apply_hint">Становится редактируемыми ключами костей от плейхеда. Отмена возвращает всё сразу.</string>
+    <string name="mocap_applied">Создано ключей костей: %1$d</string>
+    <string name="mocap_new_video">Другое видео</string>
+    <string name="mocap_low_conf">Низкая уверенность: %1$s. Эти части были скрыты или нечётки, их движение оценено приблизительно.</string>
+    <string name="mocap_limb_torso">торс</string>
+    <string name="mocap_limb_head">голова</string>
+    <string name="mocap_limb_left_arm">левая рука</string>
+    <string name="mocap_limb_right_arm">правая рука</string>
+    <string name="mocap_limb_left_leg">левая нога</string>
+    <string name="mocap_limb_right_leg">правая нога</string>
+    <string name="mocap_err_no_person">На видео не найден человек.</string>
+    <string name="mocap_err_video">Не удалось прочитать это видео.</string>
+    <string name="mocap_err_apply">Не удалось записать ключи. Слой заблокирован?</string>
+    <string name="mocap_camera_denied">Нет доступа к камере.</string>
+    <string name="mocap_limits">Приближение: в обычном видео нет настоящей глубины. Пальцы и лицо не захватываются.</string>
+</resources>

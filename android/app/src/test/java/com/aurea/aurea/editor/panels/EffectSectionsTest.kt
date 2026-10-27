@@ -108,6 +108,16 @@ class EffectSectionsTest {
         assertTrue(fxSwipeCommits(-96f, 100f, min))
     }
 
+    /** 0.3.6 (sidebar): o deslizar só toma o dedo no arrasto mais horizontal que vertical. */
+    @Test
+    fun swipeClaimsOnlyHorizontalDrags() {
+        assertTrue(fxSwipeIsHorizontal(-12f, 3f))     // para a esquerda: deslizar
+        assertTrue(fxSwipeIsHorizontal(12f, -3f))     // para a direita: eixo horizontal (fica em 0)
+        assertFalse(fxSwipeIsHorizontal(-3f, 12f))    // rolagem da lista
+        assertFalse(fxSwipeIsHorizontal(-8f, 8f))     // diagonal exata: fica com a rolagem
+        assertFalse(fxSwipeIsHorizontal(Float.NaN, 0f))
+    }
+
     @Test
     fun bridgeRowCarriesSectionToggleStateAndTip() {
         val rows = ByteBuffer.allocate(EffectParam.ROW_BYTES).order(ByteOrder.nativeOrder())

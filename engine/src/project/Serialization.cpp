@@ -1015,6 +1015,12 @@ void write_layer(ByteWriter& w, const Layer& l) {
     w.vec4(l.shape.gradColor1);
     w.vec2(l.shape.gradStart);
     w.vec2(l.shape.gradEnd);
+    // v52 (0.3.6): textura de cada material (imagem ou camada), na ordem da
+    // lista da v24 — o leitor já sabe quantos são.
+    for (const MaterialOverride& material : l.model.materials) {
+        w.u64v(material.textureImage);
+        w.u64v(material.textureLayer);
+    }
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -1692,6 +1698,17 @@ void read_layer(ByteReader& r, Layer& l) {
         l.shape.gradStart = point(r.vec2(), Vec2{0.0f, 0.5f});
         l.shape.gradEnd = point(r.vec2(), Vec2{1.0f, 0.5f});
     }
+    // v52 (0.3.6): textura de cada material. Antes dela: o mapa do arquivo
+    // (os dois zeros do padrão) — o projeto abre exatamente como era.
+    if (g_readingTimelineVersion >= 52) {
+        if (r.remaining() < l.model.materials.size() * 16u) { r.fail(); return; }
+        for (MaterialOverride& material : l.model.materials) {
+            material.textureImage = r.u64v();
+            material.textureLayer = r.u64v();
+            // As duas juntas não existem (a escolha é uma só): fica a camada.
+            if (material.textureImage && material.textureLayer) material.textureImage = 0;
+        }
+    }
 }
 
 // Values in the old effect's time parameter are seconds; direct TimeRemap
@@ -1925,6 +1942,8 @@ std::vector<u8> build_project_section(const Project& p) {
     // 0.2.5: a interface do projeto vai no FIM — quem lê um arquivo antigo
     // não acha o byte e fica na Composição; versão antiga ignora o que sobra.
     w.u8v(ed.uiMode);
+    // 0.3.6: o ímã de antes da Edição (logo depois da interface; leitor antigo ignora).
+    w.u8v(ed.magnetBeforeEdit);
 
     return std::vector<u8>(w.bytes().begin(), w.bytes().end());
 }
@@ -2101,6 +2120,12 @@ void apply_project_section(const u8* data, usize size, Project& p) {
         const u8 mode = r.u8v();
         ed.uiMode = mode <= 1 ? mode : 0;
     }
+    // 0.3.6: ausente (arquivo antigo) = não registrado; voltar à Composição não mexe no ímã.
+    ed.magnetBeforeEdit = 0;
+    if (r.good() && r.remaining() >= 1) {
+        const u8 bits = r.u8v();
+        ed.magnetBeforeEdit = (bits & EditMagnetBefore::Recorded) ? static_cast<u8>(bits & 7u) : u8{0};
+    }
 }
 
 bool apply_timeline_section(const u8* data, usize size, Project& p) {
@@ -2187,6 +2212,9 @@ bool apply_timeline_section(const u8* data, usize size, Project& p) {
                 dst->cameraTrackSource = remap(dst->cameraTrackSource);
                 dst->text.captionSource = remapPack(dst->text.captionSource);
                 dst->text.pathLayer = remapPack(dst->text.pathLayer);
+                // 0.3.6: a camada que cobre um material do objeto 3D.
+                for (MaterialOverride& material : dst->model.materials)
+                    material.textureLayer = remapPack(material.textureLayer);
                 // Parâmetro de efeito que aponta para outra camada ("Camada de
                 // áudio" da Forma de onda / do Espectro): o mesmo mapa.
                 for (EffectInstance& fx : dst->effects) {
@@ -2363,6 +2391,39 @@ void apply_scene3d_section(const u8* data, usize size, Project& p) {
     });
 }
 
+/// Seção Rig3D (v1, 0.3.6 AutoRig): a receita do rig de cada asset, na mesma
+/// ordem da seção Assets (como a Scene3D). Seção à parte: leitor antigo pula
+/// e abre o modelo sem o rig; projeto sem rig não grava a seção.
+///   u32 quantos · por asset: string receita (vazia = sem rig)
+std::vector<u8> build_rig3d_section(const Project& p) {
+    ByteWriter w;
+    u32 count = 0;
+    p.for_each_asset([&](AssetId, const Asset&) { ++count; });
+    w.u32v(count);
+    p.for_each_asset([&w](AssetId, const Asset& a) { w.str(a.model.rig); });
+    return std::vector<u8>(w.bytes().begin(), w.bytes().end());
+}
+
+bool project_has_rigs(const Project& p) {
+    bool any = false;
+    p.for_each_asset([&](AssetId, const Asset& a) { any = any || !a.model.rig.empty(); });
+    return any;
+}
+
+void apply_rig3d_section(const u8* data, usize size, Project& p) {
+    ByteReader r(data, size);
+    const u32 count = r.u32v();
+    u32 assets = 0;
+    p.for_each_asset([&](AssetId, const Asset&) { ++assets; });
+    if (!r.good() || count != assets) return;   // outra lista de assets: não adivinha
+    p.for_each_asset([&](AssetId, Asset& a) {
+        if (!r.good()) return;
+        std::string spec = r.str();
+        if (!r.good() || a.kind != AssetKind::Model3D || spec.size() > 8192) return;
+        a.model.rig = std::move(spec);
+    });
+}
+
 // -----------------------------------------------------------------------------
 // Migrações registradas. A E/S de arquivo mora em FileIO (escrita atômica com
 // fsync checado, .bak e injeção de falha para os testes de disco cheio).
@@ -2462,6 +2523,8 @@ Status ProjectSerializer::encode(const Project& project, const SaveOptions& opti
     // Só quando algum modelo foi otimizado: projeto sem 3D fica byte a byte igual.
     if (project_has_optimized_models(project))
         sections.push_back(PendingSection{SectionKind::Scene3D, 1, build_scene3d_section(project)});
+    if (project_has_rigs(project))
+        sections.push_back(PendingSection{SectionKind::Rig3D, 1, build_rig3d_section(project)});
 
     // As seções Animations, Effects, Scene3D, Particles, Fonts e Thumbnails
     // existem no enum e no índice, mas ainda não são gravadas separadamente:
@@ -2703,6 +2766,9 @@ Status ProjectSerializer::load_bytes(Project& out, const u8* fileData, usize fil
                 break;
             case SectionKind::Scene3D:
                 apply_scene3d_section(effective, effectiveSize, out);
+                break;
+            case SectionKind::Rig3D:
+                apply_rig3d_section(effective, effectiveSize, out);
                 break;
             default:
                 // Seções que esta versão não grava ainda. Se aparecerem, foram

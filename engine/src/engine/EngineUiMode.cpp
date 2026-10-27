@@ -40,8 +40,36 @@ bool Engine::set_project_ui_mode(u32 mode) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_) return false;
     EditorSettings& ed = project_->editor_settings();
+    const u8 previous = ed.uiMode;
     bool changed = ed.uiMode != mode;
     ed.uiMode = static_cast<u8>(mode);
+    if (mode == 0 && previous == 1) {
+        // 0.3.6: voltar à Composição devolve o ímã como estava ANTES da Edição.
+        // A Edição liga o ímã da composição e a trilha principal magnética só
+        // para ela; deixá-los ligados prendia a Composição às regras da Edição
+        // (vídeo preso na trilha, aparar o começo sem mover, mídia nova
+        // encostada no fim). O que a pessoa já tinha ligado antes fica.
+        const u8 before = ed.magnetBeforeEdit;
+        ed.magnetBeforeEdit = 0;
+        Composition* comp = current_composition();
+        if (comp && (before & EditMagnetBefore::Recorded)) {
+            const bool restoreComp = !(before & EditMagnetBefore::CompMagnet) && comp->edit_mode();
+            bool anyLine = false;
+            if (!(before & EditMagnetBefore::AnyLine))
+                comp->layers().for_each([&](LayerId, const Layer& l) { if (l.magneticTrack && !l.locked) anyLine = true; });
+            if (restoreComp || anyLine) {
+                history_.before_mutation(*comp, project_->timeline().current(), "modo composicao");
+                bump_model_revision_locked();
+                if (restoreComp) comp->set_edit_mode(false);
+                if (anyLine) {
+                    comp->layers().for_each([&](LayerId id, const Layer&) {
+                        if (Layer* l = comp->layer(id); l && !l->locked) l->magneticTrack = false;
+                    });
+                }
+                comp->touch();
+            }
+        }
+    }
     if (mode == 1) {
         Composition* comp = current_composition();
         if (comp) {
@@ -50,6 +78,12 @@ bool Engine::set_project_ui_mode(u32 mode) noexcept {
             // escolheu linhas magnéticas fica com a escolha dele.
             bool anyMagnetic = false;
             comp->layers().for_each([&](LayerId, const Layer& l) { if (l.magneticTrack) anyMagnetic = true; });
+            // 0.3.6: o ímã de antes da Edição, para a volta à Composição.
+            if (previous != 1) {
+                ed.magnetBeforeEdit = static_cast<u8>(EditMagnetBefore::Recorded
+                    | (comp->edit_mode() ? EditMagnetBefore::CompMagnet : 0)
+                    | (anyMagnetic ? EditMagnetBefore::AnyLine : 0));
+            }
             LayerId anchor{};
             const Layer* main = anyMagnetic ? nullptr : deepest_media(*comp, &anchor);
             if (!comp->edit_mode() || main) {

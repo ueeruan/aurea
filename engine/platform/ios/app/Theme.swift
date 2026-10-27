@@ -1453,6 +1453,11 @@ enum EditorLayout {
     static let timelineFocus: CGFloat = 80
     /// O painel cresce com a fonte do sistema: 200 em 1×, 240 em 2×.
     static func layerPanel(fontScale: CGFloat = 1) -> CGFloat { layerPanelHeight + 40 * (min(max(fontScale, 1), 2) - 1) }
+    /// 0.3.6: o teto dos painéis de propriedade (par do `EditorLayout.panelMax` do Android):
+    /// com a divisa no alto (ou a Edição numa tela alta) o painel ocupava a zona inteira;
+    /// passando disso, a timeline fica com o resto. Cresce com a fonte.
+    static let panelMaxHeight: CGFloat = 360
+    static func panelMax(fontScale: CGFloat = 1) -> CGFloat { panelMaxHeight + 60 * (min(max(fontScale, 1), 2) - 1) }
     // 0.3.4 painéis: o painel de propriedade sobe até logo abaixo da linha em foco.
     /// Régua da timeline (`TimelineMetrics.rowsTop`): 42 em 1×, +14 por 1× de fonte.
     static let focusRuler: CGFloat = 42
@@ -1541,7 +1546,8 @@ enum EditorLayout {
         case .dock: return over(min(dockHeight(rows: dockRows, fontScale: fontScale), panel))
         // 0.3.4 painéis: o painel de propriedade ocupa a zona inteira até logo abaixo
         // da linha em foco (régua + linha + folga), também com a divisa no alto.
-        case .panel, .curve: return over(zone)
+        // 0.3.6: até `panelMax`; o que passa disso fica com a timeline.
+        case .panel, .curve: return over(min(zone, panelMax(fontScale: fontScale)))
         }
     }
 
@@ -1665,6 +1671,9 @@ enum AureaIconStyle {
         CupertinoGlyph.LockOpenFill: CupertinoGlyph.LockOpen,
         CupertinoGlyph.LinkCircleFill: CupertinoGlyph.LinkCircle,
         CupertinoGlyph.EyeFill: CupertinoGlyph.Eye,
+        // 0.3.6: a tesoura da fonte tem as lâminas cheias (traço grosso ao lado dos
+        // outros ícones); a de contorno da mesma fonte tem o traço fino.
+        CupertinoGlyph.Scissors: CupertinoGlyph.ScissorsAlt,
     ]
 
     /// O glifo no estilo do app (ver `outline`).

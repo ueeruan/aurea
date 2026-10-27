@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.6 (env3d): Ambiente 3D refeito (seções), aba Render, seção Objeto e a Textura do material (arquivo ou timeline). -->
+<resources>
+    <string name="env3d_tab_render">Render</string>
+    <string name="env3d_section_sky">Céu e fundo</string>
+    <string name="env3d_sky_hint">O estúdio ou a imagem 360° em volta da cena. Ela ilumina e reflete em todos os objetos 3D do projeto.</string>
+    <string name="env3d_hdr_image">Imagem HDR</string>
+    <string name="env3d_section_light">Luz ambiente</string>
+    <string name="env3d_section_floor">Chão e sombra</string>
+    <string name="env3d_floor_hint">Sem chão, chão visível ou só a sombra dos objetos sobre o que está atrás deles.</string>
+    <string name="env3d_render_hint">Valem para toda a cena 3D do projeto: nitidez, cor final e brilho.</string>
+    <string name="env3d_section_object">Objeto</string>
+    <string name="env3d_texture">Textura</string>
+    <string name="env3d_texture_original">Do modelo</string>
+    <string name="env3d_texture_image">Imagem</string>
+    <string name="env3d_texture_from_file">Arquivo</string>
+    <string name="env3d_texture_from_timeline">Timeline</string>
+    <string name="env3d_texture_remove">Remover</string>
+    <string name="env3d_texture_layer_title">Textura da timeline</string>
+    <string name="env3d_texture_layer_hint">A camada é renderizada a cada quadro no material. Esconda a camada (olho) para ela aparecer só no objeto.</string>
+    <string name="env3d_texture_no_layers">Nenhuma camada desta composição pode virar textura. Use vídeo, imagem, texto, forma ou composição (2D).</string>
+    <string name="env3d_texture_layer_value">Camada: %1$s</string>
+    <string name="env3d_texture_error">Não foi possível usar essa textura.</string>
+    <string name="env3d_texture_desc">Textura do material %1$d</string>
+    <string name="env3d_layer_unnamed">Camada sem nome</string>
+</resources>

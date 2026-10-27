@@ -22,7 +22,7 @@ struct TextAppearanceControls: View {
     private func components(_ key: String) -> [Float] { let v = (text[key] as? [NSNumber] ?? []).map(\.floatValue); return v.count >= 4 ? v : [1, 1, 1, 1] }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            NativePanelRuler(label: AureaText.t("panel_tamanho"), value: value("size", 72), step: 0.5, range: 4...1000, unit: "px", keypad: true) { model.engine.setText(id, size: $0); refresh() }
+            NativePanelRuler(label: AureaText.t("panel_tamanho"), value: value("size", 72), step: 0.5, range: 4...TextSizeSteps.max, unit: "px", keypad: true) { model.engine.setText(id, size: $0); refresh() }
             colorRow("panel_cor", values: components("color")) { color("color", "panel_cor") }
             HStack(spacing: 6) {
                 Text(AureaText.t("panel_alinhamento")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)

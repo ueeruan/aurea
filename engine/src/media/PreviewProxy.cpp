@@ -311,11 +311,32 @@ bool proxy_source_heavy(const Asset& a, const ProxyThresholds& t) noexcept {
     return bitrate > t.heavyBitrateBps;
 }
 
-bool proxy_wanted(const Asset& a, ProxyMode mode, bool reducedPreview, const ProxyThresholds& t) noexcept {
+bool proxy_wanted(const Asset& a, ProxyMode mode, bool reducedPreview, const ProxyThresholds& t, bool slowDecode) noexcept {
     if (mode == ProxyMode::Off || a.kind != AssetKind::Video || !a.has_video() || is_image_sequence(a.sourcePath)) return false;
-    if (proxy_source_heavy(a, t)) return true;
+    if (slowDecode || proxy_source_heavy(a, t)) return true;
     const u64 pixels = static_cast<u64>(a.video.width) * a.video.height;
     return (mode == ProxyMode::Always || reducedPreview) && pixels > t.alwaysPixels;
+}
+
+bool DecodeSpeedMonitor::observe(u64 decoded, f32 msAvg, f64 fps) noexcept {
+    if (reported_) return false;
+    if (!started_ || decoded < mark_) {   // primeira leitura, ou fonte refeita
+        started_ = true;
+        mark_ = decoded;
+        strikes_ = 0;
+        return false;
+    }
+    const f64 rate = std::isfinite(fps) && fps > 0.0 ? std::min(fps, 240.0) : 30.0;
+    // Uma janela = ~1 s de quadros da fonte decodificados (no mínimo 24).
+    const u64 window = static_cast<u64>(std::max<f64>(24.0, std::round(rate)));
+    if (decoded - mark_ < window) return false;
+    mark_ = decoded;
+    const f64 frameMs = 1000.0 / rate;
+    const bool slow = std::isfinite(msAvg) && static_cast<f64>(msAvg) > frameMs * kMargin;
+    strikes_ = slow ? strikes_ + 1 : 0;
+    if (strikes_ < kStrikes) return false;
+    reported_ = true;
+    return true;
 }
 
 f64 proxy_target_fps(f64 sourceFps, f64 maxFps) noexcept {
@@ -433,11 +454,25 @@ void PreviewProxyService::set_reduced_preview(bool reduced) noexcept {
     }
     wake_.notify_all();
 }
+bool PreviewProxyService::wanted_locked(const Asset& asset) const noexcept {
+    const bool slow = !slowDecode_.empty() && slowDecode_.count(asset.sourcePath) != 0;
+    return proxy_wanted(asset, mode_.load(), reduced_.load(), thresholds_, slow);
+}
+void PreviewProxyService::mark_slow_decode(const Asset& asset) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (asset.sourcePath.empty() || !slowDecode_.insert(asset.sourcePath).second) return;
+    }
+    AUREA_LOG_INFO("proxy: '%s' nao decodifica em tempo real neste aparelho; proxy de previa pedido", asset.name.c_str());
+    // A próxima chamada de request (o quadro seguinte da prévia) põe na fila.
+}
+bool PreviewProxyService::slow_decode(const Asset& asset) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return slowDecode_.count(asset.sourcePath) != 0;
+}
 void PreviewProxyService::prune_unwanted_locked(bool interruptCurrent) {
-    const ProxyMode mode = mode_.load();
-    const bool reduced = reduced_.load();
     for (auto it = queue_.begin(); it != queue_.end();) {
-        if (proxy_wanted(it->asset, mode, reduced, thresholds_)) { ++it; continue; }
+        if (wanted_locked(it->asset)) { ++it; continue; }
         if (auto e = entries_.find(it->key); e != entries_.end() && e->second.state != ProxyState::Ready) entries_.erase(e);
         it = queue_.erase(it);
     }
@@ -445,7 +480,7 @@ void PreviewProxyService::prune_unwanted_locked(bool interruptCurrent) {
     // O asset em geração já saiu da fila: confere o que está sendo gerado.
     bool still = false;
     if (auto e = entries_.find(current_); e != entries_.end()) still = e->second.state == ProxyState::Generating
-        && proxy_wanted(currentAsset_, mode, reduced, thresholds_);
+        && wanted_locked(currentAsset_);
     if (!still) { entries_.erase(current_); cancelCurrent_.store(true); }
 }
 void PreviewProxyService::set_paused(bool paused) noexcept {
@@ -492,7 +527,7 @@ std::shared_ptr<const PreviewProxy> PreviewProxyService::request(const Asset& as
     const u32 target = shortSide_.load();
     if (!target || !worker_.joinable()) return {};
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!proxy_wanted(asset, mode_.load(), reduced_.load(), thresholds_)) return {};
+    if (!wanted_locked(asset)) return {};
     const std::string key = fingerprint(asset, target);
     if (auto it = entries_.find(key); it != entries_.end()) {
         const Entry& e = it->second;
@@ -509,7 +544,7 @@ ProxyStatus PreviewProxyService::status(const Asset& asset) {
     const u32 target = shortSide_.load();
     if (!target || !worker_.joinable()) return s;
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!proxy_wanted(asset, mode_.load(), reduced_.load(), thresholds_)) return s;
+    if (!wanted_locked(asset)) return s;
     const auto it = entries_.find(fingerprint(asset, target));
     if (it == entries_.end() || it->second.dismissed) return s;
     s.state = it->second.state;
@@ -554,7 +589,7 @@ bool PreviewProxyService::regenerate(const Asset& asset) {
     if (!target || !worker_.joinable()) return false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!proxy_wanted(asset, mode_.load(), reduced_.load(), thresholds_)) return false;
+        if (!wanted_locked(asset)) return false;
         const std::string key = fingerprint(asset, target);
         std::erase_if(queue_, [&](const Request& r) { return r.key == key; });
         if (current_ == key) cancelCurrent_.store(true);

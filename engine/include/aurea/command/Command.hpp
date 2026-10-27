@@ -206,6 +206,12 @@ struct LayerReorderPayload { LayerId layer; u32 newIndex; };
 /// borda anda (sem ele, cortar o começo de um vídeo o empurraria).
 struct LayerRangePayload { LayerId layer; FrameIndex start; FrameIndex end; FrameIndex offset; u32 setOffset; };
 struct LayerSplitPayload { LayerId layer; FrameIndex at; LayerId outSecond; };
+/// "No cabeçote": em `LayerSplitPayload::at` e no `amount` de
+/// `Engine::edit_clip_time` (aparar início/fim, ops 0 e 1), o motor usa o
+/// quadro que a prévia mostra quando o comando é aplicado — depois do pausar
+/// que veio antes no mesmo lote —, não o cabeçote que a UI tinha lido (tocando,
+/// ele vem quadros atrás). Fora do intervalo do clipe a edição é recusada.
+inline constexpr i64 kEditAtPlayhead = -(i64{1} << 39);
 struct LayerParentPayload { LayerId layer; LayerId parent; };
 struct LayerBlendPayload { LayerId layer; BlendMode mode; };
 struct LayerCompPayload { LayerId layer; CompositionId comp; };

@@ -71,6 +71,26 @@ class TimelineEmphasisTest {
         assertArrayEquals(intArrayOf(), every.dimInstants)
     }
 
+    @Test fun `um keyframe do Mover X+Y e um losango so, parcial empilha`() {
+        // 0.3.6 keys itens 1 e 3: ◆ do Mover grava X e Y no mesmo quadro.
+        val l = layer()
+        val all = listOf(key(0, 10), key(1, 10), key(0, 30))
+        val row = buildFocusedRow(l, all, listOf(TrackKey(0), TrackKey(1)), buildRow(l, all).instants)
+        assertArrayEquals(intArrayOf(25, 45), row.instants)
+        assertEquals(2, row.keysAt[0].size)
+        // X e Y no instante: UM losango (antes: dois sobrepostos).
+        assertFalse(KeyEmphasis.stacked(focusCount = 2, distinctKeyed = 2))
+        // Só X: parcial, empilhado.
+        assertEquals(1, row.keysAt[1].size)
+        assertTrue(KeyEmphasis.stacked(focusCount = 2, distinctKeyed = 1))
+        // Sem painel ou com UMA trilha em foco: nunca empilha.
+        assertFalse(KeyEmphasis.stacked(focusCount = 0, distinctKeyed = 2))
+        assertFalse(KeyEmphasis.stacked(focusCount = 1, distinctKeyed = 1))
+        // 3D (X, Y, Z): os três = um; dois de três = parcial.
+        assertFalse(KeyEmphasis.stacked(focusCount = 3, distinctKeyed = 3))
+        assertTrue(KeyEmphasis.stacked(focusCount = 3, distinctKeyed = 2))
+    }
+
     @Test fun `fade decelera de 0 a 1 em 600 ms`() {
         assertEquals(0f, RowFade.alpha(0), 0f)
         assertEquals(0.75f, RowFade.alpha(300), 1e-6f)

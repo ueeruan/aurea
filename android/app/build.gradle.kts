@@ -125,8 +125,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar os builds 2181–2191 já distribuídos; nunca reduzir o código.
-        versionCode = 2202
-        versionName = "0.3.5-beta"
+        versionCode = 2203
+        versionName = "0.3.6-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -381,6 +381,12 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
 
     implementation(libs.kotlinx.coroutines.android)
+
+    // 0.3.6 Motion Capture (BETA): pose do corpo no aparelho (ML Kit, 33 pontos).
+    // Modelos EMBUTIDOS nos AARs (sem download à parte; armeabi-v7a e arm64-v8a):
+    // o base no modo reduzido, o accurate no normal (mocap/MocapDetector.kt).
+    implementation("com.google.mlkit:pose-detection:18.0.0-beta5")
+    implementation("com.google.mlkit:pose-detection-accurate:18.0.0-beta5")
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 

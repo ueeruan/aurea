@@ -648,15 +648,20 @@ struct ExportView: View {
         return bits & 1 == 0 || bits & 32 != 0
     }
 
-    /// Mirrors export_frame_size_v2; codec stride does not resize the picture.
+    /// Mirrors export_attempt_frame_size at attempt 0 (ExportAttempts.hpp, 0.3.6):
+    /// the native even size; an odd side exports aligned (long side ×16, short
+    /// side even) instead of failing with a codec error.
     private func sizeFor(_ side: UInt32) -> (UInt32, UInt32) {
         let w = Double(model.compositionWidth), h = Double(model.compositionHeight)
         guard w > 0, h > 0 else { return (0, 0) }
         let shortest = min(w, h)
         let k = Double(side > 0 ? side : UInt32(shortest)) / shortest
         func align(_ v: Double, _ a: Double) -> UInt32 { UInt32(max(a, (v / a + 0.5).rounded(.down) * a)) }
-        if (side == 0 || Double(side) == shortest), (UInt32(w) % 2 != 0 || UInt32(h) % 2 != 0) { return (0, 0) }
-        if side % 2 != 0 { return (0, 0) }
+        let odd = ((side == 0 || Double(side) == shortest) && (UInt32(w) % 2 != 0 || UInt32(h) % 2 != 0)) || side % 2 != 0
+        if odd {
+            if w == h { let s = align(w * k, 2); return (s, s) }
+            return w > h ? (align(w * k, 16), align(h * k, 2)) : (align(w * k, 2), align(h * k, 16))
+        }
         return (align(w * k, 2), align(h * k, 2))
     }
 

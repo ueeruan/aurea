@@ -132,7 +132,7 @@ def main():
         text = strip_comments(read(os.path.join(APP, name)))
         for member in sorted(set(re.findall(r"\bmodel\.([A-Za-z_][A-Za-z0-9_]*)", text))) if name != "AureaModel.swift" else []:
             used_model += 1
-            if member not in members:
+            if member not in members and member != "objectWillChange":   # vem do ObservableObject
                 problems.append("%s: model.%s nao existe em AureaModel" % (name, member))
         for call in sorted(set(re.findall(r"\bengine\.([A-Za-z_][A-Za-z0-9_]*)", text))):
             used_engine += 1

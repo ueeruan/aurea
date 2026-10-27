@@ -52,6 +52,48 @@ AUREA_TEST(ExportAttempts, PlansGoFromTheRequestToSoftwareAt480) {
     AUREA_CHECK_EQ(export_attempt_short_side(1, 1080), 1080u);
 }
 
+// 0.3.6 ("erro de codec"): composição de lado ímpar não recusa mais, e todo
+// degrau de compatibilidade sai no tamanho que encoder de aparelho aceita
+// (lado maior múltiplo de 16, menor par). A cadeia completa de um encoder que
+// recusa: 0 pedido → 1 H.264 Baseline no aparelho, ≤60 qps, alinhado a 16 →
+// 2 software → 3/4 720p 30 qps → 5 480p.
+AUREA_TEST(ExportAttempts, OddAndCompatibilitySizesAreAlignedForTheEncoder) {
+    AUREA_CHECK(!export_attempt_plan(0).align16);
+    for (u32 a = 1; a <= kExportAttemptMax; ++a) AUREA_CHECK(export_attempt_plan(a).align16);
+    // Degrau 0: nativo exato quando par.
+    auto s = export_attempt_frame_size(1920, 1080, 0, false);
+    AUREA_CHECK_EQ(s.width, 1920u); AUREA_CHECK_EQ(s.height, 1080u);
+    s = export_attempt_frame_size(1920, 1080, 480, false);
+    AUREA_CHECK_EQ(s.width, 854u); AUREA_CHECK_EQ(s.height, 480u);
+    // Lado ímpar: alinhado, nunca 0 (antes: "dimensoes pares" e a escada pulava para 720p).
+    s = export_attempt_frame_size(1919, 1079, 0, false);
+    AUREA_CHECK_EQ(s.width, 1920u); AUREA_CHECK_EQ(s.height, 1080u);
+    s = export_attempt_frame_size(853, 480, 0, false);
+    AUREA_CHECK_EQ(s.width, 848u); AUREA_CHECK_EQ(s.height, 480u);
+    s = export_attempt_frame_size(1079, 1920, 0, false);
+    AUREA_CHECK_EQ(s.width, 1080u); AUREA_CHECK_EQ(s.height, 1920u);
+    // Degrau compatível: o maior em múltiplo de 16 mesmo vindo de um par.
+    s = export_attempt_frame_size(1920, 1080, 480, true);
+    AUREA_CHECK_EQ(s.width, 848u); AUREA_CHECK_EQ(s.height, 480u);
+    s = export_attempt_frame_size(1080, 1350, 0, true);
+    AUREA_CHECK_EQ(s.width, 1080u); AUREA_CHECK_EQ(s.height % 16, 0u);
+    for (u32 w : {640u, 853u, 1001u, 1919u, 2560u, 3839u})
+        for (u32 h : {360u, 479u, 1079u, 1440u})
+            for (u32 want : {0u, 480u, 720u, 1080u}) {
+                const auto z = export_attempt_frame_size(w, h, want, true);
+                AUREA_CHECK(z.width > 0 && z.height > 0 && z.width % 2 == 0 && z.height % 2 == 0);
+                AUREA_CHECK_EQ(std::max(z.width, z.height) % 16, 0u);
+                const auto n = export_attempt_frame_size(w, h, want, false);
+                AUREA_CHECK(n.width > 0 && n.height > 0 && n.width % 2 == 0 && n.height % 2 == 0);
+            }
+    // Encoder que recusa a partida: a escada toda, em ordem, até o software menor.
+    const ExportRequestShape r = shape(1080, 60.0, true);
+    AUREA_CHECK_EQ(export_next_attempt(0, export_retry_kind(code(Errc::EncoderUnavailable), why(ExportFailure::Encoder), false, false), r), 1u);
+    AUREA_CHECK(export_attempt_plan(1).forceH264 && export_attempt_plan(1).safeMode == 1 && export_attempt_plan(1).fpsCap == 60.0);
+    AUREA_CHECK_EQ(export_next_attempt(1, ExportRetryKind::Encoder, r), 2u);
+    AUREA_CHECK_EQ(export_attempt_plan(2).safeMode, 2u);   // encoder de software
+}
+
 AUREA_TEST(ExportAttempts, WhatCanHelpIsDecidedByCodeReasonAndStall) {
     // Nada ajuda: cancelado, sem espaço, mídia que sumiu, acima de 3 h.
     AUREA_CHECK(export_retry_kind(code(Errc::Cancelled), 0, false, false) == ExportRetryKind::None);

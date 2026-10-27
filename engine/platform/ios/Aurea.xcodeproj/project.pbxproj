@@ -30,6 +30,8 @@
 		AE000000000000000000003F /* ToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000007 /* ToolbarView.swift */; };
 		AE00000000000000000001F1 /* StageZoom.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000001F0 /* StageZoom.swift */; };
 		AE0000000000000000000201 /* RigStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000200 /* RigStage.swift */; };
+		AE0000000000000000036C01 /* MocapPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000036C00 /* MocapPanel.swift */; };
+		AE0000000000000000036B01 /* Rig3DPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000036B00 /* Rig3DPanel.swift */; };
 		AE00000000000000000027A1 /* MeshWarpStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000027A0 /* MeshWarpStage.swift */; };
 		AE00000000000000000027B1 /* RotoPaintStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00000000000000000027B0 /* RotoPaintStage.swift */; };
 		AE0000000000000000000211 /* Shape3DViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000210 /* Shape3DViews.swift */; };
@@ -161,6 +163,8 @@
 		AE0000000000000000000007 /* ToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolbarView.swift; sourceTree = "<group>"; };
 		AE00000000000000000001F0 /* StageZoom.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StageZoom.swift; sourceTree = "<group>"; };
 		AE0000000000000000000200 /* RigStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RigStage.swift; sourceTree = "<group>"; };
+		AE0000000000000000036C00 /* MocapPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MocapPanel.swift; sourceTree = "<group>"; };
+		AE0000000000000000036B00 /* Rig3DPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rig3DPanel.swift; sourceTree = "<group>"; };
 		AE00000000000000000027A0 /* MeshWarpStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshWarpStage.swift; sourceTree = "<group>"; };
 		AE00000000000000000027B0 /* RotoPaintStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotoPaintStage.swift; sourceTree = "<group>"; };
 		AE0000000000000000000210 /* Shape3DViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shape3DViews.swift; sourceTree = "<group>"; };
@@ -323,6 +327,8 @@
 				AE0000000000000000000007 /* ToolbarView.swift */,
 				AE00000000000000000001F0 /* StageZoom.swift */,
 				AE0000000000000000000200 /* RigStage.swift */,
+				AE0000000000000000036C00 /* MocapPanel.swift */,
+				AE0000000000000000036B00 /* Rig3DPanel.swift */,
 				AE00000000000000000027A0 /* MeshWarpStage.swift */,
 				AE00000000000000000027B0 /* RotoPaintStage.swift */,
 				AE0000000000000000000210 /* Shape3DViews.swift */,
@@ -638,6 +644,8 @@
 				AE000000000000000000003F /* ToolbarView.swift in Sources */,
 				AE00000000000000000001F1 /* StageZoom.swift in Sources */,
 				AE0000000000000000000201 /* RigStage.swift in Sources */,
+				AE0000000000000000036C01 /* MocapPanel.swift in Sources */,
+				AE0000000000000000036B01 /* Rig3DPanel.swift in Sources */,
 				AE00000000000000000027A1 /* MeshWarpStage.swift in Sources */,
 				AE00000000000000000027B1 /* RotoPaintStage.swift in Sources */,
 				AE0000000000000000000211 /* Shape3DViews.swift in Sources */,
@@ -779,8 +787,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2202;
-				MARKETING_VERSION = 0.3.5;
+				CURRENT_PROJECT_VERSION = 2203;
+				MARKETING_VERSION = 0.3.6;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -850,8 +858,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2202;
-				MARKETING_VERSION = 0.3.5;
+				CURRENT_PROJECT_VERSION = 2203;
+				MARKETING_VERSION = 0.3.6;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",

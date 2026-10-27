@@ -1010,6 +1010,7 @@ void Engine::shutdown() noexcept {
     }
     join_camera_track();
     join_motion_track();
+    join_autorig();
     text::FontManager::instance().set_path_resolver(nullptr);
     stop_render_thread();
     // Capture polls may deliberately release renderMutex_. Join their full
@@ -1542,6 +1543,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
 
     join_camera_track();
     join_motion_track();
+    join_autorig();
     cameraTrack_.reset();
     motionTrack_.reset();
     // A project transition owns rendering until the replacement model is in
@@ -1822,6 +1824,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
 
     join_camera_track();
     join_motion_track();
+    join_autorig();
     cameraTrack_.reset();
     motionTrack_.reset();
     // Use the same render -> model order as render_frame. The old decoder's
@@ -2008,6 +2011,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
     {
         std::vector<std::pair<u64, std::string>> pending;
         std::unordered_map<u64, std::pair<u8, u32>> pendingQuality;   // "Otimizar modelo" + triângulos guardados
+        std::unordered_map<u64, std::string> pendingRig;   // 0.3.6 AutoRig: receita do rig por asset
         std::vector<u64> letterAssets;
         {
             std::lock_guard<std::mutex> lock(modelMutex_);
@@ -2025,6 +2029,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
                 if (a.kind == AssetKind::Model3D && !a.sourcePath.empty() && std::find(unused.begin(), unused.end(), id) == unused.end()) {
                     pending.emplace_back(id.pack(), a.sourcePath);
                     pendingQuality[id.pack()] = {a.model.importQuality, a.model.triangleCount};
+                    if (!a.model.rig.empty()) pendingRig[id.pack()] = a.model.rig;
                 }
             });
         }
@@ -2069,9 +2074,12 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
                                                                        static_cast<u32>(wanted), static_cast<u32>(usedQuality));
                                                     return scene3d::import_scene_file(file, mo);
                                                 }();
-            if (!r.ok() && repairLetters) {
+            if (!r.ok() && font && spec.separateGlyphs) {
                 // An older project can exceed the per-letter geometry limit.
                 // Preserve its visible text if the repair cannot be built.
+                // 0.3.6: also a recipe saved per-letter whose font is not on
+                // this device (default font: a glyph that only triangulates
+                // merged) — before, the text vanished and every edit failed.
                 repairLetters = false; spec.separateGlyphs = false;
                 r = scene3d::build_text3d(*font, spec, [this](const std::string& path) { return resolve_asset_path(path); }, model_texture_cap());
             }
@@ -2079,6 +2087,12 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
                 ++missing;
                 AUREA_LOG_WARN("modelo 3D do projeto nao abriu (%s)", r.detail.c_str());
                 continue;
+            }
+            // AutoRig 3D: a receita refaz ossos, skin e pesos (determinístico).
+            if (const auto rigIt = pendingRig.find(key); rigIt != pendingRig.end() && !font && !isShape) {
+                const rig::AutoRigError re = rig::apply_rig_spec(*r.asset, rigIt->second);
+                if (re != rig::AutoRigError::None)
+                    AUREA_LOG_WARN("rig do modelo 3D nao refeito (%s)", rig::to_string(re));
             }
             std::lock_guard<std::mutex> lock(modelMutex_);
             if (!project_ || projectSession_ != loadedSession) return Errc::Cancelled;
@@ -7164,6 +7178,7 @@ void Engine::capture_clipboard_media_locked(ClipboardMedia& bundle, const std::v
         if (depth > 64) return;
         retain(layer.source.pack()); retain(layer.model.scene.pack());
         retain(layer.environmentAsset); retain(layer.particles.textureAsset);
+        for (const MaterialOverride& material : layer.model.materials) retain(material.textureImage);
         for (const auto& effect : layer.effects) {
             if (const auto* specs = effectRegistry_.params(effect.type)) {
                 for (u32 p = 0; p < std::min(specs->count(), static_cast<u32>(effect.params.size())); ++p)
@@ -7205,6 +7220,8 @@ void Engine::restore_clipboard_media_locked(const ClipboardMedia& bundle, std::v
         layer.model.scene = remapAsset(layer.model.scene.pack());
         layer.environmentAsset = remapAsset(layer.environmentAsset).pack();
         layer.particles.textureAsset = remapAsset(layer.particles.textureAsset).pack();
+        for (MaterialOverride& material : layer.model.materials)
+            if (material.textureImage) material.textureImage = remapAsset(material.textureImage).pack();
         for (auto& effect : layer.effects) {
             if (const auto* specs = effectRegistry_.params(effect.type))
                 for (u32 p = 0; p < std::min(specs->count(), static_cast<u32>(effect.params.size())); ++p)
@@ -8286,7 +8303,10 @@ u32 Engine::query_clip_time_actions(u64 layerId, i64 frame) noexcept {
 
 bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous, u64 next) noexcept {
     constexpr i64 limit = i64{1} << 31;
-    if (operation > 9 || amount <= -limit || amount >= limit) return false;
+    // Aparar início/fim NO CABEÇOTE (kEditAtPlayhead): o quadro vem do motor
+    // depois de drenar a fila (o pausar que a UI acabou de mandar já valeu).
+    const bool atPlayhead = amount == kEditAtPlayhead && operation <= 1;
+    if (operation > 9 || (!atPlayhead && (amount <= -limit || amount >= limit))) return false;
     const bool extendOnly = operation == 8 || operation == 9;
     if (extendOnly) operation -= 8;
     std::lock_guard<std::mutex> lock(modelMutex_);
@@ -8294,6 +8314,12 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!layer || layer->locked) return false;
+    if (atPlayhead) {
+        // Só DENTRO do clipe: com o cabeçote fora, o aparar "no cabeçote" não
+        // vira um corte preso na borda (o clamp abaixo faria um clipe de 1 quadro).
+        amount = playback_.current().value;
+        if (amount <= layer->start.value || amount >= layer->end.value) return false;
+    }
     const bool needsPrevious = operation == 3 || operation == 5;
     const bool needsNext = operation == 4 || operation == 5;
     Layer* before = needsPrevious ? comp->layer(LayerId::unpack(previous)) : nullptr;
@@ -10282,6 +10308,7 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& requested) noexcept {
     // Fonte importada: a receita guarda o caminho relativo aos documentos
     // ("docs:…"), como o texto 2D — a pasta do app muda entre instalações.
     scene3d::Text3DSpec spec = requested;
+    scene3d::sanitize_text3d(spec);
     if (!spec.fontPath.empty() && spec.fontPath.rfind("docs:", 0) != 0) spec.fontPath = store_asset_path(spec.fontPath);
     if (!spec.texturePath.empty()) spec.texturePath = store_asset_path(spec.texturePath);
     u64 session = 0; CompositionId composition;
@@ -10339,51 +10366,128 @@ Status Engine::set_text3d_texture(u64 layerId, const std::string& path) noexcept
     if (!query_text3d(layerId, spec)) return Errc::InvalidArgument;
     if (!path.empty()) {
         scene3d::Image image;
-        if (!scene3d::load_shape3d_image(resolve_asset_path(path), model_texture_cap(), image))
+        if (!scene3d::load_shape3d_image(resolve_asset_path(path), model_texture_cap(), image)) {
+            lastText3dStatus_.store(static_cast<i32>(Errc::UnsupportedFormat), std::memory_order_relaxed);
             return Status{Errc::UnsupportedFormat, "textura ilegivel ou muito grande"};
+        }
     }
     spec.texturePath = path;
     return set_text3d(layerId, spec);
 }
 
+namespace {
+/// Material da receita que vira o material `index` da malha (build_text3d:
+/// 0 = frente, ou o texto todo sem materiais por região; 1 lateral; 2 chanfro).
+scene3d::Text3DMaterial text3d_region_material(const scene3d::Text3DSpec& s, u32 index) noexcept {
+    if (!s.regionMaterials || index == 0) return s.front_material();
+    return index == 1 ? s.side : s.bevelMat;
+}
+
+/// Bug 0.3.6 ("as configurações do texto 3D não mudam neste projeto"): o
+/// ajuste de material da camada (MaterialOverride) e os keyframes de material
+/// (TrackProperty::MaterialParam) VENCEM a receita no render (place_model) —
+/// vieram do painel de material genérico, de um preset/colar ou de versão
+/// anterior. Com eles, mudar cor/metal/rugosidade no painel do texto 3D
+/// refazia a malha e nada mudava na tela. Agora o canal editado no painel
+/// segue a receita: o ajuste parado daquele canal sai, e o canal com keyframes
+/// ganha o valor novo no instante atual (como qualquer propriedade animada).
+/// Expressão ligada continua mandando (é escolha explícita do usuário).
+void follow_text3d_material_edit(Layer& layer, const scene3d::Text3DSpec& prev, const scene3d::Text3DSpec& next,
+                                 const scene3d::SceneAsset& scene, FrameIndex local) noexcept {
+    for (u32 i = 0; i < static_cast<u32>(scene.materials.size()); ++i) {
+        const scene3d::Text3DMaterial a = text3d_region_material(prev, i), b = text3d_region_material(next, i);
+        // A cor do painel é uma propriedade só: mudar o tom troca os três canais.
+        const bool color = a.color.x != b.color.x || a.color.y != b.color.y || a.color.z != b.color.z;
+        const bool changed[6] = {color, color, color, false, a.metallic != b.metallic, a.roughness != b.roughness};
+        const scene3d::Material& m = scene.materials[i];
+        const f32 value[6] = {m.baseColor.x, m.baseColor.y, m.baseColor.z, m.baseColor.w, m.metallic, m.roughness};
+        for (u32 p = 0; p < 6; ++p) {
+            if (!changed[p]) continue;
+            for (auto it = layer.model.materials.begin(); it != layer.model.materials.end(); ++it) {
+                if (it->materialIndex != i) continue;
+                it->mask &= ~(1u << p);
+                if (it->mask == 0 && !it->has_texture()) layer.model.materials.erase(it);
+                break;
+            }
+            if (Track* track = layer.tracks.find(TrackProperty::MaterialParam, i, p);
+                track && !track->has_expression() && !track->keys.empty())
+                track->set(local, value[p]);
+        }
+    }
+}
+} // namespace
+
 Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept {
+    const Status s = set_text3d_impl(layerId, spec);
+    lastText3dStatus_.store(static_cast<i32>(s.code()), std::memory_order_relaxed);
+    if (!s.ok()) AUREA_LOG_WARN("texto 3D: edicao recusada (%d %.*s)", static_cast<int>(s.code()),
+                                static_cast<int>(s.detail().size()), s.detail().empty() ? "" : s.detail().data());
+    return s;
+}
+
+Status Engine::set_text3d_impl(u64 layerId, const scene3d::Text3DSpec& spec) noexcept {
     std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     scene3d::Text3DSpec edited = spec;
+    // A ponte manda o que a UI tem (NaN de um campo vazio, segmentos 0, valor
+    // de projeto antigo fora da faixa): a malha sai da receita sã.
+    scene3d::sanitize_text3d(edited);
     if (!edited.texturePath.empty()) edited.texturePath = store_asset_path(edited.texturePath);
     if (!edited.fontPath.empty() && edited.fontPath.rfind("docs:", 0) != 0) edited.fontPath = store_asset_path(edited.fontPath);   // ver add_text3d
     AssetId previousScene;
     u64 session = 0; CompositionId composition;
+    bool previousLetters = false;
     {
         std::lock_guard<std::mutex> lock(modelMutex_);
         drain_commands_locked();
         Composition* comp = project_ ? current_composition() : nullptr;
         const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-        if (!l || l->kind != LayerKind::Model3D || l->locked) return Errc::InvalidArgument;
+        if (!l || l->kind != LayerKind::Model3D) return Status{Errc::InvalidArgument, "selecione texto 3D"};
+        if (l->locked) return Status{Errc::InvalidState, "camada bloqueada"};
         previousScene = l->model.scene;
         session = projectSession_; composition = project_->timeline().current();
-        if (source_asset_room_locked() < 4096) return Errc::BudgetExceeded;
+        // Cada edição guarda uma malha nova; numa sessão longa (ou num projeto
+        // cheio de mídia) o espaço acabava e TODA edição era recusada.
+        if (source_asset_room_locked() < 4096) release_unused_text3d_models_locked();
+        if (source_asset_room_locked() < 4096) return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
         // A stale panel snapshot must not merge the letters of a live effect.
-        if (std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& effect) {
+        if (!edited.separateGlyphs && (std::any_of(l->effects.begin(), l->effects.end(), [](const EffectInstance& effect) {
             return effect.type == effect_type_id(text::kAnimatorEffect) || effect.type == effect_type_id(text::kTransformEffect)
                 || effect.type == effect_type_id(effect_keys::kText3DLayout) || scene3d::is_part3d_effect(effect.type);
-        }) || !l->text.animators.empty() || layeranim::has_units(*l)) edited.separateGlyphs = true;
+        }) || !l->text.animators.empty() || layeranim::has_units(*l))) edited.separateGlyphs = true;
+        const auto current = models_.find(previousScene.pack());
+        if (current != models_.end() && current->second) previousLetters = current->second->textGlyphLayout;
     }
     const auto font = scene3d::text3d_font(edited);
     if (!font) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
-    scene3d::ImportResult r = scene3d::build_text3d(*font, edited, [this](const std::string& path) { return resolve_asset_path(path); }, model_texture_cap());
-    if (!r.ok()) return Status{Errc::InvalidArgument, "texto sem letras visiveis"};
+    const auto resolve = [this](const std::string& path) { return resolve_asset_path(path); };
+    scene3d::ImportResult r = scene3d::build_text3d(*font, edited, resolve, model_texture_cap());
+    if (!r.ok() && edited.separateGlyphs && !previousLetters) {
+        // Projeto antigo: a reabertura não conseguiu separar as letras (mais de
+        // 256 glifos, letra que só triangula junta) e manteve a malha inteira
+        // (ver load). Forçar a separação aqui recusava QUALQUER mudança nesse
+        // texto; ele segue inteiro, como já estava na tela.
+        scene3d::Text3DSpec merged = edited;
+        merged.separateGlyphs = false;
+        scene3d::ImportResult whole = scene3d::build_text3d(*font, merged, resolve, model_texture_cap());
+        if (whole.ok()) { r = std::move(whole); edited = std::move(merged); }
+    }
+    if (!r.ok()) return Status{Errc::OutOfRange, "texto sem letras visiveis"};
     std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_ || session != projectSession_ || composition != project_->timeline().current()) return Errc::Cancelled;
     Composition* comp = project_ ? current_composition() : nullptr;
     Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
-    if (!l || l->kind != LayerKind::Model3D || l->locked || l->model.scene != previousScene) return Errc::InvalidArgument;
+    if (!l || l->kind != LayerKind::Model3D || l->model.scene != previousScene) return Errc::InvalidArgument;
+    if (l->locked) return Status{Errc::InvalidState, "camada bloqueada"};
     const Asset* old = project_->asset(l->model.scene);
     scene3d::Text3DSpec prev;
     if (!old || !scene3d::decode_text3d(old->sourcePath, prev)) return Errc::InvalidArgument;
-    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked()) return Errc::BudgetExceeded;
+    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked()) release_unused_text3d_models_locked();
+    if (scene3d::scene_asset_memory_bytes(*scene) > source_asset_room_locked())
+        return Status{Errc::BudgetExceeded, "memoria de imagens e modelos do projeto esgotada"};
     history_.before_mutation(*comp, project_->timeline().current(), "editar texto 3D");
     bump_model_revision_locked();
+    follow_text3d_material_edit(*l, prev, edited, *scene, l->local_time(playback_.current()));
     // Asset novo (o antigo fica para o desfazer religar a malha anterior).
     const AssetId assetId = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(edited));
     models_[assetId.pack()] = scene;
@@ -10396,6 +10500,60 @@ Status Engine::set_text3d(u64 layerId, const scene3d::Text3DSpec& spec) noexcept
     project_->mark_dirty();
     request_render();
     return OkStatus;
+}
+
+u32 Engine::release_unused_text3d_models_locked() noexcept {
+    if (!project_) return 0;
+    // Colar nesta sessão religa o MESMO asset (restore_clipboard_media_locked
+    // não copia): a malha de uma camada recortada fica.
+    std::unordered_set<u64> keep;
+    for (const auto& copied : clipboard_.layers)
+        if (copied.second.kind == LayerKind::Model3D) keep.insert(copied.second.model.scene.pack());
+    u32 released = 0;
+    for (const AssetId id : project_->unreferenced_assets()) {
+        const u64 key = id.pack();
+        if (keep.count(key)) continue;
+        const auto it = models_.find(key);
+        const Asset* a = project_->asset(id);
+        if (it == models_.end() || !a || a->sourcePath.rfind(scene3d::kText3DScheme, 0) != 0) continue;
+        models_.erase(it);
+        ++released;
+    }
+    if (released) AUREA_LOG_INFO("texto 3D: %u malha(s) antiga(s) solta(s) para caber a edicao", released);
+    return released;
+}
+
+void Engine::restore_text3d_models_locked() noexcept {
+    if (!project_) return;
+    std::vector<u64> missing;
+    project_->timeline().for_each_composition([&](CompositionId, const Composition& c) {
+        c.layers().for_each([&](LayerId, const Layer& l) {
+            if (l.kind == LayerKind::Model3D && l.model.scene.valid() && !models_.count(l.model.scene.pack()))
+                missing.push_back(l.model.scene.pack());
+        });
+    });
+    std::sort(missing.begin(), missing.end());
+    missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
+    for (const u64 key : missing) {
+        const Asset* a = project_->asset(AssetId::unpack(key));
+        scene3d::Text3DSpec spec;
+        if (!a || !scene3d::decode_text3d(a->sourcePath, spec)) continue;
+        if (source_asset_room_locked() < 4096) release_unused_text3d_models_locked();
+        if (source_asset_room_locked() < 4096) continue;
+        const auto font = scene3d::text3d_font(spec);
+        if (!font) continue;
+        const auto resolve = [this](const std::string& path) { return resolve_asset_path(path); };
+        scene3d::ImportResult r = scene3d::build_text3d(*font, spec, resolve, model_texture_cap());
+        if (!r.ok() && spec.separateGlyphs) {
+            spec.separateGlyphs = false;
+            r = scene3d::build_text3d(*font, spec, resolve, model_texture_cap());
+        }
+        if (!r.ok()) continue;
+        // Desfazer: a malha da edição desfeita fica sem dono (o refazer a refaz).
+        if (scene3d::scene_asset_memory_bytes(*r.asset) > source_asset_room_locked()) release_unused_text3d_models_locked();
+        if (scene3d::scene_asset_memory_bytes(*r.asset) > source_asset_room_locked()) continue;
+        models_[key] = std::shared_ptr<const scene3d::SceneAsset>(std::move(r.asset));
+    }
 }
 
 bool Engine::query_text3d(u64 layerId, scene3d::Text3DSpec& out) noexcept {
@@ -10469,6 +10627,8 @@ Result<u32> Engine::reload_model_textures(u64 layerId, std::string* detail) noex
                       : r.error == scene3d::ImportError::TooHeavy ? Errc::BudgetExceeded : Errc::AssetCorrupted,
                       scene3d::to_string(r.error)};
     }
+    // AutoRig 3D: o modelo reimportado volta com o mesmo esqueleto e pesos.
+    if (!copy.model.rig.empty()) (void)rig::apply_rig_spec(*r.asset, copy.model.rig);
     std::shared_ptr<const scene3d::SceneAsset> scene(std::move(r.asset));
     if (detail) {
         detail->clear();
@@ -13949,9 +14109,14 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
             const u32 compShort = std::min(comp->width(), comp->height());
             wantShort = std::min(wantShort ? wantShort : compShort, attemptPlan.shortSideCap);
         }
-        const ExportFrameSize size = export_frame_size_v2(comp->width(), comp->height(), wantShort);
+        // 0.3.6: lado ímpar ou degrau de compatibilidade → tamanho alinhado
+        // (export_attempt_frame_size); antes o ímpar recusava aqui.
+        const ExportFrameSize size = export_attempt_frame_size(comp->width(), comp->height(), wantShort, attemptPlan.align16);
         if (!size.width || !size.height)
-            return Status{Errc::NotSupported, "o codec 4:2:0 requer dimensoes pares; escolha explicitamente outra resolucao"};
+            return Status{Errc::NotSupported, "dimensoes de exportacao invalidas"};
+        if (size.width != comp->width() || size.height != comp->height())
+            AUREA_LOG_INFO("export: composicao %ux%u sai em %ux%u (degrau%s)", comp->width(), comp->height(),
+                           size.width, size.height, attemptPlan.align16 ? " compativel, alinhado a 16" : "");
         ctx->width = size.width;
         ctx->height = size.height;
         const f64 seconds = static_cast<f64>(comp->export_duration(settings.trimToContent).value) / comp->fps();
@@ -13997,7 +14162,7 @@ Status Engine::start_export_checked(const ExportSettings& requested, const char*
         u32 wantShort = static_cast<u32>(std::floor(shortSide * scale)) & ~1u;
         ExportFrameSize reduced{};
         while (frozenComp && wantShort >= 16) {
-            reduced = export_frame_size_v2(frozenComp->width(), frozenComp->height(), wantShort);
+            reduced = export_attempt_frame_size(frozenComp->width(), frozenComp->height(), wantShort, attemptPlan.align16);
             if (reduced.width && reduced.height && fitsDevice(reduced.width, reduced.height)) break;
             reduced = ExportFrameSize{};
             wantShort -= 16;
@@ -16553,6 +16718,9 @@ void Engine::after_history_restore_locked() noexcept {
     Composition* comp = current_composition();
     if (!comp) return;
     std::erase_if(selection_, [&](u64 id) { return comp->layer(LayerId::unpack(id)) == nullptr; });
+    // Desfazer/refazer pode religar uma malha de texto 3D solta por falta de
+    // espaço (release_unused_text3d_models_locked): ela volta da receita.
+    restore_text3d_models_locked();
     configure_playback_locked(comp);
     adapt().configure(comp->width(), comp->height(), static_cast<f32>(comp->fps()));
     project_->mark_dirty();
@@ -16970,7 +17138,11 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         case CommandType::LayerSplit: {
             Layer* l = need_layer(cmd.layer_ref.layer);
             if (!l || !comp) return Errc::NotFound;
-            const FrameIndex at = cmd.layer_split.at;
+            // 0.3.6 (keys, item 4): `kEditAtPlayhead` = o quadro que a prévia
+            // mostra AGORA (com o pausar do mesmo lote já aplicado). A UI mandava
+            // o cabeçote que tinha lido: tocando, ele vinha quadros atrás e o
+            // corte caía à esquerda do ponto (ou nem acontecia perto do começo).
+            const FrameIndex at = cmd.layer_split.at.value == kEditAtPlayhead ? playback_.current() : cmd.layer_split.at;
             if (at.value <= l->start.value || at.value >= l->end.value) return Errc::OutOfRange;
             const FrameIndex originalStart = l->start, originalEnd = l->end, originalOffset = l->offset;
             ClipChainEdit clipChains(comp);

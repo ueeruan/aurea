@@ -636,14 +636,14 @@ struct Rig {
     }
 };
 
-Rig& rig() {
+Rig& plugin_rig() {
     static Rig r;
     return r;
 }
 
 #define AUREA_REQUIRE_PLUGIN_GPU()                                     \
     do {                                                               \
-        if (!rig().ok) { std::printf("(sem GPU Vulkan: pulado) "); return; } \
+        if (!plugin_rig().ok) { std::printf("(sem GPU Vulkan: pulado) "); return; } \
     } while (0)
 
 struct Scene {
@@ -658,7 +658,7 @@ struct Scene {
         comp = project.timeline().composition(project.timeline().root());
         comp->set_background(Color{0, 0, 0, 0});
         comp->set_duration(FrameIndex{120});
-        rig().renderer.release_project_resources();
+        plugin_rig().renderer.release_project_resources();
     }
     static const ImagePixels* lookup(void* self, AssetId id) {
         auto* s = static_cast<Scene*>(self);
@@ -683,13 +683,13 @@ struct Scene {
         EffectInstance e;
         e.id = l->alloc_effect_id();
         e.type = effect_type_id(key);
-        const ParameterRegistry* params = rig().effects.params(e.type);
+        const ParameterRegistry* params = plugin_rig().effects.params(e.type);
         if (params) initialize_instance(e, *params);
         l->effects.push_back(std::move(e));
         return l->effects.back();
     }
     Image render(FrameIndex t = FrameIndex{0}) {
-        Rig& g = rig();
+        Rig& g = plugin_rig();
         RenderSettings rs;
         rs.previewDenominator = 1;
         rs.dither = false;
@@ -748,7 +748,7 @@ ImagePixels reference(u32 w, u32 h) {
 }
 
 void ensure_installed(const char* package) {
-    const auto r = rig().install(examples() + "/" + package);
+    const auto r = plugin_rig().install(examples() + "/" + package);
     AUREA_CHECK_MSG(r.ok(), detail_of(r).c_str());
 }
 
@@ -804,7 +804,7 @@ AUREA_TEST(PluginsGpu, Shader3dReadsTheLinkedNullAndTheSceneCamera) {
                    "    return vec4(linked, clamp(p.x / aurea.comp.x, 0.0, 1.0), clamp(p.y / aurea.comp.y, 0.0, 1.0), 1.0);\n"
                    "}\n"},
     });
-    const auto r = rig().install(str(work / "cena3d.aureaplugin"));
+    const auto r = plugin_rig().install(str(work / "cena3d.aureaplugin"));
     AUREA_CHECK_MSG(r.ok(), detail_of(r).c_str());
     Scene s(64, 32);
     const LayerId img = s.image(uniform(64, 32, 128));
@@ -838,7 +838,7 @@ AUREA_TEST(PluginsGpu, MultiPassIntermediateRunsAtTheDeclaredScale) {
         {"a.frag", "vec4 aurea_main(vec2 uv) { return vec4(aurea.resolution.x / 256.0, aurea.resolution.y / 256.0 + aurea.layer.z, 0.0, 1.0); }\n"},
         {"b.frag", "vec4 aurea_main(vec2 uv) { vec4 s = texture(small, uv); return vec4(s.rg, aurea.resolution.x / 256.0, 1.0); }\n"},
     });
-    const auto r = rig().install(str(work / "escala.aureaplugin"));
+    const auto r = plugin_rig().install(str(work / "escala.aureaplugin"));
     AUREA_CHECK_MSG(r.ok(), detail_of(r).c_str());
     Scene s(64, 32);
     const LayerId id = s.image(uniform(64, 32, 128));
@@ -892,9 +892,9 @@ AUREA_TEST(PluginsGpu, StackPluginEqualsTheBuiltinsAppliedByHand) {
     {
         Scene s(96, 64);
         const LayerId id = s.image(reference(96, 64));
-        const ParameterRegistry* blur = rig().effects.params(effect_type_id(effect_keys::kGaussianBlur));
-        const ParameterRegistry* glow = rig().effects.params(effect_type_id(effect_keys::kGlow));
-        const ParameterRegistry* sat = rig().effects.params(effect_type_id(effect_keys::kSaturation));
+        const ParameterRegistry* blur = plugin_rig().effects.params(effect_type_id(effect_keys::kGaussianBlur));
+        const ParameterRegistry* glow = plugin_rig().effects.params(effect_type_id(effect_keys::kGlow));
+        const ParameterRegistry* sat = plugin_rig().effects.params(effect_type_id(effect_keys::kSaturation));
         s.add_effect(id, effect_keys::kGaussianBlur).params[blur->find("blurriness")].constant = ParamValue::scalar(6.0f);
         EffectInstance& g = s.add_effect(id, effect_keys::kGlow);
         g.params[glow->find("threshold")].constant = ParamValue::scalar(39.0f);
@@ -1064,13 +1064,13 @@ AUREA_TEST(PluginsGpu, EveryExamplePluginRendersFiniteInTheCatalogPreview) {
     for (const char* p : {"rgb-wave.aureaplugin", "soft-glow.aureaplugin", "dream-look.aureaplugin", "pulse-vignette.fs",
                           "target-3d.aureaplugin"})
         ensure_installed(p);
-    const auto list = rig().manager->list();
+    const auto list = plugin_rig().manager->list();
     AUREA_CHECK(list.size() >= 4u);
     for (const plugins::PluginInfo& info : list) {
         AUREA_CHECK_MSG(info.ok, info.error.c_str());
         AUREA_CHECK_MSG(info.testRenderMs >= 0.0f, info.id.c_str());
         std::vector<u8> out;
-        const Status s = rig().renderer.render_effect_preview(rig().effects, info.effectTypeId, 128, 96, out);
+        const Status s = plugin_rig().renderer.render_effect_preview(plugin_rig().effects, info.effectTypeId, 128, 96, out);
         AUREA_CHECK_MSG(s.ok(), info.id.c_str());
         AUREA_CHECK_EQ(out.size(), static_cast<usize>(128 * 96 * 4));
     }

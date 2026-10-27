@@ -6,7 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -996,6 +996,9 @@ private fun applyTurbulencePreset(store: EditorStore, effectId: Int) {
 /**
  * Reordenar pelo ≡ (grip): arrasto vertical imediato, só dele (não briga com a
  * rolagem da lista). Soltar grava a ordem com UM comando.
+ * 0.3.6 (sidebar): só VERTICAL — o arrasto em qualquer direção tomava também o
+ * deslizar para a esquerda que começa no ≡ (canto direito da linha, onde o dedo
+ * costuma começar), e o efeito não saía.
  */
 private fun Modifier.reorderHandle(
     id: Int,
@@ -1006,11 +1009,11 @@ private fun Modifier.reorderHandle(
     enabled: Boolean,
 ): Modifier = if (!enabled) this else this.then(
     Modifier.pointerInput(id, visible) {
-        detectDragGestures(
+        detectVerticalDragGestures(
             onDragStart = { state.begin(id, visible) },
-            onDrag = { change, amount ->
+            onVerticalDrag = { change, amount ->
                 change.consume()
-                state.offset += amount.y
+                state.offset += amount
                 state.swapIfNeeded(list)
             },
             onDragEnd = { state.finish(store) },

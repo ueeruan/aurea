@@ -11,7 +11,8 @@
      Áudio) e para o som do "Gravar agora" do AureaHyper (0.3.2): o pedido
      aparece quando a pessoa toca em Permitir/Gravar, e o áudio fica no aparelho.
    · NSCameraUsageDescription: a Real Camera (rastreio, sem gravar imagens) e o
-     "Gravar agora" do AureaHyper (grava o vídeo que vai ser melhorado).
+     "Gravar agora" do AureaHyper (grava o vídeo que vai ser melhorado) e o
+     "Gravar movimento" do Motion Capture (0.3.6; a pose é detectada no aparelho).
    · Dados de assinatura (Team ID, provisioning): quem assina é o dono, com a
      conta dele. Ver README.
 
@@ -45,7 +46,7 @@
     <key>NSMicrophoneUsageDescription</key>
     <string>O microfone grava a sua narração (Gravar voz) e o som dos vídeos que você grava no AureaHyper. O áudio fica no seu aparelho.</string>
     <key>NSCameraUsageDescription</key>
-    <string>A câmera rastreia o movimento 3D do aparelho para animar a câmera do projeto (sem gravar imagens) e grava os vídeos que você pede em Gravar agora, no AureaHyper. O vídeo fica no seu aparelho.</string>
+    <string>A câmera rastreia o movimento 3D do aparelho para animar a câmera do projeto (sem gravar imagens) e grava os vídeos que você pede em Gravar agora, no AureaHyper, e em Gravar movimento, no Motion Capture. O vídeo fica no seu aparelho.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Mostrar suas fotos e vídeos dentro do Aurea para escolher o que importar no projeto.</string>
     <key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="export036_timeout_title">Export left the foreground</string>
+    <string name="export036_timeout_text">Android limited how long the export can run in the background. Open Aurea so it can finish; if the system closes the app, the next export continues where it stopped.</string>
+    <string name="export036_timeout_notice">Android limited the background time: keep Aurea open until the export finishes.</string>
+</resources>

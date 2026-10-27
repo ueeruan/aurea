@@ -126,8 +126,12 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
                 val panel = ui.panel
                 if (panel != null) {
                     // Painel aberto: a linha do tempo encolhe e o painel da Composição sobe.
-                    KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().height(112.dp), compact = true, onAddMedia = actions.addMedia, onAddAudio = { level = EditDockLevel.Audio }, onTransition = { a, b -> cut = a to b }) }
-                    Box(Modifier.fillMaxWidth().weight(1f).background(AureaColors.EditorPanel)) {
+                    // 0.3.6: o painel vai até o teto (EditorLayout.panelMax); numa tela alta o
+                    // que passa dele fica com a linha do tempo (112 no mínimo), não com o painel.
+                    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
+                    val panelH = (total - 52.dp - previewH - 48.dp - 112.dp).coerceIn(0.dp, EditorLayout.panelMax(fontScale).dp)
+                    KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = true, onAddMedia = actions.addMedia, onAddAudio = { level = EditDockLevel.Audio }, onTransition = { a, b -> cut = a to b }) }
+                    Box(Modifier.fillMaxWidth().height(panelH).background(AureaColors.EditorPanel)) {
                         // Na Edição a barra de cima não mostra o título da seção: o painel
                         // traz o próprio cabeçalho "‹ Título" (o ✕ de cima fecha o projeto).
                         PanelContent(store, panel, onClose = { ui.panel = null }, onOpenPanel = { openPanel(store, ui, it) },

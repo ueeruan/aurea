@@ -66,6 +66,8 @@ internal class TimelineState {
     /** Tamanho medido no layout (nunca escrito na composição; spec bug 10.24). */
     var width by mutableIntStateOf(0)
     var height by mutableIntStateOf(0)
+    /** 0.3.6: px da base da timeline cobertos pelo painel por cima (doca, painel, adicionar). */
+    var obscuredBottom by mutableFloatStateOf(0f)
     /** Projeto já enquadrado pelo auto-zoom da A.01 (uma vez por projeto). */
     var fittedPath: String? = null
     /** Lido no desenho: mudar pede mais um quadro (miniaturas que ficaram para depois). */

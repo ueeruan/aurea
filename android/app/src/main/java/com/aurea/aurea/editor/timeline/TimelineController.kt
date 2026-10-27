@@ -195,8 +195,10 @@ internal class TimelineController(
         return idx
     }
 
+    // 0.3.6: a parte coberta pelo painel por cima ([TimelineState.obscuredBottom]) não
+    // conta como vista: a última fileira pode subir até logo acima dele.
     private fun maxScroll(n: Int): Float =
-        max(0f, rowTop(n) + metrics.bottomPad - (state.height - metrics.rowsTop))
+        max(0f, rowTop(n) + metrics.bottomPad - (state.height - metrics.rowsTop - state.obscuredBottom.coerceAtLeast(0f)))
 
     fun clampedScroll(n: Int): Float = if (state.compact) 0f else state.scrollY.coerceIn(0f, maxScroll(n))
 
@@ -331,7 +333,54 @@ internal class TimelineController(
     private fun handlesOn(s: RowModel) = s.track == null && selectionSize() == 1 && isSelected(s.id) && !s.locked &&
         (!omega || state.compact)
 
+    /**
+     * O que está sob o dedo. 0.3.6 (keys, item 2): o losango da camada escolhida
+     * tem alvo de [TimelineMetrics.keyReachV] × 2 (44 dp) na vertical — a linha
+     * tem 28 —, então um toque que cai na régua, no vazio ou no corpo da linha
+     * vizinha, mas perto do losango, vai para ele (antes a régua buscava, o vazio
+     * saía do foco e o vizinho era escolhido). Alça, cabeçalho e losango da
+     * própria linha continuam na frente.
+     */
     private fun hitAt(p: Offset): Hit {
+        val hit = rowHitAt(p)
+        if (hit.kind != HitKind.RULER && hit.kind != HitKind.NONE && hit.kind != HitKind.BODY) return hit
+        return nearKeyHit(p) ?: hit
+    }
+
+    /** Losango de uma camada (linha de camada, não trilha) cujo centro está a até [TimelineMetrics.keyReachV] do dedo. */
+    private fun nearKeyHit(p: Offset): Hit? {
+        val m = metrics
+        if (p.x < m.headerColumn) return null
+        val list = rows.value
+        val n = rowCount(list)
+        if (n == 0) return null
+        val scroll = clampedScroll(n)
+        val center = rowIndexAt(p.y - m.rowsTop + scroll)
+        var best: Hit? = null
+        var bestDy = Float.MAX_VALUE
+        for (j in center - 1..center + 1) {
+            if (j !in 0 until n) continue
+            val r = rowAt(list, j) ?: continue
+            if (r.track != null) continue   // trilhas abertas: LaneTouch
+            val dy = kotlin.math.abs(p.y - (m.rowsTop + rowTop(j) - scroll + m.barTop + m.diamondCyNormal))
+            if (dy > m.keyReachV || dy >= bestDy) continue
+            for (s in r.segments) {
+                if (hitSegment(s, p.x, m.diamondCyNormal) != HitKind.KEYFRAME) continue
+                best = Hit().also {
+                    it.kind = HitKind.KEYFRAME
+                    it.row = s
+                    it.lane = r
+                    it.rowIndex = j
+                    it.keyIndex = hitOut[0]
+                }
+                bestDy = dy
+                break
+            }
+        }
+        return best
+    }
+
+    private fun rowHitAt(p: Offset): Hit {
         val hit = Hit()
         val m = metrics
         // 0.3.3 recursos: o marcador antigo voltou — o relógio é parte da régua
@@ -809,7 +858,9 @@ internal class TimelineController(
         val compact = state.compact
         val tracker = VelocityTracker()
         tracker.addPointerInputChange(down)
-        val slop = viewConfiguration.touchSlop
+        // 0.3.6 (keys, item 2): no losango o dedo pode rolar um pouco mais antes de
+        // o toque virar scrub (o toque curto "não pegava" com um leve arrasto).
+        val slop = if (hit.kind == HitKind.KEYFRAME) max(viewConfiguration.touchSlop, metrics.keyTapSlop) else viewConfiguration.touchSlop
         val holdMs = OmegaHold.millis(viewConfiguration.longPressTimeoutMillis, hit.kind, compact)
         // Alça do foco tocada: 30 % até o prazo (25 % do toque longo) virar corte.
         if (compact && (hit.kind == HitKind.TRIM_START || hit.kind == HitKind.TRIM_END)) state.handleState = 1
@@ -852,7 +903,9 @@ internal class TimelineController(
         }
         if (phase != Phase.LONG_PRESS && state.handleState == 1) state.handleState = 0
         when (phase) {
-            Phase.TAP -> if (!stoppedFling) omegaTap(hit, down.position)
+            // O toque que só para a inércia não escolhe nada — exceto no losango:
+            // ali o alvo é claro (antes o toque "não pegava" logo depois de rolar).
+            Phase.TAP -> if (!stoppedFling || hit.kind == HitKind.KEYFRAME) omegaTap(hit, down.position)
             Phase.DRAG -> omegaDrag(hit, down, slopAt, tracker)
             Phase.PINCH -> pinch()
             Phase.LONG_PRESS -> omegaHold(hit, down, last, tracker, stoppedFling)
@@ -875,6 +928,15 @@ internal class TimelineController(
                 return
             }
             HitKind.RULER -> {
+                // 0.3.6: com a barra da camada ou um painel aberto por cima (foco), o
+                // toque na régua é o de SAIR dela: fecha como o resto do foco e não
+                // leva o cabeçote (antes o tempo pulava para onde a pessoa tocou).
+                if (compact) {
+                    if (System.currentTimeMillis() - eyeToggledAt < EYE_GRACE_MS) return
+                    store.clearSelectedKeyframe()
+                    onEmptyTap()
+                    return
+                }
                 // 0.3.3 recursos: a régua da 0.3.2 — leva o cabeçote ao instante do
                 // dedo; em cima de uma marca (12 dp) vai até ela e abre o editor
                 // (nome, quadro e cor).
@@ -2044,27 +2106,31 @@ internal class TimelineController(
         val list = rows.value
         val idx = rowIndexOf(list, p)
         if (idx < 0) return
-        val viewport = state.height - metrics.rowsTop
+        // 0.3.6: a vista é o que fica ACIMA do painel por cima (doca, painel ou o
+        // adicionar): a fileira escolhida não fica escondida atrás dele.
+        val viewport = TimelineReveal.viewport(state.height.toFloat(), metrics.rowsTop, state.obscuredBottom)
         if (viewport <= 0f) return
         val top = rowTop(idx)
         val bottom = top + rowHeight(list[idx])
         val s = clampedScroll(list.size)
-        val target = when {
-            top < s -> top
-            bottom > s + viewport -> bottom - viewport
-            else -> s
-        }
+        val target = TimelineReveal.target(top, bottom, s, viewport)
         if (target != s) state.scrollY = target
     }
 
     /** A.01: projeto de 20 s ou mais nasce enquadrado na largura (uma vez; depois a pinça manda). */
     fun autoFit() {
         val path = store.project.path ?: return
-        if (path == state.fittedPath || state.width <= 0) return
+        // 0.3.6: só com a timeline já medida de verdade (largura útil > 0): medida no
+        // primeiro passe, logo depois de abrir o projeto, dava o zoom mínimo e os
+        // clipes sumiam da tela; a medida certa chega pelo snapshotFlow da largura.
+        val available = state.width / metrics.density - AUTO_FIT_MARGIN_DP
+        if (path == state.fittedPath || state.width <= 0 || state.height <= 0 || available <= 0f) return
         state.fittedPath = path
+        // Outro projeto: a rolagem vertical do anterior não vale aqui.
+        state.scrollY = 0f
         val seconds = store.project.durationFrames / fps
         if (seconds < Zoom.AUTO_FIT_MIN_SECONDS) return
-        state.pps = Zoom.autoFit(state.width / metrics.density - AUTO_FIT_MARGIN_DP, seconds)
+        state.pps = Zoom.autoFit(available, seconds)
     }
 
     // =========================================================================

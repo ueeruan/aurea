@@ -21,6 +21,7 @@
 #include "aurea/scene3d/Shape3D.hpp"
 #include "aurea/scene3d/PartEffects.hpp"
 #include "aurea/scene3d/RigPose.hpp"
+#include "aurea/rig/Mocap.hpp"
 #include "aurea/scene3d/StudioEnvironment.hpp"
 #include "aurea/text/Text.hpp"
 #include "aurea/text/FontManager.hpp"
@@ -584,17 +585,17 @@ void place_model(const Composition& comp, const Layer& l, const scene3d::SceneAs
         target->mask |= 1u << track.effectParamIndex;
     }
     scene3d::Pose pose;
-    const i32 clip = l.model.animationClip;
+    // Prévia do Motion Capture: a captura parte da T-pose (sem o clipe do arquivo).
+    const i32 clip = rig::active_preview(l.model.mocapPreview) ? -1 : l.model.animationClip;
     f32 t = 0.0f;
     if (clip >= 0 && clip < static_cast<i32>(asset.animations.size())) {
         const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
         const f64 local = time - static_cast<f64>(l.start.value) + static_cast<f64>(l.offset.value);
         t = scene3d::clip_time(asset.animations[static_cast<usize>(clip)], local / fps * l.model.timeScale);
     }
-    // Rig posado pelo usuário (trilhas BonePose): entra antes das juntas.
-    thread_local std::vector<scene3d::BoneOffset> boneOffsets;
-    scene3d::bone_offsets(l, materialTime, boneOffsets);
-    scene3d::evaluate_pose(asset, clip, t, pose, workspace, boneOffsets.data(), boneOffsets.size());
+    // Rig posado pelo usuário (trilhas BonePose: rotação, translação e IK de
+    // dois ossos — 0.3.6): entra antes das juntas, igual na prévia e no export.
+    scene3d::evaluate_rig_pose(asset, l, clip, t, materialTime, pose, workspace);
     scene3d::apply_text3d_layout(asset, l, materialTime, pose.nodeWorld);
     // Formas 3D: o layout das partes (Shape 3D Layout) antes das trilhas de cada parte.
     scene3d::apply_shape3d_layout(asset, l, materialTime, pose.nodeWorld);
@@ -2435,6 +2436,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             }
         }
     }
+    // 0.3.6: a camada que cobre um material de objeto 3D também é entrada
+    // (entra escondida, como o mapa de deslocamento; não desenha sozinha).
+    for (u32 i = 0; i < n; ++i) {
+        const Layer* l = comp.layer(order.at(i));
+        if (!l || l->kind != LayerKind::Model3D || !l->contains_time(time)) continue;
+        for (const MaterialOverride& over : l->model.materials)
+            if (over.textureLayer && over.textureLayer != order.at(i).pack()) inputLayers.push_back(over.textureLayer);
+    }
     // Escopo 1 de uma camada de ajuste: onde começa o último desenho da pilha
     // (um grupo 3D conta como um). ~0u = nada que ela possa ajustar.
     u32 lastDrawOrder = ~0u;
@@ -3057,6 +3066,28 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                             swap.image, imageLookup(imageCtx, AssetId::unpack(swap.image)), frameNumber);
                         if (tex.valid()) inst.nodeTextures.push_back(scene3d::SceneNodeTexture{swap.node, tex, swap.repeat});
                     }
+                }
+                // 0.3.6 TEXTURA DO MATERIAL: a imagem já na GPU; a camada fica
+                // pelo id e vira imagem em compose_layers (desenhada antes da
+                // cena, no mesmo grafo). Camada que não vale (ela mesma, 3D,
+                // sumiu) não entra: o material fica com o mapa do arquivo.
+                for (const MaterialOverride& over : l->model.materials) {
+                    if (!over.has_texture() || over.materialIndex >= asset->materials.size()) continue;
+                    scene3d::SceneMaterialTexture own;
+                    own.material = over.materialIndex;
+                    own.keepColor = (over.mask & 7u) != 0;
+                    if (over.textureLayer) {
+                        const LayerId texLayer = LayerId::unpack(over.textureLayer);
+                        const Layer* texSource = comp.layer(texLayer);
+                        if (!texSource || !material_texture_source_ok(id, texLayer, *texSource)) continue;
+                        own.sourceLayer = over.textureLayer;
+                    } else {
+                        if (!imageLookup) continue;
+                        own.texture = scene_image_texture(over.textureImage,
+                            imageLookup(imageCtx, AssetId::unpack(over.textureImage)), frameNumber);
+                        if (!own.texture.valid()) continue;
+                    }
+                    inst.materialTextures.push_back(own);
                 }
                 inst.motionBlur = l->motionBlur;
                 inst.castShadows = l->model.castShadows;
@@ -4940,6 +4971,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 h.castShadows = false;
                 h.ownEnvironment = false;   // sem cor: não pede mapas de ambiente
                 h.nodeTextures.clear();
+                h.materialTextures.clear();   // recorte: sem cor, sem camada para ler
                 h.nodeFill.clear();
                 out.scenes[into].instances.push_back(std::move(h));
             }
@@ -5176,7 +5208,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             if (vectorFits && !changing && travel >= .01 && tryVector(f, travel))
                 continue;
             const bool batchEligible = settings.boundedSceneExposure && settings.finalQuality
-                && prepareDepth_ == 0 && out.nested.empty() && f.planeLayers.empty() && f.particleLayers.empty();
+                && prepareDepth_ == 0 && out.nested.empty() && f.planeLayers.empty() && f.particleLayers.empty()
+                && !scene3d::scene_uses_layer_textures(f);   // 0.3.6: a camada precisa do mesmo grafo
             const u32 desired = capped_shutter_samples(mb, settings.finalQuality,
                 effective_quality(settings).motionBlurSamples, travel, changing, ShutterPlan::kHardLimit);
             const u64 batchBudget = std::min(stateBudget, settings.sceneExposureBatchBudgetBytes);
@@ -5241,6 +5274,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 // "Trocar textura 3D" fica na instância (não na pose): sem esta
                 // cópia os sub-quadros do desfoque saíam com o material original.
                 base.nodeTextures = pose->nodeTextures;
+                base.materialTextures = pose->materialTextures;   // 0.3.6: textura do material
                 base.sharedPose = pose;
                 poses.push_back(std::move(pose));
             }
@@ -5292,6 +5326,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     in.holdout = base.holdout;
                     in.ownEnvironment = base.ownEnvironment; in.environment = base.environment;
                     in.nodeTextures = base.nodeTextures;
+                    in.materialTextures = base.materialTextures;
                     in.sharedPose = poses[i];
                     const Layer* layer = sourceLayer(base.layerKey);
                     const f32 amount = layer && in.motionBlur ? motion_blur_amount(layer->transform.motionBlurAmount) : 0.f;
@@ -7744,6 +7779,23 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 }
             }
         }
+        // 0.3.6 TEXTURA DO MATERIAL: a camada que cobre um material de objeto
+        // 3D, desenhada aqui (antes de qualquer cena) e lida pelo passe 3D. O
+        // filtro abaixo deixa de fora o que mora numa cena (plano 2D em 3D,
+        // partícula na cena): a cena leria a própria saída — ciclo no grafo.
+        // Uma imagem velha (de outro grafo) nunca sobra na instância.
+        auto each_material_texture = [&](auto&& fn) {
+            for (scene3d::SceneFrame& scene : snap.scenes) {
+                for (scene3d::SceneInstance& inst : scene.instances) for (auto& t : inst.materialTextures) fn(t);
+                for (scene3d::SceneFrame& sub : scene.blurFrames)
+                    for (scene3d::SceneInstance& inst : sub.instances) for (auto& t : inst.materialTextures) fn(t);
+            }
+        };
+        each_material_texture([&](scene3d::SceneMaterialTexture& t) {
+            t.layerImage = FGTexture{};
+            if (t.sourceLayer) wanted.push_back(t.sourceLayer);
+        });
+        std::vector<u64> sceneInputs;
         for (u32 i = 0; i < snap.layers.size() && !wanted.empty(); ++i) {
             const RenderLayer& layer = snap.layers[i];
             if (layer.planeGroup >= 0 || layer.particle.inScene || layer.source.kind == LayerSource::Kind::Adjustment) continue;
@@ -7762,7 +7814,22 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             if (!t.valid()) continue;
             probe.image = LayerImage{t, Rect{0.0f, 0.0f, compW, compH}, compDesc.width, compDesc.height};
             layerInputs.push_back(probe);
+            if (layer.source.kind == LayerSource::Kind::Scene3D) sceneInputs.push_back(probe.layer);
         }
+        each_material_texture([&](scene3d::SceneMaterialTexture& t) {
+            if (!t.sourceLayer) return;
+            const LayerId a = LayerId::unpack(t.sourceLayer);
+            for (const EffectBuildContext::LayerInput& in : layerInputs) {
+                // Uma cena 3D nunca vira textura de outra (o grupo leria a si mesmo).
+                if (std::find(sceneInputs.begin(), sceneInputs.end(), in.layer) != sceneInputs.end()) continue;
+                const LayerId b = LayerId::unpack(in.layer);
+                if (in.layer == t.sourceLayer || ((b.index & 0x40000000u) && a.generation == b.generation
+                                                  && (a.index & 0xFFFFu) == (b.index & 0xFFFFu))) {
+                    t.layerImage = in.image.texture;
+                    break;
+                }
+            }
+        });
     }
     ctx.set_layer_inputs(layerInputs);
     // Track matte: as mattes primeiro, cada uma sozinha num alvo do tamanho

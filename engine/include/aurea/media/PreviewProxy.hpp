@@ -6,6 +6,7 @@
 #include <deque>
 #include <limits>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace aurea {
 class VideoSourceFactory;
@@ -75,8 +76,35 @@ inline constexpr u32 kProxyMaxFailures = 2;
 [[nodiscard]] bool proxy_source_heavy(const Asset& asset, const ProxyThresholds& t = {}) noexcept;
 /// O preview desta fonte usa (e, se preciso, gera) proxy? `reducedPreview`:
 /// o usuário escolheu 1/2, 1/4 ou 1/8 — então qualquer fonte acima de 720p.
+/// `slowDecode` (0.3.6): o aparelho MEDIU que não decodifica esta fonte em
+/// tempo real (DecodeSpeedMonitor) — proxy mesmo abaixo dos limiares.
 [[nodiscard]] bool proxy_wanted(const Asset& asset, ProxyMode mode, bool reducedPreview,
-                                const ProxyThresholds& t = {}) noexcept;
+                                const ProxyThresholds& t = {}, bool slowDecode = false) noexcept;
+
+// -----------------------------------------------------------------------------
+// 0.3.6 (MKV 2K60 lento): fonte que o aparelho não decodifica em tempo real.
+//
+// A política acima olha só o arquivo (pixels, fps, codec, bitrate). Um vídeo
+// que fica abaixo dos limiares mas que ESTE aparelho não acompanha (decoder
+// de software no modo seguro, codec sem hardware, 1080p60 num aparelho
+// fraco) tocava lento para sempre. O monitor mede o custo por quadro do
+// decoder da prévia: em 3 janelas seguidas de ~1 s de quadros acima do
+// intervalo da fonte (+10%), a fonte é marcada e entra na fila do proxy.
+// -----------------------------------------------------------------------------
+class DecodeSpeedMonitor {
+public:
+    /// `decoded`: quadros decodificados pela fonte até agora (entregues +
+    /// descartados); `msAvg`: custo médio por quadro (média móvel do
+    /// VideoSource); `fps`: da fonte. true UMA vez, quando ela se mostra lenta.
+    [[nodiscard]] bool observe(u64 decoded, f32 msAvg, f64 fps) noexcept;
+    [[nodiscard]] bool reported() const noexcept { return reported_; }
+    static constexpr u32 kStrikes = 3;
+    static constexpr f64 kMargin = 1.10;
+private:
+    u64 mark_ = 0;
+    u32 strikes_ = 0;
+    bool started_ = false, reported_ = false;
+};
 /// Taxa do proxy: a da fonte, até `maxFps`.
 [[nodiscard]] f64 proxy_target_fps(f64 sourceFps, f64 maxFps = 60.0) noexcept;
 /// Encoder do proxy: H.264, GOP curto (~0,5 s, seek barato), bitrate moderado.
@@ -130,6 +158,11 @@ public:
     void set_pause_reason(PauseReason reason, bool paused) noexcept;
     /// Preview: o proxy pronto, ou nulo (e o asset entra na fila se a política pede).
     std::shared_ptr<const PreviewProxy> request(const Asset& asset);
+    /// 0.3.6: o aparelho não decodifica esta fonte em tempo real
+    /// (DecodeSpeedMonitor). Daqui em diante a política a trata como pesada
+    /// (nos modos Automático e Sempre; Desligado continua sem proxy).
+    void mark_slow_decode(const Asset& asset);
+    [[nodiscard]] bool slow_decode(const Asset& asset) const;
     [[nodiscard]] ProxyStatus status(const Asset& asset);
     [[nodiscard]] ProxySummary summary();
     /// Tira da fila / interrompe; o asset não volta sozinho até `regenerate`.
@@ -164,6 +197,8 @@ private:
     bool make_room(u64 bytes, const std::string& preserve);
     bool queue_locked(const Asset& asset, const std::string& key, u32 target, bool front, bool force);
     void prune_unwanted_locked(bool interruptCurrent);
+    [[nodiscard]] bool wanted_locked(const Asset& asset) const noexcept;
+    std::unordered_set<std::string> slowDecode_;   ///< sourcePath; guarded by mutex_
     VideoSourceFactory* media_ = nullptr;
     ExportSinkFactory sink_ = nullptr;
     void* context_ = nullptr;

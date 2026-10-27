@@ -17,6 +17,7 @@
 #include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/timeline/LayerAnimator.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -705,6 +706,174 @@ AUREA_TEST(MaterialPreview, LayerBallShowsPartImageColorAndMaterialEdits) {
     std::remove(png.c_str());
     e.shutdown();
 }
+
+// =============================================================================
+// 0.3.6 TEXTURA DO MATERIAL (MaterialOverride::textureImage/textureLayer, v52):
+// imagem ou camada da timeline por material; ciclo recusado; desfazer, salvar
+// e reabrir (com o id da camada remapeado).
+// =============================================================================
+
+AUREA_TEST(MaterialTexture, SourceRuleRefusesSelfAndEverythingInTheScene) {
+    const LayerId target{1, 1}, other{2, 1};
+    Layer src;
+    src.kind = LayerKind::Shape;
+    AUREA_CHECK(material_texture_source_ok(target, other, src));
+    AUREA_CHECK(!material_texture_source_ok(target, target, src));        // ela mesma: ciclo
+    AUREA_CHECK(!material_texture_source_ok(target, LayerId{}, src));
+    src.threeD = true;                                                     // plano na cena 3D: ciclo
+    AUREA_CHECK(!material_texture_source_ok(target, other, src));
+    src.threeD = false;
+    for (LayerKind k : {LayerKind::Model3D, LayerKind::Camera, LayerKind::Light, LayerKind::Audio,
+                        LayerKind::Null, LayerKind::Adjustment}) {
+        src.kind = k;
+        AUREA_CHECK(!material_texture_source_ok(target, other, src));
+    }
+    for (LayerKind k : {LayerKind::Video, LayerKind::Image, LayerKind::Text, LayerKind::Composition}) {
+        src.kind = k;
+        AUREA_CHECK(material_texture_source_ok(target, other, src));
+    }
+    src.kind = LayerKind::Shape;
+    src.adjustment = true;
+    AUREA_CHECK(!material_texture_source_ok(target, other, src));
+}
+
+AUREA_TEST(MaterialTexture, ImageAndLayerUndoSaveAndReopen) {
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const Result<u64> cube = e.add_shape3d(static_cast<u32>(Shape3DKind::Cube), "Cubo");
+    const Result<u64> ball = e.add_shape3d(static_cast<u32>(Shape3DKind::Sphere), "Esfera");
+    const Result<u64> flat = e.add_shape(0);
+    const Result<u64> cam = e.add_camera();
+    AUREA_CHECK(cube.ok() && ball.ok() && flat.ok() && cam.ok());
+    if (!cube.ok() || !ball.ok() || !flat.ok() || !cam.ok()) { e.shutdown(); return; }
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    const Layer* flatLayer = comp ? comp->layer(LayerId::unpack(*flat)) : nullptr;
+    AUREA_CHECK(flatLayer != nullptr);
+    const std::string flatName = flatLayer ? flatLayer->name : std::string{};
+
+    // Candidatas: a forma 2D sim; o próprio cubo, a esfera 3D e a câmera não.
+    const std::vector<u64> options = e.material_texture_layers(*cube);
+    auto has = [&](u64 id) { return std::find(options.begin(), options.end(), id) != options.end(); };
+    AUREA_CHECK(has(*flat));
+    AUREA_CHECK(!has(*cube) && !has(*ball) && !has(*cam));
+    AUREA_CHECK(e.material_texture_layers(*flat).empty());   // não é objeto 3D
+
+    // Ciclo camada → ela mesma e camadas da cena: recusa, nada muda.
+    AUREA_CHECK(!e.set_material_texture_layer(*cube, 0, *cube).ok());
+    AUREA_CHECK(!e.set_material_texture_layer(*cube, 0, *ball).ok());
+    AUREA_CHECK(!e.set_material_texture_layer(*cube, 0, *cam).ok());
+    AUREA_CHECK(!e.set_material_texture_layer(*cube, 99, *flat).ok());   // material que não existe
+    AUREA_CHECK_EQ(e.query_material_texture(*cube, 0), 0u);
+
+    // Camada: um passo de desfazer.
+    AUREA_CHECK(e.set_material_texture_layer(*cube, 0, *flat).ok());
+    u64 ref = 0;
+    std::string name;
+    AUREA_CHECK_EQ(e.query_material_texture(*cube, 0, &ref, &name), 2u);
+    AUREA_CHECK_EQ(ref, *flat);
+    AUREA_CHECK(name == flatName);
+    AUREA_CHECK_EQ(e.query_material_texture(*cube, 1), 0u);   // só o material escolhido
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    AUREA_CHECK_EQ(e.query_material_texture(*cube, 0), 0u);
+    Command redo;
+    redo.type = CommandType::Redo;
+    AUREA_CHECK(e.apply_command(redo).ok());
+    AUREA_CHECK_EQ(e.query_material_texture(*cube, 0), 2u);
+
+    // Imagem noutro material: a bola mostra a imagem nova.
+    constexpr u32 size = 96;
+    std::vector<u8> before, after;
+    AUREA_CHECK(e.material_preview(*cube, 1, size, before));
+    const std::string png = checker_png("aurea_teste_textura_material.png");
+    AUREA_CHECK(e.set_material_texture_image(*cube, 1, png.c_str()).ok());
+    AUREA_CHECK_EQ(e.query_material_texture(*cube, 1, &ref, &name), 1u);
+    AUREA_CHECK(ref != 0 && name == "aurea_teste_textura_material.png");
+    AUREA_CHECK(e.material_preview(*cube, 1, size, after));
+    const BallStats t = ball_stats(after, size);
+    AUREA_CHECK(after != before && t.reds > 300 && t.blues > 300);
+    // A imagem é do projeto: não conta como mídia sem uso.
+    const std::vector<AssetId> unused = e.project()->unreferenced_assets();
+    AUREA_CHECK(std::find(unused.begin(), unused.end(), AssetId::unpack(ref)) == unused.end());
+
+    // Salvar e reabrir: as duas escolhas voltam, a camada com o id novo.
+    const std::string path = temp_file("aurea_teste_textura_material.aurea");
+    AUREA_CHECK(e.save_project(path.c_str()).ok());
+    AUREA_CHECK(e.load_project(path.c_str()).ok());
+    comp = e.project()->timeline().composition(e.project()->timeline().current());
+    u64 cubeNow = 0;
+    if (comp) comp->layers().for_each([&](LayerId id, const Layer& l) { if (l.name == "Cubo") cubeNow = id.pack(); });
+    AUREA_CHECK(cubeNow != 0);
+    AUREA_CHECK_EQ(e.query_material_texture(cubeNow, 0, &ref, &name), 2u);
+    const Layer* source = comp ? comp->layer(LayerId::unpack(ref)) : nullptr;
+    AUREA_CHECK(source && source->kind == LayerKind::Shape && source->name == flatName);
+    AUREA_CHECK(name == flatName);
+    AUREA_CHECK_EQ(e.query_material_texture(cubeNow, 1, &ref, &name), 1u);
+    AUREA_CHECK(name == "aurea_teste_textura_material.png");
+
+    // Remover: volta ao mapa do arquivo; sem fator ajustado o ajuste some.
+    AUREA_CHECK(e.clear_material_texture(cubeNow, 0).ok());
+    AUREA_CHECK_EQ(e.query_material_texture(cubeNow, 0), 0u);
+    const Layer* cubeLayer = comp ? comp->layer(LayerId::unpack(cubeNow)) : nullptr;
+    AUREA_CHECK(cubeLayer && std::none_of(cubeLayer->model.materials.begin(), cubeLayer->model.materials.end(),
+                                          [](const MaterialOverride& m) { return m.materialIndex == 0; }));
+    // Ajuste de cor fica quando a textura sai.
+    AUREA_CHECK(e.set_material_param(cubeNow, 1, 0, 0.5f).ok());
+    AUREA_CHECK(e.clear_material_texture(cubeNow, 1).ok());
+    AUREA_CHECK_EQ(e.query_material_texture(cubeNow, 1), 0u);
+    AUREA_CHECK(cubeLayer && std::any_of(cubeLayer->model.materials.begin(), cubeLayer->model.materials.end(),
+                                         [](const MaterialOverride& m) { return m.materialIndex == 1 && m.mask == 1u; }));
+    std::remove(path.c_str());
+    std::remove(png.c_str());
+    e.shutdown();
+}
+
+#if defined(AUREA_TEST_VULKAN)
+AUREA_TEST(Gpu, MaterialTextureFromHiddenLayerRendersEveryFrame) {
+    Engine e;
+    EngineConfig ec;
+    ec.backend = new vk::Backend();
+    ec.backendConfig.enableValidation = false;
+    ec.disableAutosave = true;
+    ec.workerCount = 2;
+    if (!e.initialize(ec).ok()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    AUREA_CHECK(e.new_project(256, 144, 30.0, nullptr).ok());
+    const Result<u64> cube = e.add_shape3d(static_cast<u32>(Shape3DKind::Cube), "Cubo");
+    const Result<u64> flat = e.add_shape(10);   // "Quadrado" 2D
+    AUREA_CHECK(cube.ok() && flat.ok());
+    if (!cube.ok() || !flat.ok()) { e.shutdown(); return; }
+    auto capture = [&] {
+        test::Image8 img;
+        AUREA_CHECK(e.capture_frame_rgba(256, img.rgba, img.width, img.height).ok());
+        return img;
+    };
+    auto worst = [](const test::Image8& a, const test::Image8& b) {
+        u32 w = 0;
+        for (usize i = 0; i < a.rgba.size() && i < b.rgba.size(); ++i)
+            w = std::max(w, static_cast<u32>(std::abs(int(a.rgba[i]) - int(b.rgba[i]))));
+        return w;
+    };
+    // A camada 2D escondida (olho desligado): sozinha ela não aparece.
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    if (Layer* l = comp ? comp->layer(LayerId::unpack(*flat)) : nullptr) l->visible = false;
+    e.request_render();
+    const test::Image8 plain = capture();
+    // Todos os materiais do cubo cobertos pela camada: o cubo muda.
+    for (u32 m = 0; m < 6; ++m) AUREA_CHECK(e.set_material_texture_layer(*cube, m, *flat).ok());
+    const test::Image8 covered = capture();
+    std::printf("\n    cubo coberto pela camada: maior diferença %u", worst(plain, covered));
+    AUREA_CHECK(worst(plain, covered) > 24u);
+    // Remover volta ao cubo de antes.
+    for (u32 m = 0; m < 6; ++m) AUREA_CHECK(e.clear_material_texture(*cube, m).ok());
+    AUREA_CHECK(worst(plain, capture()) <= 4u);
+    e.shutdown();
+}
+#endif
 
 #if defined(AUREA_TEST_VULKAN)
 AUREA_TEST(Gpu, Shape3DInteriorShowsTexturedInnerFacesFromInsideTheCube) {

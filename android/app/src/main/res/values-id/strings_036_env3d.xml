@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.6 (env3d): Lingkungan 3D baru (bagian), tab Render, bagian Objek dan Tekstur material (file atau timeline). -->
+<resources>
+    <string name="env3d_tab_render">Render</string>
+    <string name="env3d_section_sky">Langit dan latar</string>
+    <string name="env3d_sky_hint">Studio atau gambar 360° di sekitar adegan. Menerangi dan memantul di semua objek 3D proyek.</string>
+    <string name="env3d_hdr_image">Gambar HDR</string>
+    <string name="env3d_section_light">Cahaya sekitar</string>
+    <string name="env3d_section_floor">Lantai dan bayangan</string>
+    <string name="env3d_floor_hint">Tanpa lantai, lantai terlihat, atau hanya bayangan objek di atas yang ada di belakangnya.</string>
+    <string name="env3d_render_hint">Berlaku untuk seluruh adegan 3D proyek: ketajaman, warna akhir, dan kilau.</string>
+    <string name="env3d_section_object">Objek</string>
+    <string name="env3d_texture">Tekstur</string>
+    <string name="env3d_texture_original">Dari model</string>
+    <string name="env3d_texture_image">Gambar</string>
+    <string name="env3d_texture_from_file">File</string>
+    <string name="env3d_texture_from_timeline">Timeline</string>
+    <string name="env3d_texture_remove">Hapus</string>
+    <string name="env3d_texture_layer_title">Tekstur dari timeline</string>
+    <string name="env3d_texture_layer_hint">Layer dirender ke material di setiap frame. Sembunyikan layer (mata) agar hanya tampil di objek.</string>
+    <string name="env3d_texture_no_layers">Tidak ada layer di komposisi ini yang bisa menjadi tekstur. Gunakan video, gambar, teks, bentuk, atau komposisi (2D).</string>
+    <string name="env3d_texture_layer_value">Layer: %1$s</string>
+    <string name="env3d_texture_error">Tekstur ini tidak bisa digunakan.</string>
+    <string name="env3d_texture_desc">Tekstur material %1$d</string>
+    <string name="env3d_layer_unnamed">Layer tanpa nama</string>
+</resources>

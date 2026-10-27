@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.6 (env3d): Entorno 3D rehecho (secciones), pestaña Render, sección Objeto y la Textura del material (archivo o línea de tiempo). -->
+<resources>
+    <string name="env3d_tab_render">Render</string>
+    <string name="env3d_section_sky">Cielo y fondo</string>
+    <string name="env3d_sky_hint">El estudio o la imagen 360° alrededor de la escena. Ilumina y se refleja en todos los objetos 3D del proyecto.</string>
+    <string name="env3d_hdr_image">Imagen HDR</string>
+    <string name="env3d_section_light">Luz ambiental</string>
+    <string name="env3d_section_floor">Suelo y sombra</string>
+    <string name="env3d_floor_hint">Sin suelo, suelo visible o solo la sombra de los objetos sobre lo que está detrás.</string>
+    <string name="env3d_render_hint">Se aplican a toda la escena 3D del proyecto: nitidez, color final y brillo.</string>
+    <string name="env3d_section_object">Objeto</string>
+    <string name="env3d_texture">Textura</string>
+    <string name="env3d_texture_original">Del modelo</string>
+    <string name="env3d_texture_image">Imagen</string>
+    <string name="env3d_texture_from_file">Archivo</string>
+    <string name="env3d_texture_from_timeline">Línea de tiempo</string>
+    <string name="env3d_texture_remove">Quitar</string>
+    <string name="env3d_texture_layer_title">Textura de la línea de tiempo</string>
+    <string name="env3d_texture_layer_hint">La capa se renderiza en el material en cada fotograma. Oculta la capa (ojo) para que solo aparezca en el objeto.</string>
+    <string name="env3d_texture_no_layers">Ninguna capa de esta composición puede ser textura. Usa video, imagen, texto, forma o composición (2D).</string>
+    <string name="env3d_texture_layer_value">Capa: %1$s</string>
+    <string name="env3d_texture_error">No se pudo usar esta textura.</string>
+    <string name="env3d_texture_desc">Textura del material %1$d</string>
+    <string name="env3d_layer_unnamed">Capa sin nombre</string>
+</resources>

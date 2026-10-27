@@ -2,7 +2,9 @@
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/project/FileIO.hpp"
+#include "aurea/project/Presets.hpp"
 #include "aurea/project/ProjectPackage.hpp"
+#include "aurea/plugins/Script.hpp"
 #include "PluginInternal.hpp"
 
 #include <algorithm>
@@ -106,10 +108,50 @@ bool prepare(const fs::path& root, const EffectRegistry& registry, Prepared& out
             }
             out.spirv.push_back(std::move(spirv));
         }
-    } else {
+    } else if (m.kind == Kind::Stack) {
         if (!compile_stack(m, registry, out.stack, error)) {
             fail = {Errc::InvalidArgument, "stack", error};
             return false;
+        }
+    }
+    // 0.3.3 plugins: o script existe, cabe e compila (só a sintaxe: nada roda
+    // na instalação); as imagens dos painéis existem e cabem.
+    if (!m.script.empty()) {
+        const fs::path path = root / path_of(m.script);
+        std::error_code ec;
+        if (!fs::is_regular_file(path, ec)) {
+            fail = {Errc::NotFound, "script", "arquivo de script ausente: " + m.script};
+            return false;
+        }
+        const auto size = fs::file_size(path, ec);
+        if (ec || size > kMaxScriptBytes) {
+            fail = {Errc::BudgetExceeded, "script", m.script + " maior que 512 KB"};
+            return false;
+        }
+        std::string source;
+        if (!read_text_file(path, kMaxScriptBytes, source)) {
+            fail = {Errc::IoError, "script", "nao foi possivel ler " + m.script};
+            return false;
+        }
+        script::ScriptError se;
+        if (!script::check_syntax(source, m.script, se)) {
+            fail = {Errc::InvalidArgument, "script", se.text()};
+            return false;
+        }
+    }
+    for (const PanelDecl& panel : m.ui.panels) {
+        for (const ControlDecl& c : panel.controls) {
+            if (c.src.empty()) continue;
+            std::error_code ec;
+            const fs::path path = root / path_of(c.src);
+            if (!fs::is_regular_file(path, ec)) {
+                fail = {Errc::NotFound, "ui", "imagem do controle \"" + c.id + "\" ausente: " + c.src};
+                return false;
+            }
+            if (fs::file_size(path, ec) > kMaxImageBytes || ec) {
+                fail = {Errc::BudgetExceeded, "ui", "imagem " + c.src + " maior que 2 MB"};
+                return false;
+            }
         }
     }
     return true;
@@ -130,6 +172,12 @@ PluginInfo info_of(const Manifest& m, const fs::path& dir) {
     i.directory = utf8(dir);
     i.params = m.params;
     i.passCount = static_cast<u32>(m.passes.size());
+    // 0.3.3 plugins
+    i.format = m.format;
+    i.script = m.script;
+    i.permissions = m.permissions;
+    i.ui = m.ui;
+    i.strings = m.strings;
     return i;
 }
 
@@ -169,6 +217,52 @@ void remove_tree(const fs::path& p) {
     fs::remove_all(p, ec);
 }
 
+/// Extrai (ZIP) ou converte (ISF) `source` em `staging`. `pluginRoot` = a pasta
+/// com o plugin.json. Falso = `code`/`message` dizem o motivo.
+bool unpack(const fs::path& source, const std::string& path, const fs::path& staging, fs::path& pluginRoot, Errc& code,
+            std::string& message) {
+    std::error_code ec;
+    std::string ext = utf8(source.extension());
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    pluginRoot = staging;
+    if (ext == ".fs" || ext == ".isf") {
+        std::string text;
+        if (!read_text_file(source, kMaxShaderBytes, text)) { code = Errc::BudgetExceeded; message = "ISF: arquivo ilegivel ou maior que 64 KB"; return false; }
+        Manifest manifest;
+        std::string shaderFile, shaderText, error;
+        if (!isf_to_plugin(utf8(source.filename()), text, manifest, shaderFile, shaderText, error)) {
+            code = Errc::UnsupportedFormat;
+            message = error;
+            return false;
+        }
+        fs::create_directories(staging, ec);
+        if (ec) { code = Errc::IoError; message = "nao foi possivel criar a pasta temporaria"; return false; }
+        const std::string json = manifest_json(manifest);
+        if (!fileio::write_atomic(utf8(staging / "plugin.json"), json.data(), json.size()).ok()
+            || !fileio::write_atomic(utf8(staging / path_of(shaderFile)), shaderText.data(), shaderText.size()).ok()) {
+            code = Errc::IoError;
+            message = "nao foi possivel gravar o plugin convertido";
+            return false;
+        }
+        return true;
+    }
+    std::vector<std::string> files;
+    const Status extracted = package::extract_model_archive(path, utf8(staging), files);
+    if (!extracted.ok()) { code = extracted.code(); message = package_error(extracted.code()); return false; }
+    // ZIP feito da PASTA (plugin.json dentro de uma subpasta única): aceito.
+    if (!fs::is_regular_file(staging / "plugin.json", ec)) {
+        fs::path only;
+        u32 dirs = 0;
+        for (fs::directory_iterator it(staging, ec), end; !ec && it != end; it.increment(ec)) {
+            std::error_code e2;
+            if (it->is_directory(e2)) { only = it->path(); ++dirs; }
+        }
+        if (dirs == 1 && fs::is_regular_file(only / "plugin.json", ec)) pluginRoot = only;
+        else { code = Errc::UnsupportedFormat; message = "plugin.json ausente no pacote"; return false; }
+    }
+    return true;
+}
+
 } // namespace
 
 PluginManager::~PluginManager() { shutdown(); }
@@ -206,6 +300,7 @@ u32 PluginManager::load_all() noexcept {
     for (Installed& p : plugins_) unregister_locked(p);
     plugins_.clear();
     if (directory_.empty()) return 0;
+    load_state_locked();   // 0.3.3 plugins: ligado/desligado e permissões
     const fs::path root = path_of(directory_);
     std::error_code ec;
     if (!fs::is_directory(root, ec)) return 0;
@@ -237,17 +332,26 @@ u32 PluginManager::load_all() noexcept {
             entry.info.ok = false;
             entry.info.errorCode = failure.errorCode;
             entry.info.error = failure.message;
+            apply_state_locked(entry.info);
             AUREA_LOG_WARN("plugin '%s' nao carregou: %s", entry.info.id.c_str(), failure.message.c_str());
             plugins_.push_back(std::move(entry));
             continue;
         }
         entry.info = info_of(prepared.manifest, dir);
+        apply_state_locked(entry.info);
         const bool duplicate = std::any_of(plugins_.begin(), plugins_.end(),
-                                           [&](const Installed& p) { return p.info.id == entry.info.id && p.registered; });
+                                           [&](const Installed& p) { return p.info.id == entry.info.id && (p.registered || p.info.ok); });
         if (duplicate) {
             entry.info.ok = false;
             entry.info.errorCode = "duplicate";
             entry.info.error = "outra pasta ja instalou o plugin \"" + entry.info.id + "\"";
+            plugins_.push_back(std::move(entry));
+            continue;
+        }
+        // 0.3.3 plugins: "panel" não tem efeito para registrar.
+        if (prepared.manifest.kind == Kind::Panel) {
+            entry.info.ok = true;
+            ++loaded;
             plugins_.push_back(std::move(entry));
             continue;
         }
@@ -304,37 +408,11 @@ Result<std::string> PluginManager::install(const std::string& path, const Instal
     } cleanup{staging};
 
     // ISF (.fs) ou pacote ZIP.
-    std::string ext = utf8(source.extension());
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    fs::path pluginRoot = staging;
-    if (ext == ".fs" || ext == ".isf") {
-        std::string text;
-        if (!read_text_file(source, kMaxShaderBytes, text)) return reject(Errc::BudgetExceeded, "ISF: arquivo ilegivel ou maior que 64 KB");
-        Manifest manifest;
-        std::string shaderFile, shaderText, error;
-        if (!isf_to_plugin(utf8(source.filename()), text, manifest, shaderFile, shaderText, error))
-            return reject(Errc::UnsupportedFormat, error);
-        fs::create_directories(staging, ec);
-        if (ec) return reject(Errc::IoError, "nao foi possivel criar a pasta temporaria");
-        const std::string json = manifest_json(manifest);
-        if (!fileio::write_atomic(utf8(staging / "plugin.json"), json.data(), json.size()).ok()
-            || !fileio::write_atomic(utf8(staging / path_of(shaderFile)), shaderText.data(), shaderText.size()).ok())
-            return reject(Errc::IoError, "nao foi possivel gravar o plugin convertido");
-    } else {
-        std::vector<std::string> files;
-        const Status extracted = package::extract_model_archive(path, utf8(staging), files);
-        if (!extracted.ok()) return reject(extracted.code(), package_error(extracted.code()));
-        // ZIP feito da PASTA (plugin.json dentro de uma subpasta única): aceito.
-        if (!fs::is_regular_file(staging / "plugin.json", ec)) {
-            fs::path only;
-            u32 dirs = 0;
-            for (fs::directory_iterator it(staging, ec), end; !ec && it != end; it.increment(ec)) {
-                std::error_code e2;
-                if (it->is_directory(e2)) { only = it->path(); ++dirs; }
-            }
-            if (dirs == 1 && fs::is_regular_file(only / "plugin.json", ec)) pluginRoot = only;
-            else return reject(Errc::UnsupportedFormat, "plugin.json ausente no pacote");
-        }
+    fs::path pluginRoot;
+    {
+        Errc code = Errc::InvalidArgument;
+        std::string message;
+        if (!unpack(source, path, staging, pluginRoot, code, message)) return reject(code, message);
     }
 
     Prepared prepared;
@@ -367,7 +445,7 @@ Result<std::string> PluginManager::install(const std::string& path, const Instal
 
     // Quadro de teste: o efeito sozinho, com os padrões, em 256x256.
     f32 testMs = -1.0f;
-    if (hooks.testRender) {
+    if (hooks.testRender && m.kind != Kind::Panel) {
         EffectRegistry probe;
         if (!probe.add(make_effect(prepared, shaders)).ok()) { dropShaders(); return reject(Errc::InvalidState, "efeito de teste nao registrou"); }
         std::string error;
@@ -401,6 +479,18 @@ Result<std::string> PluginManager::install(const std::string& path, const Instal
     entry.info = info_of(m, final);
     entry.info.testRenderMs = testMs;
     entry.shaders = std::move(shaders);
+    // 0.3.3 plugins: instalação nova = ligado e sem permissão concedida (a folha
+    // de consentimento grava o que a pessoa aceitar logo depois).
+    std::erase_if(state_, [&](const auto& row) { return row.first == m.id; });
+    state_.emplace_back(m.id, SavedState{});
+    save_state_locked();
+    apply_state_locked(entry.info);
+    if (m.kind == Kind::Panel) {
+        entry.info.ok = true;
+        AUREA_LOG_INFO("plugin instalado: %s %s (panel)", m.id.c_str(), m.version.c_str());
+        plugins_.push_back(std::move(entry));
+        return m.id;
+    }
     const Status added = registry_.add(make_effect(prepared, entry.shaders));
     if (!added.ok()) {
         for (const ShaderId id : entry.shaders) runtime_shaders::unregister_shader(id);
@@ -424,6 +514,18 @@ bool PluginManager::remove(std::string_view id) noexcept {
     auto it = std::find_if(plugins_.begin(), plugins_.end(), [&](const Installed& p) { return p.info.id == id; });
     if (it == plugins_.end()) return false;
     unregister_locked(*it);
+    // 0.3.3 plugins: o estado e os dados do plugin saem junto.
+    {
+        const std::string pid(id);
+        std::erase_if(state_, [&](const auto& row) { return row.first == pid; });
+        save_state_locked();
+        if (!directory_.empty() && valid_plugin_id(pid)) {
+            const fs::path data = path_of(directory_) / ".dados";
+            std::error_code ec;
+            fs::remove(data / path_of(pid + ".json"), ec);
+            remove_tree(data / path_of(pid));
+        }
+    }
     if (!it->info.directory.empty()) {
         // Só apaga dentro da pasta de plugins.
         const fs::path dir = path_of(it->info.directory);
@@ -443,6 +545,162 @@ std::vector<PluginInfo> PluginManager::list() const {
     for (const Installed& p : plugins_) out.push_back(p.info);
     std::sort(out.begin(), out.end(), [](const PluginInfo& a, const PluginInfo& b) { return a.id < b.id; });
     return out;
+}
+
+// =============================================================================
+// 0.3.3 plugins: estado (ligado/permissões), consulta e inspeção
+// =============================================================================
+void PluginManager::load_state_locked() {
+    state_.clear();
+    if (directory_.empty()) return;
+    std::string text;
+    if (!read_text_file(path_of(directory_) / ".estado.json", 256 * 1024, text)) return;
+    json::Value root;
+    if (!json::parse(text, root) || !root.is_object()) return;
+    for (const auto& [id, row] : root.object) {
+        if (!row.is_object() || !valid_plugin_id(id)) continue;
+        SavedState st;
+        if (const json::Value* e = row.get("enabled"); e && e->type == json::Value::Type::Bool) st.enabled = e->boolean;
+        if (const json::Value* g = row.get("granted"); g && g->is_number()) st.granted = static_cast<u32>(g->number) & 7u;
+        state_.emplace_back(id, st);
+    }
+}
+
+void PluginManager::save_state_locked() noexcept {
+    if (directory_.empty()) return;
+    json::Writer w;
+    w.begin_object();
+    for (const auto& [id, st] : state_) {
+        w.key(id).begin_object();
+        w.key("enabled").value(st.enabled);
+        w.key("granted").value(st.granted);
+        w.end_object();
+    }
+    w.end_object();
+    std::error_code ec;
+    fs::create_directories(path_of(directory_), ec);
+    (void)fileio::write_atomic(utf8(path_of(directory_) / ".estado.json"), w.str().data(), w.str().size());
+}
+
+void PluginManager::apply_state_locked(PluginInfo& info) {
+    info.generation = ++generation_;
+    info.enabled = true;
+    info.granted = 0;
+    for (const auto& [id, st] : state_) {
+        if (id != info.id) continue;
+        info.enabled = st.enabled;
+        info.granted = st.granted & info.permissions.mask();
+    }
+}
+
+bool PluginManager::set_enabled(std::string_view id, bool on) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = std::find_if(plugins_.begin(), plugins_.end(), [&](const Installed& p) { return p.info.id == id; });
+    if (it == plugins_.end()) return false;
+    it->info.enabled = on;
+    auto row = std::find_if(state_.begin(), state_.end(), [&](const auto& r) { return r.first == id; });
+    if (row == state_.end()) {
+        state_.emplace_back(std::string(id), SavedState{});
+        row = state_.end() - 1;
+    }
+    row->second.enabled = on;
+    save_state_locked();
+    return true;
+}
+
+bool PluginManager::set_granted(std::string_view id, u32 mask) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = std::find_if(plugins_.begin(), plugins_.end(), [&](const Installed& p) { return p.info.id == id; });
+    if (it == plugins_.end()) return false;
+    it->info.granted = mask & it->info.permissions.mask();
+    auto row = std::find_if(state_.begin(), state_.end(), [&](const auto& r) { return r.first == id; });
+    if (row == state_.end()) {
+        state_.emplace_back(std::string(id), SavedState{});
+        row = state_.end() - 1;
+    }
+    row->second.granted = it->info.granted;
+    save_state_locked();
+    return true;
+}
+
+bool PluginManager::find(std::string_view id, PluginInfo& out) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const Installed& p : plugins_) {
+        if (p.info.id != id) continue;
+        out = p.info;
+        return true;
+    }
+    return false;
+}
+
+std::string PluginManager::data_directory() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return directory_.empty() ? std::string() : utf8(path_of(directory_) / ".dados");
+}
+
+std::string PluginManager::inspect_json(const std::string& path) noexcept {
+    auto failure = [](const std::string& message) {
+        json::Writer w;
+        w.begin_object().key("ok").value(false).key("error").value(message).end_object();
+        return w.str();
+    };
+    std::string root;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        root = directory_;
+    }
+    const fs::path source = path_of(path);
+    std::error_code ec;
+    if (!fs::is_regular_file(source, ec)) return failure("arquivo nao encontrado");
+    if (fs::file_size(source, ec) > kMaxPackageBytes) return failure("pacote maior que 16 MB");
+    const fs::path base = root.empty() ? fs::temp_directory_path(ec) : path_of(root);
+    fs::create_directories(base, ec);
+    const fs::path staging = base / path_of(".lendo-" + std::to_string(monotonic_ns()));
+    struct Cleanup {
+        fs::path dir;
+        ~Cleanup() { if (!dir.empty()) remove_tree(dir); }
+    } cleanup{staging};
+    fs::path pluginRoot;
+    Errc code = Errc::InvalidArgument;
+    std::string message;
+    if (!unpack(source, path, staging, pluginRoot, code, message)) return failure(message);
+    std::string text;
+    if (!read_text_file(pluginRoot / "plugin.json", kMaxManifestBytes + 4, text)) return failure("plugin.json ausente ou ilegivel no pacote");
+    Manifest m;
+    std::string error;
+    if (!parse_manifest(text, m, error)) return failure(error);
+    std::string installedVersion;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const Installed& p : plugins_) if (p.info.id == m.id) installedVersion = p.info.version;
+    }
+    json::Writer w;
+    w.begin_object();
+    w.key("ok").value(true);
+    w.key("id").value(m.id);
+    w.key("version").value(m.version);
+    w.key("author").value(m.author);
+    w.key("kind").value(m.scene3d ? "shader3d" : kind_name(m.kind));
+    w.key("format").value(m.format);
+    w.key("name").begin_object();
+    for (const auto& [lang, t] : m.name) w.key(lang).value(t);
+    w.end_object();
+    w.key("description").begin_object();
+    for (const auto& [lang, t] : m.description) w.key(lang).value(t);
+    w.end_object();
+    w.key("hasScript").value(!m.script.empty());
+    w.key("panels").value(static_cast<u32>(m.ui.panels.size()));
+    w.key("actions").value(static_cast<u32>(m.ui.actions.size()));
+    w.key("permissions").begin_object();
+    w.key("network").begin_array();
+    for (const std::string& d : m.permissions.network) w.value(d);
+    w.end_array();
+    w.key("clipboard").value(m.permissions.clipboard);
+    w.key("files").value(m.permissions.files);
+    w.end_object();
+    w.key("installedVersion").value(installedVersion);
+    w.end_object();
+    return w.str();
 }
 
 } // namespace aurea::plugins

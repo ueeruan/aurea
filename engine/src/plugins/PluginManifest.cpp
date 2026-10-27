@@ -28,7 +28,7 @@ std::string localized(const LocalizedText& text, std::string_view locale) {
     return text.front().second;
 }
 
-const char* kind_name(Kind k) noexcept { return k == Kind::Stack ? "stack" : "shader"; }
+const char* kind_name(Kind k) noexcept { return k == Kind::Stack ? "stack" : k == Kind::Panel ? "panel" : "shader"; }
 
 const char* param_kind_name(ParamKind k) noexcept {
     switch (k) {
@@ -168,6 +168,15 @@ bool read_text(const Value* v, LocalizedText& out, const char* field, usize maxC
     }
     return r.fail(std::string("plugin.json: \"") + field + "\" deve ser texto ou um objeto idioma -> texto");
 }
+
+} // namespace
+
+bool read_localized(const json::Value* v, LocalizedText& out, const char* field, usize maxChars, bool required, std::string& error) {
+    Reader r{error};
+    return read_text(v, out, field, maxChars, required, r);
+}
+
+namespace {
 
 bool read_number(const Value* v, f32& out) {
     if (!v) return false;
@@ -453,11 +462,12 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
 
     const Value* format = root.get("aureaPlugin");
     f32 fmt = 0.0f;
-    if (!format || !read_number(format, fmt)) return r.fail("plugin.json: falta \"aureaPlugin\": 1 (versao do formato)");
-    if (fmt != static_cast<f32>(kFormatVersion))
+    if (!format || !read_number(format, fmt)) return r.fail("plugin.json: falta \"aureaPlugin\": 1 ou 2 (versao do formato)");
+    // 0.3.3 plugins: o formato 2 traz interface, script e permissões.
+    if (fmt != static_cast<f32>(kFormatVersion) && fmt != static_cast<f32>(kFormatVersionV2))
         return r.fail("plugin.json: \"aureaPlugin\" " + std::to_string(static_cast<int>(fmt))
-                      + " nao suportado (este app le a versao 1 do formato)");
-    m.format = kFormatVersion;
+                      + " nao suportado (este app le as versoes 1 e 2 do formato)");
+    m.format = static_cast<u32>(fmt);
 
     const Value* id = root.get("id");
     if (!id || !id->is_string()) return r.fail("plugin.json: falta \"id\"");
@@ -480,9 +490,12 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
         m.category = cat->string;
     }
     const Value* kind = root.get("kind");
-    if (!kind || !kind->is_string() || (kind->string != "shader" && kind->string != "shader3d" && kind->string != "stack"))
-        return r.fail("plugin.json: \"kind\" deve ser \"shader\", \"shader3d\" ou \"stack\"");
-    m.kind = kind->string == "stack" ? Kind::Stack : Kind::Shader;
+    if (!kind || !kind->is_string()
+        || (kind->string != "shader" && kind->string != "shader3d" && kind->string != "stack" && kind->string != "panel"))
+        return r.fail("plugin.json: \"kind\" deve ser \"shader\", \"shader3d\", \"stack\" ou \"panel\"");
+    if (kind->string == "panel" && m.format < kFormatVersionV2)
+        return r.fail("plugin.json: \"kind\": \"panel\" pede \"aureaPlugin\": 2");
+    m.kind = kind->string == "stack" ? Kind::Stack : kind->string == "panel" ? Kind::Panel : Kind::Shader;
     m.scene3d = kind->string == "shader3d";
 
     if (const Value* params = root.get("params")) {
@@ -505,8 +518,12 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
     if (layerParams > kMaxLayerParams)
         return r.fail("plugin.json: " + std::to_string(layerParams) + " parametros \"layer\" (limite "
                       + std::to_string(kMaxLayerParams) + ")");
-    if (m.kind == Kind::Shader) return read_passes(root, m, r);
-    return read_stack(root, m, r);
+    if (m.kind == Kind::Panel && !m.params.empty())
+        return r.fail("plugin.json: plugin \"panel\" nao tem \"params\" (os controles ficam em \"ui\")");
+    if (m.kind == Kind::Shader && !read_passes(root, m, r)) return false;
+    if (m.kind == Kind::Stack && !read_stack(root, m, r)) return false;
+    // 0.3.3 plugins: interface, script e permissões (formato 2).
+    return parse_manifest_v2(root, m, m.format, error);
 }
 
 // =============================================================================
@@ -660,6 +677,7 @@ std::string to_json(const std::vector<PluginInfo>& plugins) {
             w.end_object();
         }
         w.end_array();
+        write_v2_json(w, p);   // 0.3.3 plugins
         w.end_object();
     }
     w.end_array();

@@ -16,9 +16,22 @@
 #include <string_view>
 #include <vector>
 
+namespace aurea::json {
+struct Value;
+class Writer;
+} // namespace aurea::json
+
 namespace aurea::plugins {
 
 // --- plugin.json ---------------------------------------------------------------
+/// Texto por idioma (texto simples ou objeto idioma → texto). Falso = `error`.
+[[nodiscard]] bool read_localized(const json::Value* v, LocalizedText& out, const char* field, usize maxChars, bool required,
+                                  std::string& error);
+/// 0.3.3 plugins: "script", "permissions", "strings" e "ui" (PluginUiManifest.cpp).
+/// Formato 1 com esses campos = recusa (pedem "aureaPlugin": 2).
+[[nodiscard]] bool parse_manifest_v2(const json::Value& root, Manifest& m, u32 format, std::string& error);
+/// A parte da interface/permissões de um plugin na lista em JSON.
+void write_v2_json(json::Writer& w, const PluginInfo& p);
 /// Lê e confere o plugin.json. Falso = recusado; `error` diz o campo e o motivo.
 [[nodiscard]] bool parse_manifest(std::string_view json, Manifest& out, std::string& error);
 /// Serializa de volta (o ISF convertido grava o plugin.json que gerou).

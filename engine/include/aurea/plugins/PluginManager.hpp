@@ -76,12 +76,34 @@ public:
     /// Tira tudo dos registros (encerramento do motor). A pasta fica.
     void shutdown() noexcept;
 
+    // --- 0.3.3 plugins: interface, script e permissões -----------------------
+    /// Lê o pacote SEM instalar (a folha de consentimento mostra o que ele
+    /// pede). JSON: {ok, error, id, version, name, description, author, kind,
+    /// permissions{network[], clipboard, files}, panels, actions, hasScript,
+    /// installedVersion}. Nada muda na pasta.
+    [[nodiscard]] std::string inspect_json(const std::string& path) noexcept;
+    /// Liga/desliga a interface e o script do plugin (gravado em `.estado.json`).
+    bool set_enabled(std::string_view id, bool on) noexcept;
+    /// Permissões concedidas pela pessoa (kPerm*; só as que o plugin pede valem).
+    bool set_granted(std::string_view id, u32 mask) noexcept;
+    /// O plugin instalado `id` (cópia). Falso = não há.
+    [[nodiscard]] bool find(std::string_view id, PluginInfo& out) const;
+    /// `<pasta>/.dados`: dados dos plugins (storage, quadros) fora das pastas
+    /// deles — reinstalar mantém; remover apaga.
+    [[nodiscard]] std::string data_directory() const;
+
 private:
     struct Installed {
         PluginInfo info;
         std::vector<ShaderId> shaders;
         bool registered = false;
     };
+    struct SavedState { bool enabled = true; u32 granted = 0; };
+    void load_state_locked();
+    void save_state_locked() noexcept;
+    void apply_state_locked(PluginInfo& info);
+    std::vector<std::pair<std::string, SavedState>> state_;
+    u64 generation_ = 0;
     [[nodiscard]] const char* intern(std::string message);
     void unregister_locked(Installed& p) noexcept;
 

@@ -9,7 +9,7 @@ class ImportedPresetNameTest {
     fun longDuplicateNamesRemainUniqueAcrossSuffixWidths() {
         val saved = mutableSetOf<String>()
         repeat(110) {
-            val name = importedPresetName("Very long preset title ".repeat(10), saved::contains)
+            val name = importedPresetName("Very long preset title ".repeat(10), exists = saved::contains)
             assertTrue(name.length <= 60)
             assertTrue(saved.add(name))
         }

@@ -255,7 +255,7 @@ final class PluginRuntime: ObservableObject {
         thread.start()
     }
 
-    private func finish(_ id: String, _ raw: String) {
+    @MainActor private func finish(_ id: String, _ raw: String) {
         busy.remove(id)
         guard let result = pv2Object(raw) else { return }
         if let s = result["state"] as? [String: Any] { states[id] = s }
@@ -344,7 +344,7 @@ final class PluginRuntime: ObservableObject {
     }
 
     // --- instalação com consentimento ---
-    func beginInstall(_ url: URL) {
+    @MainActor func beginInstall(_ url: URL) {
         guard let model else { return }
         model.pluginBusy(AureaText.t("pv2_reading"))
         let engine = model.engine
@@ -372,7 +372,7 @@ final class PluginRuntime: ObservableObject {
         }
     }
 
-    func confirmInstall(_ mask: UInt32) {
+    @MainActor func confirmInstall(_ mask: UInt32) {
         guard let pending = pendingInstall, let model else { return }
         pendingInstall = nil
         model.pluginBusy(AureaText.t("plug_installing"))
@@ -402,14 +402,14 @@ final class PluginRuntime: ObservableObject {
         pendingInstall = nil
     }
 
-    func setEnabled(_ id: String, _ on: Bool) {
+    @MainActor func setEnabled(_ id: String, _ on: Bool) {
         guard let model, model.engine.setPluginEnabled(id, on: on) else { return }
         if !on, editorPanel?.plugin == id { editorPanel = nil }
         if !on, homePanel?.plugin == id { homePanel = nil }
         model.refreshPlugins()
     }
 
-    func setPermission(_ id: String, _ bit: UInt32, _ on: Bool) {
+    @MainActor func setPermission(_ id: String, _ bit: UInt32, _ on: Bool) {
         guard let model, let p = plugin(id) else { return }
         let mask = on ? (p.granted | bit) : (p.granted & ~bit)
         if model.engine.setPluginPermissions(id, mask: mask) { model.refreshPlugins() }

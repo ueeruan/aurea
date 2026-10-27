@@ -23,8 +23,9 @@ struct ContentIcon: View {
     var body: some View {
         Canvas { context, dims in
             let u = min(dims.width, dims.height) / 24
-            // 0.3.3: traço 1,8 + o extra dos glifos bold (AureaIconWeight.glyphStroke), como o desfoque de movimento.
-            let style = StrokeStyle(lineWidth: (1.8 + 24 * AureaIconWeight.glyphStroke) * u, lineCap: .round, lineJoin: .round)
+            // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.line); pontos de âncora e
+            // cadeado em contorno, só as pontinhas das alças cheias.
+            let style = StrokeStyle(lineWidth: AureaIconStyle.line * u, lineCap: .round, lineJoin: .round)
             func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * u, y: y * u) }
             func line(_ x0: CGFloat, _ y0: CGFloat, _ x1: CGFloat, _ y1: CGFloat) {
                 var path = Path()
@@ -58,22 +59,23 @@ struct ContentIcon: View {
                 var path = Path()
                 path.move(to: p(4, 19)); path.addLine(to: p(12, 6)); path.addLine(to: p(20, 19))
                 context.stroke(path, with: .color(tint), style: style)
-                context.fill(Path(CGRect(x: 10 * u, y: 4 * u, width: 4 * u, height: 4 * u)), with: .color(tint))
+                context.stroke(Path(CGRect(x: 10 * u, y: 4 * u, width: 4 * u, height: 4 * u)), with: .color(tint), style: style)
             case .pointCurve:
                 // Curva: o arco com o ponto e as duas alças.
                 var path = Path()
                 path.move(to: p(4, 19)); path.addCurve(to: p(20, 19), control1: p(6, 6), control2: p(18, 6))
                 context.stroke(path, with: .color(tint), style: style)
                 line(5, 9.5, 19, 9.5)
-                dot(12, 9.5, 2); dot(5, 9.5, 1.4); dot(19, 9.5, 1.4)
+                context.stroke(Path(ellipseIn: CGRect(x: 10 * u, y: 7.5 * u, width: 4 * u, height: 4 * u)), with: .color(tint), style: style)
+                dot(5, 9.5, 1.4); dot(19, 9.5, 1.4)
             case .angleLock:
                 // Alça presa na reta: duas alças opostas e um cadeado pequeno.
                 line(3, 15, 21, 15)
                 dot(12, 15, 1.8)
-                context.fill(Path(roundedRect: CGRect(x: 8.5 * u, y: 4.5 * u, width: 7 * u, height: 5.5 * u), cornerRadius: u), with: .color(tint))
+                context.stroke(Path(roundedRect: CGRect(x: 8.5 * u, y: 4.5 * u, width: 7 * u, height: 5.5 * u), cornerRadius: u), with: .color(tint), style: style)
                 var arc = Path()
                 arc.move(to: p(10, 4.5)); arc.addCurve(to: p(14, 4.5), control1: p(10, 1.5), control2: p(14, 1.5))
-                context.stroke(arc, with: .color(tint), lineWidth: (1.4 + 24 * AureaIconWeight.glyphStroke) * u)
+                context.stroke(arc, with: .color(tint), style: style)
             case .lengthLock:
                 // Comprimento igual: a régua com as duas pontas.
                 line(4, 12, 20, 12); line(4, 8, 4, 16); line(20, 8, 20, 16)

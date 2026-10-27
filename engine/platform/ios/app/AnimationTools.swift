@@ -841,21 +841,22 @@ struct NativeCurvePanel: View {
         let invertible = ease.supportsInversion
         return VStack(spacing: 0) {
             cell("curve.back", label: AureaText.t("panel_voltar"), action: back) {
-                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 22).mirrorsInRtl()
+                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: PanelMetrics.railIcon).mirrorsInRtl()
             }
             cell("curve.keyframe", label: AureaText.t(keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui"), action: { toggleKey(segment) }) {
                 KeyframeDiamondIcon(look: keyHere ? .keyHere : .animated, enabled: true)
+                    .scaleEffect(PanelMetrics.railIcon / AureaDims.diamondIcon)
             }
             cell("curve.reverse", label: AureaText.t("om_curve_reverse"), enabled: invertible, action: {
                 if let inverted = ease.inverted { set(inverted, to: segment.start, label: "inverter curva") }
                 else { model.toast = AureaText.t("pn_curve_symmetric") }
             }) {
-                CupertinoGlyph.text(CupertinoGlyph.ArrowRightArrowLeft, size: 20,
+                CupertinoGlyph.text(CupertinoGlyph.ArrowRightArrowLeft, size: 24,
                                     color: invertible && Self.isInverted(ease) ? AureaColors.accent : AureaColors.text)
             }
             .opacity(invertible ? 1 : 0.5)
             cell("curve.menu", label: AureaText.t("editor_mais"), action: { menuOpen = true }) {
-                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 24)
+                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon)
             }
             .aureaAnchoredMenu(isPresented: $menuOpen, tag: "curve.menu.list") { menuEntries(segment) }
         }
@@ -961,24 +962,24 @@ struct NativeCurvePanel: View {
             : AureaText.t(graphMode == 1 ? "particular_curve_value" : "panel_velocidade").uppercased()
         return HStack(spacing: 0) {
             Button { jump(-1) } label: {
-                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 14, color: before ? AureaColors.text : AureaColors.disabled)
-                    .frame(width: 44, height: 40).contentShape(Rectangle())
+                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 18, color: before ? AureaColors.text : AureaColors.disabled)
+                    .frame(width: 44, height: PanelMetrics.touch).contentShape(Rectangle())
             }.buttonStyle(AureaPressStyle(shrink: 1)).disabled(!before)
                 .accessibilityLabel(AureaText.t("om_curve_prev")).accessibilityIdentifier("curve.prev")
             // A curva do trecho; tocar troca a força (×1 → ×2 → ×3) — extra do AUREA.
             Text(label)
-                .font(.aurea(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.5))
+                .font(.aurea(size: PanelMetrics.note, weight: .medium)).foregroundStyle(.white.opacity(0.5))
                 .lineLimit(1).truncationMode(.tail).multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, minHeight: 40).contentShape(Rectangle())
+                .frame(maxWidth: .infinity, minHeight: PanelMetrics.touch).contentShape(Rectangle())
                 .onTapGesture { if graphMode == 0 && ease.hasHandles { set(curveNextPower(ease), to: segment.start, label: "força da curva") } }
                 .accessibilityIdentifier("curve.power")
             Button { jump(1) } label: {
-                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: after ? AureaColors.text : AureaColors.disabled)
-                    .frame(width: 44, height: 40).contentShape(Rectangle())
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 18, color: after ? AureaColors.text : AureaColors.disabled)
+                    .frame(width: 44, height: PanelMetrics.touch).contentShape(Rectangle())
             }.buttonStyle(AureaPressStyle(shrink: 1)).disabled(!after)
                 .accessibilityLabel(AureaText.t("om_curve_next")).accessibilityIdentifier("curve.next")
         }
-        .frame(maxWidth: .infinity).frame(height: 40)
+        .frame(maxWidth: .infinity).frame(height: PanelMetrics.touch)  // 0.3.4 painéis: antes 40
         // Trecho anterior/seguinte andam no tempo: LTR como o gráfico.
         .keepLtr()
     }
@@ -1060,16 +1061,16 @@ struct NativeCurvePanel: View {
             Slider(value: Binding(get: { ease.bounceStrength }, set: { apply(ease.bounce(strength: $0), to: segment.start) }),
                 in: 0.1...0.9, onEditingChanged: { if $0 { model.beginGesture("bounce") } else { model.endGesture() } })
                 .accessibilityLabel(AureaText.t("fx_amplitude")).accessibilityIdentifier("curve.bounce.strength")
-        }.font(.aurea(size: 12)).tint(curveGreen).padding(.horizontal, 6).frame(height: 44)
+        }.font(.aurea(size: PanelMetrics.label)).tint(curveGreen).padding(.horizontal, 6).frame(height: 48)
     }
     /// Overshoot: quanto passa do valor final (um desfazer por arrasto).
     private func overshootControls(_ segment: Segment) -> some View {
         HStack(spacing: 8) {
-            Text(AureaText.t("curve_param_amount")).font(.aurea(size: 10)).lineLimit(1)
+            Text(AureaText.t("curve_param_amount")).font(.aurea(size: PanelMetrics.note)).lineLimit(1)
             Slider(value: Binding(get: { ease.overshootAmount }, set: { apply(ease.overshoot(amount: $0), to: segment.start) }),
                 in: 0...1, onEditingChanged: { if $0 { model.beginGesture("overshoot") } else { model.endGesture() } })
                 .accessibilityLabel(AureaText.t("curve_param_amount")).accessibilityIdentifier("curve.overshoot.amount")
-        }.font(.aurea(size: 12)).tint(curveGreen).padding(.horizontal, 6).frame(height: 44)
+        }.font(.aurea(size: PanelMetrics.label)).tint(curveGreen).padding(.horizontal, 6).frame(height: 48)
     }
     /// Elástico: oscilações (1..8) e amortecimento (um desfazer por arrasto).
     private func elasticControls(_ segment: Segment) -> some View {
@@ -1084,7 +1085,7 @@ struct NativeCurvePanel: View {
             Slider(value: Binding(get: { ease.elasticDamping }, set: { apply(ease.elastic(damping: $0), to: segment.start) }),
                 in: 0...1, onEditingChanged: { if $0 { model.beginGesture("elastic") } else { model.endGesture() } })
                 .accessibilityLabel(AureaText.t("curve_param_damping")).accessibilityIdentifier("curve.elastic.damping")
-        }.font(.aurea(size: 12)).tint(curveGreen).padding(.horizontal, 6).frame(height: 44)
+        }.font(.aurea(size: PanelMetrics.label)).tint(curveGreen).padding(.horizontal, 6).frame(height: 48)
     }
     private func jump(_ direction: Int) {
         guard let segment, let edge = compositionFrame(direction < 0 ? segment.start.time : segment.end.time),

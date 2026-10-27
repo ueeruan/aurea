@@ -5,6 +5,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
@@ -248,15 +250,20 @@ internal fun ColumnScope.ScaleFace(env: PanelEnv, depth: Boolean) {
         write(true, it, floatArrayOf(sx, sy, sz))
     })
 
-    Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+    // 0.3.4 painéis: as réguas repartem a altura que sobra no painel (alto desde a 0.3.4).
+    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+    val spare = PanelMetrics.rulerSpace(maxHeight)
+    val tallRuler = PanelMetrics.fillRulers(spare, 1, PanelMetrics.RulerTall)
+    val pairRuler = PanelMetrics.fillRulers(spare, 2, PanelMetrics.Ruler)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         // No 3D (com o Z) a fileira pode passar da largura num telefone estreito: rola de lado.
-        TfFieldRow(top = 15.dp, scroll = depth) {
+        TfFieldRow(top = PanelMetrics.FieldRowTop, scroll = depth) {
             TfField(numeroPtBr(shownW(sx), 1), widthLabel, widthLabel, active = true, tag = "transform.scale.width",
                 enabled = enabled, onLongClick = ::keypadW) { keypadW() }
-            Spacer(Modifier.width(5.dp))
+            Spacer(Modifier.width(6.dp))
             Box(
                 Modifier
-                    .heightIn(min = 44.dp)
+                    .heightIn(min = PanelMetrics.Touch)
                     .testTag("transform.scale.link")
                     .semantics {
                         contentDescription = linkLabel
@@ -266,13 +273,13 @@ internal fun ColumnScope.ScaleFace(env: PanelEnv, depth: Boolean) {
                 contentAlignment = Alignment.TopCenter,
             ) {
                 Box(
-                    Modifier.size(25.dp).clip(RoundedCornerShape(TfFieldDims.Radius)).background(AureaColors.ControlButton),
+                    Modifier.size(TfFieldDims.Height).clip(RoundedCornerShape(TfFieldDims.Radius)).background(AureaColors.ControlButton),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CupertinoIcon(CupertinoGlyph.Link, 15.dp, if (locked) AureaColors.Accent else AureaColors.Muted)
+                    CupertinoIcon(CupertinoGlyph.Link, 20.dp, if (locked) AureaColors.Accent else AureaColors.Muted)
                 }
             }
-            Spacer(Modifier.width(5.dp))
+            Spacer(Modifier.width(6.dp))
             TfField(numeroPtBr(shownH(sy), 1), heightLabel, heightLabel, active = true, tag = "transform.scale.height",
                 enabled = enabled, onLongClick = ::keypadH) { keypadH() }
             if (depth) {
@@ -286,7 +293,7 @@ internal fun ColumnScope.ScaleFace(env: PanelEnv, depth: Boolean) {
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(PanelMetrics.RulerGap))
         Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp).graphicsLayer { scaleY = settle.value }) {
             if (locked) {
                 val snap = if (leadH) snapH else snapW
@@ -308,7 +315,7 @@ internal fun ColumnScope.ScaleFace(env: PanelEnv, depth: Boolean) {
                     },
                     onValue = { v -> write(leadH, snap.apply(v, tolerance), from) },
                     onEnd = { store.endGesture() },
-                    modifier = Modifier.fillMaxWidth().height(72.dp),
+                    modifier = Modifier.fillMaxWidth().height(tallRuler),
                 )
             } else {
                 MarkedRuler(
@@ -329,9 +336,9 @@ internal fun ColumnScope.ScaleFace(env: PanelEnv, depth: Boolean) {
                     },
                     onValue = { v -> write(false, snapW.apply(v, tolerance), from) },
                     onEnd = { store.endGesture() },
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    modifier = Modifier.fillMaxWidth().height(pairRuler),
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(PanelMetrics.RulerGap))
                 MarkedRuler(
                     value = { shownH(current()[1]) },
                     unitsPerDp = unitsPerDp,
@@ -350,11 +357,12 @@ internal fun ColumnScope.ScaleFace(env: PanelEnv, depth: Boolean) {
                     },
                     onValue = { v -> write(true, snapH.apply(v, tolerance), from) },
                     onEnd = { store.endGesture() },
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    modifier = Modifier.fillMaxWidth().height(pairRuler),
                 )
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(PanelMetrics.RulerBottom))
+    }
     }
 }
 
@@ -374,20 +382,23 @@ internal fun ColumnScope.CameraScaleFace(env: PanelEnv) {
         if (!v.isFinite()) return
         store.setCameraLens(EditorStore.CAMERA_LENS_FOCAL, CameraLens.focalFromFov(v.coerceIn(CameraLens.MIN_FOV, CameraLens.MAX_FOV)))
     }
-    Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-        Spacer(Modifier.height(15.dp))
+    // 0.3.4 painéis: a régua cresce com o painel; o resumo em texto de rótulo.
+    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+    val ruler = PanelMetrics.fillRulers(PanelMetrics.rulerSpace(maxHeight), 1, PanelMetrics.RulerTall)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Spacer(Modifier.height(PanelMetrics.FieldRowTop))
         Text(
             summary,
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 44.dp)
+                .heightIn(min = PanelMetrics.Touch)
                 .testTag("transform.scale.camera")
                 .tocavel(shrink = 1f) {
                     env.openKeypad(KeypadRequest(angleLabel, fov, "°", CameraLens.MIN_FOV, CameraLens.MAX_FOV, 1) { writeFov(it) })
                 }
                 .padding(horizontal = 12.dp, vertical = 12.dp),
-            style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = AureaColors.Subtle)),
+            style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label, color = AureaColors.Subtle)),
         )
         MarkedRuler(
             value = { store.cameraLens?.get(1) ?: fov },
@@ -405,9 +416,10 @@ internal fun ColumnScope.CameraScaleFace(env: PanelEnv) {
             },
             onValue = ::writeFov,
             onEnd = { store.endGesture() },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp).height(72.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp).height(ruler),
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(PanelMetrics.RulerBottom))
+    }
     }
 }
 
@@ -431,15 +443,18 @@ internal fun ColumnScope.SkewFace(env: PanelEnv) {
     }
     fun keypad(label: String, value: Float, property: Int) = env.openKeypad(
         KeypadRequest(label, value, "°", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 1) { write(property, it) })
-    Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-        TfFieldRow(top = 15.dp) {
+    // 0.3.4 painéis: as duas réguas repartem a altura que sobra no painel.
+    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+    val ruler = PanelMetrics.fillRulers(PanelMetrics.rulerSpace(maxHeight), 2, PanelMetrics.Ruler)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        TfFieldRow(top = PanelMetrics.FieldRowTop) {
             TfField("${numeroPtBr(kx, 1)}°", xLabel, xLabel, active = true, tag = "transform.skew.x", enabled = enabled,
                 onLongClick = { keypad(xLabel, kx, TrackProperty.SKEW_X) }) { keypad(xLabel, kx, TrackProperty.SKEW_X) }
             Spacer(Modifier.width(TfFieldDims.Gap))
             TfField("${numeroPtBr(ky, 1)}°", yLabel, yLabel, active = false, tag = "transform.skew.y", enabled = enabled,
                 onLongClick = { keypad(yLabel, ky, TrackProperty.SKEW_Y) }) { keypad(yLabel, ky, TrackProperty.SKEW_Y) }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(PanelMetrics.RulerGap))
         Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
             MarkedRuler(
                 value = { kx },
@@ -456,9 +471,9 @@ internal fun ColumnScope.SkewFace(env: PanelEnv) {
                 },
                 onValue = { write(TrackProperty.SKEW_X, it) },
                 onEnd = { store.endGesture() },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier.fillMaxWidth().height(ruler),
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(PanelMetrics.RulerGap))
             MarkedRuler(
                 value = { ky },
                 unitsPerDp = 0.2f,
@@ -474,9 +489,10 @@ internal fun ColumnScope.SkewFace(env: PanelEnv) {
                 },
                 onValue = { write(TrackProperty.SKEW_Y, it) },
                 onEnd = { store.endGesture() },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier.fillMaxWidth().height(ruler),
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(PanelMetrics.RulerBottom))
+    }
     }
 }

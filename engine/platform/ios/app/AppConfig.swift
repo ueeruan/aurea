@@ -194,7 +194,7 @@ struct ForcedUpdateView: View {
         ScrollView {
             VStack(spacing: 0) {
                 Spacer().frame(height: 64)
-                Image(systemName: "arrow.down.circle.fill").font(.system(size: 30, weight: AureaIconWeight.symbol)).foregroundStyle(AureaColors.accent)
+                Image(systemName: "arrow.down.circle").font(.system(size: 30, weight: AureaIconWeight.symbol)).foregroundStyle(AureaColors.accent)
                     .frame(width: 64, height: 64).background(RoundedRectangle(cornerRadius: 18).fill(AureaColors.accent.opacity(0.18)))
                     .accessibilityHidden(true)
                 Spacer().frame(height: 20)
@@ -237,7 +237,7 @@ struct AppConfigBanner: View {
     var body: some View {
         if let text = store.config?.message(for: model.language), store.dismissedMessage != text {
             HStack(spacing: 10) {
-                Image(systemName: "info.circle.fill").fontWeight(AureaIconWeight.symbol).foregroundStyle(AureaColors.accent).accessibilityHidden(true)
+                Image(systemName: "info.circle").fontWeight(AureaIconWeight.symbol).foregroundStyle(AureaColors.accent).accessibilityHidden(true)
                 Text(text).font(.aurea(size: 14)).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 Button { store.dismissMessage(text) } label: {

@@ -2406,17 +2406,18 @@ enum FxPluginTexts {
 // `FxParamMathTest` rodam em `verify/check_effects_omega.py` (swiftc no macOS).
 // =============================================================================
 enum FxParamMath {
-    /// Alturas das linhas (pt), as da referência (`effect_setting_*`).
-    static let ROW_SLIDER: CGFloat = 51
-    static let ROW_RULER: CGFloat = 57
-    static let ROW_SMALL: CGFloat = 38
-    static let ROW_SECTION: CGFloat = 43
-    static let ROW_LIST: CGFloat = 37
+    /// Alturas das linhas (pt). 0.3.4 painéis: ~15 % maiores que as da referência
+    /// ("está muito compacto"; eram 51 / 57 / 38 / 43 / 37). Par do `ParamRowMath.kt`.
+    static let ROW_SLIDER: CGFloat = 60
+    static let ROW_RULER: CGFloat = 66
+    static let ROW_SMALL: CGFloat = 46
+    static let ROW_SECTION: CGFloat = 48
+    static let ROW_LIST: CGFloat = 44
     /// Folga entre itens da lista e padding da sobreposição (pt).
     static let LIST_GAP: CGFloat = 6.5
-    /// Rótulo e caixa de valor (pt); margem 3 em volta do rótulo.
-    static let LABEL_W: CGFloat = 75
-    static let VALUE_W: CGFloat = 56
+    /// Rótulo e caixa de valor (pt; eram 75 / 56); margem 3 em volta do rótulo.
+    static let LABEL_W: CGFloat = 80
+    static let VALUE_W: CGFloat = 62
     static let LABEL_MARGIN: CGFloat = 3
     /// Régua: risco a cada 5,5 pt, maior a cada 5 riscos; agulha 1,5 pt.
     static let TICK_SPACING: CGFloat = 5.5

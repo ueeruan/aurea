@@ -121,7 +121,7 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
-import com.aurea.aurea.ui.theme.CupertinoIconBoldStroke
+import com.aurea.aurea.ui.theme.AureaIconStyle
 import com.aurea.aurea.ui.theme.tocavel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -707,10 +707,10 @@ internal fun BrowserTopBar(title: String, glyph: Char, description: String, tag:
 private fun DrawScope.drawNullIcon(c: Color = ShellColors.DockTileContent) {
     val k = size.minDimension / 30f
     val r = Rect(center.x - 13 * k, center.y - 13 * k, center.x + 13 * k, center.y + 13 * k)
-    // 0.3.3: + o traço extra dos glifos bold (CupertinoIconBoldStroke × 30).
-    val w = (1.8f + 30f * CupertinoIconBoldStroke) * k
+    // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.Line na caixa de 24 → × 30/24).
+    val w = AureaIconStyle.Line * 30f / 24f * k
     drawRoundRect(c, r.topLeft, r.size, CornerRadius(4 * k), style = Stroke(w))
-    drawLine(c, Offset(r.left + 3 * k, r.bottom - 3 * k), Offset(r.right - 3 * k, r.top + 3 * k), w)
+    drawLine(c, Offset(r.left + 3 * k, r.bottom - 3 * k), Offset(r.right - 3 * k, r.top + 3 * k), w, StrokeCap.Round)
 }
 
 // =============================================================================
@@ -1085,11 +1085,11 @@ private val AddBarPillShape = RoundedCornerShape(percent = 50)
 internal const val ADD_BAR_GRID_HEIGHT = 4f + 7f + 8f + 2f * (46f + 4f + 15f) + 6f + 8f + 7f + 4f
 
 /**
- * Traço dos ícones desenhados da barra, na caixa de 24 (o mesmo no iOS): 2 mais o
- * traço extra dos glifos bold (0.3.3, [CupertinoIconBoldStroke] × 24), para ficarem
- * no mesmo peso dos ícones da fonte ao lado.
+ * Traço dos ícones desenhados da barra, na caixa de 24 (o mesmo no iOS): 0.3.4, o
+ * traço fino do estilo dos ícones ([AureaIconStyle.Line]), o mesmo peso dos glifos
+ * da fonte ao lado.
  */
-private const val ADD_BAR_STROKE = 2f + 24f * CupertinoIconBoldStroke
+private const val ADD_BAR_STROKE = AureaIconStyle.Line
 
 /**
  * Ícones da barra e da grade: os do AUREA (fonte CupertinoIcons) e, onde a
@@ -1121,10 +1121,10 @@ private fun DrawScope.drawAddBarShape(c: Color) {
     val hi = 19f
     val r = 2.3f
     for ((x, y) in listOf(lo to lo, hi to lo, hi to hi, lo to hi)) drawCircle(c, r * u, p(x, y), style = Stroke(w))
-    drawLine(c, p(lo + r, lo), p(hi - r, lo), w)
-    drawLine(c, p(hi, lo + r), p(hi, hi - r), w)
-    drawLine(c, p(lo + r, hi), p(hi - r, hi), w)
-    drawLine(c, p(lo, lo + r), p(lo, hi - r), w)
+    drawLine(c, p(lo + r, lo), p(hi - r, lo), w, StrokeCap.Round)
+    drawLine(c, p(hi, lo + r), p(hi, hi - r), w, StrokeCap.Round)
+    drawLine(c, p(lo + r, hi), p(hi - r, hi), w, StrokeCap.Round)
+    drawLine(c, p(lo, lo + r), p(lo, hi - r), w, StrokeCap.Round)
 }
 
 /** Elemento: flor de 8 pétalas (só o contorno de fora de cada uma) e o miolo. */

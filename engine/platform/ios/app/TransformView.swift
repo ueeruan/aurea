@@ -288,14 +288,14 @@ struct TransformView: View {
     /// "Centro" + grade de âncora em cima e o trackpad embaixo.
     @ViewBuilder private func moveFace(pivot: Bool) -> some View {
         VStack(spacing: 0) {
-            if pivot { pivotFields.padding(.top, 6) }
+            if pivot { pivotFields.padding(.top, PanelMetrics.fieldRowTop) }
             GeometryReader { bounds in
                 ZStack(alignment: .top) {
                     padSurface(pivot: pivot, size: bounds.size)
-                    if !pivot { positionFields.padding(.top, 6) }
+                    if !pivot { positionFields.padding(.top, PanelMetrics.fieldRowTop) }
                     if expressionControlsTransform && !pivot {
                         Text(AureaText.t("transform_expression_controlled"))
-                            .font(.aurea(size: 11)).foregroundStyle(AureaColors.warning)
+                            .font(.aurea(size: PanelMetrics.note)).foregroundStyle(AureaColors.warning)
                             .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 12)
                             .frame(maxHeight: .infinity, alignment: .bottom).padding(.bottom, 40)
@@ -317,7 +317,8 @@ struct TransformView: View {
             TransformCornerMarks()
             padHint(pivot: pivot)
                 .opacity(gestureOpen || (expressionControlsTransform && !pivot) ? 0 : 1)
-                .padding(.top, pivot ? 0 : 30)
+                // 0.3.4 painéis: abaixo da fileira de campos maior (par do Android).
+                .padding(.top, pivot ? 0 : 56)
                 .allowsHitTesting(false)
         }
         .frame(width: size.width, height: size.height)
@@ -345,23 +346,24 @@ struct TransformView: View {
     @ViewBuilder private func padHint(pivot: Bool) -> some View {
         let key = pivot ? "om_ap_tf_pivot_hint" : zPicked ? "om_ap_tf_depth_hint" : "om_ap_tf_move_hint"
         VStack(spacing: 4) {
-            if zPicked && !pivot { CupertinoGlyph.text(CupertinoGlyph.ArrowUp, size: 15, color: AureaColors.muted) }
-            Text(AureaText.t(key)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
+            if zPicked && !pivot { CupertinoGlyph.text(CupertinoGlyph.ArrowUp, size: 18, color: AureaColors.muted) }
+            Text(AureaText.t(key)).font(.aurea(size: PanelMetrics.hint)).foregroundStyle(AureaColors.muted)
                 .multilineTextAlignment(.center).padding(.horizontal, 16)
                 .accessibilityIdentifier(pivot ? "transform.pivot.hint" : "transform.move.hint")
-            if zPicked && !pivot { CupertinoGlyph.text(CupertinoGlyph.ArrowDown, size: 15, color: AureaColors.muted) }
+            if zPicked && !pivot { CupertinoGlyph.text(CupertinoGlyph.ArrowDown, size: 18, color: AureaColors.muted) }
         }
     }
 
     /// Preciso (extra do AUREA): o dedo anda 4× mais para o mesmo deslocamento.
     private var preciseButton: some View {
         Button { fineMove.toggle() } label: {
-            Text(AureaText.t("panel_mover_preciso")).font(.aurea(size: 11, weight: .semibold))
-                .foregroundStyle(fineMove ? AureaColors.accent : AureaColors.text).padding(.horizontal, 10).frame(height: 26)
+            Text(AureaText.t("panel_mover_preciso")).font(.aurea(size: PanelMetrics.chipText, weight: .semibold)).lineLimit(1)
+                .foregroundStyle(fineMove ? AureaColors.accent : AureaColors.text).padding(.horizontal, PanelMetrics.chipPad)
+                .frame(minHeight: PanelMetrics.chipHeight)
                 .background(fineMove ? AureaColors.accent.opacity(0.18) : AureaColors.railModeFill, in: Capsule())
-                .frame(minHeight: 44).contentShape(Rectangle())
+                .frame(minHeight: PanelMetrics.touch).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).padding(.trailing, 10).padding(.bottom, 2)
+        .buttonStyle(.plain).padding(.trailing, 10).padding(.bottom, 4)
         .accessibilityValue(AureaText.t(fineMove ? "common_on" : "common_off"))
         .accessibilityIdentifier("transform.move.fine")
     }
@@ -371,7 +373,7 @@ struct TransformView: View {
     /// eixo; segurar sempre digita.
     private var positionFields: some View {
         let x = value(0), y = value(1), z = value(2)
-        return HStack(alignment: .top, spacing: 7) {
+        return HStack(alignment: .top, spacing: PanelMetrics.fieldGap) {
             HStack(alignment: .top, spacing: 1) {
                 pillField(number(x, decimals: 2), label: "X", tint: zPicked ? AureaColors.text : AureaColors.accent,
                           corners: .leading, description: AureaText.t("panel_posicao_x"), identifier: "transform.position.x",
@@ -402,7 +404,7 @@ struct TransformView: View {
     private var pivotFields: some View {
         let x = value(9) - sourceSize[0] / 2, y = value(10) - sourceSize[1] / 2
         return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 7) {
+            HStack(alignment: .top, spacing: PanelMetrics.fieldGap) {
                 HStack(alignment: .top, spacing: 1) {
                     pillField(number(x, decimals: 2), label: "X", tint: AureaColors.accent, corners: .leading,
                               description: AureaText.t("panel_pivo_x"), identifier: "transform.pivot.x") {
@@ -420,10 +422,10 @@ struct TransformView: View {
                     }
                 }
                 Button { write([9: sourceSize[0] / 2, 10: sourceSize[1] / 2]) } label: {
-                    Text(AureaText.t("panel_centro")).font(.aurea(size: 11, weight: .semibold)).foregroundStyle(AureaColors.text)
-                        .padding(.horizontal, 12).frame(height: 25)
-                        .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 5))
-                        .frame(minHeight: 44, alignment: .top).contentShape(Rectangle())
+                    Text(AureaText.t("panel_centro")).font(.aurea(size: PanelMetrics.chipText, weight: .semibold)).foregroundStyle(AureaColors.text)
+                        .lineLimit(1).padding(.horizontal, PanelMetrics.chipPad).frame(minHeight: PanelMetrics.fieldHeight)
+                        .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: PanelMetrics.fieldRadius))
+                        .frame(minHeight: PanelMetrics.touch, alignment: .top).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).disabled(locked)
                 .accessibilityIdentifier("transform.pivot.center")
@@ -435,7 +437,8 @@ struct TransformView: View {
             .padding(.horizontal, 8)
         }
         .keepLtr()
-        .frame(height: 44)
+        // 0.3.4 painéis: a fileira de campos maior (campo 36 + rótulo); era 44.
+        .frame(height: PanelMetrics.fieldBlock - PanelMetrics.fieldRowTop)
     }
 
     private func padDrag(pivot: Bool) -> some Gesture {
@@ -563,7 +566,7 @@ struct TransformView: View {
                     Button(AureaText.t("t3d_letters")) { wholeText = false }
                         .font(.aurea(size: 12, weight: .semibold)).frame(minHeight: 44)
                 }
-                if threeD { rotationAxisRow.padding(.top, 6) }
+                if threeD { rotationAxisRow.padding(.top, PanelMetrics.fieldRowTop) }
                 rotationDial
             }
         }
@@ -574,7 +577,7 @@ struct TransformView: View {
         return TransformDial(angle: angle, enabled: !locked, snap: dialSnap,
                              onBegin: { beginGesture() }, onValue: { write([property: $0]) },
                              onEnd: { endGesture() }, onTap: { rotationKeypad(rotationAxis) })
-            .padding(6)
+            .padding(.horizontal, 6).padding(.vertical, 8)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(AureaText.t("om_ap_tf_dial"))
             .accessibilityValue(number(angle, decimals: 1) + "°")
@@ -648,34 +651,45 @@ struct TransformView: View {
         let widthText = sized ? number(w * sx, decimals: 1) : number(sx * 100, decimals: 1) + "%"
         let heightText = sized ? number(h * sy, decimals: 1) : number(sy * 100, decimals: 1) + "%"
         let heightIsLarger = sized && abs(h * sy) > abs(w * sx)
-        return VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 5) {
-                pillField(widthText, label: AureaText.t("om_ap_tf_width"), tint: AureaColors.accent,
-                          description: AureaText.t("om_ap_tf_width"), identifier: "transform.scale.width") { scaleKeypad(axisY: false) }
-                linkButton
-                pillField(heightText, label: AureaText.t("om_ap_tf_height"), tint: AureaColors.accent,
-                          description: AureaText.t("om_ap_tf_height"), identifier: "transform.scale.height") { scaleKeypad(axisY: true) }
-                if threeD {
-                    pillField(number(value(5) * 100, decimals: 1) + "%", label: "Z", tint: AureaColors.accent,
-                              description: AureaText.t("edt_scale_z"), identifier: "transform.scale.z") { scaleZKeypad() }
-                        .padding(.leading, 9)
+        // 0.3.4 painéis: as réguas repartem a altura que sobra no painel (par do Android).
+        return GeometryReader { geo in
+            let space = PanelMetrics.rulerSpace(geo.size.height)
+            let tall = PanelMetrics.fillRulers(space, count: 1, min: PanelMetrics.rulerTall)
+            let pair = PanelMetrics.fillRulers(space, count: 2, min: PanelMetrics.ruler)
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    // No 3D (com o Z) a fileira pode passar da largura: rola de lado.
+                    PanelFieldRow {
+                        HStack(alignment: .top, spacing: 6) {
+                            pillField(widthText, label: AureaText.t("om_ap_tf_width"), tint: AureaColors.accent,
+                                      description: AureaText.t("om_ap_tf_width"), identifier: "transform.scale.width") { scaleKeypad(axisY: false) }
+                            linkButton
+                            pillField(heightText, label: AureaText.t("om_ap_tf_height"), tint: AureaColors.accent,
+                                      description: AureaText.t("om_ap_tf_height"), identifier: "transform.scale.height") { scaleKeypad(axisY: true) }
+                            if threeD {
+                                pillField(number(value(5) * 100, decimals: 1) + "%", label: "Z", tint: AureaColors.accent,
+                                          description: AureaText.t("edt_scale_z"), identifier: "transform.scale.z") { scaleZKeypad() }
+                                    .padding(.leading, PanelMetrics.fieldGap - 6)
+                            }
+                        }
+                    }
+                    .keepLtr()
+                    .padding(.top, PanelMetrics.fieldRowTop)
+                    VStack(spacing: PanelMetrics.rulerGap) {
+                        if linked {
+                            scaleRuler(axisY: heightIsLarger, primary: true, identifier: "transform.scale.ruler", height: tall)
+                        } else {
+                            scaleRuler(axisY: false, primary: true, identifier: "transform.scale.ruler", height: pair)
+                            scaleRuler(axisY: true, primary: false, identifier: "transform.scale.ruler.height", height: pair)
+                        }
+                    }
+                    .scaleEffect(x: 1, y: rulerPulse, anchor: .center)
+                    .padding(.top, PanelMetrics.rulerGap)
+                    .padding(.bottom, PanelMetrics.rulerBottom)
                 }
+                .padding(.horizontal, 8)
             }
-            .keepLtr()
-            .padding(.top, 10)
-            VStack(spacing: 6) {
-                if linked {
-                    scaleRuler(axisY: heightIsLarger, primary: true, identifier: "transform.scale.ruler", height: 56)
-                } else {
-                    scaleRuler(axisY: false, primary: true, identifier: "transform.scale.ruler", height: 48)
-                    scaleRuler(axisY: true, primary: false, identifier: "transform.scale.ruler.height", height: 48)
-                }
-            }
-            .scaleEffect(x: 1, y: rulerPulse, anchor: .center)
-            .padding(.top, 6)
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
     }
 
     /// Cadeado 25 × 25 (alvo de 44): travado = 1 régua (maior lado), destravado = 2.
@@ -686,10 +700,10 @@ struct TransformView: View {
             rulerPulse = 1.1
             DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.12)) { rulerPulse = 1 } }
         } label: {
-            MaterialGlyph(linked ? "rounded.Link" : "rounded.LinkOff", size: 16, color: linked ? AureaColors.accent : AureaColors.text)
-                .frame(width: 25, height: 25)
-                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 5))
-                .frame(width: 44, height: 44, alignment: .top)
+            MaterialGlyph(linked ? "rounded.Link" : "rounded.LinkOff", size: 20, color: linked ? AureaColors.accent : AureaColors.text)
+                .frame(width: PanelMetrics.fieldHeight, height: PanelMetrics.fieldHeight)
+                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: PanelMetrics.fieldRadius))
+                .frame(width: PanelMetrics.touch, height: PanelMetrics.touch, alignment: .top)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -849,16 +863,20 @@ struct TransformView: View {
                 model.setCameraLens(AureaModel.cameraLensFocal, value: CameraLensMath.focalForAngle($0))
             }
         }
-        return VStack(alignment: .leading, spacing: 0) {
+        // 0.3.4 painéis: o resumo em texto de rótulo (13) e a régua crescendo com o painel.
+        return GeometryReader { geo in
+        let rulerHeight = PanelMetrics.fillRulers(PanelMetrics.rulerSpace(geo.size.height), count: 1, min: PanelMetrics.rulerTall)
+        ScrollView(.vertical, showsIndicators: false) {
+        VStack(alignment: .leading, spacing: 0) {
             // O texto da referência; tocar digita o ângulo.
             Button(action: typeAngle) {
-                Text(summary).font(.aurea(size: 10)).foregroundStyle(AureaColors.subtle)
+                Text(summary).font(.aurea(size: PanelMetrics.label)).foregroundStyle(AureaColors.subtle)
                     .lineLimit(2).multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: PanelMetrics.touch, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.top, 4).padding(.horizontal, 12)
+            .padding(.top, PanelMetrics.fieldRowTop).padding(.horizontal, 12)
             .accessibilityLabel(summary)
             .accessibilityIdentifier("transform.scale.camera")
             GeometryReader { bounds in
@@ -869,8 +887,8 @@ struct TransformView: View {
                                onValue: { model.setCameraLens(AureaModel.cameraLensFocal, value: CameraLensMath.focalForAngle($0)) },
                                onEnd: { endGesture() })
             }
-            .frame(height: 56)
-            .padding(.top, 6).padding(.horizontal, 8)
+            .frame(height: rulerHeight)
+            .padding(.top, PanelMetrics.rulerGap).padding(.horizontal, 8)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(AureaText.t("om_ap_cam_view_angle"))
             .accessibilityValue(CameraLensMath.formatAngle(fov) + "°")
@@ -887,7 +905,9 @@ struct TransformView: View {
                 endGesture()
             }
             .accessibilityIdentifier("transform.scale.ruler")
-            Spacer(minLength: 0)
+            .padding(.bottom, PanelMetrics.rulerBottom)
+        }
+        }
         }
     }
 
@@ -897,8 +917,12 @@ struct TransformView: View {
 
     private var skewFace: some View {
         let x = value(13), y = value(14)
-        return VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 14) {
+        // 0.3.4 painéis: as duas réguas repartem a altura que sobra no painel (par do Android).
+        return GeometryReader { geo in
+        let rulerHeight = PanelMetrics.fillRulers(PanelMetrics.rulerSpace(geo.size.height), count: 2, min: PanelMetrics.ruler)
+        ScrollView(.vertical, showsIndicators: false) {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: PanelMetrics.fieldGap) {
                 pillField(number(x, decimals: 1) + "°", label: AureaText.t("om_ap_tf_skew_x"), tint: AureaColors.accent,
                           description: AureaText.t("om_ap_tf_skew_x"), identifier: "transform.skew.x") {
                     keypad(AureaText.t("om_ap_tf_skew_x"), x, unit: "°", decimals: 1) { writeSkew([13: $0]) }
@@ -909,18 +933,20 @@ struct TransformView: View {
                 }
             }
             .keepLtr()
-            .padding(.top, 10)
-            VStack(spacing: 6) {
-                skewRuler(13, primary: true, identifier: "transform.skew.ruler.x")
-                skewRuler(14, primary: false, identifier: "transform.skew.ruler.y")
+            .padding(.top, PanelMetrics.fieldRowTop)
+            VStack(spacing: PanelMetrics.rulerGap) {
+                skewRuler(13, primary: true, identifier: "transform.skew.ruler.x", height: rulerHeight)
+                skewRuler(14, primary: false, identifier: "transform.skew.ruler.y", height: rulerHeight)
             }
-            .padding(.top, 6)
-            Spacer(minLength: 0)
+            .padding(.top, PanelMetrics.rulerGap)
+            .padding(.bottom, PanelMetrics.rulerBottom)
         }
         .padding(.horizontal, 8)
+        }
+        }
     }
     /// Régua da inclinação: passo 0,1° por pt e linha do zero.
-    private func skewRuler(_ property: UInt32, primary: Bool, identifier: String) -> some View {
+    private func skewRuler(_ property: UInt32, primary: Bool, identifier: String, height: CGFloat = PanelMetrics.ruler) -> some View {
         let units: Float = 0.1
         let current = value(property)
         return GeometryReader { bounds in
@@ -929,7 +955,7 @@ struct TransformView: View {
                 .valueDrag(enabled: !locked, start: { value(property) }, unitsPerDp: { units }, min: -.infinity, max: .infinity,
                            onStart: { beginGesture() }, onValue: { writeSkew([property: $0]) }, onEnd: { endGesture() })
         }
-        .frame(height: 48)
+        .frame(height: height)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(AureaText.t(property == 13 ? "om_ap_tf_skew_x" : "om_ap_tf_skew_y"))
         .accessibilityValue(number(current, decimals: 1) + "°")
@@ -1101,24 +1127,25 @@ struct TransformView: View {
     }
 
     // =========================================================================
-    // Campos (pílula da referência: 63 × 25, texto 10, rótulo 9 embaixo)
+    // Campos (0.3.4 painéis: `PanelMetrics` — 72 × 36, número 15 que encolhe, rótulo 12)
     // =========================================================================
 
     private func pillField(_ text: String, label: String, tint: Color, corners: TransformPillCorners = .all,
                            description: String, identifier: String, onLongPress: (() -> Void)? = nil,
                            onTap: @escaping () -> Void) -> some View {
         let isLocked = locked
-        return VStack(spacing: 2) {
-            Text(text).font(.aurea(size: 10, weight: .semibold).monospacedDigit())
+        return VStack(spacing: PanelMetrics.fieldLabelGap) {
+            Text(text).font(.aurea(size: PanelMetrics.fieldValue, weight: .semibold).monospacedDigit())
                 .foregroundStyle(isLocked ? AureaColors.muted : tint)
-                .lineLimit(1).minimumScaleFactor(0.6).padding(.horizontal, 3)
-                .frame(width: 63, height: 25)
+                .lineLimit(1).minimumScaleFactor(PanelMetrics.fieldValueMin / PanelMetrics.fieldValue).padding(.horizontal, 4)
+                .frame(width: PanelMetrics.fieldWidth)
+                .frame(minHeight: PanelMetrics.fieldHeight)
                 .background(TransformPillShape(corners: corners).fill(AureaColors.chip))
-            Text(label).font(.aurea(size: 9)).foregroundStyle(AureaColors.muted)
-                .lineLimit(1).minimumScaleFactor(0.7).frame(width: 63)
+            Text(label).font(.aurea(size: PanelMetrics.fieldLabel)).foregroundStyle(AureaColors.muted)
+                .lineLimit(1).minimumScaleFactor(0.7).frame(width: PanelMetrics.fieldWidth)
         }
-        .frame(width: 63)
-        .frame(minHeight: 44, alignment: .top)
+        .frame(width: PanelMetrics.fieldWidth)
+        .frame(minHeight: PanelMetrics.touch, alignment: .top)
         .contentShape(Rectangle())
         .gesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in if !isLocked { (onLongPress ?? onTap)() } }
             .exclusively(before: TapGesture().onEnded { _ in if !isLocked { onTap() } }))
@@ -1405,7 +1432,7 @@ enum TransformPillCorners { case all, leading, trailing, square }
 /// Retângulo com raio 5 só nos cantos pedidos (o `UnevenRoundedRectangle` é do iOS 17).
 struct TransformPillShape: Shape {
     var corners: TransformPillCorners = .all
-    var radius: CGFloat = 5
+    var radius: CGFloat = PanelMetrics.fieldRadius
     func path(in rect: CGRect) -> Path {
         let r = min(radius, rect.height / 2, rect.width / 2)
         let left: CGFloat = corners == .all || corners == .leading ? r : 0
@@ -1688,8 +1715,9 @@ struct AnchorPresetGrid: View {
                 onPick(Float(cx) * 0.5, Float(cy) * 0.5)
             })
         }
-        .frame(width: 30, height: 30)
-        .background(AureaColors.controlButton, in: RoundedRectangle(cornerRadius: 6))
+        // 0.3.4 painéis: 40 (antes 30), par do Android (campo de 36 + 4).
+        .frame(width: PanelMetrics.fieldHeight + 4, height: PanelMetrics.fieldHeight + 4)
+        .background(AureaColors.controlButton, in: RoundedRectangle(cornerRadius: PanelMetrics.fieldRadius))
         .accessibilityLabel(AureaText.t("panel_ancora_predefinida"))
     }
 }

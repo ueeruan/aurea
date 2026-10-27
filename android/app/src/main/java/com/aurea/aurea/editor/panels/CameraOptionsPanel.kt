@@ -207,7 +207,8 @@ private fun ColumnScope.CameraViewTab(env: PanelEnv, lens: FloatArray) {
             )
             ProjectionButton()
         }
-        Row(Modifier.fillMaxWidth().height(124.dp), verticalAlignment = Alignment.CenterVertically) {
+        // 0.3.4 painéis: 140 (antes 124) para o rótulo em cima do valor maior.
+        Row(Modifier.fillMaxWidth().height(140.dp), verticalAlignment = Alignment.CenterVertically) {
             CurvedAngleRuler(
                 value = { store.cameraLens?.get(1) ?: fov },
                 min = CameraLens.MIN_FOV,
@@ -226,13 +227,16 @@ private fun ColumnScope.CameraViewTab(env: PanelEnv, lens: FloatArray) {
             )
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                // 0.3.4 painéis: o rótulo (13) fica em cima da caixa maior (72 × 36): numa
+                // tela de 360 os dois lado a lado cortavam o rótulo.
+                Text(
+                    angleLabel,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label, color = AureaColors.Muted)),
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        angleLabel,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 2,
-                        style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = AureaColors.Muted)),
-                    )
+                    Spacer(Modifier.weight(1f))
                     CameraValueBox("${CameraLens.formatFov(fov)}°", angleLabel, "camera.view.angle.value", enabled, ::angleKeypad)
                 }
                 Spacer(Modifier.height(6.dp))
@@ -253,7 +257,7 @@ private fun ColumnScope.CameraViewTab(env: PanelEnv, lens: FloatArray) {
                         },
                         onValue = ::writeZoom,
                         onEnd = { store.endGesture() },
-                        modifier = Modifier.weight(1f).height(36.dp),
+                        modifier = Modifier.weight(1f).height(PanelMetrics.Touch),
                     )
                     Spacer(Modifier.width(6.dp))
                     CameraValueBox(CameraLens.formatZoom(zoom), zoomLabel, "camera.view.zoom.value", enabled, ::zoomKeypad)
@@ -269,7 +273,7 @@ private fun ColumnScope.CameraViewTab(env: PanelEnv, lens: FloatArray) {
             Text(
                 CameraLens.formatFocal(focal),
                 modifier = Modifier.padding(end = 4.dp),
-                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)),
+                style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, color = AureaColors.Muted)),
             )
             val picked = CameraLens.presetIndex(focal)
             CameraLens.PRESETS_MM.forEachIndexed { i, mm ->
@@ -289,9 +293,11 @@ private fun ColumnScope.CameraViewTab(env: PanelEnv, lens: FloatArray) {
                         Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                            .heightIn(min = PanelMetrics.ChipHeight)
+                            .padding(horizontal = PanelMetrics.ChipPad, vertical = 7.dp),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Text("$mm", style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.W700,
+                        Text("$mm", style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.ChipText, fontWeight = FontWeight.W700,
                             color = if (on) AureaColors.Accent else AureaColors.Text)))
                     }
                 }
@@ -307,31 +313,34 @@ private fun ColumnScope.CameraViewTab(env: PanelEnv, lens: FloatArray) {
         Text(
             stringResource(R.string.om_ap_cam_tip),
             modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 10.dp).testTag("camera.view.tip"),
-            style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 14.sp, color = AureaColors.Subtle)),
+            style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Subtle)),
         )
     }
 }
 
-/** Caixa 56 × 36 de um valor da câmera (toque digita); 44 dp de toque. */
+/** Caixa de um valor da câmera ([PanelMetrics] 72 × 36, número 15 que encolhe; toque digita); 44 dp de toque. */
 @Composable
 private fun CameraValueBox(text: String, description: String, tag: String, enabled: Boolean, onTap: () -> Unit) {
     Box(
         Modifier
-            .heightIn(min = 44.dp)
+            .heightIn(min = PanelMetrics.Touch)
             .testTag(tag)
             .semantics(mergeDescendants = true) { contentDescription = description }
             .tocavel(enabled = enabled, shrink = 1f, onClick = onTap),
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            Modifier.size(width = 56.dp, height = 36.dp).clip(RoundedCornerShape(TfFieldDims.Radius)).background(AureaColors.Chip),
+            Modifier.width(PanelMetrics.FieldWidth).heightIn(min = PanelMetrics.FieldHeight)
+                .clip(RoundedCornerShape(PanelMetrics.FieldRadius)).background(AureaColors.Chip).padding(horizontal = 4.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
+            androidx.compose.foundation.text.BasicText(
                 text,
                 maxLines = 1,
+                autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(
+                    minFontSize = PanelMetrics.FieldValueMin, maxFontSize = PanelMetrics.FieldValue, stepSize = 0.5.sp),
                 style = AureaType.Base.merge(TextStyle(
-                    fontSize = 12.sp, fontWeight = FontWeight.W600,
+                    fontSize = PanelMetrics.FieldValue, fontWeight = FontWeight.W600,
                     color = if (enabled) AureaColors.Accent else AureaColors.Muted,
                     textAlign = TextAlign.Center, fontFeatureSettings = "tnum", textDirection = TextDirection.Ltr,
                 )),
@@ -357,10 +366,10 @@ private fun ProjectionButton() {
             contentAlignment = Alignment.Center,
         ) {
             Box(
-                Modifier.size(width = 33.dp, height = 30.dp).clip(RoundedCornerShape(TfFieldDims.Radius)).background(AureaColors.Chip),
+                Modifier.size(width = 40.dp, height = PanelMetrics.FieldHeight).clip(RoundedCornerShape(TfFieldDims.Radius)).background(AureaColors.Chip),
                 contentAlignment = Alignment.Center,
             ) {
-                CupertinoIcon(CupertinoGlyph.Cube, 18.dp, AureaColors.Accent)
+                CupertinoIcon(CupertinoGlyph.Cube, 22.dp, AureaColors.Accent)
             }
         }
         AnchoredMenu(
@@ -576,7 +585,7 @@ private fun ColumnScope.CameraFocusTab(env: PanelEnv, lens: FloatArray) {
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.lens_pick_focus), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600,
                     color = if (armed) AureaColors.Accent else AureaColors.Text)))
-                Text(stringResource(R.string.lens_pick_focus_hint), style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp,
+                Text(stringResource(R.string.lens_pick_focus_hint), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp,
                     color = AureaColors.Muted)))
             }
         }

@@ -508,11 +508,11 @@ struct ShellNullGlyph: View {
         Canvas { context, size in
             let k = min(size.width, size.height) / 30
             let r = CGRect(x: size.width / 2 - 13 * k, y: size.height / 2 - 13 * k, width: 26 * k, height: 26 * k)
-            // 0.3.3: + o traço extra dos glifos bold (AureaIconWeight.glyphStroke × 30).
-            let w = (1.8 + 30 * AureaIconWeight.glyphStroke) * k
+            // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.line na caixa de 24 → × 30/24).
+            let w = AureaIconStyle.line * 30 / 24 * k
             context.stroke(Path(roundedRect: r, cornerRadius: 4 * k), with: .color(StageInk.dockTileContent), lineWidth: w)
             var line = Path(); line.move(to: CGPoint(x: r.minX + 3 * k, y: r.maxY - 3 * k)); line.addLine(to: CGPoint(x: r.maxX - 3 * k, y: r.minY + 3 * k))
-            context.stroke(line, with: .color(StageInk.dockTileContent), lineWidth: w)
+            context.stroke(line, with: .color(StageInk.dockTileContent), style: StrokeStyle(lineWidth: w, lineCap: .round))
         }
     }
 }

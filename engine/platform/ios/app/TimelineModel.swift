@@ -292,7 +292,7 @@ enum TimelineLayerType: Int, CaseIterable {
         case .image:      return CupertinoGlyph.PhotoFill
         case .audio:      return CupertinoGlyph.MusicNote
         case .text:       return CupertinoGlyph.Textformat
-        case .shape:      return CupertinoGlyph.CircleFill
+        case .shape:      return CupertinoGlyph.Circle   // 0.3.4: contorno (AureaIconStyle)
         case .null:       return CupertinoGlyph.SmallcircleCircle
         case .adjustment: return CupertinoGlyph.SliderHorizontal3
         case .camera:     return CupertinoGlyph.CameraFill

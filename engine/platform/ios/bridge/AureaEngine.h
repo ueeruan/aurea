@@ -1151,6 +1151,29 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)removePlugin:(NSString*)pluginId NS_SWIFT_NAME(removePlugin(_:));
 /// A pasta de plugins em uso pelo motor.
 @property (nonatomic, readonly, copy) NSString* pluginDirectory;
+
+// --- 0.3.4 plugins: painéis, scripts e APIs (EnginePluginsV2.cpp) -----------
+// As chamadas BLOQUEIAM (o script roda na thread de quem chama): só de uma
+// thread de trabalho com pilha grande (PluginsV2.swift). Respostas em JSON.
+/// Liga rede (URLSession), área de transferência e o seletor ao motor. O
+/// seletor de arquivo é o bloco abaixo (a interface mostra e espera).
+- (BOOL)installPluginHost NS_SWIFT_NAME(installPluginHost());
+/// Chamado NA THREAD DO SCRIPT: devolve [nome, caminho, tamanho] ou nil (cancelado).
+@property (nonatomic, copy, nullable) NSArray<NSString*>* _Nullable (^pluginPickFile)(NSString* pluginId, NSArray<NSString*>* types);
+/// Lê um pacote sem instalar: o que ele pede (folha de consentimento).
+- (NSString*)inspectPlugin:(NSString*)path NS_SWIFT_NAME(inspectPlugin(_:));
+- (BOOL)setPluginEnabled:(NSString*)pluginId on:(BOOL)on NS_SWIFT_NAME(setPluginEnabled(_:on:));
+/// Permissões concedidas: 1 rede, 2 área de transferência, 4 arquivos.
+- (BOOL)setPluginPermissions:(NSString*)pluginId mask:(uint32_t)mask NS_SWIFT_NAME(setPluginPermissions(_:mask:));
+- (NSString*)pluginCall:(NSString*)pluginId function:(NSString*)function args:(NSString*)argsJSON locale:(NSString*)locale NS_SWIFT_NAME(pluginCall(_:function:args:locale:));
+- (NSString*)pluginEvent:(NSString*)pluginId control:(NSString*)control kind:(NSString*)kind value:(NSString*)valueJSON locale:(NSString*)locale NS_SWIFT_NAME(pluginEvent(_:control:kind:value:locale:));
+- (NSString*)pluginOpenPanel:(NSString*)pluginId panel:(NSString*)panel locale:(NSString*)locale NS_SWIFT_NAME(pluginOpenPanel(_:panel:locale:));
+- (NSString*)pluginState:(NSString*)pluginId NS_SWIFT_NAME(pluginState(_:));
+- (NSString*)pluginConsole:(NSString*)pluginId NS_SWIFT_NAME(pluginConsole(_:));
+- (void)pluginClearConsole:(NSString*)pluginId NS_SWIFT_NAME(pluginClearConsole(_:));
+/// Para a chamada em andamento (qualquer thread).
+- (void)pluginCancel:(NSString*)pluginId NS_SWIFT_NAME(pluginCancel(_:));
+- (void)pluginReload:(NSString*)pluginId NS_SWIFT_NAME(pluginReload(_:));
 - (NSArray<NSNumber*>*)effectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel samples:(BOOL)samples NS_SWIFT_NAME(effectCurve(_:effect:param:channel:samples:));
 - (int32_t)editEffectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel action:(uint32_t)action point:(uint32_t)point x:(float)x y:(float)y NS_SWIFT_NAME(editEffectCurve(_:effect:param:channel:action:point:x:y:));
 /// Declaração dos parâmetros de um TIPO (o catálogo, sem camada).

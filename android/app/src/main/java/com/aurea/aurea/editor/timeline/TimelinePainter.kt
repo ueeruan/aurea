@@ -36,7 +36,7 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaTimeline
 import com.aurea.aurea.ui.theme.ClipTone
 import com.aurea.aurea.ui.theme.CupertinoGlyph
-import com.aurea.aurea.ui.theme.CupertinoIconBoldStroke
+import com.aurea.aurea.ui.theme.AureaIconStyle
 import com.aurea.aurea.ui.theme.CupertinoIconsFont
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.aureaTracking
@@ -1262,14 +1262,18 @@ internal class TimelinePainter(
         return layout
     }
 
-    /** Glifo da fonte CupertinoIcons numa caixa N×N (como `CupertinoIcon`), centrado em (cx, cy). */
+    /**
+     * Glifo da fonte CupertinoIcons numa caixa N×N (como `CupertinoIcon`), centrado em (cx, cy).
+     * 0.3.4: no estilo do app (cheio → contorno, `AureaIconStyle`), desenhado uma vez.
+     */
     private fun DrawScope.drawGlyph(glyph: Char, sizeDp: Float, tint: Color, cx: Float, cy: Float) {
-        val key = glyph.code * 64 + sizeDp.roundToInt()
+        val shown = AureaIconStyle.glyph(glyph)
+        val key = shown.code * 64 + sizeDp.roundToInt()
         var layout = glyphs.get(key)
         if (layout == null) {
             val fontSize = (sizeDp / m.fontScale).sp
             layout = measurer.measure(
-                glyph.toString(),
+                shown.toString(),
                 TextStyle(
                     fontFamily = CupertinoIconsFont,
                     fontSize = fontSize,
@@ -1280,35 +1284,8 @@ internal class TimelinePainter(
             )
             glyphs.put(key, layout)
         }
-        val topLeft = Offset(cx - layout.size.width / 2f, cy - layout.size.height / 2f)
-        // 0.3.3 limpeza: o mesmo peso bold do `CupertinoIcon` (glifo cheio + contorno de
-        // CupertinoIconBoldStroke do tamanho, junção redonda). Tinta translúcida: os dois
-        // saem opacos numa camada com o alfa, senão a sobreposição deixaria a borda mais forte.
-        val strokePx = sizeDp * m.density * CupertinoIconBoldStroke
-        if (strokePx <= 0f) {
-            drawText(layout, color = tint, topLeft = topLeft)
-            return
-        }
-        if (tint.alpha <= 0f) return
-        val translucent = tint.alpha < 1f
-        val ink = if (translucent) tint.copy(alpha = 1f) else tint
-        if (translucent) {
-            glyphLayerPaint.alpha = tint.alpha
-            drawContext.canvas.saveLayer(
-                androidx.compose.ui.geometry.Rect(
-                    topLeft.x - strokePx, topLeft.y - strokePx,
-                    topLeft.x + layout.size.width + strokePx, topLeft.y + layout.size.height + strokePx,
-                ),
-                glyphLayerPaint,
-            )
-        }
-        drawText(layout, color = ink, topLeft = topLeft)
-        drawText(layout, color = ink, topLeft = topLeft, drawStyle = Stroke(width = strokePx, join = StrokeJoin.Round))
-        if (translucent) drawContext.canvas.restore()
+        drawText(layout, color = tint, topLeft = Offset(cx - layout.size.width / 2f, cy - layout.size.height / 2f))
     }
-
-    /** Camada do glifo translúcido em [drawGlyph] (só o alfa muda). */
-    private val glyphLayerPaint = androidx.compose.ui.graphics.Paint()
 
     // =================================================================================
     // Omega 0.3.2 (área 03): a timeline da referência, com o desenho do AUREA.

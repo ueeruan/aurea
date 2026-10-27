@@ -579,7 +579,7 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
         Column(Modifier.weight(1f).fillMaxHeight().background(AureaColors.CurveGraphBackground)) {
             // Os parâmetros (Quique, Elástico, Passar do ponto) numa faixa no TOPO do gráfico.
             if (graphMode == 0 && ease.isParametric) {
-                Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     when (ease.interp) {
                         Interp.OVERSHOOT -> CurveParamSlider(stringResource(R.string.curve_param_amount), ease.overshootAmount, 0f..1f, 0,
                             "curve.overshoot.amount", null, store, "overshoot") { applyEase(store, layer, start, ease.overshoot(amount = it)) }
@@ -684,23 +684,23 @@ private fun CurveLeftColumn(
     var menu by remember { mutableStateOf(false) }
     Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight()) {
         CurveCell("curve.back", stringResource(R.string.panel_voltar), onBack) {
-            CupertinoIcon(CupertinoGlyph.ChevronLeft, 22.dp, AureaColors.Text)
+            CupertinoIcon(CupertinoGlyph.ChevronLeft, PanelMetrics.RailIcon, AureaColors.Text)
         }
         CurveCell("curve.keyframe", stringResource(if (keyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui), onKey) {
             com.aurea.aurea.ui.ds.KeyframeDiamondIcon(
                 if (keyHere) com.aurea.aurea.ui.ds.KeyframeLook.KeyHere else com.aurea.aurea.ui.ds.KeyframeLook.Animated,
-                enabled = true, modifier = Modifier.size(24.dp),
+                enabled = true, modifier = Modifier.size(PanelMetrics.RailIcon),
             )
         }
         CurveCell("curve.reverse", stringResource(R.string.om_curve_reverse), onInvert, enabled = invertible, alpha = if (invertible) 1f else .5f) {
-            CupertinoIcon(CupertinoGlyph.ArrowRightArrowLeft, 20.dp, if (inverted) AureaColors.Accent else AureaColors.Text)
+            CupertinoIcon(CupertinoGlyph.ArrowRightArrowLeft, 24.dp, if (inverted) AureaColors.Accent else AureaColors.Text)
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val more = stringResource(R.string.editor_mais)
             Box(
                 Modifier.fillMaxSize().testTag("curve.menu").semantics { contentDescription = more }.tocavel(shrink = 1f) { menu = true },
                 contentAlignment = Alignment.Center,
-            ) { CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, AureaColors.Text) }
+            ) { CupertinoIcon(CupertinoGlyph.Ellipsis, PanelMetrics.RailIcon, AureaColors.Text) }
             AnchoredMenu(expanded = menu, onDismiss = { menu = false }, entries = menuEntries, tag = "curve.menu.list")
         }
     }
@@ -737,10 +737,11 @@ private fun CurveSegmentBar(
 ) {
     val previousLabel = stringResource(R.string.om_curve_prev)
     val nextLabel = stringResource(R.string.om_curve_next)
-    Row(modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(44.dp, 40.dp).testTag("curve.prev").semantics { contentDescription = previousLabel }.tocavel(enabled = before) { onJump(-1) },
+    // 0.3.4 painéis: faixa de 44 (antes 40), setas 18 e rótulo 12 (antes 9).
+    Row(modifier.fillMaxWidth().height(PanelMetrics.Touch), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(44.dp, PanelMetrics.Touch).testTag("curve.prev").semantics { contentDescription = previousLabel }.tocavel(enabled = before) { onJump(-1) },
             contentAlignment = Alignment.Center) {
-            CupertinoIcon(CupertinoGlyph.ChevronLeft, 14.dp, if (before) AureaColors.Text else AureaColors.Disabled)
+            CupertinoIcon(CupertinoGlyph.ChevronLeft, 18.dp, if (before) AureaColors.Text else AureaColors.Disabled)
         }
         // A curva do trecho; tocar troca a força (×1 → ×2 → ×3) — extra do AUREA.
         Text(
@@ -748,11 +749,11 @@ private fun CurveSegmentBar(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f).testTag("curve.power").tocavel(enabled = powered, shrink = 1f, onClick = onPower).padding(vertical = 12.dp),
-            style = AureaType.Base.merge(TextStyle(fontSize = 9.sp, fontWeight = FontWeight.W500, color = Color.White.copy(alpha = .5f), textAlign = TextAlign.Center)),
+            style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, fontWeight = FontWeight.W500, color = Color.White.copy(alpha = .5f), textAlign = TextAlign.Center)),
         )
-        Box(Modifier.size(44.dp, 40.dp).testTag("curve.next").semantics { contentDescription = nextLabel }.tocavel(enabled = after) { onJump(1) },
+        Box(Modifier.size(44.dp, PanelMetrics.Touch).testTag("curve.next").semantics { contentDescription = nextLabel }.tocavel(enabled = after) { onJump(1) },
             contentAlignment = Alignment.Center) {
-            CupertinoIcon(CupertinoGlyph.ChevronRight, 14.dp, if (after) AureaColors.Text else AureaColors.Disabled)
+            CupertinoIcon(CupertinoGlyph.ChevronRight, 18.dp, if (after) AureaColors.Text else AureaColors.Disabled)
         }
     }
 }
@@ -1003,7 +1004,7 @@ private fun androidx.compose.foundation.layout.RowScope.CurveParamSlider(
     state: String?, store: EditorStore, gesture: String, onChange: (Float) -> Unit,
 ) {
     Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp).widthIn(max = 96.dp),
-        style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = Color.White)))
+        style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, color = Color.White)))
     var changing by remember { mutableStateOf(false) }
     val change by rememberUpdatedState(onChange)
     androidx.compose.material3.Slider(value = value.coerceIn(range.start, range.endInclusive), valueRange = range, steps = steps,
@@ -1020,14 +1021,14 @@ private fun androidx.compose.foundation.layout.RowScope.CurveParamSlider(
 /** Pastilha da fileira de presets (mesmo desenho do botão Bounce), alvo de 40 dp. */
 @Composable
 private fun CurveChip(label: String, active: Boolean = false, tag: String, onTap: () -> Unit) {
-    Box(Modifier.height(40.dp).testTag(tag).tocavel { onTap() }, contentAlignment = Alignment.Center) {
+    Box(Modifier.height(PanelMetrics.Touch).testTag(tag).tocavel { onTap() }, contentAlignment = Alignment.Center) {
         Text(
             label, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.widthIn(max = 140.dp).clip(RoundedCornerShape(14.dp))
                 .background(if (active) CurveGreen.copy(alpha = .18f) else CurveRailFill)
                 .border(1.dp, if (active) CurveGreen else Color.White.copy(alpha = .18f), RoundedCornerShape(14.dp))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600,
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+            style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label, fontWeight = FontWeight.W600,
                 color = if (active) CurveGreen else Color.White)),
         )
     }

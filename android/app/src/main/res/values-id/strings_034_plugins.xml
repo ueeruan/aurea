@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.4 plugins: painéis, scripts e permissões (effects/PluginUi.kt). -->
+<resources>
+    <string name="pv2_consent_title">Pasang %1$s?</string>
+    <string name="pv2_consent_body">Plugin ini meminta:</string>
+    <string name="pv2_consent_none">Tidak meminta internet, papan klip, atau berkas.</string>
+    <string name="pv2_perm_network">Internet, hanya ke: %1$s</string>
+    <string name="pv2_perm_clipboard">Papan klip (membaca dan menyalin teks)</string>
+    <string name="pv2_perm_files">Berkas yang Anda pilih</string>
+    <string name="pv2_consent_script">Plugin menjalankan skrip di dalam AUREA, tanpa akses bebas ke perangkat. Izin bisa diubah nanti di Plugins.</string>
+    <string name="pv2_consent_update">Menggantikan versi %1$s yang terpasang.</string>
+    <string name="pv2_install">Pasang</string>
+    <string name="pv2_enabled">Aktif</string>
+    <string name="pv2_permissions">Izin</string>
+    <string name="pv2_open_panel">Buka %1$s</string>
+    <string name="pv2_console">Konsol</string>
+    <string name="pv2_console_title">Konsol %1$s</string>
+    <string name="pv2_console_empty">Konsol kosong.</string>
+    <string name="pv2_console_clear">Bersihkan</string>
+    <string name="pv2_reload">Muat ulang skrip</string>
+    <string name="pv2_cancel_run">Hentikan</string>
+    <string name="pv2_running">Berjalan…</string>
+    <string name="pv2_error_title">Plugin mengalami galat</string>
+    <string name="pv2_see_console">Lihat konsol</string>
+    <string name="pv2_menu">Plugin</string>
+    <string name="pv2_menu_empty">Tidak ada plugin dengan panel yang aktif. Pasang di Efek > Plugin.</string>
+    <string name="pv2_disabled">Nonaktif</string>
+    <string name="pv2_kind_panel">panel dan skrip</string>
+    <string name="pv2_has_script">dengan skrip</string>
+    <string name="pv2_reading">Membaca plugin…</string>
+    <string name="pv2_inspect_failed">Plugin tidak dapat dibaca: %1$s</string>
+    <string name="pv2_close">Tutup</string>
+    <string name="pv2_no_layer">Pilih lapisan terlebih dahulu.</string>
+</resources>

@@ -1,7 +1,7 @@
 // =============================================================================
 //  Aurea / engine / EnginePluginsV2.cpp
 //
-//  0.3.3 plugins: os plugins do formato 2 — painéis declarados, scripts e
+//  0.3.4 plugins: os plugins do formato 2 — painéis declarados, scripts e
 //  APIs. Aqui moram as funções do Engine que a interface chama
 //  (plugin_call, plugin_event...) e a API de OBJETOS do AUREA que o script vê,
 //  no estilo dos scripts do After Effects:

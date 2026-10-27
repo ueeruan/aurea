@@ -423,9 +423,10 @@ struct ProjectSettingsPanel: View {
         if key == "fps" {
             let custom = !frameRates.contains { abs(model.compositionFps - Double($0)) < 0.01 }
             let rates: [MenuEntry] = frameRates.map { fps -> MenuEntry in
-                .item("\(fps) fps", selected: abs(model.compositionFps - Double(fps)) < 0.01) { setFps(Double(fps)) }
+                // 0.3.4: ids das opções (= Android), para o teste de interface.
+                .item("\(fps) fps", selected: abs(model.compositionFps - Double(fps)) < 0.01, tag: "projectSettings.fps.\(fps)") { setFps(Double(fps)) }
             }
-            return rates + [.item(AureaText.t("project_fps_custom"), selected: custom) {
+            return rates + [.item(AureaText.t("project_fps_custom"), selected: custom, tag: "projectSettings.fps.custom") {
                 // fps livre: o teclado limita a 1–240 e aceita decimais (29,97).
                 model.numericKeypad = KeypadRequest(title: AureaText.t("project_fps_custom_title"), value: Float(model.compositionFps),
                                                     unit: "fps", min: 1, max: 240, decimals: 3, onValue: { setFps(Double($0)) })

@@ -21,6 +21,9 @@ class EditorLayoutTest {
         assertEquals(280f, EditorLayout.bottomZone(), 0f)
         assertEquals(200f, EditorLayout.layerPanel(), 0f)
         assertEquals(EditorLayout.BOTTOM_ZONE, EditorLayout.LAYER_PANEL + EditorLayout.TIMELINE_FOCUS, 0f)
+        // 0.3.4 painéis: a faixa de foco é régua 42 + linha 28 + folga 10.
+        assertEquals(EditorLayout.TIMELINE_FOCUS, EditorLayout.timelineFocus(), 0f)
+        assertEquals(42f + 28f + 10f, EditorLayout.timelineFocus(), 0f)
     }
 
     @Test fun previewIsTheRestAndNeverMovesWhenPanelsOpenOrClose() {
@@ -34,7 +37,7 @@ class EditorLayoutTest {
     }
 
     // 0.3.3 recursos: a divisa palco/timeline voltou (arrastar o transporte).
-    @Test fun dividerRaisesTheTimelineAndThePanelKeepsItsHeight() {
+    @Test fun dividerRaisesTheTimelineAndThePanelFollowsItUp() {
         for (h in phones) {
             val p = h - 368f - 100f   // a timeline subiu 100
             val bar = EditorLayout.solve(h, SheetContent.AddBar, false, preferred = p)
@@ -43,14 +46,34 @@ class EditorLayoutTest {
             assertEquals(310f, bar.timeline, 0.01f)
             assertEquals(EditorLayout.ADD_BAR, bar.sheet, 0.01f)
             assertEquals(h, bar.total, 0.01f)
-            for (content in listOf(SheetContent.Dock, SheetContent.Panel, SheetContent.Curve)) {
+            // A doca da camada tem a altura do conteúdo (no máximo 200).
+            val dock = EditorLayout.solve(h, SheetContent.Dock, false, preferred = p)
+            assertEquals(p, dock.preview, 0.01f)
+            assertEquals(200f, dock.sheet, 0.01f)
+            for (content in listOf(SheetContent.Panel, SheetContent.Curve)) {
                 val m = EditorLayout.solve(h, content, false, preferred = p)
-                // Prévia menor que a automática: fica onde a pessoa deixou; o painel tem 200 por cima.
+                // 0.3.4 painéis: prévia onde a pessoa deixou; o painel sobe até logo
+                // abaixo da linha em foco (régua 42 + linha 28 + 10), sem vazio por cima.
                 assertEquals("$content preview", p, m.preview, 0.01f)
                 assertTrue(m.overlay)
-                assertEquals("$content sheet", 200f, m.sheet, 0.01f)
-                assertEquals("$content visible", 180f, m.visibleTimeline, 0.01f)
+                assertEquals("$content sheet", 300f, m.sheet, 0.01f)
+                assertEquals("$content visible", 80f, m.visibleTimeline, 0.01f)
                 assertEquals(h, m.total, 0.01f)
+            }
+        }
+    }
+
+    // 0.3.4 painéis: em qualquer altura da divisa e da fonte, o painel aberto deixa à
+    // vista só a régua, a linha em foco e a folga.
+    @Test fun openPanelAlwaysEndsJustBelowTheFocusedRow() {
+        for (h in phones) for (font in listOf(1f, 1.3f, 2f)) for (pref in listOf(0f, 120f, h - 368f - 200f, h - 368f + 60f)) {
+            for (content in listOf(SheetContent.Panel, SheetContent.Curve)) {
+                val m = EditorLayout.solve(h, content, false, preferred = pref, fontScale = font)
+                val label = "$h $font $pref $content"
+                assertTrue(label, m.overlay)
+                assertEquals(label, EditorLayout.timelineFocus(font), m.visibleTimeline, 0.01f)
+                assertTrue(label, m.sheet >= EditorLayout.layerPanel(font) - 0.01f)
+                assertEquals(label, h, m.total, 0.01f)
             }
         }
     }
@@ -160,10 +183,12 @@ class EditorLayoutTest {
 
     @Test fun largerFontsGrowThePanelAndTheZone() {
         val m = EditorLayout.solve(900f, SheetContent.Panel, false, fontScale = 1.5f)
+        // 0.3.4 painéis: a faixa de foco cresce com a régua (+7) e a linha (+12): 99.
+        assertEquals(99f, EditorLayout.timelineFocus(1.5f), 0.01f)
         assertEquals(220f, m.sheet, 0.01f)
-        assertEquals(300f, m.timeline, 0.01f)
-        assertEquals(80f, m.visibleTimeline, 0.01f)
-        assertEquals(900f - 42f - 46f - 300f, m.preview, 0.01f)
+        assertEquals(319f, m.timeline, 0.01f)
+        assertEquals(99f, m.visibleTimeline, 0.01f)
+        assertEquals(900f - 42f - 46f - 319f, m.preview, 0.01f)
         assertTrue(EditorLayout.dockTile(2f) > EditorLayout.dockTile())
         assertTrue(EditorLayout.DOCK_QUICK >= 48f)
         assertTrue(EditorLayout.DOCK_TILE >= 48f)

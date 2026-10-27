@@ -250,8 +250,9 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
                                 tag = "projectSettings.fps",
                                 contentDescription = stringResource(R.string.editor_quadros_segundo),
                                 entries = FpsOptions.map { f ->
-                                    MenuEntry.Item("$f fps", selected = abs(fpsValue - f) < 0.01) { store.setCompositionFps(f.toDouble()) }
-                                } + MenuEntry.Item(customFpsLabel, selected = FpsOptions.none { abs(fpsValue - it) < 0.01 }) {
+                                    // Omega 0.3.4: ids das opções (= iOS), para o teste de interface.
+                                    MenuEntry.Item("$f fps", selected = abs(fpsValue - f) < 0.01, tag = "projectSettings.fps.$f") { store.setCompositionFps(f.toDouble()) }
+                                } + MenuEntry.Item(customFpsLabel, selected = FpsOptions.none { abs(fpsValue - it) < 0.01 }, tag = "projectSettings.fps.custom") {
                                     // fps livre: o teclado limita a 1–240 e aceita decimais (29,97).
                                     keypad = KeypadRequest(customFpsTitle, fpsValue.toFloat(), "fps", 1f, 240f, 3) { v ->
                                         store.setCompositionFps(v.toDouble())

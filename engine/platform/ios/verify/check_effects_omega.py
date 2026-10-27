@@ -63,13 +63,14 @@ func check(_ ok: Bool, _ message: String) {
 func near(_ a: Float, _ b: Float, _ e: Float = 1e-6) -> Bool { abs(a - b) <= e }
 func near(_ a: Double, _ b: Double, _ e: Double) -> Bool { abs(a - b) <= e }
 // Alturas e controle (FxParamMathTest.rowHeightsFollowTheReference).
-check(FxParamMath.rowHeight(FxParamControl.slider, fxParamFloat) == 51, "slider 51")
-check(FxParamMath.rowHeight(FxParamControl.ruler, fxParamFloat) == 57, "régua 57")
-check(FxParamMath.rowHeight(FxParamControl.point, fxParamPoint2D) == 57, "ponto 57")
-check(FxParamMath.rowHeight(FxParamControl.xyz, fxParamPoint3D) == 57, "xyz 57")
-check(FxParamMath.rowHeight(FxParamControl.auto, fxParamBool) == 38, "interruptor 38")
-check(FxParamMath.rowHeight(FxParamControl.auto, fxParamEnum) == 38, "escolha 38")
-check(FxParamMath.rowHeight(FxParamControl.auto, fxParamFloat) == 57, "número antigo = régua")
+// 0.3.4 painéis: as linhas cresceram (eram 51 / 57 / 38).
+check(FxParamMath.rowHeight(FxParamControl.slider, fxParamFloat) == 60, "slider 60")
+check(FxParamMath.rowHeight(FxParamControl.ruler, fxParamFloat) == 66, "régua 66")
+check(FxParamMath.rowHeight(FxParamControl.point, fxParamPoint2D) == 66, "ponto 66")
+check(FxParamMath.rowHeight(FxParamControl.xyz, fxParamPoint3D) == 66, "xyz 66")
+check(FxParamMath.rowHeight(FxParamControl.auto, fxParamBool) == 46, "interruptor 46")
+check(FxParamMath.rowHeight(FxParamControl.auto, fxParamEnum) == 46, "escolha 46")
+check(FxParamMath.rowHeight(FxParamControl.auto, fxParamFloat) == 66, "número antigo = régua")
 check(FxParamMath.controlFor(FxParamControl.auto, fxParamAngle) == FxParamControl.ruler, "ângulo = régua")
 check(FxParamMath.controlFor(FxParamControl.auto, fxParamPoint2D) == FxParamControl.point, "ponto")
 check(FxParamMath.controlFor(FxParamControl.auto, fxParamPoint3D) == FxParamControl.xyz, "xyz")

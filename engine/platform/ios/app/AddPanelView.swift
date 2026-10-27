@@ -803,9 +803,9 @@ struct AddBarIcon: View {
 }
 
 private enum AddBarDrawing {
-    /// 2 mais o traço extra dos glifos bold (0.3.3, `AureaIconWeight.glyphStroke` × 24),
-    /// no mesmo peso dos ícones da fonte ao lado. Par do `ADD_BAR_STROKE` do Android.
-    static let stroke: CGFloat = 2 + 24 * AureaIconWeight.glyphStroke
+    /// 0.3.4: o traço fino do estilo dos ícones (`AureaIconStyle.line`), o mesmo peso
+    /// dos glifos da fonte ao lado. Par do `ADD_BAR_STROKE` do Android.
+    static let stroke: CGFloat = AureaIconStyle.line
 
     static func draw(_ category: Int, _ context: GraphicsContext, _ box: CGSize, _ color: Color) {
         let u = min(box.width, box.height) / 24
@@ -824,7 +824,7 @@ private enum AddBarDrawing {
             path.move(to: p(hi, lo + r)); path.addLine(to: p(hi, hi - r))
             path.move(to: p(lo + r, hi)); path.addLine(to: p(hi - r, hi))
             path.move(to: p(lo, lo + r)); path.addLine(to: p(lo, hi - r))
-            context.stroke(path, with: .color(color), lineWidth: stroke * u)
+            context.stroke(path, with: .color(color), style: style)
         case 4:
             // Elemento: flor de 8 pétalas (só o arco de fora de cada uma) e o miolo.
             let center = p(12, 12)

@@ -34,10 +34,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.FormatAlignLeft
-import androidx.compose.material.icons.automirrored.rounded.FormatAlignRight
-import androidx.compose.material.icons.rounded.Stairs
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -96,6 +92,7 @@ import com.aurea.aurea.ui.ds.AnchoredMenuPosition
 import com.aurea.aurea.ui.ds.AureaSurfaceTone
 import com.aurea.aurea.ui.ds.MenuColors
 import com.aurea.aurea.ui.theme.AureaColors
+import com.aurea.aurea.ui.theme.AureaLineIcons
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
@@ -210,6 +207,8 @@ internal fun LayerTopBar(store: EditorStore, ui: EditorUi, layerId: Long) {
                 if (linking) LinkMenu(store, listOf(h.id)) { linking = false }
             }
         }
+        // 0.3.4 plugins: botões "layer.toolbar" dos plugins ligados.
+        com.aurea.aurea.effects.PluginLayerBarButtons(store, ShellDims.TopBar)
         ChromeButton(
             CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_camada),
             onClick = if (!h.locked) ({ LayerOps.delete(store, listOf(h.id)) }) else null,
@@ -463,6 +462,8 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
                     onRename = { store.renameProject(it) },
                 )
             }
+            // 0.3.4 plugins: o menu de plugins (painéis e ações "editor.menu"); some sem plugin.
+            com.aurea.aurea.effects.PluginEditorMenuButton(store, ShellDims.TopBar)
             ChromeButton(
                 CupertinoGlyph.Gear, stringResource(R.string.editor_ajustes_projeto),
                 onClick = { openSheet(store, ui, ShellSheet.ProjectSettings) },
@@ -803,13 +804,13 @@ internal fun MultiSelectBottomBar(store: EditorStore, modifier: Modifier) {
             }
         }
         Spacer(Modifier.weight(1f))
-        BottomVectorCell(Icons.AutoMirrored.Rounded.FormatAlignLeft, stringResource(R.string.editor_alinhar_inicios), "batch.bottom.alignStarts") {
+        BottomVectorCell(AureaLineIcons.AlignStarts, stringResource(R.string.editor_alinhar_inicios), "batch.bottom.alignStarts") {
             store.arrangeLayerTimes(0)
         }
-        BottomVectorCell(Icons.Rounded.Stairs, stringResource(R.string.om_sel_distribute_time), "batch.bottom.distributeTime") {
+        BottomVectorCell(AureaLineIcons.Stairs, stringResource(R.string.om_sel_distribute_time), "batch.bottom.distributeTime") {
             store.arrangeLayerTimes(3)
         }
-        BottomVectorCell(Icons.AutoMirrored.Rounded.FormatAlignRight, stringResource(R.string.editor_alinhar_fins), "batch.bottom.alignEnds") {
+        BottomVectorCell(AureaLineIcons.AlignEnds, stringResource(R.string.editor_alinhar_fins), "batch.bottom.alignEnds") {
             store.arrangeLayerTimes(2)
         }
     }

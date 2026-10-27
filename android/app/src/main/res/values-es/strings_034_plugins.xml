@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.4 plugins: painéis, scripts e permissões (effects/PluginUi.kt). -->
+<resources>
+    <string name="pv2_consent_title">¿Instalar %1$s?</string>
+    <string name="pv2_consent_body">Este plugin pide:</string>
+    <string name="pv2_consent_none">No pide internet, portapapeles ni archivos.</string>
+    <string name="pv2_perm_network">Internet, solo en: %1$s</string>
+    <string name="pv2_perm_clipboard">Portapapeles (leer y copiar texto)</string>
+    <string name="pv2_perm_files">Archivos que elijas</string>
+    <string name="pv2_consent_script">Ejecuta un script dentro de AUREA, sin acceso libre al dispositivo. Puedes cambiar los permisos después en Plugins.</string>
+    <string name="pv2_consent_update">Sustituye la versión %1$s instalada.</string>
+    <string name="pv2_install">Instalar</string>
+    <string name="pv2_enabled">Activado</string>
+    <string name="pv2_permissions">Permisos</string>
+    <string name="pv2_open_panel">Abrir %1$s</string>
+    <string name="pv2_console">Consola</string>
+    <string name="pv2_console_title">Consola de %1$s</string>
+    <string name="pv2_console_empty">Nada en la consola.</string>
+    <string name="pv2_console_clear">Limpiar</string>
+    <string name="pv2_reload">Recargar script</string>
+    <string name="pv2_cancel_run">Detener</string>
+    <string name="pv2_running">Ejecutando…</string>
+    <string name="pv2_error_title">El plugin dio un error</string>
+    <string name="pv2_see_console">Ver consola</string>
+    <string name="pv2_menu">Plugins</string>
+    <string name="pv2_menu_empty">Ningún plugin con panel activado. Instala uno en Efectos > Plugins.</string>
+    <string name="pv2_disabled">Desactivado</string>
+    <string name="pv2_kind_panel">panel y script</string>
+    <string name="pv2_has_script">con script</string>
+    <string name="pv2_reading">Leyendo el plugin…</string>
+    <string name="pv2_inspect_failed">No se pudo leer el plugin: %1$s</string>
+    <string name="pv2_close">Cerrar</string>
+    <string name="pv2_no_layer">Elige una capa primero.</string>
+</resources>

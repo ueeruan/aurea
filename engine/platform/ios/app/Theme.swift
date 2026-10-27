@@ -1466,8 +1466,22 @@ enum EditorLayout {
     static let timelineFocus: CGFloat = 80
     /// O painel cresce com a fonte do sistema: 200 em 1×, 240 em 2×.
     static func layerPanel(fontScale: CGFloat = 1) -> CGFloat { layerPanelHeight + 40 * (min(max(fontScale, 1), 2) - 1) }
+    // 0.3.4 painéis: o painel de propriedade sobe até logo abaixo da linha em foco.
+    /// Régua da timeline (`TimelineMetrics.rowsTop`): 42 em 1×, +14 por 1× de fonte.
+    static let focusRuler: CGFloat = 42
+    /// A linha da camada em foco (`TimelineMetrics.row`): 28 em 1×, +24 por 1× de fonte.
+    static let focusRow: CGFloat = 28
+    /// Folga entre a linha em foco e o topo do painel.
+    static let focusGap: CGFloat = 10
+    /// A faixa de timeline à vista com o painel aberto: régua + linha em foco + folga
+    /// (`timelineFocus` = 80 em 1×); cresce com a fonte junto com a régua e a linha.
+    /// Par do `EditorLayout.timelineFocus(fontScale)` do Android.
+    static func timelineFocusHeight(fontScale: CGFloat) -> CGFloat {
+        let s = min(max(fontScale, 1), 2) - 1
+        return focusRuler + 14 * s + focusRow + 24 * s + focusGap
+    }
     /// A zona inferior: o painel + a faixa de foco da timeline (280 em 1×).
-    static func bottomZone(fontScale: CGFloat = 1) -> CGFloat { layerPanel(fontScale: fontScale) + timelineFocus }
+    static func bottomZone(fontScale: CGFloat = 1) -> CGFloat { layerPanel(fontScale: fontScale) + timelineFocusHeight(fontScale: fontScale) }
 
     /// Folga do palco em volta do quadro ajustado (layout antigo; fica para quem lê o token).
     static let previewFitMargin: CGFloat = 16
@@ -1507,6 +1521,7 @@ enum EditorLayout {
         }
         let ws = workspace(total)
         let panel = layerPanel(fontScale: fontScale)
+        let focus = timelineFocusHeight(fontScale: fontScale)
         let previewFloor = min(previewMin, ws * 0.25)
         let automatic = min(max(previewFloor, ws - bottomZone(fontScale: fontScale)), ws)
         // 0.3.3 recursos: a altura arrastada na divisa (0 = automática).
@@ -1524,7 +1539,8 @@ enum EditorLayout {
         }
         func over(_ body: CGFloat) -> EditorMetrics {
             // Ao menos a faixa de foco da timeline fica à vista (menos numa tela baixa).
-            let sheet = min(body, max(0, zone - min(timelineFocus, zone * 0.3)))
+            // 0.3.4 painéis: o teto é metade da zona (com 0,3 a faixa de foco da fonte grande cortava a linha).
+            let sheet = min(body, max(0, zone - min(focus, zone * 0.5)))
             return EditorMetrics(topBar: topBar, preview: preview, strip: strip, transport: transport,
                                  timeline: zone, sheet: max(0, sheet), overlay: true)
         }
@@ -1536,7 +1552,9 @@ enum EditorLayout {
         // Omega adicionar: a mesma zona da barra (210 + 70); o conteúdo fica por cima da timeline.
         case .adding: return stacked(addBar)
         case .dock: return over(min(dockHeight(rows: dockRows, fontScale: fontScale), panel))
-        case .panel, .curve: return over(panel)
+        // 0.3.4 painéis: o painel de propriedade ocupa a zona inteira até logo abaixo
+        // da linha em foco (régua + linha + folga), também com a divisa no alto.
+        case .panel, .curve: return over(zone)
         }
     }
 
@@ -1620,54 +1638,95 @@ enum CupertinoFont {
 }
 
 // =============================================================================
-// 0.3.3: ícones mais bold no app inteiro (par do `CupertinoIconBoldStroke` do
-// Android, mesmo valor). A fonte CupertinoIcons só tem o peso normal e o SwiftUI
-// não contorna texto, então `AureaBoldIcon` desenha o glifo e, atrás dele, oito
-// cópias deslocadas meio traço em volta (0°, 45°…315°): o contorno de junção
-// redonda que o Android faz com `Stroke`. Todo `CupertinoGlyph.text` e todo
-// `MaterialGlyph` passam por aqui; os SF Symbols dos componentes usam `symbol`.
+// 0.3.4: o estilo dos ícones do app, num ponto só (par do `AureaIconStyle` do
+// CupertinoIcons.kt, mesmos valores). Minimalista e limpo: ícone de CONTORNO,
+// traço fino e uniforme, desenhado UMA vez (sem contorno extra, sem cópias).
 // =============================================================================
-enum AureaIconWeight {
-    /// Traço extra em volta do glifo, em fração do tamanho do ícone
-    /// (24 pt → ~1,1 pt de traço, ~0,54 pt a mais de cada lado). 0 desliga.
-    static let glyphStroke: CGFloat = 0.045
-    /// Peso dos SF Symbols desenhados pelos componentes do sistema de design.
-    static let symbol: Font.Weight = .semibold
+enum AureaIconStyle {
+    /// Traço dos ícones desenhados à mão, na caixa de 24 (multiplique pela
+    /// unidade `tamanho / 24`). É o peso dos glifos da fonte CupertinoIcons, que
+    /// já são de traço fino; cantos e pontas redondos.
+    static let line: CGFloat = 1.5
+    /// Peso dos SF Symbols: o regular, no mesmo traço fino dos glifos da fonte.
+    static let symbol: Font.Weight = .regular
+
+    /// Glifo cheio → o de contorno da mesma fonte. Vale para todo ícone que passa
+    /// por `CupertinoGlyph.text` e pelos glifos da timeline. Ficam cheios só os
+    /// que são estado ou marca: play/pausa, losango de keyframe, marcador de
+    /// batida, estrela de favorito, check de selecionado/feito, caixa marcada,
+    /// solo, ponto de cor (`CircleFill`), as metades de círculo e o triangulinho
+    /// de 7–8 pt que marca "tem menu" no canto de um botão (os de abrir/fechar
+    /// seção já usam chevron).
+    private static let outline: [Character: Character] = [
+        CupertinoGlyph.VideocamFill: CupertinoGlyph.Videocam,
+        CupertinoGlyph.PhotoFill: CupertinoGlyph.Photo,
+        CupertinoGlyph.FolderFill: CupertinoGlyph.Folder,
+        CupertinoGlyph.CameraFill: CupertinoGlyph.Camera,
+        CupertinoGlyph.CubeFill: CupertinoGlyph.Cube,
+        CupertinoGlyph.CubeBoxFill: CupertinoGlyph.CubeBox,
+        CupertinoGlyph.HouseFill: CupertinoGlyph.House,
+        CupertinoGlyph.MicFill: CupertinoGlyph.Mic,
+        CupertinoGlyph.PaintbrushFill: CupertinoGlyph.Paintbrush,
+        CupertinoGlyph.DropFill: CupertinoGlyph.Drop,
+        CupertinoGlyph.GearAltFill: CupertinoGlyph.Gear,
+        CupertinoGlyph.InfoCircleFill: CupertinoGlyph.InfoCircle,
+        CupertinoGlyph.ArrowDownCircleFill: CupertinoGlyph.ArrowDownCircle,
+        CupertinoGlyph.XmarkCircleFill: CupertinoGlyph.XmarkCircle,
+        CupertinoGlyph.SquareStack3dDownRightFill: CupertinoGlyph.SquareStack3dDownRight,
+        CupertinoGlyph.CaptionsBubbleFill: CupertinoGlyph.CaptionsBubble,
+        CupertinoGlyph.LockFill: CupertinoGlyph.Lock,
+        CupertinoGlyph.LockOpenFill: CupertinoGlyph.LockOpen,
+        CupertinoGlyph.LinkCircleFill: CupertinoGlyph.LinkCircle,
+        CupertinoGlyph.EyeFill: CupertinoGlyph.Eye,
+    ]
+
+    /// O glifo no estilo do app (ver `outline`).
+    static func glyph(_ codepoint: Character) -> Character { outline[codepoint] ?? codepoint }
 }
 
-extension Color {
-    /// Alfa da cor (0…1).
-    var aureaAlpha: Double { Double(UIColor(self).cgColor.alpha) }
-    /// A mesma cor, opaca.
-    var aureaOpaque: Color { Color(uiColor: UIColor(self).withAlphaComponent(1)) }
-}
+/// Nome da 0.3.3, mantido para as chamadas `AureaIconWeight.symbol` já espalhadas.
+typealias AureaIconWeight = AureaIconStyle
 
-/// O ícone com o contorno extra de `AureaIconWeight.glyphStroke`. `content`
-/// desenha o ícone numa cor OPACA; `alpha` é aplicado ao conjunto (assim a
-/// sobreposição das cópias não deixa a borda mais forte numa cor translúcida).
-struct AureaBoldIcon<Content: View>: View {
-    let size: CGFloat
-    var alpha: Double = 1
-    @ViewBuilder let content: () -> Content
+/// 0.3.4: ícones de linha próprios no lugar dos vetores do Material (cheios ou de
+/// traço 2): traço `AureaIconStyle.line`, pontas e cantos redondos, na caixa de 24.
+/// A mesma geometria do `AureaLineIcons` do CupertinoIcons.kt. Cada polilinha é
+/// x0, y0, x1, y1…
+enum AureaLineIcon {
+    static let chevronLeft: [[CGFloat]] = [[15, 6, 9, 12, 15, 18]]
+    static let alignStarts: [[CGFloat]] = [[4, 6, 20, 6], [4, 10, 14, 10], [4, 14, 20, 14], [4, 18, 14, 18]]
+    static let alignEnds: [[CGFloat]] = [[4, 6, 20, 6], [10, 10, 20, 10], [4, 14, 20, 14], [10, 18, 20, 18]]
+    static let stairs: [[CGFloat]] = [[4.5, 19.5, 9.5, 19.5, 9.5, 14.5, 14.5, 14.5, 14.5, 9.5, 19.5, 9.5, 19.5, 4.5]]
 
-    var body: some View {
-        let r = size * AureaIconWeight.glyphStroke / 2
-        let outlined = content().background(
-            ZStack {
-                if r > 0 {
-                    ForEach(0..<8, id: \.self) { i in
-                        let angle = Double(i) * Double.pi / 4
-                        content().offset(x: r * CGFloat(cos(angle)), y: r * CGFloat(sin(angle)))
-                    }
+    /// O desenho próprio que substitui o vetor do Material de nome `name`
+    /// (o mesmo nome do `MaterialGlyph`), ou nil para os que continuam do Material.
+    static func forMaterial(_ name: String) -> [[CGFloat]]? {
+        switch name {
+        case "filled.ChevronLeft", "rounded.ChevronLeft": return chevronLeft
+        case "automirrored.rounded.FormatAlignLeft": return alignStarts
+        case "automirrored.rounded.FormatAlignRight": return alignEnds
+        case "rounded.Stairs": return stairs
+        default: return nil
+        }
+    }
+
+    /// Desenha as polilinhas numa caixa `size`×`size`.
+    static func view(_ strokes: [[CGFloat]], size: CGFloat, color: Color) -> some View {
+        Canvas { context, box in
+            let u = min(box.width, box.height) / 24
+            let o = CGPoint(x: (box.width - 24 * u) / 2, y: (box.height - 24 * u) / 2)
+            var path = Path()
+            for s in strokes where s.count >= 4 {
+                path.move(to: CGPoint(x: o.x + s[0] * u, y: o.y + s[1] * u))
+                var i = 2
+                while i + 1 < s.count {
+                    path.addLine(to: CGPoint(x: o.x + s[i] * u, y: o.y + s[i + 1] * u))
+                    i += 2
                 }
             }
-            .accessibilityHidden(true)
-        )
-        if alpha < 0.999 {
-            outlined.compositingGroup().opacity(alpha)
-        } else {
-            outlined
+            context.stroke(path, with: .color(color),
+                           style: StrokeStyle(lineWidth: AureaIconStyle.line * u, lineCap: .round, lineJoin: .round))
         }
+        .frame(width: size, height: size)
     }
 }
 
@@ -1682,6 +1741,7 @@ enum CupertinoGlyph {
     static let ArrowDownRightSquare: Character = "\u{F4F7}"
     static let ArrowDownToLine: Character = "\u{F4FB}"
     static let ArrowDownCircleFill: Character = "\u{F4EC}"
+    static let ArrowDownCircle: Character = "\u{F4EB}"
     static let ArrowLeftRight: Character = "\u{F500}"
     static let ArrowLeftRightSquare: Character = "\u{F503}"
     static let ArrowLeftToLine: Character = "\u{F507}"
@@ -1735,6 +1795,7 @@ enum CupertinoGlyph {
     static let DocOnDoc: Character = "\u{F634}"
     static let DocText: Character = "\u{F638}"
     static let DropFill: Character = "\u{F8D9}"
+    static let Drop: Character = "\u{F8D8}"
     static let Ellipsis: Character = "\u{F46A}"
     static let ExclamationmarkBubble: Character = "\u{F656}"
     static let ExclamationmarkTriangle: Character = "\u{F660}"
@@ -1761,6 +1822,7 @@ enum CupertinoGlyph {
     static let LineHorizontal3: Character = "\u{F6E1}"
     static let Link: Character = "\u{F6E5}"
     static let LinkCircleFill: Character = "\u{F6E7}"
+    static let LinkCircle: Character = "\u{F6E6}"
     static let Lock: Character = "\u{F4C8}"
     static let LockFill: Character = "\u{F4C9}"
     static let LockOpen: Character = "\u{F6FA}"
@@ -1868,8 +1930,8 @@ enum CupertinoGlyph {
         if codepoint == MotionBlur {
             Canvas { context, dimensions in
                 let unit = min(dimensions.width, dimensions.height) / 24
-                // 0.3.3: o mesmo traço extra dos glifos (AureaIconWeight.glyphStroke).
-                let line = (1.8 + 24 * AureaIconWeight.glyphStroke) * unit
+                // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.line).
+                let line = AureaIconStyle.line * unit
                 context.stroke(Path(ellipseIn: CGRect(x: 11.6 * unit, y: 6.6 * unit,
                     width: 10.8 * unit, height: 10.8 * unit)), with: .color(color), lineWidth: line)
                 let trails: [(CGFloat, CGFloat, Double)] = [(2, 7, 0.55), (1, 12, 0.85), (3, 17, 0.55)]
@@ -1882,14 +1944,10 @@ enum CupertinoGlyph {
                 }
             }.frame(width: size, height: size)
         } else {
-            // 0.3.3: o glifo com o contorno extra (AureaIconWeight.glyphStroke).
-            let alpha = color.aureaAlpha
-            let ink = alpha < 0.999 ? color.aureaOpaque : color
-            AureaBoldIcon(size: size, alpha: alpha) {
-                Text(String(codepoint))
-                    .font(CupertinoFont.font(size))
-                    .foregroundColor(ink)
-            }
+            // 0.3.4: o glifo no estilo do app (cheio → contorno, AureaIconStyle), desenhado uma vez.
+            Text(String(AureaIconStyle.glyph(codepoint)))
+                .font(CupertinoFont.font(size))
+                .foregroundColor(color)
         }
     }
 }
@@ -2049,13 +2107,16 @@ struct MaterialGlyph: View {
         self.name = name; self.size = size; self.color = color
     }
     var body: some View {
-        // 0.3.3: o mesmo contorno extra dos glifos (AureaBoldIcon; par do `aureaBold()` do Android).
-        let alpha = color.aureaAlpha
-        let ink = alpha < 0.999 ? color.aureaOpaque : color
-        AureaBoldIcon(size: size, alpha: alpha) {
-            Image("Material-" + name.replacingOccurrences(of: ".", with: "-"))
-                .resizable().renderingMode(.template).scaledToFit()
-                .frame(width: size, height: size).foregroundStyle(ink)
+        // 0.3.4: desenhado uma vez; os que têm desenho de linha próprio (AureaLineIcon,
+        // par do `AureaLineIcons` do Android) saem no traço fino do estilo dos ícones.
+        Group {
+            if let strokes = AureaLineIcon.forMaterial(name) {
+                AureaLineIcon.view(strokes, size: size, color: color)
+            } else {
+                Image("Material-" + name.replacingOccurrences(of: ".", with: "-"))
+                    .resizable().renderingMode(.template).scaledToFit()
+                    .frame(width: size, height: size).foregroundStyle(color)
+            }
         }
             // Os `automirrored` do Compose viram sozinhos em RTL; aqui é explícito.
             // O chevron de voltar dos painéis também espelha (aponta para "trás").

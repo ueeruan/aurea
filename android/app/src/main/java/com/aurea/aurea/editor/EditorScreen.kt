@@ -368,6 +368,8 @@ fun EditorScreen(store: EditorStore) {
                 // Gravar voz: o painel por cima da timeline, com o palco à vista
                 // (também na cena 3D, cujo adicionar tem a mesma aba Áudio).
                 if (ui.voice) VoiceRecorderOverlay(store) { ui.voice = false }
+                // 0.3.4 plugins: o painel de plugin aberto (moldura comum), alertas e consentimento.
+                if (!store.sceneEditor) com.aurea.aurea.effects.PluginEditorPanelHost(store, Modifier.align(Alignment.BottomCenter))
                 // A.01: o círculo "Voltar ao editor" no canto (a HEAD perdeu — bug 1).
                 if (ui.fullscreen) {
                     val backLabel = stringResource(R.string.editor_voltar_editor)
@@ -493,6 +495,8 @@ private fun NarrowEditor(
                     KeepLtr { MultiSelectBottomBar(store, Modifier.align(Alignment.BottomCenter)) }
                 }
                 if (m.overlay) {
+                    // 0.3.4 painéis: o painel de propriedade tem a zona inteira menos a faixa de
+                    // foco (régua + linha em foco + folga; EditorLayout.timelineFocus).
                     ContextArea(
                         store, ui, content,
                         Modifier

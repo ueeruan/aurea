@@ -29,6 +29,47 @@ object PluginTexts {
         val params: List<Param>,
         /** 0.3.1: "kind": "shader3d" (câmera da cena e camadas ligadas). */
         val scene3d: Boolean = false,
+        // 0.3.4 plugins: interface, script e permissões (formato 2).
+        val enabled: Boolean = true,
+        val hasScript: Boolean = false,
+        val network: List<String> = emptyList(),
+        val wantsClipboard: Boolean = false,
+        val wantsFiles: Boolean = false,
+        /** Concedidas: 1 rede, 2 área de transferência, 4 arquivos. */
+        val granted: Int = 0,
+        val panels: List<Panel> = emptyList(),
+        val actions: List<Action> = emptyList(),
+    ) {
+        /** Bits que o plugin pede (o motor só aceita conceder estes). */
+        val requested: Int get() = (if (network.isNotEmpty()) 1 else 0) or (if (wantsClipboard) 2 else 0) or (if (wantsFiles) 4 else 0)
+    }
+
+    // 0.3.4 plugins: o que o plugin.json declara para a interface (PluginUi.hpp).
+    class Control(
+        val id: String,
+        val type: String,
+        val label: Map<String, String>,
+        val style: String,
+        val min: Double,
+        val max: Double,
+        val step: Double,
+        val unit: String,
+        val options: List<Map<String, String>>,
+        val placeholder: Map<String, String>,
+        val multiline: Boolean,
+        val maxLength: Int,
+        val aspect: Float,
+        val text: Map<String, String>,
+    )
+    class Panel(val id: String, val title: Map<String, String>, val icon: String, val placement: Set<String>, val controls: List<Control>)
+    class Action(
+        val id: String,
+        val title: Map<String, String>,
+        val icon: String,
+        val placement: Set<String>,
+        val panel: String,
+        val call: String,
+        val needsLayer: Boolean,
     )
 
     @Volatile var plugins: List<Plugin> = emptyList()
@@ -102,6 +143,58 @@ object PluginTexts {
                 Param(q.optString("id"), texts(q.optJSONObject("label")), List(opts.length()) { texts(opts.optJSONObject(it)) })
             },
             scene3d = o.optBoolean("scene3d"),
+            enabled = o.optBoolean("enabled", true),
+            hasScript = o.optBoolean("hasScript"),
+            network = o.optJSONObject("permissions")?.optJSONArray("network")?.let { a -> List(a.length()) { a.optString(it) } } ?: emptyList(),
+            wantsClipboard = o.optJSONObject("permissions")?.optBoolean("clipboard") == true,
+            wantsFiles = o.optJSONObject("permissions")?.optBoolean("files") == true,
+            granted = o.optJSONObject("granted")?.let { g ->
+                (if (g.optBoolean("network")) 1 else 0) or (if (g.optBoolean("clipboard")) 2 else 0) or (if (g.optBoolean("files")) 4 else 0)
+            } ?: 0,
+            panels = o.optJSONObject("ui")?.optJSONArray("panels")?.let { a -> List(a.length()) { panel(a.getJSONObject(it)) } } ?: emptyList(),
+            actions = o.optJSONObject("ui")?.optJSONArray("actions")?.let { a -> List(a.length()) { action(a.getJSONObject(it)) } } ?: emptyList(),
         )
     }
+
+    private fun places(a: JSONArray?): Set<String> = if (a == null) emptySet() else (0 until a.length()).map { a.optString(it) }.toSet()
+
+    private fun panel(o: JSONObject): Panel {
+        val controls = o.optJSONArray("controls") ?: JSONArray()
+        return Panel(
+            id = o.optString("id"),
+            title = texts(o.optJSONObject("title")),
+            icon = o.optString("icon", "wand"),
+            placement = places(o.optJSONArray("placement")),
+            controls = List(controls.length()) { k ->
+                val c = controls.getJSONObject(k)
+                val opts = c.optJSONArray("options") ?: JSONArray()
+                Control(
+                    id = c.optString("id"),
+                    type = c.optString("type"),
+                    label = texts(c.optJSONObject("label")),
+                    style = c.optString("style", "primary"),
+                    min = c.optDouble("min", 0.0),
+                    max = c.optDouble("max", 1.0),
+                    step = c.optDouble("step", 0.0),
+                    unit = c.optString("unit"),
+                    options = List(opts.length()) { texts(opts.optJSONObject(it)) },
+                    placeholder = texts(c.optJSONObject("placeholder")),
+                    multiline = c.optBoolean("multiline"),
+                    maxLength = c.optInt("maxLength", 2000),
+                    aspect = c.optDouble("aspect", 0.0).toFloat(),
+                    text = texts(c.optJSONObject("text")),
+                )
+            },
+        )
+    }
+
+    private fun action(o: JSONObject) = Action(
+        id = o.optString("id"),
+        title = texts(o.optJSONObject("title")),
+        icon = o.optString("icon", "wand"),
+        placement = places(o.optJSONArray("placement")),
+        panel = o.optString("panel"),
+        call = o.optString("call"),
+        needsLayer = o.optBoolean("needsLayer"),
+    )
 }

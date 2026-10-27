@@ -96,7 +96,7 @@ struct HyperLockedPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer().frame(height: 20)
             HStack(spacing: 12) {
-                Image(systemName: "lock.fill").font(.system(size: 20, weight: AureaIconWeight.symbol)).foregroundStyle(AureaColors.accent)
+                Image(systemName: "lock").font(.system(size: 20, weight: AureaIconWeight.symbol)).foregroundStyle(AureaColors.accent)
                     .frame(width: 44, height: 44).background(RoundedRectangle(cornerRadius: 12).fill(AureaColors.accent.opacity(0.18)))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
@@ -112,7 +112,7 @@ struct HyperLockedPanel: View {
             Spacer().frame(height: 14)
             ForEach(Self.features, id: \.self) { key in
                 HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(AureaColors.accent)
+                    Image(systemName: "checkmark").font(.system(size: 13, weight: AureaIconStyle.symbol)).foregroundStyle(AureaColors.accent)
                         .accessibilityHidden(true)
                     Text(AureaText.t(key)).font(.aurea(size: 14)).fixedSize(horizontal: false, vertical: true)
                 }.padding(.vertical, 5)
@@ -227,7 +227,7 @@ struct HyperLockedSheet: View {
             Spacer().frame(height: 16)
             tile("photo.on.rectangle", AureaText.t("hyper_choose_gallery"), "hyper.escolher.galeria") { picking = true }
             Spacer().frame(height: 12)
-            tile("video.fill", AureaText.t("hyper_choose_record"), "hyper.escolher.gravar") {
+            tile("video", AureaText.t("hyper_choose_record"), "hyper.escolher.gravar") {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) { recording = true }
                 else { flow.error = AureaText.t("hyper_camera_denied") }
             }

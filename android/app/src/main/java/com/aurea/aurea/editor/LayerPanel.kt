@@ -85,7 +85,7 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
-import com.aurea.aurea.ui.theme.CupertinoIconBoldStroke
+import com.aurea.aurea.ui.theme.AureaIconStyle
 import com.aurea.aurea.ui.theme.LayerType
 import kotlinx.coroutines.launch
 
@@ -819,8 +819,8 @@ internal fun TimeGlyphIcon(glyph: TimeGlyph, color: Color, modifier: Modifier) {
 
 private fun DrawScope.drawTimeGlyph(glyph: TimeGlyph, color: Color) {
     val u = size.width / 24f
-    // 0.3.3: traço 1,8 + o extra dos glifos bold (CupertinoIconBoldStroke).
-    val stroke = (1.8f + 24f * CupertinoIconBoldStroke) * u
+    // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.Line).
+    val stroke = AureaIconStyle.Line * u
     val line = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
     val dashed = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round,
         pathEffect = PathEffect.dashPathEffect(floatArrayOf(2.2f * u, 2.0f * u)))

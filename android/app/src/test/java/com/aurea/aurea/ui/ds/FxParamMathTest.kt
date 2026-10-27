@@ -18,14 +18,15 @@ class FxParamMathTest {
 
     @Test
     fun rowHeightsFollowTheReference() {
-        assertEquals(51f, FxParamMath.rowHeight(ParamControl.SLIDER, ParamType.FLOAT))
-        assertEquals(57f, FxParamMath.rowHeight(ParamControl.RULER, ParamType.FLOAT))
-        assertEquals(57f, FxParamMath.rowHeight(ParamControl.POINT, ParamType.POINT2D))
-        assertEquals(57f, FxParamMath.rowHeight(ParamControl.XYZ, ParamType.POINT3D))
-        assertEquals(38f, FxParamMath.rowHeight(ParamControl.AUTO, ParamType.BOOL))
-        assertEquals(38f, FxParamMath.rowHeight(ParamControl.AUTO, ParamType.ENUM))
+        // 0.3.4 painéis: as linhas cresceram (eram 51 / 57 / 38).
+        assertEquals(60f, FxParamMath.rowHeight(ParamControl.SLIDER, ParamType.FLOAT))
+        assertEquals(66f, FxParamMath.rowHeight(ParamControl.RULER, ParamType.FLOAT))
+        assertEquals(66f, FxParamMath.rowHeight(ParamControl.POINT, ParamType.POINT2D))
+        assertEquals(66f, FxParamMath.rowHeight(ParamControl.XYZ, ParamType.POINT3D))
+        assertEquals(46f, FxParamMath.rowHeight(ParamControl.AUTO, ParamType.BOOL))
+        assertEquals(46f, FxParamMath.rowHeight(ParamControl.AUTO, ParamType.ENUM))
         // Linha antiga (sem controle) num número: régua.
-        assertEquals(57f, FxParamMath.rowHeight(ParamControl.AUTO, ParamType.FLOAT))
+        assertEquals(66f, FxParamMath.rowHeight(ParamControl.AUTO, ParamType.FLOAT))
         assertEquals(ParamControl.RULER, FxParamMath.controlFor(ParamControl.AUTO, ParamType.ANGLE))
         assertEquals(ParamControl.POINT, FxParamMath.controlFor(ParamControl.AUTO, ParamType.POINT2D))
         assertEquals(ParamControl.XYZ, FxParamMath.controlFor(ParamControl.AUTO, ParamType.POINT3D))

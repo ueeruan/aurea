@@ -4103,6 +4103,23 @@ final class AureaModel: ObservableObject {
     func refreshPlugins() {
         FxPluginTexts.update(engine.pluginsJSON)
         plugins = FxPluginTexts.plugins
+        PluginRuntime.shared.attach(self)   // 0.3.4 plugins: painéis, scripts e rede/seletor
+    }
+
+    // MARK: 0.3.4 plugins (PluginsV2.swift): o runtime de plugins usa o mesmo motor.
+    func selectFromPlugin(_ ids: [Int64]) {
+        selection = Set(ids)
+        engine.selectLayers(ids.map { NSNumber(value: $0) })
+        refreshModel(force: true)
+    }
+    func pluginBusy(_ message: String?) {
+        importingMedia = message != nil
+        if let message { operationMessage = message }
+    }
+    func afterPluginInstall() {
+        refreshPlugins()
+        effectCatalog = []
+        refreshModel(force: true)
     }
 
     func installPlugin(url: URL) {

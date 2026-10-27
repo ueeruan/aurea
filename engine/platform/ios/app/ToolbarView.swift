@@ -247,6 +247,8 @@ struct TopBarView: View {
                     .accessibilityIdentifier("editor.topbar.exit")
                 ShellInlineName(name: model.projectName, placeholder: AureaText.t("edt_untitled"), limit: 320) { model.renameCurrentProject(to: $0) }
                     .accessibilityIdentifier("editor.topbar.title")
+                // 0.3.4 plugins: o menu de plugins (painéis e ações "editor.menu"); some sem plugin.
+                PluginEditorMenuButton()
                 ShellBarButton(glyph: CupertinoGlyph.Gear, description: AureaText.t("editor_ajustes_projeto"), width: 40, height: EditorLayout.topBar) { openSettings() }
                     .accessibilityIdentifier("editor.projectMenu")
                 ShellBarButton(glyph: CupertinoGlyph.SquareArrowUp, description: AureaText.t("om_tb_share"), width: 40, height: EditorLayout.topBar) { model.openExport() }
@@ -353,6 +355,8 @@ struct TopBarView: View {
             if row.kind != 3 {
                 linkMenuButton(tint: parent != 0 ? AureaColors.accent : AureaColors.text, width: 40)
             }
+            // 0.3.4 plugins: botões "layer.toolbar" dos plugins ligados.
+            PluginLayerBarButtons()
             ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_camada"), size: 19, width: 40, height: EditorLayout.topBar,
                            enabled: !row.locked) { removeSelection() }
                 .accessibilityIdentifier("layer.delete")
@@ -364,7 +368,7 @@ struct TopBarView: View {
             .aureaAnchoredMenu(isPresented: $layerMenu, alignEnd: true, tag: "layer.menu.popup") { [rowId = row.id] in
                 // Lê a camada AGORA: uma alternância redesenha com o estado novo.
                 guard let fresh = model.layers.first(where: { $0.id == rowId }) else { return [] }
-                return layerMenuEntries(fresh)
+                return layerMenuEntries(fresh) + PluginRuntime.shared.layerMenuEntries()   // 0.3.4 plugins
             }
         }
         .frame(maxHeight: .infinity)

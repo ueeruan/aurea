@@ -433,7 +433,8 @@ struct ValueBox: View {
     private let enabled: Bool
     private let tint: Color
 
-    init(_ text: String, width: CGFloat = 60, onTap: (() -> Void)? = nil) {
+    // 0.3.4 painéis: largura padrão `PanelMetrics.fieldWidth` (72, antes 60), par do Android.
+    init(_ text: String, width: CGFloat = PanelMetrics.fieldWidth, onTap: (() -> Void)? = nil) {
         self.text = text
         self.width = width
         self.onTap = onTap
@@ -442,7 +443,7 @@ struct ValueBox: View {
     }
 
     init(_ text: String, enabled: Bool, tint: Color = AureaColors.accent,
-         width: CGFloat = 60, onTap: (() -> Void)? = nil) {
+         width: CGFloat = PanelMetrics.fieldWidth, onTap: (() -> Void)? = nil) {
         self.text = text
         self.width = width
         self.onTap = onTap
@@ -469,17 +470,19 @@ struct ValueBox: View {
         let onTap: (() -> Void)?
 
         var body: some View {
+            // 0.3.4 painéis: número 15 que encolhe numa caixa de 36 (antes 13 em 24).
             Text(text)
-                .font(.aurea(size: 13, weight: .semibold).monospacedDigit())
+                .font(.aurea(size: PanelMetrics.fieldValue, weight: .semibold).monospacedDigit())
                 .foregroundStyle(enabled ? tint : AureaColors.muted)
                 .underline(tappable)
                 .lineLimit(1)
-                .minimumScaleFactor(0.62)
+                .minimumScaleFactor(PanelMetrics.fieldValueMin / PanelMetrics.fieldValue)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, AureaDims.s1)
-                .frame(width: width, height: AureaDims.valueBoxH)
+                .frame(width: width)
+                .frame(minHeight: PanelMetrics.fieldHeight)
                 .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: AureaDims.valueBoxRadius))
-                .frame(minHeight: 44)
+                .frame(minHeight: PanelMetrics.touch)
                 .contentShape(Rectangle())
                 .aureaTappable(shrink: 1, enabled: tappable) { onTap?() }
         }
@@ -993,19 +996,19 @@ struct KeyframeDiamondIcon: View {
             diamond.addLine(to: CGPoint(x: c.x, y: size.height - inset))
             diamond.addLine(to: CGPoint(x: inset, y: c.y))
             diamond.closeSubpath()
-            // 0.3.3: + o traço extra dos glifos bold (AureaIconWeight.glyphStroke do tamanho).
-            let bold = min(size.width, size.height) * AureaIconWeight.glyphStroke
-            ctx.stroke(diamond, with: .color(color), lineWidth: 1.6 + bold)
+            // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.line na caixa de 24), cantos redondos.
+            let line = StrokeStyle(lineWidth: AureaIconStyle.line * min(size.width, size.height) / 24, lineCap: .round, lineJoin: .round)
+            ctx.stroke(diamond, with: .color(color), style: line)
             let arm: CGFloat = 3.5
             var bar = Path()
             bar.move(to: CGPoint(x: c.x - arm, y: c.y))
             bar.addLine(to: CGPoint(x: c.x + arm, y: c.y))
-            ctx.stroke(bar, with: .color(color), lineWidth: 1.5 + bold)
+            ctx.stroke(bar, with: .color(color), style: line)
             if look != .keyHere {
                 var stem = Path()
                 stem.move(to: CGPoint(x: c.x, y: c.y - arm))
                 stem.addLine(to: CGPoint(x: c.x, y: c.y + arm))
-                ctx.stroke(stem, with: .color(color), lineWidth: 1.5 + bold)
+                ctx.stroke(stem, with: .color(color), style: line)
             }
         }
         .frame(width: AureaDims.diamondIcon, height: AureaDims.diamondIcon)
@@ -1030,17 +1033,17 @@ struct CurveRailIcon: View {
             else if animated { color = AureaColors.accent }
             else { color = AureaColors.muted }
             let box = CGRect(x: 1, y: 1, width: size.width - 2, height: size.height - 2)
-            // 0.3.3: + o traço extra dos glifos bold (AureaIconWeight.glyphStroke do tamanho).
-            let bold = min(size.width, size.height) * AureaIconWeight.glyphStroke
+            // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.line na caixa de 24).
+            let w = AureaIconStyle.line * min(size.width, size.height) / 24
             ctx.stroke(Path(roundedRect: box, cornerRadius: 4),
-                       with: .color(color.opacity(0.5)), lineWidth: 1.3 + bold)
+                       with: .color(color.opacity(0.5)), lineWidth: w)
             var curve = Path()
             curve.move(to: CGPoint(x: 4, y: size.height - 5))
             curve.addCurve(to: CGPoint(x: size.width - 4, y: 5),
                            control1: CGPoint(x: size.width * 0.45, y: size.height - 5),
                            control2: CGPoint(x: size.width * 0.55, y: 5))
             ctx.stroke(curve, with: .color(color),
-                       style: StrokeStyle(lineWidth: 1.5 + bold, lineCap: .round))
+                       style: StrokeStyle(lineWidth: w, lineCap: .round))
         }
         .frame(width: AureaDims.curveIcon, height: AureaDims.curveIcon)
     }
@@ -1118,21 +1121,24 @@ struct LeftRail: View {
 
     var body: some View {
         VStack(spacing: LeftRailLayout.gap) {
+            // 0.3.4 painéis: ícones da coluna em `PanelMetrics.railIcon` (26).
             cell(label: AureaText.t("panel_voltar_ferramentas"), action: onBack) {
-                MaterialGlyph("rounded.ChevronLeft", size: AureaDims.iconLg)
+                MaterialGlyph("rounded.ChevronLeft", size: PanelMetrics.railIcon).mirrorsInRtl()
             }
             cell(label: keyframeLook == .keyHere
                     ? AureaText.t("panel_tirar_keyframe_daqui")
                     : AureaText.t("panel_marcar_keyframe_aqui"),
                  action: onKeyframe) {
                 KeyframeDiamondIcon(look: keyframeLook, enabled: onKeyframe != nil)
+                    .scaleEffect(PanelMetrics.railIcon / AureaDims.diamondIcon)
             }
             cell(label: AureaText.t("panel_editar_curva_propriedade"), action: onCurve) {
                 CurveRailIcon(enabled: onCurve != nil, animated: curveAnimated)
+                    .scaleEffect(PanelMetrics.railIcon / AureaDims.curveIcon)
             }
             if let onExpression {
                 cell(label: AureaText.t("panel_adicionar_expressao"), action: onExpression) {
-                    Text("=").font(.aurea(size: 22, weight: .bold))
+                    Text("=").font(.aurea(size: PanelMetrics.railExpression, weight: .bold))
                         .foregroundStyle(expression == .none ? AureaColors.text : AureaColors.accent)
                 }
             }
@@ -1191,7 +1197,7 @@ struct RailMoreButton: View {
 
     var body: some View {
         ZStack {
-            CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: AureaDims.iconLg,
+            CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon,
                                 color: active ? AureaColors.accent : AureaColors.text)
             if active {
                 Circle()
@@ -1262,7 +1268,7 @@ struct RightRail: View {
     @ViewBuilder
     private func railIcon(_ mode: String, cell: CGFloat, on: Bool) -> some View {
         let tint = on ? AureaColors.accent : AureaColors.muted
-        let side = min(AureaDims.iconMd, cell * 0.6)
+        let side = min(24, cell * 0.6)  // 0.3.4 painéis: 24 (par do RightRail do Android)
         if mode.hasPrefix("material:") {
             MaterialGlyph(String(mode.dropFirst(9)), size: side, color: tint)
         } else if mode.count == 1, let glyph = mode.first {
@@ -1305,7 +1311,7 @@ struct ParamTabs: View {
                 let on = index == selected
                 HStack(spacing: AureaDims.paramTabDot) {
                     Text(tab)
-                        .font(.aurea(size: 12.5, weight: on ? .bold : .medium))
+                        .font(.aurea(size: PanelMetrics.paramTabsText, weight: on ? .bold : .medium))
                         .foregroundStyle(on ? AureaColors.accent : AureaColors.text)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -1317,7 +1323,7 @@ struct ParamTabs: View {
                 }
                 .padding(.horizontal, AureaDims.paramTabPadH)
                 .frame(maxWidth: .infinity)
-                .frame(height: AureaDims.paramTabH - 2 * AureaDims.paramTabPadV)
+                .frame(height: PanelMetrics.paramTabsHeight - 2 * AureaDims.paramTabPadV)
                 .background(on ? AureaColors.accentDim : AureaColors.chip,
                             in: RoundedRectangle(cornerRadius: AureaDims.paramTabRadius))
                 .padding(.horizontal, AureaDims.paramTabGap)
@@ -1327,7 +1333,7 @@ struct ParamTabs: View {
         }
         .padding(.horizontal, AureaDims.paramTabPadH)
         .padding(.vertical, AureaDims.paramTabPadV)
-        .frame(height: AureaDims.paramTabH)
+        .frame(height: PanelMetrics.paramTabsHeight)
     }
 }
 
@@ -1502,6 +1508,16 @@ func aureaTracking(_ value: CGFloat) -> CGFloat {
 //   }
 // =============================================================================
 
+/// 0.3.4: abre o menu da caixa. Se o toque chegou com o estado ainda "aberto"
+/// (o menu cobre a tela inteira, então um toque na caixa com o menu aberto de
+/// verdade não acontece), o estado ficou para trás: fecha e abre de novo no
+/// próximo giro, para a caixa nunca ficar morta.
+func aureaReopenMenu(_ open: Binding<Bool>) {
+    guard open.wrappedValue else { open.wrappedValue = true; return }
+    open.wrappedValue = false
+    DispatchQueue.main.async { open.wrappedValue = true }
+}
+
 enum AureaDropdownMetrics {
     static let width: CGFloat = 180
     static let height: CGFloat = 45
@@ -1536,7 +1552,7 @@ struct AureaDropdown: View {
         let ink = light ? AureaColors.lightText : AureaColors.text
         let muted = light ? AureaColors.lightTextMuted : AureaColors.muted
         let line = light ? AureaColors.lightDivider : AureaColors.border
-        Button { open = true } label: {
+        Button { aureaReopenMenu($open) } label: {
             HStack(spacing: 0) {
                 if let swatch {
                     AureaColorSwatch(color: swatch).clipShape(RoundedRectangle(cornerRadius: 5)).frame(width: 22, height: 22)
@@ -1586,12 +1602,95 @@ struct AureaDropdown: View {
 
 enum PanelFrameMetrics {
     static let height: CGFloat = 200
-    static let railWidth: CGFloat = 60
+    static let railWidth: CGFloat = PanelMetrics.railWidth
     static let divider: CGFloat = 0.7
-    static let tabInset: CGFloat = 4
-    static let tabRadius: CGFloat = 5
+    static let tabInset: CGFloat = PanelMetrics.tabInset
+    static let tabRadius: CGFloat = PanelMetrics.tabRadius
     static let disabledAlpha: Double = 0.15
     static let maxTabs = 4
+}
+
+/// 0.3.4 painéis: AS MEDIDAS CENTRAIS dos painéis de propriedade (moldura e
+/// campos), ~25 % maiores que as da Omega ("está muito compacto"). Todo painel
+/// (Transformar, Câmera, Cor e preenchimento, Borda e sombra, Mesclagem, Efeitos,
+/// Velocidade/Som, Curva) lê daqui. Par do `PanelMetrics` do `PanelChrome.kt`:
+/// os mesmos valores (pt = dp). Três campos de `fieldWidth` + o fio + `fieldGap`
+/// cabem na coluna central de 360 (360 − 2 × 60 − 2 × 0,7 − 12 = 226); o número
+/// encolhe antes de vazar.
+enum PanelMetrics {
+    // --- Moldura ---
+    static let railWidth: CGFloat = 60
+    /// Ícones das colunas (‹, ◆, curva, ⋯ e as abas): antes 22.
+    static let railIcon: CGFloat = 26
+    /// O "=" da expressão na coluna esquerda.
+    static let railExpression: CGFloat = 26
+    static let tabInset: CGFloat = 5
+    static let tabRadius: CGFloat = 7
+    /// Alvo de toque mínimo de qualquer controle do painel.
+    static let touch: CGFloat = 44
+    // --- Campos de valor (X/Y/Z, Largura/Altura, Inclinação, ângulos) ---
+    static let fieldWidth: CGFloat = 72
+    static let fieldHeight: CGFloat = 36
+    static let fieldRadius: CGFloat = 7
+    static let fieldGap: CGFloat = 8
+    /// Número do campo (antes 10); encolhe até `fieldValueMin`.
+    static let fieldValue: CGFloat = 15
+    static let fieldValueMin: CGFloat = 9
+    /// Rótulo embaixo do campo (antes 9).
+    static let fieldLabel: CGFloat = 12
+    static let fieldLabelGap: CGFloat = 3
+    /// Respiro em cima da fileira de campos (antes 6/10).
+    static let fieldRowTop: CGFloat = 12
+    /// A fileira de campos inteira: respiro + campo + vão + rótulo (≈ 17).
+    static let fieldBlock: CGFloat = 68
+    // --- Textos ---
+    /// Título de cartão/seção dentro do painel (antes 13–13,5).
+    static let title: CGFloat = 15
+    /// Rótulo de linha / título de controle (antes 10–11).
+    static let label: CGFloat = 13
+    /// Texto secundário e notas (antes 10–11,5).
+    static let note: CGFloat = 12
+    /// A dica do trackpad e de áreas de gesto (antes 12).
+    static let hint: CGFloat = 14
+    /// Botões pequenos dentro do painel ("Centro", "Preciso", chips).
+    static let chipHeight: CGFloat = 36
+    static let chipText: CGFloat = 14
+    static let chipPad: CGFloat = 14
+    // --- Réguas ---
+    /// Régua de um par no painel de 200 (antes 48–52); 68 + 8 + 56 + 8 + 56 + 4 = 200.
+    static let ruler: CGFloat = 56
+    /// Régua única no painel de 200 (antes 56–72).
+    static let rulerTall: CGFloat = 80
+    /// Teto ao crescer com o painel alto.
+    static let rulerMax: CGFloat = 128
+    static let rulerGap: CGFloat = 8
+    static let rulerBottom: CGFloat = 4
+    // --- Abas de parâmetro (ParamTabs) ---
+    static let paramTabsHeight: CGFloat = 54
+    static let paramTabsText: CGFloat = 14
+
+    /// A altura que sobra para as réguas abaixo de uma fileira de campos.
+    static func rulerSpace(_ height: CGFloat) -> CGFloat { height - fieldBlock - rulerGap - rulerBottom }
+    /// Altura de cada uma de `count` réguas para encher `available`, entre `min` e
+    /// `rulerMax`: com o painel alto elas crescem; num painel baixo ficam em `min` e rola.
+    static func fillRulers(_ available: CGFloat, count: Int, min minimum: CGFloat) -> CGFloat {
+        guard count > 0, available.isFinite else { return minimum }
+        let each = (available - rulerGap * CGFloat(count - 1)) / CGFloat(count)
+        return Swift.min(Swift.max(each, minimum), Swift.max(minimum, rulerMax))
+    }
+}
+
+/// 0.3.4 painéis: uma fileira de campos centrada; se não couber (telefone estreito,
+/// 3D, fonte grande), rola de lado em vez de cortar. Par do `TfFieldRow(scroll = true)`.
+struct PanelFieldRow<Content: View>: View {
+    private let content: () -> Content
+    init(@ViewBuilder content: @escaping () -> Content) { self.content = content }
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            content().frame(maxWidth: .infinity)
+            ScrollView(.horizontal, showsIndicators: false) { content().padding(.horizontal, 6) }
+        }
+    }
 }
 
 /// Uma aba de ícone da coluna direita. `id` é o que `onTab` devolve. `alt`: a
@@ -1687,35 +1786,38 @@ struct PanelFrame<Content: View>: View {
     private var leftRail: some View {
         VStack(spacing: 0) {
             cell("panel.rail.back", label: AureaText.t("panel_voltar_ferramentas"), enabled: true, action: rail.onBack) {
-                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 22).mirrorsInRtl()
+                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: PanelMetrics.railIcon).mirrorsInRtl()
             }
             if rail.supportsAnimation {
                 cell("panel.rail.keyframe",
                      label: AureaText.t(rail.keyframeLook == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui"),
                      enabled: rail.onKeyframe != nil, action: rail.onKeyframe,
                      longAction: rail.keyframeLook == .keyHere && rail.onDeleteAllKeyframes != nil ? askDeleteAll : nil) {
+                    // 0.3.4 painéis: os ícones pintados no tamanho da coluna (26).
                     KeyframeDiamondIcon(look: rail.keyframeLook, enabled: true)
+                        .scaleEffect(PanelMetrics.railIcon / AureaDims.diamondIcon)
                 }
                 cell("panel.rail.curve", label: AureaText.t("panel_editar_curva_propriedade"), enabled: rail.onCurve != nil,
                      action: rail.onCurve.map { openCurve in { if rail.curveReady { openCurve() } else { curveWarning() } } }) {
                     CurveRailIcon(enabled: true, animated: rail.keyframeLook != .none)
+                        .scaleEffect(PanelMetrics.railIcon / AureaDims.curveIcon)
                 }
                 if let onExpression = rail.onExpression {
                     cell("panel.rail.expression",
                          label: AureaText.t(rail.expression == .none ? "panel_adicionar_expressao" : "panel_editar_expressao"),
                          enabled: true, action: onExpression) {
-                        Text("=").font(.aurea(size: 22, weight: .bold))
+                        Text("=").font(.aurea(size: PanelMetrics.railExpression, weight: .bold))
                             .foregroundStyle(rail.expression == .none ? AureaColors.text : expressionColor(rail.expression))
                     }
                 }
                 if let entries = rail.moreEntries {
                     cell("panel.rail.more", label: AureaText.t("editor_mais"), enabled: rail.moreEnabled, action: { moreOpen = true }) {
-                        CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 24, color: rail.moreActive ? AureaColors.accent : AureaColors.text)
+                        CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon, color: rail.moreActive ? AureaColors.accent : AureaColors.text)
                     }
                     .aureaAnchoredMenu(isPresented: $moreOpen, tag: "panel.rail.more.menu", entries: entries)
                 } else if let onMore = rail.onMore {
                     cell("panel.rail.more", label: AureaText.t("editor_mais"), enabled: rail.moreEnabled, action: onMore) {
-                        CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 24, color: rail.moreActive ? AureaColors.accent : AureaColors.text)
+                        CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: PanelMetrics.railIcon, color: rail.moreActive ? AureaColors.accent : AureaColors.text)
                     }
                 } else {
                     Color.clear.frame(maxHeight: .infinity)
@@ -1795,12 +1897,13 @@ struct PanelFrame<Content: View>: View {
 
     @ViewBuilder
     private func tabIcon(_ tab: PanelTab, tint: Color) -> some View {
+        // 0.3.4 painéis: abas de ícone de 26 (antes 22).
         if let glyph = tab.glyph {
-            CupertinoGlyph.text(glyph, size: 22, color: tint)
+            CupertinoGlyph.text(glyph, size: PanelMetrics.railIcon, color: tint)
         } else if let icon = tab.icon, icon.hasPrefix("material:") {
-            MaterialGlyph(String(icon.dropFirst(9)), size: 22, color: tint)
+            MaterialGlyph(String(icon.dropFirst(9)), size: PanelMetrics.railIcon, color: tint)
         } else if let icon = tab.icon {
-            Image(systemName: icon).font(.aurea(size: 20, weight: AureaIconWeight.symbol)).foregroundStyle(tint)
+            Image(systemName: icon).font(.aurea(size: PanelMetrics.railIcon - 2, weight: AureaIconWeight.symbol)).foregroundStyle(tint)
         }
     }
 
@@ -1928,9 +2031,10 @@ struct FxParamLabel: View {
     var body: some View {
         let lit = enabled && (active || pressed)
         let ink: Color = !enabled ? AureaColors.fxDisabledText : active ? AureaColors.accent : AureaColors.text
+        // 0.3.4 painéis: até 13 (antes 12), par do `FxRow.LabelText` do Android.
         return Text(label)
-            .font(.aurea(size: 12))
-            .minimumScaleFactor(8.0 / 12.0)
+            .font(.aurea(size: PanelMetrics.label))
+            .minimumScaleFactor(8.0 / PanelMetrics.label)
             .lineLimit(2)
             .multilineTextAlignment(.center)
             .foregroundStyle(ink)
@@ -1977,14 +2081,15 @@ struct FxValueBox: View {
         VStack(alignment: .trailing, spacing: 0) {
             if let aux, !aux.isEmpty {
                 Text(aux)
-                    .font(.aurea(size: 10).monospacedDigit())
+                    .font(.aurea(size: PanelMetrics.note).monospacedDigit())
                     .minimumScaleFactor(0.8)
                     .lineLimit(1)
                     .foregroundStyle(AureaColors.fxDisabledText)
             }
+            // 0.3.4 painéis: até 15 (antes 14), par do `FxRow.ValueText` do Android.
             Text(text)
-                .font(.aurea(size: 14).monospacedDigit())
-                .minimumScaleFactor(8.0 / 14.0)
+                .font(.aurea(size: PanelMetrics.fieldValue).monospacedDigit())
+                .minimumScaleFactor(8.0 / PanelMetrics.fieldValue)
                 .lineLimit(1)
                 .foregroundStyle(enabled ? AureaColors.text : AureaColors.fxDisabledText)
         }
@@ -2384,14 +2489,15 @@ struct FxSegmented: View {
             ForEach(Array(options.enumerated()), id: \.offset) { k, option in
                 let on = k == selected
                 Button { onSelect(k) } label: {
+                    // 0.3.4 painéis: 36 com texto 13 (antes 27,5 / 12), par do `FxRow.Segment`.
                     Text(option)
-                        .font(.aurea(size: 12))
+                        .font(.aurea(size: PanelMetrics.label))
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .foregroundStyle(!enabled ? AureaColors.fxDisabledText : on ? AureaColors.accent : AureaColors.text)
                         .padding(.horizontal, 4)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 27.5)
+                        .frame(height: PanelMetrics.fieldHeight)
                         .background(on ? AureaColors.fxSegmentOn : AureaColors.fxSegment)
                         .contentShape(Rectangle())
                 }
@@ -2423,19 +2529,19 @@ struct FxDropdownBox: View {
 
     var body: some View {
         let ink = enabled ? AureaColors.accent : AureaColors.fxDisabledText
-        return Button { open = true } label: {
+        return Button { aureaReopenMenu($open) } label: {
             HStack(spacing: 6) {
                 Text(text)
-                    .font(.aurea(size: 13))
+                    .font(.aurea(size: 14))
                     .foregroundStyle(ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                CupertinoGlyph.text(CupertinoGlyph.ChevronDown, size: 12, color: ink)
+                CupertinoGlyph.text(CupertinoGlyph.ChevronDown, size: 14, color: ink)
             }
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity)
-            .frame(height: 30)
+            .frame(height: PanelMetrics.fieldHeight)  // 0.3.4 painéis: antes 30
             .background(AureaColors.fxSunken, in: RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
         }

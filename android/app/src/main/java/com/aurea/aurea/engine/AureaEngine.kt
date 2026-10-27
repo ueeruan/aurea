@@ -317,6 +317,42 @@ class AureaEngine private constructor() {
     /** A pasta de plugins em uso pelo motor. */
     fun pluginDirectory(): String = nativeWork.run("") { nativePluginDirectory(nativeHandle) }
 
+    // 0.3.4 plugins: painéis, scripts e APIs (EnginePluginsV2.cpp). As chamadas
+    // BLOQUEIAM (o script roda nesta thread): só da thread de plugins com pilha
+    // grande (effects/PluginRuntime.kt). Respostas em JSON (docs/plugins/README.md).
+    private val pluginEngineGone = "{\"ok\":false,\"value\":null,\"error\":{\"name\":\"Error\",\"message\":\"motor encerrado\",\"text\":\"motor encerrado\"}}"
+    /** Liga rede/área de transferência/seletor (effects.PluginHost) ao motor. */
+    fun installPluginHost(): Boolean = nativeWork.run(false) { nativeInstallPluginHost(nativeHandle) }
+    /** Lê um pacote sem instalar: o que ele pede (folha de consentimento). */
+    fun inspectPlugin(path: String): String = nativeWork.run("{\"ok\":false}") { nativeInspectPlugin(nativeHandle, path) }
+    fun setPluginEnabled(id: String, on: Boolean): Boolean = nativeWork.run(false) { nativeSetPluginEnabled(nativeHandle, id, on) }
+    /** Permissões concedidas: 1 rede, 2 área de transferência, 4 arquivos. */
+    fun setPluginPermissions(id: String, mask: Int): Boolean = nativeWork.run(false) { nativeSetPluginPermissions(nativeHandle, id, mask) }
+    fun pluginCall(id: String, function: String, argsJson: String, locale: String): String =
+        nativeWork.run(pluginEngineGone) { nativePluginCall(nativeHandle, id, function, argsJson, locale) }
+    fun pluginEvent(id: String, control: String, kind: String, valueJson: String, locale: String): String =
+        nativeWork.run(pluginEngineGone) { nativePluginEvent(nativeHandle, id, control, kind, valueJson, locale) }
+    fun pluginOpenPanel(id: String, panel: String, locale: String): String =
+        nativeWork.run(pluginEngineGone) { nativePluginOpenPanel(nativeHandle, id, panel, locale) }
+    fun pluginState(id: String): String = nativeWork.run("{}") { nativePluginState(nativeHandle, id) }
+    fun pluginConsole(id: String): String = nativeWork.run("[]") { nativePluginConsole(nativeHandle, id) }
+    fun pluginClearConsole(id: String) = nativeWork.run(Unit) { nativePluginClearConsole(nativeHandle, id) }
+    /** Para a chamada em andamento (qualquer thread). */
+    fun pluginCancel(id: String) = nativeWork.run(Unit) { nativePluginCancel(nativeHandle, id) }
+    fun pluginReload(id: String) = nativeWork.run(Unit) { nativePluginReload(nativeHandle, id) }
+    private external fun nativeInstallPluginHost(handle: Long): Boolean
+    private external fun nativeInspectPlugin(handle: Long, path: String): String
+    private external fun nativeSetPluginEnabled(handle: Long, id: String, on: Boolean): Boolean
+    private external fun nativeSetPluginPermissions(handle: Long, id: String, mask: Int): Boolean
+    private external fun nativePluginCall(handle: Long, id: String, function: String, args: String, locale: String): String
+    private external fun nativePluginEvent(handle: Long, id: String, control: String, kind: String, value: String, locale: String): String
+    private external fun nativePluginOpenPanel(handle: Long, id: String, panel: String, locale: String): String
+    private external fun nativePluginState(handle: Long, id: String): String
+    private external fun nativePluginConsole(handle: Long, id: String): String
+    private external fun nativePluginClearConsole(handle: Long, id: String)
+    private external fun nativePluginCancel(handle: Long, id: String)
+    private external fun nativePluginReload(handle: Long, id: String)
+
     fun startupError(): String = nativeStartupError(nativeHandle)
     private external fun nativeStartupError(handle: Long): String
 

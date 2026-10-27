@@ -344,10 +344,19 @@ struct TimelineView: View {
                 if !model.selection.isEmpty && (EditorTimelineRefresh.enabled
                     ? (model.sheetContent == .dock || model.sheetContent == .panel || model.sheetContent == .curve)
                     : (compactDock || model.sheetContent == .panel || model.sheetContent == .curve)) {
+                    // 0.3.4 presets: pílula pequena (24) centrada na faixa da régua; estilo
+                    // explícito (o estilo herdado desenhava uma mancha oval cinza que vazava).
+                    // Alvo de 44 invisível em volta. Par do Android (Timeline.kt).
                     Button { showAllLayers.toggle() } label: {
                         Text(AureaText.t(showAllLayers ? "timeline_selection_short" : "timeline_all_short"))
-                            .font(.aurea(size: 12)).lineLimit(1).frame(width: 84, height: 44)
-                    }.accessibilityLabel(AureaText.t(showAllLayers ? "timeline_selected_only" : "timeline_show_all"))
+                            .font(.aurea(size: 11.5, weight: .semibold)).lineLimit(1)
+                            .foregroundStyle(showAllLayers ? AureaColors.accent : AureaColors.text)
+                            .padding(.horizontal, 10).frame(height: 24)
+                            .background(showAllLayers ? AureaColors.accentDim : AureaColors.chip, in: Capsule())
+                            .padding(.horizontal, 8).frame(minWidth: 44).frame(height: 44)
+                            .contentShape(Rectangle())
+                    }.buttonStyle(AureaPressStyle())
+                        .accessibilityLabel(AureaText.t(showAllLayers ? "timeline_selected_only" : "timeline_show_all"))
                         .accessibilityIdentifier("timeline.showAllLayers")
                 }
             }
@@ -1207,26 +1216,9 @@ struct TimelineView: View {
     }
 
     private func glyph(_ context: inout GraphicsContext, _ glyph: Character, size: CGFloat, tint: Color, x: CGFloat, y: CGFloat) {
-        // 0.3.3 limpeza: o mesmo peso bold do `CupertinoGlyph.text` (`AureaBoldIcon`):
-        // o glifo e oito cópias deslocadas meio traço em volta. Par do `drawGlyph` do
-        // TimelinePainter.kt. Tinta translúcida: tudo opaco numa camada com o alfa,
-        // senão a sobreposição das cópias deixaria a borda mais forte.
-        let alpha = tint.aureaAlpha
-        guard alpha > 0 else { return }
-        let ink = alpha < 0.999 ? tint.aureaOpaque : tint
-        let text = context.resolve(Text(String(glyph)).font(CupertinoFont.font(size)).foregroundColor(ink))
-        let r = size * AureaIconWeight.glyphStroke / 2
-        var outer = context
-        if alpha < 0.999 { outer.opacity *= alpha }
-        outer.drawLayer { layer in
-            if r > 0 {
-                for i in 0..<8 {
-                    let angle = Double(i) * Double.pi / 4
-                    layer.draw(text, at: CGPoint(x: x + r * CGFloat(cos(angle)), y: y + r * CGFloat(sin(angle))))
-                }
-            }
-            layer.draw(text, at: CGPoint(x: x, y: y))
-        }
+        // 0.3.4: o glifo no estilo do app (cheio → contorno, `AureaIconStyle`), desenhado
+        // uma vez, como o `CupertinoGlyph.text`. Par do `drawGlyph` do TimelinePainter.kt.
+        context.draw(Text(String(AureaIconStyle.glyph(glyph))).font(CupertinoFont.font(size)).foregroundColor(tint), at: CGPoint(x: x, y: y))
     }
     private func fittedName(_ name: String, width: CGFloat, size: CGFloat = 11, weight: UIFont.Weight = .medium) -> String {
         let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: size, weight: weight), .kern: size == 11 ? -0.1 : 0]

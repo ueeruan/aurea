@@ -22,9 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,7 +56,7 @@ import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 // Omega tema (0.3.3): vetores do Material com o mesmo peso dos glifos.
-import com.aurea.aurea.ui.theme.aureaBold
+import com.aurea.aurea.ui.theme.AureaLineIcons
 import com.aurea.aurea.ui.theme.tocavel
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
@@ -144,7 +141,7 @@ internal fun PanelHeader(title: String, onBack: () -> Unit) {
                     .tocavel(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.ChevronLeft.aureaBold(), contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(26.dp).mirrorInRtl())
+                Icon(AureaLineIcons.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(26.dp).mirrorInRtl())
             }
             Text(
                 title,
@@ -191,13 +188,13 @@ internal fun LeftRail(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         RailCell(onBack, stringResource(R.string.panel_voltar_ferramentas)) {
-            Icon(Icons.Rounded.ChevronLeft.aureaBold(), contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(24.dp).mirrorInRtl())
+            Icon(AureaLineIcons.ChevronLeft, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(PanelMetrics.RailIcon).mirrorInRtl())
         }
         RailCell(onKeyframe, if (keyframeLook == KeyframeLook.KeyHere) stringResource(R.string.panel_tirar_keyframe_daqui) else stringResource(R.string.panel_marcar_keyframe_aqui)) {
-            KeyframeDiamondIcon(keyframeLook, enabled = onKeyframe != null, modifier = Modifier.size(24.dp))
+            KeyframeDiamondIcon(keyframeLook, enabled = onKeyframe != null, modifier = Modifier.size(PanelMetrics.RailIcon))
         }
         RailCell(onCurve, stringResource(R.string.panel_editar_curva_propriedade)) {
-            CurveRailIcon(enabled = onCurve != null, animated = curveAnimated, modifier = Modifier.size(22.dp))
+            CurveRailIcon(enabled = onCurve != null, animated = curveAnimated, modifier = Modifier.size(PanelMetrics.RailIcon))
         }
         if (onExpression != null) {
             // "=": o editor de expressão da propriedade (acende quando há uma).
@@ -206,7 +203,7 @@ internal fun LeftRail(
                     "=",
                     style = com.aurea.aurea.ui.theme.AureaType.Base.merge(
                         androidx.compose.ui.text.TextStyle(
-                            fontSize = 22.sp,
+                            fontSize = PanelMetrics.RailExpression,
                             fontWeight = androidx.compose.ui.text.font.FontWeight.W700,
                             color = if (expression == ExpressionLook.None) AureaColors.Text else expressionColor(expression),
                         ),
@@ -243,7 +240,7 @@ private fun RailCell(
 @Composable
 internal fun RailMoreButton(active: Boolean, onClick: () -> Unit) {
     Box(Modifier.size(44.dp).tocavel(onClick = onClick), contentAlignment = Alignment.Center) {
-        CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, if (active) AureaColors.Accent else AureaColors.Text)
+        CupertinoIcon(CupertinoGlyph.Ellipsis, PanelMetrics.RailIcon, if (active) AureaColors.Accent else AureaColors.Text)
         if (active) {
             Box(
                 Modifier
@@ -286,7 +283,7 @@ internal fun RightRail(modes: List<RailMode>, selected: Int, onSelect: (Int) -> 
                         .tocavel(shrink = 1f) { onSelect(i) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(m.icon.aureaBold(), contentDescription = null, tint = if (on) AureaColors.Accent else AureaColors.Muted, modifier = Modifier.size(min(20.dp, cell * 0.6f)))
+                    Icon(m.icon, contentDescription = null, tint = if (on) AureaColors.Accent else AureaColors.Muted, modifier = Modifier.size(min(24.dp, cell * 0.6f)))
                 }
             }
         }
@@ -308,7 +305,7 @@ internal fun ParamTabs(
     Row(
         Modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .height(PanelMetrics.ParamTabsHeight)
             .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         labels.forEachIndexed { i, l ->
@@ -332,7 +329,7 @@ internal fun ParamTabs(
                     modifier = Modifier.weight(1f, fill = false),
                     style = AureaType.Base.merge(
                         TextStyle(
-                            fontSize = 12.5.sp,
+                            fontSize = PanelMetrics.ParamTabsText,
                             fontWeight = if (on) FontWeight.W700 else FontWeight.W500,
                             color = if (on) AureaColors.Accent else AureaColors.Text,
                         ),
@@ -391,12 +388,100 @@ internal fun PanelNotice(text: String, modifier: Modifier = Modifier) {
 /** Medidas da moldura (as da referência). */
 internal object PanelFrameDefaults {
     val Height = 200.dp
-    val RailWidth = 60.dp
+    val RailWidth = PanelMetrics.RailWidth
     val Divider = 0.7.dp
-    val TabInset = 4.dp
-    val TabRadius = 5.dp
+    val TabInset = PanelMetrics.TabInset
+    val TabRadius = PanelMetrics.TabRadius
     const val DISABLED_ALPHA = 0.15f
     const val MAX_TABS = 4
+}
+
+/**
+ * 0.3.4 painéis: AS MEDIDAS CENTRAIS dos painéis de propriedade (moldura e
+ * campos), ~25 % maiores que as da Omega ("está muito compacto"). Todo painel
+ * (Transformar, Câmera, Cor e preenchimento, Borda e sombra, Mesclagem, Efeitos,
+ * Velocidade/Som, Curva) lê daqui em vez de número solto. Par de
+ * `PanelMetrics` do DesignSystem.swift: os valores são os mesmos (dp = pt, sp = pt).
+ *
+ * Largura: três campos de [FieldWidth] + o fio da pílula + [FieldGap] cabem
+ * na coluna central de um telefone de 360 dp (360 − 2 × 60 − 2 × 0,7 − 12 = 226).
+ * O número do campo encolhe (até [FieldValueMin]) antes de vazar, com fonte grande.
+ */
+internal object PanelMetrics {
+    // --- Moldura -------------------------------------------------------------
+    val RailWidth = 60.dp
+    /** Ícones das colunas (‹, ◆, curva, ⋯ e as abas): antes 22. */
+    val RailIcon = 26.dp
+    /** O "=" da expressão na coluna esquerda (sp). */
+    val RailExpression = 26.sp
+    val TabInset = 5.dp
+    val TabRadius = 7.dp
+    /** Alvo de toque mínimo de qualquer controle do painel. */
+    val Touch = 44.dp
+
+    // --- Campos de valor (X/Y/Z, Largura/Altura, Inclinação, ângulos) ----------
+    val FieldWidth = 72.dp
+    val FieldHeight = 36.dp
+    val FieldRadius = 7.dp
+    val FieldGap = 8.dp
+    /** Número do campo (antes 10). */
+    val FieldValue = 15.sp
+    val FieldValueMin = 9.sp
+    /** Rótulo embaixo do campo (antes 9). */
+    val FieldLabel = 12.sp
+    val FieldLabelGap = 3.dp
+    /** Respiro em cima da fileira de campos (antes 6/15). */
+    val FieldRowTop = 12.dp
+    /** A fileira de campos inteira: respiro + campo + vão + rótulo (≈ 17). */
+    val FieldBlock = 68.dp
+
+    // --- Textos ---------------------------------------------------------------
+    /** Título de cartão/seção dentro do painel (antes 13–13,5). */
+    val Title = 15.sp
+    /** Rótulo de linha / título de controle (antes 10–11). */
+    val Label = 13.sp
+    /** Texto secundário e notas (antes 10–11,5). */
+    val Note = 12.sp
+    /** A dica do trackpad e de áreas de gesto (antes 12). */
+    val Hint = 14.sp
+    /** Botões pequenos dentro do painel ("Centro", "Preciso", chips). */
+    val ChipHeight = 36.dp
+    val ChipText = 14.sp
+    val ChipPad = 14.dp
+
+    // --- Réguas ---------------------------------------------------------------
+    /**
+     * Régua de um par, no painel de 200 (antes 52). Com o painel mais alto as réguas
+     * crescem até [RulerMax] ([fillRulers]); 68 + 8 + 56 + 8 + 56 + 4 = 200.
+     */
+    val Ruler = 56.dp
+    /** Régua única, no painel de 200 (antes 72). */
+    val RulerTall = 80.dp
+    /** Teto ao crescer com o painel alto (as réguas repartem a sobra até aqui). */
+    val RulerMax = 128.dp
+    val RulerGap = 8.dp
+    /** Respiro embaixo da última régua. */
+    val RulerBottom = 4.dp
+
+    /** A altura que sobra para as réguas abaixo de uma fileira de campos, num conteúdo de [height]. */
+    fun rulerSpace(height: Dp): Dp = height - FieldBlock - RulerGap - RulerBottom
+
+    // --- Abas de parâmetro (ParamTabs) -----------------------------------------
+    val ParamTabsHeight = 54.dp
+    val ParamTabsText = 14.sp
+
+    /**
+     * Altura de cada uma de [count] réguas para encher [available] (a altura que
+     * sobra no painel), entre [min] e [RulerMax]. Com o painel alto as réguas
+     * crescem em vez de tudo ficar espremido no topo; num painel baixo ficam em [min]
+     * e o conteúdo rola.
+     */
+    fun fillRulers(available: Dp, count: Int, min: Dp): Dp {
+        if (count <= 0) return min
+        val gaps = RulerGap * (count - 1)
+        val each = (available - gaps) / count.toFloat()
+        return each.coerceIn(min, maxOf(min, RulerMax))
+    }
 }
 
 /**
@@ -515,7 +600,7 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
     var moreOpen by remember { mutableStateOf(false) }
     Column(Modifier.width(PanelFrameDefaults.RailWidth).fillMaxHeight()) {
         FrameCell("panel.rail.back", stringResource(R.string.panel_voltar_ferramentas), enabled = true, onClick = rail.onBack) {
-            CupertinoIcon(CupertinoGlyph.ChevronLeft, 22.dp, AureaColors.Text)
+            CupertinoIcon(CupertinoGlyph.ChevronLeft, PanelMetrics.RailIcon, AureaColors.Text)
         }
         if (!rail.supportsAnimation) {
             Spacer(Modifier.weight(3f))
@@ -528,7 +613,7 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
             onClick = rail.onKeyframe,
             onLongClick = if (rail.keyframeLook == KeyframeLook.KeyHere && rail.onDeleteAllKeyframes != null) onAskDeleteAll else null,
         ) {
-            KeyframeDiamondIcon(rail.keyframeLook, enabled = true, modifier = Modifier.size(24.dp))
+            KeyframeDiamondIcon(rail.keyframeLook, enabled = true, modifier = Modifier.size(PanelMetrics.RailIcon))
         }
         val curve = rail.onCurve
         FrameCell(
@@ -537,7 +622,7 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
             enabled = curve != null,
             onClick = if (curve != null) ({ if (rail.curveReady) curve() else onCurveWarning() }) else null,
         ) {
-            CurveRailIcon(enabled = true, animated = rail.keyframeLook != KeyframeLook.None, modifier = Modifier.size(22.dp))
+            CurveRailIcon(enabled = true, animated = rail.keyframeLook != KeyframeLook.None, modifier = Modifier.size(PanelMetrics.RailIcon))
         }
         val onExpression = rail.onExpression
         if (onExpression != null) {
@@ -551,7 +636,7 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
                     "=",
                     style = AureaType.Base.merge(
                         TextStyle(
-                            fontSize = 22.sp,
+                            fontSize = PanelMetrics.RailExpression,
                             fontWeight = FontWeight.W700,
                             color = if (rail.expression == ExpressionLook.None) AureaColors.Text else expressionColor(rail.expression),
                         ),
@@ -569,7 +654,7 @@ private fun FrameLeftRail(rail: PanelRail, onAskDeleteAll: () -> Unit, onCurveWa
                     enabled = rail.moreEnabled,   // Omega efeitos (área 07)
                     onClick = { if (entries != null) moreOpen = true else onMore?.invoke() },
                 ) {
-                    CupertinoIcon(CupertinoGlyph.Ellipsis, 24.dp, if (rail.moreActive) AureaColors.Accent else AureaColors.Text)
+                    CupertinoIcon(CupertinoGlyph.Ellipsis, PanelMetrics.RailIcon, if (rail.moreActive) AureaColors.Accent else AureaColors.Text)
                 }
                 if (entries != null) {
                     AnchoredMenu(
@@ -653,8 +738,8 @@ private fun FrameRightRail(tabs: List<PanelTab>, selectedId: String?, onTab: (St
                 val glyph = shown.glyph
                 val icon = shown.icon
                 when {
-                    glyph != null -> CupertinoIcon(glyph, 22.dp, tint)
-                    icon != null -> Icon(icon.aureaBold(), contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                    glyph != null -> CupertinoIcon(glyph, PanelMetrics.RailIcon, tint)
+                    icon != null -> Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(PanelMetrics.RailIcon))
                 }
             }
         }

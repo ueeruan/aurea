@@ -2,6 +2,10 @@
 
 > Versão em português (a principal): [README.md](README.md)
 
+> **0.3.4:** besides effects, a plugin can bring **panels and tabs** to the
+> interface, **scripts** with an After Effects style API and **access to internet
+> APIs** on the domains it declares — see [section 14](#14-panels-scripts-and-apis-format-2-034).
+
 A **plugin** is a package that adds **one effect** to the AUREA effect
 browser, in the **Plugins** category. Once installed it behaves like any
 built-in effect: it goes into the layer panel, its parameters take keyframes
@@ -25,6 +29,7 @@ and package, and what to do when installation refuses a plugin.
 - [11. Projects, versions and removal](#11-projects-versions-and-removal)
 - [12. Engine API (for UI integrators)](#12-engine-api-for-ui-integrators)
 - [13. Licences](#13-licences)
+- [14. Panels, scripts and APIs (format 2, 0.3.4)](#14-panels-scripts-and-apis-format-2-034)
 
 Ready-made examples in [`examples/`](examples/):
 
@@ -35,6 +40,8 @@ Ready-made examples in [`examples/`](examples/):
 | `dream-look/` → `dream-look.aureaplugin` | stack | built-in blur + glow + saturation driven by expressions |
 | `pulse-vignette.fs` | ISF 2.0 | importing a `.fs` (point2D, color, bool, TIME) |
 | `target-3d/` → `target-3d.aureaplugin` | shader3d, 1 pass | a ring around a 3D null seen through the scene camera; `layer` parameter with `accept`; `aurea_ray` |
+| `animated-text/` → `animated-text.aureaplugin` | panel + script (0.3.4) | **Animated text generator**: panel, Home tab, layer-bar button; creates layers and keyframes |
+| `weather-text/` → `weather-text.aureaplugin` | panel + script (0.3.4) | **Weather on screen**: `fetch` from a declared public API (Open-Meteo) and creates a text |
 
 ---
 
@@ -703,3 +710,350 @@ Their licence notices must ship with the app's licences screen. Plugins belong
 to their authors: AUREA does not redistribute third-party plugins. The examples
 in this folder were written for AUREA and may be freely used as a starting
 point.
+
+Plugin scripts (0.3.4) run on **AureaScript**, an interpreter written for AUREA
+(`engine/src/plugins/script/`): no new third-party library.
+
+## 14. Panels, scripts and APIs (format 2, 0.3.4)
+
+Starting with 0.3.4 a plugin can do much more than add an effect: **change the
+interface** (Home tabs, editor panels, menu items, buttons on the layer bar),
+**run scripts** with an object API in the style of After Effects scripts and
+**fetch data from internet APIs** on the domains it declares. It all ships in the
+same `.aureaplugin`, with `"aureaPlugin": 2`.
+
+- [14.1 The format 2 manifest](#141-the-format-2-manifest)
+- [14.2 Panels and controls](#142-panels-and-controls)
+- [14.3 Actions (menus and the layer bar)](#143-actions-menus-and-the-layer-bar)
+- [14.4 Scripts: the AureaScript language](#144-scripts-the-aureascript-language)
+- [14.5 API reference](#145-api-reference)
+- [14.6 Permissions and network](#146-permissions-and-network)
+- [14.7 Limits, errors and the console](#147-limits-errors-and-the-console)
+- [14.8 Examples](#148-examples)
+- [14.9 Engine API (for the interface)](#149-engine-api-for-the-interface)
+
+### 14.1 The format 2 manifest
+
+```json
+{
+  "aureaPlugin": 2,
+  "id": "com.studio.text",
+  "version": "1.0.0",
+  "name": {"pt-BR": "Texto animado", "en": "Animated text"},
+  "kind": "panel",
+  "script": "main.js",
+  "permissions": {"network": ["api.example.com"], "clipboard": false, "files": false},
+  "strings": {"pt-BR": {"done": "{0} camadas criadas"}, "en": {"done": "{0} layers created"}},
+  "ui": {"panels": [ ... ], "actions": [ ... ]}
+}
+```
+
+| Field | What it is |
+| --- | --- |
+| `aureaPlugin` | `2`. An older app (format 1 only) refuses it with "format version not supported". `ui`, `script`, `permissions` and `strings` with `1` are refused. |
+| `kind` | `"panel"` (new: no effect, only interface and script) or the effect kinds (`shader`, `shader3d`, `stack`), which may now also carry an interface and a script. |
+| `script` | A `.js` file in the package (up to 512 KB). Its syntax is checked on install: an error refuses the package with `file:line:column`. |
+| `permissions` | What the plugin asks for (section 14.6). Unknown fields are refused. |
+| `strings` | Script texts per language (`app.t("key", ...)`, with `{0}`, `{1}`...). Up to 512 keys per language. |
+| `ui` | `panels` (up to 8) and `actions` (up to 16). |
+
+Every text (`title`, `label`, `options`, `placeholder`, `text`) takes plain text or
+a language → text object, like `name`, with the fallback order of section 3. Size
+limits count **characters** (Hindi, Russian and Arabic count the same as English).
+
+### 14.2 Panels and controls
+
+```json
+{
+  "id": "main",
+  "title": {"pt-BR": "Texto animado", "en": "Animated text"},
+  "icon": "sparkles",
+  "placement": ["editor.panel", "home.tab"],
+  "onOpen": "opened",
+  "controls": [
+    {"id": "text", "type": "text", "label": "Text", "default": "AUREA"},
+    {"id": "make", "type": "button", "label": "Generate", "onClick": "generate"}
+  ]
+}
+```
+
+- **`placement`**: `editor.panel` — the panel opens in the editor, inside the common
+  panel frame (‹ closes it); it is listed in the **plugin menu** (wrench button at
+  the top of the editor) and under Plugins > "Open". `home.tab` — becomes a **Home
+  tab**: with a single plugin tab the dock shows its name and icon; with several, a
+  "Plugins" tab with a picker at the top.
+- **`icon`**: one of these names (both platforms use AUREA's own icons):
+  `wand sparkles text star bolt cloud music photo film layers gear brush clock list
+  cube lightbulb wrench book flag grid camera chart sliders eye folder link speed
+  waveform`. Any other name is refused.
+- **`onOpen`**: function called when the panel opens (optional).
+- **`controls`**: 1 to 32. Control ids are unique across the whole plugin (the
+  script reads them with `ui.get("id")`).
+
+| `type` | Fields | Value (`ui.get`) | Event |
+| --- | --- | --- | --- |
+| `button` | `label` (required), `style`: `primary` · `secondary` · `danger` | — | `onClick` (required) |
+| `slider` | `min`, `max`, `step` (0 = continuous), `default`, `unit` | number | `onChange` (on release) |
+| `ruler` | drag ruler: optional `min`/`max` (±1e6), `step`, `default`, `unit` | number | `onChange` (on release) |
+| `color` | `default` `"#RRGGBB"` or `"#RRGGBBAA"` | `"#RRGGBB"` | `onChange` |
+| `choice` | `options` (1 to 32 texts), `default` (index) | index | `onChange` |
+| `text` | `default`, `placeholder`, `multiline`, `maxLength` (≤ 10000) | text | `onChange` (on confirm) |
+| `list` | initial `items` `[{id, label, detail}]` (≤ 200) | chosen id or `null` | `onSelect` |
+| `image` | `src` (`.png`/`.jpg` in the package, ≤ 2 MB), `aspect` (width/height) | — | — |
+| `label` | `text` | the text | — |
+| `toggle` | `default` (`true`/`false`) | boolean | `onChange` |
+
+Handlers receive `(value, controlId)`. Every call coming from the interface is
+**one undo step** (see `app.beginUndoGroup`).
+
+### 14.3 Actions (menus and the layer bar)
+
+```json
+{"id": "quick", "title": "Animate layer", "icon": "bolt", "placement": "layer.toolbar", "call": "animate"}
+```
+
+| `placement` | Where it shows |
+| --- | --- |
+| `editor.menu` | in the plugin menu at the top of the editor |
+| `layer.menu` | in the layer ⋮ menu (plugin section at the end) |
+| `layer.toolbar` | button on the selected layer's bar (`icon` required) |
+
+Each action has **`call`** (a script function) **or** **`panel`** (opens that
+panel, which needs `editor.panel`). `needsLayer` (default `true` for layer actions).
+
+### 14.4 Scripts: the AureaScript language
+
+The script is **JavaScript** (an ES2020 subset) run by **AureaScript**, AUREA's own
+interpreter, identical on Android and iOS. The file runs once when the plugin is
+first used (defining functions and global variables, which **persist between
+calls**); after that the interface calls the functions.
+
+Supported: `let`/`const`/`var` (all block scoped), functions, arrow functions,
+closures, `this` in methods, `new` with constructor functions, objects, arrays,
+template strings, destructuring (`const {a, b} = obj`, `[x, ...rest]`, also in
+parameters), spread (`...`), default parameters, `if`/`switch`/`for`/`for...of`/
+`for...in`/`while`/`do`, `try`/`catch`/`finally`/`throw`, `?.`, `??`, `??=`, `**`,
+`typeof`, `instanceof`, `in`, `delete`.
+
+Library: `Math`, `JSON` (`parse`, `stringify` with indentation), `Object` (`keys`,
+`values`, `entries`, `assign`, `fromEntries`, `freeze`, `hasOwn`), `Array`
+(`isArray`, `from`, `of` and the methods `push pop shift unshift slice splice
+concat join reverse indexOf lastIndexOf includes at forEach map filter find
+findIndex findLast findLastIndex some every reduce reduceRight sort flat flatMap
+fill`), string methods (`toUpperCase toLowerCase trim trimStart trimEnd includes
+startsWith endsWith indexOf lastIndexOf slice substring substr charAt charCodeAt
+codePointAt at split replace replaceAll repeat padStart padEnd concat
+localeCompare`), `Number` (`toFixed`, `toPrecision`, `toString(radix)`,
+`isInteger`...), `String`, `Boolean`, `parseInt`, `parseFloat`, `isNaN`,
+`isFinite`, `encodeURIComponent`, `decodeURIComponent`, `Date` (UTC: `Date.now`,
+`new Date()`, `toISOString`, `getFullYear`...), `Error`, `TypeError`,
+`RangeError`, `ReferenceError`, `SyntaxError`, `console.log/info/warn/error`.
+
+Not supported (refused with a specific message): `class`, `async`/`await`/Promise,
+generators, regular expressions (use `split`, `includes`, `replaceAll`),
+`import`/`export`/`require`, `eval`, `Function`, labels, getters/setters in
+literals. There is **no** `window`, `document`, `XMLHttpRequest`, `process`,
+`globalThis` or anything that touches files or the system: the script only reaches
+what the reference below lists.
+
+Small differences from JavaScript: strings count **characters** (`"ação".length`
+is 4); `var` is block scoped; `Math.random` is reproducible per plugin.
+
+### 14.5 API reference
+
+Times in **composition seconds**; layer indices **from 1, top to bottom** (as in
+After Effects); position and anchor in pixels, scale and opacity in %, rotation
+in degrees; colors `[r, g, b]` (or `[r, g, b, a]`) from 0 to 1, or `"#RRGGBB"`.
+
+**`app`**
+
+| Member | |
+| --- | --- |
+| `app.version` | `"0.3.4"` |
+| `app.language` | the app language for the call (`"pt-BR"`, `"en"`...) |
+| `app.plugin` | `{id, version, name}` |
+| `app.project` | the project (below); `app.project.activeItem` is `null` with no project open |
+| `app.beginUndoGroup(name)` / `app.endUndoGroup()` | group changes into one undo step (nestable). Every call from the interface is already a group; groups left open are closed at the end. |
+| `app.alert(text)` | alert with OK |
+| `app.t(key, ...args)` | text from `strings` in the app language (`{0}`, `{1}` replaced by the arguments) |
+
+**`app.project`**: `name`, `numItems`, `item(1)`, `activeItem` (the open composition).
+
+**Composition** (`app.project.activeItem`)
+
+| Member | |
+| --- | --- |
+| `name`, `width`, `height`, `frameRate`, `frameDuration`, `numLayers` | read |
+| `duration` | read and write (seconds) |
+| `time` | read and write: the playhead |
+| `layer(index or name)` | a layer (`null` if none) |
+| `layers` | AE-like collection: `layers.length`, `layers[1]`... plus `addText(text)`, `addShape(shape)`, `addSolid(color, name, width, height)`, `addNull(threeD)`, `addCamera()`, `addLight(type)`, `byName(name)`, `toArray()` |
+| `allLayers` | a JavaScript array of the layers (top to bottom) |
+| `selectedLayers` | the selected layers |
+| `markers` | `[{time, name, color, beat}]` |
+| `addMarker(time, name, color)` / `removeMarker(time)` | composition markers |
+| `renderFrame({maxSize})` | renders the playhead frame (up to 1024 px): `{width, height, pixel(x, y), average()}`; can be shown in an `image` control with `ui.setImage` |
+
+`addShape` takes a shape index or `circle`, `roundedSquare`, `cross`, `ring`,
+`triangle`, `hexagon`, `arrow`, `square`, `star`, `capsule`, `heart`, `line`,
+`diamond`.
+
+**Layer**
+
+| Member | |
+| --- | --- |
+| `id`, `index`, `type` (`text shape video image audio null camera light model3d particles group adjustment`) | read |
+| `name`, `inPoint`, `outPoint`, `enabled`, `locked`, `threeD`, `selected`, `parent` | read and write |
+| `startTime` | read |
+| `text`, `fontSize` | text layers |
+| `fillColor` | text and shape |
+| `position`, `scale`, `rotation`, `rotationX`, `rotationY`, `rotationZ`, `opacity`, `anchorPoint` | properties (below); also as `transform.*` and `property("Position")` |
+| `effects`, `effect(name, key or index)`, `addEffect(key)` | effects (`"aurea.blur.gaussian"`...) |
+| `remove()`, `duplicate()`, `moveTo(index)`, `moveToBeginning()`, `moveToEnd()` | |
+
+**Property**
+
+| Member | |
+| --- | --- |
+| `name`, `value`, `dimensions`, `numKeys`, `isTimeVarying` | read |
+| `valueAtTime(t)` | value at a time |
+| `setValue(v)` | static value. With keyframes it refuses (use `setValueAtTime`), as in AE |
+| `setValueAtTime(t, v)`, `setValuesAtTimes(ts, vs)`, `addKey(t)` | keyframes |
+| `keyTime(k)`, `keyValue(k)`, `nearestKeyIndex(t)`, `removeKey(k)` | `k` starts at 1 |
+| `setInterpolationTypeAtKey(k, type)` | `linear`, `hold`, `bezier`, `ease`, `easeIn`, `easeOut` |
+
+**Effect**: `name`, `matchName` (the key), `enabled` (read and write),
+`numProperties`, `property(id, label or index)` (a Property), `remove()`.
+
+**`ui`** (the plugin's controls)
+
+| Function | |
+| --- | --- |
+| `ui.get(id)` / `ui.set(id, value)` | control value (types are checked: an invalid color = `TypeError`) |
+| `ui.setItems(id, items)` | items of a `list`: texts or `{id, label, detail}` |
+| `ui.setText(id, text)` | text of a `label` |
+| `ui.setLabel(id, text)` | replaces any control's label |
+| `ui.setEnabled(id, yes)` / `ui.setVisible(id, yes)` | |
+| `ui.setImage(id, file or frame)` | a package `"cover.png"`, a `renderFrame()` result or `null` |
+| `ui.progress(fraction, text)` | progress bar while the function runs (`null` clears it) |
+| `ui.toast(text)` / `ui.alert(text)` | messages |
+| `ui.openPanel(id)` | opens another panel of the plugin in the editor |
+
+**`storage`** (per plugin, persistent, 256 KB): `get(key, fallback)`, `set(key,
+value)` (any JSON value), `remove(key)`, `keys()`.
+
+**`fetch(url, options)`** (network permission): synchronous, returns
+`{ok, status, url, headers, text(), json()}`. Options: `method` (`GET POST PUT
+PATCH DELETE HEAD`), `headers` (object), `body` (text, or an object sent as JSON),
+`timeout` (ms, 1000 to 30000). Errors: `PermissionError` (no permission / domain
+not listed) and `NetworkError` (offline, timeout, response too large).
+
+**`clipboard.readText()` / `clipboard.writeText(text)`** (clipboard permission).
+
+**`files.pick({types: ["json", "txt", "csv"]})`** (files permission): opens the
+system picker and returns `{name, size, text(), json()}` (up to 1 MB), or `null`
+if the person cancels. Only the chosen file; nothing else on disk.
+
+**`console.log/info/warn/error`**: go to the plugin console (Plugins > Console).
+
+### 14.6 Permissions and network
+
+```json
+"permissions": {"network": ["open-meteo.com"], "clipboard": true, "files": true}
+```
+
+- **`network`**: up to 8 domains, name only (`api.example.com`; no `https://`,
+  port or path; `*` is refused). A domain also covers its **subdomains**
+  (`open-meteo.com` allows `api.open-meteo.com`). `fetch` only accepts `https://`,
+  no explicit port or `user@`, and **does not follow redirects** (a 3xx comes back
+  to the script). Responses up to 2 MB, request bodies up to 256 KB, 15 s by default.
+- **`clipboard`** and **`files`**: as above.
+- **Consent**: on install the app shows a sheet with what the plugin asks for; each
+  permission has a switch the person can turn off before installing. Later, under
+  Plugins, each permission can be turned on and off.
+- **Denied permission** (not declared in the manifest, or turned off by the
+  person): the function throws `PermissionError` and no byte leaves the device.
+  Catch it with `try/catch` if you want your own message.
+
+### 14.7 Limits, errors and the console
+
+| Limit | Value | When exceeded |
+| --- | --- | --- |
+| CPU time per call | 5 s (waiting for the network or the picker does not count) | `LimitError`, the call stops |
+| Steps per call | 20 million | `LimitError` |
+| Script memory | 32 MB live | `LimitError` |
+| Call depth | 64 | `RangeError` |
+| Script size | 512 KB | refused on install |
+
+Limits and cancellation (the panel's **Stop** button) **go through the script's
+`try/catch`**: an infinite loop cannot hang the app. The context stays usable.
+Memory cycles (closures pointing at each other) are collected automatically.
+
+Errors show **in the panel** (with `file:line:column`) and in the plugin
+**console** (last 200 lines, including the script's `console.log`). A failing
+script does not crash the app or the project; whatever it already changed undoes
+in one tap. For an error while loading the file: fix it and reinstall, or use
+"Reload script" in the console.
+
+**On/off**: under Plugins, the "On" switch hides the plugin's panels and actions and
+stops its script. The plugin's effect (if any) stays in the catalog, so projects
+that use it don't change.
+
+### 14.8 Examples
+
+| Folder / file | What it shows |
+| --- | --- |
+| `animated-text/` → `animated-text.aureaplugin` | **Animated text generator**: editor panel and Home tab; text, choice, slider, ruler, toggle, color; creates text layers with keyframes (opacity, position, scale, rotation, `ease`) in one undo step; a layer-bar button that animates the selected layers; `storage`; texts in all 7 languages |
+| `weather-text/` → `weather-text.aureaplugin` | **Weather on screen**: `fetch` from the public Open-Meteo API (`permissions.network: ["open-meteo.com"]`, using the `geocoding-api` and `api` subdomains), a result list filled by the script, `NetworkError` handled, creates a text layer with the temperature |
+
+Pack with `python docs/plugins/tools/pack_plugin.py <folder>` (it checks format 2:
+ids, icons, placements, permissions and that every function the interface calls
+exists in the script).
+
+### 14.9 Engine API (for the interface)
+
+C++ (`Engine.hpp`, `0.3.4 plugins` block):
+
+```cpp
+std::string inspect_plugin(const char* path) noexcept;          // reads without installing: what it asks for
+bool set_plugin_enabled(const char* id, bool on) noexcept;
+bool set_plugin_permissions(const char* id, u32 granted) noexcept;   // 1 network, 2 clipboard, 4 files
+std::string plugin_call(const char* id, const char* fn, const char* argsJson, const char* locale) noexcept;
+std::string plugin_event(const char* id, const char* control, const char* kind, const char* valueJson, const char* locale) noexcept;
+std::string plugin_open_panel(const char* id, const char* panel, const char* locale) noexcept;
+std::string plugin_state(const char* id) noexcept;
+std::string plugin_console(const char* id) noexcept;
+void plugin_clear_console(const char* id) noexcept;
+void plugin_cancel(const char* id) noexcept;       // any thread
+void plugin_reload(const char* id) noexcept;
+void set_plugin_host_io(plugins::HostIO io) noexcept;   // the platform's fetch, clipboard and picker
+```
+
+`plugin_call`/`plugin_event`/`plugin_open_panel` **block** (the script runs on the
+caller's thread): the interface calls them from a large-stack (8 MB) worker thread.
+One script call at a time in the engine; a busy plugin answers `BusyError`. The
+reply:
+
+```json
+{"ok": true, "value": <the function's return value as JSON>,
+ "error": {"name": "TypeError", "message": "...", "text": "main.js:12:5: TypeError: ...",
+           "file": "main.js", "line": 12, "column": 5, "aborted": false},
+ "messages": [{"kind": "toast" | "alert" | "select", "text": "..."}],
+ "openPanel": "",
+ "state": {"values": {...}, "items": {...}, "texts": {...}, "labels": {...},
+           "disabled": [...], "hidden": [...], "images": {...},
+           "progress": 0.5, "progressText": "", "busy": false}}
+```
+
+(`"error"` only when `ok` is false; `progress` and a `list` with no choice come as `[]`.)
+`plugins_json()` gained `format`, `hasScript`, `enabled`, `generation`,
+`permissions` `{network[], clipboard, files}`, `granted` `{network, clipboard,
+files}` and `ui` (`panels` with `controls`, and `actions`). On/off and permissions
+live in `<plugin folder>/.estado.json`; `storage` and frames in `<folder>/.dados/`.
+
+Android: `AureaEngine.kt` (`inspectPlugin`, `setPluginEnabled`,
+`setPluginPermissions`, `pluginCall`, `pluginEvent`, `pluginOpenPanel`,
+`pluginState`, `pluginConsole`, `pluginClearConsole`, `pluginCancel`,
+`pluginReload`, `installPluginHost`); I/O in `effects/PluginHost.kt`; the interface
+in `effects/PluginRuntime.kt` and `effects/PluginUi.kt`. iOS: `AureaEngine.h` (same
+names, `installPluginHost` and the `pluginPickFile` block) and `PluginsV2.swift`.

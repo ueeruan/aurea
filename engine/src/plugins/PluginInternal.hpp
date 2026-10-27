@@ -27,7 +27,7 @@ namespace aurea::plugins {
 /// Texto por idioma (texto simples ou objeto idioma → texto). Falso = `error`.
 [[nodiscard]] bool read_localized(const json::Value* v, LocalizedText& out, const char* field, usize maxChars, bool required,
                                   std::string& error);
-/// 0.3.3 plugins: "script", "permissions", "strings" e "ui" (PluginUiManifest.cpp).
+/// 0.3.4 plugins: "script", "permissions", "strings" e "ui" (PluginUiManifest.cpp).
 /// Formato 1 com esses campos = recusa (pedem "aureaPlugin": 2).
 [[nodiscard]] bool parse_manifest_v2(const json::Value& root, Manifest& m, u32 format, std::string& error);
 /// A parte da interface/permissões de um plugin na lista em JSON.

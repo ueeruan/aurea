@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.4 plugins: painéis, scripts e permissões (effects/PluginUi.kt). -->
+<resources>
+    <string name="pv2_consent_title">%1$s इंस्टॉल करें?</string>
+    <string name="pv2_consent_body">यह प्लगइन माँगता है:</string>
+    <string name="pv2_consent_none">यह इंटरनेट, क्लिपबोर्ड या फ़ाइलें नहीं माँगता।</string>
+    <string name="pv2_perm_network">इंटरनेट, केवल: %1$s</string>
+    <string name="pv2_perm_clipboard">क्लिपबोर्ड (टेक्स्ट पढ़ना और कॉपी करना)</string>
+    <string name="pv2_perm_files">आपकी चुनी हुई फ़ाइलें</string>
+    <string name="pv2_consent_script">यह AUREA के अंदर एक स्क्रिप्ट चलाता है, डिवाइस तक खुली पहुँच के बिना। अनुमतियाँ बाद में Plugins में बदल सकते हैं।</string>
+    <string name="pv2_consent_update">इंस्टॉल वर्ज़न %1$s की जगह लेगा।</string>
+    <string name="pv2_install">इंस्टॉल करें</string>
+    <string name="pv2_enabled">चालू</string>
+    <string name="pv2_permissions">अनुमतियाँ</string>
+    <string name="pv2_open_panel">%1$s खोलें</string>
+    <string name="pv2_console">कंसोल</string>
+    <string name="pv2_console_title">%1$s का कंसोल</string>
+    <string name="pv2_console_empty">कंसोल में कुछ नहीं।</string>
+    <string name="pv2_console_clear">साफ़ करें</string>
+    <string name="pv2_reload">स्क्रिप्ट फिर से लोड करें</string>
+    <string name="pv2_cancel_run">रोकें</string>
+    <string name="pv2_running">चल रहा है…</string>
+    <string name="pv2_error_title">प्लगइन में त्रुटि हुई</string>
+    <string name="pv2_see_console">कंसोल देखें</string>
+    <string name="pv2_menu">प्लगइन</string>
+    <string name="pv2_menu_empty">पैनल वाला कोई प्लगइन चालू नहीं। Effects > Plugins में इंस्टॉल करें।</string>
+    <string name="pv2_disabled">बंद</string>
+    <string name="pv2_kind_panel">पैनल और स्क्रिप्ट</string>
+    <string name="pv2_has_script">स्क्रिप्ट के साथ</string>
+    <string name="pv2_reading">प्लगइन पढ़ रहे हैं…</string>
+    <string name="pv2_inspect_failed">प्लगइन पढ़ा नहीं जा सका: %1$s</string>
+    <string name="pv2_close">बंद करें</string>
+    <string name="pv2_no_layer">पहले कोई परत चुनें।</string>
+</resources>

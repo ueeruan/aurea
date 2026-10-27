@@ -852,7 +852,8 @@ enum class LayerType(val kind: Int, val color: Color, val glyph: Char, val label
     Image(2, Color(0xFF3D6FD9), CupertinoGlyph.PhotoFill, "Imagem"),
     Audio(3, Color(0xFF1F8C93), CupertinoGlyph.MusicNote, "Áudio"),
     Text(4, Color(0xFFB07A16), CupertinoGlyph.Textformat, "Texto"),
-    Shape(5, Color(0xFF2E9459), CupertinoGlyph.CircleFill, "Forma"),
+    // 0.3.4: Forma em contorno (os cheios das outras linhas viram contorno no AureaIconStyle).
+    Shape(5, Color(0xFF2E9459), CupertinoGlyph.Circle, "Forma"),
     Null(6, Color(0xFF444C5C), CupertinoGlyph.SmallcircleCircle, "Nulo"),
     Adjustment(7, Color(0xFF5A4A7A), CupertinoGlyph.SliderHorizontal3, "Ajuste"),
     Camera(8, Color(0xFF2A7B9B), CupertinoGlyph.CameraFill, "Câmera"),

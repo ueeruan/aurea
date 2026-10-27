@@ -111,10 +111,17 @@ object FxRow {
     val List: Dp = FxParamMath.ROW_LIST.dp
     val Gap: Dp = FxParamMath.LIST_GAP.dp
     /** Coluna X/Y do ponto e caixa de XYZ. */
-    val AxisColumn: Dp = 55.dp
+    val AxisColumn: Dp = 60.dp
     val AxisBox: Dp = 36.dp
-    /** Botão da escolha segmentada. */
-    val Segment: Dp = 27.5.dp
+    /** Botão da escolha segmentada (0.3.4 painéis: 36, antes 27,5). */
+    val Segment: Dp = 36.dp
+    // 0.3.4 painéis: textos das linhas (par do `FxParamLabel`/`FxValueBox` do iOS).
+    /** Rótulo da linha: até 13 sp (antes 12), encolhe até 8. */
+    val LabelText = 13.sp
+    /** Número da caixa de valor: até 15 sp (antes 14), encolhe até 8. */
+    val ValueText = 15.sp
+    /** Linha auxiliar e rótulos de eixo (antes 10). */
+    val SmallText = 12.sp
     /** Toque de vibração ao cruzar um risco de encaixe. */
     fun tick(view: android.view.View) {
         // A referência vibra 5 ms com amplitude 50 (Vibrator); sem a permissão
@@ -177,9 +184,9 @@ fun FxParamLabel(
             text = label,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 12.sp, stepSize = 0.5.sp),
+            autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = FxRow.LabelText, stepSize = 0.5.sp),
             style = AureaType.Base.merge(
-                TextStyle(fontSize = 12.sp, lineHeight = 1.1.em, color = textColor, textAlign = TextAlign.Center),
+                TextStyle(fontSize = FxRow.LabelText, lineHeight = 1.1.em, color = textColor, textAlign = TextAlign.Center),
             ),
         )
         if (keyframe != KeyframeLook.None) {
@@ -250,9 +257,9 @@ fun FxValueBox(
                 BasicText(
                     text = aux,
                     maxLines = 1,
-                    autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 10.sp, stepSize = 0.5.sp),
+                    autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = FxRow.SmallText, stepSize = 0.5.sp),
                     style = AureaType.Base.merge(
-                        TextStyle(fontSize = 10.sp, color = AureaColors.FxDisabledText, textAlign = TextAlign.End,
+                        TextStyle(fontSize = FxRow.SmallText, color = AureaColors.FxDisabledText, textAlign = TextAlign.End,
                             textDirection = TextDirection.Ltr),
                     ),
                 )
@@ -260,10 +267,10 @@ fun FxValueBox(
             BasicText(
                 text = text,
                 maxLines = 1,
-                autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 14.sp, stepSize = 0.5.sp),
+                autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = FxRow.ValueText, stepSize = 0.5.sp),
                 style = AureaType.Base.merge(
                     TextStyle(
-                        fontSize = 14.sp,
+                        fontSize = FxRow.ValueText,
                         color = if (enabled) color else AureaColors.FxDisabledText,
                         textAlign = TextAlign.End,
                         fontFeatureSettings = "tnum",
@@ -662,7 +669,7 @@ fun FxSegmented(
                     overflow = TextOverflow.Ellipsis,
                     style = AureaType.Base.merge(
                         TextStyle(
-                            fontSize = 12.sp,
+                            fontSize = FxRow.LabelText,
                             color = when {
                                 !enabled -> AureaColors.FxDisabledText
                                 on -> AureaColors.Accent
@@ -695,7 +702,7 @@ fun FxDropdownBox(
             Modifier
                 .fillMaxWidth()
                 .padding(4.dp)
-                .height(30.dp)
+                .height(FxRow.Segment)  // 0.3.4 painéis: 36 (antes 30)
                 .clip(RoundedCornerShape(5.dp))
                 .background(AureaColors.FxSunken)
                 .testTag(tag)
@@ -710,11 +717,11 @@ fun FxDropdownBox(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
                 style = AureaType.Base.merge(
-                    TextStyle(fontSize = 13.sp, color = if (enabled) AureaColors.Accent else AureaColors.FxDisabledText),
+                    TextStyle(fontSize = 14.sp, color = if (enabled) AureaColors.Accent else AureaColors.FxDisabledText),
                 ),
             )
             Spacer(Modifier.width(6.dp))
-            CupertinoIcon(CupertinoGlyph.ChevronDown, 12.dp, if (enabled) AureaColors.Accent else AureaColors.FxDisabledText)
+            CupertinoIcon(CupertinoGlyph.ChevronDown, 14.dp, if (enabled) AureaColors.Accent else AureaColors.FxDisabledText)
         }
         AnchoredMenu(expanded = open, onDismiss = { open = false }, entries = entries, matchAnchorWidth = true, tag = "$tag.menu")
     }

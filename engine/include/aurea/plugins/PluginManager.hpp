@@ -76,7 +76,7 @@ public:
     /// Tira tudo dos registros (encerramento do motor). A pasta fica.
     void shutdown() noexcept;
 
-    // --- 0.3.3 plugins: interface, script e permissões -----------------------
+    // --- 0.3.4 plugins: interface, script e permissões -----------------------
     /// Lê o pacote SEM instalar (a folha de consentimento mostra o que ele
     /// pede). JSON: {ok, error, id, version, name, description, author, kind,
     /// permissions{network[], clipboard, files}, panels, actions, hasScript,

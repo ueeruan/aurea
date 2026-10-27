@@ -1,5 +1,5 @@
 // =============================================================================
-//  0.3.3 plugins: o formato 2 do plugin.json — "script", "permissions",
+//  0.3.4 plugins: o formato 2 do plugin.json — "script", "permissions",
 //  "strings" e "ui" (painéis e ações) — e a parte nova da lista em JSON.
 //
 //  Como no resto do manifesto, toda recusa diz o campo e o motivo em

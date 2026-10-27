@@ -9,8 +9,9 @@
 //  setas de rolagem), abaixo da âncora alinhado pela borda de INÍCIO e para cima
 //  quando não cabe. NÃO é o `Menu` do sistema.
 //
-//  COMO FUNCIONA: a âncora mede o próprio retângulo na tela (GeometryReader,
-//  espaço global) e o menu é desenhado numa camada própria por cima de TUDO —
+//  COMO FUNCIONA: a âncora mede o próprio retângulo na tela na hora de abrir
+//  (uma sonda UIKit atrás dela, 0.3.4) e o menu é desenhado numa camada própria
+//  por cima de TUDO —
 //  uma janela transparente, o mesmo que o `Popup` do Compose faz no Android.
 //  Assim ele não é cortado por ScrollView nem fica atrás de folhas e telas
 //  cheias (exportação, Novo projeto).
@@ -106,6 +107,38 @@ enum AnchoredMenuMetrics {
     static let screenMargin: CGFloat = 8
     static let anchorGap: CGFloat = 4
     static let disabledAlpha: Double = 0.25
+    /// 0.3.4: alturas FIXAS dos outros tipos de linha (título 28, divisória 1 + 4 + 4,
+    /// "‹ voltar" 40 + a linha de 1). Com elas a altura do menu sai de uma conta,
+    /// sem depender de medir a lista por preferência (ver `contentHeight`).
+    static let headingHeight: CGFloat = 28
+    static let dividerHeight: CGFloat = 9
+    static let backRowHeight: CGFloat = rowHeight + 1
+
+    /// Altura da lista inteira de uma página (sem o limite de 8 linhas).
+    ///
+    /// 0.3.4 (relato do iPhone 13): o menu só aparecia DEPOIS de medir a própria
+    /// altura por `PreferenceKey` de dentro de um `ScrollView`; quando essa medida
+    /// não chegava, a caixa ficava com 1 pt e opacidade 0, e a janela do menu, que
+    /// cobre a tela, engolia o toque seguinte: "o valor fica cinza e nada abre". A
+    /// altura agora é calculada; a medida, quando chega, só refina.
+    static func contentHeight(_ entries: [MenuEntry], back: Bool) -> CGFloat {
+        entries.reduce(back ? backRowHeight : 0) { $0 + $1.rowHeight } + verticalPadding * 2
+    }
+    /// A altura visível da página (até 8 linhas; acima disso rola).
+    static func pageHeight(_ entries: [MenuEntry], back: Bool) -> CGFloat {
+        min(contentHeight(entries, back: back), maxHeight)
+    }
+}
+
+extension MenuEntry {
+    /// A altura desta linha no menu (as medidas fixas de `AnchoredMenuMetrics`).
+    var rowHeight: CGFloat {
+        switch self {
+        case .row, .iconRow: return AnchoredMenuMetrics.rowHeight
+        case .heading: return AnchoredMenuMetrics.headingHeight
+        case .divider: return AnchoredMenuMetrics.dividerHeight
+        }
+    }
 }
 
 /// Onde o menu abre (conta pura; mesmos casos do `AnchoredMenuPosition.kt`).
@@ -176,8 +209,37 @@ extension View {
 /// Guarda o que o menu aberto lê (retângulo da âncora e as linhas mais novas).
 final class AnchoredMenuBox: ObservableObject {
     let id = UUID()
+    /// Retângulo da âncora na CENA (pontos da tela), medido na hora de abrir.
     var anchor: CGRect = .zero
     var entries: () -> [MenuEntry] = { [] }
+    /// 0.3.4: a view UIKit invisível atrás da âncora. Medir por ela dá o
+    /// retângulo real na tela em qualquer lugar (folha, tela cheia, editor), sem
+    /// um `GeometryReader` que refaz a âncora a cada quadro de rolagem.
+    weak var probe: UIView?
+
+    /// Mede a âncora agora: retângulo na cena e a cena dela (nil = fora de janela).
+    func measure() -> (rect: CGRect, scene: UIWindowScene?)? {
+        guard let view = probe, let window = view.window else { return nil }
+        let inWindow = view.convert(view.bounds, to: nil)
+        guard let scene = window.windowScene else { return (inWindow, nil) }
+        return (window.convert(inWindow, to: scene.coordinateSpace), scene)
+    }
+}
+
+/// A sonda da âncora: uma `UIView` vazia, sem toque e sem acessibilidade, do
+/// tamanho da âncora. Só serve para medir (`AnchoredMenuBox.measure`).
+private struct AnchoredMenuProbe: UIViewRepresentable {
+    let box: AnchoredMenuBox
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        view.isAccessibilityElement = false
+        view.accessibilityElementsHidden = true
+        box.probe = view
+        return view
+    }
+    func updateUIView(_ view: UIView, context: Context) { box.probe = view }
 }
 
 private struct AnchoredMenuAnchor: ViewModifier {
@@ -195,29 +257,47 @@ private struct AnchoredMenuAnchor: ViewModifier {
         // As linhas mais novas (sem estado do SwiftUI: o menu as lê ao redesenhar).
         box.entries = entries
         return content
-            .background(GeometryReader { geometry in
-                Color.clear
-                    .onAppear { box.anchor = geometry.frame(in: .global) }
-                    .onChange(of: geometry.frame(in: .global)) { box.anchor = $0 }
-            })
+            .background(AnchoredMenuProbe(box: box).allowsHitTesting(false).accessibilityHidden(true))
             .onChange(of: isPresented) { shown in
-                if shown { present() } else { AureaPopupPresenter.shared.dismiss(owner: box.id, notify: false) }
+                if shown { schedulePresent() } else { AureaPopupPresenter.shared.dismiss(owner: box.id, notify: false) }
             }
-            .onAppear { if isPresented { present() } }
+            .onAppear { if isPresented { schedulePresent() } }
             .onDisappear { AureaPopupPresenter.shared.dismiss(owner: box.id, notify: true) }
     }
 
-    private func present() {
+    /// 0.3.4: abre no PRÓXIMO giro do laço principal, fora da atualização do
+    /// SwiftUI que rodou o `onChange`. Criar a janela e o `UIHostingController`
+    /// dentro da atualização de outra hierarquia fazia o primeiro desenho do
+    /// menu se perder em aparelho. Se não der para abrir, `isPresented` volta a
+    /// falso — nunca fica preso em verdadeiro (preso, o próximo toque não mudava
+    /// nada e a caixa parecia morta).
+    private func schedulePresent() {
+        // Tudo lido AGORA (dentro do body/ação instalados), não no bloco adiado.
         let box = self.box
         let binding = $isPresented
-        let presenter = AureaPopupPresenter.shared
-        let menuWidth = matchAnchorWidth && box.anchor.width > 0 ? box.anchor.width : width
-        presenter.present(owner: box.id, onDismiss: { binding.wrappedValue = false }) {
-            AnchoredMenuOverlay(box: box, width: menuWidth, tone: tone, alignEnd: alignEnd, tag: tag,
-                                direction: direction) {
-                presenter.dismiss(owner: box.id, notify: true)
+        let width = self.width, matchAnchorWidth = self.matchAnchorWidth
+        let tone = self.tone, alignEnd = self.alignEnd, tag = self.tag, direction = self.direction
+        func attempt(_ left: Int) {
+            guard binding.wrappedValue else { return }
+            // A âncora ainda não está numa janela (acabou de aparecer): tenta de
+            // novo um pouco depois; saiu da tela de vez: desfaz o "aberto".
+            guard let measured = box.measure() else {
+                if left > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { attempt(left - 1) } }
+                else { binding.wrappedValue = false }
+                return
             }
+            box.anchor = measured.rect
+            let presenter = AureaPopupPresenter.shared
+            let menuWidth = matchAnchorWidth && box.anchor.width > 0 ? box.anchor.width : width
+            let shown = presenter.present(owner: box.id, scene: measured.scene, onDismiss: { binding.wrappedValue = false }) {
+                AnchoredMenuOverlay(box: box, width: menuWidth, tone: tone, alignEnd: alignEnd, tag: tag,
+                                    direction: direction) {
+                    presenter.dismiss(owner: box.id, notify: true)
+                }
+            }
+            if !shown { binding.wrappedValue = false }
         }
+        DispatchQueue.main.async { attempt(4) }
     }
 }
 
@@ -234,41 +314,65 @@ final class AureaPopupPresenter {
     private var owner: UUID?
     private var onDismiss: (() -> Void)?
 
+    /// A cena onde o app está na frente (a da janela-chave, se houver).
+    static func activeScene() -> UIWindowScene? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first { $0.activationState == .foregroundActive && $0.windows.contains(where: \.isKeyWindow) }
+            ?? scenes.first { $0.activationState == .foregroundActive }
+            ?? scenes.first { $0.activationState == .foregroundInactive }
+            ?? scenes.first
+    }
+
     /// Mostra `content` por cima de tudo. `onDismiss` é chamado quando a camada
     /// fecha por outro motivo que não o dono (toque fora, outro menu, item).
-    func present<Content: View>(owner: UUID, onDismiss: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+    /// `scene`: a cena da âncora (nil = a cena ativa). Devolve falso se não houve
+    /// onde mostrar (quem chama desfaz o "aberto").
+    @discardableResult
+    func present<Content: View>(owner: UUID, scene preferred: UIWindowScene? = nil, onDismiss: @escaping () -> Void,
+                                @ViewBuilder content: () -> Content) -> Bool {
         if let current = self.owner, current != owner { dismiss(owner: current, notify: true) }
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else { return }
+        guard let scene = preferred ?? Self.activeScene() else { return false }
         let host = UIHostingController(rootView: AnyView(content()))
         host.view.backgroundColor = .clear
         host.view.accessibilityViewIsModal = true
         if let window, self.owner == owner {
             window.rootViewController = host
-            return
+            window.isHidden = false
+            return true
         }
         previousKey = scene.windows.first(where: \.isKeyWindow)
         let layer = UIWindow(windowScene: scene)
-        layer.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.alert.rawValue + 1)
+        // 0.3.4: a janela cobre a cena inteira e fica ACIMA de toda janela visível
+        // do app (folhas e telas cheias moram na janela principal; anúncios e
+        // alertas podem ter janela própria), nunca abaixo do nível de alerta.
+        layer.frame = scene.coordinateSpace.bounds
+        let highest = scene.windows.filter { !$0.isHidden && $0 !== layer }.map(\.windowLevel.rawValue).max()
+            ?? UIWindow.Level.normal.rawValue
+        layer.windowLevel = UIWindow.Level(rawValue: max(UIWindow.Level.alert.rawValue + 1, highest + 1))
         layer.backgroundColor = .clear
         layer.rootViewController = host
+        layer.isHidden = false
         layer.makeKeyAndVisible()
         window = layer
         self.owner = owner
         self.onDismiss = onDismiss
         UIAccessibility.post(notification: .screenChanged, argument: host.view)
+        return true
     }
 
     /// Fecha a camada se ela for de `owner`. `notify` avisa o dono (põe o `isPresented` dele em falso).
     func dismiss(owner: UUID, notify: Bool) {
         guard self.owner == owner else { return }
         let callback = onDismiss
-        window?.isHidden = true
+        let closing = window
+        closing?.isHidden = true
         window = nil
         self.owner = nil
         onDismiss = nil
         previousKey?.makeKey()
         previousKey = nil
+        // A janela pode estar no meio do próprio toque (item do menu): solta no próximo giro.
+        DispatchQueue.main.async { _ = closing }
         if notify { callback?() }
     }
 }
@@ -300,6 +404,8 @@ private struct AnchoredMenuOverlay: View {
     let direction: LayoutDirection
     let dismiss: () -> Void
     @State private var size: CGSize = .zero
+    /// Altura calculada da página aberta (nil = a raiz); ver `AnchoredMenuMetrics.contentHeight`.
+    @State private var pageHeight: CGFloat?
 
     var body: some View {
         GeometryReader { geometry in
@@ -307,16 +413,20 @@ private struct AnchoredMenuOverlay: View {
             let window = geometry.size
             let menuWidth = min(width, max(1, window.width - 2 * AnchoredMenuMetrics.screenMargin))
             let anchor = box.anchor.offsetBy(dx: -origin.x, dy: -origin.y)
+            // 0.3.4: a altura vem da conta (aparece já no primeiro quadro); a medida só refina.
+            let height = size.height > 8 ? size.height
+                : (pageHeight ?? AnchoredMenuMetrics.pageHeight(box.entries(), back: false))
             let x = AnchoredMenuPosition.x(anchorLeft: anchor.minX, anchorRight: anchor.maxX, windowWidth: window.width,
                                            popupWidth: menuWidth, rtl: direction == .rightToLeft, alignEnd: alignEnd,
                                            margin: AnchoredMenuMetrics.screenMargin)
             let y = AnchoredMenuPosition.y(anchorTop: anchor.minY, anchorBottom: anchor.maxY, windowHeight: window.height,
-                                           popupHeight: size.height, margin: AnchoredMenuMetrics.screenMargin,
+                                           popupHeight: height, margin: AnchoredMenuMetrics.screenMargin,
                                            gap: AnchoredMenuMetrics.anchorGap)
             ZStack(alignment: .topLeading) {
                 Color.clear.contentShape(Rectangle()).onTapGesture(perform: dismiss)
                     .accessibilityHidden(true)
-                AnchoredMenuPanel(entries: { box.entries() }, colors: MenuColors.of(tone), width: menuWidth, dismiss: dismiss)
+                AnchoredMenuPanel(entries: { box.entries() }, colors: MenuColors.of(tone), width: menuWidth, dismiss: dismiss,
+                                  onPage: { pageHeight = $0 })
                     .environment(\.layoutDirection, direction)
                     .frame(width: menuWidth)
                     .background(GeometryReader { panel in
@@ -327,8 +437,6 @@ private struct AnchoredMenuOverlay: View {
                     .accessibilityAddTraits(.isModal)
                     .accessibilityAction(.escape, dismiss)
                     .offset(x: x, y: y)
-                    // Só aparece medido (a posição depende da altura).
-                    .opacity(size.height > 8 ? 1 : 0)
             }
             // Coordenadas da tela: sempre LTR; o conteúdo do menu segue o idioma.
             .environment(\.layoutDirection, .leftToRight)
@@ -357,6 +465,8 @@ struct AnchoredMenuPanel: View {
     let colors: MenuColors
     let width: CGFloat
     let dismiss: () -> Void
+    /// Avisa a altura calculada da página que abriu (subpágina ou volta).
+    var onPage: ((CGFloat) -> Void)? = nil
     /// Caminho das subpáginas abertas (índices): resolvido a cada redesenho.
     @State private var path: [Int] = []
     @State private var forward = true
@@ -386,6 +496,7 @@ struct AnchoredMenuPanel: View {
 
     private func go(_ next: [Int], forward: Bool) {
         self.forward = forward
+        onPage?(AnchoredMenuMetrics.pageHeight(resolve(entries(), next).page, back: !next.isEmpty))
         // Subpágina: entra deslizando meia largura com repique (250 ms); sai em 200 ms.
         withAnimation(forward ? .spring(response: 0.25, dampingFraction: 0.7) : .easeIn(duration: 0.2)) { path = next }
     }
@@ -414,7 +525,11 @@ private struct MenuPageView: View {
     @State private var offset: CGFloat = 0
 
     var body: some View {
-        let visible = min(contentHeight, AnchoredMenuMetrics.maxHeight)
+        // 0.3.4: a altura da lista sai da conta; a medida (preferência de dentro
+        // do ScrollView) só substitui quando chega. Sem ela o menu ficava com 1 pt.
+        let content = contentHeight > 0 ? contentHeight
+            : AnchoredMenuMetrics.contentHeight(entries, back: title != nil)
+        let visible = min(content, AnchoredMenuMetrics.maxHeight)
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
                 if let title { backRow(title) }
@@ -434,7 +549,7 @@ private struct MenuPageView: View {
         .onPreferenceChange(MenuContentHeightKey.self) { contentHeight = $0 }
         .onPreferenceChange(MenuScrollOffsetKey.self) { offset = $0 }
         .overlay(alignment: .top) { if offset > 1 { cue(CupertinoGlyph.ChevronUp) } }
-        .overlay(alignment: .bottom) { if contentHeight - offset - visible > 1 { cue(CupertinoGlyph.ChevronDown) } }
+        .overlay(alignment: .bottom) { if content - offset - visible > 1 { cue(CupertinoGlyph.ChevronDown) } }
     }
 
     /// Setas de rolagem: só quando há mais lista acima ou abaixo.
@@ -477,7 +592,9 @@ private struct MenuPageView: View {
         case .heading(let title, let tag):
             Text(title).font(.aurea(size: 11, weight: .semibold)).foregroundStyle(colors.muted).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 4)
+                .padding(.horizontal, 14).padding(.bottom, 4)
+                // Altura fixa (a conta de `AnchoredMenuMetrics.contentHeight`).
+                .frame(height: AnchoredMenuMetrics.headingHeight, alignment: .bottom)
                 .accessibilityAddTraits(.isHeader)
                 .modifier(OptionalIdentifier(tag: tag))
         case .divider:

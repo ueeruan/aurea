@@ -184,11 +184,13 @@ internal fun ProjectRowCard(
  */
 @Composable
 internal fun ProjectThumb(entry: ProjectEntry, thumbs: HomeThumbnails) {
-    val image = rememberProjectThumbnail(thumbs, entry, 256)
+    // Omega 0.3.4: o brilho só enquanto carrega; sem capa fica o fundo `HomeThumb` parado.
+    val load = rememberProjectThumbnailLoad(thumbs, entry, 256)
+    val image = load.image
     Box(Modifier.size(OmegaHomeDims.Thumb).clip(RoundedCornerShape(8.dp)).background(AureaColors.HomeThumb)) {
         if (image != null) {
             Image(image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, filterQuality = FilterQuality.Low)
-        } else {
+        } else if (!load.finished) {
             HomeShimmer(Modifier.fillMaxSize())
         }
         val duration = remember(entry.durationFrames, entry.fps) { formatProjectDuration(entry.durationFrames, entry.fps) }

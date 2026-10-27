@@ -6,6 +6,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -42,6 +43,7 @@ import com.aurea.aurea.ui.ds.PropertyCustomRow
 import com.aurea.aurea.engine.TrackKey
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.ui.theme.AureaColors
+import com.aurea.aurea.ui.theme.AureaIconStyle
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.LayerType
 
@@ -187,7 +189,8 @@ private fun MaskEditor(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean)
 /** Ícone "desenhar": um caminho com dois pontos (mesmo traço do iOS). */
 private fun DrawScope.drawMaskPenIcon(c: Color) {
     val w = size.width
-    val stroke = Stroke(1.6.dp.toPx(), cap = StrokeCap.Round)
+    // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.Line na caixa de 24).
+    val stroke = Stroke(AureaIconStyle.Line * w / 24f, cap = StrokeCap.Round, join = StrokeJoin.Round)
     val path = Path().apply {
         moveTo(w * 0.06f, w * 0.82f)
         cubicTo(w * 0.22f, w * 0.18f, w * 0.62f, w * 0.98f, w * 0.94f, w * 0.2f)
@@ -201,7 +204,8 @@ private fun DrawScope.drawMaskPenIcon(c: Color) {
 /** Ícone retângulo / elipse (mesmo traço do iOS). */
 private fun DrawScope.drawMaskShapeIcon(c: Color, oval: Boolean) {
     val w = size.width
-    val stroke = Stroke(1.7.dp.toPx())
+    // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.Line na caixa de 24).
+    val stroke = Stroke(AureaIconStyle.Line * w / 24f, join = StrokeJoin.Round)
     val topLeft = Offset(w * 0.1f, w * 0.2f)
     val box = Size(w * 0.8f, w * 0.6f)
     if (oval) drawOval(c, topLeft, box, style = stroke) else drawRect(c, topLeft, box, style = stroke)

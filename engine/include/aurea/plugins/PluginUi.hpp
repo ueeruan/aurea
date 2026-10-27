@@ -1,7 +1,7 @@
 // =============================================================================
 //  Aurea / plugins / PluginUi.hpp
 //
-//  0.3.3 plugins: o que o `plugin.json` (formato 2) declara além do efeito —
+//  0.3.4 plugins: o que o `plugin.json` (formato 2) declara além do efeito —
 //  painéis e ações de interface, o script e as permissões.
 //
 //  A interface é DECLARATIVA: o plugin diz que controles quer (botão, slider,

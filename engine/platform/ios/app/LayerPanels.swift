@@ -529,6 +529,8 @@ struct PresetsPanel: View {
     @State private var favorites = Set<String>()
     @State private var recents: [String] = []
     @FocusState private var searching: Bool
+    /// 0.3.4 presets: a busca fica recolhida numa lupa ao lado das abas.
+    @State private var searchOpen = false
 
     private var layerId: Int64 { model.primarySelection ?? 0 }
     /// Texto 2D/3D: o painel é o de PRESETS DE TEXTO (ficha "Presets" da doca do
@@ -552,41 +554,64 @@ struct PresetsPanel: View {
         return values.filter { (!isText || $0.kind == .text) && (query.isEmpty || $0.name.range(of: query, options: .caseInsensitive) != nil) }
     }
 
+    /// 0.3.4 presets: o título "Presets" mora na barra da seção (TopBarView); o
+    /// cabeçalho próprio só fica onde ela não existe (Edição e Cena), como o
+    /// `alwaysHeader` do Android.
+    private var ownHeader: Bool { model.sceneEditor || model.uiMode == AureaUiMode.edit }
+
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: AureaText.t("panel_presets"), onBack: { model.panel = .none })
+            if ownHeader { PanelHeader(title: AureaText.t("panel_presets"), onBack: { model.panel = .none }) }
             VStack(spacing: 0) {
-                searchField.padding(.top, 6)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(tabs, id: \.self) { value in
-                            Button { picked = value } label: {
-                                Text(tabLabel(value)).font(.aurea(size: 12.5, weight: tab == value ? .bold : .medium))
-                                    .foregroundStyle(tab == value ? AureaColors.accent : AureaColors.text)
-                                    .padding(.horizontal, 12).frame(height: 34)
-                                    .background(tab == value ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 9))
-                            }.buttonStyle(AureaPressStyle())
-                        }
-                    }.frame(height: 46)
+                // Cabeçalho compacto: UMA fileira de 44 (lupa + abas + "Até o fim", ou o campo de busca).
+                HStack(spacing: 0) {
+                    if searchOpen {
+                        searchField
+                    } else {
+                        Button {
+                            searchOpen = true
+                            // O campo só existe no quadro seguinte: o foco vai depois.
+                            DispatchQueue.main.async { searching = true }
+                        } label: {
+                            CupertinoGlyph.text(CupertinoGlyph.Search, size: 15, color: AureaColors.text)
+                                .frame(width: 34, height: 32)
+                                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 9))
+                                .frame(width: 44, height: 44, alignment: .leading).contentShape(Rectangle())
+                        }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("panel_buscar_preset"))
+                            .accessibilityIdentifier("presets.searchOpen")
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(tabs, id: \.self) { value in
+                                    Button { picked = value } label: {
+                                        Text(tabLabel(value)).font(.aurea(size: 12.5, weight: tab == value ? .bold : .medium)).lineLimit(1)
+                                            .foregroundStyle(tab == value ? AureaColors.accent : AureaColors.text)
+                                            .padding(.horizontal, 12).frame(height: 32)
+                                            .background(tab == value ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 9))
+                                            .frame(height: 44).contentShape(Rectangle())
+                                    }.buttonStyle(AureaPressStyle()).accessibilityAddTraits(tab == value ? .isSelected : [])
+                                }
+                            }
+                        }.accessibilityIdentifier("presets.tabs")
+                        // "Durar até o fim da camada" (antes uma linha inteira com interruptor):
+                        // pílula curta liga/desliga na ponta da fileira, só na aba Animação.
+                        if kind == .animation { stretchChip.padding(.leading, 6) }
+                    }
                 }
-                if kind == .effects {
-                    Text(AureaText.t("cc_preset_hint")).font(.aurea(size: 12))
-                        .foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.bottom, 8)
-                }
-                if kind == .animation {
-                    HStack(spacing: 0) {
-                        Text(AureaText.t("panel_durar_ate_fim_camada")).font(.aurea(size: 13))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        AureaToggle(checked: stretch) { stretch = $0 }
-                    }.frame(height: 40)
-                }
+                .frame(height: 44).padding(.top, 4)
                 if entries.isEmpty && kind == nil {
                     Text(query.isEmpty ? AureaText.t(tab == "favoritos" ? "panel_toque_preset_guardar_aqui" : "panel_ultimos_10_presets_aplicados_aparecem_aqui") : AureaText.t("ios_preset_none_matching", query))
                         .font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
+                    // A grade enche o resto do painel e rola por dentro (baixo ou alto, a
+                    // primeira fileira inteira e parte da segunda sempre aparecem).
                     ScrollView {
+                        // A dica do CC rola junto com os cartões (antes empurrava a grade para fora).
+                        if kind == .effects {
+                            Text(AureaText.t("cc_preset_hint")).font(.aurea(size: 11.5))
+                                .foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 4)
+                        }
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) {
                             ForEach(entries) { entry in
                                 PresetCardView(entry: entry, showKind: kind == nil, favorite: favorites.contains(entry.id),
@@ -598,18 +623,18 @@ struct PresetsPanel: View {
                             if let kind {
                                 Button { askSave(kind) } label: {
                                     VStack(spacing: 0) {
-                                        CupertinoGlyph.text(CupertinoGlyph.Plus, size: 24, color: AureaColors.accent)
-                                            .frame(maxWidth: .infinity).frame(height: 62)
-                                        Color.clear.frame(height: 5)
-                                        Text(AureaText.t("panel_salvar_desta_camada")).font(.aurea(size: 11.5, weight: .semibold))
+                                        CupertinoGlyph.text(CupertinoGlyph.Plus, size: 22, color: AureaColors.accent)
+                                            .frame(maxWidth: .infinity).frame(height: PresetCardMetrics.preview)
+                                        Color.clear.frame(height: 4)
+                                        Text(AureaText.t("panel_salvar_desta_camada")).font(.aurea(size: 11, weight: .semibold))
                                             .foregroundStyle(AureaColors.accent).multilineTextAlignment(.center)
-                                            .lineLimit(2).frame(height: 30)
-                                    }.padding(6).frame(maxWidth: .infinity)
+                                            .lineLimit(2).frame(height: PresetCardMetrics.name)
+                                    }.padding(5).frame(maxWidth: .infinity)
                                         .background(AureaColors.accentDim, in: RoundedRectangle(cornerRadius: 12))
                                 }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("panel_salvar_camada_como_preset"))
                             }
-                        }.padding(.bottom, 12)
-                    }
+                        }.padding(.top, 4).padding(.bottom, 12)
+                    }.accessibilityIdentifier("presets.grid")
                 }
             }.padding(.horizontal, 12)
         }
@@ -618,7 +643,7 @@ struct PresetsPanel: View {
             if model.selectedLayer?.kind == 4 || model.engine.text3D(forLayer: layerId) != nil { picked = "texto" }
             // "Meus presets" (vindo dos efeitos) abre direto na aba pedida.
             if let kind = model.presetsOpenKind { picked = kind; model.presetsOpenKind = nil }
-            if let query = model.presetsOpenSearch { search = query; model.presetsOpenSearch = nil }
+            if let query = model.presetsOpenSearch { search = query; searchOpen = !query.isEmpty; model.presetsOpenSearch = nil }
             load()
         }
         .onChange(of: model.language) { _ in load() }
@@ -631,13 +656,30 @@ struct PresetsPanel: View {
             TextField("", text: $search, prompt: Text(AureaText.t("panel_buscar_preset")).foregroundColor(AureaColors.muted))
                 .font(.aurea(size: 13.5)).textFieldStyle(.plain).tint(AureaColors.accent)
                 .autocorrectionDisabled().textInputAutocapitalization(.never).focused($searching)
-            if !search.isEmpty {
-                Button { search = "" } label: {
-                    CupertinoGlyph.text(CupertinoGlyph.XmarkCircleFill, size: 16, color: AureaColors.muted).frame(width: 34, height: 34)
-                }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("panel_limpar_busca"))
-            }
-        }.padding(.horizontal, 10).frame(height: 38)
+                .accessibilityIdentifier("presets.search")
+            // ✕ limpa e recolhe a busca de volta na lupa.
+            Button { search = ""; searching = false; searchOpen = false } label: {
+                CupertinoGlyph.text(CupertinoGlyph.XmarkCircleFill, size: 16, color: AureaColors.muted)
+                    .frame(width: 44, height: 34).contentShape(Rectangle())
+            }.buttonStyle(AureaPressStyle()).accessibilityLabel(AureaText.t("panel_limpar_busca"))
+        }.padding(.leading, 10).frame(height: 34)
             .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+    }
+    /// 0.3.4 presets: o "Durar até o fim da camada" compacto (pílula liga/desliga, alvo de 44).
+    private var stretchChip: some View {
+        Button { stretch.toggle() } label: {
+            HStack(spacing: 5) {
+                CupertinoGlyph.text(CupertinoGlyph.ArrowRightToLine, size: 13, color: stretch ? AureaColors.accent : AureaColors.muted)
+                Text(AureaText.t("p34_presets_to_end")).font(.aurea(size: 12, weight: stretch ? .bold : .medium)).lineLimit(1)
+                    .foregroundStyle(stretch ? AureaColors.accent : AureaColors.muted)
+            }
+            .padding(.horizontal, 10).frame(height: 32)
+            .background(stretch ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 9))
+            .frame(height: 44).contentShape(Rectangle())
+        }.buttonStyle(AureaPressStyle())
+            .accessibilityLabel(AureaText.t("panel_durar_ate_fim_camada"))
+            .accessibilityAddTraits(stretch ? .isSelected : [])
+            .accessibilityIdentifier("presets.stretch")
     }
     private func tabLabel(_ value: String) -> String {
         // PresetTab labels are literals in the Android source.
@@ -819,6 +861,14 @@ struct PresetDialog: View {
     }
 }
 
+/// 0.3.4 presets: medidas do cartão (par de `CardPreview`/`CardName` do PresetsPanel.kt):
+/// prévia 50 + nome em 2 linhas (26) = 90 com o respiro, para a grade mostrar 1,5+
+/// fileiras no painel baixo.
+enum PresetCardMetrics {
+    static let preview: CGFloat = 50
+    static let name: CGFloat = 26
+}
+
 private struct PresetCardView: View {
     let entry: PanelPresetEntry
     let showKind: Bool
@@ -832,27 +882,36 @@ private struct PresetCardView: View {
     var body: some View {
         Button(action: onApply) {
             VStack(alignment: .leading, spacing: 0) {
-                PresetPreviewView(entry: entry, compositionWidth: compositionWidth).frame(height: 62)
+                PresetPreviewView(entry: entry, compositionWidth: compositionWidth)
+                    .frame(maxWidth: .infinity).frame(height: PresetCardMetrics.preview)
                     .background(AureaColors.stage, in: RoundedRectangle(cornerRadius: 8)).clipShape(RoundedRectangle(cornerRadius: 8))
-                Color.clear.frame(height: 5)
-                Text(entry.name).font(.aurea(size: 11.5, weight: .semibold)).tracking(aureaTracking(-0.1)).lineLimit(2)
-                    .lineSpacing(max(0, 14 - UIFont.systemFont(ofSize: 11.5, weight: .semibold).lineHeight))
-                    .frame(maxWidth: .infinity, alignment: .topLeading).frame(height: 30, alignment: .topLeading)
-                if showKind { Text(entry.kind.label).font(.aurea(size: 10)).foregroundStyle(AureaColors.muted).lineLimit(1) }
-            }.padding(6).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(alignment: .bottomLeading) {
+                        // O tipo vira selo na prévia (antes uma linha a mais no cartão).
+                        if showKind {
+                            Text(entry.kind.label).font(.aurea(size: 9.5)).foregroundStyle(AureaColors.muted).lineLimit(1)
+                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 4)).padding(4)
+                        }
+                    }
+                Color.clear.frame(height: 4)
+                Text(entry.name).font(.aurea(size: 11, weight: .semibold)).tracking(aureaTracking(-0.1)).lineLimit(2)
+                    .foregroundStyle(AureaColors.text)
+                    .lineSpacing(max(0, 13 - UIFont.systemFont(ofSize: 11, weight: .semibold).lineHeight))
+                    .frame(maxWidth: .infinity, alignment: .topLeading).frame(height: PresetCardMetrics.name, alignment: .topLeading)
+            }.padding(5).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 12))
         }.buttonStyle(AureaPressStyle()).accessibilityLabel(applyLabel ?? AureaText.t("ios_apply_named", entry.name))
             .overlay(alignment: .topTrailing) {
                 Button(action: onFavorite) {
                     CupertinoGlyph.text(favorite ? CupertinoGlyph.StarFill : CupertinoGlyph.Star, size: 15,
                                         color: favorite ? AureaColors.warning : AureaColors.muted)
                         .frame(width: 34, height: 34)
-                }.buttonStyle(AureaPressStyle()).padding(6).accessibilityLabel(AureaText.t(favorite ? "panel_tirar_favoritos" : "panel_favoritar"))
+                }.buttonStyle(AureaPressStyle()).padding(5).accessibilityLabel(AureaText.t(favorite ? "panel_tirar_favoritos" : "panel_favoritar"))
             }
             .overlay(alignment: .topLeading) {
                 if let onDelete {
                     Button(action: onDelete) {
                         CupertinoGlyph.text(CupertinoGlyph.Trash, size: 14, color: AureaColors.danger).frame(width: 34, height: 34)
-                    }.buttonStyle(AureaPressStyle()).padding(6).accessibilityLabel(AureaText.t("panel_apagar_preset"))
+                    }.buttonStyle(AureaPressStyle()).padding(5).accessibilityLabel(AureaText.t("panel_apagar_preset"))
                 }
             }
     }
@@ -1140,20 +1199,21 @@ struct AppearancePanel: View {
 
     /// Ícone · régua · caixa de valor 56 (teclado 0–100). Um arrasto = um desfazer.
     private var opacityLine: some View {
+        // 0.3.4 painéis: linha de 52 (antes 40), ícone 24, régua 48 e a caixa central (par do Android).
         HStack(spacing: 6) {
-            CupertinoGlyph.text(CupertinoGlyph.CircleLefthalfFill, size: 22, color: AureaColors.text)
-            TickRuler(value: { opacity * 100 }, unitsPerDp: 0.35, active: true, height: 40)
+            CupertinoGlyph.text(CupertinoGlyph.CircleLefthalfFill, size: 24, color: AureaColors.text)
+            TickRuler(value: { opacity * 100 }, unitsPerDp: 0.35, active: true, height: 48)
                 .valueDrag(enabled: !locked, start: { opacity * 100 }, unitsPerDp: { 0.35 }, min: 0, max: 100,
                            onStart: { model.beginGesture("opacidade") }, onValue: write, onEnd: { model.endGesture() })
                 .accessibilityElement()
                 .accessibilityLabel(AureaText.t("panel_opacidade"))
                 .accessibilityValue("\(Int((opacity * 100).rounded()))%")
                 .accessibilityIdentifier("blend.opacity.ruler")
-            ValueBox("\(Int((opacity * 100).rounded()))%", enabled: !locked, width: 56, onTap: keypad)
+            ValueBox("\(Int((opacity * 100).rounded()))%", enabled: !locked, width: PanelMetrics.fieldWidth, onTap: keypad)
                 .accessibilityIdentifier("blend.opacity.value")
         }
-        .frame(height: 40)
-        .padding(.top, 5).padding(.leading, 6).padding(.trailing, 4)
+        .frame(height: 52)
+        .padding(.top, 6).padding(.leading, 6).padding(.trailing, 4)
     }
 
     private var accordion: some View {
@@ -1187,23 +1247,24 @@ struct AppearancePanel: View {
             } label: {
                 HStack(spacing: 6) {
                     if cat.direct == nil {
-                        CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 13, color: AureaColors.muted)
+                        CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 15, color: AureaColors.muted)
                             .mirrorsInRtl(!isOpen)
                             .rotationEffect(.degrees(isOpen ? 90 : 0))
                             .animation(.easeOut(duration: 0.15), value: isOpen)
-                            .frame(width: 18, height: 18)
+                            .frame(width: 20, height: 20)
                     } else {
-                        Color.clear.frame(width: 18, height: 18)
+                        Color.clear.frame(width: 20, height: 20)
                     }
-                    Text(AureaText.t(cat.title)).font(.aurea(size: 13.5, weight: .semibold)).lineLimit(1)
+                    // 0.3.4 painéis: título 15, modo 13, cabeçalho de 44 (antes 13,5 / 12 / 37).
+                    Text(AureaText.t(cat.title)).font(.aurea(size: PanelMetrics.title, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 4)
                     if current {
-                        Text(AureaText.t(Self.modes[Int(mode)])).font(.aurea(size: 12)).foregroundStyle(AureaColors.accent).lineLimit(1)
-                        CupertinoGlyph.text(CupertinoGlyph.CheckmarkCircleFill, size: 16, color: AureaColors.accent)
+                        Text(AureaText.t(Self.modes[Int(mode)])).font(.aurea(size: PanelMetrics.label)).foregroundStyle(AureaColors.accent).lineLimit(1)
+                        CupertinoGlyph.text(CupertinoGlyph.CheckmarkCircleFill, size: 18, color: AureaColors.accent)
                     }
                 }
                 .padding(.horizontal, 8)
-                .frame(height: 37)
+                .frame(height: PanelMetrics.touch)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -1216,7 +1277,7 @@ struct AppearancePanel: View {
                         ForEach(cat.modes, id: \.self) { value in modeItem(value) }
                     }.padding(.horizontal, 4)
                 }
-                .frame(height: 80)
+                .frame(height: 96)
             }
         }
         .background(isOpen ? AureaColors.chip : AureaColors.surfaceHigh, in: RoundedRectangle(cornerRadius: 5))
@@ -1224,15 +1285,15 @@ struct AppearancePanel: View {
         .padding(.top, 6.5)
     }
 
-    /// Um modo: 60 × 80 — miniatura de 45 (raio = lado/6) e o nome 11.
+    /// Um modo: 72 × 96 — miniatura de 54 (raio = lado/6) e o nome 12 (0.3.4 painéis; antes 60 × 80, 45, 11).
     private func modeItem(_ value: Int) -> some View {
         let lit = mode == UInt32(value)
         return Button { setMode(value) } label: {
             VStack(spacing: 4) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 7.5).fill(AureaColors.surface)
+                    RoundedRectangle(cornerRadius: 9).fill(AureaColors.surface)
                     if value == 22 || value == 23 {
-                        BlendCutThumb(exclude: value == 23, size: CGSize(width: 41, height: 41))
+                        BlendCutThumb(exclude: value == 23, size: CGSize(width: 50, height: 50))
                     } else {
                         Canvas { context, size in
                             let r = min(size.width, size.height) * 0.30
@@ -1240,18 +1301,18 @@ struct AppearancePanel: View {
                             context.blendMode = Self.previews[value]
                             context.fill(Path(ellipseIn: CGRect(x: size.width * 0.62 - r, y: size.height / 2 - r, width: r * 2, height: r * 2)), with: .color(AureaColors.blendThumbTop))
                         }
-                        .frame(width: 41, height: 41)
+                        .frame(width: 50, height: 50)
                         .drawingGroup()
                     }
                 }
-                .frame(width: 45, height: 45)
-                .clipShape(RoundedRectangle(cornerRadius: 7.5))
-                .overlay(RoundedRectangle(cornerRadius: 7.5).stroke(lit ? AureaColors.accent : .clear, lineWidth: 2))
-                Text(AureaText.t(Self.modes[value])).font(.aurea(size: 11))
+                .frame(width: 54, height: 54)
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(lit ? AureaColors.accent : .clear, lineWidth: 2))
+                Text(AureaText.t(Self.modes[value])).font(.aurea(size: PanelMetrics.note))
                     .foregroundStyle(lit ? AureaColors.accent : AureaColors.muted)
                     .lineLimit(1).padding(.horizontal, 2)
             }
-            .frame(width: 60, height: 80)
+            .frame(width: 72, height: 96)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1966,13 +2027,15 @@ private struct MaskShapeTool: View {
         case 0:
             var path = Path()
             path.move(to: p(0.06, 0.82)); path.addCurve(to: p(0.94, 0.2), control1: p(0.22, 0.18), control2: p(0.62, 0.98))
-            ctx.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.line na caixa de 24).
+            ctx.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: AureaIconStyle.line * w / 24, lineCap: .round, lineJoin: .round))
             let r = w * 0.09
             ctx.fill(Path(CGRect(x: w * 0.06 - r, y: w * 0.82 - r, width: r * 2, height: r * 2)), with: .color(color))
             ctx.fill(Path(CGRect(x: w * 0.94 - r, y: w * 0.2 - r, width: r * 2, height: r * 2)), with: .color(color))
         default:
             let box = CGRect(x: w * 0.1, y: w * 0.2, width: w * 0.8, height: w * 0.6)
-            ctx.stroke(kind == 2 ? Path(ellipseIn: box) : Path(box), with: .color(color), lineWidth: 1.7)
+            ctx.stroke(kind == 2 ? Path(ellipseIn: box) : Path(box), with: .color(color),
+                       style: StrokeStyle(lineWidth: AureaIconStyle.line * w / 24, lineJoin: .round))
         }
     }
 }
@@ -2110,7 +2173,7 @@ private struct TextAnimatorList: View {
         let v = animators[index], list = what(v)
         return Button { open = index } label: {
             HStack(spacing: 0) {
-                CupertinoGlyph.text(CupertinoGlyph.ArrowtriangleRightFill, size: 18, color: AureaColors.text.opacity(0.3))
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 18, color: AureaColors.text.opacity(0.3))
                 Color.clear.frame(width: 4, height: 1)
                 CupertinoGlyph.text(CupertinoGlyph.Textformat, size: 18, color: v[0] > 0.5 ? AureaColors.text : AureaColors.muted)
                 Color.clear.frame(width: 8, height: 1)
@@ -2131,7 +2194,7 @@ private struct TextAnimatorList: View {
         let v = animators[index]
         return HStack(spacing: 0) {
             Button { open = -1 } label: {
-                CupertinoGlyph.text(CupertinoGlyph.ArrowtriangleDownFill, size: 16).frame(width: 36, height: 40).contentShape(Rectangle())
+                CupertinoGlyph.text(CupertinoGlyph.ChevronDown, size: 16).frame(width: 36, height: 40).contentShape(Rectangle())
             }
             .buttonStyle(AureaPressStyle(shrink: 1))
             .accessibilityLabel(AureaText.t("om_anim_collapse_cd"))

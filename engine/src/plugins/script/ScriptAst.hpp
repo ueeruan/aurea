@@ -1,5 +1,5 @@
 // =============================================================================
-//  0.3.3 plugins: a árvore do AureaScript (léxico + sintaxe em ScriptParser.cpp,
+//  0.3.4 plugins: a árvore do AureaScript (léxico + sintaxe em ScriptParser.cpp,
 //  avaliação em ScriptInterp.cpp).
 // =============================================================================
 #pragma once

@@ -90,17 +90,20 @@ object ParamRowMath {
 // (`FxParamMathTest`) e espelhada em Swift com os mesmos nomes (`FxParamMath`).
 // =============================================================================
 object FxParamMath {
-    /** Alturas das linhas (dp), as da referência (`effect_setting_*`). */
-    const val ROW_SLIDER = 51f
-    const val ROW_RULER = 57f
-    const val ROW_SMALL = 38f
-    const val ROW_SECTION = 43f
-    const val ROW_LIST = 37f
+    /**
+     * Alturas das linhas (dp). 0.3.4 painéis: ~15 % maiores que as da referência
+     * ("está muito compacto"; eram 51 / 57 / 38 / 43 / 37). Par do `FxParamMath` do iOS.
+     */
+    const val ROW_SLIDER = 60f
+    const val ROW_RULER = 66f
+    const val ROW_SMALL = 46f
+    const val ROW_SECTION = 48f
+    const val ROW_LIST = 44f
     /** Folga entre itens da lista e padding da sobreposição (dp). */
     const val LIST_GAP = 6.5f
-    /** Rótulo e caixa de valor (dp); margem 3 em volta do rótulo. */
-    const val LABEL_W = 75f
-    const val VALUE_W = 56f
+    /** Rótulo e caixa de valor (dp; eram 75 / 56); margem 3 em volta do rótulo. */
+    const val LABEL_W = 80f
+    const val VALUE_W = 62f
     const val LABEL_MARGIN = 3f
     /** Régua: risco a cada 5,5 dp, maior a cada 5 riscos; agulha 1,5 dp. */
     const val TICK_SPACING = 5.5f

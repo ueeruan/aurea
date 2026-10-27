@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.3.4 plugins: painéis, scripts e permissões (effects/PluginUi.kt). -->
+<resources>
+    <string name="pv2_consent_title">Install %1$s?</string>
+    <string name="pv2_consent_body">This plugin asks for:</string>
+    <string name="pv2_consent_none">It doesn\'t ask for internet, clipboard or files.</string>
+    <string name="pv2_perm_network">Internet, only to: %1$s</string>
+    <string name="pv2_perm_clipboard">Clipboard (read and copy text)</string>
+    <string name="pv2_perm_files">Files you choose</string>
+    <string name="pv2_consent_script">It runs a script inside AUREA, with no free access to the device. You can change the permissions later in Plugins.</string>
+    <string name="pv2_consent_update">Replaces the installed version %1$s.</string>
+    <string name="pv2_install">Install</string>
+    <string name="pv2_enabled">On</string>
+    <string name="pv2_permissions">Permissions</string>
+    <string name="pv2_open_panel">Open %1$s</string>
+    <string name="pv2_console">Console</string>
+    <string name="pv2_console_title">%1$s console</string>
+    <string name="pv2_console_empty">Nothing in the console.</string>
+    <string name="pv2_console_clear">Clear</string>
+    <string name="pv2_reload">Reload script</string>
+    <string name="pv2_cancel_run">Stop</string>
+    <string name="pv2_running">Running…</string>
+    <string name="pv2_error_title">The plugin hit an error</string>
+    <string name="pv2_see_console">See console</string>
+    <string name="pv2_menu">Plugins</string>
+    <string name="pv2_menu_empty">No plugin with a panel is on. Install one in Effects > Plugins.</string>
+    <string name="pv2_disabled">Off</string>
+    <string name="pv2_kind_panel">panel and script</string>
+    <string name="pv2_has_script">with script</string>
+    <string name="pv2_reading">Reading the plugin…</string>
+    <string name="pv2_inspect_failed">Couldn\'t read the plugin: %1$s</string>
+    <string name="pv2_close">Close</string>
+    <string name="pv2_no_layer">Pick a layer first.</string>
+</resources>

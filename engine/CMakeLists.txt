@@ -201,7 +201,7 @@ set(AUREA_CORE_SOURCES
     src/plugins/PluginShader.cpp
     src/plugins/PluginEffects.cpp
     src/plugins/PluginManager.cpp
-    # 0.3.3 plugins: interface, scripts (AureaScript) e APIs
+    # 0.3.4 plugins: interface, scripts (AureaScript) e APIs
     src/plugins/PluginUiManifest.cpp
     src/plugins/PluginRuntime.cpp
     src/plugins/script/ScriptParser.cpp
@@ -258,7 +258,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineOmegaAdd.cpp
     src/engine/EngineOmegaAppearance.cpp
     src/engine/EngineOmegaChrome.cpp
-    src/engine/EnginePluginsV2.cpp   # 0.3.3 plugins
+    src/engine/EnginePluginsV2.cpp   # 0.3.4 plugins
     src/engine/EngineImageSequence.cpp
     src/engine/EngineProxy.cpp
     src/engine/EngineLayerAnim.cpp
@@ -409,7 +409,7 @@ set(AUREA_IMPORT_BOUNDARIES
     src/engine/EngineOmegaAdd.cpp
     src/engine/EngineOmegaAppearance.cpp
     src/engine/EngineOmegaChrome.cpp
-    # 0.3.3 plugins: o interpretador usa exceções por dentro (throw do script,
+    # 0.3.4 plugins: o interpretador usa exceções por dentro (throw do script,
     # limites); as fronteiras públicas dele e do runtime nunca lançam.
     src/engine/EnginePluginsV2.cpp
     src/plugins/PluginRuntime.cpp

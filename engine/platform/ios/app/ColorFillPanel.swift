@@ -48,16 +48,18 @@ enum ColorFillTab: String {
 }
 
 /// Medidas do painel (as da referência).
+/// 0.3.4 painéis: barra, botões e amostras pelas medidas centrais (`PanelMetrics`);
+/// o conteúdo cresce com o painel (127,5 é o mínimo). Par do `ColorFillPanel.kt`.
 enum ColorFillMetrics {
-    static let barHeight: CGFloat = 29.5
+    static let barHeight: CGFloat = PanelMetrics.fieldHeight
     static let barRow: CGFloat = 44
     static let barTop: CGFloat = 13
-    static let radius: CGFloat = 5
+    static let radius: CGFloat = PanelMetrics.fieldRadius
     static let side: CGFloat = 9
     static let content: CGFloat = 127.5
-    static let gradientButton = CGSize(width: 60, height: 27.5)
+    static let gradientButton = CGSize(width: PanelMetrics.fieldWidth, height: PanelMetrics.fieldHeight)
     static let gradientTop: CGFloat = 15
-    static let gradientSwatch: CGFloat = 24.5
+    static let gradientSwatch: CGFloat = 30
     static let gradientBar: CGFloat = 12
 }
 
@@ -165,13 +167,14 @@ struct ColorFillPanel: View {
                     typeBar
                         .padding(.top, ColorFillMetrics.barTop - (ColorFillMetrics.barRow - ColorFillMetrics.barHeight) / 2)
                 }
+                // 0.3.4 painéis: o conteúdo ocupa a altura que sobra (o painel é alto desde a 0.3.4).
                 content
-                    .frame(height: ColorFillMetrics.content)
+                    .frame(minHeight: ColorFillMetrics.content, maxHeight: .infinity)
                     .padding(.horizontal, ColorFillMetrics.side)
                     .padding(.top, 4)
+                    .padding(.bottom, 10)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("fill.content")
-                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
@@ -206,7 +209,7 @@ struct ColorFillPanel: View {
     private func typeButton(_ tab: ColorFillTab) -> some View {
         let on = tab == currentTab
         return Button { select(tab) } label: {
-            CupertinoGlyph.text(tab.glyph, size: 18, color: on ? AureaColors.accent : AureaColors.text)
+            CupertinoGlyph.text(tab.glyph, size: 22, color: on ? AureaColors.accent : AureaColors.text)
                 .frame(maxWidth: .infinity)
                 .frame(height: ColorFillMetrics.barRow)
                 .contentShape(Rectangle())
@@ -308,10 +311,10 @@ struct ColorFillPanel: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Button { openOriginal(group: group) } label: {
                     Text(AureaText.t(group ? "editor_entrar_grupo" : "panel_vetor"))
-                        .font(.aurea(size: 13, weight: .semibold))
+                        .font(.aurea(size: PanelMetrics.chipText, weight: .semibold))
                         .foregroundStyle(AureaColors.onAccent)
-                        .padding(.horizontal, 14)
-                        .frame(height: 34)
+                        .padding(.horizontal, PanelMetrics.chipPad)
+                        .frame(minHeight: PanelMetrics.chipHeight)
                         .background(AureaColors.accent, in: Capsule())
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
@@ -350,7 +353,7 @@ struct ColorFillPanel: View {
             // As pontas no palco valem para a tela: o degradê corre da esquerda para a direita.
             .keepLtr()
             Text(AureaText.t("om_ap_fill_grad_handles"))
-                .font(.aurea(size: 11))
+                .font(.aurea(size: PanelMetrics.note))
                 .foregroundStyle(AureaColors.muted)
                 .lineLimit(2)
                 .padding(.top, 12)
@@ -365,11 +368,14 @@ struct ColorFillPanel: View {
             model.setShapeGradientType(type)
         } label: {
             Text(AureaText.t(key))
-                .font(.aurea(size: 12, weight: .semibold))
+                .font(.aurea(size: PanelMetrics.chipText, weight: .semibold))
                 .foregroundStyle(on ? AureaColors.accent : AureaColors.text)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-                .frame(width: ColorFillMetrics.gradientButton.width, height: ColorFillMetrics.gradientButton.height)
+                .padding(.horizontal, 4)
+                // 0.3.4 painéis: até 72 de largura; encolhe para os três caberem em 360.
+                .frame(minWidth: 0, maxWidth: ColorFillMetrics.gradientButton.width)
+                .frame(height: ColorFillMetrics.gradientButton.height)
                 .background(on ? AureaColors.fxLowSurface : AureaColors.fxListSurface,
                             in: RoundedRectangle(cornerRadius: ColorFillMetrics.radius))
                 .overlay(RoundedRectangle(cornerRadius: ColorFillMetrics.radius)

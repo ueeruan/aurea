@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.3.4 presets: rótulo curto do interruptor "Durar até o fim da camada" no cabeçalho do painel Presets. -->
+    <string name="p34_presets_to_end">अंत तक</string>
+</resources>

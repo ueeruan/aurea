@@ -1493,7 +1493,7 @@ private struct FxGridCard: View {
 /// O cadeado de um efeito Hyper bloqueado (recurso pago; HyperEffectGate).
 private struct FxHyperLockBadge: View {
     var body: some View {
-        Image(systemName: "lock.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(AureaColors.accent)
+        Image(systemName: "lock").font(.system(size: 10, weight: AureaIconStyle.symbol)).foregroundStyle(AureaColors.accent)
             .frame(width: 20, height: 20).background(AureaColors.imageScrim, in: Circle())
             .accessibilityLabel(AureaText.t("hyper_effect_locked"))
             .accessibilityIdentifier("effects.hyper.cadeado")
@@ -2282,7 +2282,8 @@ struct PluginManagerView: View {
                 Text(AureaText.t("plug_hint")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
                 Button {
                     DocumentImportPicker.present(types: [UTType(filenameExtension: "aureaplugin") ?? .data, UTType(filenameExtension: "fs") ?? .data, .zip, .data]) { urls in
-                        if let url = urls?.first { model.installPlugin(url: url) }
+                        // 0.3.4 plugins: lê o pacote primeiro; a folha de consentimento instala.
+                        if let url = urls?.first { PluginRuntime.shared.beginInstall(url) }
                     }
                 } label: {
                     Text(AureaText.t("plug_install")).font(.aurea(size: 15, weight: .semibold)).foregroundStyle(AureaColors.onAccent)
@@ -2293,6 +2294,7 @@ struct PluginManagerView: View {
                     Text(AureaText.t("plug_empty")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted).padding(.vertical, 8)
                 }
                 ForEach(model.plugins) { p in row(p) }
+                PluginOverlays()   // 0.3.4 plugins: consentimento, console e alertas
                 Text(AureaText.t("plug_safety")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                 Button { help.toggle() } label: {
                     Text(AureaText.t("plug_help_title")).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.accent)
@@ -2318,7 +2320,7 @@ struct PluginManagerView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(FxPluginTexts.pick(p.names, tag) ?? p.id).font(.aurea(size: 14, weight: .semibold))
                 Text(AureaText.t("plug_by", p.author.isEmpty ? p.id : p.author, p.version) + " · "
-                     + AureaText.t(p.kind == "stack" ? "plug_kind_stack" : (p.scene3d ? "plug_kind_shader3d" : "plug_kind_shader")))
+                     + AureaText.t(p.kind == "stack" ? "plug_kind_stack" : p.kind == "panel" ? "pv2_kind_panel" : (p.scene3d ? "plug_kind_shader3d" : "plug_kind_shader")))
                     .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                 if let d = FxPluginTexts.pick(p.descriptions, tag), !d.isEmpty { Text(d).font(.aurea(size: 12)) }
                 if !p.ok {
@@ -2326,6 +2328,7 @@ struct PluginManagerView: View {
                 } else if p.testRenderMs > 0 {
                     Text(AureaText.t("plug_render_ms", String(format: "%.1f", p.testRenderMs))).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
                 }
+                PluginV2Controls(pluginId: p.id)   // 0.3.4 plugins: ligar, permissões, painéis, console
             }.frame(maxWidth: .infinity, alignment: .leading)
             Button { removing = p } label: {
                 Text(AureaText.t("plug_remove")).font(.aurea(size: 13)).foregroundStyle(AureaColors.danger)

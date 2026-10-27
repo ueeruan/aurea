@@ -207,7 +207,7 @@ private fun AnimatorRow(index: Int, v: FloatArray, onOpen: () -> Unit) {
             .padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.ArrowtriangleRightFill, 18.dp, AureaColors.Text.copy(alpha = 0.3f))
+        com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.ChevronRight, 18.dp, AureaColors.Text.copy(alpha = 0.3f))
         Spacer(Modifier.width(4.dp))
         com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.Textformat, 18.dp,
             if (v[0] > 0.5f) AureaColors.Text else AureaColors.Muted)
@@ -228,7 +228,7 @@ private fun AnimatorHeader(env: PanelEnv, index: Int, v: FloatArray, count: Int,
     val remove = stringResource(R.string.panel_remover)
     Row(Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(36.dp).semantics { contentDescription = collapse }.tocavel(shrink = 1f, onClick = onCollapse), contentAlignment = Alignment.Center) {
-            com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.ArrowtriangleDownFill, 16.dp, AureaColors.Text)
+            com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.ChevronDown, 16.dp, AureaColors.Text)
         }
         com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.Textformat, 18.dp, AureaColors.Text)
         Spacer(Modifier.width(8.dp))

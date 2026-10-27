@@ -1,7 +1,7 @@
 // =============================================================================
 //  Aurea / plugins / PluginRuntime.hpp
 //
-//  0.3.3 plugins: o runtime de UM plugin com script — o contexto AureaScript,
+//  0.3.4 plugins: o runtime de UM plugin com script — o contexto AureaScript,
 //  o estado dos painéis (valores dos controles, listas, textos), o console de
 //  erros, o `storage` e as APIs que dependem de permissão (`fetch`,
 //  `clipboard`, `files`).

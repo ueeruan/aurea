@@ -384,14 +384,27 @@ func omegaFileSize(_ bytes: Int64, locale: Locale) -> String {
     var value = Double(bytes) / 1000
     var unit = 0
     while value >= 1000 && unit < units.count - 1 { value /= 1000; unit += 1 }
+    let formatter = omegaFileSizeFormatter(locale: locale, fractionDigits: value < 100 ? 1 : 0)
+    return (formatter.string(from: NSNumber(value: value)) ?? String(format: "%.1f", value)) + " " + units[unit]
+}
+
+/// 0.3.4: um `NumberFormatter` por (idioma, casas), criado uma vez — cada linha
+/// da aba Projetos criava um novo ao aparecer na rolagem.
+private let omegaFileSizeFormatterLock = NSLock()
+private var omegaFileSizeFormatters: [String: NumberFormatter] = [:]
+private func omegaFileSizeFormatter(locale: Locale, fractionDigits: Int) -> NumberFormatter {
+    let key = "\(locale.identifier)|\(fractionDigits)"
+    omegaFileSizeFormatterLock.lock(); defer { omegaFileSizeFormatterLock.unlock() }
+    if let cached = omegaFileSizeFormatters[key] { return cached }
     let formatter = NumberFormatter()
     formatter.locale = locale
     formatter.numberStyle = .decimal
     formatter.usesGroupingSeparator = false
     formatter.minimumFractionDigits = 0
-    formatter.maximumFractionDigits = value < 100 ? 1 : 0
+    formatter.maximumFractionDigits = fractionDigits
     formatter.roundingMode = .halfEven
-    return (formatter.string(from: NSNumber(value: value)) ?? String(format: "%.1f", value)) + " " + units[unit]
+    omegaFileSizeFormatters[key] = formatter
+    return formatter
 }
 
 /// Duração: "m:ss" abaixo de 1 h, "h:mm:ss" acima; nil sem duração gravada.
@@ -516,15 +529,24 @@ struct HomeThumbnail: View {
     var shimmer: Bool = false
 
     @State private var image: UIImage?
+    /// 0.3.4: a leitura terminou sem imagem (projeto sem capa). O brilho animado
+    /// é só para "carregando": sem capa ele ficava rodando para sempre em cada
+    /// linha visível, custando quadros na rolagem.
+    @State private var missing = false
 
     private var key: String {
         "\(url?.path ?? "")|\(stamp.timeIntervalSince1970)|\(Int(maxPx))"
     }
 
     var body: some View {
+        // 0.3.4: a capa que já está no cache aparece no PRIMEIRO desenho da linha
+        // (ao voltar a rolar), sem passar pelo brilho e por um redesenho a mais.
+        let shown = image ?? HomeThumbCache.shared.image(key)
         ZStack {
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill()
+            if let shown {
+                Image(uiImage: shown).resizable().scaledToFill()
+            } else if shimmer && missing {
+                AureaColors.homeThumb
             } else if shimmer {
                 OmegaShimmer()
             } else if hero {
@@ -541,14 +563,15 @@ struct HomeThumbnail: View {
         .task(id: key) {
             let requestKey = key
             let generation = HomeThumbCache.shared.generation
-            guard let path = url?.path else { image = nil; return }
-            if let hit = HomeThumbCache.shared.image(requestKey) { image = hit; return }
+            guard let path = url?.path else { image = nil; missing = true; return }
+            if let hit = HomeThumbCache.shared.image(requestKey) { image = hit; missing = false; return }
             let loaded = await Task.detached(priority: .userInitiated) {
                 decodeHomeThumbnail(path: path, maxPx: maxPx)
             }.value
             guard !Task.isCancelled, key == requestKey, generation == HomeThumbCache.shared.generation else { return }
             if let loaded { HomeThumbCache.shared.store(requestKey, loaded, generation: generation) }
             image = loaded
+            missing = loaded == nil
         }
     }
 }
@@ -735,6 +758,17 @@ extension View {
     func omegaShadow(_ radius: CGFloat, _ color: Color) -> some View {
         shadow(color: color, radius: radius / 2, x: 0, y: radius / 6)
     }
+
+    /// 0.3.4 (rolagem da aba Projetos): o fundo do cartão com a sombra DESENHADA
+    /// no próprio retângulo — a mesma sombra de `omegaShadow`, mas calculada só
+    /// sobre a forma. `.shadow` no cartão inteiro sombreava o conteúdo todo
+    /// (miniatura, textos, ícones) numa passada fora da tela a cada quadro de
+    /// rolagem, em cada linha visível.
+    func omegaCardBackground(_ fill: Color, cornerRadius: CGFloat = 12,
+                             shadow radius: CGFloat = 12, _ color: Color) -> some View {
+        background(RoundedRectangle(cornerRadius: cornerRadius)
+            .fill(fill.shadow(.drop(color: color, radius: radius / 2, x: 0, y: radius / 6))))
+    }
 }
 
 /// O brilho animado do quadrado sem imagem (carregando ou sem miniatura).
@@ -819,18 +853,14 @@ struct OmegaProjectRow: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 12))
-        .omegaShadow(12, AureaColors.homeShadowSoft)
+        .omegaCardBackground(AureaColors.lightSurface, AureaColors.homeShadowSoft)
         .overlay {
             if selecting && !marked {
                 RoundedRectangle(cornerRadius: 12).fill(AureaColors.lightSurface.opacity(0.5)).allowsHitTesting(false)
             }
         }
-        .background(GeometryReader { geometry in
-            Color.clear
-                .onAppear { box.rect = geometry.frame(in: .global) }
-                .onChange(of: geometry.frame(in: .global)) { box.rect = $0 }
-        })
+        // O retângulo é medido no toque do ⋯ (sem refazer a linha a cada quadro de rolagem).
+        .background(OmegaFrameProbe(box: box))
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .modifier(OmegaRowGestures(enabled: interactive, onTap: onOpen, onLong: {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -841,9 +871,33 @@ struct OmegaProjectRow: View {
     }
 }
 
-/// Guarda um retângulo sem ser estado observado (mudar não redesenha).
+/// O retângulo de um cartão na janela, sem ser estado observado.
+///
+/// 0.3.4: antes um `GeometryReader` com `onChange(of: frame(in: .global))`
+/// regravava o retângulo em CADA linha visível a cada quadro de rolagem. Agora
+/// uma sonda UIKit (`OmegaFrameProbe`) mede só quando o ⋯ é tocado.
 final class OmegaFrameBox {
-    var rect: CGRect = .zero
+    weak var probe: UIView?
+    /// Retângulo na janela (= o espaço global da Home, que ocupa a janela toda).
+    var rect: CGRect {
+        guard let view = probe, view.window != nil else { return .zero }
+        return view.convert(view.bounds, to: nil)
+    }
+}
+
+/// A sonda do `OmegaFrameBox`: uma `UIView` vazia, sem toque nem acessibilidade.
+struct OmegaFrameProbe: UIViewRepresentable {
+    let box: OmegaFrameBox
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        view.isAccessibilityElement = false
+        view.accessibilityElementsHidden = true
+        box.probe = view
+        return view
+    }
+    func updateUIView(_ view: UIView, context: Context) { box.probe = view }
 }
 
 /// Toque e toque longo (0,45 s) só quando a linha é interativa (a cópia do menu não é).

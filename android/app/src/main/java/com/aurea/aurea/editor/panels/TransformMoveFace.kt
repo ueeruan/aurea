@@ -159,7 +159,7 @@ internal fun ColumnScope.MoveFace(env: PanelEnv, zMode: Boolean, onZMode: (Boole
         KeypadRequest(label, value, "px", Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, 2) { store.setTransform(property, it) })
     TransformPad(env, if (zMode) PadMode.Depth else PadMode.Move, Modifier.weight(1f).fillMaxWidth()) {
         // Os campos moram DENTRO do trackpad: arrastar começando neles move a camada.
-        TfFieldRow(top = 6.dp) {
+        TfFieldRow(top = PanelMetrics.FieldRowTop) {
             TfField(numeroPtBr(x, 2), "X", xLabel, active = !zMode, tag = "transform.position.x", shape = TfPillStart,
                 enabled = enabled, onLongClick = { keypad(xLabel, x, TrackProperty.POSITION_X) }) {
                 if (zMode) onZMode(false) else keypad(xLabel, x, TrackProperty.POSITION_X)
@@ -205,7 +205,7 @@ internal fun ColumnScope.PivotFace(env: PanelEnv, depth: Boolean) {
             }
         })
     Column(Modifier.weight(1f).fillMaxWidth().background(AureaColors.Surface)) {
-        TfFieldRow(top = 6.dp, scroll = true) {
+        TfFieldRow(top = PanelMetrics.FieldRowTop, scroll = true) {
             TfField(numeroPtBr(x, 2), "X", xLabel, active = true, tag = "transform.pivot.x", shape = TfPillStart,
                 enabled = enabled, onLongClick = { keypad(xLabel, x, 0) }) { keypad(xLabel, x, 0) }
             TfPillGap()
@@ -220,7 +220,7 @@ internal fun ColumnScope.PivotFace(env: PanelEnv, depth: Boolean) {
             val centerLabel = stringResource(R.string.panel_centro)
             Box(
                 Modifier
-                    .heightIn(min = 44.dp)
+                    .heightIn(min = PanelMetrics.Touch)
                     .testTag("transform.pivot.center")
                     .semantics { contentDescription = centerLabel }
                     .tocavel(enabled = enabled, shrink = 1f) {
@@ -230,11 +230,11 @@ internal fun ColumnScope.PivotFace(env: PanelEnv, depth: Boolean) {
                 contentAlignment = Alignment.TopCenter,
             ) {
                 Box(
-                    Modifier.height(TfFieldDims.Height).clip(RoundedCornerShape(TfFieldDims.Radius))
-                        .background(AureaColors.ControlButton).padding(horizontal = 10.dp),
+                    Modifier.heightIn(min = TfFieldDims.Height).clip(RoundedCornerShape(TfFieldDims.Radius))
+                        .background(AureaColors.ControlButton).padding(horizontal = PanelMetrics.ChipPad),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(centerLabel, style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)))
+                    Text(centerLabel, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.ChipText, fontWeight = FontWeight.W600, color = AureaColors.Text)))
                 }
             }
             Spacer(Modifier.width(TfFieldDims.Gap))
@@ -302,16 +302,17 @@ internal fun TransformPad(
         // A instrução some enquanto o dedo arrasta (pela cor: nada é remedido).
         val ink = if (driven) AureaColors.Text else if (dragging) Color.Transparent else AureaColors.Muted
         Column(
-            Modifier.align(Alignment.Center).padding(top = if (mode == PadMode.Pivot) 0.dp else 40.dp, start = 16.dp, end = 16.dp),
+            // 0.3.4 painéis: abaixo da fileira de campos (12 + 36 + rótulo), dica de 14 sp.
+            Modifier.align(Alignment.Center).padding(top = if (mode == PadMode.Pivot) 0.dp else 56.dp, start = 16.dp, end = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            if (mode == PadMode.Depth && !driven) CupertinoIcon(CupertinoGlyph.ArrowUp, 15.dp, ink)
+            if (mode == PadMode.Depth && !driven) CupertinoIcon(CupertinoGlyph.ArrowUp, 18.dp, ink)
             Text(
                 hint,
                 textAlign = TextAlign.Center,
-                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = ink)),
+                style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Hint, lineHeight = 19.sp, color = ink)),
             )
-            if (mode == PadMode.Depth && !driven) CupertinoIcon(CupertinoGlyph.ArrowDown, 15.dp, ink)
+            if (mode == PadMode.Depth && !driven) CupertinoIcon(CupertinoGlyph.ArrowDown, 18.dp, ink)
         }
         if (mode != PadMode.Pivot) {
             // Preciso (extra do AUREA): 44 dp de toque, 28 de desenho.
@@ -319,8 +320,8 @@ internal fun TransformPad(
             Box(
                 Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 10.dp, bottom = 2.dp)
-                    .heightIn(min = 44.dp)
+                    .padding(end = 10.dp, bottom = 4.dp)
+                    .heightIn(min = PanelMetrics.Touch)
                     .testTag("transform.move.fine")
                     .semantics { contentDescription = fineLabel; stateDescription = if (fine) "✓" else "" }
                     .tocavel(shrink = 1f) { fine = !fine },
@@ -328,15 +329,16 @@ internal fun TransformPad(
             ) {
                 Box(
                     Modifier
-                        .height(28.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .heightIn(min = PanelMetrics.ChipHeight)
+                        .clip(RoundedCornerShape(PanelMetrics.ChipHeight / 2))
                         .background(if (fine) AureaColors.Accent.copy(alpha = 0.18f) else AureaColors.RailModeFill)
-                        .padding(horizontal = 12.dp),
+                        .padding(horizontal = PanelMetrics.ChipPad),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         fineLabel,
-                        style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = if (fine) AureaColors.Accent else AureaColors.Text)),
+                        maxLines = 1,
+                        style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.ChipText, fontWeight = FontWeight.W600, color = if (fine) AureaColors.Accent else AureaColors.Text)),
                     )
                 }
             }
@@ -566,10 +568,10 @@ private class PadDrag private constructor(
 @Composable
 private fun AnchorPresetGrid(onPick: (Float, Float) -> Unit) {
     val label = stringResource(R.string.panel_ancora_predefinida)
-    Box(Modifier.heightIn(min = 44.dp), contentAlignment = Alignment.TopCenter) {
+    Box(Modifier.heightIn(min = PanelMetrics.Touch), contentAlignment = Alignment.TopCenter) {
         Box(
             Modifier
-                .size(34.dp)
+                .size(PanelMetrics.FieldHeight + 4.dp)
                 .clip(RoundedCornerShape(TfFieldDims.Radius))
                 .background(AureaColors.ControlButton)
                 .testTag("transform.pivot.anchor")

@@ -226,10 +226,11 @@ private fun OpacityLine(env: PanelEnv) {
     val locked by remember(store) { derivedStateOf { store.detail?.locked == true } }
     val label = stringResource(R.string.panel_opacidade)
     Row(
-        Modifier.fillMaxWidth().padding(top = 5.dp).height(40.dp).padding(start = 6.dp, end = 4.dp),
+        // 0.3.4 painéis: linha de 52 (antes 40), ícone 24, régua 48 e a caixa central de 72 × 36.
+        Modifier.fillMaxWidth().padding(top = 6.dp).height(52.dp).padding(start = 6.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CupertinoIcon(CupertinoGlyph.CircleLefthalfFill, 22.dp, AureaColors.Text)
+        CupertinoIcon(CupertinoGlyph.CircleLefthalfFill, 24.dp, AureaColors.Text)
         Spacer(Modifier.width(6.dp))
         TickRuler(
             value = { opacity },
@@ -237,7 +238,7 @@ private fun OpacityLine(env: PanelEnv) {
             active = true,
             modifier = Modifier
                 .weight(1f)
-                .height(40.dp)
+                .height(48.dp)
                 .testTag("blend.opacity.ruler")
                 .semantics { contentDescription = label }
                 .valueDrag(
@@ -254,7 +255,7 @@ private fun OpacityLine(env: PanelEnv) {
         Spacer(Modifier.width(4.dp))
         ValueBox(
             text = "${numeroPtBr(opacity, 0)}%",
-            width = 56.dp,
+            width = PanelMetrics.FieldWidth,
             enabled = !locked,
             modifier = Modifier.testTag("blend.opacity.value"),
         ) {
@@ -328,7 +329,7 @@ private fun BlendCategoryCard(
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(37.dp)
+                .height(PanelMetrics.Touch)  // 0.3.4 painéis: antes 37
                 .testTag("blend.category.${cat.key}")
                 .semantics { contentDescription = name; selected = current != null }
                 .tocavel(enabled = enabled, shrink = 1f, onClick = onHeader)
@@ -336,11 +337,11 @@ private fun BlendCategoryCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (cat.direct == null) {
-                Box(Modifier.size(18.dp).rotate(chevron), contentAlignment = Alignment.Center) {
-                    CupertinoIcon(CupertinoGlyph.ChevronRight, 13.dp, AureaColors.Muted)
+                Box(Modifier.size(20.dp).rotate(chevron), contentAlignment = Alignment.Center) {
+                    CupertinoIcon(CupertinoGlyph.ChevronRight, 15.dp, AureaColors.Muted)
                 }
             } else {
-                Spacer(Modifier.width(18.dp))
+                Spacer(Modifier.width(20.dp))
             }
             Spacer(Modifier.width(6.dp))
             Text(
@@ -348,7 +349,7 @@ private fun BlendCategoryCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
-                style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)),
+                style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Title, fontWeight = FontWeight.W600, color = AureaColors.Text)),
             )
             Spacer(Modifier.weight(1f))
             if (current != null) {
@@ -356,15 +357,15 @@ private fun BlendCategoryCard(
                     stringResource(current.label),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)),
+                    style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label, color = AureaColors.Accent)),
                 )
                 Spacer(Modifier.width(6.dp))
-                CupertinoIcon(CupertinoGlyph.CheckmarkCircleFill, 16.dp, AureaColors.Accent)
+                CupertinoIcon(CupertinoGlyph.CheckmarkCircleFill, 18.dp, AureaColors.Accent)
             }
         }
         if (isOpen) {
             LazyRow(
-                Modifier.fillMaxWidth().height(80.dp),
+                Modifier.fillMaxWidth().height(BlendItemHeight),
                 contentPadding = PaddingValues(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
@@ -376,15 +377,18 @@ private fun BlendCategoryCard(
     }
 }
 
-/** Um modo na fileira: 60 × 80 — miniatura de 45 dp (raio = lado/6) e o nome 11 sp. */
+/** 0.3.4 painéis: a fileira dos modos (antes 80; miniatura 45 → 54, nome 11 → 12). */
+private val BlendItemHeight = 96.dp
+
+/** Um modo na fileira: 72 × 96 — miniatura de 54 dp (raio = lado/6) e o nome 12 sp. */
 @Composable
 private fun BlendModeItem(m: BlendChoice, lit: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val label = stringResource(m.label)
-    val thumbShape = RoundedCornerShape(7.5.dp)   // 45 / 6
+    val thumbShape = RoundedCornerShape(9.dp)   // 54 / 6
     Column(
         Modifier
-            .width(60.dp)
-            .height(80.dp)
+            .width(72.dp)
+            .height(BlendItemHeight)
             .testTag("blend.mode.${m.engine}")
             .semantics { contentDescription = label; selected = lit }
             .tocavel(enabled = enabled, onClick = onClick),
@@ -393,17 +397,17 @@ private fun BlendModeItem(m: BlendChoice, lit: Boolean, enabled: Boolean, onClic
     ) {
         Box(
             Modifier
-                .size(45.dp)
+                .size(54.dp)
                 .clip(thumbShape)
                 .background(AureaColors.Surface)
                 .then(if (lit) Modifier.border(2.dp, AureaColors.Accent, thumbShape) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
             if (m.cut != 0) {
-                BlendCutThumb(exclude = m.cut == 2, modifier = Modifier.size(41.dp))
+                BlendCutThumb(exclude = m.cut == 2, modifier = Modifier.size(50.dp))
             } else {
                 // Camada própria (offscreen): o disco de cima compõe só com o de baixo.
-                Canvas(Modifier.size(41.dp).graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
+                Canvas(Modifier.size(50.dp).graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
                     val r = size.minDimension * 0.30f
                     drawCircle(AureaColors.BlendThumbBottom, r, Offset(size.width * 0.38f, size.height / 2f))
                     drawCircle(AureaColors.BlendThumbTop, r, Offset(size.width * 0.62f, size.height / 2f), blendMode = m.preview)
@@ -417,7 +421,7 @@ private fun BlendModeItem(m: BlendChoice, lit: Boolean, enabled: Boolean, onClic
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 2.dp),
             style = AureaType.Base.merge(
-                TextStyle(fontSize = 11.sp, textAlign = TextAlign.Center, color = if (lit) AureaColors.Accent else AureaColors.Muted),
+                TextStyle(fontSize = PanelMetrics.Note, textAlign = TextAlign.Center, color = if (lit) AureaColors.Accent else AureaColors.Muted),
             ),
         )
     }

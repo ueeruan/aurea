@@ -197,7 +197,7 @@ AUREA_TEST(Plugins, ManifestValidationNamesFieldAndReason) {
         {one_pass_manifest("com.x.res", "1.0.0", "a.frag", "{\"id\":\"mix\",\"type\":\"float\"}"), "id invalido"},
         {one_pass_manifest("com.x.enum", "1.0.0", "a.frag", "{\"id\":\"mode\",\"type\":\"enum\"}"), "options"},
         {one_pass_manifest("com.x.type", "1.0.0", "a.frag", "{\"id\":\"q\",\"type\":\"vec9\"}"), "tipo desconhecido"},
-        {"{\"aureaPlugin\":2,\"id\":\"com.x.fmt\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\"}", "versao 1 do formato"},
+        {"{\"aureaPlugin\":3,\"id\":\"com.x.fmt\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\"}", "versoes 1 e 2"},
         {"{\"aureaPlugin\":1,\"id\":\"com.x.kind\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"compute\"}", "\"kind\""},
         {"{\"aureaPlugin\":1,\"id\":\"com.x.tgt\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\","
          "\"passes\":[{\"shader\":\"a.frag\",\"target\":\"x\"}]}", "ultimo passe"},

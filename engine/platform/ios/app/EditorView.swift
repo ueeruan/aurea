@@ -129,6 +129,8 @@ struct EditorView: View {
                                         .contentShape(Rectangle()).padding(.bottom, metrics.sheet)
                                 }
                                 if metrics.overlay && metrics.sheet > 0 {
+                                    // 0.3.4 painéis: o painel de propriedade tem a zona inteira menos a faixa
+                                    // de foco (régua + linha em foco + folga; `EditorLayout.timelineFocusHeight`).
                                     // O painel por cima segura o toque: nada passa para a timeline embaixo.
                                     ContextSheet(metrics: metrics).frame(height: metrics.sheet).contentShape(Rectangle())
                                 }
@@ -190,6 +192,8 @@ struct EditorView: View {
         .background(Color.clear.fullScreenCover(isPresented: $model.omegaPresetsBrowser) { PresetsBrowserView().environmentObject(model) })
         // Gravar voz: o painel por cima da timeline, com o palco à vista (VoiceRecorder.swift).
         .overlay { if shell.voiceRecorder { VoiceRecorderOverlay() } }
+        // 0.3.4 plugins: o painel de plugin aberto (moldura comum), alertas e consentimento.
+        .overlay(alignment: .bottom) { PluginEditorPanelHost() }
         .overlay { ShellOverlayHost() }
         .environmentObject(shell)
         .modifier(ModelTexturesPrompt(shell: shell))

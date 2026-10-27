@@ -114,7 +114,7 @@ bool prepare(const fs::path& root, const EffectRegistry& registry, Prepared& out
             return false;
         }
     }
-    // 0.3.3 plugins: o script existe, cabe e compila (só a sintaxe: nada roda
+    // 0.3.4 plugins: o script existe, cabe e compila (só a sintaxe: nada roda
     // na instalação); as imagens dos painéis existem e cabem.
     if (!m.script.empty()) {
         const fs::path path = root / path_of(m.script);
@@ -172,7 +172,7 @@ PluginInfo info_of(const Manifest& m, const fs::path& dir) {
     i.directory = utf8(dir);
     i.params = m.params;
     i.passCount = static_cast<u32>(m.passes.size());
-    // 0.3.3 plugins
+    // 0.3.4 plugins
     i.format = m.format;
     i.script = m.script;
     i.permissions = m.permissions;
@@ -300,7 +300,7 @@ u32 PluginManager::load_all() noexcept {
     for (Installed& p : plugins_) unregister_locked(p);
     plugins_.clear();
     if (directory_.empty()) return 0;
-    load_state_locked();   // 0.3.3 plugins: ligado/desligado e permissões
+    load_state_locked();   // 0.3.4 plugins: ligado/desligado e permissões
     const fs::path root = path_of(directory_);
     std::error_code ec;
     if (!fs::is_directory(root, ec)) return 0;
@@ -348,7 +348,7 @@ u32 PluginManager::load_all() noexcept {
             plugins_.push_back(std::move(entry));
             continue;
         }
-        // 0.3.3 plugins: "panel" não tem efeito para registrar.
+        // 0.3.4 plugins: "panel" não tem efeito para registrar.
         if (prepared.manifest.kind == Kind::Panel) {
             entry.info.ok = true;
             ++loaded;
@@ -479,7 +479,7 @@ Result<std::string> PluginManager::install(const std::string& path, const Instal
     entry.info = info_of(m, final);
     entry.info.testRenderMs = testMs;
     entry.shaders = std::move(shaders);
-    // 0.3.3 plugins: instalação nova = ligado e sem permissão concedida (a folha
+    // 0.3.4 plugins: instalação nova = ligado e sem permissão concedida (a folha
     // de consentimento grava o que a pessoa aceitar logo depois).
     std::erase_if(state_, [&](const auto& row) { return row.first == m.id; });
     state_.emplace_back(m.id, SavedState{});
@@ -514,7 +514,7 @@ bool PluginManager::remove(std::string_view id) noexcept {
     auto it = std::find_if(plugins_.begin(), plugins_.end(), [&](const Installed& p) { return p.info.id == id; });
     if (it == plugins_.end()) return false;
     unregister_locked(*it);
-    // 0.3.3 plugins: o estado e os dados do plugin saem junto.
+    // 0.3.4 plugins: o estado e os dados do plugin saem junto.
     {
         const std::string pid(id);
         std::erase_if(state_, [&](const auto& row) { return row.first == pid; });
@@ -548,7 +548,7 @@ std::vector<PluginInfo> PluginManager::list() const {
 }
 
 // =============================================================================
-// 0.3.3 plugins: estado (ligado/permissões), consulta e inspeção
+// 0.3.4 plugins: estado (ligado/permissões), consulta e inspeção
 // =============================================================================
 void PluginManager::load_state_locked() {
     state_.clear();

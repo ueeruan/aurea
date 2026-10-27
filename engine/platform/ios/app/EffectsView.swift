@@ -1291,8 +1291,8 @@ struct EffectsView: View {
                     VStack(spacing: 0) {
                         ForEach(0..<2, id: \.self) { component in
                             HStack(spacing: 0) {
-                                Text(names[component] + ":").font(.aurea(size: 10)).foregroundStyle(AureaColors.fxAxisLabel)
-                                    .frame(width: 16, alignment: .leading)
+                                Text(names[component] + ":").font(.aurea(size: PanelMetrics.note)).foregroundStyle(AureaColors.fxAxisLabel)
+                                    .frame(width: 18, alignment: .leading)
                                 box(component, letter: nil)
                             }
                             .padding(.top, component == 0 ? 7 : 1)
@@ -1300,7 +1300,7 @@ struct EffectsView: View {
                             .frame(maxHeight: .infinity)
                         }
                     }
-                    .frame(width: 55 + 16)
+                    .frame(width: 60 + 18)  // 0.3.4 painéis: par do `FxRow.AxisColumn + 18` do Android
                     .padding(.trailing, FxParamMath.LABEL_MARGIN)
                 } else {
                     HStack(spacing: 2) {
@@ -1382,7 +1382,7 @@ struct EffectsView: View {
                               onPick: @escaping (Int) -> Void) -> some View {
         HStack(spacing: 0) {
             Text(label)
-                .font(.aurea(size: 10))
+                .font(.aurea(size: PanelMetrics.label))  // 0.3.4 painéis: antes 10
                 .foregroundStyle(!enabled ? AureaColors.fxDisabledText : labelActive ? AureaColors.accent : AureaColors.text)
                 .lineLimit(2)
                 .truncationMode(.tail)
@@ -1425,7 +1425,7 @@ struct EffectsView: View {
                          onLongPress: { paramMenu(param, effect: effect) })
                 .padding(FxParamMath.LABEL_MARGIN)
             Text(rgb)
-                .font(.aurea(size: 10).monospacedDigit())
+                .font(.aurea(size: PanelMetrics.note).monospacedDigit())
                 .foregroundStyle(enabled ? AureaColors.fxColorText : AureaColors.fxDisabledText)
                 .lineLimit(1)
                 .padding(.horizontal, 8)
@@ -1440,7 +1440,7 @@ struct EffectsView: View {
                     }, onDone: { model.endGesture() })
             } label: {
                 AureaColorSwatch(color: color(param.value))
-                    .frame(width: 24.5, height: 24.5)
+                    .frame(width: 30, height: 30)  // 0.3.4 painéis: antes 24,5
                     .clipShape(RoundedRectangle(cornerRadius: 3))
                     .overlay(RoundedRectangle(cornerRadius: 3).stroke(AureaColors.fxLowSurface, lineWidth: 0.5))
                     .padding(.trailing, 6)
@@ -1891,14 +1891,14 @@ private struct FxAxisBox: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             Text(text)
-                .font(.aurea(size: 13).monospacedDigit())
-                .minimumScaleFactor(8.0 / 13.0)
+                .font(.aurea(size: PanelMetrics.fieldValue).monospacedDigit())
+                .minimumScaleFactor(8.0 / PanelMetrics.fieldValue)
                 .lineLimit(1)
                 .foregroundStyle(enabled ? color : AureaColors.fxDisabledText)
-                .padding(.bottom, letter != nil ? 8 : 0)
+                .padding(.bottom, letter != nil ? 10 : 0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             if let letter {
-                Text(letter).font(.aurea(size: 10)).foregroundStyle(AureaColors.fxAxisLabel).padding(.bottom, 1)
+                Text(letter).font(.aurea(size: PanelMetrics.note)).foregroundStyle(AureaColors.fxAxisLabel).padding(.bottom, 1)
             }
         }
         .padding(.horizontal, 3)

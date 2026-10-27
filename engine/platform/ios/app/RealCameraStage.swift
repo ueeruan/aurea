@@ -289,7 +289,7 @@ import SwiftUI
         if cam.painting(model) {
             VStack {
                 HStack(spacing: 6) {
-                    Image(systemName: "camera.fill").font(.system(size: 12, weight: AureaIconWeight.symbol))
+                    Image(systemName: "camera").font(.system(size: 12, weight: AureaIconWeight.symbol))
                         .foregroundStyle(cam.recording ? AureaColors.danger : AureaColors.accent)
                     Text(cam.recording ? cam.statusText : AureaText.t("real_camera_title"))
                         .font(.system(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(1)
@@ -337,7 +337,7 @@ import SwiftUI
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 7) {
-                    Image(systemName: "camera.fill").font(.system(size: 12, weight: AureaIconWeight.symbol)).foregroundStyle(AureaColors.accent)
+                    Image(systemName: "camera").font(.system(size: 12, weight: AureaIconWeight.symbol)).foregroundStyle(AureaColors.accent)
                     Text(AureaText.t("real_camera_title")).font(.system(size: 12, weight: .semibold)).foregroundStyle(AureaColors.text)
                     Text(cam.statusText)
                         .font(.system(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(2)

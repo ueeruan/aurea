@@ -88,7 +88,7 @@ internal fun LayerMenu(store: EditorStore, ui: EditorUi, id: Long, expanded: Boo
         store, ui, row, index,
         onReplace = { replacePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
         onInfo = { showInfo = true },
-    )
+    ) + com.aurea.aurea.effects.pluginLayerMenuEntries(store)   // 0.3.4 plugins: ações "layer.menu"
     AnchoredMenu(expanded = true, onDismiss = onDismiss, entries = entries, alignEnd = true, tag = "layer.menu.popup")
 }
 

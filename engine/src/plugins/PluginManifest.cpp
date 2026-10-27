@@ -142,6 +142,13 @@ struct Reader {
     }
 };
 
+/// Tamanho em CARACTERES (UTF-8): hindi, russo e árabe gastam 2 a 3 bytes por letra.
+usize text_chars(const std::string& t) {
+    usize n = 0;
+    for (const char c : t) if ((static_cast<unsigned char>(c) & 0xC0) != 0x80) ++n;
+    return n;
+}
+
 bool read_text(const Value* v, LocalizedText& out, const char* field, usize maxChars, bool required, Reader& r) {
     out.clear();
     if (!v || v->type == Value::Type::Null) {
@@ -150,7 +157,7 @@ bool read_text(const Value* v, LocalizedText& out, const char* field, usize maxC
     }
     if (v->is_string()) {
         if (v->string.empty() && required) return r.fail(std::string("plugin.json: \"") + field + "\" vazio");
-        if (v->string.size() > maxChars) return r.fail(std::string("plugin.json: \"") + field + "\" longo demais");
+        if (text_chars(v->string) > maxChars) return r.fail(std::string("plugin.json: \"") + field + "\" longo demais");
         out.emplace_back("*", v->string);
         return true;
     }
@@ -160,7 +167,7 @@ bool read_text(const Value* v, LocalizedText& out, const char* field, usize maxC
                 && std::all_of(lang.begin(), lang.end(), [](char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '-'; });
             if (!tagOk) return r.fail(std::string("plugin.json: \"") + field + "\": idioma invalido \"" + lang + "\"");
             if (!text.is_string()) return r.fail(std::string("plugin.json: \"") + field + "\"." + lang + " deve ser texto");
-            if (text.string.size() > maxChars) return r.fail(std::string("plugin.json: \"") + field + "\"." + lang + " longo demais");
+            if (text_chars(text.string) > maxChars) return r.fail(std::string("plugin.json: \"") + field + "\"." + lang + " longo demais");
             out.emplace_back(lang, text.string);
         }
         if (out.empty() && required) return r.fail(std::string("plugin.json: \"") + field + "\" sem nenhum idioma");
@@ -463,7 +470,7 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
     const Value* format = root.get("aureaPlugin");
     f32 fmt = 0.0f;
     if (!format || !read_number(format, fmt)) return r.fail("plugin.json: falta \"aureaPlugin\": 1 ou 2 (versao do formato)");
-    // 0.3.3 plugins: o formato 2 traz interface, script e permissões.
+    // 0.3.4 plugins: o formato 2 traz interface, script e permissões.
     if (fmt != static_cast<f32>(kFormatVersion) && fmt != static_cast<f32>(kFormatVersionV2))
         return r.fail("plugin.json: \"aureaPlugin\" " + std::to_string(static_cast<int>(fmt))
                       + " nao suportado (este app le as versoes 1 e 2 do formato)");
@@ -522,7 +529,7 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
         return r.fail("plugin.json: plugin \"panel\" nao tem \"params\" (os controles ficam em \"ui\")");
     if (m.kind == Kind::Shader && !read_passes(root, m, r)) return false;
     if (m.kind == Kind::Stack && !read_stack(root, m, r)) return false;
-    // 0.3.3 plugins: interface, script e permissões (formato 2).
+    // 0.3.4 plugins: interface, script e permissões (formato 2).
     return parse_manifest_v2(root, m, m.format, error);
 }
 
@@ -677,7 +684,7 @@ std::string to_json(const std::vector<PluginInfo>& plugins) {
             w.end_object();
         }
         w.end_array();
-        write_v2_json(w, p);   // 0.3.3 plugins
+        write_v2_json(w, p);   // 0.3.4 plugins
         w.end_object();
     }
     w.end_array();

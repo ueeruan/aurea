@@ -1,5 +1,5 @@
 // =============================================================================
-//  0.3.3 plugins: a biblioteca padrão do AureaScript — Math, JSON, Object,
+//  0.3.4 plugins: a biblioteca padrão do AureaScript — Math, JSON, Object,
 //  Array, String, Number, Date, Error, console e os métodos de texto, lista e
 //  número. Nada aqui toca disco, rede ou sistema.
 //

@@ -9,18 +9,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.VectorGroup
-import androidx.compose.ui.graphics.vector.VectorNode
-import androidx.compose.ui.graphics.vector.VectorPath
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -41,15 +36,96 @@ import com.aurea.aurea.ui.i18n.mirrorInRtl
 val CupertinoIconsFont = FontFamily(Font(R.font.cupertino_icons))
 
 /**
- * 0.3.3: ícones mais bold no app inteiro. A fonte CupertinoIcons só tem o peso
- * normal, então o [CupertinoIcon] desenha o glifo cheio e, por cima, o contorno
- * do MESMO glifo com este traço, em fração do tamanho do ícone (24 dp → ~1,1 dp
- * de traço, ~0,54 dp a mais de cada lado; junção redonda). Vale também para o
- * vetor próprio do desfoque de movimento e para os vetores do Material que passam
- * por [aureaBold]. 0 volta ao traço da fonte. Par de `AureaIconWeight.glyphStroke`
- * do Theme.swift (mesmo valor).
+ * 0.3.4: o estilo dos ícones do app, num ponto só (par de `AureaIconStyle` do
+ * Theme.swift, mesmos valores). Minimalista e limpo: ícone de CONTORNO, traço fino
+ * e uniforme, desenhado UMA vez (sem contorno extra, sem cópias deslocadas).
  */
-const val CupertinoIconBoldStroke = 0.045f
+object AureaIconStyle {
+    /**
+     * Traço dos ícones desenhados à mão, na caixa de 24 (multiplique pela unidade
+     * `tamanho / 24`). É o peso dos glifos da fonte CupertinoIcons, que já são de
+     * traço fino; cantos e pontas redondos.
+     */
+    const val Line = 1.5f
+
+    /**
+     * Glifo cheio → o de contorno da mesma fonte. Vale para todo ícone que passa
+     * pelo [CupertinoIcon] e pelos glifos da timeline. Ficam cheios só os que são
+     * estado ou marca: play/pausa, losango de keyframe, marcador de batida, estrela
+     * de favorito, check de selecionado/feito, caixa marcada, solo, ponto de cor
+     * (`CircleFill`), as metades de círculo (opacidade/mistura) e o triangulinho
+     * de 7–8 dp que marca "tem menu" no canto de um botão (os de abrir/fechar
+     * seção já usam chevron).
+     */
+    private val Outline: Map<Char, Char> = mapOf(
+        CupertinoGlyph.VideocamFill to CupertinoGlyph.Videocam,
+        CupertinoGlyph.PhotoFill to CupertinoGlyph.Photo,
+        CupertinoGlyph.FolderFill to CupertinoGlyph.Folder,
+        CupertinoGlyph.CameraFill to CupertinoGlyph.Camera,
+        CupertinoGlyph.CubeFill to CupertinoGlyph.Cube,
+        CupertinoGlyph.CubeBoxFill to CupertinoGlyph.CubeBox,
+        CupertinoGlyph.HouseFill to CupertinoGlyph.House,
+        CupertinoGlyph.MicFill to CupertinoGlyph.Mic,
+        CupertinoGlyph.PaintbrushFill to CupertinoGlyph.Paintbrush,
+        CupertinoGlyph.DropFill to CupertinoGlyph.Drop,
+        CupertinoGlyph.GearAltFill to CupertinoGlyph.Gear,
+        CupertinoGlyph.InfoCircleFill to CupertinoGlyph.InfoCircle,
+        CupertinoGlyph.ArrowDownCircleFill to CupertinoGlyph.ArrowDownCircle,
+        CupertinoGlyph.XmarkCircleFill to CupertinoGlyph.XmarkCircle,
+        CupertinoGlyph.SquareStack3dDownRightFill to CupertinoGlyph.SquareStack3dDownRight,
+        CupertinoGlyph.CaptionsBubbleFill to CupertinoGlyph.CaptionsBubble,
+        CupertinoGlyph.LockFill to CupertinoGlyph.Lock,
+        CupertinoGlyph.LockOpenFill to CupertinoGlyph.LockOpen,
+        CupertinoGlyph.LinkCircleFill to CupertinoGlyph.LinkCircle,
+        CupertinoGlyph.EyeFill to CupertinoGlyph.Eye,
+    )
+
+    /** O glifo no estilo do app (ver [Outline]). */
+    fun glyph(c: Char): Char = Outline[c] ?: c
+}
+
+/**
+ * 0.3.4: ícones de linha próprios no lugar dos vetores do Material (cheios ou de
+ * traço 2): traço [AureaIconStyle.Line], pontas e cantos redondos, na caixa de 24.
+ * Use `Icon(AureaLineIcons.X, ...)`; a cor vem do `tint`. A mesma geometria no
+ * `AureaLineIcon` do Theme.swift.
+ */
+object AureaLineIcons {
+    /** ‹ de voltar dos painéis. */
+    val ChevronLeft: ImageVector by lazy { line("ChevronLeft", false, floatArrayOf(15f, 6f, 9f, 12f, 15f, 18f)) }
+    /** Alinhar os inícios (linhas encostadas à esquerda; espelha em RTL). */
+    val AlignStarts: ImageVector by lazy {
+        line("AlignStarts", true, floatArrayOf(4f, 6f, 20f, 6f), floatArrayOf(4f, 10f, 14f, 10f),
+            floatArrayOf(4f, 14f, 20f, 14f), floatArrayOf(4f, 18f, 14f, 18f))
+    }
+    /** Alinhar os fins (linhas encostadas à direita; espelha em RTL). */
+    val AlignEnds: ImageVector by lazy {
+        line("AlignEnds", true, floatArrayOf(4f, 6f, 20f, 6f), floatArrayOf(10f, 10f, 20f, 10f),
+            floatArrayOf(4f, 14f, 20f, 14f), floatArrayOf(10f, 18f, 20f, 18f))
+    }
+    /** Escada (uma camada começa quando a de cima termina / distribuir no tempo). */
+    val Stairs: ImageVector by lazy {
+        line("Stairs", false, floatArrayOf(4.5f, 19.5f, 9.5f, 19.5f, 9.5f, 14.5f, 14.5f, 14.5f, 14.5f, 9.5f, 19.5f, 9.5f, 19.5f, 4.5f))
+    }
+
+    /** Cada [FloatArray] é uma polilinha x0,y0,x1,y1… na caixa de 24. */
+    private fun line(name: String, autoMirror: Boolean, vararg strokes: FloatArray): ImageVector =
+        ImageVector.Builder(
+            name = "AureaLine.$name", defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f, autoMirror = autoMirror,
+        ).apply {
+            strokes.forEach { s ->
+                path(
+                    stroke = SolidColor(Color.Black), strokeLineWidth = AureaIconStyle.Line,
+                    strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round,
+                ) {
+                    moveTo(s[0], s[1])
+                    var i = 2
+                    while (i + 1 < s.size) { lineTo(s[i], s[i + 1]); i += 2 }
+                }
+            }
+        }.build()
+}
 
 @Composable
 fun CupertinoIcon(
@@ -64,8 +140,8 @@ fun CupertinoIcon(
         // Own vector: a moving object and fading trails, shared with the Swift drawing.
         Canvas(modifier.size(size)) {
             val unit = this.size.minDimension / 24f
-            // 0.3.3: o mesmo traço extra dos glifos (CupertinoIconBoldStroke).
-            val line = (1.8f + 24f * CupertinoIconBoldStroke) * unit
+            // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.Line).
+            val line = AureaIconStyle.Line * unit
             drawCircle(tint, radius = 5.4f * unit, center = Offset(17f * unit, 12f * unit),
                 style = Stroke(width = line))
             val trails = listOf(Triple(2f, 7f, .55f), Triple(1f, 12f, .85f), Triple(3f, 17f, .55f))
@@ -76,85 +152,24 @@ fun CupertinoIcon(
         }
         return
     }
-    val density = LocalDensity.current
-    val fontSize = with(density) { size.toSp() }
-    val strokePx = with(density) { size.toPx() } * CupertinoIconBoldStroke
-    val mirror = if (autoMirror && glyph in CupertinoGlyph.Directional) Modifier.mirrorInRtl() else Modifier
-    // Cor translúcida: cheio e contorno saem opacos e o alfa vai para a camada
-    // inteira, senão a faixa onde os dois se sobrepõem ficaria mais forte.
-    val translucent = strokePx > 0f && tint.isSpecified && tint.alpha < 1f
-    val ink = if (translucent) tint.copy(alpha = 1f) else tint
-    val layer = if (translucent) {
-        Modifier.graphicsLayer { alpha = tint.alpha; compositingStrategy = CompositingStrategy.Offscreen }
-    } else Modifier
-    Box(modifier.size(size).then(mirror).then(layer), contentAlignment = Alignment.Center) {
-        val style = TextStyle(
-            fontFamily = CupertinoIconsFont,
-            fontSize = fontSize,
-            lineHeight = fontSize,
-            color = ink,
-            textAlign = TextAlign.Center,
-            platformStyle = PlatformTextStyle(includeFontPadding = false),
-            lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
+    // 0.3.4: o glifo no estilo do app (cheio → contorno, AureaIconStyle), desenhado uma vez.
+    val shown = AureaIconStyle.glyph(glyph)
+    val fontSize = with(LocalDensity.current) { size.toSp() }
+    val mirror = if (autoMirror && shown in CupertinoGlyph.Directional) Modifier.mirrorInRtl() else Modifier
+    Box(modifier.size(size).then(mirror), contentAlignment = Alignment.Center) {
+        Text(
+            text = shown.toString(),
+            style = TextStyle(
+                fontFamily = CupertinoIconsFont,
+                fontSize = fontSize,
+                lineHeight = fontSize,
+                color = tint,
+                textAlign = TextAlign.Center,
+                platformStyle = PlatformTextStyle(includeFontPadding = false),
+                lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
+            ),
         )
-        Text(text = glyph.toString(), style = style)
-        if (strokePx > 0f) {
-            // 0.3.3: o contorno que engrossa o glifo (ver CupertinoIconBoldStroke).
-            Text(
-                text = glyph.toString(),
-                style = style.copy(drawStyle = Stroke(width = strokePx, join = StrokeJoin.Round)),
-                modifier = Modifier.clearAndSetSemantics { },
-            )
-        }
     }
-}
-
-private val boldVectors = java.util.WeakHashMap<ImageVector, ImageVector>()
-
-/**
- * 0.3.3: o mesmo vetor com traço extra ([CupertinoIconBoldStroke] da largura do
- * viewport) em volta de cada caminho, na cor do próprio caminho, para os ícones
- * do Material (`Icons.Rounded.*`) acompanharem o peso dos glifos. Use
- * `Icon(vetor.aureaBold(), ...)`. O resultado fica guardado por vetor.
- */
-fun ImageVector.aureaBold(): ImageVector {
-    if (CupertinoIconBoldStroke <= 0f) return this
-    synchronized(boldVectors) { boldVectors[this]?.let { return it } }
-    val extra = viewportWidth * CupertinoIconBoldStroke
-    val builder = ImageVector.Builder(
-        name = name, defaultWidth = defaultWidth, defaultHeight = defaultHeight,
-        viewportWidth = viewportWidth, viewportHeight = viewportHeight,
-        tintColor = tintColor, tintBlendMode = tintBlendMode, autoMirror = autoMirror,
-    )
-    fun add(node: VectorNode) {
-        when (node) {
-            is VectorGroup -> {
-                builder.addGroup(
-                    name = node.name, rotate = node.rotation, pivotX = node.pivotX, pivotY = node.pivotY,
-                    scaleX = node.scaleX, scaleY = node.scaleY,
-                    translationX = node.translationX, translationY = node.translationY,
-                    clipPathData = node.clipPathData,
-                )
-                node.forEach { add(it) }
-                builder.clearGroup()
-            }
-            is VectorPath -> builder.addPath(
-                pathData = node.pathData, pathFillType = node.pathFillType, name = node.name,
-                fill = node.fill, fillAlpha = node.fillAlpha,
-                stroke = node.stroke ?: node.fill,
-                strokeAlpha = if (node.stroke != null) node.strokeAlpha else node.fillAlpha,
-                strokeLineWidth = node.strokeLineWidth + extra,
-                strokeLineCap = node.strokeLineCap, strokeLineJoin = StrokeJoin.Round,
-                strokeLineMiter = node.strokeLineMiter,
-                trimPathStart = node.trimPathStart, trimPathEnd = node.trimPathEnd,
-                trimPathOffset = node.trimPathOffset,
-            )
-        }
-    }
-    root.forEach { add(it) }
-    val bold = builder.build()
-    synchronized(boldVectors) { boldVectors[this] = bold }
-    return bold
 }
 
 /** Codepoints usados pela UI (nomes do pacote cupertino_icons). */
@@ -166,6 +181,7 @@ object CupertinoGlyph {
     const val ArrowDownRightSquare = '\uF4F7'
     const val ArrowDownToLine = '\uF4FB'
     const val ArrowDownCircleFill = '\uF4EC'
+    const val ArrowDownCircle = '\uF4EB'
     const val ArrowLeftRight = '\uF500'
     const val ArrowLeftRightSquare = '\uF503'
     const val ArrowLeftToLine = '\uF507'
@@ -219,6 +235,7 @@ object CupertinoGlyph {
     const val DocOnDoc = '\uF634'
     const val DocText = '\uF638'
     const val DropFill = '\uF8D9'
+    const val Drop = '\uF8D8'
     const val Ellipsis = '\uF46A'
     const val ExclamationmarkBubble = '\uF656'
     const val ExclamationmarkTriangle = '\uF660'
@@ -245,9 +262,11 @@ object CupertinoGlyph {
     const val LineHorizontal3 = '\uF6E1'
     const val Link = '\uF6E5'
     const val LinkCircleFill = '\uF6E7'
+    const val LinkCircle = '\uF6E6'
     const val Lock = '\uF4C8'
     const val LockFill = '\uF4C9'
     const val LockOpen = '\uF6FA'
+    const val LockOpenFill = '\uF6FB'
     const val Minus = '\uF70F'
     const val MinusCircle = '\uF463'
     // Microfone (Gravar voz): contorno e cheio.
@@ -257,6 +276,7 @@ object CupertinoGlyph {
     const val MusicNote = '\uF46B'
     const val MusicNote2 = '\uF46C'
     const val Paintbrush = '\uF72E'
+    const val PaintbrushFill = '\uF72F'
     const val PauseFill = '\uF478'
     const val Pencil = '\uF37E'
     const val PencilOutline = '\uF73D'

@@ -54,7 +54,7 @@
 #include "aurea/platform/DeviceCapabilities.hpp"
 #include "aurea/playback/Playback.hpp"
 #include "aurea/plugins/PluginManager.hpp"
-// 0.3.3 plugins: runtime de script dos plugins (painéis, API de objetos).
+// 0.3.4 plugins: runtime de script dos plugins (painéis, API de objetos).
 #include "aurea/plugins/PluginRuntime.hpp"
 #include "aurea/tracking/RealCameraCapture.hpp"
 #include "aurea/project/Project.hpp"
@@ -2111,7 +2111,7 @@ public:
     void set_plugin_directory(const char* path) noexcept;
     [[nodiscard]] std::string plugin_directory() const;
 
-    // 0.3.3 plugins: interface, scripts e APIs (src/engine/EnginePluginsV2.cpp) --
+    // 0.3.4 plugins: interface, scripts e APIs (src/engine/EnginePluginsV2.cpp) --
     // Plugins do formato 2 trazem painéis/ações declarados e um script
     // (AureaScript) com a API de objetos do AUREA no estilo do After Effects.
     // As chamadas BLOQUEIAM (o script roda na thread de quem chama): a
@@ -2615,7 +2615,7 @@ private:
     /// pipelines prontos. Toma o renderMutex_ (espera o preview soltar a GPU).
     [[nodiscard]] bool plugin_test_render(const EffectRegistry& registry, EffectTypeId typeId, f32& ms,
                                           std::string& error) noexcept;
-    // 0.3.3 plugins: runtimes de script (EnginePluginsV2.cpp). shared_ptr: o
+    // 0.3.4 plugins: runtimes de script (EnginePluginsV2.cpp). shared_ptr: o
     // tipo só é completo lá (o destrutor do Engine não precisa conhecê-lo).
     struct PluginScriptState;
     std::shared_ptr<PluginScriptState> pluginScripts_;

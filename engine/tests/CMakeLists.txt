@@ -122,7 +122,7 @@ add_executable(aurea_tests
     test_shape3d.cpp
     test_shape3d_split.cpp
     test_plugins.cpp
-    test_plugins_v2.cpp   # 0.3.3 plugins
+    test_plugins_v2.cpp   # 0.3.4 plugins
     test_hyper.cpp
 )
 

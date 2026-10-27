@@ -1,5 +1,5 @@
 // =============================================================================
-//  0.3.3 plugins: o runtime de um plugin com script (PluginRuntime.hpp).
+//  0.3.4 plugins: o runtime de um plugin com script (PluginRuntime.hpp).
 //
 //  Aqui moram as APIs que não dependem do projeto: `ui` (estado dos painéis),
 //  `console`, `storage`, `fetch`, `clipboard`, `files` e o pedaço do `app`
@@ -646,7 +646,7 @@ void PluginRuntime::install_runtime_api() {
     // --- app (o motor acrescenta project, beginUndoGroup...) ---
     ObjectRef app = c.new_object();
     c.accessor(app, "language", [this](Context& cx, const Value&, std::vector<Value>&) { return cx.str(locale_); });
-    c.constant(app, "version", c.str("0.3.3"));
+    c.constant(app, "version", c.str("0.3.4"));
     {
         ObjectRef plugin = c.new_object();
         c.constant(plugin, "id", c.str(info_.id));

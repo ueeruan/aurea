@@ -88,8 +88,26 @@ internal object EditorLayout {
     /** O painel cresce com a fonte do sistema: 200 em 1×, 240 em 2×. */
     fun layerPanel(fontScale: Float = 1f): Float = LAYER_PANEL + 40f * (fontScale.coerceIn(1f, 2f) - 1f)
 
+    // 0.3.4 painéis: o painel de propriedade sobe até logo abaixo da linha em foco.
+    /** Régua da timeline (`TimelineMetrics.rowsTop`): 42 em 1×, +14 por 1× de fonte. */
+    const val FOCUS_RULER = 42f
+    /** A linha da camada em foco (`TimelineMetrics.row`): 28 em 1×, +24 por 1× de fonte. */
+    const val FOCUS_ROW = 28f
+    /** Folga entre a linha em foco e o topo do painel. */
+    const val FOCUS_GAP = 10f
+
+    /**
+     * A faixa de timeline que fica à vista com o painel aberto: régua + a linha
+     * da camada em foco + a folga ([TIMELINE_FOCUS] = 80 em 1×). Cresce com a
+     * fonte junto com a régua e a linha (senão a linha some atrás do painel).
+     */
+    fun timelineFocus(fontScale: Float = 1f): Float {
+        val s = fontScale.coerceIn(1f, 2f) - 1f
+        return FOCUS_RULER + 14f * s + FOCUS_ROW + 24f * s + FOCUS_GAP
+    }
+
     /** A zona inferior: o painel + a faixa de foco da timeline (280 em 1×). */
-    fun bottomZone(fontScale: Float = 1f): Float = layerPanel(fontScale) + TIMELINE_FOCUS
+    fun bottomZone(fontScale: Float = 1f): Float = layerPanel(fontScale) + timelineFocus(fontScale)
 
     fun dockTile(fontScale: Float = 1f): Float = DOCK_TILE + 28f * (fontScale.coerceIn(1f, 2f) - 1f)
 
@@ -124,6 +142,9 @@ internal object EditorLayout {
      * com a prévia maior que a automática, ela devolve o espaço enquanto eles estão
      * abertos (como na 0.3.2), e o painel continua com 200 + 80 de timeline.
      * Sem preferência, a prévia é a automática (área − 42 − 46 − 280).
+     * 0.3.4 painéis: Panel e Curve ocupam a zona inteira menos [timelineFocus]
+     * (régua + a linha em foco + folga): com a divisa no alto o painel cresce em vez
+     * de deixar um vazio de timeline por cima dele (200 + 80 só na zona padrão).
      * [width] e [aspect] ficam na assinatura para quem já chamava.
      */
     @Suppress("UNUSED_PARAMETER")
@@ -142,6 +163,7 @@ internal object EditorLayout {
         }
         val ws = workspace(totalHeight)
         val panel = layerPanel(fontScale)
+        val focus = timelineFocus(fontScale)
         val previewFloor = min(PREVIEW_MIN, ws * 0.25f)
         val automatic = max(previewFloor, ws - bottomZone(fontScale)).coerceAtMost(ws)
         // 0.3.3 recursos: a altura arrastada na divisa (0 = automática).
@@ -159,7 +181,8 @@ internal object EditorLayout {
         }
         fun over(body: Float): EditorMetrics {
             // Ao menos a faixa de foco da timeline fica à vista (menos numa tela baixa).
-            val sheet = min(body, max(0f, zone - min(TIMELINE_FOCUS, zone * 0.3f)))
+            // 0.3.4 painéis: o teto é metade da zona (com 0,3 a faixa de foco da fonte grande cortava a linha).
+            val sheet = min(body, max(0f, zone - min(focus, zone * 0.5f)))
             return EditorMetrics(TOP_BAR, preview, STRIP, TRANSPORT, zone, max(0f, sheet), overlay = true)
         }
         return when (content) {
@@ -170,7 +193,10 @@ internal object EditorLayout {
             // Omega adicionar: a mesma zona da barra (210 + 70); o conteúdo fica por cima da timeline.
             SheetContent.Adding -> stacked(ADD_BAR)
             SheetContent.Dock -> over(min(dock(dockRows, fontScale), panel))
-            SheetContent.Panel, SheetContent.Curve -> over(panel)
+            // 0.3.4 painéis: o painel de propriedade ocupa a zona inteira até logo abaixo
+            // da linha em foco (régua + linha + folga), também com a divisa no alto:
+            // nada de 200 fixo com um vazio de timeline por cima.
+            SheetContent.Panel, SheetContent.Curve -> over(zone)
         }
     }
 

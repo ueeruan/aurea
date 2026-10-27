@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
@@ -43,6 +44,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aurea.aurea.R
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -141,46 +148,70 @@ internal fun PresetsPanel(env: PanelEnv) {
         else -> lib.entries(tab.kind!!)
     }.filter { onlyText(it) && (q.isEmpty() || it.name.contains(q, ignoreCase = true)) }
 
+    // 0.3.4 presets: o título "Presets" mora só na barra da seção (SectionTopBar).
+    // Busca recolhida numa lupa ao lado das abas (uma fileira só); aberta, o campo
+    // ocupa a fileira e o ✕ limpa e recolhe. Vindo de "Meus presets" com busca, já aberta.
+    var searchOpen by rememberSaveable { mutableStateOf(query.isNotEmpty()) }
+    val searchFocus = remember { FocusRequester() }
+    LaunchedEffect(searchOpen) { if (searchOpen && query.isEmpty()) runCatching { searchFocus.requestFocus() } }
+
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+        // Cabeçalho compacto: UMA fileira de 44 dp (lupa + abas, ou o campo de busca).
         Row(
-            Modifier.fillMaxWidth().padding(top = 6.dp).height(38.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip).padding(horizontal = 10.dp),
+            Modifier.fillMaxWidth().padding(top = 4.dp).height(44.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CupertinoIcon(CupertinoGlyph.Search, 15.dp, AureaColors.Muted)
-            Spacer(Modifier.width(8.dp))
-            Box(Modifier.weight(1f)) {
-                if (query.isEmpty()) Text(stringResource(R.string.panel_buscar_preset), style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp, color = AureaColors.Muted)))
-                BasicTextField(
-                    query,
-                    onValueChange = { query = it },
-                    singleLine = true,
-                    cursorBrush = SolidColor(AureaColors.Accent),
-                    textStyle = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp, color = AureaColors.Text)),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            if (query.isNotEmpty()) {
-                val clearLabel = stringResource(R.string.panel_limpar_busca)
-                Box(Modifier.size(34.dp).semantics { contentDescription = clearLabel }.tocavel { query = "" }, contentAlignment = Alignment.Center) {
-                    CupertinoIcon(CupertinoGlyph.XmarkCircleFill, 16.dp, AureaColors.Muted)
+            if (searchOpen) {
+                Row(
+                    Modifier.weight(1f).height(34.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip).padding(start = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CupertinoIcon(CupertinoGlyph.Search, 15.dp, AureaColors.Muted)
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.weight(1f)) {
+                        if (query.isEmpty()) Text(stringResource(R.string.panel_buscar_preset), maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp, color = AureaColors.Muted)))
+                        BasicTextField(
+                            query,
+                            onValueChange = { query = it },
+                            singleLine = true,
+                            cursorBrush = SolidColor(AureaColors.Accent),
+                            textStyle = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp, color = AureaColors.Text)),
+                            modifier = Modifier.fillMaxWidth().focusRequester(searchFocus).testTag("presets.search"),
+                        )
+                    }
+                    val clearLabel = stringResource(R.string.panel_limpar_busca)
+                    Box(
+                        Modifier.size(44.dp, 34.dp).semantics { contentDescription = clearLabel }
+                            .tocavel { query = ""; searchOpen = false },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CupertinoIcon(CupertinoGlyph.XmarkCircleFill, 16.dp, AureaColors.Muted)
+                    }
                 }
-            }
-        }
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).height(46.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            tabs.forEach { t -> Chip(t.prefix + stringResource(t.label), t == tab) { picked = t } }
-        }
-        if (tab == PresetTab.Effects) {
-            Text(stringResource(R.string.cc_preset_hint), modifier = Modifier.padding(bottom = 8.dp),
-                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
-        }
-        if (tab == PresetTab.Animation) {
-            Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.panel_durar_ate_fim_camada), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-                AureaToggle(checked = stretch, onCheckedChange = { stretch = it })
+            } else {
+                val searchLabel = stringResource(R.string.panel_buscar_preset)
+                Box(
+                    Modifier.size(44.dp).semantics { contentDescription = searchLabel }.testTag("presets.searchOpen")
+                        .tocavel { searchOpen = true },
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Box(Modifier.size(34.dp, 32.dp).clip(RoundedCornerShape(9.dp)).background(AureaColors.Chip), contentAlignment = Alignment.Center) {
+                        CupertinoIcon(CupertinoGlyph.Search, 15.dp, AureaColors.Text)
+                    }
+                }
+                Row(
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()).testTag("presets.tabs"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    tabs.forEach { t -> TabChip(t.prefix + stringResource(t.label), t == tab) { picked = t } }
+                }
+                // "Durar até o fim da camada" (antes uma linha inteira com interruptor):
+                // pílula curta liga/desliga na ponta da fileira, só na aba Animação.
+                if (tab == PresetTab.Animation) {
+                    Spacer(Modifier.width(6.dp))
+                    StretchChip(stretch) { stretch = !stretch }
+                }
             }
         }
         if (list.isEmpty() && tab.kind == null) {
@@ -196,13 +227,22 @@ internal fun PresetsPanel(env: PanelEnv) {
                 )
             }
         } else {
+            // A grade enche o resto do painel e rola por dentro (baixo ou alto, a
+            // primeira fileira inteira e parte da segunda sempre aparecem).
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(100.dp),
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                contentPadding = PaddingValues(bottom = 12.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f).testTag("presets.grid"),
+                contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // A dica do CC rola junto com os cartões (antes empurrava a grade para fora).
+                if (tab == PresetTab.Effects) {
+                    item(key = "dica", span = { GridItemSpan(maxLineSpan) }) {
+                        Text(stringResource(R.string.cc_preset_hint),
+                            style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)))
+                    }
+                }
                 items(list, key = { it.key }) { e ->
                     PresetCard(
                         store,
@@ -383,6 +423,10 @@ private fun curveJson(store: EditorStore, name: String): String? {
 /** Fundo da prévia: o palco (a composição fica escura atrás do objeto). */
 private val PreviewBg = AureaColors.Stage
 
+/** 0.3.4 presets: medidas do cartão (par do `PresetCardView` do iOS). */
+private val CardPreview = 50.dp
+private val CardName = 26.dp
+
 /** Cartão do preset: prévia (com ☆ e, nos seus, a lixeira), nome embaixo. Toque = aplicar. */
 @Composable
 private fun PresetCard(
@@ -405,10 +449,21 @@ private fun PresetCard(
             .background(AureaColors.Chip)
             .semantics { contentDescription = applyLabel }
             .tocavel(onClick = onApply)
-            .padding(6.dp),
+            .padding(5.dp),
     ) {
-        Box(Modifier.fillMaxWidth().height(62.dp).clip(RoundedCornerShape(8.dp)).background(PreviewBg)) {
+        // 0.3.4 presets: cartão mais baixo (prévia 50 + nome em 2 linhas = 90 dp) para
+        // a grade mostrar 1,5+ fileiras no painel baixo; o tipo vira selo na prévia.
+        Box(Modifier.fillMaxWidth().height(CardPreview).clip(RoundedCornerShape(8.dp)).background(PreviewBg)) {
             PresetPreview(store, e, Modifier.fillMaxSize())
+            if (showKind) {
+                Text(
+                    stringResource(e.kind.label),
+                    maxLines = 1,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(4.dp)
+                        .clip(RoundedCornerShape(4.dp)).background(AureaColors.Chip).padding(horizontal = 4.dp, vertical = 1.dp),
+                    style = AureaType.Base.merge(TextStyle(fontSize = 9.5.sp, color = AureaColors.Muted)),
+                )
+            }
             Box(
                 Modifier.align(Alignment.TopEnd).size(34.dp)
                     .semantics { contentDescription = if (favorite) unfavoriteLabel else favoriteLabel }
@@ -426,15 +481,14 @@ private fun PresetCard(
                 }
             }
         }
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
             e.name,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.height(30.dp),
-            style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 14.sp, fontWeight = FontWeight.W600)),
+            modifier = Modifier.fillMaxWidth().height(CardName),
+            style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)),
         )
-        if (showKind) Text(stringResource(e.kind.label), maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = AureaColors.Muted)))
     }
 }
 
@@ -448,19 +502,20 @@ private fun SaveCard(onClick: () -> Unit) {
             .background(AureaColors.AccentDim)
             .semantics { contentDescription = saveLabel }
             .tocavel(onClick = onClick)
-            .padding(6.dp),
+            .padding(5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.fillMaxWidth().height(62.dp), contentAlignment = Alignment.Center) {
-            CupertinoIcon(CupertinoGlyph.Plus, 24.dp, AureaColors.Accent)
+        Box(Modifier.fillMaxWidth().height(CardPreview), contentAlignment = Alignment.Center) {
+            CupertinoIcon(CupertinoGlyph.Plus, 22.dp, AureaColors.Accent)
         }
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
             stringResource(R.string.panel_salvar_desta_camada),
             maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            modifier = Modifier.height(30.dp),
-            style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)),
+            modifier = Modifier.height(CardName),
+            style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)),
         )
     }
 }
@@ -680,6 +735,48 @@ private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, fontWeight = if (on) FontWeight.W700 else FontWeight.W500, color = if (on) AureaColors.Accent else AureaColors.Text)))
+    }
+}
+
+/** 0.3.4 presets: o "Durar até o fim da camada" compacto (pílula liga/desliga, alvo de 44 dp). */
+@Composable
+private fun StretchChip(on: Boolean, onToggle: () -> Unit) {
+    val full = stringResource(R.string.panel_durar_ate_fim_camada)
+    Box(
+        Modifier.height(44.dp)
+            .semantics { contentDescription = full; toggleableState = ToggleableState(on) }
+            .testTag("presets.stretch")
+            .tocavel(role = Role.Switch, onClick = onToggle),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            Modifier.height(32.dp).clip(RoundedCornerShape(9.dp))
+                .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CupertinoIcon(CupertinoGlyph.ArrowRightToLine, 13.dp, if (on) AureaColors.Accent else AureaColors.Muted)
+            Spacer(Modifier.width(5.dp))
+            Text(stringResource(R.string.p34_presets_to_end), maxLines = 1,
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = if (on) FontWeight.W700 else FontWeight.W500, color = if (on) AureaColors.Accent else AureaColors.Muted)))
+        }
+    }
+}
+
+/** 0.3.4 presets: aba do cabeçalho — pílula de 32 dp num alvo de 44 dp (fileira única). */
+@Composable
+private fun TabChip(label: String, on: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.height(44.dp).semantics { selected = on }.tocavel(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.height(32.dp).clip(RoundedCornerShape(9.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, fontWeight = if (on) FontWeight.W700 else FontWeight.W500, color = if (on) AureaColors.Accent else AureaColors.Text)))
+        }
     }
 }
 

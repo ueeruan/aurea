@@ -7,6 +7,7 @@
 //     chega pronta na linha da ponte (`EffectParamRow`, agora 160 bytes).
 //  2. Duplicar efeito e colar configurações (menu ⋮ do efeito).
 // =============================================================================
+#include <algorithm>
 #include "TestFramework.hpp"
 
 #include "aurea/Engine.hpp"
@@ -52,8 +53,15 @@ struct FxRig {
         add.type = CommandType::EffectAdd;
         add.effect_add.layer = LayerId::unpack(layer);
         add.effect_add.effectType = effect_type_id(key);
+        add.effect_add.index = kInvalidIndex;   // no fim da pilha
+        std::vector<u32> before;
+        if (L()) for (const auto& fx : L()->effects) before.push_back(fx.id);
         if (!e.apply_command(add).ok() || !L() || L()->effects.empty()) return kInvalidIndex;
-        return L()->effects.back().id;
+        // O efeito novo não entra necessariamente no fim (fica antes das decorações):
+        // devolve o id que apareceu.
+        for (const auto& fx : L()->effects)
+            if (std::find(before.begin(), before.end(), fx.id) == before.end()) return fx.id;
+        return kInvalidIndex;
     }
     void set_param(u32 effect, u32 index, f32 value) {
         Command c;
@@ -324,7 +332,7 @@ AUREA_TEST(OmegaEffects, PasteSettingsOnlyIntoTheSameType) {
     AUREA_CHECK(r.ok);
     if (!r.ok) return;
     const u32 a = r.add(effect_keys::kGaussianBlur);
-    const u32 b = r.add(effect_keys::kSaber);
+    const u32 b = r.add(effect_keys::kGlow);   // tipo diferente (o Saber não é registrado no host)
     const u32 c = r.add(effect_keys::kGaussianBlur);
     AUREA_CHECK(a != kInvalidIndex && b != kInvalidIndex && c != kInvalidIndex);
     if (a == kInvalidIndex || b == kInvalidIndex || c == kInvalidIndex) return;

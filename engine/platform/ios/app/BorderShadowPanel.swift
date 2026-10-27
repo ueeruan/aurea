@@ -37,23 +37,24 @@ private enum BorderShadowParam {
 
 /// Medidas (referência: `fragment_border_and_shadow`, `border_list_item`).
 private enum BorderShadowMetrics {
-    /// Linha amostra · título · interruptor (37,5 na referência; 44 = alvo de toque).
-    static let header: CGFloat = 44
-    static let swatch: CGFloat = 24.5
-    static let ruler: CGFloat = 57
+    // 0.3.4 painéis: linhas, amostras e réguas maiores (par do `BsDims` do Android).
+    /// Linha amostra · título · interruptor (antes 44).
+    static let header: CGFloat = 48
+    static let swatch: CGFloat = 30
+    static let ruler: CGFloat = 64
     static let rulerTop: CGFloat = 5
     static let valueW: CGFloat = 55
     static let valueH: CGFloat = 45
     static let gap: CGFloat = 6.5
-    /// Item de 37 com a margem de 6,5 em cima e 0,5 embaixo: o item inteiro é alvo de 44.
-    static let slot: CGFloat = 44
-    static let item: CGFloat = 37
-    static let radius: CGFloat = 5
-    static let cue: CGFloat = 18
-    static let dot: CGFloat = 20
+    /// Item de 43 com a margem de 6,5 em cima e 0,5 embaixo (antes 37 em 44).
+    static let slot: CGFloat = 50
+    static let item: CGFloat = 43
+    static let radius: CGFloat = PanelMetrics.fieldRadius
+    static let cue: CGFloat = 20
+    static let dot: CGFloat = 22
     static let label: CGFloat = 60
-    static let key: CGFloat = 40
-    static let row: CGFloat = 44
+    static let key: CGFloat = 44
+    static let row: CGFloat = 50
     static let pad: CGFloat = 10
     static let openSeconds = 0.2
     static let tickSpacing: CGFloat = 5.5
@@ -662,7 +663,7 @@ struct BorderShadowPanel: View {
             load()
         } label: {
             HStack(spacing: 6) {
-                CupertinoGlyph.text(CupertinoGlyph.Plus, size: 15)
+                CupertinoGlyph.text(CupertinoGlyph.Plus, size: 18)
                 Text(label).font(.aurea(size: 15)).foregroundStyle(AureaColors.text).lineLimit(1)
             }
             .frame(maxWidth: .infinity)
@@ -1003,6 +1004,7 @@ struct BorderShadowPanel: View {
                 onKey()
             } label: {
                 KeyframeDiamondIcon(look: look, enabled: canKey)
+                    .scaleEffect(PanelMetrics.railIcon / AureaDims.diamondIcon)
                     .frame(width: BorderShadowMetrics.key, height: height)
                     .contentShape(Rectangle())
             }
@@ -1291,10 +1293,10 @@ private struct BorderShadowValueBox: View {
     var body: some View {
         Button(action: onTap) {
             Text(text)
-                .font(.aurea(size: 14).monospacedDigit())
+                .font(.aurea(size: PanelMetrics.fieldValue).monospacedDigit())
                 .foregroundStyle(enabled ? AureaColors.text : AureaColors.fxDisabledText)
                 .lineLimit(1)
-                .minimumScaleFactor(8.0 / 14.0)
+                .minimumScaleFactor(8.0 / PanelMetrics.fieldValue)
                 .padding(.horizontal, 6)
                 .frame(width: BorderShadowMetrics.valueW, height: BorderShadowMetrics.valueH, alignment: .trailing)
                 .background(AureaColors.fxValueVeil, in: RoundedRectangle(cornerRadius: 4))
@@ -1318,10 +1320,10 @@ private struct BorderShadowLabel: View {
     var body: some View {
         Button(action: onTap) {
             Text(label)
-                .font(.aurea(size: 12))
+                .font(.aurea(size: PanelMetrics.label))
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
-                .minimumScaleFactor(8.0 / 12.0)
+                .minimumScaleFactor(8.0 / PanelMetrics.label)
                 .foregroundStyle(!enabled ? AureaColors.fxDisabledText : active ? AureaColors.accent : AureaColors.text)
                 .padding(3)
                 .frame(width: BorderShadowMetrics.label, height: Swift.max(0, height))
@@ -1349,12 +1351,12 @@ private struct BorderShadowSegmented: View {
                 let on = index == selected
                 Button { onSelect(index) } label: {
                     Text(option)
-                        .font(.aurea(size: 12))
+                        .font(.aurea(size: PanelMetrics.label))
                         .foregroundStyle(!enabled ? AureaColors.fxDisabledText : on ? AureaColors.accent : AureaColors.text)
-                        .lineLimit(1).truncationMode(.tail)
+                        .lineLimit(1).truncationMode(.tail).minimumScaleFactor(0.8)
                         .padding(.horizontal, 4)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 27.5)
+                        .frame(height: PanelMetrics.fieldHeight)
                         .background(on ? AureaColors.fxSegmentOn : AureaColors.fxSegment)
                         .frame(height: 44)
                         .contentShape(Rectangle())

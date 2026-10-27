@@ -1,5 +1,5 @@
 // =============================================================================
-//  0.3.3 plugins: léxico e sintaxe do AureaScript (um subconjunto do ES2020).
+//  0.3.4 plugins: léxico e sintaxe do AureaScript (um subconjunto do ES2020).
 //
 //  Descida recursiva clássica com precedência por níveis. Toda recusa diz a
 //  linha, a coluna e o que faltou, em português (é o que o autor do plugin vê

@@ -51,6 +51,115 @@ import UIKit
         app.buttons["transport.viewModes"].firstMatch.tap()
     }
 
+    // 0.3.4 (relato do iPhone 13): na folha "Novo projeto" a caixa de fps ficava
+    // cinza no toque e não abria nada. Abre a caixa, o menu APARECE por cima da
+    // folha, escolhe outra taxa, o valor muda; fecha por fora e abre de novo
+    // (a caixa não pode morrer depois do primeiro uso).
+    func testNewProjectFpsDropdownOpensOverTheSheetAndChangesTheValue() throws {
+        try launchHome()
+        let create = app.buttons["home.create"].firstMatch
+        XCTAssertTrue(create.waitForExistence(timeout: 20))
+        create.tap()
+        XCTAssertTrue(element("newProject.sheet").waitForExistence(timeout: 5))
+        let fps = element("newProject.fps")
+        try bringIntoView(fps, scrolling: element("newProject.sheet"))
+        let before = fps.value as? String ?? ""
+        let target = before.hasPrefix("24 ") ? 60 : 24
+
+        fps.tap()
+        XCTAssertTrue(element("newProject.fps.menu").waitForExistence(timeout: 5), "The fps menu did not appear over the sheet")
+        let option = element("newProject.fps.\(target)")
+        XCTAssertTrue(option.waitForExistence(timeout: 5)); XCTAssertTrue(option.isHittable)
+        option.tap()
+        XCTAssertTrue(waitGone(element("newProject.fps.menu")))
+        XCTAssertTrue(waitForValue(fps, prefix: "\(target) "), "The fps box kept \(fps.value as? String ?? "nil")")
+
+        // Abre de novo, fecha tocando fora e abre outra vez: a caixa continua viva.
+        fps.tap()
+        XCTAssertTrue(element("newProject.fps.menu").waitForExistence(timeout: 5))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).tap()
+        XCTAssertTrue(waitGone(element("newProject.fps.menu")))
+        fps.tap()
+        XCTAssertTrue(element("newProject.fps.menu").waitForExistence(timeout: 5), "The fps box died after the first use")
+        element("newProject.fps.\(target == 24 ? 60 : 24)").tap()
+        XCTAssertTrue(waitForValue(fps, prefix: "\(target == 24 ? 60 : 24) "))
+
+        // A resolução usa a mesma caixa.
+        let resolution = element("newProject.resolution")
+        if resolution.exists {
+            try bringIntoView(resolution, scrolling: element("newProject.sheet"))
+            resolution.tap()
+            XCTAssertTrue(element("newProject.resolution.menu").waitForExistence(timeout: 5))
+            element("newProject.resolution.720").tap()
+            XCTAssertTrue(waitForValue(resolution, prefix: "720p"))
+        }
+    }
+
+    // 0.3.4: o mesmo defeito nos Ajustes do projeto (painel do editor).
+    func testProjectSettingsFpsDropdownOpensAndChangesTheCompositionRate() throws {
+        _ = try launch("transform")
+        let gear = app.buttons["editor.projectMenu"].firstMatch
+        XCTAssertTrue(gear.waitForExistence(timeout: 5))
+        gear.tap()
+        XCTAssertTrue(element("projectSettings").waitForExistence(timeout: 5))
+        let fps = element("projectSettings.fps")
+        try bringIntoView(fps, scrolling: element("projectSettings"))
+        let before = fps.value as? String ?? ""
+        let target = before.hasPrefix("60 ") ? 24 : 60
+
+        fps.tap()
+        XCTAssertTrue(element("projectSettings.fps.menu").waitForExistence(timeout: 5), "The fps menu did not appear in project settings")
+        let option = element("projectSettings.fps.\(target)")
+        XCTAssertTrue(option.waitForExistence(timeout: 5)); XCTAssertTrue(option.isHittable)
+        option.tap()
+        XCTAssertTrue(waitGone(element("projectSettings.fps.menu")))
+        XCTAssertTrue(waitForValue(fps, prefix: "\(target) "), "The project fps stayed \(fps.value as? String ?? "nil")")
+
+        // E abre de novo depois do primeiro uso.
+        fps.tap()
+        XCTAssertTrue(element("projectSettings.fps.menu").waitForExistence(timeout: 5), "The fps box died after the first use")
+        element("projectSettings.fps.\(target == 60 ? 24 : 60)").tap()
+        XCTAssertTrue(waitForValue(fps, prefix: "\(target == 60 ? 24 : 60) "))
+    }
+
+    /// A Home do app de verdade (cena DEBUG "home": inglês, sem notas de versão nem boas-vindas).
+    private func launchHome() throws {
+        runID = UUID().uuidString
+        app = XCUIApplication(bundleIdentifier: "com.aurea.aurea")
+        app.launchEnvironment["AUREA_PARITY_SCENE"] = "home"
+        app.launchEnvironment["AUREA_UI_TEST_PROBE"] = "1"
+        app.launchEnvironment["AUREA_UI_TEST_RUN_ID"] = runID
+        app.launch()
+    }
+
+    private func element(_ id: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
+    private func bringIntoView(_ target: XCUIElement, scrolling container: XCUIElement) throws {
+        XCTAssertTrue(target.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !target.isHittable && container.exists { container.swipeUp() }
+        guard target.isHittable else {
+            XCTFail("\(target) is not reachable")
+            throw ProbeError.missing
+        }
+    }
+
+    private func waitGone(_ target: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while target.exists && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        return !target.exists
+    }
+
+    private func waitForValue(_ target: XCUIElement, prefix: String, timeout: TimeInterval = 5) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if (target.value as? String)?.hasPrefix(prefix) == true { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+        return false
+    }
+
     func testTimelineMarkersRemainOverClipsWhenFilteringZoomingAndScrubbing() throws {
         let before = try launch("timeline-markers")
         XCTAssertEqual(before.markerCount, 3)

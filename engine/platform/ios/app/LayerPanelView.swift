@@ -609,8 +609,8 @@ struct TimeGlyphView: View {
     var body: some View {
         Canvas { context, size in
             let u = size.width / 24
-            // 0.3.3: traço 1,8 + o extra dos glifos bold (AureaIconWeight.glyphStroke).
-            let sw = (1.8 + 24 * AureaIconWeight.glyphStroke) * u
+            // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.line).
+            let sw = AureaIconStyle.line * u
             let stroke = StrokeStyle(lineWidth: sw, lineCap: .round, lineJoin: .round)
             let dashed = StrokeStyle(lineWidth: sw, lineCap: .round, lineJoin: .round, dash: [2.2 * u, 2.0 * u])
             func line(_ a: CGPoint, _ b: CGPoint, _ style: StrokeStyle) {
@@ -736,7 +736,7 @@ struct SpeedPanel: View {
                 else if notBakeable { hint("om_lp_speed_keyed") }
                 else {
                     Button { openKeypad(speed) } label: {
-                        Text(value).font(.aurea(size: 12)).foregroundStyle(AureaColors.text)
+                        Text(value).font(.aurea(size: PanelMetrics.chipText)).foregroundStyle(AureaColors.text)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(AureaText.t("editor_velocidade") + " " + value)
@@ -744,7 +744,7 @@ struct SpeedPanel: View {
                 }
             }
             Color.clear.frame(height: 6)
-            SpeedSlider(value: speed, enabled: !blocked, height: 40, tag: "speed.slider",
+            SpeedSlider(value: speed, enabled: !blocked, height: PanelMetrics.touch, tag: "speed.slider",
                         onStart: { model.beginGesture("velocidade") }, onValue: { setSpeed($0) }, onEnd: { model.endGesture() })
             if !keyed { hint("om_lp_speed_constant_hint").padding(.top, 4) }
             Color.clear.frame(height: 10)
@@ -812,7 +812,7 @@ struct SpeedPanel: View {
     }
 
     private func hint(_ key: String) -> some View {
-        Text(AureaText.t(key)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
+        Text(AureaText.t(key)).font(.aurea(size: PanelMetrics.note)).foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -826,8 +826,8 @@ struct SpeedChip: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            Text(label).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
-                .padding(.horizontal, 12).frame(minHeight: 44)
+            Text(label).font(.aurea(size: PanelMetrics.chipText)).foregroundStyle(on ? AureaColors.accent : AureaColors.text).lineLimit(1)
+                .padding(.horizontal, PanelMetrics.chipPad).frame(minHeight: 44)
                 .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
@@ -848,7 +848,7 @@ struct RetimeRow: View {
             button(2, "om_lp_retime_shorten_end", "speed.retime.shortenEnd", LayerPanelBits.retimeShortenEnd)
             button(3, "om_lp_retime_extend_end", "speed.retime.extendEnd", LayerPanelBits.retimeExtendEnd)
         }
-        .frame(height: 37)
+        .frame(height: PanelMetrics.touch)  // 0.3.4 painéis: antes 37 (par do Android)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .keepLtr()
     }
@@ -880,9 +880,8 @@ private struct RetimeGlyphView: View {
     var body: some View {
         Canvas { context, size in
             let u = size.width / 24
-            // 0.3.3: + o traço extra dos glifos bold (AureaIconWeight.glyphStroke).
-            let bold = 24 * AureaIconWeight.glyphStroke * u
-            let style = StrokeStyle(lineWidth: 1.6 * u + bold, lineCap: .round)
+            // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.line), uniforme.
+            let style = StrokeStyle(lineWidth: AureaIconStyle.line * u, lineCap: .round, lineJoin: .round)
             let start = edge <= 1
             let l: CGFloat = start ? 9 : 3
             let r: CGFloat = start ? 21 : 15
@@ -891,7 +890,7 @@ private struct RetimeGlyphView: View {
             for i in 1...3 {
                 let x = l + (r - l) * CGFloat(i) / 4
                 var p = Path(); p.move(to: CGPoint(x: x * u, y: 9.5 * u)); p.addLine(to: CGPoint(x: x * u, y: 14.5 * u))
-                context.stroke(p, with: .color(color.opacity(0.55)), lineWidth: u + bold)
+                context.stroke(p, with: .color(color.opacity(0.55)), style: style)
             }
             let (from, to): (CGFloat, CGFloat) = edge == 0 ? (8, 2) : edge == 1 ? (2, 8) : edge == 2 ? (22, 16) : (16, 22)
             var a = Path(); a.move(to: CGPoint(x: from * u, y: 12 * u)); a.addLine(to: CGPoint(x: to * u, y: 12 * u))
@@ -975,7 +974,7 @@ struct SpeedSlider: View {
     }
 }
 
-/// Caixa de valor dos painéis embutidos (56 × 36, branco 5 %); o toque abre o teclado.
+/// Caixa de valor dos painéis embutidos (`PanelMetrics` 72 × 36, número 15 que encolhe; branco 5 %); o toque abre o teclado.
 struct PopoutValueBox: View {
     let text: String
     let tag: String
@@ -983,8 +982,9 @@ struct PopoutValueBox: View {
     let onTap: () -> Void
     var body: some View {
         Button(action: onTap) {
-            Text(text).font(.aurea(size: 12)).foregroundStyle(AureaColors.text).lineLimit(1)
-                .frame(width: 56, height: 36)
+            Text(text).font(.aurea(size: PanelMetrics.fieldValue)).foregroundStyle(AureaColors.text).lineLimit(1)
+                .minimumScaleFactor(PanelMetrics.fieldValueMin / PanelMetrics.fieldValue).padding(.horizontal, 4)
+                .frame(width: PanelMetrics.fieldWidth).frame(minHeight: PanelMetrics.fieldHeight)
                 .background(AureaColors.layerPanelValueBox, in: RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(AureaPressStyle())
@@ -1193,9 +1193,9 @@ private struct CompactRuler: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if showLabel { Text(label).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted) }
+            if showLabel { Text(label).font(.aurea(size: PanelMetrics.label)).foregroundStyle(AureaColors.muted) }
             HStack(spacing: 6) {
-                TickRuler(value: { value }, unitsPerDp: units, active: true, height: 40)
+                TickRuler(value: { value }, unitsPerDp: units, active: true, height: PanelMetrics.touch)
                     .valueDrag(enabled: true, start: { value }, unitsPerDp: { units }, min: min, max: max,
                                onStart: { model.beginGesture(label) }, onValue: onValue, onEnd: { model.endGesture() })
                     .accessibilityElement()

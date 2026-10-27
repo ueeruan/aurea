@@ -1,5 +1,5 @@
 ﻿// =============================================================================
-//  0.3.3 plugins: o avaliador do AureaScript (árvore → valores), o heap com a
+//  0.3.4 plugins: o avaliador do AureaScript (árvore → valores), o heap com a
 //  conta de bytes, a coleta de ciclos e as conversões do JavaScript.
 //
 //  Fluxo de controle: break/continue/return voltam como `Flow` (sem exceção);

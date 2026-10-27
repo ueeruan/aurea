@@ -205,12 +205,27 @@ fun Timeline(
         // 0.3.3 recursos: o botão "Todas/Seleção" da 0.3.2 volta: com camada escolhida
         // (foco de uma linha), mostra todas as camadas e volta só à escolhida.
         if (store.selection.isNotEmpty() && (compact || compactDock)) {
+            // 0.3.4 presets: pílula pequena (24 dp) centrada na faixa da régua, no lugar do
+            // TextButton (o fundo do toque vazava como uma mancha oval). Alvo de 44 dp invisível.
             val filterDescription = stringResource(if (showAllLayers) R.string.timeline_selected_only else R.string.timeline_show_all)
-            androidx.compose.material3.TextButton(onClick = { showAllLayers = !showAllLayers },
-                modifier = Modifier.align(Alignment.TopStart).width(84.dp).height(44.dp)
-                    .semantics { contentDescription = filterDescription }.testTag("timeline.showAllLayers")) {
-                Text(stringResource(if (showAllLayers) R.string.timeline_selection_short else R.string.timeline_all_short),
-                    fontSize = 12.sp, maxLines = 1)
+            Box(
+                Modifier.align(Alignment.TopStart).height(44.dp).widthIn(min = 44.dp)
+                    .semantics { contentDescription = filterDescription }.testTag("timeline.showAllLayers")
+                    .tocavel { showAllLayers = !showAllLayers }
+                    .padding(horizontal = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier.height(24.dp)
+                        .background(if (showAllLayers) AureaColors.AccentDim else AureaColors.Chip, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(stringResource(if (showAllLayers) R.string.timeline_selection_short else R.string.timeline_all_short),
+                        fontSize = 11.5.sp, maxLines = 1,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.W600,
+                        color = if (showAllLayers) AureaColors.Accent else AureaColors.Text)
+                }
             }
         }
     }

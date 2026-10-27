@@ -110,9 +110,10 @@ internal fun ColumnScope.RotateFace(
             androidx.compose.material3.TextButton(onClick = onLetters) { Text(stringResource(R.string.t3d_letters)) }
         }
         if (depth) {
-            TfFieldRow(top = 6.dp) {
+            // 0.3.4 painéis: três campos de 72 com vão de 4 cabem em 360 (226 úteis); rola se não couber.
+            TfFieldRow(top = PanelMetrics.FieldRowTop, scroll = true) {
                 for (i in 0..2) {
-                    if (i > 0) Spacer(Modifier.width(TfFieldDims.Gap))
+                    if (i > 0) Spacer(Modifier.width(TfFieldDims.Gap / 2))
                     val name = "XYZ"[i].toString()
                     TfField(
                         "${numeroPtBr(angles[i], 1)}°",
@@ -137,7 +138,7 @@ internal fun ColumnScope.RotateFace(
             onAngle = { write(axis, it) },
             onGestureEnd = { store.endGesture() },
             onTap = { keypad(axis) },
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp).testTag("transform.rotation.dial"),
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp).testTag("transform.rotation.dial"),
         )
     }
 }

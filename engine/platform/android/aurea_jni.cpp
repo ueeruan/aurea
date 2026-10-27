@@ -5272,6 +5272,247 @@ AUREA_JNI jstring AUREA_FN(nativePluginDirectory)(JNIEnv* env, jclass, jlong han
     return utf8_jstring(env, c ? c->engine.plugin_directory() : std::string());
 }
 
+// =============================================================================
+// 0.3.4 plugins: painéis, scripts e APIs (src/engine/EnginePluginsV2.cpp). A
+// regra (permissões, domínios, limites) mora no motor; aqui só se traduz texto
+// e se liga a E/S do anfitrião (rede, área de transferência, seletor) ao
+// objeto Kotlin `effects.PluginHost`, chamado na própria thread do script.
+// =============================================================================
+namespace {
+
+jclass g_pluginHostClass = nullptr;
+jmethodID g_pluginFetch = nullptr;
+jmethodID g_pluginClipRead = nullptr;
+jmethodID g_pluginClipWrite = nullptr;
+jmethodID g_pluginPickFile = nullptr;
+
+/// jstring → UTF-8 de verdade (o "UTF-8 modificado" do JNI estraga emoji).
+std::string plugin_utf8(JNIEnv* env, jstring s) {
+    if (!s) return {};
+    const jsize n = env->GetStringLength(s);
+    const jchar* chars = env->GetStringChars(s, nullptr);
+    if (!chars) return {};
+    std::string out;
+    out.reserve(static_cast<usize>(n));
+    for (jsize i = 0; i < n; ++i) {
+        u32 cp = chars[i];
+        if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < n && chars[i + 1] >= 0xDC00 && chars[i + 1] <= 0xDFFF) {
+            cp = 0x10000 + ((cp - 0xD800) << 10) + (chars[i + 1] - 0xDC00);
+            ++i;
+        }
+        if (cp < 0x80) out += static_cast<char>(cp);
+        else if (cp < 0x800) { out += static_cast<char>(0xC0 | (cp >> 6)); out += static_cast<char>(0x80 | (cp & 0x3F)); }
+        else if (cp < 0x10000) {
+            out += static_cast<char>(0xE0 | (cp >> 12));
+            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        } else {
+            out += static_cast<char>(0xF0 | (cp >> 18));
+            out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+    }
+    env->ReleaseStringChars(s, chars);
+    return out;
+}
+
+/// A thread do script já é da JVM (a interface chamou dela); presa por garantia.
+JNIEnv* plugin_env() {
+    if (!g_vm) return nullptr;
+    JNIEnv* env = nullptr;
+    if (g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (g_vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return nullptr;
+    }
+    return env;
+}
+
+bool plugin_clear_exception(JNIEnv* env) {
+    if (!env->ExceptionCheck()) return false;
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+    return true;
+}
+
+std::string plugin_array_item(JNIEnv* env, jobjectArray a, jsize i) {
+    if (!a || i >= env->GetArrayLength(a)) return {};
+    auto* s = static_cast<jstring>(env->GetObjectArrayElement(a, i));
+    std::string out = plugin_utf8(env, s);
+    if (s) env->DeleteLocalRef(s);
+    return out;
+}
+
+plugins::HostIO make_plugin_host_io() {
+    plugins::HostIO io;
+    io.fetch = [](const plugins::HttpRequest& req) {
+        plugins::HttpResponse r;
+        JNIEnv* env = plugin_env();
+        if (!env || !g_pluginHostClass || !g_pluginFetch) { r.error = "rede indisponivel"; return r; }
+        jobjectArray headers = env->NewObjectArray(static_cast<jsize>(req.headers.size() * 2), env->FindClass("java/lang/String"), nullptr);
+        for (usize i = 0; i < req.headers.size(); ++i) {
+            jstring k = utf8_jstring(env, req.headers[i].first);
+            jstring v = utf8_jstring(env, req.headers[i].second);
+            env->SetObjectArrayElement(headers, static_cast<jsize>(i * 2), k);
+            env->SetObjectArrayElement(headers, static_cast<jsize>(i * 2 + 1), v);
+            env->DeleteLocalRef(k);
+            env->DeleteLocalRef(v);
+        }
+        jstring url = utf8_jstring(env, req.url);
+        jstring method = utf8_jstring(env, req.method);
+        jstring body = utf8_jstring(env, req.body);
+        auto* out = static_cast<jobjectArray>(env->CallStaticObjectMethod(g_pluginHostClass, g_pluginFetch, url, method, headers, body,
+                                                                          static_cast<jint>(req.timeoutMs), static_cast<jint>(req.maxBytes)));
+        const bool failed = plugin_clear_exception(env);
+        env->DeleteLocalRef(url);
+        env->DeleteLocalRef(method);
+        env->DeleteLocalRef(body);
+        env->DeleteLocalRef(headers);
+        if (failed || !out) { r.error = "falha na rede"; return r; }
+        // [ok, status, url final, erro, cabeçalhos "k\nv\n...", corpo]
+        r.ok = plugin_array_item(env, out, 0) == "1";
+        r.status = std::atoi(plugin_array_item(env, out, 1).c_str());
+        r.url = plugin_array_item(env, out, 2);
+        r.error = plugin_array_item(env, out, 3);
+        const std::string hs = plugin_array_item(env, out, 4);
+        usize at = 0;
+        while (at < hs.size()) {
+            const usize k = hs.find('\n', at);
+            if (k == std::string::npos) break;
+            const usize v = hs.find('\n', k + 1);
+            r.headers.emplace_back(hs.substr(at, k - at), hs.substr(k + 1, (v == std::string::npos ? hs.size() : v) - k - 1));
+            if (v == std::string::npos) break;
+            at = v + 1;
+        }
+        r.body = plugin_array_item(env, out, 5);
+        env->DeleteLocalRef(out);
+        return r;
+    };
+    io.clipboardRead = [](std::string& text) {
+        JNIEnv* env = plugin_env();
+        if (!env || !g_pluginHostClass || !g_pluginClipRead) return false;
+        auto* s = static_cast<jstring>(env->CallStaticObjectMethod(g_pluginHostClass, g_pluginClipRead));
+        if (plugin_clear_exception(env) || !s) return false;
+        text = plugin_utf8(env, s);
+        env->DeleteLocalRef(s);
+        return true;
+    };
+    io.clipboardWrite = [](const std::string& text) {
+        JNIEnv* env = plugin_env();
+        if (!env || !g_pluginHostClass || !g_pluginClipWrite) return false;
+        jstring s = utf8_jstring(env, text);
+        const jboolean ok = env->CallStaticBooleanMethod(g_pluginHostClass, g_pluginClipWrite, s);
+        env->DeleteLocalRef(s);
+        return !plugin_clear_exception(env) && ok == JNI_TRUE;
+    };
+    io.pickFile = [](const std::string& pluginId, const std::vector<std::string>& types) {
+        plugins::PickedFile f;
+        JNIEnv* env = plugin_env();
+        if (!env || !g_pluginHostClass || !g_pluginPickFile) { f.error = "seletor indisponivel"; return f; }
+        jobjectArray jtypes = env->NewObjectArray(static_cast<jsize>(types.size()), env->FindClass("java/lang/String"), nullptr);
+        for (usize i = 0; i < types.size(); ++i) {
+            jstring t = utf8_jstring(env, types[i]);
+            env->SetObjectArrayElement(jtypes, static_cast<jsize>(i), t);
+            env->DeleteLocalRef(t);
+        }
+        jstring id = utf8_jstring(env, pluginId);
+        auto* out = static_cast<jobjectArray>(env->CallStaticObjectMethod(g_pluginHostClass, g_pluginPickFile, id, jtypes));
+        const bool failed = plugin_clear_exception(env);
+        env->DeleteLocalRef(id);
+        env->DeleteLocalRef(jtypes);
+        if (failed || !out) return f;   // cancelado
+        // [nome, caminho, tamanho]
+        f.name = plugin_array_item(env, out, 0);
+        f.path = plugin_array_item(env, out, 1);
+        f.size = static_cast<u64>(std::strtoull(plugin_array_item(env, out, 2).c_str(), nullptr, 10));
+        f.ok = !f.path.empty();
+        env->DeleteLocalRef(out);
+        return f;
+    };
+    return io;
+}
+
+} // namespace
+
+/// Liga rede/área de transferência/seletor do Kotlin (`effects.PluginHost`) ao motor.
+AUREA_JNI jboolean AUREA_FN(nativeInstallPluginHost)(JNIEnv* env, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return JNI_FALSE;
+    if (!g_pluginHostClass) {
+        jclass local = env->FindClass("com/aurea/aurea/effects/PluginHost");
+        if (plugin_clear_exception(env) || !local) return JNI_FALSE;
+        g_pluginHostClass = static_cast<jclass>(env->NewGlobalRef(local));
+        env->DeleteLocalRef(local);
+        g_pluginFetch = env->GetStaticMethodID(g_pluginHostClass, "fetch",
+            "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;II)[Ljava/lang/String;");
+        g_pluginClipRead = env->GetStaticMethodID(g_pluginHostClass, "clipboardRead", "()Ljava/lang/String;");
+        g_pluginClipWrite = env->GetStaticMethodID(g_pluginHostClass, "clipboardWrite", "(Ljava/lang/String;)Z");
+        g_pluginPickFile = env->GetStaticMethodID(g_pluginHostClass, "pickFile", "(Ljava/lang/String;[Ljava/lang/String;)[Ljava/lang/String;");
+        if (plugin_clear_exception(env)) return JNI_FALSE;
+    }
+    c->engine.set_plugin_host_io(make_plugin_host_io());
+    return JNI_TRUE;
+}
+
+AUREA_JNI jstring AUREA_FN(nativeInspectPlugin)(JNIEnv* env, jclass, jlong handle, jstring path) {
+    NativeContext* c = ctx_of(handle);
+    return utf8_jstring(env, c ? c->engine.inspect_plugin(plugin_utf8(env, path).c_str()) : std::string("{\"ok\":false,\"error\":\"motor\"}"));
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetPluginEnabled)(JNIEnv* env, jclass, jlong handle, jstring id, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_plugin_enabled(plugin_utf8(env, id).c_str(), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeSetPluginPermissions)(JNIEnv* env, jclass, jlong handle, jstring id, jint mask) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_plugin_permissions(plugin_utf8(env, id).c_str(), static_cast<u32>(mask)) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jstring AUREA_FN(nativePluginCall)(JNIEnv* env, jclass, jlong handle, jstring id, jstring fn, jstring args, jstring locale) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return utf8_jstring(env, "{\"ok\":false,\"value\":null,\"error\":{\"name\":\"Error\",\"message\":\"motor\",\"text\":\"motor\"}}");
+    return utf8_jstring(env, c->engine.plugin_call(plugin_utf8(env, id).c_str(), plugin_utf8(env, fn).c_str(),
+                                                   plugin_utf8(env, args).c_str(), plugin_utf8(env, locale).c_str()));
+}
+
+AUREA_JNI jstring AUREA_FN(nativePluginEvent)(JNIEnv* env, jclass, jlong handle, jstring id, jstring control, jstring kind,
+                                              jstring value, jstring locale) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return utf8_jstring(env, "{\"ok\":false,\"value\":null,\"error\":{\"name\":\"Error\",\"message\":\"motor\",\"text\":\"motor\"}}");
+    return utf8_jstring(env, c->engine.plugin_event(plugin_utf8(env, id).c_str(), plugin_utf8(env, control).c_str(),
+                                                    plugin_utf8(env, kind).c_str(), plugin_utf8(env, value).c_str(),
+                                                    plugin_utf8(env, locale).c_str()));
+}
+
+AUREA_JNI jstring AUREA_FN(nativePluginOpenPanel)(JNIEnv* env, jclass, jlong handle, jstring id, jstring panel, jstring locale) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return utf8_jstring(env, "{\"ok\":false,\"value\":null,\"error\":{\"name\":\"Error\",\"message\":\"motor\",\"text\":\"motor\"}}");
+    return utf8_jstring(env, c->engine.plugin_open_panel(plugin_utf8(env, id).c_str(), plugin_utf8(env, panel).c_str(),
+                                                         plugin_utf8(env, locale).c_str()));
+}
+
+AUREA_JNI jstring AUREA_FN(nativePluginState)(JNIEnv* env, jclass, jlong handle, jstring id) {
+    NativeContext* c = ctx_of(handle);
+    return utf8_jstring(env, c ? c->engine.plugin_state(plugin_utf8(env, id).c_str()) : std::string("{}"));
+}
+
+AUREA_JNI jstring AUREA_FN(nativePluginConsole)(JNIEnv* env, jclass, jlong handle, jstring id) {
+    NativeContext* c = ctx_of(handle);
+    return utf8_jstring(env, c ? c->engine.plugin_console(plugin_utf8(env, id).c_str()) : std::string("[]"));
+}
+
+AUREA_JNI void AUREA_FN(nativePluginClearConsole)(JNIEnv* env, jclass, jlong handle, jstring id) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.plugin_clear_console(plugin_utf8(env, id).c_str());
+}
+
+AUREA_JNI void AUREA_FN(nativePluginCancel)(JNIEnv* env, jclass, jlong handle, jstring id) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.plugin_cancel(plugin_utf8(env, id).c_str());
+}
+
+AUREA_JNI void AUREA_FN(nativePluginReload)(JNIEnv* env, jclass, jlong handle, jstring id) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.plugin_reload(plugin_utf8(env, id).c_str());
+}
+
 // Omega chrome (área 02): moldura do editor (EngineOmegaChrome.cpp).
 AUREA_JNI jstring AUREA_FN(nativeCompositionTrail)(JNIEnv* env, jclass, jlong handle) {
     NativeContext* c = ctx_of(handle);

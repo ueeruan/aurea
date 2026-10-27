@@ -51,6 +51,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -72,7 +73,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
-import com.aurea.aurea.ui.theme.CupertinoIconBoldStroke
+import com.aurea.aurea.ui.theme.AureaIconStyle
 import com.aurea.aurea.ui.theme.tocavel
 import java.util.Locale
 import kotlin.math.abs
@@ -320,16 +321,18 @@ internal fun dragBounds(min: Float, max: Float, from: Float): Pair<Float, Float>
 // =============================================================================
 
 /**
- * A CAIXA DE VALOR [A] (`CampoDeValor`): altura 24, raio 8, fundo `campo`,
- * número 13 sp w600 em `destaque` SUBLINHADO (o sublinhado é a promessa de que
+ * A CAIXA DE VALOR [A] (`CampoDeValor`): 0.3.4 painéis — altura 36, raio 8, fundo `campo`,
+ * número 15 sp w600 em `destaque` SUBLINHADO (o sublinhado é a promessa de que
  * dá para digitar; sem [onTap] não há sublinhado). O número encolhe antes de
- * vazar (a escala não tem teto). Rótulo opcional embaixo, 9 sp muted.
+ * vazar (a escala não tem teto). Rótulo opcional embaixo, 12 sp muted.
+ * Medidas de `PanelMetrics` (eram 24 / 13 / 9).
  */
 @Composable
 fun ValueBox(
     text: String,
     modifier: Modifier = Modifier,
-    width: Dp = 68.dp,
+    // 0.3.4 painéis: as medidas centrais dos campos (PanelMetrics, par do iOS): 72 × 36, número 15.
+    width: Dp = com.aurea.aurea.editor.panels.PanelMetrics.FieldWidth,
     color: Color = AureaColors.Accent,
     label: String? = null,
     enabled: Boolean = true,
@@ -337,6 +340,7 @@ fun ValueBox(
     onTap: (() -> Unit)?,
 ) {
     val tappable = onTap != null && enabled
+    val metrics = com.aurea.aurea.editor.panels.PanelMetrics
     Column(
         modifier
             .width(width)
@@ -354,7 +358,7 @@ fun ValueBox(
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(24.dp)
+                .heightIn(min = metrics.FieldHeight)
                 .clip(RoundedCornerShape(8.dp))
                 .background(AureaColors.Chip)
                 .padding(horizontal = 4.dp),
@@ -364,10 +368,10 @@ fun ValueBox(
             BasicText(
                 text = text,
                 maxLines = 1,
-                autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 13.sp, stepSize = 0.5.sp),
+                autoSize = TextAutoSize.StepBased(minFontSize = metrics.FieldValueMin, maxFontSize = metrics.FieldValue, stepSize = 0.5.sp),
                 style = AureaType.Base.merge(
                     TextStyle(
-                        fontSize = 13.sp,
+                        fontSize = metrics.FieldValue,
                         fontWeight = FontWeight.W600,
                         color = c,
                         textAlign = TextAlign.Center,
@@ -380,12 +384,12 @@ fun ValueBox(
             )
         }
         if (!label.isNullOrEmpty()) {
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(metrics.FieldLabelGap))
             Text(
                 label,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = AureaType.Base.merge(TextStyle(fontSize = 9.sp, color = AureaColors.Muted, textAlign = TextAlign.Center)),
+                style = AureaType.Base.merge(TextStyle(fontSize = metrics.FieldLabel, color = AureaColors.Muted, textAlign = TextAlign.Center)),
             )
         }
     }
@@ -880,13 +884,12 @@ fun KeyframeDiamondIcon(look: KeyframeLook, enabled: Boolean, modifier: Modifier
             lineTo(inset, c.y)
             close()
         }
-        // 0.3.3: + o traço extra dos glifos bold (CupertinoIconBoldStroke do tamanho).
-        val bold = size.minDimension * CupertinoIconBoldStroke
-        drawPath(p, color, style = Stroke(1.6.dp.toPx() + bold))
+        // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.Line na caixa de 24), cantos redondos.
+        val w = AureaIconStyle.Line * size.minDimension / 24f
+        drawPath(p, color, style = Stroke(w, join = StrokeJoin.Round))
         val arm = 3.5.dp.toPx()
-        val w = 1.5.dp.toPx() + bold
-        drawLine(color, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), w)
-        if (look != KeyframeLook.KeyHere) drawLine(color, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), w)
+        drawLine(color, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), w, StrokeCap.Round)
+        if (look != KeyframeLook.KeyHere) drawLine(color, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), w, StrokeCap.Round)
     }
 }
 
@@ -903,14 +906,14 @@ fun CurveRailIcon(enabled: Boolean, animated: Boolean, modifier: Modifier = Modi
             else -> AureaColors.Muted
         }
         val one = 1.dp.toPx()
-        // 0.3.3: + o traço extra dos glifos bold (CupertinoIconBoldStroke do tamanho).
-        val bold = size.minDimension * CupertinoIconBoldStroke
+        // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.Line na caixa de 24).
+        val w = AureaIconStyle.Line * size.minDimension / 24f
         drawRoundRect(
             color = color.copy(alpha = 0.5f),
             topLeft = Offset(one, one),
             size = Size(size.width - 2 * one, size.height - 2 * one),
             cornerRadius = CornerRadius(4.dp.toPx()),
-            style = Stroke(1.3.dp.toPx() + bold),
+            style = Stroke(w),
         )
         val p = Path().apply {
             moveTo(4.dp.toPx(), size.height - 5.dp.toPx())
@@ -920,6 +923,6 @@ fun CurveRailIcon(enabled: Boolean, animated: Boolean, modifier: Modifier = Modi
                 size.width - 4.dp.toPx(), 5.dp.toPx(),
             )
         }
-        drawPath(p, color, style = Stroke(1.5.dp.toPx() + bold, cap = StrokeCap.Round))
+        drawPath(p, color, style = Stroke(w, cap = StrokeCap.Round))
     }
 }

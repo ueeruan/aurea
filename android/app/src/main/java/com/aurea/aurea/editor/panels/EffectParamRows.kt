@@ -327,7 +327,7 @@ private fun FxNumberRow(
                 onStart = { onSelect(key, false); store.beginGesture("ajustar $label") },
                 onValue = ::write,
                 onEnd = { store.endGesture() },
-                modifier = Modifier.weight(1f).height(45.dp)
+                modifier = Modifier.weight(1f).height(FxRow.Ruler - 12.dp)  // 0.3.4 painéis: a régua cresce com a linha
                     .testTag("effects.ruler.$effectId.${s.index}")
                     .semantics { contentDescription = rulerLabel; stateDescription = format(now) },
                 state = ruler,
@@ -468,7 +468,7 @@ private fun FxVectorRow(
             onStart = { choose(axis, false); store.beginGesture("ajustar $label") },
             onValue = { write(axis, it) },
             onEnd = { store.endGesture() },
-            modifier = Modifier.weight(1f).height(45.dp).testTag("$tag.ruler")
+            modifier = Modifier.weight(1f).height(FxRow.Ruler - 12.dp).testTag("$tag.ruler")
                 .semantics { contentDescription = "$label · ${a11yNames[axis]}"; stateDescription = format(now) },
             state = ruler,
             enabled = enabled,
@@ -478,7 +478,7 @@ private fun FxVectorRow(
         // Números e letras dos eixos sempre da esquerda para a direita.
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             if (comps == 2 && control == ParamControl.POINT) {
-                Column(Modifier.width(FxRow.AxisColumn + 16.dp).fillMaxHeight().padding(end = FxRow.Margin)) {
+                Column(Modifier.width(FxRow.AxisColumn + 18.dp).fillMaxHeight().padding(end = FxRow.Margin)) {
                     (0 until 2).forEach { c ->
                         val v = if (c == axis && ruler.live != null) now else values[c]
                         Row(
@@ -488,8 +488,8 @@ private fun FxVectorRow(
                         ) {
                             Text(
                                 "${names[c]}:",
-                                modifier = Modifier.width(16.dp),
-                                style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = AureaColors.FxAxisLabel)),
+                                modifier = Modifier.width(18.dp),
+                                style = AureaType.Base.merge(TextStyle(fontSize = FxRow.SmallText, color = AureaColors.FxAxisLabel)),
                             )
                             FxAxisBox(
                                 text = compact(v),
@@ -510,7 +510,7 @@ private fun FxVectorRow(
                 }
             } else {
                 Row(
-                    Modifier.padding(end = FxRow.Margin).height(45.dp),
+                    Modifier.padding(end = FxRow.Margin).height(FxRow.Ruler - 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     (0 until comps).forEach { c ->
@@ -588,11 +588,11 @@ private fun FxAxisBox(
         BasicText(
             text = text,
             maxLines = 1,
-            autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 13.sp, stepSize = 0.5.sp),
-            modifier = Modifier.padding(bottom = if (letter != null) 8.dp else 0.dp),
+            autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = FxRow.ValueText, stepSize = 0.5.sp),
+            modifier = Modifier.padding(bottom = if (letter != null) 10.dp else 0.dp),
             style = AureaType.Base.merge(
                 TextStyle(
-                    fontSize = 13.sp,
+                    fontSize = FxRow.ValueText,
                     color = if (enabled) color else AureaColors.FxDisabledText,
                     textAlign = TextAlign.Center,
                     fontFeatureSettings = "tnum",
@@ -604,7 +604,7 @@ private fun FxAxisBox(
             Text(
                 letter,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 1.dp),
-                style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, color = AureaColors.FxAxisLabel)),
+                style = AureaType.Base.merge(TextStyle(fontSize = FxRow.SmallText, color = AureaColors.FxAxisLabel)),
             )
         }
     }
@@ -752,7 +752,7 @@ internal fun FxChoiceLayout(
                 ),
             style = AureaType.Base.merge(
                 TextStyle(
-                    fontSize = 10.sp,
+                    fontSize = FxRow.LabelText,  // 0.3.4 painéis: antes 10
                     color = when {
                         !enabled -> AureaColors.FxDisabledText
                         labelActive -> AureaColors.Accent
@@ -832,7 +832,7 @@ private fun FxColorRow(
             maxLines = 1,
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             style = AureaType.Base.merge(
-                TextStyle(fontSize = 10.sp, color = AureaColors.FxColorText, fontFeatureSettings = "tnum", textDirection = TextDirection.Ltr),
+                TextStyle(fontSize = FxRow.SmallText, color = AureaColors.FxColorText, fontFeatureSettings = "tnum", textDirection = TextDirection.Ltr),
             ),
         )
         Box(
@@ -846,7 +846,7 @@ private fun FxColorRow(
             Box(
                 Modifier
                     .padding(end = 6.dp)
-                    .size(24.5.dp)
+                    .size(30.dp)  // 0.3.4 painéis: antes 24,5
                     .clip(RoundedCornerShape(3.dp))
                     .background(color)
                     .border(0.5.dp, AureaColors.FxLowSurface, RoundedCornerShape(3.dp)),

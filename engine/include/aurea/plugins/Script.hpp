@@ -1,7 +1,7 @@
 // =============================================================================
 //  Aurea / plugins / Script.hpp
 //
-//  0.3.3 plugins: AureaScript, o interpretador dos scripts de plugin.
+//  0.3.4 plugins: AureaScript, o interpretador dos scripts de plugin.
 //
 //  Um subconjunto do JavaScript (ES2020) avaliado por árvore, inteiro em C++,
 //  igual no Android e no iOS. É um SANDBOX por construção: a linguagem não tem

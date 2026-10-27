@@ -48,7 +48,8 @@ import com.aurea.aurea.ui.theme.tocavel
 @Composable
 internal fun PluginManagerSheet(store: EditorStore, onDismiss: () -> Unit) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) store.installPlugin(uri)
+        // 0.3.4 plugins: lê o pacote primeiro; a folha de consentimento instala.
+        if (uri != null) PluginRuntime.beginInstall(uri)
     }
     LaunchedEffect(Unit) { store.refreshPlugins() }
     var removing by remember { mutableStateOf<PluginTexts.Plugin?>(null) }
@@ -75,6 +76,8 @@ internal fun PluginManagerSheet(store: EditorStore, onDismiss: () -> Unit) {
                     style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
             }
             store.plugins.forEach { p -> PluginRow(p, tag) { removing = p } }
+            // 0.3.4 plugins: consentimento, console e alertas dos scripts.
+            PluginOverlays(store)
             Text(stringResource(R.string.plug_safety), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
             Text(stringResource(R.string.plug_help_title), modifier = Modifier.padding(top = 6.dp).testTag("plugins.help").tocavel(shrink = 1f) { help = !help },
                 style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Accent)))
@@ -106,6 +109,7 @@ private fun PluginRow(p: PluginTexts.Plugin, tag: String, onRemove: () -> Unit) 
             Text(stringResource(R.string.plug_by, p.author.ifEmpty { p.id }, p.version) + " · " +
                 stringResource(when {
                     p.kind == "stack" -> R.string.plug_kind_stack
+                    p.kind == "panel" -> R.string.pv2_kind_panel
                     p.scene3d -> R.string.plug_kind_shader3d
                     else -> R.string.plug_kind_shader
                 }),
@@ -116,8 +120,38 @@ private fun PluginRow(p: PluginTexts.Plugin, tag: String, onRemove: () -> Unit) 
             if (!p.ok) Text(stringResource(R.string.plug_error, p.error), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Warning)))
             else if (p.testRenderMs > 0) Text(stringResource(R.string.plug_render_ms, String.format(java.util.Locale.ROOT, "%.1f", p.testRenderMs)),
                 style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)))
+            // 0.3.4 plugins: ligar/desligar, permissões, painéis e console.
+            if (p.ok && (p.hasScript || p.panels.isNotEmpty() || p.actions.isNotEmpty())) PluginV2Controls(p, tag)
         }
         Text(stringResource(R.string.plug_remove), modifier = Modifier.padding(start = 10.dp).testTag("plugins.remove.${p.id}").tocavel(onClick = onRemove),
             style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Danger)))
+    }
+}
+
+/** 0.3.4 plugins: o que o cartão de um plugin com interface/script ganha. */
+@Composable
+private fun PluginV2Controls(p: PluginTexts.Plugin, tag: String) {
+    Column(Modifier.fillMaxWidth().padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        PermissionRow(stringResource(R.string.pv2_enabled), p.enabled, "plugins.enabled.${p.id}") { PluginRuntime.setEnabled(p.id, it) }
+        if (p.requested != 0) {
+            Text(stringResource(R.string.pv2_permissions), modifier = Modifier.padding(top = 4.dp),
+                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = AureaColors.Muted)))
+            if (p.network.isNotEmpty()) PermissionRow(stringResource(R.string.pv2_perm_network, p.network.joinToString(", ")), p.granted and 1 != 0,
+                "plugins.perm.network.${p.id}") { PluginRuntime.setPermission(p.id, 1, it) }
+            if (p.wantsClipboard) PermissionRow(stringResource(R.string.pv2_perm_clipboard), p.granted and 2 != 0,
+                "plugins.perm.clipboard.${p.id}") { PluginRuntime.setPermission(p.id, 2, it) }
+            if (p.wantsFiles) PermissionRow(stringResource(R.string.pv2_perm_files), p.granted and 4 != 0,
+                "plugins.perm.files.${p.id}") { PluginRuntime.setPermission(p.id, 4, it) }
+        }
+        if (p.enabled) {
+            p.panels.filter { "editor.panel" in it.placement }.forEach { panel ->
+                Text(stringResource(R.string.pv2_open_panel, PluginTexts.pick(panel.title, tag).orEmpty()),
+                    modifier = Modifier.padding(vertical = 6.dp).testTag("plugins.open.${p.id}.${panel.id}").tocavel(shrink = 1f) { PluginRuntime.openPanel(p.id, panel.id) },
+                    style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Accent)))
+            }
+            if (p.hasScript) Text(stringResource(R.string.pv2_console), modifier = Modifier.padding(vertical = 6.dp).testTag("plugins.console.${p.id}")
+                .tocavel(shrink = 1f) { PluginRuntime.console = p.id },
+                style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Accent)))
+        }
     }
 }

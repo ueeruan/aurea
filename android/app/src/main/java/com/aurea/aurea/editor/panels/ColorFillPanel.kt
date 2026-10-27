@@ -16,7 +16,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -90,6 +93,8 @@ private val FillColorKeys: List<TrackKey> = (32..35).map { TrackKey(TrackPropert
 private val FillGradientKeys: List<TrackKey> = (36..47).map { TrackKey(TrackProperty.SHAPE_PARAM, 0, it) }
 
 private val FillContentHeight = 127.5.dp
+/** 0.3.4 painéis: o que fica fora do conteúdo (respiros + a barra de tipo de 44). */
+private val FillChromeHeight = 5.75.dp + 44.dp + 2.75.dp + 10.dp
 
 @Composable
 internal fun ColorFillPanel(env: PanelEnv) {
@@ -165,7 +170,12 @@ internal fun ColorFillPanel(env: PanelEnv) {
             }) else null,
             curveReady = curveReady,
         ),
+        // 0.3.4 painéis: o conteúdo cresce com o painel (alto desde a 0.3.4) e rola num painel baixo.
+        scrollContent = false,
     ) {
+      androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+       val contentHeight = androidx.compose.ui.unit.max(FillContentHeight, maxHeight - FillChromeHeight)
+       Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Spacer(Modifier.height(5.75.dp))
         FillTypeBar(tabs, kind, enabled = store.eyedropper == null) { k ->
             when (k) {
@@ -180,7 +190,7 @@ internal fun ColorFillPanel(env: PanelEnv) {
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 9.dp)
-                .height(FillContentHeight)
+                .height(contentHeight)
                 .testTag("fill.content"),
         ) {
             when (kind) {
@@ -208,6 +218,8 @@ internal fun ColorFillPanel(env: PanelEnv) {
             }
         }
         Spacer(Modifier.height(10.dp))
+       }
+      }
     }
 }
 
@@ -241,8 +253,8 @@ private fun FillTypeBar(tabs: List<FillKind>, current: FillKind, enabled: Boolea
             Modifier
                 .align(Alignment.Center)
                 .fillMaxWidth()
-                .height(29.5.dp)
-                .clip(RoundedCornerShape(5.dp))
+                .height(PanelMetrics.FieldHeight)  // 0.3.4 painéis: antes 29,5
+                .clip(RoundedCornerShape(PanelMetrics.FieldRadius))
                 .background(AureaColors.ChipHigh),
         )
         Row(Modifier.fillMaxSize()) {
@@ -261,7 +273,7 @@ private fun FillTypeBar(tabs: List<FillKind>, current: FillKind, enabled: Boolea
                         .tocavel(enabled = enabled, shrink = 1f, haptic = true) { if (!on) onPick(k) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    CupertinoIcon(fillGlyph(k), 18.dp, if (on) AureaColors.Accent else AureaColors.Text)
+                    CupertinoIcon(fillGlyph(k), 22.dp, if (on) AureaColors.Accent else AureaColors.Text)
                 }
             }
         }
@@ -304,7 +316,7 @@ private fun OriginalContent(env: PanelEnv, isGroup: Boolean, isVector: Boolean) 
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
+                style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted)),
             )
         }
         if (isVector || isGroup) {
@@ -328,11 +340,11 @@ private fun OriginalContent(env: PanelEnv, isGroup: Boolean, isVector: Boolean) 
                 Text(
                     action,
                     maxLines = 1,
-                    style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)),
+                    style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.ChipText, fontWeight = FontWeight.W600, color = AureaColors.Text)),
                     modifier = Modifier
-                        .clip(RoundedCornerShape(15.dp))
+                        .clip(RoundedCornerShape(PanelMetrics.ChipHeight / 2))
                         .background(AureaColors.ChipHigh)
-                        .padding(horizontal = 16.dp, vertical = 7.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
         }
@@ -352,13 +364,14 @@ private fun GradientContent(env: PanelEnv, fill: FloatArray) {
     val endColor = floatArrayOf(fill[11], fill[12], fill[13], fill[14])
     Column(Modifier.fillMaxSize()) {
         Spacer(Modifier.height(6.75.dp))
-        Box(Modifier.align(Alignment.CenterHorizontally).width(180.dp).height(44.dp)) {
+        // 0.3.4 painéis: 216 × 36 com texto 14 (antes 180 × 27,5 com 12).
+        Box(Modifier.align(Alignment.CenterHorizontally).widthIn(max = 216.dp).fillMaxWidth().height(PanelMetrics.Touch)) {
             Box(
                 Modifier
                     .align(Alignment.Center)
                     .fillMaxWidth()
-                    .height(27.5.dp)
-                    .clip(RoundedCornerShape(5.dp))
+                    .height(PanelMetrics.FieldHeight)
+                    .clip(RoundedCornerShape(PanelMetrics.FieldRadius))
                     .background(AureaColors.ChipHigh),
             )
             Row(Modifier.fillMaxSize()) {
@@ -416,7 +429,7 @@ private fun GradientContent(env: PanelEnv, fill: FloatArray) {
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
-            style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)),
+            style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, color = AureaColors.Muted)),
         )
     }
 }
@@ -437,7 +450,7 @@ private fun RowScope.GradientTypeCell(label: String, on: Boolean, tag: String, o
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(
-                TextStyle(fontSize = 12.sp, fontWeight = if (on) FontWeight.W700 else FontWeight.W500, color = if (on) AureaColors.Accent else AureaColors.Text),
+                TextStyle(fontSize = PanelMetrics.ChipText, fontWeight = if (on) FontWeight.W700 else FontWeight.W500, color = if (on) AureaColors.Accent else AureaColors.Text),
             ),
         )
     }
@@ -455,10 +468,10 @@ private fun GradientWell(color: FloatArray, tag: String, label: String, onOpen: 
             .tocavel(shrink = 0.9f) { rect[0]?.let(onOpen) },
         contentAlignment = Alignment.Center,
     ) {
-        val shape = RoundedCornerShape(5.dp)
+        val shape = RoundedCornerShape(PanelMetrics.FieldRadius)
         Box(
             Modifier
-                .size(24.5.dp)
+                .size(30.dp)  // 0.3.4 painéis: antes 24,5
                 .onGloballyPositioned { rect[0] = it.boundsInWindow() }
                 .clip(shape)
                 .drawBehind {

@@ -1,5 +1,5 @@
 // =============================================================================
-//  0.3.3 plugins: plugins v2 — painéis, scripts (AureaScript) e APIs.
+//  0.3.4 plugins: plugins v2 — painéis, scripts (AureaScript) e APIs.
 //
 //  CPU, sem GPU: o manifesto do formato 2 (aceita e recusa dizendo o campo),
 //  a linguagem, o sandbox (nada de require/eval/disco; passos, tempo,
@@ -575,6 +575,8 @@ function montar() {
   fundo.rotation.setInterpolationTypeAtKey(1, "hold")
   const ctrl = comp.layers.addNull()
   ctrl.name = "Controle"
+  // Lido antes do vínculo: ao ganhar pai, a posição passa ao espaço do pai (como no AE).
+  const meio = fundo.position.valueAtTime(0.5)[0]
   fundo.parent = ctrl
   const fx = fundo.addEffect("aurea.blur.gaussian")
   comp.addMarker(0.5, "meio")
@@ -584,7 +586,7 @@ function montar() {
     topo: comp.layer(1).name,
     segunda: comp.layers[2].name,
     chaves: fundo.position.numKeys,
-    x: fundo.position.valueAtTime(0.5)[0],
+    x: meio,
     t2: fundo.position.keyTime(2),
     rotHold: fundo.rotation.valueAtTime(1.5),
     opacidade: fundo.opacity.value,

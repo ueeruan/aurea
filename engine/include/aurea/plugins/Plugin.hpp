@@ -35,7 +35,7 @@ namespace aurea::plugins {
 
 // --- Limites (e o porquê de cada um está na documentação) ---------------------
 inline constexpr u32 kFormatVersion = 1;            ///< "aureaPlugin" dos plugins só de efeito
-/// 0.3.3 plugins: formato 2 = painéis, script e permissões (o app lê 1 e 2).
+/// 0.3.4 plugins: formato 2 = painéis, script e permissões (o app lê 1 e 2).
 inline constexpr u32 kFormatVersionV2 = 2;
 inline constexpr u32 kMaxParams = 16;
 inline constexpr u32 kMaxPasses = 8;
@@ -64,7 +64,7 @@ using LocalizedText = std::vector<std::pair<std::string, std::string>>;
 /// senão o primeiro declarado.
 [[nodiscard]] std::string localized(const LocalizedText& text, std::string_view locale);
 
-/// 0.3.3 plugins: `Panel` = plugin sem efeito (só interface e script).
+/// 0.3.4 plugins: `Panel` = plugin sem efeito (só interface e script).
 enum class Kind : u8 { Shader = 0, Stack, Panel };
 enum class ColorSpace : u8 { Linear = 0, Srgb };
 enum class ParamKind : u8 { Float = 0, Int, Bool, Enum, Color, Point, Angle, Layer };
@@ -134,7 +134,7 @@ struct Manifest {
     f32 margin = 0.0f;
     ColorSpace colorSpace = ColorSpace::Linear;
     std::vector<StackStepDecl> stack;
-    // 0.3.3 plugins (formato 2): interface, script e permissões.
+    // 0.3.4 plugins (formato 2): interface, script e permissões.
     std::string script;               ///< arquivo .js no pacote (vazio = sem script)
     Permissions permissions;
     UiDecl ui;
@@ -160,7 +160,7 @@ struct PluginInfo {
     std::vector<ParamDecl> params;  ///< rótulos por idioma para o painel
     u32 passCount = 0;
     f32 testRenderMs = -1.0f;       ///< medido na instalação (-1 = não medido nesta sessão)
-    // 0.3.3 plugins
+    // 0.3.4 plugins
     u32 format = kFormatVersion;
     std::string script;             ///< arquivo do script (vazio = sem script)
     Permissions permissions;        ///< o que o plugin PEDE

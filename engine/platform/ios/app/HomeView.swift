@@ -246,6 +246,9 @@ struct HomeView: View {
 
     /// P1-8 (D5): primeira abertura em Início; depois, a última aba usada.
     @AppStorage("aurea.home.tab") private var savedTab = HomeTabKind.start.rawValue
+    /// 0.3.4 plugins: a aba dos plugins com "home.tab" (fora de HomeTabKind).
+    @State private var pluginTab = false
+    @ObservedObject private var pluginRuntime = PluginRuntime.shared
     @State private var drawerOpen = false
     @State private var drawerDrag: CGFloat = 0
     @State private var accountMenu = false
@@ -376,6 +379,9 @@ struct HomeView: View {
             }
             .animation(.easeInOut(duration: 0.3), value: selecting)
             ZStack {
+                if pluginTab && pluginRuntime.homeTabLabel != nil {
+                    PluginHomeTab()   // 0.3.4 plugins
+                } else {
                 switch tab {
                 case .start: CommunityView(profileMode: false)
                 case .profile: CommunityView(profileMode: true)
@@ -384,6 +390,7 @@ struct HomeView: View {
                     OmegaProjectsTab(library: library, defaults: defaults, searching: $projectsSearching,
                                      selection: $selection, onOpen: openProject,
                                      onQuickMenu: { quick = $0 }, onDialog: { dialog = $0 })
+                }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -405,7 +412,9 @@ struct HomeView: View {
                     }, onDelete: { dialog = .batchDelete(selection) })
                     .transition(.opacity)
                 } else {
-                    OmegaHomeDock(selected: tab, onSelect: select, onCreate: { showNewProject = true })
+                    // 0.3.4 plugins: a aba dos plugins entra no dock quando algum plugin ligado a declara.
+                    OmegaHomeDock(selected: tab, onSelect: { pluginTab = false; select($0) }, onCreate: { showNewProject = true },
+                                  pluginTab: pluginRuntime.homeTabLabel, pluginSelected: pluginTab, onPlugin: { pluginTab = true })
                         .transition(.opacity)
                 }
             }
@@ -667,6 +676,10 @@ struct OmegaHomeDock: View {
     let selected: HomeTabKind
     let onSelect: (HomeTabKind) -> Void
     let onCreate: () -> Void
+    // 0.3.4 plugins: a aba dos plugins (nome e ícone do plugin quando há uma só).
+    var pluginTab: (String, Character)? = nil
+    var pluginSelected = false
+    var onPlugin: () -> Void = {}
     var body: some View {
         HStack(spacing: 0) {
             tab(.start, CupertinoGlyph.House, CupertinoGlyph.HouseFill, "home_tab_start", "home.community")
@@ -680,6 +693,21 @@ struct OmegaHomeDock: View {
                 .accessibilityIdentifier("home.create")
             tab(.projects, CupertinoGlyph.RectangleStack, CupertinoGlyph.RectangleStack, "home_tab_projects", "home.projects")
             tab(.presets, CupertinoGlyph.WandStars, CupertinoGlyph.WandStars, "home_presets_short", "home.presets")
+            if let plugin = pluginTab {
+                let ink = pluginSelected ? AureaColors.lightText : AureaColors.lightTextMuted
+                Button(action: onPlugin) {
+                    VStack(spacing: 2) {
+                        CupertinoGlyph.text(plugin.1, size: 24, color: ink)
+                        Text(plugin.0).font(.aurea(size: 12, weight: pluginSelected ? .semibold : .medium)).foregroundStyle(ink)
+                            .lineLimit(1).truncationMode(.tail)
+                    }
+                    .frame(maxWidth: 158, minHeight: 48).frame(maxWidth: .infinity).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(plugin.0)
+                .accessibilityAddTraits(pluginSelected ? .isSelected : [])
+                .accessibilityIdentifier("home.pluginsTab")
+            }
         }
         .padding(.horizontal, 8).padding(.vertical, 12)
         .frame(height: OmegaHomeDims.dock)
@@ -832,11 +860,16 @@ struct OmegaProjectsTab: View {
         }
     }
 
+    /// 0.3.4: um formatador por idioma (criar um `DateFormatter` a cada desenho da lista é caro).
+    private static var dayFormatters: [String: DateFormatter] = [:]
     private var dayFormatter: DateFormatter {
+        let language = AureaText.language.resolved.rawValue
+        if let cached = Self.dayFormatters[language] { return cached }
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: AureaText.language.resolved.rawValue)
+        formatter.locale = Locale(identifier: language)
         formatter.dateStyle = .long
         formatter.timeStyle = .none
+        Self.dayFormatters[language] = formatter
         return formatter
     }
 
@@ -874,7 +907,11 @@ struct OmegaProjectsTab: View {
                         })
                     }
                     .coordinateSpace(name: "omega.projects")
-                    .onPreferenceChange(OmegaScrollOffsetKey.self) { scrolled = $0 < -0.5 }
+                    .onPreferenceChange(OmegaScrollOffsetKey.self) { offset in
+                        // 0.3.4: chega a cada quadro de rolagem; só grava quando vira.
+                        let past = offset < -0.5
+                        if past != scrolled { scrolled = past }
+                    }
                     .scrollDisabled(sortOpen)
                     .accessibilityIdentifier("home.projects.list")
                     OmegaScrollShadow(visible: scrolled)
@@ -996,7 +1033,11 @@ struct OmegaMyPresets: View {
                     })
                 }
                 .coordinateSpace(name: "omega.presets")
-                .onPreferenceChange(OmegaScrollOffsetKey.self) { scrolled = $0 < -0.5 }
+                .onPreferenceChange(OmegaScrollOffsetKey.self) { offset in
+                    // 0.3.4: chega a cada quadro de rolagem; só grava quando vira.
+                    let past = offset < -0.5
+                    if past != scrolled { scrolled = past }
+                }
                 .accessibilityIdentifier("home.presets.list")
                 OmegaScrollShadow(visible: scrolled)
             }
@@ -1103,13 +1144,9 @@ struct OmegaPresetRow: View {
         }
         .padding(8)
         .frame(height: OmegaHomeDims.row)
-        .background(AureaColors.lightSurface, in: RoundedRectangle(cornerRadius: 12))
-        .omegaShadow(12, AureaColors.homeShadowSoft)
-        .background(GeometryReader { geometry in
-            Color.clear
-                .onAppear { box.rect = geometry.frame(in: .global) }
-                .onChange(of: geometry.frame(in: .global)) { box.rect = $0 }
-        })
+        // 0.3.4: sombra só na forma e retângulo medido no toque (ver OmegaProjectRow).
+        .omegaCardBackground(AureaColors.lightSurface, AureaColors.homeShadowSoft)
+        .background(OmegaFrameProbe(box: box))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("home.preset.row")
     }

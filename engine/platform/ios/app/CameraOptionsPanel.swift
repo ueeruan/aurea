@@ -189,7 +189,7 @@ struct CameraOptionsPanel: View {
                     beginGesture(); model.setCameraLens(AureaModel.cameraAffectsBelow, value: enabled ? 1 : 0); endGesture()
                 }
                 .padding(.horizontal, 6)
-                Text(AureaText.t("om_ap_cam_tip")).font(.aurea(size: 11)).foregroundStyle(AureaColors.subtle)
+                Text(AureaText.t("om_ap_cam_tip")).font(.aurea(size: PanelMetrics.note)).foregroundStyle(AureaColors.subtle)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 10).padding(.top, 6)
                     .accessibilityIdentifier("camera.view.tip")
@@ -202,9 +202,9 @@ struct CameraOptionsPanel: View {
     /// desabilitada (o motor só tem perspectiva; a paralela é P2-4).
     private var projectionButton: some View {
         Button { projectionOpen = true } label: {
-            CupertinoGlyph.text(CupertinoGlyph.Cube, size: 18, color: AureaColors.accent)
-                .frame(width: 33, height: 30)
-                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 5))
+            CupertinoGlyph.text(CupertinoGlyph.Cube, size: 22, color: AureaColors.accent)
+                .frame(width: 40, height: PanelMetrics.fieldHeight)
+                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: PanelMetrics.fieldRadius))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -230,7 +230,7 @@ struct CameraOptionsPanel: View {
                              onBegin: { beginGesture() },
                              onValue: { setAngle($0) },
                              onEnd: { endGesture() })
-                .frame(height: 112)
+                .frame(height: 128)  // 0.3.4 painéis: antes 112
                 .frame(maxWidth: .infinity)
                 .modifier(CameraRulerAccessibility(label: AureaText.t("om_ap_cam_view_angle"),
                                                    value: CameraLensMath.formatAngle(angle) + "°",
@@ -247,8 +247,8 @@ struct CameraOptionsPanel: View {
         let zoom = CameraLensMath.zoomFromFocal(focal)
         let current: () -> Float = { CameraLensMath.zoomFromFocal(model.cameraLens.first ?? CameraLensMath.defaultFocalMm) }
         return HStack(spacing: 8) {
-            Text(AureaText.t("om_ap_cam_zoom")).font(.aurea(size: 11, weight: .semibold)).foregroundStyle(AureaColors.muted)
-                .lineLimit(1).minimumScaleFactor(0.7).frame(width: 44, alignment: .leading)
+            Text(AureaText.t("om_ap_cam_zoom")).font(.aurea(size: PanelMetrics.label, weight: .semibold)).foregroundStyle(AureaColors.muted)
+                .lineLimit(1).minimumScaleFactor(0.7).frame(width: 52, alignment: .leading)
                 .accessibilityHidden(true)
             GeometryReader { bounds in
                 TickRuler(value: current, unitsPerDp: 0.02, active: true, height: bounds.size.height)
@@ -258,7 +258,7 @@ struct CameraOptionsPanel: View {
                                onValue: { model.setCameraLens(AureaModel.cameraLensFocal, value: CameraLensMath.focalFromZoom($0)) },
                                onEnd: { endGesture() })
             }
-            .frame(height: 36)
+            .frame(height: PanelMetrics.touch)
             .modifier(CameraRulerAccessibility(label: AureaText.t("om_ap_cam_zoom"),
                                                value: CameraLensMath.formatZoom(zoom) + ", " + CameraLensMath.formatFocal(focal),
                                                identifier: "camera.view.zoom",
@@ -280,16 +280,16 @@ struct CameraOptionsPanel: View {
         let picked = CameraLensMath.presetIndex(focal)
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                Text(CameraLensMath.formatFocal(focal)).font(.aurea(size: 11.5)).foregroundStyle(AureaColors.muted)
+                Text(CameraLensMath.formatFocal(focal)).font(.aurea(size: PanelMetrics.note)).foregroundStyle(AureaColors.muted)
                     .padding(.leading, 4).padding(.trailing, 4)
                 ForEach(Array(CameraLensMath.presetsMm.enumerated()), id: \.offset) { index, mm in
                     let on = index == picked
                     Button {
                         beginGesture(); model.setCameraLens(AureaModel.cameraLensFocal, value: Float(mm)); endGesture()
                     } label: {
-                        Text("\(mm)").font(.aurea(size: 12.5, weight: .bold))
+                        Text("\(mm)").font(.aurea(size: PanelMetrics.chipText, weight: .bold))
                             .foregroundStyle(on ? AureaColors.accent : AureaColors.text)
-                            .padding(.horizontal, 12).frame(minHeight: 36)
+                            .padding(.horizontal, PanelMetrics.chipPad).frame(minHeight: PanelMetrics.chipHeight)
                             .background(on ? AureaColors.accent.opacity(0.18) : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
                             .frame(minHeight: 44).contentShape(Rectangle())
                     }
@@ -350,7 +350,7 @@ struct CameraOptionsPanel: View {
                 }
                 .frame(height: 37.5)
                 .padding(.horizontal, 10)
-                Text(AureaText.t("lens_dof_hint")).font(.aurea(size: 11.5)).foregroundStyle(AureaColors.muted)
+                Text(AureaText.t("lens_dof_hint")).font(.aurea(size: PanelMetrics.note)).foregroundStyle(AureaColors.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 10).padding(.bottom, 4)
                 if dof {
@@ -391,7 +391,7 @@ struct CameraOptionsPanel: View {
                                 VStack(alignment: .leading, spacing: 0) {
                                     Text(AureaText.t("lens_pick_focus")).font(.aurea(size: 14, weight: .semibold))
                                         .foregroundStyle(armed ? AureaColors.accent : AureaColors.text)
-                                    Text(AureaText.t("lens_pick_focus_hint")).font(.aurea(size: 11.5)).foregroundStyle(AureaColors.muted)
+                                    Text(AureaText.t("lens_pick_focus_hint")).font(.aurea(size: PanelMetrics.note)).foregroundStyle(AureaColors.muted)
                                 }
                                 Spacer()
                             }
@@ -417,8 +417,10 @@ struct CameraOptionsPanel: View {
         let keyframe = lensLook(param)
         return HStack(spacing: 8) {
             ZStack(alignment: .topLeading) {
-                Text(label).font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.accent).underline()
-                    .multilineTextAlignment(.center).lineLimit(2).frame(width: 94, height: 32)
+                // 0.3.4 painéis: rótulo de 13 numa caixa de 36 (antes 12 em 32).
+                Text(label).font(.aurea(size: PanelMetrics.label, weight: .semibold)).foregroundStyle(AureaColors.accent).underline()
+                    .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.8)
+                    .frame(width: 94, height: PanelMetrics.fieldHeight)
                     .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
                 if keyframe != .none {
                     CameraMiniDiamond(filled: keyframe == .keyHere).frame(width: 7, height: 7).offset(x: 3, y: 3)
@@ -432,7 +434,7 @@ struct CameraOptionsPanel: View {
             .accessibilityValue(AureaText.t(keyframe == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui"))
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { if !locked { model.toggleCameraLensKey(param) } }
-            TickRuler(value: { amount }, unitsPerDp: speed, active: true, height: 40)
+            TickRuler(value: { amount }, unitsPerDp: speed, active: true, height: PanelMetrics.touch)
                 .frame(maxWidth: .infinity)
                 .valueDrag(enabled: !locked, start: { amount }, unitsPerDp: { speed }, min: lower, max: upper,
                            onStart: { beginGesture() }, onValue: onValue, onEnd: { endGesture() })
@@ -440,9 +442,9 @@ struct CameraOptionsPanel: View {
                 .accessibilityLabel(label)
                 .accessibilityValue(text)
                 .accessibilityIdentifier(identifier)
-            ValueBox(text, width: 68, onTap: locked ? nil : onTap)
+            ValueBox(text, width: PanelMetrics.fieldWidth, onTap: locked ? nil : onTap)
         }
-        .frame(height: 48)
+        .frame(height: 52)
     }
 
     // =========================================================================
@@ -549,15 +551,15 @@ struct CameraOptionsPanel: View {
         }
     }
 
-    /// Caixa de valor 56 × 36 (a da referência), número em destaque sublinhado; toque digita.
+    /// Caixa de valor (0.3.4 painéis: `PanelMetrics` 72 × 36, número 15 que encolhe), em destaque sublinhado; toque digita.
     private func cameraValueBox(_ text: String, label: String, identifier: String, onTap: @escaping () -> Void) -> some View {
         Button(action: onTap) {
-            Text(text).font(.aurea(size: 13, weight: .semibold).monospacedDigit())
+            Text(text).font(.aurea(size: PanelMetrics.fieldValue, weight: .semibold).monospacedDigit())
                 .foregroundStyle(locked ? AureaColors.muted : AureaColors.accent).underline(!locked)
-                .lineLimit(1).minimumScaleFactor(0.6).padding(.horizontal, 3)
-                .frame(width: 56, height: 36)
-                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 5))
-                .frame(minHeight: 44).contentShape(Rectangle())
+                .lineLimit(1).minimumScaleFactor(PanelMetrics.fieldValueMin / PanelMetrics.fieldValue).padding(.horizontal, 4)
+                .frame(width: PanelMetrics.fieldWidth).frame(minHeight: PanelMetrics.fieldHeight)
+                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: PanelMetrics.fieldRadius))
+                .frame(minHeight: PanelMetrics.touch).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(locked)
@@ -572,7 +574,7 @@ struct CameraOptionsPanel: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 0) {
                 Text(AureaText.t(title)).font(.aurea(size: 14, weight: .semibold))
-                Text(AureaText.t(hint)).font(.aurea(size: 11.5)).foregroundStyle(AureaColors.muted)
+                Text(AureaText.t(hint)).font(.aurea(size: PanelMetrics.note)).foregroundStyle(AureaColors.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }.frame(maxWidth: .infinity, alignment: .leading)
             AureaToggle(checked: checked) { if !locked { onChange($0) } }

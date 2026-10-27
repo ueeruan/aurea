@@ -525,15 +525,18 @@ internal fun resetWholeTransform(store: EditorStore, show3D: Boolean, isCamera: 
 }
 
 // =============================================================================
-// Peças comuns das faces: campo 63 × 25 e ids das abas
+// Peças comuns das faces: campo 72 × 36 e ids das abas
 // =============================================================================
 
-/** Medidas do campo da referência (pílula X | Y, Z, Largura/Altura, Inclinação). */
+/**
+ * Medidas do campo (pílula X | Y, Z, Largura/Altura, Inclinação). 0.3.4 painéis:
+ * vêm das medidas centrais ([PanelMetrics]); eram 63 × 25 com texto 10/9.
+ */
 internal object TfFieldDims {
-    val Width = 63.dp
-    val Height = 25.dp
-    val Radius = 5.dp
-    val Gap = 7.dp
+    val Width = PanelMetrics.FieldWidth
+    val Height = PanelMetrics.FieldHeight
+    val Radius = PanelMetrics.FieldRadius
+    val Gap = PanelMetrics.FieldGap
 }
 
 internal val TfPillStart: Shape = RoundedCornerShape(topStart = TfFieldDims.Radius, bottomStart = TfFieldDims.Radius)
@@ -541,8 +544,9 @@ internal val TfPillEnd: Shape = RoundedCornerShape(topEnd = TfFieldDims.Radius, 
 internal val TfPillAlone: Shape = RoundedCornerShape(TfFieldDims.Radius)
 
 /**
- * Um campo 63 × 25 (fundo `campo`) com o valor em 10 sp (ativo no destaque) e
- * o rótulo de 9 sp embaixo. A área de toque tem 44 dp de altura.
+ * Um campo [TfFieldDims] (fundo `campo`) com o valor em [PanelMetrics.FieldValue]
+ * (ativo no destaque; encolhe antes de vazar) e o rótulo de
+ * [PanelMetrics.FieldLabel] embaixo. A área de toque tem ao menos 44 dp de altura.
  */
 @Composable
 internal fun TfField(
@@ -562,7 +566,7 @@ internal fun TfField(
     Column(
         modifier
             .width(TfFieldDims.Width)
-            .heightIn(min = 44.dp)
+            .heightIn(min = PanelMetrics.Touch)
             .testTag(tag)
             .semantics(mergeDescendants = true) {
                 contentDescription = description
@@ -572,15 +576,17 @@ internal fun TfField(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
-            Modifier.fillMaxWidth().height(TfFieldDims.Height).clip(shape).background(AureaColors.Chip).padding(horizontal = 3.dp),
+            Modifier.fillMaxWidth().heightIn(min = TfFieldDims.Height).clip(shape).background(AureaColors.Chip).padding(horizontal = 4.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
+            // 0.3.4 painéis: 15 sp; encolhe (até 9) antes de vazar — número longo ou fonte grande.
+            androidx.compose.foundation.text.BasicText(
                 text,
                 maxLines = 1,
-                overflow = TextOverflow.Clip,
+                autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(
+                    minFontSize = PanelMetrics.FieldValueMin, maxFontSize = PanelMetrics.FieldValue, stepSize = 0.5.sp),
                 style = AureaType.Base.merge(TextStyle(
-                    fontSize = 10.sp,
+                    fontSize = PanelMetrics.FieldValue,
                     fontWeight = FontWeight.W600,
                     color = if (!enabled) AureaColors.Muted else if (active) activeColor else idleColor,
                     textAlign = TextAlign.Center,
@@ -593,8 +599,8 @@ internal fun TfField(
             label,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 2.dp),
-            style = AureaType.Base.merge(TextStyle(fontSize = 9.sp, color = AureaColors.Muted, textAlign = TextAlign.Center)),
+            modifier = Modifier.padding(top = PanelMetrics.FieldLabelGap),
+            style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.FieldLabel, color = AureaColors.Muted, textAlign = TextAlign.Center)),
         )
     }
 }
@@ -678,7 +684,7 @@ private fun ColumnScope.MotionBlurFace(env: PanelEnv) {
             Text(
                 stringResource(R.string.mb_comp_settings_hint),
                 modifier = Modifier.padding(top = 4.dp, start = 4.dp),
-                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
+                style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted)),
             )
             // Comprimento do rastro SÓ desta camada (× o obturador do projeto).
             val lengthLabel = stringResource(R.string.la_motion_blur_length)
@@ -702,7 +708,7 @@ private fun ColumnScope.MotionBlurFace(env: PanelEnv) {
             Text(
                 stringResource(R.string.la_motion_blur_length_hint),
                 modifier = Modifier.padding(top = 4.dp, start = 4.dp),
-                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
+                style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted)),
             )
             val advancedLabel = stringResource(R.string.mb_advanced)
             com.aurea.aurea.ui.ds.AdvancedToggle(advanced, 3, { advanced = !advanced },
@@ -740,8 +746,8 @@ private fun ColumnScope.MotionBlurFace(env: PanelEnv) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(vectorLabel, style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)))
-                        Text(vectorHint, style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)))
+                        Text(vectorLabel, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.ChipText, fontWeight = FontWeight.W600, color = AureaColors.Text)))
+                        Text(vectorHint, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted)))
                     }
                     Spacer(Modifier.width(10.dp))
                     com.aurea.aurea.ui.ds.AureaToggle(checked = store.motionBlurVector, onCheckedChange = store::changeMotionBlurVector)
@@ -778,8 +784,8 @@ private fun MotionBlurSetting(env: PanelEnv, label: String, value: Float, unit: 
 internal fun BlurToggleRow(label: String, hint: String, checked: Boolean, modifier: Modifier = Modifier, onChange: (Boolean) -> Unit) {
     Row(modifier.fillMaxWidth().padding(vertical = 6.dp).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)))
-            if (hint.isNotEmpty()) Text(hint, style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp, color = AureaColors.Muted)))
+            Text(label, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.ChipText, fontWeight = FontWeight.W600, color = AureaColors.Text)))
+            if (hint.isNotEmpty()) Text(hint, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted)))
         }
         Spacer(Modifier.width(10.dp))
         com.aurea.aurea.ui.ds.AureaToggle(checked = checked, onCheckedChange = onChange)

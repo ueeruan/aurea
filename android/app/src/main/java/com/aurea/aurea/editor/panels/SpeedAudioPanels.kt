@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -62,7 +63,7 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
-import com.aurea.aurea.ui.theme.CupertinoIconBoldStroke
+import com.aurea.aurea.ui.theme.AureaIconStyle
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.abs
@@ -75,6 +76,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -229,7 +231,7 @@ private fun SpeedMainTab(env: PanelEnv, keyed: Boolean) {
     val animatedSpeed = store.speedCurve?.getOrNull(6)
     val speed = if (detail.speedAnimated && animatedSpeed != null) animatedSpeed else detail.speed
     val title = stringResource(R.string.editor_velocidade)
-    val muted = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted))
+    val muted = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted))
     Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp)) {
         Spacer(Modifier.height(10.dp))
         RetimeRow(store, id, bits)
@@ -250,14 +252,14 @@ private fun SpeedMainTab(env: PanelEnv, keyed: Boolean) {
                             if (keyed) store.setLayerSpeed(v) else store.setLayerSpeedBaked(v)
                         })
                     },
-                style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)),
+                style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.ChipText, color = AureaColors.Text)),
             )
         }
         Spacer(Modifier.height(6.dp))
         SpeedSlider(
             value = speed,
             enabled = !blocked,
-            height = 40.dp,
+            height = PanelMetrics.Touch,
             tag = "speed.slider",
             onStart = { store.beginGesture("velocidade") },
             onValue = { v -> if (keyed) store.setLayerSpeed(v) else store.setLayerSpeedBaked(v) },
@@ -305,10 +307,10 @@ private fun SpeedOptionsTab(env: PanelEnv) {
         }
         if (isVideo) {
             Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.panel_passar_tras_frente), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                Text(stringResource(R.string.panel_passar_tras_frente), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
                 AureaToggle(checked = reversed, onCheckedChange = { store.setLayerReversed(it) })
             }
-            Text(stringResource(R.string.panel_quadros_camera_lenta), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            Text(stringResource(R.string.panel_quadros_camera_lenta), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
             Spacer(Modifier.height(6.dp))
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf(0 to stringResource(R.string.panel_repetir_quadro), 1 to stringResource(R.string.panel_misturar), 2 to stringResource(R.string.panel_movimento_suave)).forEach { (m, label) ->
@@ -352,7 +354,7 @@ internal fun RetimeRow(store: EditorStore, layerId: Long, bits: Int, modifier: M
     }
     // A ordem do tempo fica LTR em qualquer idioma (como a timeline).
     KeepLtr {
-        Row(modifier.fillMaxWidth().height(37.dp), horizontalArrangement = Arrangement.spacedBy(1.5.dp)) {
+        Row(modifier.fillMaxWidth().height(PanelMetrics.Touch), horizontalArrangement = Arrangement.spacedBy(1.5.dp)) {  // 0.3.4 painéis: antes 37
             RetimeButton(RetimeGlyph.ExtendStart, R.string.om_lp_retime_extend_start, "speed.retime.extendStart",
                 bits and LayerPanelBits.RETIME_EXTEND_START != 0, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)) { act(0) }
             RetimeButton(RetimeGlyph.ShortenStart, R.string.om_lp_retime_shorten_start, "speed.retime.shortenStart",
@@ -395,18 +397,17 @@ private fun RowScope.RetimeButton(
         val color = AureaColors.Text
         Canvas(Modifier.size(22.dp)) {
             val u = size.width / 24f
-            // 0.3.3: + o traço extra dos glifos bold (CupertinoIconBoldStroke).
-            val bold = 24f * CupertinoIconBoldStroke * u
-            val stroke = 1.6f * u + bold
+            // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.Line), uniforme.
+            val stroke = AureaIconStyle.Line * u
             val start = glyph == RetimeGlyph.ExtendStart || glyph == RetimeGlyph.ShortenStart
             // O clipe com os "quadros" dentro (retempo muda a velocidade, não só a borda).
             val l = if (start) 9f else 3f
             val r = if (start) 21f else 15f
             drawRoundRect(color, topLeft = Offset(l * u, 7f * u), size = Size((r - l) * u, 10f * u),
-                cornerRadius = CornerRadius(1.5f * u), style = Stroke(stroke))
+                cornerRadius = CornerRadius(1.5f * u), style = Stroke(stroke, join = StrokeJoin.Round))
             for (i in 1..3) {
                 val x = l + (r - l) * i / 4f
-                drawLine(color.copy(alpha = 0.55f), Offset(x * u, 9.5f * u), Offset(x * u, 14.5f * u), 1f * u + bold)
+                drawLine(color.copy(alpha = 0.55f), Offset(x * u, 9.5f * u), Offset(x * u, 14.5f * u), stroke, StrokeCap.Round)
             }
             fun arrow(from: Float, to: Float) {
                 drawLine(color, Offset(from * u, 12f * u), Offset(to * u, 12f * u), stroke, StrokeCap.Round)
@@ -526,12 +527,12 @@ internal fun SpeedSlider(
     }
 }
 
-/** Caixa de valor dos painéis embutidos (56 × 36, branco 5 %); o toque abre o teclado. */
+/** Caixa de valor dos painéis embutidos ([PanelMetrics] 72 × 36, número 15 que encolhe; branco 5 %); o toque abre o teclado. */
 @Composable
 internal fun PopoutValueBox(text: String, tag: String, label: String, onTap: () -> Unit) {
     Box(
         Modifier
-            .size(56.dp, 36.dp)
+            .width(PanelMetrics.FieldWidth).heightIn(min = PanelMetrics.FieldHeight)
             .clip(RoundedCornerShape(4.dp))
             .background(AureaColors.LayerPanelValueBox)
             .testTag(tag)
@@ -539,7 +540,13 @@ internal fun PopoutValueBox(text: String, tag: String, label: String, onTap: () 
             .tocavel(onClick = onTap),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
+        androidx.compose.foundation.text.BasicText(
+            text, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp),
+            autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(
+                minFontSize = PanelMetrics.FieldValueMin, maxFontSize = PanelMetrics.FieldValue, stepSize = 0.5.sp),
+            style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.FieldValue, color = AureaColors.Text,
+                textDirection = androidx.compose.ui.text.style.TextDirection.Ltr)),
+        )
     }
 }
 
@@ -592,10 +599,10 @@ private fun SpeedCurveSection(env: PanelEnv, data: FloatArray) {
     val keyTimes = (0 until keyCount).mapNotNull { i -> data.getOrNull(8 + samples + i * 3)?.toInt() }
     if (selected >= keyCount) selected = -1
     val local = store.detail?.localPlayhead ?: 0
-    val muted = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted))
+    val muted = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted))
     Text(
         stringResource(R.string.speed_at_playhead, speedLabel(data[6])),
-        style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Accent)),
+        style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label, color = AureaColors.Accent)),
     )
     Spacer(Modifier.height(8.dp))
     KeepLtr {
@@ -631,7 +638,7 @@ private fun SpeedCurveSection(env: PanelEnv, data: FloatArray) {
         RemapChip(stringResource(R.string.speed_smooth), on = false) { store.applySpeedCurve(7) }
     }
     Spacer(Modifier.height(12.dp))
-    Text(stringResource(R.string.speed_presets), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+    Text(stringResource(R.string.speed_presets), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
     Spacer(Modifier.height(6.dp))
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         listOf(
@@ -652,7 +659,7 @@ private fun SpeedCurveSection(env: PanelEnv, data: FloatArray) {
 @Composable
 private fun RemapSection(env: PanelEnv, @Suppress("UNUSED_PARAMETER") data: FloatArray?) {
     val store = env.store
-    Text(stringResource(R.string.speed_presets), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+    Text(stringResource(R.string.speed_presets), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
     Spacer(Modifier.height(6.dp))
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         listOf(
@@ -796,10 +803,10 @@ private fun VolumeFrame(
                         ) { store.setAudioVolume(it / 100f) }
                     }
                     Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(R.string.panel_mudo), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                        Text(stringResource(R.string.panel_mudo), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
                         AureaToggle(checked = detail.audioMuted, onCheckedChange = { store.setAudioMuted(it) }, modifier = Modifier.testTag("$tagPrefix.mute"))
                         Spacer(Modifier.width(16.dp))
-                        Text(stringResource(R.string.panel_solo), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+                        Text(stringResource(R.string.panel_solo), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
                         AureaToggle(checked = detail.audioSolo, onCheckedChange = { store.setAudioSolo(it) }, modifier = Modifier.testTag("$tagPrefix.solo"))
                     }
                 }
@@ -826,9 +833,9 @@ private fun CompactRuler(
     onValue: (Float) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
-        if (showLabel) Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)))
+        if (showLabel) Text(label, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label, color = AureaColors.Muted)))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f).height(40.dp).testTag(tag).semantics { contentDescription = "$label $text" }) {
+            Box(Modifier.weight(1f).height(PanelMetrics.Touch).testTag(tag).semantics { contentDescription = "$label $text" }) {
                 TickRuler(
                     value = value,
                     unitsPerDp = unitsPerDp,
@@ -875,7 +882,7 @@ private fun secs(s: Float): String = "%.2f s".format(s).replace('.', ',')
 @Composable
 private fun AudioToggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        Text(label, modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
         AureaToggle(checked = checked, onCheckedChange = onChange)
     }
 }
@@ -902,7 +909,7 @@ private fun AudioRuler(
         expression = expression, onExpression = onExpression,
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f).height(40.dp)) {
+            Box(Modifier.weight(1f).height(PanelMetrics.Touch)) {
                 TickRuler(
                     value = value,
                     unitsPerDp = unitsPerDp,
@@ -971,8 +978,8 @@ internal fun TimeRemapControls(env: PanelEnv, showInterpolation: Boolean) {
     val selectedKey by remember(store) {
         derivedStateOf { store.selectedKeyframe?.second?.takeIf { it.property == TrackProperty.TIME_REMAP }?.time }
     }
-    val muted = AureaType.Base.merge(TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = AureaColors.Muted))
-    val rowText = AureaType.Base.merge(TextStyle(fontSize = 13.sp))
+    val muted = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted))
+    val rowText = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label))
     Column(Modifier.fillMaxWidth()) {
         // 1) Manter o tom do áudio.
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1110,10 +1117,10 @@ private fun RemapChip(label: String, on: Boolean, onClick: () -> Unit) {
         Modifier.height(44.dp).clip(RoundedCornerShape(8.dp))
             .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
             .semantics { selected = on }
-            .tocavel(onClick = onClick).padding(horizontal = 12.dp),
+            .tocavel(onClick = onClick).padding(horizontal = PanelMetrics.ChipPad),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+        Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.ChipText, color = if (on) AureaColors.Accent else AureaColors.Text)))
     }
 }
 

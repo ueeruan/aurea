@@ -449,3 +449,33 @@ internal fun rememberProjectThumbnail(
     }
     return state.value
 }
+
+// Omega 0.3.4 (rolagem da aba Projetos): a capa E se a leitura já terminou.
+/** [finished] verdadeiro com [image] nulo = o projeto não tem capa (não está carregando). */
+internal class ProjectThumbLoad(val image: ImageBitmap?, val finished: Boolean)
+
+/**
+ * Como [rememberProjectThumbnail], mas diz quando a leitura acabou: o brilho
+ * animado é só para "carregando". Sem capa ele rodava para sempre em cada linha
+ * visível (par do `missing` do `HomeThumbnail` no iOS).
+ */
+@Composable
+internal fun rememberProjectThumbnailLoad(
+    thumbs: HomeThumbnails,
+    entry: ProjectEntry,
+    widthPx: Int = CARD_DECODE_PX,
+): ProjectThumbLoad {
+    val path = entry.thumbnailPath
+    val key = remember(path, entry.modifiedMs, widthPx) {
+        path?.let { "$it|${entry.modifiedMs}|$widthPx" }
+    }
+    val cached = key?.let { thumbs.peek(it) }
+    val state = produceState(ProjectThumbLoad(cached, cached != null || key == null), key) {
+        if (key == null || path == null) {
+            value = ProjectThumbLoad(null, true)
+            return@produceState
+        }
+        value = ProjectThumbLoad(thumbs.peek(key) ?: thumbs.load(key) { thumbs.decodeFile(path, widthPx) }, true)
+    }
+    return state.value
+}

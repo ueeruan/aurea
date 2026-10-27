@@ -2369,6 +2369,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (!engineReady) return
         com.aurea.aurea.effects.PluginTexts.update(engine.pluginsJson())
         plugins = com.aurea.aurea.effects.PluginTexts.plugins
+        com.aurea.aurea.effects.PluginRuntime.attach(this)   // 0.3.4 plugins: rede/seletor e painéis
     }
 
     /** Instala o arquivo escolhido (cópia temporária: o motor lê caminho). Compila e testa: fora da thread da interface. */
@@ -2398,6 +2399,24 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 errorMessage = appText(R.string.plug_failed, result.error.ifEmpty { appText(R.string.msg_nao_consegui_ler_esse_arquivo) })
             }
         }
+    }
+
+    // 0.3.4 plugins: painéis, scripts e consentimento (effects/PluginRuntime.kt)
+    // usam o mesmo motor. Depois de um script mexer no projeto, relê já.
+    internal val pluginEngine: AureaEngine get() = engine
+    internal fun afterPluginScript() = refreshNow()
+    internal fun afterPluginInstall() {
+        refreshPlugins()
+        catalog = readCatalog()
+        specCache.clear()
+        refreshNow()
+    }
+    internal fun pluginBusy(message: String?) { busyMessage = message }
+    internal fun pluginError(message: String) { errorMessage = message }
+    internal fun selectFromPlugin(ids: List<Long>) {
+        selection = LinkedHashSet(ids)
+        engine.setSelection(selection.toLongArray())
+        refreshNow()
     }
 
     /** Projetos que usam o efeito guardam os valores; reinstalar o plugin devolve o efeito. */

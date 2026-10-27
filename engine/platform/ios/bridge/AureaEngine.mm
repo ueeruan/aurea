@@ -444,6 +444,17 @@ std::atomic<bool> g_hyperNpuAvailable{false};
 bool aurea_ios_hyper_npu_available() noexcept { return g_hyperNpuAvailable.load(std::memory_order_acquire); }
 
 
+// 0.3.4 plugins: o fetch dos scripts NÃO segue redirecionamento (o domínio
+// conferido pelo motor é o domínio contatado). Um 3xx volta ao script como está.
+@interface AureaPluginNoRedirect : NSObject <NSURLSessionTaskDelegate>
+@end
+@implementation AureaPluginNoRedirect
+- (void)URLSession:(NSURLSession*)session task:(NSURLSessionTask*)task willPerformHTTPRedirection:(NSHTTPURLResponse*)response
+        newRequest:(NSURLRequest*)request completionHandler:(void (^)(NSURLRequest* _Nullable))completionHandler {
+    completionHandler(nil);
+}
+@end
+
 @implementation AureaEngine {
     CAMetalLayer* _surfaceLayer;
     std::unique_ptr<aurea::ios::Host> _host;
@@ -2889,6 +2900,151 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (NSString*)pluginDirectory {
     auto* e = self.engine;
     return e ? to_ns(e->plugin_directory()) : @"";
+}
+
+// =============================================================================
+// 0.3.4 plugins: painéis, scripts e APIs (a regra mora no motor:
+// EnginePluginsV2.cpp). Aqui só a E/S do anfitrião, chamada NA THREAD DO
+// SCRIPT depois que o motor conferiu permissão e domínio.
+// =============================================================================
+- (BOOL)installPluginHost {
+    auto* e = self.engine;
+    if (!e) return NO;
+    __weak AureaEngine* weakSelf = self;
+    aurea::plugins::HostIO io;
+    io.fetch = [](const aurea::plugins::HttpRequest& req) {
+        aurea::plugins::HttpResponse r;
+        @autoreleasepool {
+            NSURL* url = [NSURL URLWithString:to_ns(req.url)];
+            if (!url) { r.error = "endereco invalido"; return r; }
+            NSMutableURLRequest* request = [NSMutableURLRequest requestWithURL:url];
+            request.HTTPMethod = to_ns(req.method);
+            request.timeoutInterval = req.timeoutMs / 1000.0;
+            request.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+            for (const auto& [k, v] : req.headers) [request setValue:to_ns(v) forHTTPHeaderField:to_ns(k)];
+            if (!req.body.empty() && req.method != "GET" && req.method != "HEAD")
+                request.HTTPBody = [NSData dataWithBytes:req.body.data() length:req.body.size()];
+            NSURLSessionConfiguration* config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+            config.timeoutIntervalForRequest = req.timeoutMs / 1000.0;
+            config.timeoutIntervalForResource = req.timeoutMs / 1000.0;
+            NSURLSession* session = [NSURLSession sessionWithConfiguration:config delegate:[AureaPluginNoRedirect new] delegateQueue:nil];
+            dispatch_semaphore_t done = dispatch_semaphore_create(0);
+            __block NSData* body = nil;
+            __block NSHTTPURLResponse* http = nil;
+            __block NSError* failure = nil;
+            NSURLSessionDataTask* task = [session dataTaskWithRequest:request completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
+                body = data;
+                http = [response isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse*)response : nil;
+                failure = error;
+                dispatch_semaphore_signal(done);
+            }];
+            [task resume];
+            dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(req.timeoutMs + 2000) * NSEC_PER_MSEC));
+            [session finishTasksAndInvalidate];
+            if (!http) {
+                r.error = failure ? to_std(failure.localizedDescription) : std::string("sem resposta");
+                return r;
+            }
+            if (body.length > req.maxBytes) { r.error = "resposta maior que o limite"; return r; }
+            r.ok = true;
+            r.status = static_cast<int32_t>(http.statusCode);
+            r.url = to_std(http.URL.absoluteString);
+            NSDictionary* fields = http.allHeaderFields;
+            for (id key in fields) r.headers.emplace_back(to_std([key description]), to_std([fields[key] description]));
+            if (body.length) r.body.assign(static_cast<const char*>(body.bytes), body.length);
+        }
+        return r;
+    };
+    io.clipboardRead = [](std::string& text) {
+        __block NSString* s = nil;
+        dispatch_block_t read = ^{ s = UIPasteboard.generalPasteboard.string; };
+        if (NSThread.isMainThread) read(); else dispatch_sync(dispatch_get_main_queue(), read);
+        if (!s) return false;
+        text = to_std(s);
+        return true;
+    };
+    io.clipboardWrite = [](const std::string& text) {
+        NSString* s = to_ns(text);
+        dispatch_block_t write = ^{ UIPasteboard.generalPasteboard.string = s; };
+        if (NSThread.isMainThread) write(); else dispatch_sync(dispatch_get_main_queue(), write);
+        return true;
+    };
+    io.pickFile = [weakSelf](const std::string& pluginId, const std::vector<std::string>& types) {
+        aurea::plugins::PickedFile f;
+        AureaEngine* strong = weakSelf;
+        NSArray<NSString*>* _Nullable (^pick)(NSString*, NSArray<NSString*>*) = strong.pluginPickFile;
+        if (!pick) { f.error = "seletor indisponivel"; return f; }
+        NSMutableArray<NSString*>* list = [NSMutableArray array];
+        for (const auto& t : types) [list addObject:to_ns(t)];
+        NSArray<NSString*>* out = pick(to_ns(pluginId), list);
+        if (out.count >= 3) {
+            f.name = to_std(out[0]);
+            f.path = to_std(out[1]);
+            f.size = static_cast<aurea::u64>(out[2].longLongValue);
+            f.ok = !f.path.empty();
+        }
+        return f;
+    };
+    e->set_plugin_host_io(std::move(io));
+    return YES;
+}
+
+- (NSString*)inspectPlugin:(NSString*)path {
+    auto* e = self.engine;
+    return e ? to_ns(e->inspect_plugin(to_std(path).c_str())) : @"{\"ok\":false}";
+}
+
+- (BOOL)setPluginEnabled:(NSString*)pluginId on:(BOOL)on {
+    auto* e = self.engine;
+    return e && e->set_plugin_enabled(to_std(pluginId).c_str(), on) ? YES : NO;
+}
+
+- (BOOL)setPluginPermissions:(NSString*)pluginId mask:(uint32_t)mask {
+    auto* e = self.engine;
+    return e && e->set_plugin_permissions(to_std(pluginId).c_str(), mask) ? YES : NO;
+}
+
+static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"error\":{\"name\":\"Error\",\"message\":\"motor\",\"text\":\"motor\"}}";
+
+- (NSString*)pluginCall:(NSString*)pluginId function:(NSString*)function args:(NSString*)argsJSON locale:(NSString*)locale {
+    auto* e = self.engine;
+    if (!e) return kPluginEngineGone;
+    return to_ns(e->plugin_call(to_std(pluginId).c_str(), to_std(function).c_str(), to_std(argsJSON).c_str(), to_std(locale).c_str()));
+}
+
+- (NSString*)pluginEvent:(NSString*)pluginId control:(NSString*)control kind:(NSString*)kind value:(NSString*)valueJSON locale:(NSString*)locale {
+    auto* e = self.engine;
+    if (!e) return kPluginEngineGone;
+    return to_ns(e->plugin_event(to_std(pluginId).c_str(), to_std(control).c_str(), to_std(kind).c_str(), to_std(valueJSON).c_str(),
+                                 to_std(locale).c_str()));
+}
+
+- (NSString*)pluginOpenPanel:(NSString*)pluginId panel:(NSString*)panel locale:(NSString*)locale {
+    auto* e = self.engine;
+    if (!e) return kPluginEngineGone;
+    return to_ns(e->plugin_open_panel(to_std(pluginId).c_str(), to_std(panel).c_str(), to_std(locale).c_str()));
+}
+
+- (NSString*)pluginState:(NSString*)pluginId {
+    auto* e = self.engine;
+    return e ? to_ns(e->plugin_state(to_std(pluginId).c_str())) : @"{}";
+}
+
+- (NSString*)pluginConsole:(NSString*)pluginId {
+    auto* e = self.engine;
+    return e ? to_ns(e->plugin_console(to_std(pluginId).c_str())) : @"[]";
+}
+
+- (void)pluginClearConsole:(NSString*)pluginId {
+    if (auto* e = self.engine) e->plugin_clear_console(to_std(pluginId).c_str());
+}
+
+- (void)pluginCancel:(NSString*)pluginId {
+    if (auto* e = self.engine) e->plugin_cancel(to_std(pluginId).c_str());
+}
+
+- (void)pluginReload:(NSString*)pluginId {
+    if (auto* e = self.engine) e->plugin_reload(to_std(pluginId).c_str());
 }
 
 - (NSArray<NSNumber*>*)effectCurve:(long long)layerId effect:(uint32_t)effect param:(uint32_t)param channel:(uint32_t)channel samples:(BOOL)samples {

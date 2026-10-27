@@ -59,6 +59,10 @@ check(EditorLayout.dockQuick >= 44 && EditorLayout.dockTile >= 44, "doca preserv
 // Omega fundação (F6): topo 42, transporte 46, zona fixa de 280 e a prévia igual em todos os estados.
 check(near(EditorLayout.topBar, 42) && near(EditorLayout.transport, 46), "barras da referência")
 check(near(EditorLayout.bottomZone(), 280) && near(EditorLayout.layerPanel(), 200), "zona de 280 com painel de 200")
+// 0.3.4 painéis: a faixa de foco é régua 42 + linha 28 + folga 10 (e cresce com a fonte).
+check(near(EditorLayout.timelineFocusHeight(fontScale: 1), 80) && near(EditorLayout.timelineFocusHeight(fontScale: 1), EditorLayout.timelineFocus),
+      "faixa de foco de 80 em 1×")
+check(near(EditorLayout.timelineFocusHeight(fontScale: 1.5), 99), "faixa de foco de 99 com fonte 150 %")
 // 0.3.3 barra: o bloco da grade do "+" (174) cabe na zona mínima da divisa (110 + 70).
 check(near(EditorLayout.addBarGridHeight, 174) && EditorLayout.addBarGridHeight <= EditorLayout.zoneMin,
       "grade do + de \(EditorLayout.addBarGridHeight) cabe na zona mínima \(EditorLayout.zoneMin)")
@@ -92,10 +96,24 @@ for h in [CGFloat(640), 700, 760, 780, 844, 900, 960] {
     let upBar = EditorLayout.solve(total: h, content: .addBar, fullscreen: false, preferred: up)
     check(near(upBar.preview, up) && near(upBar.zone, 380) && near(upBar.timeline, 310) && near(upBar.sheet, 70) && near(upBar.total, h),
           "\(h) divisa subindo: timeline 310 + barra 70")
-    for content in [SheetContent.dock, .panel, .curve] {
+    let upDock = EditorLayout.solve(total: h, content: .dock, fullscreen: false, preferred: up)
+    check(upDock.overlay && near(upDock.preview, up) && near(upDock.sheet, 200) && near(upDock.total, h),
+          "\(h) doca com a divisa subindo: altura do conteúdo (200)")
+    for content in [SheetContent.panel, .curve] {
         let m = EditorLayout.solve(total: h, content: content, fullscreen: false, preferred: up)
-        check(m.overlay && near(m.preview, up) && near(m.sheet, 200) && near(m.visibleTimeline, 180) && near(m.total, h),
-              "\(h) \(content) divisa subindo: painel de 200 e 180 de timeline à vista")
+        // 0.3.4 painéis: o painel sobe até logo abaixo da linha em foco (sem vazio por cima).
+        check(m.overlay && near(m.preview, up) && near(m.sheet, 300) && near(m.visibleTimeline, 80) && near(m.total, h),
+              "\(h) \(content) divisa subindo: painel de 300 e só a faixa de foco (80) à vista")
+    }
+    for font in [CGFloat(1), 1.3, 2] {
+        for pref in [CGFloat(0), 120, h - 368 - 200, h - 368 + 60] {
+            for content in [SheetContent.panel, .curve] {
+                let m = EditorLayout.solve(total: h, content: content, fullscreen: false, preferred: pref, fontScale: font)
+                check(m.overlay && near(m.visibleTimeline, EditorLayout.timelineFocusHeight(fontScale: font))
+                      && m.sheet >= EditorLayout.layerPanel(fontScale: font) - 0.01 && near(m.total, h),
+                      "\(h) fonte \(font) divisa \(pref) \(content): painel até logo abaixo da linha em foco")
+            }
+        }
     }
     let down = h - 368 + 60  // a timeline desceu 60
     let downBar = EditorLayout.solve(total: h, content: .addBar, fullscreen: false, preferred: down)
@@ -122,7 +140,8 @@ for height in [CGFloat(240), 320, 480, 568] {
     }
 }
 let bigFont = EditorLayout.solve(total: 900, content: .panel, fullscreen: false, fontScale: 1.5)
-check(near(bigFont.sheet, 220) && near(bigFont.timeline, 300) && near(bigFont.preview, 900 - 388), "fonte 150 %: painel 220, zona 300")
+check(near(bigFont.sheet, 220) && near(bigFont.timeline, 319) && near(bigFont.visibleTimeline, 99) && near(bigFont.preview, 900 - 407),
+      "fonte 150 %: painel 220, zona 319 (faixa de foco de 99)")
 let oneRowDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false, dockRows: 1)
 let twoRowDock = EditorLayout.solve(total: 780, content: .dock, fullscreen: false)
 check(near(oneRowDock.sheet, EditorLayout.dockHeight(rows: 1)) && near(oneRowDock.preview, twoRowDock.preview), "doca de uma fileira não mexe na prévia")

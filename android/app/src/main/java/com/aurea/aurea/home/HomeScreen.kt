@@ -74,6 +74,10 @@ fun HomeScreen(store: EditorStore) {
     var about by rememberSaveable { mutableStateOf(false) }
     var licenses by remember { mutableStateOf(false) }
     var newProject by rememberSaveable { mutableStateOf(false) }
+    // 0.3.4 plugins: a aba dos plugins com "home.tab" (fora das abas do HomeViewModel).
+    var pluginTab by rememberSaveable { mutableStateOf(false) }
+    val pluginTabLabel = com.aurea.aurea.effects.pluginHomeTabLabel(store)
+    LaunchedEffect(pluginTabLabel == null) { if (pluginTabLabel == null) pluginTab = false }
     var reportProblem by rememberSaveable { mutableStateOf(false) }
     val dialogs = remember { ProjectDialogState() }
     val drawer = rememberDrawerState(DrawerValue.Closed)
@@ -170,7 +174,8 @@ fun HomeScreen(store: EditorStore) {
                 }
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                when (vm.tab) {
+                if (pluginTab) com.aurea.aurea.effects.PluginHomeTab(store)   // 0.3.4 plugins
+                else when (vm.tab) {
                     HomeViewModel.HOME_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, false)
                     HomeViewModel.PROFILE_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, true)
                     HomeViewModel.PRESETS_TAB -> PresetsTab(store)
@@ -190,7 +195,16 @@ fun HomeScreen(store: EditorStore) {
                         onDelete = { dialogs.current = ProjectDialog.BatchDelete(selection) },
                     )
                 } else {
-                    HomeDock(selected = vm.tab, onSelect = vm::selectTab, onCreate = { newProject = true })
+                    // 0.3.4 plugins: a aba dos plugins entra no dock quando algum plugin ligado a declara.
+                    HomeDock(
+                        selected = if (pluginTab) com.aurea.aurea.effects.PLUGIN_HOME_TAB else vm.tab,
+                        onSelect = { tab ->
+                            if (tab == com.aurea.aurea.effects.PLUGIN_HOME_TAB) pluginTab = true
+                            else { pluginTab = false; vm.selectTab(tab) }
+                        },
+                        onCreate = { newProject = true },
+                        pluginTab = pluginTabLabel,
+                    )
                 }
             }
         }
@@ -284,7 +298,7 @@ internal fun RegisteredUsersLine(count: Int?) {
  * exato: os dois grupos laterais têm o mesmo peso em qualquer largura.
  */
 @Composable
-internal fun HomeDock(selected: Int, onSelect: (Int) -> Unit, onCreate: () -> Unit) {
+internal fun HomeDock(selected: Int, onSelect: (Int) -> Unit, onCreate: () -> Unit, pluginTab: Pair<String, Char>? = null) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -320,6 +334,12 @@ internal fun HomeDock(selected: Int, onSelect: (Int) -> Unit, onCreate: () -> Un
                 selected == HomeViewModel.PROJECTS_TAB, "home.projects") { onSelect(HomeViewModel.PROJECTS_TAB) }
             DockTab(CupertinoGlyph.WandStars, CupertinoGlyph.WandStars, stringResource(R.string.home_presets_short),
                 selected == HomeViewModel.PRESETS_TAB, "home.presets") { onSelect(HomeViewModel.PRESETS_TAB) }
+            // 0.3.4 plugins: a aba dos plugins (nome e ícone do plugin quando há uma só).
+            pluginTab?.let { (label, glyph) ->
+                DockTab(glyph, glyph, label, selected == com.aurea.aurea.effects.PLUGIN_HOME_TAB, "home.pluginsTab") {
+                    onSelect(com.aurea.aurea.effects.PLUGIN_HOME_TAB)
+                }
+            }
         }
     }
 }

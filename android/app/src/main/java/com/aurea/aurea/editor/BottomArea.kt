@@ -20,10 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.FormatAlignLeft
-import androidx.compose.material.icons.automirrored.rounded.FormatAlignRight
 import androidx.compose.material.icons.rounded.OpenWith
-import androidx.compose.material.icons.rounded.Stairs
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -63,7 +60,7 @@ import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
-import com.aurea.aurea.ui.theme.aureaBold
+import com.aurea.aurea.ui.theme.AureaLineIcons
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 
@@ -143,9 +140,9 @@ internal fun MultiSelectionPanel(store: EditorStore, @Suppress("UNUSED_PARAMETER
                 BatchTool(CupertinoGlyph.DocOnDoc, stringResource(R.string.editor_copiar_camada)) { store.copyLayers() }
                 BatchTool(CupertinoGlyph.PlusSquareOnSquare, stringResource(R.string.editor_duplicar_camada)) { store.duplicateLayers() }
             } else {
-            BatchTool(Icons.AutoMirrored.Rounded.FormatAlignLeft, stringResource(R.string.editor_alinhar_inicios)) { store.arrangeLayerTimes(0) }
-            BatchTool(Icons.Rounded.Stairs, stringResource(R.string.editor_escada_comeca_quando_cima_termina)) { store.arrangeLayerTimes(1) }
-            BatchTool(Icons.AutoMirrored.Rounded.FormatAlignRight, stringResource(R.string.editor_alinhar_fins)) { store.arrangeLayerTimes(2) }
+            BatchTool(AureaLineIcons.AlignStarts, stringResource(R.string.editor_alinhar_inicios)) { store.arrangeLayerTimes(0) }
+            BatchTool(AureaLineIcons.Stairs, stringResource(R.string.editor_escada_comeca_quando_cima_termina)) { store.arrangeLayerTimes(1) }
+            BatchTool(AureaLineIcons.AlignEnds, stringResource(R.string.editor_alinhar_fins)) { store.arrangeLayerTimes(2) }
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -213,5 +210,5 @@ private fun RowScope.BatchTool(icon: ImageVector, description: String, onClick: 
         Modifier.weight(1f).fillMaxHeight().semantics { contentDescription = description }
             .tocavel(haptic = true, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon.aureaBold(), contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(22.dp)) }
+    ) { Icon(icon, contentDescription = null, tint = AureaColors.Text, modifier = Modifier.size(22.dp)) }
 }

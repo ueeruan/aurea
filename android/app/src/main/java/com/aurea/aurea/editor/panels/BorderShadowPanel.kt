@@ -149,23 +149,24 @@ private object BsParam {
 
 /** Medidas (referência: `fragment_border_and_shadow`, `border_list_item`). */
 private object BsDims {
-    /** Linha amostra · título · interruptor (37,5 na referência; 44 = alvo de toque). */
-    val Header = 44.dp
-    val Swatch = 24.5.dp
-    val Ruler = 57.dp
+    // 0.3.4 painéis: linhas, amostras e réguas maiores (par do `BorderShadowMetrics` do iOS).
+    /** Linha amostra · título · interruptor (antes 44). */
+    val Header = 48.dp
+    val Swatch = 30.dp
+    val Ruler = 64.dp
     val RulerTop = 5.dp
     val ValueW = 55.dp
     val ValueH = 45.dp
     val Gap = 6.5.dp
-    /** Item de 37 com a margem de 6,5 em cima e 0,5 embaixo: o item inteiro é alvo de 44. */
-    val Slot = 44.dp
-    val HeaderSlot = 43.5.dp
-    val Radius = 5.dp
-    val Cue = 18.dp
-    val Dot = 20.dp
+    /** Item de 43 com a margem de 6,5 em cima e 0,5 embaixo (antes 37 em 44). */
+    val Slot = 50.dp
+    val HeaderSlot = 50.dp
+    val Radius = PanelMetrics.FieldRadius
+    val Cue = 20.dp
+    val Dot = 22.dp
     val Label = 60.dp
-    val Key = 40.dp
-    val Row = 44.dp
+    val Key = 44.dp
+    val Row = 50.dp
     val Pad = 10.dp
     const val OPEN_MS = 200
     const val STROKE_DEFAULT = 4f
@@ -654,7 +655,7 @@ private fun AddBorderItem(enabled: Boolean, onClick: () -> Unit) {
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CupertinoIcon(CupertinoGlyph.Plus, 15.dp, AureaColors.Text)
+            CupertinoIcon(CupertinoGlyph.Plus, 18.dp, AureaColors.Text)
             Spacer(Modifier.width(6.dp))
             Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Text)))
         }
@@ -1043,7 +1044,7 @@ private fun BsRow(
                 ),
             contentAlignment = Alignment.Center,
         ) {
-            KeyframeDiamondIcon(look, enabled = canKey, modifier = Modifier.size(22.dp))
+            KeyframeDiamondIcon(look, enabled = canKey, modifier = Modifier.size(PanelMetrics.RailIcon))
         }
     }
 }

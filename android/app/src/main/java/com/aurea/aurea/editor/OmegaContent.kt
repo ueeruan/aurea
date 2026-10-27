@@ -44,7 +44,7 @@ import com.aurea.aurea.ui.i18n.AppText
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
-import com.aurea.aurea.ui.theme.CupertinoIconBoldStroke
+import com.aurea.aurea.ui.theme.AureaIconStyle
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 
@@ -62,8 +62,9 @@ internal enum class ContentIconKind { AlignLeft, AlignCenter, AlignRight, Eraser
 internal fun ContentIcon(kind: ContentIconKind, size: Dp, tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier.size(size)) {
         val u = this.size.minDimension / 24f
-        // 0.3.3: traço 1,8 + o extra dos glifos bold (CupertinoIconBoldStroke), como o desfoque de movimento.
-        val sw = (1.8f + 24f * CupertinoIconBoldStroke) * u
+        // 0.3.4: o traço fino do estilo dos ícones (AureaIconStyle.Line); pontos de âncora e
+        // cadeado em contorno, só as pontinhas das alças cheias.
+        val sw = AureaIconStyle.Line * u
         val stroke = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
         fun line(x0: Float, y0: Float, x1: Float, y1: Float) =
             drawLine(tint, Offset(x0 * u, y0 * u), Offset(x1 * u, y1 * u), strokeWidth = sw, cap = StrokeCap.Round)
@@ -94,14 +95,14 @@ internal fun ContentIcon(kind: ContentIconKind, size: Dp, tint: Color, modifier:
                 // Canto: duas retas que se encontram num ponto.
                 val p = Path().apply { moveTo(4f * u, 19f * u); lineTo(12f * u, 6f * u); lineTo(20f * u, 19f * u) }
                 drawPath(p, tint, style = stroke)
-                drawRect(tint, Offset(10f * u, 4f * u), Size(4f * u, 4f * u))
+                drawRect(tint, Offset(10f * u, 4f * u), Size(4f * u, 4f * u), style = stroke)
             }
             ContentIconKind.PointCurve -> {
                 // Curva: o arco com o ponto e as duas alças.
                 val p = Path().apply { moveTo(4f * u, 19f * u); cubicTo(6f * u, 6f * u, 18f * u, 6f * u, 20f * u, 19f * u) }
                 drawPath(p, tint, style = stroke)
                 line(5f, 9.5f, 19f, 9.5f)
-                drawCircle(tint, 2f * u, Offset(12f * u, 9.5f * u))
+                drawCircle(tint, 2f * u, Offset(12f * u, 9.5f * u), style = stroke)
                 drawCircle(tint, 1.4f * u, Offset(5f * u, 9.5f * u))
                 drawCircle(tint, 1.4f * u, Offset(19f * u, 9.5f * u))
             }
@@ -109,9 +110,9 @@ internal fun ContentIcon(kind: ContentIconKind, size: Dp, tint: Color, modifier:
                 // Alça presa na reta: duas alças opostas e um cadeado pequeno.
                 line(3f, 15f, 21f, 15f)
                 drawCircle(tint, 1.8f * u, Offset(12f * u, 15f * u))
-                drawRoundRect(tint, Offset(8.5f * u, 4.5f * u), Size(7f * u, 5.5f * u), CornerRadius(1f * u))
+                drawRoundRect(tint, Offset(8.5f * u, 4.5f * u), Size(7f * u, 5.5f * u), CornerRadius(1f * u), style = stroke)
                 val arc = Path().apply { moveTo(10f * u, 4.5f * u); cubicTo(10f * u, 1.5f * u, 14f * u, 1.5f * u, 14f * u, 4.5f * u) }
-                drawPath(arc, tint, style = Stroke((1.4f + 24f * CupertinoIconBoldStroke) * u))
+                drawPath(arc, tint, style = stroke)
             }
             ContentIconKind.LengthLock -> {
                 // Comprimento igual: a régua com as duas pontas.

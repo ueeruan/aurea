@@ -609,6 +609,11 @@ struct Solver {
                 if (hasFoot) {
                     footDir = P(to[s]) - P(he[s]);
                     footDir = footDir - tn * footDir.dot(tn);
+                    // Pé encurtado (no 2D o pé que aponta para a câmera tem a
+                    // profundidade achatada pelo levantamento) ou quase na
+                    // linha da coxa: o resto é ruído e não decide o giro da
+                    // coxa — com ele o eixo do joelho virava e a canela ficava reta.
+                    if (footDir.length_sq() < 0.01f * ct.length_sq()) footDir = Vec3{0, 0, 0};
                 }
                 f32 w = smoothstep(8.0f * kDeg2Rad, 25.0f * kDeg2Rad, bend);
                 const Vec3 kneeFwd = bendDir.length_sq() > 1e-12f ? -bendDir.normalized() : Vec3{0, 0, 0};

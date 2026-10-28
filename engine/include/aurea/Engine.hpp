@@ -2158,6 +2158,11 @@ public:
     [[nodiscard]] f32 preview_heavy_scale() const noexcept;
     /// Degrau de reduções que o estado térmico impõe (0 normal, 1 quente, 2 crítico).
     [[nodiscard]] u32 thermal_heavy_level() const noexcept;
+    /// 0.4.0 "Toque leve": um gesto está aberto e o preview desenha rascunho.
+    [[nodiscard]] bool interaction_draft_active() const noexcept {
+        return interactionDepth_.load(std::memory_order_acquire) > 0
+            && interaction_draft(caps_.tier()).heavyLevel > 0;
+    }
 
     // --- Proxy de edição ("Otimizar vídeos pesados", 0.2.5; EngineProxy.cpp) --
     /// ProxyMode: 0 Automático, 1 Sempre, 2 Desligado. O app grava a escolha e
@@ -2947,6 +2952,10 @@ private:
     bool refinePending_ = false;              ///< último quadro saiu reduzido
     bool refineNow_ = false;                  ///< este quadro é o refino
     u64 refineDueNs_ = 0;                     ///< prazo absoluto; vsync sem mudança não o adia
+    /// 0.4.0 "Toque leve" (interaction_draft): grupos de desfazer abertos =
+    /// dedo arrastando; o quadro desenhado em rascunho não entra na média do AUTO.
+    std::atomic<u32> interactionDepth_{0};
+    std::atomic<bool> lastFrameDrafted_{false};
     bool contentBoundedPlayback_ = false;
     // A paused transport jump may target a project marker after the last clip.
     // Keep that cursor across preview reconfiguration while the marker exists.

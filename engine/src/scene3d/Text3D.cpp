@@ -1382,7 +1382,7 @@ void apply_surface_finish(SceneAsset& asset, u32 finish) {
 std::string text3d_geometry_key(const text::Font& font, const Text3DSpec& spec) { return geom_key(font, spec); }
 
 bool apply_text3d_material_preset(Text3DSpec& s, u32 preset) noexcept {
-    if (preset > 6) return false;
+    if (preset > 13) return false;
     s.specular = 1; s.emissive = {}; s.emissiveStrength = 1;
     s.surfaceFinish = preset == 2 ? 1u : 0u;
     s.regionMaterials = false;
@@ -1401,6 +1401,49 @@ bool apply_text3d_material_preset(Text3DSpec& s, u32 preset) noexcept {
             s.side = Text3DMaterial{}; s.side.color = {.32f, .13f, .065f, 1}; s.side.metallic = .8f; s.side.roughness = .4f;
             s.bevelMat = Text3DMaterial{}; s.bevelMat.color = {1.f, .70f, .24f, 1}; s.bevelMat.metallic = .88f; s.bevelMat.roughness = .23f;
             s.bevelMat.emissive = {1.f, .27f, .015f}; s.bevelMat.emissiveStrength = .08f;
+            break;
+        // 0.4.0: estilos de tipografia 3D comuns em motion (cada um mexe também
+        // na geometria; conteúdo, fonte e animação continuam os do usuário).
+        case 7: // Inflado ("puffy"): filete largo e redondo, plástico brilhante.
+            s.depth = .3f; s.bevel = true; s.bevelWidth = .06f; s.bevelDepth = .12f;
+            s.bevelSegments = 8; s.bevelRoundness = 1;
+            s.color = {1, .45f, .72f, 1}; s.metallic = 0; s.roughness = .12f;
+            break;
+        case 8: // Retrô anos 80: frente cromada, lateral magenta, chanfro ciano.
+            s.depth = .35f; s.bevel = true; s.bevelWidth = .02f; s.bevelDepth = .03f;
+            s.bevelSegments = 2; s.bevelRoundness = 0; s.regionMaterials = true;
+            s.color = {.92f, .94f, 1, 1}; s.metallic = 1; s.roughness = .06f;
+            s.side = Text3DMaterial{}; s.side.color = {.75f, .1f, .62f, 1}; s.side.metallic = .3f; s.side.roughness = .3f;
+            s.bevelMat = Text3DMaterial{}; s.bevelMat.color = {.2f, .95f, 1, 1}; s.bevelMat.metallic = .2f; s.bevelMat.roughness = .2f;
+            s.bevelMat.emissive = {.2f, .95f, 1}; s.bevelMat.emissiveStrength = 1.5f;
+            break;
+        case 9: // Borda neon: frente escura, só o chanfro acende.
+            s.depth = .12f; s.bevel = true; s.bevelWidth = .025f; s.bevelDepth = .02f;
+            s.bevelSegments = 4; s.bevelRoundness = 1; s.regionMaterials = true;
+            s.color = {.04f, .04f, .06f, 1}; s.metallic = 0; s.roughness = .25f;
+            s.side = Text3DMaterial{}; s.side.color = {.06f, .06f, .08f, 1}; s.side.roughness = .5f;
+            s.bevelMat = Text3DMaterial{}; s.bevelMat.color = {1, .2f, .85f, 1};
+            s.bevelMat.emissive = {1, .2f, .85f}; s.bevelMat.emissiveStrength = 4;
+            break;
+        case 10: // Bloco (extrusão longa, "sombra longa"): lateral no mesmo tom, mais escura.
+            s.depth = 1.0f; s.bevel = false; s.regionMaterials = true;
+            s.color = {1, .82f, .2f, 1}; s.metallic = 0; s.roughness = .5f;
+            s.side = Text3DMaterial{}; s.side.color = {.62f, .35f, .05f, 1}; s.side.roughness = .6f;
+            s.bevelMat = s.side;
+            break;
+        case 11: // Gelo: claro, quase espelhado, reflexo forte.
+            s.bevel = true; s.bevelWidth = .015f; s.bevelDepth = .02f; s.bevelSegments = 3; s.bevelRoundness = .6f;
+            s.color = {.78f, .92f, 1, 1}; s.metallic = .1f; s.roughness = .03f; s.specular = 1;
+            s.emissive = {.05f, .12f, .2f}; s.emissiveStrength = .6f;
+            break;
+        case 12: // Pedra esculpida: profunda, chanfro reto, áspera e sem brilho.
+            s.depth = .45f; s.bevel = true; s.bevelWidth = .03f; s.bevelDepth = .03f;
+            s.bevelSegments = 1; s.bevelRoundness = 0; s.surfaceFinish = 3;
+            s.color = {.55f, .53f, .5f, 1}; s.metallic = 0; s.roughness = .95f; s.specular = .1f;
+            break;
+        case 13: // Ouro rosé.
+            s.bevel = true; s.bevelWidth = .018f; s.bevelDepth = .02f; s.bevelSegments = 4; s.bevelRoundness = 1;
+            s.color = {.98f, .68f, .6f, 1}; s.metallic = 1; s.roughness = .16f;
             break;
     }
     return true;

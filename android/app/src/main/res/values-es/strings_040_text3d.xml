@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.0: estilos de tipografia 3D (materiais prontos 7..13 do motor). -->
+    <string name="pn_t3d_preset_puffy">Inflado</string>
+    <string name="pn_t3d_preset_retro80">Retro 80</string>
+    <string name="pn_t3d_preset_neon_edge">Borde neón</string>
+    <string name="pn_t3d_preset_block">Bloque</string>
+    <string name="pn_t3d_preset_ice">Hielo</string>
+    <string name="pn_t3d_preset_stone">Piedra</string>
+    <string name="pn_t3d_preset_rose_gold">Oro rosa</string>
+</resources>

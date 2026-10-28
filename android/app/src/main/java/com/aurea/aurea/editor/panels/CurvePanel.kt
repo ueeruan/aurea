@@ -632,14 +632,14 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
                                 onEnd = { store.endGesture() },
                             )
                         }
-                        // Curva (0..1 com folga): a faixa fica por cima da base do gráfico.
-                        if (graphMode == 0) segmentBar(Modifier.align(Alignment.BottomCenter))
                     }
                     // Bugs 0.3.4 (bug 10): no gráfico de Valor/Velocidade a faixa ◀ ▶ ficava
                     // POR CIMA dos últimos ~30 dp do gráfico (e da legenda): os pontos de
                     // valor baixo caíam embaixo dela e o toque ia para as setas/rótulo.
                     // Aqui ela fica ABAIXO do gráfico (como antes da interface nova).
-                    if (graphMode != 0) segmentBar(Modifier)
+                    // 0.4.0: também na Curva. Por cima, a faixa tomava o toque da alça
+                    // de baixo (y perto de 0): "o slider de baixo às vezes não mexe".
+                    segmentBar(Modifier)
                 }
             }
         }
@@ -1017,10 +1017,13 @@ private fun androidx.compose.foundation.layout.RowScope.CurveParamSlider(
     Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp).widthIn(max = 96.dp),
         style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, color = Color.White)))
     var changing by remember { mutableStateOf(false) }
+    // 0.4.0: o dedo manda durante o arrasto; o valor do motor chega depois e
+    // fazia o polegar voltar (parecia "travar").
+    var dragValue by remember { mutableStateOf<Float?>(null) }
     val change by rememberUpdatedState(onChange)
-    androidx.compose.material3.Slider(value = value.coerceIn(range.start, range.endInclusive), valueRange = range, steps = steps,
-        onValueChange = { if (!changing) { changing = true; store.beginGesture(gesture) }; change(it) },
-        onValueChangeFinished = { if (changing) { changing = false; store.endGesture() } },
+    androidx.compose.material3.Slider(value = (dragValue ?: value).coerceIn(range.start, range.endInclusive), valueRange = range, steps = steps,
+        onValueChange = { if (!changing) { changing = true; store.beginGesture(gesture) }; dragValue = it; change(it) },
+        onValueChangeFinished = { dragValue = null; if (changing) { changing = false; store.endGesture() } },
         colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = CurveGreen,
             activeTrackColor = CurveGreen, inactiveTrackColor = CurveRailFill),
         modifier = Modifier.weight(1f).testTag(tag).semantics {

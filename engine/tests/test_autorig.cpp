@@ -296,7 +296,8 @@ AUREA_TEST(AutoRig, MapsMixamoAndBipedRigsByName) {
     AUREA_CHECK_EQ(b[HumanoidBone::Hips], 1);
     AUREA_CHECK_EQ(b[HumanoidBone::Chest], 3);
     AUREA_CHECK_EQ(b[HumanoidBone::LeftUpperArm], 7);
-    AUREA_CHECK_EQ(b[HumanoidBone::RightLowerArm], 11);
+    AUREA_CHECK_EQ(b[HumanoidBone::RightUpperArm], 11);
+    AUREA_CHECK_EQ(b[HumanoidBone::RightLowerArm], 12);   // "Bip01 R Forearm" é o 12º nó (0 = Bip01)
     AUREA_CHECK_EQ(b[HumanoidBone::LeftLowerLeg], 15);
 
     // Nomes comuns (Unreal / Blender): upperarm_l, thigh.R…

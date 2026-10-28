@@ -620,8 +620,9 @@ AUREA_TEST(MaterialPreview, PresetBallsAreRoundDistinctAndDeterministic) {
     ec.disableAutosave = true;
     AUREA_CHECK(e.initialize(ec).ok());
     constexpr u32 size = 64;
-    std::vector<std::vector<u8>> balls(7);
-    for (u32 p = 0; p < 7; ++p) {
+    // 0.4.0: 14 materiais prontos (7..13 = estilos de tipografia 3D).
+    std::vector<std::vector<u8>> balls(14);
+    for (u32 p = 0; p < 14; ++p) {
         AUREA_CHECK(e.text3d_preset_preview(p, size, balls[p]));
         AUREA_CHECK_EQ(balls[p].size(), static_cast<usize>(size * size * 4));
         if (balls[p].size() != size * size * 4) { e.shutdown(); return; }
@@ -633,7 +634,7 @@ AUREA_TEST(MaterialPreview, PresetBallsAreRoundDistinctAndDeterministic) {
     }
     // Fora da faixa: nada.
     std::vector<u8> none;
-    AUREA_CHECK(!e.text3d_preset_preview(7, size, none) && none.empty());
+    AUREA_CHECK(!e.text3d_preset_preview(14, size, none) && none.empty());
     AUREA_CHECK(!e.text3d_preset_preview(0, 8, none) && none.empty());
     AUREA_CHECK(!e.text3d_preset_preview(0, 512, none) && none.empty());
     const BallStats chrome = ball_stats(balls[0], size), gold = ball_stats(balls[1], size),

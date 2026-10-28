@@ -37,7 +37,11 @@ struct EditModeView: View {
     @State private var cut: EditCut?
 
     var body: some View {
-        let previewH = model.fullscreen ? max(0, height - 52) : min(max(height * 0.40, 160), 560)
+        // 0.4.0: com painel aberto o palco cede espaço (30 %) e a linha do tempo fica com
+        // 72 no mínimo: em tela baixa as abas eram uma faixa onde nada dava para mexer.
+        let panelOpen = model.panel != .none && model.panel != .dock && !model.textModeActive
+        let previewH = model.fullscreen ? max(0, height - 52)
+            : panelOpen ? min(max(height * 0.30, 140), 420) : min(max(height * 0.40, 160), 560)
         // Omega conteúdo (área 06, P2-15): o modo de texto também na Edição — a barra de
         // estilo no topo (52) e o painel grande embaixo do palco.
         let texting = model.textModeActive && !model.fullscreen
@@ -55,10 +59,10 @@ struct EditModeView: View {
                     // Painel aberto: a linha do tempo encolhe e o painel da Composição sobe.
                     // 0.3.6: o painel vai até o teto (`EditorLayout.panelMax`); numa tela alta o
                     // que passa dele fica com a linha do tempo (112 no mínimo). Par do Android.
-                    let panelH = min(max(0, height - 52 - previewH - 48 - 112),
+                    let panelH = min(max(0, height - 52 - previewH - 48 - 72),
                                      EditorLayout.panelMax(fontScale: UIFont.preferredFont(forTextStyle: .body).pointSize / 17))
                     EditTimelineView(compact: true, onAddMedia: addMedia, onAddAudio: { level = .audio }, onTransition: { cut = EditCut(outgoing: $0, incoming: $1) })
-                        .frame(minHeight: 112, maxHeight: .infinity)
+                        .frame(minHeight: 72, maxHeight: .infinity)
                         .environment(\.layoutDirection, .leftToRight)
                     ContextSheet(metrics: EditorMetrics(topBar: 0, preview: 0, strip: 0, transport: 0, timeline: 0, sheet: 0))
                         .frame(height: panelH)

@@ -95,6 +95,11 @@ struct ExportAttemptPlan {
         const ExportFrameSize native = export_frame_size_v2(compW, compH, wantShort);
         if (native.width && native.height) return native;
     }
+    // Só a COMPOSIÇÃO ímpar alinha: um lado menor PEDIDO ímpar (ou um valor
+    // absurdo vindo da ponte, como u32 máximo) continua inválido — antes
+    // alinhava para um tamanho gigante e o export abria o encoder.
+    const u32 nativeShort = compW && compH ? std::min(compW, compH) : 0u;
+    if (wantShort && wantShort != nativeShort && (wantShort & 1u)) return {};
     return export_frame_size(compW, compH, wantShort);
 }
 

@@ -245,6 +245,13 @@ private val PresetSwatch = mapOf(
     Text3DPreset.Matte to Color(0xFFD9D9DB),
     Text3DPreset.Neon to Color(0xFF1AFFD9),
     Text3DPreset.CinematicMetal to Color(0xFFA8ADB8),
+    Text3DPreset.Puffy to Color(0xFFFF73B8),
+    Text3DPreset.Retro80 to Color(0xFFBF1A9E),
+    Text3DPreset.NeonEdge to Color(0xFFFF33D9),
+    Text3DPreset.Block to Color(0xFFFFD133),
+    Text3DPreset.Ice to Color(0xFFC7EBFF),
+    Text3DPreset.Stone to Color(0xFF8C8780),
+    Text3DPreset.RoseGold to Color(0xFFFAAD99),
 )
 
 private val FinishLabels = listOf(

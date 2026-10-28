@@ -10778,6 +10778,16 @@ RenderSettings Engine::current_render_settings() noexcept {
         rs.previewNumerator = 1;
         rs.previewDenominator = adapt().still_denominator(caps_.thermal());
     }
+    // 0.4.0 "Toque leve": dedo arrastando = rascunho (DevicePolicy::interaction_draft).
+    bool drafted = false;
+    if (!refineNow_ && interaction_draft_active()) {
+        const InteractionDraft d = interaction_draft(caps_.tier());
+        rs.quality = rs.quality.min(PreviewQuality::level(d.heavyLevel));
+        rs.heavyScale = std::min(rs.heavyScale, rs.quality.heavy());
+        if (d.denominatorMul > 1) rs.previewDenominator = std::min<u32>(rs.previewDenominator * d.denominatorMul, 8u);
+        drafted = true;
+    }
+    lastFrameDrafted_.store(drafted, std::memory_order_release);
     rs.gpuTimers = config_.enableTelemetry;
     if (project_) {
         rs.viewportZoom = project_->editor_settings().viewportZoom > 0.0f
@@ -11465,7 +11475,8 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
     stats.memoryPressure = memory_.pressure();
     // O refino não entra na média do AUTO: é um quadro avulso em outra
     // resolução, não o ritmo do preview.
-    if (!preRendered && !refineNow_ && !rs.rawPlayback && !renderer_.last_preview_cache_hit()) (void)adapt().update(stats, caps_.thermal());
+    if (!preRendered && !refineNow_ && !rs.rawPlayback && !lastFrameDrafted_.load(std::memory_order_acquire)
+        && !renderer_.last_preview_cache_hit()) (void)adapt().update(stats, caps_.thermal());
     // A luz de ambiente termina em segundo plano. Mesmo parado, precisamos
     // apresentar outro quadro para que metais recebam os reflexos prontos.
     const auto stillScale = preview_viewport_scale(adapt().auto_mode(), snapshot_.compWidth, snapshot_.compHeight,
@@ -18385,9 +18396,14 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         // ---------------------------------------------------------------------
         case CommandType::UndoBeginGroup:
             history_.begin_group(stringData ? stringData : "acao");
+            interactionDepth_.fetch_add(1, std::memory_order_acq_rel);
             return OkStatus;
         case CommandType::UndoEndGroup:
             history_.end_group();
+            // Soltou: o próximo quadro sai na qualidade normal mesmo sem edição nova.
+            if (u32 d = interactionDepth_.load(std::memory_order_acquire); d > 0
+                && interactionDepth_.fetch_sub(1, std::memory_order_acq_rel) == 1
+                && lastFrameDrafted_.load(std::memory_order_acquire)) request_render();
             return OkStatus;
         case CommandType::Undo:
             if (!history_.undo(timeline)) return Errc::InvalidState;

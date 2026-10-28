@@ -184,4 +184,19 @@ struct DevicePolicy {
 /// A política para uma classe de aparelho sob uma faixa térmica.
 [[nodiscard]] DevicePolicy device_policy(DeviceTier tier, ThermalTier thermal) noexcept;
 
+/// 0.4.0 "Toque leve": enquanto um dedo arrasta (grupo de desfazer aberto), o
+/// preview desenha um rascunho mais barato e o quadro depois de soltar volta ao
+/// normal. Aparelho fraco perde mais: a escada de reduções vai a 1/4 e a
+/// resolução cai pela metade; no topo de linha nada muda.
+struct InteractionDraft {
+    u32 heavyLevel = 0;      ///< degrau de PreviewQuality::level (0 = nenhum)
+    u32 denominatorMul = 1;  ///< multiplica o denominador do preview (1 = igual)
+};
+[[nodiscard]] constexpr InteractionDraft interaction_draft(DeviceTier tier) noexcept {
+    return tier == DeviceTier::Low  ? InteractionDraft{2, 2}
+         : tier == DeviceTier::Mid  ? InteractionDraft{2, 1}
+         : tier == DeviceTier::High ? InteractionDraft{1, 1}
+                                    : InteractionDraft{0, 1};
+}
+
 } // namespace aurea

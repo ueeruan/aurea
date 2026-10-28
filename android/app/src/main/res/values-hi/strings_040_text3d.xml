@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.0: estilos de tipografia 3D (materiais prontos 7..13 do motor). -->
+    <string name="pn_t3d_preset_puffy">फूला हुआ</string>
+    <string name="pn_t3d_preset_retro80">रेट्रो 80s</string>
+    <string name="pn_t3d_preset_neon_edge">नियॉन किनारा</string>
+    <string name="pn_t3d_preset_block">ब्लॉक</string>
+    <string name="pn_t3d_preset_ice">बर्फ़</string>
+    <string name="pn_t3d_preset_stone">पत्थर</string>
+    <string name="pn_t3d_preset_rose_gold">रोज़ गोल्ड</string>
+</resources>

@@ -116,7 +116,13 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
             val texting = store.textEditLayer != null && !ui.fullscreen
             if (texting) Box(Modifier.fillMaxWidth().height(52.dp).zIndex(2f)) { TextStyleBar(store) }
             else if (!ui.fullscreen) EditTopBar(store, ui)
-            val previewH = if (ui.fullscreen) total - 52.dp else (total * 0.40f).coerceIn(160.dp, 560.dp)
+            // 0.4.0: com painel aberto o palco cede espaço (30 %) e a linha do tempo fica
+            // com 72 no mínimo: em tela baixa (aparelho de 2017) as abas eram uma faixa
+            // de ~150 dp onde nada dava para mexer.
+            val panelOpen = ui.panel != null && store.textEditLayer == null
+            val previewH = if (ui.fullscreen) total - 52.dp
+                else if (panelOpen) (total * 0.30f).coerceIn(140.dp, 420.dp)
+                else (total * 0.40f).coerceIn(160.dp, 560.dp)
             KeepLtr { stage(Modifier.fillMaxWidth().height(previewH).background(EditColors.Preview)) }
             if (texting) {
                 TextEditPanel(store, Modifier.fillMaxWidth().weight(1f))
@@ -129,7 +135,7 @@ internal fun EditModeEditor(store: EditorStore, ui: EditorUi, stage: @Composable
                     // 0.3.6: o painel vai até o teto (EditorLayout.panelMax); numa tela alta o
                     // que passa dele fica com a linha do tempo (112 no mínimo), não com o painel.
                     val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
-                    val panelH = (total - 52.dp - previewH - 48.dp - 112.dp).coerceIn(0.dp, EditorLayout.panelMax(fontScale).dp)
+                    val panelH = (total - 52.dp - previewH - 48.dp - 72.dp).coerceIn(0.dp, EditorLayout.panelMax(fontScale).dp)
                     KeepLtr { EditTimeline(store, Modifier.fillMaxWidth().weight(1f), compact = true, onAddMedia = actions.addMedia, onAddAudio = { level = EditDockLevel.Audio }, onTransition = { a, b -> cut = a to b }) }
                     Box(Modifier.fillMaxWidth().height(panelH).background(AureaColors.EditorPanel)) {
                         // Na Edição a barra de cima não mostra o título da seção: o painel

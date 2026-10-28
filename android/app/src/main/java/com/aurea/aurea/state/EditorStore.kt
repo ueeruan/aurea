@@ -9487,7 +9487,15 @@ enum class Text3DPreset(val labelRes: Int) {
     Glossy(R.string.pn_t3d_preset_glossy),
     Matte(R.string.pn_t3d_preset_matte),
     Neon(R.string.pn_t3d_preset_neon),
-    CinematicMetal(R.string.pn_t3d_preset_cinematic);
+    CinematicMetal(R.string.pn_t3d_preset_cinematic),
+    // 0.4.0: estilos de tipografia 3D (mesma ordem do motor, 7..13).
+    Puffy(R.string.pn_t3d_preset_puffy),
+    Retro80(R.string.pn_t3d_preset_retro80),
+    NeonEdge(R.string.pn_t3d_preset_neon_edge),
+    Block(R.string.pn_t3d_preset_block),
+    Ice(R.string.pn_t3d_preset_ice),
+    Stone(R.string.pn_t3d_preset_stone),
+    RoseGold(R.string.pn_t3d_preset_rose_gold);
 
 }
 

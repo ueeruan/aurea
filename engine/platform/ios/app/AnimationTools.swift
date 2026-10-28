@@ -710,7 +710,6 @@ struct NativeCurvePanel: View {
                                     onChange: { apply($0, to: segment.start); model.refreshModel(force: true) },
                                     onEnd: { model.endGesture() })
                                     .id("\(layer):\(segment.id)")
-                                segmentNavigation(segment)
                             } else {
                                 NativeTrackGraph(layer: layer, keys: track, speed: graphMode == 2)
                             }
@@ -718,7 +717,9 @@ struct NativeCurvePanel: View {
                         // Bugs 0.3.4 (bug 10): no gráfico de Valor/Velocidade a faixa ◀ ▶
                         // ficava POR CIMA da base do gráfico e tomava o toque dos pontos de
                         // valor baixo. Aqui ela fica ABAIXO dele (par do CurvePanel.kt).
-                        if graphMode != 0 { segmentNavigation(segment) }
+                        // 0.4.0: também na Curva. Por cima, a faixa tomava o toque da alça
+                        // de baixo (y perto de 0): "o slider de baixo às vezes não mexe".
+                        segmentNavigation(segment)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(AureaColors.curveGraphBackground)

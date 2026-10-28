@@ -48,10 +48,15 @@ struct Panel3DView: View {
 
     private var layerId: Int64 { model.primarySelection ?? 0 }
     private let presetKeys = ["pn_t3d_preset_chrome", "pn_t3d_preset_gold", "pn_t3d_preset_brushed",
-                              "pn_t3d_preset_glossy", "pn_t3d_preset_matte", "pn_t3d_preset_neon", "pn_t3d_preset_cinematic"]
+                              "pn_t3d_preset_glossy", "pn_t3d_preset_matte", "pn_t3d_preset_neon", "pn_t3d_preset_cinematic",
+                              // 0.4.0: estilos de tipografia 3D (motor 7..13).
+                              "pn_t3d_preset_puffy", "pn_t3d_preset_retro80", "pn_t3d_preset_neon_edge", "pn_t3d_preset_block",
+                              "pn_t3d_preset_ice", "pn_t3d_preset_stone", "pn_t3d_preset_rose_gold"]
     /// Cor da amostra de cada material pronto (a mesma ordem do motor).
     private let presetSwatches: [[Float]] = [[0.95, 0.96, 0.98], [1, 0.77, 0.34], [0.78, 0.79, 0.8], [0.9, 0.1, 0.12],
-                                             [0.85, 0.85, 0.86], [0.1, 1, 0.85], [0.66, 0.68, 0.72]]
+                                             [0.85, 0.85, 0.86], [0.1, 1, 0.85], [0.66, 0.68, 0.72],
+                                             [1, 0.45, 0.72], [0.75, 0.1, 0.62], [1, 0.2, 0.85], [1, 0.82, 0.2],
+                                             [0.78, 0.92, 1], [0.55, 0.53, 0.5], [0.98, 0.68, 0.6]]
     private let finishKeys = ["ui3d_finish_smooth", "ui3d_finish_brushed", "ui3d_finish_scratched",
                               "ui3d_finish_hammered", "ui3d_finish_weathered"]
 
@@ -189,7 +194,7 @@ struct Panel3DView: View {
             }.frame(minHeight: 48)
             section("ui3d_ready_materials")
             horizontal {
-                ForEach([6, 0, 1, 2, 3, 4, 5], id: \.self) { index in
+                ForEach([6, 0, 1, 2, 3, 4, 5] + Array(7...13), id: \.self) { index in
                     // A bola de estúdio do material (o motor calcula; até chegar, a cor chapada).
                     swatchChip(presetKeys[index], swatch: presetSwatches[index], thumb: presetThumb(index)) {
                         finishEditing()

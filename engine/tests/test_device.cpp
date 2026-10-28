@@ -695,3 +695,17 @@ AUREA_TEST(Thermal, EngineAppliesTierAndThermalToTheLiveKnobs) {
     AUREA_CHECK_NEAR(e.preview_heavy_scale(), 0.5f, 1e-6f);
     e.shutdown();
 }
+
+// 0.4.0 "Toque leve": o rascunho do gesto pesa mais no aparelho fraco e some no topo.
+AUREA_TEST(DevicePolicy, InteractionDraftByTier) {
+    const InteractionDraft low = interaction_draft(DeviceTier::Low);
+    const InteractionDraft mid = interaction_draft(DeviceTier::Mid);
+    const InteractionDraft high = interaction_draft(DeviceTier::High);
+    const InteractionDraft ultra = interaction_draft(DeviceTier::Ultra);
+    AUREA_CHECK_EQ(low.heavyLevel, 2u);
+    AUREA_CHECK_EQ(low.denominatorMul, 2u);
+    AUREA_CHECK_EQ(mid.denominatorMul, 1u);
+    AUREA_CHECK(high.heavyLevel < mid.heavyLevel);
+    AUREA_CHECK_EQ(ultra.heavyLevel, 0u);
+    AUREA_CHECK_EQ(ultra.denominatorMul, 1u);
+}

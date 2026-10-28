@@ -235,8 +235,15 @@ internal fun RotationDial(
         if (radius <= 4.dp.toPx()) return@Canvas
         val c = Offset(size.width / 2f, size.height / 2f)
         val track = 2.5.dp.toPx()
-        // Trilha.
-        drawCircle(AureaColors.Scrim.copy(alpha = 0.3f), radius, c, style = Stroke(track))
+        // Trilha. 0.4.1 (mockup "interface 03"): tracejada, branco a 25 %, e o ponteiro do
+        // centro até a alça no destaque.
+        drawCircle(Color.White.copy(alpha = 0.25f), radius, c,
+            style = Stroke(2.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))))
+        run {
+            val t0 = Math.toRadians(rest.toDouble())
+            drawLine(AureaColors.Accent, c, Offset(c.x + radius * sin(t0).toFloat(), c.y - radius * cos(t0).toFloat()),
+                2.5.dp.toPx(), cap = StrokeCap.Round)
+        }
         // Arco do excedente (passou de uma volta): do alto até o ângulo dentro da volta.
         if (kotlin.math.abs(a) > 360f && rest != 0f) {
             drawArc(

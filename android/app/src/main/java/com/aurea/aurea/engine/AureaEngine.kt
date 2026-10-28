@@ -834,6 +834,8 @@ class AureaEngine private constructor() {
 
     // Partículas.
     fun addParticles(preset: Int): Long = nativeAddParticles(nativeHandle, preset)
+    /** 0.4.1: Elementos › Aurora (Engine::add_aurora). */
+    fun addAurora(): Long = nativeAddAurora(nativeHandle)
 
     // Texto 3D.
     fun addText3d(content: String, fields: FloatArray, fontPath: String = ""): Long = nativeAddText3d(nativeHandle, content, fields, fontPath)
@@ -1894,6 +1896,7 @@ class AureaEngine private constructor() {
     private external fun nativeSetTimeRemap(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeSetTimeRemapValue(handle: Long, layer: Long, frame: Long, value: Float): Boolean
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
+    private external fun nativeAddAurora(handle: Long): Long
     private external fun nativeAddText3d(handle: Long, content: String, fields: FloatArray, fontPath: String): Long
     private external fun nativeSetText3d(handle: Long, layer: Long, content: String, fields: FloatArray, fontPath: String): Boolean
     private external fun nativeSetText3dTexture(handle: Long, layer: Long, path: String): Boolean

@@ -58,7 +58,11 @@ struct AureaApp: App {
                 // fora (Arquivos, AirDrop, mensageiro, "Abrir com") entra como
                 // projeto NOVO — o mesmo caminho de "Importar arquivo do projeto".
                 // Antes o app não declarava os tipos e nada chegava aqui.
-                .onOpenURL { url in openProjectFileFromOutside(url) }
+                .onOpenURL { url in
+                    // 0.4.1: a volta da folha do Google (GoogleLogin.swift) não é projeto.
+                    if GoogleLogin.tratar(url) { return }
+                    openProjectFileFromOutside(url)
+                }
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active { AureaAds.start() }   // anúncios: uma vez (o manager ignora as repetidas)

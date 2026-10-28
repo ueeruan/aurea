@@ -12,15 +12,19 @@ struct ContentView: View {
     @EnvironmentObject private var model: AureaModel
     /// 0.3.2: config remota assinada (AppConfig.swift): abaixo da versão mínima, só a tela de atualizar.
     @ObservedObject private var appConfig = AppConfigStore.shared
+    /// 0.4.1: conta obrigatória de novo — sem sessão, o app inteiro é a tela de conta.
+    @EnvironmentObject private var conta: ContaModel
     @State private var pageWidth = UIScreen.main.bounds.width
 
     var body: some View {
         ZStack {
             AureaColors.background.ignoresSafeArea()
 
-            // Projetos e editor estão disponíveis mesmo sem sessão de conta.
             if appConfig.updateRequired, let forced = appConfig.config {
                 ForcedUpdateView(config: forced).zIndex(10)
+            } else if !conta.logado {
+                // 0.4.1: sem sessão guardada, só a tela de conta (como até a 0.1.4).
+                ContaView().zIndex(5)
             } else {
             switch model.screen {
             case .home:

@@ -664,17 +664,23 @@ struct TimelineView: View {
         }
     }
 
-    /// O relógio na faixa 30..60, centrado no cabeçote: sublinhado (traço de 2
-    /// da largura do texto em y 52..54) ou numa caixa com borda no destaque.
+    /// O relógio na faixa 30..60, centrado no cabeçote, numa ficha escura (0.4.1).
     private func drawTimecode(_ context: inout GraphicsContext, size: CGSize) {
         let text = Timecode.format(Int32(clamping: self.clock.frame), fps)
         let cx = size.width / 2
-        let clock = Text(text).font(.aurea(size: m.timecodeFont, weight: .bold)).monospacedDigit().foregroundColor(.white)
+        // 0.4.1 (mockup "interface 03"): o tempo numa ficha (#141417, fio de 8 %, cantos
+        // de 10) com os dígitos no destaque, no lugar do sublinhado branco.
+        let clock = Text(text).font(.aurea(size: m.timecodeFont, weight: .bold)).monospacedDigit().foregroundColor(AureaColors.accent)
         let resolved = context.resolve(clock)
         let measured = resolved.measure(in: CGSize(width: size.width, height: m.timecodeBottom))
         let midY = (m.timecodeTop + m.underlineTop) / 2
+        let padH: CGFloat = 7
+        let chip = CGRect(x: cx - measured.width / 2 - padH, y: midY - measured.height / 2 - 1,
+                          width: measured.width + 2 * padH, height: measured.height + 2)
+        let chipPath = Path(roundedRect: chip, cornerRadius: 10, style: .continuous)
+        context.fill(chipPath, with: .color(Color(red: 0x14 / 255, green: 0x14 / 255, blue: 0x17 / 255)))
+        context.stroke(chipPath, with: .color(Color.white.opacity(0.08)), lineWidth: 1)
         context.draw(resolved, at: CGPoint(x: cx, y: midY), anchor: .center)
-        context.fill(Path(CGRect(x: cx - measured.width / 2, y: m.underlineTop, width: measured.width, height: m.underlineHeight)), with: .color(.white))
     }
 
     /// Fio branco de 1 pt, com a mesma origem temporal dos clipes e losangos.
@@ -979,6 +985,14 @@ struct TimelineView: View {
                     let radius = ClipGeometry.cornerRadius(width: inner.width, height: inner.height, requested: m.barRadius - stroke / 2)
                     outline.stroke(capped ? cappedShape(inner) : Path(roundedRect: inner, cornerRadius: radius), with: .color(AureaTimeline.clipSelected), lineWidth: stroke)
                 }
+            } else if rect.width > 2 {
+                // 0.4.1 (mockup "interface 03"): o contornozinho de 1 pt na cor do tipo (a 45 %)
+                // em volta de todo clipe não escolhido. Par do Android.
+                var outline = context; outline.clip(to: Path(rect))
+                outline.opacity = row.visible ? 1 : AureaTimeline.hiddenAlpha
+                let inner = rect.insetBy(dx: 0.5, dy: 0.5)
+                let radius = ClipGeometry.cornerRadius(width: inner.width, height: inner.height, requested: m.barRadius - 0.5)
+                outline.stroke(Path(roundedRect: inner, cornerRadius: radius), with: .color(tone.stripe.opacity(0.45)), lineWidth: 1)
             }
             if row.track == nil && model.selection.count == 1 && selected && !row.locked {
                 // A tampa "‹" já é a alça branca da ponta esquerda (o dedo ali também apara).

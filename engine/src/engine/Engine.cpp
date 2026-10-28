@@ -4949,6 +4949,37 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
     return lid.pack();
 }
 
+Result<u64> Engine::add_aurora() noexcept {
+    const EffectTypeId type = effectRegistry_.find_key(effect_keys::kAurora);
+    const ParameterRegistry* params = effectRegistry_.params(type);
+    if (!params) return Status{Errc::InvalidState, "aurora indisponivel"};
+    { std::lock_guard<std::mutex> lock(modelMutex_); history_.begin_group("adicionar aurora"); }
+    Result<u64> made = add_null(false);
+    if (made.ok()) {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        Composition* comp = project_ ? current_composition() : nullptr;
+        Layer* l = comp ? comp->layer(LayerId::unpack(*made)) : nullptr;
+        if (l) {
+            history_.before_mutation(*comp, project_->timeline().current(), "adicionar aurora");
+            bump_model_revision_locked();
+            l->name = numbered_layer_name(*comp, "Aurora");
+            l->adjustment = true;
+            // A aurora é um céu 3D: a camada nasce 3D (segue câmera e nulo pai).
+            l->threeD = true;
+            (void)enforce_clip_chains(*comp, nullptr);
+            EffectInstance e;
+            e.id = l->alloc_effect_id();
+            e.type = type;
+            initialize_instance(e, *params);
+            l->effects.push_back(std::move(e));
+            project_->mark_dirty();
+            request_render();
+        }
+    }
+    { std::lock_guard<std::mutex> lock(modelMutex_); history_.end_group(); }
+    return made;
+}
+
 bool Engine::apply_particle_preset(u64 layerId, u32 preset) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;

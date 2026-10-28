@@ -53,6 +53,32 @@
     <true/>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Salvar o vídeo exportado pelo Aurea na sua galeria.</string>
+    <!-- 0.4.1: login com Google (Firebase Auth). Valores das build settings
+         AUREA_FIREBASE_* (Firebase.xcconfig.example); vazios = botão some. -->
+    <key>AureaFirebaseProjectID</key>
+    <string>$(AUREA_FIREBASE_PROJECT_ID)</string>
+    <key>AureaFirebaseAppID</key>
+    <string>$(AUREA_FIREBASE_APP_ID)</string>
+    <key>AureaFirebaseAPIKey</key>
+    <string>$(AUREA_FIREBASE_API_KEY)</string>
+    <key>AureaFirebaseClientID</key>
+    <string>$(AUREA_FIREBASE_CLIENT_ID)</string>
+    <key>AureaFirebaseSenderID</key>
+    <string>$(AUREA_FIREBASE_SENDER_ID)</string>
+    <!-- 0.4.1: a volta da folha do Google (GoogleSignIn) pelo client id invertido. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>google-signin</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>$(AUREA_FIREBASE_REVERSED_CLIENT_ID)</string>
+            </array>
+        </dict>
+    </array>
     <key>UIAppFonts</key>
     <array>
         <string>CupertinoIcons.ttf</string>

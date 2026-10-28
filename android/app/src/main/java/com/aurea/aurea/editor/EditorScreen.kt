@@ -6,6 +6,9 @@ import android.content.ContextWrapper
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.draw.clip
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -355,14 +358,17 @@ fun EditorScreen(store: EditorStore) {
                 // barra, segue com a janela.
                 if (ui.adding && !store.sceneEditor && store.uiMode == com.aurea.aurea.state.UI_MODE_EDIT) AddLayerOverlay(store, ui)
                 // Adicionar aberto: tocar no palco fecha (o palco não recebe o toque).
-                if (ui.adding && content == SheetContent.Adding && !wide && !ui.fullscreen && !store.sceneEditor &&
+                // 0.4.1 (mockup "interface 03"): o mesmo véu escurece (preto a 45 %) barra, palco e
+                // transporte, também com a grade do "+" aberta.
+                if (((ui.adding && content == SheetContent.Adding) || AddBarState.more) && !wide && !ui.fullscreen && !store.sceneEditor &&
                     store.uiMode != com.aurea.aurea.state.UI_MODE_EDIT) {
                     Box(
                         Modifier
-                            .padding(top = m.topBar.dp)
                             .fillMaxWidth()
-                            .height(m.preview.dp)
-                            .pointerInput(Unit) { detectTapGestures { ui.adding = false } },
+                            .height((m.topBar + m.preview + EditorLayout.TRANSPORT).dp)
+                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f))
+                            .testTag("editor.dock.veil")
+                            .pointerInput(Unit) { detectTapGestures { ui.adding = false; AddBarState.more = false } },
                     )
                 }
                 // Gravar voz: o painel por cima da timeline, com o palco à vista
@@ -524,6 +530,8 @@ private fun NarrowEditor(
                             .align(Alignment.TopCenter)
                             .fillMaxWidth()
                             .height(m.timeline.dp)
+                            // 0.4.1 (mockup "interface 03"): com a gaveta aberta, o resto escurece.
+                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f))
                             .testTag("editor.adding.dismiss")
                             .pointerInput(Unit) {
                                 awaitEachGesture {
@@ -718,40 +726,72 @@ private fun ContextArea(store: EditorStore, ui: EditorUi, content: SheetContent,
         return
     }
     val panel = ui.panel
+    // 0.4.1 (mockup "interface 03"): a folha do inspetor — cantos de cima de 28, fundo
+    // #0E0E10, fio de 16 % e o puxador de 34 × 4 no topo.
+    val sheetShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    Box(modifier) {
     Column(
-        modifier
-            .background(AureaColors.EditorPanelHigh)
-            .drawTopHairline(),
+        Modifier.fillMaxSize()
+            .clip(sheetShape)
+            .background(AureaColors.EditorPanel)
+            .border(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f), sheetShape)
+            .padding(top = 8.dp),
     ) {
         // Real Camera ligada: os controles saem da prévia e ficam aqui.
         if (realCameraShowing(store)) {
             RealCameraPanel(store, Modifier.fillMaxSize())
             return@Column
         }
-        if ((content == SheetContent.Panel || content == SheetContent.Curve) && panel != null) {
-            PanelContent(
-                store = store,
-                panel = panel,
-                onClose = { ui.panel = null },
-                onOpenPanel = { openPanel(store, ui, it) },
-                onOpenEffectsBrowser = { ui.effectsBrowser = true },
-                modifier = Modifier.fillMaxSize(),
-            )
-            return@Column
-        }
-        if (!EditorTimelineRefresh.enabled) Spacer(Modifier.height(ShellDims.SheetHandle))
-        SheetBody {
-            when (content) {
-                SheetContent.Adding -> AddLayerPanel(store, ui)
-                SheetContent.Batch -> MultiSelectionPanel(store, ui)
-                SheetContent.Dock -> {
-                    val id by remember { derivedStateOf { store.primary } }
-                    // Omega painel: (área 04) o painel da camada da referência (LayerPanel.kt).
-                    id?.let { LayerPanel(store, ui, it) }
+        // 0.4.1 (mockup "interface 03"): a ferramenta entra deslizando da direita por cima
+        // das ferramentas da camada, e o ‹ volta deslizando (iOS, ~300 ms).
+        val showPanel = (content == SheetContent.Panel || content == SheetContent.Curve) && panel != null
+        val reduce = com.aurea.aurea.effects.rememberReduceMotion()
+        androidx.compose.animation.AnimatedContent(
+            targetState = showPanel,
+            modifier = Modifier.fillMaxSize(),
+            transitionSpec = {
+                if (reduce) androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                else if (targetState) androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(300)) { it } togetherWith
+                    androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(300)) { -it / 3 }
+                else androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(300)) { -it / 3 } togetherWith
+                    androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(300)) { it }
+            },
+            label = "inspector.page",
+        ) { panelPage ->
+            val shown = if (panelPage) ui.panel else null
+            if (panelPage && shown != null) {
+                PanelContent(
+                    store = store,
+                    panel = shown,
+                    onClose = { ui.panel = null },
+                    onOpenPanel = { openPanel(store, ui, it) },
+                    onOpenEffectsBrowser = { ui.effectsBrowser = true },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else if (!panelPage) {
+                Column(Modifier.fillMaxSize()) {
+                    if (!EditorTimelineRefresh.enabled) Spacer(Modifier.height(ShellDims.SheetHandle))
+                    SheetBody {
+                        when (content) {
+                            SheetContent.Adding -> AddLayerPanel(store, ui)
+                            SheetContent.Batch -> MultiSelectionPanel(store, ui)
+                            SheetContent.Panel, SheetContent.Curve, SheetContent.Dock -> {
+                                val id by remember { derivedStateOf { store.primary } }
+                                // Omega painel: (área 04) o painel da camada da referência (LayerPanel.kt).
+                                id?.let { LayerPanel(store, ui, it) }
+                            }
+                            else -> StageHint()
+                        }
+                    }
                 }
-                else -> StageHint()
             }
         }
+    }
+    Box(
+        Modifier.align(Alignment.TopCenter).padding(top = 3.dp).size(34.dp, 4.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp))
+            .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.22f)),
+    )
     }
 }
 

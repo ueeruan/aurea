@@ -125,8 +125,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar os builds 2181–2191 já distribuídos; nunca reduzir o código.
-        versionCode = 2204
-        versionName = "0.4.0-beta"
+        versionCode = 2205
+        versionName = "0.4.1-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -138,6 +138,16 @@ android {
             "\"${project.findProperty("aureaDiscoveryRepo") ?: "ueeruan/aurea"}\"",
         )
         buildConfigField("boolean", "PLAY_STORE", (aureaStore == "play").toString())
+        // 0.4.1: login com Google pelo Firebase Auth. Os valores (públicos: id do projeto,
+        // id do app, chave de API e o id de cliente Web do OAuth) vêm de
+        // android/firebase.properties; sem o arquivo o botão do Google não aparece.
+        val firebaseProps = Properties()
+        val firebaseFile: File = rootProject.file("firebase.properties")
+        if (firebaseFile.isFile) firebaseFile.inputStream().use { input -> firebaseProps.load(input) }
+        for ((campo, chave) in listOf(
+            "FIREBASE_PROJECT_ID" to "projectId", "FIREBASE_APP_ID" to "appId",
+            "FIREBASE_API_KEY" to "apiKey", "FIREBASE_WEB_CLIENT_ID" to "webClientId",
+        )) buildConfigField("String", campo, "\"${firebaseProps.getProperty(chave, "").trim()}\"")
         buildConfigField(
             "String", "AUREA_DISCOVERY_BRANCH",
             "\"${project.findProperty("aureaDiscoveryBranch") ?: "main"}\"",
@@ -381,6 +391,12 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
 
     implementation(libs.kotlinx.coroutines.android)
+    // 0.4.1: login com Google (Firebase Auth + Credential Manager).
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 
     // 0.3.6 Motion Capture (BETA): pose do corpo no aparelho (ML Kit, 33 pontos).
     // Modelos EMBUTIDOS nos AARs (sem download à parte; armeabi-v7a e arm64-v8a):

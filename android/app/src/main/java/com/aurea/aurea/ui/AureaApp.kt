@@ -41,7 +41,7 @@ import com.aurea.aurea.ui.theme.AureaTheme
  * do app antigo (a nova entra da direita, a de baixo recua um terço, 500 ms).
  */
 @Composable
-fun AureaApp(store: EditorStore) {
+fun AureaApp(store: EditorStore, conta: com.aurea.aurea.conta.ContaViewModel? = null) {
     AureaTheme {
         // 0.3.2: versão abaixo da mínima da config remota assinada = só a tela de atualizar.
         val forced = com.aurea.aurea.config.AppConfigStore.config
@@ -54,8 +54,9 @@ fun AureaApp(store: EditorStore) {
             // A página nova entra pelo lado do fim da leitura: direita em LTR,
             // esquerda em árabe (slideInHorizontally usa x absoluto).
             val sign = if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1 else 1
-            // Projetos e editor estão disponíveis mesmo sem sessão de conta.
-            AnimatedContent(
+            // 0.4.1: conta obrigatória de novo (como até a 0.1.4) — sem sessão guardada, o app
+            // inteiro é a tela de conta.
+            if (conta != null && !conta.logado) com.aurea.aurea.conta.ContaScreen(conta) else AnimatedContent(
                 targetState = store.screen,
                 transitionSpec = {
                     if (targetState == Screen.Editor) {

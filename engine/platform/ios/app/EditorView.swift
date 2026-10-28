@@ -132,7 +132,8 @@ struct EditorView: View {
                                     // 0.3.6: com o adicionar aberto, o pedaço da timeline (régua) à vista só
                                     // FECHA o adicionar: o toque é consumido inteiro e não puxa a régua nem
                                     // leva o cabeçote (par do `editor.adding.dismiss` do Android).
-                                    Color.clear.contentShape(Rectangle())
+                                    // 0.4.1 (mockup "interface 03"): com a gaveta aberta, o resto escurece.
+                                    Color.black.opacity(0.45).contentShape(Rectangle())
                                         .frame(height: metrics.timeline)
                                         .gesture(DragGesture(minimumDistance: 0).onEnded { _ in model.showAddLayer = false })
                                         .accessibilityHidden(true)
@@ -156,6 +157,13 @@ struct EditorView: View {
                                 if model.sheetContent == .addBar || model.sheetContent == .adding { AddBarMoreOverlay() }
                             }
                             .frame(height: metrics.zone)
+                        }
+                    }
+                    // 0.4.1 (mockup "interface 03"): com a grade do "+" ou uma gaveta aberta, o véu
+                    // (preto a 45 %) cobre também barra, palco e transporte; tocar fecha (par do Android).
+                    .overlay(alignment: .top) {
+                        if !model.fullscreen && !model.textModeActive {
+                            DockVeil(height: metrics.topBar + metrics.preview + metrics.transport)
                         }
                     }
                 }
@@ -480,6 +488,8 @@ private struct ModelOptimizePrompt: ViewModifier {
             // coluna de modos) e a coluna de modos presa à direita (P0-5).
             if !model.rawPlayback && !model.fullscreen {
                 CanvasZoomMode().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                // 0.4.1 (mockup "interface 03"): grade, modos de visão e zoom flutuando no canto sup-dir.
+                StageFloatPills().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 ViewModeColumn(width: ViewModeState.columnWidth(UIScreen.main.bounds.width))
             }
         }.frame(height: height).clipped()
@@ -586,6 +596,8 @@ private struct ShellStageBanner: View {
     @Environment(\.displayScale) private var displayScale
     @EnvironmentObject private var shell: ShellPresentation
     @ObservedObject private var viewZoom = StageViewZoom.shared
+    /// 0.4.1 (mockup "interface 03"): observa o "olho" do palco (`hideOverlay`).
+    @ObservedObject private var viewModes = ViewModeState.shared
     var body: some View {
         Canvas { raw, size in
             var context = raw
@@ -601,6 +613,8 @@ private struct ShellStageBanner: View {
             context.stroke(Path(CGRect(x: origin.x, y: origin.y, width: CGFloat(model.compositionWidth) * fit,
                                        height: CGFloat(model.compositionHeight) * fit)),
                            with: .color(.white.opacity(0.16)), lineWidth: 1)
+            // 0.4.1 (mockup "interface 03"): o "olho" do palco escondeu contorno e alças (ver o quadro limpo).
+            if viewModes.hideOverlay { return }
             // Omega conteúdo (área 06): desenho e Editar pontos tomam o palco (OmegaContent.swift).
             if DrawingStage.active(model) || EditPointsStage.active(model) { return }
             if model.sceneEditor {
@@ -858,7 +872,7 @@ struct ContextSheet: View {
         VStack(spacing: 0) {
             // ContextArea.kt: faixa VAZIA de 12; painel aberto começa no seu
             // próprio cabeçalho, sem puxador ou faixa adicionais.
-            Rectangle().fill(AureaColors.border).frame(height: 1)
+            // 0.4.1 (mockup "interface 03"): o fio de cima saiu (a borda da folha o faz).
             if !EditorTimelineRefresh.enabled && model.sheetContent != .panel && model.sheetContent != .curve {
                 AureaColors.editorPanelHigh.frame(height: StageDim.sheetHandle)
             }
@@ -876,13 +890,18 @@ struct ContextSheet: View {
             } else if model.selection.count > 1 && model.panel != .aiVideo && model.panel != .captions {
                 BatchToolsView()
             } else {
-            // Omega painel: (área 04, P1-10) o painel de propriedade entra por cima do
-            // painel da camada (x +100 → 0 em 100 ms, fade de 25 ms); a curva não anima.
+            // 0.4.1 (mockup "interface 03"): a ferramenta entra deslizando da direita por cima
+            // das ferramentas da camada, e o ‹ volta deslizando (~300 ms; par do ContextArea.kt).
+            InspectorPageSlide(panelPage: model.panel != .none && model.panel != .dock) {
+                // Omega painel: (área 04) o painel da camada da referência (LayerPanelView.swift).
+                LayerPanelView()
+            } panel: {
+            // Omega painel: (área 04, P1-10) trocar de um painel para outro ainda entra por cima
+            // (x +100 → 0 em 100 ms, fade de 25 ms); a curva não anima.
             Group {
             switch model.panel {
             case .none, .dock:
-                // Omega painel: (área 04) o painel da camada da referência (LayerPanelView.swift).
-                LayerPanelView()
+                EmptyView()
             case .transform:
                 TransformView()
             case .text:
@@ -940,10 +959,61 @@ struct ContextSheet: View {
                 EditPointsPanelView()
             }
             }
-            .modifier(PanelEntrance(panel: model.panel))
+            .modifier(PanelEntrance(panel: model.panel, onAppear: false))
+            }
             }
         }
+        // 0.4.1 (mockup "interface 03"): a folha do inspetor — cantos de cima de 28, fundo
+        // #0E0E10, fio de 16 % e o puxador de 34 × 4 no topo.
+        .padding(.top, 8)
         .background(AureaColors.editorPanel)
+        .clipShape(DockSheetShape(radius: 28))
+        .overlay(DockSheetShape(radius: 28).stroke(Color.white.opacity(0.16), lineWidth: 1))
+        .overlay(alignment: .top) {
+            RoundedRectangle(cornerRadius: 2).fill(Color.white.opacity(0.22))
+                .frame(width: 34, height: 4).padding(.top, 3)
+                .allowsHitTesting(false).accessibilityHidden(true)
+        }
+    }
+}
+
+/// 0.4.1 (mockup "interface 03"): a troca de página do inspetor. O painel aberto entra
+/// pela borda final por cima das ferramentas da camada, que recuam 1/3 da largura;
+/// voltar faz o caminho inverso (0,3 s). Com "reduzir movimento", troca sem animar.
+private struct InspectorPageSlide<Tools: View, Panel: View>: View {
+    let panelPage: Bool
+    private let tools: () -> Tools
+    private let panel: () -> Panel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.layoutDirection) private var direction
+
+    init(panelPage: Bool, @ViewBuilder tools: @escaping () -> Tools, @ViewBuilder panel: @escaping () -> Panel) {
+        self.panelPage = panelPage
+        self.tools = tools
+        self.panel = panel
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width, height = geometry.size.height
+            let third = width / 3 * (direction == .rightToLeft ? 1 : -1)
+            ZStack {
+                if panelPage {
+                    panel()
+                        .frame(width: width, height: height)
+                        .transition(reduceMotion ? AnyTransition.identity : AnyTransition.move(edge: .trailing))
+                        .zIndex(1)
+                } else {
+                    tools()
+                        .frame(width: width, height: height)
+                        .transition(reduceMotion ? AnyTransition.identity : AnyTransition.offset(x: third))
+                        .zIndex(0)
+                }
+            }
+            .frame(width: width, height: height)
+            .clipped()
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: panelPage)
+        }
     }
 }
 
@@ -1543,6 +1613,7 @@ private struct AddLayerSheet: View {
                     case 4:
                         drawnCard("sh_add_null", kind: -1) { model.addNull(threeD: false); close() }
                         card("particular_title", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addParticles(20); close() }   // 20 = Particular (preset Padrão)
+                        card("add_element_aurora", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addAurora(); close() }
                         card("editor_camada_ajuste", glyph: CupertinoGlyph.WandStars) { close(); model.addAdjustmentLayer() }
                         card("scene_flare3d", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addLight(3); close() }
                         card("grid_builder", glyph: CupertinoGlyph.SquareGrid2x2) { model.createGrid(); close() }

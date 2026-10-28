@@ -564,6 +564,17 @@ internal class TimelinePainter(
                             style = if (multi) multiStroke else selStroke,
                         )
                     }
+                } else if (right - left > 2f * m.density) {
+                    // 0.4.1 (mockup "interface 03"): o contornozinho de 1 dp na cor do tipo
+                    // (a 45 %) em volta de todo clipe não escolhido.
+                    val s = 0.5f * m.density
+                    drawRoundRect(
+                        tone.stripe.copy(alpha = 0.45f * alpha),
+                        Offset(left + s, top + s),
+                        Size(right - left - 2f * s, m.bar - 2f * s),
+                        CornerRadius(ClipGeometry.cornerRadius(right - left - 2f * s, m.bar - 2f * s, m.barRadius - s)),
+                        style = Stroke(1f * m.density),
+                    )
                 }
             }
             if (handles && r.track == null) {
@@ -1211,6 +1222,15 @@ internal class TimelinePainter(
         val colons = if (hourDigits > 0) 3 else 2
         val total = (hourDigits + 4 + ffDigits) * digitWidth + colons * colonWidth
         val top = m.timecodeBaseline - digitBaseline
+        // 0.4.1 (mockup "interface 03"): o tempo numa ficha (#141417, fio de 8 %, cantos
+        // de 10) com os dígitos no destaque, no lugar do sublinhado branco.
+        val padH = 7f * m.density
+        val chipTop = top - 1f * m.density
+        val chipH = digitBaseline + (digits[0]!!.size.height - digitBaseline) + 2f * m.density
+        val chip = androidx.compose.ui.geometry.CornerRadius(10f * m.density)
+        drawRoundRect(Color(0xFF141417), Offset(cx - total / 2f - padH, chipTop), Size(total + 2f * padH, chipH), chip)
+        drawRoundRect(Color.White.copy(alpha = 0.08f), Offset(cx - total / 2f - padH, chipTop), Size(total + 2f * padH, chipH), chip,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(1f * m.density))
         var x = cx - total / 2f
         if (hourDigits > 0) {
             x = drawNumber(tc[0], hourDigits, x, top)
@@ -1221,7 +1241,6 @@ internal class TimelinePainter(
         x = drawNumber(tc[2], 2, x, top)
         x = drawColon(x, top)
         drawNumber(tc[3], ffDigits, x, top)
-        drawRect(Color.White, Offset(cx - total / 2f, m.underlineTop), Size(total, m.underlineHeight))
     }
 
     private fun DrawScope.drawNumber(value: Int, count: Int, x0: Float, top: Float): Float {
@@ -1230,7 +1249,7 @@ internal class TimelinePainter(
         repeat(count - 1) { div *= 10 }
         while (div > 0) {
             val layout = digits[(value / div) % 10]!!
-            drawText(layout, topLeft = Offset(x + (digitWidth - layout.size.width) / 2f, top))
+            drawText(layout, color = com.aurea.aurea.ui.theme.AureaColors.Accent, topLeft = Offset(x + (digitWidth - layout.size.width) / 2f, top))
             x += digitWidth
             div /= 10
         }
@@ -1238,7 +1257,7 @@ internal class TimelinePainter(
     }
 
     private fun DrawScope.drawColon(x: Float, top: Float): Float {
-        drawText(digits[10]!!, topLeft = Offset(x, top))
+        drawText(digits[10]!!, color = com.aurea.aurea.ui.theme.AureaColors.Accent, topLeft = Offset(x, top))
         return x + colonWidth
     }
 

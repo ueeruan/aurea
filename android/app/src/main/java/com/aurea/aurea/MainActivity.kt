@@ -96,7 +96,7 @@ class MainActivity : ComponentActivity() {
         com.aurea.aurea.config.AppConfigStore.init(this)
         com.aurea.aurea.hyper.HyperEntitlements.init(this)
         if (savedInstanceState == null) com.aurea.aurea.config.AppConfigStore.refresh(force = true)
-        setContent { KeepAppLanguage { LanguageWelcome { CreatorWelcome { AureaApp(store) } } } }
+        setContent { KeepAppLanguage { LanguageWelcome { CreatorWelcome { AureaApp(store, conta) } } } }
 
         if (savedInstanceState == null) {
             // Número de cadastrados + revalidação da sessão (com rede; offline, segue dentro).

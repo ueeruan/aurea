@@ -100,3 +100,5 @@ entrega/
 /discovery/.wrangler/
 /discovery/.dev.vars
 /discovery/.env*
+# 0.4.1: valores do Firebase do iOS (ver engine/platform/ios/Firebase.xcconfig.example).
+/engine/platform/ios/Firebase.xcconfig

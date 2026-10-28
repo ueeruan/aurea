@@ -1,0 +1,10 @@
+{
+  "auth": {
+    "providers": {
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "Aurea",
+        "supportEmail": "ruanpablo9928@gmail.com"
+      }
+    }
+  }
+}

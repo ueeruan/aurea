@@ -10,6 +10,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.ui.semantics.role
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -447,10 +449,11 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
                 modifier = Modifier.testTag("editor.topbar.groupSettings"), size = 21.dp, height = ShellDims.TopBar,
             )
         } else {
+            // 0.4.1 (mockup "interface 03"): ‹ no lugar da caixa de saída.
             ChromeButton(
-                ShellGlyph.ExitBox, stringResource(R.string.om_tb_exit),
+                CupertinoGlyph.ChevronBack, stringResource(R.string.om_tb_exit),
                 onClick = { shellBack(store, ui) },
-                modifier = Modifier.testTag("editor.topbar.exit"), size = 21.dp, height = ShellDims.TopBar,
+                modifier = Modifier.testTag("editor.topbar.exit"), size = 19.dp, height = ShellDims.TopBar,
             )
             Box(Modifier.weight(1f).testTag("editor.topbar.title")) {
                 val title by remember { derivedStateOf { store.project.title } }
@@ -469,14 +472,20 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
                 onClick = { openSheet(store, ui, ShellSheet.ProjectSettings) },
                 modifier = Modifier.testTag("editor.projectMenu"), size = 21.dp, height = ShellDims.TopBar,
             )
-            ChromeButton(
-                CupertinoGlyph.SquareArrowUp, stringResource(R.string.om_tb_share),
-                onClick = {
-                    if (store.playing) store.pause()
-                    ui.exporting = true
-                },
-                modifier = Modifier.testTag("editor.export"), size = 21.dp, height = ShellDims.TopBar,
-            )
+            // 0.4.1 (mockup "interface 03"): exportar = quadrado de 28 com fio de 1,5 no destaque.
+            val shareLabel = stringResource(R.string.om_tb_share)
+            Box(
+                Modifier.padding(start = 4.dp, end = 10.dp).size(28.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
+                    .border(1.5.dp, AureaColors.Accent, androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
+                    .testTag("editor.export")
+                    .semantics { contentDescription = shareLabel; role = androidx.compose.ui.semantics.Role.Button }
+                    .tocavel(haptic = true) {
+                        if (store.playing) store.pause()
+                        ui.exporting = true
+                    },
+                contentAlignment = Alignment.Center,
+            ) { CupertinoIcon(CupertinoGlyph.SquareArrowUp, 16.dp, AureaColors.Accent) }
         }
     }
 }

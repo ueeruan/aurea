@@ -1,0 +1,9 @@
+# 0.4.1: login com Google (Firebase Auth). Copie para android/firebase.properties.
+# Valores do Firebase console › Configurações do projeto (todos públicos; nada de segredo aqui).
+projectId=
+# "ID do app" do app Android no Firebase (1:123…:android:…)
+appId=
+# "Chave de API da Web" do projeto
+apiKey=
+# Authentication › Login › Google › "ID do cliente da Web" (…apps.googleusercontent.com)
+webClientId=

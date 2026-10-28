@@ -1777,7 +1777,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea Beta 0.4.0 (2204) • 10/28/2026\n\n• Light touch: while you drag a control, the preview draws a lighter draft and returns to full quality when you let go — much smoother on older phones.\n• 7 new 3D text styles: Puffy, Retro 80s, Neon Edge, Block, Ice, Stone and Rose Gold.\n• Curve editor: the bottom handle no longer gets stuck under the ◀ ▶ bar; sliders follow your finger.\n• Edit mode: with a panel open, the preview gives up space and tabs get taller on short screens.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.1 (2205) • Phase 2 • 10/28/2026\n\n• New interface (Hanszx mockup): AMOLED theme, new playback bar, floating dock with the + grid, card drawers, sliding sheet inspector, quick colors, rotation wheel and clip outlines.\n• Aurora in Elements: a ready-made northern-lights sky, already 3D.\n• Account: sign in with Google, and an account is required again.\n• Time remap: the curve is now the one in the left column.\n• The layer panel no longer leaves gaps.\n• AureaHyper is now paid: access is granted per account.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -1954,7 +1954,7 @@ to edit the curve.</string>
     <!-- Conta obrigatória (conta/ContaScreen.kt, ContaView.swift) -->
     <string name="conta_titulo_cadastro">Create your account</string>
     <string name="conta_titulo_entrar">Sign in to your account</string>
-    <string name="conta_subtitulo">Signing in is optional. Your projects and the editor are available without an account.</string>
+    <string name="conta_subtitulo">Create an account or sign in to use Aurea. Your projects and media stay on your device.</string>
     <string name="conta_email">Email</string>
     <string name="conta_senha">Password</string>
     <string name="conta_senha_dica">At least 8 characters</string>

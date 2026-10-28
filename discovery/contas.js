@@ -4,6 +4,10 @@
 //  Rotas (JSON; só HTTPS — o workers.dev entrega o TLS):
 //    POST /api/auth/signup   {email, password} → 201 {token, email, users}
 //    POST /api/auth/login    {email, password} → 200 {token, email}
+//    POST /api/auth/firebase {idToken}         → 200 {token, email, created}
+//                            Login com Google pelo Firebase Auth (0.4.1; firebase.js
+//                            confere o token). Mesmo e-mail = mesma conta Aurea; e-mail
+//                            novo cria a conta sem senha (senha só pelo Google).
 //    GET  /api/auth/session  Bearer <token>    → 200 {email} | 401
 //    POST /api/auth/logout   Bearer <token>    → 200 {ok}
 //    POST /api/auth/delete   Bearer <token>  {confirm:true} → 200 {ok, deleted}
@@ -26,6 +30,8 @@
 //  100 000 iterações (o teto do Workers). Guardada como
 //  `pbkdf2_sha256$<iter>$<sal b64>$<hash b64>` — nada em texto puro, nada no log.
 // =============================================================================
+
+import { conferirTokenFirebase } from "./firebase.js";
 
 export const PBKDF2_ITERACOES = 100000;
 export const SENHA_MIN = 8;
@@ -319,6 +325,55 @@ async function entrar(req, env, ctx) {
   return json({ token, email: linha.email });
 }
 
+/**
+ * 0.4.1: login com Google (Firebase Auth). O e-mail verificado do Google é a
+ * chave: conta existente entra; conta nova é criada com um hash que NÃO é de
+ * PBKDF2 ("firebase$…"), então o login por senha nunca confere nela.
+ */
+async function entrarComFirebase(req, env, ctx) {
+  if (!(await dentroDoLimite(env, "login-ip", ip(req), LIMITES.loginIp))) {
+    return json({ error: "muitas_tentativas" }, 429, { "retry-after": "900" });
+  }
+  const { valor, erro } = await lerJson(req, CORPO_MAX * 4);
+  if (erro) return json({ error: erro }, erro === "corpo_grande" ? 413 : 400);
+  const conferido = await conferirTokenFirebase(valor.idToken, env.FIREBASE_PROJECT_ID);
+  if (conferido.erro) {
+    const status = conferido.erro === "firebase_desativado" || conferido.erro === "firebase_indisponivel" ? 503 : 401;
+    return json({ error: conferido.erro }, status);
+  }
+  const email = normalizarEmail(conferido.email);
+  if (!email) return json({ error: "email_invalido" }, 400);
+  let linha;
+  try {
+    linha = await env.AUREA_DB.prepare("SELECT id, email FROM users WHERE email = ?").bind(email).first();
+  } catch (e) {
+    console.error("contas: login google falhou no D1");
+    return json({ error: "contas_indisponiveis" }, 503);
+  }
+  let created = false;
+  if (!linha) {
+    linha = { id: crypto.randomUUID(), email };
+    try {
+      await env.AUREA_DB.batch([
+        env.AUREA_DB.prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
+          .bind(linha.id, email, `firebase$${await sha256hex(conferido.uid)}`, Date.now()),
+        env.AUREA_DB.prepare("INSERT INTO counters (name, value) VALUES ('users', 1) ON CONFLICT(name) DO UPDATE SET value = value + 1"),
+      ]);
+      created = true;
+      esquecerMemo();
+    } catch (e) {
+      // Corrida com outro aparelho criando a mesma conta: usa a que ganhou.
+      linha = await env.AUREA_DB.prepare("SELECT id, email FROM users WHERE email = ?").bind(email).first().catch(() => null);
+      if (!linha) return json({ error: "contas_indisponiveis" }, 503);
+    }
+  }
+  const atualizar = env.AUREA_DB.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").bind(Date.now(), linha.id).run()
+    .catch(() => {});
+  if (ctx?.waitUntil) ctx.waitUntil(atualizar); else await atualizar;
+  const token = await criarSessao(env, { id: linha.id, email: linha.email });
+  return json({ token, email: linha.email, created });
+}
+
 async function sessao(req, env) {
   const s = await lerSessao(env, req);
   if (!s) return json({ error: "nao_autorizado" }, 401);
@@ -459,6 +514,7 @@ export async function rotaDeContas(req, env, ctx, url) {
   if (rota === "/api/stats/users" && (req.method === "GET" || req.method === "HEAD")) return estatisticas(env);
   if (rota === "/api/auth/signup" && req.method === "POST") return cadastrar(req, env);
   if (rota === "/api/auth/login" && req.method === "POST") return entrar(req, env, ctx);
+  if (rota === "/api/auth/firebase" && req.method === "POST") return entrarComFirebase(req, env, ctx);
   if (rota === "/api/auth/session" && req.method === "GET") return sessao(req, env);
   if (rota === "/api/auth/logout" && req.method === "POST") return sair(req, env);
   if (rota === "/api/auth/delete" && req.method === "POST") return excluirConta(req, env);

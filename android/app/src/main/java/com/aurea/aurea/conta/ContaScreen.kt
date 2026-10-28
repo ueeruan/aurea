@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -82,7 +83,15 @@ fun ContaScreen(conta: ContaViewModel) {
             AureaLogo(72.dp)
             Spacer(Modifier.height(16.dp))
             Text("aurea", style = AureaType.HeadlineLarge)
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(10.dp))
+            // 0.4.1: o contador de membros da comunidade (8 mil+, informado pelo criador).
+            Text(
+                stringResource(R.string.conta_membros),
+                style = AureaType.Pill.copy(color = AureaColors.Accent),
+                modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(AureaColors.Accent.copy(alpha = 0.14f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp).testTag("conta.membros"),
+            )
+            Spacer(Modifier.height(16.dp))
             Text(stringResource(if (entrando) R.string.conta_titulo_entrar else R.string.conta_titulo_cadastro),
                 style = AureaType.TitleLarge, textAlign = TextAlign.Center)
             Spacer(Modifier.height(8.dp))
@@ -128,6 +137,29 @@ fun ContaScreen(conta: ContaViewModel) {
             ) {
                 if (conta.ocupado) CircularProgressIndicator(Modifier.size(22.dp), color = AureaColors.Text, strokeWidth = 2.dp)
                 else Text(rotuloBotao, style = AureaType.Button)
+            }
+            // 0.4.1: entrar com o Google (Firebase Auth); some sem a configuração do Firebase.
+            if (GoogleLogin.disponivel) {
+                val activity = androidx.compose.ui.platform.LocalContext.current.let { c ->
+                    generateSequence(c) { (it as? android.content.ContextWrapper)?.baseContext }.filterIsInstance<android.app.Activity>().firstOrNull()
+                }
+                val rotuloGoogle = stringResource(R.string.conta_google)
+                Spacer(Modifier.height(12.dp))
+                Text(stringResource(R.string.conta_ou), style = AureaType.Note, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(12.dp))
+                Box(
+                    Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp))
+                        .background(androidx.compose.ui.graphics.Color.White)
+                        .testTag("conta.google").semantics { contentDescription = rotuloGoogle }
+                        .tocavel(enabled = !conta.ocupado && activity != null, role = Role.Button) { activity?.let { conta.entrarComGoogle(it) } },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("G", style = AureaType.Button.copy(color = androidx.compose.ui.graphics.Color(0xFF4285F4)))
+                        Spacer(Modifier.width(10.dp))
+                        Text(rotuloGoogle, style = AureaType.Button.copy(color = androidx.compose.ui.graphics.Color(0xFF1F1F1F)))
+                    }
+                }
             }
             Spacer(Modifier.height(8.dp))
             Text(

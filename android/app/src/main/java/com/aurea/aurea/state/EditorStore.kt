@@ -5741,6 +5741,18 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         return id
     }
 
+    /** 0.4.1 (mockup "interface 03"): Elementos › Aurora — camada de ajuste com o efeito Aurora. */
+    fun addAurora(): Long {
+        val id = engine.addAurora()
+        if (id < 0) {
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_camada_2, -id)
+            return -1
+        }
+        refreshNow()
+        select(id)
+        return id
+    }
+
     fun applyParticlePreset(preset: Int) {
         val id = primary ?: return
         engine.applyParticlePreset(id, preset)

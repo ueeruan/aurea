@@ -309,6 +309,40 @@ final class ContaModel: ObservableObject {
         }
     }
 
+    /// 0.4.1: entrar com o Google (Firebase Auth). A folha do Google, o token do
+    /// Firebase e o servidor do Aurea; no fim é a mesma sessão do e-mail e senha.
+    func signInWithGoogle() {
+        guard !ocupado, GoogleLogin.disponivel else { return }
+        ocupado = true
+        erro = nil
+        Task { @MainActor in
+            let idToken: String
+            switch await GoogleLogin.entrar() {
+            case .cancelado: ocupado = false; return
+            case .falhou: ocupado = false; erro = .servico; return
+            case .token(let t): idToken = t
+            }
+            let r: ContaResposta = await ContaAPI.chamar("/api/auth/firebase", metodo: "POST",
+                                                         corpo: ["idToken": idToken], token: nil)
+            ocupado = false
+            if r.status == 0 { erro = .rede; return }
+            if !r.ok { erro = ContaLogica.erroDoServidor(status: r.status, codigo: r.codigo); return }
+            let token: String = (r.corpo["token"] as? String) ?? ""
+            let confirmado: String = (r.corpo["email"] as? String) ?? ""
+            guard token.count == 43, !confirmado.isEmpty,
+                  ContaKeychain.gravar("token", token), ContaKeychain.gravar("email", confirmado) else {
+                apagarSessao()
+                erro = .servico
+                return
+            }
+            ultimaRevalidacao = Date()
+            self.email = confirmado
+            atualizarAcessos()
+            // 0.4.1: conta nova muda o número de cadastrados.
+            if (r.corpo["created"] as? Bool) == true { await atualizarUsuarios() }
+        }
+    }
+
     /// Sai: apaga o token local na hora; avisa o servidor quando der.
     func sair() {
         let guardada: ContaSessao? = sessao()

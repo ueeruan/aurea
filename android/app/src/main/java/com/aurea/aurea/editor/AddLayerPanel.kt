@@ -169,7 +169,14 @@ internal fun omegaAddPrefs(context: Context) = context.getSharedPreferences("ome
 internal fun AddLayerPanel(store: EditorStore, ui: EditorUi, modifier: Modifier = Modifier.fillMaxSize()) {
     val close = { ui.adding = false }
     val closeLabel = stringResource(R.string.editor_fechar_adicionar)
-    Box(modifier.background(AureaColors.AddPanel).testTag("add.panel")) {
+    // 0.4.1 (mockup "interface 03"): a gaveta é um cartão flutuante — margem de 8, cantos
+    // de 24, vidro escuro (#121214 a 96 %) e fio de 14 %.
+    val card = RoundedCornerShape(24.dp)
+    Box(
+        modifier.padding(horizontal = 8.dp, vertical = 4.dp).clip(card)
+            .background(Color(0xF5121214)).border(1.dp, Color.White.copy(alpha = 0.14f), card)
+            .testTag("add.panel"),
+    ) {
         Box(Modifier.fillMaxSize().testTag("editor.addPanel")) {
             when (ui.addTab) {
                 AddTab.Shape -> ShapesPager(store, close)
@@ -203,10 +210,10 @@ internal fun AddLayerPanel(store: EditorStore, ui: EditorUi, modifier: Modifier 
             contentAlignment = Alignment.Center,
         ) {
             Box(
-                Modifier.size(32.dp).clip(CircleShape).background(AureaColors.AddPanelDeep.copy(alpha = 0.85f)),
+                Modifier.size(24.dp).clip(CircleShape).background(AureaColors.SurfaceHigh),
                 contentAlignment = Alignment.Center,
             ) {
-                CupertinoIcon(CupertinoGlyph.Xmark, 14.dp, AureaColors.Text)
+                CupertinoIcon(CupertinoGlyph.Xmark, 12.dp, AureaColors.Text)
             }
         }
     }
@@ -233,60 +240,60 @@ internal class ObjectCell(
  */
 @Composable
 internal fun ObjectGrid(cells: List<ObjectCell>, footer: String? = null, warning: String? = null) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val perRow = max(1, ((maxWidth - 20.dp) / 84.dp).toInt()).coerceAtMost(max(1, cells.size))
-        Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            cells.chunked(perRow).forEachIndexed { rowIndex, row ->
-                Row(horizontalArrangement = Arrangement.Center) {
-                    row.forEach { cell -> ObjectCellView(cell, if (rowIndex == 0) 71.dp else 64.dp) }
-                }
+    // 0.4.1 (mockup "interface 03"): duas colunas de botões (ícone no destaque + nome),
+    // fundo #1C1C1E, cantos de 12; rola na vertical dentro do cartão.
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 12.dp, end = 40.dp, top = 12.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        cells.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { cell -> ObjectCellView(cell, Modifier.weight(1f)) }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
-            if (footer != null) {
-                Text(
-                    footer,
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp),
-                    style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
-                )
-            }
-            if (warning != null) {
-                Text(
-                    warning,
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 2.dp),
-                    style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 15.sp, color = AureaColors.Warning)),
-                )
-            }
+        }
+        if (footer != null) {
+            Text(
+                footer,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 15.sp, color = AureaColors.Muted)),
+            )
+        }
+        if (warning != null) {
+            Text(
+                warning,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 15.sp, color = AureaColors.Warning)),
+            )
         }
     }
 }
 
 @Composable
-private fun ObjectCellView(cell: ObjectCell, height: Dp) {
-    Column(
-        Modifier
-            .padding(10.dp)
-            .width(64.dp)
-            .height(height)
+private fun ObjectCellView(cell: ObjectCell, modifier: Modifier) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        modifier
+            .height(40.dp)
+            .clip(shape)
+            .background(AureaColors.SurfaceHigh)
+            .border(1.dp, Color.White.copy(alpha = 0.03f), shape)
             .semantics { contentDescription = cell.label }
             .testTag(cell.tag)
-            .tocavel(onClick = cell.onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+            .tocavel(onClick = cell.onClick)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         when {
-            cell.draw != null -> Canvas(Modifier.size(30.dp)) { cell.draw.invoke(this) }
-            cell.glyph != null -> CupertinoIcon(cell.glyph, 28.dp, cell.tint ?: AureaColors.Text)
+            cell.draw != null -> Canvas(Modifier.size(18.dp)) { cell.draw.invoke(this) }
+            cell.glyph != null -> CupertinoIcon(cell.glyph, 17.dp, cell.tint ?: AureaColors.Accent)
         }
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.width(8.dp))
         Text(
             cell.label,
-            maxLines = 2,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 60.dp),
-            style = AureaType.Base.merge(TextStyle(fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.W500, color = AureaColors.Text)),
+            style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.W500, color = AureaColors.Text)),
         )
     }
 }
@@ -528,6 +535,10 @@ private fun ElementGrid(store: EditorStore, ui: EditorUi, close: () -> Unit) {
             // Extras do AUREA.
             ObjectCell(stringResource(R.string.particular_title), "add.element.particles", glyph = CupertinoGlyph.Sparkles, tint = ShellColors.Text3D) {
                 close(); store.addParticles(20)   // 20 = Particular (preset Padrão)
+            },
+            // 0.4.1 (mockup "interface 03"): a aurora boreal pronta, numa camada de ajuste.
+            ObjectCell(stringResource(R.string.add_element_aurora), "add.element.aurora", glyph = CupertinoGlyph.Sparkles, tint = ShellColors.Text3D) {
+                close(); store.addAurora()
             },
             ObjectCell(stringResource(R.string.editor_camada_ajuste), "add.element.adjust", glyph = CupertinoGlyph.WandStars) {
                 close(); store.addAdjustmentLayer()
@@ -1046,18 +1057,20 @@ internal fun toggleAddBarMore(store: EditorStore, ui: EditorUi) {
 
 /** Medidas da barra (dp). A barra continua com [EditorLayout.ADD_BAR] de altura. */
 private object AddBarDims {
-    val SideMargin = 8.dp
+    // 0.4.1 (mockup "interface 03"): pílula de 50 com cantos de 26, "+" redondo de 50,
+    // fio de 1 a 12 %, cartão da grade com cantos de 28 e ladrilhos de 14.
+    val SideMargin = 10.dp
     val VerticalMargin = 4.dp
-    val BlockPadding = 7.dp
-    val BlockRadius = 24.dp
+    val BlockPadding = 6.dp
+    val BlockRadius = 26.dp
     val Gap = 8.dp
-    /** O "+" e o "X" redondos (alvo de 48). */
-    val Round = 48.dp
-    val Icon = 21.dp
-    val Line = 0.7.dp
-    val CardRadius = 22.dp
+    /** O "+" e o "X" redondos (alvo de 50). */
+    val Round = 50.dp
+    val Icon = 19.dp
+    val Line = 1.dp
+    val CardRadius = 28.dp
     val TileHeight = 46.dp
-    val TileRadius = 15.dp
+    val TileRadius = 14.dp
     /** Peso da vaga acesa na pílula (as outras pesam 1; ficam com 44+ dp a partir de 360 dp de tela). */
     const val ACTIVE_WEIGHT = 2f
 }
@@ -1066,12 +1079,14 @@ private object AddBarDims {
 private object AddBarColors {
     /** O bloco flutuante: o tom mais fundo do tema. */
     val Block get() = AureaColors.Background
-    /** A pílula, os botões redondos e o cartão da grade. */
-    val Pill get() = AureaColors.Chip
-    /** Os ladrilhos da grade e o fio fino em volta da pílula, dos botões e do cartão. */
-    val Raised get() = AureaColors.ChipHigh
-    /** A pílula interna da categoria aberta: o destaque da marca a 30 % sobre a pílula. */
-    val Active get() = AureaColors.Accent.copy(alpha = 0.3f).compositeOver(AureaColors.Chip)
+    /** A pílula, os botões redondos e o cartão da grade (vidro escuro do mockup). */
+    val Pill get() = AureaColors.Surface
+    /** O fio fino em volta da pílula, dos botões e do cartão (branco a 12 %). */
+    val Raised get() = Color.White.copy(alpha = 0.12f)
+    /** Os ladrilhos da grade (branco a 5 % sobre o cartão). */
+    val Tile get() = Color.White.copy(alpha = 0.05f).compositeOver(AureaColors.Surface)
+    /** A pílula interna da categoria aberta: o brilho do destaque (22 %). */
+    val Active get() = AureaColors.Accent.copy(alpha = 0.22f).compositeOver(AureaColors.Surface)
 }
 
 private val AddBarPillShape = RoundedCornerShape(percent = 50)
@@ -1284,11 +1299,11 @@ private fun AddBarPillItem(
             val text = stringResource(item.label)
             when (mode) {
                 AddBarLook.Stacked -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    AddBarIcon(item, AddBarDims.Icon, AureaColors.Text)
-                    Spacer(Modifier.height(3.dp))
-                    AddBarLabel(text, 11)
+                    AddBarIcon(item, AddBarDims.Icon, AureaColors.Muted)
+                    Spacer(Modifier.height(2.dp))
+                    AddBarLabel(text, 10, color = AureaColors.Muted)
                 }
-                AddBarLook.IconOnly -> AddBarIcon(item, AddBarDims.Icon, AureaColors.Text)
+                AddBarLook.IconOnly -> AddBarIcon(item, AddBarDims.Icon, AureaColors.Muted)
                 AddBarLook.Inline -> Row(Modifier.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     AddBarIcon(item, AddBarDims.Icon, AureaColors.Text)
                     Spacer(Modifier.width(6.dp))
@@ -1300,13 +1315,13 @@ private fun AddBarPillItem(
 }
 
 @Composable
-private fun AddBarLabel(text: String, sizeSp: Int, modifier: Modifier = Modifier) {
+private fun AddBarLabel(text: String, sizeSp: Int, modifier: Modifier = Modifier, color: Color = AureaColors.Text) {
     Text(
         text,
         modifier = modifier,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        style = AureaType.Base.merge(TextStyle(fontSize = sizeSp.sp, lineHeight = (sizeSp + 3).sp, fontWeight = FontWeight.W500, color = AureaColors.Text)),
+        style = AureaType.Base.merge(TextStyle(fontSize = sizeSp.sp, lineHeight = (sizeSp + 3).sp, fontWeight = FontWeight.W500, color = color)),
     )
 }
 
@@ -1324,7 +1339,7 @@ private fun AddBarRoundButton(label: String, tag: String, rotation: Float, onCli
             .tocavel(haptic = true, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        CupertinoIcon(CupertinoGlyph.Plus, 22.dp, AureaColors.Text, Modifier.graphicsLayer { rotationZ = rotation })
+        CupertinoIcon(CupertinoGlyph.Plus, 20.dp, AureaColors.Text, Modifier.graphicsLayer { rotationZ = rotation })
     }
 }
 
@@ -1343,7 +1358,8 @@ internal fun AddBarMore(store: EditorStore, ui: EditorUi, modifier: Modifier = M
     val origin = if (LocalLayoutDirection.current == LayoutDirection.Rtl) TransformOrigin(0f, 1f) else TransformOrigin(1f, 1f)
     Box(modifier) {
         if (open) {
-            Box(Modifier.matchParentSize().pointerInput(Unit) { detectTapGestures { AddBarState.more = false } })
+            // 0.4.1 (mockup "interface 03"): o véu escurece (preto a 45 %).
+            Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.45f)).pointerInput(Unit) { detectTapGestures { AddBarState.more = false } })
         }
         AnimatedVisibility(
             visible = open,
@@ -1417,12 +1433,12 @@ private fun AddBarGridTile(store: EditorStore, ui: EditorUi, tab: AddTab, modifi
                 .fillMaxWidth()
                 .height(AddBarDims.TileHeight)
                 .clip(RoundedCornerShape(AddBarDims.TileRadius))
-                .background(AddBarColors.Raised),
+                .background(AddBarColors.Tile),
             contentAlignment = Alignment.Center,
         ) {
-            AddBarIcon(tab, 22.dp, AureaColors.Text)
+            AddBarIcon(tab, 20.dp, AureaColors.Text)
         }
         Spacer(Modifier.height(4.dp))
-        AddBarLabel(label, 12)
+        AddBarLabel(label, 10, color = AureaColors.Muted)
     }
 }

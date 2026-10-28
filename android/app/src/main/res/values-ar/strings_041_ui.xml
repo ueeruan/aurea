@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.1: tema do mockup "interface 03" (Hanszx). -->
+    <string name="theme_amoled" translatable="false">AMOLED</string>
+    <string name="om_vm_overlay">إخفاء الحدود والمقابض</string>
+    <string name="add_element_aurora">الشفق القطبي</string>
+    <string name="conta_membros">أكثر من 8 آلاف عضو</string>
+    <string name="conta_ou">أو</string>
+    <string name="conta_google">المتابعة باستخدام Google</string>
+</resources>

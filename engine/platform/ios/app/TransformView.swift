@@ -1681,7 +1681,16 @@ struct TransformDial: View {
                 Canvas { context, _ in
                     guard radius > 0 else { return }
                     let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-                    context.stroke(Path(ellipseIn: rect), with: .color(AureaColors.dialTrack), lineWidth: TransformDial.track)
+                    // Trilha. 0.4.1 (mockup "interface 03"): tracejada, branco a 25 %, e o ponteiro do
+                    // centro até a alça no destaque.
+                    context.stroke(Path(ellipseIn: rect), with: .color(Color.white.opacity(0.25)),
+                                   style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
+                    let pointerRadians = Double(within) * .pi / 180
+                    var pointer = Path()
+                    pointer.move(to: center)
+                    pointer.addLine(to: CGPoint(x: center.x + CGFloat(sin(pointerRadians)) * radius,
+                                                y: center.y - CGFloat(cos(pointerRadians)) * radius))
+                    context.stroke(pointer, with: .color(AureaColors.accent), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                     if turns != 0 && abs(within) > 0.05 {
                         // Arco do excedente: a volta em andamento depois de ±360°.
                         var arc = Path()

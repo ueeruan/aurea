@@ -12,6 +12,7 @@
 		CA2127000000000000000003 /* ContaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000004 /* ContaView.swift */; };
 		CA2128000000000000000001 /* ProjectTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2128000000000000000002 /* ProjectTransfer.swift */; };
 		CA2127000000000000000005 /* CrashReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000006 /* CrashReporter.swift */; };
+		CA2127000000000000000007 /* GoogleLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000008 /* GoogleLogin.swift */; };
 		DA2121000000000000000001 /* CommandSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2121000000000000000002 /* CommandSearch.swift */; };
 		DA2121000000000000000003 /* editor_commands.json in Resources */ = {isa = PBXBuildFile; fileRef = DA2121000000000000000004 /* editor_commands.json */; };
 		DA2113000000000000000001 /* PerformanceTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2113000000000000000002 /* PerformanceTest.swift */; };
@@ -119,6 +120,8 @@
 		AD0000000000000000000041 /* UnityMediationSDK in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000031 /* UnityMediationSDK */; };
 		AD0000000000000000000042 /* UnityAdsAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000032 /* UnityAdsAdapter */; };
 		AD0000000000000000000043 /* GoogleUserMessagingPlatform in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000033 /* GoogleUserMessagingPlatform */; };
+		AD0000000000000000000044 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000034 /* FirebaseAuth */; };
+		AD0000000000000000000045 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000035 /* GoogleSignIn */; };
 		AD0000000000000000000061 /* AureaAiClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000051 /* AureaAiClient.swift */; };
 		AD0000000000000000000062 /* AiRewardFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0000000000000000000052 /* AiRewardFlow.swift */; };
 		AD000000000000000000051 /* GuardaDaSessao.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD000000000000000000050 /* GuardaDaSessao.swift */; };
@@ -143,6 +146,7 @@
 		CA2127000000000000000004 /* ContaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContaView.swift; sourceTree = "<group>"; };
 		CA2128000000000000000002 /* ProjectTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTransfer.swift; sourceTree = "<group>"; };
 		CA2127000000000000000006 /* CrashReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashReporter.swift; sourceTree = "<group>"; };
+		CA2127000000000000000008 /* GoogleLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleLogin.swift; sourceTree = "<group>"; };
 		DA2121000000000000000002 /* CommandSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandSearch.swift; sourceTree = "<group>"; };
 		DA2121000000000000000004 /* editor_commands.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Resources/editor_commands.json; sourceTree = "<group>"; };
 		DA2113000000000000000002 /* PerformanceTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTest.swift; sourceTree = "<group>"; };
@@ -290,6 +294,8 @@
 				AD0000000000000000000041 /* UnityMediationSDK in Frameworks */,
 				AD0000000000000000000042 /* UnityAdsAdapter in Frameworks */,
 				AD0000000000000000000043 /* GoogleUserMessagingPlatform in Frameworks */,
+				AD0000000000000000000044 /* FirebaseAuth in Frameworks */,
+				AD0000000000000000000045 /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -317,6 +323,7 @@
 				CA2127000000000000000004 /* ContaView.swift */,
 				CA2128000000000000000002 /* ProjectTransfer.swift */,
 				CA2127000000000000000006 /* CrashReporter.swift */,
+				CA2127000000000000000008 /* GoogleLogin.swift */,
 				AE0000000000000000000003 /* HomeView.swift */,
 				AE0000000000000000000120 /* HomeBackdrop.swift */,
 				AE0000000000000000000004 /* EditorView.swift */,
@@ -487,6 +494,8 @@
 				AD0000000000000000000031 /* UnityMediationSDK */,
 				AD0000000000000000000032 /* UnityAdsAdapter */,
 				AD0000000000000000000033 /* GoogleUserMessagingPlatform */,
+				AD0000000000000000000034 /* FirebaseAuth */,
+				AD0000000000000000000035 /* GoogleSignIn */,
 			);
 			productName = Aurea;
 			productReference = AE000000000000000000002C /* Aurea.app */;
@@ -542,6 +551,8 @@
 				AD0000000000000000000021 /* XCRemoteSwiftPackageReference "LevelPlay-Swift-Package" */,
 				AD0000000000000000000022 /* XCRemoteSwiftPackageReference "LevelPlay-UnityAds-Adapter-Swift-Package" */,
 				AD0000000000000000000023 /* XCRemoteSwiftPackageReference "swift-package-manager-google-user-messaging-platform" */,
+				AD0000000000000000000024 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				AD0000000000000000000025 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 			);
 			productRefGroup = AE000000000000000000002B /* Products */;
 			projectDirPath = "";
@@ -634,6 +645,7 @@
 				CA2127000000000000000003 /* ContaView.swift in Sources */,
 				CA2128000000000000000001 /* ProjectTransfer.swift in Sources */,
 				CA2127000000000000000005 /* CrashReporter.swift in Sources */,
+				CA2127000000000000000007 /* GoogleLogin.swift in Sources */,
 				AE000000000000000000003B /* HomeView.swift in Sources */,
 				AE0000000000000000000121 /* HomeBackdrop.swift in Sources */,
 				AE000000000000000000003C /* EditorView.swift in Sources */,
@@ -787,8 +799,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2204;
-				MARKETING_VERSION = 0.4.0;
+				CURRENT_PROJECT_VERSION = 2205;
+				MARKETING_VERSION = 0.4.1;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -842,6 +854,12 @@
 					"Accelerate",
 					"-lc++",
 				);
+				AUREA_FIREBASE_API_KEY = "AIzaSyDXVjS5vLuADdVI0C64R9gsx7NMuUq_tBE";
+				AUREA_FIREBASE_APP_ID = "1:3607796908:ios:214d4807d790a0c6c61309";
+				AUREA_FIREBASE_CLIENT_ID = "3607796908-6eg4hj9vq9on08qb0jj9ch2f23ci0h4b.apps.googleusercontent.com";
+				AUREA_FIREBASE_PROJECT_ID = "aurea-8e5f1";
+				AUREA_FIREBASE_REVERSED_CLIENT_ID = "com.googleusercontent.apps.3607796908-6eg4hj9vq9on08qb0jj9ch2f23ci0h4b";
+				AUREA_FIREBASE_SENDER_ID = "3607796908";
 				PRODUCT_BUNDLE_IDENTIFIER = com.aurea.aurea;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "app/Aurea-Bridging-Header.h";
@@ -858,8 +876,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2204;
-				MARKETING_VERSION = 0.4.0;
+				CURRENT_PROJECT_VERSION = 2205;
+				MARKETING_VERSION = 0.4.1;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -913,6 +931,12 @@
 					"Accelerate",
 					"-lc++",
 				);
+				AUREA_FIREBASE_API_KEY = "AIzaSyDXVjS5vLuADdVI0C64R9gsx7NMuUq_tBE";
+				AUREA_FIREBASE_APP_ID = "1:3607796908:ios:214d4807d790a0c6c61309";
+				AUREA_FIREBASE_CLIENT_ID = "3607796908-6eg4hj9vq9on08qb0jj9ch2f23ci0h4b.apps.googleusercontent.com";
+				AUREA_FIREBASE_PROJECT_ID = "aurea-8e5f1";
+				AUREA_FIREBASE_REVERSED_CLIENT_ID = "com.googleusercontent.apps.3607796908-6eg4hj9vq9on08qb0jj9ch2f23ci0h4b";
+				AUREA_FIREBASE_SENDER_ID = "3607796908";
 				PRODUCT_BUNDLE_IDENTIFIER = com.aurea.aurea;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "app/Aurea-Bridging-Header.h";
@@ -1014,6 +1038,22 @@
 				version = 3.1.0;
 			};
 		};
+		AD0000000000000000000024 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.6.0;
+			};
+		};
+		AD0000000000000000000025 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1031,6 +1071,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AD0000000000000000000023 /* XCRemoteSwiftPackageReference "swift-package-manager-google-user-messaging-platform" */;
 			productName = GoogleUserMessagingPlatform;
+		};
+		AD0000000000000000000034 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AD0000000000000000000024 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		AD0000000000000000000035 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AD0000000000000000000025 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

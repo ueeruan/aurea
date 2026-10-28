@@ -177,9 +177,13 @@ struct LayerPanelView: View {
                         if spec.tallRow3 {
                             gridRow(spec.row3, layer: l, spec: spec, tall: true).frame(height: 120 * k)
                         } else {
-                            gridRow(spec.row2, layer: l, spec: spec, tall: false).frame(height: 57 * k)
-                            Color.clear.frame(height: 6 * k)
-                            gridRow(spec.row3, layer: l, spec: spec, tall: false).frame(height: 57 * k)
+                            // 0.4.1: só as ferramentas que a camada tem, em fileiras cheias (antes as
+                            // vagas vazias deixavam buracos). Par do `packedToolRows` do Android.
+                            let packed = packedToolRows((spec.row2 + spec.row3).compactMap { $0 })
+                            ForEach(Array(packed.enumerated()), id: \.offset) { item in
+                                if item.offset > 0 { Color.clear.frame(height: 6 * k) }
+                                gridRow(item.element.map { Optional($0) }, layer: l, spec: spec, tall: false).frame(height: 57 * k)
+                            }
                         }
                         Spacer(minLength: 0)
                     }
@@ -522,6 +526,8 @@ struct LayerPanelView: View {
 /// próprio painel da camada não animam; "reduzir movimento" deixa só o fade.
 struct PanelEntrance: ViewModifier {
     let panel: AureaModel.PanelKind
+    /// 0.4.1 (mockup "interface 03"): false quando a página do inspetor já desliza na entrada.
+    var onAppear: Bool = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.layoutDirection) private var direction
     @State private var offset: CGFloat = 0
@@ -532,7 +538,7 @@ struct PanelEntrance: ViewModifier {
             .offset(x: offset)
             .opacity(alpha)
             .clipped()
-            .onAppear { animate() }
+            .onAppear { if onAppear { animate() } }
             .onChange(of: panel) { _ in animate() }
     }
 
@@ -678,13 +684,17 @@ struct SpeedPanel: View {
 
     var body: some View {
         let canKey = keyed && !remap
+        // 0.4.1: com o Remapear ligado, o ◆ e a Curva da coluna esquerda são os do remapeamento.
+        let remapOn = keyed && remap
+        let keys = remapOn ? remapKeys : []
+        let remapHere = keys.contains { $0.time == model.localPlayhead }
         let rail = PanelRail(
             onBack: { model.panel = .none },
-            keyframeLook: look,
-            onKeyframe: canKey ? { toggleSpeedKey() } : nil,
-            onDeleteAllKeyframes: { model.deleteAllKeyframes(id, property: 39) },
-            onCurve: canKey ? { openSpeedCurve() } : nil,
-            curveReady: speedKeys.count >= 2)
+            keyframeLook: remapOn ? (remapHere ? .keyHere : !keys.isEmpty ? .animated : .none) : look,
+            onKeyframe: canKey ? { toggleSpeedKey() } : remapOn ? { toggleRemapKey() } : nil,
+            onDeleteAllKeyframes: { model.deleteAllKeyframes(id, property: remapOn ? 30 : 39) },
+            onCurve: canKey ? { openSpeedCurve() } : remapOn ? { openRemapCurve() } : nil,
+            curveReady: remapOn ? keys.count >= 2 : speedKeys.count >= 2)
         let tabs: [PanelTab] = media ? [
             PanelTab(id: "speed", label: AureaText.t("editor_velocidade"), glyph: CupertinoGlyph.Speedometer),
             PanelTab(id: "curve", label: AureaText.t("om_lp_speed_tab_curve"), glyph: CupertinoGlyph.Waveform),
@@ -708,6 +718,30 @@ struct SpeedPanel: View {
             else { core.insertKeyframe(forLayer: id, property: 39, time: model.localPlayhead, value: speed.clamped(to: 0.05...16)) }
         }
         model.refreshModel(force: true)
+    }
+
+    /// 0.4.1: chaves do remapeamento (TrackProperty::TimeRemap = 30), em ordem.
+    private var remapKeys: [KeyframeItem] {
+        (model.keyframes[id] ?? []).filter { $0.property == 30 }.sorted { $0.time < $1.time }
+    }
+
+    /// 0.4.1: ◆ do remapeamento — mesmas chamadas do ◇ da linha (a curva mantém 2 chaves).
+    private func toggleRemapKey() {
+        let keys = remapKeys
+        if let index = keys.firstIndex(where: { $0.time == model.localPlayhead }) {
+            if keys.count > 2 { model.engine.removeTimeRemap(id, index: UInt32(index)) }
+        } else {
+            _ = model.engine.editTimeRemap(id, index: -1, time: Int64(model.localPlayhead), value: 0, interpolation: -1)
+        }
+        model.refreshModel(force: true)
+    }
+
+    /// 0.4.1: Curva do remapeamento — o trecho sob o cabeçote (par do `openRemapCurve`).
+    private func openRemapCurve() {
+        let keys = remapKeys.map(\.time)
+        guard keys.count >= 2 else { return }
+        let i = max(0, min(keys.count - 2, keys.lastIndex { $0 <= model.localPlayhead } ?? 0))
+        model.openCurve(property: 30, effect: UInt32.max, param: 0, time: keys[i])
     }
 
     private func openSpeedCurve() {
@@ -1210,4 +1244,11 @@ private struct CompactRuler: View {
             }
         }
     }
+}
+
+/// 0.4.1: as ferramentas em 1 ou 2 fileiras sem buraco (≤ 4: uma; 5: 2 + 3; 6: 3 + 3; 7+: 3 + resto).
+func packedToolRows<T>(_ items: [T]) -> [[T]] {
+    if items.count <= 4 { return [items] }
+    if items.count == 5 { return [Array(items.prefix(2)), Array(items.dropFirst(2))] }
+    return [Array(items.prefix(3)), Array(items.dropFirst(3))]
 }

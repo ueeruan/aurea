@@ -52,7 +52,6 @@ import androidx.compose.ui.unit.sp
 import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaToggle
-import com.aurea.aurea.ui.ds.CurveRailIcon
 import com.aurea.aurea.ui.ds.KeypadRequest
 import com.aurea.aurea.ui.ds.KeyframeLook
 import com.aurea.aurea.ui.ds.PropertyCustomRow
@@ -195,13 +194,26 @@ internal fun SpeedPanel(env: PanelEnv) {
         else -> KeyframeLook.None
     }
     val canKey = keyed && !detail.timeRemap
+    // 0.4.1: com o Remapear ligado, o ◆ e a Curva da coluna esquerda passam a ser os do
+    // remapeamento (antes a curva tinha um botão próprio na linha do tempo da fonte).
+    val remap = keyed && detail.timeRemap
+    val remapKeys = if (remap) store.keyframes[detail.id].orEmpty().filter { it.property == TrackProperty.TIME_REMAP }.sortedBy { it.time } else emptyList()
+    val remapHere = remapKeys.indexOfFirst { it.time == detail.localPlayhead }
     val rail = PanelRail(
         onBack = env.onClose,
-        keyframeLook = look,
-        onKeyframe = if (canKey) ({ store.toggleSpeedKeyframe() }) else null,
-        onDeleteAllKeyframes = { store.deleteAllKeyframes(detail.id, listOf(TrackKey(TrackProperty.SPEED))) },
-        onCurve = if (canKey) ({ openTrackCurve(env, TrackProperty.SPEED) }) else null,
-        curveReady = speedKeys.size >= 2,
+        keyframeLook = if (remap) (if (remapHere >= 0) KeyframeLook.KeyHere else if (remapKeys.isNotEmpty()) KeyframeLook.Animated else KeyframeLook.None) else look,
+        onKeyframe = when {
+            canKey -> ({ store.toggleSpeedKeyframe() })
+            remap -> ({ if (remapHere >= 0) store.remapRemove(remapHere) else store.remapInsert(detail.localPlayhead.toLong()) })
+            else -> null
+        },
+        onDeleteAllKeyframes = { store.deleteAllKeyframes(detail.id, listOf(TrackKey(if (remap) TrackProperty.TIME_REMAP else TrackProperty.SPEED))) },
+        onCurve = when {
+            canKey -> ({ openTrackCurve(env, TrackProperty.SPEED) })
+            remap -> ({ openRemapCurve(env, detail.localPlayhead) })
+            else -> null
+        },
+        curveReady = if (remap) remapKeys.size >= 2 else speedKeys.size >= 2,
     )
     val tabs = if (media) listOf(
         PanelTab("speed", stringResource(R.string.editor_velocidade), glyph = CupertinoGlyph.Speedometer),
@@ -1003,7 +1015,6 @@ internal fun TimeRemapControls(env: PanelEnv, showInterpolation: Boolean) {
         var dragLocal by remember(store.primary) { mutableStateOf<Int?>(null) }
         val shownFrames = drag ?: sourceFrames
         val title = stringResource(R.string.remap_linha_tempo)
-        val curveDesc = stringResource(R.string.remap_editar_curva)
         PropertyCustomRow(
             label = title,
             selected = keyHere >= 0,
@@ -1041,13 +1052,7 @@ internal fun TimeRemapControls(env: PanelEnv, showInterpolation: Boolean) {
                         },
                     )
                 }
-                Box(
-                    Modifier.size(44.dp).semantics { contentDescription = curveDesc }
-                        .tocavel(enabled = keyTimes.size >= 2) { openRemapCurve(env, local) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CurveRailIcon(enabled = keyTimes.size >= 2, animated = selectedKey != null || keyHere >= 0)
-                }
+                // 0.4.1: a curva do trecho é a da coluna esquerda (Curva), como em toda propriedade.
             }
         }
         RemapKeyStrip(

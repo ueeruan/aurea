@@ -286,6 +286,8 @@ internal object ViewModes {
     var columnOpen by mutableStateOf(false)
     var pixel by mutableStateOf(false)
     var grid by mutableStateOf(false)
+    /** 0.4.1 (mockup "interface 03", o "olho" do palco): esconde contorno, alças e gizmo da seleção. */
+    var hideOverlay by mutableStateOf(false)
     var gridSpacing by mutableIntStateOf(GRID_MARK)
         private set
     /** 0 normal, 1 só a(s) escolhida(s), 2 a(s) escolhida(s) a 50 % (só na prévia). */

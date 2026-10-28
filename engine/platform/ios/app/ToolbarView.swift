@@ -35,7 +35,8 @@ enum OmegaGlyph {
 /// A10 barra, A9 camada, S9 coluna, S10 trilha). Par do `OmegaChrome` do Android.
 enum OmegaChrome {
     /// Barras do projeto e de reprodução (A10).
-    static var bar: Color { AureaColors.surface }
+    /// 0.4.1 (mockup "interface 03"): o fundo da barra do topo (preto no AMOLED).
+    static var bar: Color { AureaColors.editorTopBar }
     /// Barra da camada escolhida (A9).
     static var layerBar: Color { AureaColors.surfaceHigh }
     /// Coluna de modos, barra inferior da seleção e o girador da grade (S9).
@@ -243,7 +244,8 @@ struct TopBarView: View {
                 ShellBarButton(glyph: CupertinoGlyph.Gear, description: AureaText.t("om_tb_group_settings"), width: 40, height: EditorLayout.topBar) { openSettings() }
                     .accessibilityIdentifier("editor.topbar.groupSettings")
             } else {
-                ShellBarButton(glyph: OmegaGlyph.exitBox, description: AureaText.t("om_tb_exit"), width: 40, height: EditorLayout.topBar) { model.editorBack() }
+                // 0.4.1 (mockup "interface 03"): ‹ no lugar da caixa de saída.
+                ShellBarButton(glyph: CupertinoGlyph.ChevronBack, description: AureaText.t("om_tb_exit"), size: 19, width: 40, height: EditorLayout.topBar) { model.editorBack() }
                     .accessibilityIdentifier("editor.topbar.exit")
                 ShellInlineName(name: model.projectName, placeholder: AureaText.t("edt_untitled"), limit: 320) { model.renameCurrentProject(to: $0) }
                     .accessibilityIdentifier("editor.topbar.title")
@@ -251,8 +253,18 @@ struct TopBarView: View {
                 PluginEditorMenuButton()
                 ShellBarButton(glyph: CupertinoGlyph.Gear, description: AureaText.t("editor_ajustes_projeto"), width: 40, height: EditorLayout.topBar) { openSettings() }
                     .accessibilityIdentifier("editor.projectMenu")
-                ShellBarButton(glyph: CupertinoGlyph.SquareArrowUp, description: AureaText.t("om_tb_share"), width: 40, height: EditorLayout.topBar) { model.openExport() }
-                    .accessibilityIdentifier("editor.export")
+                // 0.4.1 (mockup "interface 03"): exportar = quadrado de 28 com fio de 1,5 no destaque.
+                Button { model.pause(); model.openExport() } label: {
+                    CupertinoGlyph.text(CupertinoGlyph.SquareArrowUp, size: 16, color: AureaColors.accent)
+                        .frame(width: 28, height: 28)
+                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(AureaColors.accent, lineWidth: 1.5))
+                        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+                .buttonStyle(AureaPressStyle())
+                .padding(.leading, 4).padding(.trailing, 10)
+                .frame(height: EditorLayout.topBar)
+                .accessibilityLabel(AureaText.t("om_tb_share"))
+                .accessibilityIdentifier("editor.export")
             }
         }
         .frame(maxHeight: .infinity)
@@ -887,6 +899,13 @@ struct TransportView: View {
         Group {
             if model.stageManipulating { StageInfoBar() } else { buttons }
         }.frame(height: EditorLayout.transport).background(OmegaChrome.bar)
+        // 0.4.1 (mockup "interface 03"): a pílula da divisa palco/timeline (42 × 4, branco
+        // a 28 %) no topo do transporte, que é onde o arrasto vertical já troca as alturas.
+        .overlay(alignment: .top) {
+            RoundedRectangle(cornerRadius: 2).fill(Color.white.opacity(0.28))
+                .frame(width: 42, height: 4).padding(.top, 3)
+                .allowsHitTesting(false).accessibilityHidden(true)
+        }
         // Transporte em LTR mesmo em árabe (par do KeepLtr do Android): início
         // à esquerda, fim à direita, e os ícones (desfazer/refazer inclusive)
         // na mesma ordem e sentido da timeline logo abaixo.
@@ -894,56 +913,191 @@ struct TransportView: View {
     }
 
     private var buttons: some View {
-        GeometryReader { geometry in
-            // 0.3.3 recursos: 8 células (o marcador da 0.3.2 voltou, depois do ⇥).
-            // 0.3.6: ⇤ ▶ ⇥ no CENTRO (antes o ▶ era a 4ª de 8 células iguais, fora do
-            // meio): o grupo do meio tem 3 células de 1/8 e os dois lados a mesma largura —
-            // ↶ ↷ dividem a da esquerda; marcador, Copiar e colar e painel, a da direita.
-            let side = max(1, geometry.size.width / 8)
-            let sideGroup = max(0, (geometry.size.width - 3 * side) / 2)
-            let left = max(1, sideGroup / 2), right = max(1, sideGroup / 3)
-            let h = EditorLayout.transport
+        // 0.4.1 (mockup "interface 03"): três grupos compactos com os ícones do mockup —
+        // ↶ ↷ no início, ⏮ ▶ ⏭ no centro e marcador · copiar · painel no fim. Par do Android.
+        let h = EditorLayout.transport
+        let marked = model.markerFrames.contains(model.status.playhead)
+        return HStack(spacing: 0) {
             HStack(spacing: 0) {
-                ShellBarButton(glyph: CupertinoGlyph.ArrowUturnLeft, description: AureaText.t("editor_desfazer"), size: 20, width: left, height: h,
-                               enabled: model.status.canUndo != 0, disabledTint: AureaColors.transportDisabled) { model.undo() }
+                TransportIconButton(icon: .undo, description: AureaText.t("editor_desfazer"),
+                                    enabled: model.status.canUndo != 0) { model.undo() }
                     .accessibilityIdentifier("transport.undo")
-                ShellBarButton(glyph: CupertinoGlyph.ArrowUturnRight, description: AureaText.t("editor_refazer"), size: 20, width: left, height: h,
-                               enabled: model.status.canRedo != 0, disabledTint: AureaColors.transportDisabled) { model.redo() }
+                TransportIconButton(icon: .redo, description: AureaText.t("editor_refazer"),
+                                    enabled: model.status.canRedo != 0) { model.redo() }
                     .accessibilityIdentifier("transport.redo")
+            }
+            .padding(.leading, 8).frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 4) {
                 // 0.3.3 recursos: segurar ⇤ vai ao início e ⇥ ao fim (como na 0.3.2).
-                ShellBarButton(glyph: CupertinoGlyph.BackwardEnd, description: AureaText.t("r33_tr_previous_hold"), size: 20, width: side, height: h,
-                               onLongPress: { model.seek(toFrame: 0) }) {
+                TransportIconButton(icon: .previous, description: AureaText.t("r33_tr_previous_hold"), tint: AureaColors.muted,
+                                    onLongPress: { model.seek(toFrame: 0) }) {
                     model.stepTransportEdges(-1)
                 }.accessibilityIdentifier("transport.previous")
-                PreRenderPlayControl(side: side)
-                ShellBarButton(glyph: CupertinoGlyph.ForwardEnd, description: AureaText.t("r33_tr_next_hold"), size: 20, width: side, height: h,
-                               onLongPress: { model.seek(toFrame: Int64(model.compositionDuration)) }) {
+                PreRenderPlayControl(side: 48)
+                TransportIconButton(icon: .next, description: AureaText.t("r33_tr_next_hold"), tint: AureaColors.muted,
+                                    onLongPress: { model.seek(toFrame: Int64(model.compositionDuration)) }) {
                     model.stepTransportEdges(1)
                 }.accessibilityIdentifier("transport.next")
+            }
+            HStack(spacing: 0) {
                 // 0.3.3 recursos: o marcador da 0.3.2 volta ao transporte — tocar marca ou
                 // desmarca o instante (aceso num marcador); segurar abre o editor dele
                 // (nome, quadro e cor). Par do Android.
-                let marked = model.markerFrames.contains(model.status.playhead)
-                ShellBarButton(glyph: marked ? ShellGlyph.BookmarkSolid : CupertinoGlyph.Bookmark,
-                               description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"), size: 18, width: right, height: h,
-                               tint: marked ? AureaColors.accent : AureaColors.text,
-                               onLongPress: { model.editMarkerAtPlayhead() }, action: { model.toggleMarkerAt(model.status.playhead) })
+                TransportIconButton(icon: marked ? .bookmarkFill : .bookmark,
+                                    description: AureaText.t("editor_marcar_ou_desmarcar_este_instante"),
+                                    tint: marked ? AureaColors.accent : AureaColors.text,
+                                    onLongPress: { model.editMarkerAtPlayhead() }, action: { model.toggleMarkerAt(model.status.playhead) })
                     .accessibilityIdentifier("transport.marker")
-                CopyPasteButton(side: right)
-                ShellBarButton(glyph: modes.camera ? CupertinoGlyph.CameraViewfinder : OmegaGlyph.sidebarRight, description: AureaText.t("om_tr_view_modes"),
-                               size: 20, width: right, height: h, tint: modes.columnOpen ? AureaColors.accent : AureaColors.text) {
+                CopyPasteButton(side: 40)
+                TransportIconButton(icon: .sidebar, description: AureaText.t("om_tr_view_modes"),
+                                    tint: modes.columnOpen ? AureaColors.accent : AureaColors.text) {
                     modes.columnOpen.toggle()
                 }
                 .accessibilityValue(AureaText.t(modes.columnOpen ? "common_on" : "common_off"))
                 .accessibilityIdentifier("transport.viewModes")
             }
-            .frame(height: h)
+            .padding(.trailing, 8).frame(maxWidth: .infinity, alignment: .trailing)
         }
+        .frame(height: h)
+    }
+}
+
+/// 0.4.1 (mockup "interface 03"): os ícones da barra de reprodução, os mesmos traços
+/// do mockup (caixa 24 × 24; contorno de 1,8 ou preenchidos). Par do TransportIcons.kt.
+enum TransportIcon {
+    case undo, redo, previous, play, pause, next, bookmark, bookmarkFill, copy, sidebar
+
+    var filled: Bool {
+        switch self {
+        case .previous, .play, .pause, .next, .bookmarkFill: return true
+        default: return false
+        }
+    }
+
+    /// O traço na caixa 24 × 24 (y para baixo, como o SVG do mockup).
+    var unitPath: Path {
+        var p = Path()
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x, y: y) }
+        func roundRect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ r: CGFloat) {
+            p.addRoundedRect(in: CGRect(x: x, y: y, width: w, height: h), cornerSize: CGSize(width: r, height: r), style: .circular)
+        }
+        func triangle(_ a: CGPoint, _ b: CGPoint, _ c: CGPoint) {
+            p.move(to: a); p.addLine(to: b); p.addLine(to: c); p.closeSubpath()
+        }
+        func bookmarkPath() {
+            // M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z
+            p.move(to: pt(19, 21)); p.addLine(to: pt(12, 16)); p.addLine(to: pt(5, 21))
+            p.addLine(to: pt(5, 5)); p.addArc(tangent1End: pt(5, 3), tangent2End: pt(7, 3), radius: 2)
+            p.addLine(to: pt(17, 3)); p.addArc(tangent1End: pt(19, 3), tangent2End: pt(19, 5), radius: 2)
+            p.closeSubpath()
+        }
+        switch self {
+        case .undo:
+            // M3 10h10a5 5 0 015 5v0a5 5 0 01-5 5H3 · M3 10l4-4M3 10l4 4
+            p.move(to: pt(3, 10)); p.addLine(to: pt(13, 10))
+            p.addRelativeArc(center: pt(13, 15), radius: 5, startAngle: .degrees(-90), delta: .degrees(180))
+            p.addLine(to: pt(3, 20))
+            p.move(to: pt(7, 6)); p.addLine(to: pt(3, 10)); p.addLine(to: pt(7, 14))
+        case .redo:
+            // M21 10H11a5 5 0 00-5 5v0a5 5 0 005 5h10 · M21 10l-4-4M21 10l-4 4
+            p.move(to: pt(21, 10)); p.addLine(to: pt(11, 10))
+            p.addRelativeArc(center: pt(11, 15), radius: 5, startAngle: .degrees(-90), delta: .degrees(-180))
+            p.addLine(to: pt(21, 20))
+            p.move(to: pt(17, 6)); p.addLine(to: pt(21, 10)); p.addLine(to: pt(17, 14))
+        case .previous:
+            triangle(pt(19, 20), pt(9, 12), pt(19, 4))
+            roundRect(5, 4, 2.5, 16, 1)
+        case .play:
+            triangle(pt(6, 4), pt(20, 12), pt(6, 20))
+        case .pause:
+            p.addRect(CGRect(x: 6, y: 4, width: 4, height: 16))
+            p.addRect(CGRect(x: 14, y: 4, width: 4, height: 16))
+        case .next:
+            triangle(pt(5, 4), pt(15, 12), pt(5, 20))
+            roundRect(16.5, 4, 2.5, 16, 1)
+        case .bookmark, .bookmarkFill:
+            bookmarkPath()
+        case .copy:
+            roundRect(9, 9, 13, 13, 2)
+            // M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1
+            p.move(to: pt(5, 15)); p.addLine(to: pt(4, 15))
+            p.addArc(tangent1End: pt(2, 15), tangent2End: pt(2, 13), radius: 2)
+            p.addLine(to: pt(2, 4)); p.addArc(tangent1End: pt(2, 2), tangent2End: pt(4, 2), radius: 2)
+            p.addLine(to: pt(13, 2)); p.addArc(tangent1End: pt(15, 2), tangent2End: pt(15, 4), radius: 2)
+            p.addLine(to: pt(15, 5))
+        case .sidebar:
+            roundRect(3, 4, 18, 16, 3)
+            p.move(to: pt(7, 4)); p.addLine(to: pt(7, 20))
+        }
+        return p
+    }
+}
+
+/// 0.4.1 (mockup "interface 03"): o ícone escalado da caixa 24 para o quadro, centrado.
+struct TransportIconShape: Shape {
+    let icon: TransportIcon
+    func path(in rect: CGRect) -> Path {
+        let k = min(rect.width, rect.height) / 24
+        let transform = CGAffineTransform(translationX: rect.minX + (rect.width - 24 * k) / 2,
+                                          y: rect.minY + (rect.height - 24 * k) / 2).scaledBy(x: k, y: k)
+        return icon.unitPath.applying(transform)
+    }
+}
+
+/// 0.4.1 (mockup "interface 03"): contorno de 1,8 (na caixa 24) com pontas redondas, ou preenchido.
+struct TransportGlyph: View {
+    let icon: TransportIcon
+    let size: CGFloat
+    let color: Color
+    var body: some View {
+        Group {
+            if icon.filled {
+                TransportIconShape(icon: icon).fill(color)
+            } else {
+                TransportIconShape(icon: icon)
+                    .stroke(color, style: StrokeStyle(lineWidth: 1.8 * size / 24, lineCap: .round, lineJoin: .round))
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// 0.4.1 (mockup "interface 03"): um botão da barra — 40 de largura, ícone de 17 no
+/// meio; os mesmos gestos do ShellBarButton (tocar, segurar).
+private struct TransportIconButton: View {
+    let icon: TransportIcon
+    let description: String
+    var width: CGFloat = 40
+    var tint: Color? = nil
+    var enabled = true
+    var disabledTint: Color = AureaColors.transportDisabled
+    var onLongPress: (() -> Void)? = nil
+    var action: () -> Void
+
+    var body: some View {
+        TransportGlyph(icon: icon, size: 17, color: enabled ? (tint ?? AureaColors.text) : disabledTint)
+            .frame(width: width, height: EditorLayout.transport)
+            .contentShape(Rectangle())
+            .gesture(LongPressGesture(minimumDuration: 0.45)
+                .exclusively(before: TapGesture())
+                .onEnded { value in
+                    guard enabled else { return }
+                    switch value {
+                    case .first(let held): if held { onLongPress?() }
+                    case .second: action()
+                    }
+                })
+            .accessibilityElement()
+            .accessibilityLabel(description)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default) { if enabled { action() } }
     }
 }
 
 private struct PreRenderPlayControl: View {
     @EnvironmentObject private var model: AureaModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let side: CGFloat
     @State private var pressed = false
     @State private var began: Double?
@@ -962,21 +1116,30 @@ private struct PreRenderPlayControl: View {
 
     var body: some View {
         Button { model.playPause() } label: {
-            ZStack(alignment: .bottomTrailing) {
-                ZStack {
-                    CupertinoGlyph.text(model.status.playing != 0 ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill,
-                        size: 22, color: model.looping ? AureaColors.accent : AureaColors.text)
-                    if model.preRenderPreparing || model.preRenderProgress.running || model.preRenderProgress.complete {
-                        Circle().trim(from: 0, to: CGFloat(model.preRenderPreparing ? 0.08 : model.preRenderProgress.fraction))
-                            .stroke(AureaColors.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                            .frame(width: 30, height: 30).rotationEffect(.degrees(-90)).allowsHitTesting(false)
+            ZStack {
+                // 0.4.1 (mockup "interface 03"): o ▶ do mockup, sem círculo, no destaque;
+                // tocando, o ⏸ gira pelo arco-íris (uma volta a cada 2 s). Sem animação
+                // com "Reduzir movimento".
+                if model.status.playing != 0 && !reduceMotion {
+                    SwiftUI.TimelineView(.animation) { context in
+                        let hue = (context.date.timeIntervalSinceReferenceDate / 2).truncatingRemainder(dividingBy: 1)
+                        TransportGlyph(icon: .pause, size: 18, color: Color(hue: hue, saturation: 0.75, brightness: 1))
                     }
-                }.frame(width: side, height: EditorLayout.transport).contentShape(Rectangle())
-                if model.looping {
-                    CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent)
-                        .padding(.trailing, 6).padding(.bottom, 7).allowsHitTesting(false)
+                } else {
+                    TransportGlyph(icon: model.status.playing != 0 ? .pause : .play, size: 18, color: AureaColors.accent)
                 }
-            }.opacity(pressed ? 0.65 : 1)
+                if model.preRenderPreparing || model.preRenderProgress.running || model.preRenderProgress.complete {
+                    Circle().trim(from: 0, to: CGFloat(model.preRenderPreparing ? 0.08 : model.preRenderProgress.fraction))
+                        .stroke(AureaColors.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .frame(width: 40, height: 40).rotationEffect(.degrees(-90)).allowsHitTesting(false)
+                }
+                if model.looping {
+                    // O selinho do laço, no canto do ícone (não da célula, que é larga).
+                    CupertinoGlyph.text(CupertinoGlyph.Repeat, size: 11, color: AureaColors.accent)
+                        .frame(width: 44, height: 44, alignment: .bottomTrailing).allowsHitTesting(false)
+                }
+            }.frame(width: side, height: EditorLayout.transport).contentShape(Rectangle())
+            .opacity(pressed ? 0.65 : 1)
         }.buttonStyle(.plain)
             .highPriorityGesture(DragGesture(minimumDistance: 0)
                 .onChanged { value in
@@ -1121,7 +1284,8 @@ private struct CopyPasteButton: View {
     @State private var anchor: CGRect = .zero
 
     var body: some View {
-        ShellBarButton(glyph: CupertinoGlyph.DocOnClipboard, description: AureaText.t("om_tr_copy_paste"), size: 20, width: side, height: EditorLayout.transport) {
+        // 0.4.1 (mockup "interface 03"): o ícone de copiar do mockup (dois quadrados).
+        TransportIconButton(icon: .copy, description: AureaText.t("om_tr_copy_paste"), width: side) {
             if model.status.playing != 0 { model.playPause() }
             menu = true
         }

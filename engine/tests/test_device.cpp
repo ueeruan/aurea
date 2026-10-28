@@ -9,6 +9,7 @@
 #include "SyntheticVideo.hpp"
 #include "VulkanBackend.hpp"
 #include "aurea/Engine.hpp"
+#include "aurea/effects/EffectRegistry.hpp"
 #include "aurea/media/ThumbnailService.hpp"
 #include "aurea/core/Time.hpp"
 #include "aurea/jobs/JobSystem.hpp"
@@ -708,4 +709,32 @@ AUREA_TEST(DevicePolicy, InteractionDraftByTier) {
     AUREA_CHECK(high.heavyLevel < mid.heavyLevel);
     AUREA_CHECK_EQ(ultra.heavyLevel, 0u);
     AUREA_CHECK_EQ(ultra.denominatorMul, 1u);
+}
+
+// 0.4.1 (Elementos › Aurora): uma camada de ajuste com o efeito Aurora, e um desfazer a tira.
+AUREA_TEST(Elements, AddAuroraIsOneUndoableAdjustmentLayer) {
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const auto id = e.add_aurora();
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) { e.shutdown(); return; }
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    const Layer* l = comp ? comp->layer(LayerId::unpack(*id)) : nullptr;
+    AUREA_CHECK(l != nullptr);
+    if (l) {
+        AUREA_CHECK(l->adjustment);
+        AUREA_CHECK(l->threeD);
+        AUREA_CHECK_EQ(l->effects.size(), static_cast<usize>(1));
+        AUREA_CHECK(l->effects.size() == 1 && l->effects[0].type == effect_type_id(effect_keys::kAurora));
+    }
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    comp = e.project()->timeline().composition(e.project()->timeline().current());
+    AUREA_CHECK(comp && comp->layer(LayerId::unpack(*id)) == nullptr);
+    e.shutdown();
 }

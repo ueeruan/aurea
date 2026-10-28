@@ -1339,6 +1339,9 @@ public:
 
     /// Partículas (GPU, analíticas). Presets: 0 faíscas, 1 neve, 2 poeira de luz.
     [[nodiscard]] Result<u64> add_particles(u32 preset) noexcept;
+    /// 0.4.1 (mockup "interface 03", Elementos): camada de ajuste 3D "Aurora" com o efeito
+    /// Aurora (Gerar) já aplicado, cobrindo o quadro todo. Um passo de desfazer.
+    [[nodiscard]] Result<u64> add_aurora() noexcept;
     bool apply_particle_preset(u64 layerId, u32 preset) noexcept;
     /// 0 taxa, 1 vida, 2 velocidade, 3 espalhamento, 4 gravidade, 5 tamanho
     /// inicial, 6 tamanho final, 7 direção.

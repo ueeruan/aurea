@@ -4,6 +4,10 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -19,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -120,74 +125,75 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
     val canUndo by remember { derivedStateOf { store.project.canUndo } }
     val canRedo by remember { derivedStateOf { store.project.canRedo } }
     val h = ShellDims.Transport
+    Box(Modifier.fillMaxWidth().height(h).background(OmegaChrome.Bar)) {
+    // 0.4.1 (mockup "interface 03"): a pílula da divisa palco/timeline (42 × 4, branco
+    // a 28 %) no topo do transporte, que é onde o arrasto vertical já troca as alturas.
+    Box(
+        Modifier.align(Alignment.TopCenter).padding(top = 3.dp).size(42.dp, 4.dp)
+            .clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.28f)),
+    )
     Row(
         Modifier
-            .fillMaxWidth()
-            .height(h)
-            .background(OmegaChrome.Bar),
+            .fillMaxSize(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 0.3.6: ⇤ ▶ ⇥ no CENTRO da barra. Com 8 células iguais o ▶ era a 4ª (43,75 %
-        // da largura): os dois lados agora têm o mesmo peso (TransportLayout) e as
-        // células de cada lado dividem o seu.
-        Row(Modifier.weight(TransportLayout.SIDE_WEIGHT), verticalAlignment = Alignment.CenterVertically) {
-            ChromeButton(
-                CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.editor_desfazer),
+        // 0.4.1 (mockup "interface 03"): três grupos compactos com os ícones do mockup —
+        // ↶ ↷ no início, ⏮ ▶ ⏭ no centro (12 entre eles) e marcador · copiar · painel no fim.
+        Row(Modifier.weight(1f).padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TransportIconButton(
+                TransportIcon.Undo, stringResource(R.string.editor_desfazer),
                 onClick = if (canUndo) ({ store.undo() }) else null,
-                modifier = Modifier.weight(1f).testTag("transport.undo"), size = 20.dp, height = h,
-                tint = if (canUndo) AureaColors.Text else AureaColors.EditorIconDisabled,
+                modifier = Modifier.testTag("transport.undo"),
             )
-            ChromeButton(
-                CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer),
+            TransportIconButton(
+                TransportIcon.Redo, stringResource(R.string.editor_refazer),
                 onClick = if (canRedo) ({ store.redo() }) else null,
-                modifier = Modifier.weight(1f).testTag("transport.redo"), size = 20.dp, height = h,
-                tint = if (canRedo) AureaColors.Text else AureaColors.EditorIconDisabled,
+                modifier = Modifier.testTag("transport.redo"),
             )
         }
-        Row(Modifier.weight(TransportLayout.CENTER_WEIGHT), verticalAlignment = Alignment.CenterVertically) {
-            ChromeButton(
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            TransportIconButton(
                 // 0.3.3 recursos: segurar vai ao início (como na 0.3.2).
-                CupertinoGlyph.BackwardEnd, stringResource(R.string.r33_tr_previous_hold),
+                TransportIcon.Previous, stringResource(R.string.r33_tr_previous_hold),
                 onClick = { store.stepTransportEdges(-1) }, onLongClick = { store.seek(0) },
-                modifier = Modifier.weight(1f).testTag("transport.previous"), size = 20.dp, height = h,
+                modifier = Modifier.testTag("transport.previous"), tint = AureaColors.Muted,
             )
-            PlayButton(store, Modifier.weight(1f))
-            ChromeButton(
+            PlayButton(store, Modifier.width(48.dp))
+            TransportIconButton(
                 // 0.3.3 recursos: segurar vai ao fim (como na 0.3.2).
-                CupertinoGlyph.ForwardEnd, stringResource(R.string.r33_tr_next_hold),
+                TransportIcon.Next, stringResource(R.string.r33_tr_next_hold),
                 onClick = { store.stepTransportEdges(1) }, onLongClick = { store.seek(store.project.durationFrames) },
-                modifier = Modifier.weight(1f).testTag("transport.next"), size = 20.dp, height = h,
+                modifier = Modifier.testTag("transport.next"), tint = AureaColors.Muted,
             )
         }
-        Row(Modifier.weight(TransportLayout.SIDE_WEIGHT), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
             // 0.3.3 recursos: o marcador da 0.3.2 volta ao transporte — tocar marca ou
             // desmarca o instante (aceso num marcador); segurar abre o editor dele
             // (nome, quadro e cor).
             val marked = store.playhead in store.markers.frames
-            ChromeButton(
-                if (marked) ShellGlyph.BookmarkSolid else CupertinoGlyph.Bookmark,
+            TransportIconButton(
+                if (marked) TransportIcon.BookmarkFill else TransportIcon.Bookmark,
                 stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
                 onClick = { store.toggleMarker() }, onLongClick = { store.editMarkerAtPlayhead() },
-                modifier = Modifier.weight(1f).testTag("transport.marker"), size = 18.dp, height = h,
+                modifier = Modifier.testTag("transport.marker"),
                 tint = if (marked) AureaColors.Accent else AureaColors.Text,
             )
-            CopyPasteButton(store, ui, Modifier.weight(1f).height(h))
+            CopyPasteButton(store, ui, Modifier.size(40.dp, h))
             val open = ViewModes.columnOpen
             val viewModes = stringResource(R.string.om_tr_view_modes)
             val onLabel = stringResource(R.string.common_on)
             val offLabel = stringResource(R.string.common_off)
-            ChromeButton(
-                if (ViewModes.camera) CupertinoGlyph.CameraViewfinder else ShellGlyph.SidebarRight,
+            TransportIconButton(
+                TransportIcon.Sidebar,
                 viewModes,
                 onClick = { ViewModes.columnOpen = !ViewModes.columnOpen },
                 modifier = Modifier
-                    .weight(1f)
                     .testTag("transport.viewModes")
                     .semantics { stateDescription = if (open) onLabel else offLabel },
-                size = 20.dp, height = h,
                 tint = if (open) AureaColors.Accent else AureaColors.Text,
             )
         }
+    }
     }
 }
 
@@ -299,18 +305,20 @@ private fun PlayButton(store: EditorStore, modifier: Modifier = Modifier) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        CupertinoIcon(if (playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill,
-            22.dp, if (loop) AureaColors.Accent else AureaColors.Text)
+        // 0.4.1 (mockup "interface 03"): o ▶ do mockup, sem círculo, no destaque; tocando,
+        // o ⏸ gira pelas cores do arco-íris (rgbCycleColor).
+        TransportGlyph(if (playing) TransportIcon.Pause else TransportIcon.Play, 18.dp,
+            rgbCycleColor(running = playing && !com.aurea.aurea.effects.rememberReduceMotion(), idle = AureaColors.Accent))
         if (store.preRenderPreparing || progress.running || progress.complete) {
             val color = AureaColors.Accent
-            Canvas(Modifier.size(30.dp)) {
+            Canvas(Modifier.size(40.dp)) {
                 drawArc(color, -90f, 360f * if (store.preRenderPreparing) 0.08f else progress.fraction,
                     false, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx(), cap = StrokeCap.Round))
             }
         }
         if (loop) {
             // O selinho do laço, no canto do ícone (não da célula, que é larga).
-            Box(Modifier.size(34.dp)) {
+            Box(Modifier.size(44.dp)) {
                 CupertinoIcon(
                     CupertinoGlyph.Repeat,
                     11.dp,
@@ -473,13 +481,13 @@ private fun CopyPasteButton(store: EditorStore, ui: EditorUi, modifier: Modifier
     var picker by remember { mutableStateOf(false) }
     var linking by remember { mutableStateOf(false) }
     Box(modifier) {
-        ChromeButton(
-            CupertinoGlyph.DocOnClipboard, stringResource(R.string.om_tr_copy_paste),
+        TransportIconButton(
+            TransportIcon.Copy, stringResource(R.string.om_tr_copy_paste),
             onClick = {
                 if (store.playing) store.pause()
                 menu = true
             },
-            modifier = Modifier.matchParentSize().testTag("transport.copyPaste"), size = 20.dp, height = ShellDims.Transport,
+            modifier = Modifier.matchParentSize().testTag("transport.copyPaste"),
         )
         LocaleDirection {
             if (menu) {

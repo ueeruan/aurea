@@ -514,9 +514,9 @@ struct RenderSettings {
     Vec4 editorBackground{0.0048f, 0.0070f, 0.0103f, 1.0f};
     /// Área de trabalho em volta da composição (letterbox do preview), já
     /// CODIFICADA (o swapchain é UNORM e o passe de saída limpa com ela).
-    /// #262C35: clara o bastante para uma composição preta não se confundir
+    /// #141416 (0.4.1, mockup "interface 03"; antes #262C35): clara o bastante para uma composição preta não se confundir
     /// com o entorno, escura o bastante para não brigar com o vídeo.
-    Vec4 pasteboard{0.149f, 0.173f, 0.208f, 1.0f};
+    Vec4 pasteboard{0.0784f, 0.0784f, 0.0863f, 1.0f};
     f32  viewportZoom = 1.0f;
     Vec2 viewportPan{0.0f, 0.0f};
     // Omega chrome (área 02): modos de visão da prévia (Engine::set_preview_view).

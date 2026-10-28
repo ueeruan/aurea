@@ -803,6 +803,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (long long)addText3D:(NSString*)content depth:(float)depth alignment:(uint32_t)alignment
                      r:(float)r g:(float)g b:(float)b;
 - (long long)addParticles:(uint32_t)preset;
+/// 0.4.1: Elementos › Aurora (Engine::add_aurora).
+- (long long)addAurora;
 - (long long)freezeFrameForLayer:(long long)layerId frame:(int32_t)frame hold:(int32_t)holdFrames;
 /// Motivo legível da última importação que falhou ("" quando deu certo).
 @property (nonatomic, readonly, copy) NSString* lastImportError;

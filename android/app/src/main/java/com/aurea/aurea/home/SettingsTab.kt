@@ -506,6 +506,7 @@ private fun SecretDialogField(value: String, onValueChange: (String) -> Unit, pl
 /** Nome de cada tema (o id é o salvo nos Ajustes). */
 @Composable
 private fun themeName(id: String): String = stringResource(when (id) {
+    "amoled" -> R.string.theme_amoled
     "midnight" -> R.string.theme_midnight
     "graphite" -> R.string.theme_graphite
     "emerald" -> R.string.theme_emerald

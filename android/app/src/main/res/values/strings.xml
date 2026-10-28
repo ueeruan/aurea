@@ -1809,7 +1809,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea Beta 0.4.0 (2204) • 28/10/2026\n\n• Toque leve: enquanto você arrasta um controle, a prévia desenha um rascunho mais leve e volta à qualidade cheia ao soltar — bem mais fluido em celulares antigos.\n• 7 estilos novos de texto 3D: Inflado, Retrô 80, Borda neon, Bloco, Gelo, Pedra e Ouro rosé.\n• Editor de curvas: a alça de baixo não fica mais presa embaixo da barra ◀ ▶; os controles deslizantes seguem o dedo.\n• Edição: com um painel aberto, a prévia cede espaço e as abas ficam maiores em telas baixas.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.1 (2205) • Fase 2 • 28/10/2026\n\n• Interface nova (mockup de Hanszx): tema AMOLED, barra de reprodução nova, dock flutuante com grade do +, gavetas em cartão, inspetor em folha que desliza, cores rápidas, roda de rotação e contorno nos clipes.\n• Aurora em Elementos: céu de aurora boreal pronto, já em 3D.\n• Conta: entrar com o Google e conta obrigatória de novo.\n• Remapear tempo: a curva agora é a da coluna esquerda.\n• O painel da camada não deixa mais buracos.\n• AureaHyper agora é pago: o acesso é liberado por conta.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -1986,7 +1986,7 @@
     <!-- Conta obrigatória (conta/ContaScreen.kt, ContaView.swift) -->
     <string name="conta_titulo_cadastro">Crie sua conta</string>
     <string name="conta_titulo_entrar">Entre na sua conta</string>
-    <string name="conta_subtitulo">Entrar é opcional. Seus projetos e o editor estão disponíveis sem conta.</string>
+    <string name="conta_subtitulo">Crie sua conta ou entre para usar o Aurea. Seus projetos e mídias ficam no aparelho.</string>
     <string name="conta_email">E-mail</string>
     <string name="conta_senha">Senha</string>
     <string name="conta_senha_dica">Pelo menos 8 caracteres</string>

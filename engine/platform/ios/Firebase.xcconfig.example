@@ -1,0 +1,34 @@
+// =============================================================================
+//  Aurea / platform / ios / Firebase.xcconfig.example
+//
+//  0.4.1: login com Google pelo Firebase Auth (GoogleLogin.swift). Par de
+//  android/firebase.properties.example. Sem estes valores o app compila e o
+//  botão "Entrar com o Google" simplesmente não aparece.
+//
+//  Como preencher:
+//   1. Console do Firebase → projeto → adicionar app iOS com o bundle id
+//      com.aurea.aurea → baixe o GoogleService-Info.plist (NÃO entra no repo).
+//   2. Authentication → Sign-in method → ative o provedor Google.
+//   3. Copie este arquivo para engine/platform/ios/Firebase.xcconfig (fora do git)
+//      e preencha com as chaves do GoogleService-Info.plist:
+//        PROJECT_ID → AUREA_FIREBASE_PROJECT_ID
+//        GOOGLE_APP_ID → AUREA_FIREBASE_APP_ID (o id do app iOS, 1:...:ios:...)
+//        API_KEY → AUREA_FIREBASE_API_KEY
+//        CLIENT_ID → AUREA_FIREBASE_CLIENT_ID (o client id OAuth do iOS)
+//        REVERSED_CLIENT_ID → AUREA_FIREBASE_REVERSED_CLIENT_ID (esquema de URL)
+//        GCM_SENDER_ID → AUREA_FIREBASE_SENDER_ID
+//   4. Compile passando o arquivo (tem prioridade sobre as build settings vazias
+//      do alvo):
+//        xcodebuild -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea \
+//          -xcconfig engine/platform/ios/Firebase.xcconfig ... build
+//      ou passe cada valor direto na linha do xcodebuild (AUREA_FIREBASE_API_KEY=...).
+//
+//  Os valores são públicos (vão dentro do app), mas ficam fora do repositório.
+//  Atenção: em .xcconfig, "//" inicia comentário; não há "//" nestes valores.
+// =============================================================================
+AUREA_FIREBASE_PROJECT_ID =
+AUREA_FIREBASE_APP_ID =
+AUREA_FIREBASE_API_KEY =
+AUREA_FIREBASE_CLIENT_ID =
+AUREA_FIREBASE_REVERSED_CLIENT_ID =
+AUREA_FIREBASE_SENDER_ID =

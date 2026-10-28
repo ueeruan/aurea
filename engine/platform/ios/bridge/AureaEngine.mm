@@ -2690,6 +2690,13 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     return res.ok() ? static_cast<long long>(*res) : -static_cast<long long>(res.status().code());
 }
 
+- (long long)addAurora {
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    const aurea::Result<aurea::u64> r = e->add_aurora();
+    return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code());
+}
+
 - (long long)addParticles:(uint32_t)preset {
     auto* e = self.engine;
     if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);

@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
@@ -186,6 +187,12 @@ internal fun ColorFillPanel(env: PanelEnv) {
             }
         }
         Spacer(Modifier.height(2.75.dp))
+        // 0.4.1 (mockup "interface 03"): as 7 cores rápidas do sistema, um toque = um desfazer.
+        if (kind == FillKind.Color) QuickColors { rgba ->
+            store.beginGesture("cor rápida")
+            if (fill != null) store.setShapeFillValue(0, rgba) else store.setTextColor(rgba[0], rgba[1], rgba[2], rgba[3])
+            store.endGesture()
+        }
         Box(
             Modifier
                 .fillMaxWidth()
@@ -220,6 +227,28 @@ internal fun ColorFillPanel(env: PanelEnv) {
         Spacer(Modifier.height(10.dp))
        }
       }
+    }
+}
+
+/** As cores do mockup (branco e as do sistema iOS), em sRGB. */
+private val QuickColorList = longArrayOf(0xFFFFFFFF, 0xFFFF453A, 0xFFFF9F0A, 0xFFFFD60A, 0xFF30D158, 0xFF0A84FF, 0xFFBF5AF2)
+
+@Composable
+private fun QuickColors(onPick: (FloatArray) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).testTag("fill.quickColors"),
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+    ) {
+        QuickColorList.forEachIndexed { i, argb ->
+            val c = Color(argb)
+            Box(
+                Modifier.size(28.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c)
+                    .border(1.dp, Color.White.copy(alpha = 0.16f), androidx.compose.foundation.shape.CircleShape)
+                    .testTag("fill.quick.$i")
+                    .semantics { contentDescription = "#%06X".format(argb and 0xFFFFFF) }
+                    .tocavel(haptic = true) { onPick(floatArrayOf(c.red, c.green, c.blue, 1f)) },
+            )
+        }
     }
 }
 

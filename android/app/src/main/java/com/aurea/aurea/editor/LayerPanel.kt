@@ -338,9 +338,13 @@ internal fun LayerPanel(store: EditorStore, ui: EditorUi, layerId: Long) {
             if (spec.tallRow3) {
                 GridRow(store, ui, l, spec, spec.row3, height = (120f * k).dp, tall = true)
             } else {
-                GridRow(store, ui, l, spec, spec.row2, height = (57f * k).dp, tall = false)
-                Spacer(Modifier.height((6f * k).dp))
-                GridRow(store, ui, l, spec, spec.row3, height = (57f * k).dp, tall = false)
+                // 0.4.1: só as ferramentas que a camada tem, em fileiras cheias (antes as
+                // vagas vazias deixavam buracos — camada de ajuste, imagem, Aurora).
+                val packed = packedToolRows((spec.row2 + spec.row3).filterNotNull())
+                packed.forEachIndexed { i, row ->
+                    if (i > 0) Spacer(Modifier.height((6f * k).dp))
+                    GridRow(store, ui, l, spec, row, height = (57f * k).dp, tall = false)
+                }
             }
         }
         if (popout != LayerPopout.None) {
@@ -525,6 +529,13 @@ private inline fun timeEdit(store: EditorStore, @Suppress("UNUSED_PARAMETER") l:
 // =============================================================================
 // Fileiras 2 e 3: a grade de 57 dp
 // =============================================================================
+
+/** 0.4.1: as ferramentas em 1 ou 2 fileiras sem buraco (≤ 4: uma; 5: 2 + 3; 6: 3 + 3; 7+: 3 + resto). */
+internal fun <T> packedToolRows(items: List<T>): List<List<T>> = when {
+    items.size <= 4 -> listOf(items)
+    items.size == 5 -> listOf(items.take(2), items.drop(2))
+    else -> listOf(items.take(3), items.drop(3))
+}
 
 @Composable
 private fun GridRow(

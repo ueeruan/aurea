@@ -42,6 +42,8 @@ tag = "v1-cofre-de-video"
 new_sqlite_classes = ["CofreDeVideo"]
 
 [vars]
+# 0.4.1: login com Google pelo Firebase Auth (firebase.js confere o aud/iss deste projeto).
+FIREBASE_PROJECT_ID = "aurea-8e5f1"
 # Kill switch: "false" = nenhuma chamada paga chega à 8Scale.
 AI_VIDEO_ENABLED = "true"
 # Teto de gasto do dia (UTC). Atingido, nenhuma geração nova entra.

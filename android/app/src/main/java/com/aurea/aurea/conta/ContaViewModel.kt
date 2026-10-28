@@ -144,6 +144,36 @@ class ContaViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * 0.4.1: entrar com o Google (Firebase Auth). A folha do Google, o token do Firebase
+     * e o servidor do Aurea; no fim é a mesma sessão do login por e-mail e senha.
+     */
+    fun entrarComGoogle(activity: android.app.Activity) {
+        if (ocupado || !GoogleLogin.disponivel) return
+        ocupado = true
+        erro = null
+        viewModelScope.launch {
+            val r = when (val g = GoogleLogin.entrar(activity)) {
+                GoogleLogin.Resultado.Cancelado -> { ocupado = false; return@launch }
+                is GoogleLogin.Resultado.Falhou -> { ocupado = false; erro = ErroConta.SERVICO; return@launch }
+                is GoogleLogin.Resultado.Token -> withContext(Dispatchers.IO) { ContaApi.entrarComFirebase(g.idToken) }
+            }
+            if (r.status == 0) { ocupado = false; erro = ErroConta.REDE; return@launch }
+            if (!r.ok) { ocupado = false; erro = ContaLogica.erroDoServidor(r.status, r.codigo); return@launch }
+            val token = r.corpo.optString("token")
+            val confirmado = r.corpo.optString("email")
+            val gravou = token.length == 43 && confirmado.isNotBlank() && withContext(Dispatchers.IO) {
+                runCatching { cofre.put(KEY_TOKEN, token); cofre.put(KEY_EMAIL, confirmado) }.isSuccess && sessao() != null
+            }
+            ocupado = false
+            if (!gravou) { erro = ErroConta.SERVICO; return@launch }
+            if (r.corpo.optBoolean("created")) atualizarUsuarios()
+            ultimaRevalidacao = SystemClock.elapsedRealtime()
+            estado = ContaEstado.Dentro(confirmado)
+            atualizarAcessos()
+        }
+    }
+
     /** Sai: apaga o token local na hora; avisa o servidor quando der. */
     fun sair() {
         val guardada = sessao()

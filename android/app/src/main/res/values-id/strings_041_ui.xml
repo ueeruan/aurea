@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.1: tema do mockup "interface 03" (Hanszx). -->
+    <string name="theme_amoled" translatable="false">AMOLED</string>
+    <string name="om_vm_overlay">Sembunyikan garis dan pegangan</string>
+    <string name="add_element_aurora">Aurora</string>
+    <string name="conta_membros">8 rb+ anggota</string>
+    <string name="conta_ou">atau</string>
+    <string name="conta_google">Lanjutkan dengan Google</string>
+</resources>

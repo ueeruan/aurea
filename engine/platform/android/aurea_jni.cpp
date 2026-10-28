@@ -2311,6 +2311,15 @@ AUREA_JNI jlong AUREA_FN(nativeSplitShape3d)(JNIEnv*, jclass, jlong handle, jlon
     return static_cast<jlong>(*r);
 }
 
+// 0.4.1: Elementos › Aurora (camada de ajuste com o efeito Aurora; Engine::add_aurora).
+AUREA_JNI jlong AUREA_FN(nativeAddAurora)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const Result<u64> r = c->engine.add_aurora();
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
+}
+
 AUREA_JNI jlong AUREA_FN(nativeAddParticles)(JNIEnv*, jclass, jlong handle, jint preset) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);

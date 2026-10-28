@@ -1236,12 +1236,7 @@ struct TimeRemapEffectEditor: View {
                                 drag = frames.rounded()
                                 _ = model.engine.setTimeRemapValue(id, time: Int64(dragLocal ?? model.localPlayhead), value: frames.rounded())
                             }.onEnded { _ in finishDrag() })
-                        Spacer(minLength: 4)
-                        Button(action: openCurve) {
-                            CurveRailIcon(enabled: keyTimes.count >= 2, animated: selectedKey != nil || keyHere != nil)
-                                .frame(width: 44, height: 44).contentShape(Rectangle())
-                        }.buttonStyle(AureaPressStyle()).disabled(keyTimes.count < 2)
-                            .accessibilityLabel(AureaText.t("remap_editar_curva"))
+                        // 0.4.1: a curva do trecho é a da coluna esquerda (Curva), como em toda propriedade.
                     }
                 }
                 keyStrip.padding(.leading, 102).padding(.trailing, 4)

@@ -167,6 +167,8 @@ struct ColorFillPanel: View {
                     typeBar
                         .padding(.top, ColorFillMetrics.barTop - (ColorFillMetrics.barRow - ColorFillMetrics.barHeight) / 2)
                 }
+                // 0.4.1 (mockup "interface 03"): as 7 cores rápidas do sistema, um toque = um desfazer.
+                if currentTab == .color && (target == .shape || target == .text) { quickColors }
                 // 0.3.4 painéis: o conteúdo ocupa a altura que sobra (o painel é alto desde a 0.3.4).
                 content
                     .frame(minHeight: ColorFillMetrics.content, maxHeight: .infinity)
@@ -258,6 +260,39 @@ struct ColorFillPanel: View {
             .background(AureaColors.fxLowSurface, in: RoundedRectangle(cornerRadius: ColorFillMetrics.radius))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(AureaText.t(tab.key))
+    }
+
+    // MARK: Cores rápidas (0.4.1, mockup "interface 03"; par do `QuickColors` do Android)
+
+    /// As cores do mockup (branco e as do sistema iOS), em sRGB 0xRRGGBB.
+    private static let quickColorList: [UInt32] = [0xFFFFFF, 0xFF453A, 0xFF9F0A, 0xFFD60A, 0x30D158, 0x0A84FF, 0xBF5AF2]
+
+    private var quickColors: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(Self.quickColorList.enumerated()), id: \.offset) { item in
+                let rgb = item.element
+                let r = Float((rgb >> 16) & 0xFF) / 255, g = Float((rgb >> 8) & 0xFF) / 255, b = Float(rgb & 0xFF) / 255
+                if item.offset > 0 { Spacer(minLength: 0) }
+                Button { pickQuickColor([r, g, b, 1]) } label: {
+                    Circle().fill(Color(red: Double(r), green: Double(g), blue: Double(b)))
+                        .overlay(Circle().stroke(Color.white.opacity(0.16), lineWidth: 1))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(AureaPressStyle())
+                .accessibilityLabel(String(format: "#%06X", rgb))
+                .accessibilityIdentifier("fill.quick.\(item.offset)")
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("fill.quickColors")
+    }
+
+    private func pickQuickColor(_ rgba: [Float]) {
+        model.beginGesture("cor rápida")
+        if target == .text { setTextColor(rgba) } else { model.setShapeFillValue(ShapeFillIndex.groupColor, rgba) }
+        model.endGesture()
     }
 
     private var shapeColorPicker: some View {

@@ -172,6 +172,8 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         // rótulo "NN%" no canto sup-esq (o chip "250 %" saiu: o 100 % mora no
         // número da coluna de modos).
         if (!store.rawPlayback && !ui.fullscreen) CanvasZoomMode(store, Modifier.align(Alignment.TopStart))
+        // 0.4.1 (mockup "interface 03"): grade, modos de visão e zoom flutuando no canto sup-dir.
+        if (!store.rawPlayback && !ui.fullscreen) StageFloatPills(store, Modifier.align(Alignment.TopEnd))
         if (store.selection.size == 1 && !store.rawPlayback) {
             Row(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
                 if (store.gizmoAxes) {
@@ -504,6 +506,8 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     drawRect(Color.White.copy(alpha = .16f), topLeft = Offset(m.sx(0f), m.sy(0f)),
         size = androidx.compose.ui.geometry.Size(m.sx(project.width.toFloat()) - m.sx(0f), m.sy(project.height.toFloat()) - m.sy(0f)),
         style = Stroke(1.dp.toPx()))
+    // 0.4.1: o "olho" do palco escondeu contorno e alças (ver o quadro limpo).
+    if (ViewModes.hideOverlay) return
     if (store.sceneEditor) {
         // Lidos AQUI para a órbita pelo dedo redesenhar guias e gizmo (as
         // linhas saem do motor, que não é estado do Compose).

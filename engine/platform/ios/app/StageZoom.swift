@@ -170,6 +170,8 @@ struct StagePinchTracker {
     @Published var columnOpen = false
     @Published var pixel = false
     @Published var grid = false
+    /// 0.4.1 (mockup "interface 03", o "olho" do palco): esconde contorno, alças e gizmo da seleção.
+    @Published var hideOverlay = false
     @Published private(set) var gridSpacing: Int
     /// 0 normal, 1 só a(s) escolhida(s), 2 a(s) escolhida(s) a 50 % (só na prévia).
     @Published var solo = 0
@@ -465,5 +467,56 @@ struct CanvasZoomMode: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.05) { if mine == token { showing = false } }
             }
         }
+    }
+}
+
+/// 0.4.1 (mockup "interface 03"): as pílulas flutuantes no canto sup-dir do palco —
+/// grade, modos de visão (o "olho") e o zoom "NN%" (tocar volta a 100 %). Vidro
+/// escuro de 32 com fio de 8 %; aceso = destaque. Somem com a coluna de modos aberta
+/// (ela ocupa o mesmo canto). Par do `StageFloatPills` do Android.
+struct StageFloatPills: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var modes = ViewModeState.shared
+    @ObservedObject private var view = StageViewZoom.shared
+
+    var body: some View {
+        if !modes.columnOpen {
+            let on = AureaText.t("common_on"), off = AureaText.t("common_off")
+            let percent = AureaText.t("common_percent", StageZoomMath.percent(view.zoom))
+            VStack(alignment: .trailing, spacing: 6) {
+                pill("stage.pill.grid", label: AureaText.t("om_vm_grid"), state: modes.grid ? on : off, active: modes.grid,
+                     action: { modes.grid.toggle() }) { tint in
+                    CupertinoGlyph.text(CupertinoGlyph.Grid, size: 16, color: tint)
+                }
+                // 0.4.1 (mockup "interface 03"): o "olho" esconde o contorno e as alças da seleção (aceso = escondido).
+                pill("stage.pill.overlay", label: AureaText.t("om_vm_overlay"), state: modes.hideOverlay ? on : off, active: modes.hideOverlay,
+                     action: { modes.hideOverlay.toggle() }) { tint in
+                    CupertinoGlyph.text(modes.hideOverlay ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Eye, size: 16, color: tint)
+                }
+                pill("stage.pill.zoom", label: percent, state: nil, active: view.zoom != 1, wide: true,
+                     action: { view.zoomTo(1, engine: model.engine) }) { tint in
+                    Text(percent).font(.aurea(size: 10, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(tint).lineLimit(1)
+                }
+            }
+            .padding(.top, 12).padding(.trailing, 10)
+        }
+    }
+
+    private func pill<Content: View>(_ id: String, label: String, state: String?, active: Bool, wide: Bool = false,
+                                     action: @escaping () -> Void, @ViewBuilder content: (Color) -> Content) -> some View {
+        let tint = active ? AureaColors.accent : AureaColors.muted
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        return Button(action: action) {
+            content(tint)
+                .frame(width: wide ? 48 : 32, height: 32)
+                .background(Color(red: 0x14 / 255, green: 0x14 / 255, blue: 0x16 / 255).opacity(0xD9 / 255), in: shape)
+                .overlay(shape.stroke(active ? AureaColors.accent : Color.white.opacity(0.08), lineWidth: 1))
+                .contentShape(shape)
+        }
+        .buttonStyle(AureaPressStyle())
+        .accessibilityLabel(label)
+        .accessibilityValue(state ?? "")
+        .accessibilityIdentifier(id)
     }
 }

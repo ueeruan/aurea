@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.1: tema do mockup "interface 03" (Hanszx). -->
+    <string name="theme_amoled" translatable="false">AMOLED</string>
+    <string name="om_vm_overlay">आउटलाइन और हैंडल छिपाएँ</string>
+    <string name="add_element_aurora">ऑरोरा</string>
+    <string name="conta_membros">8K+ सदस्य</string>
+    <string name="conta_ou">या</string>
+    <string name="conta_google">Google के साथ जारी रखें</string>
+</resources>

@@ -4897,6 +4897,14 @@ final class AureaModel: ObservableObject {
         return Int64(id)
     }
 
+    /// 0.4.1 (mockup "interface 03"): Elementos › Aurora — camada de ajuste com o efeito Aurora.
+    func addAurora() {
+        let id = engine.addAurora()
+        if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }
+        showAddLayer = false
+        syncAfterEdit()
+    }
+
     func addParticles(_ preset: UInt32) {
         let id = engine.addParticles(preset)
         if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }

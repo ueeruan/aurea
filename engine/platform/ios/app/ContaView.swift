@@ -28,9 +28,16 @@ struct ContaView: View {
                     HomeBrandLogo().frame(width: 72, height: 72)
                     Text("aurea").font(.aurea(size: 34, weight: .bold)).tracking(-1)
                         .foregroundStyle(AureaColors.text).padding(.top, 16)
+                    // 0.4.1: o contador de membros da comunidade (8 mil+, informado pelo criador).
+                    Text(AureaText.t("conta_membros"))
+                        .font(.aurea(size: 12, weight: .semibold)).foregroundStyle(AureaColors.accent)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(AureaColors.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+                        .padding(.top, 10)
+                        .accessibilityIdentifier("conta.membros")
                     Text(AureaText.t(conta.entrando ? "conta_titulo_entrar" : "conta_titulo_cadastro"))
                         .font(.aurea(size: 22, weight: .bold)).foregroundStyle(AureaColors.text)
-                        .multilineTextAlignment(.center).padding(.top, 20)
+                        .multilineTextAlignment(.center).padding(.top, 16)
                     Text(AureaText.t("conta_subtitulo"))
                         .font(.aurea(size: 12.5)).foregroundStyle(AureaColors.muted)
                         .multilineTextAlignment(.center).padding(.top, 8)
@@ -63,6 +70,32 @@ struct ContaView: View {
                     }
                     .buttonStyle(.plain).disabled(conta.ocupado).padding(.top, 20)
                     .accessibilityIdentifier("conta.enviar")
+
+                    // 0.4.1: entrar com o Google (Firebase Auth); some sem a configuração do Firebase.
+                    if GoogleLogin.disponivel {
+                        Text(AureaText.t("conta_ou"))
+                            .font(.aurea(size: 12.5)).foregroundStyle(AureaColors.muted)
+                            .multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.top, 12)
+                        Button {
+                            campoSenha = false
+                            conta.signInWithGoogle()
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text("G").font(.aurea(size: 17, weight: .bold))
+                                    .foregroundStyle(Color(red: 0x42 / 255.0, green: 0x85 / 255.0, blue: 0xF4 / 255.0))
+                                Text(AureaText.t("conta_google")).font(.aurea(size: 17, weight: .semibold))
+                                    .foregroundStyle(Color(red: 0x1F / 255.0, green: 0x1F / 255.0, blue: 0x1F / 255.0))
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 52)
+                            .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+                            .opacity(conta.ocupado ? 0.6 : 1)
+                        }
+                        .buttonStyle(.plain).disabled(conta.ocupado).padding(.top, 12)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(AureaText.t("conta_google"))
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityIdentifier("conta.google")
+                    }
 
                     Button {
                         conta.entrando.toggle()

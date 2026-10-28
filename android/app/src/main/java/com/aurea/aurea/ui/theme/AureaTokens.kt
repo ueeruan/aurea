@@ -45,7 +45,7 @@ object AureaColors {
      * de destaque mudam; estados (erro, aviso, sucesso) e o texto ficam.
      */
     // 0.3.3 tema: a paleta AUREA (azul) é o padrão; a Omega saiu.
-    var palette by mutableStateOf(AureaPalette.Aurea)
+    var palette by mutableStateOf(AureaPalette.Amoled)
     // --- Marca ---------------------------------------------------------------
     val BrandDeep: Color get() = palette.brandDeep
     val Brand: Color get() = palette.brand          // preenchimento de ação (Exportar, "+")
@@ -547,6 +547,44 @@ data class AureaPalette(
             editorRowPill = Color(0xFF222B3B),
             editorGlyphBox = Color(0xFF2E3B4E),
         )
+        // 0.4.1: tema do mockup "interface 03" (Hanszx, iOS True AMOLED) — o padrão.
+        val Amoled = AureaPalette(
+            id = "amoled",
+            brandDeep = Color(0xFF003A80),
+            brand = Color(0xFF0A84FF),
+            accent = Color(0xFF0A84FF),
+            keyframe = Color(0xFF64D2FF),
+            background = Color(0xFF000000),
+            surface = Color(0xFF121214),
+            surfaceHigh = Color(0xFF1C1C1E),
+            chip = Color(0xFF1C1C1E),
+            chipHigh = Color(0xFF2C2C2E),
+            border = Color(0xFF242426),
+            muted = Color(0xFF8E8E93),
+            subtle = Color(0xFF636366),
+            onAccent = Color(0xFFFFFFFF),
+            accentDim = Color(0xFF06213D),
+            keyframeDim = Color(0xFF0B2A3A),
+            stage = Color(0xFF000000),
+            hairline = Color(0x24FFFFFF),
+            editorTopBar = Color(0xFF000000),
+            editorPanel = Color(0xFF0E0E10),
+            editorPanelHigh = Color(0xFF121214),
+            pill = Color(0xFF1C1C1E),
+            actionDim = Color(0xFF0A2A4A),
+            statusBarVeil = Color(0xFF000000),
+            systemBarVeil = Color(0xFF000000),
+            tickWeak = Color(0xFF48484A),
+            tickStrong = Color(0xFF8E8E93),
+            railModeFill = Color(0xFF141416),
+            fieldFilled = Color(0xFF1C1C1E),
+            editorCanvas = Color(0xFF000000),
+            editorBar = Color(0xFF000000),
+            editorBarLine = Color(0x14FFFFFF),
+            editorRowPill = Color(0xFF121214),
+            editorGlyphBox = Color(0xFF1C1C1E),
+            onBrand = Color(0xFFFFFFFF),
+        )
         val Midnight = AureaPalette(
             id = "midnight",
             brandDeep = Color(0xFF15325A),
@@ -702,9 +740,9 @@ data class AureaPalette(
             railModeFill = Color(0xFF271E17),
             fieldFilled = Color(0xFF2E251E),
         )
-        val all = listOf(Aurea, Midnight, Graphite, Emerald, Amethyst, Sunset)
-        /** Id desconhecido (inclusive o "omega" salvo pela 0.3.2) cai na AUREA. */
-        fun of(id: String?): AureaPalette = all.firstOrNull { it.id == id } ?: Aurea
+        val all = listOf(Amoled, Aurea, Midnight, Graphite, Emerald, Amethyst, Sunset)
+        /** Id desconhecido ou nenhum salvo: o AMOLED (padrão da 0.4.1). */
+        fun of(id: String?): AureaPalette = all.firstOrNull { it.id == id } ?: Amoled
     }
 }
 

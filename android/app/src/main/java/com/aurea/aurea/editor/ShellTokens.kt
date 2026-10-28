@@ -141,7 +141,8 @@ internal object ShellGlyph {
  */
 internal object OmegaChrome {
     /** Barras do projeto e de reprodu\u00E7\u00E3o (A10). */
-    val Bar get() = AureaColors.Surface
+    /** 0.4.1 (mockup "interface 03"): o fundo da barra do topo (preto no AMOLED). */
+    val Bar get() = AureaColors.EditorTopBar
     /** Barra da camada escolhida (A9). */
     val LayerBar get() = AureaColors.SurfaceHigh
     /** Coluna de modos, barra inferior da sele\u00E7\u00E3o e o girador da grade (S9). */

@@ -149,6 +149,11 @@ struct LayerPlacement {
     Mat4 sceneView = Mat4::identity();
     Mat4 sceneCompFromWorld = Mat4::identity();
     Vec3 sceneCameraPosition{};
+    /// 0.4.1 (Reflective Floor): o mundo da camada 3D (px da camada → mundo, com
+    /// os pais e a rotação), para efeitos que tratam a camada como um plano no
+    /// espaço 3D. `layerWorldValid` falso = camada 2D.
+    bool layerWorldValid = false;
+    Mat4 layerWorld = Mat4::identity();
     f32 sceneFovY = 0.0f;    ///< radianos
     f32 sceneNearZ = 1.0f;
 };

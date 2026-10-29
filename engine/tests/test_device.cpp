@@ -738,3 +738,32 @@ AUREA_TEST(Elements, AddAuroraIsOneUndoableAdjustmentLayer) {
     AUREA_CHECK(comp && comp->layer(LayerId::unpack(*id)) == nullptr);
     e.shutdown();
 }
+
+// 0.4.1 (+ › 3D › Reflective Floor): camada de ajuste com o efeito, um desfazer a tira.
+AUREA_TEST(Elements, AddReflectiveFloorIsOneUndoableAdjustmentLayer) {
+    Engine e;
+    EngineConfig ec;
+    ec.workerCount = 1;
+    ec.disableAutosave = true;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(320, 180, 30.0, nullptr).ok());
+    const auto id = e.add_reflective_floor();
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) { e.shutdown(); return; }
+    Composition* comp = e.project()->timeline().composition(e.project()->timeline().current());
+    const Layer* l = comp ? comp->layer(LayerId::unpack(*id)) : nullptr;
+    AUREA_CHECK(l != nullptr);
+    if (l) {
+        AUREA_CHECK(l->adjustment);
+        AUREA_CHECK(l->name == "Reflective Floor");
+        AUREA_CHECK(l->threeD);                                    // segue câmera 3D e nulo
+        AUREA_CHECK(std::fabs(l->transform.rotation.x - 90.0f) < 1e-3f);   // deitado: é um chão
+        AUREA_CHECK(l->effects.size() == 1 && l->effects[0].type == effect_type_id(effect_keys::kReflectiveFloor));
+    }
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(e.apply_command(undo).ok());
+    comp = e.project()->timeline().composition(e.project()->timeline().current());
+    AUREA_CHECK(comp && comp->layer(LayerId::unpack(*id)) == nullptr);
+    e.shutdown();
+}

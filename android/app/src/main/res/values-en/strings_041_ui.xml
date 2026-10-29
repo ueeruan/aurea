@@ -7,4 +7,11 @@
     <string name="conta_membros">8K+ members</string>
     <string name="conta_ou">or</string>
     <string name="conta_google">Continue with Google</string>
+    <string name="scene_floor_reflective">Reflective Floor</string>
+    <string name="scene_floor_reflective_on">Reflective Floor added: everything below this layer reflects on the floor. Adjust it in Effects.</string>
+    <string name="cap041_cloud_progress">Captioning in the cloud… %1$d%%</string>
+    <string name="cap041_cloud_source">Whisper Large (cloud)</string>
+    <string name="cap041_cloud_fallback">Can\'t reach the cloud right now: using the on-device model.</string>
+    <string name="cap041_more_options">More options</string>
+    <string name="cap041_offline_model">On-device model (offline)</string>
 </resources>

@@ -43,6 +43,7 @@ void register_finishing_effects(EffectRegistry& r);
 // (contorno da silhueta, refinar recorte). Também no fim.
 void register_generate_effects(EffectRegistry& r);
 void register_aurora_effect(EffectRegistry& r);
+void register_reflective_floor(EffectRegistry& r);   // 0.4.1: ReflectiveFloorEffect.cpp
 void register_color_grade_effect(EffectRegistry& r);
 void register_matte_effects(EffectRegistry& r);
 // O VHS de Estilizar (o look de fita com OSD). Também no fim.

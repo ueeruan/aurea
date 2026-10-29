@@ -7,4 +7,11 @@
     <string name="conta_membros">8 mil+ miembros</string>
     <string name="conta_ou">o</string>
     <string name="conta_google">Continuar con Google</string>
+    <string name="scene_floor_reflective">Suelo reflectante</string>
+    <string name="scene_floor_reflective_on">Suelo reflectante añadido: todo lo que está debajo de esta capa se refleja. Ajústalo en Efectos.</string>
+    <string name="cap041_cloud_progress">Subtitulando en la nube… %1$d%%</string>
+    <string name="cap041_cloud_source">Whisper Large (nube)</string>
+    <string name="cap041_cloud_fallback">Sin conexión con la nube ahora: usando el modelo del dispositivo.</string>
+    <string name="cap041_more_options">Más opciones</string>
+    <string name="cap041_offline_model">Modelo del dispositivo (sin internet)</string>
 </resources>

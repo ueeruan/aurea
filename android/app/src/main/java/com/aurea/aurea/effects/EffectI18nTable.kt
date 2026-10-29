@@ -7,7 +7,7 @@ import com.aurea.aurea.R
 internal object EffectI18nTable {
     /** (typeId << 16 | índice do parâmetro) → [rótulo, opção 0, opção 1, ...] (recursos). */
     val entries: Map<Long, IntArray> by lazy {
-        HashMap<Long, IntArray>(4208).apply {
+        HashMap<Long, IntArray>(4234).apply {
             part0(this)
             part1(this)
             part2(this)
@@ -2015,6 +2015,19 @@ internal object EffectI18nTable {
         m.put("aurea.generate.aurora", 21, /* opacity */ intArrayOf(R.string.fxl_opacity))
         m.put("aurea.generate.aurora", 22, /* follow_camera */ intArrayOf(R.string.fx030_follow_camera))
         m.put("aurea.generate.aurora", 23, /* quality */ intArrayOf(R.string.fxl_quality, R.string.fxo_fast, R.string.fxo_normal, R.string.fxo_high))
+        m.put("aurea.generate.reflective_floor", 0, /* horizon */ intArrayOf(R.string.fxl_horizon))
+        m.put("aurea.generate.reflective_floor", 1, /* reflection */ intArrayOf(R.string.fxl_reflection))
+        m.put("aurea.generate.reflective_floor", 2, /* falloff */ intArrayOf(R.string.fxl_reflection_distance))
+        m.put("aurea.generate.reflective_floor", 3, /* blur */ intArrayOf(R.string.fx_name_gaussian_blur))
+        m.put("aurea.generate.reflective_floor", 4, /* distortion */ intArrayOf(R.string.fxs_distortion))
+        m.put("aurea.generate.reflective_floor", 5, /* floor */ intArrayOf(R.string.fxl_floor, R.string.fxo_smooth_2, R.string.fxl_tiling, R.string.fxo_worn_tiles))
+        m.put("aurea.generate.reflective_floor", 6, /* color */ intArrayOf(R.string.fxl_floor_color))
+        m.put("aurea.generate.reflective_floor", 7, /* tile */ intArrayOf(R.string.fxl_tile_size))
+        m.put("aurea.generate.reflective_floor", 8, /* perspective */ intArrayOf(R.string.fxl_perspective))
+        m.put("aurea.generate.reflective_floor", 9, /* texture */ intArrayOf(R.string.fxl_texture))
+        m.put("aurea.generate.reflective_floor", 10, /* brightness */ intArrayOf(R.string.fxl_floor_brightness))
+        m.put("aurea.generate.reflective_floor", 11, /* opacity */ intArrayOf(R.string.fxl_floor_opacity))
+        m.put("aurea.generate.reflective_floor", 12, /* texture_layer */ intArrayOf(R.string.fxl_floor_texture_layer))
         m.put("aurea.time.random_edits", 0, /* edit_length */ intArrayOf(R.string.fx027_edit_length))
         m.put("aurea.time.random_edits", 1, /* seed */ intArrayOf(R.string.fxl_seed))
         m.put("aurea.color.grade", 0, /* log_profile */ intArrayOf(R.string.fxl_camera_profile, R.string.fxo_none_rec_709, R.string.fxo_s_log3_sony, R.string.fxo_logc3_arri, R.string.fxo_v_log_panasonic, R.string.fxo_apple_log, R.string.fxo_cineon))
@@ -2105,6 +2118,9 @@ internal object EffectI18nTable {
         m.put("aurea.generate.constellation", 12, /* jitter */ intArrayOf(R.string.fx030c_jitter))
         m.put("aurea.generate.constellation", 13, /* center */ intArrayOf(R.string.fx030c_center))
         m.put("aurea.generate.constellation", 14, /* position_z */ intArrayOf(R.string.fx030c_position_z))
+    }
+
+    private fun part17(m: HashMap<Long, IntArray>) {
         m.put("aurea.generate.constellation", 15, /* scale */ intArrayOf(R.string.fx030c_scale))
         m.put("aurea.generate.constellation", 16, /* rotation_x */ intArrayOf(R.string.fx030c_rotation_x))
         m.put("aurea.generate.constellation", 17, /* rotation_y */ intArrayOf(R.string.fx030c_rotation_y))
@@ -2118,9 +2134,6 @@ internal object EffectI18nTable {
         m.put("aurea.generate.constellation", 25, /* noise_speed */ intArrayOf(R.string.fx030c_noise_speed))
         m.put("aurea.generate.constellation", 26, /* noise_octaves */ intArrayOf(R.string.fx030c_noise_octaves))
         m.put("aurea.generate.constellation", 27, /* field */ intArrayOf(R.string.fx030c_field))
-    }
-
-    private fun part17(m: HashMap<Long, IntArray>) {
         m.put("aurea.generate.constellation", 28, /* field_center */ intArrayOf(R.string.fx030c_field_center))
         m.put("aurea.generate.constellation", 29, /* field_z */ intArrayOf(R.string.fx030c_field_z))
         m.put("aurea.generate.constellation", 30, /* field_radius */ intArrayOf(R.string.fx030c_field_radius))

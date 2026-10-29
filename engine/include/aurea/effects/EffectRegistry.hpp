@@ -200,6 +200,7 @@ namespace effect_keys {
     // Geradores (ver GenerateEffects.cpp)
     inline constexpr const char* kFractalNoise       = "aurea.generate.fractal_noise";
     inline constexpr const char* kAurora             = "aurea.generate.aurora";
+    inline constexpr const char* kReflectiveFloor    = "aurea.generate.reflective_floor";   // 0.4.1
     inline constexpr const char* kGradientRamp       = "aurea.generate.gradient_ramp";
     inline constexpr const char* kFourColorGradient  = "aurea.generate.four_color_gradient";
     inline constexpr const char* kAudioSpectrum      = "aurea.generate.audio_spectrum";

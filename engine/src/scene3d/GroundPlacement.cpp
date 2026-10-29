@@ -2,7 +2,8 @@
 
 namespace aurea::scene3d {
 
-GroundPlacement ground_placement(const SceneFrame& frame, std::span<const GpuModel* const> models) noexcept {
+GroundPlacement ground_placement(const SceneFrame& frame, std::span<const GpuModel* const> models,
+                                 std::span<const ScenePlane> planes) noexcept {
     GroundPlacement gp;
     Vec3 lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
     auto add = [&](const Aabb& b, const Mat4& m) {
@@ -55,6 +56,20 @@ GroundPlacement ground_placement(const SceneFrame& frame, std::span<const GpuMod
         else { for (usize n = 0; n < a.nodes.size(); ++n) visit(n); }
         if (!any) add(a.bounds, inst.world);
     }
+    // 0.4.1: os quatro cantos de cada camada 2D no espaço 3D (região em px da camada).
+    f32 planeBottom = -1e30f;
+    for (const ScenePlane& p : planes) {
+        const Vec4& r = p.region;
+        if (!(r.z > 0.0f) || !(r.w > 0.0f)) continue;
+        Aabb b;
+        b.min = Vec3{r.x, r.y, 0.0f};
+        b.max = Vec3{r.x + r.z, r.y + r.w, 0.0f};
+        add(b, p.light.worldFromLayer);
+        for (int c = 0; c < 4; ++c) {
+            const Vec3 w = p.light.worldFromLayer.transform_point(Vec3{(c & 1) ? b.max.x : b.min.x, (c & 2) ? b.max.y : b.min.y, 0.0f});
+            if (std::isfinite(w.y)) planeBottom = std::max(planeBottom, w.y);
+        }
+    }
     if (!gp.valid) return gp;
     f32 floorY = hi.y;
     if (!cands.empty()) {
@@ -83,6 +98,7 @@ GroundPlacement ground_placement(const SceneFrame& frame, std::span<const GpuMod
         }
         if (exact > -1e29f) floorY = std::max(exact, boxOnly);
     }
+    floorY = std::max(floorY, planeBottom);
     gp.center = Vec3{(lo.x + hi.x) * 0.5f, floorY, (lo.z + hi.z) * 0.5f};
     gp.radius = std::max(1.0f, (hi - lo).length() * 0.5f);
     if (!std::isfinite(gp.radius) || !std::isfinite(gp.center.y)) gp.valid = false;

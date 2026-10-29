@@ -2180,7 +2180,9 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     auto* e = self.engine; if (!e) return @[];
     float post[6]{}, floor[8]{};
     e->query_scene3d_post(post); e->query_scene_floor(floor);
-    return @[@(e->studio_environment()), @(floor[0]), @(post[0]), @(post[1]), @(post[2]), @(post[3]), @(post[4]), @(post[5])];
+    // [8] (0.4.1): 1 = o chão é o "Reflective Floor". Par do Android.
+    return @[@(e->studio_environment()), @(floor[0]), @(post[0]), @(post[1]), @(post[2]), @(post[3]), @(post[4]), @(post[5]),
+             @(aurea::Engine::is_reflective_floor(floor) ? 1.f : 0.f)];
 }
 - (BOOL)setSceneSetting:(uint32_t)parameter value:(float)value {
     if (!self.engine || !std::isfinite(value)) return NO;
@@ -2216,6 +2218,8 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     case 6: return e.set_scene3d_bloom(post[3] > 0, value, post[5]);
     // Limiar do bloom (mantém ligado/força atuais).
     case 7: return e.set_scene3d_bloom(post[3] > 0, post[4], value);
+    // 0.4.1: o "Reflective Floor" num toque (Engine::apply_reflective_floor).
+    case 8: return e.apply_reflective_floor();
     default: return false;
     }
 }
@@ -2688,6 +2692,13 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     spec.color = aurea::Vec4{r, g, b, 1.0f};
     const aurea::Result<aurea::u64> res = e->add_text3d(spec);
     return res.ok() ? static_cast<long long>(*res) : -static_cast<long long>(res.status().code());
+}
+
+- (long long)addReflectiveFloor {
+    auto* e = self.engine;
+    if (!e) return -static_cast<long long>(aurea::Errc::InvalidState);
+    const aurea::Result<aurea::u64> r = e->add_reflective_floor();
+    return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code());
 }
 
 - (long long)addAurora {
@@ -3736,6 +3747,16 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     NSMutableArray* output = [NSMutableArray array];
     for (const auto& word : *result) [output addObject:@{@"word":to_ns(word.text), @"start":@(word.start), @"end":@(word.end)}];
     return output;
+}
+// 0.4.1: o áudio da camada em trechos WAV para as legendas na nuvem.
+- (NSString*)exportSpeechChunks:(long long)layerId dir:(NSString*)dir error:(NSError**)error {
+    auto* e = self.engine; if (!e) return nil;
+    auto result = e->export_speech_chunks(static_cast<aurea::u64>(layerId), to_std(dir));
+    if (!result) {
+        if (error) *error = [NSError errorWithDomain:@"AureaWhisper" code:(NSInteger)result.code() userInfo:@{NSLocalizedDescriptionKey: to_ns(std::string(result.status().detail()))}];
+        return nil;
+    }
+    return to_ns(*result);
 }
 - (int)captionProgress:(BOOL)cancel { auto* e = self.engine; if (!e) return 0; if (cancel) e->captionCancelled.store(true); return e->captionProgress.load(); }
 - (NSString*)captionTracks { auto* e = self.engine; return e ? to_ns(e->caption_tracks()) : @"[]"; }

@@ -2421,6 +2421,15 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         gi.samples = passSamples_;
         gi.exportQuality = !lodHysteresis_;       // export/captura: sem histerese de LOD
         gi.lowTier = frame.post.quality == 1u;    // BAIXO: sem reflexo planar
+        // 0.4.1 (Reflective Floor): o reflexo mostra tudo — transparentes e camadas 2D 3D.
+        gi.reflectCount = total;
+        gi.planes = planeList;
+        gi.planeCount = planeCount;
+        if (planeCount > 0) {
+            auto rp = shaders_->pipeline(ground_reflection_key(plane_key(false, false, false, false)));
+            auto rb = shaders_->pipeline(ground_reflection_key(plane_key(true, false, false, false)));
+            if (rp.ok() && rb.ok()) { gi.planePipe = *rp; gi.planeBlendPipe = *rb; }
+        }
         gi.white = white_;
         gi.black = black_;
         gi.mesh.white = white_;

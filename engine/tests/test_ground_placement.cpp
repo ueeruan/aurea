@@ -141,3 +141,22 @@ AUREA_TEST(GroundPlacement, BenchStaticGroundSupport) {
     std::printf("\n    CPU host only: 200000 static vertices, vertex scan p50=%.4f ms, complete ground bounds p50=%.4f ms\n",
                 scanTimes[scanTimes.size() / 2], compactTimes[compactTimes.size() / 2]);
 }
+
+// 0.4.1 (Reflective Floor): uma cena só com camadas 2D no espaço 3D também ganha
+// chão, sob o canto mais baixo delas ("para cima" = −Y: o maior Y).
+AUREA_TEST(GroundPlacement, PlanesAloneGetAFloorUnderTheLowestCorner) {
+    SceneFrame frame;
+    std::vector<ScenePlane> planes(2);
+    planes[0].region = Vec4{0, 0, 100, 50};
+    planes[0].light.worldFromLayer = Mat4::identity();
+    planes[0].light.worldFromLayer.col[3] = Vec4{10, 20, 0, 1};      // y de 20 a 70
+    planes[1].region = Vec4{0, 0, 40, 40};
+    planes[1].light.worldFromLayer = Mat4::identity();
+    planes[1].light.worldFromLayer.col[3] = Vec4{-50, 100, 30, 1};   // y de 100 a 140
+    const auto none = ground_placement(frame);
+    AUREA_CHECK(!none.valid);
+    const auto gp = ground_placement(frame, {}, planes);
+    AUREA_CHECK(gp.valid);
+    AUREA_CHECK(std::fabs(gp.center.y - 140.0f) < 1e-3f);
+    AUREA_CHECK(gp.radius > 1.0f);
+}

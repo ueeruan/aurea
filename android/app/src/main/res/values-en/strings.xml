@@ -1777,7 +1777,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea Beta 0.4.1 (2205) • Phase 2 • 10/28/2026\n\n• New interface (Hanszx mockup): AMOLED theme, new playback bar, floating dock with the + grid, card drawers, sliding sheet inspector, quick colors, rotation wheel and clip outlines.\n• Aurora in Elements: a ready-made northern-lights sky, already 3D.\n• Account: sign in with Google, and an account is required again.\n• Time remap: the curve is now the one in the left column.\n• The layer panel no longer leaves gaps.\n• AureaHyper is now paid: access is granted per account.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.2 (2206) • 10/28/2026\n\n• Reflective Floor: in + › 3D, a layer that creates a perspective floor reflecting everything below it (2D, 3D, particles). Tiles, worn tiles or your own image as texture; follows the 3D camera and a 3D null.\n• The 3D scene floor now also reflects transparent objects and 3D text, shapes and images.\n• Much more accurate auto captions: when signed in, speech is transcribed in the cloud (Whisper Large). Offline, the on-device model still works.\n• New, simpler captions screen: pick the style and language and tap Generate captions. Everything else is in More options.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -4535,4 +4535,14 @@ to edit the curve.</string>
     <string name="fxt_new_frames_between_the_source_frames_bui">New frames between the source frames, built from motion (block vectors in both directions). 1×: the layer gets the composition fps (e.g. a 30 fps video in a 60 fps composition). Slow motion plays inside the layer; the layer\'s sound does not change.</string>
     <string name="fxl_detect_repeated_frames">Detect repeated frames</string>
     <string name="fxt_the_preview_always_uses_turbo">The preview always uses Turbo.</string>
+    <string name="fxl_horizon">Horizon</string>
+    <string name="fxl_reflection">Reflection</string>
+    <string name="fxl_reflection_distance">Reflection distance</string>
+    <string name="fxo_smooth_2">Smooth</string>
+    <string name="fxo_worn_tiles">Worn tiles</string>
+    <string name="fxl_floor_color">Floor color</string>
+    <string name="fxl_texture">Texture</string>
+    <string name="fxl_floor_brightness">Floor brightness</string>
+    <string name="fxl_floor_opacity">Floor opacity</string>
+    <string name="fxl_floor_texture_layer">Floor texture (layer)</string>
 </resources>

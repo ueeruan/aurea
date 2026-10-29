@@ -21,6 +21,9 @@
 #include "aurea/timeline/Composition.hpp"
 
 #include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <sstream>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -355,4 +358,56 @@ AUREA_TEST(CaptionQuality, ModelSizeComesFromTheHeaderAndThreadsFromTheCpu) {
     AUREA_CHECK_EQ(text::whisper_thread_count(2), 2);
     AUREA_CHECK_EQ(text::whisper_thread_count(6), 5);
     AUREA_CHECK_EQ(text::whisper_thread_count(16), 8);
+}
+
+// 0.4.1 (legendas na nuvem): o áudio sai em trechos WAV cortados entre 25 e 45 s,
+// em sequência, cobrindo a mídia inteira.
+AUREA_TEST(CaptionQuality, SpeechChunksCoverTheMediaInWavPieces) {
+    SyntheticConfig cfg;
+    cfg.audioRate = 48000;
+    cfg.audioChannels = 2;
+    cfg.audioSeconds = 100.0;
+    SyntheticFactory factory(cfg);
+    EngineConfig ec;
+    ec.workerCount = 2;
+    ec.memoryBudgetBytes = 64ull * 1024 * 1024;
+    ec.disableAutosave = true;
+    ec.mediaFactory = &factory;
+    Engine e;
+    AUREA_CHECK(e.initialize(ec).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    VideoImport vi;
+    vi.sourcePath = "s";
+    vi.displayName = "s";
+    auto vid = e.import_video(vi);
+    AUREA_CHECK(vid.ok());
+    if (!vid.ok()) { e.shutdown(); return; }
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "aurea_speech_chunks";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    auto lines = e.export_speech_chunks(*vid, dir.string());
+    AUREA_CHECK(lines.ok());
+    if (!lines.ok()) { e.shutdown(); return; }
+    std::istringstream in(*lines);
+    std::string line;
+    f64 expected = 0.0, covered = 0.0;
+    u32 count = 0;
+    while (std::getline(in, line)) {
+        f64 s = 0, t = 0;
+        char path[512]{};
+        AUREA_CHECK(std::sscanf(line.c_str(), "%lf\t%lf\t%511[^\n]", &s, &t, path) == 3);
+        AUREA_CHECK(std::fabs(s - expected) < 0.01);        // em sequência
+        const f64 len = t - s;
+        AUREA_CHECK(len <= 45.01);
+        if (t < 99.9) AUREA_CHECK(len >= 24.99);
+        AUREA_CHECK(std::fabs(static_cast<f64>(std::filesystem::file_size(path)) - (44.0 + len * 32000.0)) < 96.0);   // 16 bits mono 16 kHz
+        expected = t;
+        covered = t;
+        ++count;
+    }
+    std::printf("\n    %u trechos, ate %.2f s ", count, covered);
+    AUREA_CHECK(count >= 3);
+    AUREA_CHECK(covered > 99.5);
+    std::filesystem::remove_all(dir);
+    e.shutdown();
 }

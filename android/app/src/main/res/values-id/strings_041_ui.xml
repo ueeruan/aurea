@@ -7,4 +7,11 @@
     <string name="conta_membros">8 rb+ anggota</string>
     <string name="conta_ou">atau</string>
     <string name="conta_google">Lanjutkan dengan Google</string>
+    <string name="scene_floor_reflective">Lantai Reflektif</string>
+    <string name="scene_floor_reflective_on">Lantai Reflektif ditambahkan: semua di bawah lapisan ini terpantul di lantai. Atur di Efek.</string>
+    <string name="cap041_cloud_progress">Membuat teks di cloud… %1$d%%</string>
+    <string name="cap041_cloud_source">Whisper Large (cloud)</string>
+    <string name="cap041_cloud_fallback">Tidak bisa terhubung ke cloud sekarang: memakai model di perangkat.</string>
+    <string name="cap041_more_options">Opsi lainnya</string>
+    <string name="cap041_offline_model">Model di perangkat (tanpa internet)</string>
 </resources>

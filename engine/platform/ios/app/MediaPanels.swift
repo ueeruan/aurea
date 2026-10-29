@@ -621,6 +621,9 @@ struct CaptionsPanel: View {
     @State private var removeFillers = true
     @State private var posY: Float = 0.78
     @State private var size: Float = 0.065
+    /// 0.4.1: "Mais opções" e a lista de idiomas começam fechadas.
+    @State private var moreOptions = false
+    @State private var languagesOpen = false
     private var captionTrack: NativeCaptionTrack? { model.captionTracks.first { $0.layer == model.primarySelection || $0.source == model.primarySelection } }
     private var id: Int64 { captionTrack?.source ?? model.primarySelection ?? 0 }
     private var path: String { model.engine.layerMediaPath(id) }
@@ -638,8 +641,11 @@ struct CaptionsPanel: View {
                             }
                         }
                     } else { controls }
-                    ForEach(0..<((words.count + 23) / 24), id: \.self) { chunk in
-                        transcriptChunk(chunk)
+                    // 0.4.1: a lista de palavras só com "Mais opções" aberto.
+                    if moreOptions {
+                        ForEach(0..<((words.count + 23) / 24), id: \.self) { chunk in
+                            transcriptChunk(chunk)
+                        }
                     }
                     Spacer().frame(height: 24)
                 }.padding(.horizontal, 18).padding(.vertical, 10)
@@ -660,72 +666,124 @@ struct CaptionsPanel: View {
         }
     }
     private var controls: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // 0.4.1: tela simplificada — estilo, idioma (um chip) e UM botão; depois de gerar,
+        // só posição, tamanho e dois interruptores. O resto fica em "Mais opções".
+        let idle = busy == nil
+        let hasOutput = captionCount > 0 || !words.isEmpty
+        return VStack(alignment: .leading, spacing: 0) {
             if let captionTrack { CaptionBlockEditor(track: captionTrack) }
-            if let busy { note(busy, color: AureaColors.accent) }
-            if let error { note(error, color: AureaColors.danger) }
-            if let notice { note(notice, color: AureaColors.muted) }
-            note(AureaText.t("ios_whisper_note"), color: AureaColors.muted)
-            if busy != nil { CaptionAction(label: AureaText.t("common_cancel")) { _ = model.engine.captionProgress(true); job?.cancel() } }
-            speechControls
-            Toggle(AureaText.t("beta_translate_english"), isOn: $translateEnglish)
-                .frame(minHeight: 44).disabled(busy != nil)
-            HStack(spacing: 8) {
-                CaptionAction(label: AureaText.t(words.isEmpty ? "panel_gerar_legendas" : "panel_transcrever_novo"), primary: true, enabled: busy == nil, action: transcribe)
-                CaptionAction(label: AureaText.t("panel_importar_legenda_srt"), enabled: busy == nil) {
-                    DocumentImportPicker.present(types: [UTType(filenameExtension: "srt") ?? .plainText, .plainText, .data]) { urls in srtPick = urls?.first }
-                }
-            }.padding(.vertical, 6)
             label("panel_estilo")
             CaptionChips(options: ["pn_caption_style_classic", "panel_caixa", "pn_caption_style_highlight", "pn_caption_style_neon", "pn_karaoke", "pn_pop", "pack_text_4", "pack_text_5"].map { AureaText.t($0) }, selected: style) { style = $0 }
-            label("pn_caption")
-            CaptionChips(options: [AureaText.t("pn_caption_grouped"), AureaText.t("pn_caption_one_per_word")], selected: mode) { mode = $0 }
-            if mode == 0 { groupingControls }
-            label("pn_caption_screen_height")
-            CaptionChips(options: ["pn_caption_pos_top", "pn_caption_pos_middle", "pn_caption_pos_bottom"].map { AureaText.t($0) },
-                selected: [Float(0.2), 0.5, 0.78].firstIndex(where: { abs($0 - posY) < 0.01 }) ?? -1) { posY = [0.2, 0.5, 0.78][$0] }
-            label("panel_tamanho")
-            CaptionChips(options: ["pn_size_small_short", "pn_size_medium_short", "pn_size_large_short"].map { AureaText.t($0) },
-                selected: [Float(0.045), 0.065, 0.09].firstIndex(where: { abs($0 - size) < 0.001 }) ?? -1) { size = [0.045, 0.065, 0.09][$0] }
-            captionToggle("pn_caption_highlight_word", value: $highlight)
-            captionToggle("pn_caption_uppercase", value: $uppercase)
-            captionToggle("pn_caption_break_pauses", value: $breakOnPause)
-            captionToggle("pn_caption_remove_fillers", value: $removeFillers)
+            languageControls
+            if let busy {
+                note(busy, color: AureaColors.accent)
+                CaptionAction(label: AureaText.t("common_cancel")) { _ = model.engine.captionProgress(true); job?.cancel() }
+            }
+            if let error { note(error, color: AureaColors.danger) }
+            if let notice { note(notice, color: AureaColors.muted) }
+            // O botão principal: gera (transcreve e cria) ou refaz.
             HStack(spacing: 8) {
-                CaptionAction(label: AureaText.t(captionCount > 0 ? "pn_caption_redo" : "pn_caption_create"), primary: true, enabled: !words.isEmpty && busy == nil, action: apply)
+                CaptionAction(label: AureaText.t(captionCount > 0 ? "panel_transcrever_novo" : "panel_gerar_legendas"), primary: true, enabled: idle, action: transcribe)
                 if captionCount > 0 {
-                    CaptionAction(label: AureaText.t("pn_caption_remove_n", captionCount), enabled: busy == nil) {
+                    CaptionAction(label: AureaText.t("pn_caption_remove_n", captionCount), enabled: idle) {
                         model.engine.removeCaptions(id); model.refreshModel(force: true)
                         captionCount = Int(model.engine.captionCount(id))
                     }
                 }
             }.padding(.vertical, 8)
-            if !words.isEmpty {
-                Text(transcriptSource.map { AureaText.plural("pn_caption_transcript_source", words.count, $0, words.count) }
-                    ?? AureaText.plural("pn_caption_transcript", words.count, words.count))
-                    .font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 8)
+            if captionCount == 0 && words.isEmpty {
+                Button(action: pickSRT) {
+                    Text(AureaText.t("panel_importar_legenda_srt")).font(.aurea(size: 13)).foregroundStyle(AureaColors.accent)
+                }.buttonStyle(AureaPressStyle()).disabled(!idle).padding(.vertical, 4)
+            }
+            if hasOutput {
+                label("pn_caption_screen_height")
+                CaptionChips(options: ["pn_caption_pos_top", "pn_caption_pos_middle", "pn_caption_pos_bottom"].map { AureaText.t($0) },
+                    selected: [Float(0.2), 0.5, 0.78].firstIndex(where: { abs($0 - posY) < 0.01 }) ?? -1) { posY = [0.2, 0.5, 0.78][$0] }
+                label("panel_tamanho")
+                CaptionChips(options: ["pn_size_small_short", "pn_size_medium_short", "pn_size_large_short"].map { AureaText.t($0) },
+                    selected: [Float(0.045), 0.065, 0.09].firstIndex(where: { abs($0 - size) < 0.001 }) ?? -1) { size = [0.045, 0.065, 0.09][$0] }
+                captionToggle("pn_caption_highlight_word", value: $highlight)
+                captionToggle("pn_caption_uppercase", value: $uppercase)
+                if !words.isEmpty && captionCount == 0 {
+                    CaptionAction(label: AureaText.t("pn_caption_create"), primary: true, enabled: idle, action: apply).padding(.vertical, 6)
+                }
+            }
+            // Mais opções (fechado): agrupamento, quebras, vícios, tradução, modelo do aparelho.
+            Button { moreOptions.toggle() } label: {
+                HStack {
+                    Text(AureaText.t("cap041_more_options")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(moreOptions ? "▴" : "▾").font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                }.frame(minHeight: 48).contentShape(Rectangle())
+            }.buttonStyle(AureaPressStyle())
+            .accessibilityAddTraits(moreOptions ? .isSelected : [])
+            if moreOptions {
+                label("pn_caption")
+                CaptionChips(options: [AureaText.t("pn_caption_grouped"), AureaText.t("pn_caption_one_per_word")], selected: mode) { mode = $0 }
+                if mode == 0 { groupingControls }
+                captionToggle("pn_caption_break_pauses", value: $breakOnPause)
+                captionToggle("pn_caption_remove_fillers", value: $removeFillers)
+                Toggle(AureaText.t("beta_translate_english"), isOn: $translateEnglish)
+                    .frame(minHeight: 44).disabled(!idle)
+                label("cap041_offline_model")
+                qualityControls
+                if captionCount > 0 {
+                    CaptionAction(label: AureaText.t("pn_caption_redo"), enabled: !words.isEmpty && idle, action: apply).padding(.vertical, 6)
+                }
+                if captionCount == 0 && !words.isEmpty {
+                    CaptionAction(label: AureaText.t("panel_importar_legenda_srt"), enabled: idle, action: pickSRT).padding(.vertical, 6)
+                }
+                if !words.isEmpty {
+                    Text(transcriptSource.map { AureaText.plural("pn_caption_transcript_source", words.count, $0, words.count) }
+                        ?? AureaText.plural("pn_caption_transcript", words.count, words.count))
+                        .font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 8)
+                }
             }
         }
     }
-    /// Idioma da fala e qualidade do Whisper. Qualidade que não cabe na
-    /// memória livre aparece desligada, com o motivo para o VoiceOver.
-    private var speechControls: some View {
+    private func pickSRT() {
+        DocumentImportPicker.present(types: [UTType(filenameExtension: "srt") ?? .plainText, .plainText, .data]) { urls in srtPick = urls?.first }
+    }
+    /// 0.4.1: idioma da fala num chip só; tocar abre a lista.
+    private var languageControls: some View {
         let codes = [""] + CaptionLanguages.codes
         let auto = AureaText.t("cap025_lang_auto")
+        let names: [String] = codes.map { $0.isEmpty ? auto : CaptionLanguages.endonym($0) }
+        let spoken: [String] = codes.map { $0.isEmpty ? auto : CaptionLanguages.spoken($0) }
+        let current = codes.firstIndex(of: language) ?? 0
+        let idle = busy == nil
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(AureaText.t("panel_idioma_fala")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                Button { languagesOpen.toggle() } label: {
+                    Text(names[current] + "  ▾").font(.aurea(size: 12))
+                        .foregroundStyle(languagesOpen ? AureaColors.accent : idle ? AureaColors.text : AureaColors.muted)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(languagesOpen ? AureaColors.accentDim : AureaColors.chip.opacity(idle ? 1 : 0.4), in: RoundedRectangle(cornerRadius: 8))
+                }.buttonStyle(AureaPressStyle()).disabled(!idle)
+                .accessibilityLabel(AureaText.t("panel_idioma_fala"))
+                .accessibilityValue(spoken[current])
+                .accessibilityAddTraits(languagesOpen ? .isSelected : [])
+            }.frame(minHeight: 44).padding(.top, 6)
+            if languagesOpen {
+                CaptionChips(options: names, selected: current, descriptions: spoken,
+                             enabled: { _ in idle }, wrap: true) { language = codes[$0]; languagesOpen = false }
+            }
+        }
+    }
+    /// O modelo do aparelho (usado sem internet ou sem conta): qualidade e download.
+    /// Qualidade que não cabe na memória livre aparece desligada, com o motivo para o VoiceOver.
+    private var qualityControls: some View {
         let qualities = WhisperQuality.allCases
         let fits = qualities.map(\.fits)
         let unavailable = AureaText.t("cap025_quality_unavailable")
-        let names: [String] = codes.map { $0.isEmpty ? auto : CaptionLanguages.endonym($0) }
-        let spoken: [String] = codes.map { $0.isEmpty ? auto : CaptionLanguages.spoken($0) }
         let explained: [String] = qualities.map { q in
             let reason = fits[q.rawValue] ? "" : " " + unavailable
             return q.label + ". " + q.hint + reason
         }
         let idle = busy == nil
         return VStack(alignment: .leading, spacing: 0) {
-            label("panel_idioma_fala")
-            CaptionChips(options: names, selected: codes.firstIndex(of: language) ?? 0, descriptions: spoken,
-                         enabled: { _ in idle }, wrap: true) { language = codes[$0] }
             label("cap025_quality")
             CaptionChips(options: qualities.map(\.label), selected: quality.rawValue, descriptions: explained,
                          enabled: { idle && fits[$0] }) { quality = qualities[$0] }
@@ -847,13 +905,52 @@ struct CaptionsPanel: View {
             } catch { if !Task.isCancelled && jobRevision == revision { self.error = error.localizedDescription } }
         }
     }
+    /// 0.4.1: primeiro a NUVEM (Whisper large-v3-turbo, CloudCaptions) quando há conta;
+    /// qualquer falha (sem rede, limite, servidor) cai no Whisper local sem perguntar.
+    /// A tradução para o inglês continua só no local.
     private func transcribe() {
+        guard busy == nil else { return }
+        guard !path.isEmpty else { error = AureaText.t("ios_no_audio_media"); return }
+        notice = nil
+        guard !translateEnglish, CloudCaptions.available else { transcribeOnDevice(); return }
+        let sourceId = id, engine = model.engine, selectedLanguage = language, project = model.projectGeneration
+        busy = AureaText.t("cap041_cloud_progress", 0); error = nil
+        let revision = UUID(); jobRevision = revision
+        job = Task {
+            do {
+                let result: [CaptionWord]
+                do {
+                    let operation = model.beginProjectOperation()
+                    defer { model.endProjectOperation(operation) }
+                    result = try await CloudCaptions.transcribe(engine: engine, layer: sourceId, language: selectedLanguage) { percent in
+                        Task { @MainActor in
+                            if jobRevision == revision && busy != nil { busy = AureaText.t("cap041_cloud_progress", percent) }
+                        }
+                    }
+                }
+                try Task.checkCancellation()
+                guard jobRevision == revision else { return }
+                guard model.projectGeneration == project, model.primarySelection == sourceId else { busy = nil; return }
+                busy = nil
+                if result.isEmpty { error = AureaText.t("app_caption_no_speech"); return }
+                setWords(result, from: AureaText.t("cap041_cloud_source")); persist(); apply()
+            } catch {
+                guard jobRevision == revision else { return }
+                busy = nil
+                guard !Task.isCancelled, model.projectGeneration == project, model.primarySelection == sourceId else { return }
+                notice = AureaText.t("cap041_cloud_fallback")
+                transcribeOnDevice()
+            }
+        }
+    }
+    /// Whisper local (o modelo baixado no aparelho): nenhum áudio vai para a rede.
+    private func transcribeOnDevice() {
         guard busy == nil else { return }
         let sourceId = id, engine = model.engine, selectedLanguage = language, translate = translateEnglish, project = model.projectGeneration
         guard !path.isEmpty else { error = AureaText.t("ios_no_audio_media"); return }
         // A memória livre muda: a qualidade pedida cai para a melhor que cabe agora.
         let chosen = quality.usable()
-        notice = chosen != quality ? AureaText.t("cap025_quality_fallback", chosen.label) : nil
+        if chosen != quality { notice = AureaText.t("cap025_quality_fallback", chosen.label) }
         busy = AureaText.t("ios_whisper_preparing"); error = nil
         let revision = UUID(); jobRevision = revision
         job = Task {

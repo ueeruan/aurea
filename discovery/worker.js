@@ -33,6 +33,7 @@ import { rotaDeAppConfig } from "./appconfig.js";
 import { rotaDeRelato } from "./relato.js";
 import { communityRoute } from "./community.js";
 import { rotaDePaginas } from "./paginas.js";
+import { rotaDeTranscricao } from "./transcribe.js";
 
 export { CofreDeVideo } from "./cofre.js";
 
@@ -100,6 +101,9 @@ async function handle(req, env, ctx, url) {
     if (crash) return crash;
     const relato = await rotaDeRelato(req, env, ctx, url);
     if (relato) return relato;
+    // 0.4.1: legendas automáticas na nuvem (Whisper large-v3-turbo, Workers AI).
+    const transcricao = await rotaDeTranscricao(req, env, ctx, url);
+    if (transcricao) return transcricao;
 
     // Geração de vídeo paga (8Scale): tudo sob /api/ai/video.
     const video = await rotaDeVideo(req, env, ctx, url);

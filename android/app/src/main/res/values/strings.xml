@@ -1809,7 +1809,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea Beta 0.4.1 (2205) • Fase 2 • 28/10/2026\n\n• Interface nova (mockup de Hanszx): tema AMOLED, barra de reprodução nova, dock flutuante com grade do +, gavetas em cartão, inspetor em folha que desliza, cores rápidas, roda de rotação e contorno nos clipes.\n• Aurora em Elementos: céu de aurora boreal pronto, já em 3D.\n• Conta: entrar com o Google e conta obrigatória de novo.\n• Remapear tempo: a curva agora é a da coluna esquerda.\n• O painel da camada não deixa mais buracos.\n• AureaHyper agora é pago: o acesso é liberado por conta.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.2 (2206) • 28/10/2026\n\n• Chão reflexivo: em + › 3D, uma camada que cria um chão em perspectiva refletindo tudo o que está abaixo dela (2D, 3D, partículas). Ladrilhos, ladrilhos gastos ou a sua própria imagem como textura; acompanha a câmera 3D e um nulo 3D.\n• O chão da cena 3D agora reflete também objetos transparentes e textos, formas e imagens em 3D.\n• Legendas automáticas muito mais precisas: com a conta conectada, a fala é transcrita na nuvem (Whisper Large). Sem internet, o modelo do aparelho continua funcionando.\n• Tela de legendas nova e mais simples: escolha o estilo, o idioma e toque em Gerar legendas. O resto fica em Mais opções.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -4567,4 +4567,14 @@
     <string name="fxt_new_frames_between_the_source_frames_bui">Quadros novos entre os da fonte pelo movimento (vetores de bloco nos dois sentidos). 1×: a camada fica com o fps da composição (ex.: vídeo 30 numa composição 60). A câmera lenta anda dentro da camada; o som da camada não muda.</string>
     <string name="fxl_detect_repeated_frames">Detectar quadros repetidos</string>
     <string name="fxt_the_preview_always_uses_turbo">A prévia usa sempre o Turbo.</string>
+    <string name="fxl_horizon">Horizonte</string>
+    <string name="fxl_reflection">Reflexo</string>
+    <string name="fxl_reflection_distance">Distância do reflexo</string>
+    <string name="fxo_smooth_2">Liso</string>
+    <string name="fxo_worn_tiles">Ladrilhos gastos</string>
+    <string name="fxl_floor_color">Cor do chão</string>
+    <string name="fxl_texture">Textura</string>
+    <string name="fxl_floor_brightness">Brilho do chão</string>
+    <string name="fxl_floor_opacity">Opacidade do chão</string>
+    <string name="fxl_floor_texture_layer">Textura do chão (camada)</string>
 </resources>

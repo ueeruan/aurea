@@ -365,8 +365,15 @@ struct Panel3DView: View {
                 envSection("env3d_section_floor", hint: "env3d_floor_hint", id: "env3d.floor") {
                     let floor = Int(sceneSettings[1])
                     AureaFlowLayout(hGap: 8, vGap: 2) {
+                        // 0.4.1: "Reflective Floor" — o chão polido que espelha tudo, num toque. Par do Android.
+                        let reflective = sceneSettings.count > 8 && sceneSettings[8] > 0.5
                         ForEach(Array(["scene031_floor_off", "scene031_floor_visible", "scene031_floor_shadow"].enumerated()), id: \.offset) { i, key in
-                            envChoice(AureaText.t(key), on: floor == i, id: "panel3d.floor.\(i)") { if floor != i { finishEditing(); setScene(1, Float(i)) } }
+                            envChoice(AureaText.t(key), on: floor == i && !(i == 1 && reflective), id: "panel3d.floor.\(i)") {
+                                if floor != i || (i == 1 && reflective) { finishEditing(); setScene(1, Float(i)) }
+                            }
+                        }
+                        envChoice(AureaText.t("scene_floor_reflective"), on: reflective, id: "panel3d.floor.reflective") {
+                            if !reflective { finishEditing(); setScene(8, 1) }
                         }
                     }
                 }

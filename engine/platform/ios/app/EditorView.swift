@@ -1634,6 +1634,7 @@ private struct AddLayerSheet: View {
                         card("scene_workspace", glyph: CupertinoGlyph.Cube, accent: true) { close(); model.enterSceneEditor() }
                         card("sh_add_model_3d", glyph: CupertinoGlyph.Cube, accent: true) { files(.model) }
                         card("sh_add_text_3d", glyph: ShellGlyph.TextformatAlt, color: ShellColors.text3D) { model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25); close() }
+                        card("scene_floor_reflective", glyph: CupertinoGlyph.Sparkles, color: ShellColors.text3D) { model.addReflectiveFloor(); close() }
                         card("panel_camera_3d", glyph: CupertinoGlyph.CameraFill, accent: true) { model.addCamera(); close() }
                         card("real_camera_title", glyph: CupertinoGlyph.CameraFill, accent: true) { model.startRealCamera(); close() }
                         drawnCard("sh_add_null_3d", kind: -1) { model.addNull(threeD: true); close() }

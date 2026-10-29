@@ -1070,6 +1070,10 @@ public:
     /// o provedor de transcrição ler o áudio. Vazio = não tem mídia.
     [[nodiscard]] std::string layer_media_path(u64 layerId) noexcept;
     [[nodiscard]] Result<std::vector<text::CaptionWord>> transcribe_local(u64 layerId, const std::string& model, const std::string& language, bool translateEnglish = false) noexcept;
+    /// 0.4.1 (legendas na nuvem): o áudio da camada em trechos WAV 16 kHz mono
+    /// cortados nas pausas, em `dir`. Uma linha por trecho: "início<TAB>fim<TAB>caminho"
+    /// (segundos da mídia). Usa o mesmo progresso/cancelar da transcrição local.
+    [[nodiscard]] Result<std::string> export_speech_chunks(u64 layerId, const std::string& dir) noexcept;
     std::atomic<int> captionProgress{0};
     std::atomic<bool> captionCancelled{false};
     [[nodiscard]] std::string caption_tracks() noexcept;
@@ -1342,6 +1346,12 @@ public:
     /// 0.4.1 (mockup "interface 03", Elementos): camada de ajuste 3D "Aurora" com o efeito
     /// Aurora (Gerar) já aplicado, cobrindo o quadro todo. Um passo de desfazer.
     [[nodiscard]] Result<u64> add_aurora() noexcept;
+    /// 0.4.1 (+ › 3D › Reflective Floor): camada de ajuste "Reflective Floor" no topo
+    /// com o efeito do mesmo nome — o chão reflete tudo o que está abaixo dela.
+    [[nodiscard]] Result<u64> add_reflective_floor() noexcept;
+    /// Camada de ajuste [name] com UM efeito [effectKey] nos padrões; [threeD] liga o 3D.
+    /// Um passo de desfazer.
+    [[nodiscard]] Result<u64> add_effect_adjustment_layer(const char* name, const char* effectKey, bool threeD) noexcept;
     bool apply_particle_preset(u64 layerId, u32 preset) noexcept;
     /// 0 taxa, 1 vida, 2 velocidade, 3 espalhamento, 4 gravidade, 5 tamanho
     /// inicial, 6 tamanho final, 7 direção.
@@ -1555,6 +1565,14 @@ public:
                          f32 contactShadow = 0.8f, f32 fade = 6.0f) noexcept;
     /// {modo, r, g, b, rugosidade, refletividade, sombra de contato, fade}.
     bool query_scene_floor(f32* out8) noexcept;
+    /// 0.4.1 "Reflective Floor": o chão visível pronto para espelhar a cena — quase
+    /// preto, polido (rugosidade 0,06), refletividade 0,9 e desbotamento longo.
+    /// O reflexo mostra modelos, transparentes e camadas 2D no espaço 3D. Um desfazer.
+    bool apply_reflective_floor() noexcept { return set_scene_floor(1u, 0.012f, 0.012f, 0.014f, 0.06f, 0.9f, 0.8f, 24.0f); }
+    /// O chão atual é o do "Reflective Floor" (visível e refletividade ≥ 0,85).
+    [[nodiscard]] static bool is_reflective_floor(const f32* floor8) noexcept {
+        return floor8 && floor8[0] > 0.5f && floor8[0] < 1.5f && floor8[5] >= 0.85f;
+    }
 
     // --- Qualidade e pós do 3D (composição atual) ---------------------------------
     /// Nível de qualidade do 3D: 0 AUTO (segue o preview adaptativo), 1 BAIXO

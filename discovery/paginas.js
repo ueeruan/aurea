@@ -48,9 +48,10 @@ const PRIVACIDADE = pagina('Aurea — Política de Privacidade / Privacy Policy'
 
 <h2>2. Resumo</h2>
 <ul>
-<li>Seus projetos, vídeos, fotos e áudios ficam no seu aparelho. Eles só saem dele quando <b>você</b> publica algo na Comunidade ou usa o Vídeo com IA.</li>
+<li>Seus projetos, vídeos, fotos e áudios ficam no seu aparelho. Eles só saem dele quando <b>você</b> publica algo na Comunidade, usa o Vídeo com IA ou gera legendas automáticas com a conta conectada.</li>
 <li>A conta (e-mail e senha) é <b>opcional</b>: é usada para a Comunidade, o Vídeo com IA e o envio de relatórios de falha.</li>
-<li>Legendas automáticas, recorte com IA, mapa de profundidade e ampliação são processados no próprio aparelho.</li>
+<li><b>Legendas automáticas</b>: com a conta conectada, o áudio do vídeo escolhido é enviado em trechos ao nosso servidor e transcrito pela Cloudflare (Workers AI); o áudio não é guardado, só o texto volta ao aparelho. Sem conta ou sem internet, a transcrição é feita no próprio aparelho.</li>
+<li>Recorte com IA, mapa de profundidade e ampliação são processados no próprio aparelho.</li>
 <li>O app mostra anúncios de parceiros, com a tela de consentimento do Google (UMP) quando a lei exige.</li>
 <li>Não vendemos dados pessoais.</li>
 </ul>
@@ -80,7 +81,7 @@ const PRIVACIDADE = pagina('Aurea — Política de Privacidade / Privacy Policy'
 <p>O app não usa localização, contatos nem notificações. O backup automático do Android está desativado.</p>
 
 <h2>5. Com quem compartilhamos</h2>
-<p>Fornecedores que tratam dados em nosso nome: Cloudflare (servidor, contas, Comunidade, arquivos), Resend (e-mail dos relatórios ao desenvolvedor), 8Scale (Vídeo com IA), Unity e Google (anúncios e consentimento), Hugging Face (download do modelo de legendas; nenhum dado pessoal além da conexão). Podemos divulgar dados se a lei exigir. Os servidores podem ficar fora do Brasil; a transferência segue a LGPD.</p>
+<p>Fornecedores que tratam dados em nosso nome: Cloudflare (servidor, contas, Comunidade, arquivos, transcrição das legendas automáticas), Resend (e-mail dos relatórios ao desenvolvedor), 8Scale (Vídeo com IA), Unity e Google (anúncios e consentimento), Hugging Face (download do modelo de legendas; nenhum dado pessoal além da conexão). Podemos divulgar dados se a lei exigir. Os servidores podem ficar fora do Brasil; a transferência segue a LGPD.</p>
 
 <h2>6. Seus direitos</h2>
 <p>Você pode acessar, corrigir e excluir seus dados. Para excluir a conta e os dados ligados a ela: no app, <b>Início → menu → Excluir conta</b>, ou pela web em <a href="/excluir-conta">/excluir-conta</a>. Os relatórios de falha ficam até 30 dias no servidor; os e-mails já enviados ao desenvolvedor não podem ser recolhidos. Para outros pedidos, escreva para <a href="mailto:${CONTATO}">${CONTATO}</a>.</p>
@@ -98,9 +99,10 @@ const PRIVACIDADE = pagina('Aurea — Política de Privacidade / Privacy Policy'
 <p>Aurea is a video and motion graphics editor made by Ruan Pablo (independent developer). Privacy contact: <a href="mailto:${CONTATO}">${CONTATO}</a>.</p>
 <h2>2. Summary</h2>
 <ul>
-<li>Your projects, videos, photos and audio stay on your device. They only leave it when <b>you</b> publish to the Community or use AI Video.</li>
+<li>Your projects, videos, photos and audio stay on your device. They only leave it when <b>you</b> publish to the Community, use AI Video or generate auto captions while signed in.</li>
 <li>The account (email and password) is <b>optional</b>: it is used for the Community, AI Video and sending crash reports.</li>
-<li>Auto captions, AI cutout, depth maps and upscaling run on the device.</li>
+<li><b>Auto captions</b>: while signed in, the audio of the chosen video is sent in chunks to our server and transcribed by Cloudflare (Workers AI); the audio is not stored, only the text comes back. Without an account or internet, transcription runs on the device.</li>
+<li>AI cutout, depth maps and upscaling run on the device.</li>
 <li>The app shows partner ads, with Google's consent screen (UMP) where the law requires it.</li>
 <li>We do not sell personal data.</li>
 </ul>

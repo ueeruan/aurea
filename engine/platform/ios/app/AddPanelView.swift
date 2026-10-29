@@ -546,6 +546,10 @@ private struct Model3DGridView: View {
                 ObjectCell(label: AureaText.t("sh_add_text_3d"), tag: "add.model3d.text", glyph: ShellGlyph.TextformatAlt, tint: ShellColors.text3D) {
                     _ = model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25); close()
                 },
+                // 0.4.1: Reflective Floor — o chão polido que espelha tudo o que é 3D, num toque. Par do Android.
+                ObjectCell(label: AureaText.t("scene_floor_reflective"), tag: "add.model3d.reflectiveFloor", glyph: CupertinoGlyph.Sparkles, tint: ShellColors.text3D) {
+                    close(); model.addReflectiveFloor()
+                },
                 ObjectCell(label: AureaText.t("scene_workspace"), tag: "add.model3d.scene", glyph: CupertinoGlyph.Cube) { close(); model.enterSceneEditor() },
                 ObjectCell(label: AureaText.t("panel_camera_3d"), tag: "add.model3d.camera", glyph: CupertinoGlyph.CameraFill) { model.addCamera(); close() },
                 ObjectCell(label: AureaText.t("real_camera_title"), tag: "add.model3d.realCamera", glyph: CupertinoGlyph.CameraViewfinder) { model.startRealCamera(); close() },

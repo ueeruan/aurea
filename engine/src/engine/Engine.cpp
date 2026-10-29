@@ -4950,22 +4950,46 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
 }
 
 Result<u64> Engine::add_aurora() noexcept {
-    const EffectTypeId type = effectRegistry_.find_key(effect_keys::kAurora);
+    // A aurora é um céu 3D: a camada nasce 3D (segue câmera e nulo pai).
+    return add_effect_adjustment_layer("Aurora", effect_keys::kAurora, true);
+}
+
+Result<u64> Engine::add_reflective_floor() noexcept {
+    // 0.4.1: o chão é um plano 3D — deitado (X 90°), na linha de 62 % da altura;
+    // segue a câmera 3D e um nulo 3D pai. Desligar o 3D da camada volta ao chão
+    // de tela (horizonte fixo).
+    Result<u64> made = add_effect_adjustment_layer("Reflective Floor", effect_keys::kReflectiveFloor, true);
+    if (!made.ok()) return made;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(*made)) : nullptr;
+    if (l) {
+        // Mesmo passo de desfazer do criar: o grupo já fechou, então a mudança vai
+        // junto na foto "antes" de add_effect_adjustment_layer (sem nova mutação).
+        l->transform.rotation = Vec3{90.0f, 0.0f, 0.0f};
+        l->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.62f, 0.0f};
+        project_->mark_dirty();
+        request_render();
+    }
+    return made;
+}
+
+Result<u64> Engine::add_effect_adjustment_layer(const char* name, const char* effectKey, bool threeD) noexcept {
+    const EffectTypeId type = effectRegistry_.find_key(effectKey);
     const ParameterRegistry* params = effectRegistry_.params(type);
-    if (!params) return Status{Errc::InvalidState, "aurora indisponivel"};
-    { std::lock_guard<std::mutex> lock(modelMutex_); history_.begin_group("adicionar aurora"); }
+    if (!params) return Status{Errc::InvalidState, "efeito indisponivel"};
+    { std::lock_guard<std::mutex> lock(modelMutex_); history_.begin_group(name); }
     Result<u64> made = add_null(false);
     if (made.ok()) {
         std::lock_guard<std::mutex> lock(modelMutex_);
         Composition* comp = project_ ? current_composition() : nullptr;
         Layer* l = comp ? comp->layer(LayerId::unpack(*made)) : nullptr;
         if (l) {
-            history_.before_mutation(*comp, project_->timeline().current(), "adicionar aurora");
+            history_.before_mutation(*comp, project_->timeline().current(), name);
             bump_model_revision_locked();
-            l->name = numbered_layer_name(*comp, "Aurora");
+            l->name = numbered_layer_name(*comp, name);
             l->adjustment = true;
-            // A aurora é um céu 3D: a camada nasce 3D (segue câmera e nulo pai).
-            l->threeD = true;
+            l->threeD = threeD;
             (void)enforce_clip_chains(*comp, nullptr);
             EffectInstance e;
             e.id = l->alloc_effect_id();
@@ -10176,6 +10200,34 @@ Result<std::vector<text::CaptionWord>> Engine::transcribe_local(u64 layerId, con
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!current() || captionCancelled.load()) return Status{Errc::Cancelled, "transcricao cancelada"};
     return result;
+}
+
+Result<std::string> Engine::export_speech_chunks(u64 layerId, const std::string& dir) noexcept {
+    static std::mutex exporting;
+    std::unique_lock task(exporting, std::try_to_lock);
+    if (!task.owns_lock()) return Status{Errc::InvalidState, "transcricao em andamento"};
+    std::string path;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        Composition* comp = project_ ? current_composition() : nullptr;
+        const Layer* layer = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        const Asset* asset = layer && (layer->kind == LayerKind::Video || layer->kind == LayerKind::Audio)
+            ? project_->asset(layer->source) : nullptr;
+        if (!asset || !config_.mediaFactory) return Status{Errc::InvalidArgument, "camada sem audio"};
+        path = resolve_asset_path(asset->sourcePath);
+        captionCancelled.store(false); captionProgress.store(0);
+    }
+    auto chunks = text::export_speech_chunks(*config_.mediaFactory, path, dir, captionCancelled,
+        [&](int value) { captionProgress.store(value); });
+    if (!chunks) return chunks.status();
+    if (captionCancelled.load()) return Status{Errc::Cancelled, "transcricao cancelada"};
+    std::string out;
+    char line[64];
+    for (const auto& c : *chunks) {
+        std::snprintf(line, sizeof(line), "%.3f\t%.3f\t", c.start, c.end);
+        out += line; out += c.path; out += '\n';
+    }
+    return out;
 }
 
 Result<u32> Engine::create_captions(u64 sourceLayer, const std::vector<text::CaptionWord>& words,

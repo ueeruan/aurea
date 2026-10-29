@@ -13,6 +13,7 @@
 		CA2128000000000000000001 /* ProjectTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2128000000000000000002 /* ProjectTransfer.swift */; };
 		CA2127000000000000000005 /* CrashReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000006 /* CrashReporter.swift */; };
 		CA2127000000000000000007 /* GoogleLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000008 /* GoogleLogin.swift */; };
+		CA2141000000000000000001 /* CloudCaptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2141000000000000000002 /* CloudCaptions.swift */; };
 		DA2121000000000000000001 /* CommandSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2121000000000000000002 /* CommandSearch.swift */; };
 		DA2121000000000000000003 /* editor_commands.json in Resources */ = {isa = PBXBuildFile; fileRef = DA2121000000000000000004 /* editor_commands.json */; };
 		DA2113000000000000000001 /* PerformanceTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2113000000000000000002 /* PerformanceTest.swift */; };
@@ -147,6 +148,7 @@
 		CA2128000000000000000002 /* ProjectTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTransfer.swift; sourceTree = "<group>"; };
 		CA2127000000000000000006 /* CrashReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashReporter.swift; sourceTree = "<group>"; };
 		CA2127000000000000000008 /* GoogleLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleLogin.swift; sourceTree = "<group>"; };
+		CA2141000000000000000002 /* CloudCaptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudCaptions.swift; sourceTree = "<group>"; };
 		DA2121000000000000000002 /* CommandSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandSearch.swift; sourceTree = "<group>"; };
 		DA2121000000000000000004 /* editor_commands.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Resources/editor_commands.json; sourceTree = "<group>"; };
 		DA2113000000000000000002 /* PerformanceTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTest.swift; sourceTree = "<group>"; };
@@ -324,6 +326,7 @@
 				CA2128000000000000000002 /* ProjectTransfer.swift */,
 				CA2127000000000000000006 /* CrashReporter.swift */,
 				CA2127000000000000000008 /* GoogleLogin.swift */,
+				CA2141000000000000000002 /* CloudCaptions.swift */,
 				AE0000000000000000000003 /* HomeView.swift */,
 				AE0000000000000000000120 /* HomeBackdrop.swift */,
 				AE0000000000000000000004 /* EditorView.swift */,
@@ -646,6 +649,7 @@
 				CA2128000000000000000001 /* ProjectTransfer.swift in Sources */,
 				CA2127000000000000000005 /* CrashReporter.swift in Sources */,
 				CA2127000000000000000007 /* GoogleLogin.swift in Sources */,
+				CA2141000000000000000001 /* CloudCaptions.swift in Sources */,
 				AE000000000000000000003B /* HomeView.swift in Sources */,
 				AE0000000000000000000121 /* HomeBackdrop.swift in Sources */,
 				AE000000000000000000003C /* EditorView.swift in Sources */,
@@ -799,8 +803,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2205;
-				MARKETING_VERSION = 0.4.1;
+				CURRENT_PROJECT_VERSION = 2206;
+				MARKETING_VERSION = 0.4.2;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -876,8 +880,8 @@
 				CODE_SIGN_ENTITLEMENTS = app/Aurea.entitlements;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2205;
-				MARKETING_VERSION = 0.4.1;
+				CURRENT_PROJECT_VERSION = 2206;
+				MARKETING_VERSION = 0.4.2;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",

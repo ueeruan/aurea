@@ -148,9 +148,16 @@ internal fun Environment3DTab(env: PanelEnv) {
         // Chão: 0 sem chão, 1 visível, 2 só sombra (compõe sobre o 2D).
         EnvSection(stringResource(R.string.env3d_section_floor), stringResource(R.string.env3d_floor_hint), Modifier.testTag("env3d.floor")) {
             val floor = settings[1].toInt()
+            // 0.4.1: "Reflective Floor" — o chão polido que espelha tudo, num toque.
+            val reflective = settings.getOrNull(8)?.let { it > 0.5f } == true
             EnvChoices {
                 EnvFloors.forEachIndexed { i, label ->
-                    EnvChoice(stringResource(label), floor == i, "panel3d.floor.$i") { if (floor != i) change(1, i.toFloat()) }
+                    EnvChoice(stringResource(label), floor == i && !(i == 1 && reflective), "panel3d.floor.$i") {
+                        if (floor != i || (i == 1 && reflective)) change(1, i.toFloat())
+                    }
+                }
+                EnvChoice(stringResource(R.string.scene_floor_reflective), reflective, "panel3d.floor.reflective") {
+                    if (!reflective) change(8, 1f)
                 }
             }
         }

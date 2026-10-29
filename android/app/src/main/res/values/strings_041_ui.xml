@@ -7,4 +7,11 @@
     <string name="conta_membros">8 mil+ membros</string>
     <string name="conta_ou">ou</string>
     <string name="conta_google">Continuar com o Google</string>
+    <string name="scene_floor_reflective">Chão reflexivo</string>
+    <string name="scene_floor_reflective_on">Chão reflexivo adicionado: tudo abaixo desta camada reflete no chão. Ajuste em Efeitos.</string>
+    <string name="cap041_cloud_progress">Legendando na nuvem… %1$d%%</string>
+    <string name="cap041_cloud_source">Whisper Large (nuvem)</string>
+    <string name="cap041_cloud_fallback">Sem conexão com a nuvem agora: usando o modelo do aparelho.</string>
+    <string name="cap041_more_options">Mais opções</string>
+    <string name="cap041_offline_model">Modelo do aparelho (sem internet)</string>
 </resources>

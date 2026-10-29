@@ -1138,7 +1138,7 @@ para editar la curva.</string>
     <string name="consent_title">Consentimiento y responsabilidad</string>
     <string name="consent_accept">Aceptar y continuar</string>
     <string name="consent_body">Aurea es una herramienta profesional de edición, creación y producción de contenido digital. Al utilizar la aplicación, el usuario reconoce que es plenamente responsable de los contenidos que crea, edita, importa, exporta, publica o comparte a través de la plataforma.\n\nAurea no controla, fomenta, apoya ni autoriza el uso de la herramienta para actividades ilegales, abusivas, fraudulentas, perjudiciales o que vulneren los derechos de terceros.\n\nEl usuario es responsable de garantizar que dispone de las autorizaciones, licencias y derechos necesarios sobre los materiales utilizados, incluidas imágenes, vídeos, música, marcas, modelos, archivos y demás contenidos protegidos.\n\nLa libertad creativa que ofrece Aurea no implica aprobación, participación ni responsabilidad de la aplicación por lo que cada usuario decide producir o hacer con la herramienta.\n\nEl usuario acepta utilizar Aurea conforme a la legislación aplicable y asume la responsabilidad de sus propias acciones y del contenido producido o distribuido mediante la aplicación.\n\nEn la máxima medida permitida por la legislación aplicable, Aurea y sus responsables no serán responsables de los actos realizados exclusivamente por el usuario, del uso indebido de la herramienta ni de las consecuencias derivadas de contenidos creados, publicados o compartidos por el propio usuario.\n\nAurea proporciona la herramienta. El usuario es responsable del modo en que decide utilizarla.\n\nAl continuar, el usuario declara que ha leído, comprendido y acepta estos términos.</string>
-    <string name="release_notes_body">Aurea Beta 0.4.1 (2205) • Fase 2 • 28/10/2026\n\n• Interfaz nueva (mockup de Hanszx): tema AMOLED, nueva barra de reproducción, dock flotante con la cuadrícula del +, cajones en tarjeta, inspector en hoja deslizante, colores rápidos, rueda de rotación y contorno en los clips.\n• Aurora en Elementos: un cielo de aurora boreal listo, ya en 3D.\n• Cuenta: inicia sesión con Google; la cuenta vuelve a ser obligatoria.\n• Reasignar tiempo: la curva ahora es la de la columna izquierda.\n• El panel de la capa ya no deja huecos.\n• AureaHyper ahora es de pago: el acceso se libera por cuenta.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.2 (2206) • 28/10/2026\n\n• Suelo reflectante: en + › 3D, una capa que crea un suelo en perspectiva que refleja todo lo que está debajo (2D, 3D, partículas). Baldosas, baldosas gastadas o tu propia imagen como textura; sigue a la cámara 3D y a un nulo 3D.\n• El suelo de la escena 3D ahora también refleja objetos transparentes y textos, formas e imágenes en 3D.\n• Subtítulos automáticos mucho más precisos: con la cuenta conectada, el habla se transcribe en la nube (Whisper Large). Sin internet, el modelo del dispositivo sigue funcionando.\n• Nueva pantalla de subtítulos, más simple: elige el estilo y el idioma y toca Generar subtítulos. El resto está en Más opciones.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Rellenar</string>
@@ -4488,4 +4488,14 @@ para editar la curva.</string>
     <string name="fxt_new_frames_between_the_source_frames_bui">Cuadros nuevos entre los de la fuente según el movimiento (vectores de bloque en ambos sentidos). 1×: la capa queda con los fps de la composición (ej.: video de 30 en una composición de 60). La cámara lenta ocurre dentro de la capa; el sonido de la capa no cambia.</string>
     <string name="fxl_detect_repeated_frames">Detectar cuadros repetidos</string>
     <string name="fxt_the_preview_always_uses_turbo">La vista previa siempre usa Turbo.</string>
+    <string name="fxl_horizon">Horizonte</string>
+    <string name="fxl_reflection">Reflejo</string>
+    <string name="fxl_reflection_distance">Distancia del reflejo</string>
+    <string name="fxo_smooth_2">Liso</string>
+    <string name="fxo_worn_tiles">Baldosas gastadas</string>
+    <string name="fxl_floor_color">Color del suelo</string>
+    <string name="fxl_texture">Textura</string>
+    <string name="fxl_floor_brightness">Brillo del suelo</string>
+    <string name="fxl_floor_opacity">Opacidad del suelo</string>
+    <string name="fxl_floor_texture_layer">Textura del suelo (capa)</string>
 </resources>

@@ -7,4 +7,11 @@
     <string name="conta_membros">8K+ सदस्य</string>
     <string name="conta_ou">या</string>
     <string name="conta_google">Google के साथ जारी रखें</string>
+    <string name="scene_floor_reflective">परावर्तक फ़र्श</string>
+    <string name="scene_floor_reflective_on">परावर्तक फ़र्श जोड़ा गया: इस लेयर के नीचे सब कुछ फ़र्श पर झलकता है। इफ़ेक्ट्स में बदलें।</string>
+    <string name="cap041_cloud_progress">क्लाउड में कैप्शन बन रहे हैं… %1$d%%</string>
+    <string name="cap041_cloud_source">Whisper Large (क्लाउड)</string>
+    <string name="cap041_cloud_fallback">अभी क्लाउड से कनेक्शन नहीं: डिवाइस वाला मॉडल इस्तेमाल हो रहा है।</string>
+    <string name="cap041_more_options">और विकल्प</string>
+    <string name="cap041_offline_model">डिवाइस वाला मॉडल (बिना इंटरनेट)</string>
 </resources>

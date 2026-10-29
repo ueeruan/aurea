@@ -6007,5 +6007,85 @@
   "hi": "Turbo (प्रीव्यू)",
   "id": "Turbo (pratinjau)",
   "ru": "Turbo (превью)"
+ },
+ "Horizonte": {
+  "en": "Horizon",
+  "es": "Horizonte",
+  "ru": "Горизонт",
+  "hi": "क्षितिज",
+  "id": "Cakrawala",
+  "ar": "الأفق"
+ },
+ "Reflexo": {
+  "en": "Reflection",
+  "es": "Reflejo",
+  "ru": "Отражение",
+  "hi": "प्रतिबिंब",
+  "id": "Pantulan",
+  "ar": "الانعكاس"
+ },
+ "Distância do reflexo": {
+  "en": "Reflection distance",
+  "es": "Distancia del reflejo",
+  "ru": "Дальность отражения",
+  "hi": "प्रतिबिंब की दूरी",
+  "id": "Jarak pantulan",
+  "ar": "مسافة الانعكاس"
+ },
+ "Liso": {
+  "en": "Smooth",
+  "es": "Liso",
+  "ru": "Гладкий",
+  "hi": "चिकना",
+  "id": "Halus",
+  "ar": "أملس"
+ },
+ "Ladrilhos gastos": {
+  "en": "Worn tiles",
+  "es": "Baldosas gastadas",
+  "ru": "Потёртая плитка",
+  "hi": "घिसी टाइलें",
+  "id": "Ubin usang",
+  "ar": "بلاط بالٍ"
+ },
+ "Cor do chão": {
+  "en": "Floor color",
+  "es": "Color del suelo",
+  "ru": "Цвет пола",
+  "hi": "फ़र्श का रंग",
+  "id": "Warna lantai",
+  "ar": "لون الأرضية"
+ },
+ "Textura": {
+  "en": "Texture",
+  "es": "Textura",
+  "ru": "Текстура",
+  "hi": "टेक्सचर",
+  "id": "Tekstur",
+  "ar": "الملمس"
+ },
+ "Brilho do chão": {
+  "en": "Floor brightness",
+  "es": "Brillo del suelo",
+  "ru": "Яркость пола",
+  "hi": "फ़र्श की चमक",
+  "id": "Kecerahan lantai",
+  "ar": "سطوع الأرضية"
+ },
+ "Opacidade do chão": {
+  "en": "Floor opacity",
+  "es": "Opacidad del suelo",
+  "ru": "Непрозрачность пола",
+  "hi": "फ़र्श की अपारदर्शिता",
+  "id": "Opasitas lantai",
+  "ar": "عتامة الأرضية"
+ },
+ "Textura do chão (camada)": {
+  "en": "Floor texture (layer)",
+  "es": "Textura del suelo (capa)",
+  "ru": "Текстура пола (слой)",
+  "hi": "फ़र्श का टेक्सचर (लेयर)",
+  "id": "Tekstur lantai (lapisan)",
+  "ar": "ملمس الأرضية (طبقة)"
  }
 }

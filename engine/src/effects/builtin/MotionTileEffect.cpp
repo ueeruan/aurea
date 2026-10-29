@@ -639,6 +639,7 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_drawing_progress_effect(registry);
     // Aurora (Gerar) — 0.2.7. No fim.
     builtin::register_aurora_effect(registry);
+    builtin::register_reflective_floor(registry);   // 0.4.1
     // Edições aleatórias (Tempo) — 0.2.7. No fim.
     builtin::register_random_edits_effect(registry);
     // Correção de cor (Cor) — 0.3.0. No fim.

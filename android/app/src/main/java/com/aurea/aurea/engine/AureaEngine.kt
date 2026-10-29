@@ -836,6 +836,8 @@ class AureaEngine private constructor() {
     fun addParticles(preset: Int): Long = nativeAddParticles(nativeHandle, preset)
     /** 0.4.1: Elementos › Aurora (Engine::add_aurora). */
     fun addAurora(): Long = nativeAddAurora(nativeHandle)
+    /** 0.4.1: + › 3D › Reflective Floor (Engine::add_reflective_floor). */
+    fun addReflectiveFloor(): Long = nativeAddReflectiveFloor(nativeHandle)
 
     // Texto 3D.
     fun addText3d(content: String, fields: FloatArray, fontPath: String = ""): Long = nativeAddText3d(nativeHandle, content, fields, fontPath)
@@ -1006,6 +1008,12 @@ class AureaEngine private constructor() {
     fun removeCaptions(layer: Long): Int = nativeRemoveCaptions(nativeHandle, layer)
     fun captionCount(layer: Long): Int = nativeCaptionCount(nativeHandle, layer)
     fun parseSrt(srt: String): String? = nativeParseSrt(srt)
+    /** 0.4.1: o áudio da camada em trechos WAV 16 kHz (cortados nas pausas) em [dir], para a nuvem. */
+    fun exportSpeechChunks(layer: Long, dir: String): List<Triple<Double, Double, String>> =
+        nativeExportSpeechChunks(nativeHandle, layer, dir.toByteArray()).toString(Charsets.UTF_8).lineSequence().mapNotNull { line ->
+            val f = line.split('\t', limit = 3)
+            if (f.size != 3) null else Triple(f[0].toDoubleOrNull() ?: return@mapNotNull null, f[1].toDoubleOrNull() ?: return@mapNotNull null, f[2])
+        }.toList()
     fun transcribeLocal(layer: Long, model: String, language: String, translateEnglish: Boolean = false): String =
         nativeWork.run("") { nativeTranscribeLocal(nativeHandle, layer, model.toByteArray(Charsets.UTF_8), language.toByteArray(Charsets.UTF_8), translateEnglish).toString(Charsets.UTF_8) }
     fun captionProgress(cancel: Boolean = false): Int = nativeWork.run(0) { nativeCaptionProgress(nativeHandle, cancel) }
@@ -1017,6 +1025,7 @@ class AureaEngine private constructor() {
     fun editCaptionTrack(layer: Long, command: String): Boolean = nativeEditCaptionTrack(nativeHandle, layer, command.toByteArray(Charsets.UTF_8))
     private external fun nativeCaptionTracks(handle: Long): ByteArray
     private external fun nativeEditCaptionTrack(handle: Long, layer: Long, command: ByteArray): Boolean
+    private external fun nativeExportSpeechChunks(handle: Long, layer: Long, dir: ByteArray): ByteArray
     private external fun nativeTranscribeLocal(handle: Long, layer: Long, model: ByteArray, language: ByteArray, translateEnglish: Boolean): ByteArray
     private external fun nativeCaptionProgress(handle: Long, cancel: Boolean): Int
     fun isFillerWord(word: String): Boolean = nativeIsFillerWord(word)
@@ -1897,6 +1906,7 @@ class AureaEngine private constructor() {
     private external fun nativeSetTimeRemapValue(handle: Long, layer: Long, frame: Long, value: Float): Boolean
     private external fun nativeAddParticles(handle: Long, preset: Int): Long
     private external fun nativeAddAurora(handle: Long): Long
+    private external fun nativeAddReflectiveFloor(handle: Long): Long
     private external fun nativeAddText3d(handle: Long, content: String, fields: FloatArray, fontPath: String): Long
     private external fun nativeSetText3d(handle: Long, layer: Long, content: String, fields: FloatArray, fontPath: String): Boolean
     private external fun nativeSetText3dTexture(handle: Long, layer: Long, path: String): Boolean

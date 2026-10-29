@@ -764,6 +764,10 @@ private fun Model3DGrid(store: EditorStore, close: () -> Unit) {
                     "application/x-fbx", "application/zip", "text/plain", "image/*", "application/octet-stream", "*/*"))
             },
             ObjectCell(stringResource(R.string.sh_add_text_3d), "add.model3d.text", glyph = ShellGlyph.TextformatAlt, tint = ShellColors.Text3D) { store.addText3D(); close() },
+            // 0.4.1: Reflective Floor — camada com o efeito: o chão reflete tudo abaixo dela.
+            ObjectCell(stringResource(R.string.scene_floor_reflective), "add.model3d.reflectiveFloor", glyph = CupertinoGlyph.Sparkles, tint = ShellColors.Text3D) {
+                close(); store.addReflectiveFloor()
+            },
             ObjectCell(stringResource(R.string.scene_workspace), "add.model3d.scene", glyph = CupertinoGlyph.Cube) { close(); store.enterSceneEditor() },
             ObjectCell(stringResource(R.string.panel_camera_3d), "add.model3d.camera", glyph = CupertinoGlyph.CameraFill) { store.addCamera(); close() },
             ObjectCell(stringResource(R.string.real_camera_title), "add.model3d.realCamera", glyph = CupertinoGlyph.CameraViewfinder) { store.startRealCamera(); close() },

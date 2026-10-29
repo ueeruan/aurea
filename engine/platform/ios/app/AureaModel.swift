@@ -4905,6 +4905,18 @@ final class AureaModel: ObservableObject {
         syncAfterEdit()
     }
 
+    /// 0.4.1: + › 3D › Reflective Floor — camada de ajuste com o efeito: o chão reflete tudo
+    /// o que está abaixo (2D, 3D, partículas). Par do Android.
+    func addReflectiveFloor() {
+        let id = engine.addReflectiveFloor()
+        if id >= 0 {
+            selection = [id]; engine.selectLayers([NSNumber(value: id)])
+            toast = AureaText.t("scene_floor_reflective_on")
+        }
+        showAddLayer = false
+        syncAfterEdit()
+    }
+
     func addParticles(_ preset: UInt32) {
         let id = engine.addParticles(preset)
         if id >= 0 { selection = [id]; engine.selectLayers([NSNumber(value: id)]) }

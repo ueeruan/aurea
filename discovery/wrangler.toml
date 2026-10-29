@@ -41,6 +41,10 @@ class_name = "CofreDeVideo"
 tag = "v1-cofre-de-video"
 new_sqlite_classes = ["CofreDeVideo"]
 
+# 0.4.1: Workers AI (legendas automáticas — transcribe.js).
+[ai]
+binding = "AI"
+
 [vars]
 # 0.4.1: login com Google pelo Firebase Auth (firebase.js confere o aud/iss deste projeto).
 FIREBASE_PROJECT_ID = "aurea-8e5f1"

@@ -251,7 +251,38 @@ struct GroundInputs {
     bool lowTier = false;                 ///< nível BAIXO: sem reflexo
     TextureHandle white{}, black{};
     GroundMeshContext mesh;
+    // 0.4.1 (Reflective Floor): o reflexo mostra TUDO — também os transparentes
+    // ([reflectCount] desenhos da lista, 0 = só os opacos) e as camadas 2D no
+    // espaço 3D ([planes]; pipelines na variante do reflexo).
+    u32 reflectCount = 0;
+    const ScenePlane* planes = nullptr;
+    u32 planeCount = 0;
+    PipelineHandle planePipe{}, planeBlendPipe{};
 };
+
+/// Inversa de uma matriz AFIM (mundo ← camada): 3 × 3 por cofatores + translação.
+inline bool ground_affine_inverse(const Mat4& m, Mat4& out) noexcept {
+    const f32 a = m.col[0].x, b = m.col[1].x, c = m.col[2].x;
+    const f32 d = m.col[0].y, e = m.col[1].y, f = m.col[2].y;
+    const f32 g = m.col[0].z, h = m.col[1].z, i = m.col[2].z;
+    const f32 A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+    const f32 det = a * A + b * B + c * C;
+    if (!std::isfinite(det) || std::fabs(det) < 1e-12f) return false;
+    const f32 k = 1.0f / det;
+    const f32 r00 = A * k, r01 = -(b * i - c * h) * k, r02 = (b * f - c * e) * k;
+    const f32 r10 = B * k, r11 = (a * i - c * g) * k, r12 = -(a * f - c * d) * k;
+    const f32 r20 = C * k, r21 = -(a * h - b * g) * k, r22 = (a * e - b * d) * k;
+    const f32 tx = m.col[3].x, ty = m.col[3].y, tz = m.col[3].z;
+    out = Mat4::identity();
+    out.col[0] = Vec4{r00, r10, r20, 0};
+    out.col[1] = Vec4{r01, r11, r21, 0};
+    out.col[2] = Vec4{r02, r12, r22, 0};
+    out.col[3] = Vec4{-(r00 * tx + r01 * ty + r02 * tz), -(r10 * tx + r11 * ty + r12 * tz), -(r20 * tx + r21 * ty + r22 * tz), 1};
+    return true;
+}
+
+/// Uma camada 2D do reflexo: o plano e a projeção espelhada dele.
+struct GroundPlaneReflection { const ScenePlane* plane; Mat4 clip; };
 
 /// Monta o reflexo e o contato (passes próprios, antes do principal) e o
 /// bloco do plano. Inválido = sem chão neste quadro.
@@ -262,7 +293,8 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
     const SceneFrame& frame = *in.frame;
     const SceneFloor& fl = frame.floor;
     if (fl.mode == 0 || fl.mode > 2 || !in.header) return gd;
-    const GroundPlacement place = ground_placement(frame, in.models);
+    const GroundPlacement place = ground_placement(frame, in.models,
+        std::span<const ScenePlane>{in.planes, in.planes ? in.planeCount : 0u});
     if (!place.valid) return gd;
     const f32 h = place.center.y;
     const f32 R = place.radius;
@@ -276,17 +308,32 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
     FGTexture reflection{}, reflectionDisplay{};
     const u32 div = in.exportQuality ? 1u : 2u;
     const u32 rw = std::max(1u, in.width / div), rh = std::max(1u, in.height / div);
-    if (reflectivity > 0.0f && !in.lowTier && count > 0) {
+    const u32 reflectCount = in.reflectCount > count ? in.reflectCount : count;
+    if (reflectivity > 0.0f && !in.lowTier && (reflectCount > 0 || in.planeCount > 0)) {
         Mat4 mirror = Mat4::identity();
         mirror.col[1] = Vec4{0, -1, 0, 0};
         mirror.col[3] = Vec4{0, 2.0f * h, 0, 1};
-        DrawT* list = arena.alloc_array<DrawT>(count);
+        DrawT* list = arena.alloc_array<DrawT>(std::max(reflectCount, 1u));
+        // 0.4.1: as camadas 2D comuns (sem Motion Tile, volume ou estilhaço), na
+        // projeção espelhada clip · W⁻¹ · espelho · W (W = mundo ← camada).
+        GroundPlaneReflection* planeRefl = nullptr;
+        u32 planeN = 0;
+        if (in.planes && in.planeCount > 0 && in.planePipe.valid() && in.planeBlendPipe.valid()) {
+            planeRefl = arena.alloc_array<GroundPlaneReflection>(in.planeCount);
+            for (u32 k = 0; planeRefl && k < in.planeCount; ++k) {
+                const ScenePlane& p = in.planes[k];
+                if (p.periodic.count || p.extrusion.count || p.shatter.pieces) continue;
+                Mat4 inv;
+                if (!ground_affine_inverse(p.light.worldFromLayer, inv)) continue;
+                planeRefl[planeN++] = GroundPlaneReflection{&p, p.clipFromLayer * inv * mirror * p.light.worldFromLayer};
+            }
+        }
         if (list) {
             // Um bloco espelhado por bloco original (materiais/ambientes).
             std::vector<std::pair<const SceneBlock*, const SceneBlock*>> remap;
             u32 n = 0;
             bool hasDisplayReflection = false;
-            for (u32 i = 0; i < count; ++i) {
+            for (u32 i = 0; i < reflectCount; ++i) {
                 DrawT d = draws[i];
                 const SceneBlock* nb = nullptr;
                 for (const auto& kv : remap) if (kv.first == d.block) { nb = kv.second; break; }
@@ -311,7 +358,8 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
                 hasDisplayReflection |= d.block->alpha.z > 0.5f;
                 list[n++] = d;
             }
-            if (n > 0) {
+            if (planeN > 0) hasDisplayReflection = true;   // plano escreve a cor de exibição (MRT0)
+            if (n > 0 || planeN > 0) {
                 TextureDesc cd;
                 cd.width = rw;
                 cd.height = rh;
@@ -330,12 +378,28 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
                 const FGTexture reflDisplay = graph.create_texture("3d-chao-reflexo-exibicao", md);
                 const FGTexture reflHdr = graph.create_texture("3d-chao-reflexo", cd);
                 const FGTexture reflDepth = graph.create_texture("3d-chao-reflexo-prof", dd);
-                struct Cap { DrawT* draws; u32 count; GroundMeshContext x; } cap{list, n, in.mesh};
+                struct Cap { DrawT* draws; u32 count; GroundMeshContext x; const GroundPlaneReflection* planes; u32 planeCount;
+                             PipelineHandle planePipe, planeBlendPipe; } cap{list, n, in.mesh, planeRefl, planeN, in.planePipe, in.planeBlendPipe};
                 const u32 pass = graph.add_raster_pass_depth("3d-chao-reflexo", PassStage::Scene3D, reflDisplay, LoadOp::Clear,
                                                              Vec4{0, 0, 0, 0}, reflDepth, LoadOp::Clear, false, 0.0f,
                                                              [cap](PassContext& pc) {
-                    ground_record_draws(pc.cmds, pc, cap.draws, cap.count, cap.x, nullptr);
+                    if (cap.count) ground_record_draws(pc.cmds, pc, cap.draws, cap.count, cap.x, nullptr);
+                    // As camadas 2D espelhadas, como no passe principal: primeiro a
+                    // profundidade dos pixels sólidos, depois as bordas misturadas.
+                    for (u32 phase = 0; phase < 2 && cap.planeCount; ++phase) {
+                        pc.cmds.bind_pipeline(phase ? cap.planeBlendPipe : cap.planePipe);
+                        for (u32 k = 0; k < cap.planeCount; ++k) {
+                            const ScenePlane& p = *cap.planes[k].plane;
+                            pc.cmds.bind_texture(0, pc.texture(p.texture), SamplerHandle{p.sampler});
+                            pc.cmds.set_uniforms(&p.light, sizeof(p.light));
+                            struct { Mat4 m; Vec4 region; Vec4 uv; Vec4 params; } push{cap.planes[k].clip, p.region, Vec4{0, 0, 1, 1},
+                                Vec4{p.opacity, static_cast<f32>(phase), 0, 0}};
+                            pc.cmds.push_constants(&push, sizeof(push));
+                            pc.cmds.draw(6u);
+                        }
+                    }
                 });
+                for (u32 k = 0; k < planeN; ++k) graph.read(pass, planeRefl[k].plane->texture);
                 graph.set_color1(pass, reflHdr);
                 if (in.mesh.shadow.valid()) graph.read(pass, in.mesh.shadow);
                 reflection = reflHdr;

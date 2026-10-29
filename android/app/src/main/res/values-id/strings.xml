@@ -1136,7 +1136,7 @@ untuk mengedit kurvanya.</string>
     <string name="consent_title">Persetujuan dan Tanggung Jawab</string>
     <string name="consent_accept">Setuju dan lanjutkan</string>
     <string name="consent_body">Aurea adalah alat profesional untuk mengedit, membuat, dan memproduksi konten digital. Dengan menggunakan aplikasi ini, pengguna mengakui bahwa mereka bertanggung jawab penuh atas konten yang mereka buat, edit, impor, ekspor, publikasikan, atau bagikan melalui platform.\n\nAurea tidak mengendalikan, mendorong, mendukung, atau mengizinkan penggunaan alat ini untuk kegiatan ilegal, abusif, curang, merugikan, atau yang melanggar hak pihak ketiga.\n\nPengguna bertanggung jawab memastikan bahwa mereka memiliki izin, lisensi, dan hak yang diperlukan atas materi yang digunakan, termasuk gambar, video, musik, merek, model, berkas, dan konten terlindungi lainnya.\n\nKebebasan kreatif yang ditawarkan Aurea tidak berarti persetujuan, keterlibatan, atau tanggung jawab aplikasi atas apa yang dipilih setiap pengguna untuk dibuat atau dilakukan dengan alat ini.\n\nPengguna setuju untuk menggunakan Aurea sesuai hukum yang berlaku dan bertanggung jawab atas tindakan mereka sendiri serta konten yang diproduksi atau didistribusikan melalui aplikasi.\n\nSejauh diizinkan oleh hukum yang berlaku, Aurea dan pihak yang bertanggung jawab atasnya tidak bertanggung jawab atas tindakan yang dilakukan semata-mata oleh pengguna, penyalahgunaan alat, atau akibat dari konten yang dibuat, dipublikasikan, atau dibagikan oleh pengguna sendiri.\n\nAurea menyediakan alatnya. Pengguna bertanggung jawab atas cara mereka memilih untuk menggunakannya.\n\nDengan melanjutkan, pengguna menyatakan bahwa mereka telah membaca, memahami, dan menyetujui ketentuan ini.</string>
-    <string name="release_notes_body">Aurea Beta 0.4.1 (2205) • Fase 2 • 28/10/2026\n\n• Antarmuka baru (mockup Hanszx): tema AMOLED, bilah putar baru, dok mengambang dengan kisi +, laci kartu, inspektur lembar geser, warna cepat, roda rotasi, dan garis tepi klip.\n• Aurora di Elemen: langit aurora siap pakai, sudah 3D.\n• Akun: masuk dengan Google, dan akun kembali wajib.\n• Remap waktu: kurvanya kini yang ada di kolom kiri.\n• Panel lapisan tidak lagi menyisakan celah.\n• AureaHyper kini berbayar: akses diberikan per akun.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.2 (2206) • 28/10/2026\n\n• Lantai Reflektif: di + › 3D, lapisan yang membuat lantai berperspektif yang memantulkan semua di bawahnya (2D, 3D, partikel). Ubin, ubin usang, atau gambar Anda sendiri sebagai tekstur; mengikuti kamera 3D dan null 3D.\n• Lantai adegan 3D kini juga memantulkan objek transparan serta teks, bentuk, dan gambar 3D.\n• Teks otomatis jauh lebih akurat: saat masuk ke akun, ucapan ditranskripsi di cloud (Whisper Large). Tanpa internet, model di perangkat tetap berjalan.\n• Layar teks baru yang lebih sederhana: pilih gaya dan bahasa lalu ketuk Buat teks. Sisanya ada di Opsi lainnya.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Isi</string>
@@ -4478,4 +4478,14 @@ untuk mengedit kurvanya.</string>
     <string name="fxt_new_frames_between_the_source_frames_bui">Frame baru di antara frame sumber berdasarkan gerakan (vektor blok dua arah). 1×: layer mengikuti fps komposisi (mis. video 30 di komposisi 60). Gerak lambat berjalan di dalam layer; suara layer tidak berubah.</string>
     <string name="fxl_detect_repeated_frames">Deteksi frame berulang</string>
     <string name="fxt_the_preview_always_uses_turbo">Pratinjau selalu memakai Turbo.</string>
+    <string name="fxl_horizon">Cakrawala</string>
+    <string name="fxl_reflection">Pantulan</string>
+    <string name="fxl_reflection_distance">Jarak pantulan</string>
+    <string name="fxo_smooth_2">Halus</string>
+    <string name="fxo_worn_tiles">Ubin usang</string>
+    <string name="fxl_floor_color">Warna lantai</string>
+    <string name="fxl_texture">Tekstur</string>
+    <string name="fxl_floor_brightness">Kecerahan lantai</string>
+    <string name="fxl_floor_opacity">Opasitas lantai</string>
+    <string name="fxl_floor_texture_layer">Tekstur lantai (lapisan)</string>
 </resources>

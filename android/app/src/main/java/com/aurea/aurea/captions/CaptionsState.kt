@@ -216,15 +216,52 @@ class CaptionsState(
         transcription?.cancel()
         engine.captionProgress(true)
     }
+    /**
+     * 0.4.1: primeiro a NUVEM (Whisper large-v3-turbo, [CloudCaptions]) quando há conta;
+     * qualquer falha (sem rede, limite, servidor) cai no Whisper local sem perguntar.
+     * A tradução para o inglês continua só no local.
+     */
     fun transcribe(language: String? = speechLanguage, thenGenerate: Boolean = true, translateEnglish: Boolean = false) {
         if (busy != null) return
         val id = layer ?: return
         if (engine.layerMediaPath(id) == null) { error = AppText.get(app, R.string.app_caption_no_audio_layer); return }
+        if (translateEnglish || !CloudCaptions.available(app)) { transcribeOnDevice(language, thenGenerate, translateEnglish); return }
+        val request = generation
+        busy = AppText.get(app, R.string.cap041_cloud_progress, 0); error = null; notice = null
+        transcription = scope.launch {
+            var fallback = false
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val context = currentCoroutineContext()
+                    CloudCaptions.transcribe(app, engine, id, language,
+                        progress = { p -> scope.launch(Dispatchers.Main) { if (generation == request) busy = AppText.get(app, R.string.cap041_cloud_progress, p) } },
+                        active = { context.isActive && generation == request })
+                }
+                if (generation != request || layer != id) return@launch
+                busy = null
+                if (result.isEmpty()) error = AppText.get(app, R.string.app_caption_no_speech)
+                else { setWords(result, AppText.get(app, R.string.cap041_cloud_source)); persist(); if (thenGenerate) generate() }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { fallback = generation == request }
+            finally {
+                if (generation == request && busy != AppText.get(app, R.string.app_caption_creating)) busy = null
+            }
+            if (fallback) {
+                notice = AppText.get(app, R.string.cap041_cloud_fallback)
+                transcribeOnDevice(language, thenGenerate, translateEnglish = false)
+            }
+        }
+    }
+
+    /** Whisper local (o modelo baixado no aparelho): nenhum áudio vai para a rede. */
+    private fun transcribeOnDevice(language: String?, thenGenerate: Boolean, translateEnglish: Boolean) {
+        if (busy != null) return
+        val id = layer ?: return
         val request = generation
         // A memória livre muda: a qualidade pedida cai para a melhor que cabe agora.
         val wanted = quality
         val chosen = WhisperModels.usable(app, wanted)
-        notice = if (chosen != wanted) AppText.get(app, R.string.cap025_quality_fallback, AppText.get(app, chosen.label)) else null
+        if (chosen != wanted) notice = AppText.get(app, R.string.cap025_quality_fallback, AppText.get(app, chosen.label))
         busy = AppText.get(app, R.string.app_caption_preparing_whisper); error = null
         transcription = scope.launch {
             try {

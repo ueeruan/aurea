@@ -6,6 +6,7 @@
 #include "aurea/text/WhisperWords.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <memory>
 #include <mutex>
 #include <limits>
@@ -77,6 +78,84 @@ whisper_alignment_heads_preset dtw_preset(const WhisperModelInfo& m) noexcept {
 struct Token { std::string text; f64 t0, t1, dtw; };
 
 } // namespace
+
+namespace {
+/// WAV PCM 16 bits mono 16 kHz (o cabeçalho de 44 bytes).
+bool write_wav16(const std::string& path, const f32* samples, usize count) noexcept {
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+    auto u32le = [&](u32 v) { const u8 b[4] = {u8(v), u8(v >> 8), u8(v >> 16), u8(v >> 24)}; std::fwrite(b, 1, 4, f); };
+    auto u16le = [&](u16 v) { const u8 b[2] = {u8(v), u8(v >> 8)}; std::fwrite(b, 1, 2, f); };
+    const u32 bytes = static_cast<u32>(count * 2);
+    std::fwrite("RIFF", 1, 4, f); u32le(36 + bytes); std::fwrite("WAVE", 1, 4, f);
+    std::fwrite("fmt ", 1, 4, f); u32le(16); u16le(1); u16le(1); u32le(static_cast<u32>(kRate)); u32le(static_cast<u32>(kRate) * 2); u16le(2); u16le(16);
+    std::fwrite("data", 1, 4, f); u32le(bytes);
+    std::vector<i16> pcm(count);
+    for (usize i = 0; i < count; ++i) pcm[i] = static_cast<i16>(std::lround(std::clamp(samples[i], -1.0f, 1.0f) * 32767.0f));
+    const bool ok = std::fwrite(pcm.data(), 2, count, f) == count;
+    return std::fclose(f) == 0 && ok;
+}
+} // namespace
+
+Result<std::vector<SpeechChunk>> export_speech_chunks(VideoSourceFactory& factory, const std::string& source, const std::string& dir,
+    std::atomic<bool>& cancelled, const std::function<void(int)>& progress) noexcept {
+    try {
+        auto decoder = factory.open_audio(source.c_str());
+        if (!decoder) return Status{Errc::DecodeFailed, "midia sem audio compativel"};
+        const auto info = decoder->info();
+        if (info.channels == 0 || info.channels > 32 || info.sampleRate < 8000 || info.sampleRate > 192000)
+            return Status{Errc::UnsupportedFormat, "formato de audio invalido"};
+        const f64 duration = info.durationUs / 1000000.0;
+        if (!(duration > 0.05)) return Status{Errc::InvalidArgument, "midia sem audio"};
+        const i64 last = static_cast<i64>(std::llround(duration * kRate));
+        constexpr i64 kMin = 25 * kRate, kMax = 45 * kRate, kFrame = kRate / 50;   // quadros de 20 ms
+        std::vector<SpeechChunk> out;
+        i64 cursor = 0;
+        u32 index = 0;
+        while (cursor < last - kRate / 20) {
+            if (cancelled.load()) return Status{Errc::Cancelled, "transcricao cancelada"};
+            const i64 want = std::min(last - cursor, kMax);
+            std::vector<f32> buf;
+            bool ended = false;
+            for (i64 at = cursor; at < cursor + want && !ended;) {
+                const i64 n = std::min<i64>(cursor + want - at, static_cast<i64>(kReadSec * kRate));
+                auto read = read_span(*decoder, info, at, n, cancelled, buf, ended);
+                if (!read) return read;
+                at += n;
+            }
+            if (buf.empty()) break;
+            // Onde cortar: o fim, se cabe; senão o quadro mais quieto entre 25 e 45 s.
+            i64 cut = static_cast<i64>(buf.size());
+            if (cursor + cut < last && cut > kMin) {
+                f64 best = 1e30;
+                for (i64 f = kMin; f + kFrame <= cut; f += kFrame) {
+                    f64 e = 0;
+                    for (i64 i = 0; i < kFrame; ++i) e += static_cast<f64>(buf[static_cast<usize>(f + i)]) * buf[static_cast<usize>(f + i)];
+                    if (e < best) { best = e; cut = f + kFrame / 2; }
+                }
+            }
+            // Sem fala (pico de energia por quadro muito baixo): não manda.
+            f64 peak = 0;
+            for (i64 f = 0; f + kFrame <= cut; f += kFrame) {
+                f64 e = 0;
+                for (i64 i = 0; i < kFrame; ++i) e += static_cast<f64>(buf[static_cast<usize>(f + i)]) * buf[static_cast<usize>(f + i)];
+                peak = std::max(peak, e / kFrame);
+            }
+            if (peak > 1e-5) {
+                char name[32];
+                std::snprintf(name, sizeof(name), "/chunk_%03u.wav", index++);
+                SpeechChunk c{dir + name, static_cast<f64>(cursor) / kRate, static_cast<f64>(cursor + cut) / kRate};
+                if (!write_wav16(c.path, buf.data(), static_cast<usize>(cut))) return Status{Errc::IoError, "nao foi possivel gravar o audio"};
+                out.push_back(std::move(c));
+            }
+            cursor += std::max<i64>(cut, kRate / 10);
+            progress(std::clamp(static_cast<int>(100.0 * static_cast<f64>(cursor) / static_cast<f64>(last)), 0, 99));
+        }
+        return out;
+    } catch (const std::bad_alloc&) {
+        return Status{Errc::OutOfMemory, "memoria insuficiente"};
+    }
+}
 
 Result<std::vector<CaptionWord>> transcribe_local(VideoSourceFactory& factory,
     const std::string& source, const std::string& model, const std::string& language,

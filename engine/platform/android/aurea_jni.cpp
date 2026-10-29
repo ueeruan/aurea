@@ -2320,6 +2320,15 @@ AUREA_JNI jlong AUREA_FN(nativeAddAurora)(JNIEnv*, jclass, jlong handle) {
     return static_cast<jlong>(*r);
 }
 
+// 0.4.1: + › 3D › Reflective Floor (camada de ajuste com o efeito; Engine::add_reflective_floor).
+AUREA_JNI jlong AUREA_FN(nativeAddReflectiveFloor)(JNIEnv*, jclass, jlong handle) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    const Result<u64> r = c->engine.add_reflective_floor();
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
+}
+
 AUREA_JNI jlong AUREA_FN(nativeAddParticles)(JNIEnv*, jclass, jlong handle, jint preset) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);
@@ -2850,6 +2859,13 @@ AUREA_JNI jbyteArray AUREA_FN(nativeTranscribeLocal)(JNIEnv* env, jclass, jlong 
     std::string output;
     for (const auto& word : *result) output += std::to_string(word.start) + "\t" + std::to_string(word.end) + "\t" + word.text + "\n";
     return bytes_of(env, output);
+}
+// 0.4.1: o audio da camada em trechos WAV para as legendas na nuvem (linhas inicio\tfim\tcaminho).
+AUREA_JNI jbyteArray AUREA_FN(nativeExportSpeechChunks)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray dir) {
+    auto* c = ctx_of(handle); if (!c) return nullptr;
+    auto result = c->engine.export_speech_chunks(static_cast<u64>(layer), utf8_of(env, dir));
+    if (!result) { env->ThrowNew(env->FindClass("java/io/IOException"), std::string(result.status().detail()).c_str()); return nullptr; }
+    return bytes_of(env, *result);
 }
 AUREA_JNI jint AUREA_FN(nativeCaptionProgress)(JNIEnv*, jclass, jlong handle, jboolean cancel) {
     auto* c = ctx_of(handle); if (!c) return 0;
@@ -5407,8 +5423,10 @@ AUREA_JNI jfloatArray AUREA_FN(nativeSceneSettings)(JNIEnv* env, jclass, jlong h
     auto* c = ctx_of(handle); if (!c) return nullptr;
     float post[6]{}, floor[8]{};
     c->engine.query_scene3d_post(post); c->engine.query_scene_floor(floor);
-    float values[8]{static_cast<float>(c->engine.studio_environment()), floor[0], post[0], post[1], post[2], post[3], post[4], post[5]};
-    auto out = env->NewFloatArray(8); if (out) env->SetFloatArrayRegion(out, 0, 8, values); return out;
+    // [8] (0.4.1): 1 = o chão é o "Reflective Floor".
+    float values[9]{static_cast<float>(c->engine.studio_environment()), floor[0], post[0], post[1], post[2], post[3], post[4], post[5],
+                    aurea::Engine::is_reflective_floor(floor) ? 1.f : 0.f};
+    auto out = env->NewFloatArray(9); if (out) env->SetFloatArrayRegion(out, 0, 9, values); return out;
 }
 AUREA_JNI jboolean AUREA_FN(nativeSetSceneSetting)(JNIEnv*, jclass, jlong handle, jint parameter, jfloat value) {
     auto* c = ctx_of(handle); if (!c || !std::isfinite(value)) return false;
@@ -5444,6 +5462,8 @@ AUREA_JNI jboolean AUREA_FN(nativeSetSceneSetting)(JNIEnv*, jclass, jlong handle
     case 6: return e.set_scene3d_bloom(post[3] > 0, value, post[5]);
     // Limiar do bloom (mantém ligado/força atuais).
     case 7: return e.set_scene3d_bloom(post[3] > 0, post[4], value);
+    // 0.4.1: o "Reflective Floor" num toque (Engine::apply_reflective_floor).
+    case 8: return e.apply_reflective_floor();
     default: return false;
     }
 }

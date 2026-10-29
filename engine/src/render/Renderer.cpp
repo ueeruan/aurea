@@ -2708,6 +2708,11 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             pl.layerWidth = out.compWidth;
             pl.layerHeight = out.compHeight;
             fillSceneCamera(pl);
+            // 0.4.1 (Reflective Floor): a camada de ajuste 3D é um plano no mundo.
+            if (l->threeD && !copyBgBackdrop) {
+                pl.layerWorldValid = true;
+                pl.layerWorld = world_3d(comp, *l, time);
+            }
             // Copiar fundo: só os efeitos depois dele, no plano da composição
             // (Repetição no caminho, mapa de profundidade: ver compSpaceHost_).
             compSpaceHost_ = copyBgBackdrop ? l : nullptr;
@@ -4189,6 +4194,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
             // composição não se aplica — ver LayerPlacement::inScene3d.
             placement.inScene3d = inScene3d;
             fillSceneCamera(placement);
+            if (l->threeD) {
+                placement.layerWorldValid = true;
+                placement.layerWorld = world_3d(comp, *l, time);
+            }
             if (effectCameraActive) {
                 placement.cameraActive = true;
                 placement.cameraView = cam3d.view;

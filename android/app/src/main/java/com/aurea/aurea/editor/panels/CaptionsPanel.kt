@@ -52,6 +52,7 @@ import androidx.compose.ui.semantics.semantics
 import com.aurea.aurea.ui.ds.AureaToggle
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
+import androidx.compose.foundation.clickable
 import com.aurea.aurea.ui.theme.tocavel
 
 // O índice é o `style` salvo nas opções da legenda; o rótulo sai do idioma do app.
@@ -96,66 +97,108 @@ internal fun CaptionsPanel(env: PanelEnv) {
     // existem; o editor da palavra aparece logo abaixo do pedaço dela.
     val words = cap.words
     val fillers = cap.fillers
+    // 0.4.1: tela simplificada — estilo, idioma (um chip) e UM botão; depois de gerar,
+    // só posição, tamanho e dois interruptores. O resto fica em "Mais opções".
+    var more by remember { mutableStateOf(false) }
+    var languages by remember { mutableStateOf(false) }
+    val idle = cap.busy == null
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)) {
         item(key = "opcoes", contentType = "opcoes") {
             Column {
                 cap.track?.let { CaptionBlockEditor(cap, store.playhead) }
                 CaptionPresetBrowser(cap)
-                cap.busy?.let { Note(it, AureaColors.Accent) }
+
+                // Idioma da fala num chip só; tocar abre a lista.
+                val auto = stringResource(R.string.cap025_lang_auto)
+                val langName = cap.speechLanguage?.let(SpeechLanguages::endonym) ?: auto
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.panel_idioma_fala), Modifier.weight(1f), style = AureaType.BodySmall)
+                    Chip("$langName  ▾", on = languages, enabled = idle, description = stringResource(R.string.panel_idioma_fala)) { languages = !languages }
+                }
+                if (languages) LanguageChips(cap) { languages = false }
+
+                cap.busy?.let {
+                    Note(it, AureaColors.Accent)
+                    Action(stringResource(R.string.common_cancel)) { cap.cancelTranscription() }
+                }
                 cap.error?.let { Note(it, AureaColors.Danger) }
                 cap.notice?.let { Note(it, AureaColors.Muted) }
-                Note(stringResource(R.string.edt_captions_whisper_note), AureaColors.Muted)
-                if (cap.busy != null) Action(stringResource(R.string.common_cancel)) { cap.cancelTranscription() }
-                SpeechControls(cap)
-                Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.beta_translate_english), Modifier.weight(1f))
-                    AureaToggle(checked = translateEnglish, onCheckedChange = { translateEnglish = it })
-                }
-                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Action(if (cap.words.isEmpty()) stringResource(R.string.panel_gerar_legendas) else stringResource(R.string.panel_transcrever_novo), primary = true, enabled = cap.busy == null) {
-                        cap.transcribe(cap.speechLanguage, translateEnglish = translateEnglish)
-                    }
-                    Action(stringResource(R.string.panel_importar_legenda_srt), enabled = cap.busy == null) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }
-                }
 
-                Label(stringResource(R.string.panel_estilo))
-                Chips(CaptionStyles.map { stringResource(it) }, s.style) { i -> set { it.copy(style = i) } }
-                Label(stringResource(R.string.pn_caption))
-                Chips(listOf(stringResource(R.string.pn_caption_grouped), stringResource(R.string.pn_caption_one_per_word)), s.mode) { i -> set { it.copy(mode = i) } }
-                if (s.mode == 0) {
-                    Label(stringResource(R.string.pn_caption_words_per_caption))
-                    Chips((1..6).map { "$it" }, s.maxWords - 1) { i -> set { it.copy(maxWords = i + 1) } }
-                    Label(stringResource(R.string.pn_caption_chars_per_line))
-                    Chips(listOf("12", "18", "24", "32"), listOf(12, 18, 24, 32).indexOf(s.maxChars)) { i -> set { it.copy(maxChars = listOf(12, 18, 24, 32)[i]) } }
-                    Label(stringResource(R.string.pn_caption_lines))
-                    Chips(listOf("1", "2", "3"), s.maxLines - 1) { i -> set { it.copy(maxLines = i + 1) } }
-                }
-                Label(stringResource(R.string.pn_caption_screen_height))
-                val ys = listOf(0.2f, 0.5f, 0.78f)
-                Chips(listOf(stringResource(R.string.pn_caption_pos_top), stringResource(R.string.pn_caption_pos_middle), stringResource(R.string.pn_caption_pos_bottom)), ys.indexOfFirst { kotlin.math.abs(it - s.posY) < 0.01f }) { i -> set { it.copy(posY = ys[i]) } }
-                Label(stringResource(R.string.panel_tamanho))
-                val sizes = listOf(0.045f, 0.065f, 0.09f)
-                Chips(listOf(stringResource(R.string.pn_size_small_short), stringResource(R.string.pn_size_medium_short), stringResource(R.string.pn_size_large_short)), sizes.indexOfFirst { kotlin.math.abs(it - s.sizeFrac) < 0.001f }) { i -> set { it.copy(sizeFrac = sizes[i]) } }
-                Toggle(stringResource(R.string.pn_caption_highlight_word), s.highlight) { v -> set { it.copy(highlight = v) } }
-                Toggle(stringResource(R.string.pn_caption_uppercase), s.uppercase) { v -> set { it.copy(uppercase = v) } }
-                Toggle(stringResource(R.string.pn_caption_break_pauses), s.breakOnPause) { v -> set { it.copy(breakOnPause = v) } }
-                Toggle(stringResource(R.string.pn_caption_remove_fillers), s.removeFillers) { v -> set { it.copy(removeFillers = v) } }
-
+                // O botão principal: gera (transcreve e cria) ou refaz.
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Action(if (cap.captionCount > 0) stringResource(R.string.pn_caption_redo) else stringResource(R.string.pn_caption_create), primary = true, enabled = words.isNotEmpty() && cap.busy == null) { cap.generate() }
-                    if (cap.captionCount > 0) Action(stringResource(R.string.pn_caption_remove_n, cap.captionCount), enabled = cap.busy == null) { cap.removeAll() }
+                    Action(
+                        if (cap.captionCount > 0) stringResource(R.string.panel_transcrever_novo) else stringResource(R.string.panel_gerar_legendas),
+                        primary = true, enabled = idle,
+                    ) { cap.transcribe(cap.speechLanguage, translateEnglish = translateEnglish) }
+                    if (cap.captionCount > 0) Action(stringResource(R.string.pn_caption_remove_n, cap.captionCount), enabled = idle) { cap.removeAll() }
                 }
-                if (words.isNotEmpty()) {
-                    val src = cap.source
-                    Label(
-                        if (src != null) pluralStringResource(R.plurals.pn_caption_transcript_source, words.size, src, words.size)
-                        else pluralStringResource(R.plurals.pn_caption_transcript, words.size, words.size),
+                if (cap.captionCount == 0 && words.isEmpty()) {
+                    Text(
+                        stringResource(R.string.panel_importar_legenda_srt),
+                        style = AureaType.BodySmall.copy(color = AureaColors.Accent),
+                        modifier = Modifier.padding(vertical = 4.dp).clickable(enabled = idle) {
+                            srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream"))
+                        },
                     )
+                }
+
+                if (cap.captionCount > 0 || words.isNotEmpty()) {
+                    Label(stringResource(R.string.pn_caption_screen_height))
+                    val ys = listOf(0.2f, 0.5f, 0.78f)
+                    Chips(listOf(stringResource(R.string.pn_caption_pos_top), stringResource(R.string.pn_caption_pos_middle), stringResource(R.string.pn_caption_pos_bottom)), ys.indexOfFirst { kotlin.math.abs(it - s.posY) < 0.01f }) { i -> set { it.copy(posY = ys[i]) } }
+                    Label(stringResource(R.string.panel_tamanho))
+                    val sizes = listOf(0.045f, 0.065f, 0.09f)
+                    Chips(listOf(stringResource(R.string.pn_size_small_short), stringResource(R.string.pn_size_medium_short), stringResource(R.string.pn_size_large_short)), sizes.indexOfFirst { kotlin.math.abs(it - s.sizeFrac) < 0.001f }) { i -> set { it.copy(sizeFrac = sizes[i]) } }
+                    Toggle(stringResource(R.string.pn_caption_highlight_word), s.highlight) { v -> set { it.copy(highlight = v) } }
+                    Toggle(stringResource(R.string.pn_caption_uppercase), s.uppercase) { v -> set { it.copy(uppercase = v) } }
+                    if (words.isNotEmpty() && cap.captionCount == 0) {
+                        Action(stringResource(R.string.pn_caption_create), primary = true, enabled = idle) { cap.generate() }
+                    }
+                }
+
+                // Mais opções (fechado): agrupamento, quebras, vícios, tradução, modelo do aparelho.
+                Row(
+                    Modifier.fillMaxWidth().height(48.dp).clickable { more = !more },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(R.string.cap041_more_options), Modifier.weight(1f), style = AureaType.BodySmall.copy(color = AureaColors.Muted))
+                    Text(if (more) "▴" else "▾", style = AureaType.BodySmall.copy(color = AureaColors.Muted))
+                }
+                if (more) {
+                    Label(stringResource(R.string.pn_caption))
+                    Chips(listOf(stringResource(R.string.pn_caption_grouped), stringResource(R.string.pn_caption_one_per_word)), s.mode) { i -> set { it.copy(mode = i) } }
+                    if (s.mode == 0) {
+                        Label(stringResource(R.string.pn_caption_words_per_caption))
+                        Chips((1..6).map { "$it" }, s.maxWords - 1) { i -> set { it.copy(maxWords = i + 1) } }
+                        Label(stringResource(R.string.pn_caption_chars_per_line))
+                        Chips(listOf("12", "18", "24", "32"), listOf(12, 18, 24, 32).indexOf(s.maxChars)) { i -> set { it.copy(maxChars = listOf(12, 18, 24, 32)[i]) } }
+                        Label(stringResource(R.string.pn_caption_lines))
+                        Chips(listOf("1", "2", "3"), s.maxLines - 1) { i -> set { it.copy(maxLines = i + 1) } }
+                    }
+                    Toggle(stringResource(R.string.pn_caption_break_pauses), s.breakOnPause) { v -> set { it.copy(breakOnPause = v) } }
+                    Toggle(stringResource(R.string.pn_caption_remove_fillers), s.removeFillers) { v -> set { it.copy(removeFillers = v) } }
+                    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.beta_translate_english), Modifier.weight(1f))
+                        AureaToggle(checked = translateEnglish, onCheckedChange = { translateEnglish = it })
+                    }
+                    Label(stringResource(R.string.cap041_offline_model))
+                    SpeechControls(cap)
+                    if (cap.captionCount > 0) Action(stringResource(R.string.pn_caption_redo), enabled = words.isNotEmpty() && idle) { cap.generate() }
+                    if (cap.captionCount == 0 && words.isNotEmpty()) {
+                        Action(stringResource(R.string.panel_importar_legenda_srt), enabled = idle) { srt.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream")) }
+                    }
+                    if (words.isNotEmpty()) {
+                        val src = cap.source
+                        Label(
+                            if (src != null) pluralStringResource(R.plurals.pn_caption_transcript_source, words.size, src, words.size)
+                            else pluralStringResource(R.plurals.pn_caption_transcript, words.size, words.size),
+                        )
+                    }
                 }
             }
         }
 
-        if (words.isNotEmpty()) {
+        if (more && words.isNotEmpty()) {
             val chunks = (words.size + WORDS_PER_ITEM - 1) / WORDS_PER_ITEM
             items(chunks, contentType = { "fala" }) { c ->
                 val from = c * WORDS_PER_ITEM
@@ -189,10 +232,9 @@ internal fun CaptionsPanel(env: PanelEnv) {
  * desligada, com o motivo para o leitor de tela.
  */
 @Composable
-private fun SpeechControls(cap: CaptionsState) {
+private fun LanguageChips(cap: CaptionsState, onPicked: () -> Unit) {
     val context = LocalContext.current
     val idle = cap.busy == null
-    Label(stringResource(R.string.panel_idioma_fala))
     val codes = listOf<String?>(null) + SpeechLanguages.codes
     val auto = stringResource(R.string.cap025_lang_auto)
     val spoken = remember(context) { SpeechLanguages.codes.associateWith { SpeechLanguages.spoken(context, it) } }
@@ -201,8 +243,13 @@ private fun SpeechControls(cap: CaptionsState) {
         selected = codes.indexOf(cap.speechLanguage),
         descriptions = codes.map { code -> code?.let { spoken[it] } ?: auto },
         enabled = { idle },
-    ) { cap.chooseLanguage(codes[it]) }
+    ) { cap.chooseLanguage(codes[it]); onPicked() }
+}
 
+/** O modelo do aparelho (usado sem internet ou sem conta): qualidade e download. */
+@Composable
+private fun SpeechControls(cap: CaptionsState) {
+    val idle = cap.busy == null
     Label(stringResource(R.string.cap025_quality))
     // Memória e arquivo baixado mudam entre uma transcrição e outra, não a cada quadro.
     val fits = remember(cap.busy) { WhisperQuality.entries.map { cap.qualityFits(it) } }

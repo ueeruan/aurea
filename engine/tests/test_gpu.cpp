@@ -14589,3 +14589,49 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "HyperGpu.inl"
 // Custo de GPU/CPU de cada efeito do catálogo em 1080p (só imprime).
 #include "EffectPerfGpu.inl"
+
+// 0.4.1 (Reflective Floor): numa camada de ajuste, o que está ACIMA da linha do
+// horizonte aparece espelhado no chão, que é opaco abaixo da linha.
+AUREA_TEST(EffectPackGpu, ReflectiveFloorMirrorsEverythingBelowTheAdjustmentLayer) {
+    AUREA_REQUIRE_GPU();
+    Scene s(64, 64);
+    s.solid(16, 16, Vec4{1, 1, 1, 1}, 32, 30);                       // objeto claro acima do horizonte (y 22..38; linha em 39,7)
+    const LayerId adj = s.solid(8, 8, Vec4{1, 0, 1, 1}, 4, 4);
+    s.comp->layer(adj)->adjustment = true;
+    auto& fx = s.add_effect(adj, effect_keys::kReflectiveFloor);
+    fx.params[4].constant = ParamValue::scalar(0.0f);                // sem distorção
+    fx.params[5].constant.v[0] = 0.0f;                               // chão liso
+    fx.params[3].constant = ParamValue::scalar(0.0f);                // sem desfoque
+    const FloatImage img = s.render();
+    const Vec4 refl = img.v(32, 44), floor = img.v(4, 44), above = img.v(32, 30);   // y 44 espelha y 35
+    std::printf("\n    reflexo %.3f chao %.3f (alfa %.2f) objeto %.3f ", refl.x, floor.x, floor.w, above.x);
+    AUREA_CHECK(above.x > 0.9f);                                     // acima da linha: intacto
+    AUREA_CHECK(floor.w > 0.99f);                                    // chão opaco
+    AUREA_CHECK(refl.x > floor.x + 0.1f);                            // o objeto refletido no chão
+}
+
+// 0.4.1 (Reflective Floor): uma prévia para olhar (só com AUREA_REFLECTIVE_FLOOR_PNG=<arquivo>):
+// "letras" claras encostadas no horizonte, chão de ladrilhos gastos com os padrões.
+AUREA_TEST(EffectPackGpu, ReflectiveFloorPreviewImage) {
+    AUREA_REQUIRE_GPU();
+    const char* path = std::getenv("AUREA_REFLECTIVE_FLOOR_PNG");
+    if (!path || !*path) return;
+    Scene s(640, 360);
+    for (int k = 0; k < 6; ++k) s.solid(56, 90, Vec4{0.95f, 0.95f, 0.92f, 1}, 135.0f + 74.0f * static_cast<f32>(k), 172.0f);
+    const LayerId adj = s.solid(8, 8, Vec4{1, 0, 1, 1}, 4, 4);
+    s.comp->layer(adj)->adjustment = true;
+    (void)s.add_effect(adj, effect_keys::kReflectiveFloor);
+    const FloatImage img = s.render();
+    AUREA_CHECK(write_png(path, img.encoded()));
+    // O mesmo chão em 3D (como o + › 3D cria): deitado em X 90°, na linha de 62 %.
+    Layer* fl = s.comp->layer(adj);
+    fl->threeD = true;
+    fl->transform.rotation = Vec3{90.0f, 0.0f, 0.0f};
+    fl->transform.position = Vec3{320.0f, 360.0f * 0.62f, 0.0f};
+    const FloatImage img3 = s.render();
+    AUREA_CHECK(write_png(std::string(path) + ".3d.png", img3.encoded()));
+    const Vec4 refl = img3.v(283, 236), between = img3.v(320, 330), above = img3.v(300, 170);
+    std::printf("\n    3D: reflexo %.3f entre %.3f objeto %.3f ", refl.x, between.x, above.x);
+    AUREA_CHECK(above.x > 0.85f);
+    AUREA_CHECK(refl.x > 0.15f);
+}

@@ -1954,6 +1954,19 @@ enum EffectI18nTable {
     aurea.generate.aurora|21|opacity|fxl_opacity|
     aurea.generate.aurora|22|follow_camera|fx030_follow_camera|
     aurea.generate.aurora|23|quality|fxl_quality|fxo_fast,fxo_normal,fxo_high
+    aurea.generate.reflective_floor|0|horizon|fxl_horizon|
+    aurea.generate.reflective_floor|1|reflection|fxl_reflection|
+    aurea.generate.reflective_floor|2|falloff|fxl_reflection_distance|
+    aurea.generate.reflective_floor|3|blur|fx_name_gaussian_blur|
+    aurea.generate.reflective_floor|4|distortion|fxs_distortion|
+    aurea.generate.reflective_floor|5|floor|fxl_floor|fxo_smooth_2,fxl_tiling,fxo_worn_tiles
+    aurea.generate.reflective_floor|6|color|fxl_floor_color|
+    aurea.generate.reflective_floor|7|tile|fxl_tile_size|
+    aurea.generate.reflective_floor|8|perspective|fxl_perspective|
+    aurea.generate.reflective_floor|9|texture|fxl_texture|
+    aurea.generate.reflective_floor|10|brightness|fxl_floor_brightness|
+    aurea.generate.reflective_floor|11|opacity|fxl_floor_opacity|
+    aurea.generate.reflective_floor|12|texture_layer|fxl_floor_texture_layer|
     aurea.time.random_edits|0|edit_length|fx027_edit_length|
     aurea.time.random_edits|1|seed|fxl_seed|
     aurea.color.grade|0|log_profile|fxl_camera_profile|fxo_none_rec_709,fxo_s_log3_sony,fxo_logc3_arri,fxo_v_log_panasonic,fxo_apple_log,fxo_cineon

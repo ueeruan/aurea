@@ -7,4 +7,11 @@
     <string name="conta_membros">أكثر من 8 آلاف عضو</string>
     <string name="conta_ou">أو</string>
     <string name="conta_google">المتابعة باستخدام Google</string>
+    <string name="scene_floor_reflective">أرضية عاكسة</string>
+    <string name="scene_floor_reflective_on">تمت إضافة الأرضية العاكسة: كل ما تحت هذه الطبقة ينعكس على الأرض. اضبطها من التأثيرات.</string>
+    <string name="cap041_cloud_progress">جارٍ إنشاء الترجمة في السحابة… %1$d%%</string>
+    <string name="cap041_cloud_source">Whisper Large (سحابة)</string>
+    <string name="cap041_cloud_fallback">تعذّر الوصول إلى السحابة الآن: يتم استخدام النموذج على الجهاز.</string>
+    <string name="cap041_more_options">خيارات إضافية</string>
+    <string name="cap041_offline_model">النموذج على الجهاز (دون إنترنت)</string>
 </resources>

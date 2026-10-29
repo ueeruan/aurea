@@ -5185,6 +5185,23 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (engine.setSceneSetting(parameter, value)) refreshNow()
     }
 
+    /**
+     * 0.4.1: + › 3D › Reflective Floor — camada de ajuste "Reflective Floor" no topo com o
+     * efeito: o chão reflete tudo o que está abaixo (2D, 3D, partículas). A camada fica
+     * escolhida para os ajustes no painel de Efeitos.
+     */
+    fun addReflectiveFloor(): Long {
+        val id = engine.addReflectiveFloor()
+        if (id < 0) {
+            errorMessage = appText(R.string.msg_nao_foi_possivel_criar_a_camada_2, -id)
+            return -1
+        }
+        refreshNow()
+        select(id)
+        showToast(appText(R.string.scene_floor_reflective_on))
+        return id
+    }
+
     // --- Ambiente 3D (HDRI) --------------------------------------------------------------
     /** {tem HDRI, intensidade, giro°}. */
     var environment by mutableStateOf(listOf(0f, 1f, 0f, 0f))

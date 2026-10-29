@@ -7,4 +7,11 @@
     <string name="conta_membros">8 тыс.+ участников</string>
     <string name="conta_ou">или</string>
     <string name="conta_google">Продолжить с Google</string>
+    <string name="scene_floor_reflective">Зеркальный пол</string>
+    <string name="scene_floor_reflective_on">Зеркальный пол добавлен: всё под этим слоем отражается в полу. Настройка — в «Эффектах».</string>
+    <string name="cap041_cloud_progress">Субтитры в облаке… %1$d%%</string>
+    <string name="cap041_cloud_source">Whisper Large (облако)</string>
+    <string name="cap041_cloud_fallback">Облако сейчас недоступно: используется модель на устройстве.</string>
+    <string name="cap041_more_options">Ещё настройки</string>
+    <string name="cap041_offline_model">Модель на устройстве (без интернета)</string>
 </resources>

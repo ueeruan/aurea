@@ -805,6 +805,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (long long)addParticles:(uint32_t)preset;
 /// 0.4.1: Elementos › Aurora (Engine::add_aurora).
 - (long long)addAurora;
+/// 0.4.1: + › 3D › Reflective Floor (Engine::add_reflective_floor).
+- (long long)addReflectiveFloor;
 - (long long)freezeFrameForLayer:(long long)layerId frame:(int32_t)frame hold:(int32_t)holdFrames;
 /// Motivo legível da última importação que falhou ("" quando deu certo).
 @property (nonatomic, readonly, copy) NSString* lastImportError;
@@ -1003,6 +1005,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words options:(NSDictionary<NSString*, NSNumber*>*)options;
 - (uint32_t)captionCount:(long long)layerId;
 - (NSArray<NSDictionary<NSString*, id>*>* _Nullable)transcribeLocal:(long long)layerId model:(NSString*)model language:(NSString*)language translateEnglish:(BOOL)translateEnglish error:(NSError* _Nullable * _Nullable)error;
+/// 0.4.1 (legendas na nuvem): trechos WAV 16 kHz mono da camada em `dir`; linhas "início	fim	caminho".
+- (NSString* _Nullable)exportSpeechChunks:(long long)layerId dir:(NSString*)dir error:(NSError* _Nullable * _Nullable)error;
 - (int)captionProgress:(BOOL)cancel;
 - (NSString*)captionTracks;
 - (NSString*)saveCaptionBundle:(long long)layer name:(NSString*)name;

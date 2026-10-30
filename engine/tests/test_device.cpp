@@ -17,8 +17,15 @@
 #include "aurea/render/PreviewCachePolicy.hpp"
 #include "aurea/platform/AndroidVideoCompatibility.hpp"
 #include "aurea/platform/AndroidVideoPath.hpp"
+#include "aurea/text/FontManager.hpp"
+#include "aurea/text/Text.hpp"
+#include "aurea/text/TextAnimator.hpp"
+#include "aurea/expr/Expression.hpp"
+#include "aurea/timeline/Timeline.hpp"
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <chrono>
 #include <cstdio>
 #include <thread>
@@ -766,4 +773,120 @@ AUREA_TEST(Elements, AddReflectiveFloorIsOneUndoableAdjustmentLayer) {
     comp = e.project()->timeline().composition(e.project()->timeline().current());
     AUREA_CHECK(comp && comp->layer(LayerId::unpack(*id)) == nullptr);
     e.shutdown();
+}
+
+// 0.4.4 Explodir texto: cada pedaço vira uma camada com só o próprio texto, e o
+// primeiro glifo de cada pedaço cai no MESMO ponto da composição.
+namespace {
+struct ExplodeRig {
+    Engine e;
+    ExplodeRig() {
+        EngineConfig ec;
+        ec.workerCount = 1;
+        ec.disableAutosave = true;
+        AUREA_CHECK(e.initialize(ec).ok());
+        AUREA_CHECK(e.new_project(1280, 720, 30.0, nullptr).ok());
+    }
+    ~ExplodeRig() { e.shutdown(); }
+    Composition* comp() { return e.project()->timeline().composition(e.project()->timeline().current()); }
+};
+Vec2 world_2d(const Layer& l, Vec2 p) {
+    const f32 r = l.transform.rotation.z * kDeg2Rad;
+    const Vec2 d{(p.x - l.transform.anchor.x) * l.transform.scale.x, (p.y - l.transform.anchor.y) * l.transform.scale.y};
+    return Vec2{l.transform.position.x + d.x * std::cos(r) - d.y * std::sin(r), l.transform.position.y + d.x * std::sin(r) + d.y * std::cos(r)};
+}
+/// Origem (no mundo) do primeiro glifo de cada palavra / da camada.
+Vec2 first_pen(const Layer& l, u32 word, bool& ok) {
+    const auto font = text::FontManager::instance().font_for(l.text);
+    text::TextLayout L;
+    const f32 pad = l.text.strokeWidth > 0.0f ? l.text.strokeWidth + 2.0f : 2.0f;
+    ok = font && text::layout_quads(*font, l.text, pad, L);
+    u32 best = ~0u;
+    Vec2 pen{0, 0};
+    if (ok) for (const auto& q : L.quads) if (q.wordIndex == word && q.charIndex < best) { best = q.charIndex; pen = Vec2{q.penX, q.baseline}; }
+    ok = ok && best != ~0u;
+    return world_2d(l, pen);
+}
+void check_explode_words(bool threeD) {
+    ExplodeRig r;
+    const auto id = r.e.add_text("AUREA BOUNCE TEXT");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    Layer* src = r.comp()->layer(LayerId::unpack(*id));
+    src->transform.rotation.z = 30.0f;
+    src->transform.scale = Vec3{1.5f, 1.5f, 1.0f};
+    src->threeD = threeD;
+    Vec2 want[3];
+    for (u32 w = 0; w < 3; ++w) { bool ok = false; want[w] = first_pen(*src, w, ok); AUREA_CHECK(ok); }
+    const auto made = r.e.explode_text(*id, 1, false);
+    AUREA_CHECK(made.ok() && *made == 3u);
+    Composition* comp = r.comp();
+    AUREA_CHECK(comp->layer(LayerId::unpack(*id)) == nullptr);
+    AUREA_CHECK_EQ(comp->layers().count(), static_cast<usize>(3));
+    const char* words[3] = {"AUREA", "BOUNCE", "TEXT"};
+    for (u32 w = 0; w < 3; ++w) {
+        const Layer* piece = nullptr;
+        comp->layers().for_each([&](LayerId, const Layer& l) { if (l.text.content == words[w]) piece = &l; });
+        AUREA_CHECK(piece != nullptr);
+        if (!piece) continue;
+        bool ok = false;
+        const Vec2 got = first_pen(*piece, 0, ok);
+        AUREA_CHECK(ok);
+        if (std::fabs(got.x - want[w].x) > 0.5f || std::fabs(got.y - want[w].y) > 0.5f)
+            std::printf("\n%s: (%.2f, %.2f) != (%.2f, %.2f)\n", words[w], got.x, got.y, want[w].x, want[w].y);
+        AUREA_CHECK(std::fabs(got.x - want[w].x) <= 0.5f && std::fabs(got.y - want[w].y) <= 0.5f);
+    }
+    Command undo;
+    undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    comp = r.comp();
+    AUREA_CHECK_EQ(comp->layers().count(), static_cast<usize>(1));
+    AUREA_CHECK(comp->layer(LayerId::unpack(*id)) != nullptr);
+}
+} // namespace
+
+AUREA_TEST(TextExplode, WordsKeepTheirPlaceAndUndoInOneStep) { check_explode_words(false); }
+AUREA_TEST(TextExplode, WordsOfA3DLayerKeepTheirPlaceThroughTheAnchor) { check_explode_words(true); }
+
+AUREA_TEST(TextExplode, CharactersAndLinesSplitTheRightText) {
+    ExplodeRig r;
+    const auto id = r.e.add_text("AB C\nDOIS");
+    AUREA_CHECK(id.ok());
+    if (!id.ok()) return;
+    const auto chars = r.e.explode_text(*id, 0, true);
+    AUREA_CHECK(chars.ok() && *chars == 7u);   // A B C D O I S (sem espaço e quebra)
+    AUREA_CHECK(r.comp()->layer(LayerId::unpack(*id)) != nullptr);   // manteve a original
+    std::vector<std::string> lines;
+    const auto made = r.e.explode_text(*id, 2, false);
+    AUREA_CHECK(made.ok() && *made == 2u);
+    r.comp()->layers().for_each([&](LayerId, const Layer& l) { if (l.text.content.size() > 1) lines.push_back(l.text.content); });
+    std::sort(lines.begin(), lines.end());
+    AUREA_CHECK(lines.size() == 2 && lines[0] == "AB C" && lines[1] == "DOIS");
+}
+
+AUREA_TEST(TextPresets, SmoothBounceDropsWordsOneAfterAnother) {
+    Timeline tl;
+    const auto compId = tl.create_composition("Bounce", 1280, 720, 30);
+    tl.set_current(compId);
+    Layer* layer = tl.composition(compId)->layer(tl.composition(compId)->add_layer(LayerKind::Text, "T"));
+    layer->text.content = "UM DOIS";
+    AUREA_CHECK(text::apply_text_preset(26, layer->text, layer->tracks, 0, 30, 30));
+    AUREA_CHECK_EQ(layer->text.animators.size(), static_cast<usize>(2));
+    const std::vector<text::GlyphUnits> units{{0, 0, 0}, {1, 0, 0}, {3, 1, 0}, {4, 1, 0}};
+    auto at = [&](f64 frame) {
+        expr::Scope scope(tl);
+        std::vector<text::GlyphAnim> out;
+        text::evaluate_text_animators(layer->text, layer->tracks, frame, 30, units, 7, 2, 1, out);
+        return out;
+    };
+    const auto start = at(0);
+    AUREA_CHECK(start[0].translate.y < -49.0f && start[0].opacity < 0.01f);   // em cima e invisível
+    const auto early = at(3);   // 0.1 s: a 1ª já desceu, a 2ª ainda não saiu
+    AUREA_CHECK(early[0].translate.y > early[2].translate.y);
+    AUREA_CHECK(early[2].opacity < early[0].opacity);
+    bool overshoot = false;
+    for (f64 f = 4; f < 20; f += 1) overshoot |= at(f)[0].translate.y > 0.5f;   // quica passando do lugar
+    AUREA_CHECK(overshoot);
+    const auto end = at(60);
+    for (const auto& g : end) AUREA_CHECK(std::fabs(g.translate.y) < 0.5f && g.opacity > 0.99f);
 }

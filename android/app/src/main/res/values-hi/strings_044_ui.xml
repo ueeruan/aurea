@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.4: preset Salto suave e Explodir texto. -->
+    <string name="app_text_preset_smooth_bounce">स्मूद बाउंस</string>
+    <string name="tx044_explode">टेक्स्ट अलग करें</string>
+    <string name="tx044_explode_hint">हर हिस्सा उसी जगह अपनी टेक्स्ट लेयर बनता है।</string>
+    <string name="tx044_explode_chars">अक्षर</string>
+    <string name="tx044_explode_words">शब्द</string>
+    <string name="tx044_explode_lines">पंक्तियाँ</string>
+    <string name="tx044_explode_done">%1$d लेयर उसी जगह बनीं</string>
+    <string name="tx044_explode_fail">यह टेक्स्ट अलग नहीं हो सकता</string>
+</resources>

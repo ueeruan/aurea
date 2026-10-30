@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.4: preset Salto suave e Explodir texto. -->
+    <string name="app_text_preset_smooth_bounce">Smooth Bounce</string>
+    <string name="tx044_explode">Explode text</string>
+    <string name="tx044_explode_hint">Each piece becomes its own text layer, in the same place.</string>
+    <string name="tx044_explode_chars">Characters</string>
+    <string name="tx044_explode_words">Words</string>
+    <string name="tx044_explode_lines">Lines</string>
+    <string name="tx044_explode_done">%1$d layers created in place</string>
+    <string name="tx044_explode_fail">This text can\'t be exploded</string>
+</resources>

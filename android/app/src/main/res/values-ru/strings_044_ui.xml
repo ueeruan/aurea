@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.4: preset Salto suave e Explodir texto. -->
+    <string name="app_text_preset_smooth_bounce">Плавный отскок</string>
+    <string name="tx044_explode">Разбить текст</string>
+    <string name="tx044_explode_hint">Каждая часть станет отдельным текстовым слоем на том же месте.</string>
+    <string name="tx044_explode_chars">Буквы</string>
+    <string name="tx044_explode_words">Слова</string>
+    <string name="tx044_explode_lines">Строки</string>
+    <string name="tx044_explode_done">Создано слоёв на месте: %1$d</string>
+    <string name="tx044_explode_fail">Этот текст нельзя разбить</string>
+</resources>

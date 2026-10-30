@@ -1037,6 +1037,8 @@ class AureaEngine private constructor() {
     fun setTextAnimParam(layer: Long, index: Int, param: Int, value: Float): Boolean = nativeSetTextAnimParam(nativeHandle, layer, index, param, value)
     fun toggleTextAnimKey(layer: Long, index: Int, param: Int): Boolean = nativeToggleTextAnimKey(nativeHandle, layer, index, param)
     fun applyTextPreset(layer: Long, preset: Int): Boolean = nativeApplyTextPreset(nativeHandle, layer, preset)
+    /** 0.4.4 Explodir texto: 0 letras, 1 palavras, 2 linhas. Quantas camadas criou (-1 = não deu). */
+    fun explodeText(layer: Long, mode: Int, keepOriginal: Boolean = false): Int = nativeExplodeText(nativeHandle, layer, mode, keepOriginal)
 
     /** Animadores de camada: 32 floats cada (ver Engine::kLayerAnimFloats). */
     fun queryLayerAnimators(layer: Long): FloatArray? = nativeQueryLayerAnimators(nativeHandle, layer)
@@ -1792,6 +1794,7 @@ class AureaEngine private constructor() {
     private external fun nativeSetTextAnimParam(handle: Long, layer: Long, index: Int, param: Int, value: Float): Boolean
     private external fun nativeToggleTextAnimKey(handle: Long, layer: Long, index: Int, param: Int): Boolean
     private external fun nativeApplyTextPreset(handle: Long, layer: Long, preset: Int): Boolean
+    private external fun nativeExplodeText(handle: Long, layer: Long, mode: Int, keepOriginal: Boolean): Int
     private external fun nativeQueryLayerAnimators(handle: Long, layer: Long): FloatArray?
     private external fun nativeQueryText3dAnim(handle: Long, layer: Long): FloatArray?
     private external fun nativeApplyText3dAnim(handle: Long, layer: Long, preset: Int, mode: Int, unit: Int, durationSec: Float, staggerMs: Float): Boolean

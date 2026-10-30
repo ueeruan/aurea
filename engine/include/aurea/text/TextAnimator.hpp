@@ -99,7 +99,7 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
 /// 5 Blur Reveal, 6 Word Highlight, 7 Karaoke, 8 Typewriter, 9 Wave,
 /// 10 Elastic. Escreve animadores + keyframes na camada (substitui os
 /// existentes). `startLocal`/`durationFrames` = trecho da animação.
-inline constexpr u32 kTextPresetCount = 26;   ///< 25 = Text Explosion
+inline constexpr u32 kTextPresetCount = 27;   ///< 25 = Text Explosion, 26 = Salto suave
 [[nodiscard]] const char* text_preset_name(u32 id) noexcept;
 bool apply_text_preset(u32 id, TextData& t, TrackSet& tracks, i64 startLocal, i64 durationFrames, f64 fps);
 

@@ -2096,6 +2096,13 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     return NO;
 }
 
+- (int32_t)explodeText:(long long)layerId mode:(uint32_t)mode keepOriginal:(BOOL)keepOriginal {
+    auto* e = self.engine;
+    if (!e) return -1;
+    auto r = e->explode_text(static_cast<aurea::u64>(layerId), mode, keepOriginal);
+    return r ? static_cast<int32_t>(*r) : -1;
+}
+
 - (void)setShape:(long long)layerId param:(uint32_t)param value:(float)value {
     if (auto* c = _batch.add(CommandType::ShapeSetParam)) {
         c->shape_param.layer = layer_of(layerId);

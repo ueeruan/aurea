@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.4: preset Salto suave e Explodir texto. -->
+    <string name="app_text_preset_smooth_bounce">Pantulan Halus</string>
+    <string name="tx044_explode">Pecah teks</string>
+    <string name="tx044_explode_hint">Setiap bagian menjadi lapisan teks sendiri, di tempat yang sama.</string>
+    <string name="tx044_explode_chars">Huruf</string>
+    <string name="tx044_explode_words">Kata</string>
+    <string name="tx044_explode_lines">Baris</string>
+    <string name="tx044_explode_done">%1$d lapisan dibuat di tempatnya</string>
+    <string name="tx044_explode_fail">Teks ini tidak bisa dipecah</string>
+</resources>

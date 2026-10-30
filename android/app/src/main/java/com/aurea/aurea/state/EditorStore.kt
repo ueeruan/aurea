@@ -6317,6 +6317,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshDetail()
     }
 
+    /** 0.4.4 Explodir texto: uma camada por letra (0), palavra (1) ou linha (2), no mesmo lugar. */
+    fun explodeText(mode: Int) {
+        val id = primary ?: return
+        val made = engine.explodeText(id, mode)
+        if (made <= 0) {
+            showToast(appText(R.string.tx044_explode_fail))
+            return
+        }
+        refreshNow()
+        refreshDetail()
+        showToast(appText(R.string.tx044_explode_done, made))
+    }
+
     // =========================================================================
     // Presets (JSON do motor; arquivos em filesDir/presets/<tipo>/)
     // =========================================================================

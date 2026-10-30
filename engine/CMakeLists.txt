@@ -238,6 +238,7 @@ set(AUREA_CORE_SOURCES
     src/text/TextTransform.cpp
     src/text/Captions.cpp
     src/engine/EngineCaptions.cpp
+    src/engine/EngineTextExplode.cpp
     src/engine/EngineUiMode.cpp
     src/engine/EngineCaptionPresets.cpp
     src/vector/Vector.cpp

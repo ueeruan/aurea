@@ -52,6 +52,7 @@ import com.aurea.aurea.ui.ds.ValueBox
 import com.aurea.aurea.ui.ds.valueDrag
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
+import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
 import kotlin.math.roundToInt
 
@@ -119,6 +120,20 @@ internal fun TextAnimSection(env: PanelEnv, showAnimatorEffect: Boolean = true) 
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         TextPresets.forEachIndexed { i, name -> AnimChip(stringResource(name), false) { store.applyTextPreset(i) } }
+    }
+    // 0.4.4 Explodir texto (só camada de texto 2D): cada pedaço vira uma camada.
+    if (store.detail?.kind == LayerType.Text.kind) {
+        Text(stringResource(R.string.tx044_explode), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
+        Text(stringResource(R.string.tx044_explode_hint), style = AureaType.Base.merge(TextStyle(fontSize = 11.sp, color = AureaColors.Muted)))
+        Row(
+            Modifier.fillMaxWidth().height(44.dp).testTag("text.explode"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf(R.string.tx044_explode_chars, R.string.tx044_explode_words, R.string.tx044_explode_lines).forEachIndexed { mode, label ->
+                AnimChip(stringResource(label), false) { store.explodeText(mode) }
+            }
+        }
     }
     // Omega conteúdo (área 06, P1-11): os animadores em LISTA (linha de 37 dp que
     // abre os ajustes a partir dela em 200 ms) e "+ Adicionar animador" no fim.

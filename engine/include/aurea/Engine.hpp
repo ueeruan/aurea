@@ -926,6 +926,10 @@ public:
     bool toggle_text_anim_key(u64 layerId, u32 index, u32 param) noexcept;
     /// Preset nativo (substitui os animadores), a partir do início da camada.
     bool apply_text_preset(u64 layerId, u32 preset) noexcept;
+    /// 0.4.4 Explodir texto: uma camada de texto por letra (0), palavra (1) ou
+    /// linha (2), cada uma só com o próprio texto e no mesmo lugar. Sem
+    /// `keepOriginal` a original sai. Um desfazer. Devolve quantas criou.
+    Result<u32> explode_text(u64 layerId, u32 mode, bool keepOriginal) noexcept;
 
     // --- Animadores de CAMADA (qualquer tipo; timeline/LayerAnimator.hpp) -------
     /// Cada animador = 32 floats (kLayerAnimFloats): 0 ativo, 1 unidade (0

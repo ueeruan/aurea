@@ -1,7 +1,7 @@
 import SwiftUI
 
 var extraTextPresetNames: [String] { [AureaText.t("ios_textpreset_x_bounce"), AureaText.t("ios_textpreset_x_soft_in"), AureaText.t("ios_textpreset_x_reveal"), AureaText.t("ios_textpreset_x_slide"),
-                          AureaText.t("ios_textpreset_x_fast_in"), AureaText.t("ios_textpreset_x_elastic_jump"), AureaText.t("ios_textpreset_x_word_jump"), AureaText.t("ios_textpreset_x_smooth_motion")] + ["pack_text_0", "pack_text_1", "pack_text_2", "pack_text_3", "pack_text_4", "pack_text_5", "app_text_preset_explosion"].map { AureaText.t($0) }
+                          AureaText.t("ios_textpreset_x_fast_in"), AureaText.t("ios_textpreset_x_elastic_jump"), AureaText.t("ios_textpreset_x_word_jump"), AureaText.t("ios_textpreset_x_smooth_motion")] + ["pack_text_0", "pack_text_1", "pack_text_2", "pack_text_3", "pack_text_4", "pack_text_5", "app_text_preset_explosion", "app_text_preset_smooth_bounce"].map { AureaText.t($0) }
 }
 import UIKit
 import UniformTypeIdentifiers
@@ -2081,6 +2081,21 @@ struct TextAnimationSection: View {
                         }
                     }
                 }.frame(height: 44)
+            }
+            // 0.4.4 Explodir texto (só camada de texto 2D): cada pedaço vira uma camada.
+            if model.selectedLayer?.kind == 4 {
+                Text(AureaText.t("tx044_explode")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 8)
+                Text(AureaText.t("tx044_explode_hint")).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted)
+                HStack(spacing: 6) {
+                    ForEach(Array(["tx044_explode_chars", "tx044_explode_words", "tx044_explode_lines"].enumerated()), id: \.offset) { mode, key in
+                        NativePanelChip(AureaText.t(key)) {
+                            beforeAnimation()
+                            let made = model.engine.explodeText(id, mode: UInt32(mode), keepOriginal: false)
+                            model.toast = made > 0 ? AureaText.t("tx044_explode_done", Int(made)) : AureaText.t("tx044_explode_fail")
+                            refresh()
+                        }
+                    }
+                }.frame(height: 44).accessibilityIdentifier("text.explode")
             }
             // Omega conteúdo (área 06, P1-11): os animadores em LISTA (linha de 37 pt que abre os
             // ajustes a partir dela) e "+ Adicionar" no fim, com os tipos.

@@ -594,6 +594,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)setTextAnimParam:(long long)layerId index:(uint32_t)index param:(uint32_t)param value:(float)value;
 - (void)toggleTextAnimKey:(long long)layerId index:(uint32_t)index param:(uint32_t)param;
 - (BOOL)applyTextPreset:(long long)layerId preset:(uint32_t)preset;
+/// 0.4.4 Explodir texto: 0 letras, 1 palavras, 2 linhas. Quantas camadas criou (-1 = não deu).
+- (int32_t)explodeText:(long long)layerId mode:(uint32_t)mode keepOriginal:(BOOL)keepOriginal;
 // --- Animadores de camada (32 floats cada — Engine::kLayerAnimFloats) --------
 - (NSArray<NSNumber*>*)layerAnimators:(long long)layerId;
 - (NSInteger)addLayerAnimator:(long long)layerId;

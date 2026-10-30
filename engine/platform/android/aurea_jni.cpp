@@ -2973,6 +2973,14 @@ AUREA_JNI jboolean AUREA_FN(nativeApplyTextPreset)(JNIEnv*, jclass, jlong handle
     return c && preset >= 0 && c->engine.apply_text_preset(static_cast<u64>(layer), static_cast<u32>(preset)) ? JNI_TRUE : JNI_FALSE;
 }
 
+// 0.4.4 Explodir texto: quantas camadas criou (-1 = não deu).
+AUREA_JNI jint AUREA_FN(nativeExplodeText)(JNIEnv*, jclass, jlong handle, jlong layer, jint mode, jboolean keepOriginal) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || mode < 0) return -1;
+    auto r = c->engine.explode_text(static_cast<u64>(layer), static_cast<u32>(mode), keepOriginal == JNI_TRUE);
+    return r ? static_cast<jint>(*r) : -1;
+}
+
 // --- Animadores de camada, desfoque por camada e escopo de grupo --------------
 
 /// Animação de texto 3D: 3 modos × Engine::kText3DAnimFloats (nulo = não é texto 3D).

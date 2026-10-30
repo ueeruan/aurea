@@ -337,7 +337,7 @@ const char* text_preset_name(u32 id) noexcept {
     static const char* names[kTextPresetCount] = {"Pop", "Bounce", "Slide", "Scale", "Fade", "Blur Reveal", "Word Highlight", "Karaoke",
         "Typewriter", "Wave", "Elastic", "Preset Bounce", "Preset Entrada suave", "Preset Revelar",
         "Preset Deslizar", "Preset Entrada rápida", "Preset Salto elástico",
-        "Preset Salto por palavra", "Preset Movimento suave", "Onda de contorno", "Digitação reversa", "Palavras em sequência", "Cintilação", "Legenda suave", "Legenda luminosa", "Text Explosion"};
+        "Preset Salto por palavra", "Preset Movimento suave", "Onda de contorno", "Digitação reversa", "Palavras em sequência", "Cintilação", "Legenda suave", "Legenda luminosa", "Text Explosion", "Salto suave"};
     return id < kTextPresetCount ? names[id] : "";
 }
 
@@ -392,6 +392,37 @@ bool apply_text_explosion(TextData& t, TrackSet& tr, i64 s, i64 d) {
     }
     return true;
 }
+
+/// 0.4.4 Salto suave: cada palavra cai de 50 px acima, aparecendo, e assenta
+/// com um quique amortecido (seno que morre na exponencial), uma palavra
+/// depois da outra. Um animador de posição (passa do lugar e volta) e um de
+/// opacidade (só sobe), ambos por palavra com a quantidade por expressão —
+/// como o seletor de expressão do After Effects.
+bool apply_smooth_bounce(TextData& t, TrackSet& tr, i64 s, f64 fps) {
+    const std::string at = std::to_string(static_cast<double>(s) / fps);
+    auto expression = [&](u32 ai, const char* source) {
+        const std::string program = "if (localTime < " + at + ") { 0; } else { var presetTime = localTime - " + at + "; " + source + " }";
+        auto& track = tr.get_or_create(TrackProperty::TextAnimParam, ai, kSelAmount);
+        track.expression = expr::compile(program);
+        track.expressionEnabled = true;
+    };
+    TextAnimator fall = reveal(1, 0, kTextPropPosition);
+    fall.name = "Salto suave queda";
+    fall.position = Vec3{0, -50, 0};
+    t.animators.push_back(fall);
+    TextAnimator fade = reveal(1, 0, kTextPropOpacity);
+    fade.name = "Salto suave entrada";
+    fade.opacity = 0;
+    t.animators.push_back(fade);
+    expression(0, "delay = 0.08; dur = 0.12; freq = 3; decay = 6;\n"
+                  "t = presetTime - (textIndex - 1) * delay;\n"
+                  "if (t < 0) { 100 } else { if (t < dur) { linear(t, 0, dur, 100, 0) } else {\n"
+                  "  w = freq * Math.PI * 2;\n"
+                  "  (-100 / dur) * Math.sin((t - dur) * w) / Math.exp(decay * (t - dur)) / w } }");
+    expression(1, "t = presetTime - (textIndex - 1) * 0.08;\n"
+                  "if (t < 0) { 100 } else { linear(t, 0, 0.12, 100, 0) }");
+    return true;
+}
 } // namespace
 
 #include "JuanTextPresets.inc"
@@ -402,6 +433,7 @@ bool apply_text_preset(u32 id, TextData& t, TrackSet& tr, i64 s, i64 d, f64 fps)
     d = std::max<i64>(2, d);
     tr.remove_if([](const Track& x) { return x.property == TrackProperty::TextAnimParam; });
     t.animators.clear();
+    if (id == 26) return apply_smooth_bounce(t, tr, s, fps > 0 ? fps : 30.0);
     if (id == 25) return apply_text_explosion(t, tr, s, std::max<i64>(d * 6 / 5, 2));
     if (id >= 19) return apply_pack_text(id, t, tr, s, d);
     if (id >= 11) return apply_juan_text(id, t, tr, s, fps > 0 ? fps : 30.0);

@@ -12,7 +12,7 @@ import org.json.JSONArray
  * `text::text_preset_name` (o índice é o que vai para o motor).
  */
 internal val ExtraTextPresetNames = listOf("Preset Bounce", "Preset Entrada suave", "Preset Revelar", "Preset Deslizar",
-    "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave", "Onda de contorno", "Digitação reversa", "Palavras em sequência", "Cintilação", "Legenda suave", "Legenda luminosa", "Text Explosion")
+    "Preset Entrada rápida", "Preset Salto elástico", "Preset Salto por palavra", "Preset Movimento suave", "Onda de contorno", "Digitação reversa", "Palavras em sequência", "Cintilação", "Legenda suave", "Legenda luminosa", "Text Explosion", "Salto suave")
 
 /** Nomes 0..7 de [ExtraTextPresetNames] no catálogo (o texto em pt acima é só referência). */
 internal val ExtraTextPresetLabels = listOf(R.string.app_text_preset_bounce, R.string.app_text_preset_soft_in, R.string.app_text_preset_reveal,
@@ -20,7 +20,7 @@ internal val ExtraTextPresetLabels = listOf(R.string.app_text_preset_bounce, R.s
     R.string.app_text_preset_smooth)
 
 internal val PackTextPresetLabels = listOf(R.string.pack_text_0, R.string.pack_text_1, R.string.pack_text_2, R.string.pack_text_3, R.string.pack_text_4, R.string.pack_text_5,
-    R.string.app_text_preset_explosion)
+    R.string.app_text_preset_explosion, R.string.app_text_preset_smooth_bounce)
 
 internal val TextPresetNames = listOf(
     R.string.pn_pop, R.string.pn_textpreset_bounce, R.string.pn_textpreset_slide, R.string.panel_escala,

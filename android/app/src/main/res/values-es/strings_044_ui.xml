@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.4: preset Salto suave e Explodir texto. -->
+    <string name="app_text_preset_smooth_bounce">Rebote suave</string>
+    <string name="tx044_explode">Separar texto</string>
+    <string name="tx044_explode_hint">Cada parte se vuelve una capa de texto, en el mismo lugar.</string>
+    <string name="tx044_explode_chars">Letras</string>
+    <string name="tx044_explode_words">Palabras</string>
+    <string name="tx044_explode_lines">Líneas</string>
+    <string name="tx044_explode_done">%1$d capas creadas en su lugar</string>
+    <string name="tx044_explode_fail">No se puede separar este texto</string>
+</resources>

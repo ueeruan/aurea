@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.4: preset Salto suave e Explodir texto. -->
+    <string name="app_text_preset_smooth_bounce">ارتداد ناعم</string>
+    <string name="tx044_explode">تفكيك النص</string>
+    <string name="tx044_explode_hint">يصبح كل جزء طبقة نص مستقلة في المكان نفسه.</string>
+    <string name="tx044_explode_chars">الحروف</string>
+    <string name="tx044_explode_words">الكلمات</string>
+    <string name="tx044_explode_lines">الأسطر</string>
+    <string name="tx044_explode_done">تم إنشاء %1$d طبقات في مكانها</string>
+    <string name="tx044_explode_fail">لا يمكن تفكيك هذا النص</string>
+</resources>

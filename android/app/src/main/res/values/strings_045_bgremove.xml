@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Remover fundo (aurea.key.background_remove) — recorte sem tela verde. -->
+    <string name="bg_remove_fx_name">Remover fundo</string>
+    <string name="bg_remove_fx_desc">Tira o fundo de um vídeo ou foto sem tela verde: a pessoa ou o objeto em destaque fica, o resto sai em todos os quadros.</string>
+    <string name="bg_remove_action">Remover fundo</string>
+    <string name="bg_remove_action_detail">Recorta a pessoa ou o objeto, sem tela verde</string>
+    <string name="bg_remove_note">Recorte automático em todos os quadros, sem tela verde. Analise o clipe uma vez: o resultado fica salvo com o projeto e o export usa o mesmo recorte.</string>
+    <string name="bg_remove_analyze">Analisar clipe</string>
+    <string name="bg_remove_analyze_count">Analisar clipe (%1$d quadros)</string>
+    <string name="bg_remove_cancel">Cancelar análise</string>
+    <string name="bg_remove_progress">Analisando %1$d de %2$d quadros</string>
+    <string name="bg_remove_clip_status">Clipe: %1$d de %2$d quadros prontos</string>
+    <string name="bg_remove_clip_done">Clipe inteiro analisado e salvo com o projeto</string>
+    <string name="bg_remove_frame_ready">Este quadro: recorte pronto</string>
+    <string name="bg_remove_frame_pending">Este quadro: calculando o recorte…</string>
+    <string name="bg_remove_failed">Não foi possível remover o fundo desta camada.</string>
+    <string name="bg_remove_failed_model">O modelo de recorte não carregou: falta memória no aparelho. Feche outros apps e toque em Analisar clipe de novo.</string>
+    <string name="bg_remove_failed_decode">Não deu para ler os quadros deste vídeo agora. Pause a reprodução e toque em Analisar clipe de novo.</string>
+    <string name="bg_remove_failed_frames">Alguns quadros não foram analisados. Toque em Analisar clipe de novo.</string>
+    <string name="bg_remove_person_unavailable">O modelo Pessoa não está disponível neste aparelho; o Automático está sendo usado.</string>
+    <string name="bg_remove_p_expand">Contrair/expandir</string>
+    <string name="bg_remove_p_invert">Inverter (manter o fundo)</string>
+    <string name="bg_remove_p_edge">Borda fina</string>
+    <string name="bg_remove_p_model">Modelo</string>
+    <string name="bg_remove_o_auto">Automático</string>
+    <string name="bg_remove_o_person">Pessoa</string>
+    <string name="bg_remove_tip_model">Automático recorta o objeto em destaque e funciona em todos os aparelhos. Pessoa usa o recorte de pessoas do sistema quando o aparelho tem; sem ele, vale o Automático.</string>
+    <string name="bg_remove_tip_edge">Refaz a borda na resolução do vídeo (cabelo, contornos finos). 0 usa a borda simples.</string>
+</resources>

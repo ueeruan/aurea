@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: painel Esqueleto 3D e grupo de pinos do Fantoche (pedido de ⚡ᴍᴀʀᴋᴢ, pauloph2517 e Jess). -->
+    <string name="skeleton_title">Kerangka</string>
+    <string name="skeleton_open">Buka panel kerangka</string>
+    <string name="skeleton_desc">Pohon tulang, rotasi angka, cermin dan salin pose</string>
+    <string name="skeleton_partner">Sisi lain: %1$s</string>
+    <string name="skeleton_bone_none">Ketuk sendi di panggung atau tulang di daftar</string>
+    <string name="skeleton_ring_hint">Cincin sendi: merah memutar di X, hijau di Y, biru di Z (sumbu tulang); putih memutar mengelilingi layar. Ketuk lagi untuk memilih sendi di bawahnya.</string>
+    <string name="skeleton_show">Tampilkan kerangka</string>
+    <string name="skeleton_ik">IK: seret ujung</string>
+    <string name="skeleton_pose">Pose</string>
+    <string name="skeleton_copy">Salin pose</string>
+    <string name="skeleton_paste">Tempel pose</string>
+    <string name="skeleton_mirror_pose">Cerminkan pose</string>
+    <string name="skeleton_mirror_bone">Cerminkan ke sisi lain</string>
+    <string name="skeleton_zero_pose">Nolkan pose</string>
+    <string name="skeleton_zero_bone">Nolkan tulang</string>
+    <string name="skeleton_bones">Tulang</string>
+    <string name="skeleton_search">Cari tulang</string>
+    <string name="skeleton_no_match">Tidak ada tulang dengan nama itu</string>
+    <string name="skeleton_bone_a11y">%1$s, tingkat %2$d</string>
+    <string name="skeleton_keyed">Ada keyframe di sini</string>
+    <string name="skeleton_expand">Buka %1$s</string>
+    <string name="skeleton_collapse">Tutup %1$s</string>
+    <string name="skeleton_rot_a11y">Rotasi %1$s: %2$s derajat</string>
+    <string name="skeleton_minus">Kurangi %1$s 5 derajat</string>
+    <string name="skeleton_plus">Tambah %1$s 5 derajat</string>
+    <string name="skeleton_pose_copied">Pose disalin</string>
+    <string name="skeleton_paste_failed">Tidak ada yang bisa ditempel di model ini</string>
+    <string name="skeleton_mirror_nothing">Tidak ada tulang berpose untuk dicerminkan</string>
+    <string name="skeleton_no_partner">Tulang ini tidak punya pasangan di sisi lain</string>
+    <string name="puppet_group">Grup</string>
+    <string name="puppet_group_clear">Kosongkan grup</string>
+    <string name="puppet_group_hint">Dengan Grup aktif, ketuk pin yang akan berputar; pin terpilih adalah poros. Seret cincin biru untuk memutar.</string>
+    <string name="puppet_group_rotate">Putar grup mengelilingi pin %1$d</string>
+</resources>

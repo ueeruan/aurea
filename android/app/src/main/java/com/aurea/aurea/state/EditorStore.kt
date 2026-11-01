@@ -36,6 +36,8 @@ import com.aurea.aurea.diagnostics.ExitDiagnostics.Phase
 import com.aurea.aurea.diagnostics.ProjectGuard
 import com.aurea.aurea.effects.EffectPreviewStore
 import com.aurea.aurea.effects.EffectPrefs
+import com.aurea.aurea.editor.BONE_FLOATS
+import com.aurea.aurea.editor.BONE_GIZMO_FLOATS
 import com.aurea.aurea.editor.timeline.KeyRef
 import com.aurea.aurea.editor.timeline.KeySelection
 import com.aurea.aurea.engine.AureaEngine
@@ -1610,7 +1612,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         editMode = engine.editMode()
         uiMode = engine.projectUiMode()
         mainTrackAnchor = engine.mainTrackAnchor()
-        precompDepth = engine.precompDepth()
+        // Bug #6: a composição mudou por fora do abrir/fechar (desfazer com o grupo
+        // aberto, "Tirar do grupo"): os ids de camada da outra composição não
+        // valem aqui — a seleção, as trilhas abertas e as miniaturas recomeçam.
+        val depth = engine.precompDepth()
+        if (depth != precompDepth) onCompositionSwitched()
+        precompDepth = depth
         run {
             val out = FloatArray(6)
             if (engine.queryEnvironment(out)) environment = out.toList()
@@ -2080,6 +2087,14 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun puppetMovePin(layer: Long, effect: Int, pin: Int, u: Float, v: Float, continuing: Boolean) {
         if (playing) pause()
         if (engine.puppetMovePin(layer, effect, pin, u, v, autoKeyTransforms, continuing)) rigRevision++
+    }
+    /** 0.4.5: gira os pinos de [mask] em volta do pino [pivot] (o dedo de (u0, v0) a (u1, v1)); um passo por gesto. */
+    fun puppetRotatePins(layer: Long, effect: Int, pivot: Int, mask: Int, u0: Float, v0: Float, u1: Float, v1: Float,
+                         continuing: Boolean): Boolean {
+        if (playing) pause()
+        val ok = engine.puppetRotatePins(layer, effect, pivot, mask, u0, v0, u1, v1, autoKeyTransforms, continuing)
+        if (ok) rigRevision++
+        return ok
     }
     fun puppetRemovePin(layer: Long, effect: Int, pin: Int) {
         if (engine.puppetRemovePin(layer, effect, pin)) { rigRevision++; refreshNow() }
@@ -2614,15 +2629,137 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             }
         } else null
         if (poseBones == null) { rigPoseMode = false; poseBone = -1 }
+        refreshPoseGizmo(id)
         refreshHumanoid(id)
     }
 
     fun setRigPose(on: Boolean) {
         rigPoseMode = on && poseBones != null
-        if (!rigPoseMode) poseBone = -1
+        if (!rigPoseMode) { poseBone = -1; skeletonPanel = false }
+        refreshPoseGizmo(primary)
     }
 
-    fun choosePoseBone(node: Int) { poseBone = node }
+    fun choosePoseBone(node: Int) {
+        poseBone = node
+        refreshPoseGizmo(primary)
+    }
+
+    // --- Esqueleto 3D (0.4.5): anéis na articulação e painel "Esqueleto" --------------
+    // Par do iOS: AureaModel.swift (bloco "Esqueleto 3D"). O motor gira, espelha e
+    // grava (EngineRigSkeleton.cpp); aqui só o estado da tela.
+    /** Anéis do osso escolhido com raio 1 (`query_bone_gizmo`): o palco escala pelo raio dele. */
+    var poseGizmo by mutableStateOf<FloatArray?>(null)
+        private set
+    /** Esqueleto escondido no palco (o osso escolhido continua com os anéis). */
+    var skeletonHidden by mutableStateOf(false)
+        private set
+    /** IK simples: arrastar a junta escolhida leva os dois ossos acima. */
+    var poseIk by mutableStateOf(false)
+        private set
+    /** Painel "Esqueleto" aberto embaixo da Cena 3D. */
+    var skeletonPanel by mutableStateOf(false)
+        private set
+    /** Pose copiada ({nó, X, Y, Z} por osso) — vale para o mesmo modelo. */
+    var poseClipboard by mutableStateOf<FloatArray?>(null)
+        private set
+
+    private fun refreshPoseGizmo(id: Long?) {
+        val g = if (id != null && rigPoseMode && poseBone >= 0) {
+            val out = FloatArray(BONE_GIZMO_FLOATS)
+            if (engine.queryBoneGizmo(id, poseBone, 1f, out) == BONE_GIZMO_FLOATS) out else null
+        } else null
+        if (g == null || poseGizmo?.contentEquals(g) != true) poseGizmo = g
+    }
+
+    fun showSkeleton(on: Boolean) { skeletonHidden = !on }
+    fun enablePoseIk(on: Boolean) { poseIk = on; if (on) poseMove = false }
+    fun openSkeletonPanel(on: Boolean) {
+        if (on && !rigPoseMode) animateBones(poseBone)
+        skeletonPanel = on && rigPoseMode
+    }
+
+    /** Dedo no anel [axis] (0..2 eixo local, 3 = em volta do olhar); px da composição. */
+    fun dragPoseRing(axis: Int, x0: Float, y0: Float, x1: Float, y1: Float, radius: Float) {
+        val id = primary ?: return
+        if (poseBone < 0) return
+        val continuing = gestureDepth > 0 && poseGestureSent
+        if (engine.dragBoneRing(id, poseBone, axis, x0, y0, x1, y1, radius, continuing) && gestureDepth > 0) poseGestureSent = true
+        refreshDetail()
+    }
+
+    /** IK simples: a junta escolhida anda (dx, dy) px da composição. */
+    fun dragPoseIk(dx: Float, dy: Float) {
+        val id = primary ?: return
+        if (poseBone < 0) return
+        val continuing = gestureDepth > 0 && poseGestureSent
+        if (engine.dragBoneIk(id, poseBone, dx, dy, continuing) && gestureDepth > 0) poseGestureSent = true
+        refreshDetail()
+    }
+
+    /** Rotação do osso nos campos numéricos (graus, Euler da camada). Um passo de desfazer. */
+    fun setBoneRotation(node: Int, x: Float, y: Float, z: Float) {
+        val id = primary ?: return
+        if (!engine.setBoneRotations(id, floatArrayOf(node.toFloat(), x, y, z), false)) showToast(appText(R.string.shape3d_key_outside))
+        refreshNow()
+    }
+
+    /** Zera a rotação do osso escolhido (ou de todos) no cabeçote; key se o osso anima. */
+    fun zeroPose(all: Boolean) {
+        val id = primary ?: return
+        val b = poseBones ?: return
+        val rows = ArrayList<Float>()
+        for (i in 0 until b.size / BONE_FLOATS) {
+            val o = i * BONE_FLOATS
+            val node = b[o].toInt()
+            if (!all && node != poseBone) continue
+            if (b[o + 2] == 0f && b[o + 3] == 0f && b[o + 4] == 0f) continue
+            rows += node.toFloat(); rows += 0f; rows += 0f; rows += 0f
+        }
+        if (rows.isEmpty()) return
+        if (!engine.setBoneRotations(id, rows.toFloatArray(), false)) showToast(appText(R.string.shape3d_key_outside))
+        thumbnails.unalias(id)
+        refreshNow()
+    }
+
+    fun copyPose() {
+        val b = poseBones ?: return
+        val rows = FloatArray(b.size / BONE_FLOATS * 4)
+        for (i in 0 until b.size / BONE_FLOATS) {
+            val o = i * BONE_FLOATS
+            rows[i * 4] = b[o]; rows[i * 4 + 1] = b[o + 2]; rows[i * 4 + 2] = b[o + 3]; rows[i * 4 + 3] = b[o + 4]
+        }
+        poseClipboard = rows
+        showToast(appText(R.string.skeleton_pose_copied))
+    }
+
+    /** Cola a pose copiada nos ossos que este modelo tem (um passo de desfazer). */
+    fun pastePose() {
+        val id = primary ?: return
+        val clip = poseClipboard ?: return
+        val b = poseBones ?: return
+        val nodes = HashSet<Int>()
+        for (i in 0 until b.size / BONE_FLOATS) nodes += b[i * BONE_FLOATS].toInt()
+        val rows = ArrayList<Float>()
+        for (i in 0 until clip.size / 4) if (clip[i * 4].toInt() in nodes) for (k in 0 until 4) rows += clip[i * 4 + k]
+        if (rows.isEmpty() || !engine.setBoneRotations(id, rows.toFloatArray(), false)) {
+            showToast(appText(R.string.skeleton_paste_failed)); return
+        }
+        thumbnails.unalias(id)
+        refreshNow()
+    }
+
+    /** Espelhar: o osso escolhido no par dele, ou a pose inteira ([all]). */
+    fun mirrorPose(all: Boolean) {
+        val id = primary ?: return
+        if (!all && poseBone < 0) return
+        if (!engine.mirrorBonePose(id, if (all) -1 else poseBone)) {
+            showToast(appText(if (all) R.string.skeleton_mirror_nothing else R.string.skeleton_no_partner)); return
+        }
+        thumbnails.unalias(id)
+        refreshNow()
+    }
+
+    fun bonePartner(node: Int): Int = primary?.let { engine.boneMirrorPartner(it, node) } ?: -1
 
     /** Dedo na cena: gira o osso escolhido (px da composição; twist em graus). */
     fun dragPoseBone(dx: Float, dy: Float, twist: Float) {
@@ -2770,7 +2907,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (node >= 0 && rigPoseMode) choosePoseBone(node)
     }
 
-    fun choosePoseMove(on: Boolean) { poseMove = on }
+    fun choosePoseMove(on: Boolean) { poseMove = on; if (on) poseIk = false }
 
     fun setHumanoidIk(limb: Int, on: Boolean) {
         val id = primary ?: return
@@ -5352,31 +5489,58 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** "Desagrupar": as camadas voltam para cá, no mesmo lugar e tempo da tela. */
-    fun ungroupPrecomp(layer: Long) {
-        val why = engine.ungroupPrecomp(layer)
-        if (why != null) {
-            errorMessage = appText(R.string.msg_nao_da_para_desagrupar_o_resultado, EngineText.reason(storeApp, why))
-            return
-        }
+    fun ungroupPrecomp(layer: Long) = ungroupPrecomps(listOf(layer))
+
+    /**
+     * Desagrupa os grupos de [ids] (os outros tipos são ignorados) num passo de
+     * desfazer. Bug #6: a seleção passa a ser a do motor — as camadas que saíram
+     * dos grupos — em vez de ficar vazia (e o motor com outra seleção).
+     */
+    fun ungroupPrecomps(ids: Collection<Long>) {
+        val groups = layers.filter { it.id in ids && it.kind == com.aurea.aurea.ui.theme.LayerType.Group.kind }.map { it.id }
+        if (groups.isEmpty()) return
+        if (playing) pause()
+        clearKeySelection()
+        val why = engine.ungroupPrecomps(groups.toLongArray())
         selection = LinkedHashSet()
+        timelineOnlySelection = emptySet()
         refreshNow()
-        showToast(appText(R.string.msg_desagrupado))
+        adoptEngineSelection()
+        if (why != null) errorMessage = appText(R.string.msg_nao_da_para_desagrupar_o_resultado, EngineText.reason(storeApp, why))
+        else showToast(appText(R.string.msg_desagrupado))
     }
 
-    fun openPrecomp(layer: Long) {
-        if (!engine.openPrecomp(layer)) return
+    /** A seleção que o motor escolheu numa ação direta (desagrupar, tirar do grupo). */
+    private fun adoptEngineSelection() {
+        val chosen = layers.filter { it.selected }.mapTo(LinkedHashSet()) { it.id }
+        if (chosen.isEmpty()) return
+        selection = chosen
+        engine.setSelection(chosen.toLongArray())
+        refreshDetail()
+        refreshEffects()
+    }
+
+    /** Outra composição na timeline: tudo o que é guardado pelo id da camada recomeça. */
+    private fun onCompositionSwitched() {
         selection = LinkedHashSet()
+        timelineOnlySelection = emptySet()
+        clearKeySelection()
+        timelineExpandedLayers = emptySet()
         // 0.3.0: os ids de camada se repetem entre grupos (cada composição tem a
         // sua tabela) e as miniaturas da timeline são guardadas pelo id: sem
         // limpar, a imagem de um grupo "pulava" para a camada de outro.
         thumbnails.clear()
+    }
+
+    fun openPrecomp(layer: Long) {
+        if (!engine.openPrecomp(layer)) return
+        onCompositionSwitched()
         refreshNow()
     }
 
     fun closePrecomp() {
         if (!engine.closePrecomp()) return
-        selection = LinkedHashSet()
-        thumbnails.clear()   // ver openPrecomp
+        onCompositionSwitched()
         refreshNow()
     }
 
@@ -6772,6 +6936,25 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshDetail()
     }
 
+    /**
+     * "Remover fundo" (0.4.5, editor/BgRemove.kt): o efeito na camada de vídeo/imagem
+     * (o que já existe ou um novo, com desfazer) e, no vídeo, a análise do clipe já
+     * começa no motor. O cartão do efeito abre no painel Efeitos.
+     */
+    fun removeBackground(layer: Long): Boolean {
+        if (playing) pause()
+        if (primary != layer) select(layer, openOptions = false)
+        val effectId = engine.bgRemoveApply(layer)
+        if (effectId < 0) {
+            showToast(appText(R.string.bg_remove_failed))
+            return false
+        }
+        pendingEffectFocus = EffectFocusRequest(layer, com.aurea.aurea.editor.panels.BG_REMOVE_TYPE_ID, emptySet())
+        refreshNow()
+        refreshDetail()
+        return true
+    }
+
     /** Alternar grupo: um grupo escolhido desagrupa; senão as escolhidas viram grupo. */
     fun toggleGroup(ids: Collection<Long> = selection) {
         val only = ids.singleOrNull()
@@ -6830,7 +7013,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             return
         }
         selection = LinkedHashSet()
-        refreshNow()
+        refreshNow()   // a timeline voltou para fora: refreshModel vê a troca de composição
+        // Bug #6: a camada que saiu fica escolhida (o motor já a escolheu).
+        adoptEngineSelection()
     }
 
     // =========================================================================
@@ -7827,11 +8012,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun setParentMany(ids: Collection<Long>, parent: Long) {
         val children = ids.filter { it != parent && (parent == 0L || parentCandidates(it).any { c -> c.id == parent }) }
         if (children.isEmpty()) return
-        beginGesture(if (parent == 0L) "soltar camadas" else "vincular camadas")
-        children.forEach { c -> send { setLayerParent(c, parent) } }
-        endGesture()
+        // Bug #9c: o motor liga todas de uma vez (Engine::set_parent_many) — um passo
+        // de desfazer, compensação de cada filho e as bloqueadas de fora.
+        val changed = engine.setParentMany(children.toLongArray(), parent)
         refreshNow()
-        if (parent != 0L) showToast(appText(R.string.msg_camada_s_seguindo_o_pai_escolhido, children.size))
+        if (changed < 0) {
+            if (layers.any { it.id in children && it.locked }) showToast(appText(R.string.editor_camada_bloqueada_desbloqueie_editar))
+            return
+        }
+        if (parent != 0L) showToast(appText(R.string.msg_camada_s_seguindo_o_pai_escolhido, changed))
     }
 
     /**
@@ -8014,8 +8203,20 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var snapGuideX by mutableStateOf<Float?>(null)
     var snapGuideY by mutableStateOf<Float?>(null)
 
-    /** Conta-gotas ao vivo no palco (P1-1): ligado pelo seletor de cor; `onPick` recebe RGBA sRGB. */
-    class EyedropperRequest(val onSample: (FloatArray) -> Unit, val onCommit: (FloatArray) -> Unit, val onCancel: () -> Unit)
+    /**
+     * Conta-gotas ao vivo no palco (P1-1): ligado pelo seletor de cor; `onSample`/`onCommit` recebem RGBA sRGB.
+     * 0.4.5: [skipLayer]/[skipEffect] = amostrar com esse efeito desligado SÓ na captura (a cor que entra
+     * nele: o verde antes do Chroma Key); [collapsed] = veio da tela cheia, que se recolheu (o painel de
+     * ajustes também some e o palco mostra o "Cancelar"); o pedido sai sozinho no commit/cancelar.
+     */
+    class EyedropperRequest(
+        val onSample: (FloatArray) -> Unit,
+        val onCommit: (FloatArray) -> Unit,
+        val onCancel: () -> Unit,
+        val skipLayer: Long = 0L,
+        val skipEffect: Int = -1,
+        val collapsed: Boolean = false,
+    )
     var eyedropper by mutableStateOf<EyedropperRequest?>(null)
 
     /** Trajetória (P1-3): o painel Mover pede a linha da posição no palco. */
@@ -8846,6 +9047,21 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val buf = directBuffer(maxDim * maxDim * 4)
         val size = IntArray(2)
         val bytes = if (preview) engine.capturePreviewFrame(maxDim, buf, size) else engine.captureFrame(maxDim, buf, size)
+        if (bytes <= 0 || size[0] <= 0 || size[1] <= 0 || projectGeneration != generation) return null
+        buf.rewind()
+        return Bitmap.createBitmap(size[0], size[1], Bitmap.Config.ARGB_8888).also { it.copyPixelsFromBuffer(buf) }
+    }
+
+    /**
+     * Conta-gotas (0.4.5): o quadro da prévia com o efeito [skipEffect] da camada [skipLayer]
+     * desligado só nesta captura (sem desfazer). Sem efeito pedido = [captureBitmap] da prévia.
+     */
+    fun captureEyedropperBitmap(maxDim: Int, skipLayer: Long, skipEffect: Int): Bitmap? {
+        if (skipLayer == 0L || skipEffect < 0) return captureBitmap(maxDim, preview = true)
+        val generation = projectGeneration
+        val buf = directBuffer(maxDim * maxDim * 4)
+        val size = IntArray(2)
+        val bytes = engine.captureEyedropperFrame(maxDim, skipLayer, skipEffect, buf, size)
         if (bytes <= 0 || size[0] <= 0 || size[1] <= 0 || projectGeneration != generation) return null
         buf.rewind()
         return Bitmap.createBitmap(size[0], size[1], Bitmap.Config.ARGB_8888).also { it.copyPixelsFromBuffer(buf) }

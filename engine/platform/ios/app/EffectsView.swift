@@ -51,21 +51,19 @@ struct EffectsView: View {
     @State private var dragOffset: CGFloat = 0
     @State private var dragStart = 0
     @State private var dragOrder: [UInt32]?
-    @GestureState private var reorderHeld = false
     /// 0.3.6 (iOS, rolagem): a linha erguida pelo toque longo. O toque que solta
     /// esse mesmo dedo não abre os controles (com o gesto simultâneo, o toque
     /// simples também chega ao soltar).
     @State private var liftedTap: UInt32?
     @State private var rowFrames: [UInt32: CGRect] = [:]
+    /// 0.4.4 (bug #4): as linhas no espaço do CONTEÚDO da lista (não mudam ao rolar),
+    /// onde os reconhecedores do UIKit da lista (`FxListGestures`) acham o dedo.
+    @State private var rowSlots: [UInt32: CGRect] = [:]
     // Deslizar para apagar: a linha sob o dedo, o deslocamento lógico (negativo =
     // para o início da linha) e o eixo travado (0 indeciso, 1 horizontal, 2 vertical).
     @State private var swipeId: UInt32?
     @State private var swipeOffset: CGFloat = 0
     @State private var swipeAxis = 0
-    /// 0.3.6 (sidebar): o dedo ainda no deslizar. Quando a rolagem toma o toque o
-    /// SwiftUI cancela o DragGesture SEM `onEnded` (o efeito nunca saía); o fim do
-    /// estado do gesto decide do mesmo jeito (como `reorderHeld`).
-    @GestureState private var swipeHeld = false
     // A sobreposição dos controles (P0-3).
     @State private var overlayId: UInt32?
     @State private var overlayProgress: CGFloat = 0
@@ -79,6 +77,8 @@ struct EffectsView: View {
 
     /// Abrir/fechar: 200 ms, acelera-desacelera (a curva padrão do Android).
     private static let openAnimation = Animation.timingCurve(0.42, 0, 0.58, 1, duration: Double(FxParamMath.OPEN_MS) / 1000)
+    /// O espaço do conteúdo da lista (= a sonda `FxListTouchBridge`).
+    private static let listContentSpace = "effect-list-content"
     private var gap: CGFloat { FxParamMath.LIST_GAP }
     /// Sem [focusedType] é o painel inteiro; com ele, o editor embutido.
     private var tabbed: Bool { focusedType == nil }
@@ -179,12 +179,20 @@ struct EffectsView: View {
                             .accessibilityHidden(overlayId != nil)
                         if let id = overlayId, let effect = model.effects.first(where: { $0.effectId == id }) {
                             settingsOverlay(effect, height: geometry.size.height)
+                                // 0.4.4 (bug #4): fechando (200 ms) os controles ainda estão na
+                                // árvore com a altura inteira (o recorte não limita o toque).
+                                .allowsHitTesting(openId != nil)
                         }
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
                 }
                 .background(AureaColors.fxPanel)
                 .clipped()
+                // 0.4.4 (bug #4): `.clipped()` só recorta o desenho. A linha deslizada
+                // (até a largura dela para a esquerda) e os controles deslocados na
+                // abertura/fechamento continuavam tocáveis FORA do painel, por cima da
+                // coluna ‹ ◆ Curva ⋯ do canto inferior esquerdo. O toque fica no painel.
+                .contentShape(Rectangle())
             }
         }
         .onAppear { refreshTools(); enterLayer(); model.refreshSelectedLayer(); refreshExpressions(); updateTimelineFocus() }
@@ -196,8 +204,6 @@ struct EffectsView: View {
         .onChange(of: puppet.editing) { _ in updateTimelineFocus() }
         .onChange(of: puppet.selected) { _ in updateTimelineFocus() }
         .onChange(of: puppet.revision) { _ in updateTimelineFocus() }
-        .onChange(of: reorderHeld) { held in if !held { finishReorder() } }
-        .onChange(of: swipeHeld) { held in if !held, let id = swipeId { settleSwipe(id) } }
         .onChange(of: model.effects.map(\.effectId)) { ids in effectsChanged(ids) }
         .task(id: pendingPick) {
             // Render lento não é recusa: depois de 3 s relê o modelo e libera
@@ -499,7 +505,9 @@ struct EffectsView: View {
                     ForEach(ordered) { effect in
                         swipeable(effect) { listRow(effect) }
                             .background(GeometryReader { geometry in
-                                Color.clear.preference(key: EffectCardFrames.self, value: [effect.effectId: geometry.frame(in: .named("effect-list"))])
+                                Color.clear
+                                    .preference(key: EffectCardFrames.self, value: [effect.effectId: geometry.frame(in: .named("effect-list"))])
+                                    .preference(key: EffectRowSlots.self, value: [effect.effectId: geometry.frame(in: .named(Self.listContentSpace))])
                             })
                             .offset(y: dragId == effect.effectId ? dragOffset : 0)
                             .zIndex(dragId == effect.effectId ? 1 : 0)
@@ -523,11 +531,23 @@ struct EffectsView: View {
                 }
                 .padding(.horizontal, gap)
                 .padding(.bottom, gap)
+                .coordinateSpace(name: Self.listContentSpace)
+                // 0.4.4 (bug #4): a sonda que prende os gestos da lista ao UIScrollView
+                // dela (mesmo quadro do espaço `listContentSpace`).
+                .background(FxListTouchBridge(enabled: { tabbed && overlayId == nil && !locked },
+                                              rtl: layoutDirection == .rightToLeft,
+                                              hit: { point in
+                                                  rowSlots.first(where: { $0.value.contains(point) }).map { (id: $0.key, frame: $0.value) }
+                                              },
+                                              onSwipe: { id, dx, ended in listSwipe(id, dx: dx, ended: ended) },
+                                              onReorder: { id, dy, ended in listReorder(id, dy: dy, ended: ended) })
+                    .accessibilityHidden(true))
             }
             .coordinateSpace(name: "effect-list")
             .scrollDisabled(dragId != nil)
             .accessibilityIdentifier("aurea.effects.stack")
             .onPreferenceChange(EffectCardFrames.self) { rowFrames = $0 }
+            .onPreferenceChange(EffectRowSlots.self) { rowSlots = $0 }
             // Depois do enterLayer (onAppear do painel): o onAppear da lista pode vir ANTES.
             .onAppear { DispatchQueue.main.async { revealAdded(ordered.map(\.effectId), proxy: proxy) } }
             .onChange(of: ordered.map(\.effectId)) { ids in revealAdded(ids, proxy: proxy) }
@@ -543,7 +563,6 @@ struct EffectsView: View {
         let id = fxEffectCardId(effect.typeId)
         let name = fxEffectDisplayName(effect.typeId, effect.name)
         let lifted = dragId == effect.effectId
-        let canReorder = overlayId == nil && !locked
         let index = shown.firstIndex(where: { $0.effectId == effect.effectId }) ?? 0
         let badge = badgeLabel(effect)
         return HStack(spacing: 0) {
@@ -566,12 +585,9 @@ struct EffectsView: View {
             .frame(height: FxParamMath.ROW_LIST)
             .contentShape(Rectangle())
             .onTapGesture { tapRow(effect) }
-            // 0.3.6 (iOS, rolagem): SIMULTÂNEO. Como `.gesture` (exclusivo) ele cobria
-            // quase toda a largura de cada linha e, no iOS 18+ (gestos do SwiftUI
-            // viraram reconhecedores do UIKit), o pan do ScrollView da lista esperava
-            // por ele: a lista não rolava começando em cima de uma linha. Erguido, o
-            // `scrollDisabled(dragId != nil)` da lista segura a rolagem.
-            .simultaneousGesture(reorderGesture(effect), including: canReorder ? .all : .subviews)
+            // 0.4.4 (bug #4): o TOQUE LONGO para erguer não é mais gesto do SwiftUI na
+            // linha (a 0.3.6 o fez simultâneo e a lista seguia sem rolar com 6–7
+            // efeitos): mora em `FxListGestures`, no próprio UIScrollView da lista.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(AureaText.t("fxui_a11y_expand", name))
             .accessibilityValue([effect.enabled ? "" : AureaText.t("fxui_effect_off"), badge].filter { !$0.isEmpty }.joined(separator: ", "))
@@ -591,21 +607,12 @@ struct EffectsView: View {
             .disabled(locked)
             .accessibilityLabel(AureaText.t(effect.enabled ? "fxui_a11y_disable" : "fxui_a11y_enable", name))
             .accessibilityIdentifier("effects.eye." + id)
+            // ≡: o arrasto VERTICAL que começa aqui reordena na hora; o horizontal é o
+            // deslizar (0.3.6). Os dois são de `FxListGestures` (0.4.4, bug #4): o
+            // `highPriorityGesture` daqui tomava a rolagem que começava no canto direito.
             CupertinoGlyph.text(CupertinoGlyph.LineHorizontal3, size: 16, color: AureaColors.text.opacity(lifted ? 0.6 : 0.15))
-                .frame(width: 32, height: FxParamMath.ROW_LIST)
+                .frame(width: FxListGestures.gripWidth, height: FxParamMath.ROW_LIST)
                 .contentShape(Rectangle())
-                .highPriorityGesture(DragGesture(minimumDistance: 4, coordinateSpace: .global)
-                    .updating($reorderHeld) { _, state, _ in state = true }
-                    .onChanged { value in
-                        // 0.3.6 (sidebar): o ≡ só ergue no arrasto VERTICAL. O deslizar para a
-                        // esquerda costuma começar aqui (canto direito) e o ≡ o tomava.
-                        if dragId == nil {
-                            if swipeId == effect.effectId && swipeAxis == 1 { return }
-                            if fxSwipeIsHorizontal(dx: value.translation.width, dy: value.translation.height) { return }
-                        }
-                        reorder(effect, translation: value.translation.height)
-                    }
-                    .onEnded { _ in finishReorder() }, including: canReorder ? .all : .none)
                 .accessibilityLabel(AureaText.t("fxui_a11y_drag", name))
                 .accessibilityIdentifier("effects.grip." + id)
         }
@@ -633,22 +640,16 @@ struct EffectsView: View {
         return fxIsPluginEffect(effect.typeId) ? AureaText.t("fxui_group_plugins") : ""
     }
 
-    /// TOQUE LONGO (0,4 s) em qualquer ponto da linha ergue e arrasta para
-    /// reordenar (`ItemTouchHelper` da referência). Andar antes solta o gesto para
-    /// a rolagem ou para o deslizar: 0.3.6, o dedo que anda 4 pt (o slop das
-    /// réguas) já está rolando e o toque longo falha, para não erguer a linha no
-    /// meio de uma rolagem lenta (com o gesto simultâneo, os dois correm juntos).
-    private func reorderGesture(_ effect: EffectItem) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.4, maximumDistance: FxParamMath.TOUCH_SLOP * FxParamMath.SLIDER_SLOP_FRACTION)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
-            .updating($reorderHeld) { value, state, _ in
-                if case .second(true, _) = value { state = true }
-            }
-            .onChanged { value in
-                guard case .second(true, let drag) = value else { return }
-                reorder(effect, translation: drag?.translation.height ?? 0)
-            }
-            .onEnded { _ in finishReorder() }
+    /// TOQUE LONGO (0,4 s) em qualquer ponto da linha (menos o 👁) ergue e arrasta
+    /// para reordenar (`ItemTouchHelper` da referência); o arrasto vertical no ≡
+    /// reordena na hora. Andar 4 pt antes do toque longo (o slop das réguas) solta
+    /// o dedo para a rolagem ou para o deslizar. Quem reconhece é `FxListGestures`
+    /// (UIKit, no UIScrollView da lista); aqui chega o deslocamento vertical desde o
+    /// início e, no fim (soltar ou cancelar, sempre entregue), `ended`.
+    private func listReorder(_ id: UInt32, dy: CGFloat, ended: Bool) {
+        if ended { finishReorder(); return }
+        guard let effect = shown.first(where: { $0.effectId == id }) else { return }
+        reorder(effect, translation: dy)
     }
 
     /// Arrasto vertical: só a ordem local muda; a pilha recebe UM comando ao soltar.
@@ -704,27 +705,25 @@ struct EffectsView: View {
             }
             content().offset(x: active ? swipeOffset : 0)
         }
-        .simultaneousGesture(DragGesture(minimumDistance: 12, coordinateSpace: .global)
-            .updating($swipeHeld) { _, state, _ in state = true }
-            .onChanged { value in swipeChanged(effect, value, enabled: enabled) }
-            .onEnded { _ in settleSwipe(effect.effectId) }, including: enabled ? .all : .subviews)
+        // 0.4.4 (bug #4): o arrasto horizontal vem de `FxListGestures` (UIKit, no
+        // UIScrollView da lista), não de um `DragGesture` simultâneo em cada linha.
         .accessibilityHint(enabled ? AureaText.t("fxui_a11y_swipe_delete") : "")
     }
-    private func swipeChanged(_ effect: EffectItem, _ value: DragGesture.Value, enabled: Bool) {
-        guard enabled, dragId == nil else { return }
-        if swipeId != effect.effectId { swipeId = effect.effectId; swipeOffset = 0; swipeAxis = 0 }
-        let dx = value.translation.width, dy = value.translation.height
-        // Trava o eixo no primeiro movimento: vertical é a rolagem da lista
-        // (0.3.6: a mesma regra do Android, `fxSwipeIsHorizontal`).
-        if swipeAxis == 0 { swipeAxis = fxSwipeIsHorizontal(dx: dx, dy: dy) ? 1 : 2 }
-        guard swipeAxis == 1 else { return }
+    /// O deslizar em curso: `dx` é o deslocamento horizontal (da tela) desde o início.
+    /// O eixo já foi travado por `FxListGestures` (`fxSwipeIsHorizontal`, a mesma
+    /// regra do Android): vertical é a rolagem da lista e nem chega aqui.
+    private func listSwipe(_ id: UInt32, dx: CGFloat, ended: Bool) {
+        if ended { settleSwipe(id); return }
+        guard overlayId == nil, dragId == nil, !locked else { return }
+        if swipeId != id { swipeId = id; swipeOffset = 0 }
+        swipeAxis = 1
         // Tela em árabe: o "para o início da linha" é para a direita.
         let logical = layoutDirection == .rightToLeft ? -dx : dx
-        let width = rowFrames[effect.effectId]?.width ?? 0
+        let width = rowFrames[id]?.width ?? 0
         swipeOffset = Swift.min(0, Swift.max(-width, logical))
     }
-    /// Soltar (`onEnded`) ou gesto cancelado pela rolagem (`swipeHeld` volta a falso):
-    /// passou do limite, apaga com "Desfazer"; senão volta. Só uma vez por deslizar.
+    /// Soltar ou gesto cancelado (o UIKit sempre entrega um dos dois): passou do
+    /// limite, apaga com "Desfazer"; senão volta. Só uma vez por deslizar.
     private func settleSwipe(_ effectId: UInt32) {
         guard swipeId == effectId else { return }
         let width = rowFrames[effectId]?.width ?? 0
@@ -1043,6 +1042,9 @@ struct EffectsView: View {
     @ViewBuilder private func specialTools(_ effect: EffectItem) -> some View {
         let type = effect.typeId
         let localAiBit: UInt32 = type == fxEffectTypeId("aurea.ai.depth_map") ? 1 : type == fxEffectTypeId("aurea.key.rotobrush") ? 2 : 0
+        if type == fxEffectTypeId(bgRemoveEffectKey) {
+            BgRemoveCardTools(effectId: effect.effectId).padding(.horizontal, 6).padding(.vertical, 4)
+        }
         if type == fxEffectTypeId("aurea.key.rotobrush") {
             VStack(spacing: 0) {
                 FxBodyNotice(text: AureaText.t("roto_note"))
@@ -1466,27 +1468,40 @@ struct EffectsView: View {
                 .padding(.horizontal, 8)
                 .keepLtr()
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Button {
-                choose(param, effect: effect, component: 0, explicit: false)
-                model.beginGesture("cor")
-                model.colorSheet = ColorSheetRequest(title: d.label,
-                    initial: AureaColorSpace.engineToDisplay(param.value), onChange: { r, g, b, a in
-                        writeVector(param.index, effect: effect, values: AureaColorSpace.displayToEngine(r, g, b, a))
-                    }, onDone: { model.endGesture() })
-            } label: {
-                AureaColorSwatch(color: color(param.value))
-                    .frame(width: 30, height: 30)  // 0.3.4 painéis: antes 24,5
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(AureaColors.fxLowSurface, lineWidth: 0.5))
-                    .padding(.trailing, 6)
-                    .frame(width: 44, height: FxParamMath.ROW_SMALL, alignment: .trailing)
-                    .contentShape(Rectangle())
+            // Bug #9a: a amostra ancora o balão do seletor — o embutido, com o CONTA-GOTAS ao
+            // vivo do palco (tocar na prévia escolhe a cor-chave do Chroma Key). Sem âncora abria
+            // a tela cheia, que não tem conta-gotas; ela continua no "Mais cores" do balão.
+            GeometryReader { geo in
+                Button {
+                    let f = geo.frame(in: .global)
+                    let owner = model.primarySelection
+                    choose(param, effect: effect, component: 0, explicit: false)
+                    model.beginGesture("cor")
+                    // 0.4.5: o conta-gotas pega a cor que ENTRA no efeito (o fundo verde antes
+                    // do Chroma Key tirá-lo), na camada do painel. Par do FxColorRow.
+                    model.colorSheet = ColorSheetRequest(title: d.label,
+                        initial: AureaColorSpace.engineToDisplay(param.value),
+                        anchor: CGRect(x: f.minX, y: f.midY - 15, width: f.width, height: 30),
+                        sampleLayer: owner ?? 0, sampleEffect: Int32(bitPattern: effect), onChange: { r, g, b, a in
+                            guard model.primarySelection == owner else { return }
+                            writeVector(param.index, effect: effect, values: AureaColorSpace.displayToEngine(r, g, b, a))
+                        }, onDone: { model.endGesture() })
+                } label: {
+                    AureaColorSwatch(color: color(param.value))
+                        .frame(width: 30, height: 30)  // 0.3.4 painéis: antes 24,5
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(AureaColors.fxLowSurface, lineWidth: 0.5))
+                        .padding(.trailing, 6)
+                        .frame(width: 44, height: FxParamMath.ROW_SMALL, alignment: .trailing)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle())
+                .disabled(!enabled)
+                .accessibilityLabel(d.label)
+                .accessibilityValue(enabled ? rgb : off)
+                .accessibilityIdentifier("effects.color.\(effect).\(param.index)")
             }
-            .buttonStyle(AureaPressStyle())
-            .disabled(!enabled)
-            .accessibilityLabel(d.label)
-            .accessibilityValue(enabled ? rgb : off)
-            .accessibilityIdentifier("effects.color.\(effect).\(param.index)")
+            .frame(width: 44, height: FxParamMath.ROW_SMALL)
         }
         .frame(height: FxParamMath.ROW_SMALL)
     }
@@ -2145,6 +2160,266 @@ private struct EffectParamSelection: Identifiable, Equatable {
 private struct EffectCardFrames: PreferenceKey {
     static var defaultValue: [UInt32: CGRect] = [:]
     static func reduce(value: inout [UInt32: CGRect], nextValue: () -> [UInt32: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { _, next in next }) }
+}
+/// As linhas de efeito no espaço do CONTEÚDO da lista (não mudam ao rolar).
+private struct EffectRowSlots: PreferenceKey {
+    static var defaultValue: [UInt32: CGRect] = [:]
+    static func reduce(value: inout [UInt32: CGRect], nextValue: () -> [UInt32: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { _, next in next }) }
+}
+
+// =============================================================================
+// 0.4.4 (bug #4, iOS): os gestos da LISTA de efeitos no UIKit.
+//
+// Relato desde a 0.3.4: "depois de 6 ou 7 efeitos não dá mais para rolar o
+// painel nem chegar em 'Adicionar efeito'". Cada linha tinha três gestos do
+// SwiftUI — `DragGesture` simultâneo (deslizar para apagar) na linha inteira,
+// `LongPressGesture` → `DragGesture(minimumDistance: 0)` (erguer) e um
+// `highPriorityGesture` no ≡ — e, no iOS 18+, os gestos do SwiftUI são
+// reconhecedores do UIKit que disputam o toque com o pan do UIScrollView da
+// lista. Com poucos efeitos tudo cabe e ninguém nota; quando a lista passa da
+// altura do painel, o pan da rolagem perdia o dedo e o "+ Adicionar efeito"
+// ficava fora de alcance. A 0.3.6 tornou o erguer simultâneo e não bastou.
+//
+// Agora a lista só tem toques simples (abrir, 👁, adicionar) no SwiftUI e os três
+// arrastos são reconhecedores do UIKit presos ao PRÓPRIO UIScrollView, com a regra
+// explícita (a mesma do Android: `FxSwipeToDelete`, `reorderHandle`,
+// `reorderLongPress`):
+//  - pan: só começa se o dedo pousou numa linha de efeito E o movimento é
+//    horizontal (deslizar) ou vertical a partir do ≡ (reordenar). Senão falha na
+//    hora e a rolagem segue — o pan da rolagem espera só essa decisão;
+//  - toque longo (0,4 s, dedo quieto até 4 pt): convive com a rolagem até erguer;
+//    erguido, a rolagem para (e `scrollDisabled(dragId != nil)` a segura);
+//  - o fim (soltar ou cancelar) é SEMPRE entregue pelo UIKit — o `onEnded` que o
+//    SwiftUI pulava quando a rolagem tomava o toque não existe mais.
+// =============================================================================
+@MainActor final class FxListGestures: NSObject, UIGestureRecognizerDelegate {
+    private enum Mode { case idle, swipe, grip, lift }
+    /// Larguras do ≡ e do 👁 no fim da linha (`EffectsView.listRow`).
+    static let gripWidth: CGFloat = 32
+    static let eyeWidth: CGFloat = 44
+
+    /// Lidos a cada toque (o SwiftUI troca os fechos a cada desenho da lista).
+    var enabled: () -> Bool = { false }
+    var rtl = false
+    /// A linha de efeito sob o ponto (coordenadas da sonda = conteúdo da lista).
+    var hit: (CGPoint) -> (id: UInt32, frame: CGRect)? = { _ in nil }
+    /// (efeito, deslocamento desde o início, terminou).
+    var onSwipe: (UInt32, CGFloat, Bool) -> Void = { _, _, _ in }
+    var onReorder: (UInt32, CGFloat, Bool) -> Void = { _, _, _ in }
+
+    private weak var probe: UIView?
+    private weak var scroll: UIScrollView?
+    private var pan: UIPanGestureRecognizer?
+    private var press: UILongPressGestureRecognizer?
+    private var mode = Mode.idle
+    private var target: UInt32?
+    private var origin = CGPoint.zero
+
+    /// Prende os reconhecedores ao UIScrollView mais próximo acima da sonda.
+    func attach(_ view: UIView) {
+        probe = view
+        guard view.window != nil else { detach(); return }
+        var ancestor = view.superview
+        while let current = ancestor, !(current is UIScrollView) { ancestor = current.superview }
+        guard let found = ancestor as? UIScrollView else { return }
+        if found === scroll, self.pan?.view === found, self.press?.view === found { return }
+        detach()
+        let newPan = UIPanGestureRecognizer(target: self, action: #selector(panned(_:)))
+        newPan.maximumNumberOfTouches = 1
+        newPan.delegate = self
+        let newPress = UILongPressGestureRecognizer(target: self, action: #selector(pressed(_:)))
+        newPress.minimumPressDuration = 0.4
+        newPress.allowableMovement = FxParamMath.TOUCH_SLOP * FxParamMath.SLIDER_SLOP_FRACTION
+        newPress.delegate = self
+        found.addGestureRecognizer(newPan)
+        found.addGestureRecognizer(newPress)
+        pan = newPan
+        press = newPress
+        scroll = found
+    }
+
+    /// Solta os reconhecedores; um gesto em curso termina (no próximo giro: quem
+    /// chama pode estar no meio de uma atualização do SwiftUI).
+    func detach() {
+        if let pan { pan.view?.removeGestureRecognizer(pan) }
+        if let press { press.view?.removeGestureRecognizer(press) }
+        pan = nil
+        press = nil
+        scroll = nil
+        finish(deferred: true)
+    }
+
+    /// A sonda saiu de vez: solta os reconhecedores; um gesto em curso termina
+    /// (adiado) e os fechos voltam a não fazer nada.
+    func release() {
+        detach()
+        enabled = { false }
+        hit = { _ in nil }
+        onSwipe = { _, _, _ in }
+        onReorder = { _, _, _ in }
+    }
+
+    private var tracking: Bool {
+        let live: (UIGestureRecognizer?) -> Bool = { recognizer in
+            recognizer.map { $0.state == .began || $0.state == .changed } ?? false
+        }
+        return live(pan) || live(press)
+    }
+
+    /// (no ≡, no 👁) para um ponto da linha; o fim da linha troca de lado em RTL.
+    private func zone(_ point: CGPoint, _ frame: CGRect) -> (grip: Bool, eye: Bool) {
+        let fromEnd = rtl ? point.x - frame.minX : frame.maxX - point.x
+        return (fromEnd <= Self.gripWidth, fromEnd > Self.gripWidth && fromEnd <= Self.gripWidth + Self.eyeWidth)
+    }
+
+    /// Para a rolagem que estivesse começando (o pan dela perde o dedo de agora).
+    private func stopScrolling() {
+        guard let recognizer = scroll?.panGestureRecognizer, recognizer.isEnabled else { return }
+        recognizer.isEnabled = false
+        recognizer.isEnabled = true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        // Um gesto decidido que o UIKit não deixou começar não prende o próximo toque.
+        if mode != .idle && !tracking { mode = .idle; target = nil }
+        return true
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let probe, mode == .idle, enabled() else { return false }
+        if let press, gestureRecognizer === press {
+            let point = press.location(in: probe)
+            guard let row = hit(point), !zone(point, row.frame).eye else { return false }
+            mode = .lift; target = row.id; origin = point
+            return true
+        }
+        if let pan, gestureRecognizer === pan {
+            let moved = pan.translation(in: probe)
+            let now = pan.location(in: probe)
+            let start = CGPoint(x: now.x - moved.x, y: now.y - moved.y)
+            guard let row = hit(start) else { return false }
+            let horizontal = fxSwipeIsHorizontal(dx: moved.x, dy: moved.y)
+            if zone(start, row.frame).grip && !horizontal { mode = .grip }
+            else if horizontal { mode = .swipe }
+            else { return false }
+            target = row.id; origin = start
+            return true
+        }
+        return false
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Com a rolagem: juntos até um gesto da lista ser decidido; depois, só ele.
+        if let scroll, otherGestureRecognizer === scroll.panGestureRecognizer { return mode == .idle }
+        return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // O pan da rolagem espera a decisão do pan da lista (que falha na hora se não for dela).
+        guard let pan, let scroll else { return false }
+        return gestureRecognizer === pan && otherGestureRecognizer === scroll.panGestureRecognizer
+    }
+
+    @objc private func pressed(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            guard mode == .lift, let id = target else { return }
+            stopScrolling()
+            onReorder(id, 0, false)
+        case .changed:
+            guard mode == .lift, let id = target, let probe else { return }
+            onReorder(id, recognizer.location(in: probe).y - origin.y, false)
+        case .ended, .cancelled, .failed:
+            if mode == .lift { finish(deferred: false) }
+        default:
+            break
+        }
+    }
+
+    @objc private func panned(_ recognizer: UIPanGestureRecognizer) {
+        switch recognizer.state {
+        case .began, .changed:
+            guard let id = target, let probe else { return }
+            let moved = recognizer.translation(in: probe)
+            if mode == .swipe {
+                onSwipe(id, moved.x, false)
+            } else if mode == .grip {
+                if recognizer.state == .began { stopScrolling() }
+                onReorder(id, moved.y, false)
+            }
+        case .ended, .cancelled, .failed:
+            if mode == .swipe || mode == .grip { finish(deferred: false) }
+        default:
+            break
+        }
+    }
+
+    private func finish(deferred: Bool) {
+        let ended = mode
+        let id = target
+        mode = .idle
+        target = nil
+        guard let id, ended != .idle else { return }
+        // Os fechos de AGORA (o `release` os troca logo depois do `detach`).
+        let deliver: (UInt32, CGFloat, Bool) -> Void = ended == .swipe ? onSwipe : onReorder
+        if deferred {
+            DispatchQueue.main.async { deliver(id, 0, true) }
+        } else {
+            deliver(id, 0, true)
+        }
+    }
+}
+
+/// A sonda da lista: `UIView` vazia atrás do conteúdo, sem toque nem
+/// acessibilidade. Ao entrar na janela, prende `FxListGestures` ao UIScrollView.
+private final class FxListTouchProbe: UIView {
+    var gestures: FxListGestures?
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+        isAccessibilityElement = false
+        accessibilityElementsHidden = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        gestures?.attach(self)
+    }
+}
+
+/// A ponte: o `FxListGestures` é o coordenador (um por sonda, fora do estado da
+/// `EffectsView` — os fechos prendem a view e ela não o prende de volta).
+@MainActor
+private struct FxListTouchBridge: UIViewRepresentable {
+    let enabled: () -> Bool
+    let rtl: Bool
+    let hit: (CGPoint) -> (id: UInt32, frame: CGRect)?
+    let onSwipe: (UInt32, CGFloat, Bool) -> Void
+    let onReorder: (UInt32, CGFloat, Bool) -> Void
+
+    func makeCoordinator() -> FxListGestures { FxListGestures() }
+    func makeUIView(context: Context) -> FxListTouchProbe {
+        let view = FxListTouchProbe()
+        configure(context.coordinator, view)
+        return view
+    }
+    func updateUIView(_ view: FxListTouchProbe, context: Context) { configure(context.coordinator, view) }
+    static func dismantleUIView(_ view: FxListTouchProbe, coordinator: FxListGestures) {
+        view.gestures = nil
+        coordinator.release()
+    }
+    private func configure(_ gestures: FxListGestures, _ view: FxListTouchProbe) {
+        gestures.enabled = enabled
+        gestures.rtl = rtl
+        gestures.hit = hit
+        gestures.onSwipe = onSwipe
+        gestures.onReorder = onReorder
+        view.gestures = gestures
+        gestures.attach(view)
+    }
 }
 
 /// Índice de camada (parte baixa do id empacotado) — o que a "Camada de áudio" guarda.

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Tile Shift, Hexagon Tile Rotate/Shift, Hollow Box, Time Displacement, Mirror e Zoom blur. -->
+    <string name="fx045d_name_tile_shift">Сдвиг плиток</string>
+    <string name="fx045d_name_hex_tile_rotate">Поворот шестиугольников</string>
+    <string name="fx045d_name_hex_tile_shift">Сдвиг шестиугольников</string>
+    <string name="fx045d_name_hollow_box">Полая коробка</string>
+    <string name="fx045d_name_time_displacement">Смещение во времени</string>
+    <string name="fx045d_desc_tile_shift">Делит слой на плитки и сдвигает содержимое каждой по отдельности.</string>
+    <string name="fx045d_desc_hex_tile_rotate">Делит слой на соты из шестиугольников и поворачивает каждую ячейку отдельно.</string>
+    <string name="fx045d_desc_hex_tile_shift">Делит слой на соты из шестиугольников и сдвигает содержимое каждой ячейки.</string>
+    <string name="fx045d_desc_hollow_box">Превращает слой в полую 3D-коробку с открытыми сторонами, вырезами и светом.</string>
+    <string name="fx045d_desc_time_displacement">Каждый пиксель берётся из другого момента по яркости карты: светлое — вперёд, тёмное — назад.</string>
+    <string name="fx045d_alt_rows">Чередующиеся ряды</string>
+    <string name="fx045d_alt_cols">Чередующиеся столбцы</string>
+    <string name="fx045d_cell_edges">Края ячейки</string>
+    <string name="fx045d_wrap_in_cell">Повтор внутри ячейки</string>
+    <string name="fx045d_continuous">Сплошное изображение</string>
+    <string name="fx045d_tip_rand_shift">0%: все ячейки сдвигаются на одно расстояние. 100%: каждая — на случайное.</string>
+    <string name="fx045d_tip_rand_rotate">0%: все ячейки поворачиваются одинаково. 100%: каждая — на случайный угол.</string>
+    <string name="fx045d_outset">Раздвинуть стороны</string>
+    <string name="fx045d_smoothing">Скругление</string>
+    <string name="fx045d_hidden">Скрыто</string>
+    <string name="fx045d_circle_cutout">Круглое отверстие</string>
+    <string name="fx045d_circle_crop">Круглая обрезка</string>
+    <string name="fx045d_square_cutout">Квадратное отверстие</string>
+    <string name="fx045d_square_crop">Квадратная обрезка</string>
+    <string name="fx045d_cutout_size">Размер выреза</string>
+    <string name="fx045d_lighting">Освещение</string>
+    <string name="fx045d_precision">Точность</string>
+    <string name="fx045d_tip_cutout">Для сторон с отверстием или обрезкой.</string>
+    <string name="fx045d_tip_precision">Больше шагов: чище края, медленнее превью.</string>
+    <string name="fx045d_layer_itself">Сам слой</string>
+    <string name="fx045d_grad_h">Горизонтальный градиент</string>
+    <string name="fx045d_grad_v">Вертикальный градиент</string>
+    <string name="fx045d_grad_r">Радиальный градиент</string>
+    <string name="fx045d_max_time">Максимальное смещение</string>
+    <string name="fx045d_time_resolution">Разрешение по времени</string>
+    <string name="fx045d_invert_map">Инвертировать карту</string>
+    <string name="fx045d_smooth_levels">Сглаживать между уровнями</string>
+    <string name="fx045d_tip_time_map">Белый — вперёд, чёрный — назад, серый 50% — сейчас.</string>
+    <string name="fx045d_both_axes">Отразить по двум осям</string>
+    <string name="fx045d_replace_side">Заменить сторону</string>
+    <string name="fx045d_overlay_copy">Наложить копию</string>
+    <string name="fx045d_copy_opacity">Непрозрачность копии</string>
+    <string name="fx045d_copy_behind">Копия за слоем</string>
+    <string name="fx045d_copy">Копия</string>
+    <string name="fx045d_tip_mirror_mode">Наложить копию: слой остаётся целым, добавляется отражённая копия.</string>
+</resources>

@@ -58,10 +58,14 @@ inline const char* box_sized(const char* key) {
         "aurea.transition.radial_scale_wipe", "aurea.transition.block_dissolve", "aurea.glitch.cross",
         "aurea.transition.wipe_plasma", "aurea.transition.burn_film", "aurea.distort.page_turn",
         "aurea.distort.sphere_wrap", "aurea.distort.cylinder_wrap", "aurea.stylize.ball_grid",
+        // 0.4.5: a caixa oca é do tamanho da camada (largura/altura em % dela).
+        "aurea.distort.hollow_box",
         "aurea.distort.fisheye", "aurea.distort.mesh_warp", "aurea.distort.puppet",
         // 0.3.0: a lente do rastreio (k1/k2 na meia altura da camada); longe da caixa o
         // polinômio da lente sai do quadro filmado, como no Fisheye.
         "aurea.distort.lens_distortion_match",
+        // 0.4.5: as linhas da Caneta esferográfica dividem a caixa da camada.
+        "aurea.transition.ballpoint",
     };
     for (const char* k : kBox) if (std::strcmp(k, key) == 0) return k;
     return nullptr;

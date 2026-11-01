@@ -160,3 +160,24 @@ AUREA_TEST(GroundPlacement, PlanesAloneGetAFloorUnderTheLowestCorner) {
     AUREA_CHECK(std::fabs(gp.center.y - 140.0f) < 1e-3f);
     AUREA_CHECK(gp.radius > 1.0f);
 }
+
+// Regressão 0.4.2 (bug #8a): com um modelo na cena, uma camada 2D em 3D (fundo de
+// tela cheia, câmera "afeta camadas abaixo") não pode descer o chão até a borda
+// dela nem alargar o raio — a sombra do modelo no chão some de perto dele e
+// deixa de seguir a luz. O chão fica onde ficava sem os planos.
+AUREA_TEST(GroundPlacement, PlanesDoNotMoveTheFloorAwayFromAModel) {
+    const auto asset = ground_asset();
+    SceneFrame frame; SceneInstance instance; instance.asset = asset;
+    frame.instances.push_back(instance);
+    GpuModel gpuModel; gpuModel.drawableNodes = {0};
+    const GpuModel* models[] = {&gpuModel};
+    std::vector<ScenePlane> planes(1);
+    planes[0].region = Vec4{0, 0, 1920, 1080};
+    planes[0].light.worldFromLayer = Mat4::translation({-960, -540, 0});   // y de −540 a 540
+    const auto alone = ground_placement(frame, models);
+    const auto withPlane = ground_placement(frame, models, planes);
+    AUREA_CHECK(alone.valid && withPlane.valid);
+    AUREA_CHECK_EQ(alone.center.y, 6.f);
+    AUREA_CHECK_EQ(withPlane.center, alone.center);
+    AUREA_CHECK_EQ(withPlane.radius, alone.radius);
+}

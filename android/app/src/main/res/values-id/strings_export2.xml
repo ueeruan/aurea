@@ -21,4 +21,5 @@
     <string name="app_export_codec_hung_retry">Encoder video ponsel macet. Kami akan mencoba lagi dalam mode kompatibel.</string>
     <string name="app_export_retry_compatible">Mencoba lagi dalam mode kompatibel…</string>
     <string name="app_export_hevc_to_h264">Ponsel ini tidak punya encoder HEVC untuk ukuran ini: mengekspor dalam H.264.</string>
+    <string name="expfail_after_ladder">Kami juga mencoba mode yang lebih kompatibel (H.264, encoder perangkat lunak, dan resolusi lebih rendah) dan tidak ada yang berhasil di ponsel ini. Kode dukungan: E%1$d-%2$d-%3$d.</string>
 </resources>

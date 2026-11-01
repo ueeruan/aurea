@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: painel Esqueleto 3D e grupo de pinos do Fantoche (pedido de ⚡ᴍᴀʀᴋᴢ, pauloph2517 e Jess). -->
+    <string name="skeleton_title">الهيكل</string>
+    <string name="skeleton_open">فتح لوحة الهيكل</string>
+    <string name="skeleton_desc">شجرة العظام، دوران بالأرقام، عكس الوضعية ونسخها</string>
+    <string name="skeleton_partner">الجهة الأخرى: %1$s</string>
+    <string name="skeleton_bone_none">انقر على مفصل في المسرح أو على عظمة في القائمة</string>
+    <string name="skeleton_ring_hint">حلقات المفصل: الأحمر يدوّر حول X والأخضر حول Y والأزرق حول Z (محاور العظمة)؛ الأبيض يدوّر حول الشاشة. انقر مجددًا لاختيار المفصل الذي تحته.</string>
+    <string name="skeleton_show">إظهار الهيكل</string>
+    <string name="skeleton_ik">IK: اسحب الطرف</string>
+    <string name="skeleton_pose">الوضعية</string>
+    <string name="skeleton_copy">نسخ الوضعية</string>
+    <string name="skeleton_paste">لصق الوضعية</string>
+    <string name="skeleton_mirror_pose">عكس الوضعية</string>
+    <string name="skeleton_mirror_bone">عكس إلى الجهة الأخرى</string>
+    <string name="skeleton_zero_pose">تصفير الوضعية</string>
+    <string name="skeleton_zero_bone">تصفير العظمة</string>
+    <string name="skeleton_bones">العظام</string>
+    <string name="skeleton_search">البحث عن عظمة</string>
+    <string name="skeleton_no_match">لا توجد عظمة بهذا الاسم</string>
+    <string name="skeleton_bone_a11y">%1$s، المستوى %2$d</string>
+    <string name="skeleton_keyed">يوجد إطار مفتاحي هنا</string>
+    <string name="skeleton_expand">توسيع %1$s</string>
+    <string name="skeleton_collapse">طي %1$s</string>
+    <string name="skeleton_rot_a11y">الدوران %1$s: %2$s درجة</string>
+    <string name="skeleton_minus">إنقاص %1$s بمقدار 5 درجات</string>
+    <string name="skeleton_plus">زيادة %1$s بمقدار 5 درجات</string>
+    <string name="skeleton_pose_copied">تم نسخ الوضعية</string>
+    <string name="skeleton_paste_failed">لا شيء للصق في هذا النموذج</string>
+    <string name="skeleton_mirror_nothing">لا توجد عظمة في وضعية لعكسها</string>
+    <string name="skeleton_no_partner">هذه العظمة ليس لها نظير في الجهة الأخرى</string>
+    <string name="puppet_group">مجموعة</string>
+    <string name="puppet_group_clear">إفراغ المجموعة</string>
+    <string name="puppet_group_hint">مع تشغيل المجموعة، انقر على الدبابيس التي ستدور؛ الدبوس المختار هو المحور. اسحب الحلقة الزرقاء للتدوير.</string>
+    <string name="puppet_group_rotate">تدوير المجموعة حول الدبوس %1$d</string>
+</resources>

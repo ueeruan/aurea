@@ -43,6 +43,30 @@ enum GoogleLogin {
     /// 0.4.1: sem configuração do Firebase o botão do Google não aparece.
     static var disponivel: Bool {
         return !projeto.isEmpty && !appID.isEmpty && !chaveAPI.isEmpty && !clienteID.isEmpty && !remetente.isEmpty
+            && appIDValido && esquemaRegistrado
+    }
+
+    /// Bug #2 (o app fecha): o GoogleSignIn lança uma NSException (que o Swift
+    /// não pega) quando o client id invertido não está em CFBundleURLTypes —
+    /// por exemplo, build com AUREA_FIREBASE_REVERSED_CLIENT_ID vazio. Sem o
+    /// esquema, o botão some em vez de derrubar o app no toque.
+    private static var esquemaRegistrado: Bool {
+        let invertido: String = clienteID.split(separator: ".").reversed().joined(separator: ".").lowercased()
+        guard !invertido.isEmpty else { return false }
+        let tipos: [[String: Any]] = (Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]]) ?? []
+        for tipo in tipos {
+            let esquemas: [String] = (tipo["CFBundleURLSchemes"] as? [String]) ?? []
+            if esquemas.contains(where: { $0.lowercased() == invertido }) { return true }
+        }
+        return false
+    }
+
+    /// Bug #2: GOOGLE_APP_ID fora do formato do Firebase ("1:<número>:ios:<hex>")
+    /// faz o `FirebaseApp.configure` lançar uma NSException. Só configura o válido.
+    private static var appIDValido: Bool {
+        let partes: [Substring] = appID.split(separator: ":", omittingEmptySubsequences: false)
+        return partes.count == 4 && partes[0] == "1" && !partes[1].isEmpty && partes[1].allSatisfy { $0.isNumber }
+            && partes[2] == "ios" && !partes[3].isEmpty && partes[3].allSatisfy { $0.isHexDigit }
     }
 
     private static func app() -> FirebaseApp? {

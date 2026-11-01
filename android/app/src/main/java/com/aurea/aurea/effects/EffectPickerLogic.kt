@@ -164,6 +164,7 @@ private val GroupByCategory: Map<String, EffectGroup> = buildMap {
 private val GroupByKey: Map<Int, EffectGroup> by lazy {
     buildMap {
         put(effectTypeId("aurea.generate.raster_extrude"), EffectGroup.ThreeD)
+        put(effectTypeId("aurea.distort.hollow_box"), EffectGroup.ThreeD)
         listOf(
             "aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.drop_shadow",
             "aurea.stylize.find_edges", "aurea.stylize.bevel_alpha", "aurea.draw.drawing_progress",
@@ -175,6 +176,7 @@ private val GroupByKey: Map<Int, EffectGroup> by lazy {
         listOf(
             "aurea.stylize.repeat_tile", "aurea.stylize.motion_tile", "aurea.stylize.tiler", "aurea.stylize.hex_tile",
             "aurea.distort.kaleidoscope", "aurea.distort.mirror", "aurea.distort.griddler", "aurea.stylize.ball_grid",
+            "aurea.distort.tile_shift", "aurea.distort.hex_tile_rotate", "aurea.distort.hex_tile_shift",
         ).forEach { put(effectTypeId(it), EffectGroup.Repeat) }
     }
 }

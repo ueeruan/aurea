@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Remover fundo (aurea.key.background_remove) — recorte sem tela verde. -->
+    <string name="bg_remove_fx_name">Remove Background</string>
+    <string name="bg_remove_fx_desc">Removes the background of a video or photo without a green screen: the person or main object stays, the rest goes away in every frame.</string>
+    <string name="bg_remove_action">Remove background</string>
+    <string name="bg_remove_action_detail">Cuts out the person or object, no green screen</string>
+    <string name="bg_remove_note">Automatic cutout on every frame, no green screen. Analyze the clip once: the result is saved with the project and export uses the same cutout.</string>
+    <string name="bg_remove_analyze">Analyze clip</string>
+    <string name="bg_remove_analyze_count">Analyze clip (%1$d frames)</string>
+    <string name="bg_remove_cancel">Cancel analysis</string>
+    <string name="bg_remove_progress">Analyzing %1$d of %2$d frames</string>
+    <string name="bg_remove_clip_status">Clip: %1$d of %2$d frames ready</string>
+    <string name="bg_remove_clip_done">Whole clip analyzed and saved with the project</string>
+    <string name="bg_remove_frame_ready">This frame: cutout ready</string>
+    <string name="bg_remove_frame_pending">This frame: computing the cutout…</string>
+    <string name="bg_remove_failed">Could not remove the background of this layer.</string>
+    <string name="bg_remove_failed_model">The cutout model did not load: the phone is low on memory. Close other apps and tap Analyze clip again.</string>
+    <string name="bg_remove_failed_decode">The frames of this video could not be read right now. Pause playback and tap Analyze clip again.</string>
+    <string name="bg_remove_failed_frames">Some frames were not analyzed. Tap Analyze clip again.</string>
+    <string name="bg_remove_person_unavailable">The Person model is not available on this device; Automatic is being used.</string>
+    <string name="bg_remove_p_expand">Choke/expand</string>
+    <string name="bg_remove_p_invert">Invert (keep the background)</string>
+    <string name="bg_remove_p_edge">Fine edge</string>
+    <string name="bg_remove_p_model">Model</string>
+    <string name="bg_remove_o_auto">Automatic</string>
+    <string name="bg_remove_o_person">Person</string>
+    <string name="bg_remove_tip_model">Automatic cuts out the main object and works on every device. Person uses the system\'s people segmentation when the device has it; without it, Automatic is used.</string>
+    <string name="bg_remove_tip_edge">Rebuilds the edge at video resolution (hair, thin outlines). 0 uses the simple edge.</string>
+</resources>

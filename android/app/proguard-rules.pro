@@ -26,6 +26,24 @@
     native <methods>;
 }
 
+# Plugins 0.3.4: o motor acha `PluginHost` por FindClass/GetStaticMethodID
+# (aurea_jni.cpp, nativeInstallPluginHost). Sem a regra o R8 renomeia a classe
+# e apaga os métodos (só a JNI os chama): no release a rede/área de
+# transferência/seletor dos plugins ficava desligada sem aviso.
+-keep class com.aurea.aurea.effects.PluginHost {
+    public static java.lang.String[] fetch(java.lang.String, java.lang.String, java.lang.String[], java.lang.String, int, int);
+    public static java.lang.String clipboardRead();
+    public static boolean clipboardWrite(java.lang.String);
+    public static java.lang.String[] pickFile(java.lang.String, java.lang.String[]);
+}
+
+# 0.4.1 login com Google (Credential Manager): o provedor do Play Services é
+# carregado por reflexão; a regra recomendada pela documentação do androidx.
+-if class androidx.credentials.CredentialManager
+-keep class androidx.credentials.playservices.** {
+  *;
+}
+
 # Os números de linha do stack trace de um crash de release continuam
 # legíveis com o mapping.txt do build (guardar junto com o APK publicado).
 -keepattributes SourceFile,LineNumberTable

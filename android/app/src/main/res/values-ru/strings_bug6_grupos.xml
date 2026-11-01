@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="eng_ungroup_effects">у группы есть эффекты</string>
+    <string name="eng_ungroup_masks">у группы есть маски</string>
+    <string name="eng_ungroup_blend">у группы задан режим наложения</string>
+    <string name="eng_ungroup_opacity">у группы своя непрозрачность</string>
+    <string name="eng_ungroup_3d">группа находится в 3D</string>
+    <string name="eng_ungroup_transition">у группы есть переход или эхо</string>
+    <string name="eng_ungroup_background">у группы свой фон</string>
+    <string name="eng_ungroup_camera_light">у группы своя камера или свет</string>
+    <string name="eng_ungroup_animation">у группы есть анимация появления или исчезновения</string>
+</resources>

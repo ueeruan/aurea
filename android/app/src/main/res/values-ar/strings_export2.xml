@@ -21,4 +21,5 @@
     <string name="app_export_codec_hung_retry">توقف مُرمِّز الفيديو في الهاتف عن الاستجابة. سنحاول مرة أخرى في وضع التوافق.</string>
     <string name="app_export_retry_compatible">نحاول مرة أخرى في وضع التوافق…</string>
     <string name="app_export_hevc_to_h264">لا يحتوي هذا الهاتف على مُرمِّز HEVC لهذا الحجم: يتم التصدير بصيغة H.264.</string>
+    <string name="expfail_after_ladder">جرّبنا أيضًا أوضاعًا أكثر توافقًا (H.264، مُرمِّز برمجي ودقة أقل) ولم ينجح أي منها على هذا الهاتف. رمز الدعم: E%1$d-%2$d-%3$d.</string>
 </resources>

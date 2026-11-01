@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Remover fundo (aurea.key.background_remove) — recorte sem tela verde. -->
+    <string name="bg_remove_fx_name">إزالة الخلفية</string>
+    <string name="bg_remove_fx_desc">يزيل خلفية الفيديو أو الصورة دون شاشة خضراء: يبقى الشخص أو العنصر الرئيسي ويختفي الباقي في كل إطار.</string>
+    <string name="bg_remove_action">إزالة الخلفية</string>
+    <string name="bg_remove_action_detail">يقص الشخص أو العنصر دون شاشة خضراء</string>
+    <string name="bg_remove_note">قص تلقائي في كل الإطارات دون شاشة خضراء. حلّل المقطع مرة واحدة: تُحفظ النتيجة مع المشروع ويستخدم التصدير القص نفسه.</string>
+    <string name="bg_remove_analyze">تحليل المقطع</string>
+    <string name="bg_remove_analyze_count">تحليل المقطع (%1$d إطار)</string>
+    <string name="bg_remove_cancel">إلغاء التحليل</string>
+    <string name="bg_remove_progress">جارٍ تحليل %1$d من %2$d إطار</string>
+    <string name="bg_remove_clip_status">المقطع: %1$d من %2$d إطار جاهز</string>
+    <string name="bg_remove_clip_done">تم تحليل المقطع كله وحفظه مع المشروع</string>
+    <string name="bg_remove_frame_ready">هذا الإطار: القص جاهز</string>
+    <string name="bg_remove_frame_pending">هذا الإطار: جارٍ حساب القص…</string>
+    <string name="bg_remove_failed">تعذّرت إزالة خلفية هذه الطبقة.</string>
+    <string name="bg_remove_failed_model">لم يُحمَّل نموذج القص: الذاكرة في الجهاز غير كافية. أغلق التطبيقات الأخرى ثم اضغط على تحليل المقطع مرة أخرى.</string>
+    <string name="bg_remove_failed_decode">تعذّرت قراءة إطارات هذا الفيديو الآن. أوقف التشغيل مؤقتًا ثم اضغط على تحليل المقطع مرة أخرى.</string>
+    <string name="bg_remove_failed_frames">لم تُحلَّل بعض الإطارات. اضغط على تحليل المقطع مرة أخرى.</string>
+    <string name="bg_remove_person_unavailable">نموذج الشخص غير متاح على هذا الجهاز؛ يُستخدم النموذج التلقائي.</string>
+    <string name="bg_remove_p_expand">تقليص/توسيع</string>
+    <string name="bg_remove_p_invert">عكس (الإبقاء على الخلفية)</string>
+    <string name="bg_remove_p_edge">حافة دقيقة</string>
+    <string name="bg_remove_p_model">النموذج</string>
+    <string name="bg_remove_o_auto">تلقائي</string>
+    <string name="bg_remove_o_person">شخص</string>
+    <string name="bg_remove_tip_model">التلقائي يقص العنصر الرئيسي ويعمل على كل الأجهزة. الشخص يستخدم تحديد الأشخاص في النظام إن توفر في الجهاز؛ وإلا يُستخدم التلقائي.</string>
+    <string name="bg_remove_tip_edge">يعيد بناء الحافة بدقة الفيديو (الشعر والخطوط الرفيعة). القيمة 0 تستخدم الحافة البسيطة.</string>
+</resources>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Glitch 0.4.5 (2026-11-01): Glitchify completo, Hyper Glitch, Block Glitch e Trocar canais. Chaves fx045g_*. -->
+<resources>
+    <string name="fx045g_name_hyper_glitch">Hyper Glitch</string>
+    <string name="fx045g_desc_hyper_glitch">Glitch pesado: fatias que escorregam, blocos fora do lugar, separação RGB, rastros de pixels, compressão e cores trocadas — tudo por uma intensidade e uma semente animáveis.</string>
+    <string name="fx045g_name_block_glitch">Glitch de blocos</string>
+    <string name="fx045g_desc_block_glitch">Blocos retangulares deslocados, com canais trocados e separados, no estilo do Block Glitch do DaVinci Resolve. Controle o tamanho, a quantidade e a frequência dos blocos.</string>
+    <string name="fx045g_name_shift_channels">Trocar canais</string>
+    <string name="fx045g_desc_shift_channels">Escolha de onde vem cada canal (alfa, vermelho, verde e azul): de outro canal, da luminância, matiz, claridade, saturação, cheio ou desligado. Como o Shift Channels do After Effects.</string>
+    <string name="fx045g_transition_channel">Canal da transição</string>
+    <string name="fx045g_transform_speed">Velocidade da transformação</string>
+    <string name="fx045g_split_mode">Modo da separação</string>
+    <string name="fx045g_split_speed">Velocidade da separação</string>
+    <string name="fx045g_scale_channel">Canal da escala</string>
+    <string name="fx045g_corrupt_offset">Recuo da corrupção</string>
+    <string name="fx045g_corrupt_amount">Força da corrupção</string>
+    <string name="fx045g_corrupt_opacity">Opacidade da corrupção</string>
+    <string name="fx045g_slice_amount">Fatia comprimida</string>
+    <string name="fx045g_slice_position">Posição da fatia</string>
+    <string name="fx045g_slice_quality">Qualidade da fatia</string>
+    <string name="fx045g_slice_shift">Tremor da fatia</string>
+    <string name="fx045g_copy_block_amount">Blocos trocados</string>
+    <string name="fx045g_copy_block_speed">Velocidade dos blocos</string>
+    <string name="fx045g_copy_block_width">Largura do bloco trocado</string>
+    <string name="fx045g_copy_block_height">Altura do bloco trocado</string>
+    <string name="fx045g_copy_block_direction">Direção dos blocos</string>
+    <string name="fx045g_compression_jpeg">Compressão (JPEG)</string>
+    <string name="fx045g_palette_dither">Pontilhado da paleta</string>
+    <string name="fx045g_noise_octaves">Oitavas do ruído</string>
+    <string name="fx045g_noise_gain">Ganho do ruído</string>
+    <string name="fx045g_noise_lacunarity">Lacunaridade do ruído</string>
+    <string name="fx045g_show_noise">Mostrar o ruído</string>
+    <string name="fx045g_wiggle_steps">Passos do tremor</string>
+    <string name="fx045g_slice_height">Altura da fatia</string>
+    <string name="fx045g_compression">Compressão</string>
+    <string name="fx045g_color_swap">Troca de cor</string>
+    <string name="fx045g_amount">Quantidade</string>
+    <string name="fx045g_size_variation">Variação de tamanho</string>
+    <string name="fx045g_channel_swap">Troca de canais</string>
+    <string name="fx045g_take_alpha">Tirar o alfa de</string>
+    <string name="fx045g_take_red">Tirar o vermelho de</string>
+    <string name="fx045g_take_green">Tirar o verde de</string>
+    <string name="fx045g_take_blue">Tirar o azul de</string>
+    <string name="fx045g_opt_bands_random">Faixas (aleatório)</string>
+    <string name="fx045g_opt_lightness">Claridade</string>
+    <string name="fx045g_opt_rgb_default">RGB (padrão)</string>
+    <string name="fx045g_opt_red_cyan">Vermelho-ciano</string>
+    <string name="fx045g_opt_green_magenta">Verde-magenta</string>
+    <string name="fx045g_opt_blue_yellow">Azul-amarelo</string>
+    <string name="fx045g_opt_y_luma">Y′ (luma)</string>
+    <string name="fx045g_opt_cb">Cb</string>
+    <string name="fx045g_opt_cr">Cr</string>
+    <string name="fx045g_opt_uniform">Uniforme</string>
+    <string name="fx045g_opt_luma">Luma</string>
+    <string name="fx045g_opt_full">Cheio</string>
+</resources>

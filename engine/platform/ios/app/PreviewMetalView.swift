@@ -495,12 +495,34 @@ struct PreviewMetalView: UIViewRepresentable {
         private var rigBegan = false
         private var rigAngle: CGFloat?
         private var rigLast = SIMD2<Float>(0, 0)
+        /// 0.4.5: anel em curso (0..2 eixo local, 3 = o de fora; −1 = nenhum), juntas sob o dedo e se o escolhido estava entre elas.
+        private var rigRing = -1
+        private var rigNearList: [Int32] = []
+        private var rigKeep = false
         /// Um dedo gira o osso (trackball, px da composição); dois giram em volta do olhar.
+        /// No anel, gira no eixo LOCAL do osso (ou em volta do olhar, no anel de fora).
         private func rigPoseEvent(_ pressed: [StageTouchPoint], view: UIView) {
             if pressed.isEmpty {
                 if rigBegan { model.endGesture(); model.endPoseGesture() }
-                if !rigMoved && rigNear < 0 { model.choosePoseBone(-1) }   // toque no vazio solta o osso
+                if !rigMoved && rigRing < 0 {
+                    if rigNear < 0 { model.choosePoseBone(-1) }   // toque no vazio solta o osso
+                    else if rigKeep && rigNearList.count > 1, let i = rigNearList.firstIndex(of: model.poseBone) {
+                        model.choosePoseBone(rigNearList[(i + 1) % rigNearList.count])   // juntas sobrepostas: a próxima
+                    }
+                }
+                rigRing = -1
                 stageFinger = nil; stageMode = .idle
+                return
+            }
+            if rigRing >= 0 {
+                guard let finger = pressed.first(where: { $0.id == stageFinger }) ?? pressed.first else { return }
+                if !rigMoved && hypot(finger.position.x - stageDown.x, finger.position.y - stageDown.y) < 8 { return }
+                let point = compositionPoint(finger.position, view: view)
+                rigMoved = true
+                if point == rigLast { return }
+                if !rigBegan { model.beginGesture("girar osso"); rigBegan = true }
+                model.dragPoseRing(axis: rigRing, from: rigLast, to: point, radius: Float(SkeletonRing.radius) * scaleFactor(view))
+                rigLast = point
                 return
             }
             if pressed.count >= 2 {
@@ -526,7 +548,8 @@ struct PreviewMetalView: UIViewRepresentable {
             rigLast = point
             if dx == 0 && dy == 0 { return }
             if !rigBegan { model.beginGesture("posar osso"); rigBegan = true }
-            model.dragPoseBone(dx: dx, dy: dy, twist: 0)
+            // 0.4.5: IK simples leva a cadeia; "Mover" e o resto seguem como antes.
+            if model.poseIk && !model.poseMove { model.dragPoseIk(dx: dx, dy: dy) } else { model.dragPoseBone(dx: dx, dy: dy, twist: 0) }
         }
         // AutoRig 3D (0.3.6): junta canônica arrastada / controlador IK em curso.
         private var rigFixBone = -1
@@ -611,13 +634,23 @@ struct PreviewMetalView: UIViewRepresentable {
                     rigLast = compositionPoint(first.position, view: view)
                     return
                 }
-                // Pose do rig (RigPoseStage.kt): junta perto do dedo ou osso escolhido = gira o osso.
-                let poseNear = model.rigPoseActive ? model.pickPoseBone(compositionPoint(first.position, view: view), reach: 36 * scaleFactor(view)) : -1
-                if model.rigPoseActive && (poseNear >= 0 || model.poseBone >= 0) {
-                    if poseNear >= 0 && poseNear != model.poseBone { model.choosePoseBone(poseNear) }
-                    stageMode = .rigPose; rigNear = poseNear; rigMoved = false; rigBegan = false; rigAngle = nil
-                    rigLast = compositionPoint(first.position, view: view)
-                    return
+                // Pose do rig (RigPoseStage.kt): anel do osso escolhido, junta perto do dedo ou
+                // osso escolhido = gira o osso. 0.4.5: anéis por eixo local e juntas sobrepostas em ciclo.
+                if model.rigPoseActive {
+                    let p = compositionPoint(first.position, view: view), k = scaleFactor(view)
+                    let ring = model.poseBone >= 0
+                        ? model.pickPoseRing(p, ring: Float(SkeletonRing.radius) * k, reach: 16 * k, core: 18 * k) : -1
+                    let nearList = ring < 0 ? model.pickPoseBones(p, reach: 36 * k) : []
+                    if ring >= 0 || !nearList.isEmpty || model.poseBone >= 0 {
+                        rigRing = ring
+                        rigNearList = nearList
+                        // O osso escolhido entre os candidatos fica (o arrasto gira ele); senão, o mais perto.
+                        rigKeep = model.poseBone >= 0 && nearList.contains(model.poseBone)
+                        if let n = nearList.first, !rigKeep { model.choosePoseBone(n) }
+                        stageMode = .rigPose; rigNear = nearList.first ?? -1; rigMoved = false; rigBegan = false; rigAngle = nil
+                        rigLast = p
+                        return
+                    }
                 }
                 if !model.sceneEditor && startShape(at: first.position, view: view) { stageMode = .shape }
                 else if startGizmo(at: first.position, view: view) { stageMode = .gizmo }
@@ -1492,10 +1525,11 @@ enum LayerResizeGeometry {
 // Omega aparência (área 05): conta-gotas AO VIVO (P1-1) e pontas do degradê
 // (P1-4) no palco. Par do bloco "Omega aparência" do Stage.kt.
 //
-// • Conta-gotas (`model.eyedropper`, ligado pelo seletor): arrastar em
-//   QUALQUER lugar do palco anda a mira RELATIVA (EyedropperStage), que amostra
-//   do quadro capturado no começo de cada arrasto; soltar aplica. Continua
-//   ligado até o seletor desligar.
+// • Conta-gotas (`model.eyedropper`, ligado pelo seletor): tocar/arrastar põe a
+//   mira SOB O DEDO (0.4.5; antes relativa) e a lupa acima dele (EyedropperStage),
+//   que amostra do quadro capturado no começo de cada arrasto (cor de efeito: com
+//   o efeito desligado só na captura); soltar aplica. Continua ligado até o
+//   seletor desligar (a tela cheia recolhida volta sozinha no soltar).
 // • Pontas do degradê (`FillStageState.gradientHandles`, ligado pelo painel Cor
 //   e preenchimento com o Degradê aberto): o toque pega a ponta mais perto,
 //   passa do "touch slop" e arrasta (relativo à caixa da camada) num passo de
@@ -1563,7 +1597,9 @@ extension PreviewMetalView.Coordinator {
                 s.mode = .eyedropper
                 s.finger = first.id
                 s.last = first.position
-                EyedropperStage.shared.begin(model, composition: compositionSize)
+                // 0.4.5: a mira começa SOB O DEDO (o pixel tocado) e o acompanha.
+                let at = compositionPoint(first.position, view: view)
+                EyedropperStage.shared.begin(model, composition: compositionSize, at: CGPoint(x: CGFloat(at.x), y: CGFloat(at.y)))
                 return true
             }
             if FillStageState.shared.gradientHandles, editableSelection(), startGradientHandle(first, view: view) {
@@ -1584,8 +1620,8 @@ extension PreviewMetalView.Coordinator {
                 s.mode = pressed.isEmpty ? .idle : .drain
                 return true
             }
-            let f = CGFloat(scaleFactor(view))
-            EyedropperStage.shared.move((finger.position.x - s.last.x) * f, (finger.position.y - s.last.y) * f, model: model)
+            let at = compositionPoint(finger.position, view: view)
+            EyedropperStage.shared.move(to: CGPoint(x: CGFloat(at.x), y: CGFloat(at.y)), model: model)
             s.last = finger.position
             return true
         case .gradient:
@@ -1687,10 +1723,12 @@ extension PreviewMetalView.Coordinator {
                 }
                 if let cross {
                     marker(cross, key: "om_ap_cp_eyedropper", tag: "stage.eyedropper")
-                    Text(AureaText.t("om_ap_cp_eyedropper_hint"))
+                        .accessibilityValue(pickedValue)
+                    Text(eyedropperHint)
                         .font(.aurea(size: 12, weight: .semibold))
                         .foregroundStyle(AureaColors.text)
-                        .lineLimit(1)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(StageInk.resolutionChip, in: Capsule())
@@ -1713,6 +1751,21 @@ extension PreviewMetalView.Coordinator {
         return HandlePair(start: points[0], end: points[1],
                           c0: Array(fill[ShapeFillIndex.color0..<(ShapeFillIndex.color0 + 4)]),
                           c1: Array(fill[ShapeFillIndex.color1..<(ShapeFillIndex.color1 + 4)]))
+    }
+
+    /// A dica do topo; cor de efeito (0.4.5) avisa que a amostra é a cor de antes do efeito.
+    private var eyedropperHint: String {
+        let hint = AureaText.t("om_ap_cp_eyedropper_hint")
+        guard model.eyedropper?.skipsEffect == true else { return hint }
+        return hint + " · " + AureaText.t("om_ap_cp_eyedropper_source")
+    }
+
+    /// VoiceOver: a cor que a lupa pegou ("Cor pegada: #RRGGBB").
+    private var pickedValue: String {
+        guard let c = dropper.color, c.count >= 3 else { return "" }
+        let hex = String(format: "#%02X%02X%02X", Int((c[0].clamped(to: 0...1) * 255).rounded()),
+                         Int((c[1].clamped(to: 0...1) * 255).rounded()), Int((c[2].clamped(to: 0...1) * 255).rounded()))
+        return AureaText.t("om_ap_cp_eyedropper_picked", hex)
     }
 
     private func crosshair(scale: CGFloat, origin: CGPoint, cw: CGFloat, ch: CGFloat) -> CGPoint? {

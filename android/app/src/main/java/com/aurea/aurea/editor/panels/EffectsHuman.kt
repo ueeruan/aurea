@@ -747,7 +747,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.glitch.glitchify",
         EffectHuman(
             name = R.string.fx_name_glitchify,
-            keywords = "glitchify glitch defeito digital rasgo bloco corrupcao",
+            keywords = "glitchify glitch defeito digital rasgo bloco corrupcao cinema spice transicao fatia jpeg webp compressao pontilhado ruido canal",
             principal = listOf(17, 18, 1, 3, 13, 34),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_altura_faixa, suffix = "px", decimals = 0),
@@ -806,7 +806,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         "aurea.glitch.signal",
         EffectHuman(
             name = R.string.fx_name_signal,
-            keywords = "signal sinal interferencia transmissao banda sincronia chiado",
+            keywords = "signal glitch sinal glitch de sinal interferencia transmissao banda sincronia chiado",
             principal = listOf(0, 1, 2, 3, 4),
             params = mapOf(
                 0 to ParamHuman(label = R.string.fx_bandas_perdidas, decimals = 0),
@@ -972,6 +972,47 @@ private val Table: Map<Int, EffectHuman> = buildMap {
             ),
         ),
     )
+    // 0.4.5 (pedidos de usuários): glitch pesado, blocos no estilo do DaVinci e
+    // o Shift Channels do AE. Mesma tabela no iOS (EffectsHuman.swift).
+    put(
+        "aurea.glitch.hyper_glitch",
+        EffectHuman(
+            name = R.string.fx045g_name_hyper_glitch,
+            keywords = "hyper glitch hiper glitch pesado forte intenso blocos fatias rgb split pixel sort rastro compressao corrupcao datamosh",
+            principal = listOf(0, 1, 2, 4, 5, 6, 8),
+            params = mapOf(
+                0 to ParamHuman(decimals = 0),
+                2 to ParamHuman(suffix = "Hz", decimals = 1),
+                3 to ParamHuman(suffix = "px", decimals = 0),
+                5 to ParamHuman(suffix = "px", decimals = 0),
+                7 to ParamHuman(suffix = "px", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.glitch.block_glitch",
+        EffectHuman(
+            name = R.string.fx045g_name_block_glitch,
+            keywords = "block glitch blocos glitch de blocos davinci resolve fusion bloco retangular deslocar canais trocados macrobloco",
+            principal = listOf(0, 1, 2, 4, 5, 6),
+            params = mapOf(
+                0 to ParamHuman(decimals = 0),
+                1 to ParamHuman(suffix = "px", decimals = 0),
+                2 to ParamHuman(suffix = "px", decimals = 0),
+                4 to ParamHuman(suffix = "px", decimals = 0),
+                5 to ParamHuman(suffix = "Hz", decimals = 1),
+                7 to ParamHuman(suffix = "px", decimals = 0),
+            ),
+        ),
+    )
+    put(
+        "aurea.color.shift_channels",
+        EffectHuman(
+            name = R.string.fx045g_name_shift_channels,
+            keywords = "shift channels trocar canais mudar canais set channels canal alfa vermelho verde azul luminancia rgb trocar cores",
+            principal = listOf(0, 1, 2, 3),
+        ),
+    )
     put(
         "aurea.distort.displacement_map",
         EffectHuman(
@@ -994,7 +1035,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     // Câmera lenta por vetores e desfoque calculado da filmagem (0.1.8). Nomes
     // próprios; a busca acha pelos nomes dos plugins de mesmo propósito.
     put("aurea.time.flow_retime", EffectHuman(
-        keywords = "twixtor flow retime camera lenta slow motion super slow optical flow vetores interpolar quadros velocidade remapear tempo time remap timewarp suave duplicados repetidos duplicate frames chronos topaz",
+        keywords = "twixtor kee flow retime camera lenta slow motion slowmo super slow optical flow vetores interpolar interpolacao quadros frame interpolation velocidade remapear tempo time remap timewarp suave duplicados repetidos duplicate frames chronos topaz camara lenta замедленная съемка замедление स्लो मोशन धीमी गति حركة بطيئة gerak lambat",
         principal = listOf(0, 1, 2, 3, 4),
         params = mapOf(5 to ParamHuman(suffix = "%", decimals = 0))))
     // Aprimorar (0.3.0): a restauração do Topaz (Proteus) com nome próprio.
@@ -1147,7 +1188,7 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         )))
     put("aurea.blur.radial", EffectHuman(
         name = R.string.fx_name_radial_blur,
-        keywords = "desfoque radial radial blur zoom blur spin giro rotacional velocidade cc fast",
+        keywords = "desfoque radial radial blur zoom blur spin giro rotacional velocidade cc fast radial fast blur",
         principal = listOf(0, 1, 2, 3, 4),
         params = mapOf(
             0 to ParamHuman(label = R.string.fx_tipo),
@@ -1158,11 +1199,13 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         )))
     put("aurea.distort.mirror", EffectHuman(
         name = R.string.fx_name_mirror,
-        keywords = "espelho mirror refletir simetria reflexo",
+        keywords = "espelho mirror refletir simetria reflexo espelhar camada mirror layer flip inverter horizontal vertical dois eixos both axes quatro quadrantes sobrepor copia overlay copy alight motion am",
+        principal = listOf(0, 1, 2, 3, 4),
         params = mapOf(
             0 to ParamHuman(label = R.string.fx_centro),
             1 to ParamHuman(label = R.string.fx_angulo),
             2 to ParamHuman(label = R.string.fx_trocar_lado),
+            5 to ParamHuman(decimals = 0),
         )))
     put("aurea.transform.crop", EffectHuman(
         name = R.string.fx_name_crop_edges,
@@ -1226,12 +1269,13 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         )))
     put("aurea.blur.zoom", EffectHuman(
         name = R.string.fx_name_zoom_blur,
-        keywords = "zoom rastro radial lente empurrar desfoque cc fast blur",
+        keywords = "zoom rastro radial lente empurrar desfoque cc fast blur cc radial fast blur radial fast blur mais claro mais escuro brightest darkest",
         params = mapOf(
             0 to ParamHuman(label = R.string.fx_centro),
             1 to ParamHuman(label = R.string.fx_intensidade, decimals = 0),
             2 to ParamHuman(label = R.string.fx_esticar_bordas),
             3 to ParamHuman(label = R.string.fx_mistura, decimals = 0),
+            4 to ParamHuman(label = R.string.fxl_mode),
         )))
     put("aurea.distort.bulge", EffectHuman(
         name = R.string.fx_name_bulge,
@@ -1752,6 +1796,35 @@ private val Table: Map<Int, EffectHuman> = buildMap {
         keywords = "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh cc rainfall snowfall particle world",
         principal = listOf(0, 9, 13, 15, 22, 24, 27, 32, 33, 35, 38),
     ))
+    // --- 0.4.5: pedidos de usuários. Nomes de produtos de terceiros (Light Wrap
+    // dos compositores, Magic Bullet Looks, Ballpoint/Dust dos pacotes de
+    // transição) só como palavras de busca, como no pacote CC. Mesmos
+    // principais no iOS (EffectsHuman.swift).
+    put("aurea.distort.water_reflection", EffectHuman(
+        name = R.string.fx045_name_water_reflection,
+        keywords = "reflexo na agua water reflection espelho mirror lago lake rio river mar sea oceano ocean ondas waves ondulacao ripple poca puddle superficie surface horizonte horizon",
+        principal = listOf(0, 2, 4, 5, 6, 7, 3, 11),
+    ))
+    put("aurea.light.light_wrap", EffectHuman(
+        name = R.string.fx045_name_light_wrap,
+        keywords = "light wrap envolver com luz luz de borda edge light envoltorio wrap composicao compositing recorte keying chroma fundo background integrar blend",
+        principal = listOf(0, 1, 2, 3, 4, 5),
+    ))
+    put("aurea.color.looks", EffectHuman(
+        name = R.string.fx045_name_looks,
+        keywords = "magic bullet looks look looks de cinema cinematic filme film preset filtro filter teal orange bleach bypass noir vintage cyberpunk sepia pastel hora dourada golden hour noite americana day for night faroeste western correcao de cor color grade",
+        principal = listOf(0, 1, 2, 3, 4, 5),
+    ))
+    put("aurea.transition.ballpoint", EffectHuman(
+        name = R.string.fx045_name_ballpoint,
+        keywords = "ballpoint caneta esferografica pen bic rabisco scribble rabiscar hachura hatch desenho drawing escrita handwriting revelar reveal tinta ink transicao transition",
+        principal = listOf(0, 1, 2, 3, 4, 5, 9),
+    ))
+    put("aurea.transition.dust", EffectHuman(
+        name = R.string.fx045_name_dust,
+        keywords = "dust poeira po areia sand cinzas ashes vento wind desintegrar disintegrate particulas particles desfazer dissolver dissolve sumir transicao transition",
+        principal = listOf(0, 1, 5, 6, 7, 2, 13),
+    ))
     // Sinônimos de busca (nomes do After Effects e da referência) dos efeitos sem ficha.
     put("aurea.blur.box", EffectHuman(keywords = "fast box blur"))
     put("aurea.blur.directional", EffectHuman(keywords = "motion blur"))
@@ -1760,7 +1833,32 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.distort.corner_pin", EffectHuman(keywords = "cc power pin"))
     put("aurea.color.cube_lut", EffectHuman(keywords = "apply color lut"))
     put("aurea.key.rotobrush", EffectHuman(keywords = "roto brush rotoscope"))
+    // 0.4.5: Remover fundo (sem tela verde). Principais: modelo, contrair/expandir,
+    // suavidade, borda fina, visualização e inverter; o resto em Avançado.
+    put("aurea.key.background_remove", EffectHuman(name = R.string.bg_remove_fx_name,
+        keywords = "remove background background remover remover fundo tirar fundo recortar pessoa sem tela verde chroma key green screen " +
+            "quitar fondo borrar fondo удалить фон बैकग्राउंड हटाएँ إزالة الخلفية hapus latar blurrr capcut cutout segment",
+        principal = listOf(10, 2, 1, 9, 5, 3),
+    ))
     put("aurea.color.rgb_split", EffectHuman(keywords = "rgb shift"))
+    // 0.4.5 (pedidos de usuários): ladrilhos que se mexem e caixa oca do Alight
+    // Motion, Time Displacement do AE. Nomes em inglês; a busca acha nos 7 idiomas
+    // pelo nome traduzido (R.string.fx045d_name_*) e pelas palavras abaixo.
+    put("aurea.distort.tile_shift", EffectHuman(name = R.string.fx045d_name_tile_shift,
+        keywords = "tile shift deslocar ladrilhos ladrilho azulejo mosaico grade quadrados blocos fileiras colunas aleatorio glitch alight motion am",
+        principal = listOf(0, 1, 2, 3, 4), params = mapOf(0 to ParamHuman(decimals = 0), 1 to ParamHuman(decimals = 0), 3 to ParamHuman(decimals = 0))))
+    put("aurea.distort.hex_tile_rotate", EffectHuman(name = R.string.fx045d_name_hex_tile_rotate,
+        keywords = "hexagon tile rotate hexagono hexagonal hex colmeia honeycomb celulas girar rotacao rodar mosaico alight motion am",
+        principal = listOf(0, 1, 2, 3, 4), params = mapOf(0 to ParamHuman(decimals = 0), 3 to ParamHuman(decimals = 0))))
+    put("aurea.distort.hex_tile_shift", EffectHuman(name = R.string.fx045d_name_hex_tile_shift,
+        keywords = "hexagon tile shift hexagono hexagonal hex colmeia honeycomb celulas deslocar mover mosaico alight motion am",
+        principal = listOf(0, 1, 2, 3, 4), params = mapOf(0 to ParamHuman(decimals = 0), 1 to ParamHuman(decimals = 0), 3 to ParamHuman(decimals = 0))))
+    put("aurea.distort.hollow_box", EffectHuman(name = R.string.fx045d_name_hollow_box,
+        keywords = "hollow box caixa oca vazada cubo cube box 3d lados recorte contorno moldura alight motion am",
+        principal = listOf(6, 7, 8, 10, 2, 3, 4), params = mapOf(3 to ParamHuman(decimals = 1), 4 to ParamHuman(decimals = 0), 5 to ParamHuman(decimals = 1))))
+    put("aurea.time.time_displacement", EffectHuman(name = R.string.fx045d_name_time_displacement,
+        keywords = "time displacement deslocamento no tempo deslocamento temporal slit scan fenda atraso mapa luminancia brilho after effects ae kee",
+        principal = listOf(0, 1, 2, 3, 4, 5), params = mapOf(2 to ParamHuman(decimals = 2), 3 to ParamHuman(decimals = 0))))
 }
 
 /**
@@ -1812,6 +1910,9 @@ internal val TileSearchEffects: Set<Int> = listOf(
     "aurea.distort.displacement_map",
     "aurea.transform.offset",
     "aurea.repeat.grid",
+    "aurea.distort.tile_shift",
+    "aurea.distort.hex_tile_rotate",
+    "aurea.distort.hex_tile_shift",
 ).map { effectTypeId(it) }.toSet()
 
 /** Os termos de ladrilho deste efeito no idioma de `res` (vazio = não ladrilha). */

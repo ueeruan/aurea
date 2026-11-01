@@ -1329,6 +1329,9 @@ private fun openEffectColor(env: PanelEnv, effectId: Int, param: Int, anchor: Re
             },
             onDone = { store.endGesture() },
             anchor = anchor,
+            // 0.4.5: o conta-gotas amostra sem a própria borda/sombra (a cor da camada por baixo).
+            sampleLayer = owner,
+            sampleEffect = effectId,
         ),
     )
 }

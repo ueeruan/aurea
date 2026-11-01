@@ -88,6 +88,8 @@ namespace effect_keys {
     inline constexpr const char* kRadialRays = "aurea.pattern.radial_rays";
     inline constexpr const char* kGrid = "aurea.pattern.grid";
     inline constexpr const char* kRotobrush = "aurea.key.rotobrush";
+    /// "Remover fundo" (0.4.5): recorte por quadro em cache, sem tela verde.
+    inline constexpr const char* kBackgroundRemove = "aurea.key.background_remove";
     inline constexpr const char* kParentingHelper = "aurea.transform.parenting_helper";
     inline constexpr const char* kText3DLayout = "aurea.text3d.layout";
     /// Irmão do Text 3D Layout para as FORMAS 3D: mesmos índices de parâmetro,
@@ -157,6 +159,11 @@ namespace effect_keys {
     inline constexpr const char* kUniVhs             = "aurea.glitch.uni_vhs";
     inline constexpr const char* kSignal             = "aurea.glitch.signal";
     inline constexpr const char* kCrossGlitch        = "aurea.glitch.cross";
+    // 0.4.5 (pedidos de usuários): glitch pesado, blocos no estilo do DaVinci
+    // e o Shift Channels do AE (GlitchEffects.cpp).
+    inline constexpr const char* kHyperGlitch        = "aurea.glitch.hyper_glitch";
+    inline constexpr const char* kBlockGlitch        = "aurea.glitch.block_glitch";
+    inline constexpr const char* kShiftChannels      = "aurea.color.shift_channels";
     // Tempo (integrados ao Temporal Engine, não desenham na cadeia de pixels)
     inline constexpr const char* kPosterizeTime      = "aurea.time.posterize";
     inline constexpr const char* kLowFps             = "aurea.time.low_fps";

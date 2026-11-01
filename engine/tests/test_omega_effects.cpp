@@ -361,3 +361,43 @@ AUREA_TEST(OmegaEffects, PasteSettingsOnlyIntoTheSameType) {
     AUREA_CHECK_EQ(r.e.clipboard_effect_type(), 0u);
     AUREA_CHECK(!r.e.paste_effect_settings(r.layer, c));
 }
+
+// Relato 0.4.4 ("a intensidade do Deep Glow não muda nada"): a Intensidade do
+// brilho em oitavas virava RÉGUA de 0,05 por risco (a faixa digitada 0..100
+// passava de 4× a do slider). Agora é slider 0..10 com passo 0,1 nas duas
+// plataformas (a linha da ponte carrega o controle e o passo), e o valor
+// escrito chega ao efeito.
+AUREA_TEST(OmegaEffects, DeepGlowIntensityIsASliderOverItsWholeRange) {
+    FxRig r;
+    AUREA_CHECK(r.ok);
+    if (!r.ok) return;
+    const ParameterRegistry* specs = r.e.effects().params(effect_type_id(effect_keys::kDeepGlow));
+    AUREA_CHECK(specs != nullptr);
+    if (!specs) return;
+    const u32 k = specs->find("glow_intensity");
+    AUREA_CHECK(k != kInvalidIndex);
+    if (k == kInvalidIndex) return;
+    const ParamSpec& s = specs->at(k);
+    AUREA_CHECK(resolve_control(s) == ParamControl::Slider);
+    AUREA_CHECK_NEAR(resolve_step(s), 0.1f, 1e-6f);
+    AUREA_CHECK_NEAR(s.minValue, 0.0f, 1e-6f);
+    AUREA_CHECK_NEAR(s.maxValue, 10.0f, 1e-6f);
+    AUREA_CHECK_NEAR(s.typed_max(), 100.0f, 1e-6f);   // o teclado continua indo além da régua
+    // Instância nova: a linha da ponte traz o slider visível, e a escrita da UI
+    // (EffectSetParam no índice da linha) muda o valor que o efeito lê.
+    const u32 fx = r.add(effect_keys::kDeepGlow);
+    AUREA_CHECK(fx != kInvalidIndex);
+    if (fx == kInvalidIndex) return;
+    std::vector<bridge::EffectParamRow> rows;
+    std::vector<char> blob;
+    const u32 n = r.query(fx, rows, blob);
+    AUREA_CHECK(n > k);
+    if (n <= k) return;
+    AUREA_CHECK_EQ(rows[k].index, k);
+    AUREA_CHECK_EQ(rows[k].control, static_cast<u32>(ParamControl::Slider));
+    AUREA_CHECK((rows[k].flags & kParamHidden) == 0u);
+    r.set_param(fx, k, 7.5f);
+    const EffectInstance* inst = r.fx(fx);
+    AUREA_CHECK(inst != nullptr && k < inst->params.size());
+    if (inst && k < inst->params.size()) AUREA_CHECK_NEAR(inst->params[k].constant.v[0], 7.5f, 1e-6f);
+}

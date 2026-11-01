@@ -170,7 +170,13 @@ object AppConfigStore {
     const val MIN_INTERVAL_MS = 30L * 60 * 1000
 
     private var appContext: Context? = null
-    private val scope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
+    // Bug #2 (abre e fecha): a consulta roda em TODA abertura; uma exceção
+    // inesperada aqui derrubava o app em vez de só deixar a config como estava.
+    private val scope by lazy {
+        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+            android.util.Log.w("AureaConfig", "consulta da config falhou", e)
+        })
+    }
     private val key by lazy { AppConfigVerifier.publicKey(AppConfigKeys.PUBLIC_KEY_SPKI) }
     private var lastAttempt = 0L
     private var listeners = mutableListOf<() -> Unit>()

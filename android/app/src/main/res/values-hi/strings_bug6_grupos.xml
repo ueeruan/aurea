@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="eng_ungroup_effects">समूह पर इफ़ेक्ट लगे हैं</string>
+    <string name="eng_ungroup_masks">समूह पर मास्क लगे हैं</string>
+    <string name="eng_ungroup_blend">समूह का ब्लेंड मोड बदला हुआ है</string>
+    <string name="eng_ungroup_opacity">समूह की अपनी अपारदर्शिता है</string>
+    <string name="eng_ungroup_3d">समूह 3D में है</string>
+    <string name="eng_ungroup_transition">समूह पर ट्रांज़िशन या इको है</string>
+    <string name="eng_ungroup_background">समूह का अपना बैकग्राउंड है</string>
+    <string name="eng_ungroup_camera_light">समूह का अपना कैमरा या लाइट है</string>
+    <string name="eng_ungroup_animation">समूह पर आने या जाने का एनिमेशन है</string>
+</resources>

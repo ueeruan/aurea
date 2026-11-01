@@ -739,7 +739,9 @@ struct NativeCurvePanel: View {
                     }.buttonStyle(AureaPressStyle(shrink: 1))
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear {
-                    if model.curveSelectedTime != nil && !curveEditable(track) {
+                    // Correção #5 (0.4.4): antes de voltar, procura um trecho que exista
+                    // (par do `recoverCurveSegment` do Android); só sem nenhum avisa e volta.
+                    if model.curveSelectedTime != nil && !recoverSegment() && !curveEditable(track) {
                         model.toast = AureaText.t("pn_curve_need_two_keys"); back()
                     }
                 }
@@ -790,6 +792,33 @@ struct NativeCurvePanel: View {
         if let query, (query["flags"]?.uint32Value ?? 0) & 8 != 0, let start = query["segmentStart"]?.int64Value {
             model.curveSelectedTime = Int32(clamping: start)
         } else { model.curveSelectedTime = head.time }
+    }
+    /// Correção #5 (0.4.4): a marca escolhida não abre trecho no motor. Escolhe o início
+    /// de um trecho que exista — na mesma trilha (o do cabeçote, senão o 1º), senão noutra
+    /// trilha animada da camada (a mesma busca do `followLayer`). Falso = nada mudou.
+    private func recoverSegment() -> Bool {
+        let keys = track
+        if keys.count >= 2 {
+            let frames: [Int64] = [model.status.playhead] + keys.compactMap { compositionFrame($0.time) }
+            for frame in frames {
+                guard let query = navigation(at: frame), (query["flags"]?.uint32Value ?? 0) & 8 != 0,
+                      let start = query["segmentStart"]?.int64Value, let end = query["segmentEnd"]?.int64Value,
+                      keys.contains(where: { Int64($0.time) == start }),
+                      keys.contains(where: { Int64($0.time) == end }) else { continue }
+                let time = Int32(clamping: start)
+                guard time != model.curveSelectedTime else { return false }
+                model.curveSelectedTime = time
+                return true
+            }
+            return false
+        }
+        let like = KeyframeItem(property: model.curveProperty, paramIndex: model.curveParam, effectIndex: model.curveEffect,
+                                time: 0, value: 0, interpolation: 1)
+        let next = graphTrackFor((model.keyframes[layer] ?? []).filter { $0.timelineVisible }, like: like)
+        guard next.count >= 2, let head = next.first else { return false }
+        model.curveProperty = head.property; model.curveEffect = head.effectIndex; model.curveParam = head.paramIndex
+        model.curveSelectedTime = head.time
+        return true
     }
     private func followPlayhead() {
         guard !model.timelineKeyDragActive else { return }

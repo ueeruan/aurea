@@ -57,7 +57,17 @@ FrameIndex PlaybackController::clamp_frame(FrameIndex f) const noexcept {
         ? navigationEnd_.value : floor};
 }
 
+void PlaybackController::set_held(bool held, u64 nowNs) noexcept {
+    if (mode_ != PlaybackMode::Playing) { held_ = false; return; }
+    if (held_ == held) return;
+    held_ = held;
+    // Ao segurar e ao soltar, o relógio parte do quadro atual: soltar não pode
+    // pular o tempo em que ficou segurado.
+    clock_.start(currentNs_, nowNs, speed_);
+}
+
 void PlaybackController::play(u64 nowNs) noexcept {
+    held_ = false;
     if (mode_ == PlaybackMode::Playing) return;
     // Tocar a partir do último frame volta ao começo — é o que todo player faz.
     if (current_.value >= duration_.value - 1) {
@@ -72,6 +82,7 @@ void PlaybackController::play(u64 nowNs) noexcept {
 }
 
 void PlaybackController::pause(u64 nowNs) noexcept {
+    held_ = false;
     if (mode_ != PlaybackMode::Playing) return;
     clock_.stop(nowNs);
     // Pausa no frame INTEIRO mostrado, não no meio de um: o próximo play
@@ -88,6 +99,7 @@ void PlaybackController::toggle(u64 nowNs) noexcept {
 }
 
 void PlaybackController::seek(FrameIndex frame, u64 nowNs) noexcept {
+    held_ = false;
     current_ = clamp_frame(frame);
     currentNs_ = frame_to_ns(current_);
     clock_.seek(currentNs_, nowNs);
@@ -96,6 +108,7 @@ void PlaybackController::seek(FrameIndex frame, u64 nowNs) noexcept {
 }
 
 void PlaybackController::begin_scrub(u64 nowNs) noexcept {
+    held_ = false;
     wasPlayingBeforeScrub_ = mode_ == PlaybackMode::Playing;
     if (wasPlayingBeforeScrub_) clock_.stop(nowNs);
     mode_ = PlaybackMode::Scrubbing;
@@ -164,6 +177,9 @@ FrameIndex PlaybackController::update(u64 nowNs) noexcept {
         }
     }
     if (mode_ != PlaybackMode::Playing) return current_;
+    // Segurado (a prévia não entrega quadro): o relógio não anda; set_held
+    // reancora ao soltar.
+    if (held_) return current_;
 
     i64 ns = clock_.media_ns(nowNs);
     const i64 endNs = frame_to_ns(duration_);
@@ -185,6 +201,53 @@ FrameIndex PlaybackController::update(u64 nowNs) noexcept {
     currentNs_ = ns;
     current_ = clamp_frame(ns_to_frame(ns));
     return current_;
+}
+
+// =============================================================================
+// PresentationWatchdog
+// =============================================================================
+PresentationWatchdog::Action PresentationWatchdog::observe(bool playing, bool held, i64 playhead, u64 nowNs) noexcept {
+    if (!playing) {
+        wasPlaying_ = false;
+        lagSinceNs_ = heldSinceNs_ = 0;
+        return held ? Action::Release : Action::None;
+    }
+    if (!wasPlaying_) {
+        // O play parte do quadro que está na tela.
+        wasPlaying_ = true;
+        shown_ = playhead;
+        lagSinceNs_ = heldSinceNs_ = 0;
+    }
+    if (held) {
+        // Chegou o quadro completo da agulha segurada: volta a andar.
+        if (playhead == shown_) { heldSinceNs_ = lagSinceNs_ = 0; return Action::Release; }
+        if (!heldSinceNs_) heldSinceNs_ = nowNs;
+        if (nowNs - heldSinceNs_ < kMaxHoldNs) return Action::None;
+        // Desiste: toca sem a camada que falta até um quadro completo voltar.
+        yielded_ = true;
+        shown_ = playhead;
+        heldSinceNs_ = lagSinceNs_ = 0;
+        return Action::Release;
+    }
+    heldSinceNs_ = 0;
+    if (yielded_ || playhead == shown_) { lagSinceNs_ = 0; return Action::None; }
+    if (!lagSinceNs_) { lagSinceNs_ = nowNs; return Action::None; }
+    if (nowNs - lagSinceNs_ < kStallNs) return Action::None;
+    lagSinceNs_ = 0;
+    heldSinceNs_ = nowNs;
+    ++holds_;
+    return Action::Hold;
+}
+
+void PresentationWatchdog::presented(i64 frame, bool playing, bool complete) noexcept {
+    if (!playing) return;
+    if (complete) {
+        shown_ = frame;
+        lagSinceNs_ = 0;
+        yielded_ = false;
+    } else if (yielded_) {
+        shown_ = frame;
+    }
 }
 
 // =============================================================================

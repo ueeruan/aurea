@@ -668,17 +668,37 @@ void Impl::reclaim_stale_imports() noexcept {
         if (!t || frameNumber > t->lastUsedFrame + framesInFlight) stale.push_back(id);
     }
     for (u64 id : stale) self->destroy_texture(TextureHandle{id});
+    // 0.4.5 (prévia que degradava tocando): o CVMetalTextureCache só fazia a
+    // própria faxina ao fechar o projeto, no trim de memória e no suspend.
+    // Tocando, cada quadro novo do decoder passa por aqui e é reimportado; sem
+    // o flush periódico (a Apple pede chamá-lo regularmente) o cache acumulava
+    // referências a IOSurfaces já soltas, segurando o pool do decoder. Uma vez
+    // por ~meio segundo de quadros; texturas ainda vivas (inclusive as que a
+    // fila adiada protege) seguram o próprio CVPixelBuffer e não são afetadas.
+    if (!stale.empty() && textureCache && frameNumber >= nextCacheFlushFrame) {
+        CVMetalTextureCacheFlush(textureCache, 0);
+        nextCacheFlushFrame = frameNumber + 30;
+    }
 }
 
 // =============================================================================
 // Frame
 // =============================================================================
+// 0.4.5: a thread de render do motor é uma std::thread sem pool de
+// autorelease próprio — o que escapasse aqui (label do command buffer, o
+// drawable e a textura dele, os logs de espera do fence) nunca era drenado
+// enquanto o app vivesse. Um pool por quadro; o que o frame guarda (f.cmd,
+// drawable) é referência forte do ARC e sobrevive ao fim do pool.
 Status Backend::begin_frame(FrameBegin& out) noexcept {
-    return impl_->begin_frame_impl(out, true);
+    @autoreleasepool {
+        return impl_->begin_frame_impl(out, true);
+    }
 }
 
 Status Backend::begin_offscreen_frame(FrameBegin& out) noexcept {
-    return impl_->begin_frame_impl(out, false);
+    @autoreleasepool {
+        return impl_->begin_frame_impl(out, false);
+    }
 }
 
 Status Backend::begin_presentable_frame_lease() noexcept {

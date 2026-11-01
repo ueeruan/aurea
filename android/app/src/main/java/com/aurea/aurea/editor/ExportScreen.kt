@@ -78,8 +78,10 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -976,8 +978,10 @@ private fun Progress(st: com.aurea.aurea.state.ExportUiState, format: ExportForm
  * A página azul-marinho do resultado: a prévia (70 %) — vídeo com ▶ de 62 dp e
  * barra de busca, GIF animado, PNG, a 1ª imagem da sequência — e a base
  * (30 %) com Salvar | Compartilhar (57 dp), Fechar e o cartão de apoio.
- * O AUREA já salvou sozinho: o Salvar diz "Salvo na galeria ✓" e abre
- * "Salvar em…"; se a galeria recusou, volta a ser "Salvar" e tenta de novo.
+ * O AUREA já salvou sozinho: o Salvar diz "Salvo na galeria ✓" e só confirma
+ * onde ficou (bug #12: antes abria o seletor de documentos); se a galeria
+ * recusou, volta a ser "Salvar" e tenta de novo. "Salvar em…" (cópia num
+ * documento escolhido) é o link separado abaixo dos botões.
  */
 @Composable
 private fun ResultPage(store: EditorStore, item: ExportItem, opts: ExportOptions, compW: Int, compH: Int, compFps: Double, onClose: () -> Unit) {
@@ -987,10 +991,27 @@ private fun ResultPage(store: EditorStore, item: ExportItem, opts: ExportOptions
     val scope = rememberCoroutineScope()
     val uri = st.outputUri
     val savedLabel = stringResource(R.string.om_exp_saved_gallery)
+    // Bug #12: o aviso fica DENTRO do resultado — ele é um Dialog, e o toast do
+    // app (AureaApp) desenha embaixo da janela do Dialog, invisível.
+    var notice by remember { mutableStateOf<String?>(null) }
+    var noticeSerial by remember { mutableIntStateOf(0) }
+    LaunchedEffect(noticeSerial) { if (notice != null) { delay(2200); notice = null } }
+    fun confirm(text: String) { notice = text; noticeSerial++ }
+    // "Salvar em…" é uma ação SEPARADA (o link abaixo dos botões). O Salvar
+    // nunca abre o seletor de documentos: o vídeo já está na galeria.
     val saveAs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(st.format.mime)) { target ->
         if (target != null) scope.launch {
-            val ok = exporter.saveCopy(target)
-            store.showToast(if (ok) savedLabel else context.getString(R.string.app_export_gallery_failed))
+            if (!exporter.saveCopy(target)) {
+                confirm(context.getString(R.string.app_export_gallery_failed))
+                return@launch
+            }
+            val name = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.query(target, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                        ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                }.getOrNull()
+            } ?: exporter.suggestedName()
+            confirm(context.getString(R.string.app_saved_to_path, name))
         }
     }
     val sequenceFrames = remember(st.format) {
@@ -1019,6 +1040,15 @@ private fun ResultPage(store: EditorStore, item: ExportItem, opts: ExportOptions
                     )
                 }
             }
+            notice?.let { text ->
+                Text(
+                    text, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(12.dp).clip(RoundedCornerShape(12.dp))
+                        .background(AureaColors.SurfaceHigh).padding(horizontal = 16.dp, vertical = 10.dp)
+                        .semantics { liveRegion = LiveRegionMode.Polite }.testTag("export.result.notice"),
+                    style = AureaType.Body,
+                )
+            }
         }
         Column(Modifier.weight(0.3f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp)) {
             if (st.message.isNotBlank()) {
@@ -1032,10 +1062,22 @@ private fun ResultPage(store: EditorStore, item: ExportItem, opts: ExportOptions
                     if (saved) CupertinoGlyph.CheckmarkCircleFill else CupertinoGlyph.ArrowDownToLine,
                     "export.result.save", Modifier.weight(1f),
                 ) {
-                    if (saved) saveAs.launch(exporter.suggestedName()) else exporter.retryGallery()
+                    // Bug #12: já salvo → só confirma (sem seletor de documentos);
+                    // a galeria tinha recusado → tenta de novo.
+                    if (saved) confirm(st.message.lineSequence().firstOrNull()?.takeIf { it.isNotBlank() } ?: savedLabel)
+                    else exporter.retryGallery()
                 }
                 ResultButton(stringResource(R.string.editor_compartilhar), CupertinoGlyph.SquareArrowUp, "export.result.share", Modifier.weight(1f)) {
                     exporter.shareIntent()?.let { runCatching { context.startActivity(it) } }
+                }
+            }
+            if (uri != null && st.phase == ExportPhase.Done) {
+                Box(
+                    Modifier.fillMaxWidth().padding(top = 6.dp).height(44.dp)
+                        .testTag("export.result.saveAs").tocavel { saveAs.launch(exporter.suggestedName()) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(stringResource(R.string.om_exp_save_as), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.OnImage70)))
                 }
             }
             Spacer(Modifier.height(15.dp))

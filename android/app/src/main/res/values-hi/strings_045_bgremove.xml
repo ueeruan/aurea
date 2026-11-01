@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Remover fundo (aurea.key.background_remove) — recorte sem tela verde. -->
+    <string name="bg_remove_fx_name">बैकग्राउंड हटाएँ</string>
+    <string name="bg_remove_fx_desc">बिना ग्रीन स्क्रीन के वीडियो या फ़ोटो का बैकग्राउंड हटाता है: व्यक्ति या मुख्य वस्तु रहती है, बाकी हर फ़्रेम से हट जाता है।</string>
+    <string name="bg_remove_action">बैकग्राउंड हटाएँ</string>
+    <string name="bg_remove_action_detail">बिना ग्रीन स्क्रीन के व्यक्ति या वस्तु को काटता है</string>
+    <string name="bg_remove_note">हर फ़्रेम में अपने-आप कटआउट, बिना ग्रीन स्क्रीन। क्लिप को एक बार विश्लेषित करें: नतीजा प्रोजेक्ट के साथ सेव होता है और एक्सपोर्ट भी वही कटआउट इस्तेमाल करता है।</string>
+    <string name="bg_remove_analyze">क्लिप विश्लेषित करें</string>
+    <string name="bg_remove_analyze_count">क्लिप विश्लेषित करें (%1$d फ़्रेम)</string>
+    <string name="bg_remove_cancel">विश्लेषण रद्द करें</string>
+    <string name="bg_remove_progress">%2$d में से %1$d फ़्रेम विश्लेषित हो रहे हैं</string>
+    <string name="bg_remove_clip_status">क्लिप: %2$d में से %1$d फ़्रेम तैयार</string>
+    <string name="bg_remove_clip_done">पूरी क्लिप विश्लेषित और प्रोजेक्ट के साथ सेव</string>
+    <string name="bg_remove_frame_ready">यह फ़्रेम: कटआउट तैयार</string>
+    <string name="bg_remove_frame_pending">यह फ़्रेम: कटआउट बन रहा है…</string>
+    <string name="bg_remove_failed">इस लेयर का बैकग्राउंड नहीं हटाया जा सका।</string>
+    <string name="bg_remove_failed_model">कटआउट मॉडल लोड नहीं हुआ: डिवाइस में मेमोरी कम है। दूसरे ऐप बंद करें और फिर से क्लिप विश्लेषित करें पर टैप करें।</string>
+    <string name="bg_remove_failed_decode">इस वीडियो के फ़्रेम अभी पढ़े नहीं जा सके। प्लेबैक रोकें और फिर से क्लिप विश्लेषित करें पर टैप करें।</string>
+    <string name="bg_remove_failed_frames">कुछ फ़्रेम विश्लेषित नहीं हुए। फिर से क्लिप विश्लेषित करें पर टैप करें।</string>
+    <string name="bg_remove_person_unavailable">इस डिवाइस पर व्यक्ति मॉडल उपलब्ध नहीं है; ऑटोमैटिक इस्तेमाल हो रहा है।</string>
+    <string name="bg_remove_p_expand">सिकोड़ें/फैलाएँ</string>
+    <string name="bg_remove_p_invert">उलटें (बैकग्राउंड रखें)</string>
+    <string name="bg_remove_p_edge">बारीक किनारा</string>
+    <string name="bg_remove_p_model">मॉडल</string>
+    <string name="bg_remove_o_auto">ऑटोमैटिक</string>
+    <string name="bg_remove_o_person">व्यक्ति</string>
+    <string name="bg_remove_tip_model">ऑटोमैटिक मुख्य वस्तु को काटता है और हर डिवाइस पर चलता है। व्यक्ति, डिवाइस में होने पर सिस्टम का लोगों वाला कटआउट इस्तेमाल करता है; न होने पर ऑटोमैटिक चलता है।</string>
+    <string name="bg_remove_tip_edge">वीडियो के रिज़ॉल्यूशन पर किनारा फिर से बनाता है (बाल, पतली रेखाएँ)। 0 साधारण किनारा इस्तेमाल करता है।</string>
+</resources>

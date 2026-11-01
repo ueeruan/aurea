@@ -59,7 +59,8 @@ import com.aurea.aurea.state.CompositionSettings
 import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.AureaDropdown
 import com.aurea.aurea.ui.ds.AureaToggle
-import com.aurea.aurea.ui.ds.ColorPickerSheet
+import com.aurea.aurea.editor.panels.rememberFullEyedropper
+import com.aurea.aurea.ui.ds.ColorPickerFull
 import com.aurea.aurea.ui.ds.KeypadRequest
 import com.aurea.aurea.ui.ds.MenuEntry
 import com.aurea.aurea.ui.ds.NumericKeypadSheet
@@ -130,7 +131,10 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
     var keypad by remember { mutableStateOf<KeypadRequest?>(null) }
     var pickingBackground by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+    // 0.4.5: o conta-gotas da cor de fundo recolhe a tela cheia; o painel também sai da
+    // frente da prévia até a cor voltar (o estado dele fica aqui fora do Dialog).
+    val sampling = store.eyedropper?.collapsed == true
+    if (!sampling) Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val enter = remember { Animatable(1f) }
         LaunchedEffect(Unit) { enter.animateTo(0f, tween(200)) }
         BoxWithConstraints(
@@ -309,13 +313,14 @@ internal fun ProjectSettingsSheet(store: EditorStore, ui: EditorUi, onDismiss: (
             store.beginGesture("fundo da composição")
             onDispose { store.endGesture() }
         }
-        ColorPickerSheet(
+        // 0.4.5: a tela cheia (par do iOS) com o conta-gotas da prévia: o fundo pega a cor
+        // da mídia ou de qualquer objeto do quadro.
+        ColorPickerFull(
             initial = initial,
             withAlpha = false,
-            pickFromPreview = { store.captureBitmap(720) },
-            previewIdentity = store.projectGeneration to comp.id,
             onChange = { r, g, b, _ -> store.setCompositionBackground(r, g, b, 1f) },
             onDone = { pickingBackground = false },
+            eyedropper = rememberFullEyedropper(store),
         )
     }
 }

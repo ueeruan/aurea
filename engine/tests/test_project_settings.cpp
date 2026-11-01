@@ -335,6 +335,73 @@ AUREA_TEST(ProjectBackground, ClearColorShowsInPreviewAndExport) {
     }
 }
 
+// Conta-gotas (0.4.5): a cor de um ponto da composição, com a opção de ignorar
+// o efeito que está sendo editado (o verde antes do Chroma Key) — sem desfazer,
+// sem revisão nova e sem deixar o efeito desligado na prévia seguinte.
+AUREA_TEST(Eyedropper, SampleSkipsEditedEffectWithoutTouchingModel) {
+    if (!gpu_available()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
+    GpuRig r;
+    AUREA_CHECK(r.ok);
+    if (!r.ok) return;
+    const f32 blue[4] = {0.2f, 0.6f, 0.9f, 1.0f};
+    AUREA_CHECK(r.e.new_project(64, 36, 30.0, nullptr, blue).ok());
+    const Result<u64> shape = r.e.add_shape(10);   // "Quadrado" no centro
+    AUREA_CHECK(shape.ok());
+    if (!shape.ok()) return;
+    auto near = [](const f32* a, const f32* b, f32 tol) {
+        for (int i = 0; i < 3; ++i) if (std::abs(a[i] - b[i]) > tol) return false;
+        return true;
+    };
+    f32 plain[4] = {};
+    AUREA_CHECK(r.e.sample_composition_color(32.0f, 18.0f, 0, kInvalidIndex, plain).ok());
+
+    Command add;
+    add.type = CommandType::EffectAdd;
+    add.effect_add.layer = LayerId::unpack(*shape);
+    add.effect_add.effectType = effect_type_id(effect_keys::kInvert);
+    add.effect_add.index = kInvalidIndex;
+    AUREA_CHECK(r.e.apply_command(add).ok());
+    const Layer* layer = current(r.e)->layer(LayerId::unpack(*shape));
+    AUREA_CHECK(layer && layer->effects.size() == 1);
+    if (!layer || layer->effects.empty()) return;
+    const u32 fx = layer->effects[0].id;
+
+    f32 inverted[4] = {};
+    AUREA_CHECK(r.e.sample_composition_color(32.0f, 18.0f, 0, kInvalidIndex, inverted).ok());
+    AUREA_CHECK(!near(plain, inverted, 0.2f));   // o Inverter aparece na prévia
+
+    const EngineStatus before = r.e.read_status();
+    f32 source[4] = {};
+    AUREA_CHECK(r.e.sample_composition_color(32.0f, 18.0f, *shape, fx, source).ok());
+    AUREA_CHECK(near(plain, source, 3.0f / 255.0f));   // a cor que ENTRA no efeito
+    if (!near(plain, source, 3.0f / 255.0f))
+        std::printf("origem %.3f %.3f %.3f, esperado %.3f %.3f %.3f ", source[0], source[1], source[2], plain[0], plain[1], plain[2]);
+    // Fora do quadro: preso à borda (o fundo azul, sRGB 0.2/0.6/0.9).
+    f32 corner[4] = {};
+    AUREA_CHECK(r.e.sample_composition_color(-50.0f, -50.0f, *shape, fx, corner).ok());
+    AUREA_CHECK(near(corner, blue, 3.0f / 255.0f));
+    AUREA_CHECK_NEAR(corner[3], 1.0f, 1e-3f);
+
+    // O modelo não mudou: efeito ligado, sem passo de desfazer, mesma revisão.
+    const EngineStatus after = r.e.read_status();
+    AUREA_CHECK(layer->effects[0].enabled);
+    AUREA_CHECK_EQ(after.undoDepth, before.undoDepth);
+    AUREA_CHECK_EQ(after.modelRevision, before.modelRevision);
+    // A captura seguinte, sem pedido, mostra o efeito de novo.
+    f32 again[4] = {};
+    AUREA_CHECK(r.e.sample_composition_color(32.0f, 18.0f, 0, kInvalidIndex, again).ok());
+    AUREA_CHECK(near(inverted, again, 3.0f / 255.0f));
+    // O quadro inteiro do conta-gotas tem o tamanho da prévia pedida.
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0;
+    AUREA_CHECK(r.e.capture_eyedropper_frame_rgba(32, *shape, fx, rgba, w, h).ok());
+    AUREA_CHECK(w == 32 && h == 18 && rgba.size() == static_cast<usize>(w) * h * 4);
+    // Efeito que não existe: a prévia comum (nada falha, nada muda).
+    f32 missing[4] = {};
+    AUREA_CHECK(r.e.sample_composition_color(32.0f, 18.0f, *shape, fx + 99, missing).ok());
+    AUREA_CHECK(near(inverted, missing, 3.0f / 255.0f));
+}
+
 AUREA_TEST(ProjectFps, ExportFrameCountAndTimestampsAtFractionalRates) {
     if (!gpu_available()) { std::printf("(sem GPU Vulkan: pulado) "); return; }
     GpuRig r;

@@ -871,13 +871,24 @@ Status Backend::begin_frame_impl(FrameBegin& out, bool withSurface) noexcept {
         if (w != VK_SUCCESS) return fail_recording(w, "vkWaitForFences frame");
         collect_timings(f);
         run_deferred(f);
-        // Imagens importadas que ninguém usa há 10 s: a importação é soltada
-        // (o decoder pode ter trocado de buffers após um seek ou fechamento).
-        if (!externalImageScopes_ && frameNumber_ % 120 == 0) {
+        // Imagens importadas que ninguém usa há kImportIdleFrames quadros: a
+        // importação é soltada (o decoder pode ter trocado de buffers após um
+        // seek, um codec recriado ou o fechamento do clipe).
+        // 0.4.5 (prévia que degradava tocando): eram 600 quadros, conferidos só
+        // no quadro exato múltiplo de 120 — e pulados se um grafo segmentado
+        // estivesse aberto nele. Tocando a 30 fps isso segurava ~20–40 s de
+        // buffers de cada decoder já fechado (cada clipe tem o próprio pool:
+        // ~90 MB em 1080p, ~200 MB em 4K), fora da verba do MemoryManager. Num
+        // projeto com cortes a memória subia até a GPU recusar alocações e a
+        // prévia congelar/ficar preta. O conjunto em uso (o ImageReader e o
+        // pool RGBA giram em ~12 buffers) volta a cada poucos quadros, então
+        // não é reimportado; a fila adiada protege as leituras em voo.
+        if (!externalImageScopes_ && frameNumber_ >= nextImportSweepFrame_) {
+            nextImportSweepFrame_ = frameNumber_ + kImportSweepFrames;
             std::vector<u64> stale;
             for (auto& [buf, id] : importedByBuffer_) {
                 const Texture* t = textures_.get(id);
-                if (!t || frameNumber_ > t->lastUsedFrame + 600) stale.push_back(id);
+                if (!t || frameNumber_ > t->lastUsedFrame + kImportIdleFrames) stale.push_back(id);
             }
             for (u64 id : stale) destroy_texture(TextureHandle{id});
         }

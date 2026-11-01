@@ -810,7 +810,13 @@ internal class TimelineController(
             return
         }
         if (!(selectionSize() == 1 && isSelected(r.id))) store.select(r.id)
-        val key = r.keysAt[index].first()
+        // Correção #5 (0.4.4): no resumo (e na trilha de grupo) o 1º losango do instante
+        // podia ser de uma trilha SEM trecho (1 marca só): a curva abria e fechava na
+        // hora ("precisa de 2 keyframes"). Prefere a marca que abre um trecho, como o iOS.
+        val group = r.keysAt[index]
+        val key = group.firstOrNull { k ->
+            store.keyframeNavigation(r.id, com.aurea.aurea.engine.TrackKey(k.property, k.effectIndex, k.paramIndex), r.instants[index])?.hasSegment == true
+        } ?: group.first()
         store.seek(r.instants[index])
         // Trilha de grupo: todos os eixos daquele instante ficam escolhidos.
         store.tapTimelineKey(r.id, key, if (r.track?.group == true) r.keysAt[index] else listOf(key))

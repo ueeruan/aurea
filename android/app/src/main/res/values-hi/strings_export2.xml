@@ -21,4 +21,5 @@
     <string name="app_export_codec_hung_retry">फ़ोन का वीडियो एनकोडर अटक गया। हम संगत मोड में फिर से कोशिश करेंगे।</string>
     <string name="app_export_retry_compatible">संगत मोड में फिर से कोशिश की जा रही है…</string>
     <string name="app_export_hevc_to_h264">इस फ़ोन में इस साइज़ के लिए HEVC एनकोडर नहीं है: H.264 में एक्सपोर्ट हो रहा है।</string>
+    <string name="expfail_after_ladder">हमने ज़्यादा संगत मोड भी आज़माए (H.264, सॉफ़्टवेयर एनकोडर और कम रिज़ॉल्यूशन), लेकिन इस फ़ोन पर कोई काम नहीं किया। सपोर्ट कोड: E%1$d-%2$d-%3$d.</string>
 </resources>

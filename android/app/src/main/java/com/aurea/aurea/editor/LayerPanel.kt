@@ -133,6 +133,8 @@ internal enum class LayerSlot(val tag: String) {
     Edit("edit"),
     Presets("presets"),
     Effects("effects"),
+    /** Bug #9b: Máscara (o painel de máscaras) nas camadas visuais cujo Editar não é o recorte. */
+    Mask("mask"),
 }
 
 /** O que a vaga "Editar…" é em cada tipo (uma por vez, como na referência). */
@@ -169,7 +171,7 @@ internal data class PanelLayer(
 )
 
 /**
- * A grade de um tipo. [row2] tem 3 vagas e [row3] 2 a 4 (nula = invisível,
+ * A grade de um tipo. [row2] tem 3 vagas (+ Máscara no fim, bug #9b) e [row3] 2 a 4 (nula = invisível,
  * guarda o espaço). [tallRow3]: a fileira 2 inteira sumiu e a 3 ocupa as duas
  * alturas (colapso "a"). [speedArrow]: a seta ▾ da Velocidade (só no grupo).
  */
@@ -188,6 +190,10 @@ internal fun layerPanelSpec(l: PanelLayer): LayerPanelSpec {
     val c = LayerSlot.ColorFill
     val b = LayerSlot.BorderShadow
     val m = LayerSlot.BlendOpacity
+    // Bug #9b: a máscara vale em qualquer camada visual (motor: Engine::add_mask). Imagem e
+    // vídeo já chegam nela pelo Editar (MediaShape); forma, texto, grupo e partículas
+    // ganham o botão na fileira 2 (era a ficha Máscara da doca até a 0.3.2).
+    val k = LayerSlot.Mask
     val std = listOf(LayerSlot.MoveTransform, LayerSlot.Edit, LayerSlot.Presets, LayerSlot.Effects)
     if (l.adjustment || type == LayerType.Adjustment) {
         // Camada de ajuste: só a mistura e os efeitos que ela aplica embaixo.
@@ -195,11 +201,11 @@ internal fun layerPanelSpec(l: PanelLayer): LayerPanelSpec {
     }
     return when (type) {
         LayerType.Shape -> LayerPanelSpec(
-            listOf(c, b, m), std,
+            listOf(c, b, m, k), std,
             when { l.drawing -> LayerEdit.Drawing; l.vector -> LayerEdit.Points; else -> LayerEdit.Shape },
             false, false, SpeedRoute.Constant,
         )
-        LayerType.Text -> LayerPanelSpec(listOf(c, b, m), std, LayerEdit.Text, false, false, SpeedRoute.Constant)
+        LayerType.Text -> LayerPanelSpec(listOf(c, b, m, k), std, LayerEdit.Text, false, false, SpeedRoute.Constant)
         LayerType.Model3D -> LayerPanelSpec(
             listOf(c, null, m), std, if (l.text3D) LayerEdit.Text else LayerEdit.Material, false, false, SpeedRoute.Constant,
         )
@@ -207,8 +213,8 @@ internal fun layerPanelSpec(l: PanelLayer): LayerPanelSpec {
         // "Editar forma". O preenchimento de mídia é da área 05 (até lá a vaga fica vazia).
         LayerType.Image -> LayerPanelSpec(listOf(null, b, m), std, LayerEdit.MediaShape, false, false, SpeedRoute.Constant)
         LayerType.Video -> LayerPanelSpec(listOf(null, b, m), std, LayerEdit.MediaShape, false, false, SpeedRoute.Panel)
-        LayerType.Group -> LayerPanelSpec(listOf(null, b, m), std, LayerEdit.Group, false, true, SpeedRoute.Group)
-        LayerType.Particles -> LayerPanelSpec(listOf(null, null, m), std, LayerEdit.Particles, false, false, SpeedRoute.Constant)
+        LayerType.Group -> LayerPanelSpec(listOf(null, b, m, k), std, LayerEdit.Group, false, true, SpeedRoute.Group)
+        LayerType.Particles -> LayerPanelSpec(listOf(null, null, m, k), std, LayerEdit.Particles, false, false, SpeedRoute.Constant)
         // Áudio: os efeitos de áudio na largura toda e altos (colapso "c").
         LayerType.Audio -> LayerPanelSpec(listOf(null, null, null), listOf(LayerSlot.Effects), null, true, false, SpeedRoute.Panel)
         LayerType.Camera -> LayerPanelSpec(
@@ -530,10 +536,12 @@ private inline fun timeEdit(store: EditorStore, @Suppress("UNUSED_PARAMETER") l:
 // Fileiras 2 e 3: a grade de 57 dp
 // =============================================================================
 
-/** 0.4.1: as ferramentas em 1 ou 2 fileiras sem buraco (≤ 4: uma; 5: 2 + 3; 6: 3 + 3; 7+: 3 + resto). */
+/** 0.4.1: as ferramentas em 1 ou 2 fileiras sem buraco (≤ 4: uma; 5: 2 + 3; 6: 3 + 3; 7: 3 + 4; 8+: 4 + resto). */
 internal fun <T> packedToolRows(items: List<T>): List<List<T>> = when {
     items.size <= 4 -> listOf(items)
     items.size == 5 -> listOf(items.take(2), items.drop(2))
+    // Bug #9b: com a Máscara, forma e texto têm 8 — duas fileiras de 4 (não 3 + 5).
+    items.size >= 8 -> listOf(items.take(4), items.drop(4))
     else -> listOf(items.take(3), items.drop(3))
 }
 
@@ -601,6 +609,7 @@ private fun slotGlyph(slot: LayerSlot, edit: LayerEdit?): Char = when (slot) {
     LayerSlot.Edit -> edit?.glyph ?: CupertinoGlyph.Pencil
     LayerSlot.Presets -> CupertinoGlyph.WandStars
     LayerSlot.Effects -> CupertinoGlyph.Sparkles
+    LayerSlot.Mask -> ShellGlyph.SquareSplit2x2
 }
 
 @StringRes
@@ -612,6 +621,7 @@ private fun slotLabel(slot: LayerSlot, edit: LayerEdit?): Int = when (slot) {
     LayerSlot.Edit -> edit?.label ?: R.string.sh_dock_edit_shape
     LayerSlot.Presets -> R.string.sh_dock_presets
     LayerSlot.Effects -> R.string.sh_dock_effects
+    LayerSlot.Mask -> R.string.sh_dock_mask
 }
 
 /**
@@ -648,6 +658,8 @@ private fun onSlot(store: EditorStore, ui: EditorUi, l: PanelLayer, slot: LayerS
         }
         LayerSlot.Presets -> openLayerPresets(store, ui, l)
         LayerSlot.Effects -> openPanel(store, ui, EditorPanel.Effects)
+        // Bug #9b: o mesmo painel que imagem e vídeo abrem pelo Editar.
+        LayerSlot.Mask -> openPanel(store, ui, EditorPanel.Mask)
     }
 }
 

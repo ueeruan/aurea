@@ -94,7 +94,11 @@
 
     <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
     <string name="om_ap_cp_eyedropper">Pipet</string>
-    <string name="om_ap_cp_eyedropper_hint">Seret di panggung untuk memilih warna</string>
+    <string name="om_ap_cp_eyedropper_hint">Ketuk atau seret di pratinjau untuk mengambil warna</string>
+    <string name="om_ap_cp_eyedropper_source">warna asli, sebelum efek ini</string>
+    <string name="om_ap_cp_eyedropper_picked">Warna diambil: %1$s</string>
+    <string name="om_ap_cp_eyedropper_cancel">Batalkan pipet dan kembali ke pemilih warna</string>
+    <string name="om_ap_cp_eyedropper_full_hint">Ambil warna dari pratinjau</string>
     <string name="om_ap_cp_fine">Pemilih halus</string>
     <string name="om_ap_cp_full">Warna lainnya</string>
     <string name="om_ap_cp_unavailable">Warna transparan tidak tersedia di sini</string>
@@ -103,6 +107,7 @@
     <string name="om_ap_cp_paste_code">Tempel kode warna</string>
     <string name="om_ap_cp_code_copied">Kode warna disalin</string>
     <string name="om_ap_cp_code">Kode warna %1$s</string>
+    <string name="om_ap_cp_type_code">Ketik kode warna</string>
     <string name="om_ap_cp_wheel">Roda</string>
     <string name="om_ap_cp_rgb">RGB</string>
     <string name="om_ap_cp_done">Selesai</string>

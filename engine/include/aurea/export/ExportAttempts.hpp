@@ -91,15 +91,19 @@ struct ExportAttemptPlan {
 /// passo de 16 que todo encoder de aparelho aceita.
 [[nodiscard]] inline ExportFrameSize export_attempt_frame_size(u32 compW, u32 compH, u32 wantShort,
                                                                bool align16) noexcept {
+    // 0.4.5: só um valor ABSURDO vindo da ponte (acima do teto do sink, como
+    // u32 máximo — ímpar OU par) é inválido: ele alinhava para um tamanho
+    // gigante e o export abria o encoder. Vem ANTES do nativo: o v2 escala um
+    // par absurdo sem teto. A 0.4.0 recusava todo lado menor pedido ímpar: a
+    // tela mostrava "1079p · 1920 × 1080" (VideoExportRules.frameSize / sizeFor
+    // alinham o ímpar) e o motor devolvia "dimensões inválidas" nos degraus
+    // 0..2; a escada só exportava ao chegar em 720p. Agora o pedido ímpar
+    // plausível sai no tamanho alinhado (par mais próximo), como as telas mostram.
+    if (wantShort > kExportMaxFrameSide) return {};
     if (!align16) {
         const ExportFrameSize native = export_frame_size_v2(compW, compH, wantShort);
         if (native.width && native.height) return native;
     }
-    // Só a COMPOSIÇÃO ímpar alinha: um lado menor PEDIDO ímpar (ou um valor
-    // absurdo vindo da ponte, como u32 máximo) continua inválido — antes
-    // alinhava para um tamanho gigante e o export abria o encoder.
-    const u32 nativeShort = compW && compH ? std::min(compW, compH) : 0u;
-    if (wantShort && wantShort != nativeShort && (wantShort & 1u)) return {};
     return export_frame_size(compW, compH, wantShort);
 }
 
@@ -137,11 +141,16 @@ enum class ExportRetryKind : u32 {
                                                  static_cast<ExportFailure>(failure) == ExportFailure::EncoderStalled))
         return ExportRetryKind::Busy;
     switch (static_cast<ExportFailure>(failure)) {
-        case ExportFailure::Encoder: return ExportRetryKind::Encoder;
+        // 0.4.5: "codec/formato que o aparelho não exporta" (o sink recusou ao
+        // abrir: NotSupported/UnsupportedCodec/UnsupportedFormat) segue a
+        // escada inteira, na ordem pedida: HEVC → H.264, aparelho → software e
+        // SÓ DEPOIS menos pixels. Como Memory, um HEVC 1080p sem encoder HEVC
+        // pulava direto para 720p, sem tentar o H.264 no mesmo tamanho.
+        case ExportFailure::Encoder:
+        case ExportFailure::Unsupported: return ExportRetryKind::Encoder;
         case ExportFailure::EncoderStalled: return ExportRetryKind::Stall;
         case ExportFailure::Render:
-        case ExportFailure::GpuMemory:
-        case ExportFailure::Unsupported: return ExportRetryKind::Memory;
+        case ExportFailure::GpuMemory: return ExportRetryKind::Memory;
         case ExportFailure::Media: return code == static_cast<i32>(Errc::MediaSourceMissing) ? ExportRetryKind::None
                                                                                             : ExportRetryKind::Stall;
         case ExportFailure::File:

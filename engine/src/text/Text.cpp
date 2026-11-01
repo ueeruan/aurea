@@ -33,6 +33,7 @@
 #include "hb-ot.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -41,7 +42,17 @@
 
 namespace aurea::text {
 
+namespace {
+/// Número único por fonte carregada (nunca reaproveitado no processo).
+std::atomic<u64> g_fontSerial{1};
+} // namespace
+
 struct Font::Impl {
+    // Chave das entradas do atlas de glifos. Antes era o endereço do Impl:
+    // uma fonte solta (cache limpo, fonte importada removida) e outra
+    // alocada no mesmo endereço herdavam os glifos da anterior — inclusive
+    // entradas vazias (w = 0), e as letras sumiam até trocar de fonte.
+    const u64 serial = g_fontSerial.fetch_add(1, std::memory_order_relaxed);
     std::vector<u8> data;
     stbtt_fontinfo info{};
     int ascent = 0, descent = 0, lineGap = 0;
@@ -892,6 +903,11 @@ struct Atlas {
     u32 shelfX = 1, shelfY = 1, shelfH = 0;
     u64 generation = 1;
     bool dirty = true;
+    /// Cresce a cada mudança dos pixels (glifo novo, atlas refeito). Cada
+    /// renderer (prévia, export) guarda a revisão que já subiu: o `dirty`
+    /// global era apagado pelo primeiro que lia — o renderer do export subia
+    /// os glifos novos e a prévia nunca mais os enviava (letras sumiam).
+    u64 revision = 1;
     u32 rasterized = 0;   ///< SDFs gerados (8E: em regime, 0 por quadro)
     u32 resets = 0;       ///< atlas cheio → refeito
 };
@@ -902,7 +918,8 @@ Atlas& atlas() {
 
 /// Entrada do glifo (rasteriza e empacota na 1ª vez). Falso = atlas cheio.
 bool atlas_glyph(Atlas& A, const Font::Impl& f, int glyph, AtlasEntry& out) {
-    const u64 key = (reinterpret_cast<u64>(&f) << 20) ^ static_cast<u64>(glyph);
+    // Glifo < 2^16 (OpenType): a fonte nos bits de cima, sem colisão.
+    const u64 key = (f.serial << 20) | (static_cast<u64>(glyph) & 0xFFFFFull);
     if (auto it = A.entries.find(key); it != A.entries.end()) { out = it->second; return true; }
     const f32 fs = stbtt_ScaleForPixelHeight(&f.info, kGlyphBasePx);
     int w = 0, h = 0, xo = 0, yo = 0;
@@ -922,6 +939,7 @@ bool atlas_glyph(Atlas& A, const Font::Impl& f, int glyph, AtlasEntry& out) {
         A.shelfX += static_cast<u32>(w) + 1;
         A.shelfH = std::max(A.shelfH, static_cast<u32>(h));
         A.dirty = true;
+        ++A.revision;
     }
     if (sdf) stbtt_FreeSDF(sdf, nullptr);
     ++A.rasterized;
@@ -937,6 +955,20 @@ const u8* glyph_atlas(u64& generation, bool& dirty) {
     generation = A.generation;
     dirty = A.dirty;
     return A.px.data();
+}
+
+u64 glyph_atlas_revision() noexcept {
+    Atlas& A = atlas();
+    std::lock_guard<std::mutex> lock(A.mutex);
+    return A.revision;
+}
+
+u64 copy_glyph_atlas(std::vector<u8>& out, u64* generation) {
+    Atlas& A = atlas();
+    std::lock_guard<std::mutex> lock(A.mutex);
+    out.assign(A.px.begin(), A.px.end());
+    if (generation) *generation = A.generation;
+    return A.revision;
 }
 
 void glyph_atlas_stats(u32& rasterized, u32& resets) noexcept {
@@ -1021,6 +1053,7 @@ bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out)
         ++A.generation;
         ++A.resets;
         A.dirty = true;
+        ++A.revision;
     }
     return !out.quads.empty();
 }

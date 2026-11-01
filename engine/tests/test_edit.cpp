@@ -1210,6 +1210,61 @@ AUREA_TEST(Parenting, SelectionParentsToNewNullWithoutMovingAndUndoesOnce) {
     AUREA_CHECK(!r.L(r.a)->parent.valid() && !r.L(r.b)->parent.valid());
 }
 
+// Bug #9c: "Vincular selecionadas" a um nulo QUE JÁ EXISTE — várias camadas de
+// uma vez, sem ninguém sair do lugar na tela, num passo de desfazer.
+AUREA_TEST(Parenting, ManyLayersLinkToExistingNullInOneUndo) {
+    EditRig r;
+    Layer* la = r.comp()->layer(LayerId::unpack(r.a));
+    Layer* lb = r.comp()->layer(LayerId::unpack(r.b));
+    Layer* nl = r.comp()->layer(LayerId::unpack(r.c));   // C é um nulo: o pai
+    la->transform.position = Vec3{100.0f, 50.0f, 0.0f};
+    lb->transform.position = Vec3{220.0f, 130.0f, 0.0f};
+    lb->transform.rotation = Vec3{0.0f, 0.0f, 30.0f};
+    nl->transform.position = Vec3{160.0f, 90.0f, 0.0f};
+    nl->transform.scale = Vec3{1.5f, 1.5f, 1.0f};
+    const FrameIndex t{0};
+    const Mat4 wa = layer_world_matrix(*r.comp(), *la, t), wb = layer_world_matrix(*r.comp(), *lb, t);
+    const u32 depth = r.e.history().depth();
+    // O próprio pai e um id repetido na lista são ignorados.
+    const u64 ids[4] = {r.a, r.b, r.c, r.a};
+    auto linked = r.e.set_parent_many(ids, 4, r.c);
+    AUREA_CHECK(linked.ok() && *linked == 2);
+    AUREA_CHECK(r.L(r.a)->parent == LayerId::unpack(r.c));
+    AUREA_CHECK(r.L(r.b)->parent == LayerId::unpack(r.c));
+    AUREA_CHECK(!r.L(r.c)->parent.valid());
+    AUREA_CHECK_EQ(r.e.history().depth(), depth + 1);   // UM passo
+    // Compensação: nada mudou na tela.
+    const Mat4 wa2 = layer_world_matrix(*r.comp(), *r.L(r.a), t), wb2 = layer_world_matrix(*r.comp(), *r.L(r.b), t);
+    for (int c = 0; c < 4; ++c) {
+        AUREA_CHECK_NEAR(wa2.col[c].x, wa.col[c].x, 0.01f); AUREA_CHECK_NEAR(wa2.col[c].y, wa.col[c].y, 0.01f);
+        AUREA_CHECK_NEAR(wb2.col[c].x, wb.col[c].x, 0.01f); AUREA_CHECK_NEAR(wb2.col[c].y, wb.col[c].y, 0.01f);
+    }
+    // De novo com o mesmo pai: nada muda e nada entra no histórico.
+    const u32 after = r.e.history().depth();
+    AUREA_CHECK(!r.e.set_parent_many(ids, 2, r.c).ok());
+    AUREA_CHECK_EQ(r.e.history().depth(), after);
+    // Ciclo: o nulo (pai de A) não pode virar filho de A.
+    const u64 parentOnly[1] = {r.c};
+    AUREA_CHECK(!r.e.set_parent_many(parentOnly, 1, r.a).ok());
+    AUREA_CHECK(!r.L(r.c)->parent.valid());
+    r.undo();   // UM desfazer solta as duas
+    AUREA_CHECK(!r.L(r.a)->parent.valid() && !r.L(r.b)->parent.valid());
+    // Bloqueada fica de fora; 0 = soltar todas, também num passo.
+    r.comp()->layer(LayerId::unpack(r.b))->locked = true;
+    linked = r.e.set_parent_many(ids, 2, r.c);
+    AUREA_CHECK(linked.ok() && *linked == 1);
+    AUREA_CHECK(r.L(r.a)->parent == LayerId::unpack(r.c) && !r.L(r.b)->parent.valid());
+    r.comp()->layer(LayerId::unpack(r.b))->locked = false;
+    AUREA_CHECK(r.e.set_parent_many(ids, 2, r.c).ok());
+    const u32 linkedDepth = r.e.history().depth();
+    linked = r.e.set_parent_many(ids, 2, 0);
+    AUREA_CHECK(linked.ok() && *linked == 2);
+    AUREA_CHECK(!r.L(r.a)->parent.valid() && !r.L(r.b)->parent.valid());
+    AUREA_CHECK_EQ(r.e.history().depth(), linkedDepth + 1);
+    // Pai que não existe: recusa.
+    AUREA_CHECK(!r.e.set_parent_many(ids, 2, LayerId{7777, 3}.pack()).ok());
+}
+
 // =============================================================================
 //  Escalonar: cascata de N quadros na ordem escolhida (camadas ou só animação)
 // =============================================================================

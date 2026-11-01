@@ -597,7 +597,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.glitch.glitchify", FxEffectHuman(
         name: "fx_name_glitchify",
-        keywords: "glitchify glitch defeito digital rasgo bloco corrupcao",
+        keywords: "glitchify glitch defeito digital rasgo bloco corrupcao cinema spice transicao fatia jpeg webp compressao pontilhado ruido canal",
         principal: [17, 18, 1, 3, 13, 34],
         params: [
             0: FxParamHuman(label: "fx_altura_faixa", suffix: "px", decimals: 0),
@@ -644,7 +644,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.glitch.signal", FxEffectHuman(
         name: "fx_name_signal",
-        keywords: "signal sinal interferencia transmissao banda sincronia chiado",
+        keywords: "signal glitch sinal glitch de sinal interferencia transmissao banda sincronia chiado",
         principal: [0, 1, 2, 3, 4],
         params: [
             0: FxParamHuman(label: "fx_bandas_perdidas", decimals: 0),
@@ -904,6 +904,35 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
             5: FxParamHuman(label: "fx_datamosh_color_bleed", decimals: 0),
             6: FxParamHuman(label: "fx_semente", decimals: 0),
         ])),
+    // 0.4.5 (pedidos de usuários): glitch pesado, blocos no estilo do DaVinci e
+    // o Shift Channels do AE. Mesma tabela no Android (EffectsHuman.kt).
+    ("aurea.glitch.hyper_glitch", FxEffectHuman(
+        name: "fx045g_name_hyper_glitch",
+        keywords: "hyper glitch hiper glitch pesado forte intenso blocos fatias rgb split pixel sort rastro compressao corrupcao datamosh",
+        principal: [0, 1, 2, 4, 5, 6, 8],
+        params: [
+            0: FxParamHuman(decimals: 0),
+            2: FxParamHuman(suffix: "Hz", decimals: 1),
+            3: FxParamHuman(suffix: "px", decimals: 0),
+            5: FxParamHuman(suffix: "px", decimals: 0),
+            7: FxParamHuman(suffix: "px", decimals: 0),
+        ])),
+    ("aurea.glitch.block_glitch", FxEffectHuman(
+        name: "fx045g_name_block_glitch",
+        keywords: "block glitch blocos glitch de blocos davinci resolve fusion bloco retangular deslocar canais trocados macrobloco",
+        principal: [0, 1, 2, 4, 5, 6],
+        params: [
+            0: FxParamHuman(decimals: 0),
+            1: FxParamHuman(suffix: "px", decimals: 0),
+            2: FxParamHuman(suffix: "px", decimals: 0),
+            4: FxParamHuman(suffix: "px", decimals: 0),
+            5: FxParamHuman(suffix: "Hz", decimals: 1),
+            7: FxParamHuman(suffix: "px", decimals: 0),
+        ])),
+    ("aurea.color.shift_channels", FxEffectHuman(
+        name: "fx045g_name_shift_channels",
+        keywords: "shift channels trocar canais mudar canais set channels canal alfa vermelho verde azul luminancia rgb trocar cores",
+        principal: [0, 1, 2, 3])),
     ("aurea.distort.displacement_map", FxEffectHuman(
         name: "fx_name_displacement_map",
         keywords: "displacement map mapa de deslocamento deslocar camada mapa distorcer canal",
@@ -921,7 +950,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     // Câmera lenta por vetores e desfoque calculado da filmagem (0.1.8).
     ("aurea.time.flow_retime", FxEffectHuman(
-        keywords: "twixtor flow retime camera lenta slow motion super slow optical flow vetores interpolar quadros velocidade remapear tempo time remap timewarp suave duplicados repetidos duplicate frames chronos topaz",
+        keywords: "twixtor kee flow retime camera lenta slow motion slowmo super slow optical flow vetores interpolar interpolacao quadros frame interpolation velocidade remapear tempo time remap timewarp suave duplicados repetidos duplicate frames chronos topaz camara lenta замедленная съемка замедление स्लो मोशन धीमी गति حركة بطيئة gerak lambat",
         principal: [0, 1, 2, 3, 4],
         params: [5: FxParamHuman(suffix: "%", decimals: 0)])),
     // Aprimorar (0.3.0): a restauração do Topaz (Proteus) com nome próprio.
@@ -1069,7 +1098,7 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.blur.radial", FxEffectHuman(
         name: "fx_name_radial_blur",
-        keywords: "desfoque radial radial blur zoom blur spin giro rotacional velocidade cc fast",
+        keywords: "desfoque radial radial blur zoom blur spin giro rotacional velocidade cc fast radial fast blur",
         principal: [0, 1, 2, 3, 4],
         params: [
             0: FxParamHuman(label: "fx_tipo"),
@@ -1080,11 +1109,13 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.distort.mirror", FxEffectHuman(
         name: "fx_name_mirror",
-        keywords: "espelho mirror refletir simetria reflexo",
+        keywords: "espelho mirror refletir simetria reflexo espelhar camada mirror layer flip inverter horizontal vertical dois eixos both axes quatro quadrantes sobrepor copia overlay copy alight motion am",
+        principal: [0, 1, 2, 3, 4],
         params: [
             0: FxParamHuman(label: "fx_centro"),
             1: FxParamHuman(label: "fx_angulo"),
             2: FxParamHuman(label: "fx_trocar_lado"),
+            5: FxParamHuman(decimals: 0),
         ])),
     ("aurea.transform.crop", FxEffectHuman(
         name: "fx_name_crop_edges",
@@ -1148,12 +1179,13 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         ])),
     ("aurea.blur.zoom", FxEffectHuman(
         name: "fx_name_zoom_blur",
-        keywords: "zoom rastro radial lente empurrar desfoque cc fast blur",
+        keywords: "zoom rastro radial lente empurrar desfoque cc fast blur cc radial fast blur radial fast blur mais claro mais escuro brightest darkest",
         params: [
             0: FxParamHuman(label: "fx_centro"),
             1: FxParamHuman(label: "fx_intensidade", decimals: 0),
             2: FxParamHuman(label: "fx_esticar_bordas"),
             3: FxParamHuman(label: "fx_mistura", decimals: 0),
+            4: FxParamHuman(label: "fxl_mode"),
         ])),
     ("aurea.distort.bulge", FxEffectHuman(
         name: "fx_name_bulge",
@@ -1530,6 +1562,30 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
         name: "afx_name_particular",
         keywords: "particulas particles particular emissor emitter neve snow chuva rain fogo fire faiscas sparks fogos fireworks poeira dust bokeh cc rainfall snowfall particle world",
         principal: [0, 9, 13, 15, 22, 24, 27, 32, 33, 35, 38])),
+    // --- 0.4.5: pedidos de usuários. Nomes de produtos de terceiros (Light Wrap
+    // dos compositores, Magic Bullet Looks, Ballpoint/Dust dos pacotes de
+    // transição) só como palavras de busca, como no pacote CC. Mesmos
+    // principais do Android (EffectsHuman.kt).
+    ("aurea.distort.water_reflection", FxEffectHuman(
+        name: "fx045_name_water_reflection",
+        keywords: "reflexo na agua water reflection espelho mirror lago lake rio river mar sea oceano ocean ondas waves ondulacao ripple poca puddle superficie surface horizonte horizon",
+        principal: [0, 2, 4, 5, 6, 7, 3, 11])),
+    ("aurea.light.light_wrap", FxEffectHuman(
+        name: "fx045_name_light_wrap",
+        keywords: "light wrap envolver com luz luz de borda edge light envoltorio wrap composicao compositing recorte keying chroma fundo background integrar blend",
+        principal: [0, 1, 2, 3, 4, 5])),
+    ("aurea.color.looks", FxEffectHuman(
+        name: "fx045_name_looks",
+        keywords: "magic bullet looks look looks de cinema cinematic filme film preset filtro filter teal orange bleach bypass noir vintage cyberpunk sepia pastel hora dourada golden hour noite americana day for night faroeste western correcao de cor color grade",
+        principal: [0, 1, 2, 3, 4, 5])),
+    ("aurea.transition.ballpoint", FxEffectHuman(
+        name: "fx045_name_ballpoint",
+        keywords: "ballpoint caneta esferografica pen bic rabisco scribble rabiscar hachura hatch desenho drawing escrita handwriting revelar reveal tinta ink transicao transition",
+        principal: [0, 1, 2, 3, 4, 5, 9])),
+    ("aurea.transition.dust", FxEffectHuman(
+        name: "fx045_name_dust",
+        keywords: "dust poeira po areia sand cinzas ashes vento wind desintegrar disintegrate particulas particles desfazer dissolver dissolve sumir transicao transition",
+        principal: [0, 1, 5, 6, 7, 2, 13])),
     // Sinônimos de busca (nomes do After Effects e da referência) dos efeitos sem ficha.
     ("aurea.blur.box", FxEffectHuman(keywords: "fast box blur")),
     ("aurea.blur.directional", FxEffectHuman(keywords: "motion blur")),
@@ -1538,7 +1594,28 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.distort.corner_pin", FxEffectHuman(keywords: "cc power pin")),
     ("aurea.color.cube_lut", FxEffectHuman(keywords: "apply color lut")),
     ("aurea.key.rotobrush", FxEffectHuman(keywords: "roto brush rotoscope")),
+    // 0.4.5: Remover fundo (sem tela verde). Mesma ficha do Android (EffectsHuman.kt).
+    ("aurea.key.background_remove", FxEffectHuman(name: "bg_remove_fx_name",
+        keywords: "remove background background remover remover fundo tirar fundo recortar pessoa sem tela verde chroma key green screen quitar fondo borrar fondo удалить фон बैकग्राउंड हटाएँ إزالة الخلفية hapus latar blurrr capcut cutout segment",
+        principal: [10, 2, 1, 9, 5, 3])),
     ("aurea.color.rgb_split", FxEffectHuman(keywords: "rgb shift")),
+    // 0.4.5 (pedidos de usuários): ladrilhos que se mexem e caixa oca do Alight
+    // Motion, Time Displacement do AE. Mesmas fichas do Android (EffectsHuman.kt).
+    ("aurea.distort.tile_shift", FxEffectHuman(name: "fx045d_name_tile_shift",
+        keywords: "tile shift deslocar ladrilhos ladrilho azulejo mosaico grade quadrados blocos fileiras colunas aleatorio glitch alight motion am",
+        principal: [0, 1, 2, 3, 4], params: [0: FxParamHuman(decimals: 0), 1: FxParamHuman(decimals: 0), 3: FxParamHuman(decimals: 0)])),
+    ("aurea.distort.hex_tile_rotate", FxEffectHuman(name: "fx045d_name_hex_tile_rotate",
+        keywords: "hexagon tile rotate hexagono hexagonal hex colmeia honeycomb celulas girar rotacao rodar mosaico alight motion am",
+        principal: [0, 1, 2, 3, 4], params: [0: FxParamHuman(decimals: 0), 3: FxParamHuman(decimals: 0)])),
+    ("aurea.distort.hex_tile_shift", FxEffectHuman(name: "fx045d_name_hex_tile_shift",
+        keywords: "hexagon tile shift hexagono hexagonal hex colmeia honeycomb celulas deslocar mover mosaico alight motion am",
+        principal: [0, 1, 2, 3, 4], params: [0: FxParamHuman(decimals: 0), 1: FxParamHuman(decimals: 0), 3: FxParamHuman(decimals: 0)])),
+    ("aurea.distort.hollow_box", FxEffectHuman(name: "fx045d_name_hollow_box",
+        keywords: "hollow box caixa oca vazada cubo cube box 3d lados recorte contorno moldura alight motion am",
+        principal: [6, 7, 8, 10, 2, 3, 4], params: [3: FxParamHuman(decimals: 1), 4: FxParamHuman(decimals: 0), 5: FxParamHuman(decimals: 1)])),
+    ("aurea.time.time_displacement", FxEffectHuman(name: "fx045d_name_time_displacement",
+        keywords: "time displacement deslocamento no tempo deslocamento temporal slit scan fenda atraso mapa luminancia brilho after effects ae kee",
+        principal: [0, 1, 2, 3, 4, 5], params: [2: FxParamHuman(decimals: 2), 3: FxParamHuman(decimals: 0)])),
 ]
 
 /// A tabela indexada pelo `typeId`, e a posição declarada (para ordenar sem
@@ -1595,6 +1672,9 @@ let FxTileSearchEffects: Set<UInt32> = Set([
     "aurea.distort.displacement_map",
     "aurea.transform.offset",
     "aurea.repeat.grid",
+    "aurea.distort.tile_shift",
+    "aurea.distort.hex_tile_rotate",
+    "aurea.distort.hex_tile_shift",
 ].map { fxEffectTypeId($0) })
 
 /// Os termos de ladrilho do efeito no idioma atual (vazio = não ladrilha).
@@ -1977,6 +2057,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.stylize.motion_tile", "fx_desc_stylize_motion_tile", FxVisualTargets)
     put("aurea.key.luma", "fx_desc_key_luma", FxKeyTargets)
     put("aurea.key.chroma", "fx_desc_key_chroma", FxKeyTargets)
+    put("aurea.key.background_remove", "bg_remove_fx_desc", [.imagem, .video])
     put("aurea.time.echo", "fx_desc_time_echo")
     // --- Fase 7.3: o pacote novo ---------------------------------------------
     put("aurea.color.invert", "fx_desc_color_invert")
@@ -2006,7 +2087,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.glitch.signal", "fx_desc_glitch_signal")
     put("aurea.glitch.cross", "fx_desc_glitch_cross")
     put("aurea.time.posterize", "fx_desc_time_posterize", FxTimeTargets, "stop motion quadros taxa travada")
-    put("aurea.time.flow_retime", "fx_desc_time_flow_retime", [.video], "twixtor camera lenta slow motion optical flow quadros inventados duplicados repetidos")
+    put("aurea.time.flow_retime", "fx_desc_time_flow_retime", [.video], "twixtor camera lenta slow motion slowmo optical flow quadros inventados interpolacao duplicados repetidos camara lenta")
     put("aurea.time.flow_motion_blur", "fx_desc_time_flow_motion_blur", [.video], "rsmb reelsmart desfoque de movimento vetores borrao")
     put("aurea.time.warp_rgb", "fx_desc_time_warp_rgb", [.video, .preComposicao, .imagem], "rgb no tempo canais separados atraso de cor")
     put("aurea.time.slice", "fx_desc_time_slice", [.video, .preComposicao], "timeslice fatias faixas tempo slit scan helice")
@@ -2023,6 +2104,10 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.stylize.crt_emulator", "fx_desc_stylize_crt_emulator", FxAllTargets, "crt tv tubo retro varredura fosforo")
     put("aurea.glitch.dissolve_shake", "fx_desc_glitch_dissolve_shake", FxAllTargets, "tremor dissolver fragmentos quebrar")
     put("aurea.glitch.datamosh", "fx_desc_glitch_datamosh", FxAllTargets, "datamosh compressao blocos arrastar derreter codec")
+    // 0.4.5 (pedidos de usuários).
+    put("aurea.glitch.hyper_glitch", "fx045g_desc_hyper_glitch", FxAllTargets, "hyper glitch pesado blocos fatias rgb rastro compressao")
+    put("aurea.glitch.block_glitch", "fx045g_desc_block_glitch", FxAllTargets, "block glitch blocos davinci resolve canais trocados")
+    put("aurea.color.shift_channels", "fx045g_desc_shift_channels", FxAllTargets, "shift channels trocar canais alfa luminancia")
     put("aurea.distort.displacement_map", "fx_desc_distort_displacement_map", FxAllTargets, "mapa deslocamento camada distorcer")
     put("aurea.control.slider", "fx_desc_control_slider")
     put("aurea.control.angle", "fx_desc_control_angle")
@@ -2039,7 +2124,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.transition.box_wipe", "fx_desc_transition_box_wipe")
     put("aurea.transition.venetian_blinds", "fx_desc_transition_venetian_blinds")
     put("aurea.blur.radial", "fx_desc_blur_radial")
-    put("aurea.distort.mirror", "fx_desc_distort_mirror")
+    put("aurea.distort.mirror", "fx_desc_distort_mirror", FxAllTargets, "espelhar camada mirror layer flip dois eixos sobrepor copia alight motion")
     put("aurea.transform.crop", "fx_desc_transform_crop")
     put("aurea.stylize.vignette", "fx_desc_stylize_vignette")
     put("aurea.stylize.mosaic", "fx_desc_stylize_mosaic")
@@ -2056,7 +2141,7 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     // --- Pacote do editor antigo: o que só ele tinha ---
     put("aurea.color.fill", "fx_desc_color_fill", FxAllTargets, "preencher fill cor chapada tinta solido")
     put("aurea.color.balance_hls", "fx_desc_color_balance_hls", FxAllTargets, "equilibrio balanco cor hls matiz luz saturacao")
-    put("aurea.blur.zoom", "fx_desc_blur_zoom", FxAllTargets, "zoom rastro radial lente empurrar desfoque")
+    put("aurea.blur.zoom", "fx_desc_blur_zoom", FxAllTargets, "zoom rastro radial lente empurrar desfoque cc radial fast blur mais claro mais escuro")
     put("aurea.distort.bulge", "fx_desc_distort_bulge", FxAllTargets, "bojo bulge pinca estufar puxar lente centro")
     put("aurea.pattern.checkerboard", "fx_desc_pattern_checkerboard", FxAllTargets, "xadrez checkerboard quadriculado tabuleiro celulas padrao")
     put("aurea.pattern.hexagonal", "fx_desc_pattern_hexagonal", FxAllTargets, "hexagonal favos abelha painel led malha matriz")
@@ -2095,6 +2180,12 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     put("aurea.distort.split", "cc_desc_split", FxVisualTargets + [.cena3D], "cc split 2 rasgar split abrir open corte cut fenda slit rachar crack rasgo tear")
     put("aurea.distort.slant", "cc_desc_slant", FxVisualTargets + [.cena3D], "cc slant inclinar slant italico italic cisalhar shear sombra projetada cast shadow")
     put("aurea.stylize.tiler", "cc_desc_tiler", FxVisualTargets + [.cena3D], "cc tiler mosaico tiler copias copies repetir repeat grade grid")
+    // 0.4.5 (pedidos de usuários): ladrilhos que se mexem, caixa oca e deslocamento no tempo.
+    put("aurea.distort.tile_shift", "fx045d_desc_tile_shift", FxVisualTargets + [.cena3D], "tile shift deslocar ladrilhos mosaico grade blocos alight motion")
+    put("aurea.distort.hex_tile_rotate", "fx045d_desc_hex_tile_rotate", FxVisualTargets + [.cena3D], "hexagon tile rotate hexagono colmeia girar celulas alight motion")
+    put("aurea.distort.hex_tile_shift", "fx045d_desc_hex_tile_shift", FxVisualTargets + [.cena3D], "hexagon tile shift hexagono colmeia deslocar celulas alight motion")
+    put("aurea.distort.hollow_box", "fx045d_desc_hollow_box", FxVisualTargets + [.cena3D], "hollow box caixa oca cubo 3d lados recorte alight motion")
+    put("aurea.time.time_displacement", "fx045d_desc_time_displacement", [.video, .preComposicao], "time displacement deslocamento no tempo slit scan mapa luminancia after effects")
     put("aurea.stylize.hex_tile", "cc_desc_hex_tile", FxVisualTargets + [.cena3D], "cc hextile hexagono hexagon colmeia honeycomb ladrilho tile mosaico mosaic")
     put("aurea.blur.vector_blur", "cc_desc_vector_blur", FxVisualTargets + [.cena3D], "cc vector blur desfoque vetorial vector blur pinceladas brush strokes pintura painting")
     put("aurea.light.light_burst", "cc_desc_light_burst", FxVisualTargets + [.cena3D], "cc light burst explosao de luz light burst raios rays brilho glow zoom radial")
@@ -2121,6 +2212,17 @@ private let FxMetaTable: [UInt32: (description: String, targets: [FxTarget], key
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", "fx_desc_ai_depth_map", [.imagem, .video], "profundidade depth mapa ia ai midas distancia perto longe z matte fundo")
     put("aurea.distort.puppet", "fx_desc_puppet", FxAllTargets, "fantoche puppet pino pin marionete rig personagem deformar")
+    // --- 0.4.5: pedidos de usuários (mesma tabela no Android, EffectCatalogMeta.kt) ---
+    put("aurea.distort.water_reflection", "fx045_desc_water_reflection", [.imagem, .video, .texto, .vetor, .forma, .preComposicao, .cena3D],
+        "reflejo agua отражение вода प्रतिबिंब पानी انعكاس ماء pantulan air")
+    put("aurea.light.light_wrap", "fx045_desc_light_wrap", [.imagem, .video, .texto, .vetor, .forma, .preComposicao, .cena3D],
+        "envoltura de luz световое обтекание लाइट रैप التفاف الضوء bungkus cahaya")
+    put("aurea.color.looks", "fx045_desc_looks", FxAllTargets,
+        "looks de cine кинолуки सिनेमैटिक लुक्स مظاهر سينمائية look sinematik")
+    put("aurea.transition.ballpoint", "fx045_desc_ballpoint", [.imagem, .video, .texto, .vetor, .forma, .preComposicao, .cena3D],
+        "boligrafo garabato шариковая ручка बॉलपॉइंट पेन قلم حبر جاف pulpen coretan")
+    put("aurea.transition.dust", "fx045_desc_dust", [.imagem, .video, .texto, .vetor, .forma, .preComposicao, .cena3D],
+        "polvo viento пыль ветер धूल हवा غبار رياح debu angin")
     return out
 }()
 

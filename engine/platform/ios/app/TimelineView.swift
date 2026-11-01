@@ -1592,7 +1592,14 @@ struct TimelineView: View {
     private func keyTap(_ row: TimelineRow, index: Int) {
         guard row.keysAt.indices.contains(index) else { return }
         pause()
-        let key = row.keysAt[index][0]
+        // Correção #5 (0.4.4): no resumo (e na trilha de grupo) o 1º losango do instante
+        // podia ser de uma trilha sem trecho (1 marca): prefere a marca que abre um
+        // trecho, para a curva abrir (par do TimelineController.kt).
+        let key = row.keysAt[index].first { k in
+            let probe = model.engine.keyframeNavigation(row.id, property: k.property, effect: k.effectIndex,
+                param: k.paramIndex, compositionFrame: Int64(row.instants[index]))
+            return ((probe?["flags"]?.uint32Value ?? 0) & 8) != 0
+        } ?? row.keysAt[index][0]
         let track = TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)
         if model.timelineKeySelectMode {
             // Modo "Selecionar": soma/tira (trilha: 1 keyframe; resumo: o instante
@@ -1621,6 +1628,9 @@ struct TimelineView: View {
            let start = navigation?["segmentStart"]?.int64Value {
             model.openCurve(property: key.property, effect: key.effectIndex, param: key.paramIndex,
                             time: Int32(clamping: start))
+        } else if key.property != 44 && (model.panel == .none || model.panel == .dock || model.panel == .effects) {
+            // Sem trecho: a curva não abre (o mesmo aviso do Android, sem o painel piscar).
+            model.toast = AureaText.t("pn_curve_need_two_keys")
         }
     }
 

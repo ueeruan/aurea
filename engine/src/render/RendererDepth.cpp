@@ -15,6 +15,7 @@
 // =============================================================================
 #include "aurea/render/Renderer.hpp"
 #include "aurea/ai/RotoService.hpp"
+#include "aurea/ai/BackgroundRemoval.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/project/Project.hpp"
@@ -88,6 +89,8 @@ void Renderer::set_foreground_model_directory(std::string path) {
 
 DepthMapResult Renderer::depth_map(const DepthMapRequest& request) noexcept {
     DepthMapResult none; none.failed = planFinal_;
+    // Remover fundo: o recorte por quadro do cache (RendererBgRemove.cpp).
+    if (request.backgroundRemove) return bg_map(request);
     if (request.foreground && request.instance) {
         // Rotobrush com traços: o recorte do Roto Brush (RendererRoto.cpp).
         ai::RotoStrokes strokes;
@@ -335,6 +338,8 @@ void Renderer::release_depth(bool destroyTextures) noexcept {
     depthTex_.clear();
     rotoRefinedTex_.clear();
     depthState_.clear();
+    // O worker do Remover fundo usa o `foreground_`: para antes dele.
+    if (bg_) bg_->clear();   // o cache dos recortes é do motor: fica
     if (depth_) depth_->clear();
     if (foreground_) foreground_->clear();
     if (roto_) roto_->clear();

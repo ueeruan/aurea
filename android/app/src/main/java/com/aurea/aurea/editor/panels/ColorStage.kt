@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,6 +54,7 @@ import com.aurea.aurea.ui.theme.AureaType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -62,10 +64,11 @@ import kotlin.math.roundToInt
 // Omega aparência (área 05): o que o seletor de cor e o Cor e preenchimento
 // pedem ao PALCO (chamado do PreviewStage, por cima dos gestos dele):
 //
-//  P1-1 · CONTA-GOTAS AO VIVO (`store.eyedropper`): arrastar em qualquer lugar
-//         move uma MIRA RELATIVA (do centro da composição ou da última posição),
-//         com a lupa sobre o dedo; a cor vem do quadro da prévia capturado no
-//         começo do arrasto. `onSample` a cada passo, `onCommit` ao soltar.
+//  P1-1 · CONTA-GOTAS AO VIVO (`store.eyedropper`): tocar/arrastar põe a MIRA
+//         sob o dedo (0.4.5; antes era relativa), com a lupa acima dele; a cor
+//         vem do quadro da prévia capturado no começo do arrasto (cor de efeito:
+//         com o efeito desligado só na captura). `onSample` a cada passo,
+//         `onCommit` ao soltar.
 //  P1-4 · PONTAS DO DEGRADÊ (painel no Degradê): duas alças nas pontas
 //         (relativas à caixa da camada → composição pelos cantos do motor); o
 //         toque pega a mais perto, passa da folga e arrasta — um passo de desfazer.
@@ -104,21 +107,36 @@ private fun EyedropperStage(store: EditorStore, m: StageMapper, request: EditorS
     var picked by remember { mutableStateOf(Color.Transparent) }
     val frameNow by rememberUpdatedState(frame)
 
-    // O quadro da prévia (captura síncrona na GPU: fora da linha principal).
+    // O quadro da prévia (captura síncrona na GPU: fora da linha principal). 0.4.5: a cor de um
+    // EFEITO é amostrada com ele desligado só na captura (o verde antes do Chroma Key).
     fun capture() {
         scope.launch {
-            val bmp = withContext(Dispatchers.Default) { runCatching { store.captureBitmap(720, preview = true) }.getOrNull() }
+            val bmp = withContext(Dispatchers.Default) {
+                runCatching { store.captureEyedropperBitmap(720, request.skipLayer, request.skipEffect) }.getOrNull()
+            }
             if (bmp != null) frame = bmp
         }
     }
     LaunchedEffect(request) { capture() }
 
+    val skipping = request.skipLayer != 0L && request.skipEffect >= 0
     val hint = stringResource(R.string.om_ap_cp_eyedropper_hint)
+    val sourceHint = stringResource(R.string.om_ap_cp_eyedropper_source)
+    val pickedLabel = stringResource(R.string.om_ap_cp_eyedropper_picked)
     Box(
         Modifier
             .fillMaxSize()
             .testTag("stage.eyedropper")
-            .semantics { contentDescription = hint }
+            .semantics {
+                contentDescription = if (skipping) "$hint. $sourceHint" else hint
+                // TalkBack lê a cor que a lupa pegou.
+                if (picked.alpha > 0f) {
+                    stateDescription = String.format(
+                        pickedLabel,
+                        String.format(Locale.ROOT, "#%02X%02X%02X", (picked.red * 255).roundToInt(), (picked.green * 255).roundToInt(), (picked.blue * 255).roundToInt()),
+                    )
+                }
+            }
             .pointerInput(request) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -136,7 +154,9 @@ private fun EyedropperStage(store: EditorStore, m: StageMapper, request: EditorS
                         picked = c.copy(alpha = 1f)
                         return floatArrayOf(c.red, c.green, c.blue, 1f)
                     }
-                    var cur = EyedropperAim.point(m)
+                    // 0.4.5: a mira começa SOB O DEDO (o pixel tocado) e o acompanha; a
+                    // lupa acima do dedo mostra a amostra que ele cobre.
+                    var cur = Offset(m.cx(down.position.x).coerceIn(0f, m.compW), m.cy(down.position.y).coerceIn(0f, m.compH))
                     var last = down.position
                     var sample: FloatArray? = null
                     aim = cur
@@ -214,8 +234,8 @@ private fun EyedropperStage(store: EditorStore, m: StageMapper, request: EditorS
             },
     ) {
         Text(
-            hint,
-            maxLines = 1,
+            if (skipping) "$hint · $sourceHint" else hint,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)),
             modifier = Modifier

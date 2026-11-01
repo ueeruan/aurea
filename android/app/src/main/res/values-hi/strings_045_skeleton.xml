@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: painel Esqueleto 3D e grupo de pinos do Fantoche (pedido de ⚡ᴍᴀʀᴋᴢ, pauloph2517 e Jess). -->
+    <string name="skeleton_title">कंकाल</string>
+    <string name="skeleton_open">कंकाल पैनल खोलें</string>
+    <string name="skeleton_desc">हड्डियों का पेड़, संख्या से घुमाव, पोज़ मिरर और कॉपी करें</string>
+    <string name="skeleton_partner">दूसरी तरफ़: %1$s</string>
+    <string name="skeleton_bone_none">मंच पर किसी जोड़ या सूची में किसी हड्डी को टैप करें</string>
+    <string name="skeleton_ring_hint">जोड़ के छल्ले: लाल X पर, हरा Y पर, नीला Z पर घुमाता है (हड्डी की धुरियाँ); सफ़ेद स्क्रीन के चारों ओर घुमाता है। नीचे वाला जोड़ चुनने के लिए फिर टैप करें।</string>
+    <string name="skeleton_show">कंकाल दिखाएँ</string>
+    <string name="skeleton_ik">IK: सिरा खींचें</string>
+    <string name="skeleton_pose">पोज़</string>
+    <string name="skeleton_copy">पोज़ कॉपी करें</string>
+    <string name="skeleton_paste">पोज़ चिपकाएँ</string>
+    <string name="skeleton_mirror_pose">पोज़ मिरर करें</string>
+    <string name="skeleton_mirror_bone">दूसरी तरफ़ मिरर करें</string>
+    <string name="skeleton_zero_pose">पोज़ शून्य करें</string>
+    <string name="skeleton_zero_bone">हड्डी शून्य करें</string>
+    <string name="skeleton_bones">हड्डियाँ</string>
+    <string name="skeleton_search">हड्डी खोजें</string>
+    <string name="skeleton_no_match">इस नाम की कोई हड्डी नहीं</string>
+    <string name="skeleton_bone_a11y">%1$s, स्तर %2$d</string>
+    <string name="skeleton_keyed">यहाँ कीफ़्रेम है</string>
+    <string name="skeleton_expand">%1$s खोलें</string>
+    <string name="skeleton_collapse">%1$s बंद करें</string>
+    <string name="skeleton_rot_a11y">घुमाव %1$s: %2$s डिग्री</string>
+    <string name="skeleton_minus">%1$s को 5 डिग्री घटाएँ</string>
+    <string name="skeleton_plus">%1$s को 5 डिग्री बढ़ाएँ</string>
+    <string name="skeleton_pose_copied">पोज़ कॉपी हुआ</string>
+    <string name="skeleton_paste_failed">इस मॉडल में चिपकाने को कुछ नहीं</string>
+    <string name="skeleton_mirror_nothing">मिरर करने के लिए कोई पोज़ की हुई हड्डी नहीं</string>
+    <string name="skeleton_no_partner">इस हड्डी की दूसरी तरफ़ कोई जोड़ी नहीं</string>
+    <string name="puppet_group">समूह</string>
+    <string name="puppet_group_clear">समूह खाली करें</string>
+    <string name="puppet_group_hint">समूह चालू होने पर घूमने वाले पिन टैप करें; चुना हुआ पिन धुरी है। घुमाने के लिए नीला छल्ला खींचें।</string>
+    <string name="puppet_group_rotate">पिन %1$d के चारों ओर समूह घुमाएँ</string>
+</resources>

@@ -116,6 +116,14 @@ internal fun Rig3DTab(env: PanelEnv) {
             ActionCard(stringResource(R.string.rig3d_animate), stringResource(R.string.rig3d_animate_desc)) { store.animateBones() }
         }
     }
+    // 0.4.5: o painel Esqueleto (árvore de ossos, rotação numérica, espelhar L/R) —
+    // também para esqueleto do arquivo que não é humanoide.
+    if (status >= 1 && store.poseBones != null) {
+        Spacer(Modifier.height(6.dp))
+        Box(Modifier.testTag("rig3d.skeleton")) {
+            ActionCard(stringResource(R.string.skeleton_open), stringResource(R.string.skeleton_desc)) { store.openSkeletonPanel(true) }
+        }
+    }
     val joints = store.humanoidJoints
     if (status != 3 && assignList && joints != null) {
         // Lista dos ossos canônicos: tocar escolhe a junta do arquivo.

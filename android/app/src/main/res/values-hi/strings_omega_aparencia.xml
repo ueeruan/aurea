@@ -94,7 +94,11 @@
 
     <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
     <string name="om_ap_cp_eyedropper">आईड्रॉपर</string>
-    <string name="om_ap_cp_eyedropper_hint">रंग चुनने के लिए मंच पर खींचें</string>
+    <string name="om_ap_cp_eyedropper_hint">रंग लेने के लिए प्रीव्यू पर टैप करें या खींचें</string>
+    <string name="om_ap_cp_eyedropper_source">मूल रंग, इस इफ़ेक्ट से पहले</string>
+    <string name="om_ap_cp_eyedropper_picked">चुना गया रंग: %1$s</string>
+    <string name="om_ap_cp_eyedropper_cancel">आईड्रॉपर रद्द करें और रंग चयनकर्ता पर लौटें</string>
+    <string name="om_ap_cp_eyedropper_full_hint">प्रीव्यू से रंग लें</string>
     <string name="om_ap_cp_fine">बारीक चयन</string>
     <string name="om_ap_cp_full">और रंग</string>
     <string name="om_ap_cp_unavailable">पारदर्शी रंग यहाँ उपलब्ध नहीं है</string>
@@ -103,6 +107,7 @@
     <string name="om_ap_cp_paste_code">रंग कोड पेस्ट करें</string>
     <string name="om_ap_cp_code_copied">रंग कोड कॉपी हुआ</string>
     <string name="om_ap_cp_code">रंग कोड %1$s</string>
+    <string name="om_ap_cp_type_code">रंग कोड लिखें</string>
     <string name="om_ap_cp_wheel">पहिया</string>
     <string name="om_ap_cp_rgb">RGB</string>
     <string name="om_ap_cp_done">हो गया</string>

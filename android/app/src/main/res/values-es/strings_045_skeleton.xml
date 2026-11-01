@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: painel Esqueleto 3D e grupo de pinos do Fantoche (pedido de ⚡ᴍᴀʀᴋᴢ, pauloph2517 e Jess). -->
+    <string name="skeleton_title">Esqueleto</string>
+    <string name="skeleton_open">Abrir panel del esqueleto</string>
+    <string name="skeleton_desc">Árbol de huesos, rotación numérica, espejar y copiar la pose</string>
+    <string name="skeleton_partner">Otro lado: %1$s</string>
+    <string name="skeleton_bone_none">Toca una articulación en el escenario o un hueso de la lista</string>
+    <string name="skeleton_ring_hint">Anillos en la articulación: rojo gira en X, verde en Y, azul en Z (ejes del hueso); el blanco gira alrededor de la pantalla. Toca otra vez para tomar la articulación de abajo.</string>
+    <string name="skeleton_show">Mostrar esqueleto</string>
+    <string name="skeleton_ik">IK: arrastrar la punta</string>
+    <string name="skeleton_pose">Pose</string>
+    <string name="skeleton_copy">Copiar pose</string>
+    <string name="skeleton_paste">Pegar pose</string>
+    <string name="skeleton_mirror_pose">Espejar pose</string>
+    <string name="skeleton_mirror_bone">Espejar al otro lado</string>
+    <string name="skeleton_zero_pose">Poner pose a cero</string>
+    <string name="skeleton_zero_bone">Poner hueso a cero</string>
+    <string name="skeleton_bones">Huesos</string>
+    <string name="skeleton_search">Buscar hueso</string>
+    <string name="skeleton_no_match">Ningún hueso con ese nombre</string>
+    <string name="skeleton_bone_a11y">%1$s, nivel %2$d</string>
+    <string name="skeleton_keyed">Con keyframe aquí</string>
+    <string name="skeleton_expand">Expandir %1$s</string>
+    <string name="skeleton_collapse">Contraer %1$s</string>
+    <string name="skeleton_rot_a11y">Rotación %1$s: %2$s grados</string>
+    <string name="skeleton_minus">Reducir %1$s 5 grados</string>
+    <string name="skeleton_plus">Aumentar %1$s 5 grados</string>
+    <string name="skeleton_pose_copied">Pose copiada</string>
+    <string name="skeleton_paste_failed">Nada para pegar en este modelo</string>
+    <string name="skeleton_mirror_nothing">Ningún hueso posado para espejar</string>
+    <string name="skeleton_no_partner">Este hueso no tiene pareja del otro lado</string>
+    <string name="puppet_group">Grupo</string>
+    <string name="puppet_group_clear">Vaciar grupo</string>
+    <string name="puppet_group_hint">Con Grupo activado, toca los pines que van a girar; el pin elegido es el pivote. Arrastra el anillo azul para girar.</string>
+    <string name="puppet_group_rotate">Girar grupo alrededor del pin %1$d</string>
+</resources>

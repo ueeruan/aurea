@@ -119,6 +119,7 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     )
     put("aurea.key.luma", EffectMeta(R.string.fx_desc_key_luma, listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.PreComposicao)))
     put("aurea.key.chroma", EffectMeta(R.string.fx_desc_key_chroma, listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.PreComposicao)))
+    put("aurea.key.background_remove", EffectMeta(R.string.bg_remove_fx_desc, listOf(EffectTarget.Imagem, EffectTarget.Video)))
     put("aurea.time.echo", EffectMeta(R.string.fx_desc_time_echo, AllTargets))
     // --- Fase 7.3: o pacote novo ---------------------------------------------
     put("aurea.color.invert", EffectMeta(R.string.fx_desc_color_invert, AllTargets))
@@ -164,7 +165,7 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.time.flow_retime", EffectMeta(
         R.string.fx_desc_time_flow_retime,
         listOf(EffectTarget.Video),
-        "twixtor camera lenta slow motion optical flow quadros inventados duplicados repetidos",
+        "twixtor camera lenta slow motion slowmo optical flow quadros inventados interpolacao duplicados repetidos camara lenta",
     ))
     // Aprimorar (0.3.0): vídeo, pré-composição e camada de ajuste usam os quadros vizinhos; foto, só o quadro.
     put("aurea.enhance.video", EffectMeta(R.string.fx030e_desc,
@@ -210,6 +211,10 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.stylize.crt_emulator", EffectMeta(R.string.fx_desc_stylize_crt_emulator, AllTargets, "crt tv tubo retro varredura fosforo"))
     put("aurea.glitch.dissolve_shake", EffectMeta(R.string.fx_desc_glitch_dissolve_shake, AllTargets, "tremor dissolver fragmentos quebrar"))
     put("aurea.glitch.datamosh", EffectMeta(R.string.fx_desc_glitch_datamosh, AllTargets, "datamosh compressao blocos arrastar derreter codec"))
+    // 0.4.5 (pedidos de usuários).
+    put("aurea.glitch.hyper_glitch", EffectMeta(R.string.fx045g_desc_hyper_glitch, AllTargets, "hyper glitch pesado blocos fatias rgb rastro compressao"))
+    put("aurea.glitch.block_glitch", EffectMeta(R.string.fx045g_desc_block_glitch, AllTargets, "block glitch blocos davinci resolve canais trocados"))
+    put("aurea.color.shift_channels", EffectMeta(R.string.fx045g_desc_shift_channels, AllTargets, "shift channels trocar canais alfa luminancia"))
     put("aurea.distort.displacement_map", EffectMeta(R.string.fx_desc_distort_displacement_map, AllTargets, "mapa deslocamento camada distorcer"))
     put("aurea.control.slider", EffectMeta(R.string.fx_desc_control_slider, AllTargets))
     put("aurea.control.angle", EffectMeta(R.string.fx_desc_control_angle, AllTargets))
@@ -226,7 +231,8 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.transition.box_wipe", EffectMeta(R.string.fx_desc_transition_box_wipe, AllTargets))
     put("aurea.transition.venetian_blinds", EffectMeta(R.string.fx_desc_transition_venetian_blinds, AllTargets))
     put("aurea.blur.radial", EffectMeta(R.string.fx_desc_blur_radial, AllTargets))
-    put("aurea.distort.mirror", EffectMeta(R.string.fx_desc_distort_mirror, AllTargets))
+    put("aurea.distort.mirror", EffectMeta(R.string.fx_desc_distort_mirror, AllTargets,
+        "espelhar camada mirror layer flip dois eixos sobrepor copia alight motion"))
     put("aurea.distort.puppet", EffectMeta(R.string.fx_desc_puppet, AllTargets,
         "fantoche puppet pino pin marionete rig personagem deformar"))
     put("aurea.transform.crop", EffectMeta(R.string.fx_desc_transform_crop, AllTargets))
@@ -261,7 +267,7 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.color.balance_hls", EffectMeta(R.string.fx_desc_color_balance_hls, AllTargets,
         "equilibrio balanco cor hls matiz luz saturacao"))
     put("aurea.blur.zoom", EffectMeta(R.string.fx_desc_blur_zoom, AllTargets,
-        "zoom rastro radial lente empurrar desfoque"))
+        "zoom rastro radial lente empurrar desfoque cc radial fast blur mais claro mais escuro"))
     put("aurea.distort.bulge", EffectMeta(R.string.fx_desc_distort_bulge, AllTargets,
         "bojo bulge pinca estufar puxar lente centro"))
     put("aurea.pattern.checkerboard", EffectMeta(R.string.fx_desc_pattern_checkerboard, AllTargets,
@@ -349,6 +355,18 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     put("aurea.stylize.tiler", EffectMeta(R.string.cc_desc_tiler,
         listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
         "cc tiler mosaico tiler copias copies repetir repeat grade grid"))
+    // 0.4.5 (pedidos de usuários): ladrilhos que se mexem, caixa oca e deslocamento no tempo.
+    put("aurea.distort.tile_shift", EffectMeta(R.string.fx045d_desc_tile_shift, listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "tile shift deslocar ladrilhos mosaico grade blocos alight motion"))
+    put("aurea.distort.hex_tile_rotate", EffectMeta(R.string.fx045d_desc_hex_tile_rotate, listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "hexagon tile rotate hexagono colmeia girar celulas alight motion"))
+    put("aurea.distort.hex_tile_shift", EffectMeta(R.string.fx045d_desc_hex_tile_shift, listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "hexagon tile shift hexagono colmeia deslocar celulas alight motion"))
+    put("aurea.distort.hollow_box", EffectMeta(R.string.fx045d_desc_hollow_box, listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "hollow box caixa oca cubo 3d lados recorte alight motion"))
+    put("aurea.time.time_displacement", EffectMeta(R.string.fx045d_desc_time_displacement,
+        listOf(EffectTarget.Video, EffectTarget.PreComposicao),
+        "time displacement deslocamento no tempo slit scan mapa luminancia after effects"))
     put("aurea.stylize.hex_tile", EffectMeta(R.string.cc_desc_hex_tile,
         listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
         "cc hextile hexagono hexagon colmeia honeycomb ladrilho tile mosaico mosaic"))
@@ -423,6 +441,21 @@ private val Table: Map<Int, EffectMeta> = buildMap {
     // --- IA: a rede lê a FONTE da camada (foto ou vídeo) ---
     put("aurea.ai.depth_map", EffectMeta(R.string.fx_desc_ai_depth_map, listOf(EffectTarget.Imagem, EffectTarget.Video),
         "profundidade depth mapa ia ai midas distancia perto longe z matte fundo"))
+    // --- 0.4.5: pedidos de usuários (mesma tabela no iOS, EffectsHuman.swift) ---
+    put("aurea.distort.water_reflection", EffectMeta(R.string.fx045_desc_water_reflection,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "reflejo agua отражение вода प्रतिबिंब पानी انعكاس ماء pantulan air"))
+    put("aurea.light.light_wrap", EffectMeta(R.string.fx045_desc_light_wrap,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "envoltura de luz световое обтекание लाइट रैप التفاف الضوء bungkus cahaya"))
+    put("aurea.color.looks", EffectMeta(R.string.fx045_desc_looks, AllTargets,
+        "looks de cine кинолуки सिनेमैटिक लुक्स مظاهر سينمائية look sinematik"))
+    put("aurea.transition.ballpoint", EffectMeta(R.string.fx045_desc_ballpoint,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "boligrafo garabato шариковая ручка बॉलपॉइंट पेन قلم حبر جاف pulpen coretan"))
+    put("aurea.transition.dust", EffectMeta(R.string.fx045_desc_dust,
+        listOf(EffectTarget.Imagem, EffectTarget.Video, EffectTarget.Texto, EffectTarget.Vetor, EffectTarget.Forma, EffectTarget.PreComposicao, EffectTarget.Cena3D),
+        "polvo viento пыль ветер धूल हवा غبار رياح debu angin"))
 }
 
 /** As chaves dos efeitos de SOM (espelho de `audio::fx_keys`). */
@@ -780,17 +813,18 @@ private val TagByKey: Map<Int, List<String>> by lazy {
         "particles" to listOf(
             "aurea.generate.particular", "aurea.transition.disintegrate", "aurea.stylize.ball_grid",
             "aurea.stylize.star_field", "aurea.stylize.scatter", "aurea.generate.constellation", "aurea.3d.shatter",
+            "aurea.transition.dust",
         ),
         "shadow" to listOf("aurea.stylize.drop_shadow", "aurea.distort.slant", "aurea.stylize.bevel_alpha"),
         "outline" to listOf(
             "aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.find_edges", "aurea.3d.stroke",
-            "aurea.draw.drawing_progress", "aurea.light.saber",
+            "aurea.draw.drawing_progress", "aurea.light.saber", "aurea.transition.ballpoint",
         ),
         "3d" to listOf(
             "aurea.distort.sphere_wrap", "aurea.distort.cylinder_wrap", "aurea.generate.raster_extrude",
             "aurea.3d.part_transform", "aurea.3d.part_hide", "aurea.3d.part_texture", "aurea.3d.shatter",
             "aurea.3d.stroke", "aurea.shape3d.layout", "aurea.generate.aurora", "aurea.generate.constellation",
-            "aurea.ai.depth_map", EffectTool.CameraTrack.key,
+            "aurea.ai.depth_map", EffectTool.CameraTrack.key, "aurea.distort.hollow_box",
         ),
         "transition" to listOf(
             "aurea.transition.luma_dissolve", "aurea.distort.ripple_dissolve", "aurea.glitch.dissolve_shake",
@@ -798,21 +832,23 @@ private val TagByKey: Map<Int, List<String>> by lazy {
         ),
         "text" to listOf("aurea.text.animator", "aurea.text.transform", EffectTool.Captions.key),
         "mask" to listOf(
-            EffectTool.Mask.key, "aurea.key.chroma", "aurea.key.luma", "aurea.key.matte_refine", "aurea.key.rotobrush",
+            EffectTool.Mask.key, "aurea.key.background_remove", "aurea.key.chroma", "aurea.key.luma", "aurea.key.matte_refine", "aurea.key.rotobrush",
             "aurea.utility.copy_background", "aurea.transform.crop", "aurea.ai.depth_map",
         ),
         "motion" to listOf(
             "aurea.distort.shake", "aurea.time.flow_motion_blur", "aurea.blur.directional", EffectTool.CameraTrack.key,
             "aurea.motion.swing", "aurea.motion.wiggle", "aurea.motion.twitch", "aurea.motion.oscillate.cycles",
         ),
-        "repeat" to listOf("aurea.pattern.checkerboard", "aurea.pattern.hexagonal", "aurea.stylize.mosaic"),
-        "color" to listOf("aurea.time.warp_rgb", "aurea.color.color_offset", "aurea.color.threshold_rgb", "aurea.color.rgb_split", "aurea.color.grade"),
+        "repeat" to listOf("aurea.pattern.checkerboard", "aurea.pattern.hexagonal", "aurea.stylize.mosaic",
+            "aurea.distort.tile_shift", "aurea.distort.hex_tile_rotate", "aurea.distort.hex_tile_shift"),
+        "color" to listOf("aurea.time.warp_rgb", "aurea.color.color_offset", "aurea.color.threshold_rgb", "aurea.color.rgb_split", "aurea.color.grade",
+            "aurea.color.shift_channels"),
         "distort" to listOf("aurea.glitch.datamosh", "aurea.distort.displacement_map"),
         "glitch" to listOf(
             "aurea.stylize.pixel_sort", "aurea.stylize.jpeg_damage", "aurea.color.rgb_split", "aurea.stylize.pixel_encoder",
-            "aurea.glitch.video_glitch", "aurea.glitch.datamosh", "aurea.time.random_edits",
+            "aurea.glitch.video_glitch", "aurea.glitch.datamosh", "aurea.time.random_edits", "aurea.color.shift_channels",
         ),
-        "time" to listOf("aurea.time.echo", "aurea.time.wide_time", "aurea.enhance.video"),
+        "time" to listOf("aurea.time.echo", "aurea.time.wide_time", "aurea.enhance.video", "aurea.time.time_displacement"),
         "audio" to listOf(
             "aurea.generate.audio_spectrum", "aurea.generate.audio_waveform", "aurea.generate.spectrum_analyzer",
             AudioFxKeys.Tone,

@@ -651,24 +651,58 @@ private struct ShellStageBanner: View {
                     // Pose do rig (RigPoseStage.kt): juntas e ossos no lugar do gizmo.
                     let b = model.poseBones, f = AureaModel.boneFloats, chosen = model.poseBone
                     let count = b.count / f
-                    for i in 0..<count {
-                        let parent = Int(b[i * f + 1])
-                        guard parent >= 0, parent < count, b[i * f + 9] > 0.5, b[parent * f + 9] > 0.5 else { continue }
-                        var line = Path()
-                        line.move(to: screen(b[parent * f + 7], b[parent * f + 8])); line.addLine(to: screen(b[i * f + 7], b[i * f + 8]))
-                        let on = Int32(b[i * f]) == chosen || Int32(b[parent * f]) == chosen
-                        context.stroke(line, with: .color(StageInk.outlineUnder), style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        context.stroke(line, with: .color(on ? AureaColors.accent : .white.opacity(0.85)), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    if !model.skeletonHidden {
+                        // 0.4.5: o osso escolhido (e os filhos dele) mais grosso e aceso.
+                        for i in 0..<count {
+                            let parent = Int(b[i * f + 1])
+                            guard parent >= 0, parent < count, b[i * f + 9] > 0.5, b[parent * f + 9] > 0.5 else { continue }
+                            var line = Path()
+                            line.move(to: screen(b[parent * f + 7], b[parent * f + 8])); line.addLine(to: screen(b[i * f + 7], b[i * f + 8]))
+                            let on = Int32(b[i * f]) == chosen || Int32(b[parent * f]) == chosen
+                            context.stroke(line, with: .color(StageInk.outlineUnder), style: StrokeStyle(lineWidth: on ? 6 : 4, lineCap: .round))
+                            context.stroke(line, with: .color(on ? AureaColors.accent : .white.opacity(0.85)), style: StrokeStyle(lineWidth: on ? 3.5 : 2, lineCap: .round))
+                        }
+                        // Juntas: ponto maior que o osso, com a área de toque marcada por um anel fino.
+                        for i in 0..<count where b[i * f + 9] > 0.5 {
+                            let c = screen(b[i * f + 7], b[i * f + 8])
+                            let on = Int32(b[i * f]) == chosen
+                            let r: CGFloat = on ? 8 : 6
+                            context.stroke(Path(ellipseIn: CGRect(x: c.x - 13, y: c.y - 13, width: 26, height: 26)), with: .color(.white.opacity(0.22)), lineWidth: 1)
+                            circle(&context, c, r + 1.5, StageInk.outlineUnder)
+                            circle(&context, c, r, on ? AureaColors.accent : .white)
+                            if b[i * f + 6] > 0.5 {
+                                context.stroke(Path(ellipseIn: CGRect(x: c.x - r - 4, y: c.y - r - 4, width: (r + 4) * 2, height: (r + 4) * 2)),
+                                               with: .color(AureaColors.accent), lineWidth: 2)
+                            }
+                        }
                     }
-                    for i in 0..<count where b[i * f + 9] > 0.5 {
-                        let c = screen(b[i * f + 7], b[i * f + 8])
-                        let on = Int32(b[i * f]) == chosen
-                        let r: CGFloat = on ? 7 : 4.5
-                        circle(&context, c, r + 1.5, StageInk.outlineUnder)
-                        circle(&context, c, r, on ? AureaColors.accent : .white)
-                        if b[i * f + 6] > 0.5 {
-                            context.stroke(Path(ellipseIn: CGRect(x: c.x - r - 4, y: c.y - r - 4, width: (r + 4) * 2, height: (r + 4) * 2)),
-                                           with: .color(AureaColors.accent), lineWidth: 2)
+                    // Anéis do osso escolhido: X/Y/Z locais (metade de trás apagada) e o de fora (em volta do olhar).
+                    let gz = model.poseGizmo
+                    if gz.count == AureaModel.boneGizmoFloats, gz[2] > 0.5, !model.poseMove, fit > 0 {
+                        let ring = Float(SkeletonRing.radius / fit)
+                        let c = screen(gz[0], gz[1])
+                        let outer = SkeletonRing.radius * CGFloat(AureaModel.outerRing)
+                        let outerPath = Path(ellipseIn: CGRect(x: c.x - outer, y: c.y - outer, width: outer * 2, height: outer * 2))
+                        context.stroke(outerPath, with: .color(StageInk.outlineUnder), lineWidth: 3.5)
+                        context.stroke(outerPath, with: .color(.white.opacity(0.75)), lineWidth: 1.5)
+                        for axis in 0..<3 {
+                            let o = 3 + axis * 6
+                            var front = Path(), back = Path()
+                            var prev: CGPoint? = nil, prevFront = true
+                            for s in 0...48 {
+                                let t = Float(s) / 48 * 2 * .pi
+                                let cs = cos(t), sn = sin(t)
+                                let p = screen(gz[0] + (gz[o] * cs + gz[o + 3] * sn) * ring, gz[1] + (gz[o + 1] * cs + gz[o + 4] * sn) * ring)
+                                let isFront = gz[o + 2] * cs + gz[o + 5] * sn >= -0.05
+                                if let q = prev {
+                                    if prevFront && isFront { front.move(to: q); front.addLine(to: p) } else { back.move(to: q); back.addLine(to: p) }
+                                }
+                                prev = p; prevFront = isFront
+                            }
+                            let color = SkeletonRing.colors[axis]
+                            context.stroke(back, with: .color(color.opacity(0.3)), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                            context.stroke(front, with: .color(StageInk.outlineUnder), style: StrokeStyle(lineWidth: 4.5, lineCap: .round))
+                            context.stroke(front, with: .color(color), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                         }
                     }
                     // AutoRig 3D (0.3.6): alvo (quadrado) e polo (losango) dos membros com IK.
@@ -1033,6 +1067,10 @@ private struct BatchToolsView: View {
                 AureaColors.border.frame(width: 1, height: 24)
                 if EditorTimelineRefresh.enabled {
                     tool(CupertinoGlyph.RectangleStack, "editor_agrupar_camadas_escolhidas") { model.groupSelection() }
+                    // Bug #6 (par do GroupSelectionSheet): desagrupar com grupo na seleção.
+                    if selected.contains(where: { $0.kind == 12 }) {
+                        tool(ShellGlyph.SquareSplit2x2, "editor_desagrupar") { model.ungroup(groups: selected.map(\.id)) }
+                    }
                     tool(CupertinoGlyph.DocOnDoc, "editor_copiar_camada") { model.engine.copyLayers(selected.map { NSNumber(value: $0.id) }) }
                     tool(CupertinoGlyph.PlusSquareOnSquare, "editor_duplicar_camada") {
                         model.engine.duplicateLayers(selected.map { NSNumber(value: $0.id) }); model.refreshModel(force: true)
@@ -2002,7 +2040,9 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                         .background(StageInk.floatingDark, in: RoundedRectangle(cornerRadius: 12))
                         .padding(.horizontal, 24).padding(.bottom, 8).transition(.opacity).allowsHitTesting(false)
                 }
-                let objects = model.layers.filter { $0.threeD }
+                // 0.4.5: com o painel Esqueleto aberto, ele ocupa o lugar das fileiras de baixo.
+                let skeletonOpen = model.skeletonPanel && model.rigPoseMode && !model.poseBones.isEmpty
+                let objects = model.layers.filter { !skeletonOpen && $0.threeD }
                 if !objects.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
@@ -2019,11 +2059,15 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                     }.padding(.bottom, 8)
                 }
                 // A fileira rola na horizontal (tela estreita / textos longos); cabendo, fica centrada.
-                ViewThatFits(in: .horizontal) {
-                    pillRow.padding(.horizontal, 12)
-                    ScrollView(.horizontal, showsIndicators: false) { pillRow.padding(.horizontal, 12) }
-                }.padding(.bottom, model.rigPoseMode ? 8 : 12)
-                if model.rigPoseMode && !model.poseBones.isEmpty { rigPoseBar }
+                if !skeletonOpen {
+                    ViewThatFits(in: .horizontal) {
+                        pillRow.padding(.horizontal, 12)
+                        ScrollView(.horizontal, showsIndicators: false) { pillRow.padding(.horizontal, 12) }
+                    }.padding(.bottom, model.rigPoseMode ? 8 : 12)
+                }
+                if skeletonOpen {
+                    SkeletonPanelView().environmentObject(model).frame(height: height * 0.46)
+                } else if model.rigPoseMode && !model.poseBones.isEmpty { rigPoseBar }
                 if model.rigFixMode && !model.humanoidJoints.isEmpty { rigFixBar }
             }
         }
@@ -2088,6 +2132,9 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                             .buttonStyle(.plain).accessibilityAddTraits(model.poseMove ? [.isSelected] : [])
                     }
                     Button { model.resetPose(all: true) } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("rig_reset_all")) }.buttonStyle(.plain)
+                    // 0.4.5: o painel Esqueleto (árvore, rotação numérica, espelhar, copiar/colar).
+                    Button { model.openSkeletonPanel(true) } label: { pill(CupertinoGlyph.PersonCropCircle, AureaText.t("skeleton_title")) }
+                        .buttonStyle(.plain).accessibilityIdentifier("rig.skeleton")
                     Button { model.setRigPose(false) } label: { pill(CupertinoGlyph.CheckmarkAlt, AureaText.t("rig_done")) }.buttonStyle(.plain)
                 }.padding(.horizontal, 12)
             }

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Tile Shift, Hexagon Tile Rotate/Shift, Hollow Box, Time Displacement, Mirror e Zoom blur. -->
+    <string name="fx045d_name_tile_shift">Tile Shift</string>
+    <string name="fx045d_name_hex_tile_rotate">Hexagon Tile Rotate</string>
+    <string name="fx045d_name_hex_tile_shift">Hexagon Tile Shift</string>
+    <string name="fx045d_name_hollow_box">Hollow Box</string>
+    <string name="fx045d_name_time_displacement">Time Displacement</string>
+    <string name="fx045d_desc_tile_shift">Splits the layer into tiles and shifts the content of each one on its own.</string>
+    <string name="fx045d_desc_hex_tile_rotate">Splits the layer into a honeycomb of hexagons and rotates each cell on its own.</string>
+    <string name="fx045d_desc_hex_tile_shift">Splits the layer into a honeycomb of hexagons and shifts the content of each cell.</string>
+    <string name="fx045d_desc_hollow_box">Turns the layer into a hollow 3D box, with open sides, cutouts and lighting.</string>
+    <string name="fx045d_desc_time_displacement">Each pixel comes from another moment, set by the brightness of a map: light is ahead, dark is behind.</string>
+    <string name="fx045d_alt_rows">Alternate rows</string>
+    <string name="fx045d_alt_cols">Alternate columns</string>
+    <string name="fx045d_cell_edges">Cell edges</string>
+    <string name="fx045d_wrap_in_cell">Wrap inside the cell</string>
+    <string name="fx045d_continuous">Continuous image</string>
+    <string name="fx045d_tip_rand_shift">0%: every cell moves the same distance. 100%: each one moves a random distance.</string>
+    <string name="fx045d_tip_rand_rotate">0%: every cell rotates the same. 100%: each one rotates a random amount.</string>
+    <string name="fx045d_outset">Outset</string>
+    <string name="fx045d_smoothing">Smoothing</string>
+    <string name="fx045d_hidden">Hidden</string>
+    <string name="fx045d_circle_cutout">Circular cutout</string>
+    <string name="fx045d_circle_crop">Circular crop</string>
+    <string name="fx045d_square_cutout">Square cutout</string>
+    <string name="fx045d_square_crop">Square crop</string>
+    <string name="fx045d_cutout_size">Cutout size</string>
+    <string name="fx045d_lighting">Lighting</string>
+    <string name="fx045d_precision">Precision</string>
+    <string name="fx045d_tip_cutout">Applies to sides set to a cutout or crop.</string>
+    <string name="fx045d_tip_precision">More steps: cleaner edges and a slower preview.</string>
+    <string name="fx045d_layer_itself">The layer itself</string>
+    <string name="fx045d_grad_h">Horizontal gradient</string>
+    <string name="fx045d_grad_v">Vertical gradient</string>
+    <string name="fx045d_grad_r">Radial gradient</string>
+    <string name="fx045d_max_time">Max displacement time</string>
+    <string name="fx045d_time_resolution">Time resolution</string>
+    <string name="fx045d_invert_map">Invert map</string>
+    <string name="fx045d_smooth_levels">Smooth between levels</string>
+    <string name="fx045d_tip_time_map">White = ahead, black = behind, mid gray (50%) = now.</string>
+    <string name="fx045d_both_axes">Mirror on both axes</string>
+    <string name="fx045d_replace_side">Replace the side</string>
+    <string name="fx045d_overlay_copy">Overlay copy</string>
+    <string name="fx045d_copy_opacity">Copy opacity</string>
+    <string name="fx045d_copy_behind">Copy behind the layer</string>
+    <string name="fx045d_copy">Copy</string>
+    <string name="fx045d_tip_mirror_mode">Overlay copy: the whole layer stays and the mirrored copy is added.</string>
+</resources>

@@ -599,6 +599,14 @@ private fun copyPasteEntries(
         sublabel = stringResource(R.string.editor_otimizar_keyframes_detalhe),
         enabled = primary != null, tag = "copyPaste.more.optimizeKeys",
     ) { store.optimizeKeyframes() }
+    // Bug #6: "Desagrupar" com UM grupo escolhido também (antes só aparecia com
+    // duas ou mais camadas) — todos os grupos escolhidos num passo de desfazer.
+    val groups = store.layers.filter { it.id in selection && it.kind == LayerType.Group.kind }.map { it.id }
+    if (groups.isNotEmpty()) {
+        out += MenuEntry.Item(stringResource(R.string.editor_desagrupar), glyph = ShellGlyph.SquareSplit2x2, tag = "copyPaste.more.ungroup") {
+            store.ungroupPrecomps(groups)
+        }
+    }
     if (count >= 2) {
         out += MenuEntry.Item(
             stringResource(R.string.editor_ajustar_tela), glyph = CupertinoGlyph.FullscreenExit, tag = "copyPaste.more.fit",
@@ -612,12 +620,6 @@ private fun copyPasteEntries(
             stringResource(R.string.editor_escada_comeca_quando_cima_termina), glyph = CupertinoGlyph.ArrowRightToLine,
             tag = "copyPaste.more.stairs",
         ) { store.arrangeLayerTimes(1) }
-        val groups = store.layers.filter { it.id in selection && it.kind == LayerType.Group.kind }.map { it.id }
-        if (groups.isNotEmpty()) {
-            out += MenuEntry.Item(stringResource(R.string.editor_desagrupar), glyph = ShellGlyph.SquareSplit2x2, tag = "copyPaste.more.ungroup") {
-                groups.forEach { store.ungroupPrecomp(it) }
-            }
-        }
         out += MenuEntry.Item(
             stringResource(R.string.om_cp_link_selected), glyph = CupertinoGlyph.Link, tag = "copyPaste.more.link",
         ) {

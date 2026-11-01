@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Glitch 0.4.5 (2026-11-01): Glitchify completo, Hyper Glitch, Block Glitch e Trocar canais. Chaves fx045g_*. -->
+<resources>
+    <string name="fx045g_name_hyper_glitch">हाइपर ग्लिच</string>
+    <string name="fx045g_desc_hyper_glitch">भारी ग्लिच: खिसकती पट्टियाँ, जगह से हटे ब्लॉक, RGB विभाजन, पिक्सेल की लकीरें, कंप्रेशन और बदले हुए रंग — सब एक एनिमेट होने वाली तीव्रता और सीड से।</string>
+    <string name="fx045g_name_block_glitch">ब्लॉक ग्लिच</string>
+    <string name="fx045g_desc_block_glitch">आयताकार ब्लॉक खिसकते हैं, चैनल बदले और अलग होते हैं — DaVinci Resolve के Block Glitch की शैली में। ब्लॉक का आकार, मात्रा और आवृत्ति नियंत्रित करें।</string>
+    <string name="fx045g_name_shift_channels">चैनल शिफ़्ट</string>
+    <string name="fx045g_desc_shift_channels">चुनें कि हर चैनल (अल्फ़ा, लाल, हरा और नीला) कहाँ से आए: किसी दूसरे चैनल, ल्यूमिनेंस, ह्यू, लाइटनेस, सैचुरेशन, पूरा या बंद। After Effects के Shift Channels की तरह।</string>
+    <string name="fx045g_transition_channel">ट्रांज़िशन चैनल</string>
+    <string name="fx045g_transform_speed">ट्रांसफ़ॉर्म की गति</string>
+    <string name="fx045g_split_mode">विभाजन मोड</string>
+    <string name="fx045g_split_speed">विभाजन की गति</string>
+    <string name="fx045g_scale_channel">स्केल चैनल</string>
+    <string name="fx045g_corrupt_offset">करप्शन ऑफ़सेट</string>
+    <string name="fx045g_corrupt_amount">करप्शन की ताकत</string>
+    <string name="fx045g_corrupt_opacity">करप्शन की अपारदर्शिता</string>
+    <string name="fx045g_slice_amount">कंप्रेस्ड पट्टी</string>
+    <string name="fx045g_slice_position">पट्टी की स्थिति</string>
+    <string name="fx045g_slice_quality">पट्टी की गुणवत्ता</string>
+    <string name="fx045g_slice_shift">पट्टी का कंपन</string>
+    <string name="fx045g_copy_block_amount">बदले गए ब्लॉक</string>
+    <string name="fx045g_copy_block_speed">ब्लॉक की गति</string>
+    <string name="fx045g_copy_block_width">बदले ब्लॉक की चौड़ाई</string>
+    <string name="fx045g_copy_block_height">बदले ब्लॉक की ऊँचाई</string>
+    <string name="fx045g_copy_block_direction">ब्लॉक की दिशा</string>
+    <string name="fx045g_compression_jpeg">कंप्रेशन (JPEG)</string>
+    <string name="fx045g_palette_dither">पैलेट डिदर</string>
+    <string name="fx045g_noise_octaves">नॉइज़ ऑक्टेव</string>
+    <string name="fx045g_noise_gain">नॉइज़ गेन</string>
+    <string name="fx045g_noise_lacunarity">नॉइज़ लैकुनैरिटी</string>
+    <string name="fx045g_show_noise">नॉइज़ दिखाएँ</string>
+    <string name="fx045g_wiggle_steps">विगल चरण</string>
+    <string name="fx045g_slice_height">पट्टी की ऊँचाई</string>
+    <string name="fx045g_compression">कंप्रेशन</string>
+    <string name="fx045g_color_swap">रंग अदला-बदली</string>
+    <string name="fx045g_amount">मात्रा</string>
+    <string name="fx045g_size_variation">आकार में बदलाव</string>
+    <string name="fx045g_channel_swap">चैनल अदला-बदली</string>
+    <string name="fx045g_take_alpha">अल्फ़ा कहाँ से</string>
+    <string name="fx045g_take_red">लाल कहाँ से</string>
+    <string name="fx045g_take_green">हरा कहाँ से</string>
+    <string name="fx045g_take_blue">नीला कहाँ से</string>
+    <string name="fx045g_opt_bands_random">पट्टियाँ (रैंडम)</string>
+    <string name="fx045g_opt_lightness">लाइटनेस</string>
+    <string name="fx045g_opt_rgb_default">RGB (डिफ़ॉल्ट)</string>
+    <string name="fx045g_opt_red_cyan">लाल-सियान</string>
+    <string name="fx045g_opt_green_magenta">हरा-मैजेंटा</string>
+    <string name="fx045g_opt_blue_yellow">नीला-पीला</string>
+    <string name="fx045g_opt_y_luma">Y′ (ल्यूमा)</string>
+    <string name="fx045g_opt_cb">Cb</string>
+    <string name="fx045g_opt_cr">Cr</string>
+    <string name="fx045g_opt_uniform">एक समान</string>
+    <string name="fx045g_opt_luma">ल्यूमा</string>
+    <string name="fx045g_opt_full">पूरा</string>
+</resources>

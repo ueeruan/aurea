@@ -593,6 +593,8 @@ Result<u32> Engine::add_layers_to_group(const u64* ids, u32 count, u64 groupLaye
         if (why) *why = reason;
         return Status{code, reason};
     };
+    // Bug #6: comandos na fila entram antes (ordem do desfazer, ids certos).
+    if (project_) drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     if (!comp || !ids || count == 0) return refuse(Errc::InvalidArgument, "nada para agrupar");
     Timeline& tl = project_->timeline();
@@ -718,6 +720,9 @@ Result<u64> Engine::remove_layer_from_group(u64 layerId, std::string* why) noexc
         return Status{code, reason};
     };
     if (!project_ || compStack_.empty()) return refuse(Errc::InvalidArgument, "nao esta dentro de um grupo");
+    // Bug #6: o que está na fila é de dentro do grupo: aplica antes de sair dele.
+    drain_commands_locked();
+    if (compStack_.empty()) return refuse(Errc::InvalidArgument, "nao esta dentro de um grupo");
     Timeline& tl = project_->timeline();
     const CompositionId childId = tl.current();
     const CompositionId parentId = compStack_.back();

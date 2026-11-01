@@ -170,6 +170,7 @@ class AureaEngine private constructor() {
         }
 
         @JvmStatic external fun nativeCreate(): Long
+        @JvmStatic external fun nativeBgRemoveNativeAvailable(): Boolean
         /** Shared limits for a proportional 2D/3D pinch; no render/model lock. */
         @JvmStatic external fun clampPinchFactor(factor: Float, x: Float, y: Float, z: Float, threeD: Boolean): Float
         /** Pinça 3D: limite com a regra de profundidade do motor (Z de conteúdo acompanha X). */
@@ -611,6 +612,18 @@ class AureaEngine private constructor() {
         nativeWork.run(0) { nativeCapturePreviewFrame(nativeHandle, maxDim, out, outSize) }
 
     /**
+     * Conta-gotas (0.4.5): o quadro da prévia com o efeito [effectId] da camada
+     * [layer] desligado SÓ nesta captura (a cor que entra nele: o verde antes do
+     * Chroma Key). [layer] 0 / [effectId] < 0 = a prévia comum. Sem desfazer.
+     */
+    fun captureEyedropperFrame(maxDim: Int, layer: Long, effectId: Int, out: ByteBuffer, outSize: IntArray): Int =
+        nativeWork.run(0) { nativeCaptureEyedropperFrame(nativeHandle, maxDim, layer, effectId, out, outSize) }
+
+    /** Conta-gotas (0.4.5): RGBA sRGB do ponto ([x], [y]) px da composição em [out]; falso = sem quadro. */
+    fun sampleCompositionColor(x: Float, y: Float, layer: Long, effectId: Int, out: FloatArray): Boolean =
+        nativeWork.run(false) { nativeSampleCompositionColor(nativeHandle, x, y, layer, effectId, out) }
+
+    /**
      * A prévia de um efeito: o efeito de verdade rodando sobre a cartela de
      * demonstração do motor, em RGBA8 (pré-multiplicado não: alfa reto).
      * `outSize` recebe largura/altura de verdade. Falso = não deu para
@@ -763,6 +776,8 @@ class AureaEngine private constructor() {
     fun openPrecomp(layer: Long): Boolean = nativeOpenPrecomp(nativeHandle, layer)
     /** null = desagrupou; senão o motivo da recusa. */
     fun ungroupPrecomp(layer: Long): String? = nativeUngroupPrecomp(nativeHandle, layer)
+    /** Vários grupos num passo de desfazer. null = todos desfeitos; senão o motivo da 1ª recusa. */
+    fun ungroupPrecomps(layers: LongArray): String? = nativeUngroupPrecomps(nativeHandle, layers)
     fun closePrecomp(): Boolean = nativeClosePrecomp(nativeHandle)
     fun precompDepth(): Int = nativePrecompDepth(nativeHandle)
     fun compositionName(): String = nativeCompositionName(nativeHandle) ?: ""
@@ -820,6 +835,10 @@ class AureaEngine private constructor() {
     fun puppetMovePin(layer: Long, effect: Int, pin: Int, u: Float, v: Float, autoKey: Boolean, continuing: Boolean): Boolean =
         nativePuppetMovePin(nativeHandle, layer, effect, pin, u, v, autoKey, continuing)
     fun puppetRemovePin(layer: Long, effect: Int, pin: Int): Boolean = nativePuppetRemovePin(nativeHandle, layer, effect, pin)
+    /** 0.4.5: gira os pinos de [mask] (bit i = pino i) em volta do pino [pivot]; o dedo de (u0, v0) a (u1, v1). */
+    fun puppetRotatePins(layer: Long, effect: Int, pivot: Int, mask: Int, u0: Float, v0: Float, u1: Float, v1: Float,
+                         autoKey: Boolean, continuing: Boolean): Boolean =
+        nativePuppetRotatePins(nativeHandle, layer, effect, pivot, mask, u0, v0, u1, v1, autoKey, continuing)
     fun setTrackMatte(layer: Long, matte: Long, mode: Int): Boolean = nativeSetTrackMatte(nativeHandle, layer, matte, mode)
     /** {matte, modo} (matte 0 = nenhuma). */
     fun queryTrackMatte(layer: Long, out: LongArray): Boolean = nativeQueryTrackMatte(nativeHandle, layer, out)
@@ -1087,6 +1106,20 @@ class AureaEngine private constructor() {
      *  quadros do clipe prontos, quadros do clipe, há traços] */
     fun rotoStatus(layer: Long, effectId: Int): LongArray =
         nativeRotoStatus(nativeHandle, layer, effectId)?.takeIf { it.size >= 10 } ?: LongArray(10)
+
+    // Remover fundo (0.4.5, EngineBgRemove.cpp): a ação da camada (efeito + análise
+    // do clipe), a análise com progresso/cancelamento e o estado para a interface.
+    /** Id do efeito "Remover fundo" da camada (existente ou novo, com desfazer); -1 falhou. */
+    fun bgRemoveApply(layer: Long): Int = nativeBgRemoveApply(nativeHandle, layer)
+    fun bgRemoveAnalyze(layer: Long, effectId: Int): Boolean = nativeBgRemoveAnalyze(nativeHandle, layer, effectId)
+    fun bgRemoveCancel() = nativeBgRemoveCancel(nativeHandle)
+    /** [analisados, total, analisando, falhou (motivo), quadro atual pronto, quadros do clipe
+     *  prontos, quadros do clipe, modelo efetivo, válido]. válido = 0: o render estava ocupado
+     *  (mantenha o último estado). */
+    fun bgRemoveStatus(layer: Long, effectId: Int): LongArray =
+        nativeBgRemoveStatus(nativeHandle, layer, effectId)?.takeIf { it.size >= 9 } ?: LongArray(9)
+    /** Há segmentador nativo de pessoa (no Android não há: o modelo embutido vale). */
+    fun bgRemoveNativeAvailable(): Boolean = nativeBgRemoveNativeAvailable()
     fun setGroupCameraPassThrough(layer: Long, on: Boolean): Boolean = nativeSetGroupCameraPassThrough(nativeHandle, layer, on)
     /** −1 = não é grupo. */
     fun queryGroupCameraPassThrough(layer: Long): Int = nativeQueryGroupCameraPassThrough(nativeHandle, layer)
@@ -1228,6 +1261,22 @@ class AureaEngine private constructor() {
     /** Keyframe do osso no cabeçote (node −1 = todos): 1 marcou, 0 tirou, −1 fora da camada. */
     fun toggleBoneKey(layer: Long, node: Int): Int = nativeToggleBoneKey(nativeHandle, layer, node)
     fun resetBonePose(layer: Long, node: Int): Boolean = nativeResetBonePose(nativeHandle, layer, node)
+    // Esqueleto 3D (0.4.5) — Engine::query_bone_gizmo e família (EngineRigSkeleton.cpp).
+    /** Anéis do osso (BONE_GIZMO_FLOATS): junta na tela, na frente, e U/V (x, y, z) por eixo local; 0 = sem osso. */
+    fun queryBoneGizmo(layer: Long, node: Int, radius: Float, out: FloatArray?): Int =
+        nativeQueryBoneGizmo(nativeHandle, layer, node, radius, out)
+    /** Dedo no anel [axis] (0..2 eixo local, 3 = em volta do olhar), px da composição. */
+    fun dragBoneRing(layer: Long, node: Int, axis: Int, x0: Float, y0: Float, x1: Float, y1: Float, radius: Float, continuing: Boolean): Boolean =
+        nativeDragBoneRing(nativeHandle, layer, node, axis, x0, y0, x1, y1, radius, continuing)
+    /** Rotações em lote, 4 floats por osso {nó, X, Y, Z °}: um passo de desfazer. */
+    fun setBoneRotations(layer: Long, values: FloatArray, continuing: Boolean): Boolean =
+        nativeSetBoneRotations(nativeHandle, layer, values, continuing)
+    fun boneMirrorPartner(layer: Long, node: Int): Int = nativeBoneMirrorPartner(nativeHandle, layer, node)
+    /** node ≥ 0: o osso espelhado no par; −1: troca os lados da pose inteira. */
+    fun mirrorBonePose(layer: Long, node: Int): Boolean = nativeMirrorBonePose(nativeHandle, layer, node)
+    /** IK simples: a ponta anda (dx, dy) px e os dois ossos acima seguem. */
+    fun dragBoneIk(layer: Long, node: Int, dx: Float, dy: Float, continuing: Boolean): Boolean =
+        nativeDragBoneIk(nativeHandle, layer, node, dx, dy, continuing)
     // AutoRig 3D (0.3.6 BETA) — Engine::humanoid_* / autorig_* (rig/AutoRig.hpp).
     /** 0 sem esqueleto, 1 esqueleto não humanoide, 2 rig compatível, 3 AutoRig; −1 sem motor. */
     fun humanoidStatus(layer: Long): Int = nativeHumanoidStatus(nativeHandle, layer)
@@ -1455,6 +1504,8 @@ class AureaEngine private constructor() {
     fun addNull(threeD: Boolean): Long = nativeAddNull(nativeHandle, threeD)
     /** "Vincular a novo nulo": nulo no centro das camadas, pai de todas (um desfazer). Id ≥ 0 ou −Errc. */
     fun parentToNewNull(ids: LongArray): Long = nativeParentToNewNull(nativeHandle, ids)
+    /** "Vincular selecionadas": todas ao mesmo pai (0 = soltar), um desfazer. Quantas mudaram ≥ 1 ou −Errc. */
+    fun setParentMany(ids: LongArray, parent: Long): Int = nativeSetParentMany(nativeHandle, ids, parent)
     /** "Escalonar": cascata de `stepFrames` na ordem de `ids` (a primeira fica). Camadas que andaram ≥ 0 ou −Errc. */
     fun staggerLayers(ids: LongArray, stepFrames: Int, keysOnly: Boolean): Int = nativeStaggerLayers(nativeHandle, ids, stepFrames, keysOnly)
     fun arrangeLayerTimes(ids: LongArray, mode: Int, playhead: Long): Int = nativeArrangeLayerTimes(nativeHandle, ids, mode, playhead)
@@ -1708,6 +1759,8 @@ class AureaEngine private constructor() {
     ): Int
     private external fun nativeCaptureFrame(handle: Long, maxDim: Int, out: ByteBuffer, outSize: IntArray): Int
     private external fun nativeCapturePreviewFrame(handle: Long, maxDim: Int, out: ByteBuffer, outSize: IntArray): Int
+    private external fun nativeCaptureEyedropperFrame(handle: Long, maxDim: Int, layer: Long, effectId: Int, out: ByteBuffer, outSize: IntArray): Int
+    private external fun nativeSampleCompositionColor(handle: Long, x: Float, y: Float, layer: Long, effectId: Int, out: FloatArray): Boolean
     private external fun nativeRenderEffectPreview(
         handle: Long, typeId: Int, width: Int, height: Int, out: ByteBuffer, outSize: IntArray,
     ): Boolean
@@ -1737,6 +1790,7 @@ class AureaEngine private constructor() {
     private external fun nativeAddCamera(handle: Long): Long
     private external fun nativeAddNull(handle: Long, threeD: Boolean): Long
     private external fun nativeParentToNewNull(handle: Long, ids: LongArray): Long
+    private external fun nativeSetParentMany(handle: Long, ids: LongArray, parent: Long): Int
     private external fun nativeStaggerLayers(handle: Long, ids: LongArray, stepFrames: Int, keysOnly: Boolean): Int
     private external fun nativeArrangeLayerTimes(handle: Long, ids: LongArray, mode: Int, playhead: Long): Int
     private external fun nativeToggleMarker(handle: Long, frame: Long): Boolean
@@ -1826,6 +1880,10 @@ class AureaEngine private constructor() {
     private external fun nativeRotoCancel(handle: Long)
     private external fun nativeRotoSetView(handle: Long, layer: Long, effectId: Int, mode: Int): Boolean
     private external fun nativeRotoStatus(handle: Long, layer: Long, effectId: Int): LongArray?
+    private external fun nativeBgRemoveApply(handle: Long, layer: Long): Int
+    private external fun nativeBgRemoveAnalyze(handle: Long, layer: Long, effectId: Int): Boolean
+    private external fun nativeBgRemoveCancel(handle: Long)
+    private external fun nativeBgRemoveStatus(handle: Long, layer: Long, effectId: Int): LongArray?
     private external fun nativeSetGroupCameraPassThrough(handle: Long, layer: Long, on: Boolean): Boolean
     private external fun nativeQueryGroupCameraPassThrough(handle: Long, layer: Long): Int
     private external fun nativeSetLayerAcceptsLights(handle: Long, layer: Long, on: Boolean): Boolean
@@ -1880,6 +1938,13 @@ class AureaEngine private constructor() {
     private external fun nativeDragBone(handle: Long, layer: Long, node: Int, dx: Float, dy: Float, twist: Float, continuing: Boolean): Boolean
     private external fun nativeToggleBoneKey(handle: Long, layer: Long, node: Int): Int
     private external fun nativeResetBonePose(handle: Long, layer: Long, node: Int): Boolean
+    private external fun nativeQueryBoneGizmo(handle: Long, layer: Long, node: Int, radius: Float, out: FloatArray?): Int
+    private external fun nativeDragBoneRing(handle: Long, layer: Long, node: Int, axis: Int, x0: Float, y0: Float, x1: Float, y1: Float,
+                                            radius: Float, continuing: Boolean): Boolean
+    private external fun nativeSetBoneRotations(handle: Long, layer: Long, values: FloatArray, continuing: Boolean): Boolean
+    private external fun nativeBoneMirrorPartner(handle: Long, layer: Long, node: Int): Int
+    private external fun nativeMirrorBonePose(handle: Long, layer: Long, node: Int): Boolean
+    private external fun nativeDragBoneIk(handle: Long, layer: Long, node: Int, dx: Float, dy: Float, continuing: Boolean): Boolean
     private external fun nativeHumanoidStatus(handle: Long, layer: Long): Int
     private external fun nativeAutoRigStart(handle: Long, layer: Long): Boolean
     private external fun nativeAutoRigProgress(handle: Long, out: FloatArray)
@@ -1964,6 +2029,8 @@ class AureaEngine private constructor() {
     private external fun nativePuppetMovePin(handle: Long, layer: Long, effect: Int, pin: Int, u: Float, v: Float,
                                              autoKey: Boolean, continuing: Boolean): Boolean
     private external fun nativePuppetRemovePin(handle: Long, layer: Long, effect: Int, pin: Int): Boolean
+    private external fun nativePuppetRotatePins(handle: Long, layer: Long, effect: Int, pivot: Int, mask: Int, u0: Float, v0: Float,
+                                                u1: Float, v1: Float, autoKey: Boolean, continuing: Boolean): Boolean
     private external fun nativeSetTrackMatte(handle: Long, layer: Long, matte: Long, mode: Int): Boolean
     private external fun nativeQueryTrackMatte(handle: Long, layer: Long, out: LongArray): Boolean
     private external fun nativeTrackPoint(handle: Long, layer: Long, x: Float, y: Float, stabilize: Boolean, tracked: IntArray): Long
@@ -1986,6 +2053,7 @@ class AureaEngine private constructor() {
     private external fun nativeQueryTimelineNavigation(handle: Long, layer: Long, frame: Long, direction: Int): Long
     private external fun nativeSeekTimelineEvent(handle: Long, frame: Long): Boolean
     private external fun nativeUngroupPrecomp(handle: Long, layer: Long): String?
+    private external fun nativeUngroupPrecomps(handle: Long, layers: LongArray): String?
     private external fun nativeImportHdri(handle: Long, path: String): Long
     private external fun nativeQueryGizmo(handle: Long, layer: Long, length: Float, out: FloatArray, localSpace: Boolean): Boolean
     private external fun nativeGizmoMoveLocal(handle: Long, layer: Long, axis: Int, amount: Float, out: FloatArray): Boolean

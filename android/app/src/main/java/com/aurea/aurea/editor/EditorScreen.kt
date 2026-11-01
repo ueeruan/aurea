@@ -710,7 +710,20 @@ private fun onKeyframeTapped(store: EditorStore, ui: EditorUi, layer: Long, key:
     // velocidade), como no iOS; só a malha (Mesh Warp) vai para Efeitos. Com o
     // painel de Efeitos aberto o toque também abre a curva (antes não fazia nada).
     if (current != null && current != EditorPanel.Curve && current != EditorPanel.Effects) return
-    openPanel(store, ui, if (key.property == TrackProperty.MESH_WARP) EditorPanel.Effects else EditorPanel.Curve)
+    if (key.property == TrackProperty.MESH_WARP) {
+        openPanel(store, ui, EditorPanel.Effects)
+        return
+    }
+    // Correção #5 (0.4.4): marca sem trecho (a trilha tem 1 keyframe visível) não abre a
+    // curva — antes abria e o editor fechava na hora com o aviso. Como no iOS (keyTap),
+    // a curva só abre com trecho; aqui fica o aviso, sem o painel piscar.
+    val frame = store.queryDetail(layer)?.timelineFrame(key.time) ?: store.playhead
+    val target = com.aurea.aurea.engine.TrackKey(key.property, key.effectIndex, key.paramIndex)
+    if (store.keyframeNavigation(layer, target, frame)?.hasSegment != true) {
+        if (current != EditorPanel.Curve) store.toastText(R.string.pn_curve_need_two_keys)
+        return
+    }
+    openPanel(store, ui, EditorPanel.Curve)
 }
 
 /**

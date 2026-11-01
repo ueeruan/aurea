@@ -363,6 +363,7 @@ private let fxGroupByCategory: [String: FxEffectGroup] = {
 private let fxGroupByKey: [UInt32: FxEffectGroup] = {
     var map: [UInt32: FxEffectGroup] = [:]
     map[fxEffectTypeId("aurea.generate.raster_extrude")] = .threeD
+    map[fxEffectTypeId("aurea.distort.hollow_box")] = .threeD
     for key in ["aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.drop_shadow",
                 "aurea.stylize.find_edges", "aurea.stylize.bevel_alpha", "aurea.draw.drawing_progress"] { map[fxEffectTypeId(key)] = .drawEdge }
     for key in ["aurea.transform", "aurea.motion.oscillate.cycles", "aurea.motion.swing", "aurea.motion.wiggle",
@@ -370,7 +371,8 @@ private let fxGroupByKey: [UInt32: FxEffectGroup] = {
         map[fxEffectTypeId(key)] = .motion
     }
     for key in ["aurea.stylize.repeat_tile", "aurea.stylize.motion_tile", "aurea.stylize.tiler", "aurea.stylize.hex_tile",
-                "aurea.distort.kaleidoscope", "aurea.distort.mirror", "aurea.distort.griddler", "aurea.stylize.ball_grid"] {
+                "aurea.distort.kaleidoscope", "aurea.distort.mirror", "aurea.distort.griddler", "aurea.stylize.ball_grid",
+                "aurea.distort.tile_shift", "aurea.distort.hex_tile_rotate", "aurea.distort.hex_tile_shift"] {
         map[fxEffectTypeId(key)] = .repeatTiles
     }
     return map
@@ -755,27 +757,30 @@ private let fxTagByKey: [UInt32: [String]] = {
         ("noise", ["aurea.generate.fractal_noise", "aurea.stylize.grain", "aurea.stylize.film_damage",
                    "aurea.transition.noise_dissolve", "aurea.stylize.scatter", "aurea.distort.turbulence"]),
         ("particles", ["aurea.generate.particular", "aurea.transition.disintegrate", "aurea.stylize.ball_grid",
-                       "aurea.stylize.star_field", "aurea.stylize.scatter", "aurea.generate.constellation", "aurea.3d.shatter"]),
+                       "aurea.stylize.star_field", "aurea.stylize.scatter", "aurea.generate.constellation", "aurea.3d.shatter",
+                       "aurea.transition.dust"]),
         ("shadow", ["aurea.stylize.drop_shadow", "aurea.distort.slant", "aurea.stylize.bevel_alpha"]),
         ("outline", ["aurea.stylize.stroke_outline", "aurea.stylize.border", "aurea.stylize.find_edges", "aurea.3d.stroke",
-                     "aurea.draw.drawing_progress", "aurea.light.saber"]),
+                     "aurea.draw.drawing_progress", "aurea.light.saber", "aurea.transition.ballpoint"]),
         ("3d", ["aurea.distort.sphere_wrap", "aurea.distort.cylinder_wrap", "aurea.generate.raster_extrude",
                 "aurea.3d.part_transform", "aurea.3d.part_hide", "aurea.3d.part_texture", "aurea.3d.shatter",
                 "aurea.3d.stroke", "aurea.shape3d.layout", "aurea.generate.aurora", "aurea.generate.constellation",
-                "aurea.ai.depth_map", FxEffectTool.cameraTrack.key]),
+                "aurea.ai.depth_map", FxEffectTool.cameraTrack.key, "aurea.distort.hollow_box"]),
         ("transition", ["aurea.transition.luma_dissolve", "aurea.distort.ripple_dissolve", "aurea.glitch.dissolve_shake",
                         "aurea.transition.disintegrate", "aurea.transition.noise_dissolve"]),
         ("text", ["aurea.text.animator", "aurea.text.transform", FxEffectTool.captions.key]),
-        ("mask", [FxEffectTool.mask.key, "aurea.key.chroma", "aurea.key.luma", "aurea.key.matte_refine", "aurea.key.rotobrush",
+        ("mask", [FxEffectTool.mask.key, "aurea.key.background_remove", "aurea.key.chroma", "aurea.key.luma", "aurea.key.matte_refine", "aurea.key.rotobrush",
                   "aurea.utility.copy_background", "aurea.transform.crop", "aurea.ai.depth_map"]),
         ("motion", ["aurea.distort.shake", "aurea.time.flow_motion_blur", "aurea.blur.directional", FxEffectTool.cameraTrack.key,
                     "aurea.motion.swing", "aurea.motion.wiggle", "aurea.motion.twitch", "aurea.motion.oscillate.cycles"]),
-        ("repeat", ["aurea.pattern.checkerboard", "aurea.pattern.hexagonal", "aurea.stylize.mosaic"]),
-        ("color", ["aurea.time.warp_rgb", "aurea.color.color_offset", "aurea.color.threshold_rgb", "aurea.color.rgb_split", "aurea.color.grade"]),
+        ("repeat", ["aurea.pattern.checkerboard", "aurea.pattern.hexagonal", "aurea.stylize.mosaic",
+                    "aurea.distort.tile_shift", "aurea.distort.hex_tile_rotate", "aurea.distort.hex_tile_shift"]),
+        ("color", ["aurea.time.warp_rgb", "aurea.color.color_offset", "aurea.color.threshold_rgb", "aurea.color.rgb_split", "aurea.color.grade",
+                   "aurea.color.shift_channels"]),
         ("distort", ["aurea.glitch.datamosh", "aurea.distort.displacement_map"]),
         ("glitch", ["aurea.stylize.pixel_sort", "aurea.stylize.jpeg_damage", "aurea.color.rgb_split", "aurea.stylize.pixel_encoder",
-                    "aurea.glitch.video_glitch", "aurea.glitch.datamosh", "aurea.time.random_edits"]),
-        ("time", ["aurea.time.echo", "aurea.time.wide_time", "aurea.enhance.video"]),
+                    "aurea.glitch.video_glitch", "aurea.glitch.datamosh", "aurea.time.random_edits", "aurea.color.shift_channels"]),
+        ("time", ["aurea.time.echo", "aurea.time.wide_time", "aurea.enhance.video", "aurea.time.time_displacement"]),
         ("audio", ["aurea.generate.audio_spectrum", "aurea.generate.audio_waveform", "aurea.generate.spectrum_analyzer", "aurea.audio.tone"]),
         ("blur", ["aurea.time.flow_motion_blur", "aurea.blur.vector_blur"]),
         ("stylize", ["aurea.stylize.holomatrix", "aurea.stylize.vignette"]),

@@ -334,10 +334,10 @@
     <string name="editor_video">Video</string>
     <string name="editor_video_pronto">Video siap</string>
     <string name="editor_vinculada_outra_camada_trocar">Terpaut ke lapisan lain · ganti</string>
-    <string name="editor_vincular_escolhidas_camada">Pautkan yang terpilih ke sebuah lapisan</string>
+    <string name="editor_vincular_escolhidas_camada">Tautkan yang terpilih ke sebuah lapisan</string>
     <string name="editor_vincular_novo_nulo">Null baru</string>
     <string name="msg_camadas_seguindo_novo_nulo">%1$s lapisan mengikuti Null baru</string>
-    <string name="editor_vincular_outra_camada">Pautkan ke lapisan lain</string>
+    <string name="editor_vincular_outra_camada">Tautkan ke lapisan lain</string>
     <string name="editor_volta_aceitar_movimento_edicao">Menerima gerak dan penyuntingan lagi</string>
     <string name="editor_voltar_composicao_principal">Kembali ke komposisi utama</string>
     <string name="editor_voltar_editor">Kembali ke editor</string>
@@ -1136,7 +1136,7 @@ untuk mengedit kurvanya.</string>
     <string name="consent_title">Persetujuan dan Tanggung Jawab</string>
     <string name="consent_accept">Setuju dan lanjutkan</string>
     <string name="consent_body">Aurea adalah alat profesional untuk mengedit, membuat, dan memproduksi konten digital. Dengan menggunakan aplikasi ini, pengguna mengakui bahwa mereka bertanggung jawab penuh atas konten yang mereka buat, edit, impor, ekspor, publikasikan, atau bagikan melalui platform.\n\nAurea tidak mengendalikan, mendorong, mendukung, atau mengizinkan penggunaan alat ini untuk kegiatan ilegal, abusif, curang, merugikan, atau yang melanggar hak pihak ketiga.\n\nPengguna bertanggung jawab memastikan bahwa mereka memiliki izin, lisensi, dan hak yang diperlukan atas materi yang digunakan, termasuk gambar, video, musik, merek, model, berkas, dan konten terlindungi lainnya.\n\nKebebasan kreatif yang ditawarkan Aurea tidak berarti persetujuan, keterlibatan, atau tanggung jawab aplikasi atas apa yang dipilih setiap pengguna untuk dibuat atau dilakukan dengan alat ini.\n\nPengguna setuju untuk menggunakan Aurea sesuai hukum yang berlaku dan bertanggung jawab atas tindakan mereka sendiri serta konten yang diproduksi atau didistribusikan melalui aplikasi.\n\nSejauh diizinkan oleh hukum yang berlaku, Aurea dan pihak yang bertanggung jawab atasnya tidak bertanggung jawab atas tindakan yang dilakukan semata-mata oleh pengguna, penyalahgunaan alat, atau akibat dari konten yang dibuat, dipublikasikan, atau dibagikan oleh pengguna sendiri.\n\nAurea menyediakan alatnya. Pengguna bertanggung jawab atas cara mereka memilih untuk menggunakannya.\n\nDengan melanjutkan, pengguna menyatakan bahwa mereka telah membaca, memahami, dan menyetujui ketentuan ini.</string>
-    <string name="release_notes_body">Aurea Beta 0.4.4 (2207) • 29/10/2026\n\n• Pecah teks: di Animasi teks, pisahkan teks menjadi huruf, kata, atau baris. Setiap bagian menjadi lapisan teks sendiri, tepat di tempat yang sama, siap dianimasikan.\n• Preset baru Pantulan Halus: setiap kata jatuh sambil muncul dan berhenti dengan pantulan yang meredam, satu per satu.\n• Teks otomatis di cloud dan Lantai Reflektif (dari 0.4.2) tetap ada di versi ini.\n• Masuk dengan Google kini berfungsi di aplikasi yang diunduh dari Play.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.5 (2208) • 01/11/2026\n\n• Perbaikan: pratinjau tidak lagi macet saat diputar, ekspor berfungsi di lebih banyak perangkat dan resolusi, huruf teks tidak lagi hilang setelah ekspor, satu grup bisa dipisahkan, grafik kurva tidak lagi menutup sendiri, dan bayangan 3D kembali mengikuti cahaya.\n• Pipet di semua warna: ambil warna dari pratinjau di roda warna, di Chroma Key (warna latar asli) dan di warna latar proyek.\n• Hapus latar video tanpa layar hijau: menganalisis klip dan memotong orang atau objek, dengan penghalusan tepi.\n• Efek baru: Hyper Glitch, Block Glitch, Shift Channels, Time Displacement, Tile Shift, Hexagon Tile, Hollow Box, Pantulan air, Light Wrap, Tampilan sinema, serta transisi Pulpen dan Debu. Glitchify kini punya jauh lebih banyak kontrol.\n• Kerangka 3D lebih mudah: cincin rotasi di sendi dan panel khusus dengan pohon tulang. Di Wayang, putar beberapa pin sekaligus.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Isi</string>
@@ -4488,4 +4488,49 @@ untuk mengedit kurvanya.</string>
     <string name="fxl_floor_brightness">Kecerahan lantai</string>
     <string name="fxl_floor_opacity">Opasitas lantai</string>
     <string name="fxl_floor_texture_layer">Tekstur lantai (lapisan)</string>
+    <string name="fx045_name_water_reflection">Pantulan Air</string>
+    <string name="fx045_desc_water_reflection">Layer dipantulkan di bawah garis cakrawala seperti di permukaan air, dengan riak beranimasi, perspektif, blur, dan warna air.</string>
+    <string name="fx045_name_light_wrap">Bungkus Cahaya</string>
+    <string name="fx045_desc_light_wrap">Cahaya latar merembes ke tepi layer, hanya di dalam siluetnya, untuk menyatukan potongan dengan adegan. Pilih layer latar atau gunakan warna.</string>
+    <string name="fx045_name_looks">Look Sinematik</string>
+    <string name="fx045_desc_looks">Look warna siap pakai (Teal &amp; Orange, Bleach Bypass, Noir, Vintage, Cyberpunk, dan lainnya) dengan intensitas serta penyesuaian cepat eksposur, suhu, kontras, dan saturasi.</string>
+    <string name="fx045_name_ballpoint">Pulpen</string>
+    <string name="fx045_desc_ballpoint">Transisi: pulpen mencoret layer baris demi baris dan coretannya menampilkan (atau menghapus) gambar, dengan tinta, getaran tangan, dan isian.</string>
+    <string name="fx045_name_dust">Debu</string>
+    <string name="fx045_desc_dust">Transisi: layer hancur menjadi debu halus yang terbawa angin, dengan tepi organik, pusaran, dan butiran yang menghilang.</string>
+    <string name="fxt_0_the_width_comes_from_the_number_of_str">0 = lebar mengikuti jumlah strip.</string>
+    <string name="fxl_reflection_length">Panjang pantulan</string>
+    <string name="fxl_reflection_opacity">Opasitas pantulan</string>
+    <string name="fxl_falloff_2">Pemudaran</string>
+    <string name="fxt_waves_per_100_px">Gelombang per 100 px.</string>
+    <string name="fxt_waves_per_second_0_still_water">Gelombang per detik. 0 = air tenang.</string>
+    <string name="fxl_water_color">Warna air</string>
+    <string name="fxt_pick_the_layer_behind_its_light_enters_t">Pilih layer di belakang (cahayanya masuk ke tepi). Tanpa layer, cahayanya adalah warna di bawah.</string>
+    <string name="fxl_blend_mode">Mode campuran</string>
+    <string name="fxl_background_blur">Blur latar</string>
+    <string name="fxl_wrap_only">Hanya bungkus</string>
+    <string name="fxl_stroke_thickness">Ketebalan goresan</string>
+    <string name="fxl_scribble_density">Kerapatan coretan</string>
+    <string name="fxl_hand_jitter">Getaran tangan</string>
+    <string name="fxl_ink_color">Warna tinta</string>
+    <string name="fxl_ink">Tinta</string>
+    <string name="fxl_fill_delay">Jeda isian</string>
+    <string name="fxt_how_far_along_the_row_the_pen_travels_be">Seberapa jauh pulpen bergerak di baris sebelum area di belakangnya selesai terisi.</string>
+    <string name="fxl_wind_direction">Arah angin</string>
+    <string name="fxl_wind_strength">Kekuatan angin</string>
+    <string name="fxl_look">Look</string>
+    <string name="fxo_teal_orange">Teal &amp; Orange</string>
+    <string name="fxo_bleach_bypass">Bleach Bypass</string>
+    <string name="fxo_warm_film">Film hangat</string>
+    <string name="fxo_cool_film">Film dingin</string>
+    <string name="fxo_noir">Noir</string>
+    <string name="fxo_vintage">Vintage</string>
+    <string name="fxo_cyberpunk">Cyberpunk</string>
+    <string name="fxo_sepia">Sepia</string>
+    <string name="fxo_pastel">Pastel</string>
+    <string name="fxo_golden_hour">Jam emas</string>
+    <string name="fxo_day_for_night">Malam buatan</string>
+    <string name="fxo_digital_green">Hijau digital</string>
+    <string name="fxo_western">Koboi</string>
+    <string name="fxl_temperature">Suhu</string>
 </resources>

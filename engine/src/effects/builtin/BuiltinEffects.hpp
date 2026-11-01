@@ -51,6 +51,7 @@ void register_vhs_look_effect(EffectRegistry& r);
 // Mapa de profundidade (IA). O último de todos.
 void register_depth_effects(EffectRegistry& r);
 void register_rotobrush_effect(EffectRegistry& r);
+void register_background_remove_effect(EffectRegistry& r);   // 0.4.5: BackgroundRemoveEffect.cpp
 void register_lens_distortion_effect(EffectRegistry& r);
 void register_grid_layout_effects(EffectRegistry& r);
 // Pacote de áudio (efeitos de som + Forma de onda, Espectro e Bolas). Depois de todos.
@@ -111,6 +112,18 @@ void register_enhance_effect(EffectRegistry& r);
 void register_copy_background_effect(EffectRegistry& r);
 /// AureaHyper (HyperEffects.cpp): Hyper Upscale, Hyper Clean e Hyper Motion. No fim.
 void register_hyper_effects(EffectRegistry& r);
+/// 0.4.5 (pedidos de usuários): Tile Shift, Hexagon Tile Rotate/Shift
+/// (TileShiftEffects.cpp), Hollow Box (HollowBoxEffect.cpp) e Time
+/// Displacement (TimeDisplacementEffect.cpp). No fim.
+void register_tile_shift_effects(EffectRegistry& r);
+void register_hollow_box_effect(EffectRegistry& r);
+void register_time_displacement_effect(EffectRegistry& r);
+/// Pedidos de usuários da 0.4.5. No fim: Reflexo na água, Envolver com luz e
+/// Caneta esferográfica (WaterWrapBallpointEffects.cpp), Poeira
+/// (DisintegrateEffect.cpp) e Looks de cinema (ColorGradeEffect.cpp).
+void register_water_wrap_ballpoint_effects(EffectRegistry& r);
+void register_dust_transition(EffectRegistry& r);
+void register_color_looks_effect(EffectRegistry& r);
 
 /// O bloco de uniforms dos efeitos novos, num layout só.
 ///

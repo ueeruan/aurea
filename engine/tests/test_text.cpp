@@ -1037,3 +1037,81 @@ AUREA_TEST(Text, JapaneseFallsBackPerGlyphInsteadOfTofu) {
     AUREA_CHECK(okOutline && contours.size() > 30);
     text::set_default_font_path("");
 }
+
+// #7 (0.4.4): "letras do texto somem depois de exportar; trocar a fonte e voltar
+// resolve". O atlas de glifos é um só no processo, mas o renderer da prévia e o
+// do export têm cada um a sua textura. O `dirty` era um flag global apagado por
+// quem subia primeiro: glifos rasterizados durante o export iam só para a
+// textura do export e a prévia nunca os recebia. Agora cada consumidor compara
+// a revisão do atlas com a que já subiu.
+AUREA_TEST(Text, GlyphAtlasRevisionIsPerConsumerAndFontKeysAreNotReused) {
+    const std::string robotoPath = repo_font("Roboto-Regular.ttf");
+    auto roboto = font_at(robotoPath.c_str());
+    AUREA_CHECK(roboto != nullptr);
+    if (!roboto) return;
+    constexpr u32 S = text::kGlyphAtlasSize;
+    std::vector<u8> preview, exported;
+    const u64 previewRev = text::copy_glyph_atlas(preview);   // a prévia subiu tudo até aqui
+    // Fonte recém-carregada: os glifos dela ainda não estão no atlas — só o
+    // "export" os desenha.
+    auto fresh = font_at(robotoPath.c_str());
+    AUREA_CHECK(fresh != nullptr);
+    if (!fresh) return;
+    TextData t;
+    t.content = "Aurea";
+    t.size = 64.0f;
+    text::TextLayout L;
+    AUREA_CHECK(text::layout_quads(*fresh, t, 2, L));
+    // O export sobe primeiro (o caminho antigo ainda chamava glyph_atlas_clean).
+    const u64 exportRev = text::copy_glyph_atlas(exported);
+    text::glyph_atlas_clean();
+    AUREA_CHECK(exportRev > previewRev);
+    // A prévia continua atrás e tem de subir de novo, com a tinta dos glifos novos.
+    AUREA_CHECK(text::glyph_atlas_revision() != previewRev);
+    const u64 previewRev2 = text::copy_glyph_atlas(preview);
+    AUREA_CHECK_EQ(previewRev2, exportRev);
+    auto ink = [&](const std::vector<u8>& px, const text::GlyphQuad& q) {
+        const u32 x0 = static_cast<u32>(q.u0 * S + 0.5f), x1 = static_cast<u32>(q.u1 * S + 0.5f);
+        const u32 y0 = static_cast<u32>(q.v0 * S + 0.5f), y1 = static_cast<u32>(q.v1 * S + 0.5f);
+        u32 n = 0;
+        for (u32 y = y0; y < y1 && y < S; ++y)
+            for (u32 x = x0; x < x1 && x < S; ++x) n += px[static_cast<usize>(y) * S + x] > 128 ? 1u : 0u;
+        return n;
+    };
+    u32 glyphsWithInk = 0;
+    for (const auto& q : L.quads) glyphsWithInk += ink(preview, q) > 0 ? 1u : 0u;
+    // Sem glifo novo a revisão não muda: em regime nenhum renderer sobe o atlas.
+    text::TextLayout again;
+    AUREA_CHECK(text::layout_quads(*fresh, t, 2, again));
+    const u64 steadyRev = text::glyph_atlas_revision();
+    std::printf("    atlas: revisao previa %llu -> export %llu, previa recopiou %llu; %u de %zu glifos com tinta; regime %llu\n",
+                static_cast<unsigned long long>(previewRev), static_cast<unsigned long long>(exportRev),
+                static_cast<unsigned long long>(previewRev2), glyphsWithInk, L.quads.size(),
+                static_cast<unsigned long long>(steadyRev));
+    AUREA_CHECK(!L.quads.empty() && glyphsWithInk == L.quads.size());
+    AUREA_CHECK_EQ(steadyRev, exportRev);
+
+    // A chave do atlas era o endereço da fonte: uma fonte solta e outra no mesmo
+    // endereço herdavam os glifos (e as entradas vazias) da anterior.
+    auto arialRef = font_at("C:/Windows/Fonts/arial.ttf");
+    if (!arialRef) return;
+    TextData w;
+    w.content = "Wg";
+    w.size = 64.0f;
+    auto extents = [&](const text::Font& f) {
+        std::vector<std::pair<long, long>> e;
+        text::TextLayout X;
+        if (text::layout_quads(f, w, 2, X))
+            for (const auto& q : X.quads) e.emplace_back(std::lround((q.u1 - q.u0) * S), std::lround((q.v1 - q.v0) * S));
+        return e;
+    };
+    const auto refRoboto = extents(*roboto), refArial = extents(*arialRef);
+    AUREA_CHECK(!refRoboto.empty() && !refArial.empty());
+    for (int i = 0; i < 8; ++i) {
+        const bool useArial = (i & 1) != 0;
+        auto tmp = font_at(useArial ? "C:/Windows/Fonts/arial.ttf" : robotoPath.c_str());
+        AUREA_CHECK(tmp != nullptr);
+        if (!tmp) continue;
+        AUREA_CHECK(extents(*tmp) == (useArial ? refArial : refRoboto));
+    }
+}

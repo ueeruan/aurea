@@ -30,11 +30,12 @@ class LayerPanelSpecTest {
     private val c = LayerSlot.ColorFill
     private val b = LayerSlot.BorderShadow
     private val m = LayerSlot.BlendOpacity
+    private val k = LayerSlot.Mask
     private val std = listOf(LayerSlot.MoveTransform, LayerSlot.Edit, LayerSlot.Presets, LayerSlot.Effects)
 
     @Test fun shapesKeepTheFullGridAndTheirEditSlot() {
         val shape = spec(LayerType.Shape)
-        assertEquals(listOf(c, b, m), shape.row2)
+        assertEquals(listOf(c, b, m, k), shape.row2)
         assertEquals(std, shape.row3)
         assertEquals(LayerEdit.Shape, shape.edit)
         assertFalse(shape.tallRow3)
@@ -89,7 +90,7 @@ class LayerPanelSpecTest {
         assertEquals(LayerEdit.Material, spec(LayerType.Model3D).edit)
         assertEquals(listOf(c, null, m), spec(LayerType.Model3D).row2)
         assertEquals(LayerEdit.Particles, spec(LayerType.Particles).edit)
-        assertEquals(listOf(null, null, m), spec(LayerType.Particles).row2)
+        assertEquals(listOf(null, null, m, k), spec(LayerType.Particles).row2)
         val adjustment = spec(LayerType.Adjustment)
         assertEquals(listOf(null, null, m), adjustment.row2)
         assertEquals(listOf(null, null, null, LayerSlot.Effects), adjustment.row3)
@@ -100,13 +101,42 @@ class LayerPanelSpecTest {
     @Test fun gridShapeIsAlwaysFixed() {
         for (type in LayerType.entries) {
             val s = spec(type)
-            assertEquals("row 2 of $type", 3, s.row2.size)
+            // Bug #9b: 3 vagas, + Máscara no fim onde o Editar não é o recorte.
+            assertEquals("row 2 of $type", if (LayerSlot.Mask in s.row2) 4 else 3, s.row2.size)
+            if (LayerSlot.Mask in s.row2) assertEquals("mask last in $type", LayerSlot.Mask, s.row2.last())
             assertTrue("row 3 of $type", s.row3.size in 1..4)
             // Fileira 2 vazia ⇔ botões altos (colapso "a").
             assertEquals("tall of $type", s.row2.all { it == null }, s.tallRow3)
             // A vaga Editar só existe quando o tipo diz o que ela é.
             assertEquals("edit of $type", LayerSlot.Edit in s.row3, s.edit != null)
         }
+    }
+
+    /** Bug #9b: a máscara voltou para forma (inclusive vetor e desenho), texto, grupo e partículas. */
+    @Test fun maskReachesEveryVisualLayer() {
+        for (s in listOf(spec(LayerType.Shape), spec(LayerType.Shape, vector = true), spec(LayerType.Shape, vector = true, drawing = true),
+            spec(LayerType.Text), spec(LayerType.Group), spec(LayerType.Particles))) {
+            assertTrue("mask in ${s.edit}", LayerSlot.Mask in s.row2)
+        }
+        // Imagem e vídeo chegam nela pelo Editar (MediaShape): sem botão repetido.
+        for (type in listOf(LayerType.Image, LayerType.Video)) assertFalse("mask twice on $type", LayerSlot.Mask in spec(type).row2)
+        // Sem nada para recortar (ou sem textura própria): nada de Máscara.
+        for (type in listOf(LayerType.Audio, LayerType.Camera, LayerType.Light, LayerType.Null, LayerType.Adjustment, LayerType.Model3D)) {
+            val s = spec(type)
+            assertFalse("mask on $type", LayerSlot.Mask in s.row2 || LayerSlot.Mask in s.row3)
+        }
+        assertFalse(LayerSlot.Mask in spec(LayerType.Shape, adjustment = true).row2)
+    }
+
+    @Test fun eightToolsPackIntoTwoRowsOfFour() {
+        val shape = spec(LayerType.Shape)
+        val packed = packedToolRows((shape.row2 + shape.row3).filterNotNull())
+        assertEquals(listOf(listOf(c, b, m, k), std), packed)
+        // Os outros tamanhos seguem como na 0.4.1.
+        assertEquals(listOf(3, 3), packedToolRows((1..6).toList()).map { it.size })
+        assertEquals(listOf(3, 4), packedToolRows((1..7).toList()).map { it.size })
+        assertEquals(listOf(2, 3), packedToolRows((1..5).toList()).map { it.size })
+        assertEquals(listOf(4), packedToolRows((1..4).toList()).map { it.size })
     }
 
     @Test fun audioButtonFollowsTheEngineBits() {
@@ -119,7 +149,7 @@ class LayerPanelSpecTest {
 
     @Test fun idsAreTheSameOnBothPlatforms() {
         assertEquals(
-            listOf("colorFill", "borderShadow", "blendOpacity", "moveTransform", "edit", "presets", "effects"),
+            listOf("colorFill", "borderShadow", "blendOpacity", "moveTransform", "edit", "presets", "effects", "mask"),
             LayerSlot.entries.map { it.tag },
         )
         // Os bits são os de Engine::query_layer_panel (EngineOmegaLayer.cpp).

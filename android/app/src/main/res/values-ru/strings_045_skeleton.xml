@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: painel Esqueleto 3D e grupo de pinos do Fantoche (pedido de ⚡ᴍᴀʀᴋᴢ, pauloph2517 e Jess). -->
+    <string name="skeleton_title">Скелет</string>
+    <string name="skeleton_open">Открыть панель скелета</string>
+    <string name="skeleton_desc">Дерево костей, поворот числом, отражение и копирование позы</string>
+    <string name="skeleton_partner">Другая сторона: %1$s</string>
+    <string name="skeleton_bone_none">Коснитесь сустава на сцене или кости в списке</string>
+    <string name="skeleton_ring_hint">Кольца у сустава: красное вращает по X, зелёное по Y, синее по Z (оси кости); белое вращает вокруг экрана. Коснитесь ещё раз, чтобы выбрать сустав под ним.</string>
+    <string name="skeleton_show">Показать скелет</string>
+    <string name="skeleton_ik">IK: тянуть кончик</string>
+    <string name="skeleton_pose">Поза</string>
+    <string name="skeleton_copy">Копировать позу</string>
+    <string name="skeleton_paste">Вставить позу</string>
+    <string name="skeleton_mirror_pose">Отразить позу</string>
+    <string name="skeleton_mirror_bone">Отразить на другую сторону</string>
+    <string name="skeleton_zero_pose">Обнулить позу</string>
+    <string name="skeleton_zero_bone">Обнулить кость</string>
+    <string name="skeleton_bones">Кости</string>
+    <string name="skeleton_search">Найти кость</string>
+    <string name="skeleton_no_match">Нет кости с таким именем</string>
+    <string name="skeleton_bone_a11y">%1$s, уровень %2$d</string>
+    <string name="skeleton_keyed">Здесь есть ключ</string>
+    <string name="skeleton_expand">Развернуть %1$s</string>
+    <string name="skeleton_collapse">Свернуть %1$s</string>
+    <string name="skeleton_rot_a11y">Поворот %1$s: %2$s градусов</string>
+    <string name="skeleton_minus">Уменьшить %1$s на 5 градусов</string>
+    <string name="skeleton_plus">Увеличить %1$s на 5 градусов</string>
+    <string name="skeleton_pose_copied">Поза скопирована</string>
+    <string name="skeleton_paste_failed">Нечего вставить в эту модель</string>
+    <string name="skeleton_mirror_nothing">Нет позированных костей для отражения</string>
+    <string name="skeleton_no_partner">У этой кости нет пары на другой стороне</string>
+    <string name="puppet_group">Группа</string>
+    <string name="puppet_group_clear">Очистить группу</string>
+    <string name="puppet_group_hint">С включённой группой коснитесь булавок, которые будут вращаться; выбранная булавка — центр. Тяните синее кольцо, чтобы вращать.</string>
+    <string name="puppet_group_rotate">Вращать группу вокруг булавки %1$d</string>
+</resources>

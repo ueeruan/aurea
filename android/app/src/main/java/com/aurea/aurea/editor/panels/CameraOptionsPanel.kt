@@ -74,10 +74,11 @@ import kotlin.math.sin
 // ([PanelFrame], 200 dp), com as abas **Visão** · **Desfoque de foco** · **Névoa**.
 //
 //   Visão: título "Visão da câmera" + botão perspectiva/paralela (a paralela
-//   ainda não existe no motor: o menu avisa); régua vertical CURVA do ângulo de
+//   ainda não existe no motor: o menu avisa); "Afeta camadas abaixo" (logo abaixo
+//   do título, à vista sem rolar); régua vertical CURVA do ângulo de
 //   visão (FOV vertical) com a caixa 56 × 36; régua de zoom de 36 dp + caixa
 //   56 × 36 (zoom ↔ focal por CameraLensMath.kt); as lentes prontas (extra do
-//   AUREA); "Afeta camadas abaixo"; a dica da visão pela câmera.
+//   AUREA); a dica da visão pela câmera.
 //   Desfoque de foco: o que a antiga face Lente tinha (profundidade de campo,
 //   foco, abertura, força, tocar para focar), com ◇ por linha.
 //   Névoa: a névoa da câmera ainda não existe no motor (aviso).
@@ -207,6 +208,17 @@ private fun ColumnScope.CameraViewTab(env: PanelEnv, lens: FloatArray) {
             )
             ProjectionButton()
         }
+        // "Afeta camadas abaixo" (0.1.6) logo abaixo do título: no fim da aba ele ficava
+        // depois da régua de 140 dp e das lentes, fora dos 200 dp da moldura, e quem
+        // procurava não achava (bug #8b). Câmera nova nasce desligada (0.3.1, como no AE).
+        val affectsBelow = lens.size > 9 && lens[9] >= 0.5f
+        BlurToggleRow(stringResource(R.string.camera_affects_below), stringResource(R.string.camera_affects_below_hint), affectsBelow,
+            // Rótulo e dica lidos junto com o interruptor (TalkBack).
+            Modifier.testTag("camera.view.affectsBelow").semantics(mergeDescendants = true) {}) { on ->
+            store.beginGesture("camera afeta camadas abaixo")
+            store.setCameraLens(EditorStore.CAMERA_AFFECTS_BELOW, if (on) 1f else 0f)
+            store.endGesture()
+        }
         // 0.3.4 painéis: 140 (antes 124) para o rótulo em cima do valor maior.
         Row(Modifier.fillMaxWidth().height(140.dp), verticalAlignment = Alignment.CenterVertically) {
             CurvedAngleRuler(
@@ -302,13 +314,6 @@ private fun ColumnScope.CameraViewTab(env: PanelEnv, lens: FloatArray) {
                     }
                 }
             }
-        }
-        val affectsBelow = lens.size > 9 && lens[9] >= 0.5f
-        BlurToggleRow(stringResource(R.string.camera_affects_below), stringResource(R.string.camera_affects_below_hint), affectsBelow,
-            Modifier.testTag("camera.view.affectsBelow")) { on ->
-            store.beginGesture("camera afeta camadas abaixo")
-            store.setCameraLens(EditorStore.CAMERA_AFFECTS_BELOW, if (on) 1f else 0f)
-            store.endGesture()
         }
         Text(
             stringResource(R.string.om_ap_cam_tip),

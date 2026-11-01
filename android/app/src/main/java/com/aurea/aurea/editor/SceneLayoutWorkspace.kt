@@ -104,7 +104,9 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
                     modifier = Modifier.padding(horizontal = 24.dp).background(ShellColors.FloatingDark, RoundedCornerShape(12.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp))
             }
-            val objects = store.layers.filter { it.isThreeD }
+            // 0.4.5: com o painel Esqueleto aberto, ele ocupa o lugar das fileiras de baixo.
+            val skeletonOpen = store.skeletonPanel && store.rigPoseMode && store.poseBones != null
+            val objects = store.layers.filter { !skeletonOpen && it.isThreeD }
             if (objects.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 objects.forEach { row ->
@@ -120,7 +122,7 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
                 }
             }
             // A fileira rola na horizontal (tela estreita / textos longos); cabendo, fica centrada.
-            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+            if (!skeletonOpen) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     ScenePillButton(CupertinoGlyph.Plus, stringResource(R.string.panel_adicionar).removePrefix("+ ")) { addMenu = true }
@@ -149,7 +151,8 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
                 }
                 ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.scene_recenter)) { store.resetSceneView() }
             }
-            if (store.rigPoseMode && store.poseBones != null) RigPoseBar(store)
+            if (skeletonOpen) com.aurea.aurea.editor.panels.SkeletonPanel(store, Modifier.fillMaxWidth().fillMaxHeight(.46f))
+            else if (store.rigPoseMode && store.poseBones != null) RigPoseBar(store)
             if (store.rigFixMode && store.humanoidJoints != null) RigFixBar(store)
         }
     }
@@ -174,6 +177,8 @@ private fun RigPoseBar(store: EditorStore) {
         if (chosen) ScenePillButton(if (store.poseMove) CupertinoGlyph.CheckmarkAlt else CupertinoGlyph.Move,
             stringResource(R.string.rig3d_move)) { store.choosePoseMove(!store.poseMove) }
         ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.rig_reset_all)) { store.resetPose(true) }
+        // 0.4.5: o painel Esqueleto (árvore, rotação numérica, espelhar, copiar/colar).
+        ScenePillButton(CupertinoGlyph.PersonCropCircle, stringResource(R.string.skeleton_title)) { store.openSkeletonPanel(true) }
         ScenePillButton(CupertinoGlyph.CheckmarkAlt, stringResource(R.string.rig_done)) { store.setRigPose(false) }
     }
 }

@@ -646,6 +646,88 @@ AUREA_TEST(Timeline, AbandonedScrubClosesPausedAfterTheTimeout) {
     AUREA_CHECK(p.playing());
 }
 
+// -----------------------------------------------------------------------------
+// 0.4.5: a agulha não anda sozinha quando a prévia para de entregar quadros
+// -----------------------------------------------------------------------------
+
+AUREA_TEST(Timeline, HeldPlaybackDoesNotAdvanceAndResumesFromTheHeldFrame) {
+    PlaybackController p;
+    p.configure(30.0, FrameIndex{3000});
+    p.play(0);
+    const u64 second = 1'000'000'000ull;
+    AUREA_CHECK_EQ(p.update(second).value, static_cast<i64>(30));
+    p.set_held(true, second);
+    AUREA_CHECK(p.held());
+    AUREA_CHECK(p.playing());   // continua Playing: a UI não troca o botão
+    // Segurado por 2 s: a agulha fica no quadro 30.
+    AUREA_CHECK_EQ(p.update(2 * second).value, static_cast<i64>(30));
+    AUREA_CHECK_EQ(p.update(3 * second).value, static_cast<i64>(30));
+    // Solta: volta a andar DO quadro 30, sem pular o tempo segurado.
+    p.set_held(false, 3 * second);
+    AUREA_CHECK_EQ(p.update(4 * second).value, static_cast<i64>(60));
+    // Pausa, seek e play soltam a agulha.
+    p.set_held(true, 4 * second);
+    p.pause(5 * second);
+    AUREA_CHECK(!p.held());
+    p.play(5 * second);
+    p.set_held(true, 5 * second);
+    p.seek(FrameIndex{100}, 6 * second);
+    AUREA_CHECK(!p.held());
+    // Parado não segura.
+    p.pause(7 * second);
+    p.set_held(true, 7 * second);
+    AUREA_CHECK(!p.held());
+}
+
+AUREA_TEST(Timeline, PresentationWatchdogHoldsWhenFramesStopAndReleasesOnDelivery) {
+    using A = PresentationWatchdog::Action;
+    const u64 ms = 1'000'000ull;
+    PresentationWatchdog w;
+    // Tocando e entregando quadro a quadro: nunca segura.
+    u64 now = 0;
+    for (i64 f = 0; f < 60; ++f, now += 33 * ms) {
+        AUREA_CHECK(w.observe(true, false, f, now) == A::None);
+        w.presented(f, true, true);
+    }
+    // A prévia para no quadro 59; a agulha segue.
+    AUREA_CHECK(w.observe(true, false, 60, now) == A::None);          // atraso começa
+    AUREA_CHECK(w.observe(true, false, 70, now + 300 * ms) == A::None);
+    // Quadro presente mas INCOMPLETO (camada de vídeo preta) não conta.
+    w.presented(70, true, false);
+    AUREA_CHECK(w.observe(true, false, 75, now + 510 * ms) == A::Hold);
+    AUREA_CHECK_EQ(w.holds(), 1u);
+    // Segurado: espera o quadro completo da agulha.
+    AUREA_CHECK(w.observe(true, true, 75, now + 600 * ms) == A::None);
+    w.presented(75, true, true);
+    AUREA_CHECK(w.observe(true, true, 75, now + 650 * ms) == A::Release);
+    // Pausar com a agulha segurada solta.
+    AUREA_CHECK(w.observe(true, false, 76, now + 700 * ms) == A::None);
+    AUREA_CHECK(w.observe(false, true, 76, now + 800 * ms) == A::Release);
+}
+
+AUREA_TEST(Timeline, PresentationWatchdogGivesUpOnBrokenMediaUntilACompleteFrame) {
+    using A = PresentationWatchdog::Action;
+    const u64 ms = 1'000'000ull;
+    PresentationWatchdog w;
+    AUREA_CHECK(w.observe(true, false, 0, 0) == A::None);              // play parte do quadro 0
+    AUREA_CHECK(w.observe(true, false, 1, 10 * ms) == A::None);
+    AUREA_CHECK(w.observe(true, false, 15, 520 * ms) == A::Hold);
+    // Nenhum quadro completo chega (mídia quebrada): a espera é limitada.
+    AUREA_CHECK(w.observe(true, true, 15, 1'000 * ms) == A::None);
+    AUREA_CHECK(w.observe(true, true, 15, 520 * ms + PresentationWatchdog::kMaxHoldNs) == A::Release);
+    AUREA_CHECK(w.yielded());
+    // Desistiu: toca com quadros incompletos sem segurar de novo.
+    for (i64 f = 16; f < 200; ++f) {
+        AUREA_CHECK(w.observe(true, false, f, 3'000 * ms + static_cast<u64>(f) * 33 * ms) == A::None);
+        w.presented(f, true, false);
+    }
+    // Um quadro completo volta a armar o vigia.
+    w.presented(200, true, true);
+    AUREA_CHECK(!w.yielded());
+    AUREA_CHECK(w.observe(true, false, 201, 10'000 * ms) == A::None);
+    AUREA_CHECK(w.observe(true, false, 230, 10'600 * ms) == A::Hold);
+}
+
 AUREA_TEST(RandomEdits, ShuffleUsesEverySegmentOnceAndIsRepeatableBySeed) {
     // "Edições aleatórias" (0.2.7): cada trecho aparece uma vez, a mesma
     // semente dá a mesma montagem e outra semente dá outra.

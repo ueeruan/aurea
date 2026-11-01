@@ -28,7 +28,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 glow;     // cor do brilho (linear), intensidade
     vec4 texel;
     vec4 uvMap;    // uv da saída -> uv da camada
-    vec4 mode;     // x = mistura, y = desintegrar
+    vec4 mode;     // x = mistura, y = desintegrar, z = poeira, w = escala do ruído da poeira (px)
 } p;
 
 float hash1(uint x) {
@@ -44,10 +44,31 @@ uint cell_id(ivec2 c) {
     return (uint(c.x) * 73856093u) ^ (uint(c.y) * 19349663u) ^ (uint(p.grid.w) * 83492791u + 0x9E3779B9u);
 }
 
+// Poeira (mode.z = 1): ruído de valor suave — a frente fica orgânica (manchas,
+// não células soltas). Mesma conta no vértice e na composição.
+float dust_noise(vec2 q) {
+    const vec2 i = floor(q), f = fract(q);
+    const vec2 u = f * f * (3.0 - 2.0 * f);
+    const uint s = uint(p.grid.w) * 2654435761u;
+    const float a = hash1((uint(int(i.x)) * 73856093u) ^ (uint(int(i.y)) * 19349663u) ^ s);
+    const float b = hash1((uint(int(i.x) + 1) * 73856093u) ^ (uint(int(i.y)) * 19349663u) ^ s);
+    const float c = hash1((uint(int(i.x)) * 73856093u) ^ (uint(int(i.y) + 1) * 19349663u) ^ s);
+    const float d = hash1((uint(int(i.x) + 1) * 73856093u) ^ (uint(int(i.y) + 1) * 19349663u) ^ s);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
 float release_at(ivec2 c) {
     const vec2 center = p.src.xy + (vec2(c) + 0.5) * p.grid.z;
     const float s = clamp((dot(center, p.front.xy) - p.front.z) * p.front.w, 0.0, 1.0);
-    const float h = hash1(cell_id(c));
+    float h = hash1(cell_id(c));
+    if (p.mode.z > 0.5) {
+        // Poeira: duas oitavas de ruído pela escala + um grão por célula.
+        const vec2 q = center / max(p.mode.w, 1.0);
+        h = 0.62 * dust_noise(q) + 0.26 * dust_noise(q * 2.7 + 17.0) + 0.12 * h;
+        // O ruído somado se junta perto de 0,5: esticar devolve uma frente que
+        // anda por igual (na metade da conclusão sobra parte da camada).
+        h = clamp((h - 0.5) * 2.4 + 0.5, 0.0, 1.0);
+    }
     return mix(s, h, p.timing.y) * (1.0 - p.timing.z);
 }
 

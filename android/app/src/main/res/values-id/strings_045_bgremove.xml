@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Remover fundo (aurea.key.background_remove) — recorte sem tela verde. -->
+    <string name="bg_remove_fx_name">Hapus latar</string>
+    <string name="bg_remove_fx_desc">Menghapus latar video atau foto tanpa layar hijau: orang atau objek utama tetap ada, sisanya hilang di setiap frame.</string>
+    <string name="bg_remove_action">Hapus latar</string>
+    <string name="bg_remove_action_detail">Memotong orang atau objek, tanpa layar hijau</string>
+    <string name="bg_remove_note">Potongan otomatis di setiap frame, tanpa layar hijau. Analisis klip sekali: hasilnya disimpan bersama proyek dan ekspor memakai potongan yang sama.</string>
+    <string name="bg_remove_analyze">Analisis klip</string>
+    <string name="bg_remove_analyze_count">Analisis klip (%1$d frame)</string>
+    <string name="bg_remove_cancel">Batalkan analisis</string>
+    <string name="bg_remove_progress">Menganalisis %1$d dari %2$d frame</string>
+    <string name="bg_remove_clip_status">Klip: %1$d dari %2$d frame siap</string>
+    <string name="bg_remove_clip_done">Seluruh klip sudah dianalisis dan disimpan bersama proyek</string>
+    <string name="bg_remove_frame_ready">Frame ini: potongan siap</string>
+    <string name="bg_remove_frame_pending">Frame ini: menghitung potongan…</string>
+    <string name="bg_remove_failed">Tidak dapat menghapus latar lapisan ini.</string>
+    <string name="bg_remove_failed_model">Model potongan tidak termuat: memori perangkat kurang. Tutup aplikasi lain lalu ketuk Analisis klip lagi.</string>
+    <string name="bg_remove_failed_decode">Frame video ini tidak dapat dibaca sekarang. Jeda pemutaran lalu ketuk Analisis klip lagi.</string>
+    <string name="bg_remove_failed_frames">Beberapa frame belum dianalisis. Ketuk Analisis klip lagi.</string>
+    <string name="bg_remove_person_unavailable">Model Orang tidak tersedia di perangkat ini; Otomatis sedang dipakai.</string>
+    <string name="bg_remove_p_expand">Ciutkan/perluas</string>
+    <string name="bg_remove_p_invert">Balik (pertahankan latar)</string>
+    <string name="bg_remove_p_edge">Tepi halus</string>
+    <string name="bg_remove_p_model">Model</string>
+    <string name="bg_remove_o_auto">Otomatis</string>
+    <string name="bg_remove_o_person">Orang</string>
+    <string name="bg_remove_tip_model">Otomatis memotong objek utama dan berjalan di semua perangkat. Orang memakai segmentasi orang dari sistem bila perangkat memilikinya; jika tidak, Otomatis dipakai.</string>
+    <string name="bg_remove_tip_edge">Membangun ulang tepi pada resolusi video (rambut, garis tipis). 0 memakai tepi sederhana.</string>
+</resources>

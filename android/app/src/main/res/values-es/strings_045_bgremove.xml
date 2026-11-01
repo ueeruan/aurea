@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Remover fundo (aurea.key.background_remove) — recorte sem tela verde. -->
+    <string name="bg_remove_fx_name">Quitar fondo</string>
+    <string name="bg_remove_fx_desc">Quita el fondo de un video o foto sin pantalla verde: la persona o el objeto principal se queda y el resto desaparece en todos los fotogramas.</string>
+    <string name="bg_remove_action">Quitar fondo</string>
+    <string name="bg_remove_action_detail">Recorta a la persona o el objeto, sin pantalla verde</string>
+    <string name="bg_remove_note">Recorte automático en todos los fotogramas, sin pantalla verde. Analiza el clip una vez: el resultado se guarda con el proyecto y la exportación usa el mismo recorte.</string>
+    <string name="bg_remove_analyze">Analizar clip</string>
+    <string name="bg_remove_analyze_count">Analizar clip (%1$d fotogramas)</string>
+    <string name="bg_remove_cancel">Cancelar análisis</string>
+    <string name="bg_remove_progress">Analizando %1$d de %2$d fotogramas</string>
+    <string name="bg_remove_clip_status">Clip: %1$d de %2$d fotogramas listos</string>
+    <string name="bg_remove_clip_done">Clip completo analizado y guardado con el proyecto</string>
+    <string name="bg_remove_frame_ready">Este fotograma: recorte listo</string>
+    <string name="bg_remove_frame_pending">Este fotograma: calculando el recorte…</string>
+    <string name="bg_remove_failed">No se pudo quitar el fondo de esta capa.</string>
+    <string name="bg_remove_failed_model">El modelo de recorte no se cargó: falta memoria en el dispositivo. Cierra otras apps y toca Analizar clip de nuevo.</string>
+    <string name="bg_remove_failed_decode">No se pudieron leer los fotogramas de este video ahora. Pausa la reproducción y toca Analizar clip de nuevo.</string>
+    <string name="bg_remove_failed_frames">Algunos fotogramas no se analizaron. Toca Analizar clip de nuevo.</string>
+    <string name="bg_remove_person_unavailable">El modelo Persona no está disponible en este dispositivo; se está usando el Automático.</string>
+    <string name="bg_remove_p_expand">Contraer/expandir</string>
+    <string name="bg_remove_p_invert">Invertir (conservar el fondo)</string>
+    <string name="bg_remove_p_edge">Borde fino</string>
+    <string name="bg_remove_p_model">Modelo</string>
+    <string name="bg_remove_o_auto">Automático</string>
+    <string name="bg_remove_o_person">Persona</string>
+    <string name="bg_remove_tip_model">Automático recorta el objeto principal y funciona en todos los dispositivos. Persona usa el recorte de personas del sistema cuando el dispositivo lo tiene; si no, se usa el Automático.</string>
+    <string name="bg_remove_tip_edge">Rehace el borde a la resolución del video (cabello, contornos finos). 0 usa el borde simple.</string>
+</resources>

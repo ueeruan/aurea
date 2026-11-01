@@ -90,6 +90,10 @@ internal class ColorRequest(
     val anchor: androidx.compose.ui.geometry.Rect? = null,
     /** Omega aparência: o campo aceita alfa (amostra com alfa num campo sem alfa fica indisponível). */
     val withAlpha: Boolean = true,
+    /** 0.4.5: cor de um EFEITO — o conta-gotas amostra com esse efeito ([sampleEffect]) da camada
+     *  [sampleLayer] desligado só na captura (o verde original antes do Chroma Key). 0 / −1 = a prévia. */
+    val sampleLayer: Long = 0L,
+    val sampleEffect: Int = -1,
 ) {
     private var finished = false
 

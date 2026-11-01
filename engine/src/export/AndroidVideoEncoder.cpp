@@ -6,6 +6,7 @@
 #include "aurea/core/Log.hpp"
 #include "aurea/core/Thread.hpp"
 #include "aurea/core/Time.hpp"
+#include "aurea/export/ExportRules.hpp"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -209,6 +210,18 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
         if (!ctor || !infos || !isEncoder || (modern && (!isHardware || !isSoftware)) || !types || !name || !capabilities ||
             !videoCaps || !encCaps || !supports || !bitrateMode || !formatsField || !levelsField ||
             !profileField || !levelField) break;
+        // 0.4.5: o teto de taxa do encoder (VideoCapabilities.getBitrateRange).
+        // Opcional: sem ele o teto fica desconhecido e o configure leva o pedido.
+        const auto bitrateRange = env->GetMethodID(videoClass, "getBitrateRange", "()Landroid/util/Range;");
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        const jclass rangeClass = env->FindClass("android/util/Range");
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        const auto rangeUpper = rangeClass ? env->GetMethodID(rangeClass, "getUpper", "()Ljava/lang/Comparable;") : nullptr;
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        const jclass numberClass = env->FindClass("java/lang/Number");
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        const auto numberValue = numberClass ? env->GetMethodID(numberClass, "intValue", "()I") : nullptr;
+        if (env->ExceptionCheck()) env->ExceptionClear();
         const jobject list = env->NewObject(listClass, ctor, 1 /* ALL_CODECS */);
         if (!list || env->ExceptionCheck()) break;
         const auto array = static_cast<jobjectArray>(env->CallObjectMethod(list, infos));
@@ -263,6 +276,15 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
                     out.cbr = env->CallBooleanMethod(enc, bitrateMode, kBitrateCbr) && !env->ExceptionCheck();
                 }
                 if (env->ExceptionCheck()) env->ExceptionClear();
+                if (bitrateRange && rangeUpper && numberValue) {
+                    const jobject range = env->CallObjectMethod(vc, bitrateRange);
+                    const jobject upper = range && !env->ExceptionCheck() ? env->CallObjectMethod(range, rangeUpper) : nullptr;
+                    const jint bps = upper && !env->ExceptionCheck() ? env->CallIntMethod(upper, numberValue) : 0;
+                    if (!env->ExceptionCheck() && bps > 0) out.maxBitrateBps = static_cast<u32>(bps);
+                    if (env->ExceptionCheck()) env->ExceptionClear();
+                    if (upper) env->DeleteLocalRef(upper);
+                    if (range) env->DeleteLocalRef(range);
+                }
                 if (const auto levels = static_cast<jobjectArray>(env->GetObjectField(cap, levelsField)); levels && !hevc) {
                     for (jsize l = 0; l < env->GetArrayLength(levels); ++l) {
                         const jobject pl = env->GetObjectArrayElement(levels, l);
@@ -820,6 +842,13 @@ struct Encoder::Impl {
         if (r.rateMode == 0) mode = info.cbr ? kBitrateCbr : info.vbr ? kBitrateVbr : -1;
         else mode = info.vbr ? kBitrateVbr : info.cbr ? kBitrateCbr : -1;
         const bool forcedCbr = android_codec::device_rate_mode(info.name, r.rateMode) != r.rateMode;
+        // 0.4.5: no máximo o teto que o encoder anuncia (getBitrateRange):
+        // encoder de fabricante que recusava o configure acima dele derrubava
+        // o export para o software. Desconhecido (0) = o pedido, como antes.
+        const u32 askedBps = r.bitrateBps ? r.bitrateBps : 12'000'000u;
+        const u32 bitrateBps = export_encoder_bitrate_bps(askedBps, info.maxBitrateBps);
+        if (bitrateBps != askedBps)
+            AUREA_LOG_INFO("export: %s anuncia ate %u bps; taxa %u -> %u", info.name, info.maxBitrateBps, askedBps, bitrateBps);
         const auto configure = [&](i32 rate) noexcept -> media_status_t {
             AMediaFormat* format = AMediaFormat_new();
             if (!format) return AMEDIA_ERROR_UNKNOWN;
@@ -827,7 +856,7 @@ struct Encoder::Impl {
             AMediaFormat_setInt32(format, "width", static_cast<i32>(r.width));
             AMediaFormat_setInt32(format, "height", static_cast<i32>(r.height));
             AMediaFormat_setInt32(format, "color-format", colorFormat);
-            AMediaFormat_setInt32(format, "bitrate", static_cast<i32>(std::min<u32>(r.bitrateBps ? r.bitrateBps : 12'000'000u, 0x7fffffffu)));
+            AMediaFormat_setInt32(format, "bitrate", static_cast<i32>(std::min<u32>(bitrateBps, 0x7fffffffu)));
             if (rate >= 0) AMediaFormat_setInt32(format, "bitrate-mode", rate);
             const f64 roundedFps = std::round(r.fps);
             if (std::abs(r.fps - roundedFps) < 1e-6) AMediaFormat_setInt32(format, "frame-rate", static_cast<i32>(roundedFps));

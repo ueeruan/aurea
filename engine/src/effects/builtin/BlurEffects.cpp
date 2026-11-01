@@ -330,7 +330,10 @@ public:
 // -----------------------------------------------------------------------------
 class ZoomBlur final : public Effect {
 public:
-    enum : u32 { kCenter = 0, kAmount, kRepeat, kMix };
+    // Novo no FIM (0.4.5, o "Zoom" do CC Radial Fast Blur): Normal é a média
+    // de sempre; Mais claro/Mais escuro guardam a amostra mais clara/escura do
+    // rastro (as luzes ou as sombras se espalham).
+    enum : u32 { kCenter = 0, kAmount, kRepeat, kMix, kMode };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kZoomBlur, "Desfoque de zoom", "Desfoque",
@@ -346,6 +349,8 @@ public:
         p.typed_range(-400.0f, 400.0f);
         p.add_bool("repeat_edge", "Repetir a borda", false);
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        static const char* const kModes[] = {"Normal", "Mais claro", "Mais escuro"};
+        p.add_enum("mode", "Modo", kModes, 3, 0);
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         return std::fabs(e.f(kAmount)) < 0.01f || e.f(kMix) < 0.01f;
@@ -368,7 +373,7 @@ public:
                     e.b(kRepeat) ? 1.0f : 0.0f};
         // A mistura com o original: o rastro nunca é o único resultado.
         const f32 k = std::clamp(e.f(kMix) * 0.01f, 0.0f, 1.0f);
-        u.p1 = Vec4{k, 0, 0, 0};
+        u.p1 = Vec4{k, e.count > kMode ? static_cast<f32>(std::min(e.e(kMode), 2u)) : 0.0f, 0, 0};
         const CommonSampler sampler = e.b(kRepeat) ? CommonSampler::LinearRepeat : CommonSampler::LinearClamp;
         out = input;
         out.texture = ctx.texture("desfoque-zoom", input.width, input.height);

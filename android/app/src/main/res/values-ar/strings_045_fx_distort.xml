@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Tile Shift, Hexagon Tile Rotate/Shift, Hollow Box, Time Displacement, Mirror e Zoom blur. -->
+    <string name="fx045d_name_tile_shift">إزاحة البلاطات</string>
+    <string name="fx045d_name_hex_tile_rotate">تدوير البلاطات السداسية</string>
+    <string name="fx045d_name_hex_tile_shift">إزاحة البلاطات السداسية</string>
+    <string name="fx045d_name_hollow_box">صندوق مجوّف</string>
+    <string name="fx045d_name_time_displacement">إزاحة زمنية</string>
+    <string name="fx045d_desc_tile_shift">يقسم الطبقة إلى بلاطات ويزيح محتوى كل بلاطة على حدة.</string>
+    <string name="fx045d_desc_hex_tile_rotate">يقسم الطبقة إلى خلية نحل من السداسيات ويدير كل خلية على حدة.</string>
+    <string name="fx045d_desc_hex_tile_shift">يقسم الطبقة إلى خلية نحل من السداسيات ويزيح محتوى كل خلية.</string>
+    <string name="fx045d_desc_hollow_box">يحوّل الطبقة إلى صندوق ثلاثي الأبعاد مجوّف بجوانب مفتوحة وقصّات وإضاءة.</string>
+    <string name="fx045d_desc_time_displacement">يأتي كل بكسل من لحظة أخرى حسب سطوع خريطة: الفاتح متقدّم والداكن متأخر.</string>
+    <string name="fx045d_alt_rows">صفوف متناوبة</string>
+    <string name="fx045d_alt_cols">أعمدة متناوبة</string>
+    <string name="fx045d_cell_edges">حواف الخلية</string>
+    <string name="fx045d_wrap_in_cell">التفاف داخل الخلية</string>
+    <string name="fx045d_continuous">صورة متصلة</string>
+    <string name="fx045d_tip_rand_shift">0%: تتحرك كل الخلايا المسافة نفسها. 100%: تتحرك كل خلية مسافة عشوائية.</string>
+    <string name="fx045d_tip_rand_rotate">0%: تدور كل الخلايا بالقدر نفسه. 100%: تدور كل خلية بمقدار عشوائي.</string>
+    <string name="fx045d_outset">إبعاد الجوانب</string>
+    <string name="fx045d_smoothing">تنعيم الحواف</string>
+    <string name="fx045d_hidden">مخفي</string>
+    <string name="fx045d_circle_cutout">ثقب دائري</string>
+    <string name="fx045d_circle_crop">اقتصاص دائري</string>
+    <string name="fx045d_square_cutout">ثقب مربع</string>
+    <string name="fx045d_square_crop">اقتصاص مربع</string>
+    <string name="fx045d_cutout_size">حجم القصّ</string>
+    <string name="fx045d_lighting">الإضاءة</string>
+    <string name="fx045d_precision">الدقة</string>
+    <string name="fx045d_tip_cutout">يُطبَّق على الجوانب ذات الثقب أو الاقتصاص.</string>
+    <string name="fx045d_tip_precision">خطوات أكثر: حواف أنظف ومعاينة أبطأ.</string>
+    <string name="fx045d_layer_itself">الطبقة نفسها</string>
+    <string name="fx045d_grad_h">تدرّج أفقي</string>
+    <string name="fx045d_grad_v">تدرّج عمودي</string>
+    <string name="fx045d_grad_r">تدرّج شعاعي</string>
+    <string name="fx045d_max_time">أقصى إزاحة</string>
+    <string name="fx045d_time_resolution">دقة الزمن</string>
+    <string name="fx045d_invert_map">عكس الخريطة</string>
+    <string name="fx045d_smooth_levels">تنعيم بين المستويات</string>
+    <string name="fx045d_tip_time_map">الأبيض = متقدّم، الأسود = متأخر، الرمادي 50% = الآن.</string>
+    <string name="fx045d_both_axes">انعكاس على المحورين</string>
+    <string name="fx045d_replace_side">استبدال الجانب</string>
+    <string name="fx045d_overlay_copy">تراكب نسخة</string>
+    <string name="fx045d_copy_opacity">عتامة النسخة</string>
+    <string name="fx045d_copy_behind">النسخة خلف الطبقة</string>
+    <string name="fx045d_copy">النسخة</string>
+    <string name="fx045d_tip_mirror_mode">تراكب نسخة: تبقى الطبقة كاملة وتُضاف النسخة المعكوسة.</string>
+</resources>

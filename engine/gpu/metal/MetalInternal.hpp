@@ -380,6 +380,8 @@ struct Impl {
     std::vector<PendingSubmission> pendingImmediate;
 
     CVMetalTextureCacheRef textureCache = nullptr;
+    /// Próximo quadro em que reclaim_stale_imports faz a faxina do cache (0.4.5).
+    u64 nextCacheFlushFrame = 0;
 
     /// Capacidade de amostragem de contadores: descoberta uma vez, na abertura.
     bool counterSampling = false;

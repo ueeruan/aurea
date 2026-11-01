@@ -94,7 +94,11 @@
 
     <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
     <string name="om_ap_cp_eyedropper">Пипетка</string>
-    <string name="om_ap_cp_eyedropper_hint">Ведите по сцене, чтобы выбрать цвет</string>
+    <string name="om_ap_cp_eyedropper_hint">Коснитесь или ведите по превью, чтобы взять цвет</string>
+    <string name="om_ap_cp_eyedropper_source">исходный цвет, до этого эффекта</string>
+    <string name="om_ap_cp_eyedropper_picked">Выбранный цвет: %1$s</string>
+    <string name="om_ap_cp_eyedropper_cancel">Отменить пипетку и вернуться к выбору цвета</string>
+    <string name="om_ap_cp_eyedropper_full_hint">Взять цвет из превью</string>
     <string name="om_ap_cp_fine">Точная настройка</string>
     <string name="om_ap_cp_full">Другие цвета</string>
     <string name="om_ap_cp_unavailable">Прозрачный цвет здесь недоступен</string>
@@ -103,6 +107,7 @@
     <string name="om_ap_cp_paste_code">Вставить код цвета</string>
     <string name="om_ap_cp_code_copied">Код цвета скопирован</string>
     <string name="om_ap_cp_code">Код цвета %1$s</string>
+    <string name="om_ap_cp_type_code">Ввести код цвета</string>
     <string name="om_ap_cp_wheel">Круг</string>
     <string name="om_ap_cp_rgb">RGB</string>
     <string name="om_ap_cp_done">Готово</string>

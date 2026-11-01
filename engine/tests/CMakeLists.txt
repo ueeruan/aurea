@@ -90,6 +90,7 @@ add_executable(aurea_tests
     test_grid.cpp
     test_foreground.cpp
     test_roto.cpp
+    test_bgremove.cpp
     test_expr.cpp
     test_keyframe_shape.cpp
     test_vector.cpp
@@ -122,6 +123,7 @@ add_executable(aurea_tests
     test_rig.cpp
     test_mocap.cpp        # 0.3.6 Motion Capture (BETA)
     test_autorig.cpp      # 0.3.6 AutoRig 3D (BETA)
+    test_rig_skeleton.cpp # 0.4.5 Esqueleto 3D e Fantoche mais fáceis
     test_shape3d.cpp
     test_shape3d_split.cpp
     test_plugins.cpp

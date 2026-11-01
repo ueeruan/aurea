@@ -639,6 +639,16 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)rotoSetView:(uint32_t)mode effect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(rotoSetView(_:effect:layer:));
 /// [feitos, total, rodando, falhou, traços no quadro, traços no total]
 - (NSArray<NSNumber *> *)rotoStatusForEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(rotoStatus(effect:layer:));
+/// Remover fundo (0.4.5, EngineBgRemove.cpp): o efeito na camada de vídeo/imagem
+/// (existente ou novo, com desfazer) e, no vídeo, a análise do clipe. −1 = falhou.
+- (int32_t)bgRemoveApplyForLayer:(long long)layerId NS_SWIFT_NAME(bgRemoveApply(layer:));
+- (BOOL)bgRemoveAnalyzeEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(bgRemoveAnalyze(effect:layer:));
+- (void)bgRemoveCancel NS_SWIFT_NAME(bgRemoveCancel());
+/// [analisados, total, analisando, falhou (motivo), quadro atual pronto, quadros do clipe
+///  prontos, quadros do clipe, modelo efetivo, válido]. válido = 0: o render estava ocupado.
+- (NSArray<NSNumber *> *)bgRemoveStatusForEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(bgRemoveStatus(effect:layer:));
+/// Há segmentador nativo de pessoa (Vision) registrado no motor.
+@property (nonatomic, readonly) BOOL bgRemoveNativeAvailable;
 /// Grupo: câmera de fora alcança as camadas de dentro (−1 = não é grupo).
 - (BOOL)setGroupCameraPassThrough:(BOOL)on forLayer:(long long)layerId;
 - (int32_t)groupCameraPassThrough:(long long)layerId;
@@ -715,6 +725,9 @@ NS_SWIFT_NAME(AureaEngine)
 /// a UI mostra — o motor recusa o que MUDARIA o resultado, nunca o que é
 /// trabalhoso).
 - (NSString*)ungroupPrecomp:(long long)layerId;
+/// Vários grupos num passo de desfazer. "" = todos desfeitos; senão o motivo
+/// da 1ª recusa (os outros grupos foram desfeitos mesmo assim).
+- (NSString*)ungroupPrecomps:(NSArray<NSNumber*>*)layerIds NS_SWIFT_NAME(ungroupPrecomps(_:));
 
 // --- Importação -------------------------------------------------------------
 /// Caminho de arquivo no sandbox (o Swift copia o que vem do seletor para lá).
@@ -796,6 +809,10 @@ NS_SWIFT_NAME(AureaEngine)
 /// dele o pai de todas — nada sai do lugar na tela; nulo 3D se alguma camada
 /// é 3D; um passo de desfazer. Devolve o id do nulo, ou −Errc.
 - (long long)parentToNewNull:(NSArray<NSNumber*>*)layerIds;
+/// "Vincular selecionadas" (bug #9c): todas ao MESMO pai já existente (0 =
+/// soltar), com a compensação de cada filho; bloqueadas ficam de fora. Um
+/// passo de desfazer. Devolve quantas mudaram (≥ 1), ou −Errc.
+- (int)parentLayers:(NSArray<NSNumber*>*)layerIds toParent:(long long)parent NS_SWIFT_NAME(parentLayers(_:to:));
 /// "Escalonar": cascata de `stepFrames` na ordem de `layerIds` (a primeira
 /// fica); `keysOnly` = só a animação anda. Um passo de desfazer. Devolve
 /// quantas camadas andaram, ou −Errc.
@@ -896,6 +913,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (int32_t)puppetAddPin:(long long)layerId effect:(int32_t)effectId u:(float)u v:(float)v NS_SWIFT_NAME(puppetAddPin(_:effect:u:v:));
 - (BOOL)puppetMovePin:(long long)layerId effect:(int32_t)effectId pin:(int32_t)pin u:(float)u v:(float)v autoKey:(BOOL)autoKey continuing:(BOOL)continuing NS_SWIFT_NAME(puppetMovePin(_:effect:pin:u:v:autoKey:continuing:));
 - (BOOL)puppetRemovePin:(long long)layerId effect:(int32_t)effectId pin:(int32_t)pin NS_SWIFT_NAME(puppetRemovePin(_:effect:pin:));
+/// 0.4.5: gira os pinos de `mask` (bit i = pino i) em volta do pino `pivot`; o dedo de (u0, v0) a (u1, v1).
+- (BOOL)puppetRotatePins:(long long)layerId effect:(int32_t)effectId pivot:(int32_t)pivot mask:(int32_t)mask u0:(float)u0 v0:(float)v0 u1:(float)u1 v1:(float)v1 autoKey:(BOOL)autoKey continuing:(BOOL)continuing NS_SWIFT_NAME(puppetRotatePins(_:effect:pivot:mask:u0:v0:u1:v1:autoKey:continuing:));
 // Formas 3D (Engine::add_shape3d e família; scene3d/Shape3D.hpp). Receita:
 // [forma, nº de partes, 5 por parte (RGBA sRGB, 1 = tem imagem)]. Partes no
 // cabeçote: 14 floats cada (Engine::kShapePartFloats).
@@ -1044,6 +1063,18 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)dragBone:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy twist:(float)twist continuing:(BOOL)continuing;
 - (int32_t)toggleBoneKey:(long long)layerId node:(int32_t)node;
 - (BOOL)resetBonePose:(long long)layerId node:(int32_t)node;
+/// Esqueleto 3D (0.4.5) — Engine::query_bone_gizmo e família (EngineRigSkeleton.cpp). Par do Android: AureaEngine.kt.
+/// Anéis do osso (21 floats: junta na tela, na frente, U/V (x, y, z) por eixo local); vazio = sem osso.
+- (NSArray<NSNumber*>*)boneGizmo:(long long)layerId node:(int32_t)node radius:(float)radius NS_SWIFT_NAME(boneGizmo(_:node:radius:));
+/// Dedo no anel `axis` (0..2 eixo local, 3 = em volta do olhar), px da composição. Um desfazer por gesto.
+- (BOOL)dragBoneRing:(long long)layerId node:(int32_t)node axis:(int32_t)axis x0:(float)x0 y0:(float)y0 x1:(float)x1 y1:(float)y1 radius:(float)radius continuing:(BOOL)continuing NS_SWIFT_NAME(dragBoneRing(_:node:axis:x0:y0:x1:y1:radius:continuing:));
+/// Rotações em lote, 4 números por osso {nó, X, Y, Z °}: um passo de desfazer.
+- (BOOL)setBoneRotations:(long long)layerId values:(NSArray<NSNumber*>*)values continuing:(BOOL)continuing NS_SWIFT_NAME(setBoneRotations(_:values:continuing:));
+- (int32_t)boneMirrorPartner:(long long)layerId node:(int32_t)node NS_SWIFT_NAME(boneMirrorPartner(_:node:));
+/// node ≥ 0: o osso espelhado no par; −1: troca os lados da pose inteira.
+- (BOOL)mirrorBonePose:(long long)layerId node:(int32_t)node NS_SWIFT_NAME(mirrorBonePose(_:node:));
+/// IK simples: a ponta anda (dx, dy) px e os dois ossos acima seguem.
+- (BOOL)dragBoneIk:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy continuing:(BOOL)continuing NS_SWIFT_NAME(dragBoneIk(_:node:dx:dy:continuing:));
 /// AutoRig 3D (0.3.6 BETA) — Engine::humanoid_* / autorig_* (rig/AutoRig.hpp).
 /// 0 sem esqueleto, 1 esqueleto não humanoide, 2 rig compatível, 3 AutoRig.
 - (int32_t)humanoidStatus:(long long)layerId NS_SWIFT_NAME(humanoidStatus(_:));
@@ -1290,6 +1321,15 @@ NS_SWIFT_NAME(AureaEngine)
 /// Não altera a captura final nem a saída de exportação.
 - (nullable NSData*)capturePreviewFrame:(uint32_t)maxDim outWidth:(nullable uint32_t*)outWidth
                                outHeight:(nullable uint32_t*)outHeight;
+/// Conta-gotas (0.4.5): o quadro da prévia com o efeito `effectId` da camada
+/// `layerId` desligado SÓ nesta captura (a cor que entra nele: o verde antes do
+/// Chroma Key). `layerId` 0 / `effectId` < 0 = a prévia comum. Sem desfazer.
+- (nullable NSData*)captureEyedropperFrame:(uint32_t)maxDim skipLayer:(long long)layerId skipEffect:(int32_t)effectId
+                                   outWidth:(nullable uint32_t*)outWidth outHeight:(nullable uint32_t*)outHeight;
+/// Conta-gotas (0.4.5): RGBA sRGB (alfa reto) do ponto (x, y) px da composição,
+/// com o mesmo efeito ignorado; vazio = sem quadro.
+- (NSArray<NSNumber*>*)sampleCompositionColorAtX:(float)x y:(float)y skipLayer:(long long)layerId
+                                        skipEffect:(int32_t)effectId;
 /// Prévia de um efeito (ficha do catálogo) em RGBA8 sRGB.
 - (nullable NSData*)effectPreview:(uint32_t)typeId width:(uint32_t)width height:(uint32_t)height
                           outSize:(nullable CGSize*)outSize;

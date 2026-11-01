@@ -1004,6 +1004,9 @@ final class AureaModel: ObservableObject {
     private var exportWatch = ExportStallWatch()
     /// O degrau da escada de tentativas em uso (export/ExportAttempts.hpp; 0 = o pedido).
     private var exportSafeMode: UInt32 = 0
+    /// 0.4.5: o degrau em que o último export de vídeo parou (só leitura, para a
+    /// falha da tela Exportar dizer que a escada já foi tentada).
+    var exportAttemptLevel: UInt32 { exportSafeMode }
     /// Lado menor do vídeo quando a escada exportou abaixo do pedido (0 = o pedido).
     private var exportReducedSide: UInt32 = 0
     /// Taxa do vídeo quando a escada a limitou abaixo do pedido (0 = a pedida).
@@ -2146,6 +2149,17 @@ final class AureaModel: ObservableObject {
         if uiMode != nextUiMode { uiMode = nextUiMode }
         let nextAnchor = engine.mainTrackAnchor
         if mainTrackAnchor != nextAnchor { mainTrackAnchor = nextAnchor }
+        // Bug #6 (par do EditorStore.refreshModel): a composição mudou por fora do
+        // abrir/fechar (desfazer com o grupo aberto, "Tirar do grupo"). Os ids de
+        // camada da outra composição não valem aqui: miniaturas, trilhas abertas
+        // e keyframes escolhidos recomeçam (a seleção vem do motor logo abaixo).
+        let depth = engine.precompDepth
+        if depth != lastPrecompDepth {
+            lastPrecompDepth = depth
+            resetGroupThumbnails()
+            clearTimelineKeySelection()
+            if !timelineExpandedLayers.isEmpty { timelineExpandedLayers = [] }
+        }
         // Desfazer/refazer, abrir projeto e ripple também mexem nas marcas: a
         // lista local não pode ficar velha (a âncora acendia numa marca extinta).
         refreshMarkers()
@@ -2256,7 +2270,8 @@ final class AureaModel: ObservableObject {
         // Pose do rig 3D (0.1.8): ossos do modelo escolhido na Cena 3D.
         let nextBones: [Float] = sceneEditor && selectedLayer?.kind == 10 ? engine.modelBones(layerId).map(\.floatValue) : []
         if nextBones != poseBones { poseBones = nextBones }
-        if poseBones.isEmpty && (rigPoseMode || poseBone >= 0) { rigPoseMode = false; poseBone = -1 }
+        if poseBones.isEmpty && (rigPoseMode || poseBone >= 0) { rigPoseMode = false; poseBone = -1; skeletonPanel = false }
+        refreshPoseGizmo(layerId)   // Esqueleto 3D (0.4.5): anéis do osso escolhido
         refreshHumanoid(layerId)   // AutoRig 3D (0.3.6)
         if panel == .mask || panel == .vector { refreshMasks() }
         if let effectId = selectedEffectId {
@@ -2348,6 +2363,13 @@ final class AureaModel: ObservableObject {
     func puppetRemovePin(_ layer: Int64, effect: Int32, pin: Int32) {
         if engine.puppetRemovePin(layer, effect: effect, pin: pin) { refreshModel(force: true) }
     }
+    /// 0.4.5: gira os pinos de `mask` em volta do pino `pivot` (o dedo de (u0, v0) a (u1, v1)); um passo por gesto.
+    func puppetRotatePins(_ layer: Int64, effect: Int32, pivot: Int32, mask: Int32, u0: Float, v0: Float, u1: Float, v1: Float,
+                          continuing: Bool) -> Bool {
+        if status.playing != 0 { playPause() }
+        return engine.puppetRotatePins(layer, effect: effect, pivot: pivot, mask: mask, u0: u0, v0: v0, u1: u1, v1: v1,
+                                       autoKey: autoKeyTransforms, continuing: continuing)
+    }
     /// A ferramenta Fantoche (a entrada "Rig" da doca): abre o cartão do efeito
     /// na camada escolhida — cria se ainda não tem — já no modo de pinos.
     func openPuppetTool() {
@@ -2359,6 +2381,19 @@ final class AureaModel: ObservableObject {
         } else {
             addEffectAndFocus(type, layer: layer)
         }
+        openPanel(.effects)
+    }
+
+    /// 0.4.5 "Remover fundo" (par de EditorStore.removeBackground): o efeito na camada
+    /// de vídeo/imagem (o existente ou um novo, com desfazer) e, no vídeo, a análise do
+    /// clipe já começa no motor. O cartão do efeito abre no painel Efeitos.
+    func removeBackground(_ layer: Int64) {
+        if status.playing != 0 { playPause() }
+        if primarySelection != layer { select(layerId: layer, openOptions: false) }
+        let effectId = engine.bgRemoveApply(layer: layer)
+        guard effectId >= 0 else { toast = AureaText.t("bg_remove_failed"); return }
+        pendingEffectFocus = EffectFocusRequest(layer: layer, type: fxEffectTypeId(bgRemoveEffectKey), previous: [])
+        refreshModel(force: true)
         openPanel(.effects)
     }
 
@@ -2602,11 +2637,25 @@ final class AureaModel: ObservableObject {
         else { groupSelection() }
     }
 
-    func ungroup(_ layerId: Int64) {
-        let why = engine.ungroupPrecomp(layerId)
-        if !why.isEmpty { toast = AureaText.t("msg_nao_da_para_desagrupar_o_resultado", AureaEngineText.reason(why)) }
+    func ungroup(_ layerId: Int64) { ungroup(groups: [layerId]) }
+
+    /// Desagrupa os grupos escolhidos num passo de desfazer (par do
+    /// `EditorStore.ungroupPrecomps`). A seleção passa a ser a do motor: as
+    /// camadas que saíram dos grupos (o refreshModel a lê das linhas).
+    func ungroup(groups ids: [Int64]) {
+        let groups = layers.filter { ids.contains($0.id) && $0.kind == 12 }.map { NSNumber(value: $0.id) }
+        guard !groups.isEmpty else { return }
+        if status.playing != 0 { playPause() }
+        commitPendingCommands()
+        clearTimelineKeySelection()
+        let why = engine.ungroupPrecomps(groups)
         refreshModel(force: true)
+        toast = why.isEmpty ? AureaText.t("msg_desagrupado")
+                            : AureaText.t("msg_nao_da_para_desagrupar_o_resultado", AureaEngineText.reason(why))
     }
+
+    /// Profundidade de grupo vista na última releitura (bug #6: troca de composição).
+    private var lastPrecompDepth: UInt32 = 0
 
     /// Renomeia o projeto ABERTO (arquivo + capa), mantendo o editor nele.
     func renameCurrentProject(to newName: String) {
@@ -3018,6 +3067,25 @@ final class AureaModel: ObservableObject {
                     : native.captureFrame(maxDimension, outWidth: &width, outHeight: &height)
                 guard let data,
                       width > 0, height > 0 else { continuation.resume(returning: nil); return }
+                continuation.resume(returning: (data, width, height))
+            }
+        }
+        guard started, !Task.isCancelled, projectContentGeneration == project, projectURL == sourceURL else { return nil }
+        return frame
+    }
+
+    /// Conta-gotas (0.4.5, par do `captureEyedropperBitmap` do Android): o quadro da prévia
+    /// com o efeito `skipEffect` da camada `skipLayer` desligado SÓ nesta captura (o verde
+    /// antes do Chroma Key). Sem efeito pedido (0 / −1) = a prévia comum. Sem desfazer.
+    func captureEyedropperFrame(_ maxDimension: UInt32, skipLayer: Int64, skipEffect: Int32) async -> (data: Data, width: UInt32, height: UInt32)? {
+        guard started, !Task.isCancelled else { return nil }
+        let native = engine, project = projectContentGeneration, sourceURL = projectURL
+        let frame: (data: Data, width: UInt32, height: UInt32)? = await withCheckedContinuation { continuation in
+            mediaQueue.async {
+                var width: UInt32 = 0, height: UInt32 = 0
+                let data = native.captureEyedropperFrame(maxDimension, skipLayer: skipLayer, skipEffect: skipEffect,
+                                                         outWidth: &width, outHeight: &height)
+                guard let data, width > 0, height > 0 else { continuation.resume(returning: nil); return }
                 continuation.resume(returning: (data, width, height))
             }
         }
@@ -4596,7 +4664,17 @@ final class AureaModel: ObservableObject {
     @Published var humanoidJoints: [Float] = []
     @Published var humanoidIk: [Float] = []
     /// Osso escolhido no modo de pose desloca em vez de girar (o quadril).
-    @Published var poseMove = false
+    @Published var poseMove = false { didSet { if poseMove { poseIk = false } } }
+    /// Esqueleto 3D (0.4.5): anéis do osso escolhido com raio 1 (`query_bone_gizmo`; o palco escala).
+    @Published var poseGizmo: [Float] = []
+    /// Esqueleto escondido no palco (o osso escolhido continua com os anéis).
+    @Published var skeletonHidden = false
+    /// IK simples: arrastar a junta escolhida leva os dois ossos acima.
+    @Published var poseIk = false { didSet { if poseIk { poseMove = false } } }
+    /// Painel "Esqueleto" aberto embaixo da Cena 3D.
+    @Published var skeletonPanel = false
+    /// Pose copiada ({nó, X, Y, Z} por osso) — vale para o mesmo modelo.
+    @Published var poseClipboard: [Float] = []
     /// Junta canônica sendo arrastada no Corrigir esqueleto (osso, ponto em px da composição).
     @Published var rigFixDrag: (Int, SIMD2<Float>)?
     @Published var sceneYaw: Float = -30
@@ -5106,7 +5184,8 @@ final class AureaModel: ObservableObject {
                     self.exportMessage = code == 0 ? AureaText.t("ios_export_could_not_start")
                         : code == 6 && self.plannedExportSeconds(options) > Self.exportMaxSeconds
                         ? AureaText.t("exp_too_long_3h")
-                        : AureaEngineText.sentence(message, code: code)
+                        : Self.exportAfterLadder(AureaEngineText.sentence(message, code: code), attempt: usedSafeMode,
+                                                 progress: finalProgress)
                 } else {
                     self.exportMessage = finalImageCode == 6 && self.plannedExportSeconds(options) > Self.exportMaxSeconds
                         ? AureaText.t("exp_too_long_3h")
@@ -5384,6 +5463,20 @@ final class AureaModel: ObservableObject {
         }
     }
 
+    /// 0.4.5 (bug "exportação ainda falha"): a falha que aparece DEPOIS de a
+    /// escada já ter tentado modos mais compatíveis (`attempt` > 0: H.264,
+    /// encoder de software, resolução menor) diz isso e leva um código curto
+    /// para o suporte: E<motivo>-<código Errc>-<degrau>. O mesmo do Android
+    /// (Exporter.afterLadder). Cancelado (25) e sem espaço (28) ficam como estão.
+    nonisolated static func exportAfterLadder(_ message: String, attempt: UInt32, progress: [String: Any]) -> String {
+        let code = (progress["result"] as? NSNumber)?.intValue ?? 0
+        let failure = (progress[AureaExportFailure] as? NSNumber)?.intValue ?? 0
+        let level = Int(attempt & 0xFF)
+        guard level > 0, code != 0, code != 25, code != 28 else { return message }
+        let trimmed = message.trimmingCharacters(in: .whitespaces)
+        return trimmed + " " + AureaText.t("expfail_after_ladder", failure, code, level)
+    }
+
     private func startExportPolling() {
         exportTimer?.invalidate()
         let timer = Timer(timeInterval: 0.35, repeats: true) { [weak self] _ in
@@ -5491,8 +5584,9 @@ final class AureaModel: ObservableObject {
                             // vai para a tela.
                             self.exportMessage = self.exportStalled ? AureaText.t("ios_export_failed_detail", AureaText.t("expfail_stuck"))
                                 : result == 28 ? AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco")
-                                : Self.exportFailureReason(self.exportProgress).map { AureaText.t("ios_export_failed_detail", $0) }
-                                ?? (message.isEmpty || AureaText.language.resolved != .pt ? AureaText.t("ios_export_failed") : message)
+                                : Self.exportAfterLadder(Self.exportFailureReason(self.exportProgress).map { AureaText.t("ios_export_failed_detail", $0) }
+                                    ?? (message.isEmpty || AureaText.language.resolved != .pt ? AureaText.t("ios_export_failed") : message),
+                                    attempt: self.exportSafeMode, progress: self.exportProgress)
                             self.toast = self.exportMessage
                         }
                     }
@@ -6195,11 +6289,20 @@ final class AureaModel: ObservableObject {
         let children = ids.filter { id in
             id != parent && (parent == 0 || parentCandidatesForAll([id]).contains { $0.id == parent })
         }
-        guard !children.isEmpty else { return }
-        beginGesture(parent == 0 ? "soltar camadas" : "vincular camadas")
-        mutate { engine in for id in children { engine.setLayer(id, parent: parent) } }
-        endGesture()
+        guard started, !children.isEmpty else { return }
+        // Uma camada só: o mesmo caminho do ⛓ da barra da camada (par do `setParent` do Android).
+        if ids.count == 1 { setParent(children[0], parent: parent); return }
+        // Bug #9c: o motor liga todas de uma vez (Engine::set_parent_many) — um passo
+        // de desfazer, compensação de cada filho e as bloqueadas de fora (par do Android).
+        let changed = Int(engine.parentLayers(children.map { NSNumber(value: $0) }, to: parent))
         refreshModel(force: true)
+        if changed < 0 {
+            if layers.contains(where: { children.contains($0.id) && $0.locked }) {
+                toast = AureaText.t("editor_camada_bloqueada_desbloqueie_editar")
+            }
+            return
+        }
+        if parent != 0 { toast = AureaText.t("msg_camada_s_seguindo_o_pai_escolhido", String(changed)) }
     }
 
     /// "Vincular a novo nulo" (o mesmo do Android): o motor cria um nulo no
@@ -6936,9 +7039,134 @@ extension AureaModel {
     var rigPoseActive: Bool { sceneEditor && rigPoseMode && selection.count == 1 && !poseBones.isEmpty }
     func setRigPose(_ on: Bool) {
         rigPoseMode = on && !poseBones.isEmpty
-        if !rigPoseMode { poseBone = -1 }
+        if !rigPoseMode { poseBone = -1; skeletonPanel = false }
+        refreshPoseGizmo(primarySelection)
     }
-    func choosePoseBone(_ node: Int32) { poseBone = node }
+    func choosePoseBone(_ node: Int32) {
+        poseBone = node
+        refreshPoseGizmo(primarySelection)
+    }
+
+    // MARK: Esqueleto 3D (0.4.5) — EditorStore.kt (bloco "Esqueleto 3D")
+    // O motor gira, espelha e grava (EngineRigSkeleton.cpp); aqui só o estado da tela.
+    /// Floats de `Engine::query_bone_gizmo` (anéis da articulação).
+    static let boneGizmoFloats = 21
+    func refreshPoseGizmo(_ layerId: Int64?) {
+        let g: [Float] = layerId != nil && rigPoseMode && poseBone >= 0
+            ? engine.boneGizmo(layerId!, node: poseBone, radius: 1).map(\.floatValue) : []
+        if g != poseGizmo { poseGizmo = g.count == Self.boneGizmoFloats ? g : [] }
+    }
+    func openSkeletonPanel(_ on: Bool) {
+        if on && !rigPoseMode { animateBones(poseBone) }
+        skeletonPanel = on && rigPoseMode
+    }
+    /// Dedo no anel `axis` (0..2 eixo local, 3 = em volta do olhar); px da composição.
+    func dragPoseRing(axis: Int, from a: SIMD2<Float>, to b: SIMD2<Float>, radius: Float) {
+        guard let id = primarySelection, poseBone >= 0 else { return }
+        if engine.dragBoneRing(id, node: poseBone, axis: Int32(axis), x0: a.x, y0: a.y, x1: b.x, y1: b.y, radius: radius,
+                               continuing: poseGestureSent) { poseGestureSent = true }
+        refreshSelectedLayer(refreshEffectStack: false)
+    }
+    /// IK simples: a junta escolhida anda (dx, dy) px da composição.
+    func dragPoseIk(dx: Float, dy: Float) {
+        guard let id = primarySelection, poseBone >= 0 else { return }
+        if engine.dragBoneIk(id, node: poseBone, dx: dx, dy: dy, continuing: poseGestureSent) { poseGestureSent = true }
+        refreshSelectedLayer(refreshEffectStack: false)
+    }
+    /// Rotação do osso nos campos numéricos (graus, Euler da camada). Um passo de desfazer.
+    func setBoneRotation(_ node: Int32, x: Float, y: Float, z: Float) {
+        guard let id = primarySelection else { return }
+        if !engine.setBoneRotations(id, values: [NSNumber(value: Float(node)), NSNumber(value: x), NSNumber(value: y), NSNumber(value: z)],
+                                    continuing: false) { toast = AureaText.t("shape3d_key_outside") }
+        refreshModel(force: true)
+    }
+    /// Zera a rotação do osso escolhido (ou de todos) no cabeçote; key se o osso anima.
+    func zeroPose(all: Bool) {
+        guard let id = primarySelection else { return }
+        let f = Self.boneFloats
+        var rows: [NSNumber] = []
+        for i in 0..<(poseBones.count / f) {
+            let o = i * f, node = Int32(poseBones[o])
+            if !all && node != poseBone { continue }
+            if poseBones[o + 2] == 0 && poseBones[o + 3] == 0 && poseBones[o + 4] == 0 { continue }
+            rows += [NSNumber(value: Float(node)), 0, 0, 0]
+        }
+        guard !rows.isEmpty else { return }
+        if !engine.setBoneRotations(id, values: rows, continuing: false) { toast = AureaText.t("shape3d_key_outside") }
+        unaliasThumbs(id)
+        refreshModel(force: true)
+    }
+    func copyPose() {
+        let f = Self.boneFloats
+        var rows: [Float] = []
+        for i in 0..<(poseBones.count / f) {
+            let o = i * f
+            rows += [poseBones[o], poseBones[o + 2], poseBones[o + 3], poseBones[o + 4]]
+        }
+        poseClipboard = rows
+        toast = AureaText.t("skeleton_pose_copied")
+    }
+    /// Cola a pose copiada nos ossos que este modelo tem (um passo de desfazer).
+    func pastePose() {
+        guard let id = primarySelection, !poseClipboard.isEmpty else { return }
+        let f = Self.boneFloats
+        let nodes = Set((0..<(poseBones.count / f)).map { Int32(poseBones[$0 * f]) })
+        var rows: [NSNumber] = []
+        for i in 0..<(poseClipboard.count / 4) where nodes.contains(Int32(poseClipboard[i * 4])) {
+            rows += (0..<4).map { NSNumber(value: poseClipboard[i * 4 + $0]) }
+        }
+        guard !rows.isEmpty, engine.setBoneRotations(id, values: rows, continuing: false) else {
+            toast = AureaText.t("skeleton_paste_failed"); return
+        }
+        unaliasThumbs(id)
+        refreshModel(force: true)
+    }
+    /// Espelhar: o osso escolhido no par dele, ou a pose inteira (`all`).
+    func mirrorPose(all: Bool) {
+        guard let id = primarySelection, all || poseBone >= 0 else { return }
+        guard engine.mirrorBonePose(id, node: all ? -1 : poseBone) else {
+            toast = AureaText.t(all ? "skeleton_mirror_nothing" : "skeleton_no_partner"); return
+        }
+        unaliasThumbs(id)
+        refreshModel(force: true)
+    }
+    func bonePartner(_ node: Int32) -> Int32 {
+        guard let id = primarySelection else { return -1 }
+        return engine.boneMirrorPartner(id, node: node)
+    }
+    /// Juntas perto do ponto (px da composição) dentro de `reach`, da mais perto à mais longe: os NÓS.
+    func pickPoseBones(_ point: SIMD2<Float>, reach: Float) -> [Int32] {
+        guard !skeletonHidden else { return [] }
+        let f = Self.boneFloats
+        var hits: [(Float, Int32)] = []
+        for i in 0..<(poseBones.count / f) where poseBones[i * f + 9] > 0.5 {
+            let d = hypot(point.x - poseBones[i * f + 7], point.y - poseBones[i * f + 8])
+            if d < reach { hits.append((d, Int32(poseBones[i * f]))) }
+        }
+        return hits.sorted { $0.0 < $1.0 }.map(\.1)
+    }
+    /// Anel sob o ponto (px da composição): 0..2 eixo local, 3 = o de fora, ou −1. `ring` = raio na composição.
+    func pickPoseRing(_ point: SIMD2<Float>, ring: Float, reach: Float, core: Float) -> Int {
+        let g = poseGizmo
+        guard g.count == Self.boneGizmoFloats, g[2] > 0.5, !poseMove else { return -1 }
+        let dc = hypot(point.x - g[0], point.y - g[1])
+        if dc < core { return -1 }
+        var best = reach, hit = -1
+        for axis in 0..<3 {
+            let o = 3 + axis * 6
+            for s in 0..<64 {
+                let t = Float(s) / 64 * 2 * .pi
+                let cs = cos(t), sn = sin(t)
+                if g[o + 2] * cs + g[o + 5] * sn < -0.05 { continue }   // só a metade da frente pega o dedo
+                let d = hypot(point.x - (g[0] + (g[o] * cs + g[o + 3] * sn) * ring), point.y - (g[1] + (g[o + 1] * cs + g[o + 4] * sn) * ring))
+                if d < best { best = d; hit = axis }
+            }
+        }
+        if hit < 0 && abs(dc - ring * Self.outerRing) < reach { hit = 3 }
+        return hit
+    }
+    /// Anel de fora (em volta do olhar) = raio × este fator (RigPoseStage.kt).
+    static let outerRing: Float = 1.3
     /// Junta mais perto (px da composição) dentro de `reach`: o NÓ do osso, ou −1.
     func pickPoseBone(_ point: SIMD2<Float>, reach: Float) -> Int32 {
         var best = reach, hit: Int32 = -1

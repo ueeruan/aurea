@@ -42,12 +42,17 @@ inline const char* not_for_adjustment(const Effect& fx) {
     // A segmentação por IA recorta o SUJEITO da própria fonte; a camada de
     // ajuste não tem fonte para o modelo (o recorte é o da camada de vídeo).
     if (t == effect_type_id(effect_keys::kRotobrush)) return "segmentacao da propria fonte";
+    if (t == effect_type_id(effect_keys::kBackgroundRemove)) return "segmentacao da propria fonte";
     // Prende a camada a outra (pai): a camada de ajuste não tem pixels próprios
     // para levar junto — os efeitos dela já valem para o quadro inteiro.
     if (t == effect_type_id(effect_keys::kParentingHelper)) return "vinculo de camada";
     // Copiar fundo divide a pilha de uma camada 2D comum em janela e fundo; a
     // camada de ajuste já é o fundo inteiro (CopyBackgroundGpu.inl).
     if (t == effect_type_id(effect_keys::kCopyBackground)) return "janela de camada comum";
+    // Deslocamento no tempo (0.4.5): busca o CONTEÚDO de outros instantes da
+    // fonte (vídeo/pré-composição, como as faixas do TimeSlice); o catálogo
+    // não o oferece em camada de ajuste. Coberto por Distort045.*.
+    if (std::strcmp(key, "aurea.time.time_displacement") == 0) return "conteudo de outros instantes da fonte";
     return nullptr;
 }
 

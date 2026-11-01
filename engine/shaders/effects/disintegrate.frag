@@ -29,7 +29,8 @@ layout(location = 2) flat in vec4 v_info;
 layout(location = 0) out vec4 o_color;
 
 void main() {
-    const float edge = max(abs(v_local.x), abs(v_local.y));
+    // Poeira (mode.z = 1): grão redondo; os fragmentos, quadrados.
+    const float edge = p.mode.z > 0.5 ? length(v_local) : max(abs(v_local.x), abs(v_local.y));
     const float cov = clamp((1.0 - edge) * v_info.z + 0.5, 0.0, 1.0);
     if (cov <= 0.0) discard;
     const vec4 s = texture(u_tex0, v_uv);

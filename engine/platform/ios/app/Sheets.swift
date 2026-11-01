@@ -823,9 +823,15 @@ struct ColorSheetRequest: Identifiable {
     /// Omega aparência (P0-5): retângulo GLOBAL da amostra tocada. Com ele a cor
     /// abre no balão ancorado (seletor embutido); sem ele, no seletor em tela cheia.
     let anchor: CGRect?
+    /// 0.4.5: cor de um EFEITO — o conta-gotas amostra com esse efeito (`sampleEffect`) da
+    /// camada `sampleLayer` desligado só na captura (o verde antes do Chroma Key). 0 / −1 = a prévia.
+    let sampleLayer: Int64
+    let sampleEffect: Int32
     init(title: String, initial: [Float], withAlpha: Bool = true, anchor: CGRect? = nil,
+         sampleLayer: Int64 = 0, sampleEffect: Int32 = -1,
          onChange: @escaping (Float, Float, Float, Float) -> Void, onDone: @escaping () -> Void) {
         self.title = title; self.initial = initial; self.withAlpha = withAlpha; self.anchor = anchor
+        self.sampleLayer = sampleLayer; self.sampleEffect = sampleEffect
         self.onChange = onChange; self.onDone = onDone
     }
 }

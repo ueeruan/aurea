@@ -16,9 +16,9 @@ struct GroundPlacement {
     u64 verticesVisited = 0;
 };
 
-/// 0.4.1 (Reflective Floor): as camadas 2D no espaço 3D ([planes]) também
-/// contam — o chão fica sob o ponto mais baixo de modelos E planos, e uma cena
-/// só com texto/forma 3D ganha chão.
+/// 0.4.1 (Reflective Floor): uma cena só com camadas 2D no espaço 3D ([planes])
+/// também ganha chão, sob o canto mais baixo delas. Com algum modelo na cena os
+/// planos não contam: o chão (e a sombra que ele recebe) fica sob os modelos.
 [[nodiscard]] GroundPlacement ground_placement(const SceneFrame& frame,
     std::span<const GpuModel* const> models = {}, std::span<const ScenePlane> planes = {}) noexcept;
 

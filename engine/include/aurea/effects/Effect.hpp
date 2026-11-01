@@ -286,6 +286,10 @@ struct DepthMapRequest {
     /// `smoothing` leva o "Reduzir trepidação".
     f32 rotoEdgeRadius = 0.0f;
     bool rotoDecontaminate = false;
+    /// "Remover fundo" (ai::BgRemoveService): o recorte por quadro do cache
+    /// em vez do mapa cru. `bgModel` = ai::kBgModel* pedido pelo efeito.
+    bool backgroundRemove = false;
+    u32 bgModel = 0;
 };
 
 /// A disparidade 256×256 da FONTE da camada (R: normalizada pelos percentis

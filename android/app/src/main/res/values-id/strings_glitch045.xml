@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Glitch 0.4.5 (2026-11-01): Glitchify completo, Hyper Glitch, Block Glitch e Trocar canais. Chaves fx045g_*. -->
+<resources>
+    <string name="fx045g_name_hyper_glitch">Hyper Glitch</string>
+    <string name="fx045g_desc_hyper_glitch">Glitch berat: irisan yang bergeser, blok yang berpindah, pemisahan RGB, jejak piksel, kompresi, dan warna tertukar — semua dikendalikan satu intensitas dan seed yang bisa dianimasikan.</string>
+    <string name="fx045g_name_block_glitch">Glitch blok</string>
+    <string name="fx045g_desc_block_glitch">Blok persegi panjang bergeser, dengan kanal tertukar dan terpisah, bergaya Block Glitch DaVinci Resolve. Atur ukuran, jumlah, dan frekuensi blok.</string>
+    <string name="fx045g_name_shift_channels">Geser kanal</string>
+    <string name="fx045g_desc_shift_channels">Pilih asal setiap kanal (alfa, merah, hijau, dan biru): dari kanal lain, luminans, hue, kecerahan, saturasi, penuh, atau mati. Seperti Shift Channels di After Effects.</string>
+    <string name="fx045g_transition_channel">Kanal transisi</string>
+    <string name="fx045g_transform_speed">Kecepatan transformasi</string>
+    <string name="fx045g_split_mode">Mode pemisahan</string>
+    <string name="fx045g_split_speed">Kecepatan pemisahan</string>
+    <string name="fx045g_scale_channel">Kanal skala</string>
+    <string name="fx045g_corrupt_offset">Offset korupsi</string>
+    <string name="fx045g_corrupt_amount">Kekuatan korupsi</string>
+    <string name="fx045g_corrupt_opacity">Opasitas korupsi</string>
+    <string name="fx045g_slice_amount">Irisan terkompresi</string>
+    <string name="fx045g_slice_position">Posisi irisan</string>
+    <string name="fx045g_slice_quality">Kualitas irisan</string>
+    <string name="fx045g_slice_shift">Getaran irisan</string>
+    <string name="fx045g_copy_block_amount">Blok tertukar</string>
+    <string name="fx045g_copy_block_speed">Kecepatan blok</string>
+    <string name="fx045g_copy_block_width">Lebar blok tertukar</string>
+    <string name="fx045g_copy_block_height">Tinggi blok tertukar</string>
+    <string name="fx045g_copy_block_direction">Arah blok</string>
+    <string name="fx045g_compression_jpeg">Kompresi (JPEG)</string>
+    <string name="fx045g_palette_dither">Dither palet</string>
+    <string name="fx045g_noise_octaves">Oktaf noise</string>
+    <string name="fx045g_noise_gain">Penguatan noise</string>
+    <string name="fx045g_noise_lacunarity">Lakunaritas noise</string>
+    <string name="fx045g_show_noise">Tampilkan noise</string>
+    <string name="fx045g_wiggle_steps">Langkah goyangan</string>
+    <string name="fx045g_slice_height">Tinggi irisan</string>
+    <string name="fx045g_compression">Kompresi</string>
+    <string name="fx045g_color_swap">Tukar warna</string>
+    <string name="fx045g_amount">Jumlah</string>
+    <string name="fx045g_size_variation">Variasi ukuran</string>
+    <string name="fx045g_channel_swap">Tukar kanal</string>
+    <string name="fx045g_take_alpha">Ambil alfa dari</string>
+    <string name="fx045g_take_red">Ambil merah dari</string>
+    <string name="fx045g_take_green">Ambil hijau dari</string>
+    <string name="fx045g_take_blue">Ambil biru dari</string>
+    <string name="fx045g_opt_bands_random">Pita (acak)</string>
+    <string name="fx045g_opt_lightness">Kecerahan</string>
+    <string name="fx045g_opt_rgb_default">RGB (bawaan)</string>
+    <string name="fx045g_opt_red_cyan">Merah-sian</string>
+    <string name="fx045g_opt_green_magenta">Hijau-magenta</string>
+    <string name="fx045g_opt_blue_yellow">Biru-kuning</string>
+    <string name="fx045g_opt_y_luma">Y′ (luma)</string>
+    <string name="fx045g_opt_cb">Cb</string>
+    <string name="fx045g_opt_cr">Cr</string>
+    <string name="fx045g_opt_uniform">Seragam</string>
+    <string name="fx045g_opt_luma">Luma</string>
+    <string name="fx045g_opt_full">Penuh</string>
+</resources>

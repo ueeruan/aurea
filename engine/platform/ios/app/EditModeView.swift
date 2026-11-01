@@ -320,6 +320,10 @@ struct EditModeView: View {
             if video { list.append(item("volume", CupertinoGlyph.Speaker2, "edit_clip_volume") { panel(.audio) }) }
             list += [transform, opacity, duplicate]
             if clip.kind != 12 { list.append(item("replace", CupertinoGlyph.Arrow2Squarepath, "edit_clip_replace") { replaceTarget = clip }) }
+            // 0.4.5: Remover fundo (vídeo/imagem): efeito + análise do clipe.
+            if clip.kind == 1 || clip.kind == 2 {
+                list.append(item("bgRemove", CupertinoGlyph.PersonCropCircle, "bg_remove_action") { model.removeBackground(clip.id) })
+            }
             if video {
                 list.append(item("freeze", ShellGlyph.Snow, "edit_clip_freeze") {
                     let created = model.engine.freezeFrame(forLayer: clip.id, frame: Int32(clamping: model.status.playhead),

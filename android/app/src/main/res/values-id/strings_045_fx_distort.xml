@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Tile Shift, Hexagon Tile Rotate/Shift, Hollow Box, Time Displacement, Mirror e Zoom blur. -->
+    <string name="fx045d_name_tile_shift">Geser Ubin</string>
+    <string name="fx045d_name_hex_tile_rotate">Putar Ubin Heksagon</string>
+    <string name="fx045d_name_hex_tile_shift">Geser Ubin Heksagon</string>
+    <string name="fx045d_name_hollow_box">Kotak Berongga</string>
+    <string name="fx045d_name_time_displacement">Perpindahan Waktu</string>
+    <string name="fx045d_desc_tile_shift">Membagi layer menjadi ubin dan menggeser isi tiap ubin sendiri-sendiri.</string>
+    <string name="fx045d_desc_hex_tile_rotate">Membagi layer menjadi sarang heksagon dan memutar tiap sel sendiri-sendiri.</string>
+    <string name="fx045d_desc_hex_tile_shift">Membagi layer menjadi sarang heksagon dan menggeser isi tiap sel.</string>
+    <string name="fx045d_desc_hollow_box">Mengubah layer menjadi kotak 3D berongga, dengan sisi terbuka, potongan, dan cahaya.</string>
+    <string name="fx045d_desc_time_displacement">Setiap piksel diambil dari momen lain sesuai kecerahan peta: terang maju, gelap mundur.</string>
+    <string name="fx045d_alt_rows">Baris berselang</string>
+    <string name="fx045d_alt_cols">Kolom berselang</string>
+    <string name="fx045d_cell_edges">Tepi sel</string>
+    <string name="fx045d_wrap_in_cell">Ulang di dalam sel</string>
+    <string name="fx045d_continuous">Gambar bersambung</string>
+    <string name="fx045d_tip_rand_shift">0%: semua sel bergeser sejauh yang sama. 100%: tiap sel bergeser sejauh acak.</string>
+    <string name="fx045d_tip_rand_rotate">0%: semua sel berputar sama. 100%: tiap sel berputar sebesar nilai acak.</string>
+    <string name="fx045d_outset">Renggangkan sisi</string>
+    <string name="fx045d_smoothing">Pembulatan</string>
+    <string name="fx045d_hidden">Tersembunyi</string>
+    <string name="fx045d_circle_cutout">Lubang lingkaran</string>
+    <string name="fx045d_circle_crop">Potong lingkaran</string>
+    <string name="fx045d_square_cutout">Lubang persegi</string>
+    <string name="fx045d_square_crop">Potong persegi</string>
+    <string name="fx045d_cutout_size">Ukuran potongan</string>
+    <string name="fx045d_lighting">Pencahayaan</string>
+    <string name="fx045d_precision">Presisi</string>
+    <string name="fx045d_tip_cutout">Berlaku untuk sisi dengan lubang atau potongan.</string>
+    <string name="fx045d_tip_precision">Lebih banyak langkah: tepi lebih bersih, pratinjau lebih lambat.</string>
+    <string name="fx045d_layer_itself">Layer itu sendiri</string>
+    <string name="fx045d_grad_h">Gradien horizontal</string>
+    <string name="fx045d_grad_v">Gradien vertikal</string>
+    <string name="fx045d_grad_r">Gradien radial</string>
+    <string name="fx045d_max_time">Perpindahan maksimum</string>
+    <string name="fx045d_time_resolution">Resolusi waktu</string>
+    <string name="fx045d_invert_map">Balik peta</string>
+    <string name="fx045d_smooth_levels">Haluskan antar tingkat</string>
+    <string name="fx045d_tip_time_map">Putih = maju, hitam = mundur, abu-abu 50% = sekarang.</string>
+    <string name="fx045d_both_axes">Cermin di kedua sumbu</string>
+    <string name="fx045d_replace_side">Ganti sisi</string>
+    <string name="fx045d_overlay_copy">Tumpuk salinan</string>
+    <string name="fx045d_copy_opacity">Opasitas salinan</string>
+    <string name="fx045d_copy_behind">Salinan di belakang layer</string>
+    <string name="fx045d_copy">Salinan</string>
+    <string name="fx045d_tip_mirror_mode">Tumpuk salinan: seluruh layer tetap dan salinan cermin ditambahkan.</string>
+</resources>

@@ -14,6 +14,7 @@ import com.aurea.aurea.state.EditorStore
 import com.aurea.aurea.ui.ds.ColorPickerFull
 import com.aurea.aurea.ui.ds.ColorPopover
 import com.aurea.aurea.ui.ds.EmbeddedColorPicker
+import com.aurea.aurea.ui.ds.FullEyedropper
 
 // =============================================================================
 // Omega aparência (área 05): o seletor de cor ligado ao editor — o conta-gotas
@@ -30,7 +31,8 @@ internal class EyedropperHook(val active: Boolean, val toggle: () -> Unit)
  * [ColorStageOverlay]): cada arrasto no palco é UM passo de desfazer (aberto na
  * primeira amostra, fechado ao soltar) e o modo continua ligado até o botão ser
  * tocado de novo, outro seletor pedir o palco, a camada mudar ou o seletor sair
- * da tela. A amostra entra com o alfa atual da cor ([currentAlpha]).
+ * da tela. A amostra entra com o alfa atual da cor ([currentAlpha]). Cor de efeito
+ * (0.4.5): [skipLayer]/[skipEffect] desligam esse efeito só na captura do palco.
  */
 @Composable
 internal fun rememberStageEyedropper(
@@ -39,6 +41,8 @@ internal fun rememberStageEyedropper(
     onColor: (FloatArray) -> Unit,
     onGestureStart: () -> Unit,
     onGestureEnd: () -> Unit,
+    skipLayer: Long = 0L,
+    skipEffect: Int = -1,
 ): EyedropperHook {
     val mine = remember { mutableStateOf<EditorStore.EyedropperRequest?>(null) }
     val owner = remember { longArrayOf(Long.MIN_VALUE) }
@@ -91,6 +95,8 @@ internal fun rememberStageEyedropper(
                     close()
                 },
                 onCancel = { close() },
+                skipLayer = skipLayer,
+                skipEffect = skipEffect,
             )
             // Um palco, um conta-gotas: quem tinha o modo sai dele.
             store.eyedropper?.onCancel()
@@ -100,6 +106,49 @@ internal fun rememberStageEyedropper(
         }
     }
     return EyedropperHook(active, toggle)
+}
+
+/**
+ * O conta-gotas da TELA CHEIA (0.4.5): o seletor se recolhe e o palco entra no modo
+ * "recolhido" (`collapsed`): um toque/arrasto amostra, soltar devolve a cor ao seletor
+ * e o modo sai sozinho. O passo de desfazer é o da tela cheia (nada abre aqui).
+ */
+@Composable
+internal fun rememberFullEyedropper(store: EditorStore, skipLayer: Long = 0L, skipEffect: Int = -1): FullEyedropper {
+    val mine = remember { arrayOfNulls<EditorStore.EyedropperRequest>(1) }
+    return remember(store, skipLayer, skipEffect) {
+        fun release(r: EditorStore.EyedropperRequest?) {
+            if (r == null) return
+            if (mine[0] === r) mine[0] = null
+            if (store.eyedropper === r) store.eyedropper = null
+        }
+        FullEyedropper(
+            start = { onSample, onCommit, onCancel ->
+                var self: EditorStore.EyedropperRequest? = null
+                val request = EditorStore.EyedropperRequest(
+                    onSample = { rgba -> onSample(rgba) },
+                    onCommit = { rgba ->
+                        release(self)
+                        onCommit(rgba)
+                    },
+                    onCancel = {
+                        release(self)
+                        onCancel()
+                    },
+                    skipLayer = skipLayer,
+                    skipEffect = skipEffect,
+                    collapsed = true,
+                )
+                self = request
+                // Um palco, um conta-gotas: quem tinha o modo sai dele.
+                store.eyedropper?.onCancel()
+                if (store.playing) store.pause()
+                mine[0] = request
+                store.eyedropper = request
+            },
+            stop = { release(mine[0]) },
+        )
+    }
 }
 
 /**
@@ -130,6 +179,7 @@ internal fun StoreColorPicker(
         eyedropperActive = eye.active,
         onEyedropper = eye.toggle,
         onMessage = { store.showToast(it) },
+        fullEyedropper = rememberFullEyedropper(store),
     )
 }
 
@@ -157,9 +207,10 @@ internal fun ColorRequestHost(store: EditorStore, panel: EditorPanel, request: C
         request.onChange(c[0], c[1], c[2], c[3])
     }
     val anchor = request.anchor
+    val full = rememberFullEyedropper(store, request.sampleLayer, request.sampleEffect)
     if (anchor != null) {
         // O balão segura o passo do pedido: o conta-gotas dele não abre outro.
-        val eye = rememberStageEyedropper(store, { current[3] }, applyColor, {}, {})
+        val eye = rememberStageEyedropper(store, { current[3] }, applyColor, {}, {}, request.sampleLayer, request.sampleEffect)
         ColorPopover(
             anchor = anchor,
             color = current,
@@ -169,6 +220,9 @@ internal fun ColorRequestHost(store: EditorStore, panel: EditorPanel, request: C
             eyedropperActive = eye.active,
             onEyedropper = eye.toggle,
             onMessage = { store.showToast(it) },
+            fullEyedropper = full,
+            // O "Mais cores" do balão amostrando: o balão some e deixa a prévia livre.
+            collapsed = store.eyedropper?.collapsed == true,
         )
     } else {
         ColorPickerFull(
@@ -176,6 +230,7 @@ internal fun ColorRequestHost(store: EditorStore, panel: EditorPanel, request: C
             withAlpha = request.withAlpha,
             onChange = { r, g, b, a -> applyColor(floatArrayOf(r, g, b, a)) },
             onDone = { close() },
+            eyedropper = full,
         )
     }
 }

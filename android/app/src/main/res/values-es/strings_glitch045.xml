@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Glitch 0.4.5 (2026-11-01): Glitchify completo, Hyper Glitch, Block Glitch e Trocar canais. Chaves fx045g_*. -->
+<resources>
+    <string name="fx045g_name_hyper_glitch">Hyper Glitch</string>
+    <string name="fx045g_desc_hyper_glitch">Glitch intenso: franjas que se deslizan, bloques fuera de lugar, separación RGB, estelas de píxeles, compresión y colores cambiados, todo con una intensidad y una semilla animables.</string>
+    <string name="fx045g_name_block_glitch">Glitch de bloques</string>
+    <string name="fx045g_desc_block_glitch">Bloques rectangulares desplazados, con canales intercambiados y separados, al estilo del Block Glitch de DaVinci Resolve. Controla el tamaño, la cantidad y la frecuencia de los bloques.</string>
+    <string name="fx045g_name_shift_channels">Cambiar canales</string>
+    <string name="fx045g_desc_shift_channels">Elige de dónde viene cada canal (alfa, rojo, verde y azul): de otro canal, de la luminancia, el tono, la luminosidad, la saturación, lleno o apagado. Como el Shift Channels de After Effects.</string>
+    <string name="fx045g_transition_channel">Canal de la transición</string>
+    <string name="fx045g_transform_speed">Velocidad de la transformación</string>
+    <string name="fx045g_split_mode">Modo de separación</string>
+    <string name="fx045g_split_speed">Velocidad de separación</string>
+    <string name="fx045g_scale_channel">Canal de la escala</string>
+    <string name="fx045g_corrupt_offset">Desfase de la corrupción</string>
+    <string name="fx045g_corrupt_amount">Fuerza de la corrupción</string>
+    <string name="fx045g_corrupt_opacity">Opacidad de la corrupción</string>
+    <string name="fx045g_slice_amount">Franja comprimida</string>
+    <string name="fx045g_slice_position">Posición de la franja</string>
+    <string name="fx045g_slice_quality">Calidad de la franja</string>
+    <string name="fx045g_slice_shift">Temblor de la franja</string>
+    <string name="fx045g_copy_block_amount">Bloques intercambiados</string>
+    <string name="fx045g_copy_block_speed">Velocidad de los bloques</string>
+    <string name="fx045g_copy_block_width">Ancho del bloque intercambiado</string>
+    <string name="fx045g_copy_block_height">Alto del bloque intercambiado</string>
+    <string name="fx045g_copy_block_direction">Dirección de los bloques</string>
+    <string name="fx045g_compression_jpeg">Compresión (JPEG)</string>
+    <string name="fx045g_palette_dither">Tramado de paleta</string>
+    <string name="fx045g_noise_octaves">Octavas del ruido</string>
+    <string name="fx045g_noise_gain">Ganancia del ruido</string>
+    <string name="fx045g_noise_lacunarity">Lacunaridad del ruido</string>
+    <string name="fx045g_show_noise">Mostrar el ruido</string>
+    <string name="fx045g_wiggle_steps">Pasos del temblor</string>
+    <string name="fx045g_slice_height">Alto de la franja</string>
+    <string name="fx045g_compression">Compresión</string>
+    <string name="fx045g_color_swap">Intercambio de color</string>
+    <string name="fx045g_amount">Cantidad</string>
+    <string name="fx045g_size_variation">Variación de tamaño</string>
+    <string name="fx045g_channel_swap">Intercambio de canales</string>
+    <string name="fx045g_take_alpha">Tomar alfa de</string>
+    <string name="fx045g_take_red">Tomar rojo de</string>
+    <string name="fx045g_take_green">Tomar verde de</string>
+    <string name="fx045g_take_blue">Tomar azul de</string>
+    <string name="fx045g_opt_bands_random">Franjas (aleatorio)</string>
+    <string name="fx045g_opt_lightness">Luminosidad</string>
+    <string name="fx045g_opt_rgb_default">RGB (predeterminado)</string>
+    <string name="fx045g_opt_red_cyan">Rojo-cian</string>
+    <string name="fx045g_opt_green_magenta">Verde-magenta</string>
+    <string name="fx045g_opt_blue_yellow">Azul-amarillo</string>
+    <string name="fx045g_opt_y_luma">Y′ (luma)</string>
+    <string name="fx045g_opt_cb">Cb</string>
+    <string name="fx045g_opt_cr">Cr</string>
+    <string name="fx045g_opt_uniform">Uniforme</string>
+    <string name="fx045g_opt_luma">Luma</string>
+    <string name="fx045g_opt_full">Lleno</string>
+</resources>

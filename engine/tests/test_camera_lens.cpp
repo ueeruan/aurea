@@ -400,3 +400,42 @@ AUREA_TEST(CameraLens, NewCameraAffects2DLayersBelowIt) {
     std::remove(file.c_str());
     std::remove((file + ".bak").c_str());
 }
+
+// Regressão 0.4.2 (bug #8a): depois do "Reflective Floor" (quase preto, refletividade
+// 0,9) os chips Visível / Só sombra / Sem chão mantinham o chão preto e espelhado —
+// "Visível" nunca acendia e a sombra das luzes não aparecia nele. Saindo do preset o
+// chão volta ao padrão; fora dele, trocar o modo mantém a aparência escolhida.
+AUREA_TEST(Scene3DFloor, LeavingReflectiveFloorRestoresTheDefaultLook) {
+    LensRig rig;
+    AUREA_CHECK(rig.ok);
+    if (!rig.ok) return;
+    f32 f[8]{};
+    AUREA_CHECK(rig.e.apply_reflective_floor());
+    AUREA_CHECK(rig.e.query_scene_floor(f));
+    AUREA_CHECK(Engine::is_reflective_floor(f));
+    for (u32 mode : {1u, 2u, 0u}) {
+        AUREA_CHECK(rig.e.apply_reflective_floor());
+        AUREA_CHECK(rig.e.set_scene_floor_mode(mode));
+        AUREA_CHECK(rig.e.query_scene_floor(f));
+        const FloorSettings d;
+        AUREA_CHECK_EQ(f[0], static_cast<f32>(mode));
+        AUREA_CHECK_EQ(f[1], d.color.r);
+        AUREA_CHECK_EQ(f[4], d.roughness);
+        AUREA_CHECK_EQ(f[5], d.reflectivity);
+        AUREA_CHECK_EQ(f[7], d.fade);
+        AUREA_CHECK(!Engine::is_reflective_floor(f));
+    }
+    // Chão do usuário (não é o preset): só o modo muda.
+    AUREA_CHECK(rig.e.set_scene_floor(1u, .3f, .2f, .1f, .4f, .6f, .7f, 9.0f));
+    AUREA_CHECK(rig.e.set_scene_floor_mode(2u));
+    AUREA_CHECK(rig.e.query_scene_floor(f));
+    AUREA_CHECK_EQ(f[0], 2.0f);
+    AUREA_CHECK(std::fabs(f[1] - .3f) < 1e-6f && std::fabs(f[4] - .4f) < 1e-6f && std::fabs(f[5] - .6f) < 1e-6f);
+    AUREA_CHECK(std::fabs(f[6] - .7f) < 1e-6f && std::fabs(f[7] - 9.0f) < 1e-6f);
+    // Um passo de desfazer por toque: volta ao modo 1 com a mesma aparência.
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(rig.e.apply_command(undo).ok());
+    AUREA_CHECK(rig.e.query_scene_floor(f));
+    AUREA_CHECK_EQ(f[0], 1.0f);
+    AUREA_CHECK(std::fabs(f[1] - .3f) < 1e-6f);
+}

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: painel Esqueleto 3D e grupo de pinos do Fantoche (pedido de ⚡ᴍᴀʀᴋᴢ, pauloph2517 e Jess). -->
+    <string name="skeleton_title">Skeleton</string>
+    <string name="skeleton_open">Open skeleton panel</string>
+    <string name="skeleton_desc">Bone tree, numeric rotation, mirror and copy the pose</string>
+    <string name="skeleton_partner">Other side: %1$s</string>
+    <string name="skeleton_bone_none">Tap a joint on the stage or a bone in the list</string>
+    <string name="skeleton_ring_hint">Joint rings: red turns on X, green on Y, blue on Z (bone axes); white turns around the screen. Tap again to reach the joint underneath.</string>
+    <string name="skeleton_show">Show skeleton</string>
+    <string name="skeleton_ik">IK: drag the tip</string>
+    <string name="skeleton_pose">Pose</string>
+    <string name="skeleton_copy">Copy pose</string>
+    <string name="skeleton_paste">Paste pose</string>
+    <string name="skeleton_mirror_pose">Mirror pose</string>
+    <string name="skeleton_mirror_bone">Mirror to other side</string>
+    <string name="skeleton_zero_pose">Zero pose</string>
+    <string name="skeleton_zero_bone">Zero bone</string>
+    <string name="skeleton_bones">Bones</string>
+    <string name="skeleton_search">Search bone</string>
+    <string name="skeleton_no_match">No bone with that name</string>
+    <string name="skeleton_bone_a11y">%1$s, level %2$d</string>
+    <string name="skeleton_keyed">Keyframe here</string>
+    <string name="skeleton_expand">Expand %1$s</string>
+    <string name="skeleton_collapse">Collapse %1$s</string>
+    <string name="skeleton_rot_a11y">Rotation %1$s: %2$s degrees</string>
+    <string name="skeleton_minus">Decrease %1$s by 5 degrees</string>
+    <string name="skeleton_plus">Increase %1$s by 5 degrees</string>
+    <string name="skeleton_pose_copied">Pose copied</string>
+    <string name="skeleton_paste_failed">Nothing to paste on this model</string>
+    <string name="skeleton_mirror_nothing">No posed bone to mirror</string>
+    <string name="skeleton_no_partner">This bone has no partner on the other side</string>
+    <string name="puppet_group">Group</string>
+    <string name="puppet_group_clear">Clear group</string>
+    <string name="puppet_group_hint">With Group on, tap the pins that will turn; the chosen pin is the pivot. Drag the blue ring to rotate.</string>
+    <string name="puppet_group_rotate">Rotate group around pin %1$d</string>
+</resources>

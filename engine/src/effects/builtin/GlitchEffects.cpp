@@ -31,7 +31,13 @@ public:
     }
     enum : u32 { kBandHeight = 0, kDisplace, kSpike, kChannelSplit, kFrequency, kSeed,
                  kFreeze, kMix, kVertical, kColorCorruption, kPixelSize, kChannelScale, kBlockWidth, kBlockShift, kTear, kFlicker, kPixelSort, kAmount, kSpeed, kDensity, kPosition, kScale, kCrop, kSplitY, kScaleY, kCenter,
-                 kChannels, kColors, kImage, kCompletion, kTransitionSoftness, kDither, kRepeatEdges, kVerticalSort, kStreak };
+                 kChannels, kColors, kImage, kCompletion, kTransitionSoftness, kDither, kRepeatEdges, kVerticalSort, kStreak,
+                 // 0.4.5: os controles que faltavam do Glitchify original (build/reference/glitchify/SPEC.md).
+                 // Todos no fim e com padrão neutro: projeto antigo desenha igual.
+                 kTransitionChannel, kTransformSpeed, kCompositeOver, kSplitMode, kSplitSpeed, kScaleChannel,
+                 kCorruptOffset, kCorruptAmount, kCorruptOpacity, kSliceAmount, kSlicePosition, kSliceQuality, kSliceShift,
+                 kCopyBlockAmount, kCopyBlockSpeed, kCopyBlockWidth, kCopyBlockHeight, kCopyBlockDirection,
+                 kCompression, kPaletteDither, kNoiseOctaves, kNoiseGain, kNoiseLacunarity, kShowNoise, kWiggleSteps };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kGlitchify, "Glitchify", "Glitch", EffectClass::Domain};
@@ -73,12 +79,57 @@ public:
         p.add_bool("repeat_edges", "Repeat Edge Pixels", false);
         p.add_bool("vertical_sort", "Vertical Sort", false);
         p.add_float("streak", "Pixel Streak", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
+        // --- 0.4.5 -------------------------------------------------------------
+        static const char* const kTransitionChannels[] = {"Faixas (aleatório)", "Vermelho", "Verde", "Azul", "Alfa",
+                                                          "Luminância", "Claridade", "Matiz", "Saturação", "Ruído"};
+        static const char* const kSplitModes[] = {"RGB (padrão)", "Vermelho-ciano", "Verde-magenta", "Azul-amarelo",
+                                                  "Y′ (luma)", "Cb", "Cr", "Matiz", "Saturação", "Valor"};
+        static const char* const kScaleChannels[] = {"Uniforme", "Luma", "Claridade", "Matiz", "Saturação",
+                                                     "Vermelho", "Verde", "Azul", "Alfa"};
+        static const char* const kBlockDirections[] = {"Horizontal", "Vertical", "Horizontal e vertical"};
+        p.add_enum("transition_channel", "Canal da transição", kTransitionChannels, 10, 0);
+        p.add_float("transform_speed", "Velocidade da transformação", 1, 0, 100, kParamAnimatable, "×");
+        p.add_bool("composite_over", "Compor sobre o original", false);
+        p.add_enum("split_mode", "Modo da separação", kSplitModes, 10, 0);
+        p.add_float("split_speed", "Velocidade da separação", 0, 0, 10, kParamAnimatable, "×");
+        p.add_enum("scale_channel", "Canal da escala", kScaleChannels, 9, 0);
+        p.add_float("corrupt_offset", "Recuo da corrupção", 0, 0, 100, kParamAnimatable);
+        p.add_float("corrupt_amount", "Força da corrupção", 80, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("corrupt_opacity", "Opacidade da corrupção", 25, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("slice_amount", "Fatia comprimida", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("slice_position", "Posição da fatia", 50, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("slice_quality", "Qualidade da fatia", 10, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("slice_shift", "Tremor da fatia", 40, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("copy_block_amount", "Blocos trocados", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("copy_block_speed", "Velocidade dos blocos", 50, 0, 100, kParamAnimatable);
+        p.add_float("copy_block_width", "Largura do bloco trocado", 150, 4, 2000, kParamAnimatable | kParamPixels, "px");
+        p.add_float("copy_block_height", "Altura do bloco trocado", 50, 4, 2000, kParamAnimatable | kParamPixels, "px");
+        p.add_enum("copy_block_direction", "Direção dos blocos", kBlockDirections, 3, 0);
+        p.add_float("compression", "Compressão (JPEG)", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_float("palette_dither", "Pontilhado da paleta", 0, 0, 100, kParamAnimatable | kParamPercent, "%");
+        p.add_int("noise_octaves", "Oitavas do ruído", 2, 1, 16);
+        p.add_float("noise_gain", "Ganho do ruído", 1.5f, 0, 5, kParamAnimatable);
+        p.add_float("noise_lacunarity", "Lacunaridade do ruído", 10, 0.5f, 30, kParamAnimatable);
+        p.add_bool("show_noise", "Mostrar o ruído", false);
+        p.add_float("wiggle_steps", "Passos do tremor", 0, 0, 64, kParamAnimatable);
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         return e.f(kMix) < .01f || e.f(kAmount) < .01f;
     }
+    static f32 layer_extent(const EffectEval& e) noexcept {
+        return e.placement ? static_cast<f32>(std::max(e.placement->layerWidth, e.placement->layerHeight)) : 2048.0f;
+    }
     f32 input_margin(const EffectEval& e) const noexcept override {
-        return (e.f(kDisplace)*7 + e.f(kChannelSplit)*2 + e.f(kBlockShift) + e.f(kTear) + e.f(kPosition)) * e.f(kAmount)*.01f;
+        const f32 amount = e.f(kAmount)*.01f;
+        f32 m = (e.f(kDisplace)*7 + e.f(kChannelSplit)*2 + e.f(kBlockShift) + e.f(kTear) + e.f(kPosition)) * amount;
+        // Os blocos trocados vêm de até 3 blocos de distância; a fatia e a
+        // corrupção de cor leem qualquer ponto da camada.
+        if (e.f(kCopyBlockAmount) > 0.0f && e.b(kImage))
+            m += 3.0f * std::max(e.f(kCopyBlockWidth), e.f(kCopyBlockHeight));
+        if ((e.f(kSliceAmount) > 0.0f && e.b(kImage)) || (e.f(kCorruptOffset) > 0.0f && e.b(kColors)))
+            m = std::max(m, layer_extent(e));
+        if (e.e(kSplitMode) > 0) m += std::fabs(e.f(kSplitY)) * 2.0f;
+        return m;
     }
 
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
@@ -95,7 +146,8 @@ public:
         u32 w = 0, h = 0;
         ctx.region_size(region, input.texel_scale_x(), w, h);
 
-        struct { EffectUniforms base; Vec4 transform, channel, options, image; } uniforms{};
+        struct { EffectUniforms base; Vec4 transform, channel, options, image,
+                 trans, split, corrupt, slice, block, extra, noise, layer; } uniforms{};
         auto& u = uniforms.base;
         const f32 amount = e.f(kAmount)*.01f;
         const f32 image = e.b(kImage) ? amount : 0.f, channels = e.b(kChannels) ? amount : 0.f;
@@ -114,6 +166,28 @@ public:
         uniforms.channel = {e.f(kSplitY)*channels, e.f(kScaleY)*.01f*channels, center.x, center.y};
         uniforms.options = {e.f(kCompletion)*.01f*amount, e.f(kTransitionSoftness)*.01f, e.f(kDither)*.01f*amount, e.b(kRepeatEdges) ? 1.f : 0.f};
         uniforms.image = {e.b(kVerticalSort) ? 1.f : 0.f, e.f(kStreak)*.01f*image, 0, 0};
+        // 0.4.5 (SPEC.md): transição por canal, transformação com velocidade
+        // própria, separação de um componente, escala por canal, corrupção do
+        // fluxo de bytes, fatia comprimida, blocos trocados, compressão,
+        // pontilhado e o motor de ruído (oitavas/ganho/lacunaridade).
+        const f32 layerW = e.placement && e.placement->layerWidth ? static_cast<f32>(e.placement->layerWidth) : input.region.w;
+        const f32 layerH = e.placement && e.placement->layerHeight ? static_cast<f32>(e.placement->layerHeight) : input.region.h;
+        const f32 seconds = static_cast<f32>(e.localTime.value / std::max(1e-6, e.framesPerSecond));
+        const f32 colors = e.b(kColors) ? amount : 0.f;
+        uniforms.trans = {static_cast<f32>(std::min<u32>(e.e(kTransitionChannel), 9u)), std::max(0.f, e.f(kTransformSpeed)),
+                          e.b(kCompositeOver) ? 1.f : 0.f, std::clamp(std::round(e.f(kWiggleSteps)), 0.f, 64.f)};
+        uniforms.split = {static_cast<f32>(std::min<u32>(e.e(kSplitMode), 9u)), std::max(0.f, e.f(kSplitSpeed)),
+                          static_cast<f32>(std::min<u32>(e.e(kScaleChannel), 8u)), 0};
+        uniforms.corrupt = {std::floor(std::max(0.f, e.f(kCorruptOffset)) * 80.f), e.f(kCorruptOffset) > 0.f ? e.f(kCorruptAmount)*.01f*colors : 0.f,
+                            e.f(kCorruptOpacity)*.01f, std::max(1.f, layerW)};
+        uniforms.slice = {e.f(kSliceAmount)*.01f*image, e.f(kSlicePosition)*.01f, e.f(kSliceQuality)*.01f, e.f(kSliceShift)*.01f};
+        uniforms.block = {e.f(kCopyBlockAmount)*.01f*image, std::max(0.f, e.f(kCopyBlockSpeed)),
+                          std::max(4.f, e.f(kCopyBlockWidth)), std::max(4.f, e.f(kCopyBlockHeight))};
+        uniforms.extra = {static_cast<f32>(std::min<u32>(e.e(kCopyBlockDirection), 2u)), e.f(kCompression)*.01f*amount,
+                          e.f(kPaletteDither)*.01f*amount, e.b(kShowNoise) ? 1.f : 0.f};
+        uniforms.noise = {static_cast<f32>(std::clamp<i32>(static_cast<i32>(std::lround(e.f(kNoiseOctaves))), 1, 16)),
+                          e.f(kNoiseGain), e.f(kNoiseLacunarity), seconds * e.f(kSpeed) * 2.f};
+        uniforms.layer = {std::max(1.f, layerW), std::max(1.f, layerH), 0, 0};
         out = LayerImage{ctx.texture("glitchify", w, h), region, w, h};
         if (ctx.fullscreen_pass("glitchify", PassStage::Transform, out.texture, ShaderId::effects_glitchify_frag,
                                 {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
@@ -762,6 +836,183 @@ public:
     }
 };
 
+// -----------------------------------------------------------------------------
+// 0.4.5 — pedidos de usuários: Hyper Glitch, Block Glitch (estilo DaVinci) e
+// Shift Channels (o do After Effects). Os três leem a camada em px da camada
+// (a mesma imagem no preview e no export) e sorteiam por hash de (célula,
+// evento, semente), com o evento contado em SEGUNDOS.
+// -----------------------------------------------------------------------------
+struct GlitchRegionUniforms {
+    EffectUniforms u;
+    Rect region;
+};
+
+/// Região com margem + uniforms com uv por px da camada e a origem da região.
+GlitchRegionUniforms glitch_region(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input,
+                                   f32 reach, f32 margin, u32& w, u32& h) {
+    GlitchRegionUniforms g{};
+    g.region = spread_region(input.region, reach, reach, e.placement, margin);
+    ctx.region_size(g.region, input.texel_scale_x(), w, h);
+    g.u.uvMap = EffectBuildContext::uv_map(g.region, input.region);
+    g.u.texel = Vec4{input.region.w > 0.0f ? 1.0f / input.region.w : 0.0f,
+                     input.region.h > 0.0f ? 1.0f / input.region.h : 0.0f, input.region.x, input.region.y};
+    return g;
+}
+
+f32 glitch_event(const EffectEval& e, f32 perSecond) {
+    const f64 seconds = static_cast<f64>(e.localTime.value) / std::max(1e-6, e.framesPerSecond);
+    return perSecond <= 0.0f ? 0.0f : static_cast<f32>(std::floor(seconds * static_cast<f64>(perSecond)));
+}
+
+class HyperGlitch final : public Effect {
+public:
+    enum : u32 { kIntensity = 0, kSeed, kSpeed, kBlockSize, kBlocks, kRgbSplit, kSlices, kSliceHeight,
+                 kStreak, kCompression, kColorSwap, kMix };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kHyperGlitch, "Hyper Glitch", "Glitch", EffectClass::Domain};
+        return i;
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_hyper_glitch_frag, work));
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        p.add_float("intensity", "Intensidade", 70.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_int("seed", "Semente", 7, 0, 9999);
+        p.add_float("speed", "Velocidade", 8.0f, 0.0f, 60.0f, kParamAnimatable, "Hz");
+        p.add_float("block_size", "Tamanho do bloco", 40.0f, 4.0f, 400.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("blocks", "Blocos", 60.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("rgb_split", "Separação RGB", 16.0f, 0.0f, 200.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("slices", "Fatias", 50.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("slice_height", "Altura da fatia", 12.0f, 1.0f, 200.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("streak", "Rastro de pixels", 35.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("compression", "Compressão", 35.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("color_swap", "Troca de cor", 30.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return e.f(kMix) < 0.01f || e.f(kIntensity) < 0.01f;
+    }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        const f32 i = std::clamp(e.f(kIntensity) * 0.01f, 0.0f, 1.0f);
+        const f32 layerW = e.placement && e.placement->layerWidth ? static_cast<f32>(e.placement->layerWidth) : 1920.0f;
+        return layerW * 0.36f * i + std::max(4.0f, e.f(kBlockSize)) * 3.0f * (1.0f + 3.0f * i) +
+               e.f(kRgbSplit) * 2.0f + 70.0f;
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
+                 LayerImage& out) const override {
+        u32 w = 0, h = 0;
+        GlitchRegionUniforms g = glitch_region(ctx, e, input, input_margin(e), margin, w, h);
+        const f32 layerW = e.placement && e.placement->layerWidth ? static_cast<f32>(e.placement->layerWidth) : input.region.w;
+        const f32 layerH = e.placement && e.placement->layerHeight ? static_cast<f32>(e.placement->layerHeight) : input.region.h;
+        g.u.p0 = Vec4{std::clamp(e.f(kIntensity) * 0.01f, 0.0f, 1.0f), static_cast<f32>(std::max<i32>(0, static_cast<i32>(e.f(kSeed)))),
+                      glitch_event(e, e.f(kSpeed)), e.f(kMix) * 0.01f};
+        g.u.p1 = Vec4{e.f(kBlockSize), e.f(kBlocks) * 0.01f, e.f(kRgbSplit), e.f(kSlices) * 0.01f};
+        g.u.p2 = Vec4{e.f(kSliceHeight), e.f(kStreak) * 0.01f, e.f(kCompression) * 0.01f, e.f(kColorSwap) * 0.01f};
+        g.u.p3 = Vec4{std::max(1.0f, layerW), std::max(1.0f, layerH), 0.0f, 0.0f};
+        out = LayerImage{ctx.texture("hyper-glitch", w, h), g.region, w, h};
+        if (ctx.fullscreen_pass("hyper-glitch", PassStage::Transform, out.texture, ShaderId::effects_hyper_glitch_frag,
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
+                                &g.u, sizeof(g.u)) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+        return OkStatus;
+    }
+};
+
+class BlockGlitch final : public Effect {
+public:
+    enum : u32 { kAmount = 0, kBlockWidth, kBlockHeight, kSizeVariation, kDisplacement, kFrequency,
+                 kChannelSwap, kRgbOffset, kDirection, kSeed, kMix };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kBlockGlitch, "Block Glitch", "Glitch", EffectClass::Domain};
+        return i;
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_block_glitch_frag, work));
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        static const char* const kDirs[] = {"Horizontal", "Vertical", "Horizontal e vertical"};
+        p.add_float("amount", "Quantidade", 40.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("block_width", "Largura do bloco", 96.0f, 2.0f, 1000.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("block_height", "Altura do bloco", 32.0f, 2.0f, 1000.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("size_variation", "Variação de tamanho", 50.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("displacement", "Deslocamento", 80.0f, 0.0f, 1000.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_float("frequency", "Frequência", 12.0f, 0.0f, 60.0f, kParamAnimatable, "Hz");
+        p.add_float("channel_swap", "Troca de canais", 50.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_float("rgb_offset", "Separação RGB", 6.0f, 0.0f, 100.0f, kParamAnimatable | kParamPixels, "px");
+        p.add_enum("direction", "Direção", kDirs, 3, 0);
+        p.add_int("seed", "Semente", 3, 0, 9999);
+        p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return e.f(kMix) < 0.01f || e.f(kAmount) < 0.01f;
+    }
+    f32 input_margin(const EffectEval& e) const noexcept override {
+        return std::fabs(e.f(kDisplacement)) * 1.5f + e.f(kRgbOffset) * 1.5f + 2.0f;
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
+                 LayerImage& out) const override {
+        u32 w = 0, h = 0;
+        GlitchRegionUniforms g = glitch_region(ctx, e, input, input_margin(e), margin, w, h);
+        g.u.p0 = Vec4{std::clamp(e.f(kAmount) * 0.01f, 0.0f, 1.0f), std::max(2.0f, e.f(kBlockWidth)),
+                      std::max(2.0f, e.f(kBlockHeight)), std::clamp(e.f(kSizeVariation) * 0.01f, 0.0f, 1.0f)};
+        g.u.p1 = Vec4{e.f(kDisplacement), std::clamp(e.f(kChannelSwap) * 0.01f, 0.0f, 1.0f), std::max(0.0f, e.f(kRgbOffset)),
+                      static_cast<f32>(std::min<u32>(e.e(kDirection), 2u))};
+        g.u.p2 = Vec4{static_cast<f32>(std::max<i32>(0, static_cast<i32>(e.f(kSeed)))), glitch_event(e, e.f(kFrequency)),
+                      e.f(kMix) * 0.01f, 0.0f};
+        out = LayerImage{ctx.texture("block-glitch", w, h), g.region, w, h};
+        if (ctx.fullscreen_pass("block-glitch", PassStage::Transform, out.texture, ShaderId::effects_block_glitch_frag,
+                                {PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
+                                &g.u, sizeof(g.u)) == kInvalidIndex) {
+            return Errc::PipelineCompileFailed;
+        }
+        return OkStatus;
+    }
+};
+
+class ShiftChannels final : public Effect {
+public:
+    enum : u32 { kTakeAlpha = 0, kTakeRed, kTakeGreen, kTakeBlue, kMix };
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{effect_keys::kShiftChannels, "Trocar canais", "Cor", EffectClass::Neighborhood};
+        return i;
+    }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_shift_channels_frag, work));
+    }
+    void declare_parameters(ParameterRegistry& p) const override {
+        // A ordem do AE (Take Alpha/Red/Green/Blue From), com as mesmas fontes.
+        static const char* const kSources[] = {"Alfa", "Vermelho", "Verde", "Azul", "Luminância",
+                                               "Matiz", "Claridade", "Saturação", "Cheio", "Desligado"};
+        p.add_enum("take_alpha", "Tirar o alfa de", kSources, 10, 0);
+        p.add_enum("take_red", "Tirar o vermelho de", kSources, 10, 1);
+        p.add_enum("take_green", "Tirar o verde de", kSources, 10, 2);
+        p.add_enum("take_blue", "Tirar o azul de", kSources, 10, 3);
+        p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return e.f(kMix) < 0.01f || (e.e(kTakeAlpha) == 0 && e.e(kTakeRed) == 1 && e.e(kTakeGreen) == 2 && e.e(kTakeBlue) == 3);
+    }
+    bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
+        // Vermelho ← verde, verde ← azul, azul ← vermelho: os canais rodam.
+        v[kTakeRed] = ParamValue::scalar(2.0f);
+        v[kTakeGreen] = ParamValue::scalar(3.0f);
+        v[kTakeBlue] = ParamValue::scalar(1.0f);
+        return true;
+    }
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32,
+                 LayerImage& out) const override {
+        EffectUniforms u = base_uniforms(input);
+        u.p0 = Vec4{static_cast<f32>(std::min<u32>(e.e(kTakeAlpha), 9u)), static_cast<f32>(std::min<u32>(e.e(kTakeRed), 9u)),
+                    static_cast<f32>(std::min<u32>(e.e(kTakeGreen), 9u)), static_cast<f32>(std::min<u32>(e.e(kTakeBlue), 9u))};
+        u.p1 = Vec4{e.f(kMix) * 0.01f, 0.0f, 0.0f, 0.0f};
+        return single_pass(ctx, ShaderId::effects_shift_channels_frag, input, u, "trocar-canais", out);
+    }
+};
+
 } // namespace
 
 void register_glitch_effects(EffectRegistry& r) {
@@ -774,6 +1025,9 @@ void register_glitch_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<FilmDamage>());
     (void)r.add(std::make_unique<JpegDamage>());
     (void)r.add(std::make_unique<PixelSort>());
+    (void)r.add(std::make_unique<HyperGlitch>());
+    (void)r.add(std::make_unique<BlockGlitch>());
+    (void)r.add(std::make_unique<ShiftChannels>());
 }
 
 } // namespace aurea::builtin

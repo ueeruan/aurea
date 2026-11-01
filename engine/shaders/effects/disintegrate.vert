@@ -25,7 +25,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 glow;     // cor do brilho (linear), intensidade
     vec4 texel;    // px por texel, -, -, -
     vec4 uvMap;    // (composição)
-    vec4 mode;     // (composição)
+    vec4 mode;     // x, y (composição); z = 1 poeira; w = escala do ruído da poeira (px)
 } p;
 
 layout(location = 0) out vec2 v_uv;             // uv da camada
@@ -45,11 +45,32 @@ uint cell_id(ivec2 c) {
     return (uint(c.x) * 73856093u) ^ (uint(c.y) * 19349663u) ^ (uint(p.grid.w) * 83492791u + 0x9E3779B9u);
 }
 
+// Poeira (mode.z = 1): ruído de valor suave — a frente fica orgânica (manchas,
+// não células soltas). Mesma conta no vértice e na composição.
+float dust_noise(vec2 q) {
+    const vec2 i = floor(q), f = fract(q);
+    const vec2 u = f * f * (3.0 - 2.0 * f);
+    const uint s = uint(p.grid.w) * 2654435761u;
+    const float a = hash1((uint(int(i.x)) * 73856093u) ^ (uint(int(i.y)) * 19349663u) ^ s);
+    const float b = hash1((uint(int(i.x) + 1) * 73856093u) ^ (uint(int(i.y)) * 19349663u) ^ s);
+    const float c = hash1((uint(int(i.x)) * 73856093u) ^ (uint(int(i.y) + 1) * 19349663u) ^ s);
+    const float d = hash1((uint(int(i.x) + 1) * 73856093u) ^ (uint(int(i.y) + 1) * 19349663u) ^ s);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
 // Instante (0..1 da conclusão) em que o fragmento da célula c se solta.
 float release_at(ivec2 c) {
     const vec2 center = p.src.xy + (vec2(c) + 0.5) * p.grid.z;
     const float s = clamp((dot(center, p.front.xy) - p.front.z) * p.front.w, 0.0, 1.0);
-    const float h = hash1(cell_id(c));
+    float h = hash1(cell_id(c));
+    if (p.mode.z > 0.5) {
+        // Poeira: duas oitavas de ruído pela escala + um grão por célula.
+        const vec2 q = center / max(p.mode.w, 1.0);
+        h = 0.62 * dust_noise(q) + 0.26 * dust_noise(q * 2.7 + 17.0) + 0.12 * h;
+        // O ruído somado se junta perto de 0,5: esticar devolve uma frente que
+        // anda por igual (na metade da conclusão sobra parte da camada).
+        h = clamp((h - 0.5) * 2.4 + 0.5, 0.0, 1.0);
+    }
     return mix(s, h, p.timing.y) * (1.0 - p.timing.z);
 }
 
@@ -79,21 +100,26 @@ void main() {
     const float h3 = hash1(id * 1597334677u + 3u);
     const float h4 = hash1(id * 3266489917u + 4u);
 
-    // Voo: começa devagar (o fragmento descola) e acelera.
+    const bool dust = p.mode.z > 0.5;
+    // Voo: começa devagar (o fragmento descola) e acelera. A poeira é levada
+    // pelo vento: arranca mais devagar e acelera mais (age^1,6).
     const float ang = atan(p.front.y, p.front.x) + (h1 * 2.0 - 1.0) * p.motion.y;
     const vec2 dir = vec2(cos(ang), sin(ang));
-    const float travel = p.motion.x * (0.55 + 0.9 * h2) * age * (0.35 + 0.65 * age);
+    const float travel = dust ? p.motion.x * (0.6 + 0.8 * h2) * pow(age, 1.6)
+                              : p.motion.x * (0.55 + 0.9 * h2) * age * (0.35 + 0.65 * age);
     vec2 pos = center + dir * travel;
     pos.y += p.motion.w * age * age;
     // Fluxo: dois senos cruzados, fase por fragmento, amplitude cresce com a idade.
-    const vec2 w = pos / 90.0;
+    // Na poeira o redemoinho é mais fino (escala 45 px) e cresce mais rápido.
+    const vec2 w = pos / (dust ? 45.0 : 90.0);
     const float ph = h3 * 6.28318530718;
     const vec2 flow = vec2(sin(w.y * 1.7 + age * 3.1 + ph) + 0.5 * sin(w.x * 2.9 - age * 2.3),
                            cos(w.x * 1.3 - age * 2.7 + ph) + 0.5 * cos(w.y * 2.3 + age * 1.9));
-    pos += flow * p.motion.z * age * 0.6;
+    pos += flow * p.motion.z * (dust ? sqrt(age) * 0.8 : age * 0.6);
 
-    const float spin = (h4 * 2.0 - 1.0) * 6.28318530718 * 1.25 * age;
-    const float scale = mix(1.0, 0.3, age);
+    // A poeira não gira (é um grão redondo) e some encolhendo até nada.
+    const float spin = dust ? 0.0 : (h4 * 2.0 - 1.0) * 6.28318530718 * 1.25 * age;
+    const float scale = dust ? mix(1.0, 0.05, age) * (0.7 + 0.6 * h4) : mix(1.0, 0.3, age);
     const float halfSide = 0.5 * side * scale;
     const float margin = max(p.texel.x, 1e-3);   // um texel, em px
     const float grow = (halfSide + margin) / max(halfSide, 1e-4);

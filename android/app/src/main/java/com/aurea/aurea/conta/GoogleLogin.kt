@@ -77,6 +77,10 @@ object GoogleLogin {
         Resultado.Cancelado
     } catch (e: Exception) {
         Resultado.Falhou(e.javaClass.simpleName)
+    } catch (e: LinkageError) {
+        // Bug #2: Play Services/Credential Manager ausente ou cortado pelo R8
+        // (NoClassDefFoundError) vira "não deu", nunca um fechamento do app.
+        Resultado.Falhou(e.javaClass.simpleName)
     }
 
     private suspend fun <T> Task<T>.aguardar(): T = suspendCancellableCoroutine { c ->

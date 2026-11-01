@@ -93,6 +93,24 @@ struct ExportFrameSize {
     return static_cast<usize>(width) * height + 2u * static_cast<usize>((width + 1) / 2) * ((height + 1) / 2);
 }
 
+/// 0.4.5 (bug "exportação ainda falha"): o maior lado que um pedido de export
+/// pode ter. É o teto do sink (FFmpegExportSink::open recusa acima disso); um
+/// lado menor PEDIDO acima dele é valor absurdo vindo da ponte (u32 máximo,
+/// lixo de memória) e é recusado antes de abrir o encoder. Abaixo dele, o
+/// pedido é normalizado (par, alinhado) e o teto do aparelho reduz o resto.
+inline constexpr u32 kExportMaxFrameSide = 16'384;
+
+/// 0.4.5: a taxa que vai para um encoder de hardware que anuncia um teto
+/// (VideoCapabilities.getBitrateRange no Android). Alguns encoders de
+/// fabricante recusam o configure acima do teto (e o export caía no software,
+/// lento) em vez de limitar sozinhos. `encoderMaxBps` 0 = teto desconhecido:
+/// fica o pedido. Nunca abaixo de 100 kbps (um teto anunciado absurdo não
+/// zera a taxa).
+[[nodiscard]] inline u32 export_encoder_bitrate_bps(u32 requestedBps, u32 encoderMaxBps) noexcept {
+    if (requestedBps == 0 || encoderMaxBps == 0 || requestedBps <= encoderMaxBps) return requestedBps;
+    return std::max<u32>(encoderMaxBps, 100'000u);
+}
+
 // -----------------------------------------------------------------------------
 // Motivo da falha (código estável; o MESMO número nas duas interfaces).
 // -----------------------------------------------------------------------------

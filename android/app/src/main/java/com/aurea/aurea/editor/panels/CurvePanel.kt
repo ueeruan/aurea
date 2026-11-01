@@ -435,9 +435,19 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
     val seg = segment
     if (seg == null) {
         // Propriedade com menos de 2 keyframes: não há curva — avisa e volta.
-        if (store.selectedKeyframe != null) {
+        // Correção #5 (0.4.4): antes de voltar, procura um trecho que exista (o do
+        // cabeçote ou o 1º da mesma trilha; senão outra trilha animada da camada,
+        // como o `followGraphLayer`). Sem isso o editor abria e fechava na hora
+        // quando a marca escolhida não abria trecho (resumo, marca fora do clipe).
+        val chosen = store.selectedKeyframe
+        if (chosen != null) {
             val needTwo = stringResource(R.string.pn_curve_need_two_keys)
-            LaunchedEffect(Unit) {
+            var recovered by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+            LaunchedEffect(chosen) {
+                if (recovered < 2 && recoverCurveSegment(store, chosen.first, chosen.second)) {
+                    recovered++
+                    return@LaunchedEffect
+                }
                 store.showToast(needTwo)
                 back()
             }
@@ -1095,6 +1105,32 @@ private fun followGraphLayer(store: EditorStore) {
     if (track.isEmpty()) { if (current != null) store.clearSelectedKeyframe(); return }
     val i = localPlayhead(store, layer)?.let { segmentIndexAt(track, it) } ?: 0
     store.selectKeyframe(layer, track[i.coerceAtLeast(0)])
+}
+
+/**
+ * Correção #5 (0.4.4): a marca escolhida não abre trecho no motor. Escolhe o
+ * início de um trecho que exista — na mesma trilha (o do cabeçote, senão o 1º),
+ * senão noutra trilha animada da camada ([graphTrackFor]). Falso = não há curva
+ * nenhuma para mostrar (aí o editor avisa e volta, como sempre).
+ */
+private fun recoverCurveSegment(store: EditorStore, layer: Long, sel: KeyframeRow): Boolean {
+    val keys = store.keyframes[layer].orEmpty()
+    val detail = store.queryDetail(layer) ?: return false
+    fun startOf(track: List<KeyframeRow>): KeyframeRow? {
+        if (track.size < 2) return null
+        val head = track[0]
+        val target = com.aurea.aurea.engine.TrackKey(head.property, head.effectIndex, head.paramIndex)
+        for (frame in listOf(store.playhead) + track.map { detail.timelineFrame(it.time) }) {
+            val nav = store.keyframeNavigation(layer, target, frame)?.takeIf { it.hasSegment } ?: continue
+            val start = track.firstOrNull { it.time == nav.segmentStart } ?: continue
+            if (track.any { it.time == nav.segmentEnd }) return start
+        }
+        return null
+    }
+    val start = startOf(keys.track(sel)) ?: startOf(graphTrackFor(keys, sel)) ?: return false
+    if (start.time == sel.time && start.sameTrack(sel)) return false
+    store.selectKeyframe(layer, start)
+    return true
 }
 
 /** Cabeçote parado noutro trecho da trilha mostrada: o painel mostra esse trecho. */

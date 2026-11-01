@@ -13,6 +13,12 @@
 //      Conclusão 100% = todos apagados, 0% = a camada intacta (identidade);
 //    * os fragmentos saem da caixa da camada: a região de saída cresce pelo
 //      alcance do voo (recortada ao quadro visível, como o brilho e os raios).
+//
+//  Poeira (Transição, 0.4.5; o "Dust" das transições de editores): a MESMA
+//  máquina com grãos redondos de 1–3 px, frente orgânica (ruído de valor na
+//  escala pedida em vez do sorteio por célula), vento que arranca devagar e
+//  acelera, redemoinho fino e grão que encolhe até sumir. Mesmos índices de
+//  parâmetro do Desintegrar + "Escala do ruído" no fim; padrões de poeira.
 // =============================================================================
 #include "BuiltinEffects.hpp"
 
@@ -23,43 +29,56 @@ namespace aurea::builtin {
 namespace {
 
 constexpr const char* kDisintegrateKey = "aurea.transition.disintegrate";
+constexpr const char* kDustKey = "aurea.transition.dust";
 
 f32 finite_or(f32 v, f32 fallback) noexcept { return std::isfinite(v) ? v : fallback; }
 
-/// Fração da conclusão que um fragmento vive depois de solto.
+/// Fração da conclusão que um fragmento vive depois de solto. A poeira vive menos:
+/// a frente anda mais devagar e na metade ainda sobra parte da camada inteira.
 constexpr f32 kLife = 0.4f;
+constexpr f32 kDustLife = 0.3f;
 /// Teto de fragmentos (6 vértices cada): o tamanho cresce antes de passar.
 constexpr f32 kMaxCells = 262144.0f;
 
 class Disintegrate final : public Effect {
 public:
     enum : u32 { kCompletion = 0, kDirection, kParticleSize, kRandomness, kSpread, kSpeed, kTurbulence,
-                 kGravity, kFade, kSeed, kGlowColor, kGlowIntensity, kMix };
+                 kGravity, kFade, kSeed, kGlowColor, kGlowIntensity, kMix, kNoiseScale };
+
+    explicit Disintegrate(bool dust = false) : dust_(dust) {}
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{kDisintegrateKey, "Desintegrar", "Transição", EffectClass::Domain};
-        return i;
+        static const EffectInfo d{kDustKey, "Poeira", "Transição", EffectClass::Domain};
+        return dust_ ? d : i;
     }
     void declare_parameters(ParameterRegistry& p) const override {
         constexpr u16 kAnim = kParamAnimatable;
         constexpr u16 kAnimPct = kParamAnimatable | kParamPercent;
         p.add_float("completion", "Conclusão", 0.0f, 0.0f, 100.0f, kAnimPct, "%");
-        p.add_angle("direction", "Direção", 0.0f);
-        p.add_float("particle_size", "Tamanho da partícula", 6.0f, 1.0f, 64.0f, kAnim | kParamPixels, "px");
+        p.add_angle("direction", dust_ ? "Direção do vento" : "Direção", 0.0f);
+        p.add_float("particle_size", dust_ ? "Tamanho do grão" : "Tamanho da partícula", dust_ ? 2.0f : 6.0f, 1.0f,
+                    64.0f, kAnim | kParamPixels, "px");
         p.typed_range(1.0f, 400.0f);
-        p.add_float("randomness", "Aleatoriedade", 40.0f, 0.0f, 100.0f, kAnimPct, "%");
-        p.add_angle("spread", "Espalhamento", 35.0f, 0.0f, 180.0f);
-        p.add_float("speed", "Velocidade", 260.0f, 0.0f, 2000.0f, kAnim | kParamPixels, "px");
+        p.add_float("randomness", "Aleatoriedade", dust_ ? 75.0f : 40.0f, 0.0f, 100.0f, kAnimPct, "%");
+        p.add_angle("spread", "Espalhamento", dust_ ? 25.0f : 35.0f, 0.0f, 180.0f);
+        p.add_float("speed", dust_ ? "Força do vento" : "Velocidade", dust_ ? 320.0f : 260.0f, 0.0f, 2000.0f,
+                    kAnim | kParamPixels, "px");
         p.typed_range(0.0f, 20000.0f);
-        p.add_float("turbulence", "Turbulência", 40.0f, 0.0f, 500.0f, kAnim | kParamPixels, "px");
+        p.add_float("turbulence", "Turbulência", dust_ ? 70.0f : 40.0f, 0.0f, 500.0f, kAnim | kParamPixels, "px");
         p.typed_range(0.0f, 5000.0f);
-        p.add_float("gravity", "Gravidade", 0.0f, -1000.0f, 1000.0f, kAnim | kParamPixels, "px");
+        p.add_float("gravity", "Gravidade", dust_ ? -60.0f : 0.0f, -1000.0f, 1000.0f, kAnim | kParamPixels, "px");
         p.typed_range(-20000.0f, 20000.0f);
-        p.add_float("fade", "Esmaecer", 70.0f, 0.0f, 100.0f, kAnimPct, "%");
+        p.add_float("fade", "Esmaecer", dust_ ? 80.0f : 70.0f, 0.0f, 100.0f, kAnimPct, "%");
         p.add_int("seed", "Semente", 0, 0, 9999, kAnim);
-        p.add_color("glow_color", "Cor do brilho", Vec4{1.0f, 0.55f, 0.15f, 1.0f});
+        p.add_color("glow_color", "Cor do brilho", dust_ ? Vec4{1.0f, 0.82f, 0.6f, 1.0f} : Vec4{1.0f, 0.55f, 0.15f, 1.0f});
         p.add_float("glow_intensity", "Brilho da borda", 0.0f, 0.0f, 400.0f, kAnimPct, "%");
         p.add_float("mix", "Mistura", 100.0f, 0.0f, 100.0f, kAnimPct, "%");
+        if (dust_) {
+            // Tamanho das manchas da frente: pequeno = borda esfarelada, grande = blocos que voam juntos.
+            p.add_float("noise_scale", "Escala do ruído", 60.0f, 4.0f, 400.0f, kAnim | kParamPixels, "px");
+            p.typed_range(1.0f, 4000.0f);
+        }
     }
     bool is_identity(const EffectEval& e) const noexcept override {
         return !(finite_or(e.f(kCompletion), 0.0f) > 0.0f) || !(finite_or(e.f(kMix), 100.0f) > 0.0f);
@@ -73,6 +92,13 @@ public:
     }
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
         v[kCompletion] = ParamValue::scalar(45.0f);
+        if (dust_) {
+            // A cartela é pequena (320×200): vento curto e manchas menores.
+            v[kSpeed] = ParamValue::scalar(90.0f);
+            v[kTurbulence] = ParamValue::scalar(20.0f);
+            v[kNoiseScale] = ParamValue::scalar(24.0f);
+            return true;
+        }
         v[kParticleSize] = ParamValue::scalar(4.0f);
         v[kSpeed] = ParamValue::scalar(70.0f);
         v[kTurbulence] = ParamValue::scalar(12.0f);
@@ -89,7 +115,8 @@ public:
         const Rect src = input.region;
         if (!(src.w > 0.0f) || !(src.h > 0.0f)) { out = input; return OkStatus; }
 
-        f32 side = std::clamp(finite_or(e.f(kParticleSize), 6.0f), 1.0f, 400.0f);
+        f32 side = std::clamp(finite_or(e.f(kParticleSize), dust_ ? 2.0f : 6.0f), 1.0f, 400.0f);
+        const f32 life = dust_ ? kDustLife : kLife;
         while (std::ceil(src.w / side) * std::ceil(src.h / side) > kMaxCells) side *= 1.25f;
         const f32 cols = std::max(1.0f, std::ceil(src.w / side));
         const f32 rows = std::max(1.0f, std::ceil(src.h / side));
@@ -112,7 +139,8 @@ public:
 
         // Alcance do voo (px): velocidade × 1,45 (o maior sorteio), a gravidade,
         // o fluxo (1,5 × 0,6 × turbulência) e o fragmento girado.
-        const f32 reach = speed * 1.45f + std::fabs(gravity) + turbulence * 0.9f + side + 2.0f;
+        // (O redemoinho da poeira chega a 1,2 × turbulência.)
+        const f32 reach = speed * 1.45f + std::fabs(gravity) + turbulence * (dust_ ? 1.25f : 0.9f) + side + 2.0f;
         const bool clipped = e.placement && !e.placement->inScene3d && !e.placement->preserveFullExtent
                           && e.placement->compWidth && e.placement->compHeight;
         // Na cena 3D (sem recorte) o crescimento tem teto, como nos raios.
@@ -127,7 +155,7 @@ public:
         u.dst = Vec4{region.x, region.y, region.w, region.h};
         u.grid = Vec4{cols, rows, side, static_cast<f32>(std::clamp(e.value(kSeed).as_int(), 0, 9999))};
         u.front = Vec4{dir.x, dir.y, lo, 1.0f / std::max(hi - lo, 1e-3f)};
-        u.timing = Vec4{completion, std::clamp(finite_or(e.f(kRandomness), 40.0f) / 100.0f, 0.0f, 1.0f), kLife,
+        u.timing = Vec4{completion, std::clamp(finite_or(e.f(kRandomness), 40.0f) / 100.0f, 0.0f, 1.0f), life,
                         std::clamp(finite_or(e.f(kFade), 70.0f) / 100.0f, 0.0f, 1.0f)};
         u.motion = Vec4{speed, spread, turbulence, gravity};
         u.glow = Vec4{Color::srgb_to_linear(std::clamp(glow.x, 0.0f, 1.0f)),
@@ -136,7 +164,9 @@ public:
                       std::clamp(finite_or(e.f(kGlowIntensity), 0.0f) / 100.0f, 0.0f, 4.0f)};
         u.texel = Vec4{1.0f / std::max(input.texel_scale_x(), 1e-4f), 0.0f, 0.0f, 0.0f};
         u.uvMap = EffectBuildContext::uv_map(region, src);
-        u.mode = Vec4{std::clamp(finite_or(e.f(kMix), 100.0f) / 100.0f, 0.0f, 1.0f), 1.0f, 0.0f, 0.0f};
+        const f32 noiseScale = dust_ && e.count > kNoiseScale
+                                 ? std::clamp(finite_or(e.f(kNoiseScale), 60.0f), 1.0f, 4000.0f) : 60.0f;
+        u.mode = Vec4{std::clamp(finite_or(e.f(kMix), 100.0f) / 100.0f, 0.0f, 1.0f), 1.0f, dust_ ? 1.0f : 0.0f, noiseScale};
 
         const FGTexture parts = ctx.texture("desintegrar-fragmentos", w, h);
         const u32 vertices = static_cast<u32>(cols * rows) * 6u;
@@ -155,12 +185,19 @@ public:
         }
         return OkStatus;
     }
+
+private:
+    bool dust_ = false;
 };
 
 } // namespace
 
 void register_disintegrate_effect(EffectRegistry& r) {
     (void)r.add(std::make_unique<Disintegrate>());
+}
+
+void register_dust_transition(EffectRegistry& r) {
+    (void)r.add(std::make_unique<Disintegrate>(true));
 }
 
 } // namespace aurea::builtin

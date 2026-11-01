@@ -302,8 +302,146 @@ public:
     }
 };
 
+// =============================================================================
+// Looks de cinema (Cor, 0.4.5): looks PRONTOS com uma intensidade.
+//
+// Pedido de usuário pelo comportamento dos pacotes de "looks" dos editores
+// (Magic Bullet Looks e afins: escolher um visual de cinema e dosar). Os looks
+// são NOSSOS — valores da Correção de cor acima, sem LUT de terceiros — e o
+// efeito monta exatamente o passe dela (color_grade.frag): a intensidade é a
+// Mistura com o original. Exposição, temperatura, contraste e saturação ajustam
+// o look escolhido (somam; a saturação multiplica). Índices fixos nos projetos:
+// look novo entra no FIM da lista.
+// =============================================================================
+class ColorLooks final : public Effect {
+public:
+    enum : u32 { kLookParam = 0, kIntensity, kExposureAdj, kTemperatureAdj, kContrastAdj, kSaturationAdj, kCount };
+    static constexpr u32 kLooks = 13;
+
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{"aurea.color.looks", "Looks de cinema", "Cor", EffectClass::Neighborhood};
+        return i;
+    }
+
+    void declare_parameters(ParameterRegistry& p) const override {
+        static const char* const kNames[kLooks] = {
+            "Teal & Orange", "Bleach Bypass", "Filme quente", "Filme frio", "Noir", "Vintage", "Cyberpunk",
+            "Sépia", "Pastel", "Hora dourada", "Noite americana", "Verde digital", "Faroeste"};
+        constexpr u16 kAnimPct = kParamAnimatable | kParamPercent;
+        p.add_enum("look", "Look", kNames, kLooks, 0);
+        p.add_float("intensity", "Intensidade", 100.0f, 0.0f, 100.0f, kAnimPct, "%");
+        p.add_float("exposure", "Exposição", 0.0f, -3.0f, 3.0f, kParamAnimatable, "EV");
+        p.add_float("temperature", "Temperatura", 0.0f, -100.0f, 100.0f, kParamAnimatable);
+        p.add_float("contrast", "Contraste", 0.0f, -100.0f, 100.0f, kParamAnimatable);
+        p.add_float("saturation", "Saturação", 100.0f, 0.0f, 200.0f, kAnimPct, "%");
+    }
+
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return e.count < kCount || !(finite_or(e.f(kIntensity), 100.0f) > 0.01f);
+    }
+    // Alguns looks têm nitidez (1 px de vizinhança).
+    f32 input_margin(const EffectEval&) const noexcept override { return 1.0f; }
+    void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
+        out.push_back(PipelineKey::fullscreen(ShaderId::effects_color_grade_frag, work));
+    }
+
+    /// Os valores da Correção de cor de um look (sem os ajustes do usuário).
+    static std::span<const EffectPresetValue> look(u32 index) noexcept {
+        using G = ColorGrade;
+        // Rodas: (cos, sen) da matiz × força (matiz 0 = vermelho, 0,5 = ciano).
+        static constexpr EffectPresetValue kTealOrange[] = {
+            {G::kContrast, 18}, {G::kSaturation, 110}, {G::kVibrance, 10},
+            {G::kShadowTint, -0.50f, 0}, {G::kShadowTint, -0.15f, 1},
+            {G::kHighlightTint, 0.45f, 0}, {G::kHighlightTint, 0.25f, 1}};
+        static constexpr EffectPresetValue kBleach[] = {
+            {G::kSaturation, 45}, {G::kContrast, 40}, {G::kHighlights, -15}, {G::kBlacks, -10},
+            {G::kSharpen, 15}, {G::kGrain, 10}};
+        static constexpr EffectPresetValue kWarmFilm[] = {
+            {G::kTemperature, 30}, {G::kTint, 4}, {G::kContrast, 10}, {G::kFade, 12}, {G::kGrain, 18},
+            {G::kHighlightTint, 0.35f, 0}, {G::kHighlightTint, 0.25f, 1}};
+        static constexpr EffectPresetValue kCoolFilm[] = {
+            {G::kTemperature, -28}, {G::kTint, -3}, {G::kContrast, 12}, {G::kFade, 10}, {G::kGrain, 15},
+            {G::kShadowTint, -0.35f, 0}, {G::kShadowTint, -0.25f, 1}};
+        static constexpr EffectPresetValue kNoir[] = {
+            {G::kSaturation, 0}, {G::kContrast, 55}, {G::kBlacks, -30}, {G::kHighlights, 10},
+            {G::kVignette, -45}, {G::kGrain, 22}};
+        static constexpr EffectPresetValue kVintage[] = {
+            {G::kFade, 38}, {G::kSaturation, 75}, {G::kTemperature, 18}, {G::kContrast, -12},
+            {G::kShadowTint, 0.30f, 0}, {G::kShadowTint, 0.12f, 1},
+            {G::kHighlightTint, 0.25f, 0}, {G::kHighlightTint, 0.20f, 1}, {G::kGrain, 25}, {G::kVignette, -25}};
+        static constexpr EffectPresetValue kCyberpunk[] = {
+            {G::kSaturation, 125}, {G::kContrast, 22}, {G::kTint, 30}, {G::kVibrance, 20},
+            {G::kShadowTint, -0.48f, 0}, {G::kShadowTint, -0.15f, 1},
+            {G::kHighlightTint, 0.29f, 0}, {G::kHighlightTint, -0.40f, 1}};
+        static constexpr EffectPresetValue kSepia[] = {
+            {G::kSaturation, 15}, {G::kTemperature, 40}, {G::kContrast, 5}, {G::kFade, 10},
+            {G::kShadowTint, 0.25f, 0}, {G::kShadowTint, 0.12f, 1},
+            {G::kHighlightTint, 0.35f, 0}, {G::kHighlightTint, 0.28f, 1}};
+        static constexpr EffectPresetValue kPastel[] = {
+            {G::kFade, 30}, {G::kSaturation, 80}, {G::kContrast, -20}, {G::kBrightness, 10},
+            {G::kWhites, -10}, {G::kVibrance, 15}};
+        static constexpr EffectPresetValue kGolden[] = {
+            {G::kTemperature, 45}, {G::kTint, 8}, {G::kHighlights, -10}, {G::kVibrance, 20}, {G::kSaturation, 108},
+            {G::kHighlightTint, 0.45f, 0}, {G::kHighlightTint, 0.30f, 1}};
+        static constexpr EffectPresetValue kDayForNight[] = {
+            {G::kExposure, -1.4f}, {G::kTemperature, -55}, {G::kSaturation, 55}, {G::kContrast, 20},
+            {G::kHighlights, -40}, {G::kShadowTint, -0.30f, 0}, {G::kShadowTint, -0.40f, 1}};
+        static constexpr EffectPresetValue kDigitalGreen[] = {
+            {G::kTint, -35}, {G::kSaturation, 80}, {G::kContrast, 20},
+            {G::kShadowTint, -0.19f, 0}, {G::kShadowTint, 0.35f, 1},
+            {G::kHighlightTint, -0.10f, 0}, {G::kHighlightTint, 0.20f, 1}};
+        static constexpr EffectPresetValue kWestern[] = {
+            {G::kTemperature, 35}, {G::kSaturation, 70}, {G::kContrast, 30}, {G::kBlacks, -10},
+            {G::kHighlightTint, 0.40f, 0}, {G::kHighlightTint, 0.28f, 1}, {G::kGrain, 20}, {G::kVignette, -20}};
+        static const std::span<const EffectPresetValue> kAll[kLooks] = {
+            kTealOrange, kBleach, kWarmFilm, kCoolFilm, kNoir, kVintage, kCyberpunk,
+            kSepia, kPastel, kGolden, kDayForNight, kDigitalGreen, kWestern};
+        return kAll[std::min(index, kLooks - 1)];
+    }
+
+    /// Os valores completos da Correção de cor para `e` (look + ajustes + intensidade).
+    static void grade_values(const EffectEval& e, std::vector<ParamValue>& v) {
+        static const std::vector<ParamValue> kDefaults = [] {
+            ParameterRegistry reg;
+            ColorGrade{}.declare_parameters(reg);
+            std::vector<ParamValue> d(reg.count());
+            for (u32 i = 0; i < reg.count(); ++i) d[i] = reg.at(i).defaultValue;
+            return d;
+        }();
+        v = kDefaults;
+        for (const EffectPresetValue& pv : look(e.e(kLookParam)))
+            if (pv.param < v.size() && pv.component < 4) v[pv.param].v[pv.component] = pv.value;
+        using G = ColorGrade;
+        v[G::kExposure].v[0] = std::clamp(v[G::kExposure].v[0] + finite_or(e.f(kExposureAdj), 0.0f), -5.0f, 5.0f);
+        v[G::kTemperature].v[0] = std::clamp(v[G::kTemperature].v[0] + finite_or(e.f(kTemperatureAdj), 0.0f), -100.0f, 100.0f);
+        v[G::kContrast].v[0] = std::clamp(v[G::kContrast].v[0] + finite_or(e.f(kContrastAdj), 0.0f), -100.0f, 100.0f);
+        v[G::kSaturation].v[0] = std::clamp(v[G::kSaturation].v[0] * std::max(0.0f, finite_or(e.f(kSaturationAdj), 100.0f)) / 100.0f,
+                                            0.0f, 400.0f);
+        v[G::kMix].v[0] = std::clamp(finite_or(e.f(kIntensity), 100.0f), 0.0f, 100.0f);
+    }
+
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
+                 LayerImage& out) const override {
+        static const ColorGrade grade;
+        thread_local std::vector<ParamValue> values;
+        grade_values(e, values);
+        // O passe da Correção de cor com estes valores: sem curvas, sem LUT
+        // (os recursos auxiliares ficam vazios — nada do planejamento viaja).
+        EffectEval ge = e;
+        ge.effect = &grade;
+        ge.instance = nullptr;
+        ge.values = values.data();
+        ge.count = static_cast<u32>(values.size());
+        ge.aux = TextureHandle{};
+        ge.auxExtra[0] = TextureHandle{};
+        ge.auxExtra[1] = TextureHandle{};
+        return grade.build(ctx, ge, input, margin, out);
+    }
+};
+
 } // namespace
 
 void register_color_grade_effect(EffectRegistry& r) { (void)r.add(std::make_unique<ColorGrade>()); }
+void register_color_looks_effect(EffectRegistry& r) { (void)r.add(std::make_unique<ColorLooks>()); }
 
 } // namespace aurea::builtin

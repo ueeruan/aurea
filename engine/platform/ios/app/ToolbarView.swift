@@ -556,6 +556,10 @@ struct TopBarView: View {
             if row.kind == 1 || row.kind == 2 {
                 out.append(.item(AureaText.t("layer_replace_media"), glyph: CupertinoGlyph.Arrow2Squarepath, sublabel: AureaText.t("layer_replace_media_detail"),
                                  enabled: !row.locked) { replaceTarget = LayerRef(id: row.id) })
+                // 0.4.5: Remover fundo — o efeito na camada e, no vídeo, a análise do clipe.
+                out.append(.item(AureaText.t("bg_remove_action"), glyph: CupertinoGlyph.PersonCropCircle,
+                                 sublabel: AureaText.t("bg_remove_action_detail"), enabled: !row.locked,
+                                 tag: "layer.menu.bgRemove") { model.removeBackground(row.id) })
             }
             let path = model.layerSourcePath(row.id)
             out.append(.item(AureaText.t("media_info_title"), glyph: CupertinoGlyph.InfoCircle, tag: "layer.menu.mediaInfo") {
@@ -611,10 +615,12 @@ struct TopBarView: View {
     /// de 1 camada: ✕ · "N camadas selecionadas" · Agrupar · Agrupar e mascarar ·
     /// Agrupar e excluir · 🗑 · ›. O `›` troca a fileira pela de ALINHAMENTO NA
     /// TELA: ‹ + 6 alinhamentos + 2 distribuições, todos do mesmo tamanho. As outras
-    /// ações (escolher uma, desagrupar, duplicar, vincular) moram no Copiar e colar.
+    /// ações (escolher uma, desagrupar, duplicar, vincular) moram no Copiar e colar;
+    /// vincular (bug #9c) também fica aqui, antes do 🗑.
     private var batchBar: some View {
         let ink = AureaColors.onAccent
         let canMask = count >= 2 && model.engine.canGroupAndMask(ids)
+        let selectedGroups = model.layers.filter { model.selection.contains($0.id) && $0.kind == 12 }.map(\.id)
         let dim = ink.opacity(0.38)
         let three = count >= 3
         func finish() { model.changeTimelineLayerSelectMode(false) }
@@ -641,6 +647,21 @@ struct TopBarView: View {
                                            tint: canMask ? ink : dim) {
                                 if canMask { model.groupAndMaskSelection(exclude: true) } else { model.toast = AureaText.t("batch_need_two_visual") }
                             }.accessibilityIdentifier("batch.groupExclude")
+                            // Bug #6 (par do BatchTopBar): com grupo na seleção, desagrupar na barra.
+                            if !selectedGroups.isEmpty {
+                                ShellBarButton(glyph: ShellGlyph.SquareSplit2x2, description: AureaText.t("editor_desagrupar"), size: 19, width: 40, height: EditorLayout.topBar, tint: ink) {
+                                    model.ungroup(groups: selectedGroups); finish()
+                                }.accessibilityIdentifier("batch.ungroup")
+                            }
+                            // Bug #9c (par do BatchTopBar): vincular TODAS as escolhidas a um pai
+                            // (um nulo, por exemplo) num toque; o motor liga num passo de desfazer.
+                            GeometryReader { bounds in
+                                ShellBarButton(glyph: CupertinoGlyph.Link, description: AureaText.t("editor_vincular_escolhidas_camada"), size: 19, width: 40,
+                                               height: EditorLayout.topBar, tint: ink) {
+                                    if model.status.playing != 0 { model.playPause() }
+                                    shell.linkIds = Array(model.selection); shell.linkAnchor = bounds.frame(in: .global)
+                                }.accessibilityIdentifier("batch.link")
+                            }.frame(width: 40, height: EditorLayout.topBar)
                             ShellBarButton(glyph: CupertinoGlyph.Trash, description: AureaText.t("editor_excluir_selecao"), size: 19, width: 40, height: EditorLayout.topBar, tint: ink) {
                                 removeSelection(); finish()
                             }.accessibilityIdentifier("batch.delete")
@@ -1349,6 +1370,14 @@ private struct CopyPasteButton: View {
                          enabled: primary != nil, tag: "copyPaste.more.copyAnimation") { model.copyAnimation() })
         out.append(.item(AureaText.t("editor_otimizar_keyframes"), glyph: CupertinoGlyph.WandStars, sublabel: AureaText.t("editor_otimizar_keyframes_detalhe"),
                          enabled: primary != nil, tag: "copyPaste.more.optimizeKeys") { model.optimizeKeyframes() })
+        // Bug #6: "Desagrupar" com UM grupo escolhido também (antes só com duas ou
+        // mais camadas) — todos os grupos escolhidos num passo de desfazer.
+        let groups = model.layers.filter { model.selection.contains($0.id) && $0.kind == 12 }.map(\.id)
+        if !groups.isEmpty {
+            out.append(.item(AureaText.t("editor_desagrupar"), glyph: ShellGlyph.SquareSplit2x2, tag: "copyPaste.more.ungroup") {
+                model.ungroup(groups: groups)
+            })
+        }
         if count >= 2 {
             let chosen = ids.map(\.int64Value)
             out.append(.item(AureaText.t("editor_ajustar_tela"), glyph: CupertinoGlyph.FullscreenExit, tag: "copyPaste.more.fit") {
@@ -1361,12 +1390,6 @@ private struct CopyPasteButton: View {
             // telefone em pé a folha de lote da 0.3.2 saiu e a barra de baixo não tem esta.
             out.append(.item(AureaText.t("editor_escada_comeca_quando_cima_termina"), glyph: CupertinoGlyph.ArrowRightToLine,
                              tag: "copyPaste.more.stairs") { model.arrangeLayerTimes(1) })
-            let groups = model.layers.filter { model.selection.contains($0.id) && $0.kind == 12 }.map(\.id)
-            if !groups.isEmpty {
-                out.append(.item(AureaText.t("editor_desagrupar"), glyph: ShellGlyph.SquareSplit2x2, tag: "copyPaste.more.ungroup") {
-                    for group in groups { model.ungroup(group) }
-                })
-            }
             out.append(.item(AureaText.t("om_cp_link_selected"), glyph: CupertinoGlyph.Link, tag: "copyPaste.more.link") {
                 if model.status.playing != 0 { model.playPause() }
                 shell.linkIds = Array(model.selection); shell.linkAnchor = anchor

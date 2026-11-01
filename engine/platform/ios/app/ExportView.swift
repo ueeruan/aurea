@@ -697,9 +697,15 @@ struct ExportView: View {
         if result == 28 { return AureaText.t("msg_sem_espaco_no_aparelho_libere_espaco") }
         if result != 0 {
             // O motivo do motor (ExportRules.hpp) no idioma do app; a frase crua só em português.
-            if let reason = AureaModel.exportFailureReason(model.exportProgress) { return AureaText.t("ios_export_failed_detail", reason) }
+            // 0.4.5: depois da escada inteira, a falha diz que os modos compatíveis já foram tentados (e o código do suporte).
+            let attempt = model.exportedKind == .video ? model.exportAttemptLevel : 0
+            if let reason = AureaModel.exportFailureReason(model.exportProgress) {
+                return AureaModel.exportAfterLadder(AureaText.t("ios_export_failed_detail", reason), attempt: attempt, progress: model.exportProgress)
+            }
             let raw = model.exportProgress["message"] as? String ?? ""
-            return AureaText.t("ios_export_failed_detail", raw.isEmpty || AureaText.language.resolved != .pt ? AureaText.t("ios_error_code", "\(result)") : raw)
+            return AureaModel.exportAfterLadder(AureaText.t("ios_export_failed_detail",
+                raw.isEmpty || AureaText.language.resolved != .pt ? AureaText.t("ios_error_code", "\(result)") : raw),
+                attempt: attempt, progress: model.exportProgress)
         }
         return model.exportMessage
     }
@@ -871,8 +877,10 @@ private struct ExportProgressPanel: View {
 /// A página azul-marinho do resultado: a prévia (70 %) — vídeo com ▶ de 62 e a
 /// busca, GIF animado, PNG, a imagem da sequência — e a base (30 %) com Salvar |
 /// Compartilhar (57), Fechar e o cartão de apoio. O AUREA já salvou em Fotos:
-/// o Salvar diz "Salvo em Fotos ✓" e abre "Salvar em…" (Arquivos); se Fotos
-/// recusou, volta a ser "Salvar" e tenta de novo.
+/// o Salvar diz "Salvo em Fotos ✓" e só confirma (bug #12: antes abria o
+/// seletor de Arquivos); se Fotos recusou, volta a ser "Salvar" e tenta de
+/// novo. "Salvar em…" (Arquivos) é o link separado abaixo dos botões; a
+/// sequência .zip não vai para Fotos, e o botão dela é "Salvar em Arquivos".
 private struct ExportResultPage: View {
     @EnvironmentObject private var model: AureaModel
     let preview: UIImage?
@@ -880,6 +888,10 @@ private struct ExportResultPage: View {
     let onClose: () -> Void
     @State private var sharing = false
     @State private var savingToFiles = false
+    /// Aviso de confirmação dentro do resultado (o toast do app fica embaixo
+    /// desta tela cheia).
+    @State private var notice: String?
+    @State private var noticeTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -905,6 +917,15 @@ private struct ExportResultPage: View {
                             }
                         }
                     }
+                    .overlay(alignment: .top) {
+                        if let notice {
+                            Text(notice).font(.aurea(size: 13)).foregroundStyle(AureaColors.onImage).lineLimit(3)
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                                .background(AureaColors.exportResultButton, in: RoundedRectangle(cornerRadius: 12))
+                                .padding(12)
+                                .accessibilityIdentifier("export.result.notice")
+                        }
+                    }
                     .frame(height: geometry.size.height * 0.7)
                     ScrollView {
                         VStack(spacing: 0) {
@@ -917,9 +938,24 @@ private struct ExportResultPage: View {
                                 resultButton(saved ? (model.exportedKind == .sequence ? AureaText.t("ios_export_save_files") : AureaText.t("om_exp_saved_photos"))
                                              : AureaText.t("om_exp_save"),
                                              glyph: saved ? CupertinoGlyph.CheckmarkCircleFill : CupertinoGlyph.ArrowDownToLine, tag: "export.result.save") {
-                                    if saved { savingToFiles = true } else { model.retrySaveExportToPhotos() }
+                                    // Bug #12: já em Fotos → só confirma (sem seletor de Arquivos).
+                                    // A sequência .zip (rótulo "Salvar em Arquivos") abre Arquivos.
+                                    if model.exportedKind == .sequence { savingToFiles = true }
+                                    else if model.exportSavedToPhotos {
+                                        let first = model.exportMessage?.components(separatedBy: "\n").first ?? ""
+                                        confirm(first.isEmpty ? AureaText.t("om_exp_saved_photos") : first)
+                                    } else { model.retrySaveExportToPhotos() }
                                 }
                                 resultButton(AureaText.t("editor_compartilhar"), glyph: CupertinoGlyph.SquareArrowUp, tag: "export.result.share") { sharing = true }
+                            }
+                            if model.exportedKind != .sequence {
+                                Button { savingToFiles = true } label: {
+                                    Text(AureaText.t("om_exp_save_as")).font(.aurea(size: 15)).foregroundStyle(AureaColors.onImage70)
+                                        .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain).padding(.top, 6)
+                                .disabled(model.exportPublishing)
+                                .accessibilityIdentifier("export.result.saveAs")
                             }
                             Button(action: onClose) {
                                 Text(AureaText.t("om_exp_close")).font(.aurea(size: 17, weight: .semibold)).foregroundStyle(AureaColors.accent)
@@ -936,7 +972,23 @@ private struct ExportResultPage: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("export.result")
         .sheet(isPresented: $sharing) { if let url = model.exportedURL { ExportShareSheet(url: url) } }
-        .sheet(isPresented: $savingToFiles) { if let url = model.exportedURL { ExportFilesPicker(url: url) } }
+        .sheet(isPresented: $savingToFiles) {
+            if let url = model.exportedURL {
+                ExportFilesPicker(url: url) { saved in confirm(AureaText.t("app_saved_to_path", saved.lastPathComponent)) }
+            }
+        }
+        .onDisappear { noticeTask?.cancel() }
+    }
+
+    /// Mostra o aviso por 2,2 s e o anuncia ao VoiceOver.
+    private func confirm(_ text: String) {
+        notice = text
+        noticeTask?.cancel()
+        noticeTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            if !Task.isCancelled { notice = nil }
+        }
+        UIAccessibility.post(notification: .announcement, argument: text)
     }
 
     private func resultButton(_ title: String, glyph: Character, tag: String, action: @escaping () -> Void) -> some View {
@@ -1062,10 +1114,22 @@ private struct ResultGifView: UIViewRepresentable {
 /// fica no Documents do app para abrir/compartilhar).
 private struct ExportFilesPicker: UIViewControllerRepresentable {
     let url: URL
+    /// A cópia gravada (o destino escolhido), para o aviso de confirmação.
+    var onSaved: (URL) -> Void = { _ in }
+    func makeCoordinator() -> Coordinator { Coordinator(onSaved: onSaved) }
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+        let picker = UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+        picker.delegate = context.coordinator
+        return picker
     }
     func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onSaved: (URL) -> Void
+        init(onSaved: @escaping (URL) -> Void) { self.onSaved = onSaved }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            if let saved = urls.first { onSaved(saved) }
+        }
+    }
 }
 
 struct ExportShareSheet: UIViewControllerRepresentable {

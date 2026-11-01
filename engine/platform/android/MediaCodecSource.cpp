@@ -444,6 +444,27 @@ public:
             if (const Status status = seek_to_keyframe(target); !status.ok()) return status;
             result = next_image_timed_frame(target, out, outPtsUs, endOfStream);
         }
+        // 0.4.5 (prévia que degrada até congelar): um Timeout num caminho que JÁ
+        // entregou quadros é engasgo passageiro (aparelho quente, render ou
+        // codec disputados), não defeito do caminho. Antes, um só engasgo de
+        // 1–3 s rebaixava este decoder para sempre: GL → planos pela CPU (cópia
+        // YUV por quadro), e o segundo → decoder de software, que não acompanha
+        // 4K/HEVC: a imagem parava e a agulha seguia. Agora o primeiro Timeout
+        // volta ao VideoSource, que refaz o seek (flush) no MESMO caminho; só um
+        // segundo Timeout seguido, sem quadro entregue entre eles, troca de
+        // caminho (o driver que trava depois do flush continua coberto). Teto
+        // de kTransientTimeouts perdões por decoder: um caminho que trava de
+        // tempos em tempos deixa de custar um engasgo a cada vez e é trocado.
+        if (result.ok()) {
+            timeoutsWithoutFrame_ = 0;
+            if (out) pathProven_ = true;
+        } else if (result.code() == Errc::Timeout && pathProven_ && transientTimeouts_ < kTransientTimeouts
+                   && ++timeoutsWithoutFrame_ < 2) {
+            ++transientTimeouts_;
+            AUREA_LOG_WARN("video: %s sem quadro (%s); novo seek no mesmo caminho (%s, %u de %u)", info_.decoderName,
+                           result.message().data(), video_path_name(current_path()), transientTimeouts_, kTransientTimeouts);
+            return result;
+        }
         // Caminho GL do driver falhou neste vídeo (EGLImage recusado, FBO,
         // codec que não anda com saída PRIVATE): planos pela CPU com o MESMO
         // decoder de hardware, a partir do mesmo instante. Só para a frente.
@@ -456,6 +477,8 @@ public:
                            video_path_name(fallbackPath), static_cast<long long>(target));
             glPath_ = false;
             zeroCopy_ = false;
+            pathProven_ = false;
+            timeoutsWithoutFrame_ = 0;
             destroy_codec();
             bridge_.reset();   // quadros ainda vivos seguram os próprios alvos
             if (const Status opened = create_codec(); !opened.ok()) return opened;
@@ -477,6 +500,8 @@ public:
         AUREA_LOG_WARN("decoder %s falhou (%s%s); tentando software em %lld us", info_.decoderName,
             result.message().data(), zeroCopy_ ? "" : ", planos pela CPU", static_cast<long long>(target));
         softwareFallback_ = true;
+        pathProven_ = false;
+        timeoutsWithoutFrame_ = 0;
         destroy_codec();
         if (const Status opened = create_codec(); !opened.ok()) return opened;
         if (const Status seek = seek_to_keyframe(target); !seek.ok()) return seek;
@@ -1166,6 +1191,13 @@ private:
     i64 pendingPts_ = 0; // Actual PTS lookahead preserves long VFR presentation intervals.
     bool pendingEos_ = false;
     bool softwareFallback_ = false;
+    /// O caminho atual já entregou um quadro (Timeout nele = engasgo passageiro).
+    bool pathProven_ = false;
+    /// Timeouts seguidos sem quadro entregue: o segundo troca de caminho.
+    u32 timeoutsWithoutFrame_ = 0;
+    /// Timeouts perdoados neste decoder (engasgo passageiro, mesmo caminho).
+    static constexpr u32 kTransientTimeouts = 3;
+    u32 transientTimeouts_ = 0;
     /// Caminho GL do driver (padrão): o AImage PRIVATE vira RGBA num passe GL.
     bool glPath_ = false;
     bool diagnosticSoftwareFallback_ = false;

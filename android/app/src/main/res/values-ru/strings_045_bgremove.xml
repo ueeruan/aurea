@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Remover fundo (aurea.key.background_remove) — recorte sem tela verde. -->
+    <string name="bg_remove_fx_name">Удалить фон</string>
+    <string name="bg_remove_fx_desc">Удаляет фон видео или фото без зелёного экрана: человек или главный объект остаётся, остальное исчезает в каждом кадре.</string>
+    <string name="bg_remove_action">Удалить фон</string>
+    <string name="bg_remove_action_detail">Вырезает человека или объект без зелёного экрана</string>
+    <string name="bg_remove_note">Автоматическая вырезка в каждом кадре без зелёного экрана. Проанализируйте клип один раз: результат сохраняется с проектом, и экспорт использует ту же вырезку.</string>
+    <string name="bg_remove_analyze">Анализ клипа</string>
+    <string name="bg_remove_analyze_count">Анализ клипа (кадров: %1$d)</string>
+    <string name="bg_remove_cancel">Отменить анализ</string>
+    <string name="bg_remove_progress">Анализ: %1$d из %2$d кадров</string>
+    <string name="bg_remove_clip_status">Клип: готово %1$d из %2$d кадров</string>
+    <string name="bg_remove_clip_done">Весь клип проанализирован и сохранён с проектом</string>
+    <string name="bg_remove_frame_ready">Этот кадр: вырезка готова</string>
+    <string name="bg_remove_frame_pending">Этот кадр: вычисляется вырезка…</string>
+    <string name="bg_remove_failed">Не удалось удалить фон этого слоя.</string>
+    <string name="bg_remove_failed_model">Модель вырезки не загрузилась: на устройстве мало памяти. Закройте другие приложения и снова нажмите «Анализ клипа».</string>
+    <string name="bg_remove_failed_decode">Сейчас не удалось прочитать кадры этого видео. Поставьте воспроизведение на паузу и снова нажмите «Анализ клипа».</string>
+    <string name="bg_remove_failed_frames">Некоторые кадры не проанализированы. Снова нажмите «Анализ клипа».</string>
+    <string name="bg_remove_person_unavailable">Модель «Человек» недоступна на этом устройстве; используется «Автоматически».</string>
+    <string name="bg_remove_p_expand">Сжать/расширить</string>
+    <string name="bg_remove_p_invert">Инвертировать (оставить фон)</string>
+    <string name="bg_remove_p_edge">Тонкий край</string>
+    <string name="bg_remove_p_model">Модель</string>
+    <string name="bg_remove_o_auto">Автоматически</string>
+    <string name="bg_remove_o_person">Человек</string>
+    <string name="bg_remove_tip_model">«Автоматически» вырезает главный объект и работает на всех устройствах. «Человек» использует системное выделение людей, если оно есть на устройстве; иначе используется «Автоматически».</string>
+    <string name="bg_remove_tip_edge">Пересчитывает край в разрешении видео (волосы, тонкие контуры). 0 — простой край.</string>
+</resources>

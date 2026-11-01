@@ -26,6 +26,9 @@
 
 #import "AureaBridge.h"
 #import <VideoToolbox/VideoToolbox.h>
+#import <Vision/Vision.h>
+#import <CoreVideo/CoreVideo.h>
+#include "aurea/ai/BackgroundRemoval.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/GestureMath.hpp"
@@ -456,6 +459,74 @@ bool aurea_ios_hyper_npu_available() noexcept { return g_hyperNpuAvailable.load(
 }
 @end
 
+// =============================================================================
+//  Remover fundo, modelo "Pessoa" (0.4.5): o segmentador NATIVO que o motor
+//  chama no worker dele (ai::bg_set_native_segmenter). Vision
+//  VNGeneratePersonSegmentationRequest (iOS 15+, qualidade "accurate": a análise
+//  é em segundo plano). A máscara sai na grade do motor (outSize², o quadro
+//  inteiro), por amostragem bilinear. Falha = o motor usa o modelo embutido.
+// =============================================================================
+namespace {
+bool aurea_vision_person_segment(void*, uint32_t model, const uint8_t* rgb, uint32_t width, uint32_t height,
+                                 uint32_t outSize, float* out) {
+    if (model != aurea::ai::kBgModelPerson || !rgb || !width || !height || !outSize || !out) return false;
+    @autoreleasepool {
+        CVPixelBufferRef frame = nullptr;
+        NSDictionary* attributes = @{ (id)kCVPixelBufferIOSurfacePropertiesKey: @{} };
+        if (CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
+                                (__bridge CFDictionaryRef)attributes, &frame) != kCVReturnSuccess || !frame) return false;
+        CVPixelBufferLockBaseAddress(frame, 0);
+        uint8_t* base = static_cast<uint8_t*>(CVPixelBufferGetBaseAddress(frame));
+        const size_t stride = CVPixelBufferGetBytesPerRow(frame);
+        if (base) {
+            for (uint32_t y = 0; y < height; ++y) {
+                const uint8_t* s = rgb + static_cast<size_t>(y) * width * 3;
+                uint8_t* d = base + static_cast<size_t>(y) * stride;
+                for (uint32_t x = 0; x < width; ++x) {
+                    d[x * 4] = s[x * 3 + 2]; d[x * 4 + 1] = s[x * 3 + 1]; d[x * 4 + 2] = s[x * 3]; d[x * 4 + 3] = 255;
+                }
+            }
+        }
+        CVPixelBufferUnlockBaseAddress(frame, 0);
+        if (!base) { CVPixelBufferRelease(frame); return false; }
+        VNGeneratePersonSegmentationRequest* request = [[VNGeneratePersonSegmentationRequest alloc] init];
+        request.qualityLevel = VNGeneratePersonSegmentationRequestQualityLevelAccurate;
+        request.outputPixelFormat = kCVPixelFormatType_OneComponent8;
+        VNImageRequestHandler* handler = [[VNImageRequestHandler alloc] initWithCVPixelBuffer:frame options:@{}];
+        NSError* error = nil;
+        const BOOL performed = [handler performRequests:@[request] error:&error];
+        CVPixelBufferRelease(frame);
+        if (!performed) return false;
+        VNPixelBufferObservation* observation = request.results.firstObject;
+        CVPixelBufferRef mask = observation ? observation.pixelBuffer : nullptr;
+        if (!mask || CVPixelBufferGetPixelFormatType(mask) != kCVPixelFormatType_OneComponent8) return false;
+        CVPixelBufferLockBaseAddress(mask, kCVPixelBufferLock_ReadOnly);
+        const uint8_t* m = static_cast<const uint8_t*>(CVPixelBufferGetBaseAddress(mask));
+        const size_t mw = CVPixelBufferGetWidth(mask), mh = CVPixelBufferGetHeight(mask);
+        const size_t ms = CVPixelBufferGetBytesPerRow(mask);
+        const bool ok = m && mw && mh;
+        if (ok) {
+            auto at = [&](size_t x, size_t y) { return m[std::min(y, mh - 1) * ms + std::min(x, mw - 1)] * (1.0f / 255.0f); };
+            for (uint32_t gy = 0; gy < outSize; ++gy) {
+                const float fy = std::max(0.0f, (gy + 0.5f) * static_cast<float>(mh) / outSize - 0.5f);
+                const size_t y0 = static_cast<size_t>(fy);
+                const float ty = fy - static_cast<float>(y0);
+                for (uint32_t gx = 0; gx < outSize; ++gx) {
+                    const float fx = std::max(0.0f, (gx + 0.5f) * static_cast<float>(mw) / outSize - 0.5f);
+                    const size_t x0 = static_cast<size_t>(fx);
+                    const float tx = fx - static_cast<float>(x0);
+                    const float top = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * tx;
+                    const float bottom = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * tx;
+                    out[static_cast<size_t>(gy) * outSize + gx] = top + (bottom - top) * ty;
+                }
+            }
+        }
+        CVPixelBufferUnlockBaseAddress(mask, kCVPixelBufferLock_ReadOnly);
+        return ok;
+    }
+}
+} // namespace
+
 @implementation AureaEngine {
     CAMetalLayer* _surfaceLayer;
     std::unique_ptr<aurea::ios::Host> _host;
@@ -490,6 +561,9 @@ bool aurea_ios_hyper_npu_available() noexcept { return g_hyperNpuAvailable.load(
         _cacheDirectory = [cacheDirectory copy] ?: @"";
         _documentsDirectory = [documentsDirectory copy] ?: @"";
         _lastImportError = @"";
+        // Remover fundo: o modelo "Pessoa" usa o Vision (registrado uma vez).
+        static dispatch_once_t visionOnce;
+        dispatch_once(&visionOnce, ^{ aurea::ai::bg_set_native_segmenter(&aurea_vision_person_segment, nullptr); });
     }
     return self;
 }
@@ -2215,9 +2289,9 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
         if (hdri) ok = e.clear_hdri() && ok;
         return ok;
     }
-    // Chão: 0 sem chão, 1 chão visível, 2 só sombra (shadow catcher).
-    case 1: return e.set_scene_floor(value >= 1.5f ? 2u : value > 0 ? 1u : 0u, floor[1], floor[2], floor[3], floor[4],
-                                     floor[5] > 0 ? floor[5] : .5f, floor[6], floor[7]);
+    // Chão: 0 sem chão, 1 chão visível, 2 só sombra (shadow catcher). Saindo do
+    // "Reflective Floor" o motor volta ao chão padrão (Engine::set_scene_floor_mode). Par do Android.
+    case 1: return e.set_scene_floor_mode(value >= 1.5f ? 2u : value > 0 ? 1u : 0u);
     case 2: return e.set_scene3d_quality(static_cast<aurea::u32>(value));
     case 3: return e.set_scene3d_tonemap(static_cast<aurea::u32>(value), post[2]);
     case 4: return e.set_scene3d_tonemap(static_cast<aurea::u32>(post[1]), value);
@@ -2664,6 +2738,20 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     if (ids.empty()) return -static_cast<long long>(aurea::Errc::InvalidArgument);
     const aurea::Result<aurea::u64> r = e->parent_to_new_null(ids.data(), static_cast<aurea::u32>(ids.size()));
     return r.ok() ? static_cast<long long>(*r) : -static_cast<long long>(r.status().code());
+}
+
+- (int)parentLayers:(NSArray<NSNumber*>*)layerIds toParent:(long long)parent {
+    auto* e = self.engine;
+    if (!e) return -static_cast<int>(aurea::Errc::InvalidState);
+    // Comandos ainda no lote da ponte (arrastos, keys) entram antes: a compensação mede o estado final.
+    [self flush];
+    std::vector<aurea::u64> ids;
+    ids.reserve(layerIds.count);
+    for (NSNumber* n in layerIds) ids.push_back(static_cast<aurea::u64>(n.longLongValue));
+    if (ids.empty()) return -static_cast<int>(aurea::Errc::InvalidArgument);
+    const aurea::Result<aurea::u32> r = e->set_parent_many(ids.data(), static_cast<aurea::u32>(ids.size()),
+                                                           static_cast<aurea::u64>(parent));
+    return r.ok() ? static_cast<int>(*r) : -static_cast<int>(r.status().code());
 }
 
 - (int)staggerLayers:(NSArray<NSNumber*>*)layerIds stepFrames:(int)stepFrames keysOnly:(BOOL)keysOnly {
@@ -3891,6 +3979,35 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (BOOL)resetBonePose:(long long)layerId node:(int32_t)node {
     auto* e = self.engine; return e && e->reset_bone_pose(static_cast<aurea::u64>(layerId), node);
 }
+// ---- Esqueleto 3D (0.4.5) — EngineRigSkeleton.cpp -------------------------------------
+- (NSArray<NSNumber*>*)boneGizmo:(long long)layerId node:(int32_t)node radius:(float)radius {
+    auto* e = self.engine; if (!e) return @[];
+    float v[aurea::Engine::kBoneGizmoFloats];
+    const auto w = e->query_bone_gizmo(static_cast<aurea::u64>(layerId), node, radius, v, aurea::Engine::kBoneGizmoFloats);
+    return w == aurea::Engine::kBoneGizmoFloats ? floats_to_array(v, w) : @[];
+}
+- (BOOL)dragBoneRing:(long long)layerId node:(int32_t)node axis:(int32_t)axis x0:(float)x0 y0:(float)y0 x1:(float)x1 y1:(float)y1 radius:(float)radius continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    return e && node >= 0 && axis >= 0
+        && e->drag_bone_ring(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(node), static_cast<aurea::u32>(axis), x0, y0, x1, y1, radius, continuing);
+}
+- (BOOL)setBoneRotations:(long long)layerId values:(NSArray<NSNumber*>*)values continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    if (!e || values.count < 4) return NO;
+    std::vector<float> v(values.count);
+    for (NSUInteger i = 0; i < values.count; ++i) v[i] = values[i].floatValue;
+    return e->set_bone_rotations(static_cast<aurea::u64>(layerId), v.data(), static_cast<aurea::u32>(v.size() / 4), continuing);
+}
+- (int32_t)boneMirrorPartner:(long long)layerId node:(int32_t)node {
+    auto* e = self.engine; return e ? e->bone_mirror_partner(static_cast<aurea::u64>(layerId), node) : -1;
+}
+- (BOOL)mirrorBonePose:(long long)layerId node:(int32_t)node {
+    auto* e = self.engine; return e && e->mirror_bone_pose(static_cast<aurea::u64>(layerId), node);
+}
+- (BOOL)dragBoneIk:(long long)layerId node:(int32_t)node dx:(float)dx dy:(float)dy continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    return e && node >= 0 && e->drag_bone_ik(static_cast<aurea::u64>(layerId), static_cast<aurea::u32>(node), dx, dy, continuing);
+}
 // ---- AutoRig 3D (0.3.6 BETA) --------------------------------------------------------
 - (int32_t)humanoidStatus:(long long)layerId {
     auto* e = self.engine; return e ? e->humanoid_status(static_cast<aurea::u64>(layerId)) : -1;
@@ -4331,6 +4448,12 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     auto* e = self.engine;
     return e && effectId >= 0 && pin >= 0 && e->puppet_remove_pin(layerId, static_cast<aurea::u32>(effectId), static_cast<aurea::u32>(pin));
 }
+- (BOOL)puppetRotatePins:(long long)layerId effect:(int32_t)effectId pivot:(int32_t)pivot mask:(int32_t)mask u0:(float)u0 v0:(float)v0 u1:(float)u1 v1:(float)v1 autoKey:(BOOL)autoKey continuing:(BOOL)continuing {
+    auto* e = self.engine;
+    return e && effectId >= 0 && pivot >= 0
+        && e->puppet_rotate_pins(layerId, static_cast<aurea::u32>(effectId), static_cast<aurea::u32>(pivot),
+                                 static_cast<aurea::u32>(mask), u0, v0, u1, v1, autoKey, continuing);
+}
 - (long long)addShape3D:(uint32_t)kind name:(NSString*)name {
     auto* e = self.engine;
     if (!e) return -1;
@@ -4534,6 +4657,36 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
         v[6] = st[4]; v[7] = st[5]; v[8] = st[6]; v[9] = st[7];
     }
     return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4]), @(v[5]), @(v[6]), @(v[7]), @(v[8]), @(v[9])];
+}
+
+- (int32_t)bgRemoveApplyForLayer:(long long)layerId {
+    if (auto* e = self.engine) return e->bg_remove_apply(static_cast<aurea::u64>(layerId));
+    return -1;
+}
+
+- (BOOL)bgRemoveAnalyzeEffect:(uint32_t)effectId layer:(long long)layerId {
+    if (auto* e = self.engine) return e->bg_remove_analyze(static_cast<aurea::u64>(layerId), effectId) ? YES : NO;
+    return NO;
+}
+
+- (void)bgRemoveCancel {
+    if (auto* e = self.engine) e->bg_remove_cancel();
+}
+
+- (NSArray<NSNumber *> *)bgRemoveStatusForEffect:(uint32_t)effectId layer:(long long)layerId {
+    long long v[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    if (auto* e = self.engine) {
+        aurea::i64 st[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        if (e->bg_remove_status(static_cast<aurea::u64>(layerId), effectId, st)) {
+            for (int i = 0; i < 8; ++i) v[i] = st[i];
+            v[8] = 1;
+        }
+    }
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4]), @(v[5]), @(v[6]), @(v[7]), @(v[8])];
+}
+
+- (BOOL)bgRemoveNativeAvailable {
+    return aurea::Engine::bg_remove_native_available() ? YES : NO;
 }
 
 - (BOOL)applyEffectPreset:(uint32_t)preset effect:(uint32_t)effectId forLayer:(long long)layerId {
@@ -4743,6 +4896,19 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     return to_ns(why.empty() ? std::string("nao deu para desagrupar") : why);
 }
 
+// Bug #6: vários grupos num passo de desfazer (par do nativeUngroupPrecomps).
+- (NSString*)ungroupPrecomps:(NSArray<NSNumber*>*)layerIds {
+    auto* e = self.engine;
+    if (!e) return @"motor indisponivel";
+    std::vector<aurea::u64> ids;
+    ids.reserve(layerIds.count);
+    for (NSNumber* n in layerIds) ids.push_back(static_cast<aurea::u64>(n.longLongValue));
+    std::string why;
+    const aurea::Result<aurea::u32> r = e->ungroup_precomps(ids.data(), static_cast<aurea::u32>(ids.size()), &why);
+    if (r.ok() && why.empty()) return @"";
+    return to_ns(why.empty() ? std::string("nao deu para desagrupar") : why);
+}
+
 - (void)setTimeRemap:(BOOL)on forLayer:(long long)layerId {
     if (auto* e = self.engine) (void)e->set_time_remap(static_cast<aurea::u64>(layerId), on != NO);
 }
@@ -4891,6 +5057,30 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     if (outWidth) *outWidth = w;
     if (outHeight) *outHeight = h;
     return [NSData dataWithBytes:rgba.data() length:rgba.size()];
+}
+
+- (NSData*)captureEyedropperFrame:(uint32_t)maxDim skipLayer:(long long)layerId skipEffect:(int32_t)effectId
+                          outWidth:(uint32_t*)outWidth outHeight:(uint32_t*)outHeight {
+    auto* e = self.engine;
+    if (!e || maxDim == 0) return nil;
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0;
+    const u32 effect = effectId < 0 ? aurea::kInvalidIndex : static_cast<u32>(effectId);
+    const aurea::Status result = e->capture_eyedropper_frame_rgba(maxDim, static_cast<u64>(layerId), effect, rgba, w, h);
+    if (!result.ok() || rgba.empty()) return nil;
+    if (outWidth) *outWidth = w;
+    if (outHeight) *outHeight = h;
+    return [NSData dataWithBytes:rgba.data() length:rgba.size()];
+}
+
+- (NSArray<NSNumber*>*)sampleCompositionColorAtX:(float)x y:(float)y skipLayer:(long long)layerId
+                                        skipEffect:(int32_t)effectId {
+    auto* e = self.engine;
+    if (!e) return @[];
+    float rgba[4] = {};
+    const u32 effect = effectId < 0 ? aurea::kInvalidIndex : static_cast<u32>(effectId);
+    if (!e->sample_composition_color(x, y, static_cast<u64>(layerId), effect, rgba).ok()) return @[];
+    return @[@(rgba[0]), @(rgba[1]), @(rgba[2]), @(rgba[3])];
 }
 
 - (NSData*)effectPreview:(uint32_t)typeId width:(uint32_t)width height:(uint32_t)height outSize:(CGSize*)outSize {

@@ -640,12 +640,15 @@ private fun InlineName(
  * seguem a regra do motor (≥ 2 camadas visuais destravadas); distribuir pede
  * ≥ 3. Fora da regra, o botão fica apagado e o toque explica o porquê. As
  * outras ações (escolher uma, desagrupar, duplicar, vincular) moram no Copiar
- * e colar do transporte.
+ * e colar do transporte; vincular (bug #9c) também fica aqui, antes do 🗑.
  */
 @Composable
 internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
     val count by remember { derivedStateOf { store.selection.size } }
     val canMask by remember { derivedStateOf { store.selection.size >= 2 && store.canGroupAndMask(store.selection.toList()) } }
+    val groups by remember {
+        derivedStateOf { store.layers.filter { it.id in store.selection && it.kind == LayerType.Group.kind }.map { it.id } }
+    }
     var aligning by remember { mutableStateOf(false) }
     val ink = AureaColors.OnAccent
     val dim = ink.copy(alpha = 0.38f)
@@ -696,6 +699,25 @@ internal fun BatchTopBar(store: EditorStore, ui: EditorUi) {
                     ChromeButton(CupertinoGlyph.MinusCircle, stringResource(R.string.batch_group_exclude_a11y), onClick = {
                         if (canMask) store.groupAndMask(true) else store.showToast(needTwo)
                     }, Modifier.testTag("batch.groupExclude"), size = 19.dp, height = ShellDims.TopBar, tint = if (canMask) ink else dim)
+                    // Bug #6: com grupo na seleção, desagrupar na própria barra (antes
+                    // só pelo ⋮ da camada; com a seleção ligada não havia caminho).
+                    if (groups.isNotEmpty()) {
+                        ChromeButton(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar), onClick = {
+                            store.ungroupPrecomps(groups)
+                            finish()
+                        }, Modifier.testTag("batch.ungroup"), size = 19.dp, height = ShellDims.TopBar, tint = ink)
+                    }
+                    // Bug #9c: vincular TODAS as escolhidas a um pai (um nulo, por exemplo)
+                    // num toque, como na barra de lote antes da 0.3.2 (o popup de pai
+                    // recebe a seleção inteira; o motor liga num passo de desfazer).
+                    Box {
+                        var linking by remember { mutableStateOf(false) }
+                        ChromeButton(CupertinoGlyph.Link, stringResource(R.string.editor_vincular_escolhidas_camada), onClick = {
+                            if (store.playing) store.pause()
+                            linking = true
+                        }, Modifier.testTag("batch.link"), size = 19.dp, height = ShellDims.TopBar, tint = ink)
+                        if (linking) LinkMenu(store, store.selection.toList()) { linking = false }
+                    }
                     ChromeButton(CupertinoGlyph.Trash, stringResource(R.string.editor_excluir_selecao), onClick = {
                         LayerOps.delete(store, store.selection)
                         finish()

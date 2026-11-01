@@ -1,6 +1,13 @@
 package com.aurea.aurea.ui.ds
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -62,6 +69,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -119,12 +127,25 @@ private object FullDims {
 }
 
 /**
+ * O CONTA-GOTAS DA TELA CHEIA (0.4.5): o seletor se recolhe, a prévia fica livre e o
+ * palco amostra (mira sob o dedo, lupa); a cor escolhida volta para o seletor, que
+ * reaparece. Quem cria (o editor) liga o modo do palco em [start] — `onSample` ao
+ * vivo, `onCommit` ao soltar o dedo, `onCancel` se o modo cair — e o desliga em [stop]
+ * (o seletor voltou sem amostra ou saiu da tela).
+ */
+class FullEyedropper(
+    val start: (onSample: (FloatArray) -> Unit, onCommit: (FloatArray) -> Unit, onCancel: () -> Unit) -> Unit,
+    val stop: () -> Unit,
+)
+
+/**
  * O seletor em tela cheia (por cima do editor).
  *
  * @param initial a cor de partida (RGBA sRGB 0..1); a metade "atual" do cartão volta a ela.
  * @param withAlpha sem alfa, as réguas e rótulos de alfa somem.
  * @param onChange a cor nova, ao vivo (só quando muda) e no fechar.
  * @param onDone fechou (✓ ou Voltar); a última cor já foi mandada.
+ * @param eyedropper o conta-gotas do palco (só no editor); nulo = sem o botão.
  */
 @Composable
 fun ColorPickerFull(
@@ -132,16 +153,22 @@ fun ColorPickerFull(
     withAlpha: Boolean = true,
     onChange: (r: Float, g: Float, b: Float, a: Float) -> Unit,
     onDone: () -> Unit,
+    eyedropper: FullEyedropper? = null,
 ) {
     val context = LocalContext.current
     val start = remember { rgba4(initial) }
     val state = remember { ColorPickState(start) }
     val emit by rememberUpdatedState(onChange)
     val done by rememberUpdatedState(onDone)
+    val dropper by rememberUpdatedState(eyedropper)
     val sent = remember { start.copyOf() }
     var closed by remember { mutableStateOf(false) }
     val prefs = remember { context.getSharedPreferences(SavedPalette.PREFS, Context.MODE_PRIVATE) }
     var tab by remember { mutableStateOf(prefs.getString(SavedPalette.KEY_TAB, SavedPalette.TAB_WHEEL) ?: SavedPalette.TAB_WHEEL) }
+    // Conta-gotas: o seletor recolhido enquanto o palco amostra; a cor de antes volta no "Cancelar".
+    var sampling by remember { mutableStateOf(false) }
+    val beforeSampling = remember { FloatArray(4) }
+    val samplingNow = remember { booleanArrayOf(false) }
 
     fun push() {
         val c = state.rgba()
@@ -162,6 +189,56 @@ fun ColorPickerFull(
         prefs.edit().putString(SavedPalette.KEY_TAB, t).apply()
     }
 
+    // A amostra do palco entra com o alfa ATUAL do seletor (o palco não tem alfa).
+    fun takeSample(rgba: FloatArray) {
+        state.set(floatArrayOf(rgba[0], rgba[1], rgba[2], state.alpha))
+        push()
+    }
+
+    fun endSampling() {
+        samplingNow[0] = false
+        sampling = false
+    }
+
+    fun startSampling() {
+        val d = dropper ?: return
+        state.rgba().copyInto(beforeSampling)
+        samplingNow[0] = true
+        sampling = true
+        d.start(
+            { rgba -> if (samplingNow[0]) takeSample(rgba) },
+            { rgba ->
+                if (samplingNow[0]) {
+                    takeSample(rgba)
+                    endSampling()
+                }
+            },
+            {
+                if (samplingNow[0]) {
+                    state.set(beforeSampling)
+                    push()
+                    endSampling()
+                }
+            },
+        )
+    }
+
+    // Voltar sem amostra: desliga o palco e devolve a cor de antes.
+    fun cancelSampling() {
+        if (!samplingNow[0]) return
+        dropper?.stop()
+        state.set(beforeSampling)
+        push()
+        endSampling()
+    }
+
+    // Saiu da tela no meio da amostra (painel/camada mudou): o palco sai do modo.
+    DisposableEffect(Unit) { onDispose { if (samplingNow[0]) dropper?.stop() } }
+
+    if (sampling) {
+        EyedropperSamplingBar(state, onCancel = { cancelSampling() })
+        return
+    }
     Dialog(onDismissRequest = { close() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         FullBody(
             state = state,
@@ -171,7 +248,69 @@ fun ColorPickerFull(
             onTab = { pickTab(it) },
             onEdit = { push() },
             onDone = { close() },
+            onEyedropper = if (eyedropper != null) ({ startSampling() }) else null,
         )
+    }
+}
+
+/**
+ * A faixa do conta-gotas da tela cheia (0.4.5): no rodapé, por cima dos painéis, sem
+ * cobrir a prévia (o toque fora dela passa para o palco). A amostra mostra a cor que o
+ * dedo está pegando; "Cancelar" (ou Voltar) devolve o seletor com a cor de antes.
+ */
+@Composable
+private fun EyedropperSamplingBar(state: ColorPickState, onCancel: () -> Unit) {
+    val cancel by rememberUpdatedState(onCancel)
+    val density = LocalDensity.current
+    val margin = with(density) { 24.dp.roundToPx() }
+    BackHandler { cancel() }
+    val provider = remember(margin) {
+        object : PopupPositionProvider {
+            override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset =
+                IntOffset((windowSize.width - popupContentSize.width) / 2, windowSize.height - popupContentSize.height - margin)
+        }
+    }
+    val title = stringResource(R.string.om_ap_cp_eyedropper)
+    val cancelText = stringResource(R.string.common_cancel)
+    val cancelLabel = stringResource(R.string.om_ap_cp_eyedropper_cancel)
+    val current = state.rgba()
+    Popup(
+        popupPositionProvider = provider,
+        onDismissRequest = { cancel() },
+        properties = PopupProperties(focusable = false, dismissOnBackPress = false, dismissOnClickOutside = false),
+    ) {
+        Row(
+            Modifier
+                .navigationBarsPadding()
+                .clip(RoundedCornerShape(22.dp))
+                .background(PickerColors.Box)
+                .testTag("colorpicker.full.sampling")
+                .padding(start = 8.dp, end = 4.dp)
+                .height(44.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .drawBehind { drawRect(Color(current[0], current[1], current[2], 1f)) }
+                    .semantics { contentDescription = title },
+            )
+            Spacer(Modifier.width(8.dp))
+            CupertinoIcon(CupertinoGlyph.Eyedropper, 15.dp, AureaColors.Accent)
+            Spacer(Modifier.width(4.dp))
+            Box(
+                Modifier
+                    .height(44.dp)
+                    .testTag("colorpicker.full.sampling.cancel")
+                    .semantics { contentDescription = cancelLabel }
+                    .tocavel(shrink = 1f, haptic = true) { cancel() }
+                    .padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(cancelText, style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600, color = AureaColors.Text)))
+            }
+        }
     }
 }
 
@@ -184,6 +323,7 @@ private fun FullBody(
     onTab: (String) -> Unit,
     onEdit: () -> Unit,
     onDone: () -> Unit,
+    onEyedropper: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -232,6 +372,24 @@ private fun FullBody(
             Row(Modifier.fillMaxWidth().height(FullDims.TopBar)) {
                 FullTab(stringResource(R.string.om_ap_cp_wheel), tab != SavedPalette.TAB_RGB, "colorpicker.full.wheel") { onTab(SavedPalette.TAB_WHEEL) }
                 FullTab(stringResource(R.string.om_ap_cp_rgb), tab == SavedPalette.TAB_RGB, "colorpicker.full.rgb") { onTab(SavedPalette.TAB_RGB) }
+                if (onEyedropper != null) {
+                    // 0.4.5: o conta-gotas recolhe a tela cheia e amostra na prévia.
+                    val dropperLabel = stringResource(R.string.om_ap_cp_eyedropper)
+                    val dropperHint = stringResource(R.string.om_ap_cp_eyedropper_full_hint)
+                    Box(
+                        Modifier
+                            .width(FullDims.TopBar)
+                            .fillMaxHeight()
+                            .testTag("colorpicker.full.eyedropper")
+                            .semantics {
+                                contentDescription = dropperLabel
+                                // TalkBack: "toque duas vezes para pegar uma cor da prévia" (a ação é do tocavel).
+                                onClick(label = dropperHint, action = null)
+                            }
+                            .tocavel(shrink = 1f, haptic = true, onClick = onEyedropper),
+                        contentAlignment = Alignment.Center,
+                    ) { CupertinoIcon(CupertinoGlyph.Eyedropper, 20.dp, AureaColors.Text) }
+                }
                 val doneLabel = stringResource(R.string.om_ap_cp_done)
                 Box(
                     Modifier
@@ -599,11 +757,16 @@ private fun WheelPage(state: ColorPickState, start: FloatArray, withAlpha: Boole
                 Spacer(Modifier.height(5.dp))
                 val now = state.rgba()
                 KeepLtr {
-                    Text(
-                        AureaEngine.formatColorCode(now[0], now[1], now[2], now[3], withAlpha),
-                        modifier = Modifier.testTag("colorpicker.full.code"),
-                        style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Text, fontFeatureSettings = "tnum")),
-                    )
+                    // Correção #10 (0.4.4): o código aceita digitar (toque abre o campo).
+                    EditableColorCode(
+                        code = AureaEngine.formatColorCode(now[0], now[1], now[2], now[3], withAlpha),
+                        color = AureaColors.Text,
+                        fontSize = 15.sp,
+                        tag = "colorpicker.full.code",
+                    ) { rgba ->
+                        state.set(if (withAlpha) rgba else floatArrayOf(rgba[0], rgba[1], rgba[2], state.alpha))
+                        edit()
+                    }
                 }
             }
         }
@@ -679,11 +842,19 @@ private fun RgbPage(state: ColorPickState, start: FloatArray, withAlpha: Boolean
                 val hex = AureaEngine.formatColorCode(now[0], now[1], now[2], 1f, false)
                 val text = if (withAlpha) String.format(Locale.ROOT, "%s (%d%%)", hex, (now[3] * 100).roundToInt()) else hex
                 KeepLtr {
-                    Text(
-                        text,
-                        modifier = Modifier.testTag("colorpicker.full.code"),
-                        style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Text, fontFeatureSettings = "tnum")),
-                    )
+                    // Correção #10 (0.4.4): toque abre o campo (com o #RRGGBB; o alfa fica na
+                    // régua A, a não ser que a pessoa digite 8 dígitos).
+                    EditableColorCode(
+                        code = text,
+                        editText = hex,
+                        color = AureaColors.Text,
+                        fontSize = 15.sp,
+                        tag = "colorpicker.full.code",
+                    ) { rgba ->
+                        val keepAlpha = !withAlpha || rgba[3] >= 1f
+                        state.set(if (keepAlpha) floatArrayOf(rgba[0], rgba[1], rgba[2], state.alpha) else rgba)
+                        edit()
+                    }
                 }
             }
         }

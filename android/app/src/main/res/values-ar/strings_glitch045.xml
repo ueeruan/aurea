@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Glitch 0.4.5 (2026-11-01): Glitchify completo, Hyper Glitch, Block Glitch e Trocar canais. Chaves fx045g_*. -->
+<resources>
+    <string name="fx045g_name_hyper_glitch">هايبر غليتش</string>
+    <string name="fx045g_desc_hyper_glitch">غليتش قوي: شرائح تنزلق، كتل في غير مكانها، فصل RGB، آثار بكسلات، ضغط وألوان متبدلة — كلها بشدة وبذرة قابلتين للتحريك.</string>
+    <string name="fx045g_name_block_glitch">غليتش الكتل</string>
+    <string name="fx045g_desc_block_glitch">كتل مستطيلة مُزاحة بقنوات متبدلة ومنفصلة، بأسلوب Block Glitch في DaVinci Resolve. تحكّم في حجم الكتل وكميتها وتكرارها.</string>
+    <string name="fx045g_name_shift_channels">تبديل القنوات</string>
+    <string name="fx045g_desc_shift_channels">اختر مصدر كل قناة (ألفا والأحمر والأخضر والأزرق): من قناة أخرى أو من الإضاءة أو التدرج أو السطوع أو التشبع أو ممتلئة أو مطفأة. مثل Shift Channels في After Effects.</string>
+    <string name="fx045g_transition_channel">قناة الانتقال</string>
+    <string name="fx045g_transform_speed">سرعة التحويل</string>
+    <string name="fx045g_split_mode">وضع الفصل</string>
+    <string name="fx045g_split_speed">سرعة الفصل</string>
+    <string name="fx045g_scale_channel">قناة التحجيم</string>
+    <string name="fx045g_corrupt_offset">إزاحة التلف</string>
+    <string name="fx045g_corrupt_amount">قوة التلف</string>
+    <string name="fx045g_corrupt_opacity">عتامة التلف</string>
+    <string name="fx045g_slice_amount">شريحة مضغوطة</string>
+    <string name="fx045g_slice_position">موضع الشريحة</string>
+    <string name="fx045g_slice_quality">جودة الشريحة</string>
+    <string name="fx045g_slice_shift">اهتزاز الشريحة</string>
+    <string name="fx045g_copy_block_amount">كتل متبادلة</string>
+    <string name="fx045g_copy_block_speed">سرعة الكتل</string>
+    <string name="fx045g_copy_block_width">عرض الكتلة المتبادلة</string>
+    <string name="fx045g_copy_block_height">ارتفاع الكتلة المتبادلة</string>
+    <string name="fx045g_copy_block_direction">اتجاه الكتل</string>
+    <string name="fx045g_compression_jpeg">الضغط (JPEG)</string>
+    <string name="fx045g_palette_dither">تنقيط اللوحة</string>
+    <string name="fx045g_noise_octaves">طبقات التشويش</string>
+    <string name="fx045g_noise_gain">كسب التشويش</string>
+    <string name="fx045g_noise_lacunarity">فجوية التشويش</string>
+    <string name="fx045g_show_noise">إظهار التشويش</string>
+    <string name="fx045g_wiggle_steps">خطوات الاهتزاز</string>
+    <string name="fx045g_slice_height">ارتفاع الشريحة</string>
+    <string name="fx045g_compression">الضغط</string>
+    <string name="fx045g_color_swap">تبديل الألوان</string>
+    <string name="fx045g_amount">الكمية</string>
+    <string name="fx045g_size_variation">تفاوت الحجم</string>
+    <string name="fx045g_channel_swap">تبديل القنوات</string>
+    <string name="fx045g_take_alpha">خذ ألفا من</string>
+    <string name="fx045g_take_red">خذ الأحمر من</string>
+    <string name="fx045g_take_green">خذ الأخضر من</string>
+    <string name="fx045g_take_blue">خذ الأزرق من</string>
+    <string name="fx045g_opt_bands_random">شرائط (عشوائي)</string>
+    <string name="fx045g_opt_lightness">السطوع</string>
+    <string name="fx045g_opt_rgb_default">RGB (افتراضي)</string>
+    <string name="fx045g_opt_red_cyan">أحمر-سماوي</string>
+    <string name="fx045g_opt_green_magenta">أخضر-أرجواني</string>
+    <string name="fx045g_opt_blue_yellow">أزرق-أصفر</string>
+    <string name="fx045g_opt_y_luma">Y′ (الإضاءة)</string>
+    <string name="fx045g_opt_cb">Cb</string>
+    <string name="fx045g_opt_cr">Cr</string>
+    <string name="fx045g_opt_uniform">موحّد</string>
+    <string name="fx045g_opt_luma">لوما</string>
+    <string name="fx045g_opt_full">ممتلئ</string>
+</resources>

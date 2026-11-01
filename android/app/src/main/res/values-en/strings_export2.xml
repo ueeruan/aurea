@@ -21,4 +21,5 @@
     <string name="app_export_codec_hung_retry">The phone\'s video encoder froze. We\'ll try again in compatibility mode.</string>
     <string name="app_export_retry_compatible">Trying again in compatibility mode…</string>
     <string name="app_export_hevc_to_h264">This phone has no HEVC encoder for this size: exporting in H.264.</string>
+    <string name="expfail_after_ladder">We also tried more compatible modes (H.264, software encoder and a lower resolution) and none worked on this phone. Support code: E%1$d-%2$d-%3$d.</string>
 </resources>

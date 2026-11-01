@@ -107,7 +107,14 @@ struct ContentView: View {
         }
         .overlay {
             if let request = model.liveNoticePopup { LiveNoticePopup(request: request) }
-            if model.showProjectSettings { ProjectSettingsPanel(onDismiss: { model.showProjectSettings = false }) }
+            if model.showProjectSettings {
+                // 0.4.5: o conta-gotas da cor de fundo recolhe a tela cheia; o painel sai da
+                // frente da prévia até a cor voltar (fica montado: o passo de desfazer continua).
+                ProjectSettingsPanel(onDismiss: { model.showProjectSettings = false })
+                    .opacity(model.eyedropper?.collapsed == true ? 0 : 1)
+                    .allowsHitTesting(model.eyedropper?.collapsed != true)
+                    .accessibilityHidden(model.eyedropper?.collapsed == true)
+            }
             if let request = model.actionSheet { AureaActionSheet(title: request.title, message: request.message, actions: request.actions) { model.actionSheet = nil } }
             if let request = model.colorSheet {
                 // Omega aparência (P0-5 / P1-8): com âncora, o balão com o seletor

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="eng_ungroup_effects">the group has effects</string>
+    <string name="eng_ungroup_masks">the group has masks</string>
+    <string name="eng_ungroup_blend">the group has a blend mode</string>
+    <string name="eng_ungroup_opacity">the group has its own opacity</string>
+    <string name="eng_ungroup_3d">the group is in 3D</string>
+    <string name="eng_ungroup_transition">the group has a transition or echo</string>
+    <string name="eng_ungroup_background">the group has its own background</string>
+    <string name="eng_ungroup_camera_light">the group has its own camera or light</string>
+    <string name="eng_ungroup_animation">the group has an in or out animation</string>
+</resources>

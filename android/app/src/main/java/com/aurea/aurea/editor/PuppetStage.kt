@@ -3,8 +3,10 @@ package com.aurea.aurea.editor
 import com.aurea.aurea.editor.panels.EditorPanel
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,9 +66,16 @@ internal object PuppetStage {
     var selected by mutableIntStateOf(-1)
     /** A doca (o antigo Rig) pediu o modo de pinos nesta camada assim que o cartão abrir. */
     var pendingEdit by mutableLongStateOf(0L)
+    /** 0.4.5: "Grupo" ligado — tocar num pino põe/tira ele do grupo que gira em volta do escolhido (o pivô). */
+    var grouping by mutableStateOf(false)
+    /** Pinos do grupo (bit i = pino i; o pivô nunca entra). */
+    var group by mutableIntStateOf(0)
+
+    /** Pinos que giram em volta do escolhido (sem o próprio pivô). */
+    fun ringMask(): Int = if (selected >= 0) group and (1 shl selected).inv() else 0
 
     fun open(layerId: Long, effectId: Int) {
-        if (layer != layerId || effect != effectId) { selected = -1; editing = false }
+        if (layer != layerId || effect != effectId) { selected = -1; editing = false; grouping = false; group = 0 }
         layer = layerId
         effect = effectId
         if (pendingEdit == layerId) { editing = true; pendingEdit = 0L }
@@ -77,8 +86,16 @@ internal object PuppetStage {
         effect = -1
         editing = false
         selected = -1
+        grouping = false
+        group = 0
     }
 }
+
+/** Raio do anel de girar o grupo de pinos e a folga do toque nele (0.4.5). */
+private val PuppetRing = 56.dp
+private val PuppetRingReach = 16.dp
+/** Alcance do toque num pino (era 24 dp: pino pequeno era difícil de pegar). */
+private val PinReach = 32.dp
 
 /** Modo de pinos ligado na camada escolhida? */
 internal fun puppetActive(store: EditorStore): Boolean {
@@ -146,6 +163,7 @@ internal fun DrawScope.drawPuppetOverlay(store: EditorStore, m: StageMapper) {
     }
     val under = ShellColors.OutlineUnder
     val pins = store.puppetPins(PuppetStage.layer, PuppetStage.effect)
+    val group = PuppetStage.ringMask()
     var k = 0
     while (k + PuppetStage.PIN_FLOATS <= pins.size) {
         val index = pins[k].toInt()
@@ -155,25 +173,81 @@ internal fun DrawScope.drawPuppetOverlay(store: EditorStore, m: StageMapper) {
         drawCircle(under, r + 2.dp.toPx(), o)
         if (chosen) drawCircle(PinYellow, r, o)
         else drawCircle(PinYellow, r - 1.dp.toPx(), o, style = Stroke(2.5.dp.toPx()))
+        // 0.4.5: pino do grupo = miolo azul; o pivô (escolhido com grupo) = cruz.
+        if ((group shr index) and 1 == 1) drawCircle(PinGroup, 3.5.dp.toPx(), o)
+        if (chosen && group != 0) {
+            val s = 4.dp.toPx()
+            drawLine(under, Offset(o.x - s, o.y), Offset(o.x + s, o.y), 2.dp.toPx())
+            drawLine(under, Offset(o.x, o.y - s), Offset(o.x, o.y + s), 2.dp.toPx())
+        }
         // Key do pino no cabeçote: anel externo.
         if (pins[k + 3] > 0.5f) drawCircle(PinYellow, r + 5.dp.toPx(), o, style = Stroke(1.5.dp.toPx()))
         k += PuppetStage.PIN_FLOATS
     }
+    // Anel de girar o grupo em volta do pivô.
+    pivotScreen(pins, c, m)?.let { o ->
+        if (group == 0) return@let
+        drawCircle(under, PuppetRing.toPx(), o, style = Stroke(4.dp.toPx()))
+        drawCircle(PinGroup, PuppetRing.toPx(), o, style = Stroke(2.dp.toPx()))
+    }
 }
 
-/** Pino sob o dedo (índice do motor) ou −1. */
-private fun pickPin(pins: FloatArray, c: FloatArray, m: StageMapper, x: Float, y: Float, reach: Float): Int {
+private val PinGroup = Color(0xFF4FC3FF)
+
+/** Onde o pivô (o pino escolhido) está na tela, ou nulo. */
+private fun pivotScreen(pins: FloatArray, c: FloatArray, m: StageMapper): Offset? {
     val p = FloatArray(2)
-    var best = reach
-    var hit = -1
+    var k = 0
+    while (k + PuppetStage.PIN_FLOATS <= pins.size) {
+        if (pins[k].toInt() == PuppetStage.selected) {
+            uvToComp(c, pins[k + 1], pins[k + 2], p)
+            return Offset(m.sx(p[0]), m.sy(p[1]))
+        }
+        k += PuppetStage.PIN_FLOATS
+    }
+    return null
+}
+
+/** Pinos sob o dedo (índices do motor), do mais perto ao mais longe. */
+private fun pickPins(pins: FloatArray, c: FloatArray, m: StageMapper, x: Float, y: Float, reach: Float): List<Int> {
+    val p = FloatArray(2)
+    val hits = ArrayList<Pair<Float, Int>>()
     var k = 0
     while (k + PuppetStage.PIN_FLOATS <= pins.size) {
         uvToComp(c, pins[k + 1], pins[k + 2], p)
         val d = hypot(x - m.sx(p[0]), y - m.sy(p[1]))
-        if (d < best) { best = d; hit = pins[k].toInt() }
+        if (d < reach) hits += d to pins[k].toInt()
         k += PuppetStage.PIN_FLOATS
     }
-    return hit
+    return hits.sortedBy { it.first }.map { it.second }
+}
+
+/** Arrasto no anel: o grupo gira em volta do pivô (motor, px da camada). Um passo de desfazer. */
+private suspend fun AwaitPointerEventScope.puppetRingGesture(store: EditorStore, m: StageMapper, down: PointerInputChange, c: FloatArray) {
+    val layer = PuppetStage.layer
+    val effect = PuppetStage.effect
+    val pivot = PuppetStage.selected
+    val mask = PuppetStage.ringMask()
+    val slop = 6.dp.toPx()
+    down.consume()
+    var moved = false
+    var sent = false
+    var last = down.position
+    val a = FloatArray(2)
+    val b = FloatArray(2)
+    while (true) {
+        val e = awaitPointerEvent()
+        val ch = e.changes.firstOrNull { it.id == down.id } ?: break
+        ch.consume()
+        if (!ch.pressed) break
+        if (!moved && hypot(ch.position.x - down.position.x, ch.position.y - down.position.y) < slop) continue
+        moved = true
+        if (ch.position == last) continue
+        if (!compToUv(c, m.cx(last.x), m.cy(last.y), a) || !compToUv(c, m.cx(ch.position.x), m.cy(ch.position.y), b)) continue
+        if (store.puppetRotatePins(layer, effect, pivot, mask, a[0], a[1], b[0], b[1], sent)) sent = true
+        last = ch.position
+    }
+    if (sent) store.rigGestureEnd()
 }
 
 /** Gesto no modo de pinos. Chamado com o primeiro toque; consome até o dedo subir. */
@@ -181,7 +255,19 @@ internal suspend fun AwaitPointerEventScope.puppetGesture(store: EditorStore, m:
     val layer = PuppetStage.layer
     val effect = PuppetStage.effect
     val c = puppetCorners(store)
-    val hit = if (m.valid && c != null) pickPin(store.puppetPins(layer, effect), c, m, down.position.x, down.position.y, 24.dp.toPx()) else -1
+    val pins = if (m.valid && c != null) store.puppetPins(layer, effect) else FloatArray(0)
+    val hits = if (m.valid && c != null) pickPins(pins, c, m, down.position.x, down.position.y, PinReach.toPx()) else emptyList()
+    // 0.4.5: o anel em volta do pivô (fora dos pinos) gira o grupo.
+    if (hits.isEmpty() && c != null && m.valid && PuppetStage.ringMask() != 0) {
+        val o = pivotScreen(pins, c, m)
+        if (o != null && kotlin.math.abs(hypot(down.position.x - o.x, down.position.y - o.y) - PuppetRing.toPx()) < PuppetRingReach.toPx()) {
+            puppetRingGesture(store, m, down, c)
+            return
+        }
+    }
+    // Pino escolhido entre os candidatos fica (o arrasto leva ele); senão, o mais perto.
+    val keepCurrent = PuppetStage.selected >= 0 && PuppetStage.selected in hits
+    val hit = if (keepCurrent) PuppetStage.selected else hits.firstOrNull() ?: -1
     val slop = 6.dp.toPx()
     down.consume()
     var moved = false
@@ -193,6 +279,7 @@ internal suspend fun AwaitPointerEventScope.puppetGesture(store: EditorStore, m:
         if (e == null) {
             store.puppetRemovePin(layer, effect, hit)
             if (PuppetStage.selected == hit) PuppetStage.selected = -1
+            PuppetStage.group = PuppetStage.group and (1 shl hit).inv()
             while (true) {   // o resto do toque não faz mais nada
                 val rest = awaitPointerEvent()
                 val ch = rest.changes.firstOrNull { it.id == down.id } ?: return
@@ -216,7 +303,19 @@ internal suspend fun AwaitPointerEventScope.puppetGesture(store: EditorStore, m:
         return
     }
     if (moved) return
-    if (hit >= 0) { PuppetStage.selected = hit; return }
+    if (hit >= 0) {
+        if (PuppetStage.grouping) {
+            // Grupo: tocar põe/tira o pino (o pivô não entra; sem pivô, o primeiro tocado vira o pivô).
+            if (PuppetStage.selected < 0) PuppetStage.selected = hit
+            else if (hit != PuppetStage.selected) PuppetStage.group = PuppetStage.group xor (1 shl hit)
+            store.rigGestureEnd()
+            return
+        }
+        // Tocar de novo em pinos sobrepostos passa para o próximo debaixo do dedo.
+        PuppetStage.selected = if (keepCurrent && hits.size > 1) hits[(hits.indexOf(hit) + 1) % hits.size] else hit
+        return
+    }
+    if (PuppetStage.grouping) return   // no modo Grupo, tocar fora não cria pino
     // Toque fora de pino, em cima da camada: pino novo.
     if (c == null || !m.valid || !compToUv(c, m.cx(down.position.x), m.cy(down.position.y), uv)) return
     if (uv[0] < -0.02f || uv[0] > 1.02f || uv[1] < -0.02f || uv[1] > 1.02f) { PuppetStage.selected = -1; return }
@@ -260,6 +359,23 @@ internal fun PuppetCardTools(store: EditorStore, effectId: Int) {
         ) {
             Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600,
                 color = if (editing) Color.Black else AureaColors.Text)))
+        }
+        // 0.4.5: girar um grupo de pinos em volta do pino escolhido (o pivô).
+        if (editing) {
+            val groupLabel = stringResource(R.string.puppet_group)
+            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                com.aurea.aurea.editor.panels.KitChip(groupLabel, on = PuppetStage.grouping,
+                    modifier = Modifier.testTag("fx.puppet.group")) {
+                    PuppetStage.grouping = !PuppetStage.grouping
+                }
+                if (PuppetStage.group != 0) com.aurea.aurea.editor.panels.KitChip(stringResource(R.string.puppet_group_clear), on = false) {
+                    PuppetStage.group = 0
+                }
+            }
+            if (PuppetStage.grouping || PuppetStage.group != 0) Text(
+                stringResource(R.string.puppet_group_hint),
+                style = AureaType.Base.merge(TextStyle(fontSize = 11.5.sp, color = AureaColors.Muted)),
+            )
         }
     }
 }

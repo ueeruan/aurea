@@ -30,55 +30,147 @@ internal const val BONE_FLOATS = 10
 internal fun rigPoseActive(store: EditorStore): Boolean =
     store.sceneEditor && store.rigPoseMode && store.selection.size == 1 && store.poseBones != null
 
+/** Floats de `Engine::query_bone_gizmo` (anéis da articulação). */
+internal const val BONE_GIZMO_FLOATS = 21
+
+/** Raio dos anéis na tela e a folga do toque neles (0.4.5). */
+private val RingRadius = 64.dp
+private val RingReach = 16.dp
+/** Anel de fora (em volta do olhar) = raio × este fator. */
+private const val OUTER_RING = 1.3f
+/** Cores dos eixos locais (X vermelho, Y verde, Z azul, como no Blender/Maya). */
+internal val PoseAxisColors = arrayOf(Color(0xFFFF5A5F), Color(0xFF5BD86A), Color(0xFF4F9BFF))
+
 internal fun DrawScope.drawRigPoseOverlay(store: EditorStore, m: StageMapper) {
     val b = store.poseBones ?: return
     val chosen = store.poseBone
     val count = b.size / BONE_FLOATS
     val bone = Color.White.copy(alpha = .85f)
-    // Ossos: do pai até a junta.
-    for (i in 0 until count) {
-        val o = i * BONE_FLOATS
-        val parent = b[o + 1].toInt()
-        if (parent < 0 || b[o + 9] < .5f || b[parent * BONE_FLOATS + 9] < .5f) continue
-        val p = parent * BONE_FLOATS
-        val a = Offset(m.sx(b[p + 7]), m.sy(b[p + 8]))
-        val c = Offset(m.sx(b[o + 7]), m.sy(b[o + 8]))
-        val on = b[o].toInt() == chosen || b[p].toInt() == chosen
-        drawLine(ShellColors.OutlineUnder, a, c, 4.dp.toPx(), StrokeCap.Round)
-        drawLine(if (on) AureaColors.Accent else bone, a, c, 2.dp.toPx(), StrokeCap.Round)
+    if (!store.skeletonHidden) {
+        // Ossos: do pai até a junta; o osso escolhido (e os filhos dele) mais grosso e aceso.
+        for (i in 0 until count) {
+            val o = i * BONE_FLOATS
+            val parent = b[o + 1].toInt()
+            if (parent < 0 || b[o + 9] < .5f || b[parent * BONE_FLOATS + 9] < .5f) continue
+            val p = parent * BONE_FLOATS
+            val a = Offset(m.sx(b[p + 7]), m.sy(b[p + 8]))
+            val c = Offset(m.sx(b[o + 7]), m.sy(b[o + 8]))
+            val on = b[o].toInt() == chosen || b[p].toInt() == chosen
+            drawLine(ShellColors.OutlineUnder, a, c, (if (on) 6.dp else 4.dp).toPx(), StrokeCap.Round)
+            drawLine(if (on) AureaColors.Accent else bone, a, c, (if (on) 3.5.dp else 2.dp).toPx(), StrokeCap.Round)
+        }
+        // Juntas: ponto maior que o osso, com a área de toque marcada por um anel
+        // fino; a escolhida acesa; anel destaque = keyframe no cabeçote.
+        for (i in 0 until count) {
+            val o = i * BONE_FLOATS
+            if (b[o + 9] < .5f) continue
+            val c = Offset(m.sx(b[o + 7]), m.sy(b[o + 8]))
+            val on = b[o].toInt() == chosen
+            val r = (if (on) 8.dp else 6.dp).toPx()
+            drawCircle(Color.White.copy(alpha = .22f), 13.dp.toPx(), c, style = Stroke(1.dp.toPx()))
+            drawCircle(ShellColors.OutlineUnder, r + 1.5.dp.toPx(), c)
+            drawCircle(if (on) AureaColors.Accent else Color.White, r, c)
+            if (b[o + 6] > .5f) drawCircle(AureaColors.Accent, r + 4.dp.toPx(), c, style = Stroke(2.dp.toPx()))
+        }
     }
-    // Juntas: a escolhida maior e acesa; anel = keyframe no cabeçote.
-    for (i in 0 until count) {
-        val o = i * BONE_FLOATS
-        if (b[o + 9] < .5f) continue
-        val c = Offset(m.sx(b[o + 7]), m.sy(b[o + 8]))
-        val on = b[o].toInt() == chosen
-        val r = (if (on) 7.dp else 4.5.dp).toPx()
-        drawCircle(ShellColors.OutlineUnder, r + 1.5.dp.toPx(), c)
-        drawCircle(if (on) AureaColors.Accent else Color.White, r, c)
-        if (b[o + 6] > .5f) drawCircle(AureaColors.Accent, r + 4.dp.toPx(), c, style = Stroke(2.dp.toPx()))
+    drawPoseRings(store, m)
+}
+
+/** Anéis de rotação do osso escolhido: X/Y/Z locais (metade de trás apagada) e o de fora (olhar). */
+private fun DrawScope.drawPoseRings(store: EditorStore, m: StageMapper) {
+    val g = store.poseGizmo ?: return
+    if (g[2] < .5f || store.poseMove) return
+    val c = Offset(m.sx(g[0]), m.sy(g[1]))
+    val r = RingRadius.toPx()
+    drawCircle(ShellColors.OutlineUnder, r * OUTER_RING, c, style = Stroke(3.5.dp.toPx()))
+    drawCircle(Color.White.copy(alpha = .75f), r * OUTER_RING, c, style = Stroke(1.5.dp.toPx()))
+    val steps = 48
+    for (axis in 0 until 3) {
+        val o = 3 + axis * 6
+        val color = PoseAxisColors[axis]
+        var prev: Offset? = null
+        var prevFront = true
+        for (s in 0..steps) {
+            val t = (2.0 * Math.PI * s / steps).toFloat()
+            val cs = kotlin.math.cos(t); val sn = kotlin.math.sin(t)
+            val p = Offset(c.x + (g[o] * cs + g[o + 3] * sn) * r, c.y + (g[o + 1] * cs + g[o + 4] * sn) * r)
+            val front = g[o + 2] * cs + g[o + 5] * sn >= -0.05f
+            prev?.let {
+                if (prevFront && front) drawLine(ShellColors.OutlineUnder, it, p, 4.5.dp.toPx(), StrokeCap.Round)
+                drawLine(if (prevFront && front) color else color.copy(alpha = .3f), it, p,
+                    (if (prevFront && front) 2.5.dp else 1.5.dp).toPx(), StrokeCap.Round)
+            }
+            prev = p
+            prevFront = front
+        }
     }
 }
 
-/** Junta mais perto do dedo (até [reach] px do palco): o NÓ do osso, ou −1. */
-internal fun pickPoseBone(store: EditorStore, m: StageMapper, x: Float, y: Float, reach: Float): Int {
-    val b = store.poseBones ?: return -1
+/** Anel sob o dedo (0..2 eixo local, 3 = o de fora) ou −1. A junta em si (miolo) não conta. */
+internal fun pickPoseRing(store: EditorStore, m: StageMapper, x: Float, y: Float, ringPx: Float, reach: Float, core: Float): Int {
+    val g = store.poseGizmo ?: return -1
+    if (g[2] < .5f || store.poseMove) return -1
+    val cx = m.sx(g[0]); val cy = m.sy(g[1])
+    val dc = hypot(x - cx, y - cy)
+    if (dc < core) return -1
     var best = reach
     var hit = -1
+    val steps = 64
+    for (axis in 0 until 3) {
+        val o = 3 + axis * 6
+        for (s in 0 until steps) {
+            val t = (2.0 * Math.PI * s / steps).toFloat()
+            val cs = kotlin.math.cos(t); val sn = kotlin.math.sin(t)
+            // Só a metade da frente do anel pega o dedo.
+            if (g[o + 2] * cs + g[o + 5] * sn < -0.05f) continue
+            val d = hypot(x - (cx + (g[o] * cs + g[o + 3] * sn) * ringPx), y - (cy + (g[o + 1] * cs + g[o + 4] * sn) * ringPx))
+            if (d < best) { best = d; hit = axis }
+        }
+    }
+    if (hit < 0 && kotlin.math.abs(dc - ringPx * OUTER_RING) < reach) hit = 3
+    return hit
+}
+
+/** Juntas perto do dedo (até [reach] px do palco), da mais perto à mais longe: os NÓS. */
+internal fun pickPoseBones(store: EditorStore, m: StageMapper, x: Float, y: Float, reach: Float): List<Int> {
+    val b = store.poseBones ?: return emptyList()
+    if (store.skeletonHidden) return emptyList()
+    val hits = ArrayList<Pair<Float, Int>>()
     for (i in 0 until b.size / BONE_FLOATS) {
         val o = i * BONE_FLOATS
         if (b[o + 9] < .5f) continue
         val d = hypot(x - m.sx(b[o + 7]), y - m.sy(b[o + 8]))
-        if (d < best) { best = d; hit = b[o].toInt() }
+        if (d < reach) hits += d to b[o].toInt()
     }
-    return hit
+    return hits.sortedBy { it.first }.map { it.second }
 }
 
-/** Gesto no modo de pose (só começa com uma junta perto do dedo ou um osso escolhido). */
+/** Junta mais perto do dedo (até [reach] px do palco): o NÓ do osso, ou −1. */
+internal fun pickPoseBone(store: EditorStore, m: StageMapper, x: Float, y: Float, reach: Float): Int =
+    pickPoseBones(store, m, x, y, reach).firstOrNull() ?: -1
+
+/**
+ * Gesto no modo de pose (0.4.5):
+ *  - no ANEL de um eixo, gira o osso no eixo LOCAL dele, na articulação; no
+ *    anel de fora, gira em volta do olhar;
+ *  - numa junta, escolhe o osso; tocar de novo no mesmo lugar passa para a
+ *    junta de baixo (juntas sobrepostas); arrastar gira como trackball (ou
+ *    leva a cadeia, com o IK ligado);
+ *  - dois dedos giram em volta do olhar. Cada gesto = UM passo de desfazer.
+ */
 internal suspend fun AwaitPointerEventScope.rigPoseGesture(store: EditorStore, m: StageMapper, down: PointerInputChange, slop: Float) {
     down.consume()
-    val near = pickPoseBone(store, m, down.position.x, down.position.y, 36.dp.toPx())
-    if (near >= 0 && near != store.poseBone) store.choosePoseBone(near)
+    val ringPx = RingRadius.toPx()
+    val ring = if (store.poseBone >= 0) pickPoseRing(store, m, down.position.x, down.position.y, ringPx, RingReach.toPx(), 18.dp.toPx()) else -1
+    if (ring >= 0) {
+        poseRingGesture(store, m, down, slop, ring, ringPx / m.fit)
+        return
+    }
+    val nearList = pickPoseBones(store, m, down.position.x, down.position.y, 36.dp.toPx())
+    val near = nearList.firstOrNull() ?: -1
+    // O osso escolhido entre os candidatos fica (o arrasto gira ele); senão, o mais perto.
+    val keepCurrent = store.poseBone >= 0 && store.poseBone in nearList
+    if (near >= 0 && !keepCurrent) store.choosePoseBone(near)
     var moved = false
     var began = false
     var last = down.position
@@ -114,13 +206,44 @@ internal suspend fun AwaitPointerEventScope.rigPoseGesture(store: EditorStore, m
             last = c.position
             if (dx == 0f && dy == 0f) continue
             if (!began) { store.beginGesture("posar osso"); began = true }
-            store.dragPoseBone(dx, dy, 0f)
+            // 0.4.5: IK simples leva a cadeia; "Mover" e o resto seguem como antes.
+            if (store.poseIk && !store.poseMove) store.dragPoseIk(dx, dy) else store.dragPoseBone(dx, dy, 0f)
         }
     } finally {
         if (began) { store.endGesture(); store.endPoseGesture() }
     }
+    if (moved) return
     // Toque no vazio: solta o osso (o dedo volta a orbitar a cena).
-    if (!moved && near < 0) store.choosePoseBone(-1)
+    if (near < 0) { store.choosePoseBone(-1); return }
+    // Toque de novo em juntas sobrepostas: passa para a próxima debaixo do dedo.
+    if (keepCurrent && nearList.size > 1) {
+        val i = nearList.indexOf(store.poseBone)
+        store.choosePoseBone(nearList[(i + 1) % nearList.size])
+    }
+}
+
+/** Arrasto num anel: gira o osso no eixo dele (0..2) ou em volta do olhar (3). Um desfazer. */
+private suspend fun AwaitPointerEventScope.poseRingGesture(store: EditorStore, m: StageMapper, down: PointerInputChange,
+                                                           slop: Float, axis: Int, radiusComp: Float) {
+    var moved = false
+    var began = false
+    var last = down.position
+    try {
+        while (true) {
+            val e = awaitPointerEvent()
+            e.changes.forEach { it.consume() }
+            val c = e.changes.firstOrNull { it.id == down.id } ?: break
+            if (!c.pressed) break
+            if (!moved && hypot(c.position.x - down.position.x, c.position.y - down.position.y) < slop) continue
+            moved = true
+            if (c.position == last) continue
+            if (!began) { store.beginGesture("girar osso"); began = true }
+            store.dragPoseRing(axis, m.cx(last.x), m.cy(last.y), m.cx(c.position.x), m.cy(c.position.y), radiusComp)
+            last = c.position
+        }
+    } finally {
+        if (began) { store.endGesture(); store.endPoseGesture() }
+    }
 }
 
 // =============================================================================

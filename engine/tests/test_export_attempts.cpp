@@ -272,3 +272,59 @@ AUREA_TEST(ExportAttempts, AndroidCodecNamesTellSoftwareFromHardware) {
     AUREA_CHECK(!android_codec::software_by_name("c2.exynos.h264.encoder"));
     AUREA_CHECK(!android_codec::software_by_name("OMX.IMG.TOPAZ.VIDEO.Encoder"));
 }
+
+// 0.4.5 ("exportação ainda falha para alguns usuários"): a correção da 0.4.0
+// recusava TODO lado menor pedido ímpar ("dimensoes de exportacao invalidas")
+// enquanto as duas telas mostravam o tamanho alinhado; os degraus 0..2 falhavam
+// e o vídeo só saía em 720p. Agora só o valor absurdo (acima do teto do sink,
+// par ou ímpar) é recusado; o ímpar plausível sai alinhado, como as telas mostram.
+AUREA_TEST(ExportAttempts, OddRequestedSideAlignsAndOnlyAbsurdValuesAreRejected) {
+    auto s = export_attempt_frame_size(1920, 1080, 1079, false);
+    AUREA_CHECK_EQ(s.width, 1920u); AUREA_CHECK_EQ(s.height, 1080u);
+    s = export_attempt_frame_size(1920, 1080, 1079, true);
+    AUREA_CHECK_EQ(s.width, 1920u); AUREA_CHECK_EQ(s.height, 1080u);
+    s = export_attempt_frame_size(1080, 1920, 721, false);
+    AUREA_CHECK_EQ(s.width, 722u); AUREA_CHECK_EQ(s.height, 1280u);
+    for (u32 want : {481u, 719u, 1079u, 1081u, 1439u, 2159u})
+        for (bool align : {false, true}) {
+            const auto z = export_attempt_frame_size(1920, 1080, want, align);
+            AUREA_CHECK(z.width > 0 && z.height > 0 && z.width % 2 == 0 && z.height % 2 == 0);
+            AUREA_CHECK_EQ(z.width % kExportLongSideAlign, 0u);
+        }
+    // Absurdo (ímpar ou par): nunca vira um tamanho gigante para o encoder.
+    for (u32 want : {std::numeric_limits<u32>::max(), std::numeric_limits<u32>::max() - 1u, kExportMaxFrameSide + 2u})
+        for (bool align : {false, true}) {
+            const auto z = export_attempt_frame_size(1920, 1080, want, align);
+            AUREA_CHECK_EQ(z.width, 0u); AUREA_CHECK_EQ(z.height, 0u);
+        }
+    // O teto do sink ainda é um pedido válido (o teto do aparelho reduz depois).
+    AUREA_CHECK(export_attempt_frame_size(1080, 1080, kExportMaxFrameSide, false).width > 0);
+}
+
+// 0.4.5: o sink recusou o codec/formato ao abrir (ExportFailure::Unsupported):
+// a escada tenta H.264 e o software NO MESMO TAMANHO antes de tirar pixels.
+// Antes era tratado como memória e um HEVC 1080p ia direto para 720p.
+AUREA_TEST(ExportAttempts, UnsupportedCodecTriesH264AndSoftwareBeforeFewerPixels) {
+    const ExportRequestShape r = shape(1080, 30.0, true);
+    const ExportRetryKind kind = export_retry_kind(code(Errc::UnsupportedCodec), why(ExportFailure::Unsupported), false, false);
+    AUREA_CHECK(kind == ExportRetryKind::Encoder);
+    AUREA_CHECK(export_retry_kind(code(Errc::NotSupported), why(ExportFailure::Unsupported), false, false) == ExportRetryKind::Encoder);
+    AUREA_CHECK_EQ(export_next_attempt(0, kind, r), 1u);   // H.264, 1080
+    AUREA_CHECK(export_attempt_plan(1).forceH264 && export_attempt_plan(1).shortSideCap == 0u);
+    AUREA_CHECK_EQ(export_next_attempt(1, kind, r), 2u);   // software, 1080
+    AUREA_CHECK_EQ(export_next_attempt(2, kind, r), 3u);   // só agora 720p
+    // Falha de memória/GPU continua indo direto para menos pixels.
+    AUREA_CHECK(export_retry_kind(code(Errc::OutOfMemory), why(ExportFailure::GpuMemory), false, false) == ExportRetryKind::Memory);
+    // Sem motivo do motor (falha antes do sink), NotSupported continua sendo tamanho.
+    AUREA_CHECK(export_retry_kind(code(Errc::NotSupported), 0, false, false) == ExportRetryKind::Memory);
+}
+
+// 0.4.5: a taxa enviada ao encoder de hardware respeita o teto que ele anuncia
+// (getBitrateRange); teto desconhecido mantém o pedido.
+AUREA_TEST(ExportAttempts, EncoderBitrateRespectsTheAnnouncedCeiling) {
+    AUREA_CHECK_EQ(export_encoder_bitrate_bps(18'000'000u, 14'000'000u), 14'000'000u);
+    AUREA_CHECK_EQ(export_encoder_bitrate_bps(8'000'000u, 14'000'000u), 8'000'000u);
+    AUREA_CHECK_EQ(export_encoder_bitrate_bps(18'000'000u, 0u), 18'000'000u);
+    AUREA_CHECK_EQ(export_encoder_bitrate_bps(0u, 14'000'000u), 0u);
+    AUREA_CHECK_EQ(export_encoder_bitrate_bps(18'000'000u, 1u), 100'000u);
+}

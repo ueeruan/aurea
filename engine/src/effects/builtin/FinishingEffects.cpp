@@ -114,7 +114,10 @@ public:
 // -----------------------------------------------------------------------------
 class Mirror final : public Effect {
 public:
-    enum : u32 { kCenter = 0, kAngle, kFlip };
+    // Novos sempre no FIM (0.4.5, o Mirror do Alight Motion): espelhar nos dois
+    // eixos e o modo "sobrepor cópia" — a camada inteira fica e a cópia
+    // espelhada entra por cima (ou por trás), com opacidade.
+    enum : u32 { kCenter = 0, kAngle, kFlip, kBothAxes, kMode, kCopyOpacity, kCopyBehind };
 
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kMirror, "Espelho", "Distorcer", EffectClass::Domain};
@@ -126,6 +129,17 @@ public:
         // 0° = reta vertical, a metade da esquerda se repete à direita.
         p.add_angle("angle", "Ângulo", 0.0f);
         p.add_bool("flip_side", "Trocar o lado", false);
+        // A reta perpendicular também espelha: um quarto se repete nos quatro.
+        p.add_bool("both_axes", "Espelhar nos dois eixos", false);
+        static const char* const kModes[] = {"Substituir o lado", "Sobrepor cópia"};
+        p.add_enum("mode", "Modo", kModes, 2, 0);
+        p.add_float("copy_opacity", "Opacidade da cópia", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
+        p.add_bool("copy_behind", "Cópia atrás da camada", false);
+        p.set_tip(kMode, "Sobrepor cópia: a camada fica inteira e a cópia espelhada entra junto.");
+        p.add_section("copy", "Cópia", {kCopyOpacity, kCopyBehind}, kInvalidIndex, false);
+    }
+    bool is_identity(const EffectEval& e) const noexcept override {
+        return e.count > kCopyOpacity && e.e(kMode) == 1 && !(finite_or(e.f(kCopyOpacity), 100.0f) > 0.01f);
     }
     void pipelines(std::vector<PipelineKey>& out, SurfaceFormat work) const override {
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_mirror_frag, work));
@@ -139,6 +153,11 @@ public:
         EffectUniforms u = base_uniforms(input);
         u.p0 = Vec4{finite_or(rel.x, 0.5f) * size.x, finite_or(rel.y, 0.5f) * size.y,
                     std::cos(a) * side, std::sin(a) * side};
+        // Projeto antigo (3 valores): um eixo, substituir o lado — o de sempre.
+        const bool extended = e.count > kCopyBehind;
+        u.p1 = Vec4{extended && e.b(kBothAxes) ? 1.0f : 0.0f, extended && e.e(kMode) == 1 ? 1.0f : 0.0f,
+                    extended ? std::clamp(finite_or(e.f(kCopyOpacity), 100.0f) / 100.0f, 0.0f, 1.0f) : 1.0f,
+                    extended && e.b(kCopyBehind) ? 1.0f : 0.0f};
         u.p2 = region_vec(input.region);
         return single_pass(ctx, ShaderId::effects_mirror_frag, input, u, "espelho", out);
     }
@@ -582,10 +601,16 @@ public:
         u.p3 = Vec4{std::max(region.w, 1e-4f), std::max(region.h, 1e-4f), 0.0f, 0.0f};
         u.color = e.color(kColor);
 
+        // A camada é lida FORA da região dela (a faixa da borda): tem de vir
+        // transparente, como no passe 1. Com LinearClamp a borda da imagem se
+        // repetia na faixa — numa foto/vídeo/sólido (bordas opacas) o anel
+        // dava `m - layer.a = 0` e a faixa mostrava os pixels esticados da
+        // imagem no lugar da cor escolhida (relato 0.4.4: "as cores do efeito
+        // Borda não funcionam"). Só o texto (borda transparente) acertava.
         const FGTexture result = ctx.texture("borda", w, h);
         if (ctx.fullscreen_pass("borda", PassStage::Effects, result, ShaderId::effects_border_combine_frag,
                                 {PassTexture{dilated, {}, CommonSampler::LinearClamp},
-                                 PassTexture{input.texture, {}, CommonSampler::LinearClamp}},
+                                 PassTexture{input.texture, {}, CommonSampler::LinearBorder}},
                                 &u, sizeof(u)) == kInvalidIndex) {
             return Errc::PipelineCompileFailed;
         }

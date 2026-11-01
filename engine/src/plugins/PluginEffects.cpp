@@ -495,7 +495,8 @@ bool stackable(std::string_view key) noexcept {
                                "aurea.text", "aurea.shape3d.", "plugin."})
         if (key.starts_with(prefix)) return false;
     for (const char* exact : {kMeshWarpKey, puppet::kPuppetKey, "aurea.transform.parenting_helper",
-                              "aurea.generate.particular", "aurea.key.rotobrush", text::kAnimatorEffect,
+                              "aurea.generate.particular", "aurea.key.rotobrush", "aurea.key.background_remove",
+                              text::kAnimatorEffect,
                               "aurea.utility.copy_background"})
         if (key == exact) return false;
     return true;

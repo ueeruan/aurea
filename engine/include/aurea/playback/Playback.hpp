@@ -81,6 +81,13 @@ public:
     void set_loop(bool loop) noexcept { loop_ = loop; }
     void set_speed(f32 speed, u64 nowNs) noexcept;
 
+    /// Segura o relógio no quadro atual sem sair de Playing: a prévia parou de
+    /// entregar quadros (PresentationWatchdog) e a agulha não pode seguir
+    /// sozinha. Segurar e soltar reancoram o relógio no quadro atual; pause,
+    /// play, seek e scrub soltam.
+    void set_held(bool held, u64 nowNs) noexcept;
+    [[nodiscard]] bool held() const noexcept { return held_; }
+
     /// Avança o relógio. Chamado uma vez por frame de display. Tocando, faz o
     /// loop ou para no fim.
     FrameIndex update(u64 nowNs) noexcept;
@@ -131,8 +138,47 @@ private:
     static constexpr u64 kScrubAbandonNs = 1'500'000'000ull;
     FrameIndex lastScrubFrame_{0};
     bool wasPlayingBeforeScrub_ = false;
+    bool held_ = false;
     u64 generation_ = 1;
     u64 mediaEpoch_ = 1;
+};
+
+/// A agulha só anda enquanto a prévia entrega quadros (0.4.5).
+///
+/// O relógio do transporte é o do sistema (ou o do som): se o render parar de
+/// apresentar — decoder sem quadro, GPU falhando, cena pesada demais — ele
+/// seguia andando sozinho, e a timeline se afastava da imagem congelada ou
+/// preta. Tocando, este vigia compara a agulha com o último quadro COMPLETO
+/// que chegou à tela (sem camada de vídeo faltando): a agulha adiante dele por
+/// mais de kStallNs sem quadro novo → segura o relógio onde está
+/// (PlaybackController::set_held) até um quadro completo chegar. A espera é
+/// limitada (kMaxHoldNs): mídia quebrada ou GPU perdida não podem prender o
+/// play para sempre — solta e não segura de novo até um quadro completo.
+/// Só a thread de render usa (renderMutex_).
+class PresentationWatchdog {
+public:
+    static constexpr u64 kStallNs = 500'000'000ull;
+    static constexpr u64 kMaxHoldNs = 1'500'000'000ull;
+
+    enum class Action : u8 { None = 0, Hold, Release };
+
+    /// A cada quadro do motor, depois do update do relógio. `playing` falso
+    /// zera a observação (pausa, fim, buffering).
+    [[nodiscard]] Action observe(bool playing, bool held, i64 playhead, u64 nowNs) noexcept;
+    /// Um quadro chegou à tela. `complete` = nenhuma camada de vídeo faltando.
+    void presented(i64 frame, bool playing, bool complete) noexcept;
+    void reset() noexcept { *this = PresentationWatchdog{}; }
+
+    [[nodiscard]] u32 holds() const noexcept { return holds_; }
+    [[nodiscard]] bool yielded() const noexcept { return yielded_; }
+
+private:
+    i64 shown_ = -1;         ///< último quadro completo mostrado tocando
+    u64 lagSinceNs_ = 0;     ///< desde quando a agulha está adiante de shown_
+    u64 heldSinceNs_ = 0;
+    bool wasPlaying_ = false;
+    bool yielded_ = false;   ///< desistiu de segurar até o próximo quadro completo
+    u32 holds_ = 0;
 };
 
 /// Conta frames perdidos e decide se há o que desenhar.

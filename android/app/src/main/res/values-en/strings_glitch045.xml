@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Glitch 0.4.5 (2026-11-01): Glitchify completo, Hyper Glitch, Block Glitch e Trocar canais. Chaves fx045g_*. -->
+<resources>
+    <string name="fx045g_name_hyper_glitch">Hyper Glitch</string>
+    <string name="fx045g_desc_hyper_glitch">Heavy glitch: sliding slices, misplaced blocks, RGB split, pixel streaks, compression and swapped colors — all driven by one animatable intensity and seed.</string>
+    <string name="fx045g_name_block_glitch">Block Glitch</string>
+    <string name="fx045g_desc_block_glitch">Rectangular blocks displaced, with swapped and split channels, in the style of the DaVinci Resolve Block Glitch. Control block size, amount and frequency.</string>
+    <string name="fx045g_name_shift_channels">Shift Channels</string>
+    <string name="fx045g_desc_shift_channels">Choose where each channel (alpha, red, green and blue) comes from: another channel, luminance, hue, lightness, saturation, full or off. Like Shift Channels in After Effects.</string>
+    <string name="fx045g_transition_channel">Transition channel</string>
+    <string name="fx045g_transform_speed">Transform speed</string>
+    <string name="fx045g_split_mode">Split mode</string>
+    <string name="fx045g_split_speed">Split speed</string>
+    <string name="fx045g_scale_channel">Scale channel</string>
+    <string name="fx045g_corrupt_offset">Corruption offset</string>
+    <string name="fx045g_corrupt_amount">Corruption strength</string>
+    <string name="fx045g_corrupt_opacity">Corruption opacity</string>
+    <string name="fx045g_slice_amount">Compressed slice</string>
+    <string name="fx045g_slice_position">Slice position</string>
+    <string name="fx045g_slice_quality">Slice quality</string>
+    <string name="fx045g_slice_shift">Slice jitter</string>
+    <string name="fx045g_copy_block_amount">Swapped blocks</string>
+    <string name="fx045g_copy_block_speed">Block speed</string>
+    <string name="fx045g_copy_block_width">Swapped block width</string>
+    <string name="fx045g_copy_block_height">Swapped block height</string>
+    <string name="fx045g_copy_block_direction">Block direction</string>
+    <string name="fx045g_compression_jpeg">Compression (JPEG)</string>
+    <string name="fx045g_palette_dither">Palette dither</string>
+    <string name="fx045g_noise_octaves">Noise octaves</string>
+    <string name="fx045g_noise_gain">Noise gain</string>
+    <string name="fx045g_noise_lacunarity">Noise lacunarity</string>
+    <string name="fx045g_show_noise">Show noise</string>
+    <string name="fx045g_wiggle_steps">Wiggle steps</string>
+    <string name="fx045g_slice_height">Slice height</string>
+    <string name="fx045g_compression">Compression</string>
+    <string name="fx045g_color_swap">Color swap</string>
+    <string name="fx045g_amount">Amount</string>
+    <string name="fx045g_size_variation">Size variation</string>
+    <string name="fx045g_channel_swap">Channel swap</string>
+    <string name="fx045g_take_alpha">Take alpha from</string>
+    <string name="fx045g_take_red">Take red from</string>
+    <string name="fx045g_take_green">Take green from</string>
+    <string name="fx045g_take_blue">Take blue from</string>
+    <string name="fx045g_opt_bands_random">Bands (random)</string>
+    <string name="fx045g_opt_lightness">Lightness</string>
+    <string name="fx045g_opt_rgb_default">RGB (default)</string>
+    <string name="fx045g_opt_red_cyan">Red-cyan</string>
+    <string name="fx045g_opt_green_magenta">Green-magenta</string>
+    <string name="fx045g_opt_blue_yellow">Blue-yellow</string>
+    <string name="fx045g_opt_y_luma">Y′ (luma)</string>
+    <string name="fx045g_opt_cb">Cb</string>
+    <string name="fx045g_opt_cr">Cr</string>
+    <string name="fx045g_opt_uniform">Uniform</string>
+    <string name="fx045g_opt_luma">Luma</string>
+    <string name="fx045g_opt_full">Full</string>
+</resources>

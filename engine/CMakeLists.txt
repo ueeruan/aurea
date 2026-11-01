@@ -102,6 +102,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/ConstellationEffect.cpp
     src/effects/builtin/EnhanceEffect.cpp
     src/effects/builtin/CopyBackgroundEffect.cpp
+    src/effects/builtin/WaterWrapBallpointEffects.cpp
     src/project/ProjectPackage.cpp
     src/export/ImageEncode.cpp
     src/export/ExportRecovery.cpp
@@ -127,6 +128,7 @@ set(AUREA_CORE_SOURCES
     src/render/RendererDepth.cpp
     src/render/RendererEffectSequence.cpp
     src/render/RendererRoto.cpp
+    src/render/RendererBgRemove.cpp
     src/render/RendererAudio.cpp
     src/effects/Parameter.cpp
     src/effects/CubeLut.cpp
@@ -183,6 +185,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/VhsLookEffect.cpp
     src/effects/builtin/DepthEffects.cpp
     src/effects/builtin/RotobrushEffect.cpp
+    src/effects/builtin/BackgroundRemoveEffect.cpp
     src/effects/builtin/LensDistortionEffect.cpp
     src/effects/builtin/AudioPackEffects.cpp
     src/effects/builtin/ParticularEffect.cpp
@@ -195,6 +198,9 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/SaberEffect.cpp
     src/effects/builtin/LumaDissolveEffect.cpp
     src/effects/builtin/DrawingProgressEffect.cpp
+    src/effects/builtin/TileShiftEffects.cpp        # 0.4.5: Tile Shift, Hexagon Tile Rotate/Shift
+    src/effects/builtin/HollowBoxEffect.cpp         # 0.4.5: Hollow Box
+    src/effects/builtin/TimeDisplacementEffect.cpp  # 0.4.5: Time Displacement
     src/expr/Expression.cpp
     src/plugins/PluginExpr.cpp
     src/plugins/PluginManifest.cpp
@@ -219,6 +225,7 @@ set(AUREA_CORE_SOURCES
     src/ai/DepthMapService.cpp
     src/ai/RotoMatte.cpp
     src/ai/RotoService.cpp
+    src/ai/BackgroundRemoval.cpp
     src/ai/RotoRefine.cpp
     src/audio/AudioCore.cpp
     src/audio/AudioBlockCache.cpp
@@ -252,6 +259,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EnginePuppet.cpp
     src/engine/EngineShape3D.cpp
     src/engine/EngineRigPose.cpp
+    src/engine/EngineRigSkeleton.cpp
     src/engine/EngineMocap.cpp   # 0.3.6 Motion Capture (BETA)
     src/rig/Mocap.cpp            # 0.3.6 Motion Capture (BETA): solver
     src/engine/EngineAutoRig.cpp # 0.3.6 AutoRig 3D (BETA)
@@ -272,6 +280,7 @@ set(AUREA_CORE_SOURCES
     src/engine/EngineProxy.cpp
     src/engine/EngineLayerAnim.cpp
     src/engine/EngineRoto.cpp
+    src/engine/EngineBgRemove.cpp
     src/playback/Playback.cpp
     src/scene3d/GltfImporter.cpp
     src/scene3d/ModelBudget.cpp
@@ -286,6 +295,7 @@ set(AUREA_CORE_SOURCES
     src/scene3d/Shape3D.cpp
     src/scene3d/PartEffects.cpp
     src/scene3d/RigPose.cpp
+    src/scene3d/RigSkeleton.cpp
     src/scene3d/MaterialPreview.cpp
     src/engine/Engine.cpp
     src/engine/EngineRealCamera.cpp
@@ -431,6 +441,10 @@ set(AUREA_IMPORT_BOUNDARIES
     src/engine/EnginePsd.cpp
     src/engine/EngineRoto.cpp
     src/render/RendererRoto.cpp
+    # 0.4.5 Remover fundo: worker, arquivo das mascaras e alocacoes por quadro.
+    src/ai/BackgroundRemoval.cpp
+    src/engine/EngineBgRemove.cpp
+    src/render/RendererBgRemove.cpp
     # 0.3.0: o refinamento da borda cria threads (falha sem memória vira menos threads).
     src/ai/RotoRefine.cpp
     src/project/Psd.cpp

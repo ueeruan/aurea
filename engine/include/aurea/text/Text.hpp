@@ -151,9 +151,18 @@ struct TextLayout {
 bool layout_quads(const Font& font, const TextData& t, f32 pad, TextLayout& out);
 
 /// Atlas (R8, kGlyphAtlasSize²): pixels, geração (muda quando é refeito) e se
-/// mudou desde a última leitura (o renderer sobe a textura).
+/// mudou desde a última leitura. Legado: o `dirty` é UM só para o processo —
+/// o renderer usa glyph_atlas_revision()/copy_glyph_atlas() (um por consumidor).
 const u8* glyph_atlas(u64& generation, bool& dirty);
 void glyph_atlas_clean() noexcept;
+/// Revisão do conteúdo do atlas: cresce a cada glifo novo ou atlas refeito.
+/// Há mais de um consumidor (renderer da prévia e o do export, cada um com a
+/// sua textura): cada um compara com a revisão que já subiu, em vez do
+/// `dirty` global que o primeiro a ler apagava para todos.
+[[nodiscard]] u64 glyph_atlas_revision() noexcept;
+/// Copia os pixels sob o lock (sem corrida com um layout_quads de outra
+/// thread) e devolve a revisão exata da cópia.
+u64 copy_glyph_atlas(std::vector<u8>& out, u64* generation = nullptr);
 /// SDFs gerados e atlas refeitos (acumulados no processo) — 8E: em regime de
 /// playback nenhum dos dois cresce.
 void glyph_atlas_stats(u32& rasterized, u32& resets) noexcept;

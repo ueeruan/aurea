@@ -94,7 +94,11 @@
 
     <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
     <string name="om_ap_cp_eyedropper">Eyedropper</string>
-    <string name="om_ap_cp_eyedropper_hint">Drag on the stage to pick a color</string>
+    <string name="om_ap_cp_eyedropper_hint">Tap or drag on the preview to pick a color</string>
+    <string name="om_ap_cp_eyedropper_source">original color, before this effect</string>
+    <string name="om_ap_cp_eyedropper_picked">Picked color: %1$s</string>
+    <string name="om_ap_cp_eyedropper_cancel">Cancel the eyedropper and return to the picker</string>
+    <string name="om_ap_cp_eyedropper_full_hint">Pick a color from the preview</string>
     <string name="om_ap_cp_fine">Fine picker</string>
     <string name="om_ap_cp_full">More colors</string>
     <string name="om_ap_cp_unavailable">Transparent color not available here</string>
@@ -103,6 +107,7 @@
     <string name="om_ap_cp_paste_code">Paste color code</string>
     <string name="om_ap_cp_code_copied">Color code copied</string>
     <string name="om_ap_cp_code">Color code %1$s</string>
+    <string name="om_ap_cp_type_code">Type the color code</string>
     <string name="om_ap_cp_wheel">Wheel</string>
     <string name="om_ap_cp_rgb">RGB</string>
     <string name="om_ap_cp_done">Done</string>

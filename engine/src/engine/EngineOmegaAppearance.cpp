@@ -30,6 +30,7 @@ namespace {
 // MatteEffects.cpp StrokeOutline e FinishingEffects.cpp DropShadow).
 constexpr u32 kOutlineWidth = 0, kOutlineColor = 1, kOutlineSoftness = 2, kOutlinePosition = 3, kOutlineOpacity = 4;
 constexpr f32 kOutlineInside = 2.0f;   ///< enum "Posição": 0 Fora, 1 Centro, 2 Dentro
+constexpr f32 kOutlineOutside = 0.0f;
 constexpr u32 kShadowColor = 0, kShadowOpacity = 1, kShadowDirection = 2, kShadowDistance = 3, kShadowSoftness = 4;
 
 /// Primeira posição do grupo do papel e uma depois da última (a pilha está
@@ -113,11 +114,20 @@ u32 Engine::decoration_add(u64 layerId, u32 role) noexcept {
     initialize_instance(e, *params);
     auto set = [&](u32 index, ParamValue v) { if (index < e.params.size()) e.params[index].constant = v; };
     if (role == kEffectRoleBorder) {
-        // A borda nova da referência: dentro, branca, 6 px, sem suavidade.
+        // A borda nova da referência: dentro, branca, 6 px, sem suavidade. Da
+        // segunda em diante ela nasce POR FORA da última, com a cor alternada
+        // (branco / #0F141A), como na referência. Antes toda borda nova era
+        // idêntica: a última pintava exatamente a mesma faixa por cima das
+        // outras e trocar a cor de qualquer borda que não fosse a última não
+        // mudava nada na tela (relato 0.4.4: "as cores da Borda não funcionam").
+        u32 borders = 0;
+        for (const EffectInstance& other : l->effects) borders += other.role == kEffectRoleBorder ? 1u : 0u;
+        const bool dark = (borders & 1u) != 0;
         set(kOutlineWidth, ParamValue::scalar(6.0f));
-        set(kOutlineColor, ParamValue::color(1.0f, 1.0f, 1.0f, 1.0f));
+        // #0F141A em linear (a cor do efeito é linear).
+        set(kOutlineColor, dark ? ParamValue::color(0.0048f, 0.0060f, 0.0103f, 1.0f) : ParamValue::color(1.0f, 1.0f, 1.0f, 1.0f));
         set(kOutlineSoftness, ParamValue::scalar(0.0f));
-        set(kOutlinePosition, ParamValue::scalar(kOutlineInside));
+        set(kOutlinePosition, ParamValue::scalar(borders == 0 ? kOutlineInside : kOutlineOutside));
         set(kOutlineOpacity, ParamValue::scalar(100.0f));
     } else {
         // Sombra: preta, deslocamento (5, 5) px → 45° a 7,07 px; suavidade 8 px.

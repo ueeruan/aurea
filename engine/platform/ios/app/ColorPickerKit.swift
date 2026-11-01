@@ -151,10 +151,10 @@ struct PickerHSV: Equatable {
 // MARK: - Conta-gotas ao vivo (estado do palco)
 
 /// O conta-gotas ao vivo (P1-1). O seletor liga com `model.eyedropper`; o palco
-/// (PreviewMetalView) manda aqui o arrasto e desenha a mira e a lupa. A mira
-/// é RELATIVA: anda o quanto o dedo anda, em qualquer lugar do palco, e começa
-/// no centro da composição ou onde parou da última vez. Cada arrasto captura UM
-/// quadro da prévia no começo e amostra dele (alfa = o do seletor).
+/// (PreviewMetalView) manda aqui o arrasto e desenha a mira e a lupa. 0.4.5: a
+/// mira fica SOB O DEDO (o pixel tocado; antes era relativa) e a lupa acima dele.
+/// Cada arrasto captura UM quadro da prévia no começo e amostra dele (alfa = o do
+/// seletor); cor de efeito = o quadro com esse efeito desligado só na captura.
 @MainActor final class EyedropperStage: ObservableObject {
     static let shared = EyedropperStage()
     /// Mira em px da composição (nil = nunca usada: começa no centro).
@@ -169,10 +169,10 @@ struct PickerHSV: Equatable {
     private var generation = 0
     private var commitPending = false
 
-    /// O dedo pousou no palco com o conta-gotas ligado.
-    func begin(_ model: AureaModel, composition size: CGSize) {
+    /// O dedo pousou no palco com o conta-gotas ligado (`point` em px da composição).
+    func begin(_ model: AureaModel, composition size: CGSize, at point: CGPoint) {
         composition = CGSize(width: max(1, size.width), height: max(1, size.height))
-        crosshair = clamp(crosshair ?? CGPoint(x: composition.width / 2, y: composition.height / 2))
+        crosshair = clamp(point)
         dragging = true
         shot = nil
         color = nil
@@ -180,9 +180,10 @@ struct PickerHSV: Equatable {
         generation &+= 1
         let ticket = generation
         capture?.cancel()
+        let skipLayer = model.eyedropper?.skipLayer ?? 0, skipEffect = model.eyedropper?.skipEffect ?? -1
         capture = Task { @MainActor [weak self, weak model] in
             guard let model else { return }
-            let frame = await model.capturePreviewFrame(720)
+            let frame = await model.captureEyedropperFrame(720, skipLayer: skipLayer, skipEffect: skipEffect)
             guard let self, !Task.isCancelled, self.generation == ticket, let frame,
                   let image = UIImage.fromRGBA(frame.data, width: Int(frame.width), height: Int(frame.height)) else { return }
             self.shot = PreviewShot(image: image, rgba: frame.data, width: Int(frame.width), height: Int(frame.height))
@@ -198,10 +199,10 @@ struct PickerHSV: Equatable {
         }
     }
 
-    /// O dedo andou `dx`, `dy` px da composição.
-    func move(_ dx: CGFloat, _ dy: CGFloat, model: AureaModel) {
-        guard dragging, let point = crosshair else { return }
-        crosshair = clamp(CGPoint(x: point.x + dx, y: point.y + dy))
+    /// O dedo está em `point` (px da composição).
+    func move(to point: CGPoint, model: AureaModel) {
+        guard dragging else { return }
+        crosshair = clamp(point)
         guard let sample = sampleHere() else { return }
         color = sample
         model.eyedropper?.onSample(sample)
@@ -241,6 +242,73 @@ struct PickerHSV: Equatable {
     }
 }
 
+/// Correção #10 (0.4.4): o que o campo do código aceita enquanto se digita — só dígitos
+/// hexadecimais e um "#" opcional na frente, até 8 dígitos. Par do `sanitizeColorCodeInput`
+/// do Android; o motor (`parseColorCode`) é quem decide se é cor.
+func sanitizeColorCodeInput(_ text: String) -> String {
+    let hash = text.drop(while: { $0 == " " }).hasPrefix("#")
+    let digits = String(text.filter { $0.isASCII && $0.isHexDigit }.prefix(8))
+    return hash ? "#" + digits : digits
+}
+
+/// Código completo (3, 6 ou 8 dígitos), com "#" para o motor ler; nil enquanto falta.
+func completeColorCode(_ text: String) -> String? {
+    let digits = text.hasPrefix("#") ? String(text.dropFirst()) : text
+    return [3, 6, 8].contains(digits.count) ? "#" + digits : nil
+}
+
+/// Correção #10: o código da tela cheia que vira campo ao toque (par do
+/// `EditableColorCode` do Android). `onColor` recebe cada código completo já lido
+/// pelo motor (RGBA 0..1); quem chama decide o alfa. A tela cheia já segura o passo
+/// de desfazer até o ✓.
+struct EditableColorCodeText: View {
+    let code: String
+    /// O que o campo traz ao abrir (sem o "(A%)" do RGB, que viraria dígitos).
+    var editText: String? = nil
+    let onColor: ([Float]) -> Void
+    @EnvironmentObject private var model: AureaModel
+    @State private var editing = false
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        if editing {
+            TextField("", text: $draft)
+                .font(.aurea(size: 15).monospacedDigit())
+                .foregroundStyle(AureaColors.text)
+                .multilineTextAlignment(.center)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .keyboardType(.asciiCapable)
+                .submitLabel(.done)
+                .focused($focused)
+                .frame(width: 150, height: 32)
+                .onChange(of: draft) { text in
+                    let clean = sanitizeColorCodeInput(text)
+                    if clean != text { draft = clean; return }
+                    guard let full = completeColorCode(clean) else { return }
+                    let parsed = model.engine.parseColorCode(full).map(\.floatValue)
+                    if parsed.count >= 4 { onColor(Array(parsed.prefix(4))) }
+                }
+                .onSubmit { editing = false }
+                .onChange(of: focused) { now in if !now { editing = false } }
+                .onAppear { DispatchQueue.main.async { focused = true } }
+                .accessibilityLabel(AureaText.t("om_ap_cp_type_code"))
+                .accessibilityIdentifier("colorpicker.full.code.field")
+        } else {
+            Text(code)
+                .font(.aurea(size: 15).monospacedDigit())
+                .foregroundStyle(AureaColors.text)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .contentShape(Rectangle())
+                .onTapGesture { draft = editText ?? code; editing = true }
+                .accessibilityLabel(AureaText.t("om_ap_cp_code", code))
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction(named: AureaText.t("om_ap_cp_type_code")) { draft = editText ?? code; editing = true }
+        }
+    }
+}
+
 /// Um passo de desfazer do conta-gotas: abre no primeiro `onSample` e fecha no
 /// `onCommit` (ou no `onCancel`).
 private final class EyedropperUndo {
@@ -263,6 +331,9 @@ struct EmbeddedColorPicker: View {
     let onChange: ([Float]) -> Void
     let onEnd: () -> Void
     let onFull: (() -> Void)?
+    /// 0.4.5: cor de efeito — o conta-gotas amostra com esse efeito desligado só na captura.
+    let sampleLayer: Int64
+    let sampleEffect: Int32
 
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var palette = ColorPaletteStore.shared
@@ -274,6 +345,12 @@ struct EmbeddedColorPicker: View {
     /// Centro do anel durante um arrasto: "H°", "S% / V%" ou o alfa.
     @State private var readout: String?
     @State private var codeMenu = false
+    /// Correção #10 (0.4.4): o código aberto para digitar, o rascunho da pessoa (a cor
+    /// que volta não o reescreve) e o passo de desfazer da digitação inteira.
+    @State private var codeEditing = false
+    @State private var codeDraft = ""
+    @State private var codeUndoOpen = false
+    @FocusState private var codeFocused: Bool
     @State private var clipboard: [Float]?
     @State private var dropperId: UUID?
     @State private var svStart: PickerHSV?
@@ -290,7 +367,8 @@ struct EmbeddedColorPicker: View {
     }
 
     init(color: [Float], withAlpha: Bool = true, onBegin: @escaping () -> Void = {},
-         onChange: @escaping ([Float]) -> Void, onEnd: @escaping () -> Void = {}, onFull: (() -> Void)? = nil) {
+         onChange: @escaping ([Float]) -> Void, onEnd: @escaping () -> Void = {}, onFull: (() -> Void)? = nil,
+         sampleLayer: Int64 = 0, sampleEffect: Int32 = -1) {
         var c = PickerColor.rgba(color)
         if !withAlpha { c[3] = 1 }
         self.color = c
@@ -299,6 +377,8 @@ struct EmbeddedColorPicker: View {
         self.onChange = onChange
         self.onEnd = onEnd
         self.onFull = onFull
+        self.sampleLayer = sampleLayer
+        self.sampleEffect = sampleEffect
         _hsv = State(initialValue: PickerHSV(c, keepHue: 0))
         _shown = State(initialValue: c)
         _emitted = State(initialValue: PickerColor.pack(c))
@@ -318,7 +398,7 @@ struct EmbeddedColorPicker: View {
         .onChange(of: PickerColor.pack(color)) { next in
             if next != emitted { adopt(color) }
         }
-        .onDisappear { stopEyedropper() }
+        .onDisappear { stopEyedropper(); finishCode() }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("colorpicker")
     }
@@ -383,6 +463,7 @@ struct EmbeddedColorPicker: View {
                            on: dropperActive, action: toggleEyedropper)
             }
             sideButton(CupertinoGlyph.SliderHorizontal3, key: "om_ap_cp_fine", tag: "colorpicker.fine", on: fine) {
+                finishCode()
                 fine.toggle()
                 readout = nil
             }
@@ -412,7 +493,8 @@ struct EmbeddedColorPicker: View {
         let change = onChange, end = onEnd
         onBegin()
         model.colorSheet = ColorSheetRequest(title: AureaText.t("om_ap_cp_full"), initial: shown, withAlpha: withAlpha,
-                                             anchor: nil, onChange: { r, g, b, a in change([r, g, b, a]) }, onDone: end)
+                                             anchor: nil, sampleLayer: sampleLayer, sampleEffect: sampleEffect,
+                                             onChange: { r, g, b, a in change([r, g, b, a]) }, onDone: end)
     }
 
     // MARK: Conta-gotas (P1-1)
@@ -437,7 +519,8 @@ struct EmbeddedColorPicker: View {
             },
             onCancel: {
                 if undo.open { undo.open = false; end() }
-            })
+            },
+            skipLayer: sampleLayer, skipEffect: sampleEffect)
         // Outro conta-gotas ligado (outro seletor): fecha o passo dele.
         model.eyedropper?.onCancel()
         model.eyedropper = request
@@ -473,6 +556,29 @@ struct EmbeddedColorPicker: View {
         let inkColor = ink
         return ZStack {
             AureaColorSwatch(color: PickerColor.color(shown))
+            if codeEditing {
+                // Correção #10 (0.4.4): o código era só leitura ("o campo hex não aceita
+                // digitar"). Digitação livre — só hex e um "#" opcional; cada código
+                // completo (#RGB, #RRGGBB, #RRGGBBAA) já aplica. Par do ColorPicker.kt.
+                TextField("", text: $codeDraft)
+                    .font(.aurea(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(inkColor)
+                    .tint(inkColor)
+                    .multilineTextAlignment(.center)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .keyboardType(.asciiCapable)
+                    .submitLabel(.done)
+                    .focused($codeFocused)
+                    .frame(width: 110)
+                    .frame(maxHeight: .infinity)
+                    .onChange(of: codeDraft) { typeCode($0) }
+                    .onSubmit { finishCode() }
+                    .onChange(of: codeFocused) { focused in if !focused { finishCode() } }
+                    .onAppear { DispatchQueue.main.async { codeFocused = true } }
+                    .accessibilityLabel(AureaText.t("om_ap_cp_type_code"))
+                    .accessibilityIdentifier("colorpicker.hex.field")
+            } else {
             Text(code)
                 .font(.aurea(size: 13, weight: .semibold).monospacedDigit())
                 .foregroundStyle(inkColor)
@@ -480,14 +586,17 @@ struct EmbeddedColorPicker: View {
                 .padding(.horizontal, 10)
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
+                .onTapGesture { startCodeEdit() }
                 .onLongPressGesture(minimumDuration: 0.45) { openCodeMenu() }
                 .aureaAnchoredMenu(isPresented: $codeMenu, tone: .light, tag: "colorpicker.code.menu") { codeEntries }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(AureaText.t("om_ap_cp_code", code))
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction(.default) { openCodeMenu() }
+                .accessibilityAction(named: AureaText.t("om_ap_cp_type_code")) { startCodeEdit() }
                 .accessibilityAction(named: AureaText.t("om_ap_cp_copy_code")) { copyCode() }
                 .accessibilityIdentifier("colorpicker.hex")
+            }
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 if !palette.contains(PickerColor.pack(shown)) {
@@ -580,6 +689,32 @@ struct EmbeddedColorPicker: View {
     private func copyCode() {
         UIPasteboard.general.string = codeText
         model.toast = AureaText.t("om_ap_cp_code_copied")
+    }
+
+    /// Correção #10: toque no código → campo com o código atual (o teclado sobe).
+    private func startCodeEdit() {
+        guard !codeEditing else { return }
+        codeDraft = codeText
+        codeEditing = true
+    }
+
+    /// Cada tecla: limpa (só hex e "#" na frente) sem mexer no resto do rascunho e,
+    /// com 3, 6 ou 8 dígitos, aplica a cor. A digitação inteira é um passo de desfazer.
+    private func typeCode(_ text: String) {
+        let clean = sanitizeColorCodeInput(text)
+        if clean != text { codeDraft = clean; return }   // o onChange volta com o texto limpo
+        guard let full = completeColorCode(clean) else { return }
+        let parsed = model.engine.parseColorCode(full).map(\.floatValue)
+        guard parsed.count >= 4 else { return }
+        if !codeUndoOpen { codeUndoOpen = true; onBegin() }
+        set(withAlpha ? parsed : [parsed[0], parsed[1], parsed[2], hsv.a])
+    }
+
+    /// Concluir, sair do campo ou o seletor sumir: fecha o campo e o passo de desfazer.
+    private func finishCode() {
+        if codeEditing { codeEditing = false }
+        if codeFocused { codeFocused = false }
+        if codeUndoOpen { codeUndoOpen = false; onEnd() }
     }
 
     // MARK: Modo fino
@@ -919,7 +1054,8 @@ struct ColorPopover: View {
                                     current = c
                                     request.onChange(c[0], c[1], c[2], c[3])
                                 },
-                                onFull: openFull)
+                                onFull: openFull,
+                                sampleLayer: request.sampleLayer, sampleEffect: request.sampleEffect)
                 .environment(\.layoutDirection, direction)
                 .padding(ColorPopoverLayout.padding)
                 .background(AureaColors.panelFrameBackground,
@@ -949,6 +1085,7 @@ struct ColorPopover: View {
     private func openFull() {
         let r = request
         model.colorSheet = ColorSheetRequest(title: r.title, initial: current, withAlpha: r.withAlpha, anchor: nil,
+                                             sampleLayer: r.sampleLayer, sampleEffect: r.sampleEffect,
                                              onChange: r.onChange, onDone: r.onDone)
     }
 }
@@ -1032,9 +1169,14 @@ struct ColorPickerFull: View {
     @State private var overTrash = false
     @State private var tapBlockedUntil = Date.distantPast
     @State private var notice: String?
+    /// 0.4.5: o conta-gotas recolheu a tela cheia e o palco amostra; a cor de antes volta no "Cancelar".
+    @State private var sampling = false
+    @State private var beforeSampling: [Float] = []
 
     private static let space = "aurea.colorpicker.full"
     private var withAlpha: Bool { request.withAlpha }
+    /// O conta-gotas só existe com o palco (no editor), como no seletor embutido.
+    private var showsEyedropper: Bool { model.screen == .editor }
 
     init(request: ColorSheetRequest, onDismiss: @escaping () -> Void) {
         self.request = request
@@ -1048,6 +1190,13 @@ struct ColorPickerFull: View {
     }
 
     var body: some View {
+        Group {
+            if sampling { samplingBar } else { fullBody }
+        }
+        .onDisappear { stopSampling() }
+    }
+
+    private var fullBody: some View {
         VStack(spacing: 0) {
             topBar
             ZStack(alignment: .bottom) {
@@ -1122,14 +1271,121 @@ struct ColorPickerFull: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { if notice == text { notice = nil } }
     }
 
+    // MARK: Conta-gotas (0.4.5)
+
+    /// Recolhe a tela cheia e liga o palco no modo "recolhido": tocar/arrastar amostra
+    /// (mira sob o dedo, lupa) e soltar devolve a cor aqui. O passo de desfazer é o da
+    /// tela cheia (quem abriu segura até o ✓). Par do `ColorPickerFull.kt`.
+    private func startSampling() {
+        let m = model
+        let picker = self
+        beforeSampling = shown
+        sampling = true
+        let release = { if m.eyedropper?.collapsed == true { m.eyedropper = nil } }
+        let dropper = EyedropperRequest(
+            onSample: { rgba in picker.takeSample(rgba) },
+            onCommit: { rgba in
+                release()
+                picker.takeSample(rgba)
+                picker.endSampling()
+            },
+            onCancel: {
+                release()
+                picker.restoreBeforeSampling()
+            },
+            skipLayer: request.sampleLayer, skipEffect: request.sampleEffect, collapsed: true)
+        // Um palco, um conta-gotas: quem tinha o modo sai dele.
+        m.eyedropper?.onCancel()
+        if m.status.playing != 0 { m.playPause() }
+        m.eyedropper = dropper
+    }
+
+    /// A amostra do palco com o alfa ATUAL do seletor (o palco não tem alfa).
+    private func takeSample(_ rgba: [Float]) {
+        let c = PickerColor.rgba(rgba)
+        setAll([c[0], c[1], c[2], withAlpha ? hsv.a : 1])
+    }
+
+    private func endSampling() { sampling = false }
+
+    private func restoreBeforeSampling() {
+        guard sampling else { return }
+        if !beforeSampling.isEmpty { setAll(beforeSampling) }
+        sampling = false
+    }
+
+    /// "Cancelar" (ou escape): o palco sai do modo e a cor de antes volta.
+    private func cancelSampling() {
+        if model.eyedropper?.collapsed == true { model.eyedropper = nil }
+        restoreBeforeSampling()
+    }
+
+    /// Saiu da tela no meio da amostra: o palco sai do modo.
+    private func stopSampling() {
+        guard sampling else { return }
+        if model.eyedropper?.collapsed == true { model.eyedropper = nil }
+    }
+
+    /// A faixa do rodapé enquanto o palco amostra: a cor pegada e o "Cancelar". O resto
+    /// da tela fica livre (o toque passa para a prévia).
+    private var samplingBar: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                AureaColorSwatch(color: PickerColor.color(PickerColor.opaque(shown)))
+                    .frame(width: 28, height: 28)
+                    .clipShape(Circle())
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(AureaText.t("om_ap_cp_eyedropper"))
+                    .accessibilityValue(code)
+                CupertinoGlyph.text(CupertinoGlyph.Eyedropper, size: 15, color: AureaColors.accent)
+                    .accessibilityHidden(true)
+                Button(action: cancelSampling) {
+                    Text(AureaText.t("common_cancel"))
+                        .font(.aurea(size: 14, weight: .semibold))
+                        .foregroundStyle(AureaColors.text)
+                        .padding(.horizontal, 12)
+                        .frame(height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityLabel(AureaText.t("om_ap_cp_eyedropper_cancel"))
+                .accessibilityIdentifier("colorpicker.full.sampling.cancel")
+            }
+            .padding(.leading, 8)
+            .padding(.trailing, 4)
+            .frame(height: 44)
+            .background(AureaColors.panelFrameDivider, in: Capsule())
+            .accessibilityElement(children: .contain)
+            .accessibilityAction(.escape) { cancelSampling() }
+            .accessibilityIdentifier("colorpicker.full.sampling")
+            .padding(.bottom, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     // MARK: Topo
 
     private var topBar: some View {
         GeometryReader { geo in
-            let unit = geo.size.width / 2.3
+            // 0.4.5: o conta-gotas (45) entre as abas e o ✓, só no editor.
+            let dropper: CGFloat = showsEyedropper ? 45 : 0
+            let unit = (geo.size.width - dropper) / 2.3
             HStack(spacing: 0) {
                 tabButton("wheel", key: "om_ap_cp_wheel", tag: "colorpicker.full.wheel").frame(width: unit)
                 tabButton("rgb", key: "om_ap_cp_rgb", tag: "colorpicker.full.rgb").frame(width: unit)
+                if showsEyedropper {
+                    Button(action: startSampling) {
+                        CupertinoGlyph.text(CupertinoGlyph.Eyedropper, size: 20, color: AureaColors.text)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(AureaPressStyle(shrink: 1))
+                    .frame(width: dropper)
+                    .accessibilityLabel(AureaText.t("om_ap_cp_eyedropper"))
+                    .accessibilityHint(AureaText.t("om_ap_cp_eyedropper_full_hint"))
+                    .accessibilityIdentifier("colorpicker.full.eyedropper")
+                }
                 Button(action: close) {
                     CupertinoGlyph.text(CupertinoGlyph.CheckmarkAlt, size: 22, color: AureaColors.accent)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1137,7 +1393,7 @@ struct ColorPickerFull: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(AureaPressStyle(shrink: 1))
-                .frame(width: max(44, geo.size.width - 2 * unit))
+                .frame(width: max(44, geo.size.width - 2 * unit - dropper))
                 .accessibilityLabel(AureaText.t("om_ap_cp_done"))
                 .accessibilityIdentifier("colorpicker.full.done")
             }
@@ -1264,7 +1520,8 @@ struct ColorPickerFull: View {
                 .accessibilityIdentifier("colorpicker.full.hue")
             VStack(spacing: 8) {
                 compareCard(width: 70, height: 50)
-                Text(code).font(.aurea(size: 15).monospacedDigit()).foregroundStyle(AureaColors.text)
+                // Correção #10 (0.4.4): o código aceita digitar (toque abre o campo).
+                EditableColorCodeText(code: code) { c in setAll(c) }
             }
         }
         .contentShape(Circle())
@@ -1335,9 +1592,13 @@ struct ColorPickerFull: View {
         VStack(spacing: 0) {
             Spacer(minLength: 12)
             compareCard(width: 140, height: 70)
-            Text(rgbText)
-                .font(.aurea(size: 15).monospacedDigit())
-                .foregroundStyle(AureaColors.text)
+            // Correção #10 (0.4.4): toque abre o campo (com o #RRGGBB; o alfa fica na régua A,
+            // a não ser que a pessoa digite 8 dígitos). Par do ColorPickerFull.kt.
+            EditableColorCodeText(code: rgbText,
+                                  editText: model.engine.formatColorCode(shown[0], g: shown[1], b: shown[2], a: 1, withAlpha: false)) { c in
+                let keepAlpha = !withAlpha || c[3] >= 1
+                setAll(keepAlpha ? [c[0], c[1], c[2], shown[3]] : c)
+            }
                 .padding(.top, 12)
                 .accessibilityIdentifier("colorpicker.full.code")
             Spacer(minLength: 12)

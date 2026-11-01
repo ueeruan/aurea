@@ -321,6 +321,14 @@ private fun layerMenuEntries(
                 sublabel = stringResource(R.string.layer_replace_media_detail),
                 enabled = !row.locked,
             ) { onReplace() }
+            // 0.4.5: Remover fundo — o efeito na camada e, no vídeo, a análise do clipe.
+            out += MenuEntry.Item(
+                stringResource(R.string.bg_remove_action),
+                glyph = CupertinoGlyph.PersonCropCircle,
+                sublabel = stringResource(R.string.bg_remove_action_detail),
+                enabled = !row.locked,
+                tag = "layer.menu.bgRemove",
+            ) { if (store.removeBackground(id)) openPanel(store, ui, EditorPanel.Effects) }
         }
         out += MenuEntry.Item(stringResource(R.string.media_info_title), glyph = CupertinoGlyph.InfoCircle, tag = "layer.menu.mediaInfo") { onInfo() }
         if (type == LayerType.Video) {
@@ -597,5 +605,9 @@ internal fun GroupSelectionSheet(store: EditorStore, onDismiss: () -> Unit) {
         MenuItemRow(CupertinoGlyph.Crop, stringResource(R.string.editor_group_exclude),
             if (store.selection.size >= 2) action { store.groupAndMask(true) } else null,
             detail = stringResource(R.string.editor_group_exclude_hint))
+        // Bug #6: desagrupar também mora aqui (com algum grupo na seleção).
+        val groups = store.layers.filter { it.id in store.selection && LayerType.of(it.kind) == LayerType.Group }.map { it.id }
+        MenuItemRow(ShellGlyph.SquareSplit2x2, stringResource(R.string.editor_desagrupar),
+            if (groups.isNotEmpty()) action { store.ungroupPrecomps(groups) } else null)
     }
 }

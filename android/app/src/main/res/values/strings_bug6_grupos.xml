@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bug #6 (grupos): motivos do motor para não desagrupar, no idioma do app (EngineText). -->
+<resources>
+    <string name="eng_ungroup_effects">o grupo tem efeitos</string>
+    <string name="eng_ungroup_masks">o grupo tem máscaras</string>
+    <string name="eng_ungroup_blend">o grupo tem modo de mesclagem</string>
+    <string name="eng_ungroup_opacity">o grupo tem opacidade própria</string>
+    <string name="eng_ungroup_3d">o grupo está em 3D</string>
+    <string name="eng_ungroup_transition">o grupo tem transição ou eco</string>
+    <string name="eng_ungroup_background">o grupo tem fundo próprio</string>
+    <string name="eng_ungroup_camera_light">o grupo tem câmera ou luz própria</string>
+    <string name="eng_ungroup_animation">o grupo tem animação de entrada ou saída</string>
+</resources>

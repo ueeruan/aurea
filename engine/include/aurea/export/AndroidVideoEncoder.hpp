@@ -43,6 +43,9 @@ struct CodecInfo {
     bool cbr = false, vbr = false;   ///< EncoderCapabilities.isBitrateModeSupported
     i32 baselineProfile = 0;         ///< AVC Baseline anunciado (0 = não)
     i32 baselineLevel = 0;
+    /// 0.4.5: teto de VideoCapabilities.getBitrateRange (bps; 0 = desconhecido).
+    /// O configure leva no máximo isto (export_encoder_bitrate_bps).
+    u32 maxBitrateBps = 0;
     std::vector<i32> colorFormats;
 };
 

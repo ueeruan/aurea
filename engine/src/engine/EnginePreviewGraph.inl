@@ -91,6 +91,7 @@ bool Engine::continue_preview_graph_locked(u64 frameStart, Status& result) noexc
     incompleteRetries_ = 0;
     lastCulledLayers_.store(snapshot_.culledLayers, std::memory_order_relaxed);
     frameScheduler_.presented(FrameIndex{livePreviewGraphKey_.playhead}, playing);
+    presentWatchdog_.presented(livePreviewGraphKey_.playhead, playing, !snapshot_.missingVideoFrames);
     stats.frameIndex = static_cast<u32>(frameCounter_);
     stats.cpuMs = timings.cpuPrepareMs + timings.cpuRecordMs;
     stats.decodeMs = media_.stats().decodeMsAvg;

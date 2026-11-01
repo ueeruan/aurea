@@ -443,3 +443,38 @@ AUREA_TEST(OmegaAppearance, ColorCodeParsesTheAcceptedFormats) {
     AUREA_CHECK(!color_code::wants_dark_text(navy));
     AUREA_CHECK(color_code::wants_dark_text(half));
 }
+
+// Relato 0.4.4 ("as cores da Borda não funcionam"): toda borda nova nascia
+// igual (dentro, branca, 6 px) e a última cobria as outras na mesma faixa —
+// trocar a cor de qualquer outra não aparecia. Da segunda em diante a borda
+// nasce por fora da última, com a cor alternada (branco / #0F141A).
+AUREA_TEST(OmegaAppearance, NewBordersStackOutsideWithAlternatingColors) {
+    AppearanceRig r;
+    const u64 id = r.square(20.0f, 20.0f);
+    if (!id) return;
+    const u32 b1 = r.e.decoration_add(id, kEffectRoleBorder);
+    const u32 b2 = r.e.decoration_add(id, kEffectRoleBorder);
+    const u32 b3 = r.e.decoration_add(id, kEffectRoleBorder);
+    AUREA_CHECK(b1 != kInvalidIndex && b2 != kInvalidIndex && b3 != kInvalidIndex);
+    const Layer* l = r.L(id);
+    AUREA_CHECK_EQ(l->effects.size(), static_cast<usize>(3));
+    if (l->effects.size() != 3) return;
+    // 1ª: dentro, branca (a da referência). 2ª e 3ª: por fora, cores alternadas.
+    AUREA_CHECK_NEAR(l->effects[0].params[3].constant.v[0], 2.0f, 1e-6f);
+    AUREA_CHECK_NEAR(l->effects[1].params[3].constant.v[0], 0.0f, 1e-6f);
+    AUREA_CHECK_NEAR(l->effects[2].params[3].constant.v[0], 0.0f, 1e-6f);
+    AUREA_CHECK_NEAR(l->effects[0].params[1].constant.v[0], 1.0f, 1e-6f);
+    AUREA_CHECK(l->effects[1].params[1].constant.v[0] < 0.05f);
+    AUREA_CHECK_NEAR(l->effects[2].params[1].constant.v[0], 1.0f, 1e-6f);
+    // Cada uma com a sua cor, e a escrita da cor chega à borda certa.
+    Command c;
+    c.type = CommandType::EffectSetColorParam;
+    c.effect_color.layer = LayerId::unpack(id);
+    c.effect_color.effect = EffectId{b1, 0};
+    c.effect_color.paramIndex = 1;
+    c.effect_color.r = 1.0f; c.effect_color.g = 0.0f; c.effect_color.b = 0.0f; c.effect_color.a = 1.0f;
+    AUREA_CHECK(r.e.apply_command(c).ok());
+    l = r.L(id);
+    AUREA_CHECK_NEAR(l->effects[0].params[1].constant.v[1], 0.0f, 1e-6f);
+    AUREA_CHECK_NEAR(l->effects[2].params[1].constant.v[1], 1.0f, 1e-6f);
+}

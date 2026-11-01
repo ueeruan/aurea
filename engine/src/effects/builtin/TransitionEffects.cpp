@@ -1,5 +1,6 @@
 #include "BuiltinEffects.hpp"
 #include <algorithm>
+#include <cmath>
 
 namespace aurea::builtin {
 namespace {
@@ -79,6 +80,11 @@ public:
             // mais faixas que pixels vira ruído.
             p.add_float("count", "Faixas", 10.f, 1.f, 200.f);
             p.typed_range(1.f, 2000.f);
+            // 0.4.5 (índice 5, no fim): largura da faixa em px, como nas
+            // Persianas dos editores de movimento. 0 = pelo número de Faixas.
+            p.add_float("width", "Largura da faixa", 0.f, 0.f, 500.f, kParamAnimatable | kParamPixels, "px");
+            p.typed_range(0.f, 10000.f);
+            p.set_tip(5, "0 = a largura sai do número de faixas.");
             return;
         }
         p.add_point2("center", "Centro", Vec2{0.5f, 0.5f}, -1.f, 2.f, kParamAnimatable | kParamRelative);
@@ -98,7 +104,16 @@ public:
         u.p0 = {std::clamp(e.f(kCompletion) / 100.f, 0.f, 1.f), std::clamp(e.f(kFeather) / 100.f, 0.f, 1.f),
                 e.b(kReverse) ? 1.f : 0.f, static_cast<f32>(mode_)};
         if (mode_ == kBlinds) {
-            u.p1 = {0.f, 0.f, std::clamp(e.f(4), 1.f, 2000.f), e.f(3) * kDeg2Rad};
+            f32 count = std::clamp(e.f(4), 1.f, 2000.f);
+            // Largura em px (> 0) manda: vira o número de faixas que cabe na
+            // extensão da camada ao longo da direção (a mesma conta do shader).
+            const f32 band = e.count > 5 ? e.f(5) : 0.f;
+            if (std::isfinite(band) && band > 0.f) {
+                const f32 a = e.f(3) * kDeg2Rad;
+                const f32 span = std::fabs(std::cos(a)) * w + std::fabs(std::sin(a)) * h;
+                count = std::clamp(span / std::max(band, 0.5f), 1e-3f, 20000.f);
+            }
+            u.p1 = {0.f, 0.f, count, e.f(3) * kDeg2Rad};
         } else {
             const Vec2 c = e.p2(3);
             u.p1 = {c.x * w, c.y * h, mode_ == kIris ? static_cast<f32>(e.value(5).as_int()) : 0.f,

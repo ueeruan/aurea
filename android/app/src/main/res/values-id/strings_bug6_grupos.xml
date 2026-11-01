@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="eng_ungroup_effects">grup memiliki efek</string>
+    <string name="eng_ungroup_masks">grup memiliki mask</string>
+    <string name="eng_ungroup_blend">grup memiliki mode blend</string>
+    <string name="eng_ungroup_opacity">grup memiliki opasitas sendiri</string>
+    <string name="eng_ungroup_3d">grup berada dalam mode 3D</string>
+    <string name="eng_ungroup_transition">grup memiliki transisi atau gema</string>
+    <string name="eng_ungroup_background">grup memiliki latar belakang sendiri</string>
+    <string name="eng_ungroup_camera_light">grup memiliki kamera atau cahaya sendiri</string>
+    <string name="eng_ungroup_animation">grup memiliki animasi masuk atau keluar</string>
+</resources>

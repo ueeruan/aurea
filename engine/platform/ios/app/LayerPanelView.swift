@@ -39,6 +39,8 @@ enum LayerPanelBits {
 /// Um botão da grade. O id é `layer.panel.<rawValue>` nas duas plataformas.
 enum LayerSlot: String, CaseIterable {
     case colorFill, borderShadow, blendOpacity, moveTransform, edit, presets, effects
+    /// Bug #9b: Máscara (o painel de máscaras) nas camadas visuais cujo Editar não é o recorte.
+    case mask
 }
 
 /// O que a vaga "Editar…" é em cada tipo (uma por vez, como na referência).
@@ -106,12 +108,15 @@ struct LayerPanelSpec: Equatable {
         if l.adjustment || l.kind == 7 {
             return LayerPanelSpec(row2: [nil, nil, .blendOpacity], row3: [nil, nil, nil, .effects], edit: nil, tallRow3: false, speedArrow: false, speed: .constant)
         }
+        // Bug #9b: a máscara vale em qualquer camada visual (motor: Engine::add_mask). Imagem e
+        // vídeo já chegam nela pelo Editar (.mediaShape); forma, texto, grupo e partículas
+        // ganham o botão no fim da fileira 2 (par do `layerPanelSpec` do Android).
         switch l.kind {
         case 5:
             let edit: LayerEdit = l.drawing ? .drawing : l.vector ? .points : .shape
-            return LayerPanelSpec(row2: [.colorFill, .borderShadow, .blendOpacity], row3: std, edit: edit, tallRow3: false, speedArrow: false, speed: .constant)
+            return LayerPanelSpec(row2: [.colorFill, .borderShadow, .blendOpacity, .mask], row3: std, edit: edit, tallRow3: false, speedArrow: false, speed: .constant)
         case 4:
-            return LayerPanelSpec(row2: [.colorFill, .borderShadow, .blendOpacity], row3: std, edit: .text, tallRow3: false, speedArrow: false, speed: .constant)
+            return LayerPanelSpec(row2: [.colorFill, .borderShadow, .blendOpacity, .mask], row3: std, edit: .text, tallRow3: false, speedArrow: false, speed: .constant)
         case 10:
             return LayerPanelSpec(row2: [.colorFill, nil, .blendOpacity], row3: std, edit: l.text3D ? .text : .material, tallRow3: false, speedArrow: false, speed: .constant)
         // Imagem e vídeo são forma com mídia na referência (evidência REA, seção 8).
@@ -120,9 +125,9 @@ struct LayerPanelSpec: Equatable {
         case 1:
             return LayerPanelSpec(row2: [nil, .borderShadow, .blendOpacity], row3: std, edit: .mediaShape, tallRow3: false, speedArrow: false, speed: .panel)
         case 12:
-            return LayerPanelSpec(row2: [nil, .borderShadow, .blendOpacity], row3: std, edit: .group, tallRow3: false, speedArrow: true, speed: .group)
+            return LayerPanelSpec(row2: [nil, .borderShadow, .blendOpacity, .mask], row3: std, edit: .group, tallRow3: false, speedArrow: true, speed: .group)
         case 11:
-            return LayerPanelSpec(row2: [nil, nil, .blendOpacity], row3: std, edit: .particles, tallRow3: false, speedArrow: false, speed: .constant)
+            return LayerPanelSpec(row2: [nil, nil, .blendOpacity, .mask], row3: std, edit: .particles, tallRow3: false, speedArrow: false, speed: .constant)
         case 3:
             return LayerPanelSpec(row2: none, row3: [.effects], edit: nil, tallRow3: true, speedArrow: false, speed: .panel)
         case 8:
@@ -376,6 +381,7 @@ struct LayerPanelView: View {
         case .edit: return edit?.glyph ?? CupertinoGlyph.Pencil
         case .presets: return CupertinoGlyph.WandStars
         case .effects: return CupertinoGlyph.Sparkles
+        case .mask: return ShellGlyph.SquareSplit2x2
         }
     }
 
@@ -388,6 +394,7 @@ struct LayerPanelView: View {
         case .edit: return edit?.label ?? "sh_dock_edit_shape"
         case .presets: return "sh_dock_presets"
         case .effects: return "sh_dock_effects"
+        case .mask: return "sh_dock_mask"
         }
     }
 
@@ -419,6 +426,8 @@ struct LayerPanelView: View {
             }
         case .presets: openPresets(l)
         case .effects: model.openPanel(.effects)
+        // Bug #9b: o mesmo painel que imagem e vídeo abrem pelo Editar.
+        case .mask: model.openPanel(.mask)
         }
     }
 
@@ -1246,9 +1255,11 @@ private struct CompactRuler: View {
     }
 }
 
-/// 0.4.1: as ferramentas em 1 ou 2 fileiras sem buraco (≤ 4: uma; 5: 2 + 3; 6: 3 + 3; 7+: 3 + resto).
+/// 0.4.1: as ferramentas em 1 ou 2 fileiras sem buraco (≤ 4: uma; 5: 2 + 3; 6: 3 + 3; 7: 3 + 4; 8+: 4 + resto).
 func packedToolRows<T>(_ items: [T]) -> [[T]] {
     if items.count <= 4 { return [items] }
     if items.count == 5 { return [Array(items.prefix(2)), Array(items.dropFirst(2))] }
+    // Bug #9b: com a Máscara, forma e texto têm 8 — duas fileiras de 4 (não 3 + 5).
+    if items.count >= 8 { return [Array(items.prefix(4)), Array(items.dropFirst(4))] }
     return [Array(items.prefix(3)), Array(items.dropFirst(3))]
 }

@@ -41,7 +41,7 @@ TSV = os.path.join(ROOT, "tools", "effect_i18n.tsv")
 OUT_KT = os.path.join(ROOT, "android/app/src/main/java/com/aurea/aurea/effects/EffectI18nTable.kt")
 OUT_SWIFT = os.path.join(ROOT, "engine/platform/ios/app/EffectI18nTable.swift")
 LANGS = ["en", "es", "ru", "hi", "id", "ar"]
-REUSE_PREFIXES = ("fx_", "afx_", "fxl_", "fxo_", "fx3_", "fx3o_", "core2_fx_", "core2_fxo_")
+REUSE_PREFIXES = ("fx_", "afx_", "fxl_", "fxo_", "fx3_", "fx3o_", "core2_fx_", "core2_fxo_", "fx045g_")
 REUSE_KEYS = {"scene_low", "scene_medium", "scene_high"}
 
 

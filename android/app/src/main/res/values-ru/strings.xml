@@ -1142,7 +1142,7 @@
     <string name="consent_title">Согласие и ответственность</string>
     <string name="consent_accept">Согласиться и продолжить</string>
     <string name="consent_body">Aurea — профессиональный инструмент для редактирования, создания и производства цифрового контента. Используя приложение, пользователь признаёт, что несёт полную ответственность за контент, который он создаёт, редактирует, импортирует, экспортирует, публикует или распространяет через платформу.\n\nAurea не контролирует, не поощряет, не поддерживает и не разрешает использование инструмента для незаконной, оскорбительной, мошеннической, вредоносной деятельности или деятельности, нарушающей права третьих лиц.\n\nПользователь обязан убедиться, что у него есть необходимые разрешения, лицензии и права на используемые материалы, включая изображения, видео, музыку, товарные знаки, модели, файлы и другой защищённый контент.\n\nТворческая свобода, которую предоставляет Aurea, не означает одобрения, участия или ответственности приложения за то, что каждый пользователь решает создавать или делать с помощью инструмента.\n\nПользователь соглашается использовать Aurea в соответствии с применимым законодательством и принимает ответственность за свои действия и контент, созданный или распространённый через приложение.\n\nВ максимальной степени, допускаемой применимым законодательством, Aurea и ответственные за него лица не несут ответственности за действия, совершённые исключительно пользователем, за ненадлежащее использование инструмента или за последствия контента, созданного, опубликованного или распространённого самим пользователем.\n\nAurea предоставляет инструмент. Пользователь отвечает за то, как он решает его использовать.\n\nПродолжая, пользователь заявляет, что прочитал, понял и принимает эти условия.</string>
-    <string name="release_notes_body">Aurea Beta 0.4.4 (2207) • 29.10.2026\n\n• Разбить текст: в «Анимации текста» разделите текст на буквы, слова или строки. Каждая часть становится отдельным текстовым слоем точно на том же месте и готова к анимации.\n• Новый пресет «Плавный отскок»: слова по очереди падают сверху, проявляясь, и останавливаются с затухающим отскоком.\n• Облачные автосубтитры и Зеркальный пол (из 0.4.2) входят в эту версию.\n• Вход через Google теперь работает в приложении из Play.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.5 (2208) • 01.11.2026\n\n• Исправления: превью больше не зависает при воспроизведении, экспорт работает на большем числе устройств и разрешений, буквы текста не пропадают после экспорта, можно разгруппировать одну группу, график кривых больше не закрывается сам, а 3D-тени снова следуют за светом.\n• Пипетка для всех цветов: берите цвет из превью в цветовом круге, в Chroma Key (исходный цвет фона) и в цвете фона проекта.\n• Удаление фона видео без зелёного экрана: анализирует клип и вырезает человека или объект с уточнением краёв.\n• Новые эффекты: Hyper Glitch, Block Glitch, Shift Channels, Time Displacement, Tile Shift, Hexagon Tile, Hollow Box, Отражение в воде, Light Wrap, Кинолуки и переходы Ручка и Пыль. У Glitchify стало намного больше настроек.\n• Удобнее 3D-скелет: кольца вращения на суставах и отдельная панель с деревом костей. В «Марионетке» можно вращать несколько точек вместе.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Заливка</string>
@@ -4506,4 +4506,49 @@
     <string name="fxl_floor_brightness">Яркость пола</string>
     <string name="fxl_floor_opacity">Непрозрачность пола</string>
     <string name="fxl_floor_texture_layer">Текстура пола (слой)</string>
+    <string name="fx045_name_water_reflection">Отражение в воде</string>
+    <string name="fx045_desc_water_reflection">Слой отражается ниже линии горизонта, как на водной глади, с анимированной рябью, перспективой, размытием и оттенком воды.</string>
+    <string name="fx045_name_light_wrap">Световое обтекание</string>
+    <string name="fx045_desc_light_wrap">Свет фона проникает в края слоя, только внутри силуэта, чтобы вписать вырезанный объект в сцену. Выберите слой фона или используйте цвет.</string>
+    <string name="fx045_name_looks">Кинолуки</string>
+    <string name="fx045_desc_looks">Готовые цветовые луки (Teal &amp; Orange, Bleach Bypass, нуар, винтаж, киберпанк и другие) с интенсивностью и быстрой настройкой экспозиции, температуры, контраста и насыщенности.</string>
+    <string name="fx045_name_ballpoint">Шариковая ручка</string>
+    <string name="fx045_desc_ballpoint">Переход: ручка штрихует слой ряд за рядом, и штриховка открывает (или стирает) изображение — с чернилами, дрожанием руки и заливкой.</string>
+    <string name="fx045_name_dust">Пыль</string>
+    <string name="fx045_desc_dust">Переход: слой рассыпается в мелкую пыль, которую уносит ветер, — с органичным краем, завихрениями и исчезающими крупинками.</string>
+    <string name="fxt_0_the_width_comes_from_the_number_of_str">0 = ширина задаётся числом полос.</string>
+    <string name="fxl_reflection_length">Длина отражения</string>
+    <string name="fxl_reflection_opacity">Непрозрачность отражения</string>
+    <string name="fxl_falloff_2">Затухание</string>
+    <string name="fxt_waves_per_100_px">Волн на 100 пкс.</string>
+    <string name="fxt_waves_per_second_0_still_water">Волн в секунду. 0 = спокойная вода.</string>
+    <string name="fxl_water_color">Цвет воды</string>
+    <string name="fxt_pick_the_layer_behind_its_light_enters_t">Выберите слой позади (его свет проникает в края). Без слоя свет берётся из цвета ниже.</string>
+    <string name="fxl_blend_mode">Режим наложения</string>
+    <string name="fxl_background_blur">Размытие фона</string>
+    <string name="fxl_wrap_only">Только обтекание</string>
+    <string name="fxl_stroke_thickness">Толщина штриха</string>
+    <string name="fxl_scribble_density">Плотность штриховки</string>
+    <string name="fxl_hand_jitter">Дрожание руки</string>
+    <string name="fxl_ink_color">Цвет чернил</string>
+    <string name="fxl_ink">Чернила</string>
+    <string name="fxl_fill_delay">Задержка заливки</string>
+    <string name="fxt_how_far_along_the_row_the_pen_travels_be">Сколько ручка проходит по ряду, прежде чем область позади неё полностью заполнится.</string>
+    <string name="fxl_wind_direction">Направление ветра</string>
+    <string name="fxl_wind_strength">Сила ветра</string>
+    <string name="fxl_look">Лук</string>
+    <string name="fxo_teal_orange">Teal &amp; Orange</string>
+    <string name="fxo_bleach_bypass">Bleach Bypass</string>
+    <string name="fxo_warm_film">Тёплая плёнка</string>
+    <string name="fxo_cool_film">Холодная плёнка</string>
+    <string name="fxo_noir">Нуар</string>
+    <string name="fxo_vintage">Винтаж</string>
+    <string name="fxo_cyberpunk">Киберпанк</string>
+    <string name="fxo_sepia">Сепия</string>
+    <string name="fxo_pastel">Пастель</string>
+    <string name="fxo_golden_hour">Золотой час</string>
+    <string name="fxo_day_for_night">Американская ночь</string>
+    <string name="fxo_digital_green">Цифровой зелёный</string>
+    <string name="fxo_western">Вестерн</string>
+    <string name="fxl_temperature">Температура</string>
 </resources>

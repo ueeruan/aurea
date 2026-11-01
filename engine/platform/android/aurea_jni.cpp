@@ -1146,6 +1146,43 @@ AUREA_JNI jint AUREA_FN(nativeCapturePreviewFrame)(JNIEnv* env, jclass, jlong ha
     return capture_frame(env, handle, maxDim, out, outSize, true);
 }
 
+/// Conta-gotas (0.4.5): o quadro da prévia com o efeito `effectId` da camada
+/// `layer` desligado só nesta captura (layer 0 = a prévia comum). Sem desfazer.
+AUREA_JNI jint AUREA_FN(nativeCaptureEyedropperFrame)(JNIEnv* env, jclass, jlong handle, jint maxDim, jlong layer,
+                                                      jint effectId, jobject out, jintArray outSize) {
+    NativeContext* c = ctx_of(handle);
+    auto* dst = static_cast<u8*>(buffer_ptr(env, out));
+    if (!c || !dst || maxDim <= 0) return 0;
+    std::vector<u8> rgba;
+    u32 w = 0, h = 0;
+    const u32 effect = effectId < 0 ? kInvalidIndex : static_cast<u32>(effectId);
+    const Status captured = c->engine.capture_eyedropper_frame_rgba(static_cast<u32>(maxDim), static_cast<u64>(layer),
+                                                                   effect, rgba, w, h);
+    if (!captured.ok()) {
+        AUREA_LOG_WARN("captura do conta-gotas falhou (%u): %s", static_cast<u32>(captured.code()), captured.message().data());
+        return 0;
+    }
+    if (static_cast<jlong>(rgba.size()) > buffer_capacity(env, out)) return 0;
+    std::memcpy(dst, rgba.data(), rgba.size());
+    if (outSize && env->GetArrayLength(outSize) >= 2) {
+        const jint wh[2] = {static_cast<jint>(w), static_cast<jint>(h)};
+        env->SetIntArrayRegion(outSize, 0, 2, wh);
+    }
+    return static_cast<jint>(rgba.size());
+}
+
+/// Conta-gotas (0.4.5): a cor sRGB (alfa reto) do ponto (x, y) px da composição.
+AUREA_JNI jboolean AUREA_FN(nativeSampleCompositionColor)(JNIEnv* env, jclass, jlong handle, jfloat x, jfloat y,
+                                                          jlong layer, jint effectId, jfloatArray outRgba) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !outRgba || env->GetArrayLength(outRgba) < 4) return JNI_FALSE;
+    f32 rgba[4] = {};
+    const u32 effect = effectId < 0 ? kInvalidIndex : static_cast<u32>(effectId);
+    if (!c->engine.sample_composition_color(x, y, static_cast<u64>(layer), effect, rgba).ok()) return JNI_FALSE;
+    env->SetFloatArrayRegion(outRgba, 0, 4, rgba);
+    return JNI_TRUE;
+}
+
 /// A prévia de um efeito em RGBA8 sRGB; `outSize` recebe largura/altura.
 AUREA_JNI jboolean AUREA_FN(nativeRenderEffectPreview)(JNIEnv* env, jclass, jlong handle, jint typeId,
                                                        jint width, jint height, jobject out,
@@ -1620,6 +1657,18 @@ AUREA_JNI jstring AUREA_FN(nativeUngroupPrecomp)(JNIEnv* env, jclass, jlong hand
     return env->NewStringUTF(why.empty() ? "nao deu para desagrupar" : why.c_str());
 }
 
+// Bug #6: vários grupos num passo de desfazer. null = todos desfeitos; senão o
+// motivo da 1ª recusa (os outros grupos foram desfeitos mesmo assim, se deu).
+AUREA_JNI jstring AUREA_FN(nativeUngroupPrecomps)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return env->NewStringUTF("motor indisponivel");
+    const auto v = jlongs(env, ids);
+    std::string why;
+    const Result<u32> r = c->engine.ungroup_precomps(v.data(), static_cast<u32>(v.size()), &why);
+    if (r.ok() && why.empty()) return nullptr;
+    return env->NewStringUTF(why.empty() ? "nao deu para desagrupar" : why.c_str());
+}
+
 AUREA_JNI jlong AUREA_FN(nativePrecompose)(JNIEnv* env, jclass, jlong handle, jlongArray ids) {
     NativeContext* c = ctx_of(handle);
     if (!c) return -static_cast<jlong>(Errc::InvalidState);
@@ -1914,6 +1963,17 @@ AUREA_JNI jboolean AUREA_FN(nativePuppetRemovePin)(JNIEnv*, jclass, jlong handle
     NativeContext* c = ctx_of(handle);
     return c && effect >= 0 && pin >= 0
         && c->engine.puppet_remove_pin(static_cast<u64>(layer), static_cast<u32>(effect), static_cast<u32>(pin)) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// 0.4.5: gira os pinos de `mask` em volta do pino `pivot` (o dedo de (u0, v0) a (u1, v1)).
+AUREA_JNI jboolean AUREA_FN(nativePuppetRotatePins)(JNIEnv*, jclass, jlong handle, jlong layer, jint effect, jint pivot, jint mask,
+                                                   jfloat u0, jfloat v0, jfloat u1, jfloat v1, jboolean autoKey,
+                                                   jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && effect >= 0 && pivot >= 0
+        && c->engine.puppet_rotate_pins(static_cast<u64>(layer), static_cast<u32>(effect), static_cast<u32>(pivot),
+                                        static_cast<u32>(mask), u0, v0, u1, v1, autoKey == JNI_TRUE, continuing == JNI_TRUE)
+        ? JNI_TRUE : JNI_FALSE;
 }
 
 /// Quadros rastreados, ou −Errc.
@@ -3104,6 +3164,39 @@ AUREA_JNI jlongArray AUREA_FN(nativeRotoStatus)(JNIEnv* env, jclass, jlong handl
     return out;
 }
 
+// --- Remover fundo (EngineBgRemove.cpp, 0.4.5) ---------------------------------
+AUREA_JNI jint AUREA_FN(nativeBgRemoveApply)(JNIEnv*, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    return c ? static_cast<jint>(c->engine.bg_remove_apply(static_cast<u64>(layer))) : -1;
+}
+AUREA_JNI jboolean AUREA_FN(nativeBgRemoveAnalyze)(JNIEnv*, jclass, jlong handle, jlong layer, jint effectId) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.bg_remove_analyze(static_cast<u64>(layer), static_cast<u32>(effectId)) ? JNI_TRUE : JNI_FALSE;
+}
+AUREA_JNI void AUREA_FN(nativeBgRemoveCancel)(JNIEnv*, jclass, jlong handle) {
+    if (NativeContext* c = ctx_of(handle)) c->engine.bg_remove_cancel();
+}
+/// [analisados, total, analisando, falhou (motivo), quadro atual pronto,
+///  quadros do clipe prontos, quadros do clipe, modelo efetivo, válido]
+/// válido = 0: o render estava ocupado; a interface mantém o último estado.
+AUREA_JNI jlongArray AUREA_FN(nativeBgRemoveStatus)(JNIEnv* env, jclass, jlong handle, jlong layer, jint effectId) {
+    NativeContext* c = ctx_of(handle);
+    jlong v[9]{};
+    if (c) {
+        i64 st[8]{};
+        if (c->engine.bg_remove_status(static_cast<u64>(layer), static_cast<u32>(effectId), st)) {
+            for (u32 i = 0; i < 8; ++i) v[i] = st[i];
+            v[8] = 1;
+        }
+    }
+    jlongArray out = env->NewLongArray(9);
+    if (out) env->SetLongArrayRegion(out, 0, 9, v);
+    return out;
+}
+AUREA_JNI jboolean AUREA_FN(nativeBgRemoveNativeAvailable)(JNIEnv*, jclass) {
+    return Engine::bg_remove_native_available() ? JNI_TRUE : JNI_FALSE;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeSetLayerMotionBlurLength)(JNIEnv*, jclass, jlong handle, jlong layer, jfloat factor) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.set_layer_motion_blur_length(static_cast<u64>(layer), factor) ? JNI_TRUE : JNI_FALSE;
@@ -3732,6 +3825,58 @@ AUREA_JNI jboolean AUREA_FN(nativeResetBonePose)(JNIEnv*, jclass, jlong handle, 
     return c && c->engine.reset_bone_pose(static_cast<u64>(layer), node) ? JNI_TRUE : JNI_FALSE;
 }
 
+// --- Esqueleto 3D (0.4.5) — EngineRigSkeleton.cpp. Par do iOS: AureaEngine.mm. ---
+/// Anéis do osso (Engine::kBoneGizmoFloats); array curto devolve o tamanho pedido.
+AUREA_JNI jint AUREA_FN(nativeQueryBoneGizmo)(JNIEnv* env, jclass, jlong handle, jlong layer, jint node, jfloat radius,
+                                             jfloatArray out) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return 0;
+    f32 v[Engine::kBoneGizmoFloats];
+    const u32 w = c->engine.query_bone_gizmo(static_cast<u64>(layer), node, radius, v, Engine::kBoneGizmoFloats);
+    if (!out || w == 0) return static_cast<jint>(w);
+    if (env->GetArrayLength(out) < static_cast<jsize>(w)) return static_cast<jint>(w);
+    env->SetFloatArrayRegion(out, 0, static_cast<jsize>(w), v);
+    return static_cast<jint>(w);
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeDragBoneRing)(JNIEnv*, jclass, jlong handle, jlong layer, jint node, jint axis, jfloat x0,
+                                               jfloat y0, jfloat x1, jfloat y1, jfloat radius, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && node >= 0 && axis >= 0
+        && c->engine.drag_bone_ring(static_cast<u64>(layer), static_cast<u32>(node), static_cast<u32>(axis), x0, y0, x1, y1,
+                                    radius, continuing == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+/// 4 floats por osso {nó, X, Y, Z °}.
+AUREA_JNI jboolean AUREA_FN(nativeSetBoneRotations)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray values,
+                                                   jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !values) return JNI_FALSE;
+    const jsize n = env->GetArrayLength(values);
+    if (n < 4) return JNI_FALSE;
+    std::vector<f32> v(static_cast<usize>(n));
+    env->GetFloatArrayRegion(values, 0, n, v.data());
+    return c->engine.set_bone_rotations(static_cast<u64>(layer), v.data(), static_cast<u32>(n / 4), continuing == JNI_TRUE)
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jint AUREA_FN(nativeBoneMirrorPartner)(JNIEnv*, jclass, jlong handle, jlong layer, jint node) {
+    NativeContext* c = ctx_of(handle);
+    return c ? c->engine.bone_mirror_partner(static_cast<u64>(layer), node) : -1;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeMirrorBonePose)(JNIEnv*, jclass, jlong handle, jlong layer, jint node) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.mirror_bone_pose(static_cast<u64>(layer), node) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jboolean AUREA_FN(nativeDragBoneIk)(JNIEnv*, jclass, jlong handle, jlong layer, jint node, jfloat dx, jfloat dy,
+                                             jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    return c && node >= 0
+        && c->engine.drag_bone_ik(static_cast<u64>(layer), static_cast<u32>(node), dx, dy, continuing == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
 // ---- AutoRig 3D (0.3.6 BETA) — Engine::humanoid_* / autorig_* -------------------------
 namespace {
 template <class Q>
@@ -4302,6 +4447,17 @@ AUREA_JNI jlong AUREA_FN(nativeParentToNewNull)(JNIEnv* env, jclass, jlong handl
     const Result<u64> r = c->engine.parent_to_new_null(v.data(), static_cast<u32>(v.size()));
     if (!r.ok()) return -static_cast<jlong>(r.status().code());
     return static_cast<jlong>(*r);
+}
+
+/// "Vincular selecionadas" (bug #9c): todas ao mesmo pai (0 = soltar), um passo
+/// de desfazer. Quantas mudaram (≥ 1) ou `-Errc` em caso de recusa.
+AUREA_JNI jint AUREA_FN(nativeSetParentMany)(JNIEnv* env, jclass, jlong handle, jlongArray ids, jlong parent) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jint>(Errc::InvalidState);
+    const auto v = jlongs(env, ids);
+    if (v.empty()) return -static_cast<jint>(Errc::InvalidArgument);
+    const Result<u32> r = c->engine.set_parent_many(v.data(), static_cast<u32>(v.size()), static_cast<u64>(parent));
+    return r.ok() ? static_cast<jint>(*r) : -static_cast<jint>(r.status().code());
 }
 
 /// "Escalonar": quantas camadas andaram (≥ 0) ou `-Errc` em caso de recusa.
@@ -5460,9 +5616,9 @@ AUREA_JNI jboolean AUREA_FN(nativeSetSceneSetting)(JNIEnv*, jclass, jlong handle
         if (hdri) ok = e.clear_hdri() && ok;
         return ok;
     }
-    // Chão: 0 sem chão, 1 chão visível, 2 só sombra (shadow catcher).
-    case 1: return e.set_scene_floor(value >= 1.5f ? 2u : value > 0 ? 1u : 0u, floor[1], floor[2], floor[3], floor[4],
-                                     floor[5] > 0 ? floor[5] : .5f, floor[6], floor[7]);
+    // Chão: 0 sem chão, 1 chão visível, 2 só sombra (shadow catcher). Saindo do
+    // "Reflective Floor" o motor volta ao chão padrão (Engine::set_scene_floor_mode).
+    case 1: return e.set_scene_floor_mode(value >= 1.5f ? 2u : value > 0 ? 1u : 0u);
     case 2: return e.set_scene3d_quality(static_cast<aurea::u32>(value));
     case 3: return e.set_scene3d_tonemap(static_cast<aurea::u32>(value), post[2]);
     case 4: return e.set_scene3d_tonemap(static_cast<aurea::u32>(post[1]), value);

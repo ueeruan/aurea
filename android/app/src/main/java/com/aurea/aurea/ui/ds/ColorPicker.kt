@@ -104,6 +104,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import com.aurea.aurea.engine.AureaEngine
 import kotlinx.coroutines.delay
 import kotlin.math.abs
@@ -805,6 +807,23 @@ internal fun writeClipboardText(context: Context, text: String) {
 /** "#RRGGBB" de uma cor da paleta (rótulo de acessibilidade). */
 internal fun argbLabel(argb: Int): String = String.format(Locale.ROOT, "#%06X", argb and 0xFFFFFF)
 
+/**
+ * Correção #10 (0.4.4): o que o campo do código aceita enquanto a pessoa digita —
+ * só dígitos hexadecimais e um "#" opcional no começo, até 8 dígitos (RRGGBBAA).
+ * Não muda maiúsculas/minúsculas (o motor aceita as duas) para não brigar com o teclado.
+ */
+internal fun sanitizeColorCodeInput(text: String): String {
+    val hash = text.trimStart().startsWith("#")
+    val digits = text.filter { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }.take(8)
+    return if (hash) "#$digits" else digits
+}
+
+/** O texto do campo já é um código completo (3, 6 ou 8 dígitos)? Devolve-o com "#" para o motor ler. */
+internal fun completeColorCode(text: String): String? {
+    val digits = text.removePrefix("#")
+    return if (digits.length == 3 || digits.length == 6 || digits.length == 8) "#$digits" else null
+}
+
 /** Tinta legível sobre a cor (a conta é do motor: igual no iOS). */
 internal fun inkOver(rgba: FloatArray): Color =
     if (AureaEngine.colorWantsDarkText(rgba[0], rgba[1], rgba[2], rgba.getOrElse(3) { 1f })) Color.Black else Color.White
@@ -823,6 +842,7 @@ private enum class FineLabel { None, Hue, SatVal, Alpha }
  * @param eyedropperActive o conta-gotas do palco está ligado por este seletor.
  * @param onEyedropper liga/desliga o conta-gotas; nulo = sem o botão (fora do editor).
  * @param onMessage avisos curtos (o toast do editor); nulo = toast do sistema.
+ * @param fullEyedropper o conta-gotas da tela cheia do "Mais cores" (0.4.5); nulo = sem ele.
  */
 @Composable
 fun EmbeddedColorPicker(
@@ -835,6 +855,7 @@ fun EmbeddedColorPicker(
     eyedropperActive: Boolean = false,
     onEyedropper: (() -> Unit)? = null,
     onMessage: ((String) -> Unit)? = null,
+    fullEyedropper: FullEyedropper? = null,
 ) {
     val context = LocalContext.current
     val state = rememberPickState(color)
@@ -889,6 +910,13 @@ fun EmbeddedColorPicker(
                     },
                     onPaste = { rgba -> applyOnce(if (withAlpha) rgba else floatArrayOf(rgba[0], rgba[1], rgba[2], state.alpha)) },
                     onCopied = { notify(copiedText) },
+                    // Correção #10: cada código válido digitado aplica a cor; a digitação
+                    // inteira é UM passo de desfazer (fecha ao sair do campo).
+                    onCodeInput = { rgba ->
+                        state.set(if (withAlpha) rgba else floatArrayOf(rgba[0], rgba[1], rgba[2], state.alpha))
+                        emit()
+                    },
+                    onCodeDone = { gate.close() },
                 )
             }
         }
@@ -898,6 +926,9 @@ fun EmbeddedColorPicker(
             }
             SideButton(CupertinoGlyph.SliderHorizontal3, stringResource(R.string.om_ap_cp_fine), fine, "colorpicker.fine") { fine = !fine }
             SideButton(CupertinoGlyph.ColorFilter, stringResource(R.string.om_ap_cp_full), false, "colorpicker.full") {
+                // A tela cheia cobre o palco: o conta-gotas ao vivo deste seletor desliga
+                // (par do iOS); a tela cheia tem o dela (0.4.5).
+                if (eyedropperActive) onEyedropper?.invoke()
                 gate.close()
                 full = true
             }
@@ -915,6 +946,7 @@ fun EmbeddedColorPicker(
                 full = false
                 gate.close()
             },
+            eyedropper = fullEyedropper,
         )
     }
 }
@@ -947,6 +979,8 @@ private fun SwatchArea(
     onSwatch: (Int) -> Unit,
     onPaste: (FloatArray) -> Unit,
     onCopied: () -> Unit,
+    onCodeInput: (FloatArray) -> Unit = {},
+    onCodeDone: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val palette = rememberSavedPalette()
@@ -965,17 +999,48 @@ private fun SwatchArea(
                 },
         ) {
             var menu by remember { mutableStateOf(false) }
+            // Correção #10 (0.4.4): o código era só leitura (o toque não fazia nada e só o
+            // segurar copiava/colava) — "o campo hex não aceita digitar". Agora o toque o
+            // abre para digitar; o rascunho é da pessoa (a cor que chega de volta não o
+            // reescreve) e cada código completo (#RGB, #RRGGBB, #RRGGBBAA) já aplica.
+            var editing by remember { mutableStateOf(false) }
+            var draft by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("")) }
             val codeLabel = stringResource(R.string.om_ap_cp_code, code)
+            val typeLabel = stringResource(R.string.om_ap_cp_type_code)
             Box(
                 Modifier
                     .fillMaxSize()
                     .testTag("colorpicker.hex")
-                    .semantics { contentDescription = codeLabel }
-                    .tocavel(shrink = 1f, onLongClick = { menu = true }) {},
+                    .semantics { contentDescription = if (editing) typeLabel else codeLabel }
+                    .tocavel(shrink = 1f, onLongClick = { menu = true }) {
+                        if (!editing) {
+                            draft = androidx.compose.ui.text.input.TextFieldValue(code, androidx.compose.ui.text.TextRange(0, code.length))
+                            editing = true
+                        }
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 KeepLtr {
-                    Text(code, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = ink, fontFeatureSettings = "tnum")))
+                    if (editing) {
+                        ColorCodeField(
+                            value = draft,
+                            ink = ink,
+                            label = typeLabel,
+                            onValue = { next ->
+                                draft = next
+                                completeColorCode(next.text)
+                                    ?.let { AureaEngine.parseColorCode(it) }
+                                    ?.takeIf { it.size >= 4 }
+                                    ?.let { onCodeInput(rgba4(it)) }
+                            },
+                            onDone = {
+                                editing = false
+                                onCodeDone()
+                            },
+                        )
+                    } else {
+                        Text(code, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, fontWeight = FontWeight.W600, color = ink, fontFeatureSettings = "tnum")))
+                    }
                 }
                 // P1-7: copiar / colar o código (o colar mostra a cor da área de transferência).
                 val clip = remember(menu) { if (menu) readClipboardText(context) else null }
@@ -1042,6 +1107,108 @@ private fun SwatchArea(
             }
         }
     }
+}
+
+/**
+ * Correção #10: o código da cor que vira campo ao toque (seletor em tela cheia).
+ * [onColor] recebe cada código completo já lido pelo motor (RGBA 0..1); quem chama
+ * decide o alfa. Fora da edição mostra [code] como sempre.
+ */
+@Composable
+internal fun EditableColorCode(
+    code: String,
+    color: Color,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    tag: String,
+    /** O que o campo traz ao abrir (sem o "(A%)" do RGB, que viraria dígitos). */
+    editText: String = code,
+    onColor: (FloatArray) -> Unit,
+) {
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("")) }
+    val codeLabel = stringResource(R.string.om_ap_cp_code, code)
+    val typeLabel = stringResource(R.string.om_ap_cp_type_code)
+    if (editing) {
+        ColorCodeField(
+            value = draft,
+            ink = color,
+            label = typeLabel,
+            fontSize = fontSize,
+            onValue = { next ->
+                draft = next
+                completeColorCode(next.text)
+                    ?.let { AureaEngine.parseColorCode(it) }
+                    ?.takeIf { it.size >= 4 }
+                    ?.let { onColor(rgba4(it)) }
+            },
+            onDone = { editing = false },
+        )
+    } else {
+        Text(
+            code,
+            modifier = Modifier.testTag(tag)
+                .semantics { contentDescription = codeLabel }
+                .tocavel(shrink = 1f) {
+                    draft = androidx.compose.ui.text.input.TextFieldValue(editText, androidx.compose.ui.text.TextRange(0, editText.length))
+                    editing = true
+                }
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            style = AureaType.Base.merge(TextStyle(fontSize = fontSize, color = color, fontFeatureSettings = "tnum")),
+        )
+    }
+}
+
+/**
+ * Correção #10: o campo do código da cor. Digitação livre (só hex e um "#" na
+ * frente); o foco e o teclado sobem ao abrir; Concluir ou sair do campo fecha.
+ */
+@Composable
+private fun ColorCodeField(
+    value: androidx.compose.ui.text.input.TextFieldValue,
+    ink: Color,
+    label: String,
+    onValue: (androidx.compose.ui.text.input.TextFieldValue) -> Unit,
+    onDone: () -> Unit,
+    fontSize: androidx.compose.ui.unit.TextUnit = 12.sp,
+) {
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val done by rememberUpdatedState(onDone)
+    var focused by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        focus.requestFocus()
+        keyboard?.show()
+    }
+    // Saiu da tela no meio (modo fino, balão fechado): o passo de desfazer fecha igual.
+    DisposableEffect(Unit) { onDispose { done() } }
+    androidx.compose.foundation.text.BasicTextField(
+        value = value,
+        onValueChange = { next ->
+            val clean = sanitizeColorCodeInput(next.text)
+            onValue(if (clean == next.text) next else androidx.compose.ui.text.input.TextFieldValue(clean, androidx.compose.ui.text.TextRange(clean.length)))
+        },
+        singleLine = true,
+        textStyle = AureaType.Base.merge(TextStyle(fontSize = fontSize, fontWeight = FontWeight.W600, color = ink,
+            fontFeatureSettings = "tnum", textAlign = TextAlign.Center)),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(ink),
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+            capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Characters,
+            autoCorrectEnabled = false,
+            keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii,
+            imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+        ),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focusManager.clearFocus() }),
+        modifier = Modifier
+            .width(if (fontSize.value > 13f) 140.dp else 96.dp)
+            .focusRequester(focus)
+            .testTag("colorpicker.hex.field")
+            .semantics { contentDescription = label }
+            .onFocusChanged { state ->
+                if (focused && !state.isFocused) done()
+                focused = state.isFocused
+            },
+    )
 }
 
 /** Uma amostra da paleta (célula de [cell]; amostra de [size], raio 5). */
@@ -1385,6 +1552,8 @@ fun ColorPopover(
     eyedropperActive: Boolean = false,
     onEyedropper: (() -> Unit)? = null,
     onMessage: ((String) -> Unit)? = null,
+    fullEyedropper: FullEyedropper? = null,
+    collapsed: Boolean = false,
 ) {
     val density = LocalDensity.current
     var placement by remember { mutableStateOf<ColorPopoverMath.Placement?>(null) }
@@ -1407,13 +1576,16 @@ fun ColorPopover(
         popupPositionProvider = provider,
         onDismissRequest = onDismiss,
         properties = PopupProperties(
-            focusable = !eyedropperActive,
-            dismissOnBackPress = true,
-            dismissOnClickOutside = !eyedropperActive,
+            focusable = !eyedropperActive && !collapsed,
+            dismissOnBackPress = !collapsed,
+            dismissOnClickOutside = !eyedropperActive && !collapsed,
         ),
     ) {
         val p = placement
-        Column(Modifier.width(width).alpha(if (p == null) 0f else 1f).testTag("colorpicker.popover")) {
+        // 0.4.5: a tela cheia do "Mais cores" amostrando na prévia ([collapsed]): o balão
+        // fica composto (guarda o seletor e a tela cheia), mas sem tamanho e sem toque.
+        val shown = if (collapsed) Modifier.size(0.dp) else Modifier.width(width)
+        Column(shown.alpha(if (p == null || collapsed) 0f else 1f).testTag("colorpicker.popover")) {
             PopoverArrow(up = true, visible = p?.below == true, arrowX = p?.arrowX)
             EmbeddedColorPicker(
                 color = color,
@@ -1423,6 +1595,7 @@ fun ColorPopover(
                 eyedropperActive = eyedropperActive,
                 onEyedropper = onEyedropper,
                 onMessage = onMessage,
+                fullEyedropper = fullEyedropper,
             )
             PopoverArrow(up = false, visible = p?.below == false, arrowX = p?.arrowX)
         }

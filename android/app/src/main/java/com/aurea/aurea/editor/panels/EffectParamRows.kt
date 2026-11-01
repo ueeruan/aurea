@@ -38,6 +38,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -801,6 +803,11 @@ private fun FxColorRow(
     val expr = rememberExpr(env, effectId, s)
     val locked = rememberLocked(env)
     val enabled = s.enabled && !locked
+    // Bug #9a: a amostra (px da janela) ancora o balão do seletor — o embutido, com o
+    // CONTA-GOTAS ao vivo do palco (tocar na prévia escolhe a cor-chave do Chroma Key).
+    // Sem âncora abria a tela cheia, que não tem conta-gotas (a folha antiga, com ele,
+    // saiu na 0.3.2 Omega). A tela cheia continua no "Mais cores" do balão.
+    val anchor = remember(effectId, s.index) { arrayOfNulls<androidx.compose.ui.geometry.Rect>(1) }
     val pick = {
         onSelect(ParamKey(effectId, s.index, 0), false)
         store.beginGesture("cor $label")
@@ -811,6 +818,11 @@ private fun FxColorRow(
                     store.paramOf(effectId, s.index)?.let { store.writeParamVector(effectId, it, displayToEngine(r, g, b, a)) }
                 },
                 onDone = { store.endGesture() },
+                anchor = anchor[0],
+                // 0.4.5: o conta-gotas pega a cor que ENTRA no efeito (o fundo verde antes
+                // do Chroma Key tirá-lo), na camada do painel.
+                sampleLayer = store.primary ?: 0L,
+                sampleEffect = effectId,
             ),
         )
     }
@@ -847,6 +859,7 @@ private fun FxColorRow(
                 Modifier
                     .padding(end = 6.dp)
                     .size(30.dp)  // 0.3.4 painéis: antes 24,5
+                    .onGloballyPositioned { anchor[0] = it.boundsInWindow() }
                     .clip(RoundedCornerShape(3.dp))
                     .background(color)
                     .border(0.5.dp, AureaColors.FxLowSurface, RoundedCornerShape(3.dp)),

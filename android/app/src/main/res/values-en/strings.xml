@@ -985,7 +985,7 @@ to edit the curve.</string>
     <string name="fx_name_glitchify">Glitchify</string>
     <string name="fx_name_vhs">VHS</string>
     <string name="fx_name_uni_vhs">VHS Tape</string>
-    <string name="fx_name_signal">Signal</string>
+    <string name="fx_name_signal">Signal Glitch</string>
     <string name="fx_name_cross_glitch">Cross Glitch</string>
     <string name="fx_name_posterize_time">Posterize Time</string>
     <string name="fx_name_time_warp_rgb">Timewarp RGB</string>
@@ -1777,7 +1777,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea Beta 0.4.4 (2207) • 10/29/2026\n\n• Explode text: in Text animation, split the text into characters, words or lines. Each piece becomes its own text layer, exactly in the same place, ready to animate.\n• New Smooth Bounce preset: each word drops in, fading up, and settles with a damped bounce, one after another.\n• Cloud auto captions and Reflective Floor (from 0.4.2) are included.\n• Sign in with Google now works in the app downloaded from Play.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.5 (2208) • 11/01/2026\n\n• Fixes: the preview no longer freezes during playback, export works on more devices and resolutions, text letters no longer disappear after exporting, you can ungroup a single group, the curve graph no longer closes by itself, and 3D shadows follow the light again.\n• Eyedropper in every color: pick a color from the preview in the color wheel, in Chroma Key (the original background color) and in the project background color.\n• Remove video background without a green screen: analyzes the clip and cuts out the person or object, with edge refinement.\n• New effects: Hyper Glitch, Block Glitch, Shift Channels, Time Displacement, Tile Shift, Hexagon Tile, Hollow Box, Water Reflection, Light Wrap, Cinema Looks and the Ballpoint and Dust transitions. Glitchify got many more controls.\n• Easier 3D skeleton: rotation rings on the joints and a dedicated panel with the bone tree. In Puppet, rotate several pins together.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -4545,4 +4545,49 @@ to edit the curve.</string>
     <string name="fxl_floor_brightness">Floor brightness</string>
     <string name="fxl_floor_opacity">Floor opacity</string>
     <string name="fxl_floor_texture_layer">Floor texture (layer)</string>
+    <string name="fx045_name_water_reflection">Water Reflection</string>
+    <string name="fx045_desc_water_reflection">The layer is mirrored below a horizon line as on a water surface, with animated ripples, perspective, blur and a water tint.</string>
+    <string name="fx045_name_light_wrap">Light Wrap</string>
+    <string name="fx045_desc_light_wrap">Background light spills into the layer\'s edges, only inside its silhouette, to blend cutouts into the scene. Pick the background layer or use a color.</string>
+    <string name="fx045_name_looks">Cinematic Looks</string>
+    <string name="fx045_desc_looks">Ready-made color looks (Teal &amp; Orange, Bleach Bypass, Noir, Vintage, Cyberpunk and more) with intensity and quick exposure, temperature, contrast and saturation tweaks.</string>
+    <string name="fx045_name_ballpoint">Ballpoint</string>
+    <string name="fx045_desc_ballpoint">Transition: a pen scribbles across the layer row by row and the scribble reveals (or erases) the image, with ink, hand jitter and fill.</string>
+    <string name="fx045_name_dust">Dust</string>
+    <string name="fx045_desc_dust">Transition: the layer crumbles into fine dust carried by the wind, with an organic edge, swirls and vanishing grains.</string>
+    <string name="fxt_0_the_width_comes_from_the_number_of_str">0 = the width comes from the number of strips.</string>
+    <string name="fxl_reflection_length">Reflection length</string>
+    <string name="fxl_reflection_opacity">Reflection opacity</string>
+    <string name="fxl_falloff_2">Falloff</string>
+    <string name="fxt_waves_per_100_px">Waves per 100 px.</string>
+    <string name="fxt_waves_per_second_0_still_water">Waves per second. 0 = still water.</string>
+    <string name="fxl_water_color">Water color</string>
+    <string name="fxt_pick_the_layer_behind_its_light_enters_t">Pick the layer behind (its light enters the edges). With no layer, the light is the color below.</string>
+    <string name="fxl_blend_mode">Blend mode</string>
+    <string name="fxl_background_blur">Background blur</string>
+    <string name="fxl_wrap_only">Wrap only</string>
+    <string name="fxl_stroke_thickness">Stroke thickness</string>
+    <string name="fxl_scribble_density">Scribble density</string>
+    <string name="fxl_hand_jitter">Hand jitter</string>
+    <string name="fxl_ink_color">Ink color</string>
+    <string name="fxl_ink">Ink</string>
+    <string name="fxl_fill_delay">Fill delay</string>
+    <string name="fxt_how_far_along_the_row_the_pen_travels_be">How far along the row the pen travels before the area behind it finishes filling.</string>
+    <string name="fxl_wind_direction">Wind direction</string>
+    <string name="fxl_wind_strength">Wind strength</string>
+    <string name="fxl_look">Look</string>
+    <string name="fxo_teal_orange">Teal &amp; Orange</string>
+    <string name="fxo_bleach_bypass">Bleach Bypass</string>
+    <string name="fxo_warm_film">Warm film</string>
+    <string name="fxo_cool_film">Cool film</string>
+    <string name="fxo_noir">Noir</string>
+    <string name="fxo_vintage">Vintage</string>
+    <string name="fxo_cyberpunk">Cyberpunk</string>
+    <string name="fxo_sepia">Sepia</string>
+    <string name="fxo_pastel">Pastel</string>
+    <string name="fxo_golden_hour">Golden hour</string>
+    <string name="fxo_day_for_night">Day for night</string>
+    <string name="fxo_digital_green">Digital green</string>
+    <string name="fxo_western">Western</string>
+    <string name="fxl_temperature">Temperature</string>
 </resources>

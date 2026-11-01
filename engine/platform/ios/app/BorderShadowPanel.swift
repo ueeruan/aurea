@@ -1145,7 +1145,9 @@ struct BorderShadowPanel: View {
     private func openEffectColor(_ effect: UInt32, _ index: UInt32, label: String, anchor: CGRect) {
         guard !locked, let layer = model.primarySelection, let p = param(effect, index) else { return }
         model.beginGesture("cor " + label)
+        // 0.4.5: o conta-gotas amostra sem a própria borda/sombra (par do BorderShadowPanel.kt).
         model.colorSheet = ColorSheetRequest(title: label, initial: AureaColorSpace.engineToDisplay(p.value), anchor: anchor,
+                                             sampleLayer: layer, sampleEffect: Int32(bitPattern: effect),
                                              onChange: { r, g, b, a in
                                                  guard model.primarySelection == layer else { return }
                                                  writeVector(effect, index, AureaColorSpace.displayToEngine(r, g, b, a))

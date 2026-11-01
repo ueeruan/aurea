@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Tile Shift, Hexagon Tile Rotate/Shift, Hollow Box, Time Displacement, Mirror e Zoom blur. -->
+    <string name="fx045d_name_tile_shift">Deslocar ladrilhos</string>
+    <string name="fx045d_name_hex_tile_rotate">Girar hexágonos</string>
+    <string name="fx045d_name_hex_tile_shift">Deslocar hexágonos</string>
+    <string name="fx045d_name_hollow_box">Caixa oca</string>
+    <string name="fx045d_name_time_displacement">Deslocamento no tempo</string>
+    <string name="fx045d_desc_tile_shift">Divide a camada em ladrilhos e desloca o conteúdo de cada um sozinho.</string>
+    <string name="fx045d_desc_hex_tile_rotate">Divide a camada numa colmeia de hexágonos e gira cada célula sozinha.</string>
+    <string name="fx045d_desc_hex_tile_shift">Divide a camada numa colmeia de hexágonos e desloca o conteúdo de cada célula.</string>
+    <string name="fx045d_desc_hollow_box">Transforma a camada numa caixa 3D oca, com lados abertos, recortes e luz.</string>
+    <string name="fx045d_desc_time_displacement">Cada pixel vem de outro instante, pelo brilho de um mapa: claro adianta, escuro atrasa.</string>
+    <string name="fx045d_alt_rows">Fileiras alternadas</string>
+    <string name="fx045d_alt_cols">Colunas alternadas</string>
+    <string name="fx045d_cell_edges">Bordas da célula</string>
+    <string name="fx045d_wrap_in_cell">Repetir dentro da célula</string>
+    <string name="fx045d_continuous">Imagem contínua</string>
+    <string name="fx045d_tip_rand_shift">0%: todas as células andam a mesma distância. 100%: cada uma anda uma distância sorteada.</string>
+    <string name="fx045d_tip_rand_rotate">0%: todas as células giram igual. 100%: cada uma gira um valor sorteado.</string>
+    <string name="fx045d_outset">Afastar os lados</string>
+    <string name="fx045d_smoothing">Arredondar</string>
+    <string name="fx045d_hidden">Oculto</string>
+    <string name="fx045d_circle_cutout">Recorte circular</string>
+    <string name="fx045d_circle_crop">Corte circular</string>
+    <string name="fx045d_square_cutout">Recorte quadrado</string>
+    <string name="fx045d_square_crop">Corte quadrado</string>
+    <string name="fx045d_cutout_size">Tamanho do recorte</string>
+    <string name="fx045d_lighting">Luz</string>
+    <string name="fx045d_precision">Precisão</string>
+    <string name="fx045d_tip_cutout">Vale para os lados em recorte ou corte.</string>
+    <string name="fx045d_tip_precision">Mais passos: bordas mais limpas e prévia mais lenta.</string>
+    <string name="fx045d_layer_itself">A própria camada</string>
+    <string name="fx045d_grad_h">Degradê horizontal</string>
+    <string name="fx045d_grad_v">Degradê vertical</string>
+    <string name="fx045d_grad_r">Degradê radial</string>
+    <string name="fx045d_max_time">Deslocamento máximo</string>
+    <string name="fx045d_time_resolution">Resolução do tempo</string>
+    <string name="fx045d_invert_map">Inverter o mapa</string>
+    <string name="fx045d_smooth_levels">Suavizar entre os níveis</string>
+    <string name="fx045d_tip_time_map">Branco = adiantado, preto = atrasado, cinza 50% = agora.</string>
+    <string name="fx045d_both_axes">Espelhar nos dois eixos</string>
+    <string name="fx045d_replace_side">Substituir o lado</string>
+    <string name="fx045d_overlay_copy">Sobrepor cópia</string>
+    <string name="fx045d_copy_opacity">Opacidade da cópia</string>
+    <string name="fx045d_copy_behind">Cópia atrás da camada</string>
+    <string name="fx045d_copy">Cópia</string>
+    <string name="fx045d_tip_mirror_mode">Sobrepor cópia: a camada fica inteira e a cópia espelhada entra junto.</string>
+</resources>

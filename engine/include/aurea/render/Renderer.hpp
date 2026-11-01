@@ -23,7 +23,7 @@
 
 #include "aurea/render/ShutterPlan.hpp"
 #include "aurea/ai/DepthMapService.hpp"
-namespace aurea::ai { class RotoService; struct RotoStroke; }
+namespace aurea::ai { class RotoService; struct RotoStroke; class BgRemoveService; class BgMatteStore; }
 #include "aurea/effects/EffectGraph.hpp"
 #include "aurea/effects/CubeLut.hpp"
 #include "aurea/media/MediaManager.hpp"
@@ -308,16 +308,24 @@ struct RenderLayer {
     /// `frame` o quadro decodificado dele (vazio = já está no cache da GPU).
     /// `content` (Tempo amplo): como a faixa do TimeSlice, a amostra traz o
     /// conteúdo do SEU instante, mas cobre a camada inteira (sem recorte).
+    /// `displace` (Deslocamento no tempo, 0.4.5): x = 1 liga; y = mapa (0 camada
+    /// do mapa, 1 a própria camada, 2..4 degradê horizontal/vertical/radial),
+    /// z = inverter, w = suavizar. A amostra é o NÍVEL `slice.z` de `slice.w`;
+    /// o peso de cada pixel sai do mapa no shader (composite/time_displace.frag).
     struct TemporalSample {
         Mat4 m; f32 weight = 1.0f; Vec3 mask{0, 0, 0}; f64 time = 0.0; u32 nested = ~0u;
         Vec4 slice{0, 0, 0, 0}; i64 sourceUs = -1; FrameRef frame;
         bool content = false;
+        Vec4 displace{0, 0, 0, 0};
     };
     /// As amostras trazem o conteúdo de cada instante (TimeSlice, Tempo amplo).
     [[nodiscard]] bool per_sample_content() const noexcept {
         return !temporal.empty() && (temporal.front().slice.w > 0.0f || temporal.front().content);
     }
     std::vector<TemporalSample> temporal;
+    /// Deslocamento no tempo com "Camada do mapa": a camada lida como mapa
+    /// (desenhada antes, como o mapa do Mapa de deslocamento). 0 = nenhuma.
+    u64 timeDisplaceMap = 0;
     /// APRIMORAR (temporal, 0.3.0): a FONTE da camada noutros quadros (±1..±3
     /// quadros da fonte), que a cadeia de efeitos recebe como vizinhos
     /// (`LayerImage::neighbors`). Vídeo: `sourceUs` e o quadro decodificado
@@ -888,6 +896,23 @@ public:
     /// como contorno da malha).
     [[nodiscard]] std::shared_ptr<const std::vector<f32>> roto_cached_matte(const Composition* comp, const Layer& layer,
                                                                             const EffectInstance& instance, i64 frame, const Asset* asset) noexcept;
+    /// Remover fundo (render/RendererBgRemove.cpp). O cache dos recortes é
+    /// compartilhado com o renderizador do export e salvo com o projeto (o
+    /// motor o entrega aqui); sem ele, um cache próprio.
+    void set_bg_matte_store(std::shared_ptr<ai::BgMatteStore> store) noexcept;
+    [[nodiscard]] ai::BgRemoveService* bg_service() noexcept { return bg_.get(); }
+    /// "Analisar clipe": os quadros da fonte que a camada usa, no worker.
+    bool bg_analyze(const Project& project, const Composition& comp, const Layer& layer,
+                    const EffectInstance& instance, MediaManager* media) noexcept;
+    /// Estado do Remover fundo desta camada + instância: out[0] analisados,
+    /// [1] total da análise, [2] analisando (0/1), [3] falhou (0 ou o motivo,
+    /// DepthMapService::Failure), [4] recorte do quadro `sourceFrame` pronto,
+    /// [5] quadros do clipe prontos, [6] quadros do clipe, [7] modelo efetivo
+    /// (0 automático, 1 pessoa nativo). Falso = não é um Remover fundo.
+    bool bg_status(const Project& project, const Composition& comp, const Layer& layer,
+                   const EffectInstance& instance, i64 sourceFrame, i64* out8) noexcept;
+    /// As chaves de recorte que valem para o projeto (o arquivo guarda só estas).
+    static void bg_project_keys(const Project& project, std::vector<u64>& out);
     /// "Propagar clipe": todos os quadros da fonte da camada no worker do Roto.
     bool roto_propagate(const Project& project, const Composition& comp, const Layer& layer,
                         const EffectInstance& instance, MediaManager* media) noexcept;
@@ -1172,6 +1197,7 @@ private:
     // Texto na GPU: atlas de glifos (R8) e o buffer de glifos do quadro (anel).
     TextureHandle glyphAtlas_{};
     u64 glyphAtlasGen_ = 0;
+    u64 glyphAtlasRev_ = 0;   ///< text::glyph_atlas_revision() já enviada a glyphAtlas_ (por renderer)
     static constexpr u32 kGlyphRing = 4;
     BufferHandle glyphBuf_[kGlyphRing]{};
     usize glyphCap_[kGlyphRing]{};
@@ -1335,6 +1361,9 @@ private:
     std::shared_ptr<ai::RotoService> roto_;   ///< shared_ptr: tipo incompleto aqui
     [[nodiscard]] DepthMapResult roto_map(const DepthMapRequest& request,
                                           const std::vector<ai::RotoStroke>& strokes) noexcept;
+    std::shared_ptr<ai::BgRemoveService> bg_;      ///< Remover fundo (nulo até o primeiro pedido)
+    std::shared_ptr<ai::BgMatteStore> bgStore_;    ///< do motor (prévia + export + arquivo)
+    [[nodiscard]] DepthMapResult bg_map(const DepthMapRequest& request) noexcept;
     std::string foregroundModelDirectory_;
     std::unordered_map<u64, LutTexture> depthTex_;     ///< por quadro-fonte
     /// Recortes refinados do Roto (R8/RGBA8 na resolução do quadro, até 8 MB

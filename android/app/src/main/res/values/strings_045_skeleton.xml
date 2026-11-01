@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: painel Esqueleto 3D e grupo de pinos do Fantoche (pedido de ⚡ᴍᴀʀᴋᴢ, pauloph2517 e Jess). -->
+    <string name="skeleton_title">Esqueleto</string>
+    <string name="skeleton_open">Abrir painel do esqueleto</string>
+    <string name="skeleton_desc">Árvore de ossos, rotação por número, espelhar e copiar a pose</string>
+    <string name="skeleton_partner">Outro lado: %1$s</string>
+    <string name="skeleton_bone_none">Toque numa junta no palco ou num osso da lista</string>
+    <string name="skeleton_ring_hint">Anéis na junta: vermelho gira em X, verde em Y, azul em Z (eixos do osso); o branco gira em volta da tela. Toque de novo para pegar a junta de baixo.</string>
+    <string name="skeleton_show">Mostrar esqueleto</string>
+    <string name="skeleton_ik">IK: arrastar a ponta</string>
+    <string name="skeleton_pose">Pose</string>
+    <string name="skeleton_copy">Copiar pose</string>
+    <string name="skeleton_paste">Colar pose</string>
+    <string name="skeleton_mirror_pose">Espelhar pose</string>
+    <string name="skeleton_mirror_bone">Espelhar no outro lado</string>
+    <string name="skeleton_zero_pose">Zerar pose</string>
+    <string name="skeleton_zero_bone">Zerar osso</string>
+    <string name="skeleton_bones">Ossos</string>
+    <string name="skeleton_search">Buscar osso</string>
+    <string name="skeleton_no_match">Nenhum osso com esse nome</string>
+    <string name="skeleton_bone_a11y">%1$s, nível %2$d</string>
+    <string name="skeleton_keyed">Com keyframe aqui</string>
+    <string name="skeleton_expand">Abrir %1$s</string>
+    <string name="skeleton_collapse">Recolher %1$s</string>
+    <string name="skeleton_rot_a11y">Rotação %1$s: %2$s graus</string>
+    <string name="skeleton_minus">Diminuir %1$s em 5 graus</string>
+    <string name="skeleton_plus">Aumentar %1$s em 5 graus</string>
+    <string name="skeleton_pose_copied">Pose copiada</string>
+    <string name="skeleton_paste_failed">Nada para colar neste modelo</string>
+    <string name="skeleton_mirror_nothing">Nenhum osso posado para espelhar</string>
+    <string name="skeleton_no_partner">Este osso não tem par do outro lado</string>
+    <string name="puppet_group">Grupo</string>
+    <string name="puppet_group_clear">Limpar grupo</string>
+    <string name="puppet_group_hint">Com Grupo ligado, toque nos pinos que vão girar; o pino escolhido é o pivô. Arraste o anel azul para girar.</string>
+    <string name="puppet_group_rotate">Girar grupo em volta do pino %1$d</string>
+</resources>

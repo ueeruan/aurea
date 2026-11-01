@@ -236,3 +236,137 @@ func rotoFailedKey(_ reason: Int64) -> String {
         }
     }
 }
+
+// =============================================================================
+//  "Remover fundo" (0.4.5, aurea.key.background_remove). O recorte por quadro é
+//  do motor (EngineBgRemove.cpp: cache salvo com o projeto, estável no tempo);
+//  aqui ficam a análise do clipe (progresso, cancelar), o estado deste quadro e
+//  os avisos. Os controles de refino são as linhas normais do efeito.
+//  Par Android: BgRemoveControls (editor/panels/BgRemovePanel.kt).
+// =============================================================================
+
+let bgRemoveEffectKey = "aurea.key.background_remove"
+
+/// O aviso de falha pelo motivo do motor (DepthMapService::Failure).
+func bgRemoveFailedKey(_ reason: Int64) -> String {
+    switch reason {
+    case 2, 4: return "bg_remove_failed_model"
+    case 3: return "bg_remove_failed_decode"
+    default: return "bg_remove_failed_frames"
+    }
+}
+
+/// No topo do cartão do Remover fundo: análise do clipe, progresso e estado.
+@MainActor struct BgRemoveCardTools: View {
+    @EnvironmentObject private var model: AureaModel
+    let effectId: UInt32
+    /// [analisados, total, analisando, falhou, quadro pronto, prontos no clipe, quadros do clipe, modelo, válido]
+    @State private var status: [Int64] = Array(repeating: 0, count: 9)
+    private let timer = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
+    @State private var ticks = 0
+
+    private func refresh() {
+        guard let layer = model.primarySelection else { return }
+        let next = model.engine.bgRemoveStatus(effect: effectId, layer: layer).map { $0.int64Value }
+        // Render ocupado (válido = 0): fica o último estado, sem piscar.
+        if next.count >= 9 && next[8] != 0 { status = next }
+    }
+
+    private func chip(_ text: String, _ id: String, _ on: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AureaColors.text)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 44)
+                .background(RoundedRectangle(cornerRadius: 8).fill(on ? AureaColors.text.opacity(0.18) : AureaColors.chip))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(text)
+        .accessibilityIdentifier(id)
+    }
+
+    var body: some View {
+        let layer = model.primarySelection ?? 0
+        let video = model.layers.first { $0.id == layer }?.kind == 1
+        let running = status[2] != 0
+        let clipFrames = status[6]
+        let readyFrames = status[5]
+        let requestedPerson = Int(model.effectParams.first { $0.index == 10 }?.scalar ?? 0) == 1
+        VStack(alignment: .leading, spacing: 6) {
+            Text(AureaText.t("bg_remove_note"))
+                .font(.system(size: 11.5))
+                .foregroundStyle(AureaColors.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            if status[8] != 0 {
+                let ready = status[4] != 0
+                Text(AureaText.t(ready ? "bg_remove_frame_ready" : "bg_remove_frame_pending"))
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(ready ? AureaColors.success : AureaColors.text)
+                    .accessibilityIdentifier("fx.bg.frame")
+                if video && clipFrames > 1 {
+                    Text(readyFrames >= clipFrames ? AureaText.t("bg_remove_clip_done")
+                         : String(format: AureaText.t("bg_remove_clip_status"), Int(readyFrames), Int(clipFrames)))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AureaColors.muted)
+                        .accessibilityIdentifier("fx.bg.clip")
+                }
+                if requestedPerson && status[7] == 0 {
+                    Text(AureaText.t("bg_remove_person_unavailable"))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AureaColors.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("fx.bg.person")
+                }
+                if status[3] != 0 && !running {
+                    Text(AureaText.t(bgRemoveFailedKey(status[3])))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AureaColors.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("fx.bg.failed")
+                }
+            }
+            if video {
+                HStack(spacing: 6) {
+                    if running {
+                        chip(AureaText.t("bg_remove_cancel"), "fx.bg.cancel", true) {
+                            model.engine.bgRemoveCancel()
+                            status[2] = 0
+                        }
+                    } else if readyFrames < clipFrames || clipFrames <= 1 {
+                        let label = clipFrames > 1 ? String(format: AureaText.t("bg_remove_analyze_count"), Int(clipFrames))
+                                                   : AureaText.t("bg_remove_analyze")
+                        chip(label, "fx.bg.analyze", false) {
+                            if model.status.playing != 0 { model.pause() }
+                            if model.engine.bgRemoveAnalyze(effect: effectId, layer: layer) {
+                                status[2] = 1; status[0] = 0; status[1] = Swift.max(1, clipFrames)
+                            } else {
+                                model.toast = AureaText.t("bg_remove_failed")
+                            }
+                        }
+                    }
+                }
+                if running && status[1] > 0 {
+                    let done = Swift.min(Swift.max(0, status[0]), status[1])
+                    let label = String(format: AureaText.t("bg_remove_progress"), Int(done), Int(status[1]))
+                    ProgressView(value: Double(done), total: Double(status[1]))
+                        .tint(AureaColors.keyframe)
+                        .accessibilityLabel(label)
+                        .accessibilityIdentifier("fx.bg.progressBar")
+                    Text(label)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AureaColors.muted)
+                        .accessibilityIdentifier("fx.bg.progress")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 6)
+        .onAppear { refresh() }
+        .onReceive(timer) { _ in
+            // Analisando ou com este quadro pendente: 4×/s; parado, ~1×/s.
+            ticks += 1
+            if status[2] != 0 || status[4] == 0 || ticks % 4 == 0 { refresh() }
+        }
+    }
+}

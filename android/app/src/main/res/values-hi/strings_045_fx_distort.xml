@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.5: Tile Shift, Hexagon Tile Rotate/Shift, Hollow Box, Time Displacement, Mirror e Zoom blur. -->
+    <string name="fx045d_name_tile_shift">टाइल शिफ्ट</string>
+    <string name="fx045d_name_hex_tile_rotate">षट्कोण टाइल घुमाएँ</string>
+    <string name="fx045d_name_hex_tile_shift">षट्कोण टाइल शिफ्ट</string>
+    <string name="fx045d_name_hollow_box">खोखला बॉक्स</string>
+    <string name="fx045d_name_time_displacement">समय विस्थापन</string>
+    <string name="fx045d_desc_tile_shift">लेयर को टाइलों में बाँटकर हर टाइल की सामग्री अलग से खिसकाता है।</string>
+    <string name="fx045d_desc_hex_tile_rotate">लेयर को षट्कोणों के छत्ते में बाँटकर हर सेल को अलग से घुमाता है।</string>
+    <string name="fx045d_desc_hex_tile_shift">लेयर को षट्कोणों के छत्ते में बाँटकर हर सेल की सामग्री खिसकाता है।</string>
+    <string name="fx045d_desc_hollow_box">लेयर को खुले किनारों, कटआउट और रोशनी वाले खोखले 3D बॉक्स में बदलता है।</string>
+    <string name="fx045d_desc_time_displacement">हर पिक्सेल एक मैप की चमक के अनुसार दूसरे पल से आता है: हल्का आगे, गहरा पीछे।</string>
+    <string name="fx045d_alt_rows">वैकल्पिक पंक्तियाँ</string>
+    <string name="fx045d_alt_cols">वैकल्पिक कॉलम</string>
+    <string name="fx045d_cell_edges">सेल किनारे</string>
+    <string name="fx045d_wrap_in_cell">सेल के अंदर दोहराएँ</string>
+    <string name="fx045d_continuous">निरंतर छवि</string>
+    <string name="fx045d_tip_rand_shift">0%: सभी सेल बराबर दूरी खिसकते हैं। 100%: हर सेल यादृच्छिक दूरी खिसकता है।</string>
+    <string name="fx045d_tip_rand_rotate">0%: सभी सेल बराबर घूमते हैं। 100%: हर सेल यादृच्छिक मात्रा में घूमता है।</string>
+    <string name="fx045d_outset">किनारे अलग करें</string>
+    <string name="fx045d_smoothing">गोलाई</string>
+    <string name="fx045d_hidden">छिपा हुआ</string>
+    <string name="fx045d_circle_cutout">गोल छेद</string>
+    <string name="fx045d_circle_crop">गोल क्रॉप</string>
+    <string name="fx045d_square_cutout">चौकोर छेद</string>
+    <string name="fx045d_square_crop">चौकोर क्रॉप</string>
+    <string name="fx045d_cutout_size">कटआउट आकार</string>
+    <string name="fx045d_lighting">प्रकाश</string>
+    <string name="fx045d_precision">सटीकता</string>
+    <string name="fx045d_tip_cutout">छेद या क्रॉप वाले किनारों पर लागू।</string>
+    <string name="fx045d_tip_precision">ज़्यादा चरण: साफ़ किनारे और धीमा प्रीव्यू।</string>
+    <string name="fx045d_layer_itself">यही लेयर</string>
+    <string name="fx045d_grad_h">क्षैतिज ग्रेडिएंट</string>
+    <string name="fx045d_grad_v">ऊर्ध्वाधर ग्रेडिएंट</string>
+    <string name="fx045d_grad_r">रेडियल ग्रेडिएंट</string>
+    <string name="fx045d_max_time">अधिकतम विस्थापन</string>
+    <string name="fx045d_time_resolution">समय रेज़ोल्यूशन</string>
+    <string name="fx045d_invert_map">मैप उलटें</string>
+    <string name="fx045d_smooth_levels">स्तरों के बीच स्मूद करें</string>
+    <string name="fx045d_tip_time_map">सफ़ेद = आगे, काला = पीछे, 50% ग्रे = अभी।</string>
+    <string name="fx045d_both_axes">दोनों अक्षों पर दर्पण</string>
+    <string name="fx045d_replace_side">किनारा बदलें</string>
+    <string name="fx045d_overlay_copy">कॉपी ओवरले करें</string>
+    <string name="fx045d_copy_opacity">कॉपी अपारदर्शिता</string>
+    <string name="fx045d_copy_behind">कॉपी लेयर के पीछे</string>
+    <string name="fx045d_copy">कॉपी</string>
+    <string name="fx045d_tip_mirror_mode">कॉपी ओवरले: पूरी लेयर रहती है और दर्पण कॉपी जुड़ती है।</string>
+</resources>

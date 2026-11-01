@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Glitch 0.4.5 (2026-11-01): Glitchify completo, Hyper Glitch, Block Glitch e Trocar canais. Chaves fx045g_*. -->
+<resources>
+    <string name="fx045g_name_hyper_glitch">Гипер-глитч</string>
+    <string name="fx045g_desc_hyper_glitch">Мощный глитч: скользящие полосы, смещённые блоки, разделение RGB, шлейфы пикселей, сжатие и перепутанные цвета — всё управляется одной анимируемой интенсивностью и зерном.</string>
+    <string name="fx045g_name_block_glitch">Блочный глитч</string>
+    <string name="fx045g_desc_block_glitch">Смещённые прямоугольные блоки с перепутанными и разделёнными каналами, в стиле Block Glitch из DaVinci Resolve. Настройте размер, количество и частоту блоков.</string>
+    <string name="fx045g_name_shift_channels">Сдвиг каналов</string>
+    <string name="fx045g_desc_shift_channels">Выберите, откуда берётся каждый канал (альфа, красный, зелёный и синий): из другого канала, яркости, тона, светлоты, насыщенности, полный или выключен. Как Shift Channels в After Effects.</string>
+    <string name="fx045g_transition_channel">Канал перехода</string>
+    <string name="fx045g_transform_speed">Скорость трансформации</string>
+    <string name="fx045g_split_mode">Режим разделения</string>
+    <string name="fx045g_split_speed">Скорость разделения</string>
+    <string name="fx045g_scale_channel">Канал масштаба</string>
+    <string name="fx045g_corrupt_offset">Смещение порчи</string>
+    <string name="fx045g_corrupt_amount">Сила порчи</string>
+    <string name="fx045g_corrupt_opacity">Непрозрачность порчи</string>
+    <string name="fx045g_slice_amount">Сжатая полоса</string>
+    <string name="fx045g_slice_position">Положение полосы</string>
+    <string name="fx045g_slice_quality">Качество полосы</string>
+    <string name="fx045g_slice_shift">Дрожание полосы</string>
+    <string name="fx045g_copy_block_amount">Переставленные блоки</string>
+    <string name="fx045g_copy_block_speed">Скорость блоков</string>
+    <string name="fx045g_copy_block_width">Ширина переставленного блока</string>
+    <string name="fx045g_copy_block_height">Высота переставленного блока</string>
+    <string name="fx045g_copy_block_direction">Направление блоков</string>
+    <string name="fx045g_compression_jpeg">Сжатие (JPEG)</string>
+    <string name="fx045g_palette_dither">Дизеринг палитры</string>
+    <string name="fx045g_noise_octaves">Октавы шума</string>
+    <string name="fx045g_noise_gain">Усиление шума</string>
+    <string name="fx045g_noise_lacunarity">Лакунарность шума</string>
+    <string name="fx045g_show_noise">Показать шум</string>
+    <string name="fx045g_wiggle_steps">Шаги дрожания</string>
+    <string name="fx045g_slice_height">Высота полосы</string>
+    <string name="fx045g_compression">Сжатие</string>
+    <string name="fx045g_color_swap">Смена цвета</string>
+    <string name="fx045g_amount">Количество</string>
+    <string name="fx045g_size_variation">Разброс размера</string>
+    <string name="fx045g_channel_swap">Перестановка каналов</string>
+    <string name="fx045g_take_alpha">Альфа из</string>
+    <string name="fx045g_take_red">Красный из</string>
+    <string name="fx045g_take_green">Зелёный из</string>
+    <string name="fx045g_take_blue">Синий из</string>
+    <string name="fx045g_opt_bands_random">Полосы (случайно)</string>
+    <string name="fx045g_opt_lightness">Светлота</string>
+    <string name="fx045g_opt_rgb_default">RGB (по умолчанию)</string>
+    <string name="fx045g_opt_red_cyan">Красный-голубой</string>
+    <string name="fx045g_opt_green_magenta">Зелёный-пурпурный</string>
+    <string name="fx045g_opt_blue_yellow">Синий-жёлтый</string>
+    <string name="fx045g_opt_y_luma">Y′ (яркость)</string>
+    <string name="fx045g_opt_cb">Cb</string>
+    <string name="fx045g_opt_cr">Cr</string>
+    <string name="fx045g_opt_uniform">Равномерно</string>
+    <string name="fx045g_opt_luma">Яркость (luma)</string>
+    <string name="fx045g_opt_full">Полный</string>
+</resources>

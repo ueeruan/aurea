@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="eng_ungroup_effects">للمجموعة تأثيرات</string>
+    <string name="eng_ungroup_masks">للمجموعة أقنعة</string>
+    <string name="eng_ungroup_blend">للمجموعة وضع مزج</string>
+    <string name="eng_ungroup_opacity">للمجموعة شفافية خاصة بها</string>
+    <string name="eng_ungroup_3d">المجموعة في وضع ⁦3D⁩</string>
+    <string name="eng_ungroup_transition">للمجموعة انتقال أو صدى</string>
+    <string name="eng_ungroup_background">للمجموعة خلفية خاصة بها</string>
+    <string name="eng_ungroup_camera_light">للمجموعة كاميرا أو إضاءة خاصة بها</string>
+    <string name="eng_ungroup_animation">للمجموعة حركة دخول أو خروج</string>
+</resources>

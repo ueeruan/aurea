@@ -75,6 +75,7 @@ constexpr i8 kWavePin[] = {-1, 0, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
 constexpr i8 kTurbDisplace[] = {-1, 0, 1, 2, -1, 3, 4, 5, -1, 6, 7, 8};
 constexpr i8 kTurbPinning[] = {-1, 0, -1, 1, 6, 7, 2, 3, 4, 5, -1, 8, 9, 10, -1, -1, -1, -1};
 constexpr i8 kRadialWipeDir[] = {-1, 0, 1, -1};
+constexpr i8 kRadialFastZoom[] = {-1, 0, 1, 2};
 constexpr i8 kColoramaInput[] = {-1, 0, 2, 3, 4, 1, -1, -1, -1, -1, -1};
 
 // --- parâmetros por efeito (ordem da interface do AE) -------------------------
@@ -334,7 +335,7 @@ constexpr PRule kFindEdges[] = {
 constexpr PRule kRadialFastBlur[] = {
     P(1, "Center", "center", PConv::PointRel),
     P(2, "Amount", "amount"),
-    U(3, "Zoom", 1),
+    E(3, "Zoom", "mode", kRadialFastZoom),   // Standard, Brightest, Darkest (0.4.5)
 };
 
 constexpr PRule kTurbulentDisplace[] = {

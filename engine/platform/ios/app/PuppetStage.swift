@@ -24,9 +24,20 @@ import SwiftUI
     @Published var revision = 0
     /// A doca (o antigo Rig) pediu o modo de pinos nesta camada.
     var pendingEdit: Int64 = 0
+    /// 0.4.5: "Grupo" ligado — tocar num pino põe/tira ele do grupo que gira em volta do escolhido (o pivô).
+    @Published var grouping = false
+    /// Pinos do grupo (bit i = pino i; o pivô nunca entra).
+    @Published var group: Int32 = 0
+    /// Raio do anel de girar o grupo (pt) e a folga do toque nele; alcance do toque num pino (era 24).
+    static let ringRadius: CGFloat = 56
+    static let ringReach: CGFloat = 16
+    static let pinReach: CGFloat = 32
+
+    /// Pinos que giram em volta do escolhido (sem o próprio pivô).
+    func ringMask() -> Int32 { selected >= 0 && selected < 31 ? group & ~(Int32(1) << Int32(selected)) : 0 }
 
     func open(_ layerId: Int64, _ effectId: Int32) {
-        if layer != layerId || effect != effectId { selected = -1; editing = false }
+        if layer != layerId || effect != effectId { selected = -1; editing = false; grouping = false; group = 0 }
         layer = layerId
         effect = effectId
         if pendingEdit == layerId { editing = true; pendingEdit = 0 }
@@ -36,6 +47,8 @@ import SwiftUI
         effect = -1
         editing = false
         selected = -1
+        grouping = false
+        group = 0
     }
     func active(_ model: AureaModel) -> Bool {
         guard editing, effect >= 0, model.selection.count == 1, model.primarySelection == layer,
@@ -48,6 +61,7 @@ import SwiftUI
 // em AureaModel.swift, como os do resto do palco.
 
 private let pinYellow = Color(red: 1.0, green: 0.84, blue: 0.04)
+private let pinGroup = Color(red: 0.31, green: 0.76, blue: 1.0)
 
 private func puppetToComp(_ c: [Float], _ u: Float, _ v: Float) -> CGPoint {
     CGPoint(x: CGFloat(c[0] + u * (c[2] - c[0]) + v * (c[6] - c[0])),
@@ -73,6 +87,11 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
     @State private var sent = false
     @State private var removed = false
     @State private var hold: Task<Void, Never>? = nil
+    /// 0.4.5: arrasto no anel do grupo, pinos sob o dedo e se o escolhido estava entre eles.
+    @State private var ringDrag = false
+    @State private var last: CGPoint = .zero
+    @State private var hits: [Int] = []
+    @State private var keepCurrent = false
 
     var body: some View {
         if puppet.active(model) {
@@ -106,7 +125,24 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
                             .accessibilityAction { puppet.selected = index }
                             .accessibilityAction(named: Text(AureaText.t("common_delete"))) {
                                 model.puppetRemovePin(puppet.layer, effect: puppet.effect, pin: Int32(index))
+                                puppet.group &= ~(Int32(1) << Int32(index))
                                 puppet.revision += 1
+                            }
+                            .accessibilityAction(named: Text(AureaText.t("puppet_group"))) {
+                                // VoiceOver: põe/tira o pino do grupo (o escolhido é o pivô).
+                                if puppet.selected < 0 { puppet.selected = index }
+                                else if index != puppet.selected { puppet.group ^= Int32(1) << Int32(index) }
+                                puppet.revision += 1
+                            }
+                            .accessibilityAction(named: Text(AureaText.t("puppet_group_rotate", index + 1))) {
+                                // VoiceOver: um quarto de volta do grupo em volta deste pino (pivô).
+                                guard index == puppet.selected, puppet.ringMask() != 0 else { return }
+                                let u = pins[k + 1], v = pins[k + 2]
+                                if model.puppetRotatePins(puppet.layer, effect: puppet.effect, pivot: Int32(index), mask: puppet.ringMask(),
+                                                          u0: u + 0.1, v0: v, u1: u, v1: v + 0.1, continuing: false) {
+                                    puppet.revision += 1
+                                    model.refreshModel(force: true)
+                                }
                             }
                             .allowsHitTesting(false)
                     }
@@ -128,6 +164,7 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
 
     private func draw(_ context: inout GraphicsContext, _ pins: [Float], _ fit: CGFloat, _ origin: CGPoint) {
         guard corners() != nil else { return }
+        let group = puppet.ringMask()
         // Malha deformada: triângulos em traço fino e claro.
         let mesh = model.puppetMesh(puppet.layer, effect: puppet.effect)
         if mesh.count >= 6 {
@@ -153,26 +190,53 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
             } else {
                 context.stroke(Path(ellipseIn: CGRect(x: o.x - r + 1, y: o.y - r + 1, width: 2 * r - 2, height: 2 * r - 2)), with: .color(pinYellow), lineWidth: 2.5)
             }
+            // 0.4.5: pino do grupo = miolo azul; o pivô (escolhido com grupo) = cruz.
+            let index = Int(pins[k])
+            if index < 31 && (group >> Int32(index)) & 1 == 1 {
+                context.fill(Path(ellipseIn: CGRect(x: o.x - 3.5, y: o.y - 3.5, width: 7, height: 7)), with: .color(pinGroup))
+            }
+            if chosen && group != 0 {
+                var cross = Path()
+                cross.move(to: CGPoint(x: o.x - 4, y: o.y)); cross.addLine(to: CGPoint(x: o.x + 4, y: o.y))
+                cross.move(to: CGPoint(x: o.x, y: o.y - 4)); cross.addLine(to: CGPoint(x: o.x, y: o.y + 4))
+                context.stroke(cross, with: .color(StageInk.outlineUnder), lineWidth: 2)
+            }
             if pins[k + 3] > 0.5 {   // key do pino no cabeçote
                 context.stroke(Path(ellipseIn: CGRect(x: o.x - r - 5, y: o.y - r - 5, width: 2 * r + 10, height: 2 * r + 10)), with: .color(pinYellow), lineWidth: 1.5)
             }
             k += PuppetStageState.pinFloats
         }
+        // Anel de girar o grupo em volta do pivô.
+        if group != 0, let o = pivotScreen(pins, fit, origin) {
+            let rr = PuppetStageState.ringRadius
+            let ring = Path(ellipseIn: CGRect(x: o.x - rr, y: o.y - rr, width: 2 * rr, height: 2 * rr))
+            context.stroke(ring, with: .color(StageInk.outlineUnder), lineWidth: 4)
+            context.stroke(ring, with: .color(pinGroup), lineWidth: 2)
+        }
     }
 
-    /// Pino sob o dedo (índice do motor) ou −1.
-    private func pick(_ p: CGPoint, _ fit: CGFloat, _ origin: CGPoint) -> Int {
+    /// Onde o pivô (o pino escolhido) está na tela, ou nil.
+    private func pivotScreen(_ pins: [Float], _ fit: CGFloat, _ origin: CGPoint) -> CGPoint? {
+        var k = 0
+        while k + PuppetStageState.pinFloats <= pins.count {
+            if Int(pins[k]) == puppet.selected { return screen(pins[k + 1], pins[k + 2], fit, origin) }
+            k += PuppetStageState.pinFloats
+        }
+        return nil
+    }
+
+    /// Pinos sob o dedo (índices do motor), do mais perto ao mais longe.
+    private func pickAll(_ p: CGPoint, _ fit: CGFloat, _ origin: CGPoint) -> [Int] {
         let pins = model.puppetPins(puppet.layer, effect: puppet.effect)
-        var best: CGFloat = 24
-        var found = -1
+        var found: [(CGFloat, Int)] = []
         var k = 0
         while k + PuppetStageState.pinFloats <= pins.count {
             let q = screen(pins[k + 1], pins[k + 2], fit, origin)
             let d = hypot(p.x - q.x, p.y - q.y)
-            if d < best { best = d; found = Int(pins[k]) }
+            if d < PuppetStageState.pinReach { found.append((d, Int(pins[k]))) }
             k += PuppetStageState.pinFloats
         }
-        return found
+        return found.sorted { $0.0 < $1.0 }.map(\.1)
     }
 
     private func uv(_ p: CGPoint, _ fit: CGFloat, _ origin: CGPoint) -> (Float, Float)? {
@@ -186,8 +250,21 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
             moved = false
             sent = false
             removed = false
-            hit = pick(v.startLocation, fit, origin)
+            ringDrag = false
+            hits = pickAll(v.startLocation, fit, origin)
             hold?.cancel()
+            // 0.4.5: o anel em volta do pivô (fora dos pinos) gira o grupo.
+            if hits.isEmpty, puppet.ringMask() != 0,
+               let o = pivotScreen(model.puppetPins(puppet.layer, effect: puppet.effect), fit, origin),
+               abs(hypot(v.startLocation.x - o.x, v.startLocation.y - o.y) - PuppetStageState.ringRadius) < PuppetStageState.ringReach {
+                ringDrag = true
+                last = v.startLocation
+                hit = -1
+                return
+            }
+            // Pino escolhido entre os candidatos fica (o arrasto leva ele); senão, o mais perto.
+            keepCurrent = puppet.selected >= 0 && hits.contains(puppet.selected)
+            hit = keepCurrent ? puppet.selected : (hits.first ?? -1)
             if hit >= 0 {
                 // Segurar parado sobre o pino (0,5 s) apaga.
                 let pin = hit
@@ -197,6 +274,7 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
                     removed = true
                     model.puppetRemovePin(puppet.layer, effect: puppet.effect, pin: Int32(pin))
                     if puppet.selected == pin { puppet.selected = -1 }
+                    if pin < 31 { puppet.group &= ~(Int32(1) << Int32(pin)) }
                     puppet.revision += 1
                 }
             }
@@ -205,6 +283,16 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
         if !moved && hypot(v.translation.width, v.translation.height) < 6 { return }
         moved = true
         hold?.cancel()
+        if ringDrag {
+            guard v.location != last, let a = uv(last, fit, origin), let b = uv(v.location, fit, origin) else { return }
+            if model.puppetRotatePins(puppet.layer, effect: puppet.effect, pivot: Int32(puppet.selected), mask: puppet.ringMask(),
+                                      u0: a.0, v0: a.1, u1: b.0, v1: b.1, continuing: sent) {
+                sent = true
+                puppet.revision += 1
+            }
+            last = v.location
+            return
+        }
         guard hit >= 0, let q = uv(v.location, fit, origin) else { return }
         if model.puppetMovePin(puppet.layer, effect: puppet.effect, pin: Int32(hit), u: q.0, v: q.1, continuing: sent) {
             puppet.revision += 1
@@ -213,9 +301,18 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
     }
 
     private func ended(_ v: DragGesture.Value, _ fit: CGFloat, _ origin: CGPoint) {
-        defer { started = false; hold?.cancel(); hold = nil }
+        defer { started = false; hold?.cancel(); hold = nil; ringDrag = false }
         if removed { return }
-        if !started { hit = pick(v.startLocation, fit, origin); moved = false; sent = false }
+        if ringDrag {
+            if sent { puppet.revision += 1; model.refreshModel(force: true) }
+            return
+        }
+        if !started {
+            hits = pickAll(v.startLocation, fit, origin)
+            keepCurrent = puppet.selected >= 0 && hits.contains(puppet.selected)
+            hit = keepCurrent ? puppet.selected : (hits.first ?? -1)
+            moved = false; sent = false
+        }
         if sent {
             puppet.selected = hit
             puppet.revision += 1
@@ -223,7 +320,20 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
             return
         }
         guard !moved else { return }
-        if hit >= 0 { puppet.selected = hit; return }
+        if hit >= 0 {
+            if puppet.grouping {
+                // Grupo: tocar põe/tira o pino (o pivô não entra; sem pivô, o primeiro tocado vira o pivô).
+                if puppet.selected < 0 { puppet.selected = hit }
+                else if hit != puppet.selected && hit < 31 { puppet.group ^= Int32(1) << Int32(hit) }
+                puppet.revision += 1
+                return
+            }
+            // Tocar de novo em pinos sobrepostos passa para o próximo debaixo do dedo.
+            if keepCurrent && hits.count > 1, let i = hits.firstIndex(of: hit) { puppet.selected = hits[(i + 1) % hits.count] }
+            else { puppet.selected = hit }
+            return
+        }
+        if puppet.grouping { return }   // no modo Grupo, tocar fora não cria pino
         // Toque fora de pino, em cima da camada: pino novo.
         guard let q = uv(v.startLocation, fit, origin) else { return }
         guard q.0 >= -0.02, q.0 <= 1.02, q.1 >= -0.02, q.1 <= 1.02 else { puppet.selected = -1; return }
@@ -264,10 +374,37 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
             .buttonStyle(.plain)
             .accessibilityLabel(label)
             .accessibilityIdentifier("fx.puppet.edit")
+            // 0.4.5: girar um grupo de pinos em volta do pino escolhido (o pivô).
+            if editing {
+                HStack(spacing: 6) {
+                    groupChip(AureaText.t("puppet_group"), on: puppet.grouping) { puppet.grouping.toggle() }
+                        .accessibilityIdentifier("fx.puppet.group")
+                    if puppet.group != 0 {
+                        groupChip(AureaText.t("puppet_group_clear"), on: false) { puppet.group = 0; puppet.revision += 1 }
+                    }
+                }
+                if puppet.grouping || puppet.group != 0 {
+                    Text(AureaText.t("puppet_group_hint"))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AureaColors.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 6)
         .onAppear { if let layer = model.primarySelection { puppet.open(layer, id32) } }
         .onDisappear { puppet.close(id32) }
+    }
+
+    private func groupChip(_ label: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label).font(.system(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text).lineLimit(1)
+                .padding(.horizontal, 12).frame(minHeight: 44)
+                .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? [.isSelected] : [])
     }
 }

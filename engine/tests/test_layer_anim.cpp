@@ -418,6 +418,194 @@ AUREA_TEST(LayerAnim, AddToGroupAndRemoveFromGroupKeepTimesAndUndo) {
     e.shutdown();
 }
 
+// Bug #6 (grupos): desagrupar mantém tempos, leva para as camadas o que valia
+// para o grupo inteiro (oculto, guia), deixa escolhidas as que saíram, troca
+// o grupo pelas camadas na lista de um ajuste e desfaz num passo só.
+AUREA_TEST(LayerAnim, UngroupKeepsTimesFlagsSelectionAndUndoesInOneStep) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_anim()).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    const auto a = e.add_shape(10);
+    const auto b = e.add_shape(10);
+    AUREA_CHECK(a.ok() && b.ok());
+    if (!a.ok() || !b.ok()) return;
+    layer(e, *b)->start = FrameIndex{12};
+    layer(e, *b)->end = FrameIndex{80};
+    const u64 ids[] = {*a, *b};
+    const auto g = e.precompose(ids, 2);
+    AUREA_CHECK(g.ok());
+    if (!g.ok()) return;
+    const auto adj = e.add_shape(10);   // acima do grupo
+    AUREA_CHECK(adj.ok());
+    if (!adj.ok()) return;
+    AUREA_CHECK(e.set_adjustment_target(*adj, *g, true));
+    layer(e, *g)->visible = false;
+    layer(e, *g)->guide = true;
+    const u32 before = current(e)->order().size();   // grupo + ajuste
+    std::string why;
+    const auto r = e.ungroup_precomp(*g, &why);
+    AUREA_CHECK_MSG(r.ok(), why.c_str());
+    if (!r.ok()) return;
+    AUREA_CHECK_EQ(*r, 2u);
+    AUREA_CHECK(current(e)->layer(LayerId::unpack(*g)) == nullptr);
+    AUREA_CHECK_EQ(current(e)->order().size(), before + 1);
+    bool timed = false;
+    u32 hiddenGuides = 0;
+    for (u32 i = 0; i < current(e)->order().size(); ++i) {
+        const LayerId id = current(e)->order().at(i);
+        if (id.pack() == *adj) continue;
+        const Layer* x = current(e)->layer(id);
+        if (!x) continue;
+        if (x->start.value == 12 && x->end.value == 80) timed = true;
+        if (!x->visible && x->guide) ++hiddenGuides;
+    }
+    AUREA_CHECK(timed);
+    AUREA_CHECK_EQ(hiddenGuides, 2u);   // grupo oculto/guia: as camadas soltas também
+    // A seleção do motor = as duas camadas que saíram do grupo.
+    u64 sel[8]{};
+    AUREA_CHECK_EQ(e.get_selection(sel, 8), 2u);
+    // O ajuste que tinha o grupo na lista passa a ter as duas camadas.
+    u64 targets[8]{};
+    AUREA_CHECK_EQ(e.query_adjustment_targets(*adj, targets, 8), 2u);
+    // Um desfazer devolve o grupo inteiro.
+    undo(e);
+    AUREA_CHECK(current(e)->layer(LayerId::unpack(*g)) != nullptr);
+    AUREA_CHECK_EQ(current(e)->order().size(), before);
+    e.shutdown();
+}
+
+// Bug #6: o que mudaria a tela é recusado com motivo (e nada muda): animação
+// de entrada/saída no grupo e outra camada usando o grupo como matte.
+AUREA_TEST(LayerAnim, UngroupRefusesAnimatorsAndMatteOnTheGroup) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_anim()).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    const auto a = e.add_shape(10);
+    AUREA_CHECK(a.ok());
+    if (!a.ok()) return;
+    const u64 ids[] = {*a};
+    const auto g = e.precompose(ids, 1);
+    AUREA_CHECK(g.ok());
+    if (!g.ok()) return;
+    LayerAnimator anim;
+    anim.enabled = true;
+    layer(e, *g)->layerAnimators.push_back(anim);
+    std::string why;
+    AUREA_CHECK(!e.ungroup_precomp(*g, &why).ok());
+    AUREA_CHECK(!why.empty());
+    AUREA_CHECK(current(e)->layer(LayerId::unpack(*g)) != nullptr);
+    layer(e, *g)->layerAnimators.clear();
+    const auto user = e.add_shape(10);
+    AUREA_CHECK(user.ok());
+    if (!user.ok()) return;
+    layer(e, *user)->matteSource = LayerId::unpack(*g);
+    layer(e, *user)->matteMode = MatteMode::Alpha;
+    why.clear();
+    AUREA_CHECK(!e.ungroup_precomp(*g, &why).ok());
+    AUREA_CHECK(!why.empty());
+    AUREA_CHECK(current(e)->layer(LayerId::unpack(*g)) != nullptr);
+    layer(e, *user)->matteSource = LayerId{};
+    layer(e, *user)->matteMode = MatteMode::None;
+    AUREA_CHECK(e.ungroup_precomp(*g).ok());
+    e.shutdown();
+}
+
+// Bug #6: "Desagrupar" com dois grupos escolhidos = UM passo de desfazer.
+AUREA_TEST(LayerAnim, UngroupSeveralGroupsIsOneUndoStep) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_anim()).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    const auto a = e.add_shape(10);
+    const auto b = e.add_shape(10);
+    const auto c = e.add_shape(10);
+    const auto d = e.add_shape(10);
+    AUREA_CHECK(a.ok() && b.ok() && c.ok() && d.ok());
+    if (!a.ok() || !b.ok() || !c.ok() || !d.ok()) return;
+    const u64 first[] = {*a, *b};
+    const u64 second[] = {*c, *d};
+    const auto g1 = e.precompose(first, 2);
+    const auto g2 = e.precompose(second, 2);
+    AUREA_CHECK(g1.ok() && g2.ok());
+    if (!g1.ok() || !g2.ok()) return;
+    AUREA_CHECK_EQ(current(e)->order().size(), 2u);
+    const u64 groups[] = {*g1, *g2, *g1};   // repetido: conta uma vez
+    std::string why;
+    const auto r = e.ungroup_precomps(groups, 3, &why);
+    AUREA_CHECK_MSG(r.ok() && why.empty(), why.c_str());
+    if (r.ok()) AUREA_CHECK_EQ(*r, 2u);
+    AUREA_CHECK_EQ(current(e)->order().size(), 4u);
+    u64 sel[8]{};
+    AUREA_CHECK_EQ(e.get_selection(sel, 8), 4u);
+    undo(e);
+    AUREA_CHECK_EQ(current(e)->order().size(), 2u);
+    AUREA_CHECK(current(e)->layer(LayerId::unpack(*g1)) != nullptr);
+    AUREA_CHECK(current(e)->layer(LayerId::unpack(*g2)) != nullptr);
+    e.shutdown();
+}
+
+// Bug #6: desfazer com o grupo aberto não deixa a timeline numa composição
+// órfã — desfazer o "agrupar" ou o "pôr no grupo" volta para fora.
+AUREA_TEST(LayerAnim, UndoWithAnOpenGroupNeverLeavesAnOrphanComposition) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_anim()).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    const CompositionId root = e.project()->timeline().current();
+    const auto a = e.add_shape(10);
+    const auto b = e.add_shape(10);
+    AUREA_CHECK(a.ok() && b.ok());
+    if (!a.ok() || !b.ok()) return;
+    // 1. Desfazer o "agrupar" de dentro do grupo.
+    const u64 one[] = {*a};
+    const auto g = e.precompose(one, 1);
+    AUREA_CHECK(g.ok());
+    if (!g.ok()) return;
+    AUREA_CHECK(e.open_precomp(*g));
+    AUREA_CHECK_EQ(e.precomp_depth(), 1u);
+    undo(e);
+    AUREA_CHECK_EQ(e.precomp_depth(), 0u);
+    AUREA_CHECK(e.project()->timeline().current() == root);
+    AUREA_CHECK(layer(e, *a) != nullptr);
+    // 2. Desfazer o "pôr no grupo" de dentro do grupo (ele mostra outra composição).
+    const auto g2 = e.precompose(one, 1);
+    AUREA_CHECK(g2.ok());
+    if (!g2.ok()) return;
+    const u64 moving[] = {*b};
+    AUREA_CHECK(e.add_layers_to_group(moving, 1, *g2).ok());
+    AUREA_CHECK(e.open_precomp(*g2));
+    AUREA_CHECK_EQ(current(e)->order().size(), 2u);
+    undo(e);
+    AUREA_CHECK_EQ(e.precomp_depth(), 0u);
+    AUREA_CHECK(e.project()->timeline().current() == root);
+    AUREA_CHECK(layer(e, *b) != nullptr);
+    // 3. Desfazer uma edição de DENTRO continua dentro.
+    AUREA_CHECK(e.open_precomp(*g2));
+    const u32 inside = current(e)->order().size();
+    const auto c = e.add_shape(10);
+    AUREA_CHECK(c.ok());
+    undo(e);
+    AUREA_CHECK_EQ(e.precomp_depth(), 1u);
+    AUREA_CHECK_EQ(current(e)->order().size(), inside);
+    e.shutdown();
+}
+
+// Bug #6: entrar leva o cabeçote para o tempo de dentro; sair volta ao mesmo
+// instante de fora (antes o número de dentro passava a valer fora).
+AUREA_TEST(LayerAnim, ClosingAGroupReturnsThePlayheadToTheSameInstant) {
+    Engine e;
+    AUREA_CHECK(e.initialize(headless_anim()).ok());
+    AUREA_CHECK(e.new_project(640, 360, 30.0, nullptr).ok());
+    seek(e, 20);
+    const auto g = e.add_empty_group();
+    AUREA_CHECK(g.ok());
+    if (!g.ok()) return;
+    seek(e, 25);
+    AUREA_CHECK(e.open_precomp(*g));
+    AUREA_CHECK_EQ(e.read_status().playhead.value, i64{5});   // começa no início da camada
+    AUREA_CHECK(e.close_precomp());
+    AUREA_CHECK_EQ(e.read_status().playhead.value, i64{25});
+    e.shutdown();
+}
+
 // Ajuste nas camadas escolhidas (a lista marcada do app antigo): marcar põe o
 // escopo em 2, desmarcar tira, um passo de desfazer cada, e o arquivo guarda.
 AUREA_TEST(LayerAnim, AdjustmentChosenLayersToggleUndoAndSave) {

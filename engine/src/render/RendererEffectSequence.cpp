@@ -217,7 +217,8 @@ void scene_at(const EffectPreviewSequence& s, f64 t, std::vector<u8>& out) noexc
     }
 }
 
-enum class TemporalKind : u8 { None, Echo, RgbTime, Posterize, Slice, Remap, Retime, FlowBlur, RandomEdits, WideTime, HyperMotion };
+enum class TemporalKind : u8 { None, Echo, RgbTime, Posterize, Slice, Remap, Retime, FlowBlur, RandomEdits, WideTime, HyperMotion,
+                               TimeDisplace };
 
 TemporalKind temporal_kind(std::string_view key) noexcept {
     if (key == effect_keys::kEchoTrail) return TemporalKind::Echo;
@@ -230,6 +231,7 @@ TemporalKind temporal_kind(std::string_view key) noexcept {
     if (key == effect_keys::kRandomEdits) return TemporalKind::RandomEdits;
     if (key == effect_keys::kWideTime) return TemporalKind::WideTime;
     if (key == hyper::effect_keys::kHyperMotion) return TemporalKind::HyperMotion;
+    if (key == "aurea.time.time_displacement") return TemporalKind::TimeDisplace;
     return TemporalKind::None;
 }
 
@@ -370,6 +372,47 @@ bool compose_temporal(TemporalKind kind, const std::vector<ParamValue>& v, Scene
                     acc[i * 3 + 0] = img.px[i * 3 + 0];
                     acc[i * 3 + 1] = img.px[i * 3 + 1];
                     acc[i * 3 + 2] = img.px[i * 3 + 2];
+                }
+            }
+            break;
+        }
+        case TemporalKind::TimeDisplace: {
+            // Deslocamento no tempo (0.4.5), com as regras do renderer: níveis de
+            // −máx a +máx (2·round(máx·resolução)+1, até 31), o nível do pixel
+            // pelo brilho codificado do mapa (sem camada de mapa aqui: a própria
+            // cena no quadro de agora), suavizado entre os dois vizinhos.
+            const u32 source = std::min<u32>(v.empty() ? 2u : v[0].as_enum(), 4u);
+            const f32 maxSec = val(v, 2, 1.0f);
+            const f64 res = std::clamp(static_cast<f64>(val(v, 3, 15.0f)), 0.1, 120.0);
+            const bool invert = v.size() > 4 && v[4].as_bool();
+            const bool smooth = v.size() <= 5 || v[5].as_bool();
+            if (std::fabs(maxSec) < 1e-4f) { add(scene.at(t), 1.0f, 1, 1, 1); break; }
+            const i32 levels = 2 * static_cast<i32>(std::clamp(std::round(std::fabs(static_cast<f64>(maxSec)) * res), 1.0, 15.0)) + 1;
+            const Linear now = scene.at(t);
+            auto frame_of = [&](i32 level) {
+                return std::floor(t + static_cast<f64>(maxSec) * (2.0 * level / (levels - 1) - 1.0) * 30.0 + 0.5);
+            };
+            for (u32 y = 0; y < h; ++y) {
+                for (u32 x = 0; x < w; ++x) {
+                    const usize i = static_cast<usize>(y) * w + x;
+                    const f32 u = (static_cast<f32>(x) + 0.5f) / static_cast<f32>(w);
+                    const f32 q = (static_cast<f32>(y) + 0.5f) / static_cast<f32>(h);
+                    f32 lum;
+                    if (source == 2) lum = u;
+                    else if (source == 3) lum = q;
+                    else if (source == 4) lum = std::min(1.0f, std::sqrt((u - 0.5f) * (u - 0.5f) + (q - 0.5f) * (q - 0.5f)) * 1.41421356f);
+                    else {
+                        const f32 l = 0.2126f * now.px[i * 3] + 0.7152f * now.px[i * 3 + 1] + 0.0722f * now.px[i * 3 + 2];
+                        lum = static_cast<f32>(linear_to_srgb8(l)) / 255.0f;
+                    }
+                    if (invert) lum = 1.0f - lum;
+                    const f32 f = std::clamp(lum, 0.0f, 1.0f) * static_cast<f32>(levels - 1);
+                    const i32 lo = std::clamp(static_cast<i32>(std::floor(f)), 0, levels - 1);
+                    const i32 hi = std::min(lo + 1, levels - 1);
+                    const f32 wHi = smooth ? f - static_cast<f32>(lo) : (f - static_cast<f32>(lo) >= 0.5f ? 1.0f : 0.0f);
+                    const Linear& a = scene.at(frame_of(lo));
+                    const Linear& b = scene.at(frame_of(hi));
+                    for (int c = 0; c < 3; ++c) acc[i * 3 + c] = a.px[i * 3 + c] * (1.0f - wHi) + b.px[i * 3 + c] * wHi;
                 }
             }
             break;

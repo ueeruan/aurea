@@ -652,6 +652,18 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_copy_background_effect(registry);
     // AureaHyper: Hyper Upscale, Hyper Clean e Hyper Motion — 0.3.2. No fim.
     builtin::register_hyper_effects(registry);
+    // Remover fundo (Keying) — 0.4.5. No fim.
+    builtin::register_background_remove_effect(registry);
+    // Pedidos de usuários da 0.4.5: Reflexo na água, Envolver com luz, Caneta
+    // esferográfica, Poeira e Looks de cinema. No fim.
+    builtin::register_water_wrap_ballpoint_effects(registry);
+    builtin::register_dust_transition(registry);
+    builtin::register_color_looks_effect(registry);
+    // Pedidos de usuários da 0.4.5: Tile Shift, Hexagon Tile Rotate/Shift,
+    // Hollow Box e Time Displacement. No fim.
+    builtin::register_tile_shift_effects(registry);
+    builtin::register_hollow_box_effect(registry);
+    builtin::register_time_displacement_effect(registry);
 }
 
 } // namespace aurea

@@ -91,16 +91,19 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.BLACK),
         )
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        com.aurea.aurea.home.HomeViewModel.loadTheme(this)
+        // Bug #2 (abre e fecha): serviços opcionais (tema salvo, config remota,
+        // portão do Hyper, conta) nunca derrubam a abertura — sem eles o app
+        // segue com os padrões.
+        opcional("tema") { com.aurea.aurea.home.HomeViewModel.loadTheme(this) }
         // 0.3.2: config remota assinada (atualização obrigatória, política do AureaHyper, aviso).
-        com.aurea.aurea.config.AppConfigStore.init(this)
-        com.aurea.aurea.hyper.HyperEntitlements.init(this)
-        if (savedInstanceState == null) com.aurea.aurea.config.AppConfigStore.refresh(force = true)
+        opcional("config") { com.aurea.aurea.config.AppConfigStore.init(this) }
+        opcional("hyper") { com.aurea.aurea.hyper.HyperEntitlements.init(this) }
+        if (savedInstanceState == null) opcional("config") { com.aurea.aurea.config.AppConfigStore.refresh(force = true) }
         setContent { KeepAppLanguage { LanguageWelcome { CreatorWelcome { AureaApp(store, conta) } } } }
 
         if (savedInstanceState == null) {
             // Número de cadastrados + revalidação da sessão (com rede; offline, segue dentro).
-            conta.aoAbrir()
+            opcional("conta") { conta.aoAbrir() }
             // Crash: coleta o que sobrou da sessão anterior; envia quando houver
             // conta (o cadastro avisa do envio antes). Longe da subida do motor.
             lifecycleScope.launch {
@@ -237,12 +240,24 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         CrashReporter.primeiroPlano(this, true)
-        conta.revalidarSeVencido()
+        opcional("conta") { conta.revalidarSeVencido() }
         // No máximo a cada 30 min (AppConfigStore.MIN_INTERVAL_MS); o prazo do Hyper "free" é recalculado.
-        com.aurea.aurea.config.AppConfigStore.refresh()
-        com.aurea.aurea.hyper.HyperEntitlements.recheck()
+        opcional("config") { com.aurea.aurea.config.AppConfigStore.refresh() }
+        opcional("hyper") { com.aurea.aurea.hyper.HyperEntitlements.recheck() }
         store.onEnterForeground()
-        AureaAdsManager.onForeground(this, trabalhando())
+        opcional("ads") { AureaAdsManager.onForeground(this, trabalhando()) }
+    }
+
+    /**
+     * Bug #2 (abre e fecha): um serviço OPCIONAL (config remota, conta, Hyper,
+     * anúncios) que falhe fica no log; o app continua aberto sem ele.
+     */
+    private inline fun opcional(nome: String, bloco: () -> Unit) {
+        try {
+            bloco()
+        } catch (e: Exception) {
+            android.util.Log.w("AureaStart", "serviço opcional falhou ($nome)", e)
+        }
     }
 
     override fun onResume() {

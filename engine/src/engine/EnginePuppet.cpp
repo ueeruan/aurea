@@ -55,6 +55,29 @@ std::vector<puppet::Pin> pins_at(const Layer& l, const EffectInstance& e, FrameI
     return pins;
 }
 
+/// Grava a posição do pino no instante: keyframe se a trilha já anima ou com
+/// `autoKey`; sempre também a constante (o arrasto e o giro de pinos).
+void write_pin_pos(Layer& l, EffectInstance& e, u32 pin, Vec2 uv, FrameIndex local, bool autoKey) {
+    const u32 param = puppet::pin_pos(pin);
+    const f32 value[2] = {uv.x, uv.y};
+    for (u32 c = 0; c < 2; ++c) {
+        Track* t = l.tracks.find(TrackProperty::EffectParam, e.id, param_track_key(param, c));
+        if ((t && !t->keys.empty()) || autoKey) {
+            Track& tr = t ? *t : l.tracks.get_or_create(TrackProperty::EffectParam, e.id, param_track_key(param, c));
+            // A first drag after seeking must keep the pin's earlier pose.
+            // One key at the destination alone samples that pose at every frame.
+            if (tr.keys.empty()) {
+                const f32 initial = e.params[param].constant.v[c];
+                tr.staticValue = initial;
+                const FrameIndex start = l.local_time(l.start);
+                if (local.value > start.value) (void)tr.set(start, initial, Interpolation::Linear);
+            }
+            (void)tr.set(local, value[c]);
+        }
+        e.params[param].constant.v[c] = value[c];
+    }
+}
+
 /// Linhas do contorno gravadas no efeito.
 void outline_of(const EffectInstance& e, f32* rows) noexcept {
     for (u32 r = 0; r < puppet::kOutline; ++r) {
@@ -254,24 +277,48 @@ bool Engine::puppet_move_pin(u64 layerId, u32 effectId, u32 pin, f32 u, f32 v, b
     if (!e || pin >= puppet::kMaxPins || !pin_on(*e, pin) || !std::isfinite(u) || !std::isfinite(v)) return false;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "mover pino");
     bump_model_revision_locked();
+    write_pin_pos(*l, *e, pin, Vec2{u, v}, l->local_time(playback_.current()), autoKey);
+    project_->mark_dirty();
+    request_render();
+    return true;
+}
+
+bool Engine::puppet_rotate_pins(u64 layerId, u32 effectId, u32 pivot, u32 mask, f32 u0, f32 v0, f32 u1, f32 v1,
+                                bool autoKey, bool continuing) noexcept {
+    if (!std::isfinite(u0) || !std::isfinite(v0) || !std::isfinite(u1) || !std::isfinite(v1)) return false;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    EffectInstance* e = puppet_effect(l, effectId);
+    if (!e || l->locked || pivot >= puppet::kMaxPins || !pin_on(*e, pivot)) return false;
+    mask &= ~(1u << pivot);
+    u32 moving = 0;
+    for (u32 i = 0; i < puppet::kMaxPins; ++i)
+        if ((mask >> i) & 1u) moving |= pin_on(*e, i) ? (1u << i) : 0u;
+    if (!moving) return false;
+    // Ângulo varrido em volta do pivô em px da camada (fração achataria o giro).
+    f32 w, h;
+    puppet_layer_size(*l, w, h);
     const FrameIndex local = l->local_time(playback_.current());
-    const u32 param = puppet::pin_pos(pin);
-    const f32 value[2] = {u, v};
-    for (u32 c = 0; c < 2; ++c) {
-        Track* t = l->tracks.find(TrackProperty::EffectParam, e->id, param_track_key(param, c));
-        if ((t && !t->keys.empty()) || autoKey) {
-            Track& tr = t ? *t : l->tracks.get_or_create(TrackProperty::EffectParam, e->id, param_track_key(param, c));
-            // A first drag after seeking must keep the pin's earlier pose.
-            // One key at the destination alone samples that pose at every frame.
-            if (tr.keys.empty()) {
-                const f32 initial = e->params[param].constant.v[c];
-                tr.staticValue = initial;
-                const FrameIndex start = l->local_time(l->start);
-                if (local.value > start.value) (void)tr.set(start, initial, Interpolation::Linear);
-            }
-            (void)tr.set(local, value[c]);
-        }
-        e->params[param].constant.v[c] = value[c];
+    const Vec2 pv = pin_value(*l, *e, puppet::pin_pos(pivot), local);
+    const Vec2 c{pv.x * w, pv.y * h};
+    const Vec2 a = Vec2{u0 * w, v0 * h} - c, b = Vec2{u1 * w, v1 * h} - c;
+    if (a.length_sq() < 1e-6f || b.length_sq() < 1e-6f) return false;
+    f32 ang = std::atan2(b.y, b.x) - std::atan2(a.y, a.x);
+    constexpr f32 kPi = 3.14159265358979323846f;
+    while (ang > kPi) ang -= 2.0f * kPi;
+    while (ang < -kPi) ang += 2.0f * kPi;
+    if (!std::isfinite(ang) || std::fabs(ang) < 1e-7f) return false;
+    const f32 cs = std::cos(ang), sn = std::sin(ang);
+    if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "girar pinos");
+    bump_model_revision_locked();
+    for (u32 i = 0; i < puppet::kMaxPins; ++i) {
+        if (!((moving >> i) & 1u)) continue;
+        const Vec2 p = pin_value(*l, *e, puppet::pin_pos(i), local);
+        const Vec2 d = Vec2{p.x * w, p.y * h} - c;
+        const Vec2 r{c.x + d.x * cs - d.y * sn, c.y + d.x * sn + d.y * cs};
+        write_pin_pos(*l, *e, i, Vec2{r.x / w, r.y / h}, local, autoKey);
     }
     project_->mark_dirty();
     request_render();

@@ -94,7 +94,11 @@
 
     <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
     <string name="om_ap_cp_eyedropper">Cuentagotas</string>
-    <string name="om_ap_cp_eyedropper_hint">Arrastra en el escenario para elegir el color</string>
+    <string name="om_ap_cp_eyedropper_hint">Toca o arrastra en la vista previa para tomar el color</string>
+    <string name="om_ap_cp_eyedropper_source">color original, antes de este efecto</string>
+    <string name="om_ap_cp_eyedropper_picked">Color tomado: %1$s</string>
+    <string name="om_ap_cp_eyedropper_cancel">Cancelar el cuentagotas y volver al selector</string>
+    <string name="om_ap_cp_eyedropper_full_hint">Tomar un color de la vista previa</string>
     <string name="om_ap_cp_fine">Ajuste fino</string>
     <string name="om_ap_cp_full">Más colores</string>
     <string name="om_ap_cp_unavailable">Color con transparencia no disponible aquí</string>
@@ -103,6 +107,7 @@
     <string name="om_ap_cp_paste_code">Pegar código de color</string>
     <string name="om_ap_cp_code_copied">Código de color copiado</string>
     <string name="om_ap_cp_code">Código de color %1$s</string>
+    <string name="om_ap_cp_type_code">Escribir el código de color</string>
     <string name="om_ap_cp_wheel">Rueda</string>
     <string name="om_ap_cp_rgb">RGB</string>
     <string name="om_ap_cp_done">Listo</string>

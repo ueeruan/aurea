@@ -57,8 +57,15 @@ GroundPlacement ground_placement(const SceneFrame& frame, std::span<const GpuMod
         if (!any) add(a.bounds, inst.world);
     }
     // 0.4.1: os quatro cantos de cada camada 2D no espaço 3D (região em px da camada).
+    // Só numa cena SEM modelo: com modelo o chão fica sob o modelo, como antes da
+    // 0.4.2. Um fundo 2D em 3D (camada de tela cheia, câmera "afeta camadas
+    // abaixo") descia o chão até a borda de baixo dele e alargava o raio: a
+    // sombra do modelo caía longe, fora do quadro, e mexer a luz não mudava nada
+    // perto do objeto. O reflexo das camadas 2D não depende disto (Ground.cpp).
+    const bool modelBounds = gp.valid;
     f32 planeBottom = -1e30f;
     for (const ScenePlane& p : planes) {
+        if (modelBounds) break;
         const Vec4& r = p.region;
         if (!(r.z > 0.0f) || !(r.w > 0.0f)) continue;
         Aabb b;

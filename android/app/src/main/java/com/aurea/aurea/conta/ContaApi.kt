@@ -88,6 +88,12 @@ object ContaApi {
             Resposta(0, JSONObject())
         } catch (_: SecurityException) {
             Resposta(0, JSONObject())
+        } catch (_: RuntimeException) {
+            // Bug #2 (abre e fecha): a pilha HTTP de alguns aparelhos lança
+            // RuntimeException (NPE/IllegalState/IllegalArgument da okhttp
+            // interna) em rede instável. Quem chama está numa corrotina sem
+            // handler na abertura (cadastrados, sessão, config): vira "sem rede".
+            Resposta(0, JSONObject())
         } finally {
             conexao?.disconnect()
         }

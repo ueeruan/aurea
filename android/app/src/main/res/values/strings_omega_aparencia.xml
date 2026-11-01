@@ -94,7 +94,11 @@
 
     <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
     <string name="om_ap_cp_eyedropper">Conta-gotas</string>
-    <string name="om_ap_cp_eyedropper_hint">Arraste no palco para escolher a cor</string>
+    <string name="om_ap_cp_eyedropper_hint">Toque ou arraste na prévia para pegar a cor</string>
+    <string name="om_ap_cp_eyedropper_source">cor original, antes deste efeito</string>
+    <string name="om_ap_cp_eyedropper_picked">Cor pegada: %1$s</string>
+    <string name="om_ap_cp_eyedropper_cancel">Cancelar o conta-gotas e voltar ao seletor</string>
+    <string name="om_ap_cp_eyedropper_full_hint">Pegar uma cor da prévia</string>
     <string name="om_ap_cp_fine">Ajuste fino</string>
     <string name="om_ap_cp_full">Mais cores</string>
     <string name="om_ap_cp_unavailable">Cor com transparência não disponível aqui</string>
@@ -103,6 +107,7 @@
     <string name="om_ap_cp_paste_code">Colar código da cor</string>
     <string name="om_ap_cp_code_copied">Código da cor copiado</string>
     <string name="om_ap_cp_code">Código da cor %1$s</string>
+    <string name="om_ap_cp_type_code">Digitar o código da cor</string>
     <string name="om_ap_cp_wheel">Roda</string>
     <string name="om_ap_cp_rgb">RGB</string>
     <string name="om_ap_cp_done">Pronto</string>

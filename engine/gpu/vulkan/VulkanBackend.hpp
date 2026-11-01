@@ -665,6 +665,12 @@ private:
     std::unordered_map<u64, VkDescriptorSetLayout> setLayouts_;
     std::unordered_map<u64, u64> ycbcrByFormat_;                  ///< formato externo → sampler
     std::unordered_map<void*, u64> importedByBuffer_;             ///< AHardwareBuffer → textura
+    /// begin_frame: importação sem uso há mais que isto é soltada (0.4.5: eram
+    /// 600, só no quadro múltiplo de 120). A varredura fica devida até rodar —
+    /// um grafo segmentado aberto só a adia para o quadro seguinte.
+    static constexpr u64 kImportIdleFrames = 90;
+    static constexpr u64 kImportSweepFrames = 30;
+    u64 nextImportSweepFrame_ = 0;
 
     u64 dummyTexture_ = 0;
     u64 dummyStorage_ = 0;

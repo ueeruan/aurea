@@ -504,6 +504,10 @@ private fun rememberEditActions(store: EditorStore, ui: EditorUi, setLevel: (Edi
                     if (clip != null && clip.kind != 12) add(EditDockItem("replace", CupertinoGlyph.Arrow2Squarepath, R.string.edit_clip_replace) {
                         replaceTarget = clip.id; if (store.playing) store.pause(); replace.launch(visual)
                     })
+                    // 0.4.5: Remover fundo (vídeo/imagem): efeito + análise do clipe.
+                    if (clip != null && (clip.kind == 1 || clip.kind == 2)) add(EditDockItem("bgRemove", CupertinoGlyph.PersonCropCircle, R.string.bg_remove_action) {
+                        if (store.removeBackground(clip.id)) panel(EditorPanel.Effects)
+                    })
                     if (video) add(EditDockItem("freeze", ShellGlyph.Snow, R.string.edit_clip_freeze) { store.freezeFrame() })
                     if (video) add(EditDockItem("extract", CupertinoGlyph.Waveform, R.string.edit_clip_extract_audio) { store.extractAudio() })
                     if (video) add(EditDockItem("stabilize", ShellGlyph.Viewfinder, R.string.edit_clip_stabilize) { panel(EditorPanel.Tracking) })

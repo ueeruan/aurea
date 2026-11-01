@@ -598,7 +598,8 @@ class Exporter internal constructor(
                 }
                 val nativeCause = if (freshFailure && progress.message.isNotBlank())
                     EngineText.reason(app, progress.message, code) else startError(code, options)
-                state = state.copy(phase = ExportPhase.Failed, message = nativeCause)
+                state = state.copy(phase = ExportPhase.Failed,
+                    message = afterLadder(nativeCause, safeMode, if (freshFailure) progress.failure else 0, code))
                 android.util.Log.e("AureaExport", "Export did not start: code=$code safeMode=$safeMode format=${options.format}")
                 com.aurea.aurea.diagnostics.ProblemReport.noteExport(app,
                     "Android ${Build.VERSION.SDK_INT}: nao iniciou codigo=$code seguranca=$safeMode formato=${options.format} " +
@@ -693,8 +694,9 @@ class Exporter internal constructor(
                         phase = ExportPhase.Failed,
                         // O MOTIVO (código estável do motor) manda; a frase crua
                         // do motor só é consultada quando o motor não deu motivo.
-                        message = text(R.string.app_export_failed,
+                        message = afterLadder(text(R.string.app_export_failed,
                             failureReason(progress.failure) ?: EngineText.reason(app, progress.message, progress.result)),
+                            safeMode, progress.failure, progress.result),
                     )
                 }
                 // Temporário com dono (Fase 8B §52): falhou ou cancelou, o
@@ -965,6 +967,18 @@ class Exporter internal constructor(
         ExportProgress.FAILURE_UNSUPPORTED -> text(R.string.expfail_unsupported)
         else -> null
     }
+
+    /**
+     * 0.4.5 (bug "exportação ainda falha"): a falha que aparece DEPOIS de a
+     * escada já ter tentado modos mais compatíveis ([attempt] > 0: H.264,
+     * encoder de software, resolução menor) diz isso — a frase do motivo sozinha
+     * mandava "tentar outra resolução", o que a escada já fez — e leva um código
+     * curto para o suporte: E<motivo>-<código Errc>-<degrau>. O mesmo no iOS
+     * (AureaModel.exportAfterLadder). Cancelado e sem espaço ficam como estão.
+     */
+    private fun afterLadder(message: String, attempt: Int, failure: Int, code: Int): String =
+        if (attempt <= 0 || code == 0 || code == CANCELLED || code == STORAGE_FULL) message
+        else message.trimEnd() + " " + text(R.string.expfail_after_ladder, failure, code, attempt)
 
     /** 0.3.2: o que o motor teve de reduzir (antes só ia para o log). */
     private fun qualityNotes(flags: Int): List<String> = buildList {

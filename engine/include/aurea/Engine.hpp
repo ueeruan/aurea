@@ -78,6 +78,7 @@
 #include <vector>
 
 namespace aurea { class OfflineFrameRenderer; }
+namespace aurea::ai { class BgMatteStore; }
 namespace aurea::export_checkpoint { struct SourceIdentity; }
 namespace aurea {
 class PreRenderCache;
@@ -805,6 +806,33 @@ public:
     i32 toggle_bone_key(u64 layerId, i32 node) noexcept;
     /// Volta o osso (node < 0 = todos) à pose do arquivo: apaga as trilhas.
     bool reset_bone_pose(u64 layerId, i32 node) noexcept;
+    // --- Esqueleto 3D (0.4.5) — EngineRigSkeleton.cpp, scene3d/RigSkeleton.hpp ---
+    /// Anéis de rotação do osso no cabeçote: [0..1] junta na tela (px da
+    /// composição), [2] na frente da câmera; por eixo LOCAL a (X, Y, Z do
+    /// osso) 6 floats: U(x, y, z) e V(x, y, z) — o anel é U·cosθ + V·sinθ em
+    /// px relativos à junta (raio `radiusPx` de frente; z = quanto aponta para
+    /// a câmera, −1..1: a metade de trás do anel fica apagada). 0 = sem osso.
+    static constexpr u32 kBoneGizmoFloats = 21;
+    u32 query_bone_gizmo(u64 layerId, i32 node, f32 radiusPx, f32* out, u32 capacity) noexcept;
+    /// Gira o osso `deg` graus em volta do eixo LOCAL dele (0 X, 1 Y, 2 Z), na
+    /// articulação. Regra de key do drag_bone; `continuing` = mesmo gesto.
+    bool rotate_bone_axis(u64 layerId, u32 node, u32 axis, f32 deg, bool continuing) noexcept;
+    /// Dedo no anel `axis` (0..2 eixo local; 3 = anel de fora, em volta do
+    /// olhar) de (x0, y0) a (x1, y1), px da composição. Um desfazer por gesto.
+    bool drag_bone_ring(u64 layerId, u32 node, u32 axis, f32 x0, f32 y0, f32 x1, f32 y1, f32 radiusPx,
+                        bool continuing) noexcept;
+    /// Rotações em lote, 4 floats por osso {nó, X, Y, Z °}: campos numéricos,
+    /// colar pose, zerar. Regra de key do drag_bone; um passo de desfazer.
+    bool set_bone_rotations(u64 layerId, const f32* nodeXyz, u32 count, bool continuing) noexcept;
+    /// Osso do outro lado pelo nome (Left/Right, esquerdo/direito, L/R
+    /// isolado); −1 = sem par (osso do meio).
+    [[nodiscard]] i32 bone_mirror_partner(u64 layerId, i32 node) noexcept;
+    /// Espelhar: node ≥ 0 leva a pose do osso, espelhada, para o par dele;
+    /// node < 0 troca os lados da pose inteira (o meio espelha nele mesmo).
+    bool mirror_bone_pose(u64 layerId, i32 node) noexcept;
+    /// IK simples: a ponta (o osso) anda (dx, dy) px na tela e os dois ossos
+    /// acima seguem (grava FK neles). Regra de key do drag_bone.
+    bool drag_bone_ik(u64 layerId, u32 node, f32 dxPx, f32 dyPx, bool continuing) noexcept;
     // --- AutoRig 3D / esqueleto humanoide (0.3.6 BETA) — rig/Humanoid.hpp ---
     /// 0 sem esqueleto · 1 esqueleto do arquivo não humanoide · 2 rig
     /// compatível (importado, mapeado por nome) · 3 AutoRig do Aurea.
@@ -1011,6 +1039,19 @@ public:
     /// Modo de vista (0 final, 1 máscara, 2 sobreposição) sem passo de desfazer:
     /// o modo de pintura liga a sobreposição e devolve o anterior ao sair.
     bool roto_set_view(u64 layerId, u32 effectId, u32 mode) noexcept;
+
+    // --- Remover fundo (EngineBgRemove.cpp, 0.4.5) -----------------------------
+    /// A ação "Remover fundo" da camada de vídeo/imagem: o efeito
+    /// aurea.key.background_remove (o existente ou um novo, com desfazer) e,
+    /// no vídeo, "Analisar clipe" já começa. Devolve o id do efeito; −1 falhou.
+    i32 bg_remove_apply(u64 layerId) noexcept;
+    /// "Analisar clipe": todos os quadros que a camada usa, no worker, com progresso.
+    bool bg_remove_analyze(u64 layerId, u32 effectId) noexcept;
+    void bg_remove_cancel() noexcept;
+    /// Renderer::bg_status para a camada + efeito no quadro atual.
+    bool bg_remove_status(u64 layerId, u32 effectId, i64* out8) noexcept;
+    /// Há segmentador nativo de pessoa nesta plataforma (Vision no iOS).
+    [[nodiscard]] static bool bg_remove_native_available() noexcept;
     /// Grupo (pré-composição): a câmera de fora alcança as camadas 3D de dentro.
     bool set_group_camera_pass_through(u64 layerId, bool on) noexcept;
     /// −1 = não é grupo; 0/1.
@@ -1111,6 +1152,14 @@ public:
     /// sai do lugar na tela e as animações próprias ficam. Nulo 3D se alguma
     /// camada é 3D. Tudo num passo de desfazer. Devolve o id do nulo.
     [[nodiscard]] Result<u64> parent_to_new_null(const u64* layerIds, u32 count) noexcept;
+    /// "Vincular selecionadas" (bug #9c): liga as camadas ao MESMO pai já
+    /// existente (um nulo, por exemplo) — `parentId` = 0 solta todas. Cada
+    /// filho passa pela compensação de LayerSetParent (nada sai do lugar na
+    /// tela). Pula bloqueadas, repetidas, o próprio pai, as que já têm esse pai
+    /// e as que fechariam ciclo (o pai descende delas). Tudo num passo de
+    /// desfazer; nenhuma válida = recusa sem entrar no histórico. Devolve
+    /// quantas camadas mudaram de pai.
+    [[nodiscard]] Result<u32> set_parent_many(const u64* layerIds, u32 count, u64 parentId) noexcept;
     /// "Escalonar": em cascata, na ordem de `layerIds`, a i-ésima camada
     /// desbloqueada anda i × `stepFrames` quadros (a primeira fica). Com
     /// `keysOnly`, só a ANIMAÇÃO anda — keyframes de todas as trilhas, das
@@ -1321,6 +1370,12 @@ public:
     /// Arrasto do pino; `continuing` = mesmo gesto (sem passo novo).
     bool puppet_move_pin(u64 layerId, u32 effectId, u32 pin, f32 u, f32 v, bool autoKey, bool continuing) noexcept;
     bool puppet_remove_pin(u64 layerId, u32 effectId, u32 pin) noexcept;
+    /// 0.4.5: gira os pinos de `mask` (bit i = pino i; o pivô fica) em volta
+    /// do pino `pivot` pelo ângulo que o dedo varreu de (u0, v0) a (u1, v1)
+    /// — em px da camada, sem achatar. Regra de key do arrasto; um passo de
+    /// desfazer por gesto (`continuing`).
+    bool puppet_rotate_pins(u64 layerId, u32 effectId, u32 pivot, u32 mask, f32 u0, f32 v0, f32 u1, f32 v1, bool autoKey,
+                            bool continuing) noexcept;
     /// Malha deformada no playhead (o mesmo contorno e densidade do render):
     /// 6 floats por triângulo (u, v dos 3 vértices). Devolve o necessário.
     u32 query_puppet_mesh(u64 layerId, u32 effectId, f32* out, u32 capacity) noexcept;
@@ -1577,6 +1632,22 @@ public:
     [[nodiscard]] static bool is_reflective_floor(const f32* floor8) noexcept {
         return floor8 && floor8[0] > 0.5f && floor8[0] < 1.5f && floor8[5] >= 0.85f;
     }
+    /// Os chips do chão (0 sem chão, 1 visível, 2 só sombra): troca só o modo e
+    /// mantém a aparência — exceto saindo do "Reflective Floor" (quase preto e
+    /// espelhado, em qualquer modo): aí volta ao chão padrão (FloorSettings), onde
+    /// a sombra das luzes aparece. Antes (0.4.2) "Visível" mantinha o chão preto
+    /// de refletividade 0,9: o chip nunca acendia e a sombra não se via. Um desfazer.
+    bool set_scene_floor_mode(u32 mode) noexcept {
+        f32 f[8]{};
+        if (!query_scene_floor(f)) return false;
+        mode = mode > 2u ? 2u : mode;
+        const bool reflectiveLook = f[5] >= 0.85f && f[1] < 0.05f && f[2] < 0.05f && f[3] < 0.05f;
+        if (reflectiveLook) {
+            const FloorSettings d;
+            return set_scene_floor(mode, d.color.r, d.color.g, d.color.b, d.roughness, d.reflectivity, d.contactShadow, d.fade);
+        }
+        return set_scene_floor(mode, f[1], f[2], f[3], f[4], f[5] > 0 ? f[5] : .5f, f[6], f[7]);
+    }
 
     // --- Qualidade e pós do 3D (composição atual) ---------------------------------
     /// Nível de qualidade do 3D: 0 AUTO (segue o preview adaptativo), 1 BAIXO
@@ -1678,6 +1749,15 @@ public:
     /// transições/eco na camada; câmera/luz ou fundo opaco dentro.
     /// Devolve quantas camadas voltaram.
     [[nodiscard]] Result<u32> ungroup_precomp(u64 layerId, std::string* why = nullptr) noexcept;
+    /// Desagrupa vários grupos da composição atual num ÚNICO passo de desfazer
+    /// (a seleção com dois ou mais grupos). Os que não são grupo são ignorados;
+    /// a 1ª recusa vai em `why` e os outros grupos continuam. Seleção final = as
+    /// camadas que voltaram. Devolve quantos grupos foram desfeitos (0 = erro).
+    [[nodiscard]] Result<u32> ungroup_precomps(const u64* ids, u32 count, std::string* why = nullptr) noexcept;
+private:
+    [[nodiscard]] Result<u32> ungroup_precomp_locked(u64 layerId, std::string* why,
+                                                     std::vector<u64>* added) noexcept;
+public:
     /// Entra na pré-composição da camada (a timeline passa a mostrar ela).
     bool open_precomp(u64 layerId) noexcept;
     /// Volta para a composição principal. false = já estava nela.
@@ -2212,6 +2292,19 @@ public:
     /// Capa da Home: políticas da prévia e intermediários na escala da capa.
     /// A captura exata e a exportação mantêm a qualidade final.
     [[nodiscard]] Status capture_preview_frame_rgba(u32 maxDim, std::vector<u8>& out, u32& width, u32& height) noexcept;
+    /// CONTA-GOTAS (0.4.5): o quadro do cabeçote como a prévia mostra (o mesmo
+    /// contrato de `capture_preview_frame_rgba`), com o efeito `skipEffectId` da
+    /// camada `skipLayerId` desligado SÓ nesta captura — a cor que entra nele
+    /// (o verde original antes do Chroma Key tirar o fundo). Não mexe no modelo:
+    /// sem passo de desfazer, sem revisão nova, sem projeto sujo. `skipLayerId`
+    /// 0 (ou efeito que não existe/já desligado) = o quadro da prévia comum.
+    [[nodiscard]] Status capture_eyedropper_frame_rgba(u32 maxDim, u64 skipLayerId, u32 skipEffectId,
+                                                       std::vector<u8>& out, u32& width, u32& height) noexcept;
+    /// A cor (sRGB 0..1, alfa reto) do pixel em (`x`, `y`) px da COMPOSIÇÃO
+    /// atual no cabeçote, pelo mesmo quadro do conta-gotas (com `skipLayerId`/
+    /// `skipEffectId` como acima). Ponto fora do quadro é preso à borda.
+    [[nodiscard]] Status sample_composition_color(f32 x, f32 y, u64 skipLayerId, u32 skipEffectId,
+                                                  f32 outRgba[4]) noexcept;
 
     // --- Correção de cor no modo de edição (0.3.0, EngineColor.cpp) ---------
     /// A "Correção de cor" da camada com o papel `role` (1 Filtro, 2 Ajustar):
@@ -2701,6 +2794,11 @@ private:
     /// Depois de desfazer/refazer: seleção sem layers mortas, fontes de mídia
     /// órfãs fechadas, playback no tamanho novo.
     void after_history_restore_locked() noexcept;
+    /// Bug #6 (grupos): desfazer/refazer na composição de FORA pode sumir com o
+    /// grupo aberto (desfazer o "agrupar") ou apontá-lo para outra composição
+    /// (desfazer o "pôr no grupo"). Sobe até o último nível ainda ligado, para a
+    /// timeline nunca ficar numa composição órfã. true = mudou de composição.
+    bool repair_comp_stack_locked() noexcept;
     void drain_commands_locked() noexcept;
     [[nodiscard]] Composition* current_composition() noexcept;
     [[nodiscard]] Status recover_device_locked() noexcept;
@@ -2721,7 +2819,8 @@ private:
                                                u64 expectedGpuGeneration, bool targetPreviewScale,
                                                OffscreenRequest& request) noexcept;
     [[nodiscard]] Status capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& width, u32& height,
-                                                bool asPreview) noexcept;
+                                                bool asPreview, u64 skipLayer = 0,
+                                                u32 skipEffect = kInvalidIndex) noexcept;
     static const ImagePixels* image_lookup(void* self, AssetId id);
     static void on_frame_ready(void* self);
 
@@ -2755,6 +2854,11 @@ private:
                                            bool* saved = nullptr) noexcept;
     mutable std::mutex saveStatsMutex_;
     SaveStats          saveStats_{};
+    /// Remover fundo: os recortes por quadro (prévia + export), salvos ao
+    /// lado do projeto como `<projeto>.bgmask` (EngineBgRemove.cpp).
+    std::shared_ptr<ai::BgMatteStore> bgStore_;
+    void bg_remove_project_opened_locked() noexcept;
+    void bg_remove_project_saved(const std::string& path) noexcept;
     /// O arquivo principal do projeto aberto estava ruim (abriu da cópia ou
     /// parcial): a próxima gravação NÃO o gira para `.bak` — senão o lixo
     /// tomaria o lugar do último estado válido. Sob modelMutex_.
@@ -2942,6 +3046,9 @@ private:
     std::atomic<u64>  mediaReadyGen_{0};      ///< frames novos do decoder
     i64  lastRenderedFrame_ = -1;
     PreviewRefill previewRefill_;
+    /// renderMutex_: tocando, segura a agulha quando a prévia para de entregar
+    /// quadros (Playback.hpp). Sem ele, timeline e imagem se separavam.
+    PresentationWatchdog presentWatchdog_;
     PreviewIdleBuffer previewIdle_;          ///< render thread / renderMutex_
     std::atomic<bool> livePreviewGraphActive_{false}; ///< secondary effect-preview early Busy without renderMutex_
     PreviewIdleKey livePreviewGraphKey_{};

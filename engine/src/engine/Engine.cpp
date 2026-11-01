@@ -575,6 +575,7 @@ Status Engine::initialize(const EngineConfig& config) noexcept {
         config_.mediaFactory = &sequenceFactory_;
     }
     renderer_.set_foreground_model_directory(config.documentsDirectory + "/ai/rotobrush");
+    bg_remove_project_opened_locked();   // Remover fundo: o cache dos recortes do motor
     startup_ = StartupTimings{};
     const u64 tStart = monotonic_ns();
     auto ms_since = [](u64 t0) noexcept { return static_cast<f32>(static_cast<f64>(monotonic_ns() - t0) * 1e-6); };
@@ -1569,6 +1570,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
         commandQueue_->reset();
         project_ = std::make_unique<Project>(std::move(*result));
     }
+    bg_remove_project_opened_locked();   // Remover fundo: projeto novo, sem recortes
     ++projectSession_;
     captionCancelled.store(true);
     compStack_.clear();
@@ -1588,6 +1590,7 @@ Status Engine::new_project(u32 width, u32 height, f64 fps, const char* title, co
         configure_playback_locked(c);
     }
     frameScheduler_.reset();
+    presentWatchdog_.reset();
     state_ = EngineState::Ready;
     request_render();
     return OkStatus;
@@ -1855,6 +1858,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
         compStack_.clear();
         project_->timeline().set_current(project_->timeline().root());
         project_->set_path(main);
+        bg_remove_project_opened_locked();   // Remover fundo: `<projeto>.bgmask`
         mainFileSuspect_ = (notice & (kLoadRecoveredCopy | kLoadPartial)) != 0;
         migrate_echo_to_effect();
         // Append newly introduced parameters without resetting old values,
@@ -1901,6 +1905,7 @@ Status Engine::load_project_checked(const char* path, ExportRestartGuard* restar
         if (Composition* c = current_composition()) {
             adapt().configure(c->width(), c->height(), static_cast<f32>(c->fps()));
             playback_ = PlaybackController{};
+            presentWatchdog_.reset();
             previewBuffering_ = false;
             previewBufferStatus_.store(0, std::memory_order_release);
             configure_playback_locked(c);
@@ -2197,6 +2202,7 @@ Status Engine::save_project_impl(const char* requestedPath, bool idleOnly, bool 
         return s;
     }
     if (saved) *saved = true;
+    bg_remove_project_saved(path);   // Remover fundo: os recortes ao lado (só se mudaram)
 
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_ || session != projectSession_) return OkStatus;
@@ -3071,6 +3077,60 @@ Result<u64> Engine::parent_to_new_null(const u64* layerIds, u32 count) noexcept 
     request_render();
     AUREA_LOG_INFO("novo nulo %s: %u de %zu camadas vinculadas", threeD ? "3D" : "2D", linked, children.size());
     return nullId.pack();
+}
+
+Result<u32> Engine::set_parent_many(const u64* layerIds, u32 count, u64 parentId) noexcept {
+    if (!layerIds || count == 0 || count > 4096) return Status{Errc::InvalidArgument, "nenhuma camada"};
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    // Edições ainda na fila (arrastos, keys) vêm ANTES: a compensação mede o estado final.
+    drain_commands_locked();
+    Composition* comp = current_composition();
+    if (!comp) return Status{Errc::InvalidState, "projeto sem composicao"};
+    // As duas UIs mandam 0 para "nenhum" (mesma regra do LayerSetParent).
+    const LayerId parent = parentId == 0 ? LayerId{} : LayerId::unpack(parentId);
+    if (parent.valid() && !comp->layer(parent)) return Status{Errc::NotFound, "pai nao encontrado"};
+    // O pai sobe a cadeia até a raiz; passar pelo filho = ciclo. Mais passos do
+    // que camadas também só existe com ciclo (mesmo teto do LayerSetParent).
+    const u32 chainLimit = std::max(comp->layers().count(), static_cast<u32>(comp->order().size())) + 1;
+    auto closes_cycle = [&](LayerId child) {
+        LayerId cursor = parent;
+        for (u32 depth = 0; cursor.valid(); ++depth) {
+            if (depth > chainLimit || cursor == child) return true;
+            const Layer* p = comp->layer(cursor);
+            if (!p) break;
+            cursor = p->parent;
+        }
+        return false;
+    };
+    std::vector<LayerId> children;
+    for (u32 i = 0; i < count; ++i) {
+        const LayerId id = LayerId::unpack(layerIds[i]);
+        const Layer* l = comp->layer(id);
+        if (!l || l->locked || id == parent || std::find(children.begin(), children.end(), id) != children.end()) continue;
+        const bool same = parent.valid() ? l->parent == parent : !l->parent.valid();
+        if (same || (parent.valid() && closes_cycle(id))) continue;
+        children.push_back(id);
+    }
+    if (children.empty()) return Status{Errc::InvalidArgument, "nenhuma camada para vincular"};
+
+    const char* label = parent.valid() ? "vincular camadas" : "soltar camadas";
+    history_.begin_group(label);
+    history_.before_mutation(*comp, project_->timeline().current(), label);
+    bump_model_revision_locked();
+    u32 changed = 0;
+    for (const LayerId child : children) {
+        Command c;
+        c.type = CommandType::LayerSetParent;
+        c.layer_parent.layer = child;
+        c.layer_parent.parent = parent;
+        if (apply_command_internal(c, nullptr, true).ok()) ++changed;
+    }
+    history_.end_group();
+    project_->mark_dirty();
+    request_render();
+    AUREA_LOG_INFO("vincular em lote: %u de %zu camadas", changed, children.size());
+    return changed;
 }
 
 namespace {
@@ -7011,6 +7071,51 @@ Result<u64> Engine::precompose_locked(const u64* ids, u32 count, const char* nam
 
 Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    // Bug #6: comandos ainda na fila (um renomear, o fim de um arrasto) entram
+    // ANTES, como no agrupar — senão caíam depois, fora de ordem no desfazer.
+    drain_commands_locked();
+    std::vector<u64> added;
+    const Result<u32> r = ungroup_precomp_locked(layerId, why, &added);
+    if (r.ok()) {
+        selection_ = added;
+        project_->mark_dirty();
+        request_render();
+    }
+    return r;
+}
+
+Result<u32> Engine::ungroup_precomps(const u64* ids, u32 count, std::string* why) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    if (!project_) return Status{Errc::InvalidState, "nenhum projeto aberto"};
+    if (!ids || count == 0) return Status{Errc::InvalidArgument, "nao e uma pre-composicao"};
+    drain_commands_locked();
+    std::vector<u64> groups;
+    for (u32 i = 0; i < count; ++i)
+        if (std::find(groups.begin(), groups.end(), ids[i]) == groups.end()) groups.push_back(ids[i]);
+    // Todos na MESMA composição: o grupo de histórico guarda um retrato só,
+    // tirado antes do primeiro — um desfazer devolve todos os grupos.
+    history_.begin_group("desagrupar");
+    std::vector<u64> added;
+    u32 done = 0;
+    Status first = OkStatus;
+    std::string firstWhy;
+    for (const u64 id : groups) {
+        std::string reason;
+        const Result<u32> r = ungroup_precomp_locked(id, &reason, &added);
+        if (r.ok()) ++done;
+        else if (first.ok()) { first = r.status(); firstWhy = reason; }
+    }
+    history_.end_group();
+    if (why) *why = firstWhy;
+    if (done == 0) return first.ok() ? Status{Errc::InvalidArgument, "nao e uma pre-composicao"} : first;
+    selection_ = added;
+    project_->mark_dirty();
+    request_render();
+    return done;
+}
+
+Result<u32> Engine::ungroup_precomp_locked(u64 layerId, std::string* why, std::vector<u64>* addedOut) noexcept {
     Composition* comp = project_ ? current_composition() : nullptr;
     const LayerId pid = LayerId::unpack(layerId);
     const Layer* P = comp ? comp->layer(pid) : nullptr;
@@ -7033,6 +7138,9 @@ Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
     if (P->threeD) return refuse("a camada do grupo esta em 3D");
     if (P->timeRemapEnabled || P->speed != 1.0f || P->reversed || P->speed_track()) return refuse("o tempo do grupo foi alterado");
     if (P->transitionIn || P->transitionOut || P->echoCount || P->rgbDelay > 0.0f) return refuse("o grupo tem transicao ou eco");
+    // Bug #6: a entrada/saída animada do grupo (animadores de camada) sumia
+    // calada ao desagrupar — a tela mudava sem aviso.
+    if (layeranim::has_whole(*P)) return refuse("a camada do grupo tem animacao de entrada ou saida");
     if (!C->transparent_background()) return refuse("o grupo tem fundo proprio");
     bool camOrLight = false;
     for (u32 i = 0; i < C->order().size(); ++i) {
@@ -7045,6 +7153,18 @@ Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
     const i64 visLo = std::max(P->start.value, shift), visHi = std::min(P->end.value, shift + C->duration().value);
     u32 index = 0;
     for (u32 i = 0; i < comp->order().size(); ++i) if (comp->order().at(i) == pid) index = i;
+    // Bug #6: matte e recorte ligados AO GRUPO. Antes a camada do grupo saía e
+    // quem a usava como matte ficava apontando para uma camada que não existe
+    // mais (e o grupo recortado perdia o recorte): recusa, como as outras.
+    if (P->matteSource.valid() && P->matteMode != MatteMode::None) return refuse("a camada do grupo usa uma matte");
+    if (P->clipToBelow) return refuse("a camada do grupo tem mascara de recorte");
+    for (u32 i = 0; i < comp->order().size(); ++i) {
+        const LayerId xid = comp->order().at(i);
+        const Layer* x = comp->layer(xid);
+        if (!x || xid == pid) continue;
+        if (x->matteSource == pid && x->matteMode != MatteMode::None) return refuse("outra camada usa o grupo como matte");
+        if (i == index + 1 && x->clipToBelow) return refuse("outra camada usa o grupo como matte");
+    }
     // A group's destination-in/out blend is isolated to its child backdrop.
     // Exposing it in the parent would also cut unrelated content below it.
     // Retain the existing result-preserving ungroup contract, but allow groups
@@ -7123,6 +7243,13 @@ Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
         dst->trackId = ungroupedTrack(src->trackId);
         dst->start = FrameIndex{s};
         dst->end = FrameIndex{e};
+        // Bug #6: o que valia para o grupo inteiro passa para cada camada —
+        // grupo oculto/mudo/guia/solo continua oculto/mudo/guia/solo solto
+        // (antes as camadas de um grupo escondido apareciam ao desagrupar).
+        dst->visible = src->visible && group.visible;
+        dst->muted = src->muted || group.muted;
+        dst->guide = src->guide || group.guide;
+        dst->solo = src->solo || group.solo;
         // Aparar a entrada: o conteúdo continua no mesmo lugar do tempo.
         if (cutIn > 0) {
             dst->offset = FrameIndex{src->offset.value + (dst->timeRemapEnabled || dst->speed == 1.0f
@@ -7144,9 +7271,17 @@ Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
         if (!matte.valid()) dst->matteMode = MatteMode::None;
     }
     // Quem era filho da camada do grupo passa a ser do Nulo (ou do pai dela).
+    // Bug #6: um ajuste que tinha o grupo na lista de afetadas passa a afetar
+    // as camadas que saíram dele (antes ficava apontando para o nada).
     for (u32 i = 0; i < comp->order().size(); ++i) {
         Layer* x = comp->layer(comp->order().at(i));
-        if (x && x->parent == pid) x->parent = nullId.valid() ? nullId : group.parent;
+        if (!x) continue;
+        if (x->parent == pid) x->parent = nullId.valid() ? nullId : group.parent;
+        auto& targets = x->adjustmentTargets;
+        if (std::find(targets.begin(), targets.end(), pid) != targets.end()) {
+            targets.erase(std::remove(targets.begin(), targets.end(), pid), targets.end());
+            for (LayerId id : added) targets.push_back(id);
+        }
     }
     media_.close_layer(pid);
     comp->remove_layer(pid);
@@ -7155,15 +7290,19 @@ Result<u32> Engine::ungroup_precomp(u64 layerId, std::string* why) noexcept {
     for (LayerId id : added) (void)comp->reorder_layer(id, at++);
     if (nullId.valid()) (void)comp->reorder_layer(nullId, at);
     comp->rebuild_draw_order();
-    selection_.clear();
-    for (LayerId id : added) selection_.push_back(id.pack());
+    // A seleção (as camadas que voltaram) é aplicada por quem chamou: com
+    // vários grupos de uma vez ela junta as de todos.
+    if (addedOut) for (LayerId id : added) addedOut->push_back(id.pack());
     project_->mark_dirty();
-    request_render();
     return static_cast<u32>(added.size());
 }
 
 bool Engine::open_precomp(u64 layerId) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
+    // Bug #6: os ids de camada se repetem entre composições. Um comando ainda
+    // na fila (o fim de um arrasto, um renomear) feito FORA do grupo era
+    // aplicado depois de entrar — na camada de mesmo id DENTRO do grupo.
+    if (project_) drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
     const Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
     if (!l || l->kind != LayerKind::Composition) return false;
@@ -7186,13 +7325,32 @@ bool Engine::open_precomp(u64 layerId) noexcept {
 bool Engine::close_precomp() noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     if (!project_ || compStack_.empty()) return false;
+    // Bug #6: o que está na fila é de DENTRO do grupo: aplica antes de sair
+    // (depois cairia na camada de mesmo id da composição de fora).
+    drain_commands_locked();
+    if (compStack_.empty()) return false;
     Timeline& tl = project_->timeline();
+    const CompositionId inner = tl.current();
+    const i64 innerFrame = playback_.current().value;
     const CompositionId back = compStack_.back();
     compStack_.pop_back();
     if (!tl.composition(back)) return false;
     tl.set_current(back);
     selection_.clear();
-    if (Composition* c = current_composition()) configure_playback_locked(c);
+    if (Composition* c = current_composition()) {
+        configure_playback_locked(c);
+        // Bug #6: o abrir leva o cabeçote para o tempo de dentro; o fechar
+        // deixava o número de dentro valendo fora (o cabeçote pulava). Volta
+        // ao instante correspondente pela camada do grupo (tempo 1:1).
+        for (u32 i = 0; i < c->order().size(); ++i) {
+            const Layer* g = c->layer(c->order().at(i));
+            if (!g || g->kind != LayerKind::Composition || g->nested.composition != inner) continue;
+            if (g->timeRemapEnabled || g->speed != 1.0f || g->reversed || g->speed_track()) break;
+            const i64 outer = innerFrame + g->start.value - g->offset.value;
+            playback_.seek(FrameIndex{std::clamp<i64>(outer, 0, std::max<i64>(0, c->duration().value - 1))}, monotonic_ns());
+            break;
+        }
+    }
     bump_model_revision_locked();
     request_render();
     return true;
@@ -9207,8 +9365,10 @@ void Engine::sync_audio_locked(const Composition& comp) noexcept {
         } else audio_.set_snapshot(audio::build_snapshot(comp, *project_, audio_.cache(), &Engine::audio_path_resolver, this),
                                    playback_.playing() ? playback_.current_ns() : -1);
     }
-    // Audio remains master at every supported transport rate.
-    const bool want = playback_.playing()
+    // Audio remains master at every supported transport rate. Agulha segurada
+    // (PresentationWatchdog): o som para junto e volta do mesmo quadro ao
+    // soltar (audio_.play abaixo), em vez de seguir sem a imagem.
+    const bool want = playback_.playing() && !playback_.held()
                    && !exportActive_.load(std::memory_order_acquire);
     if (want) {
         if (!audio_.playing() || playback_.generation() != audioGeneration_ || std::fabs(audio_.rate() - playback_.speed()) > 1e-6) {
@@ -11090,7 +11250,27 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         // novo (senão o relógio do áudio ainda diria o instante antigo).
         sync_audio_locked(*comp);
         t = playback_.update(frameStart);
-        // Depois: o loop acontece dentro do update.
+        // 0.4.5: a agulha não anda sozinha. Tocando com a prévia sem entregar
+        // quadro completo há PresentationWatchdog::kStallNs (decoder parado,
+        // GPU falhando, quadro pesado demais), o relógio fica segurado no
+        // quadro atual até a imagem dele chegar — timeline e prévia não se
+        // separam mais. Sem GPU/superfície nada é apresentado: não vigia.
+        {
+            const bool watch = playback_.playing() && !rawAsset && gpu_ && renderer_.ready() && surfaceAttached_;
+            const auto action = presentWatchdog_.observe(watch, playback_.held(), t.value, frameStart);
+            if (action == PresentationWatchdog::Action::Hold) {
+                playback_.set_held(true, frameStart);
+                AUREA_LOG_WARN("preview: sem quadro completo ha %llu ms tocando; agulha segurada no quadro %lld (ultimo mostrado %lld)",
+                    static_cast<unsigned long long>(PresentationWatchdog::kStallNs / 1'000'000ull),
+                    static_cast<long long>(t.value), static_cast<long long>(lastRenderedFrame_));
+            } else if (action == PresentationWatchdog::Action::Release) {
+                if (presentWatchdog_.yielded() && playback_.held())
+                    AUREA_LOG_WARN("preview: quadro %lld nao chegou; agulha solta sem ele", static_cast<long long>(t.value));
+                playback_.set_held(false, frameStart);
+            }
+        }
+        // Depois: o loop acontece dentro do update (e o som para/volta com a
+        // agulha segurada/solta).
         sync_audio_locked(*comp);
         project_->timeline().set_playhead(t);
         playing = playback_.playing();
@@ -11549,7 +11729,11 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         lastSkipped_ = true;
         wake_render();
     }
-    if (s.ok()) frameScheduler_.presented(t, playing);
+    if (s.ok()) {
+        frameScheduler_.presented(t, playing);
+        // Completo = nenhuma camada de vídeo sem quadro (preto no lugar dela).
+        presentWatchdog_.presented(t.value, playing, snapshot_.missingVideoFrames == 0);
+    }
     stats.frameIndex = static_cast<u32>(frameCounter_);
     stats.cpuMs = timings.cpuPrepareMs + timings.cpuRecordMs;
     stats.decodeMs = media_.stats().decodeMsAvg;
@@ -11645,6 +11829,9 @@ struct Engine::OffscreenRequest {
     bool gpuDeadlineArmed = false;
     u64 firstCaptureSubmission = 0;
     bool reader = false;
+    /// Conta-gotas (0.4.5): o efeito desligado SÓ nesta captura (0 = nenhum).
+    u64 skipLayer = 0;
+    u32 skipEffect = kInvalidIndex;
     explicit OffscreenRequest(Engine& value)
         : engine(value), ownership(value.offscreenRequestMutex_, std::defer_lock) {}
     ~OffscreenRequest() {
@@ -11926,9 +12113,21 @@ Status Engine::render_offscreen_impl(TextureHandle target, u32 width, u32 height
             rs.mediaGeneration = playback_.media_epoch();
             project_->timeline().set_playhead(t);
             {
+                // Conta-gotas (0.4.5): o efeito pedido sai SÓ deste preparo. O
+                // snapshot copia os planos de efeito, e o modelo volta ao que era
+                // antes de soltar o lock: sem revisão nova, sem desfazer.
+                EffectInstance* skipped = nullptr;
+                if (request.skipLayer != 0 && request.skipEffect != kInvalidIndex) {
+                    if (Layer* sl = comp->layer(LayerId::unpack(request.skipLayer))) {
+                        skipped = sl->find_effect(EffectId{request.skipEffect, 0});
+                        if (skipped && !skipped->enabled) skipped = nullptr;
+                        if (skipped) skipped->enabled = false;
+                    }
+                }
                 tracking::RealCameraPreviewScope realCameraPreview(real_camera_preview_layer_locked());
                 renderer_.prepare(*comp, *project_, t, &media_, &Engine::image_lookup, this, rs, ++frameCounter_,
                                   0, DecodeMode::Still, 1.0f, snapshot_);
+                if (skipped) skipped->enabled = true;
             }
         }
         tPrep1 = monotonic_ns();
@@ -12367,12 +12566,46 @@ Status Engine::capture_preview_frame_rgba(u32 maxDim, std::vector<u8>& out, u32&
     return capture_frame_rgba_impl(maxDim, out, width, height, true);
 }
 
+Status Engine::capture_eyedropper_frame_rgba(u32 maxDim, u64 skipLayerId, u32 skipEffectId,
+                                             std::vector<u8>& out, u32& width, u32& height) noexcept {
+    return capture_frame_rgba_impl(maxDim, out, width, height, true, skipLayerId, skipEffectId);
+}
+
+Status Engine::sample_composition_color(f32 x, f32 y, u64 skipLayerId, u32 skipEffectId, f32 outRgba[4]) noexcept {
+    if (!outRgba) return Status{Errc::InvalidState, "sem destino"};
+    if (!std::isfinite(x) || !std::isfinite(y)) return Status{Errc::InvalidState, "ponto invalido"};
+    u32 cw = 0, ch = 0;
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        const Composition* c = project_ ? current_composition() : nullptr;
+        if (!c) return Errc::InvalidState;
+        cw = c->width();
+        ch = c->height();
+    }
+    if (!cw || !ch) return Errc::InvalidState;
+    // Um ponto: o quadro inteiro na escala da prévia (lado maior ≤ 1024).
+    std::vector<u8> frame;
+    u32 w = 0, h = 0;
+    if (const Status s = capture_eyedropper_frame_rgba(std::min<u32>(1024, std::max(cw, ch)), skipLayerId, skipEffectId,
+                                                       frame, w, h); !s.ok()) return s;
+    if (!w || !h || frame.size() < static_cast<usize>(w) * h * 4) return Status{Errc::InvalidState, "quadro vazio"};
+    const f32 fx = std::clamp(x / static_cast<f32>(cw), 0.0f, 1.0f) * static_cast<f32>(w);
+    const f32 fy = std::clamp(y / static_cast<f32>(ch), 0.0f, 1.0f) * static_cast<f32>(h);
+    const u32 px = std::min<u32>(w - 1, static_cast<u32>(fx));
+    const u32 py = std::min<u32>(h - 1, static_cast<u32>(fy));
+    const u8* p = &frame[(static_cast<usize>(py) * w + px) * 4];
+    for (u32 i = 0; i < 4; ++i) outRgba[i] = static_cast<f32>(p[i]) / 255.0f;
+    return OkStatus;
+}
+
 Status Engine::capture_frame_rgba_impl(u32 maxDim, std::vector<u8>& out, u32& width, u32& height,
-                                       bool asPreview) noexcept {
+                                       bool asPreview, u64 skipLayer, u32 skipEffect) noexcept {
     if (exportActive_.load(std::memory_order_acquire))
         return Status{Errc::Busy, "captura aguarda a exportacao terminar"};
     if (maxDim == 0) return Status{Errc::InvalidState, "dimensao de captura invalida"};
     OffscreenRequest request{*this};
+    request.skipLayer = skipLayer;
+    request.skipEffect = skipEffect;
     if (const Status owned = request.acquire(); !owned.ok()) return owned;
     u32 cw = 0, ch = 0;
     {
@@ -13524,6 +13757,10 @@ u32 Engine::query_effect_catalog(bridge::EffectCatalogRow* out, u32 capacity, ch
             effect_type_id(effect_keys::kSaber), effect_type_id(effect_keys::kLumaDissolve),
             effect_type_id(effect_keys::kDrawingProgress), effect_type_id(effect_keys::kEnhance),
             effect_type_id(effect_keys::kCopyBackground),
+            // 0.4.5 (pedidos de usuários)
+            effect_type_id("aurea.distort.tile_shift"), effect_type_id("aurea.distort.hex_tile_rotate"),
+            effect_type_id("aurea.distort.hex_tile_shift"), effect_type_id("aurea.distort.hollow_box"),
+            effect_type_id("aurea.time.time_displacement"),
         };
         row.reserved = std::find(std::begin(newlyAdded), std::end(newlyAdded), e.type_id()) != std::end(newlyAdded) ? 1u : 0u;
         (void)put_string(blob, blobCapacity, cursor, e.info().name, row.nameOffset, row.nameLength);
@@ -15009,6 +15246,8 @@ Status Engine::initialize_offline_export(ExportContext& ctx) noexcept {
             &memory_, renderBudget, static_cast<u64>(config_.exportGpuTimeoutMs) * 1'000'000ull); !initialized.ok())
         return initialized;
     auto& offlineRenderer = ctx.offline->compositor();
+    // Remover fundo: o export lê os recortes já analisados na prévia.
+    offlineRenderer.set_bg_matte_store(bgStore_);
     // 0.3.0: o renderizador do export é outro objeto e nascia com a regra de
     // aparelho grande — Roto Brush com 48+64 MB de cache e refino em 1920 px,
     // pool sem teto. Num aparelho de até ~4 GB (iPhone 11/XR, Poco M) o sistema
@@ -16808,7 +17047,46 @@ void Engine::record_history_locked(CommandType type) noexcept {
     }
 }
 
+bool Engine::repair_comp_stack_locked() noexcept {
+    if (!project_ || compStack_.empty()) return false;
+    Timeline& tl = project_->timeline();
+    // A composição `outer` ainda mostra `inner` numa camada de grupo?
+    const auto shows = [&](CompositionId outer, CompositionId inner) {
+        const Composition* c = tl.composition(outer);
+        if (!c) return false;
+        for (u32 i = 0; i < c->order().size(); ++i) {
+            const Layer* l = c->layer(c->order().at(i));
+            if (l && l->kind == LayerKind::Composition && l->nested.composition == inner) return true;
+        }
+        return false;
+    };
+    // O caminho é compStack_[0] → … → compStack_[n-1] → atual. O 1º elo
+    // quebrado diz até onde ele ainda vale.
+    const usize n = compStack_.size();
+    usize keep = n;
+    for (usize k = 0; k < n && keep == n; ++k) {
+        const CompositionId inner = k + 1 < n ? compStack_[k + 1] : tl.current();
+        if (!shows(compStack_[k], inner)) keep = k;
+    }
+    if (keep == n) return false;
+    const CompositionId target = compStack_[keep];
+    if (!tl.composition(target)) {
+        compStack_.clear();
+        tl.set_current(tl.root());
+    } else {
+        compStack_.resize(keep);
+        tl.set_current(target);
+    }
+    // Os ids de camada da composição de antes não valem aqui.
+    selection_.clear();
+    bump_model_revision_locked();
+    return true;
+}
+
 void Engine::after_history_restore_locked() noexcept {
+    // Bug #6: desfazer o "agrupar" (ou o "pôr no grupo") com o grupo aberto
+    // deixava a timeline numa composição que nenhuma camada mostra mais.
+    (void)repair_comp_stack_locked();
     Composition* comp = current_composition();
     if (!comp) return;
     std::erase_if(selection_, [&](u64 id) { return comp->layer(LayerId::unpack(id)) == nullptr; });
@@ -17872,6 +18150,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             const EffectTypeId type = cmd.effect_add.effectType;
             if (type == effect_type_id(effect_keys::kRasterExtrude) && !raster_extrude::accepts(l->kind)) return Errc::InvalidArgument;
             if (type == effect_type_id(effect_keys::kRotobrush) && l->kind != LayerKind::Image && l->kind != LayerKind::Video) return Errc::InvalidArgument;
+            if (type == effect_type_id(effect_keys::kBackgroundRemove) && l->kind != LayerKind::Image && l->kind != LayerKind::Video) return Errc::InvalidArgument;
             if ((type == effect_type_id(text::kTransformEffect) || type == effect_type_id(text::kAnimatorEffect)) && l->kind != LayerKind::Text) {
                 const Asset* source = project_->asset(l->model.scene);
                 scene3d::Text3DSpec spec;

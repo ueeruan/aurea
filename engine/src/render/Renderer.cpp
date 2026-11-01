@@ -8,6 +8,7 @@
 #include "aurea/render/MotionBlurBounds.hpp"
 #include "aurea/media/P010Upload.hpp"
 #include "aurea/ai/RotoService.hpp"
+#include "aurea/ai/BackgroundRemoval.hpp"
 #include <bit>
 #include "aurea/timeline/GridLayout.hpp"
 #include "aurea/render/MaskRaster.hpp"
@@ -1278,6 +1279,7 @@ void Renderer::forget_device() noexcept {
     glyphAtlas_ = TextureHandle{};
     particleQuad_ = BufferHandle{};
     glyphAtlasGen_ = 0;
+    glyphAtlasRev_ = 0;
     for (u32 i = 0; i < kGlyphRing; ++i) {
         glyphBuf_[i] = BufferHandle{}; glyphCap_[i] = 0;
         maskBuf_[i] = BufferHandle{}; maskCap_[i] = 0;
@@ -3970,6 +3972,48 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     }
                 }
                 break;   // um TimeSlice por camada
+            }
+        }
+        // DESLOCAMENTO NO TEMPO (0.4.5, o Time Displacement do AE): cada pixel
+        // vem de um instante diferente, pelo brilho do mapa — branco = o
+        // deslocamento máximo para a frente, preto = para trás, cinza 50% =
+        // agora. Os instantes são NÍVEIS (de −máx a +máx na "Resolução do
+        // tempo", no máximo 31): cada um é uma amostra com o conteúdo daquele
+        // instante, como as faixas do TimeSlice, e o shader dá a cada pixel o
+        // peso do nível dele (composite/time_displace.frag). Manda sobre Eco,
+        // RGB no tempo e TimeSlice.
+        if (effects_ && !wants_3d(comp, *l, time)
+            && (rl.source.kind == LayerSource::Kind::Video || rl.source.kind == LayerSource::Kind::Nested)) {
+            static const EffectTypeId kDisplaceType = effect_type_id("aurea.time.time_displacement");
+            const ParameterRegistry* dp = effects_->params(kDisplaceType);
+            for (const EffectInstance& inst : l->effects) {
+                if (&inst >= copyBgEnd) break;   // Copiar fundo: o de depois é do fundo
+                if (!inst.enabled || inst.type != kDisplaceType || !dp || dp->count() < 6) continue;
+                const u32 source = std::min(evaluate_param(l->tracks, inst, 0, dp->at(0), local).as_enum(), 4u);
+                const u64 mapRef = evaluate_param(l->tracks, inst, 1, dp->at(1), local).ref;
+                const f32 maxSec = evaluate_param(l->tracks, inst, 2, dp->at(2), local).v[0];
+                const f32 res = evaluate_param(l->tracks, inst, 3, dp->at(3), local).v[0];
+                const bool invert = evaluate_param(l->tracks, inst, 4, dp->at(4), local).as_bool();
+                const bool smooth = evaluate_param(l->tracks, inst, 5, dp->at(5), local).as_bool();
+                if (!std::isfinite(maxSec) || std::fabs(maxSec) < 1e-4f) break;
+                const f64 perSide = std::round(std::fabs(static_cast<f64>(maxSec))
+                                               * std::clamp(std::isfinite(res) ? static_cast<f64>(res) : 15.0, 0.1, 120.0));
+                const i32 n = 2 * static_cast<i32>(std::clamp(perSide, 1.0, 15.0)) + 1;
+                // Sem camada no mapa, o mapa é a própria camada.
+                const u32 mapMode = source == 0 && !mapRef ? 1u : source;
+                rl.temporal.clear();
+                rl.blurMatrices.clear();
+                rgbOn = false;
+                rl.timeDisplaceMap = mapMode == 0 ? mapRef : 0;
+                const f64 fps = comp.fps() > 0.0 ? comp.fps() : 30.0;
+                for (i32 s = 0; s < n; ++s) {
+                    const f64 offset = static_cast<f64>(maxSec) * (2.0 * s / (n - 1) - 1.0) * fps;
+                    RenderLayer::TemporalSample a{m, 1.0f, Vec3{0, 0, 0}, std::floor(static_cast<f64>(time.value) + offset + 0.5)};
+                    a.slice = Vec4{0.0f, 0.0f, static_cast<f32>(s), static_cast<f32>(n)};
+                    a.displace = Vec4{1.0f, static_cast<f32>(mapMode), invert ? 1.0f : 0.0f, smooth ? 1.0f : 0.0f};
+                    rl.temporal.push_back(std::move(a));
+                }
+                break;   // um Deslocamento no tempo por camada
             }
         }
         // TEMPO AMPLO (CC Wide Time, 0.3.0): média de pesos iguais das amostras
@@ -7499,8 +7543,14 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             // Tempo amplo: a mesma busca por instante, desenhada inteira
             // (composite_layer.frag com o peso) em vez de recortada na faixa.
             const bool wide = layer.temporal.front().slice.w <= 0.0f;
+            // Deslocamento no tempo: os níveis com o peso de cada pixel tirado
+            // do mapa (composite/time_displace.frag), na mesma soma.
+            const bool displace = !wide && layer.temporal.front().displace.x > 0.5f;
+            const FGTexture currentImage = draw.texture;   // o quadro de agora (o mapa "a própria camada")
             auto pSlice = shaders_.pipeline(PipelineKey::graphics(ShaderId::composite_layer_vert,
-                wide ? ShaderId::composite_layer_frag : ShaderId::composite_time_slice_frag, kWorkFormat, true, BlendMode::Add));
+                wide ? ShaderId::composite_layer_frag
+                     : displace ? ShaderId::composite_time_displace_frag : ShaderId::composite_time_slice_frag,
+                kWorkFormat, true, BlendMode::Add));
             const u32 k = static_cast<u32>(layer.temporal.size());
             FGTexture* perSample = pSlice.ok() ? arena_.alloc_array<FGTexture>(k) : nullptr;
             if (!perSample) { mark_incomplete(__FILE__, __LINE__); return true; }
@@ -7648,17 +7698,47 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
             const FGTexture acc = graph_.create_texture("timeslice", accDesc);
             struct SlicePush { Mat4 clipFromLayer; Vec4 region; Vec4 uvRect; Vec4 params; Vec4 slice; };
             static_assert(sizeof(SlicePush) <= binding::kPushConstantBytes, "push constants do time_slice.frag");
+            // O mapa do Deslocamento no tempo: a camada do mapa (desenhada antes,
+            // do tamanho da composição) ou o quadro de agora da própria camada.
+            FGTexture mapTex = currentImage;
+            bool mapInComp = false;
+            Vec4 displaceInfo{};
+            if (displace) {
+                displaceInfo = layer.temporal.front().displace;
+                if (displaceInfo.y < 0.5f) {
+                    const LayerImage* map = ctx.layer_input(layer.timeDisplaceMap);
+                    if (map && map->texture.valid()) { mapTex = map->texture; mapInComp = true; }
+                    else displaceInfo.y = 1.0f;   // mapa ainda não desenhado (laço A↔B): a própria camada
+                }
+            }
             struct Cap {
                 const RenderLayer* layer; Mat4 fold; u32 k; PipelineHandle p; u64 sampler; Rect region;
-                f32 w, h; const FGTexture* perSample; Vec2 axis; bool wide;
-            } cap{&layer, fold, k, *pSlice, draw.sampler, draw.region, compW, compH, perSample, axis, wide};
+                f32 w, h; const FGTexture* perSample; Vec2 axis; bool wide; bool displace; FGTexture map;
+                Vec4 displaceInfo; bool mapInComp; u64 mapSampler;
+            } cap{&layer, fold, k, *pSlice, draw.sampler, draw.region, compW, compH, perSample, axis, wide,
+                  displace, mapTex, displaceInfo, mapInComp, shaders_.sampler(CommonSampler::LinearClamp).id};
             const u32 pass = graph_.add_raster_pass(wide ? "tempo-amplo" : "timeslice", PassStage::Composite, acc, LoadOp::Clear,
                                                     Vec4{0, 0, 0, 0}, [cap](PassContext& pc) {
                 const Mat4 clip = clip_from_comp(cap.w, cap.h);
                 pc.cmds.bind_pipeline(cap.p);
+                if (cap.displace) pc.cmds.bind_texture(1, pc.texture(cap.map), SamplerHandle{cap.mapSampler});
                 for (u32 s = 0; s < cap.k; ++s) {
                     const auto& sample = cap.layer->temporal[s];
                     pc.cmds.bind_texture(0, pc.texture(cap.perSample[s]), SamplerHandle{cap.sampler});
+                    if (cap.displace) {
+                        // params = mapa, nível, número de níveis, opções (1 inverter, 2 suavizar, 4 mapa na composição).
+                        SlicePush push;
+                        push.clipFromLayer = clip * (sample.m * cap.fold);
+                        push.region = Vec4{cap.region.x, cap.region.y, cap.region.w, cap.region.h};
+                        push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+                        push.params = Vec4{cap.displaceInfo.y, sample.slice.z, sample.slice.w,
+                                           (cap.displaceInfo.z > 0.5f ? 1.0f : 0.0f) + (cap.displaceInfo.w > 0.5f ? 2.0f : 0.0f)
+                                           + (cap.mapInComp ? 4.0f : 0.0f)};
+                        push.slice = Vec4{0.0f, 0.0f, 0.0f, 0.0f};
+                        pc.cmds.push_constants(&push, sizeof(push));
+                        pc.cmds.draw(6);
+                        continue;
+                    }
                     if (cap.wide) {
                         LayerPush push;
                         push.clipFromLayer = clip * (sample.m * cap.fold);
@@ -7683,6 +7763,11 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 bool seen = false;
                 for (u32 r = 0; r < s && !seen; ++r) seen = perSample[r] == perSample[s];
                 if (!seen) graph_.read(pass, perSample[s]);
+            }
+            if (displace) {
+                bool seen = false;
+                for (u32 r = 0; r < k && !seen; ++r) seen = perSample[r] == mapTex;
+                if (!seen) graph_.read(pass, mapTex);
             }
             draw.texture = acc;
             draw.region = Rect{0, 0, compW, compH};
@@ -7788,6 +7873,8 @@ void Renderer::compose_layers(FrameSnapshot& snap, FGTexture comp, const Texture
                 }
             }
         }
+        // O mapa do Deslocamento no tempo (declarativo: não está nos planos).
+        for (const RenderLayer& layer : snap.layers) if (layer.timeDisplaceMap) wanted.push_back(layer.timeDisplaceMap);
         // 0.3.6 TEXTURA DO MATERIAL: a camada que cobre um material de objeto
         // 3D, desenhada aqui (antes de qualquer cena) e lida pelo passe 3D. O
         // filtro abaixo deixa de fora o que mora numa cena (plano 2D em 3D,
@@ -8606,9 +8693,10 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
 
     // RAW never touches the text subsystem.
     if (!settings.rawPlayback) {
-        u64 gen = 0;
-        bool dirty = false;
-        const u8* px = text::glyph_atlas(gen, dirty);
+        // Revisão própria deste renderer (não o `dirty` global): o renderer do
+        // export também sobe o atlas, e apagar o flag por ele deixava a
+        // textura da prévia sem os glifos que só o export rasterizou.
+        bool dirty = text::glyph_atlas_revision() != glyphAtlasRev_;
         if (!glyphAtlas_.valid()) {
             TextureDesc d;
             d.width = d.height = text::kGlyphAtlasSize;
@@ -8620,14 +8708,12 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
             if (t.ok()) glyphAtlas_ = *t;
             dirty = true;
         }
-        if (glyphAtlas_.valid() && (dirty || gen != glyphAtlasGen_)) {
+        if (glyphAtlas_.valid() && dirty) {
             PendingUpload up;
             up.texture = glyphAtlas_;
             up.bytesPerRow = text::kGlyphAtlasSize;
-            up.data.assign(px, px + static_cast<usize>(text::kGlyphAtlasSize) * text::kGlyphAtlasSize);
+            glyphAtlasRev_ = text::copy_glyph_atlas(up.data, &glyphAtlasGen_);
             uploads_.push_back(std::move(up));
-            glyphAtlasGen_ = gen;
-            text::glyph_atlas_clean();
             ++heavyStats_.glyphAtlasUploads;
             heavyStats_.glyphAtlasUploadBytes += static_cast<u64>(text::kGlyphAtlasSize) * text::kGlyphAtlasSize;
         }
@@ -9955,6 +10041,10 @@ u32 Renderer::trim_memory(u8 stage, u64 frameNumber) noexcept {
     // Recortes do Roto Brush (até 48 MB de RLE na CPU): saem sob pressão
     // crítica (RUNNING_CRITICAL, MODERATE, COMPLETE). Refazem-se pelos traços.
     if (stage >= 6 && roto_) (void)roto_->trim_to(0);
+    // Remover fundo: refinados (refazem-se do recorte) e, com o projeto salvo,
+    // os recortes vão para o arquivo e saem da memória (relidos sob demanda).
+    if (bg_) bg_->trim();
+    if (stage >= 6 && bgStore_) (void)bgStore_->release_memory();
     particleStatics_.collect(frameNumber, 0);
     particleExtraBufs_.collect(*backend_, frameNumber, 1);
     // Entre quadros nada do pool está em uso: tudo volta a nascer sob demanda.

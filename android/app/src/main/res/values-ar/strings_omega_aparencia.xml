@@ -94,7 +94,11 @@
 
     <!-- Seletor de cor (P0-5, P1-1, P1-7, P1-8) -->
     <string name="om_ap_cp_eyedropper">القطّارة</string>
-    <string name="om_ap_cp_eyedropper_hint">اسحب على المسرح لاختيار اللون</string>
+    <string name="om_ap_cp_eyedropper_hint">المس أو اسحب على المعاينة لأخذ اللون</string>
+    <string name="om_ap_cp_eyedropper_source">اللون الأصلي، قبل هذا التأثير</string>
+    <string name="om_ap_cp_eyedropper_picked">اللون المأخوذ: %1$s</string>
+    <string name="om_ap_cp_eyedropper_cancel">إلغاء القطّارة والعودة إلى منتقي الألوان</string>
+    <string name="om_ap_cp_eyedropper_full_hint">أخذ لون من المعاينة</string>
     <string name="om_ap_cp_fine">ضبط دقيق</string>
     <string name="om_ap_cp_full">مزيد من الألوان</string>
     <string name="om_ap_cp_unavailable">اللون الشفاف غير متاح هنا</string>
@@ -103,6 +107,7 @@
     <string name="om_ap_cp_paste_code">لصق رمز اللون</string>
     <string name="om_ap_cp_code_copied">تم نسخ رمز اللون</string>
     <string name="om_ap_cp_code">رمز اللون %1$s</string>
+    <string name="om_ap_cp_type_code">اكتب رمز اللون</string>
     <string name="om_ap_cp_wheel">العجلة</string>
     <string name="om_ap_cp_rgb">RGB</string>
     <string name="om_ap_cp_done">تم</string>

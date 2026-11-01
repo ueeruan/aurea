@@ -10,16 +10,27 @@ import SwiftUI
 
 /// Conta-gotas ao vivo no palco (P1-1): o seletor liga, o palco amostra.
 /// `onSample` a cada passo do arrasto (RGBA sRGB 0..1), `onCommit` ao soltar.
+/// 0.4.5 (par do EditorStore.kt): `skipLayer`/`skipEffect` = amostrar com esse efeito
+/// desligado SÓ na captura (o verde antes do Chroma Key); `collapsed` = veio da tela
+/// cheia, que se recolheu (o painel de ajustes também sai da frente da prévia).
 final class EyedropperRequest: Identifiable {
     let id = UUID()
     let onSample: ([Float]) -> Void
     let onCommit: ([Float]) -> Void
     let onCancel: () -> Void
-    init(onSample: @escaping ([Float]) -> Void, onCommit: @escaping ([Float]) -> Void, onCancel: @escaping () -> Void) {
+    let skipLayer: Int64
+    let skipEffect: Int32
+    let collapsed: Bool
+    init(onSample: @escaping ([Float]) -> Void, onCommit: @escaping ([Float]) -> Void, onCancel: @escaping () -> Void,
+         skipLayer: Int64 = 0, skipEffect: Int32 = -1, collapsed: Bool = false) {
         self.onSample = onSample
         self.onCommit = onCommit
         self.onCancel = onCancel
+        self.skipLayer = skipLayer
+        self.skipEffect = skipEffect
+        self.collapsed = collapsed
     }
+    var skipsEffect: Bool { skipLayer != 0 && skipEffect >= 0 }
 }
 
 /// Índices de `AureaModel.shapeFill` (Engine::query_shape_fill).

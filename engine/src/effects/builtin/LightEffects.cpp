@@ -71,6 +71,14 @@ public:
         p.add_float("algorithm", "Algoritmo", 1.0f, 0.0f, 1.0f, kParamHidden | kParamLegacyZero);
         p.add_float("glow_intensity", "Intensidade", 2.2f, 0.0f, 10.0f);
         p.typed_range(0.0f, 100.0f);
+        // Relato 0.4.4 ("a intensidade do Deep Glow não muda nada"): a faixa
+        // digitada (0..100) passava de 4× a do slider e a regra virava RÉGUA
+        // de 0,05 por risco — um arrasto inteiro andava ~2 a partir de 2,2,
+        // onde o mapa de tom já está perto do branco e a diferença some.
+        // Slider de 0 a 10 (passo 0,1): o dedo percorre a faixa toda e o 0
+        // (identidade) fica a um gesto. O teclado continua aceitando até 100.
+        p.set_control(kGlowIntensity, ParamControl::Slider);
+        p.set_step(kGlowIntensity, 0.1f);
         p.add_float("falloff", "Decaimento", 15.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("tint_amount", "Quantidade da cor", 100.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");
         p.add_float("chromatic", "Aberração cromática", 0.0f, 0.0f, 100.0f, kParamAnimatable | kParamPercent, "%");

@@ -9330,6 +9330,8 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         // Gpu.NewToolsRotobrushRealMaskAndControls test loads the real model,
         // waits for final-quality inference and checks mask/inversion/mix pixels.
         if (fx.type_id() == effect_type_id(effect_keys::kRotobrush)) continue;
+        // Remover fundo: o mesmo modelo; BgRemoveGpu.* confere recorte, controles e export.
+        if (fx.type_id() == effect_type_id(effect_keys::kBackgroundRemove)) continue;
         const bool parenting = fx.type_id() == effect_type_id(effect_keys::kParentingHelper);
         const bool shadow = fx.type_id() == effect_type_id(effect_keys::kShadowStudio3);
         const bool cubeLut = fx.type_id() == effect_type_id(effect_keys::kCubeLut);
@@ -14589,6 +14591,17 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "HyperGpu.inl"
 // Custo de GPU/CPU de cada efeito do catálogo em 1080p (só imprime).
 #include "EffectPerfGpu.inl"
+// Pedidos de usuários da 0.4.5: Reflexo na água, Envolver com luz, Looks,
+// Caneta esferográfica, Poeira e a largura das Persianas.
+#include "UserRequests045Gpu.inl"
+// Pedidos de usuários da 0.4.5: Tile Shift, Hexagon Tile Rotate/Shift, Hollow
+// Box, Time Displacement, o Mirror do Alight Motion e o modo do Desfoque de zoom.
+#include "Distort045Gpu.inl"
+// Pedidos de usuários da 0.4.5 (glitch): Glitchify completo, Hyper Glitch,
+// Block Glitch e Shift Channels.
+#include "GlitchPack045Gpu.inl"
+// 0.4.5: Remover fundo (sem tela verde) — recorte, controles e export.
+#include "BgRemoveGpu.inl"
 
 // 0.4.1 (Reflective Floor): numa camada de ajuste, o que está ACIMA da linha do
 // horizonte aparece espelhado no chão, que é opaco abaixo da linha.
@@ -14634,4 +14647,29 @@ AUREA_TEST(EffectPackGpu, ReflectiveFloorPreviewImage) {
     std::printf("\n    3D: reflexo %.3f entre %.3f objeto %.3f ", refl.x, between.x, above.x);
     AUREA_CHECK(above.x > 0.85f);
     AUREA_CHECK(refl.x > 0.15f);
+}
+
+// Relato 0.4.4 ("as cores do efeito Borda não funcionam"): o passe final lia a
+// camada com LinearClamp FORA da região dela. Numa imagem de bordas opacas o
+// anel saía `m - 1 = 0` e a faixa mostrava os pixels da beirada esticados
+// (aqui, verde) em vez da cor escolhida. Só texto (beirada transparente) acertava.
+AUREA_TEST(Gpu, BorderOnOpaqueImageUsesTheChosenColor) {
+    AUREA_REQUIRE_GPU();
+    Scene s(256, 256);
+    const LayerId id = s.image(uniform_image(32, 32, 0, 255, 0), 128, 128);   // 112..144
+    auto& e = s.add_effect(id, effect_keys::kBorder);
+    e.params[0].constant = ParamValue::color(1.0f, 0.0f, 0.0f, 1.0f);   // cor
+    e.params[1].constant = ParamValue::scalar(6.0f);                    // largura (px)
+    e.params[2].constant = ParamValue::scalar(100.0f);                  // opacidade
+    const FloatImage red = s.render();
+    const Vec4 band = red.v(147, 128), inside = red.v(128, 128), far = red.v(170, 128);
+    std::printf("    borda vermelha: faixa (%.3f %.3f %.3f) dentro (%.3f %.3f %.3f) longe %.3f\n",
+                band.x, band.y, band.z, inside.x, inside.y, inside.z, far.x + far.y + far.z);
+    AUREA_CHECK(band.x > 0.9f && band.y < 0.05f && band.z < 0.05f);
+    AUREA_CHECK(inside.y > 0.9f && inside.x < 0.05f);   // a imagem por dentro fica intacta
+    AUREA_CHECK(far.x + far.y + far.z < 0.01f);           // além da largura: fundo
+    // Trocar a cor muda a faixa.
+    s.comp->layer(id)->effects.back().params[0].constant = ParamValue::color(0.0f, 0.0f, 1.0f, 1.0f);
+    const Vec4 blue = s.render().v(147, 128);
+    AUREA_CHECK(blue.z > 0.9f && blue.x < 0.05f && blue.y < 0.05f);
 }

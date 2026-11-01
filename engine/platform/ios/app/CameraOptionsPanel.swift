@@ -6,8 +6,8 @@ import UIKit
 //  (`fragment_camera_options` da referência; par do `CameraOptionsPanel.kt`).
 //
 //  Moldura comum (`PanelFrame`, 200 pt) com três abas: **Visão** (perspectiva/
-//  paralela, régua vertical curva do ângulo de visão, régua de zoom, "Afeta as
-//  de baixo" e a dica), **Desfoque de foco** (o que era a face Lente do
+//  paralela, "Afeta camadas abaixo" logo abaixo do título, régua vertical curva
+//  do ângulo de visão, régua de zoom e a dica), **Desfoque de foco** (o que era a face Lente do
 //  Transformar: profundidade de campo, foco, abertura, intensidade, escolher o
 //  foco no palco) e **Névoa** (ainda não existe por câmera no motor: aviso).
 //
@@ -181,14 +181,17 @@ struct CameraOptionsPanel: View {
                 }
                 .frame(height: 37.5)
                 .padding(.horizontal, 10)
-                angleRow
-                zoomRow.padding(.top, 8)
-                presetChips.padding(.top, 6)
+                // "Afeta camadas abaixo" (0.1.6) logo abaixo do título: no fim da aba ele
+                // ficava depois da régua e das lentes, fora da moldura, e quem procurava
+                // não achava (bug #8b). Par do Android. Câmera nova nasce desligada (0.3.1).
                 cameraToggle("camera_affects_below", hint: "camera_affects_below_hint",
                              checked: lens.count > 9 && lens[9] >= 0.5, identifier: "camera.view.affectsBelow") { enabled in
                     beginGesture(); model.setCameraLens(AureaModel.cameraAffectsBelow, value: enabled ? 1 : 0); endGesture()
                 }
                 .padding(.horizontal, 6)
+                angleRow
+                zoomRow.padding(.top, 8)
+                presetChips.padding(.top, 6)
                 Text(AureaText.t("om_ap_cam_tip")).font(.aurea(size: PanelMetrics.note)).foregroundStyle(AureaColors.subtle)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 10).padding(.top, 6)
@@ -579,6 +582,7 @@ struct CameraOptionsPanel: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
             AureaToggle(checked: checked) { if !locked { onChange($0) } }
                 .accessibilityLabel(AureaText.t(title))
+                .accessibilityHint(AureaText.t(hint))
                 .accessibilityIdentifier(identifier)
         }
         .padding(.vertical, 6).padding(.leading, 4)

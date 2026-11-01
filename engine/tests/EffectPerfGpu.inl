@@ -313,7 +313,7 @@ bool skipped(const Effect& fx) {
         effect_type_id(effect_keys::kPart3DTransform), effect_type_id(effect_keys::kPart3DHide),
         effect_type_id(effect_keys::kPart3DTexture), effect_type_id(text::kTransformEffect),
         effect_type_id(text::kAnimatorEffect), effect_type_id(effect_keys::kSceneFlare),
-        effect_type_id(effect_keys::kRotobrush),
+        effect_type_id(effect_keys::kRotobrush), effect_type_id(effect_keys::kBackgroundRemove),
         // Aposentados do catálogo (Engine::query_effect_catalog).
         effect_type_id("aurea.audio.reverb"), effect_type_id("aurea.audio.flanger"),
         effect_type_id("aurea.audio.echo"), effect_type_id(effect_keys::kAudioSpectrum),

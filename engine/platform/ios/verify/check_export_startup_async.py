@@ -391,7 +391,11 @@ final class Native: @unchecked Sendable {
         ]),
         "LADDER": ladder,
         "WATCH": block("struct ExportStallWatch {"),
-        "FAILURE": block("static func exportFailureReason("),
+        # 0.4.5: as falhas depois da escada levam "também tentamos…" + código.
+        "FAILURE": "\n".join([
+            block("static func exportFailureReason("),
+            block("nonisolated static func exportAfterLadder("),
+        ]),
         "POLL": poll.replace("private func", "func", 1),
     }
     harness = re.sub(r"\b(" + "|".join(values) + r")\b", lambda match: values[match.group(0)], harness)

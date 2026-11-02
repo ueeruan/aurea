@@ -113,41 +113,57 @@ private func puppetToUv(_ c: [Float], _ x: Float, _ y: Float) -> (Float, Float)?
                 .accessibilityLabel(AureaText.t("fx_name_puppet"))
                 .accessibilityHint(AureaText.t("puppet_hint"))
                 .accessibilityIdentifier("stage.puppet")
-                .overlay {
-                    // Cada pino é um elemento de acessibilidade (VoiceOver: escolher / apagar).
-                    ForEach(Array(stride(from: 0, to: pins.count - PuppetStageState.pinFloats + 1, by: PuppetStageState.pinFloats)), id: \.self) { k in
-                        let index = Int(pins[k])
-                        let p = screen(pins[k + 1], pins[k + 2], placed.scale, placed.origin)
-                        Color.clear.frame(width: 28, height: 28).position(p)
-                            .accessibilityElement()
-                            .accessibilityLabel(AureaText.t("puppet_pin_a11y", index + 1))
-                            .accessibilityAddTraits(index == puppet.selected ? [.isButton, .isSelected] : .isButton)
-                            .accessibilityAction { puppet.selected = index }
-                            .accessibilityAction(named: Text(AureaText.t("common_delete"))) {
-                                model.puppetRemovePin(puppet.layer, effect: puppet.effect, pin: Int32(index))
-                                puppet.group &= ~(Int32(1) << Int32(index))
-                                puppet.revision += 1
-                            }
-                            .accessibilityAction(named: Text(AureaText.t("puppet_group"))) {
-                                // VoiceOver: põe/tira o pino do grupo (o escolhido é o pivô).
-                                if puppet.selected < 0 { puppet.selected = index }
-                                else if index != puppet.selected { puppet.group ^= Int32(1) << Int32(index) }
-                                puppet.revision += 1
-                            }
-                            .accessibilityAction(named: Text(AureaText.t("puppet_group_rotate", index + 1))) {
-                                // VoiceOver: um quarto de volta do grupo em volta deste pino (pivô).
-                                guard index == puppet.selected, puppet.ringMask() != 0 else { return }
-                                let u = pins[k + 1], v = pins[k + 2]
-                                if model.puppetRotatePins(puppet.layer, effect: puppet.effect, pivot: Int32(index), mask: puppet.ringMask(),
-                                                          u0: u + 0.1, v0: v, u1: u, v1: v + 0.1, continuing: false) {
-                                    puppet.revision += 1
-                                    model.refreshModel(force: true)
-                                }
-                            }
-                            .allowsHitTesting(false)
-                    }
-                }
+                .overlay { pinElements(pins, placed.scale, placed.origin) }
             }
+        }
+    }
+
+    /// Cada pino é um elemento de acessibilidade (VoiceOver: escolher / apagar /
+    /// grupo). Fora do `body` para o verificador de tipos do Swift dar conta.
+    @ViewBuilder
+    private func pinElements(_ pins: [Float], _ fit: CGFloat, _ origin: CGPoint) -> some View {
+        let step = PuppetStageState.pinFloats
+        let starts: [Int] = Array(stride(from: 0, to: pins.count - step + 1, by: step))
+        ForEach(starts, id: \.self) { k in
+            pinElement(pins, k, fit, origin)
+        }
+    }
+
+    private func pinElement(_ pins: [Float], _ k: Int, _ fit: CGFloat, _ origin: CGPoint) -> some View {
+        let index = Int(pins[k])
+        let u = pins[k + 1], v = pins[k + 2]
+        let traits: AccessibilityTraits = index == puppet.selected ? [.isButton, .isSelected] : .isButton
+        return Color.clear.frame(width: 28, height: 28).position(screen(u, v, fit, origin))
+            .accessibilityElement()
+            .accessibilityLabel(AureaText.t("puppet_pin_a11y", index + 1))
+            .accessibilityAddTraits(traits)
+            .accessibilityAction { puppet.selected = index }
+            .accessibilityAction(named: Text(AureaText.t("common_delete"))) { removePin(index) }
+            .accessibilityAction(named: Text(AureaText.t("puppet_group"))) { toggleGroup(index) }
+            .accessibilityAction(named: Text(AureaText.t("puppet_group_rotate", index + 1))) { rotateGroup(index, u, v) }
+            .allowsHitTesting(false)
+    }
+
+    private func removePin(_ index: Int) {
+        model.puppetRemovePin(puppet.layer, effect: puppet.effect, pin: Int32(index))
+        puppet.group &= ~(Int32(1) << Int32(index))
+        puppet.revision += 1
+    }
+
+    /// VoiceOver: põe/tira o pino do grupo (o escolhido é o pivô).
+    private func toggleGroup(_ index: Int) {
+        if puppet.selected < 0 { puppet.selected = index }
+        else if index != puppet.selected { puppet.group ^= Int32(1) << Int32(index) }
+        puppet.revision += 1
+    }
+
+    /// VoiceOver: um quarto de volta do grupo em volta deste pino (pivô).
+    private func rotateGroup(_ index: Int, _ u: Float, _ v: Float) {
+        guard index == puppet.selected, puppet.ringMask() != 0 else { return }
+        if model.puppetRotatePins(puppet.layer, effect: puppet.effect, pivot: Int32(index), mask: puppet.ringMask(),
+                                  u0: u + 0.1, v0: v, u1: u, v1: v + 0.1, continuing: false) {
+            puppet.revision += 1
+            model.refreshModel(force: true)
         }
     }
 

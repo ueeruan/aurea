@@ -1264,7 +1264,9 @@ struct CaptionSampleView: View {
         let split = shown.lastIndex(of: " ").map { shown.index(after: $0) } ?? shown.index(before: shown.endIndex)
         let fill = preview.fill.color
         let accent = preview.highlight ? preview.highlightColor.color : fill
-        let font = Font.system(size: size, weight: Self.weight(preview.weight)).italic(preview.italic)
+        // `Font.italic(_:)` com argumento é só do iOS 26; o `.italic()` sem argumento vale no 16.
+        let upright = Font.system(size: size, weight: Self.weight(preview.weight))
+        let font = preview.italic ? upright.italic() : upright
         let styled = Text(String(shown[..<split])).foregroundColor(fill) + Text(String(shown[split...])).foregroundColor(accent)
         let width = size * CGFloat(preview.strokeFrac)
         return ZStack {

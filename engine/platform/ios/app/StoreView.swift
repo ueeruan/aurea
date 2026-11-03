@@ -266,6 +266,20 @@ struct StoreView: View {
 }
 
 private let storeReportReasons = ["spam", "nudity", "violence", "hate", "harassment", "illegal", "copyright", "other"]
+/// Rótulo de cada motivo com a chave escrita por extenso (o verificador do
+/// catálogo de textos confere cada uma; chave montada em tempo de execução não passa).
+private func storeReasonLabel(_ reason: String) -> String {
+    switch reason {
+    case "spam": return AureaText.t("mod_reason_spam")
+    case "nudity": return AureaText.t("mod_reason_nudity")
+    case "violence": return AureaText.t("mod_reason_violence")
+    case "hate": return AureaText.t("mod_reason_hate")
+    case "harassment": return AureaText.t("mod_reason_harassment")
+    case "illegal": return AureaText.t("mod_reason_illegal")
+    case "copyright": return AureaText.t("mod_reason_copyright")
+    default: return AureaText.t("mod_reason_other")
+    }
+}
 
 struct StoreDetailView: View {
     @EnvironmentObject private var model: AureaModel
@@ -374,7 +388,7 @@ struct StoreDetailView: View {
         .presentationDetents([.large])
         .confirmationDialog(AureaText.t("mod_report_title"), isPresented: $reporting, titleVisibility: .visible) {
             ForEach(storeReportReasons, id: \.self) { reason in
-                Button(AureaText.t("mod_reason_\(reason)")) { run {
+                Button(storeReasonLabel(reason)) { run {
                     _ = try await api.call("/reports", method: "POST", body: ["kind": "store", "id": item.id, "reason": reason], as: StoreOK.self)
                     model.toast = AureaText.t("mod_report_thanks")
                 } }

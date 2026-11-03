@@ -27,6 +27,11 @@ on:
         required: false
         default: ''
         type: string
+      clean_build:
+        description: 'Ignore the incremental build cache (DerivedData + CMake) and compile everything from scratch'
+        required: false
+        default: false
+        type: boolean
   push:
     branches: ['codex/native-beta2-ipa', 'claude/release-2194']
     paths: ['engine/**', '.github/workflows/build-ipa.yml']
@@ -48,11 +53,30 @@ jobs:
       # O IronSource (LevelPlay 9.6.0) vem compilado com Swift 6.2: so linka com o
       # Xcode 26 (no 16.4 faltam isIsolatingCurrentContext e swift_coroFrameAlloc).
       - name: Select Xcode 26
+        id: xcode
         run: |
           XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -z "$XC" ]; then echo "Xcode 26 nao instalado no runner"; ls -d /Applications/Xcode*.app; exit 1; fi
           sudo xcode-select -s "$XC/Contents/Developer"
           xcodebuild -version
+          echo "build=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_OUTPUT"
+      # 0.4.6: build INCREMENTAL. O DerivedData do Xcode (com os pacotes Swift ja
+      # baixados) e a pasta do CMake do motor voltam da rodada anterior; o
+      # ci_mtimes devolve a data antiga aos arquivos que nao mudaram (o checkout
+      # marca tudo como novo). So o que mudou recompila. `clean_build` ignora.
+      - name: Restore incremental iOS build
+        if: github.event_name != 'workflow_dispatch' || !inputs.clean_build
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/ios
+            engine/platform/ios/build/core
+            build/ci-mtimes.json
+          key: ios-incremental-v1-${{ runner.os }}-${{ steps.xcode.outputs.build }}-${{ github.run_id }}
+          restore-keys: ios-incremental-v1-${{ runner.os }}-${{ steps.xcode.outputs.build }}-
+      - name: Keep file dates of unchanged sources
+        if: github.event_name != 'workflow_dispatch' || !inputs.clean_build
+        run: python3 tools/ci_mtimes.py restore build/ci-mtimes.json
       - name: Ensure Xcode Metal compiler is available
         run: |
           if ! xcrun --sdk iphonesimulator metal --version; then
@@ -128,13 +152,20 @@ jobs:
           cmake -S engine/tools/metal-shaders -B build/metal-tools -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/metal-tools --parallel 3
           echo "AUREA_METAL_COMPILER=$GITHUB_WORKSPACE/build/metal-tools/aurea-metal-compiler" >> "$GITHUB_ENV"
+      # 0.4.6: Swift arquivo por arquivo (`singlefile`). No modo "whole module" o
+      # Swift do app inteiro compilava num processo só (≈21 min, sempre do zero);
+      # por arquivo ele usa os 3 núcleos e só refaz o que mudou.
       - name: Compile native iOS app
+        id: compile
         run: |
           set -o pipefail
+          ccache -z || true
           xcodebuild -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath build/ios CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            SWIFT_COMPILATION_MODE=singlefile \
             build 2>&1 | tee build-ios.log
+          ccache -s || true
       - name: Validate compiled app with Foundation
         run: swift engine/platform/ios/verify/check_bundle.swift build/ios/Build/Products/Release-iphoneos/Aurea.app
       - name: Preserve symbols matching the packaged executable
@@ -210,6 +241,18 @@ jobs:
         with:
           path: build/ccache
           key: ios-cxx-${{ runner.os }}-${{ github.run_id }}
+      # O build incremental da próxima rodada (só depois que a compilação rodou).
+      - name: Record file dates for the next incremental build
+        if: always() && steps.compile.outcome != 'skipped'
+        run: python3 tools/ci_mtimes.py save build/ci-mtimes.json
+      - uses: actions/cache/save@v4
+        if: always() && steps.compile.outcome != 'skipped'
+        with:
+          path: |
+            build/ios
+            engine/platform/ios/build/core
+            build/ci-mtimes.json
+          key: ios-incremental-v1-${{ runner.os }}-${{ steps.xcode.outputs.build }}-${{ github.run_id }}
   simulator-parity:
     if: github.event_name != 'workflow_dispatch' || inputs.run_simulator
     runs-on: macos-15

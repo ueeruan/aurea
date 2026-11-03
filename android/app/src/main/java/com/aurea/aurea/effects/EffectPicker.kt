@@ -221,7 +221,8 @@ private fun EffectBrowserBody(
         val textLayer = kind == 4
         val effects = pickableEffects(catalog, layerHasAudio, layerKind = kind).filter {
             (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.transform")) &&
-                (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.animator"))
+                (textLayer || text3dLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.animator")) &&
+                (textLayer || it.typeId != com.aurea.aurea.editor.panels.effectTypeId("aurea.text.animator_pro"))   // 0.4.6: só texto 2D
         }
         // Bugs 0.3.4 (bug 3): um efeito por typeId (a chave das grades é o typeId).
         val all = distinctEffects(effects + pickableTools(kind).map { toolCatalogEntry(it, toolNames.getValue(it)) })

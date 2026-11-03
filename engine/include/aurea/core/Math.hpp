@@ -437,8 +437,77 @@ inline constexpr f32 kOvershootDefaultAmount = 1.70158f / kOvershootMaxStrength;
 inline constexpr f32 kElasticDefaultCycles = 3.0f / 8.0f;
 inline constexpr f32 kElasticDefaultDamping = 0.25f;
 
+/// 0.4.6: Degraus (A = quantidade, 2..32), Repetir (A = vezes, 1..16), Vai e
+/// volta (A = meias-voltas 2·round(8A)+1), Onda (A = ciclos 1..16, B =
+/// amplitude 0..0,5) e Aleatório (A = degraus 2..32, B = suavização, x2 =
+/// semente). Todas começam em 0 e TERMINAM em 1: o keyframe seguinte é exato.
+inline constexpr f32 kStepsDefaultCount = 2.0f / 30.0f;      ///< 4 degraus (o de sempre)
+inline constexpr f32 kRepeatDefaultCount = 2.0f / 15.0f;     ///< 3 vezes
+inline constexpr f32 kPingPongDefaultCount = 1.0f / 8.0f;    ///< 3 meias-voltas
+inline constexpr f32 kWaveDefaultCycles = 2.0f / 15.0f;      ///< 3 ciclos
+inline constexpr f32 kWaveDefaultAmplitude = 0.3f;           ///< 0,15 do trecho
+inline constexpr f32 kRandomDefaultCount = 6.0f / 30.0f;     ///< 8 degraus
+inline constexpr f32 kRandomDefaultSmooth = 0.0f;
+
+/// Curvas que guardam parâmetros nos quatro floats (com o marcador em by2).
 [[nodiscard]] constexpr bool ease_has_params(Interpolation kind) noexcept {
+    return kind == Interpolation::Bounce || kind == Interpolation::Elastic || kind == Interpolation::Overshoot
+        || kind == Interpolation::Steps || kind == Interpolation::Repeat || kind == Interpolation::PingPong
+        || kind == Interpolation::Wave || kind == Interpolation::Random;
+}
+/// Só estas têm espelho exato pelos parâmetros (x2 = sentido).
+[[nodiscard]] constexpr bool ease_has_mirror_param(Interpolation kind) noexcept {
     return kind == Interpolation::Bounce || kind == Interpolation::Elastic || kind == Interpolation::Overshoot;
+}
+
+/// Hash inteiro → [0,1) (degraus aleatórios determinísticos: export = prévia).
+[[nodiscard]] inline f32 ease_hash01(u32 i, u32 seed) noexcept {
+    u32 h = i * 0x9E3779B1u ^ (seed + 0x7F4A7C15u);
+    h ^= h >> 16; h *= 0x85EBCA6Bu; h ^= h >> 13; h *= 0xC2B2AE35u; h ^= h >> 16;
+    return static_cast<f32>(h >> 8) * (1.0f / 16777216.0f);
+}
+
+[[nodiscard]] inline f32 ease_cycle_curve(Interpolation kind, f32 t, f32 a, f32 b, f32 c) noexcept {
+    if (t <= 0.0f) return 0.0f;
+    if (t >= 1.0f) return 1.0f;
+    switch (kind) {
+        case Interpolation::Steps: {
+            const f32 n = static_cast<f32>(2 + std::clamp(static_cast<int>(std::round(a * 30.0f)), 0, 30));
+            return std::floor(t * n) / n;
+        }
+        case Interpolation::Repeat: {
+            const f32 n = static_cast<f32>(1 + std::clamp(static_cast<int>(std::round(a * 15.0f)), 0, 15));
+            const f32 p = t * n;
+            return p - std::floor(p);
+        }
+        case Interpolation::PingPong: {
+            const int h = 2 * std::clamp(static_cast<int>(std::round(a * 8.0f)), 0, 8) + 1;
+            const f32 p = t * static_cast<f32>(h);
+            const int k = static_cast<int>(std::floor(p));
+            const f32 f = p - static_cast<f32>(k);
+            return (k % 2 == 0) ? f : 1.0f - f;
+        }
+        case Interpolation::Wave: {
+            const f32 n = static_cast<f32>(1 + std::clamp(static_cast<int>(std::round(a * 15.0f)), 0, 15));
+            return t + 0.5f * clampf(b, 0.0f, 1.0f) * std::sin(2.0f * kPi * n * t);
+        }
+        case Interpolation::Random: {
+            const int n = 2 + std::clamp(static_cast<int>(std::round(a * 30.0f)), 0, 30);
+            const u32 seed = static_cast<u32>(std::clamp(c, 0.0f, 1.0f) * 65535.0f);
+            const f32 p = t * static_cast<f32>(n);
+            const int k = std::min(static_cast<int>(std::floor(p)), n - 1);
+            auto level = [&](int i) { return i <= 0 ? 0.0f : i >= n ? 1.0f : ease_hash01(static_cast<u32>(i), seed); };
+            const f32 l0 = level(k), l1 = level(k + 1);
+            const f32 f = p - static_cast<f32>(k);
+            const f32 smooth = clampf(b, 0.0f, 1.0f);
+            // Suavização 0 = degrau (segura o nível); 1 = desliza o degrau inteiro
+            // até o próximo. A transição ocupa o fim de cada degrau.
+            if (smooth <= 0.0f) return l0;
+            const f32 g = clampf((f - (1.0f - smooth)) / smooth, 0.0f, 1.0f);
+            return l0 + (l1 - l0) * (g * g * (3.0f - 2.0f * g));
+        }
+        default: return t;
+    }
 }
 
 /// Overshoot ("back") saindo de 0 e chegando em 1, passando de 1 no caminho.
@@ -520,7 +589,18 @@ inline constexpr f32 kElasticDefaultDamping = 0.25f;
             return (1.f-std::exp(-6.f*t)*std::cos(6.f*kPi*t))/(1.f-std::exp(-6.f));
         }
         case Interpolation::Steps:
+            if (by2 == kEaseParamMarker) return ease_cycle_curve(kind, t, bx1, by1, bx2);
             return std::floor(clampf(t, 0.f, 1.f)*4.f)*0.25f;
+        case Interpolation::Repeat:
+            return ease_cycle_curve(kind, t, by2 == kEaseParamMarker ? bx1 : kRepeatDefaultCount, 0.0f, 0.0f);
+        case Interpolation::PingPong:
+            return ease_cycle_curve(kind, t, by2 == kEaseParamMarker ? bx1 : kPingPongDefaultCount, 0.0f, 0.0f);
+        case Interpolation::Wave:
+            return by2 == kEaseParamMarker ? ease_cycle_curve(kind, t, bx1, by1, 0.0f)
+                                           : ease_cycle_curve(kind, t, kWaveDefaultCycles, kWaveDefaultAmplitude, 0.0f);
+        case Interpolation::Random:
+            return by2 == kEaseParamMarker ? ease_cycle_curve(kind, t, bx1, by1, bx2)
+                                           : ease_cycle_curve(kind, t, kRandomDefaultCount, kRandomDefaultSmooth, 0.0f);
         case Interpolation::Overshoot:
             // Sem marcador (curva escolhida por um caminho que não grava os
             // parâmetros): o overshoot padrão, no sentido normal.

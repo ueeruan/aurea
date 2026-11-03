@@ -322,6 +322,12 @@ private fun SpeedOptionsTab(env: PanelEnv) {
                 Text(stringResource(R.string.panel_passar_tras_frente), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
                 AureaToggle(checked = reversed, onCheckedChange = { store.setLayerReversed(it) })
             }
+            // 0.4.6: repetir o vídeo quando a camada é mais longa que a fonte.
+            val loop = store.detail?.loopMedia == true
+            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.layer_media_loop), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
+                AureaToggle(checked = loop, onCheckedChange = { store.setLayerMediaLoop(it) })
+            }
             Text(stringResource(R.string.panel_quadros_camera_lenta), style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Label)))
             Spacer(Modifier.height(6.dp))
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

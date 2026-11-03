@@ -36,7 +36,7 @@ using namespace cc;
 
 class DrawingProgress final : public Effect {
 public:
-    enum : u32 { kProgress = 0, kOrder, kReverse, kSoftness, kAngle };
+    enum : u32 { kProgress = 0, kOrder, kReverse, kSoftness, kAngle, kStart };
     enum : u32 { kSequential = 0, kSimultaneous };
     /// Na varredura, o papel claro chega esta fração da varredura depois da
     /// tinta escura (o nanquim antes da aguada).
@@ -54,6 +54,10 @@ public:
         p.add_bool("reverse", "Inverter", false);
         p.add_float("softness", "Suavidade da ponta", 8.0f, 0.0f, 100.0f, kAnimPct, "%");
         p.add_angle("angle", "Ângulo", 0.0f);
+        // 0.4.6 (no fim: os índices salvos não mudam): o INÍCIO do trecho. O
+        // Progresso é o Fim; com os dois animados, um pedaço do traço corre
+        // pelo desenho (o "Avanço do desenho", Início e Fim).
+        p.add_float("start", "Início", 0.0f, 0.0f, 100.0f, kAnimPct, "%");
     }
 
     bool demo_values(EffectInstance&, std::vector<ParamValue>& v) const noexcept override {
@@ -69,6 +73,8 @@ public:
 
     /// Fração desenhada, 0..1 (NaN = inteira, o padrão).
     static f32 amount(const EffectEval& e) noexcept { return clampf(e.f(kProgress), 0.0f, 100.0f, 100.0f) / 100.0f; }
+    /// Início do trecho, 0..1 (projeto antigo não tem o parâmetro: 0).
+    static f32 head(const EffectEval& e) noexcept { return e.count > kStart ? clampf(e.f(kStart), 0.0f, 100.0f, 0.0f) / 100.0f : 0.0f; }
 
     /// A camada tem traço de verdade para seguir (a geometria é cortada no renderer).
     static bool vector_layer(const Layer* l) noexcept {
@@ -81,13 +87,14 @@ public:
         out.amount = amount(e);
         out.sequential = std::min<u32>(e.e(kOrder), kSimultaneous) == kSequential;
         out.reverse = e.b(kReverse);
+        out.start = head(e);
         return true;
     }
 
     // Na camada vetorial o corte já está na malha: nenhum passe. Nas outras,
     // 100 % é a camada exata e sai da cadeia.
     bool is_identity(const EffectEval& e) const noexcept override {
-        return vector_layer(e.layer) || !(amount(e) < 1.0f);
+        return vector_layer(e.layer) || (!(amount(e) < 1.0f) && !(head(e) > 0.0f));
     }
 
     Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& in, f32, LayerImage& out) const override {
@@ -109,7 +116,9 @@ public:
         // 0 % não mostra nenhum pixel e 100 % mostra todos.
         u.p0 = Vec4{t * (1.0f + kInkLead + soft), soft, kInkLead, t <= 0.0f ? 1.0f : 0.0f};
         u.p1 = Vec4{box.x + 0.5f * box.w, box.y + 0.5f * box.h, dir.x, dir.y};
-        u.p2 = Vec4{span, 0.0f, 0.0f, 0.0f};
+        // 0.4.6: o Início apaga o que a frente de trás já passou (mesma rampa).
+        const f32 t0 = head(e);
+        u.p2 = Vec4{span, t0 > 0.0f ? t0 * (1.0f + kInkLead + soft) : -1.0f, 0.0f, 0.0f};
         return run_pass(ctx, e, ShaderId::effects_drawing_progress_frag, in, in.region, u, "drawing-progress", out);
     }
 };

@@ -90,6 +90,17 @@ public:
     bool is_identity(const EffectEval&) const noexcept override { return true; }
 };
 
+// 0.4.6 · Text Animator Pro (TextAnimatorPro.cpp): o animador completo.
+class TextAnimatorProEffect final : public Effect {
+public:
+    const EffectInfo& info() const noexcept override {
+        static const EffectInfo i{text::kAnimatorProEffect, "Text Animator Pro", "Text", EffectClass::Domain};
+        return i;
+    }
+    void declare_parameters(ParameterRegistry& p) const override { text::declare_animator_pro_params(p); }
+    bool is_identity(const EffectEval&) const noexcept override { return true; }
+};
+
 class TextSurfaceEffect final : public Effect {
     bool bevel_;
 public:
@@ -303,6 +314,7 @@ void register_pattern_effects(EffectRegistry& r) {
     (void)r.add(std::make_unique<Text3DLayout>());
     (void)r.add(std::make_unique<TextTransform>());
     (void)r.add(std::make_unique<TextAnimatorEffect>());
+    (void)r.add(std::make_unique<TextAnimatorProEffect>());
     (void)r.add(std::make_unique<TextSurfaceEffect>(true));
     (void)r.add(std::make_unique<TextSurfaceEffect>(false));
     (void)r.add(std::make_unique<Checkerboard>());

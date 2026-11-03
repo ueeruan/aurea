@@ -558,6 +558,7 @@ void register_builtin_effects(EffectRegistry& registry) {
     builtin::register_expression_controls(registry);
     builtin::register_echo_effect(registry);
     builtin::register_distort_effects(registry);
+    builtin::register_gap_effects_046(registry);
     builtin::register_stylize_effects(registry);
     builtin::register_light_effects(registry);
     builtin::register_glitch_effects(registry);

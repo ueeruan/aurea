@@ -126,12 +126,19 @@ std::string shader_header(const Manifest& m, u32 pass) {
     h += "layout(set = 0, binding = 0) uniform sampler2D aurea_source;\n";
     for (usize i = 0; i < p.inputs.size(); ++i)
         h += "layout(set = 0, binding = " + std::to_string(i + 1) + ") uniform sampler2D " + p.inputs[i].first + ";\n";
+    // 0.4.6: as imagens do pacote ("textures") vêm depois das entradas, em
+    // todos os passes. getFile(nome) é o próprio sampler (a API que o autor lê).
+    for (usize i = 0; i < m.textures.size(); ++i)
+        h += "layout(set = 0, binding = " + std::to_string(1 + p.inputs.size() + i) + ") uniform sampler2D "
+             + m.textures[i].name + ";\n";
+    h += "#define getFile(name) (name)\n";
+    h += "#define AUREA_TEXTURE_COUNT " + std::to_string(m.textures.size()) + "\n";
     h += "layout(set = 0, binding = 12, std140) uniform AureaPluginBlock {\n"
          "    vec4 resolution;   // xy = texels deste passe, zw = 1/xy\n"
          "    vec4 time;         // x = segundos, y = quadro, z = fps\n"
          "    vec4 layer;        // xy = tamanho da camada (px), zw = texels por px da camada neste passe\n"
          "    vec4 region;       // xy = origem da regiao (px da camada), zw = tamanho (px da camada)\n"
-         "    vec4 params[16];   // um vec4 por parametro, na ordem de plugin.json\n";
+         "    vec4 params[" + std::to_string(param_slots(m)) + "];   // um vec4 por parametro, na ordem de plugin.json\n";
     if (m.scene3d) {
         h += "    mat4 view;          // vista <- mundo (x direita, y baixo, z frente)\n"
              "    mat4 compFromWorld; // px da composicao (homogeneo) <- mundo\n"
@@ -139,9 +146,9 @@ std::string shader_header(const Manifest& m, u32 pass) {
              "    vec4 camera;        // xyz posicao no mundo, w = 1 camera de camada\n"
              "    vec4 lens;          // x fovY (rad), y plano proximo, z aspecto, w focal (px)\n"
              "    vec4 comp;          // xy tamanho da composicao (px), zw = 1/xy\n"
-             "    mat4 layerWorld[4]; // mundo <- px de cada camada ligada\n"
-             "    vec4 layerPos[4];   // xyz ancora no mundo, w = 1 ligada\n"
-             "    vec4 layerInfo[4];  // x tipo (6 nulo, 8 camera, 9 luz), y fovY, z 3D\n";
+             "    mat4 layerWorld[" + std::to_string(kMaxLayerParams) + "]; // mundo <- px de cada camada ligada\n"
+             "    vec4 layerPos[" + std::to_string(kMaxLayerParams) + "];   // xyz ancora no mundo, w = 1 ligada\n"
+             "    vec4 layerInfo[" + std::to_string(kMaxLayerParams) + "];  // x tipo (6 nulo, 8 camera, 9 luz), y fovY, z 3D\n";
     }
     h += "} aurea;\n";
     u32 layerSlot = 0;

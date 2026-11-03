@@ -53,6 +53,7 @@ struct Backend::Impl final : CommandList {
     GPUCapabilities caps;
     BackendConfig settings;
     PipelineCacheInfo cacheInfo;
+    std::string lastCompileLog;   ///< info log do driver na última recusa (last_compile_log)
     std::string cacheDirectory;
     std::unordered_map<u64, Texture> textures;
     std::unordered_map<u64, Buffer> buffers;

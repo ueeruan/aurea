@@ -998,6 +998,15 @@ class AureaEngine private constructor() {
     fun textFont(layer: Long): String? = nativeTextFont(nativeHandle, layer)
     fun setTextStyle(layer: Long, v: FloatArray): Boolean = nativeSetTextStyle(nativeHandle, layer, v)
     fun queryTextStyle(layer: Long, out: FloatArray): Boolean = nativeQueryTextStyle(nativeHandle, layer, out)
+    /** 0.4.6: texto dinâmico — {ligado, de, até, casas, separador, curva} (`set_text_dynamic`). */
+    fun setTextDynamic(layer: Long, v: DoubleArray): Boolean = nativeSetTextDynamic(nativeHandle, layer, v)
+    /** 0.4.6: repetir o vídeo além do fim da fonte. */
+    fun setLayerMediaLoop(layer: Long, on: Boolean): Boolean = nativeSetLayerMediaLoop(nativeHandle, layer, on)
+    /** 0.4.6: caminho curvo — tangentes do keyframe de posição (entrada xyz, saída xyz). */
+    fun setPositionTangents(layer: Long, time: Long, v: FloatArray): Boolean = nativeSetPositionTangents(nativeHandle, layer, time, v)
+    /** O caminho avaliado: [n, k, n×(x,y), k×(tempo, x, y, entrada x/y, saída x/y)] no espaço do pai. */
+    fun queryPositionPath(layer: Long): FloatArray? = nativeQueryPositionPath(nativeHandle, layer)
+    fun queryTextDynamic(layer: Long): DoubleArray? = nativeQueryTextDynamic(nativeHandle, layer)
     fun setTextSpan(layer: Long, start: Int, end: Int, hasColor: Boolean, r: Float, g: Float, b: Float, weight: Int, scale: Float): Boolean =
         nativeSetTextSpan(nativeHandle, layer, start, end, hasColor, r, g, b, weight, scale)
     fun clearTextSpans(layer: Long, start: Int, end: Int): Boolean = nativeClearTextSpans(nativeHandle, layer, start, end)
@@ -1042,6 +1051,24 @@ class AureaEngine private constructor() {
     private external fun nativeSaveCaptionBundle(handle: Long, layer: Long, name: ByteArray): ByteArray
     private external fun nativeApplyCaptionBundle(handle: Long, layer: Long, data: ByteArray): Boolean
     fun editCaptionTrack(layer: Long, command: String): Boolean = nativeEditCaptionTrack(nativeHandle, layer, command.toByteArray(Charsets.UTF_8))
+    // 0.4.6: opções da legenda em JSON (o bloco "caption" do preset), com a aparência própria.
+    fun createCaptionsJson(layer: Long, texts: Array<String>, times: DoubleArray, options: String): Int =
+        nativeWork.run(-5) { nativeCreateCaptionsJson(nativeHandle, layer, texts, times, options.toByteArray(Charsets.UTF_8)) }
+    /** Opções da faixa de legendas da camada (ou da faixa feita da fala dela); vazio = sem faixa. */
+    fun captionOptions(layer: Long): String = nativeCaptionOptions(nativeHandle, layer).toString(Charsets.UTF_8)
+    /** Troca estilo/aparência/tamanho/altura da faixa pronta (um passo de desfazer). */
+    fun setCaptionOptions(layer: Long, options: String): Boolean = nativeSetCaptionOptions(nativeHandle, layer, options.toByteArray(Charsets.UTF_8))
+    fun captionTemplates(): String = nativeCaptionTemplates().toString(Charsets.UTF_8)
+    fun captionPreview(options: String): String = nativeCaptionPreview(options.toByteArray(Charsets.UTF_8)).toString(Charsets.UTF_8)
+    /** As opções com o modelo [id] aplicado (estilo e aparência; o resto fica). Vazio = inválido. */
+    fun captionWithTemplate(options: String, id: String): String =
+        nativeCaptionWithTemplate(options.toByteArray(Charsets.UTF_8), id.toByteArray(Charsets.UTF_8)).toString(Charsets.UTF_8)
+    private external fun nativeCaptionWithTemplate(options: ByteArray, id: ByteArray): ByteArray
+    private external fun nativeCreateCaptionsJson(handle: Long, layer: Long, texts: Array<String>, times: DoubleArray, options: ByteArray): Int
+    private external fun nativeCaptionOptions(handle: Long, layer: Long): ByteArray
+    private external fun nativeSetCaptionOptions(handle: Long, layer: Long, options: ByteArray): Boolean
+    private external fun nativeCaptionTemplates(): ByteArray
+    private external fun nativeCaptionPreview(options: ByteArray): ByteArray
     private external fun nativeCaptionTracks(handle: Long): ByteArray
     private external fun nativeEditCaptionTrack(handle: Long, layer: Long, command: ByteArray): Boolean
     private external fun nativeExportSpeechChunks(handle: Long, layer: Long, dir: ByteArray): ByteArray
@@ -1162,8 +1189,9 @@ class AureaEngine private constructor() {
         nativeImportAeFile(nativeHandle, path.toByteArray(Charsets.UTF_8), layer)?.toString(Charsets.UTF_8)
             ?: """{"ok":false,"skipped":[],"notes":[],"message":"motor indisponivel"}"""
     /** O mesmo com os bytes já lidos (ex.: content://); [fileName] só dá a extensão. */
-    fun importAeData(data: ByteArray, fileName: String, layer: Long): String =
-        nativeImportAeData(nativeHandle, data, fileName.toByteArray(Charsets.UTF_8), layer)?.toString(Charsets.UTF_8)
+    /** [textAnimatorPro] (0.4.6): animadores de texto do .ffx viram efeitos Text Animator Pro (editáveis). */
+    fun importAeData(data: ByteArray, fileName: String, layer: Long, textAnimatorPro: Boolean = false): String =
+        nativeImportAeData(nativeHandle, data, fileName.toByteArray(Charsets.UTF_8), layer, textAnimatorPro)?.toString(Charsets.UTF_8)
             ?: """{"ok":false,"skipped":[],"notes":[],"message":"motor indisponivel"}"""
     /** Um passo de desfazer. Nulo = aplicado; senão, o motivo. `duration` > 0 estica a animação. */
     fun applyPreset(layer: Long, json: String, duration: Long = 0): String? =
@@ -1469,6 +1497,27 @@ class AureaEngine private constructor() {
     fun setRawPlayback(enabled: Boolean): Boolean = nativeSetRawPlayback(nativeHandle, enabled)
     private external fun nativeSetRawPlayback(handle: Long, enabled: Boolean): Boolean
     fun setSceneEditor(enabled: Boolean, yaw: Float, pitch: Float, distance: Float) = nativeSetSceneEditor(nativeHandle, enabled, yaw, pitch, distance)
+    /** 0.4.6: assistente de IA — ferramentas (formato OpenAI), instruções e execução no motor. */
+    fun assistantTools(): String = nativeAssistantTools().toString(Charsets.UTF_8)
+    fun assistantSystemPrompt(language: String, version: String): String =
+        nativeAssistantSystemPrompt(language.toByteArray(Charsets.UTF_8), version.toByteArray(Charsets.UTF_8)).toString(Charsets.UTF_8)
+    /** Uma ferramenta pedida pelo modelo; devolve o JSON da resposta. Pode demorar (script): fora da UI. */
+    fun assistantCall(name: String, args: String): String =
+        nativeWork.run("{\"ok\":false,\"error\":\"engine busy\"}") {
+            nativeAssistantCall(nativeHandle, name.toByteArray(Charsets.UTF_8), args.toByteArray(Charsets.UTF_8)).toString(Charsets.UTF_8)
+        }
+    private external fun nativeAssistantTools(): ByteArray
+    private external fun nativeAssistantSystemPrompt(language: ByteArray, version: ByteArray): ByteArray
+    private external fun nativeAssistantCall(handle: Long, name: ByteArray, args: ByteArray): ByteArray
+    /** 0.4.6: vista do palco do AE (0 câmera ativa … 10 vista personalizada 3); só a prévia. */
+    fun setViewMode(mode: Int): Boolean = nativeSetViewMode(nativeHandle, mode)
+    /** Órbita/zoom da vista atual (personalizada: tudo; frente..base: só o zoom). */
+    fun setViewOrbit(yaw: Float, pitch: Float, distance: Float): Boolean = nativeSetViewOrbit(nativeHandle, yaw, pitch, distance)
+    /** {modo, yaw, pitch, distância, ortográfica}. */
+    fun queryView(): FloatArray = nativeQueryView(nativeHandle) ?: floatArrayOf(0f, 0f, 0f, 1f, 0f)
+    private external fun nativeSetViewMode(handle: Long, mode: Int): Boolean
+    private external fun nativeSetViewOrbit(handle: Long, yaw: Float, pitch: Float, distance: Float): Boolean
+    private external fun nativeQueryView(handle: Long): FloatArray?
     fun sceneGuides(output: FloatArray): Int = nativeSceneGuides(nativeHandle, output)
     /** Cena 3D: camada 3D sob o ponto (px da composição) pelo corpo real; 0 = nada. */
     fun scenePick(x: Float, y: Float, radius: Float): Long = nativeScenePick(nativeHandle, x, y, radius)
@@ -1496,10 +1545,10 @@ class AureaEngine private constructor() {
 
     fun addCamera(): Long = nativeAddCamera(nativeHandle)
     /** Lente da câmera 3D (10 valores, ver `nativeQueryCameraLens`; [9] = afeta camadas abaixo); null se não é câmera. */
-    fun cameraLens(layer: Long): FloatArray? = FloatArray(10).takeIf { nativeQueryCameraLens(nativeHandle, layer, it) }
+    fun cameraLens(layer: Long): FloatArray? = FloatArray(11).takeIf { nativeQueryCameraLens(nativeHandle, layer, it) }
     /** Pick Focus: distância no eixo ótico até o 3D sob o ponto (px da composição); < 0 = nada ali. */
     fun pickFocusDistance(layer: Long, compX: Float, compY: Float): Float = nativePickFocusDistance(nativeHandle, layer, compX, compY)
-    /** LayerSetCameraParam: 0 mm, 1 DOF, 2 distância de foco, 3 f/, 4 desfoque ×. */
+    /** LayerSetCameraParam: 0 mm, 1 DOF, 2 distância de foco, 3 f/, 4 desfoque ×, 7 afeta abaixo, 8 paralela (0.4.6). */
     fun setCameraParam(layer: Long, param: Int, value: Float): Boolean = nativeSetCameraParam(nativeHandle, layer, param, value)
     fun addNull(threeD: Boolean): Long = nativeAddNull(nativeHandle, threeD)
     /** "Vincular a novo nulo": nulo no centro das camadas, pai de todas (um desfazer). Id ≥ 0 ou −Errc. */
@@ -1821,6 +1870,11 @@ class AureaEngine private constructor() {
     private external fun nativeModelPartNames(handle: Long, layer: Long): Array<String>?
     private external fun nativeSetTextFont(handle: Long, layer: Long, family: String, weight: Int, italic: Boolean, path: String): Boolean
     private external fun nativeSetTextStyle(handle: Long, layer: Long, v: FloatArray): Boolean
+    private external fun nativeSetTextDynamic(handle: Long, layer: Long, v: DoubleArray): Boolean
+    private external fun nativeSetLayerMediaLoop(handle: Long, layer: Long, on: Boolean): Boolean
+    private external fun nativeSetPositionTangents(handle: Long, layer: Long, time: Long, v: FloatArray): Boolean
+    private external fun nativeQueryPositionPath(handle: Long, layer: Long): FloatArray?
+    private external fun nativeQueryTextDynamic(handle: Long, layer: Long): DoubleArray?
     private external fun nativeQueryTextStyle(handle: Long, layer: Long, out: FloatArray): Boolean
     private external fun nativeSetTextSpan(handle: Long, layer: Long, start: Int, end: Int, hasColor: Boolean, r: Float, g: Float, b: Float, weight: Int, scale: Float): Boolean
     private external fun nativeClearTextSpans(handle: Long, layer: Long, start: Int, end: Int): Boolean
@@ -1899,7 +1953,7 @@ class AureaEngine private constructor() {
     private external fun nativeImportAlightMotion(handle: Long, data: ByteArray): ByteArray?
     private external fun nativeApplyPreset(handle: Long, layer: Long, json: ByteArray, duration: Long): ByteArray?
     private external fun nativeImportAeFile(handle: Long, path: ByteArray, layer: Long): ByteArray?
-    private external fun nativeImportAeData(handle: Long, data: ByteArray, fileName: ByteArray, layer: Long): ByteArray?
+    private external fun nativeImportAeData(handle: Long, data: ByteArray, fileName: ByteArray, layer: Long, textAnimatorPro: Boolean): ByteArray?
     private external fun nativeMakeCaptionPreset(name: ByteArray, ints: IntArray, floats: FloatArray): ByteArray?
     private external fun nativeParseCaptionPreset(json: ByteArray): FloatArray?
     private external fun nativeMakeCurvePreset(name: ByteArray, interp: Int, x1: Float, y1: Float, x2: Float, y2: Float, power: Int): ByteArray?

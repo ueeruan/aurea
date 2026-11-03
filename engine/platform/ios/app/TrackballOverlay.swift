@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import simd
 
 /// Trackball do gizmo 3D de girar (ferramenta Girar) — par do TrackballStage.kt.
 /// Esfera branca no pivô, anéis vermelho/verde/azul = grandes círculos
@@ -161,69 +162,112 @@ import UIKit
         }
     }
 
-    /// A linha pelos keyframes de posição (X/Y amostrados pelo motor com a
-    /// mesma conta da prévia, `trackCurve`), levada do pai para a composição
-    /// pelo `parentAffine` do detalhe; cor `texto` a 60 %.
+    /// 0.4.6: a trajetória como o motor a AVALIA (`positionPath`, com a bézier
+    /// espacial) e as alças de cada canto (par do TransformStage.kt). Pontos no
+    /// espaço do pai; o desenho leva para a composição pelo `parentAffine`.
     private static func drawMotionPath(_ context: inout GraphicsContext, model: AureaModel,
                                        screen: (Float, Float) -> CGPoint) {
-        guard model.showMotionPath, model.panel == .transform, model.selection.count == 1,
-              let id = model.primarySelection, let row = model.selectedLayer, row.id == id,
-              !row.threeD, ![UInt32(8), 9, 10].contains(row.kind) else { return }
-        let points = motionPath(model: model, layer: id)
-        guard points.count >= 2 else { return }
+        guard pathActive(model), let id = model.primarySelection else { return }
+        refresh(model: model, layer: id)
+        guard pathPoints.count >= 2 else { return }
         let affine = StageGeom.floats(model.detail["parentAffine"])
         func place(_ p: SIMD2<Float>) -> CGPoint {
             let c = StageGeom.applyAffine(affine, p.x, p.y)
             return screen(c.0, c.1)
         }
         var path = Path()
-        path.move(to: place(points[0]))
-        for p in points.dropFirst() { path.addLine(to: place(p)) }
+        path.move(to: place(pathPoints[0]))
+        for p in pathPoints.dropFirst() { path.addLine(to: place(p)) }
         context.stroke(path, with: .color(StageInk.outlineUnder), style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
         context.stroke(path, with: .color(AureaColors.text.opacity(0.6)), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-        for key in keyPoints {
-            let c = place(key)
-            let dot = Path(ellipseIn: CGRect(x: c.x - 3, y: c.y - 3, width: 6, height: 6))
-            context.fill(dot, with: .color(StageInk.outlineUnder))
-            context.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(AureaColors.text.opacity(0.85)))
+        for key in pathKeys {
+            let v = place(key.position)
+            for handle in [key.inHandle, key.outHandle] where simd_length(handle) > 0.01 {
+                let h = place(key.position + handle)
+                var line = Path(); line.move(to: v); line.addLine(to: h)
+                context.stroke(line, with: .color(AureaColors.accent), lineWidth: 1)
+                context.fill(Path(ellipseIn: CGRect(x: h.x - 3, y: h.y - 3, width: 6, height: 6)), with: .color(AureaColors.accent))
+            }
+            let box = CGRect(x: v.x - 3.5, y: v.y - 3.5, width: 7, height: 7)
+            context.fill(Path(box.insetBy(dx: -1, dy: -1)), with: .color(StageInk.outlineUnder))
+            context.fill(Path(box), with: .color(AureaColors.text.opacity(0.85)))
         }
     }
 
-    /// Amostras da posição (espaço do pai) entre o primeiro e o último keyframe
-    /// de X/Y. Um eixo sem trilha fica no valor parado do detalhe.
-    private static func motionPath(model: AureaModel, layer: Int64) -> [SIMD2<Float>] {
-        let keys = (model.keyframes[layer] ?? []).filter { ($0.property == 0 || $0.property == 1) && $0.effectIndex == UInt32.max }
-        guard keys.count >= 2, let from = keys.map(\.time).min(), let to = keys.map(\.time).max(), to > from else {
-            pathKey = ""; pathPoints = []; keyPoints = []
-            return []
+    struct PathKey { var time: Int32; var position: SIMD2<Float>; var inHandle: SIMD2<Float>; var outHandle: SIMD2<Float> }
+    private static var pathKeys: [PathKey] = []
+
+    static func pathActive(_ model: AureaModel) -> Bool {
+        guard model.showMotionPath, model.panel == .transform, model.selection.count == 1,
+              let id = model.primarySelection, let row = model.selectedLayer, row.id == id,
+              !row.threeD, ![UInt32(8), 9, 10].contains(row.kind) else { return false }
+        return true
+    }
+
+    /// Amostras (espaço do pai) e os cantos com as alças, refeitos quando o modelo muda.
+    private static func refresh(model: AureaModel, layer: Int64) {
+        let key = "\(layer):\(model.status.modelRevision)"
+        if key == pathKey { return }
+        pathKey = key
+        let raw = model.engine.positionPath(layer).map(\.floatValue)
+        pathPoints = []; pathKeys = []; keyPoints = []
+        guard raw.count >= 2 else { return }
+        let n = Int(raw[0]), k = Int(raw[1])
+        guard n >= 2, raw.count >= 2 + n * 2 + k * 7 else { return }
+        pathPoints = (0..<n).map { SIMD2(raw[2 + $0 * 2], raw[3 + $0 * 2]) }
+        let base = 2 + n * 2
+        pathKeys = (0..<k).map { i in
+            let o = base + i * 7
+            return PathKey(time: Int32(raw[o]), position: SIMD2(raw[o + 1], raw[o + 2]),
+                           inHandle: SIMD2(raw[o + 3], raw[o + 4]), outHandle: SIMD2(raw[o + 5], raw[o + 6]))
         }
-        let key = "\(layer):\(model.status.modelRevision):\(from):\(to):\(keys.count)"
-        if key == pathKey { return pathPoints }
-        let xs = model.engine.trackCurve(layer, property: 0, effect: UInt32.max, param: 0, from: from, to: to).map(\.floatValue)
-        let ys = model.engine.trackCurve(layer, property: 1, effect: UInt32.max, param: 0, from: from, to: to).map(\.floatValue)
-        let position = StageGeom.floats(model.detail["position"])
-        let restX = position.count > 0 ? position[0] : 0, restY = position.count > 1 ? position[1] : 0
-        let count = max(xs.count, ys.count)
-        var out: [SIMD2<Float>] = []
-        if count >= 2 {
-            out.reserveCapacity(count)
-            for i in 0..<count {
-                let x = xs.count == count ? xs[i] : restX
-                let y = ys.count == count ? ys[i] : restY
-                if x.isFinite && y.isFinite { out.append(SIMD2(x, y)) }
+        keyPoints = pathKeys.map(\.position)
+    }
+
+    /// O que o dedo pegou (ponto da composição): canto (0), ponta da entrada (1) ou da saída (2).
+    static func pathHit(_ model: AureaModel, _ comp: SIMD2<Float>, reach: Float) -> (Int, Int)? {
+        guard pathActive(model), let id = model.primarySelection else { return nil }
+        refresh(model: model, layer: id)
+        let affine = StageGeom.floats(model.detail["parentAffine"])
+        var best: (Int, Int)? = nil, bestD = reach
+        for (i, key) in pathKeys.enumerated() {
+            for part in 0...2 {
+                let off = part == 0 ? SIMD2<Float>(0, 0) : part == 1 ? key.inHandle : key.outHandle
+                if part > 0 && simd_length(off) < 0.01 { continue }
+                let c = StageGeom.applyAffine(affine, key.position.x + off.x, key.position.y + off.y)
+                let d = hypot(c.0 - comp.x, c.1 - comp.y)
+                if d < bestD || (part > 0 && d < bestD + reach * 0.3) { bestD = d; best = (i, part) }
             }
         }
-        // Os pontos dos keyframes: a amostra mais perto de cada tempo de chave.
-        var marks: [SIMD2<Float>] = []
-        if out.count >= 2 {
-            let times = Set(keys.map(\.time)).sorted()
-            for time in times {
-                let t = Double(time - from) / Double(to - from)
-                let index = min(out.count - 1, max(0, Int((t * Double(out.count - 1)).rounded())))
-                marks.append(out[index])
-            }
-        }
-        pathKey = key; pathPoints = out; keyPoints = marks
-        return out
+        return best
+    }
+
+    /// Arrasto: o canto arranca as duas alças simétricas; a ponta de uma alça a
+    /// ajusta e a outra acompanha espelhada (como no After Effects).
+    static func pathDrag(_ model: AureaModel, hit: (Int, Int), comp: SIMD2<Float>, first: Bool) {
+        guard let id = model.primarySelection, hit.0 < pathKeys.count else { return }
+        let key = pathKeys[hit.0]
+        let affine = StageGeom.floats(model.detail["parentAffine"])
+        let local = toParent(affine, comp)
+        let d = local - key.position
+        if first { model.beginGesture("curvar caminho") }
+        if hit.1 == 1 { model.setPositionTangents(id, time: key.time, inHandle: d, outHandle: -d) }
+        else { model.setPositionTangents(id, time: key.time, inHandle: -d, outHandle: d) }
+    }
+
+    /// Toque parado no canto: volta a canto reto.
+    static func pathReset(_ model: AureaModel, hit: (Int, Int)) {
+        guard let id = model.primarySelection, hit.0 < pathKeys.count else { return }
+        model.beginGesture("canto reto")
+        model.setPositionTangents(id, time: pathKeys[hit.0].time, inHandle: .zero, outHandle: .zero)
+        model.endGesture()
+    }
+
+    private static func toParent(_ affine: [Float], _ p: SIMD2<Float>) -> SIMD2<Float> {
+        guard affine.count == 6 else { return p }
+        let det = affine[0] * affine[3] - affine[1] * affine[2]
+        guard abs(det) > 0.000001 else { return p }
+        let x = p.x - affine[4], y = p.y - affine[5]
+        return SIMD2((affine[3] * x - affine[2] * y) / det, (-affine[1] * x + affine[0] * y) / det)
     }
 }

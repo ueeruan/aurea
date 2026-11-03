@@ -27,6 +27,22 @@ internal fun JSONObject.profile() = CommunityProfile(getString("id"), optString(
 internal fun JSONObject.asset() = CommunityAsset(getString("id"), getString("kind"), getString("name"), getLong("bytes"))
 internal fun JSONObject.post() = CommunityPost(getString("id"), optString("body"), getLong("createdAt"),
     getJSONObject("author").profile(), optJSONObject("asset")?.asset(), optInt("likes"), optInt("comments"), optBoolean("liked"))
+/** Item da Loja da Comunidade. `type`: plugin, effect ou preset; `format`: plugin ou preset. */
+internal data class StoreItem(val id: String, val type: String, val format: String, val name: String, val description: String,
+    val tutorialUrl: String, val photos: Int, val pluginId: String?, val version: String, val presetKind: String?,
+    val network: List<String>, val clipboard: Boolean, val files: Boolean, val hasScript: Boolean,
+    val downloads: Int, val likes: Int, val liked: Boolean, val bytes: Long, val status: String, val reviewNote: String,
+    val mine: Boolean, val author: CommunityProfile, val createdAt: Long)
+internal fun JSONObject.storeItem(): StoreItem {
+    val perms = optJSONObject("permissions") ?: JSONObject()
+    val network = perms.optJSONArray("network")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+    fun opt(key: String) = optString(key).takeIf { it.isNotEmpty() && it != "null" }
+    return StoreItem(getString("id"), getString("type"), getString("format"), optString("name"), optString("description"),
+        optString("tutorialUrl"), optInt("photos"), opt("pluginId"), optString("version"), opt("presetKind"),
+        network, perms.optBoolean("clipboard"), perms.optBoolean("files"), optBoolean("hasScript"),
+        optInt("downloads"), optInt("likes"), optBoolean("liked"), optLong("bytes"), optString("status"), optString("reviewNote"),
+        optBoolean("mine"), getJSONObject("author").profile(), optLong("createdAt"))
+}
 internal fun JSONObject.comment() = CommunityComment(getString("id"), getString("body"), getLong("createdAt"), getJSONObject("author").profile())
 internal fun <T> JSONArray?.mapObjects(transform: (JSONObject) -> T): List<T> = if (this == null) emptyList() else (0 until length()).map { transform(getJSONObject(it)) }
 internal fun JSONObject.nextCursor(): String? = optString("cursor").takeIf { it.isNotEmpty() && it != "null" }
@@ -35,7 +51,7 @@ internal fun JSONObject.nextCursor(): String? = optString("cursor").takeIf { it.
 // alvos são os mesmos que o servidor aceita; o que não passa aqui ele recusa.
 internal val reportReasons = listOf("spam", "nudity", "violence", "hate", "harassment", "illegal", "copyright", "other")
 internal const val REPORT_DETAILS_MAX = 500
-private val reportKinds = setOf("post", "comment", "user", "ai_video")
+private val reportKinds = setOf("post", "comment", "user", "ai_video", "store")
 /** Post, comentário e perfil são UUID; o vídeo de IA é o id opaco do job. */
 internal fun isReportTarget(kind: String, id: String): Boolean =
     kind in reportKinds && id.matches(if (kind == "ai_video") Regex("[A-Za-z0-9_.:-]{1,80}") else Regex("[0-9a-f-]{36}"))
@@ -118,6 +134,53 @@ internal open class CommunityApi(private val token: String,
                 if (total != asset.bytes) throw CommunityFailure("invalid_file")
             } }
         } catch (e: Exception) { target.delete(); throw e } finally { c.disconnect() }
+    }
+    // ------------------------------------------------------------------
+    // Loja da Comunidade (0.4.6): plugins, efeitos e presets.
+    // ------------------------------------------------------------------
+    /** Pacote (.aureaplugin / preset .json) ou foto de exemplo; o servidor confere o conteúdo. */
+    fun storeUpload(file: File, role: String, name: String): JSONObject {
+        val max = when { role == "photo" -> 3L * 1024 * 1024; name.endsWith(".json", true) -> 1024L * 1024; else -> 20L * 1024 * 1024 }
+        if (file.length() !in 1..max) throw CommunityFailure("file_too_large")
+        val c = open("/store/files?role=$role&name=${query(name)}", "POST")
+        try {
+            c.doOutput = true; c.setFixedLengthStreamingMode(file.length()); c.setRequestProperty("Content-Type", "application/octet-stream")
+            file.inputStream().use { input -> c.outputStream.use { input.copyTo(it) } }
+            return response(c)
+        } finally { c.disconnect() }
+    }
+    /** Baixa o pacote do item (conta um download por pessoa por dia no servidor). */
+    fun storeDownload(item: StoreItem, target: File) {
+        if (item.bytes !in 1..20L * 1024 * 1024 || !item.id.matches(Regex("[a-f0-9-]{36}"))) throw CommunityFailure("invalid_file")
+        val c = open("/store/${item.id}/package", "GET")
+        try {
+            if (c.responseCode != 200) throw CommunityFailure("community_unavailable")
+            c.inputStream.use { input -> target.outputStream().use { out ->
+                val buf = ByteArray(64 * 1024); var total = 0L
+                while (true) { val n = input.read(buf); if (n < 0) break; total += n
+                    if (total > item.bytes) throw CommunityFailure("invalid_file"); out.write(buf, 0, n) }
+                if (total != item.bytes) throw CommunityFailure("invalid_file")
+            } }
+        } catch (e: Exception) { target.delete(); throw e } finally { c.disconnect() }
+    }
+    /** Foto de exemplo do item (cache em memória, decodificada no tamanho da tela). */
+    fun storePhoto(id: String, index: Int, maxSide: Int = 1080): Bitmap? {
+        val key = "store:$id:$index:$maxSide"
+        avatars.get(key)?.let { return it }
+        if (!id.matches(Regex("[a-f0-9-]{36}")) || index !in 0..3) return null
+        val c = open("/store/$id/photos/$index", "GET")
+        return try {
+            if (c.responseCode != 200) return null
+            val data = c.inputStream.use { it.readBounded(3 * 1024 * 1024) }
+            if (data.size > 3 * 1024 * 1024) return null
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+            val sample = com.aurea.aurea.engine.ImageMemoryPolicy.sampleSize(bounds.outWidth, bounds.outHeight, maxSide, maxSide.toLong() * maxSide) ?: return null
+            BitmapFactory.decodeByteArray(data, 0, data.size, BitmapFactory.Options().apply { inSampleSize = sample })?.also { avatars.put(key, it) }
+        } catch (_: OutOfMemoryError) {
+            avatars.evictAll(); null
+        } finally { c.disconnect() }
     }
     fun avatar(id: String): Bitmap? {
         avatars.get(id)?.let { return it }

@@ -1021,6 +1021,41 @@ void write_layer(ByteWriter& w, const Layer& l) {
         w.u64v(material.textureImage);
         w.u64v(material.textureLayer);
     }
+    // v53 (0.4.6): texto dinâmico (contador/timecode).
+    w.boolv(l.text.dynamic);
+    w.f64v(l.text.counterFrom);
+    w.f64v(l.text.counterTo);
+    w.u8v(l.text.counterDecimals);
+    w.boolv(l.text.counterGrouping);
+    w.u8v(l.text.counterEase);
+    w.boolv(l.camera.parallel);
+    w.boolv(l.loopMedia);
+    w.u32v(static_cast<u32>(l.positionTangents.size()));
+    for (const SpatialTangent& t : l.positionTangents) {
+        w.i64v(t.time);
+        w.f32v(t.in.x); w.f32v(t.in.y); w.f32v(t.in.z);
+        w.f32v(t.out.x); w.f32v(t.out.y); w.f32v(t.out.z);
+    }
+    // v54 (0.4.6): o resto das opções da faixa de legendas — agrupamento,
+    // caixa alta, altura, tamanho e a aparência própria (fonte, cores, fundo).
+    const text::CaptionOptions& co = l.captionOptions;
+    w.u32v(co.mode); w.u32v(co.maxWords); w.u32v(co.maxChars); w.u32v(co.maxLines);
+    w.boolv(co.uppercase); w.boolv(co.breakOnPause);
+    w.f32v(co.pauseSec); w.f32v(co.posY); w.f32v(co.sizeFrac);
+    w.u32v(co.look); w.str(co.fontFamily); w.u32v(co.fontWeight); w.boolv(co.fontItalic); w.str(co.fontPath);
+    w.vec4(co.fill); w.vec4(co.stroke); w.f32v(co.strokeFrac);
+    w.boolv(co.box); w.vec4(co.boxColor); w.boolv(co.shadow);
+    // v55 (0.4.6): estilo próprio de cada bloco (só a aparência), na ordem dos blocos.
+    w.u32v(static_cast<u32>(l.captions.size()));
+    for (const auto& segment : l.captions) {
+        w.boolv(segment.look.has_value());
+        if (!segment.look) continue;
+        const text::CaptionOptions& b = *segment.look;
+        w.u32v(b.style); w.boolv(b.highlight); w.boolv(b.uppercase); w.vec4(b.highlightColor);
+        w.u32v(b.look); w.str(b.fontFamily); w.u32v(b.fontWeight); w.boolv(b.fontItalic); w.str(b.fontPath);
+        w.vec4(b.fill); w.vec4(b.stroke); w.f32v(b.strokeFrac);
+        w.boolv(b.box); w.vec4(b.boxColor); w.boolv(b.shadow);
+    }
 }
 
 /// Versão da seção Timeline. v2: layer de modelo 3D guarda escala de unidade
@@ -1707,6 +1742,76 @@ void read_layer(ByteReader& r, Layer& l) {
             material.textureLayer = r.u64v();
             // As duas juntas não existem (a escolha é uma só): fica a camada.
             if (material.textureImage && material.textureLayer) material.textureImage = 0;
+        }
+    }
+    // v53 (0.4.6): texto dinâmico. Antes dela: texto comum (as marcas, se
+    // houver, aparecem como foram digitadas).
+    if (g_readingTimelineVersion >= 53) {
+        l.text.dynamic = r.boolv();
+        const f64 from = r.f64v(), to = r.f64v();
+        l.text.counterFrom = std::isfinite(from) ? std::clamp(from, -1e12, 1e12) : 0.0;
+        l.text.counterTo = std::isfinite(to) ? std::clamp(to, -1e12, 1e12) : 100.0;
+        l.text.counterDecimals = std::min<u8>(r.u8v(), 6);
+        l.text.counterGrouping = r.boolv();
+        const u8 ease = r.u8v();
+        l.text.counterEase = ease <= static_cast<u8>(kLastInterpolation) ? ease : static_cast<u8>(Interpolation::Linear);
+        l.camera.parallel = r.boolv();   // 0.4.6: câmera paralela (antes: perspectiva)
+        l.loopMedia = r.boolv();         // 0.4.6: repetir o vídeo
+        // 0.4.6: tangentes espaciais da posição (caminho curvo).
+        const u32 count = r.u32v();
+        if (count > 100000u || r.remaining() < static_cast<usize>(count) * 32u) { r.fail(); return; }
+        l.positionTangents.resize(count);
+        for (SpatialTangent& t : l.positionTangents) {
+            t.time = r.i64v();
+            const f32 v[6]{r.f32v(), r.f32v(), r.f32v(), r.f32v(), r.f32v(), r.f32v()};
+            auto fin = [](f32 x) { return std::isfinite(x) ? std::clamp(x, -1.0e6f, 1.0e6f) : 0.0f; };
+            t.in = Vec3{fin(v[0]), fin(v[1]), fin(v[2])};
+            t.out = Vec3{fin(v[3]), fin(v[4]), fin(v[5])};
+        }
+    }
+    // v54 (0.4.6): opções completas da legenda. Antes dela: os padrões (a
+    // aparência já estava no texto da camada; só não dava para mexer nela).
+    if (g_readingTimelineVersion >= 54) {
+        text::CaptionOptions& co = l.captionOptions;
+        auto unit = [](f32 x, f32 lo, f32 hi, f32 def) { return std::isfinite(x) ? std::clamp(x, lo, hi) : def; };
+        auto color = [&](Vec4 c) { return Vec4{unit(c.x, 0, 1, 1), unit(c.y, 0, 1, 1), unit(c.z, 0, 1, 1), unit(c.w, 0, 1, 1)}; };
+        co.mode = std::min(r.u32v(), 1u);
+        co.maxWords = std::clamp(r.u32v(), 1u, 20u);
+        co.maxChars = std::clamp(r.u32v(), 4u, 80u);
+        co.maxLines = std::clamp(r.u32v(), 1u, 5u);
+        co.uppercase = r.boolv(); co.breakOnPause = r.boolv();
+        co.pauseSec = unit(r.f32v(), 0.05f, 5.0f, 0.6f);
+        co.posY = unit(r.f32v(), 0.1f, 0.9f, 0.78f);
+        co.sizeFrac = unit(r.f32v(), 0.02f, 0.25f, 0.065f);
+        co.look = r.u32v() & text::kCaptionLookAll;
+        co.fontFamily = r.str();
+        co.fontWeight = static_cast<u16>(std::clamp(r.u32v(), 100u, 1000u));
+        co.fontItalic = r.boolv();
+        co.fontPath = r.str();
+        co.fill = color(r.vec4()); co.stroke = color(r.vec4());
+        co.strokeFrac = unit(r.f32v(), 0.0f, 0.3f, 0.08f);
+        co.box = r.boolv(); co.boxColor = color(r.vec4()); co.shadow = r.boolv();
+        if (co.fontFamily.size() > 1024 || co.fontPath.size() > 4096) { r.fail(); return; }
+    }
+    // v55 (0.4.6): estilo próprio dos blocos. Antes dela: todos com o da faixa.
+    if (g_readingTimelineVersion >= 55) {
+        auto unit = [](f32 x, f32 lo, f32 hi, f32 def) { return std::isfinite(x) ? std::clamp(x, lo, hi) : def; };
+        auto color = [&](Vec4 c) { return Vec4{unit(c.x, 0, 1, 1), unit(c.y, 0, 1, 1), unit(c.z, 0, 1, 1), unit(c.w, 0, 1, 1)}; };
+        if (r.u32v() != l.captions.size()) { r.fail(); return; }
+        for (auto& segment : l.captions) {
+            if (!r.boolv()) continue;
+            text::CaptionOptions b;
+            b.style = r.u32v(); b.highlight = r.boolv(); b.uppercase = r.boolv(); b.highlightColor = color(r.vec4());
+            b.look = r.u32v() & text::kCaptionLookAll;
+            b.fontFamily = r.str();
+            b.fontWeight = static_cast<u16>(std::clamp(r.u32v(), 100u, 1000u));
+            b.fontItalic = r.boolv();
+            b.fontPath = r.str();
+            b.fill = color(r.vec4()); b.stroke = color(r.vec4());
+            b.strokeFrac = unit(r.f32v(), 0.0f, 0.3f, 0.08f);
+            b.box = r.boolv(); b.boxColor = color(r.vec4()); b.shadow = r.boolv();
+            if (b.style >= text::kCaptionStyleCount || b.fontFamily.size() > 1024 || b.fontPath.size() > 4096) { r.fail(); return; }
+            segment.look = std::move(b);
         }
     }
 }

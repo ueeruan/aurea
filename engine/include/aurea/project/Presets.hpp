@@ -72,7 +72,10 @@
 //  "caption" — opções da legenda automática (text::CaptionOptions):
 //    "caption": { mode, maxWords, maxChars, maxLines, style, highlight,
 //                 uppercase, breakOnPause, pauseSec, posY, sizeFrac,
-//                 "highlightColor":[4], removeFillers }
+//                 "highlightColor":[4], removeFillers,
+//                 look, fontFamily, fontWeight, fontItalic, fontPath,
+//                 "fill":[4], "stroke":[4], strokeFrac, box, "boxColor":[4],
+//                 shadow }   (0.4.6: `look` = bits text::kCaptionLook*)
 //
 //  "curve" — um easing: "curve": {"interp": 2, "x1", "y1", "x2", "y2",
 //    "power"} (power = força ×1/×2/×3 da bézier; ausente = 1, o de antes).
@@ -243,6 +246,21 @@ bool apply(const Preset& p, Layer& layer, i64 anchorLocal, i64 durationFrames, f
 
 /// Atalhos para os tipos que não moram na camada.
 [[nodiscard]] std::string make_caption_preset(const std::string& name, const text::CaptionOptions& o, bool removeFillers);
+/// 0.4.6: só o bloco "caption" (as opções da legenda em JSON). É o formato que
+/// as interfaces mandam ao motor (gerar, trocar opções) e recebem dele.
+[[nodiscard]] std::string caption_options_json(const text::CaptionOptions& o, bool removeFillers);
+[[nodiscard]] bool parse_caption_options(const std::string& json, text::CaptionOptions& o, bool& removeFillers);
+/// Aparência resolvida (estilo + `look`) para a interface desenhar a amostra:
+/// {fontFamily, weight, italic, fill[4], stroke[4], strokeFrac (do tamanho),
+///  box, boxColor[4], shadow, shadowColor[4], glow, highlight,
+///  highlightColor[4], uppercase}.
+[[nodiscard]] std::string caption_preview_json(const text::CaptionOptions& o);
+/// Os modelos prontos: [{id, options: {bloco caption}, preview: {acima}}].
+[[nodiscard]] std::string caption_templates_json();
+/// As opções com o modelo `id` aplicado (text::apply_caption_template: estilo
+/// e aparência do modelo; fonte, agrupamento, posição e tamanho ficam).
+/// Vazio = JSON inválido ou modelo desconhecido.
+[[nodiscard]] std::string caption_with_template(const std::string& optionsJson, const std::string& id);
 [[nodiscard]] std::string make_curve_preset(const std::string& name, Interpolation interp, f32 x1, f32 y1, f32 x2, f32 y2,
                                             u32 power = 1);
 

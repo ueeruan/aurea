@@ -8,10 +8,10 @@
 namespace aurea::plugins {
 
 namespace {
-constexpr usize kMaxExprBytes = 512;
-constexpr usize kMaxInstructions = 256;
-constexpr u32 kMaxStack = 64;
-constexpr u32 kMaxDepth = 32;
+constexpr usize kMaxExprBytes = 8192;
+constexpr usize kMaxInstructions = 4096;
+constexpr u32 kMaxStack = 256;
+constexpr u32 kMaxDepth = 128;
 constexpr f32 kPi = 3.14159265358979323846f;
 } // namespace
 

@@ -26,16 +26,16 @@ namespace aurea::plugins {
 using LocalizedText = std::vector<std::pair<std::string, std::string>>;
 
 // --- Limites -------------------------------------------------------------------
-inline constexpr u32 kMaxPanels = 8;
-inline constexpr u32 kMaxControlsPerPanel = 32;
-inline constexpr u32 kMaxActions = 16;
-inline constexpr u32 kMaxListItems = 200;
-inline constexpr u32 kMaxChoiceOptions = 32;
-inline constexpr u32 kMaxNetworkDomains = 8;
-inline constexpr u32 kMaxStringKeys = 512;
-inline constexpr usize kMaxScriptBytes = 512u * 1024u;
-inline constexpr usize kMaxImageBytes = 2u << 20;       ///< imagem de painel no pacote
-inline constexpr usize kMaxStorageBytes = 256u * 1024u;  ///< `storage` do plugin
+inline constexpr u32 kMaxPanels = 32;
+inline constexpr u32 kMaxControlsPerPanel = 256;
+inline constexpr u32 kMaxActions = 128;
+inline constexpr u32 kMaxListItems = 10000;
+inline constexpr u32 kMaxChoiceOptions = 256;
+inline constexpr u32 kMaxNetworkDomains = 64;
+inline constexpr u32 kMaxStringKeys = 8192;
+inline constexpr usize kMaxScriptBytes = 8u << 20;
+inline constexpr usize kMaxImageBytes = 32u << 20;      ///< imagem de painel no pacote
+inline constexpr usize kMaxStorageBytes = 16u << 20;    ///< `storage` do plugin
 
 // --- Lugares (bits) --------------------------------------------------------------
 inline constexpr u32 kPlaceEditorPanel = 1u << 0;   ///< painel no editor (moldura PanelFrame)

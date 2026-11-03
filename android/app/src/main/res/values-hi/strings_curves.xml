@@ -8,4 +8,17 @@
     <string name="curve_param_oscillations">दोलन</string>
     <string name="curve_param_damping">अवमंदन</string>
     <string name="curve_param_oscillations_value">दोलन: %1$d</string>
+    <!-- 0.4.6: curvas de repetição e aleatórias -->
+    <string name="curve_type_steps">स्टेप्स</string>
+    <string name="curve_type_repeat">दोहराएँ</string>
+    <string name="curve_type_pingpong">आगे-पीछे</string>
+    <string name="curve_type_wave">लहर</string>
+    <string name="curve_type_random">रैंडम</string>
+    <string name="curve_param_steps">स्टेप्स: %1$d</string>
+    <string name="curve_param_repeats">बार: %1$d</string>
+    <string name="curve_param_turns">आधे चक्कर: %1$d</string>
+    <string name="curve_param_cycles">चक्र: %1$d</string>
+    <string name="curve_param_amplitude">आयाम</string>
+    <string name="curve_param_smooth">स्मूद</string>
+    <string name="curve_param_seed">फिर से चुनें</string>
 </resources>

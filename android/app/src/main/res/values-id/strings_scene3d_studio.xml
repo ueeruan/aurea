@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="s3d_mode_object">Mode Objek</string>
+    <string name="s3d_mode_pose">Mode Pose</string>
+    <string name="s3d_area_timeline">Timeline</string>
+    <string name="s3d_area_properties">Properti</string>
+    <string name="s3d_area_outliner">Outliner</string>
+    <string name="s3d_position">Posisi</string>
+    <string name="s3d_rotation">Rotasi</string>
+    <string name="s3d_scale">Skala</string>
+    <string name="s3d_insert_key">◆ Sisipkan</string>
+    <string name="s3d_insert_key_desc">Sisipkan keyframe di frame saat ini</string>
+    <string name="s3d_delete_key">Hapus keyframe</string>
+    <string name="s3d_summary">Ringkasan</string>
+    <string name="s3d_nothing_selected">Tidak ada yang dipilih — ketuk objek di adegan atau di Outliner</string>
+    <string name="s3d_key_here">◆ keyframe di frame %1$d</string>
+    <string name="s3d_no_key">◇ tanpa keyframe</string>
+    <string name="s3d_import_model">Impor model 3D</string>
+    <string name="s3d_import_formats">GLB · glTF · FBX · OBJ</string>
+    <string name="s3d_section_import">Impor</string>
+    <string name="s3d_section_mesh">Mesh</string>
+    <string name="s3d_section_other">Lainnya</string>
+    <string name="s3d_cube">Kubus</string>
+    <string name="s3d_sphere">Bola</string>
+    <string name="s3d_cylinder">Silinder</string>
+    <string name="s3d_cone">Kerucut</string>
+    <string name="s3d_pyramid">Piramida</string>
+    <string name="s3d_torus">Torus</string>
+    <string name="s3d_empty">Kosong</string>
+    <string name="s3d_delete_named">Hapus %1$s</string>
+    <string name="s3d_add_named">Tambah %1$s</string>
+    <string name="s3d_scene">Adegan</string>
+    <string name="s3d_prev_key">Keyframe sebelumnya</string>
+    <string name="s3d_next_key">Keyframe berikutnya</string>
+    <string name="s3d_start">Awal</string>
+    <string name="s3d_end">Akhir</string>
+    <string name="s3d_play">Putar</string>
+    <string name="s3d_pause">Jeda</string>
+    <string name="s3d_autokey_on">Rekam otomatis aktif</string>
+    <string name="s3d_autokey_off">Rekam otomatis nonaktif</string>
+    <string name="s3d_no_rig">Objek ini tidak punya kerangka</string>
+</resources>

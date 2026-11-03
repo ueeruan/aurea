@@ -99,7 +99,18 @@ class MainActivity : ComponentActivity() {
         opcional("config") { com.aurea.aurea.config.AppConfigStore.init(this) }
         opcional("hyper") { com.aurea.aurea.hyper.HyperEntitlements.init(this) }
         if (savedInstanceState == null) opcional("config") { com.aurea.aurea.config.AppConfigStore.refresh(force = true) }
-        setContent { KeepAppLanguage { LanguageWelcome { CreatorWelcome { AureaApp(store, conta) } } } }
+        // Debug-only: mockup da nova Cena 3D (editor/scene3d), sem motor e sem projeto.
+        if (BuildConfig.DEBUG && intent.getStringExtra("aureaMockup") == "scene3d") {
+            setContent { com.aurea.aurea.ui.theme.AureaTheme { com.aurea.aurea.editor.scene3d.Scene3DStudioMockup(onClose = ::finish) } }
+            return
+        }
+        // Debug (0.4.6): a cena demo — e QUALQUER teste no emulador — abre direto,
+        // sem as telas de boas-vindas, do criador e da conta. Só no build de
+        // debug rodando em emulador; release e aparelho de verdade não mudam.
+        if (BuildConfig.DEBUG && (intent.getStringExtra("aureaDemo") != null || runningOnEmulator()))
+            setContent { KeepAppLanguage { AureaApp(store, null) } }   // sem a tela de conta (só debug)
+        else
+            setContent { KeepAppLanguage { LanguageWelcome { CreatorWelcome { AureaApp(store, conta) } } } }
 
         if (savedInstanceState == null) {
             // Número de cadastrados + revalidação da sessão (com rede; offline, segue dentro).
@@ -123,6 +134,149 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Debug-only (0.4.6): cena 3D de demonstração no motor real — formas
+        // encostadas (oclusão ambiente), sol com sombra, luz pontual e chão.
+        if (BuildConfig.DEBUG && intent.getStringExtra("aureaDemo") == "scene3d") {
+            com.aurea.aurea.ui.i18n.AppLanguage.select(this, com.aurea.aurea.ui.i18n.AppLanguage.PT_BR)
+            lifecycleScope.launch {
+                snapshotFlow { store.engineReady }.first { it }
+                store.newProject(1920, 1080, 30f, "Cena 3D demo")
+                snapshotFlow { store.screen }.first { it == Screen.Editor }
+                kotlinx.coroutines.delay(300)
+                fun shape(kind: Int, x: Float, y: Float, z: Float, s: Float, rx: Float, ry: Float) {
+                    val id = store.addShape3D(kind)
+                    if (id < 0) return
+                    store.setTransform(com.aurea.aurea.engine.TrackProperty.POSITION_X, x, id)
+                    store.setTransform(com.aurea.aurea.engine.TrackProperty.POSITION_Y, y, id)
+                    store.setTransform(com.aurea.aurea.engine.TrackProperty.POSITION_Z, z, id)
+                    for (p in listOf(com.aurea.aurea.engine.TrackProperty.SCALE_X, com.aurea.aurea.engine.TrackProperty.SCALE_Y, com.aurea.aurea.engine.TrackProperty.SCALE_Z)) store.setTransform(p, s, id)
+                    store.setTransform(com.aurea.aurea.engine.TrackProperty.ROTATION_X, rx, id)
+                    store.setTransform(com.aurea.aurea.engine.TrackProperty.ROTATION_Y, ry, id)
+                }
+                // Shape3DKind: 0 cubo, 1 esfera, 2 cilindro, 5 toro.
+                // Espalhadas pela composição, encostando umas nas outras (AO nos contatos).
+                shape(0, 960f, 560f, 0f, 1.0f, -15f, 35f)
+                shape(1, 560f, 640f, -40f, 0.75f, 0f, 0f)
+                shape(2, 1380f, 520f, 80f, 0.8f, 0f, 20f)
+                shape(5, 1190f, 760f, -160f, 0.7f, 70f, 15f)
+                store.addLight(0)   // sol (direcional, com sombra)
+                store.addLight(1)   // luz pontual
+                store.addReflectiveFloor()
+                store.enterSceneEditor()
+                store.updateSceneView(-28f, 16f, 1.7f)
+            }
+        }
+
+        // Debug-only (0.4.6): a cena da floresta com os modelos que a pessoa pôs em
+        // <externo>/files/demo (tank_t-55a.glb, pine_forest.glb, old_bicycle.glb),
+        // com sol, oclusão ambiente e neblina com raios de luz.
+        if (BuildConfig.DEBUG && intent.getStringExtra("aureaDemo") == "floresta") {
+            com.aurea.aurea.ui.i18n.AppLanguage.select(this, com.aurea.aurea.ui.i18n.AppLanguage.PT_BR)
+            lifecycleScope.launch {
+                snapshotFlow { store.engineReady }.first { it }
+                store.newProject(1920, 1080, 30f, "Floresta")
+                snapshotFlow { store.screen }.first { it == Screen.Editor }
+                kotlinx.coroutines.delay(300)
+                val dir = getExternalFilesDir("demo") ?: return@launch
+                val engine = store.engineForStress
+                val memory = com.aurea.aurea.engine.ModelPlan.memoryNow(this@MainActivity)
+                suspend fun model(file: String, name: String, x: Float, y: Float, z: Float, s: Float, ry: Float,
+                                  hideMaterials: List<Int> = emptyList()) {
+                    val path = java.io.File(dir, file)
+                    if (!path.isFile) { android.util.Log.w("AureaDemo", "falta ${path.absolutePath}"); return }
+                    val detail = arrayOfNulls<String>(1)
+                    val id = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        engine.importModel(path.absolutePath, name, detail, com.aurea.aurea.engine.MODEL_QUALITY_ORIGINAL, memory)
+                    }
+                    android.util.Log.i("AureaDemo", "$file -> $id ${detail[0] ?: ""}")
+                    if (id < 0) return
+                    store.select(id, openOptions = false)
+                    val t = com.aurea.aurea.engine.TrackProperty
+                    store.setTransform(t.POSITION_X, x, id)
+                    store.setTransform(t.POSITION_Y, y, id)
+                    store.setTransform(t.POSITION_Z, z, id)
+                    for (p in listOf(t.SCALE_X, t.SCALE_Y, t.SCALE_Z)) store.setTransform(p, s, id)
+                    store.setTransform(t.ROTATION_Y, ry, id)
+                    // Placas falsas do arquivo (sombra/fumaça pintadas): opacidade 0.
+                    for (m in hideMaterials) engine.setMaterialParam(id, m, 3, 0f)
+                }
+                // Escala do mundo: 1 m = 33 px (com 100 px a câmera ficava dentro da
+                // floresta e as texturas do chão e dos pinheiros esticavam em riscos);
+                // chão em y ≈ 607. Antes: 1 m = 100 px; chão em y ≈ 740 ("para cima" = −Y),
+                // 2 m abaixo do alvo da órbita (o centro da composição). O motor
+                // normaliza cada modelo (maior medida = 594 px, pivô no centro da
+                // caixa); as escalas vêm das caixas dos arquivos:
+                // - pine_forest: pinheiros (10 un.) + disco de chão + céu (esfera de
+                //   raio 70,6, centro no chão) → 28,5 = pinheiros de ~12 m;
+                // - tanque: 14,2 × 3,1 m com a placa de sombra → 2,4; pivô 1,5 m acima da base;
+                // - bicicleta: 16,7 un. para 1,7 m → 0,29; pivô 0,46 m acima da base.
+                // Hoje tudo ÷ 3 (9,5 / 0,8 / 0,097; distâncias ao centro também).
+                model("pine_forest.glb", "Floresta", 960f, 617f, 0f, 9.5f, 0f)
+                model("tank_t-55a.glb", "Tanque", 960f, 556f, 100f, 0.8f, -32f, hideMaterials = listOf(2, 6, 10))
+                model("old_bicycle.glb", "Bicicleta", 857f, 591f, -50f, 0.097f, 55f)
+                store.addLight(0)                 // sol (direcional com sombra: os feixes)
+                store.setSceneSetting(0, 3f)      // luz do dia do estúdio "Céu com sol" (o fundo é o panorama da floresta)
+                store.setSceneSetting(9, 1f)      // neblina com raios de luz
+                store.setSceneSetting(10, 0.00036f)
+                store.setSceneSetting(11, 1.6f)
+                if (intent.getStringExtra("ssr") == "0") store.setSceneSetting(12, 0f)
+                kotlinx.coroutines.delay(600)   // o import termina de abrir os painéis antes
+                store.enterSceneEditor()
+                store.updateSceneView(-14f, 12f, 1.05f)
+            }
+        }
+
+        // Debug-only: exporta um vídeo local (filesDir/playback) e mede o tempo,
+        // quadro a quadro, para achar exports lentos. Release não aceita o intent.
+        if (BuildConfig.DEBUG && intent.hasExtra("aureaExportTest")) {
+            lifecycleScope.launch {
+                snapshotFlow { store.engineReady }.first { it }
+                val name = intent.getStringExtra("aureaExportTest") ?: return@launch
+                val root = java.io.File(filesDir, "playback").canonicalFile
+                val media = java.io.File(root, name).canonicalFile
+                if (media.parentFile != root || !media.isFile) return@launch
+                val side = intent.getIntExtra("testSide", 720)
+                store.newProject(1920, 1080, 30f, "Export benchmark")
+                snapshotFlow { store.screen }.first { it == Screen.Editor }
+                val engine = store.engineForStress
+                val id = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    engine.importVideo(media.absolutePath, name)
+                }
+                if (id < 0) { android.util.Log.e("AureaExportTest", "import failed"); return@launch }
+                // testScene=transition: o caso dos relatórios — 2 clipes no corte
+                // com transição e shake nos dois.
+                if (intent.getStringExtra("testScene") == "transition") {
+                    val second = intent.getStringExtra("testSecond") ?: name
+                    val media2 = java.io.File(root, second).canonicalFile
+                    if (media2.parentFile != root || !media2.isFile) return@launch
+                    val id2 = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        engine.importVideo(media2.absolutePath, second)
+                    }
+                    kotlinx.coroutines.delay(800)
+                    engine.moveClipToMainTrack(id2)
+                    val transition = engine.setCutTransition(id, id2, intent.getIntExtra("testTransition", 1), 15)
+                    store.addEffect(com.aurea.aurea.editor.panels.effectTypeId("aurea.distort.shake"), listOf(id, id2))
+                    android.util.Log.i("AureaExportTest", "scene: clips $id $id2 transition=$transition " +
+                        "duration=${engine.exportDuration(true)}")
+                }
+                kotlinx.coroutines.delay(1500)
+                val out = java.io.File(root, "$name-export.mp4"); out.delete()
+                val t0 = android.os.SystemClock.elapsedRealtime()
+                val code = engine.startExport(out.absolutePath, side, 0.0, 0, 0)
+                android.util.Log.i("AureaExportTest", "start code=$code")
+                val buffer = java.nio.ByteBuffer.allocateDirect(4096).order(java.nio.ByteOrder.nativeOrder())
+                val prog = com.aurea.aurea.engine.ExportProgress()
+                while (code == 0) {
+                    kotlinx.coroutines.delay(1000)
+                    if (!engine.exportProgress(buffer)) continue
+                    prog.readFrom(buffer)
+                    android.util.Log.i("AureaExportTest", "t=${(android.os.SystemClock.elapsedRealtime() - t0) / 1000.0}s " +
+                        "${prog.framesDone}/${prog.framesTotal} fps=${prog.fps} flags=0x${Integer.toHexString(prog.flags)}")
+                    if (prog.finished) break
+                }
+                android.util.Log.i("AureaExportTest", "COMPLETE result=${prog.result} ${(android.os.SystemClock.elapsedRealtime() - t0) / 1000.0}s ${out.length()} bytes ${prog.message}")
+            }
+        }
         // Debug-only, locally supplied media. No test intent is accepted by release builds.
         if (BuildConfig.DEBUG && intent.hasExtra("aureaPlaybackTest")) {
             lifecycleScope.launch {
@@ -391,4 +545,12 @@ private fun MainActivity.CreatorWelcome(content: @Composable () -> Unit) {
             }
         }
     }
+}
+
+/** Debug: o app roda num emulador do Android (pula as telas de entrada nos testes). */
+private fun runningOnEmulator(): Boolean {
+    val b = android.os.Build.FINGERPRINT + " " + android.os.Build.MODEL + " " + android.os.Build.HARDWARE + " " + android.os.Build.PRODUCT
+    return b.contains("generic", ignoreCase = true) || b.contains("emulator", ignoreCase = true) ||
+        b.contains("ranchu", ignoreCase = true) || b.contains("goldfish", ignoreCase = true) ||
+        b.contains("sdk_gphone", ignoreCase = true) || b.contains("google_sdk", ignoreCase = true)
 }

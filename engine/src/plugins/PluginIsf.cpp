@@ -77,7 +77,7 @@ bool isf_to_plugin(std::string_view fileName, std::string_view source, Manifest&
         error = "ISF: " + std::move(message);
         return false;
     };
-    if (source.size() > kMaxShaderBytes) return fail("arquivo maior que 64 KB");
+    if (source.size() > kMaxShaderBytes) return fail("arquivo maior que 1 MB");
     // O comentário JSON do topo.
     usize start = 0;
     while (start < source.size() && std::isspace(static_cast<unsigned char>(source[start]))) ++start;
@@ -152,7 +152,7 @@ bool isf_to_plugin(std::string_view fileName, std::string_view source, Manifest&
         if (type == "audio" || type == "audioFFT") return fail("entrada de audio \"" + name + "\" nao e suportada");
         if (!valid_shader_identifier(name))
             return fail("entrada \"" + name + "\": nome que o motor nao aceita como parametro (reservado ou invalido)");
-        if (m.params.size() >= kMaxParams) return fail("mais de 16 entradas");
+        if (m.params.size() >= kMaxParams) return fail("mais de " + std::to_string(kMaxParams) + " entradas");
         ParamDecl p;
         p.id = name;
         if (const Value* label = in.get("LABEL"); label && label->is_string() && !label->string.empty())
@@ -187,7 +187,7 @@ bool isf_to_plugin(std::string_view fileName, std::string_view source, Manifest&
                 vals.push_back(static_cast<i32>(std::lround(n)));
             }
             if (!vals.empty()) {
-                if (vals.size() > kMaxEnumOptions) return fail("entrada \"" + name + "\": mais de 32 VALUES");
+                if (vals.size() > kMaxEnumOptions) return fail("entrada \"" + name + "\": mais de " + std::to_string(kMaxEnumOptions) + " VALUES");
                 p.kind = ParamKind::Enum;
                 for (usize k = 0; k < vals.size(); ++k) {
                     LocalizedText t;

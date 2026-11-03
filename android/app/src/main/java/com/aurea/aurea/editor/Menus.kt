@@ -258,6 +258,11 @@ private fun layerMenuEntries(
     )
 
     if (visual) {
+        // 0.4.6: espelhar (como o "Flip" da referência): a escala do eixo troca de sinal.
+        out += MenuEntry.Item(stringResource(R.string.layer_flip_horizontal), glyph = CupertinoGlyph.ArrowLeftRight,
+            tag = "layer.flip.h") { store.flipLayer(id, vertical = false) }
+        out += MenuEntry.Item(stringResource(R.string.layer_flip_vertical), glyph = CupertinoGlyph.ArrowUpArrowDown,
+            tag = "layer.flip.v") { store.flipLayer(id, vertical = true) }
         out += MenuEntry.Header(stringResource(R.string.editor_grupo))
         if (row.clipToBelow || row.clipCandidate) {
             out += MenuEntry.Item(

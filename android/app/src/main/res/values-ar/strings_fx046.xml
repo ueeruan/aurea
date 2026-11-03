@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: efeitos novos (GapEffects046.cpp). -->
+<resources>
+    <string name="fx046_name_swirl">دوامة</string>
+    <string name="fx046_name_polar">إحداثيات قطبية</string>
+    <string name="fx046_name_tunnel">نفق</string>
+    <string name="fx046_name_magnify">عدسة مكبرة</string>
+    <string name="fx046_name_long_shadow">ظل طويل</string>
+    <string name="fx046_name_roughen">حواف خشنة</string>
+    <string name="fx046_name_contour">خطوط كنتورية</string>
+    <string name="fx046_name_inner_glow">توهج داخلي</string>
+    <string name="fx046_name_lightning">برق</string>
+    <string name="fx046_name_voronoi">خلايا (فورونوي)</string>
+</resources>

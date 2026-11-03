@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: texto dinâmico (contador/timecode). -->
+<resources>
+    <string name="text_dynamic">डायनामिक टेक्स्ट</string>
+    <string name="text_token_counter">काउंटर</string>
+    <string name="text_token_timecode">टाइमकोड</string>
+    <string name="text_token_time">समय</string>
+    <string name="text_token_frame">फ्रेम</string>
+    <string name="text_token_insert">%1$s डालें</string>
+    <string name="text_counter_from">से</string>
+    <string name="text_counter_to">तक</string>
+    <string name="text_counter_decimals">दशमलव स्थान</string>
+    <string name="text_counter_grouping">हज़ार विभाजक</string>
+</resources>

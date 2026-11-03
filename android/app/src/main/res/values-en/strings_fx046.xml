@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: efeitos novos (GapEffects046.cpp). -->
+<resources>
+    <string name="fx046_name_swirl">Swirl</string>
+    <string name="fx046_name_polar">Polar Coordinates</string>
+    <string name="fx046_name_tunnel">Tunnel</string>
+    <string name="fx046_name_magnify">Magnify</string>
+    <string name="fx046_name_long_shadow">Long Shadow</string>
+    <string name="fx046_name_roughen">Roughen Edges</string>
+    <string name="fx046_name_contour">Contour Lines</string>
+    <string name="fx046_name_inner_glow">Inner Glow</string>
+    <string name="fx046_name_lightning">Lightning</string>
+    <string name="fx046_name_voronoi">Cells (Voronoi)</string>
+</resources>

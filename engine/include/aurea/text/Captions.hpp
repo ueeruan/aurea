@@ -12,6 +12,7 @@
 #include "aurea/core/Math.hpp"
 #include "aurea/core/Types.hpp"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,21 +30,6 @@ struct CaptionWord {
     f64 end = 0.0;
 };
 
-// Times are integer frames local to one dedicated caption layer. Stable ids
-// survive text edits, moves and undo; a segment never creates another layer.
-struct CaptionToken { std::string text; i64 start = 0, end = 0; };
-struct CaptionSegment {
-    u64 id = 0;
-    i64 start = 0, end = 0;
-    std::string text;
-    std::vector<CaptionToken> words;
-};
-[[nodiscard]] const CaptionSegment* active_caption(const std::vector<CaptionSegment>& segments, i64 frame) noexcept;
-[[nodiscard]] bool valid_caption_track(const std::vector<CaptionSegment>& segments) noexcept;
-// Matching words retain their original timestamps; inserted/replaced words
-// use only the gap between their preserved neighbours.
-void edit_caption_text(CaptionSegment& segment, const std::string& text);
-
 struct CaptionOptions {
     u32  mode = 0;            ///< 0 agrupadas, 1 uma camada por palavra
     u32  maxWords = 4;        ///< por legenda (agrupadas)
@@ -57,7 +43,53 @@ struct CaptionOptions {
     f32  posY = 0.78f;        ///< centro da legenda, fração da altura (área segura: 0.1..0.9)
     f32  sizeFrac = 0.065f;   ///< tamanho do texto, fração do lado menor
     Vec4 highlightColor{1.0f, 0.83f, 0.0f, 1.0f};   ///< sRGB
+
+    /// 0.4.6: aparência própria por cima do estilo. Cada bit de `look` troca
+    /// uma parte do estilo pelo valor daqui; sem o bit, vale a do estilo.
+    u32  look = 0;
+    std::string fontFamily;   ///< kCaptionLookFont (vazio = fonte do aparelho)
+    u16  fontWeight = 700;
+    bool fontItalic = false;
+    std::string fontPath;     ///< fonte importada (arquivo); vazio = do aparelho
+    Vec4 fill{1.0f, 1.0f, 1.0f, 1.0f};          ///< kCaptionLookFill
+    Vec4 stroke{0.0f, 0.0f, 0.0f, 1.0f};        ///< kCaptionLookStroke
+    f32  strokeFrac = 0.08f;                    ///< contorno, fração do tamanho (0 = sem)
+    bool box = false;                           ///< kCaptionLookBox: fundo ligado
+    Vec4 boxColor{0.0f, 0.0f, 0.0f, 0.7f};
+    bool shadow = false;                        ///< kCaptionLookShadow: sombra ligada
 };
+
+inline constexpr u32 kCaptionLookFont = 1u << 0;
+inline constexpr u32 kCaptionLookFill = 1u << 1;
+inline constexpr u32 kCaptionLookStroke = 1u << 2;
+inline constexpr u32 kCaptionLookBox = 1u << 3;
+inline constexpr u32 kCaptionLookShadow = 1u << 4;
+inline constexpr u32 kCaptionLookAll = (1u << 5) - 1;
+
+// Times are integer frames local to one dedicated caption layer. Stable ids
+// survive text edits, moves and undo; a segment never creates another layer.
+struct CaptionToken { std::string text; i64 start = 0, end = 0; };
+struct CaptionSegment {
+    u64 id = 0;
+    i64 start = 0, end = 0;
+    std::string text;
+    std::vector<CaptionToken> words;
+    /// 0.4.6: estilo só deste bloco (o "Estilo" dos blocos marcados). Vale a
+    /// parte de aparência — estilo, destaque, caixa alta e `look`; agrupamento,
+    /// posição e tamanho continuam os da faixa. Vazio = o da faixa.
+    std::optional<CaptionOptions> look;
+};
+[[nodiscard]] const CaptionSegment* active_caption(const std::vector<CaptionSegment>& segments, i64 frame) noexcept;
+[[nodiscard]] bool valid_caption_track(const std::vector<CaptionSegment>& segments) noexcept;
+// Matching words retain their original timestamps; inserted/replaced words
+// use only the gap between their preserved neighbours.
+void edit_caption_text(CaptionSegment& segment, const std::string& text);
+
+/// Leva só a aparência de `from` para `to` (estilo, destaque, caixa alta e
+/// `look` com os valores dele); o resto de `to` fica.
+void copy_caption_appearance(const CaptionOptions& from, CaptionOptions& to);
+/// As opções que valem para o bloco: as da faixa com a aparência do bloco.
+[[nodiscard]] CaptionOptions caption_block_options(const CaptionOptions& track, const CaptionSegment& segment);
 
 /// Uma legenda pronta: texto com as quebras, tempo e as palavras dela.
 struct CaptionGroup {
@@ -116,5 +148,26 @@ void apply_caption_style(const CaptionOptions& opt, u32 compShortSide, TextData&
                          const std::vector<i64>& wordFrames, i64 endFrame);
 void apply_caption_animation(const CaptionOptions& opt, TextData& t, TrackSet& tracks,
                              const std::vector<i64>& wordFrames, i64 endFrame);
+
+/// 0.4.6: troca de opções numa faixa já pronta. Mudou o estilo: refaz tudo.
+/// Senão mexe só no que mudou (tamanho em escala, cada parte de `look`), para
+/// não apagar a aparência que veio de um preset da comunidade ou do painel Texto.
+void update_caption_look(const CaptionOptions& before, const CaptionOptions& after, u32 compShortSide,
+                         TextData& t, TrackSet& tracks);
+/// O texto do bloco com estilo próprio: o texto da faixa (`t`, com o que o
+/// painel Texto mudou) e por cima as partes em que o bloco difere da faixa.
+/// Os animadores do usuário ficam (as trilhas deles apontam pelo índice).
+void apply_caption_block_look(const CaptionOptions& track, const CaptionOptions& block, u32 compShortSide, TextData& t);
+
+/// Modelos prontos da legenda (escolhidos antes de gerar). `id` é estável:
+/// a interface traduz o nome por ele. As opções só trazem estilo e aparência;
+/// agrupamento, posição e tamanho continuam os do usuário.
+struct CaptionTemplate {
+    const char* id;
+    CaptionOptions options;
+};
+[[nodiscard]] const std::vector<CaptionTemplate>& caption_templates();
+/// Leva estilo e aparência do modelo para `opt` (o resto fica).
+void apply_caption_template(const CaptionTemplate& tpl, CaptionOptions& opt);
 
 } // namespace aurea::text

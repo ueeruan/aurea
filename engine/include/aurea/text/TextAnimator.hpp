@@ -25,6 +25,7 @@ namespace aurea {
 struct TextData;
 struct TextAnimator;
 struct Layer;
+struct EffectInstance;
 class ParameterRegistry;
 }
 
@@ -37,6 +38,43 @@ enum AnimatorEffectParam : u32 {
     aeStrokeOn, aeStroke, aeCount
 };
 void declare_animator_effect_params(ParameterRegistry& params);
+
+/// 0.4.6 · Text Animator Pro: o animador completo, com o comportamento do
+/// animador de texto do After Effects como referência (seletor de intervalo
+/// em % ou índice, por letra/letra sem espaço/palavra/linha, modo de
+/// combinação, suavidade; seletor de oscilação com mín./máx., correlação e
+/// fases; ponto de âncora, agrupamento "tudo" com alinhamento, matiz/
+/// saturação/brilho/opacidade do preenchimento, espaçamento entre linhas).
+/// Implementação própria (nada de código do AE). Índices dos parâmetros são
+/// fixos (salvos no projeto); acrescente só no fim.
+inline constexpr const char* kAnimatorProEffect = "aurea.text.animator_pro";
+enum AnimatorProParam : u32 {
+    apUnits, apBasedOn, apStart, apEnd, apOffset, apMode, apAmount, apShape, apSmoothness, apEaseHigh, apEaseLow,
+    apRandom, apSeed,
+    apWiggly, apWigglyMode, apWigglyMax, apWigglyMin, apWigglyRate, apCorrelation, apTemporalPhase, apSpatialPhase,
+    apLockDims, apWigglySeed,
+    apAnchor, apPosition, apScale, apSkew, apSkewAxis, apRotation, apOpacity,
+    apFillOn, apFill, apFillHue, apFillSaturation, apFillBrightness, apFillOpacity,
+    apStrokeOn, apStroke, apStrokeWidth, apTracking, apLineSpacing, apBlur, apGrouping, apGroupAlign,
+    // Seletor de expressão (o "Expression Selector" das referências): a
+    // Intensidade por eixo (%) é avaliada POR UNIDADE, com textIndex/textTotal
+    // na expressão, e SUBSTITUI a seleção de cima (como selectorValue → valor).
+    apExprOn, apExprAmount,
+    apCount
+};
+void declare_animator_pro_params(ParameterRegistry& params);
+/// O animador simples ou o Pro (os dois agem nos glifos do texto).
+[[nodiscard]] bool is_animator_effect(u32 type) noexcept;
+/// Combinação de seletores (modo do AE): soma, subtrai, interseção, mín., máx., diferença.
+[[nodiscard]] f32 combine_selector(f32 above, f32 value, u32 mode) noexcept;
+/// Seletor de intervalo do Pro para a unidade `unit` de `count`: 0..1 (sem a intensidade).
+/// `units` 0 = %, 1 = índice. `smoothness` 0..1 (só na forma quadrada).
+[[nodiscard]] f32 pro_range_weight(f32 start, f32 end, f32 offset, u32 units, u32 shape, f32 smoothness,
+                                   f32 easeHigh, f32 easeLow, u32 unit, u32 count) noexcept;
+/// Oscilação do Pro: −1..1 por unidade e dimensão, entre `minAmount` e `maxAmount` (−1..1).
+/// `correlation` 0..1 (1 = todas iguais), fases em graus.
+[[nodiscard]] f32 pro_wiggle(u32 seed, u32 unit, u32 dimension, f64 timeSec, f32 rate, f32 correlation,
+                             f32 temporalPhase, f32 spatialPhase, f32 minAmount, f32 maxAmount) noexcept;
 bool has_animator_effect(const Layer& layer) noexcept;
 f32 animator_effect_padding(const Layer& layer, f64 time, f32 size, u32 chars);
 
@@ -64,13 +102,18 @@ struct GlyphAnim {
     f32  blur = 0.0f;         ///< px
     f32  skew = 0.0f;         ///< graus
     Mat4 skewTransform = Mat4::identity();
-    u32 anchorGrouping = 0;   ///< 0 glyph, 1 word, 2 line
+    u32 anchorGrouping = 0;   ///< 0 glyph, 1 word, 2 line, 3 tudo (Pro)
+    Vec2 anchor{0, 0};        ///< ponto de âncora do Pro (px): o glifo gira/escala em volta de pivô + âncora
+    Vec2 groupAlign{0, 0};    ///< alinhamento do agrupamento do Pro (−1..1 da meia caixa)
     f32  strokeAdd = 0.0f;    ///< px
     f32  trackingShift = 0.0f;
     Vec4 fill{0, 0, 0, 0};    ///< a = peso da mistura com a cor do animador (sRGB)
     f32 fillOpacity = 1.0f;   ///< alpha da cor de preenchimento, separado do peso da mistura
     Vec4 stroke{0, 0, 0, 0};
 };
+/// Aplica um Text Animator Pro (TextAnimatorPro.cpp); chamado por evaluate_animator_effects.
+void evaluate_animator_pro(const Layer& layer, const EffectInstance& fx, f64 time, f64 fps, const std::vector<GlyphUnits>& units,
+                           u32 chars, u32 words, u32 lines, std::vector<GlyphAnim>& out);
 void evaluate_animator_effects(const Layer& layer, f64 time, f64 fps, const std::vector<GlyphUnits>& units,
                               u32 chars, u32 words, u32 lines, std::vector<GlyphAnim>& out);
 
@@ -94,6 +137,14 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
 
 /// Algum animador ativo?
 [[nodiscard]] bool has_animators(const TextData& t) noexcept;
+
+/// 0.4.6: texto dinâmico (TextData::dynamic): troca {#} {tc} {t} {f} pelos
+/// valores no instante. `local` = quadro local da camada, `duration` = quadros
+/// da camada, `compFrame` = quadro da composição. Sem marcas: o próprio texto.
+[[nodiscard]] std::string expand_dynamic(const TextData& t, f64 local, f64 duration, f64 compFrame, f64 fps);
+/// O número do contador formatado (casas, separador de milhar com ponto e
+/// vírgula decimal — o formato da marca do Aurea; o sinal fica na frente).
+[[nodiscard]] std::string format_counter(f64 value, u32 decimals, bool grouping);
 
 /// Presets nativos (dados): 0 Pop, 1 Bounce, 2 Slide, 3 Scale, 4 Fade,
 /// 5 Blur Reveal, 6 Word Highlight, 7 Karaoke, 8 Typewriter, 9 Wave,

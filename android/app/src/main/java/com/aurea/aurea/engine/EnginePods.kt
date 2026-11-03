@@ -1100,6 +1100,8 @@ data class LayerDetail(
     val keepPitch: Boolean get() = (timeFlags and 128) != 0
     /** A curva de remapeamento anda para trás (Ao contrário ligado). */
     val remapReversed: Boolean get() = (timeFlags and 256) != 0
+    /** 0.4.6: o vídeo repete além do fim da fonte. */
+    val loopMedia: Boolean get() = (timeFlags and 512) != 0
 
     val audioMuted: Boolean get() = (audioFlags and 1) != 0
     val audioSolo: Boolean get() = (audioFlags and 2) != 0

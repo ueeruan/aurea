@@ -23,6 +23,8 @@
 #define TEX_BRDF      AUREA_TEX7
 #define TEX_SHADOW    AUREA_TEX8   // sampler2DShadow (comparação do hardware)
 #define TEX_SHADOW_DEPTH AUREA_TEX11 // o MESMO mapa, profundidade crua (busca de bloqueadores do PCSS)
+#define TEX_SSAO      AUREA_TEX10  // 0.4.6: oclusão ambiente de tela (post/gtao.frag), meia resolução
+#define TEX_LOCAL_SHADOW AUREA_TEX9 // 0.4.6: atlas de sombra das luzes locais (ponto/spot), comparação
 
 #define MAX_LIGHTS 4
 
@@ -62,6 +64,15 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform SceneBlock {
     // Sombra suave (PCSS) — ver common/shadow.glsl.
     vec4 shadowParams2;     // x = k da penumbra (uv por unidade de profundidade), y = normal offset (mundo),
                             // z = inclinação uv → profundidade (S/R), w = amostras da busca de bloqueadores (0 = PCF fixo)
+    // 0.4.6: oclusão ambiente de tela (GTAO). x = ligada (0/1), y = mínimo
+    // (nunca escurece abaixo disto), zw = 1/tamanho do alvo do passe (gl_FragCoord → uv).
+    vec4 aoParams;
+    // 0.4.6: sombra de até 2 luzes LOCAIS num atlas (ponto: 6 faces de cubo,
+    // spot: 1). lightSpot2[i].z = 1 + índice aqui (0 = sem sombra).
+    vec4 localShadow[2];      // x = 1º tile, y = tipo (0 ponto, 1 spot), z = perto, w = longe
+    vec4 localShadowPos[2];   // xyz = posição da luz, w = tan(meio ângulo) do spot
+    vec4 localShadowDir[2];   // xyz = frente do spot, w = viés de profundidade
+    vec4 localAtlas;          // x = colunas, y = linhas, z = 1/lado do tile (px), w = ligado
 } u;
 
 const float PI = 3.14159265359;

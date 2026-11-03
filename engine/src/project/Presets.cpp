@@ -502,8 +502,8 @@ void write_text(json::Writer& w, const Preset& p) {
     }
 }
 
-void write_caption(json::Writer& w, const text::CaptionOptions& o, bool removeFillers) {
-    w.key("caption").begin_object();
+void write_caption_body(json::Writer& w, const text::CaptionOptions& o, bool removeFillers) {
+    w.begin_object();
     w.key("mode").value(o.mode);
     w.key("maxWords").value(o.maxWords);
     w.key("maxChars").value(o.maxChars);
@@ -517,7 +517,24 @@ void write_caption(json::Writer& w, const text::CaptionOptions& o, bool removeFi
     w.key("sizeFrac").value(o.sizeFrac);
     write_vec4(w, "highlightColor", o.highlightColor);
     w.key("removeFillers").value(removeFillers);
+    // 0.4.6: aparência própria (bits de `look`; ausente = só o estilo).
+    w.key("look").value(o.look & text::kCaptionLookAll);
+    w.key("fontFamily").value(o.fontFamily);
+    w.key("fontWeight").value(static_cast<u32>(o.fontWeight));
+    w.key("fontItalic").value(o.fontItalic);
+    w.key("fontPath").value(o.fontPath);
+    write_vec4(w, "fill", o.fill);
+    write_vec4(w, "stroke", o.stroke);
+    w.key("strokeFrac").value(o.strokeFrac);
+    w.key("box").value(o.box);
+    write_vec4(w, "boxColor", o.boxColor);
+    w.key("shadow").value(o.shadow);
     w.end_object();
+}
+
+void write_caption(json::Writer& w, const text::CaptionOptions& o, bool removeFillers) {
+    w.key("caption");
+    write_caption_body(w, o, removeFillers);
 }
 
 // --- leitura -----------------------------------------------------------------
@@ -887,8 +904,7 @@ bool read_animation(Reader& r, const json::Value& root, Preset& p) {
     return true;
 }
 
-bool read_caption(Reader& r, const json::Value& root, Preset& p) {
-    const json::Value* c = root.get("caption");
+bool read_caption_body(Reader& r, const json::Value* c, text::CaptionOptions& out, bool& removeFillers) {
     if (!c || !c->is_object()) return r.fail("preset de legenda sem bloco caption");
     text::CaptionOptions o;
     o.mode = r.u(*c, "mode", o.mode, 1);
@@ -904,10 +920,26 @@ bool read_caption(Reader& r, const json::Value& root, Preset& p) {
     o.sizeFrac = r.f(*c, "sizeFrac", o.sizeFrac, 0.01, 0.3);
     o.highlightColor = r.vec4(*c, "highlightColor", o.highlightColor, 0.0, 1.0);
     const bool rf = r.b(*c, "removeFillers", true);
+    // 0.4.6: aparência própria. Preset antigo não tem: fica só o estilo.
+    o.look = r.u(*c, "look", 0, text::kCaptionLookAll);
+    o.fontFamily = r.s(*c, "fontFamily");
+    o.fontWeight = static_cast<u16>(std::max(100u, r.u(*c, "fontWeight", o.fontWeight, 1000)));
+    o.fontItalic = r.b(*c, "fontItalic", false);
+    o.fontPath = r.s(*c, "fontPath");
+    o.fill = r.vec4(*c, "fill", o.fill, 0.0, 1.0);
+    o.stroke = r.vec4(*c, "stroke", o.stroke, 0.0, 1.0);
+    o.strokeFrac = r.f(*c, "strokeFrac", o.strokeFrac, 0.0, 0.3);
+    o.box = r.b(*c, "box", false);
+    o.boxColor = r.vec4(*c, "boxColor", o.boxColor, 0.0, 1.0);
+    o.shadow = r.b(*c, "shadow", false);
     if (!r.ok()) return false;
-    p.caption = o;
-    p.removeFillers = rf;
+    out = o;
+    removeFillers = rf;
     return true;
+}
+
+bool read_caption(Reader& r, const json::Value& root, Preset& p) {
+    return read_caption_body(r, root.get("caption"), p.caption, p.removeFillers);
 }
 
 bool read_curve(Reader& r, const json::Value& root, Preset& p) {
@@ -1283,6 +1315,80 @@ std::string make_caption_preset(const std::string& name, const text::CaptionOpti
     p.caption = o;
     p.removeFillers = removeFillers;
     return write(p);
+}
+
+std::string caption_options_json(const text::CaptionOptions& o, bool removeFillers) {
+    json::Writer w;
+    write_caption_body(w, o, removeFillers);
+    return w.str();
+}
+
+namespace {
+/// A aparência que o estilo + `look` dão, para a interface desenhar a amostra
+/// (cartão do modelo, prévia antes de gerar) sem repetir as regras do estilo.
+void write_caption_preview(json::Writer& w, const text::CaptionOptions& o) {
+    TextData t;
+    TrackSet tracks;
+    text::apply_caption_style(o, 1000, t, tracks, {}, 0);
+    const f32 size = std::max(1.0f, t.size);
+    w.begin_object();
+    w.key("fontFamily").value(t.fontFamily);
+    w.key("weight").value(static_cast<u32>(t.fontWeight));
+    w.key("italic").value(t.fontItalic);
+    write_vec4(w, "fill", t.color);
+    write_vec4(w, "stroke", t.strokeColor);
+    w.key("strokeFrac").value(t.strokeWidth / size);
+    w.key("box").value(t.background);
+    write_vec4(w, "boxColor", t.backgroundColor);
+    w.key("shadow").value(t.shadow);
+    write_vec4(w, "shadowColor", t.shadowColor);
+    w.key("glow").value(t.shadow && t.shadowOffset.x == 0.0f && t.shadowOffset.y == 0.0f);
+    w.key("highlight").value(o.highlight && o.style != 4);
+    // Karaokê: a palavra falada fica branca; nos outros, a cor do destaque.
+    write_vec4(w, "highlightColor", o.style == 4 ? Vec4{1, 1, 1, 1} : o.highlightColor);
+    w.key("uppercase").value(o.uppercase);
+    w.end_object();
+}
+} // namespace
+
+std::string caption_preview_json(const text::CaptionOptions& o) {
+    json::Writer w;
+    write_caption_preview(w, o);
+    return w.str();
+}
+
+std::string caption_templates_json() {
+    json::Writer w;
+    w.begin_array();
+    for (const auto& tpl : text::caption_templates()) {
+        w.begin_object().key("id").value(std::string(tpl.id));
+        w.key("options");
+        write_caption_body(w, tpl.options, true);
+        w.key("preview");
+        write_caption_preview(w, tpl.options);
+        w.end_object();
+    }
+    return w.end_array().str();
+}
+
+std::string caption_with_template(const std::string& optionsJson, const std::string& id) {
+    text::CaptionOptions o;
+    bool removeFillers = true;
+    if (!parse_caption_options(optionsJson, o, removeFillers)) return {};
+    for (const auto& tpl : text::caption_templates()) {
+        if (id != tpl.id) continue;
+        text::apply_caption_template(tpl, o);
+        return caption_options_json(o, removeFillers);
+    }
+    return {};
+}
+
+bool parse_caption_options(const std::string& text, text::CaptionOptions& o, bool& removeFillers) {
+    if (text.size() > 64 * 1024) return false;
+    json::Value root;
+    if (!json::parse(text, root)) return false;
+    Reader r;
+    return read_caption_body(r, &root, o, removeFillers);
 }
 
 std::string make_curve_preset(const std::string& name, Interpolation interp, f32 x1, f32 y1, f32 x2, f32 y2, u32 power) {

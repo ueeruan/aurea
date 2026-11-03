@@ -7,6 +7,8 @@ import os
 
 struct NativeCaptionBlock: Codable, Equatable, Identifiable {
     var id: Int64; var start: Int32; var end: Int32; var text: String
+    /// 0.4.6: estilo próprio do bloco (JSON das opções); nulo = o da faixa.
+    var look: String?
 }
 struct NativeCaptionTrack: Codable, Equatable {
     var layer: Int64; var source: Int64; var segments: [NativeCaptionBlock]
@@ -21,6 +23,14 @@ struct CaptionBlockEditor: View {
     @State private var start = ""
     @State private var end = ""
     @State private var error: String?
+    /// 0.4.6: "Estilo" dos blocos marcados — o mesmo modelo/aparência da faixa, só neles.
+    @State private var styling = false
+    @State private var blockStyle = 2
+    @State private var blockHighlight = true
+    @State private var blockUppercase = false
+    @State private var blockLook = CaptionLook()
+    @State private var blockTemplate: String?
+    @State private var fontsOpen = false
     private func edit(_ op: String, _ fields: [String: Any] = [:]) {
         var value = fields; value["op"] = op; value["ids"] = Array(selected)
         guard let data = try? JSONSerialization.data(withJSONObject: value), let command = String(data: data, encoding: .utf8) else { return }
@@ -29,13 +39,25 @@ struct CaptionBlockEditor: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(AureaText.t("ios_caption_track_hint"))
+            HStack {
+                Text(AureaText.t("ios_caption_track_hint")).frame(maxWidth: .infinity, alignment: .leading)
+                // 0.4.6: escolher todos os blocos de uma vez (para apagar ou mover juntos).
+                let all = !track.segments.isEmpty && selected.count == track.segments.count
+                Button(AureaText.t(all ? "editor_limpar_selecao" : "home_select_all")) {
+                    selected = all ? [] : Set(track.segments.map(\.id))
+                }
+            }
             ScrollView(.horizontal) {
                 HStack {
                     ForEach(track.segments) { block in
                         Button { if selected.contains(block.id) { selected.remove(block.id) } else { selected.insert(block.id) }; text = block.text; start = String(block.start); end = String(block.end) } label: {
-                            Text("\(ltrIsolado("\(block.start)–\(block.end)"))\n\(block.text)").lineLimit(2).padding(8).background(selected.contains(block.id) ? AureaColors.accent.opacity(0.5) : AureaColors.muted.opacity(0.15)).clipShape(RoundedRectangle(cornerRadius: 8))
+                            HStack(alignment: .top, spacing: 4) {
+                                // Bloco com estilo próprio: um ponto na cor de destaque.
+                                if block.look != nil { Circle().fill(AureaColors.accent).frame(width: 8, height: 8).padding(.top, 4) }
+                                Text("\(ltrIsolado("\(block.start)–\(block.end)"))\n\(block.text)").lineLimit(2)
+                            }.padding(8).background(selected.contains(block.id) ? AureaColors.accent.opacity(0.5) : AureaColors.muted.opacity(0.15)).clipShape(RoundedRectangle(cornerRadius: 8))
                         }.buttonStyle(.plain)
+                        .accessibilityValue(block.look != nil ? AureaText.t("cap046_block_own_style") : "")
                     }
                 }
             }
@@ -46,7 +68,10 @@ struct CaptionBlockEditor: View {
                     Button(AureaText.t("dock_short_split")) { edit("split", ["frame": model.status.playhead]) }.disabled(selected.count != 1)
                     Button(AureaText.t("panel_unir")) { edit("merge"); selected.removeAll() }.disabled(selected.count < 2)
                     Button(AureaText.t("common_delete")) { edit("delete"); selected.removeAll() }
+                    Button(AureaText.t("panel_estilo") + (styling ? "  ▴" : "  ▾")) { styling.toggle(); if styling { loadBlockStyle() } }
+                        .accessibilityAddTraits(styling ? .isSelected : [])
                 }
+                if styling { blockStyleControls }
                 if selected.count == 1 {
                     TextField(AureaText.t("panel_texto"), text: $text).textFieldStyle(.roundedBorder)
                     Button(AureaText.t("ios_caption_apply_text")) { edit("text", ["text": text]) }
@@ -57,6 +82,65 @@ struct CaptionBlockEditor: View {
             }
             if let error { Text(error).foregroundStyle(.red) }
         }.padding(.vertical, 10)
+        .onChange(of: selected) { _ in if styling { loadBlockStyle() } }
+        .fullScreenCover(isPresented: $fontsOpen) {
+            FontBrowserView(onPick: { f in
+                let path = (f.imported || f.path.hasPrefix(AureaPaths.documents.path)) ? f.path : ""
+                blockLook.font(family: f.family, weight: Int(f.weight), italic: f.italic, path: path)
+                FontPrefs.shared.recordUse(f)
+                fontsOpen = false; blockCustomized()
+            }, onDismiss: { fontsOpen = false }).environmentObject(model)
+        }
+    }
+
+    /// Modelos e aparência só dos blocos marcados (os mesmos controles da faixa).
+    private var blockStyleControls: some View {
+        let own = track.segments.contains { selected.contains($0.id) && $0.look != nil }
+        return VStack(alignment: .leading, spacing: 0) {
+            Text(AureaText.t("cap046_block_style_n", selected.count)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 6)
+            CaptionTemplateRow(selected: blockTemplate, enabled: true) { applyBlockTemplate($0) }
+            blockToggle("pn_caption_highlight_word", blockHighlight) { blockHighlight = $0; pushBlockStyle() }
+            blockToggle("pn_caption_uppercase", blockUppercase) { blockUppercase = $0; pushBlockStyle() }
+            CaptionCustomizeView(look: $blockLook, highlight: blockHighlight, preview: CaptionPreview(json: model.engine.captionPreview(blockOptionsJSON)),
+                                 openFonts: { fontsOpen = true }, onChange: blockCustomized)
+            Button(AureaText.t("cap046_block_use_track")) { edit("clear_look"); loadBlockStyle() }.disabled(!own).frame(minHeight: 44)
+        }
+    }
+    private func blockToggle(_ key: String, _ value: Bool, _ set: @escaping (Bool) -> Void) -> some View {
+        HStack {
+            Text(AureaText.t(key)).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+            AureaToggle(checked: value, onCheckedChange: set)
+        }.frame(height: 44)
+    }
+    /// Só a aparência (estilo, destaque, caixa alta e `look`): o agrupamento é o da faixa.
+    private var blockOptionsJSON: String {
+        var dict: [String: Any] = ["style": blockStyle, "highlight": blockHighlight, "uppercase": blockUppercase]
+        dict.merge(blockLook.dictionary) { _, fresh in fresh }
+        guard let data = try? JSONSerialization.data(withJSONObject: dict), let text = String(data: data, encoding: .utf8) else { return "{}" }
+        return text
+    }
+    private func loadBlock(json: String) {
+        guard let data = json.data(using: .utf8), let v = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        blockStyle = ((v["style"] as? NSNumber)?.intValue ?? blockStyle).clamped(to: 0...7)
+        blockHighlight = (v["highlight"] as? NSNumber)?.boolValue ?? blockHighlight
+        blockUppercase = (v["uppercase"] as? NSNumber)?.boolValue ?? blockUppercase
+        blockLook = CaptionLook(dictionary: v, fallback: CaptionLook())
+    }
+    /// Começa no estilo do primeiro bloco marcado (o dele ou o da faixa).
+    private func loadBlockStyle() {
+        let first = track.segments.first { selected.contains($0.id) }
+        loadBlock(json: first?.look ?? model.engine.captionOptions(track.layer))
+        blockTemplate = nil
+    }
+    private func pushBlockStyle() {
+        guard !selected.isEmpty else { return }
+        edit("look", ["options": blockOptionsJSON])
+    }
+    private func blockCustomized() { blockTemplate = nil; pushBlockStyle() }
+    private func applyBlockTemplate(_ id: String) {
+        let json = model.engine.captionOptions(blockOptionsJSON, withTemplate: id)
+        guard !json.isEmpty else { return }
+        loadBlock(json: json); blockTemplate = id; pushBlockStyle()
     }
 }
 
@@ -621,6 +705,10 @@ struct CaptionsPanel: View {
     @State private var removeFillers = true
     @State private var posY: Float = 0.78
     @State private var size: Float = 0.065
+    /// 0.4.6: aparência própria (fonte, cores, contorno, fundo, sombra) e o modelo escolhido.
+    @State private var look = CaptionLook()
+    @State private var templateId: String? = "highlight"
+    @State private var fontsOpen = false
     /// 0.4.1: "Mais opções" e a lista de idiomas começam fechadas.
     @State private var moreOptions = false
     @State private var languagesOpen = false
@@ -654,11 +742,19 @@ struct CaptionsPanel: View {
         .onAppear { loadOptions() }
         // 0.3.5: `.task(id:)` roda ao aparecer e a cada troca de camada com a view NOVA;
         // o `onChange(of: id) { _ in open() }` lia o `id`/`path` antigos (legendas da camada anterior).
-        .task(id: id) { open() }
+        .task(id: id) { open(); loadTrackOptions() }
+        .fullScreenCover(isPresented: $fontsOpen) {
+            FontBrowserView(onPick: { f in
+                let path = (f.imported || f.path.hasPrefix(AureaPaths.documents.path)) ? f.path : ""
+                look.font(family: f.family, weight: Int(f.weight), italic: f.italic, path: path)
+                FontPrefs.shared.recordUse(f)
+                fontsOpen = false; customized()
+            }, onDismiss: { fontsOpen = false }).environmentObject(model)
+        }
         .onChange(of: model.status.modelRevision) { _ in captionCount = Int(model.engine.captionCount(id)) }
         .onChange(of: language) { CaptionLanguages.save($0) }
         .onChange(of: quality) { notice = nil; WhisperQuality.save($0) }
-        .onDisappear { _ = model.engine.captionProgress(true); job?.cancel(); loading?.cancel(); persist(); model.captionOptions = options }
+        .onDisappear { _ = model.engine.captionProgress(true); job?.cancel(); loading?.cancel(); persist(); model.captionOptions = options; CaptionLook.draft = optionsJSON }
         .onChange(of: srtPick) { picked in
             guard let url = picked else { return }
             srtPick = nil
@@ -669,11 +765,11 @@ struct CaptionsPanel: View {
         // 0.4.1: tela simplificada — estilo, idioma (um chip) e UM botão; depois de gerar,
         // só posição, tamanho e dois interruptores. O resto fica em "Mais opções".
         let idle = busy == nil
-        let hasOutput = captionCount > 0 || !words.isEmpty
         return VStack(alignment: .leading, spacing: 0) {
             if let captionTrack { CaptionBlockEditor(track: captionTrack) }
-            label("panel_estilo")
-            CaptionChips(options: ["pn_caption_style_classic", "panel_caixa", "pn_caption_style_highlight", "pn_caption_style_neon", "pn_karaoke", "pn_pop", "pack_text_4", "pack_text_5"].map { AureaText.t($0) }, selected: style) { style = $0 }
+            // 0.4.6: modelos prontos antes de gerar (e trocáveis depois, na hora).
+            label("cap046_templates")
+            CaptionTemplateRow(selected: templateId, enabled: idle) { applyTemplate($0) }
             languageControls
             if let busy {
                 note(busy, color: AureaColors.accent)
@@ -696,15 +792,17 @@ struct CaptionsPanel: View {
                     Text(AureaText.t("panel_importar_legenda_srt")).font(.aurea(size: 13)).foregroundStyle(AureaColors.accent)
                 }.buttonStyle(AureaPressStyle()).disabled(!idle).padding(.vertical, 4)
             }
-            if hasOutput {
+            // 0.4.6: posição, tamanho e aparência também antes de gerar; com a faixa pronta, na hora.
+            Group {
                 label("pn_caption_screen_height")
                 CaptionChips(options: ["pn_caption_pos_top", "pn_caption_pos_middle", "pn_caption_pos_bottom"].map { AureaText.t($0) },
-                    selected: [Float(0.2), 0.5, 0.78].firstIndex(where: { abs($0 - posY) < 0.01 }) ?? -1) { posY = [0.2, 0.5, 0.78][$0] }
+                    selected: [Float(0.2), 0.5, 0.78].firstIndex(where: { abs($0 - posY) < 0.01 }) ?? -1) { posY = [0.2, 0.5, 0.78][$0]; pushLive() }
                 label("panel_tamanho")
                 CaptionChips(options: ["pn_size_small_short", "pn_size_medium_short", "pn_size_large_short"].map { AureaText.t($0) },
-                    selected: [Float(0.045), 0.065, 0.09].firstIndex(where: { abs($0 - size) < 0.001 }) ?? -1) { size = [0.045, 0.065, 0.09][$0] }
-                captionToggle("pn_caption_highlight_word", value: $highlight)
-                captionToggle("pn_caption_uppercase", value: $uppercase)
+                    selected: [Float(0.045), 0.065, 0.09].firstIndex(where: { abs($0 - size) < 0.001 }) ?? -1) { size = [0.045, 0.065, 0.09][$0]; pushLive() }
+                captionToggle("pn_caption_highlight_word", value: live($highlight))
+                captionToggle("pn_caption_uppercase", value: live($uppercase))
+                CaptionCustomizeView(look: $look, highlight: highlight, preview: preview, openFonts: { fontsOpen = true }, onChange: customized)
                 if !words.isEmpty && captionCount == 0 {
                     CaptionAction(label: AureaText.t("pn_caption_create"), primary: true, enabled: idle, action: apply).padding(.vertical, 6)
                 }
@@ -1000,7 +1098,7 @@ struct CaptionsPanel: View {
             error = AureaText.t("ios_check_word_times"); return
         }
         persist(); model.captionOptions = options; busy = AureaText.t("ios_creating_captions"); error = nil
-        let sourceId = id, engine = model.engine, snapshot = words.map(\.native), settings = options, project = model.projectGeneration
+        let sourceId = id, engine = model.engine, snapshot = words.map(\.native), settings = optionsJSON, project = model.projectGeneration
         let operation = model.beginProjectOperation()
         let revision = UUID(); jobRevision = revision
         job = Task {
@@ -1009,7 +1107,7 @@ struct CaptionsPanel: View {
                 if jobRevision == revision { busy = nil }
             }
             let result = await Task.detached(priority: .userInitiated) {
-                engine.createCaptions(sourceId, words: snapshot, options: settings)
+                engine.createCaptions(sourceId, words: snapshot, optionsJSON: settings)
             }.value
             guard !Task.isCancelled, jobRevision == revision, model.projectGeneration == project else { return }
             model.refreshModel(force: true)
@@ -1032,6 +1130,329 @@ struct CaptionsPanel: View {
         highlight = v["highlight"]?.boolValue ?? true; uppercase = v["uppercase"]?.boolValue ?? false
         breakOnPause = v["breakOnPause"]?.boolValue ?? true; removeFillers = v["removeFillers"]?.boolValue ?? true
         posY = (v["posY"]?.floatValue ?? 0.78).clamped(to: 0.1...0.9); size = (v["sizeFrac"]?.floatValue ?? 0.065).clamped(to: 0.02...0.15)
+        if let draft = CaptionLook.draft { load(json: draft) }
+    }
+
+    // MARK: 0.4.6 — aparência própria e modelos (o motor resolve as regras)
+
+    /// O bloco "caption" do preset (presets::caption_options_json): a forma que o motor lê.
+    private var optionsJSON: String {
+        var dict: [String: Any] = ["mode": mode, "style": style, "maxWords": maxWords, "maxChars": maxChars, "maxLines": maxLines,
+            "highlight": highlight, "uppercase": uppercase, "breakOnPause": breakOnPause, "removeFillers": removeFillers,
+            "pauseSec": Double(model.captionOptions["pauseSec"]?.floatValue ?? 0.6), "posY": Double(posY), "sizeFrac": Double(size)]
+        dict.merge(look.dictionary) { _, fresh in fresh }
+        guard let data = try? JSONSerialization.data(withJSONObject: dict), let text = String(data: data, encoding: .utf8) else { return "{}" }
+        return text
+    }
+    private func load(json: String) {
+        guard let data = json.data(using: .utf8), let v = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        func int(_ k: String, _ d: Int) -> Int { (v[k] as? NSNumber)?.intValue ?? d }
+        func bool(_ k: String, _ d: Bool) -> Bool { (v[k] as? NSNumber)?.boolValue ?? d }
+        mode = int("mode", mode).clamped(to: 0...1); style = int("style", style).clamped(to: 0...7)
+        maxWords = int("maxWords", maxWords).clamped(to: 1...12); maxChars = int("maxChars", maxChars).clamped(to: 6...60)
+        maxLines = int("maxLines", maxLines).clamped(to: 1...4)
+        highlight = bool("highlight", highlight); uppercase = bool("uppercase", uppercase); breakOnPause = bool("breakOnPause", breakOnPause)
+        posY = ((v["posY"] as? NSNumber)?.floatValue ?? posY).clamped(to: 0.1...0.9)
+        size = ((v["sizeFrac"] as? NSNumber)?.floatValue ?? size).clamped(to: 0.02...0.15)
+        look = CaptionLook(dictionary: v, fallback: look)
+    }
+    /// Amostra da aparência atual (estilo + personalização).
+    private var preview: CaptionPreview? { CaptionPreview(json: model.engine.captionPreview(optionsJSON)) }
+    /// Com a faixa pronta, estilo, aparência, tamanho e altura mudam na hora (um passo de desfazer).
+    private func pushLive() {
+        guard let track = captionTrack else { return }
+        if model.engine.setCaptionOptions(track.layer, json: optionsJSON) { model.refreshModel(force: true) }
+    }
+    private func live(_ value: Binding<Bool>) -> Binding<Bool> {
+        Binding(get: { value.wrappedValue }, set: { value.wrappedValue = $0; pushLive() })
+    }
+    private func customized() { templateId = nil; pushLive() }
+    private func applyTemplate(_ templateId: String) {
+        let json = model.engine.captionOptions(optionsJSON, withTemplate: templateId)
+        guard !json.isEmpty else { return }
+        load(json: json); self.templateId = templateId; pushLive()
+    }
+    /// As opções guardadas na faixa (o painel mostra o que está na tela).
+    private func loadTrackOptions() {
+        guard let track = captionTrack else { return }
+        let json = model.engine.captionOptions(track.layer)
+        guard !json.isEmpty else { return }
+        let before = optionsJSON
+        let keep = removeFillers
+        load(json: json); removeFillers = keep
+        if optionsJSON != before { templateId = nil }
+    }
+}
+
+/// 0.4.6: aparência própria da legenda (espelha text::CaptionOptions; bits iguais a kCaptionLook*).
+struct CaptionLook: Equatable {
+    static let font = 1, fill = 2, stroke = 4, box = 8, shadow = 16
+    /// Última aparência usada (o painel volta com ela).
+    @MainActor static var draft: String?
+    var bits = 0
+    var fontFamily = "", fontWeight = 700, fontItalic = false, fontPath = ""
+    var fillColor: [Float] = [1, 1, 1, 1]
+    var strokeColor: [Float] = [0, 0, 0, 1]
+    var strokeFrac: Float = 0.08
+    var boxOn = false
+    var boxColor: [Float] = [0, 0, 0, 0.7]
+    var shadowOn = false
+    var highlightColor: [Float] = [1, 0.83, 0, 1]
+    func has(_ bit: Int) -> Bool { bits & bit != 0 }
+    mutating func set(_ bit: Int, _ on: Bool) { bits = on ? bits | bit : bits & ~bit }
+    mutating func font(family: String, weight: Int, italic: Bool, path: String) {
+        set(Self.font, true); fontFamily = family; fontWeight = weight; fontItalic = italic; fontPath = path
+    }
+    var dictionary: [String: Any] {
+        func c(_ v: [Float]) -> [Double] { (0..<4).map { Double(v.indices.contains($0) ? v[$0] : 1).clamped(to: 0...1) } }
+        return ["look": bits, "fontFamily": fontFamily, "fontWeight": fontWeight, "fontItalic": fontItalic, "fontPath": fontPath,
+                "fill": c(fillColor), "stroke": c(strokeColor), "strokeFrac": Double(strokeFrac), "box": boxOn, "boxColor": c(boxColor),
+                "shadow": shadowOn, "highlightColor": c(highlightColor)]
+    }
+    init() {}
+    init(dictionary v: [String: Any], fallback: CaptionLook) {
+        self = fallback
+        func color(_ k: String, _ d: [Float]) -> [Float] {
+            guard let a = v[k] as? [NSNumber], a.count >= 4 else { return d }
+            return a.prefix(4).map(\.floatValue)
+        }
+        bits = (v["look"] as? NSNumber)?.intValue ?? bits
+        fontFamily = v["fontFamily"] as? String ?? fontFamily
+        fontWeight = (v["fontWeight"] as? NSNumber)?.intValue ?? fontWeight
+        fontItalic = (v["fontItalic"] as? NSNumber)?.boolValue ?? fontItalic
+        fontPath = v["fontPath"] as? String ?? fontPath
+        fillColor = color("fill", fillColor); strokeColor = color("stroke", strokeColor)
+        strokeFrac = (v["strokeFrac"] as? NSNumber)?.floatValue ?? strokeFrac
+        boxOn = (v["box"] as? NSNumber)?.boolValue ?? boxOn; boxColor = color("boxColor", boxColor)
+        shadowOn = (v["shadow"] as? NSNumber)?.boolValue ?? shadowOn
+        highlightColor = color("highlightColor", highlightColor)
+    }
+}
+
+/// Aparência resolvida pelo motor (presets::caption_preview_json), para desenhar a amostra.
+struct CaptionPreview: Equatable {
+    var weight = 700, italic = false, fill: [Float] = [1, 1, 1, 1], stroke: [Float] = [0, 0, 0, 1], strokeFrac: Float = 0
+    var box = false, boxColor: [Float] = [0, 0, 0, 0.7], shadow = false, shadowColor: [Float] = [0, 0, 0, 0.6], glow = false
+    var highlight = false, highlightColor: [Float] = [1, 1, 1, 1], uppercase = false
+    init?(json: String) {
+        guard let data = json.data(using: .utf8), let v = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        self.init(dictionary: v)
+    }
+    init(dictionary v: [String: Any]) {
+        func c(_ k: String, _ d: [Float]) -> [Float] { (v[k] as? [NSNumber]).map { $0.prefix(4).map(\.floatValue) } ?? d }
+        weight = (v["weight"] as? NSNumber)?.intValue ?? 700; italic = (v["italic"] as? NSNumber)?.boolValue ?? false
+        fill = c("fill", fill); stroke = c("stroke", stroke); strokeFrac = (v["strokeFrac"] as? NSNumber)?.floatValue ?? 0
+        box = (v["box"] as? NSNumber)?.boolValue ?? false; boxColor = c("boxColor", boxColor)
+        shadow = (v["shadow"] as? NSNumber)?.boolValue ?? false; shadowColor = c("shadowColor", shadowColor)
+        glow = (v["glow"] as? NSNumber)?.boolValue ?? false
+        highlight = (v["highlight"] as? NSNumber)?.boolValue ?? false; highlightColor = c("highlightColor", highlightColor)
+        uppercase = (v["uppercase"] as? NSNumber)?.boolValue ?? false
+    }
+}
+
+private extension Array where Element == Float {
+    var color: Color { Color(.sRGB, red: Double(self[0]), green: Double(self[1]), blue: Double(self[2]), opacity: Double(count > 3 ? self[3] : 1)) }
+}
+
+/// A amostra "Aa" com a aparência que o motor resolveu (o "a" leva a cor do destaque).
+struct CaptionSampleView: View {
+    let preview: CaptionPreview
+    let text: String
+    let size: CGFloat
+    var body: some View {
+        let shown = preview.uppercase ? text.uppercased() : text
+        let split = shown.lastIndex(of: " ").map { shown.index(after: $0) } ?? shown.index(before: shown.endIndex)
+        let fill = preview.fill.color
+        let accent = preview.highlight ? preview.highlightColor.color : fill
+        let font = Font.system(size: size, weight: Self.weight(preview.weight)).italic(preview.italic)
+        let styled = Text(String(shown[..<split])).foregroundColor(fill) + Text(String(shown[split...])).foregroundColor(accent)
+        let width = size * CGFloat(preview.strokeFrac)
+        return ZStack {
+            if width > 0.3 {
+                // Contorno: a mesma linha deslocada em oito direções, na cor do contorno.
+                ForEach(0..<8, id: \.self) { i in
+                    let a = Double(i) * .pi / 4
+                    Text(shown).font(font).foregroundColor(preview.stroke.color)
+                        .offset(x: cos(a) * width, y: sin(a) * width)
+                }
+            }
+            styled.font(font)
+                .shadow(color: preview.shadow ? preview.shadowColor.color : .clear,
+                        radius: preview.glow ? size * 0.4 : size * 0.12, x: 0, y: preview.glow ? 0 : size * 0.08)
+        }
+        .lineLimit(1)
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(preview.box ? preview.boxColor.color : .clear, in: RoundedRectangle(cornerRadius: 6))
+    }
+    static func weight(_ w: Int) -> Font.Weight {
+        switch w { case ..<250: return .thin; case ..<350: return .light; case ..<450: return .regular; case ..<550: return .medium
+        case ..<650: return .semibold; case ..<750: return .bold; case ..<850: return .heavy; default: return .black }
+    }
+}
+
+/// Nome de cada modelo do motor (o id é estável; o texto, do idioma do app).
+enum CaptionTemplates {
+    static let names: [String: String] = [
+        "highlight": "pn_caption_style_highlight", "classic": "pn_caption_style_classic", "box": "panel_caixa",
+        "neon": "pn_caption_style_neon", "karaoke": "pn_karaoke", "pop": "pn_pop", "soft": "pack_text_4", "glow": "pack_text_5",
+        "gold": "cap046_tpl_gold", "bubble": "cap046_tpl_bubble", "mint": "cap046_tpl_mint",
+        "comic": "cap046_tpl_comic", "tag": "cap046_tpl_tag", "minimal": "cap046_tpl_minimal",
+    ]
+    @MainActor static var cached: [(id: String, preview: CaptionPreview)]?
+    @MainActor static func list(_ engine: AureaEngine) -> [(id: String, preview: CaptionPreview)] {
+        if let cached { return cached }
+        guard let data = engine.captionTemplates().data(using: .utf8),
+              let array = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
+        let list = array.compactMap { o -> (id: String, preview: CaptionPreview)? in
+            guard let id = o["id"] as? String, let p = o["preview"] as? [String: Any] else { return nil }
+            return (id, CaptionPreview(dictionary: p))
+        }
+        cached = list
+        return list
+    }
+}
+
+/// Modelos prontos: o cartão desenha o próprio estilo.
+@MainActor
+struct CaptionTemplateRow: View {
+    @EnvironmentObject private var model: AureaModel
+    let selected: String?
+    let enabled: Bool
+    let onPick: (String) -> Void
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(CaptionTemplates.list(model.engine), id: \.id) { t in
+                    let name = AureaText.t(CaptionTemplates.names[t.id] ?? "panel_estilo")
+                    let on = selected == t.id
+                    Button { onPick(t.id) } label: {
+                        VStack(spacing: 6) {
+                            CaptionSampleView(preview: t.preview, text: "Aa", size: 22)
+                                .frame(maxWidth: .infinity, minHeight: 40).background(Color(red: 0.23, green: 0.25, blue: 0.28))
+                            Text(name).font(.aurea(size: 11)).lineLimit(1).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
+                        }
+                        .frame(width: 92).padding(.vertical, 10)
+                        .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(on ? AureaColors.accent : .clear, lineWidth: 2))
+                    }
+                    .buttonStyle(AureaPressStyle()).disabled(!enabled)
+                    .accessibilityLabel(name)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }.padding(.vertical, 8)
+        }
+    }
+}
+
+/// "Personalizar estilo": fonte, cor do texto, contorno, fundo, sombra e cor do destaque.
+@MainActor
+struct CaptionCustomizeView: View {
+    @Binding var look: CaptionLook
+    let highlight: Bool
+    let preview: CaptionPreview?
+    let openFonts: () -> Void
+    let onChange: () -> Void
+    @State private var open = false
+    private static let swatches: [(UInt32, String)] = [
+        (0xFFFFFF, "cap046_color_white"), (0x000000, "cap046_color_black"), (0xFFE34D, "cap046_color_yellow"),
+        (0xFFC23D, "cap046_color_gold"), (0xFF8A00, "cap046_color_orange"), (0xE5252A, "cap046_color_red"),
+        (0xFF3D7F, "cap046_color_pink"), (0xA259FF, "cap046_color_purple"), (0x2F7BFF, "cap046_color_blue"),
+        (0x3DE0FF, "cap046_color_cyan"), (0x4CD964, "cap046_color_green"), (0x7CFFB2, "cap046_color_mint"),
+    ]
+    private static func rgba(_ hex: UInt32, _ a: Float = 1) -> [Float] {
+        [Float((hex >> 16) & 255) / 255, Float((hex >> 8) & 255) / 255, Float(hex & 255) / 255, a]
+    }
+    private func change(_ f: (inout CaptionLook) -> Void) { f(&look); onChange() }
+    var body: some View {
+        let fromStyle = AureaText.t("cap046_from_style")
+        VStack(alignment: .leading, spacing: 0) {
+            Button { open.toggle() } label: {
+                HStack {
+                    Text(AureaText.t("cap046_customize")).font(.aurea(size: 13, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(open ? "▴" : "▾").font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                }.frame(minHeight: 48).contentShape(Rectangle())
+            }.buttonStyle(AureaPressStyle()).accessibilityAddTraits(open ? .isSelected : [])
+            if open {
+                if let preview {
+                    CaptionSampleView(preview: preview, text: AureaText.t("cap046_sample"), size: 20)
+                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                        .background(Color(red: 0.23, green: 0.25, blue: 0.28), in: RoundedRectangle(cornerRadius: 10)).padding(.vertical, 6)
+                }
+                HStack {
+                    Text(AureaText.t("panel_fonte")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                    if look.has(CaptionLook.font) { chip(fromStyle, on: false) { change { $0.set(CaptionLook.font, false) } } }
+                    Button(action: openFonts) {
+                        Text((look.has(CaptionLook.font) && !look.fontFamily.isEmpty ? look.fontFamily : fromStyle) + "  ›")
+                            .font(.aurea(size: 13)).foregroundStyle(AureaColors.accent)
+                    }.buttonStyle(AureaPressStyle())
+                }.frame(minHeight: 48)
+                section("cap046_text_color")
+                swatchRow(current: look.has(CaptionLook.fill) ? look.fillColor : nil, styleLabel: fromStyle) { hex in
+                    change { l in if let hex { l.set(CaptionLook.fill, true); l.fillColor = Self.rgba(hex) } else { l.set(CaptionLook.fill, false) } }
+                }
+                section("panel_contorno")
+                let widths: [Float] = [0, 0.05, 0.09, 0.14]
+                let strokeIndex = look.has(CaptionLook.stroke) ? (widths.firstIndex { abs($0 - look.strokeFrac) < 0.005 } ?? -1) + 1 : 0
+                chipRow([fromStyle, AureaText.t("cap046_none"), AureaText.t("cap046_thin"), AureaText.t("cap046_medium"), AureaText.t("cap046_thick")], selected: strokeIndex) { i in
+                    change { l in if i == 0 { l.set(CaptionLook.stroke, false) } else { l.set(CaptionLook.stroke, true); l.strokeFrac = widths[i - 1] } }
+                }
+                if look.has(CaptionLook.stroke) && look.strokeFrac > 0 {
+                    swatchRow(current: look.strokeColor, styleLabel: nil) { hex in if let hex { change { $0.strokeColor = Self.rgba(hex) } } }
+                }
+                section("panel_fundo")
+                chipRow([fromStyle, AureaText.t("cap046_none"), AureaText.t("cap046_on")],
+                        selected: !look.has(CaptionLook.box) ? 0 : look.boxOn ? 2 : 1) { i in
+                    change { l in if i == 0 { l.set(CaptionLook.box, false) } else { l.set(CaptionLook.box, true); l.boxOn = i == 2 } }
+                }
+                if look.has(CaptionLook.box) && look.boxOn {
+                    swatchRow(current: look.boxColor, styleLabel: nil) { hex in if let hex { change { $0.boxColor = Self.rgba(hex, hex == 0 ? 0.7 : 0.9) } } }
+                }
+                section("panel_sombra")
+                chipRow([fromStyle, AureaText.t("cap046_none"), AureaText.t("cap046_on")],
+                        selected: !look.has(CaptionLook.shadow) ? 0 : look.shadowOn ? 2 : 1) { i in
+                    change { l in if i == 0 { l.set(CaptionLook.shadow, false) } else { l.set(CaptionLook.shadow, true); l.shadowOn = i == 2 } }
+                }
+                if highlight {
+                    section("cap046_highlight_color")
+                    swatchRow(current: look.highlightColor, styleLabel: nil) { hex in if let hex { change { $0.highlightColor = Self.rgba(hex) } } }
+                }
+                Spacer().frame(height: 6)
+            }
+        }
+    }
+    private func section(_ key: String) -> some View {
+        Text(AureaText.t(key)).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).padding(.top, 6)
+    }
+    private func chip(_ label: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.accent : AureaColors.text)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+        }.buttonStyle(AureaPressStyle()).accessibilityAddTraits(on ? .isSelected : [])
+    }
+    private func chipRow(_ options: [String], selected: Int, onPick: @escaping (Int) -> Void) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) { ForEach(options.indices, id: \.self) { i in chip(options[i], on: i == selected) { onPick(i) } } }
+        }.frame(minHeight: 44)
+    }
+    /// Paleta: `current` nulo = "do estilo" (o primeiro chip, quando `styleLabel` existe).
+    private func swatchRow(current: [Float]?, styleLabel: String?, onPick: @escaping (UInt32?) -> Void) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if let styleLabel { chip(styleLabel, on: current == nil) { onPick(nil) } }
+                ForEach(Self.swatches, id: \.0) { item in
+                    let hex = item.0, key = item.1
+                    let c = Self.rgba(hex)
+                    let on = current.map { cur in (0..<3).allSatisfy { abs(cur[$0] - c[$0]) < 0.01 } } ?? false
+                    Button { onPick(hex) } label: {
+                        Circle().fill(c.color).frame(width: 32, height: 32)
+                            .overlay(Circle().stroke(on ? AureaColors.accent : Color.white.opacity(0.33), lineWidth: on ? 3 : 1))
+                    }.buttonStyle(AureaPressStyle())
+                    .accessibilityLabel(AureaText.t(key))
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+        }.frame(minHeight: 48)
     }
 }
 

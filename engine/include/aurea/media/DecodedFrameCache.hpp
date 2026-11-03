@@ -62,6 +62,12 @@ public:
     [[nodiscard]] Config config() const noexcept;
     /// Number of future frames that can coexist with the current display frame.
     [[nodiscard]] u32 prefetch_capacity() const noexcept;
+    /// 0.4.6: cabe mais um quadro ADIANTE de `afterUs` (o último entregue) sem
+    /// que ele seja recusado ou despeje um quadro ainda à frente do foco? Não =
+    /// o decoder para de adiantar: um quadro já decodificado e jogado fora só
+    /// volta com seek ao keyframe — com GOP longo, centenas de quadros por
+    /// quadro de export (o "vídeo de 1 MB que leva 10 min").
+    [[nodiscard]] bool room_ahead(i64 afterUs) const noexcept;
 
     /// Liga ao orçamento do motor (categoria DecodedFrames). Idempotente;
     /// nulo desliga. Os bytes já guardados passam a contar na hora.

@@ -142,6 +142,14 @@ internal fun TextAnimSection(env: PanelEnv, showAnimatorEffect: Boolean = true) 
     if (showAnimatorEffect) TextButton(modifier = Modifier.testTag("text.animator.add"), onClick = {
             store.addEffectAndFocus(effectTypeId("aurea.text.animator")); env.onOpenPanel(EditorPanel.Effects)
     }) { Text(stringResource(R.string.text_animator_add)) }
+    // 0.4.6: o Text Animator Pro (só texto 2D; a forma 3D usa o animador comum).
+    if (showAnimatorEffect && env.store.text3d == null) TextButton(modifier = Modifier.testTag("text.animator_pro.add"), onClick = {
+            env.store.addEffectAndFocus(effectTypeId("aurea.text.animator_pro")); env.onOpenPanel(EditorPanel.Effects)
+    }) { Text(stringResource(R.string.text_animator_pro_add)) }
+    // 0.4.6: preset de texto do After Effects (.ffx) direto no Text Animator Pro (editável no efeito).
+    if (showAnimatorEffect && env.store.text3d == null) TextButton(modifier = Modifier.testTag("text.animator_pro.ffx"), onClick = {
+            env.store.requestAeImport(textAnimatorPro = true)
+    }) { Text(stringResource(R.string.text_animator_pro_import)) }
     if (showAnimatorEffect) TextButton(modifier = Modifier.testTag("text.transform.add"), onClick = {
             store.addEffectAndFocus(effectTypeId("aurea.text.transform")); env.onOpenPanel(EditorPanel.Effects)
     }) { Text(stringResource(R.string.text_transform_add)) }

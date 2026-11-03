@@ -22,7 +22,7 @@ struct ContentView: View {
 
             if appConfig.updateRequired, let forced = appConfig.config {
                 ForcedUpdateView(config: forced).zIndex(10)
-            } else if !conta.logado {
+            } else if !conta.logado && !skipEntryScreensForTesting {
                 // 0.4.1: sem sessão guardada, só a tela de conta (como até a 0.1.4).
                 ContaView().zIndex(5)
             } else {

@@ -414,7 +414,79 @@ struct Applier {
         }
     }
 
+    // --- 0.4.6: animador do AE -> efeito Text Animator Pro (editavel) ----------
+    bool pro = false;                 ///< importar animadores de texto no Text Animator Pro
+    std::vector<u32> proEffects;      ///< efeitos Pro criados (recebem o agrupamento do "Mais opcoes")
+    std::vector<const Node*> proMore; ///< propriedades do "Mais opcoes" (aplicadas no fim a cada Pro)
+
+    void pro_apply(u32 fx, u32 kind, const Node& n, bool index) {
+        const std::string_view m = n.match;
+        if (kind == 0 && index && starts(m, "ADBE Text Percent")) return;
+        if (kind == 0 && !index && starts(m, "ADBE Text Index")) return;
+        apply_prop(bind_text_pro(fx, kind, m, w.layer ? w.layer->text.size : 72.0), n, kind == 3 ? "propriedade" : "seletor");
+    }
+
+    void animator_pro(const Node& n) {
+        if (n.kind != Node::Kind::Group || !text_ok()) return;
+        const EffectTypeId type = effect_type_id(text::kAnimatorProEffect);
+        const u32 fx = host.add_effect(lid, type);
+        refresh();
+        EffectInstance* inst = w.layer ? w.layer->find_effect(EffectId{fx, 0}) : nullptr;
+        if (fx == kInvalidIndex || !inst) { rep.skip("texto", n.name, "o Aurea recusou o Text Animator Pro nesta camada"); return; }
+        inst->enabled = (n.flags & 1u) != 0 || n.flags == 0;
+        proEffects.push_back(fx);
+        ++rep.animators;
+        ++applied;
+        if (const Node* sels = n.child("ADBE Text Selectors")) {
+            bool range = false, wiggly = false, expression = false;
+            for (const Node& s : sels->children) {
+                if (s.kind != Node::Kind::Group) continue;
+                if ((s.flags & 1u) == 0 && s.flags != 0) continue;   // desligado no AE
+                const u32 k = selector_kind(s.match);
+                const std::string shown = s.name.empty() ? std::string(s.match) : s.name;
+                if (k > 2 || (k == 0 && range) || (k == 1 && wiggly) || (k == 2 && expression)) {
+                    rep.note("seletor", shown, "o Text Animator Pro combina um seletor de intervalo, um de oscilacao e um de expressao: este ficou de fora");
+                    continue;
+                }
+                std::vector<const Node*> v;
+                leaves(s, v);
+                const bool index = k == 0 && leaf_value(v, "ADBE Text Range Units", 1) > 1.5;
+                if (k == 2) {
+                    refresh();
+                    if (EffectInstance* e = w.layer->find_effect(EffectId{fx, 0}); e && text::apExprOn < e->params.size())
+                        e->params[text::apExprOn].constant.v[0] = 1.0f;
+                    expression = true;
+                } else if (k == 1) {
+                    refresh();
+                    if (EffectInstance* e = w.layer->find_effect(EffectId{fx, 0}); e && text::apWiggly < e->params.size())
+                        e->params[text::apWiggly].constant.v[0] = 1.0f;
+                    // Sem intervalo antes: a oscilacao age no texto todo.
+                    wiggly = true;
+                } else {
+                    range = true;
+                }
+                for (const Node* leaf : v) pro_apply(fx, k, *leaf, index);
+            }
+            // Só oscilação (sem intervalo): no AE ela age sozinha. No Pro o
+            // intervalo some (Fim 0) e a oscilação SOMA ao nada.
+            if (wiggly && !range) {
+                refresh();
+                if (EffectInstance* e = w.layer->find_effect(EffectId{fx, 0}); e && text::apWigglyMode < e->params.size()) {
+                    e->params[text::apEnd].constant.v[0] = 0.0f;
+                    e->params[text::apWigglyMode].constant.v[0] = 0.0f;
+                }
+            }
+        }
+        if (const Node* props = n.child("ADBE Text Animator Properties")) {
+            for (const Node& p : props->children) {
+                if (p.kind != Node::Kind::Property || p.hidden()) continue;
+                pro_apply(fx, 3, p, false);
+            }
+        }
+    }
+
     void animator(const Node& n) {
+        if (pro && w.layer && w.layer->kind == LayerKind::Text) { animator_pro(n); return; }
         if (n.kind != Node::Kind::Group || !text_ok()) return;
         Layer& l = *w.layer;
         if (l.text.animators.size() >= 64) {
@@ -475,6 +547,8 @@ struct Applier {
     void text_more(const Node& n) {
         if (n.kind == Node::Kind::Group) { for (const Node& c : n.children) text_more(c); return; }
         if (n.kind != Node::Kind::Property || !text_ok()) return;
+        // Pro: o agrupamento e o alinhamento valem para cada Text Animator Pro do preset (no fim).
+        if (pro && (n.match == "ADBE Text Anchor Point Option" || n.match == "ADBE Text Anchor Point Align")) { proMore.push_back(&n); return; }
         if (n.match == "ADBE Text Anchor Point Align") {
             const bool zero = !n.hasValue || std::all_of(n.value.begin(), n.value.end(), [](f64 x) { return std::fabs(x) < 1e-6; });
             if (zero && !animated(n)) return;
@@ -689,6 +763,11 @@ struct Applier {
     void finish() {
         Layer* l = w.layer;
         if (!l) return;
+        for (const u32 fx : proEffects)
+            for (const Node* n : proMore) { refresh(); pro_apply(fx, 3, *n, false); }
+        refresh();
+        l = w.layer;
+        if (!l) return;
         if (w.pendingPathMask > 0) {
             const usize i = static_cast<usize>(w.pendingPathMask - 1);
             if (i < maskIds.size()) {
@@ -721,7 +800,7 @@ struct Applier {
 
 } // namespace
 
-bool apply_ffx(const FfxDocument& doc, Host& host, LayerId target, ImportReport& report) {
+bool apply_ffx(const FfxDocument& doc, Host& host, LayerId target, ImportReport& report, bool textAnimatorPro) {
     report.kind = "ffx";
     Composition* comp = host.composition();
     Layer* l = comp ? comp->layer(target) : nullptr;
@@ -734,6 +813,7 @@ bool apply_ffx(const FfxDocument& doc, Host& host, LayerId target, ImportReport&
         return false;
     }
     Applier a(host, target, report);
+    a.pro = textAnimatorPro;
     a.comp = comp;
     a.w.layer = l;
     a.w.fps = comp->fps() > 0 ? comp->fps() : 30.0;

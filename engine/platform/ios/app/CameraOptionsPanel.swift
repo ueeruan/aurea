@@ -201,25 +201,29 @@ struct CameraOptionsPanel: View {
         }
     }
 
-    /// Perspectiva ⇄ paralela: menu com a Perspectiva marcada e a Paralela
-    /// desabilitada (o motor só tem perspectiva; a paralela é P2-4).
+    /// Perspectiva ⇄ paralela (0.4.6: a ortográfica do motor; par do Android `ProjectionButton`).
     private var projectionButton: some View {
-        Button { projectionOpen = true } label: {
-            CupertinoGlyph.text(CupertinoGlyph.Cube, size: 22, color: AureaColors.accent)
+        let parallel = lens.count > 10 && lens[10] >= 0.5
+        return Button { projectionOpen = true } label: {
+            CupertinoGlyph.text(parallel ? CupertinoGlyph.Square : CupertinoGlyph.Cube, size: 22, color: AureaColors.accent)
                 .frame(width: 40, height: PanelMetrics.fieldHeight)
                 .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: PanelMetrics.fieldRadius))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(AureaPressStyle(shrink: 1))
-        .accessibilityLabel(AureaText.t("om_ap_cam_perspective"))
-        .accessibilityHint(AureaText.t("om_ap_cam_parallel_soon"))
+        .accessibilityLabel(AureaText.t(parallel ? "om_ap_cam_parallel" : "om_ap_cam_perspective"))
         .accessibilityIdentifier("camera.view.projection")
         .aureaAnchoredMenu(isPresented: $projectionOpen, alignEnd: true, tag: "camera.view.projection.menu") {
             [
-                .item(AureaText.t("om_ap_cam_perspective"), glyph: CupertinoGlyph.Cube, selected: true, checked: true) {},
-                .item(AureaText.t("om_ap_cam_parallel"), glyph: CupertinoGlyph.Square,
-                      sublabel: AureaText.t("om_ap_cam_parallel_soon"), enabled: false),
+                .item(AureaText.t("om_ap_cam_perspective"), glyph: CupertinoGlyph.Cube, selected: !parallel, checked: !parallel) {
+                    projectionOpen = false
+                    if parallel { beginGesture(); model.setCameraLens(AureaModel.cameraParallel, value: 0); endGesture() }
+                },
+                .item(AureaText.t("om_ap_cam_parallel"), glyph: CupertinoGlyph.Square, selected: parallel, checked: parallel) {
+                    projectionOpen = false
+                    if !parallel { beginGesture(); model.setCameraLens(AureaModel.cameraParallel, value: 1); endGesture() }
+                },
             ]
         }
     }
@@ -459,10 +463,8 @@ struct CameraOptionsPanel: View {
             Text(AureaText.t("om_ap_cam_fog")).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.muted)
                 .frame(height: 37.5)
                 .accessibilityAddTraits(.isHeader)
-            Text(AureaText.t("om_ap_cam_fog_soon")).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("camera.fog.notice")
-            Spacer(minLength: 0)
+            // 0.4.6: a névoa que a câmera vê (a volumetria da cena, com raios do sol).
+            ScrollView { SceneFogControls().accessibilityIdentifier("camera.fog") }
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

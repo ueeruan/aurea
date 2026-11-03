@@ -40,7 +40,7 @@ struct HttpRequest {
     std::vector<std::pair<std::string, std::string>> headers;
     std::string body;
     u32 timeoutMs = 15000;
-    usize maxBytes = 2u << 20;
+    usize maxBytes = 64u << 20;
 };
 struct HttpResponse {
     bool ok = false;            ///< transporte: houve resposta HTTP
@@ -72,10 +72,12 @@ struct CallHooks {
     std::function<void()> end;
 };
 
-inline constexpr usize kMaxConsoleLines = 200;
-inline constexpr usize kMaxFetchBodyOut = 256u * 1024u;
-inline constexpr u32 kMaxFetchTimeoutMs = 30000;
-inline constexpr usize kMaxPickedFileBytes = 1u << 20;
+inline constexpr usize kMaxConsoleLines = 2000;
+inline constexpr usize kMaxFetchBodyOut = 32u << 20;
+inline constexpr u32 kMaxFetchTimeoutMs = 120000;
+inline constexpr usize kMaxPickedFileBytes = 64u << 20;
+/// 0.4.6: `plugin.getFile` lê arquivos do PRÓPRIO pacote (nunca fora dele).
+inline constexpr usize kMaxPackageFileBytes = 64u << 20;
 /// `Object::hostTag` de um quadro renderizado (comp.renderFrame): `hostData` é
 /// um std::string com o caminho do PNG. `ui.setImage` aceita esse objeto.
 inline constexpr u32 kHostTagFrame = 0xF4A3u;

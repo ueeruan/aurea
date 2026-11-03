@@ -219,7 +219,10 @@ public:
 /// indicador de tempo atual. Falso = nada pôde ser aplicado (`report` diz).
 /// Sem camada escolhida, o Engine cria uma antes (como o AE: texto para preset
 /// de texto, sólido do tamanho da composição para o resto).
-bool apply_ffx(const FfxDocument& doc, Host& host, LayerId target, ImportReport& report);
+/// `textAnimatorPro` (0.4.6): cada animador de texto do preset vira um efeito
+/// Text Animator Pro na camada (todos os seletores e propriedades do AE que o
+/// Pro tem, editáveis no painel do efeito), em vez do animador simples.
+bool apply_ffx(const FfxDocument& doc, Host& host, LayerId target, ImportReport& report, bool textAnimatorPro = false);
 
 /// Limites do sandbox do .jsx.
 struct ScriptLimits {

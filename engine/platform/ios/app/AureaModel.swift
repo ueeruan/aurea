@@ -4182,11 +4182,15 @@ final class AureaModel: ObservableObject {
     /// Preset .ffx na camada escolhida ou script .jsx (interpretador fechado: sem arquivos, rede
     /// nem sistema). Um passo de desfazer; o relatório diz o que ficou de fora. 0.3.1: sem camada
     /// escolhida, o motor cria uma para o preset (como o AE).
+    /// 0.4.6: o próximo .ffx entra no Text Animator Pro (pedido pelo painel de texto). Par do Android.
+    var aeImportTextPro = false
     func importAeFile(url: URL) {
         // Outra importação em curso: diz o porquê em vez de calar (EditorStore.importAeFile).
         guard !importingMedia else { toast = AureaText.t("ios_importing_media"); return }
         importingMedia = true; operationMessage = AureaText.t("ae_importing")
         let native = engine, target = UInt64(bitPattern: primarySelection ?? 0)
+        let textPro = aeImportTextPro
+        aeImportTextPro = false
         mediaQueue.async { [weak self] in
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -4194,7 +4198,7 @@ final class AureaModel: ObservableObject {
             let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             let tooBig = size > 64 * 1024 * 1024
             let data = tooBig ? nil : try? Data(contentsOf: url)
-            let json = data.map { native.importAeData($0, fileName: url.lastPathComponent, layer: target) }
+            let json = data.map { native.importAeData($0, fileName: url.lastPathComponent, layer: target, textAnimatorPro: textPro) }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.importingMedia = false
@@ -4707,6 +4711,58 @@ final class AureaModel: ObservableObject {
     /// Toque duplo no vazio da cena: a vista volta ao ângulo inicial.
     func resetSceneView() { setSceneView(yaw: -30, pitch: 20, distance: 3) }
 
+    // MARK: 0.4.6 — vistas do palco como no After Effects (só a prévia)
+    /// 0 câmera ativa, 1 padrão, 2..7 frente/trás/esquerda/direita/topo/base, 8..10 personalizada 1..3.
+    @Published private(set) var viewMode = 0
+    /// [modo, yaw, pitch, distância, ortográfica] da vista atual (do motor).
+    @Published private(set) var viewOrbit: [Float] = [0, 0, 0, 1, 0]
+    /// Frente..base e personalizadas: um dedo orbita (personalizada), pinça aproxima.
+    var viewNavigable: Bool { viewMode >= 2 && !sceneEditor }
+    func selectViewMode(_ mode: Int) {
+        guard engine.setViewMode(Int32(mode)) else { return }
+        viewMode = mode
+        viewOrbit = engine.queryView().map(\.floatValue)
+        refreshSelectedLayer()
+    }
+    /// Arrasto de um dedo (graus) e pinça (fator) na vista atual.
+    func navigateView(yaw dYaw: Float, pitch dPitch: Float, zoom: Float = 1) {
+        guard viewMode >= 2, viewOrbit.count >= 4 else { return }
+        guard engine.setViewOrbitYaw(viewOrbit[1] + dYaw, pitch: viewOrbit[2] + dPitch, distance: viewOrbit[3] * zoom) else { return }
+        viewOrbit = engine.queryView().map(\.floatValue)
+        refreshSelectedLayer()
+    }
+    // MARK: 0.4.6 — assistente de IA (AssistantView.swift)
+    /// O chat do assistente aberto (tela cheia).
+    @Published var assistantOpen = false
+    /// O assistente pediu uma tela (o motor devolveu {"ui":"open_panel"}): fecha o chat e abre.
+    func assistantOpenPanel(_ panel: String) {
+        assistantOpen = false
+        switch panel {
+        case "media": omegaMediaBrowser = true
+        case "export": pause(); openExport()
+        case "captions": openPanel(.captions)
+        case "effects": openPanel(.effects)
+        case "text": openPanel(.text)
+        case "audio": openPanel(.audio)
+        case "scene3d": enterSceneEditor()
+        default: break
+        }
+    }
+
+    static func viewModeName(_ mode: Int) -> String {
+        switch mode {
+        case 0: return AureaText.t("om_view_active")
+        case 1: return AureaText.t("om_view_default")
+        case 2: return AureaText.t("om_view_front")
+        case 3: return AureaText.t("om_view_back")
+        case 4: return AureaText.t("om_view_left")
+        case 5: return AureaText.t("om_view_right")
+        case 6: return AureaText.t("om_view_top")
+        case 7: return AureaText.t("om_view_bottom")
+        default: return AureaText.t("om_view_custom", mode - 7)
+        }
+    }
+
     /// Objeto 3D sob o dedo (px da composição), decidido pelo motor
     /// (`Engine::scene_pick`): o raio da câmera de navegação contra o corpo real
     /// — plano do texto/forma, triângulos do texto 3D/forma 3D/modelo — em
@@ -4825,6 +4881,8 @@ final class AureaModel: ObservableObject {
     static let cameraLensBlur: UInt32 = 4
     /// A câmera afeta as camadas 2D abaixo dela (0/1).
     static let cameraAffectsBelow: UInt32 = 7
+    /// 0.4.6: câmera paralela (ortográfica, `CameraData::parallel`).
+    static let cameraParallel: UInt32 = 8
 
     /// Trilha animável de um parâmetro da lente (`aurea::TrackProperty`; DOF ligado não anima).
     func cameraLensTrack(_ param: UInt32) -> UInt32? {
@@ -5989,6 +6047,24 @@ final class AureaModel: ObservableObject {
     /// outra linha não anda). Um passo de desfazer.
     /// Máscara de recorte ("Criar/Liberar máscara de recorte"): a regra mora no
     /// motor (elegibilidade e cadeias); aqui só pede e relê.
+    /// 0.4.6: alças do canto do caminho de movimento (keyframe de posição no
+    /// quadro LOCAL `time`, px do espaço do pai). Zero = canto reto.
+    func setPositionTangents(_ id: Int64, time: Int32, inHandle: SIMD2<Float>, outHandle: SIMD2<Float>) {
+        if selectedLayer?.locked == true { toast = AureaText.t("editor_camada_bloqueada"); return }
+        let values = [inHandle.x, inHandle.y, 0, outHandle.x, outHandle.y, 0].map { NSNumber(value: $0) }
+        mutate { _ = $0.setPositionTangents(id, time: Int64(time), values: values) }
+        refreshModel(force: true)
+    }
+
+    /// 0.4.6: espelhar a camada (par do EditorStore.flipLayer): a escala do eixo troca de sinal.
+    func flipLayer(_ id: Int64, vertical: Bool) {
+        guard let d = engine.layerDetail(id), let scale = d["scale"] as? [NSNumber], scale.count >= 2 else { return }
+        if (d["locked"] as? NSNumber)?.boolValue == true { toast = AureaText.t("editor_camada_bloqueada"); return }
+        beginGesture(vertical ? "espelhar vertical" : "espelhar horizontal")
+        setTransform(vertical ? 4 : 3, value: -scale[vertical ? 1 : 0].floatValue, layer: id)
+        endGesture()
+    }
+
     func setLayerClipToBelow(_ id: Int64, _ on: Bool) {
         mutate { engine in _ = engine.setLayer(id, clipToBelow: on) }
         refreshModel(force: true)

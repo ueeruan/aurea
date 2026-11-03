@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.6: neblina volumétrica com raios de luz (Render3DTab, Scene3DEnvironment.kt). -->
+    <string name="scene046_fog">Niebla y rayos de luz</string>
+    <string name="scene046_fog_hint">Bruma en el aire; el sol atraviesa los huecos en haces</string>
+    <string name="scene046_fog_density">Densidad</string>
+    <string name="scene046_fog_rays">Rayos del sol</string>
+</resources>

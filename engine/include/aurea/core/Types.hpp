@@ -186,11 +186,16 @@ enum class Interpolation : u8 {
     // Gravado no projeto: um tipo novo entra SEMPRE no fim. Um app antigo lê
     // o valor desconhecido como Linear (checked_enum na leitura).
     Overshoot,  ///< "back": passa do valor final e volta (parâmetros em bx1/bx2)
+    // 0.4.6: curvas de repetição e aleatórias (parâmetros em bx1/by1/bx2).
+    Repeat,     ///< dente de serra: o trecho inteiro N vezes (0→1, 0→1, …)
+    PingPong,   ///< vai e volta: 0→1→0→1… em N meias-voltas (ímpar: termina em 1)
+    Wave,       ///< onda: o linear com uma senoide de N ciclos por cima
+    Random,     ///< degraus aleatórios (fixos por semente), com suavização
 };
 
 /// O último tipo de curva conhecido: os limites de leitura/validação usam este
 /// nome, não `Steps`, para um tipo novo não ser recusado como lixo.
-inline constexpr Interpolation kLastInterpolation = Interpolation::Overshoot;
+inline constexpr Interpolation kLastInterpolation = Interpolation::Random;
 
 /// Modo da máscara na pilha (AE). `None` entra no FIM para os projetos
 /// gravados antes dele continuarem com os mesmos números.

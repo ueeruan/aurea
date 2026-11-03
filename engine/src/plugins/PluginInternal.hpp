@@ -78,8 +78,25 @@ struct CompiledStackStep {
 [[nodiscard]] bool compile_stack(const Manifest& m, const EffectRegistry& registry,
                                  std::vector<CompiledStackStep>& out, std::string& error);
 
+/// 0.4.6: uma imagem do pacote ("textures"), decodificada uma vez em RGBA8.
+struct PluginImage {
+    u32 width = 0, height = 0;
+    std::vector<u8> rgba;   ///< RGBA8, linha a linha
+    u64 key = 0;            ///< identidade do conteúdo (cache de textura do renderer)
+    bool srgb = false;      ///< a GPU lineariza ao amostrar (cor num plugin linear)
+};
+using PluginImages = std::vector<std::shared_ptr<const PluginImage>>;
+/// Decodifica `file` (PNG/JPG) para RGBA8. Falso = `error` diz o motivo.
+[[nodiscard]] bool decode_plugin_image(const std::string& path, const std::string& pluginId, const TextureDecl& decl,
+                                       bool srgbPlugin, PluginImage& out, std::string& error);
+/// Quantos vec4 de parâmetro o bloco `aurea` declara (≥ 1: GLSL não aceita array vazio).
+[[nodiscard]] inline u32 param_slots(const Manifest& m) noexcept {
+    return m.params.empty() ? 1u : static_cast<u32>(m.params.size());
+}
+
 /// O efeito de um plugin "shader": um `ShaderId` dinâmico por passe.
-[[nodiscard]] std::unique_ptr<Effect> make_shader_effect(const Manifest& m, std::vector<ShaderId> passShaders);
+[[nodiscard]] std::unique_ptr<Effect> make_shader_effect(const Manifest& m, std::vector<ShaderId> passShaders,
+                                                         PluginImages images = {});
 /// O efeito de um plugin "stack".
 [[nodiscard]] std::unique_ptr<Effect> make_stack_effect(const Manifest& m, std::vector<CompiledStackStep> steps);
 

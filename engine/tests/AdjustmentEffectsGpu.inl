@@ -66,6 +66,9 @@ inline void configure(const Effect& fx, const ParameterRegistry& params, EffectI
         for (u32 p = 0; p < params.count(); ++p) e.params[p].constant = values[p];
     }
     if (fx.type_id() == effect_type_id(effect_keys::kCornerPin)) e.params[0].constant = ParamValue::scalar(20.f);
+    // 0.4.6: a sombra longa fica ATRÁS da camada; com o quadro inteiro opaco só
+    // aparece no modo "só a sombra".
+    if (std::strcmp(key, "aurea.stylize.long_shadow") == 0) e.params[5].constant = ParamValue::scalar(1.0f);
     if (fx.type_id() == effect_type_id(effect_keys::kCubeLut)) e.params[0].constant.ref = AssetId{12, 1}.pack();
     if (std::strncmp(key, "aurea.repeat.", 13) == 0) {
         e.params[0].constant = ParamValue::scalar(4);

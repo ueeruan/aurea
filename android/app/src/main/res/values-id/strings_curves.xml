@@ -8,4 +8,17 @@
     <string name="curve_param_oscillations">Osilasi</string>
     <string name="curve_param_damping">Redaman</string>
     <string name="curve_param_oscillations_value">Osilasi: %1$d</string>
+    <!-- 0.4.6: curvas de repetição e aleatórias -->
+    <string name="curve_type_steps">Langkah</string>
+    <string name="curve_type_repeat">Ulangi</string>
+    <string name="curve_type_pingpong">Bolak-balik</string>
+    <string name="curve_type_wave">Gelombang</string>
+    <string name="curve_type_random">Acak</string>
+    <string name="curve_param_steps">Langkah: %1$d</string>
+    <string name="curve_param_repeats">Kali: %1$d</string>
+    <string name="curve_param_turns">Setengah putaran: %1$d</string>
+    <string name="curve_param_cycles">Siklus: %1$d</string>
+    <string name="curve_param_amplitude">Amplitudo</string>
+    <string name="curve_param_smooth">Haluskan</string>
+    <string name="curve_param_seed">Acak ulang</string>
 </resources>

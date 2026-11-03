@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.4.6: neblina volumétrica com raios de luz (Render3DTab, Scene3DEnvironment.kt). -->
+    <string name="scene046_fog">कोहरा और प्रकाश किरणें</string>
+    <string name="scene046_fog_hint">हवा में धुंध; सूरज दरारों से किरणों के रूप में आता है</string>
+    <string name="scene046_fog_density">घनत्व</string>
+    <string name="scene046_fog_rays">सूर्य की किरणें</string>
+</resources>

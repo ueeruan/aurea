@@ -439,3 +439,36 @@ AUREA_TEST(Scene3DFloor, LeavingReflectiveFloorRestoresTheDefaultLook) {
     AUREA_CHECK_EQ(f[0], 1.0f);
     AUREA_CHECK(std::fabs(f[1] - .3f) < 1e-6f);
 }
+
+// 0.4.6: câmera PARALELA (ortográfica). O plano das camadas 2D fica com o mesmo
+// enquadramento; um ponto mais fundo não encolhe para o centro (sem perspectiva);
+// o modo grava e volta pelo desfazer.
+AUREA_TEST(CameraLens, ParallelCameraKeepsTheLayerPlaneAndDropsPerspective) {
+    LensRig r;
+    AUREA_CHECK(r.ok); if (!r.ok) return;
+    const Composition* c = comp_of(r.e);
+    auto project = [&](f32 x, f32 z) {
+        const Mat4 vp = comp_view_projection(*c, FrameIndex{0});
+        const Vec4 p = vp * Vec4{c->width() * 0.5f + x, c->height() * 0.5f, z, 1.0f};
+        return p.x / p.w - c->width() * 0.5f;
+    };
+    const f32 perspNear = project(40.0f, 0.0f), perspDeep = project(40.0f, 600.0f);
+    AUREA_CHECK(perspDeep < perspNear - 1.0f);   // perspectiva: o fundo encolhe
+    AUREA_CHECK(lens(r.e, r.cam, 8, 1.0f).ok());
+    AUREA_CHECK(r.camera()->camera.parallel);
+    std::vector<f32> v(11, 0.0f);
+    AUREA_CHECK(r.e.query_camera_lens(r.cam, v.data(), 11));
+    AUREA_CHECK(v[10] == 1.0f);
+    const f32 orthoNear = project(40.0f, 0.0f), orthoDeep = project(40.0f, 600.0f);
+    AUREA_CHECK_NEAR(orthoNear, perspNear, 0.05f);   // mesmo enquadramento no plano z = 0
+    AUREA_CHECK_NEAR(orthoDeep, orthoNear, 0.05f);   // sem perspectiva
+    const scene3d::SceneCamera cam = comp_camera(*c, FrameIndex{0}, c->width(), c->height());
+    AUREA_CHECK(cam.orthographic && cam.orthoHeight > 0.0f);
+    // A profundidade continua Z reverso: mais perto = maior.
+    const Mat4 proj = scene3d::camera_projection(cam, static_cast<f32>(c->width()) / c->height());
+    const Vec4 a = proj * Vec4{0, 0, 100.0f, 1}, b = proj * Vec4{0, 0, 5000.0f, 1};
+    AUREA_CHECK(a.z / a.w > b.z / b.w && b.z / b.w > 0.0f && a.z / a.w <= 1.0f);
+    Command undo; undo.type = CommandType::Undo;
+    AUREA_CHECK(r.e.apply_command(undo).ok());
+    AUREA_CHECK(!r.camera()->camera.parallel);
+}

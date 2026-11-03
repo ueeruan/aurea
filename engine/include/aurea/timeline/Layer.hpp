@@ -23,6 +23,7 @@
 #include "aurea/core/Handle.hpp"
 #include "aurea/core/Math.hpp"
 #include "aurea/animation/Curve.hpp"
+#include "aurea/timeline/SpatialPath.hpp"
 #include "aurea/effects/Parameter.hpp"
 #include "aurea/vector/VectorData.hpp"
 #include "aurea/text/Captions.hpp"
@@ -257,6 +258,16 @@ struct TextData {
     /// meio das duas. `pathForceAlign` espalha cada linha da inicial à final.
     f32         pathLastMargin = 0.0f;
     bool        pathForceAlign = false;
+    /// 0.4.6 (v53): TEXTO DINÂMICO. Ligado, as marcas no texto viram valores a
+    /// cada quadro (text::expand_dynamic): {#} = contador de `counterFrom` a
+    /// `counterTo` ao longo da duração da camada (curva `counterEase`),
+    /// {tc} = timecode HH:MM:SS:QQ da composição, {t} = M:SS, {f} = quadro.
+    bool        dynamic = false;
+    f64         counterFrom = 0.0;
+    f64         counterTo = 100.0;
+    u8          counterDecimals = 0;          ///< 0..6
+    bool        counterGrouping = true;       ///< separador de milhar (1.000)
+    u8          counterEase = static_cast<u8>(Interpolation::Linear);
     /// Projeto de antes da v49: a letra ia para margem + posição na caixa
     /// (o alinhamento não contava). Fica assim até mexerem no caminho.
     bool        pathLegacyLayout = false;
@@ -330,6 +341,9 @@ struct CameraData {
     /// Timeline v47: the active camera also projects visual 2D layers below it.
     /// Older documents retain their original 3D-only camera behavior.
     bool affectsLayersBelow = false;
+    /// 0.4.6 (v53): câmera PARALELA (ortográfica): sem perspectiva; o
+    /// enquadramento no plano das camadas 2D (z = 0) é o mesmo da perspectiva.
+    bool parallel = false;
 };
 
 /// LENTE: sensor full frame 36 × 24 mm. A projeção do Aurea é por FOV
@@ -663,6 +677,12 @@ struct Layer {
     /// entrada. `offset` continua sendo o ponto de entrada na fonte.
     f32   speed = 1.0f;
     bool  reversed = false;
+    /// 0.4.6 (v53): REPETIR o vídeo além do fim da fonte (volta ao começo) em
+    /// vez de congelar no último quadro.
+    bool  loopMedia = false;
+    /// 0.4.6 (v53): tangentes espaciais dos keyframes de posição (o caminho de
+    /// movimento curvo; timeline/SpatialPath.hpp). Vazio = caminho reto.
+    std::vector<SpatialTangent> positionTangents;
     /// Manter o tom do áudio quando o tempo da fonte não anda a 1× (velocidade,
     /// curva de remapeamento): o som segue a MESMA posição da fonte, mas em
     /// grãos tocados na velocidade natural — sem voz de esquilo nem de monstro.

@@ -233,7 +233,12 @@ VideoSource* MediaManager::source_for(LayerId layer, AssetId assetId, const Asse
         }
     }
 
-    if (!softwareOnly) {
+    // 0.4.6: o export que trocou para decodificação em SOFTWARE (degrau da
+    // escada) não pega sessão do codec da plataforma — não precisa esperar o
+    // decoder de hardware antigo terminar de fechar. Antes, um fechamento
+    // preso no driver deixava a camada sem fonte até o quadro estourar 120 s.
+    const bool cpuDecode = softwareOnly || openPriority_.load(std::memory_order_relaxed) == MediaPriority::ExportSoftwareDecode;
+    if (!cpuDecode) {
         std::lock_guard<std::mutex> closing(retireMutex_);
         // Do not accumulate replacement codecs while an old platform session
         // is stuck closing. Completion wakes the renderer to retry admission.

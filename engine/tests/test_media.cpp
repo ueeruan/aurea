@@ -131,6 +131,33 @@ AUREA_TEST(DecodedFrameCache, ReverseFallbackPreservesVfrCoverage) {
     AUREA_CHECK(frame && frame->ptsUs == 0 && !exact);
 }
 
+// 0.4.6: o decoder só adianta se o próximo quadro cabe sem jogar fora um que
+// ainda está à frente do foco (perdido = seek ao keyframe quando pedido).
+AUREA_TEST(DecodedFrameCache, RoomAheadStopsPrefetchBeforeDiscardingDecodedFrames) {
+    DecodedFrameCache cache;
+    const auto bytes = frame_at(0)->approx_bytes();
+    cache.configure({3, bytes * 8, 3});
+    cache.set_focus(0, 1);
+    AUREA_CHECK(cache.room_ahead(-1));
+    AUREA_CHECK(cache.insert(frame_at(0)));
+    AUREA_CHECK(cache.insert(frame_at(kFrame)));
+    AUREA_CHECK(cache.room_ahead(kFrame));
+    AUREA_CHECK(cache.insert(frame_at(2 * kFrame)));
+    // Cheio, tudo no foco ou adiante: o próximo seria recusado (ou despejaria
+    // um quadro ainda por usar). Para de adiantar.
+    AUREA_CHECK(!cache.room_ahead(2 * kFrame));
+    // O foco andou: o quadro 0 ficou para trás e cede o lugar.
+    cache.set_focus(kFrame, 1);
+    AUREA_CHECK(cache.room_ahead(2 * kFrame));
+    // Teto de bytes: mesmo com vaga na contagem, sem bytes não adianta.
+    DecodedFrameCache tight;
+    tight.configure({8, bytes * 2, 8});
+    tight.set_focus(0, 1);
+    AUREA_CHECK(tight.insert(frame_at(0)));
+    AUREA_CHECK(tight.insert(frame_at(kFrame)));
+    AUREA_CHECK(!tight.room_ahead(kFrame));
+}
+
 AUREA_TEST(DecodedFrameCache, TemporalSamplesBorrowBoundedSlotsAndReleaseThem) {
     DecodedFrameCache cache;
     const auto bytes = frame_at(0)->approx_bytes();

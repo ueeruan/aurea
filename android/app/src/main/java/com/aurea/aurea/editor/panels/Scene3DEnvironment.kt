@@ -197,7 +197,29 @@ internal fun Render3DTab(env: PanelEnv) {
             }
         }
     }
+    SceneFogSection(env)
     Spacer(Modifier.height(16.dp))
+}
+
+/**
+ * 0.4.6: a NÉVOA da cena (volumétrica, com raios de luz) — no Render e também
+ * na aba Névoa da câmera: é a névoa que a câmera vê, um só ajuste.
+ */
+@Composable
+internal fun SceneFogSection(env: PanelEnv) {
+    val (settings, change) = rememberSceneSettings(env.store)
+    if (settings.size >= 15) EnvSection(stringResource(R.string.scene046_fog), stringResource(R.string.scene046_fog_hint), Modifier.testTag("env3d.fog")) {
+        EnvToggle(stringResource(R.string.scene046_fog), settings[9] > 0.5f, "env3d.fog.switch") { change(9, if (it) 1f else 0f) }
+        if (settings[9] > 0.5f) {
+            // Densidade em "por 10 mil px": 6 = névoa leve, 30 = cerração.
+            EnvValueRow(env, stringResource(R.string.scene046_fog_density), settings[10] * 10000f, 0.5f, 0f, 200f, "", 6f, "neblina 3D", decimals = 1) {
+                change(10, it / 10000f)
+            }
+            EnvValueRow(env, stringResource(R.string.scene046_fog_rays), settings[11] * 100f, 5f, 0f, 800f, "%", 100f, "neblina 3D") {
+                change(11, it / 100f)
+            }
+        }
+    }
 }
 
 /**

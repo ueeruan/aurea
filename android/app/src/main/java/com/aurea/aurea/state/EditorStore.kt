@@ -250,6 +250,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * Criadas no primeiro uso (8I): a abertura não lê o cofre da chave.
      */
     val captions by lazy { com.aurea.aurea.captions.CaptionsState(app, engine, viewModelScope) { refreshNow() } }
+    /** 0.4.6: o painel que o assistente de IA pediu para abrir (o editor consome e zera). */
+    var assistantPanel by mutableStateOf<String?>(null)
+    /** 0.4.6: o assistente de IA (a conversa sobrevive a fechar e abrir o chat). */
+    val assistant by lazy {
+        com.aurea.aurea.assistant.AssistantChat(app, engine, viewModelScope,
+            onUi = { assistantPanel = it }, onModelChanged = { refreshNow() })
+    }
 
     /**
      * "Otimizar vídeos pesados" (0.2.5): modo gravado, fila do proxy de edição
@@ -1768,9 +1775,12 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             refreshTextFont()
             val st = FloatArray(20)
             textStyle = same(textStyle, if (engine.queryTextStyle(id, st)) st else null)
+            val dyn = engine.queryTextDynamic(id)
+            if (dyn == null || textDynamic == null || !dyn.contentEquals(textDynamic)) textDynamic = dyn
         } else {
             textFont = null
             textStyle = null
+            textDynamic = null
         }
         val anim = if (id != null && (detail?.kind == com.aurea.aurea.ui.theme.LayerType.Text.kind || text3d != null)) {
             engine.queryTextAnimators(id)?.let { a -> List(a.size / 40) { i -> a.copyOfRange(i * 40, i * 40 + 40) } } ?: emptyList()
@@ -2370,8 +2380,11 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     var aePickRequested by mutableStateOf(false)
         private set
-    fun requestAeImport() {
+    /** 0.4.6: o próximo .ffx entra no Text Animator Pro (pedido pelo painel de texto). */
+    private var aeImportTextPro = false
+    fun requestAeImport(textAnimatorPro: Boolean = false) {
         if (playing) pause()
+        aeImportTextPro = textAnimatorPro
         aePickRequested = true
     }
     fun consumeAePickRequest() { aePickRequested = false }
@@ -2382,6 +2395,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (busyMessage != null) { showToast(appText(R.string.ios_importing_media)); return }
         val app = getApplication<Application>()
         val target = primary ?: 0L
+        val textPro = aeImportTextPro
+        aeImportTextPro = false
         busyMessage = appText(R.string.ae_importing)
         launchImport launch@{
             val name = displayName(uri) ?: uri.lastPathSegment.orEmpty()
@@ -2398,7 +2413,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                     }
                     out.toByteArray()
                 } ?: return@withContext null
-                engine.importAeData(bytes, name, target)
+                engine.importAeData(bytes, name, target, textPro)
             }
             busyMessage = null
             if (json == null) { errorMessage = appText(if (tooBig) R.string.ae_too_big else R.string.ae_failed_read); return@launch }
@@ -3755,6 +3770,17 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      * Máscara de recorte ("Criar/Liberar máscara de recorte"): a regra mora no
      * motor (elegibilidade e cadeias); aqui só pede e relê.
      */
+    /** 0.4.6: espelhar a camada (a escala do eixo troca de sinal; um passo de desfazer). */
+    fun flipLayer(layer: Long, vertical: Boolean) {
+        val d = detailOf(layer) ?: return
+        if (d.locked) { showToast(appText(R.string.editor_camada_bloqueada)); return }
+        val axis = if (vertical) 1 else 0
+        val current = d.scale.getOrNull(axis) ?: return
+        beginGesture(if (vertical) "espelhar vertical" else "espelhar horizontal")
+        setTransform(if (vertical) TrackProperty.SCALE_Y else TrackProperty.SCALE_X, -current, layer)
+        endGesture()
+    }
+
     fun setLayerClipToBelow(layer: Long, on: Boolean) {
         if (engine.setLayerClipToBelow(layer, on)) refreshNow()
     }
@@ -5190,6 +5216,32 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Toque duplo no vazio da cena: a vista volta ao ângulo inicial. */
     fun resetSceneView() = updateSceneView(-30f, 20f, 3f)
 
+    // --- 0.4.6: vistas do palco como no After Effects (só a prévia) ---------------------
+    /** 0 câmera ativa, 1 padrão, 2..7 frente/trás/esquerda/direita/topo/base, 8..10 personalizada 1..3. */
+    var viewMode by mutableIntStateOf(0)
+        private set
+    /** {modo, yaw, pitch, distância, ortográfica} da vista atual (do motor). */
+    var viewOrbit by mutableStateOf(floatArrayOf(0f, 0f, 0f, 1f, 0f))
+        private set
+    /** Frente..base e personalizadas: um dedo orbita (personalizada), pinça aproxima. */
+    val viewNavigable get() = viewMode >= 2 && !sceneEditor
+
+    fun selectViewMode(mode: Int) {
+        if (!engine.setViewMode(mode)) return
+        viewMode = mode
+        viewOrbit = engine.queryView()
+        refreshNow()
+    }
+
+    /** Arrasto de um dedo (graus) e pinça (fator) na vista atual. */
+    fun navigateView(dYaw: Float, dPitch: Float, zoom: Float = 1f) {
+        if (viewMode < 2) return
+        val v = viewOrbit
+        if (!engine.setViewOrbit(v[1] + dYaw, v[2] + dPitch, v[3] * zoom)) return
+        viewOrbit = engine.queryView()
+        refreshNow()
+    }
+
     /**
      * Objeto 3D sob o dedo (px da composição), decidido pelo motor
      * (`Engine::scene_pick`): o raio da câmera de navegação contra o corpo real
@@ -6443,6 +6495,28 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     var textStyle by mutableStateOf<FloatArray?>(null)
         private set
 
+    /** 0.4.6: texto dinâmico da camada de texto ({ligado, de, até, casas, separador, curva}). */
+    var textDynamic by mutableStateOf<DoubleArray?>(null)
+        private set
+
+    fun setTextDynamicValue(index: Int, value: Double) {
+        val id = primary ?: return
+        val v = (textDynamic ?: return).copyOf()
+        v[index] = value
+        textDynamic = v
+        engine.setTextDynamic(id, v)
+        refreshDetail()
+    }
+
+    /** Põe a marca (`{#}`, `{tc}`, `{t}`, `{f}`) no fim do texto e liga o modo dinâmico. */
+    fun insertTextToken(token: String) {
+        val id = primary ?: return
+        val content = textDetail?.content ?: return
+        val v = (textDynamic ?: return).copyOf()
+        if (v[0] < .5) { v[0] = 1.0; textDynamic = v; engine.setTextDynamic(id, v) }
+        setTextContent(if (content.isEmpty()) token else "$content $token")
+    }
+
     fun setTextStyleValue(index: Int, value: Float) {
         val id = primary ?: return
         val v = (textStyle ?: return).copyOf()
@@ -6612,16 +6686,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         when (e.kind) {
             com.aurea.aurea.presets.PresetKind.Curve -> return false
             com.aurea.aurea.presets.PresetKind.Caption -> {
-                val v = presets.jsonOf(e)?.let { engine.parseCaptionPreset(it) }
+                val json = presets.jsonOf(e)
+                val v = json?.let { engine.parseCaptionPreset(it) }
                 if (v == null || v.size < 15) {
                     showToast(appText(R.string.msg_preset_de_legenda_invalido))
                     return false
                 }
-                captions.settings = com.aurea.aurea.captions.CaptionSettings(
-                    mode = v[0].toInt(), maxWords = v[1].toInt(), maxChars = v[2].toInt(), maxLines = v[3].toInt(), style = v[4].toInt(),
-                    highlight = v[5] != 0f, uppercase = v[6] != 0f, breakOnPause = v[7] != 0f, removeFillers = v[8] != 0f,
-                    pauseSec = v[9], posY = v[10], sizeFrac = v[11], highlightColor = floatArrayOf(v[12], v[13], v[14]),
-                )
+                // 0.4.6: o bloco "caption" inteiro (com a aparência própria), validado acima pelo motor.
+                val block = runCatching { org.json.JSONObject(json).optJSONObject("caption")?.toString() }.getOrNull()
+                captions.settings = com.aurea.aurea.captions.CaptionSettings.fromJson(block ?: "{}")
                 val id = primary
                 if (id != null && captions.layer == id && captions.captionCount > 0 && captions.words.isNotEmpty()) {
                     captions.generate()
@@ -8244,6 +8317,31 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshNow()
     }
 
+    /** 0.4.6: caminho de movimento — muda a cada alça puxada (o palco refaz a curva). */
+    var motionPathRevision by mutableIntStateOf(0)
+        private set
+
+    fun queryPositionPath(layer: Long): FloatArray? = engine.queryPositionPath(layer)
+
+    /**
+     * Alças do canto do caminho de movimento (keyframe de posição no quadro LOCAL
+     * `time`), em px do espaço do pai. Tudo zero = canto reto. Arraste entre
+     * `beginGesture`/`endGesture` (um passo de desfazer).
+     */
+    fun setPositionTangents(layer: Long, time: Int, inX: Float, inY: Float, outX: Float, outY: Float) {
+        if (detail?.locked == true) { showToast(appText(R.string.editor_camada_bloqueada)); return }
+        if (engine.setPositionTangents(layer, time.toLong(), floatArrayOf(inX, inY, 0f, outX, outY, 0f))) {
+            motionPathRevision++
+            refreshNow()
+        }
+    }
+
+    /** 0.4.6: repetir o vídeo além do fim da fonte (um passo de desfazer). */
+    fun setLayerMediaLoop(on: Boolean) {
+        val id = primary ?: return
+        if (engine.setLayerMediaLoop(id, on)) refreshNow()
+    }
+
     fun setLayerReversed(reversed: Boolean) {
         val id = primary ?: return
         send { setLayerReversed(id, reversed) }
@@ -9548,6 +9646,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         const val CAMERA_LENS_BLUR = 4
         /** A câmera afeta as camadas 2D abaixo dela (0/1). */
         const val CAMERA_AFFECTS_BELOW = 7
+        /** 0.4.6: câmera paralela (ortográfica). */
+        const val CAMERA_PARALLEL = 8
         /** `ParticleParam::Count` do motor (contrato v21: 70 parâmetros). */
         const val PARTICLE_PARAM_COUNT = 70
         /** Fontes aceitas na importação (o motor converte WOFF e coleções). */

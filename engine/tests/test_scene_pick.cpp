@@ -11,8 +11,10 @@
 #include "aurea/bridge/BridgePods.hpp"
 #include "aurea/scene3d/Text3D.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 using namespace aurea;
 
@@ -150,4 +152,81 @@ AUREA_TEST(ScenePick, BodylessObjectsPickByOrigin) {
     AUREA_CHECK(r.e.query_gizmo(*null, 1.0f, g));
     AUREA_CHECK_EQ(r.e.scene_pick(g[0] + 10.0f, g[1] - 10.0f, 30.0f), *null);
     AUREA_CHECK_EQ(r.e.scene_pick(g[0] + 80.0f, g[1], 30.0f), 0ull);
+}
+
+// -----------------------------------------------------------------------------
+// 0.4.6: vistas do palco como no After Effects (Engine::set_view_mode). Só a
+// prévia muda; cada modo lembra a própria órbita; a cena 3D vence o palco.
+// -----------------------------------------------------------------------------
+
+AUREA_TEST(ScenePick, ViewModesFollowAfterEffectsAndRememberTheirOrbit) {
+    PickRig r; AUREA_CHECK(r.ok); if (!r.ok) return;
+    f32 v[5]{};
+    r.e.query_view(v);
+    AUREA_CHECK_EQ(v[0], 0.0f);                       // começa na câmera ativa
+    AUREA_CHECK(!r.e.set_view_orbit(10, 10, 2));      // câmera ativa não orbita
+    AUREA_CHECK(!r.e.set_view_mode(Engine::kViewModeCount));
+    AUREA_CHECK(r.e.set_view_mode(9));                // Vista personalizada 2
+    AUREA_CHECK(r.e.set_view_orbit(70, -20, 4));
+    AUREA_CHECK(r.e.set_view_mode(8));
+    r.e.query_view(v);
+    AUREA_CHECK_EQ(v[1], -45.0f);                     // a 1 tem a própria órbita
+    AUREA_CHECK(r.e.set_view_mode(9));
+    r.e.query_view(v);
+    AUREA_CHECK_EQ(v[1], 70.0f); AUREA_CHECK_EQ(v[2], -20.0f); AUREA_CHECK_EQ(v[3], 4.0f);
+    AUREA_CHECK_EQ(v[4], 0.0f);
+    // Frente: sem perspectiva; o orbitar só muda o zoom.
+    AUREA_CHECK(r.e.set_view_mode(2));
+    AUREA_CHECK(r.e.set_view_orbit(90, 45, 2.0f));
+    r.e.query_view(v);
+    AUREA_CHECK_EQ(v[4], 1.0f); AUREA_CHECK_EQ(v[1], 0.0f); AUREA_CHECK_EQ(v[3], 2.0f);
+    // A cena 3D vence; ao sair, volta a vista do palco (as guias mostram qual vale).
+    std::vector<f32> front(4096), scene(4096), again(4096);
+    const u32 nFront = r.e.query_scene_guides(front.data(), 800);
+    r.e.set_scene_editor(true, -30, 20, 3);
+    const u32 nScene = r.e.query_scene_guides(scene.data(), 800);
+    r.e.set_scene_editor(false, 0, 0, 3);
+    const u32 nAgain = r.e.query_scene_guides(again.data(), 800);
+    AUREA_CHECK(nFront > 0 && nScene > 0);
+    AUREA_CHECK(std::vector<f32>(front.begin(), front.begin() + nFront * 5) != std::vector<f32>(scene.begin(), scene.begin() + nScene * 5));
+    AUREA_CHECK(nAgain == nFront && std::equal(front.begin(), front.begin() + nFront * 5, again.begin()));
+    AUREA_CHECK(r.e.set_view_mode(0));
+    AUREA_CHECK_EQ(r.e.query_scene_guides(again.data(), 800), 0u);   // câmera ativa: sem vista de navegação
+}
+
+AUREA_TEST(ScenePick, OrthographicViewsLookAlongTheirAxis) {
+    const u32 w = 1080, h = 1920;
+    auto project = [&](SceneViewKind kind, Vec3 p, f32& x, f32& y) {
+        SceneEditorView view; view.enabled = true; view.kind = kind; view.distance = 1.0f;
+        const Mat4 m = scene_editor_projection(w, h, view);
+        const Vec4 c = m * Vec4{p.x, p.y, p.z, 1};
+        x = c.x / c.w; y = c.y / c.w;
+    };
+    const Vec3 center{w * 0.5f, h * 0.5f, 0};
+    f32 x = 0, y = 0;
+    for (SceneViewKind k : {SceneViewKind::Front, SceneViewKind::Back, SceneViewKind::Left, SceneViewKind::Right,
+                            SceneViewKind::Top, SceneViewKind::Bottom}) {
+        project(k, center, x, y);
+        AUREA_CHECK(std::fabs(x - w * 0.5f) < 0.5f && std::fabs(y - h * 0.5f) < 0.5f);   // olha o centro
+        SceneEditorView ortho; ortho.enabled = true; ortho.kind = k; ortho.distance = 1.0f;
+        AUREA_CHECK(scene_editor_camera(w, h, ortho).orthographic);
+    }
+    // Frente: profundidade não move (sem perspectiva); x da cena = x da tela.
+    project(SceneViewKind::Front, center + Vec3{100, 0, 5000}, x, y);
+    AUREA_CHECK(std::fabs(x - (w * 0.5f + 100)) < 0.5f && std::fabs(y - h * 0.5f) < 0.5f);
+    // Trás: espelhado em x.
+    project(SceneViewKind::Back, center + Vec3{100, 0, 0}, x, y);
+    AUREA_CHECK(std::fabs(x - (w * 0.5f - 100)) < 0.5f);
+    // Topo: o que está mais longe da câmera padrão (+z) sobe na tela.
+    project(SceneViewKind::Top, center + Vec3{0, 0, 200}, x, y);
+    AUREA_CHECK(y < h * 0.5f - 100);
+    // Esquerda e direita veem z em lados opostos.
+    f32 left = 0, right = 0;
+    project(SceneViewKind::Left, center + Vec3{0, 0, 200}, left, y);
+    project(SceneViewKind::Right, center + Vec3{0, 0, 200}, right, y);
+    AUREA_CHECK((left - w * 0.5f) * (right - w * 0.5f) < 0.0f);
+    // Câmera padrão = a da composição sem camadas de câmera.
+    SceneEditorView def; def.enabled = true; def.kind = SceneViewKind::DefaultCamera;
+    const auto a = scene_editor_camera(w, h, def), b = scene3d::default_camera(w, h);
+    AUREA_CHECK(std::fabs(a.position.z - b.position.z) < 1e-3f && !a.orthographic);
 }

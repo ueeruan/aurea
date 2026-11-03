@@ -43,13 +43,13 @@
 namespace aurea::plugins::script {
 
 struct Limits {
-    u64 maxHeapBytes = 32ull << 20;      ///< bytes vivos no heap do contexto
-    u64 maxSteps = 20'000'000;           ///< nós avaliados por chamada
-    u32 maxTimeMs = 5000;                ///< CPU do script por chamada
-    u32 maxDepth = 64;                   ///< chamadas de função aninhadas
-    usize maxSourceBytes = 512u * 1024u; ///< tamanho do arquivo de script
-    usize maxStringBytes = 8u << 20;     ///< maior texto
-    u32 maxArrayLength = 1u << 22;       ///< maior lista
+    u64 maxHeapBytes = 256ull << 20;     ///< bytes vivos no heap do contexto
+    u64 maxSteps = 2'000'000'000;        ///< nós avaliados por chamada
+    u32 maxTimeMs = 120000;              ///< CPU do script por chamada (fora da thread da tela)
+    u32 maxDepth = 256;                  ///< chamadas aninhadas (o trabalhador tem pilha de 8 MB)
+    usize maxSourceBytes = 8u << 20;     ///< tamanho do arquivo de script
+    usize maxStringBytes = 128u << 20;   ///< maior texto
+    u32 maxArrayLength = 1u << 26;       ///< maior lista
 };
 
 /// Contador de bytes do contexto. Um texto/objeto soma ao nascer e tira ao morrer.

@@ -294,7 +294,8 @@ bool read_param(const Value& v, u32 index, ParamDecl& p, Reader& r) {
             const Value* opts = v.get("options");
             if (!opts || !opts->is_array() || opts->array.empty())
                 return r.fail("plugin.json: " + pw + ": enum precisa de \"options\" (lista de textos)");
-            if (opts->array.size() > kMaxEnumOptions) return r.fail("plugin.json: " + pw + ": mais de 32 opcoes");
+            if (opts->array.size() > kMaxEnumOptions)
+                return r.fail("plugin.json: " + pw + ": mais de " + std::to_string(kMaxEnumOptions) + " opcoes");
             for (const Value& o : opts->array) {
                 LocalizedText t;
                 if (!read_text(&o, t, "options", 48, true, r)) return false;
@@ -342,10 +343,58 @@ bool read_param(const Value& v, u32 index, ParamDecl& p, Reader& r) {
     return true;
 }
 
+/// 0.4.6: "textures": { "nome": "arquivo.png" } ou
+/// { "nome": { "file": "...", "colorSpace": "data", "filter": "nearest", "wrap": "repeat" } }.
+bool read_textures(const Value& root, Manifest& m, Reader& r) {
+    const Value* tex = root.get("textures");
+    if (!tex) return true;
+    if (!tex->is_object()) return r.fail("plugin.json: \"textures\" deve ser um objeto nome -> arquivo");
+    if (tex->object.size() > kMaxTextures)
+        return r.fail("plugin.json: mais de " + std::to_string(kMaxTextures) + " texturas");
+    for (const auto& [name, v] : tex->object) {
+        const std::string where = "textura \"" + name + "\"";
+        if (!valid_shader_identifier(name)) return r.fail("plugin.json: " + where + ": nome invalido");
+        for (const ParamDecl& p : m.params)
+            if (p.id == name) return r.fail("plugin.json: " + where + " tem o nome de um parametro");
+        TextureDecl t;
+        t.name = name;
+        const Value* file = v.is_string() ? &v : v.is_object() ? v.get("file") : nullptr;
+        if (!file || !file->is_string() || file->string.empty())
+            return r.fail("plugin.json: " + where + ": falta o arquivo (\"file\")");
+        t.file = file->string;
+        std::string ext = t.file.substr(t.file.find_last_of('.') == std::string::npos ? t.file.size() : t.file.find_last_of('.'));
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (ext != ".png" && ext != ".jpg" && ext != ".jpeg")
+            return r.fail("plugin.json: " + where + ": use .png, .jpg ou .jpeg");
+        if (t.file.find("..") != std::string::npos || t.file.front() == '/' || t.file.front() == '\\' || t.file.find(':') != std::string::npos)
+            return r.fail("plugin.json: " + where + ": o arquivo precisa estar dentro do pacote");
+        if (v.is_object()) {
+            if (const Value* cs = v.get("colorSpace")) {
+                if (!cs->is_string() || (cs->string != "color" && cs->string != "data"))
+                    return r.fail("plugin.json: " + where + ": \"colorSpace\" deve ser \"color\" ou \"data\"");
+                t.data = cs->string == "data";
+            }
+            if (const Value* f = v.get("filter")) {
+                if (!f->is_string() || (f->string != "linear" && f->string != "nearest"))
+                    return r.fail("plugin.json: " + where + ": \"filter\" deve ser \"linear\" ou \"nearest\"");
+                t.filter = f->string == "nearest" ? 1 : 0;
+            }
+            if (const Value* w = v.get("wrap")) {
+                if (!w->is_string() || (w->string != "clamp" && w->string != "repeat" && w->string != "mirror"))
+                    return r.fail("plugin.json: " + where + ": \"wrap\" deve ser \"clamp\", \"repeat\" ou \"mirror\"");
+                t.wrap = w->string == "repeat" ? 1 : w->string == "mirror" ? 2 : 0;
+            }
+        }
+        m.textures.push_back(std::move(t));
+    }
+    return true;
+}
+
 bool read_passes(const Value& root, Manifest& m, Reader& r) {
     const Value* passes = root.get("passes");
     if (!passes || !passes->is_array() || passes->array.empty())
-        return r.fail("plugin.json: plugin \"shader\" precisa de \"passes\" (1 a 8)");
+        return r.fail("plugin.json: plugin \"shader\" precisa de \"passes\" (1 a " + std::to_string(kMaxPasses) + ")");
+    if (!read_textures(root, m, r)) return false;
     if (passes->array.size() > kMaxPasses)
         return r.fail("plugin.json: " + std::to_string(passes->array.size()) + " passes (limite " + std::to_string(kMaxPasses) + ")");
     std::vector<std::string> targets;
@@ -375,8 +424,8 @@ bool read_passes(const Value& root, Manifest& m, Reader& r) {
         }
         if (const Value* in = v.get("inputs")) {
             if (!in->is_object()) return r.fail("plugin.json: " + where + ": \"inputs\" deve ser um objeto nome -> origem");
-            if (in->object.size() > kMaxPassInputs)
-                return r.fail("plugin.json: " + where + ": mais de " + std::to_string(kMaxPassInputs) + " entradas");
+            if (in->object.size() + m.textures.size() > kMaxPassInputs)
+                return r.fail("plugin.json: " + where + ": entradas + texturas passam de " + std::to_string(kMaxPassInputs));
             for (const auto& [name, from] : in->object) {
                 if (!valid_shader_identifier(name))
                     return r.fail("plugin.json: " + where + ": entrada com nome invalido \"" + name + "\"");
@@ -384,6 +433,8 @@ bool read_passes(const Value& root, Manifest& m, Reader& r) {
                     if (p.id == name) return r.fail("plugin.json: " + where + ": entrada \"" + name + "\" tem o nome de um parametro");
                 for (const auto& other : pass.inputs)
                     if (other.first == name) return r.fail("plugin.json: " + where + ": entrada repetida \"" + name + "\"");
+                for (const TextureDecl& t : m.textures)
+                    if (t.name == name) return r.fail("plugin.json: " + where + ": entrada \"" + name + "\" tem o nome de uma textura");
                 if (!from.is_string()) return r.fail("plugin.json: " + where + ": a origem de \"" + name + "\" deve ser texto");
                 if (from.string != "source" && std::find(targets.begin(), targets.end(), from.string) == targets.end())
                     return r.fail("plugin.json: " + where + ": entrada \"" + name + "\" le \"" + from.string
@@ -396,7 +447,7 @@ bool read_passes(const Value& root, Manifest& m, Reader& r) {
     }
     if (const Value* margin = root.get("margin")) {
         if (!read_number(margin, m.margin) || m.margin < 0.0f || m.margin > kMaxMargin)
-            return r.fail("plugin.json: \"margin\" deve estar entre 0 e 1024 (px da camada)");
+            return r.fail("plugin.json: \"margin\" deve estar entre 0 e " + std::to_string(static_cast<int>(kMaxMargin)) + " (px da camada)");
     }
     if (const Value* cs = root.get("colorSpace")) {
         if (!cs->is_string() || (cs->string != "linear" && cs->string != "srgb"))
@@ -457,7 +508,7 @@ bool parse_manifest(std::string_view text, Manifest& m, std::string& error) {
     m = Manifest{};
     error.clear();
     Reader r{error};
-    if (text.size() > kMaxManifestBytes) return r.fail("plugin.json maior que 256 KB");
+    if (text.size() > kMaxManifestBytes) return r.fail("plugin.json maior que 4 MB");
     // BOM do UTF-8 (editores do Windows): fora.
     if (text.size() >= 3 && static_cast<u8>(text[0]) == 0xEF && static_cast<u8>(text[1]) == 0xBB && static_cast<u8>(text[2]) == 0xBF)
         text.remove_prefix(3);
@@ -618,6 +669,17 @@ std::string manifest_json(const Manifest& m) {
             w.end_object();
         }
         w.end_array();
+        if (!m.textures.empty()) {
+            w.key("textures").begin_object();
+            for (const TextureDecl& t : m.textures) {
+                w.key(t.name).begin_object().key("file").value(t.file);
+                if (t.data) w.key("colorSpace").value("data");
+                if (t.filter) w.key("filter").value("nearest");
+                if (t.wrap) w.key("wrap").value(t.wrap == 1 ? "repeat" : "mirror");
+                w.end_object();
+            }
+            w.end_object();
+        }
         if (m.margin > 0.0f) w.key("margin").value(m.margin);
         w.key("colorSpace").value(m.colorSpace == ColorSpace::Srgb ? "srgb" : "linear");
     } else {

@@ -333,10 +333,21 @@ struct AudioAnalysisResult {
     f32 peak = 0.0f;
 };
 
+/// 0.4.6: texturas persistentes que um efeito pode resolver no planejamento
+/// (as imagens do pacote de um plugin) e ler na montagem (EffectEval::auxImages).
+inline constexpr u32 kEffectAuxImages = 8;
+
 /// Recursos persistentes de efeito (LUTs de curva). Implementado pelo renderer.
 class EffectResources {
 public:
     virtual ~EffectResources() = default;
+    /// 0.4.6: imagem RGBA8 `width`×`height` (as "textures" de um plugin),
+    /// guardada por `key`; `srgb` = a GPU lineariza ao amostrar. Sobe uma vez
+    /// e fica enquanto for usada. Nula = sem GPU (o shader lê preto).
+    [[nodiscard]] virtual TextureHandle image_texture(u64 key, const u8* rgba, u32 width, u32 height, bool srgb) noexcept {
+        (void)key; (void)rgba; (void)width; (void)height; (void)srgb;
+        return {};
+    }
     // Equal-distance positions (xy) and tangent (z, radians), in host-layer pixels.
     [[nodiscard]] virtual std::vector<Vec4> repeat_path(const Layer*, u32, f32, u64 guide = 0) noexcept { (void)guide; return {}; }
     /// 0.3.1: o mundo da camada `ref` (câmera, nulo, luz...) da composição de
@@ -414,6 +425,8 @@ struct EffectEval {
     /// Mais recursos persistentes do planejamento, para efeitos que leem
     /// várias tabelas (Correção de cor: curvas RGB, curvas de matiz e a LUT).
     TextureHandle         auxExtra[2]{};
+    /// 0.4.6: imagens persistentes resolvidas no planejamento (plugins).
+    TextureHandle         auxImages[kEffectAuxImages]{};
     Vec4                  auxInfo{};   ///< o que o efeito quiser anotar junto (nº de faixas...)
     f64                   auxTimeFrames = std::numeric_limits<f64>::quiet_NaN();
     i64                   foregroundSourceTimeUs = -1;
@@ -468,6 +481,12 @@ public:
     /// um bloco de uniforms (copiado para a arena do frame).
     u32 fullscreen_pass(const char* name, PassStage stage, FGTexture target, ShaderId fragment,
                         std::initializer_list<PassTexture> textures,
+                        const void* uniforms, u32 uniformBytes,
+                        LoadOp load = LoadOp::DontCare) noexcept;
+    /// 0.4.6: o mesmo com até `binding::kTextureSlots` texturas (plugins com
+    /// muitas entradas e imagens do pacote). As amarrações vão para a arena do frame.
+    u32 fullscreen_pass(const char* name, PassStage stage, FGTexture target, ShaderId fragment,
+                        const PassTexture* textures, u32 textureCount,
                         const void* uniforms, u32 uniformBytes,
                         LoadOp load = LoadOp::DontCare) noexcept;
 

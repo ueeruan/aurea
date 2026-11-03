@@ -269,6 +269,7 @@ void release_window_locked(NativeContext& c) noexcept {
 } // namespace
 
 #include "aurea/timeline/CanvasFit.hpp"
+#include "aurea/assistant/Assistant.hpp"
 #define AUREA_JNI extern "C" JNIEXPORT
 #define AUREA_FN(name) JNICALL Java_com_aurea_aurea_engine_AureaEngine_##name
 
@@ -2718,6 +2719,50 @@ AUREA_JNI jboolean AUREA_FN(nativeSetTextStyle)(JNIEnv* env, jclass, jlong handl
     return c->engine.set_text_style(static_cast<u64>(layer), v, n) ? JNI_TRUE : JNI_FALSE;
 }
 
+// 0.4.6: caminho de movimento curvo — tangentes do keyframe e o caminho avaliado.
+AUREA_JNI jboolean AUREA_FN(nativeSetPositionTangents)(JNIEnv* env, jclass, jlong handle, jlong layer, jlong time, jfloatArray in) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !in || env->GetArrayLength(in) < 6) return JNI_FALSE;
+    f32 v[6]{};
+    env->GetFloatArrayRegion(in, 0, 6, v);
+    return c->engine.set_position_tangents(static_cast<u64>(layer), static_cast<i64>(time), v) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jfloatArray AUREA_FN(nativeQueryPositionPath)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return nullptr;
+    std::vector<f32> buf(2 + 600 * 2 + 256 * 7);
+    const u32 n = c->engine.query_position_path(static_cast<u64>(layer), buf.data(), static_cast<u32>(buf.size()));
+    if (n == 0) return nullptr;
+    jfloatArray out = env->NewFloatArray(static_cast<jsize>(n));
+    if (out) env->SetFloatArrayRegion(out, 0, static_cast<jsize>(n), buf.data());
+    return out;
+}
+
+// 0.4.6: repetir o vídeo além do fim da fonte.
+AUREA_JNI jboolean AUREA_FN(nativeSetLayerMediaLoop)(JNIEnv*, jclass, jlong handle, jlong layer, jboolean on) {
+    NativeContext* c = ctx_of(handle);
+    return c && c->engine.set_layer_media_loop(static_cast<u64>(layer), on == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+// 0.4.6: texto dinâmico — {ligado, de, até, casas, separador, curva}.
+AUREA_JNI jboolean AUREA_FN(nativeSetTextDynamic)(JNIEnv* env, jclass, jlong handle, jlong layer, jdoubleArray in) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !in || env->GetArrayLength(in) < 6) return JNI_FALSE;
+    f64 v[6]{};
+    env->GetDoubleArrayRegion(in, 0, 6, v);
+    return c->engine.set_text_dynamic(static_cast<u64>(layer), v) ? JNI_TRUE : JNI_FALSE;
+}
+
+AUREA_JNI jdoubleArray AUREA_FN(nativeQueryTextDynamic)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    NativeContext* c = ctx_of(handle);
+    f64 v[6]{};
+    if (!c || !c->engine.query_text_dynamic(static_cast<u64>(layer), v)) return nullptr;
+    jdoubleArray out = env->NewDoubleArray(6);
+    if (out) env->SetDoubleArrayRegion(out, 0, 6, v);
+    return out;
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeQueryTextStyle)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
     NativeContext* c = ctx_of(handle);
     if (!c || !out || env->GetArrayLength(out) < 18) return JNI_FALSE;
@@ -2948,6 +2993,50 @@ AUREA_JNI jboolean AUREA_FN(nativeApplyCaptionBundle)(JNIEnv* env, jclass, jlong
 }
 AUREA_JNI jboolean AUREA_FN(nativeEditCaptionTrack)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray command) {
     auto* c = ctx_of(handle); return c && c->engine.edit_caption_track(static_cast<u64>(layer), utf8_of(env, command));
+}
+
+// 0.4.6: opções da legenda em JSON (presets::caption_options_json) — a mesma
+// forma nas duas plataformas, com a aparência própria (fonte, cores, fundo).
+AUREA_JNI jint AUREA_FN(nativeCreateCaptionsJson)(JNIEnv* env, jclass, jlong handle, jlong layer, jobjectArray texts, jdoubleArray times,
+                                                 jbyteArray options) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || !texts || !times || !options) return -1;
+    text::CaptionOptions o;
+    bool removeFillers = true;
+    if (!presets::parse_caption_options(utf8_of(env, options), o, removeFillers)) return -1;
+    const jsize n = env->GetArrayLength(texts);
+    if (env->GetArrayLength(times) < n * 2) return -1;
+    std::vector<f64> t(static_cast<usize>(n) * 2);
+    env->GetDoubleArrayRegion(times, 0, n * 2, t.data());
+    std::vector<text::CaptionWord> words(static_cast<usize>(n));
+    for (jsize i = 0; i < n; ++i) {
+        auto js = static_cast<jstring>(env->GetObjectArrayElement(texts, i));
+        const char* s = js ? env->GetStringUTFChars(js, nullptr) : nullptr;
+        words[static_cast<usize>(i)] = text::CaptionWord{s ? s : "", t[static_cast<usize>(i) * 2], t[static_cast<usize>(i) * 2 + 1]};
+        if (s) env->ReleaseStringUTFChars(js, s);
+        if (js) env->DeleteLocalRef(js);
+    }
+    if (removeFillers) words = text::remove_filler_words(words);
+    auto r = c->engine.create_captions(static_cast<u64>(layer), words, o);
+    return r.ok() ? static_cast<jint>(*r) : -static_cast<jint>(r.status().code());
+}
+AUREA_JNI jbyteArray AUREA_FN(nativeCaptionOptions)(JNIEnv* env, jclass, jlong handle, jlong layer) {
+    auto* c = ctx_of(handle); return bytes_of(env, c ? c->engine.caption_options(static_cast<u64>(layer)) : "");
+}
+AUREA_JNI jboolean AUREA_FN(nativeSetCaptionOptions)(JNIEnv* env, jclass, jlong handle, jlong layer, jbyteArray options) {
+    auto* c = ctx_of(handle); if (!c) return JNI_FALSE;
+    text::CaptionOptions o; bool removeFillers = true;
+    return presets::parse_caption_options(utf8_of(env, options), o, removeFillers) && c->engine.set_caption_options(static_cast<u64>(layer), o);
+}
+AUREA_JNI jbyteArray AUREA_FN(nativeCaptionTemplates)(JNIEnv* env, jclass) {
+    return bytes_of(env, presets::caption_templates_json());
+}
+AUREA_JNI jbyteArray AUREA_FN(nativeCaptionWithTemplate)(JNIEnv* env, jclass, jbyteArray options, jbyteArray id) {
+    return bytes_of(env, presets::caption_with_template(utf8_of(env, options), utf8_of(env, id)));
+}
+AUREA_JNI jbyteArray AUREA_FN(nativeCaptionPreview)(JNIEnv* env, jclass, jbyteArray options) {
+    text::CaptionOptions o; bool removeFillers = true;
+    return bytes_of(env, presets::parse_caption_options(utf8_of(env, options), o, removeFillers) ? presets::caption_preview_json(o) : std::string{});
 }
 
 /// SRT → "início\tfim\tpalavra" por linha.
@@ -3440,10 +3529,11 @@ AUREA_JNI jbyteArray AUREA_FN(nativeImportAeFile)(JNIEnv* env, jclass, jlong han
 
 /// O mesmo com os bytes já lidos (content:// lido pela plataforma);
 /// `fileName` só serve para a extensão (.ffx/.jsx).
-AUREA_JNI jbyteArray AUREA_FN(nativeImportAeData)(JNIEnv* env, jclass, jlong handle, jbyteArray data, jbyteArray fileName, jlong layer) {
+AUREA_JNI jbyteArray AUREA_FN(nativeImportAeData)(JNIEnv* env, jclass, jlong handle, jbyteArray data, jbyteArray fileName, jlong layer,
+                                                   jboolean textAnimatorPro) {
     NativeContext* c = ctx_of(handle);
     ae::ImportReport report;
-    if (c) report = c->engine.import_ae_data(utf8_of(env, data), utf8_of(env, fileName), static_cast<u64>(layer));
+    if (c) report = c->engine.import_ae_data(utf8_of(env, data), utf8_of(env, fileName), static_cast<u64>(layer), textAnimatorPro == JNI_TRUE);
     else report.message = "motor indisponivel";
     return bytes_of(env, ae::report_json(report));
 }
@@ -4313,6 +4403,32 @@ AUREA_JNI jboolean AUREA_FN(nativeSetRawPlayback)(JNIEnv*, jclass, jlong handle,
 }
 AUREA_JNI void AUREA_FN(nativeSetSceneEditor)(JNIEnv*, jclass, jlong handle, jboolean enabled, jfloat yaw, jfloat pitch, jfloat distance) {
     if (auto* c = ctx_of(handle)) c->engine.set_scene_editor(enabled == JNI_TRUE, yaw, pitch, distance);
+}
+// 0.4.6: assistente de IA (assistant/Assistant.hpp): ferramentas, instruções e execução.
+AUREA_JNI jbyteArray AUREA_FN(nativeAssistantTools)(JNIEnv* env, jclass) {
+    return bytes_of(env, assistant::tools_json());
+}
+AUREA_JNI jbyteArray AUREA_FN(nativeAssistantSystemPrompt)(JNIEnv* env, jclass, jbyteArray language, jbyteArray version) {
+    return bytes_of(env, assistant::system_prompt(utf8_of(env, language), utf8_of(env, version)));
+}
+AUREA_JNI jbyteArray AUREA_FN(nativeAssistantCall)(JNIEnv* env, jclass, jlong handle, jbyteArray name, jbyteArray args) {
+    auto* c = ctx_of(handle);
+    return bytes_of(env, c ? c->engine.assistant_call(utf8_of(env, name), utf8_of(env, args)) : std::string("{\"ok\":false,\"error\":\"engine unavailable\"}"));
+}
+// 0.4.6: vistas do palco como no After Effects (Engine::set_view_mode).
+AUREA_JNI jboolean AUREA_FN(nativeSetViewMode)(JNIEnv*, jclass, jlong handle, jint mode) {
+    auto* c = ctx_of(handle); return c && mode >= 0 && c->engine.set_view_mode(static_cast<u32>(mode));
+}
+AUREA_JNI jboolean AUREA_FN(nativeSetViewOrbit)(JNIEnv*, jclass, jlong handle, jfloat yaw, jfloat pitch, jfloat distance) {
+    auto* c = ctx_of(handle); return c && c->engine.set_view_orbit(yaw, pitch, distance);
+}
+AUREA_JNI jfloatArray AUREA_FN(nativeQueryView)(JNIEnv* env, jclass, jlong handle) {
+    auto* c = ctx_of(handle); if (!c) return nullptr;
+    f32 v[5]{};
+    c->engine.query_view(v);
+    jfloatArray out = env->NewFloatArray(5);
+    if (out) env->SetFloatArrayRegion(out, 0, 5, v);
+    return out;
 }
 AUREA_JNI jlong AUREA_FN(nativeScenePick)(JNIEnv*, jclass, jlong handle, jfloat x, jfloat y, jfloat radius) {
     auto* c = ctx_of(handle);
@@ -5585,18 +5701,19 @@ AUREA_JNI jlongArray AUREA_FN(nativeQueryTextPath)(JNIEnv* env, jclass, jlong ha
 
 AUREA_JNI jfloatArray AUREA_FN(nativeSceneSettings)(JNIEnv* env, jclass, jlong handle) {
     auto* c = ctx_of(handle); if (!c) return nullptr;
-    float post[6]{}, floor[8]{};
-    c->engine.query_scene3d_post(post); c->engine.query_scene_floor(floor);
+    float post[6]{}, floor[8]{}, fog[6]{};
+    c->engine.query_scene3d_post(post); c->engine.query_scene_floor(floor); c->engine.query_scene3d_fog(fog);
     // [8] (0.4.1): 1 = o chão é o "Reflective Floor".
-    float values[9]{static_cast<float>(c->engine.studio_environment()), floor[0], post[0], post[1], post[2], post[3], post[4], post[5],
-                    aurea::Engine::is_reflective_floor(floor) ? 1.f : 0.f};
-    auto out = env->NewFloatArray(9); if (out) env->SetFloatArrayRegion(out, 0, 9, values); return out;
+    // [9..14] (0.4.6): neblina volumétrica {ligada, densidade, raios, r, g, b}.
+    float values[15]{static_cast<float>(c->engine.studio_environment()), floor[0], post[0], post[1], post[2], post[3], post[4], post[5],
+                     aurea::Engine::is_reflective_floor(floor) ? 1.f : 0.f, fog[0], fog[1], fog[2], fog[3], fog[4], fog[5]};
+    auto out = env->NewFloatArray(15); if (out) env->SetFloatArrayRegion(out, 0, 15, values); return out;
 }
 AUREA_JNI jboolean AUREA_FN(nativeSetSceneSetting)(JNIEnv*, jclass, jlong handle, jint parameter, jfloat value) {
     auto* c = ctx_of(handle); if (!c || !std::isfinite(value)) return false;
     auto& e = c->engine;
-    float post[6]{}, floor[8]{};
-    e.query_scene3d_post(post); e.query_scene_floor(floor);
+    float post[6]{}, floor[8]{}, fog[6]{};
+    e.query_scene3d_post(post); e.query_scene_floor(floor); e.query_scene3d_fog(fog);
     switch (parameter) {
     case 0: {
         // Fonte de luz (0.3.1): só a luz. Antes este caso regravava o chão com
@@ -5628,6 +5745,14 @@ AUREA_JNI jboolean AUREA_FN(nativeSetSceneSetting)(JNIEnv*, jclass, jlong handle
     case 7: return e.set_scene3d_bloom(post[3] > 0, post[4], value);
     // 0.4.1: o "Reflective Floor" num toque (Engine::apply_reflective_floor).
     case 8: return e.apply_reflective_floor();
+    // 0.4.6: neblina volumétrica — ligar (9), densidade (10), raios (11).
+    // Ligar sem densidade começa com uma névoa leve visível.
+    case 9: return e.set_scene3d_fog(value > 0, value > 0 && fog[1] <= 0 ? 0.0006f : fog[1], fog[2], fog[3], fog[4], fog[5]);
+    case 10: return e.set_scene3d_fog(fog[0] > 0, value, fog[2], fog[3], fog[4], fog[5]);
+    case 11: return e.set_scene3d_fog(fog[0] > 0, fog[1], value, fog[3], fog[4], fog[5]);
+    // 0.4.6: reflexos de tela (12) e oclusão ambiente (13) — ligados por padrão.
+    case 12: e.renderer().scene_renderer().set_screen_reflections(value > 0); return true;
+    case 13: e.renderer().scene_renderer().set_ambient_occlusion(value > 0); return true;
     default: return false;
     }
 }

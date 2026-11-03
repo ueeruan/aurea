@@ -210,6 +210,8 @@ struct CommunityView: View {
     @State private var editing = false
     @State private var composing = false
     @State private var legacy = false
+    @State private var storeOpen = false
+    @State private var storeSoon = false
     @State private var verifying = false
     @State private var deleting: SocialPost?
     @State private var comments: SocialPost?
@@ -283,6 +285,10 @@ struct CommunityView: View {
                 SocialComments(post: post, ownID: state.me?.id, api: state.api) { id in comments = nil; state.run { try await state.open(id) } }
             }
             .sheet(isPresented: $legacy) { HomeCommunityPresets().padding(.top, 24) }
+            .fullScreenCover(isPresented: $storeOpen) { StoreView().environmentObject(model).environmentObject(conta) }
+            .alert(AureaText.t("store_soon"), isPresented: $storeSoon) {
+                Button(AureaText.t("editor_fechar"), role: .cancel) {}
+            } message: { Text(AureaText.t("store_soon_message")) }
             .sheet(isPresented: Binding(get: { people != nil }, set: { if !$0 { people = nil } })) {
                 if let type = people, let p = state.profile { SocialPeople(profileID: p.id, type: type, api: state.api) { id in people = nil; state.run { try await state.open(id) } } }
             }
@@ -312,6 +318,11 @@ struct CommunityView: View {
                     .fontWeight(state.following ? .bold : .regular).frame(minHeight: 44)
                 Spacer()
                 Button(AureaText.t("pn_caption")) { legacy = true }.frame(minHeight: 44)
+                // 0.4.6: a Loja da Comunidade (plugins, efeitos e presets). Par do Android.
+                // Enquanto o armazenamento (R2) não está ativo no servidor: "Em breve".
+                Button(AureaText.t("store_title") + (storeEnabled ? "" : " · " + AureaText.t("store_soon"))) {
+                    if storeEnabled { storeOpen = true } else { storeSoon = true }
+                }.frame(minHeight: 44).accessibilityIdentifier("social.store")
             }.disabled(state.busy)
         }
     }

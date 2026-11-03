@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <string>
 
 namespace aurea::text {
 
@@ -56,12 +58,23 @@ std::array<ParamValue, aeCount> animator_values(const Layer& layer, const Effect
 }
 
 bool has_animator_effect(const Layer& layer) noexcept {
-    for (const auto& fx : layer.effects) if (fx.enabled && fx.type == effect_type_id(kAnimatorEffect)) return true;
+    for (const auto& fx : layer.effects) if (fx.enabled && is_animator_effect(fx.type)) return true;
     return false;
 }
 
 f32 animator_effect_padding(const Layer& layer, f64 time, f32 size, u32 chars) {
     f32 pad = 0;
+    // Pro: um teto generoso (âncora, posição, linhas e oscilação somados).
+    for (const auto& fx : layer.effects) if (fx.enabled && fx.type == effect_type_id(kAnimatorProEffect)) {
+        static const ParameterRegistry pro = [] { ParameterRegistry p; declare_animator_pro_params(p); return p; }();
+        auto at = [&](u32 i) { return evaluate_param_f(layer.tracks, fx, i, pro.at(i), time); };
+        const ParamValue P = at(apPosition), A = at(apAnchor), S = at(apScale), L = at(apLineSpacing);
+        pad += std::max({std::fabs(P.v[0]), std::fabs(P.v[1]), std::fabs(P.v[2])}) + std::max(std::fabs(A.v[0]), std::fabs(A.v[1]));
+        pad += std::max(std::fabs(L.v[0]), std::fabs(L.v[1])) * 8.0f;
+        pad += size * std::max(0.f, std::max(std::fabs(S.v[0]), std::fabs(S.v[1])) / 100 - 1) + at(apBlur).v[0] * 2 + at(apStrokeWidth).v[0];
+        if (at(apRotation).v[0] || at(apRotation).v[1] || at(apRotation).v[2] || at(apSkew).v[0]) pad += size;
+        pad += std::fabs(at(apTracking).v[0]) * std::min(chars, 200u);
+    }
     for (const auto& fx : layer.effects) if (fx.enabled && fx.type == effect_type_id(kAnimatorEffect)) {
         const auto v = animator_values(layer, fx, time);
         pad += std::max({std::fabs(v[aePosition].v[0]), std::fabs(v[aePosition].v[1]), std::fabs(v[aePosition].v[2])});
@@ -75,6 +88,8 @@ f32 animator_effect_padding(const Layer& layer, f64 time, f32 size, u32 chars) {
 void evaluate_animator_effects(const Layer& layer, f64 time, f64 fps, const std::vector<GlyphUnits>& units,
                               u32 chars, u32 words, u32 lines, std::vector<GlyphAnim>& out) {
     if (out.size() != units.size()) out.resize(units.size());
+    for (const auto& fx : layer.effects) if (fx.enabled && fx.type == effect_type_id(kAnimatorProEffect))
+        evaluate_animator_pro(layer, fx, time, fps, units, chars, words, lines, out);
     for (const auto& fx : layer.effects) if (fx.enabled && fx.type == effect_type_id(kAnimatorEffect)) {
         const auto v = animator_values(layer, fx, time);
         TextData t; t.size = layer.text.size;
@@ -263,6 +278,66 @@ void evaluate_text_animators(const TextData& t, const TrackSet& tracks, f64 loca
             }
         }
     }
+}
+
+std::string format_counter(f64 value, u32 decimals, bool grouping) {
+    decimals = std::min(decimals, 6u);
+    if (!std::isfinite(value)) value = 0.0;
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.*f", static_cast<int>(decimals), std::fabs(value));
+    std::string digits(buf);
+    std::string frac;
+    if (const auto dot = digits.find('.'); dot != std::string::npos) { frac = digits.substr(dot + 1); digits.resize(dot); }
+    std::string out;
+    // "-0" nunca aparece: o sinal só se o número mostrado não é zero.
+    bool nonzero = false;
+    for (char c : digits + frac) if (c != '0') nonzero = true;
+    if (value < 0.0 && nonzero) out += '-';
+    for (usize i = 0; i < digits.size(); ++i) {
+        if (grouping && i > 0 && (digits.size() - i) % 3 == 0) out += '.';
+        out += digits[i];
+    }
+    if (!frac.empty()) { out += ','; out += frac; }
+    return out;
+}
+
+std::string expand_dynamic(const TextData& t, f64 local, f64 duration, f64 compFrame, f64 fps) {
+    if (!t.dynamic || t.content.find('{') == std::string::npos) return t.content;
+    if (!(fps > 0.0)) fps = 30.0;
+    const f64 span = std::max(1.0, duration - 1.0);
+    const f32 progress = static_cast<f32>(std::clamp(local / span, 0.0, 1.0));
+    const Interpolation ease = t.counterEase <= static_cast<u8>(kLastInterpolation)
+        ? static_cast<Interpolation>(t.counterEase) : Interpolation::Linear;
+    const f32 k = apply_easing(ease, progress, 0.42f, 0.0f, 0.58f, 1.0f);
+    const f64 value = t.counterFrom + (t.counterTo - t.counterFrom) * static_cast<f64>(k);
+    const i64 frame = std::max<i64>(0, static_cast<i64>(std::floor(compFrame + 1e-6)));
+    const i64 rate = std::max<i64>(1, static_cast<i64>(std::llround(fps)));
+    const i64 seconds = frame / rate;
+    std::string out;
+    out.reserve(t.content.size() + 16);
+    for (usize i = 0; i < t.content.size();) {
+        auto take = [&](const char* token) {
+            const usize n = std::char_traits<char>::length(token);
+            if (t.content.compare(i, n, token) != 0) return false;
+            i += n;
+            return true;
+        };
+        char buf[48];
+        if (take("{#}")) { out += format_counter(value, t.counterDecimals, t.counterGrouping); continue; }
+        if (take("{tc}")) {
+            std::snprintf(buf, sizeof(buf), "%02lld:%02lld:%02lld:%02lld", static_cast<long long>(seconds / 3600),
+                          static_cast<long long>(seconds / 60 % 60), static_cast<long long>(seconds % 60),
+                          static_cast<long long>(frame % rate));
+            out += buf; continue;
+        }
+        if (take("{t}")) {
+            std::snprintf(buf, sizeof(buf), "%lld:%02lld", static_cast<long long>(seconds / 60), static_cast<long long>(seconds % 60));
+            out += buf; continue;
+        }
+        if (take("{f}")) { out += std::to_string(frame); continue; }
+        out += t.content[i++];
+    }
+    return out;
 }
 
 std::string apply_char_offset(const TextData& t, const TrackSet& tracks, f64 local, f64 fps) {

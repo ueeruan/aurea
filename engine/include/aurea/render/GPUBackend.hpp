@@ -97,7 +97,7 @@ namespace binding {
     /// Tamanho máximo de um bloco de uniform por passe. 1 KB cobre a matriz de
     /// cor de 16 operações fundidas com folga; passar disso é sinal de que o
     /// dado deveria ser textura ou storage buffer.
-    inline constexpr u32 kMaxUniformBytes   = 1024;
+    inline constexpr u32 kMaxUniformBytes   = 4096;   // 0.4.6: plugins com 64 parametros (Metal setBytes vai ate 4 KB)
 }
 
 // -----------------------------------------------------------------------------
@@ -681,6 +681,12 @@ public:
         return Status{Errc::NotSupported, "backend sem shaders de runtime"};
     }
     [[nodiscard]] virtual Result<PipelineHandle> create_pipeline(const PipelineDesc&) noexcept = 0;
+    /// 0.4.6: a mensagem do compilador do DRIVER na última recusa de
+    /// create_shader/create_pipeline (GLES: info log). Vazio = o backend não
+    /// tem (Vulkan/Metal recebem módulos prontos). A tela de "não iniciou"
+    /// mostra o começo dela: sem isso, um aparelho que recusa os shaders
+    /// básicos (Mali-T820) só dava para diagnosticar com logcat.
+    [[nodiscard]] virtual std::string last_compile_log() const { return {}; }
 
     /// Destruição ADIADA: o objeto só morre quando a GPU terminou todo frame
     /// que pode tê-lo usado. O handle fica inválido na hora.

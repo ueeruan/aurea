@@ -20,6 +20,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** Opções da geração (espelham `text::CaptionOptions`). */
 data class CaptionSettings(
@@ -36,7 +38,158 @@ data class CaptionSettings(
     val posY: Float = 0.78f,
     val sizeFrac: Float = 0.065f,
     val highlightColor: FloatArray = floatArrayOf(1f, 0.83f, 0f),
-)
+    // 0.4.6: aparência própria por cima do estilo (bits `CaptionLook.*`).
+    val look: Int = 0,
+    val fontFamily: String = "",
+    val fontWeight: Int = 700,
+    val fontItalic: Boolean = false,
+    val fontPath: String = "",
+    val fill: FloatArray = floatArrayOf(1f, 1f, 1f, 1f),
+    val stroke: FloatArray = floatArrayOf(0f, 0f, 0f, 1f),
+    val strokeFrac: Float = 0.08f,
+    val box: Boolean = false,
+    val boxColor: FloatArray = floatArrayOf(0f, 0f, 0f, 0.7f),
+    val shadow: Boolean = false,
+) {
+    fun has(bit: Int) = look and bit != 0
+    fun with(bit: Int, on: Boolean) = copy(look = if (on) look or bit else look and bit.inv())
+
+    /** O bloco "caption" do preset (presets::caption_options_json): a forma que o motor lê. */
+    fun toJson(): String = JSONObject().apply {
+        put("mode", mode); put("maxWords", maxWords); put("maxChars", maxChars); put("maxLines", maxLines)
+        put("style", style); put("highlight", highlight); put("uppercase", uppercase); put("breakOnPause", breakOnPause)
+        put("pauseSec", pauseSec.toDouble()); put("posY", posY.toDouble()); put("sizeFrac", sizeFrac.toDouble())
+        put("highlightColor", rgba(floatArrayOf(highlightColor[0], highlightColor[1], highlightColor[2], 1f)))
+        put("removeFillers", removeFillers)
+        put("look", look); put("fontFamily", fontFamily); put("fontWeight", fontWeight); put("fontItalic", fontItalic); put("fontPath", fontPath)
+        put("fill", rgba(fill)); put("stroke", rgba(stroke)); put("strokeFrac", strokeFrac.toDouble())
+        put("box", box); put("boxColor", rgba(boxColor)); put("shadow", shadow)
+    }.toString()
+
+    companion object {
+        private fun rgba(c: FloatArray) = JSONArray().apply { for (i in 0 until 4) put(c.getOrElse(i) { 1f }.toDouble().coerceIn(0.0, 1.0)) }
+        private fun JSONObject.color(key: String, fallback: FloatArray): FloatArray {
+            val a = optJSONArray(key) ?: return fallback
+            return if (a.length() < 4) fallback else FloatArray(4) { a.optDouble(it, 1.0).toFloat() }
+        }
+
+        /** Lê o JSON do motor; o que faltar vem de [base]. */
+        fun fromJson(json: String, base: CaptionSettings = CaptionSettings()): CaptionSettings {
+            val o = runCatching { JSONObject(json) }.getOrNull() ?: return base
+            val hc = o.color("highlightColor", floatArrayOf(base.highlightColor[0], base.highlightColor[1], base.highlightColor[2], 1f))
+            return base.copy(
+                mode = o.optInt("mode", base.mode), maxWords = o.optInt("maxWords", base.maxWords),
+                maxChars = o.optInt("maxChars", base.maxChars), maxLines = o.optInt("maxLines", base.maxLines),
+                style = o.optInt("style", base.style), highlight = o.optBoolean("highlight", base.highlight),
+                uppercase = o.optBoolean("uppercase", base.uppercase), breakOnPause = o.optBoolean("breakOnPause", base.breakOnPause),
+                pauseSec = o.optDouble("pauseSec", base.pauseSec.toDouble()).toFloat(),
+                posY = o.optDouble("posY", base.posY.toDouble()).toFloat(), sizeFrac = o.optDouble("sizeFrac", base.sizeFrac.toDouble()).toFloat(),
+                highlightColor = floatArrayOf(hc[0], hc[1], hc[2]),
+                look = o.optInt("look", base.look), fontFamily = o.optString("fontFamily", base.fontFamily),
+                fontWeight = o.optInt("fontWeight", base.fontWeight), fontItalic = o.optBoolean("fontItalic", base.fontItalic),
+                fontPath = o.optString("fontPath", base.fontPath),
+                fill = o.color("fill", base.fill), stroke = o.color("stroke", base.stroke),
+                strokeFrac = o.optDouble("strokeFrac", base.strokeFrac.toDouble()).toFloat(),
+                box = o.optBoolean("box", base.box), boxColor = o.color("boxColor", base.boxColor), shadow = o.optBoolean("shadow", base.shadow),
+            )
+        }
+    }
+}
+
+/** Bits de `CaptionSettings.look` (iguais a text::kCaptionLook*). */
+object CaptionLook {
+    const val FONT = 1
+    const val FILL = 2
+    const val STROKE = 4
+    const val BOX = 8
+    const val SHADOW = 16
+}
+
+/** Aparência resolvida pelo motor (presets::caption_preview_json), para desenhar a amostra. */
+data class CaptionPreview(
+    val weight: Int, val italic: Boolean, val fill: FloatArray, val stroke: FloatArray, val strokeFrac: Float,
+    val box: Boolean, val boxColor: FloatArray, val shadow: Boolean, val shadowColor: FloatArray, val glow: Boolean,
+    val highlight: Boolean, val highlightColor: FloatArray, val uppercase: Boolean,
+) {
+    companion object {
+        fun parse(o: JSONObject?): CaptionPreview? {
+            o ?: return null
+            fun c(k: String) = o.optJSONArray(k)?.let { a -> FloatArray(4) { a.optDouble(it, 1.0).toFloat() } } ?: floatArrayOf(1f, 1f, 1f, 1f)
+            return CaptionPreview(o.optInt("weight", 700), o.optBoolean("italic"), c("fill"), c("stroke"), o.optDouble("strokeFrac").toFloat(),
+                o.optBoolean("box"), c("boxColor"), o.optBoolean("shadow"), c("shadowColor"), o.optBoolean("glow"),
+                o.optBoolean("highlight"), c("highlightColor"), o.optBoolean("uppercase"))
+        }
+    }
+}
+
+/** Um modelo pronto do motor (text::caption_templates). */
+data class CaptionTemplateItem(val id: String, val preview: CaptionPreview)
+
+/**
+ * O que os controles de modelo e aparência mexem: a faixa inteira
+ * ([CaptionsState]) ou só os blocos marcados ([CaptionBlockLook]).
+ */
+interface CaptionLookTarget {
+    val settings: CaptionSettings
+    val templates: List<CaptionTemplateItem>
+    /** Modelo escolhido; nulo depois de personalizar à mão. */
+    val templateId: String?
+    val preview: CaptionPreview?
+    val lookEnabled: Boolean
+    fun update(custom: Boolean = true, f: (CaptionSettings) -> CaptionSettings)
+    fun applyTemplate(id: String)
+}
+
+/**
+ * 0.4.6: estilo só dos blocos marcados (o "Estilo" do editor de blocos). As
+ * opções começam nas do primeiro bloco (as dele ou as da faixa); cada toque
+ * manda a aparência ao motor (op "look"), um passo de desfazer.
+ */
+class CaptionBlockLook internal constructor(
+    private val engine: AureaEngine,
+    private val owner: CaptionsState,
+    val ids: Set<Long>,
+    initial: CaptionSettings,
+) : CaptionLookTarget {
+    override var settings by mutableStateOf(initial)
+        private set
+    override val templates: List<CaptionTemplateItem> get() = owner.templates
+    override var templateId by mutableStateOf<String?>(null)
+        private set
+    override var preview by mutableStateOf<CaptionPreview?>(null)
+        private set
+    override val lookEnabled: Boolean get() = owner.lookEnabled
+
+    init { refreshPreview() }
+
+    private fun refreshPreview() {
+        preview = runCatching { CaptionPreview.parse(JSONObject(engine.captionPreview(settings.toJson()))) }.getOrNull()
+    }
+
+    override fun update(custom: Boolean, f: (CaptionSettings) -> CaptionSettings) {
+        val next = f(settings)
+        if (next == settings) return
+        settings = next
+        if (custom) templateId = null
+        refreshPreview()
+        owner.editBlocks(JSONObject().put("op", "look").put("ids", JSONArray(ids.toList())).put("options", next.toJson()))
+    }
+
+    override fun applyTemplate(id: String) {
+        val json = engine.captionWithTemplate(settings.toJson(), id)
+        if (json.isEmpty()) return
+        update(custom = false) { CaptionSettings.fromJson(json, it) }
+        templateId = id
+    }
+
+    /** Volta os blocos ao estilo da faixa. */
+    fun clear() {
+        owner.editBlocks(JSONObject().put("op", "clear_look").put("ids", JSONArray(ids.toList())))
+        settings = owner.settings
+        templateId = null
+        refreshPreview()
+    }
+}
 
 /**
  * Estado das legendas da camada escolhida: a transcrição (do cache, do
@@ -51,7 +204,7 @@ class CaptionsState(
     private val engine: AureaEngine,
     private val scope: CoroutineScope,
     private val onModelChanged: () -> Unit,
-) {
+) : CaptionLookTarget {
     private var generation = 0L
     private var transcription: Job? = null
     fun resetProject() {
@@ -73,8 +226,16 @@ class CaptionsState(
     fun applyPreset(data: String) {
         val current = track ?: return
         error = if (engine.applyCaptionBundle(current.layer, data)) null else AppText.get(app, R.string.app_caption_preset_incompatible)
+        loadTrackOptions()
         onModelChanged()
     }
+    /** Estilo dos blocos [ids]: começa no do primeiro marcado (o dele ou o da faixa). */
+    fun blockLook(ids: Set<Long>): CaptionBlockLook {
+        val first = track?.segments?.firstOrNull { it.id in ids }
+        val initial = first?.look?.let { CaptionSettings.fromJson(it, settings) } ?: settings
+        return CaptionBlockLook(engine, this, ids, initial)
+    }
+
     fun editBlocks(command: org.json.JSONObject) {
         val current = track ?: return
         if (!engine.editCaptionTrack(current.layer, command.toString())) { error = AppText.get(app, R.string.app_caption_edit_overlap); return }
@@ -95,9 +256,66 @@ class CaptionsState(
     var busy by mutableStateOf<String?>(null)
         private set
     var error by mutableStateOf<String?>(null)
-    var settings by mutableStateOf(CaptionSettings())
+    override var settings by mutableStateOf(CaptionSettings())
     var captionCount by mutableStateOf(0)
         private set
+
+    // 0.4.6: modelos prontos (do motor) e aparência própria antes e depois de gerar.
+    override val templates: List<CaptionTemplateItem> by lazy {
+        runCatching {
+            val a = JSONArray(engine.captionTemplates())
+            (0 until a.length()).mapNotNull { i ->
+                val o = a.getJSONObject(i)
+                CaptionPreview.parse(o.optJSONObject("preview"))?.let { CaptionTemplateItem(o.getString("id"), it) }
+            }
+        }.getOrDefault(emptyList())
+    }
+    /** Modelo escolhido; nulo depois de personalizar à mão. */
+    override var templateId by mutableStateOf<String?>("highlight")
+        private set
+    /** Amostra da aparência atual (o motor resolve estilo + personalização). */
+    override var preview by mutableStateOf<CaptionPreview?>(null)
+        private set
+
+    private fun refreshPreview() {
+        preview = runCatching { CaptionPreview.parse(JSONObject(engine.captionPreview(settings.toJson()))) }.getOrNull()
+    }
+
+    /**
+     * Troca as opções. Com a faixa pronta, estilo, aparência, tamanho e altura
+     * mudam na hora (um passo de desfazer); agrupamento vale ao refazer.
+     */
+    override val lookEnabled: Boolean get() = busy == null
+
+    override fun update(custom: Boolean, f: (CaptionSettings) -> CaptionSettings) {
+        val next = f(settings)
+        if (next == settings) return
+        settings = next
+        if (custom) templateId = null
+        refreshPreview()
+        val current = track ?: return
+        if (engine.setCaptionOptions(current.layer, next.toJson())) { error = null; onModelChanged() }
+    }
+
+    override fun applyTemplate(id: String) {
+        val json = engine.captionWithTemplate(settings.toJson(), id)
+        if (json.isEmpty()) return
+        update(custom = false) { CaptionSettings.fromJson(json, it) }
+        templateId = id
+    }
+
+    /** As opções guardadas na faixa (o painel mostra o que está na tela). */
+    private fun loadTrackOptions() {
+        val current = track ?: return
+        val json = engine.captionOptions(current.layer)
+        if (json.isEmpty()) return
+        val loaded = CaptionSettings.fromJson(json, settings).copy(removeFillers = settings.removeFillers)
+        if (loaded != settings) {
+            settings = loaded
+            templateId = null
+        }
+        refreshPreview()
+    }
 
     // 0.2.5: idioma da fala e qualidade ficam guardados entre aberturas do
     // painel (e entre sessões); o padrão é o idioma do app e a melhor qualidade.
@@ -169,6 +387,7 @@ class CaptionsState(
         track = tracks.firstOrNull { it.layer == layerId || it.source == layerId }
         val sourceId = tracks.firstOrNull { it.layer == layerId }?.source ?: layerId
         openSource(sourceId)
+        if (track != null) loadTrackOptions() else if (preview == null) refreshPreview()
     }
     private fun openSource(layerId: Long) {
         if (busy != null && layer != layerId) return
@@ -350,20 +569,15 @@ class CaptionsState(
         val request = generation
         val id = layer ?: return
         if (words.isEmpty()) return
-        val s = settings
+        val options = settings.toJson()
         val texts = words.map { it.text }.toTypedArray()
         val times = DoubleArray(words.size * 2) { i -> if (i % 2 == 0) words[i / 2].start else words[i / 2].end }
-        val ints = intArrayOf(
-            s.mode, s.maxWords, s.maxChars, s.maxLines, s.style,
-            if (s.highlight) 1 else 0, if (s.uppercase) 1 else 0, if (s.breakOnPause) 1 else 0, if (s.removeFillers) 1 else 0,
-        )
-        val floats = floatArrayOf(s.pauseSec, s.posY, s.sizeFrac, s.highlightColor[0], s.highlightColor[1], s.highlightColor[2])
         // Fase 8D: milhares de palavras viram milhares de camadas (texto medido
         // uma a uma): fora da thread da UI, com aviso enquanto faz.
         busy = AppText.get(app, R.string.app_caption_creating)
         scope.launch {
             try {
-                val n = withContext(Dispatchers.Default) { engine.createCaptions(id, texts, times, ints, floats) }
+                val n = withContext(Dispatchers.Default) { engine.createCaptionsJson(id, texts, times, options) }
                 if (generation != request || layer != id) return@launch
                 if (n < 0) error = AppText.get(app, R.string.app_caption_create_failed, -n) else error = null
                 captionCount = engine.captionCount(id)

@@ -22,13 +22,18 @@ import sys
 import zipfile
 from pathlib import Path
 
-MAX_PARAMS = 16
-MAX_PASSES = 8
-MAX_INPUTS = 3
-MAX_STACK = 16
-MAX_SHADER_BYTES = 64 * 1024
-MAX_MANIFEST_BYTES = 256 * 1024
-MAX_PACKAGE_BYTES = 16 * 1024 * 1024
+# 0.4.6 ("plugin sem limites"): os mesmos tetos de engine/include/aurea/plugins/Plugin.hpp.
+MAX_PARAMS = 64
+MAX_PASSES = 32
+MAX_INPUTS = 11          # entradas + texturas do pacote, por passe
+MAX_TEXTURES = 8
+MAX_TEXTURE_BYTES = 64 * 1024 * 1024
+MAX_LAYER_PARAMS = 8
+MAX_STACK = 64
+MAX_SHADER_BYTES = 1024 * 1024
+MAX_MANIFEST_BYTES = 4 * 1024 * 1024
+MAX_PACKAGE_BYTES = 512 * 1024 * 1024
+MAX_MARGIN = 4096
 PARAM_TYPES = {"float", "int", "bool", "enum", "color", "point", "angle", "layer"}
 ID_RE = re.compile(r"^[a-z0-9._-]{3,64}$")
 VERSION_RE = re.compile(r"^\d{1,5}\.\d{1,5}\.\d{1,5}$")
@@ -292,7 +297,7 @@ def check(folder):
     if layers and kind != "shader3d":
         raise Invalid('parametro "layer" so em plugin "kind": "shader3d"')
     if layers > 4:
-        raise Invalid(f'{layers} parametros "layer" (limite 4)')
+        raise Invalid(f'{layers} parametros "layer" (limite {MAX_LAYER_PARAMS})')
     if len(set(ids)) != len(ids):
         raise Invalid("parametro repetido")
     files = ["plugin.json"]
@@ -304,9 +309,32 @@ def check(folder):
     elif kind in ("shader", "shader3d"):
         passes = m.get("passes")
         if not isinstance(passes, list) or not passes:
-            raise Invalid('plugin "shader" precisa de "passes" (1 a 8)')
+            raise Invalid(f'plugin "shader" precisa de "passes" (1 a {MAX_PASSES})')
         if len(passes) > MAX_PASSES:
             raise Invalid(f"{len(passes)} passes (limite {MAX_PASSES})")
+        # 0.4.6: "textures" (o getFile do GLSL): imagens do pacote.
+        textures = m.get("textures", {})
+        if not isinstance(textures, dict) or len(textures) > MAX_TEXTURES:
+            raise Invalid(f'"textures" deve ser um objeto nome -> arquivo (ate {MAX_TEXTURES})')
+        for name, t in textures.items():
+            where = f'textura "{name}"'
+            if not valid_ident(name) or name in ids:
+                raise Invalid(f"{where}: nome invalido ou igual a um parametro")
+            tf = t if isinstance(t, str) else t.get("file") if isinstance(t, dict) else None
+            if not isinstance(tf, str) or not safe_file(tf) or not tf.lower().endswith((".png", ".jpg", ".jpeg")):
+                raise Invalid(f"{where}: use um .png/.jpg dentro do pacote")
+            if not (folder / tf).is_file():
+                raise Invalid(f"{where}: arquivo ausente: {tf}")
+            if (folder / tf).stat().st_size > MAX_TEXTURE_BYTES:
+                raise Invalid(f"{where}: {tf} maior que 64 MB")
+            if isinstance(t, dict):
+                if t.get("colorSpace", "color") not in ("color", "data"):
+                    raise Invalid(f'{where}: "colorSpace" deve ser "color" ou "data"')
+                if t.get("filter", "linear") not in ("linear", "nearest"):
+                    raise Invalid(f'{where}: "filter" deve ser "linear" ou "nearest"')
+                if t.get("wrap", "clamp") not in ("clamp", "repeat", "mirror"):
+                    raise Invalid(f'{where}: "wrap" deve ser "clamp", "repeat" ou "mirror"')
+            files.append(tf)
         targets = []
         for i, p in enumerate(passes):
             where = f"passe {i + 1}"
@@ -318,7 +346,7 @@ def check(folder):
             if not path.is_file():
                 raise Invalid(f"{where}: arquivo de shader ausente: {shader}")
             if path.stat().st_size > MAX_SHADER_BYTES:
-                raise Invalid(f"{where}: {shader} maior que 64 KB")
+                raise Invalid(f"{where}: {shader} maior que 1 MB")
             if "aurea_main" not in path.read_text(encoding="utf-8", errors="replace"):
                 raise Invalid(f"{where}: {shader} nao define vec4 aurea_main(vec2 uv)")
             files.append(shader)
@@ -335,18 +363,18 @@ def check(folder):
             if not isinstance(scale, (int, float)) or not 0.125 <= scale <= 1:
                 raise Invalid(f'{where}: "scale" deve estar entre 0.125 e 1')
             inputs = p.get("inputs", {})
-            if not isinstance(inputs, dict) or len(inputs) > MAX_INPUTS:
-                raise Invalid(f'{where}: "inputs" deve ser um objeto com ate {MAX_INPUTS} entradas')
+            if not isinstance(inputs, dict) or len(inputs) + len(textures) > MAX_INPUTS:
+                raise Invalid(f'{where}: entradas + texturas passam de {MAX_INPUTS}')
             for name, src in inputs.items():
-                if not valid_ident(name) or name in ids:
+                if not valid_ident(name) or name in ids or name in textures:
                     raise Invalid(f'{where}: entrada com nome invalido "{name}"')
                 if src != "source" and src not in targets:
                     raise Invalid(f'{where}: entrada "{name}" le "{src}", que nao e "source" nem o target de um passe anterior')
             if target:
                 targets.append(target)
         margin = m.get("margin", 0)
-        if not isinstance(margin, (int, float)) or not 0 <= margin <= 1024:
-            raise Invalid('"margin" deve estar entre 0 e 1024 (px da camada)')
+        if not isinstance(margin, (int, float)) or not 0 <= margin <= MAX_MARGIN:
+            raise Invalid(f'"margin" deve estar entre 0 e {MAX_MARGIN} (px da camada)')
         if m.get("colorSpace", "linear") not in ("linear", "srgb"):
             raise Invalid('"colorSpace" deve ser "linear" ou "srgb"')
     else:
@@ -371,7 +399,19 @@ def check(folder):
 
 def pack(folder, output):
     m, files = check(folder)
+    # 0.4.6: plugin.getFile() le QUALQUER arquivo do pacote: tudo da pasta vai
+    # junto (menos ocultos, .cache e o proprio pacote de saida).
     output = Path(output)
+    root = Path(folder)
+    extra = []
+    for path in sorted(root.rglob("*")):
+        rel = path.relative_to(root).as_posix()
+        if not path.is_file() or any(part.startswith(".") for part in rel.split("/")):
+            continue
+        if path.resolve() == output.resolve() or rel.endswith(".aureaplugin"):
+            continue
+        extra.append(rel)
+    files = list(dict.fromkeys(list(files) + extra))
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as z:
         for rel in files:
             info = zipfile.ZipInfo(rel, date_time=(2026, 1, 1, 0, 0, 0))   # pacote reprodutível
@@ -380,7 +420,7 @@ def pack(folder, output):
             z.writestr(info, (Path(folder) / rel).read_bytes())
     if output.stat().st_size > MAX_PACKAGE_BYTES:
         output.unlink()
-        raise Invalid("pacote maior que 16 MB")
+        raise Invalid("pacote maior que 512 MB")
     return m, files
 
 

@@ -34,22 +34,31 @@
 namespace aurea::plugins {
 
 // --- Limites (e o porquê de cada um está na documentação) ---------------------
+// 0.4.6 ("plugin sem limites"): os tetos subiram até onde o aparelho ainda
+// aguenta sem travar a GPU ou estourar a memória. O que sobrou é guarda de
+// segurança (quadro de teste, memória do script), não limite de criatividade.
 inline constexpr u32 kFormatVersion = 1;            ///< "aureaPlugin" dos plugins só de efeito
 /// 0.3.4 plugins: formato 2 = painéis, script e permissões (o app lê 1 e 2).
 inline constexpr u32 kFormatVersionV2 = 2;
-inline constexpr u32 kMaxParams = 16;
-inline constexpr u32 kMaxPasses = 8;
-inline constexpr u32 kMaxPassInputs = 3;            ///< entradas nomeadas além da fonte
-inline constexpr u32 kMaxStackSteps = 16;
-inline constexpr u32 kMaxEnumOptions = 32;
-inline constexpr usize kMaxShaderBytes = 64 * 1024; ///< por arquivo de shader
-inline constexpr usize kMaxManifestBytes = 256 * 1024;
-inline constexpr u64 kMaxPackageBytes = 16ull << 20;
-inline constexpr f32 kMaxMargin = 1024.0f;           ///< px da camada
+inline constexpr u32 kMaxParams = 64;
+inline constexpr u32 kMaxPasses = 32;
+inline constexpr u32 kMaxPassInputs = 11;           ///< entradas nomeadas + texturas do pacote, além da fonte
+/// 0.4.6: imagens do pacote amarradas como sampler2D ("textures": o getFile do GLSL).
+inline constexpr u32 kMaxTextures = 8;
+inline constexpr usize kMaxTextureBytes = 64ull << 20;   ///< arquivo de imagem no pacote
+inline constexpr u32 kMaxTextureSide = 8192;
+inline constexpr u32 kMaxStackSteps = 64;
+inline constexpr u32 kMaxEnumOptions = 256;
+inline constexpr usize kMaxShaderBytes = 1024 * 1024; ///< por arquivo de shader
+inline constexpr usize kMaxManifestBytes = 4u << 20;
+inline constexpr u64 kMaxPackageBytes = 512ull << 20;
+/// Soma descompactada de um pacote (contra zip-bomb: 512 MB podem inflar sem fim).
+inline constexpr u64 kMaxUnpackedBytes = 1ull << 30;
+inline constexpr f32 kMaxMargin = 4096.0f;           ///< px da camada
 inline constexpr u32 kTestRenderSize = 256;          ///< prévia de teste na instalação
-inline constexpr f32 kTestRenderBudgetMs = 250.0f;   ///< teto do quadro de teste
+inline constexpr f32 kTestRenderBudgetMs = 1000.0f;  ///< teto do quadro de teste (guarda contra travar a GPU)
 /// 0.3.1: parâmetros "layer" (câmera/nulo/luz ligados ao plugin 3D).
-inline constexpr u32 kMaxLayerParams = 4;
+inline constexpr u32 kMaxLayerParams = 8;
 
 /// Prefixo da chave do efeito: "plugin." + id.
 inline constexpr std::string_view kEffectKeyPrefix = "plugin.";
@@ -96,6 +105,16 @@ struct ParamDecl {
 };
 
 /// Um passe de um plugin "shader".
+/// 0.4.6 ("textures", o getFile do GLSL): uma imagem do pacote amarrada como
+/// sampler2D em todos os passes. O motor decodifica uma vez e guarda na GPU.
+struct TextureDecl {
+    std::string name;     ///< nome do sampler no GLSL
+    std::string file;     ///< arquivo no pacote (.png/.jpg/.jpeg)
+    bool data = false;    ///< "colorSpace": "data" = bytes crus (LUT, ruído, máscara, mapa)
+    u8 filter = 0;        ///< 0 linear, 1 nearest
+    u8 wrap = 0;          ///< 0 clamp, 1 repeat, 2 mirror
+};
+
 struct PassDecl {
     std::string shader;    ///< arquivo no pacote (relativo à raiz)
     std::string target;    ///< textura intermediária; vazio = saída (último passe)
@@ -131,6 +150,7 @@ struct Manifest {
     bool scene3d = false;
     std::vector<ParamDecl> params;
     std::vector<PassDecl> passes;
+    std::vector<TextureDecl> textures;   ///< 0.4.6: imagens do pacote (todos os passes)
     f32 margin = 0.0f;
     ColorSpace colorSpace = ColorSpace::Linear;
     std::vector<StackStepDecl> stack;

@@ -171,6 +171,7 @@ internal fun TextPanel(env: PanelEnv) {
         TextRuler(env, stringResource(R.string.panel_largura_contorno), { store.textDetail?.strokeWidth ?: 0f }, "${td.strokeWidth.roundToInt()} px",
             0.1f, 0f, 60f, stringResource(R.string.panel_contorno_texto)) { store.setTextStrokeWidth(it) }
         TextStyleSections(env)
+        TextDynamicSection(env)
         TextPathSection(env)
         AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() }
     }
@@ -182,6 +183,62 @@ private fun SpanChip(label: String, onClick: () -> Unit) {
         Modifier.clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip).tocavel(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
+    }
+}
+
+/**
+ * 0.4.6: texto dinâmico — contador e timecode (`TextData::dynamic`). As marcas
+ * {#} {tc} {t} {f} no texto viram valores a cada quadro; o contador vai de "De"
+ * a "Até" ao longo da camada.
+ */
+@Composable
+private fun TextDynamicSection(env: PanelEnv) {
+    val store = env.store
+    val d = store.textDynamic ?: return
+    Spacer(Modifier.height(6.dp))
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.text_dynamic), modifier = Modifier.weight(1f),
+            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
+        AureaToggle(checked = d[0] > .5, onCheckedChange = { store.setTextDynamicValue(0, if (it) 1.0 else 0.0) })
+    }
+    Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf("{#}" to R.string.text_token_counter, "{tc}" to R.string.text_token_timecode,
+               "{t}" to R.string.text_token_time, "{f}" to R.string.text_token_frame).forEach { (token, label) ->
+            val desc = stringResource(R.string.text_token_insert, stringResource(label))
+            Box(Modifier.clip(RoundedCornerShape(8.dp)).background(AureaColors.Chip)
+                .semantics { contentDescription = desc }.tocavel(onClick = { store.insertTextToken(token) })
+                .padding(horizontal = 10.dp, vertical = 6.dp)) {
+                Text(stringResource(label), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Text)))
+            }
+        }
+    }
+    if (d[0] > .5) {
+        TextRuler(env, stringResource(R.string.text_counter_from), { (store.textDynamic?.get(1) ?: 0.0).toFloat() },
+            com.aurea.aurea.editor.formatCounter(d[1], d[3].toInt(), d[4] > .5), 0.5f, -1e9f, 1e9f, "contador de") {
+            store.setTextDynamicValue(1, kotlin.math.round(it.toDouble() * 1e6) / 1e6)
+        }
+        TextRuler(env, stringResource(R.string.text_counter_to), { (store.textDynamic?.get(2) ?: 100.0).toFloat() },
+            com.aurea.aurea.editor.formatCounter(d[2], d[3].toInt(), d[4] > .5), 0.5f, -1e9f, 1e9f, "contador ate") {
+            store.setTextDynamicValue(2, kotlin.math.round(it.toDouble() * 1e6) / 1e6)
+        }
+        TextRuler(env, stringResource(R.string.text_counter_decimals), { (store.textDynamic?.get(3) ?: 0.0).toFloat() },
+            "${d[3].toInt()}", 0.05f, 0f, 6f, "casas do contador") {
+            store.setTextDynamicValue(3, kotlin.math.round(it).toDouble())
+        }
+        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.text_counter_grouping), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+            AureaToggle(checked = d[4] > .5, onCheckedChange = { store.setTextDynamicValue(4, if (it) 1.0 else 0.0) })
+        }
+        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Curva do contador: Linear (1), Suave (5), Entrada (3), Saída (4).
+            listOf(1 to R.string.panel_linear, 5 to R.string.pn_ease_in_out, 3 to R.string.pn_ease_in, 4 to R.string.pn_ease_out).forEach { (ease, label) ->
+                val on = d[5].toInt() == ease
+                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                    .tocavel(onClick = { store.setTextDynamicValue(5, ease.toDouble()) }).padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    Text(stringResource(label), style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
+                }
+            }
+        }
     }
 }
 

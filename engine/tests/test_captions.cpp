@@ -18,6 +18,7 @@
 #include "aurea/timeline/Composition.hpp"
 #include "aurea/text/WhisperWords.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -632,4 +633,334 @@ AUREA_TEST(Captions, CaptionPresetRoundTripsEveryFieldTheTrackUses) {
     // Estilo fora da faixa válida é recusado na leitura.
     presets::Preset ignored;
     AUREA_CHECK(!presets::parse("{\"aurea_preset\":1,\"kind\":\"caption\",\"name\":\"x\",\"caption\":{\"style\":99}}", ignored, nullptr, &error));
+}
+
+// -----------------------------------------------------------------------------
+// 0.4.6: aparência própria da legenda (fonte, cores, contorno, fundo, sombra),
+// modelos prontos e troca de opções numa faixa já pronta.
+// -----------------------------------------------------------------------------
+
+namespace {
+bool near_color(const Vec4& a, const Vec4& b) {
+    return std::fabs(a.x - b.x) < 1e-4f && std::fabs(a.y - b.y) < 1e-4f && std::fabs(a.z - b.z) < 1e-4f && std::fabs(a.w - b.w) < 1e-4f;
+}
+bool undo_once(Engine& engine) {
+    Command u;
+    u.type = CommandType::Undo;
+    return engine.apply_command(u).ok();
+}
+} // namespace
+
+AUREA_TEST(Captions, LookChosenBeforeGeneratingIsOnTheTrack) {
+    text::CaptionOptions o;
+    o.style = 2;
+    o.look = text::kCaptionLookFont | text::kCaptionLookFill | text::kCaptionLookStroke | text::kCaptionLookBox;
+    o.fontFamily = "Serif Teste"; o.fontWeight = 500; o.fontItalic = true;
+    o.fill = Vec4{1.0f, 0.2f, 0.4f, 1.0f};
+    o.stroke = Vec4{0.0f, 0.0f, 1.0f, 1.0f}; o.strokeFrac = 0.0f;
+    o.box = true; o.boxColor = Vec4{1.0f, 1.0f, 1.0f, 0.9f};
+    CaptionRig rig(6, o);
+    const Layer* l = rig.track();
+    AUREA_CHECK(l != nullptr); if (!l) return;
+    AUREA_CHECK_EQ(l->text.fontFamily, std::string("Serif Teste"));
+    AUREA_CHECK_EQ(static_cast<u32>(l->text.fontWeight), 500u);
+    AUREA_CHECK(l->text.fontItalic);
+    AUREA_CHECK(near_color(l->text.color, o.fill));
+    AUREA_CHECK_EQ(l->text.strokeWidth, 0.0f);          // contorno "nenhum" vence o do estilo
+    AUREA_CHECK(l->text.background);
+    AUREA_CHECK(near_color(l->text.backgroundColor, o.boxColor));
+    AUREA_CHECK(l->text.shadow);                        // sem o bit, a sombra é a do estilo Destaque
+}
+
+AUREA_TEST(Captions, ChangingOptionsOnAReadyTrackIsOneUndoStep) {
+    CaptionRig rig(6);
+    const Layer* l = rig.track();
+    AUREA_CHECK(l != nullptr); if (!l) return;
+    const Vec4 styleColor = l->text.color;
+    const f32 size = l->text.size, stroke = l->text.strokeWidth;
+    const f32 y = l->transform.position.y;
+    const auto blocks = rig.engine.caption_tracks();
+    text::CaptionOptions o = l->captionOptions;
+    o.look = text::kCaptionLookFill; o.fill = Vec4{0.0f, 1.0f, 0.0f, 1.0f};
+    o.sizeFrac = l->captionOptions.sizeFrac * 2.0f;
+    o.posY = 0.2f;
+    // A camada da fala também acha a faixa (é o que o painel tem selecionado).
+    AUREA_CHECK(rig.engine.set_caption_options(rig.video, o));
+    l = rig.track();
+    AUREA_CHECK(near_color(l->text.color, o.fill));
+    AUREA_CHECK(std::fabs(l->text.size - std::round(size * 2.0f)) <= 1.0f);
+    AUREA_CHECK(std::fabs(l->text.strokeWidth - stroke * l->text.size / size) < 0.01f);
+    AUREA_CHECK(std::fabs(l->transform.position.y - 1920.0f * 0.2f) < 0.5f);
+    AUREA_CHECK_EQ(rig.engine.caption_tracks(), blocks);   // blocos e tempos não mudam
+    AUREA_CHECK(undo_once(rig.engine));
+    l = rig.track();
+    AUREA_CHECK(near_color(l->text.color, styleColor));
+    AUREA_CHECK_EQ(l->text.size, size);
+    AUREA_CHECK_EQ(l->transform.position.y, y);
+}
+
+AUREA_TEST(Captions, ClearingALookPartReturnsToTheStyle) {
+    text::CaptionOptions o;
+    o.style = 0;
+    o.look = text::kCaptionLookFill | text::kCaptionLookFont;
+    o.fill = Vec4{1, 0, 0, 1}; o.fontFamily = "Mono Teste";
+    CaptionRig rig(4, o);
+    text::CaptionOptions next = rig.track()->captionOptions;
+    next.look = 0;
+    AUREA_CHECK(rig.engine.set_caption_options(rig.trackId, next));
+    const Layer* l = rig.track();
+    AUREA_CHECK(near_color(l->text.color, Vec4{1, 1, 1, 1}));   // Clássico: branco
+    AUREA_CHECK(l->text.fontFamily.empty());
+    AUREA_CHECK_EQ(static_cast<u32>(l->text.fontWeight), 700u);
+}
+
+AUREA_TEST(Captions, SizeChangeKeepsTheLookFromTheTextPanel) {
+    CaptionRig rig(4);
+    // Cor posta pelo painel Texto (ou por um preset da comunidade), fora das opções.
+    rig.track_mut()->text.color = Vec4{0.3f, 0.6f, 0.9f, 1.0f};
+    text::CaptionOptions o = rig.track()->captionOptions;
+    o.sizeFrac = 0.09f;
+    o.uppercase = true;
+    AUREA_CHECK(rig.engine.set_caption_options(rig.trackId, o));
+    AUREA_CHECK(near_color(rig.track()->text.color, Vec4{0.3f, 0.6f, 0.9f, 1.0f}));
+    AUREA_CHECK(rig.track()->captionOptions.uppercase);
+    // Trocar o ESTILO refaz a aparência inteira.
+    o.style = 3;
+    AUREA_CHECK(rig.engine.set_caption_options(rig.trackId, o));
+    AUREA_CHECK(!near_color(rig.track()->text.color, Vec4{0.3f, 0.6f, 0.9f, 1.0f}));
+}
+
+AUREA_TEST(Captions, SetOptionsRefusesLayersWithoutTrack) {
+    CaptionRig rig(4);
+    AUREA_CHECK(!rig.engine.set_caption_options(0, {}));
+    AUREA_CHECK(rig.engine.caption_options(0).empty());
+    AUREA_CHECK(!rig.engine.caption_options(rig.video).empty());
+}
+
+AUREA_TEST(Captions, FullOptionsSurviveSaveAndReopen) {
+    text::CaptionOptions o;
+    o.style = 1; o.uppercase = true; o.posY = 0.3f; o.sizeFrac = 0.05f; o.maxWords = 3;
+    o.look = text::kCaptionLookAll;
+    o.fontFamily = "Fonte X"; o.fontWeight = 900; o.fontItalic = true;
+    o.fill = Vec4{0.1f, 0.2f, 0.3f, 1.0f}; o.stroke = Vec4{0.9f, 0.8f, 0.7f, 1.0f}; o.strokeFrac = 0.12f;
+    o.box = true; o.boxColor = Vec4{0.5f, 0.5f, 0.5f, 0.5f}; o.shadow = true;
+    CaptionRig rig(6, o);
+    const std::string path = caption_path("aparencia");
+    AUREA_CHECK(rig.engine.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.engine.load_project(path.c_str()).ok());
+    const Layer* l = rig.track();
+    AUREA_CHECK(l != nullptr); if (!l) { std::remove(path.c_str()); return; }
+    const auto& c = l->captionOptions;
+    AUREA_CHECK(c.uppercase);
+    AUREA_CHECK(std::fabs(c.posY - 0.3f) < 1e-6f);
+    AUREA_CHECK(std::fabs(c.sizeFrac - 0.05f) < 1e-6f);
+    AUREA_CHECK_EQ(c.maxWords, 3u);
+    AUREA_CHECK_EQ(c.look, text::kCaptionLookAll);
+    AUREA_CHECK_EQ(c.fontFamily, std::string("Fonte X"));
+    AUREA_CHECK_EQ(static_cast<u32>(c.fontWeight), 900u);
+    AUREA_CHECK(c.fontItalic);
+    AUREA_CHECK(near_color(c.fill, o.fill));
+    AUREA_CHECK(near_color(c.stroke, o.stroke));
+    AUREA_CHECK(std::fabs(c.strokeFrac - 0.12f) < 1e-6f);
+    AUREA_CHECK(c.box && c.shadow);
+    AUREA_CHECK(near_color(c.boxColor, o.boxColor));
+    std::remove(path.c_str());
+}
+
+AUREA_TEST(Captions, OptionsJsonRoundTripsLookAndOldPresetsHaveNone) {
+    text::CaptionOptions o;
+    o.style = 5; o.look = text::kCaptionLookFill | text::kCaptionLookShadow;
+    o.fill = Vec4{1, 0.5f, 0, 1}; o.shadow = true; o.fontFamily = "Y"; o.fontPath = "docs:fonts/y.ttf";
+    const std::string json = presets::caption_options_json(o, false);
+    text::CaptionOptions back; bool fillers = true;
+    AUREA_CHECK(presets::parse_caption_options(json, back, fillers));
+    AUREA_CHECK(!fillers);
+    AUREA_CHECK_EQ(back.style, 5u);
+    AUREA_CHECK_EQ(back.look, o.look);
+    AUREA_CHECK(near_color(back.fill, o.fill));
+    AUREA_CHECK(back.shadow);
+    AUREA_CHECK_EQ(back.fontPath, o.fontPath);
+    // Preset de antes da 0.4.6: sem aparência própria.
+    presets::Preset p; std::string error;
+    AUREA_CHECK(presets::parse("{\"aurea_preset\":1,\"kind\":\"caption\",\"name\":\"x\",\"caption\":{\"style\":1}}", p, nullptr, &error));
+    AUREA_CHECK_EQ(p.caption.look, 0u);
+    // Bits desconhecidos e cor fora de 0..1 são recusados.
+    AUREA_CHECK(!presets::parse_caption_options("{\"look\":64}", back, fillers));
+    AUREA_CHECK(!presets::parse_caption_options("{\"fill\":[2,0,0,1]}", back, fillers));
+    AUREA_CHECK(!presets::parse_caption_options("[]", back, fillers));
+}
+
+AUREA_TEST(Captions, TemplatesAreDistinctAndKeepTheUsersFont) {
+    const auto& list = text::caption_templates();
+    AUREA_CHECK(list.size() >= 14u);
+    std::vector<std::string> ids;
+    for (const auto& t : list) {
+        ids.push_back(t.id);
+        AUREA_CHECK(t.options.style < text::kCaptionStyleCount);
+        AUREA_CHECK_EQ(t.options.look & text::kCaptionLookFont, 0u);   // modelo não escolhe fonte
+    }
+    std::sort(ids.begin(), ids.end());
+    AUREA_CHECK(std::adjacent_find(ids.begin(), ids.end()) == ids.end());
+    text::CaptionOptions mine;
+    mine.look = text::kCaptionLookFont; mine.fontFamily = "Minha"; mine.posY = 0.3f; mine.maxWords = 2;
+    const auto& bubble = *std::find_if(list.begin(), list.end(), [](const auto& t) { return std::string(t.id) == "bubble"; });
+    text::apply_caption_template(bubble, mine);
+    AUREA_CHECK_EQ(mine.style, bubble.options.style);
+    AUREA_CHECK(mine.look & text::kCaptionLookFont);
+    AUREA_CHECK(mine.look & text::kCaptionLookBox);
+    AUREA_CHECK_EQ(mine.fontFamily, std::string("Minha"));
+    AUREA_CHECK(std::fabs(mine.posY - 0.3f) < 1e-6f);   // posição e agrupamento continuam
+    AUREA_CHECK_EQ(mine.maxWords, 2u);
+    // O JSON da interface tem id, opções e a prévia resolvida.
+    json::Value root;
+    AUREA_CHECK(json::parse(presets::caption_templates_json(), root));
+    AUREA_CHECK(root.is_array() && root.array.size() == list.size());
+    const json::Value* preview = root.array.empty() ? nullptr : root.array[0].get("preview");
+    AUREA_CHECK(preview && preview->get("fill") && preview->get("strokeFrac"));
+}
+
+// -----------------------------------------------------------------------------
+// 0.4.6: estilo por bloco — marcar alguns blocos e mudar só eles.
+// -----------------------------------------------------------------------------
+
+namespace {
+std::string look_command(const std::string& ids, const text::CaptionOptions& o) {
+    json::Writer w;
+    w.begin_object().key("op").value("look").key("options").value(presets::caption_options_json(o, true));
+    std::string out = w.end_object().str();
+    out.insert(out.size() - 1, ",\"ids\":" + ids);
+    return out;
+}
+} // namespace
+
+AUREA_TEST(Captions, BlockLookChangesOnlyTheChosenBlocksAndIsOneUndoStep) {
+    CaptionRig rig(12);
+    AUREA_CHECK(rig.blocks() >= 3u); if (rig.blocks() < 3u) return;
+    const auto trackOptions = presets::caption_options_json(rig.track()->captionOptions, true);
+    const auto content = rig.track()->text.content;
+    text::CaptionOptions o;
+    o.style = 3; o.uppercase = true; o.posY = 0.2f; o.maxWords = 1;   // posição/agrupamento não entram
+    o.look = text::kCaptionLookFill; o.fill = Vec4{1, 0, 0, 1};
+    AUREA_CHECK(rig.edit(look_command(rig.one_of(1), o)));
+    const Layer* l = rig.track();
+    AUREA_CHECK(!l->captions[0].look && !l->captions[2].look);
+    AUREA_CHECK(l->captions[1].look.has_value());
+    if (l->captions[1].look) {
+        const auto& b = *l->captions[1].look;
+        AUREA_CHECK_EQ(b.style, 3u);
+        AUREA_CHECK(b.uppercase);
+        AUREA_CHECK(near_color(b.fill, o.fill));
+        // As opções do bloco: a aparência dele, o resto da faixa.
+        const auto merged = text::caption_block_options(l->captionOptions, l->captions[1]);
+        AUREA_CHECK_EQ(merged.style, 3u);
+        AUREA_CHECK_EQ(merged.maxWords, l->captionOptions.maxWords);
+        AUREA_CHECK_EQ(merged.posY, l->captionOptions.posY);
+    }
+    // A faixa não muda: opções e texto da camada continuam.
+    AUREA_CHECK_EQ(presets::caption_options_json(l->captionOptions, true), trackOptions);
+    AUREA_CHECK_EQ(l->text.content, content);
+    // O JSON dos blocos diz qual tem estilo próprio.
+    json::Value root;
+    AUREA_CHECK(json::parse(rig.engine.caption_tracks(), root) && root.is_array() && !root.array.empty());
+    if (root.is_array() && !root.array.empty()) {
+        const auto* segs = root.array[0].get("segments");
+        AUREA_CHECK(segs && segs->array.size() >= 3u);
+        if (segs && segs->array.size() >= 3u) {
+            AUREA_CHECK(segs->array[0].get("look") == nullptr);
+            const auto* look = segs->array[1].get("look");
+            AUREA_CHECK(look && look->is_string());
+            text::CaptionOptions back; bool rf = false;
+            AUREA_CHECK(look && presets::parse_caption_options(look->string, back, rf) && back.style == 3u);
+        }
+    }
+    // Mandar o mesmo de novo não cria passo vazio: um desfazer volta tudo.
+    AUREA_CHECK(rig.edit(look_command(rig.one_of(1), o)));
+    AUREA_CHECK(undo_once(rig.engine));
+    AUREA_CHECK(!rig.track()->captions[1].look);
+}
+
+AUREA_TEST(Captions, BlockLookOnManyBlocksAndClearReturnsToTheTrack) {
+    CaptionRig rig(12);
+    AUREA_CHECK(rig.blocks() >= 3u); if (rig.blocks() < 3u) return;
+    text::CaptionOptions o; o.style = 1;
+    AUREA_CHECK(rig.edit(look_command(rig.range_of(0, rig.blocks() - 1), o)));
+    for (const auto& s : rig.track()->captions) AUREA_CHECK(s.look && s.look->style == 1u);
+    AUREA_CHECK(rig.edit("{\"op\":\"clear_look\",\"ids\":" + rig.one_of(0) + "}"));
+    AUREA_CHECK(!rig.track()->captions[0].look);
+    AUREA_CHECK(rig.track()->captions[1].look.has_value());
+    // Limpar o que já está limpo: nada muda, sem passo de desfazer.
+    AUREA_CHECK(rig.edit("{\"op\":\"clear_look\",\"ids\":" + rig.one_of(0) + "}"));
+    AUREA_CHECK(undo_once(rig.engine));
+    AUREA_CHECK(rig.track()->captions[0].look.has_value());
+    // Opções inválidas não mexem em nada.
+    AUREA_CHECK(!rig.edit("{\"op\":\"look\",\"ids\":" + rig.one_of(0) + ",\"options\":\"{nada\"}"));
+    AUREA_CHECK(!rig.edit("{\"op\":\"look\",\"ids\":" + rig.one_of(0) + "}"));
+}
+
+AUREA_TEST(Captions, SplitKeepsTheBlockLookOnBothHalves) {
+    CaptionRig rig(12);
+    const Layer* l = rig.track();
+    AUREA_CHECK(l && !l->captions.empty()); if (!l || l->captions.empty()) return;
+    const i64 cut = (l->captions[0].start + l->captions[0].end) / 2;
+    AUREA_CHECK(cut > l->captions[0].start); if (cut <= l->captions[0].start) return;
+    text::CaptionOptions o; o.style = 4;
+    AUREA_CHECK(rig.edit(look_command(rig.one_of(0), o)));
+    AUREA_CHECK(rig.edit("{\"op\":\"split\",\"ids\":" + rig.one_of(0) + ",\"frame\":" + std::to_string(cut) + "}"));
+    l = rig.track();
+    AUREA_CHECK(l->captions[0].look && l->captions[0].look->style == 4u);
+    AUREA_CHECK(l->captions[1].look && l->captions[1].look->style == 4u);
+}
+
+AUREA_TEST(Captions, BlockLookIsDrawnOverTheTrackTextAndKeepsUserAnimators) {
+    text::CaptionOptions track;   // Clássico, sem aparência própria
+    TextData t; TrackSet tracks;
+    text::apply_caption_style(track, 1080, t, tracks, {}, 0);
+    t.color = Vec4{0.3f, 0.6f, 0.9f, 1.0f};            // cor do painel Texto
+    TextAnimator mine; mine.name = "Meu";
+    t.animators.push_back(mine);
+    // Só o contorno no bloco: a cor do painel Texto fica.
+    text::CaptionOptions block = track;
+    block.look = text::kCaptionLookStroke; block.stroke = Vec4{1, 0, 0, 1}; block.strokeFrac = 0.1f;
+    TextData a = t;
+    text::apply_caption_block_look(track, block, 1080, a);
+    AUREA_CHECK(near_color(a.color, t.color));
+    AUREA_CHECK(near_color(a.strokeColor, block.stroke));
+    AUREA_CHECK_EQ(a.animators.size(), static_cast<usize>(1));
+    // Outro estilo: a aparência é a do estilo do bloco, os animadores ficam.
+    block = track; block.style = 1;   // Caixa
+    TextData b = t;
+    text::apply_caption_block_look(track, block, 1080, b);
+    AUREA_CHECK(b.background);
+    AUREA_CHECK_EQ(b.size, t.size);    // tamanho é o da faixa
+    AUREA_CHECK_EQ(b.animators.size(), static_cast<usize>(1));
+    AUREA_CHECK(!b.animators.empty() && b.animators[0].name == "Meu");
+}
+
+AUREA_TEST(Captions, BlockLookSurvivesSaveAndReopen) {
+    CaptionRig rig(12);
+    AUREA_CHECK(rig.blocks() >= 2u); if (rig.blocks() < 2u) return;
+    text::CaptionOptions o;
+    o.style = 2; o.highlight = false; o.uppercase = true; o.highlightColor = Vec4{0, 1, 1, 1};
+    o.look = text::kCaptionLookAll; o.fontFamily = "Bloco"; o.fontWeight = 300; o.fontItalic = true;
+    o.fill = Vec4{0.1f, 0.2f, 0.3f, 1}; o.stroke = Vec4{0.4f, 0.5f, 0.6f, 1}; o.strokeFrac = 0.05f;
+    o.box = true; o.boxColor = Vec4{0.7f, 0.8f, 0.9f, 0.5f}; o.shadow = true;
+    AUREA_CHECK(rig.edit(look_command(rig.one_of(1), o)));
+    text::CaptionOptions want;
+    text::copy_caption_appearance(o, want);
+    const std::string path = caption_path("bloco");
+    AUREA_CHECK(rig.engine.save_project(path.c_str()).ok());
+    AUREA_CHECK(rig.engine.load_project(path.c_str()).ok());
+    const Layer* l = rig.track();
+    AUREA_CHECK(l && l->captions.size() >= 2u); if (!l || l->captions.size() < 2u) { std::remove(path.c_str()); return; }
+    AUREA_CHECK(!l->captions[0].look);
+    AUREA_CHECK(l->captions[1].look.has_value());
+    if (l->captions[1].look)
+        AUREA_CHECK_EQ(presets::caption_options_json(*l->captions[1].look, true), presets::caption_options_json(want, true));
+    // O preset da faixa (bundle) aplica na faixa e não apaga o estilo do bloco.
+    rig.remember_track();
+    const auto bundle = rig.engine.save_caption_bundle(rig.trackId, "Com bloco");
+    AUREA_CHECK(!bundle.empty());
+    AUREA_CHECK(rig.engine.apply_caption_bundle(rig.trackId, bundle));
+    AUREA_CHECK(rig.track()->captions[1].look.has_value());
+    std::remove(path.c_str());
 }

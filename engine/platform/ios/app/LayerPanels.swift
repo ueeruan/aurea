@@ -34,6 +34,7 @@ struct TextAppearanceControls: View {
             colorRow("panel_cor_contorno", values: components("strokeColor")) { color("strokeColor", "panel_cor_contorno") }
             NativePanelRuler(label: AureaText.t("panel_largura_contorno"), value: value("strokeWidth"), step: 0.1, range: 0...60, unit: "px", keypad: true) { model.engine.setText(id, strokeWidth: $0); refresh() }
             if style.count >= 20 { styleSections }
+            NativeTextDynamicSection()
             NativeTextPathSection()
             NativePanelChip(AureaText.t("la_animators")) { model.transformTab = 6; model.openPanel(.transform) }
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
@@ -114,6 +115,58 @@ struct TextAppearanceControls: View {
             else { model.engine.setText(layer, strokeR: r, g: g, b: b, a: a) }
             refresh()
         }, onDone: { model.endGesture() })
+    }
+}
+
+/// 0.4.6: texto dinâmico — contador e timecode (TextPanel.kt `TextDynamicSection`).
+/// As marcas {#} {tc} {t} {f} no texto viram valores a cada quadro.
+private struct NativeTextDynamicSection: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var values: [Double] = []
+    private var id: Int64 { model.primarySelection ?? 0 }
+    private func load() { values = model.engine.textDynamic(id).map(\.doubleValue) }
+    private func set(_ slot: Int, _ value: Double) {
+        guard values.count >= 6 else { return }
+        var next = values; next[slot] = value
+        _ = model.engine.setTextDynamic(id, values: next.map { NSNumber(value: $0) })
+        model.refreshModel(force: true); load()
+    }
+    private func insert(_ token: String) {
+        if values.count >= 6 && values[0] < 0.5 { set(0, 1) }
+        let current = (model.engine.text(forLayer: id)?["content"] as? String) ?? ""
+        model.engine.setText(id, content: current.isEmpty ? token : current + " " + token)
+        model.refreshModel(force: true)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if values.count >= 6 {
+                NativePanelToggle(AureaText.t("text_dynamic"), checked: values[0] > 0.5) { set(0, $0 ? 1 : 0) }.padding(.top, 6)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach([("{#}", "text_token_counter"), ("{tc}", "text_token_timecode"), ("{t}", "text_token_time"), ("{f}", "text_token_frame")], id: \.0) { token, key in
+                            NativePanelChip(AureaText.t(key)) { insert(token) }
+                                .accessibilityLabel(AureaText.t("text_token_insert", AureaText.t(key)))
+                        }
+                    }.frame(height: 44)
+                }
+                if values[0] > 0.5 {
+                    NativePanelRuler(label: AureaText.t("text_counter_from"), value: Float(values[1]), step: 0.5, range: -1_000_000_000...1_000_000_000,
+                                     decimals: Int(values[3]), keypad: true) { set(1, Double($0)) }
+                    NativePanelRuler(label: AureaText.t("text_counter_to"), value: Float(values[2]), step: 0.5, range: -1_000_000_000...1_000_000_000,
+                                     decimals: Int(values[3]), keypad: true) { set(2, Double($0)) }
+                    NativePanelRuler(label: AureaText.t("text_counter_decimals"), value: Float(values[3]), step: 0.05, range: 0...6) { set(3, Double($0.rounded())) }
+                    NativePanelToggle(AureaText.t("text_counter_grouping"), checked: values[4] > 0.5, fontSize: 13, weight: .regular) { set(4, $0 ? 1 : 0) }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            // Curva do contador: Linear (1), Suave (5), Entrada (3), Saída (4).
+                            ForEach([(1, "panel_linear"), (5, "pn_ease_in_out"), (3, "pn_ease_in"), (4, "pn_ease_out")], id: \.0) { ease, key in
+                                NativePanelChip(AureaText.t(key), selected: Int(values[5]) == ease) { set(5, Double(ease)) }
+                            }
+                        }.frame(height: 44)
+                    }
+                }
+            }
+        }.onAppear { load() }.onChange(of: id) { _ in load() }.onChange(of: model.status.modelRevision) { _ in load() }
     }
 }
 
@@ -2105,6 +2158,17 @@ struct TextAnimationSection: View {
                 model.addEffectAndFocus(fxEffectTypeId("aurea.text.animator"), layer: id)
                 refresh(); model.openPanel(.effects)
             }.accessibilityIdentifier("text.animator.add") }
+            // 0.4.6: o Text Animator Pro (só texto 2D). Par do Android.
+            if showAnimatorEffect && (model.engine.text3D(forLayer: id) ?? [:]).isEmpty { NativePanelChip(AureaText.t("text_animator_pro_add")) {
+                beforeAnimation()
+                model.addEffectAndFocus(fxEffectTypeId("aurea.text.animator_pro"), layer: id)
+                refresh(); model.openPanel(.effects)
+            }.accessibilityIdentifier("text.animator_pro.add") }
+            // 0.4.6: preset de texto do After Effects (.ffx) direto no Text Animator Pro. Par do Android.
+            if showAnimatorEffect && (model.engine.text3D(forLayer: id) ?? [:]).isEmpty { NativePanelChip(AureaText.t("text_animator_pro_import")) {
+                model.aeImportTextPro = true
+                OmegaChromeRequests.shared.aeImport = true
+            }.accessibilityIdentifier("text.animator_pro.ffx") }
             if showAnimatorEffect { NativePanelChip(AureaText.t("text_transform_add")) {
                 beforeAnimation()
                 model.addEffectAndFocus(fxEffectTypeId("aurea.text.transform"), layer: id)

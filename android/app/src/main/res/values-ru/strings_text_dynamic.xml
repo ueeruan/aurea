@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: texto dinâmico (contador/timecode). -->
+<resources>
+    <string name="text_dynamic">Динамический текст</string>
+    <string name="text_token_counter">Счётчик</string>
+    <string name="text_token_timecode">Таймкод</string>
+    <string name="text_token_time">Время</string>
+    <string name="text_token_frame">Кадр</string>
+    <string name="text_token_insert">Вставить %1$s</string>
+    <string name="text_counter_from">От</string>
+    <string name="text_counter_to">До</string>
+    <string name="text_counter_decimals">Знаков после запятой</string>
+    <string name="text_counter_grouping">Разделитель тысяч</string>
+</resources>

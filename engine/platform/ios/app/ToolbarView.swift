@@ -249,6 +249,11 @@ struct TopBarView: View {
                     .accessibilityIdentifier("editor.topbar.exit")
                 ShellInlineName(name: model.projectName, placeholder: AureaText.t("edt_untitled"), limit: 320) { model.renameCurrentProject(to: $0) }
                     .accessibilityIdentifier("editor.topbar.title")
+                // 0.4.6: o assistente de IA (OpenRouter, modelos gratuitos) que age no projeto.
+                ShellBarButton(glyph: CupertinoGlyph.Sparkles, description: AureaText.t("ai_open"), size: 20, width: 40, height: EditorLayout.topBar) {
+                    model.pause(); model.assistantOpen = true
+                }
+                .accessibilityIdentifier("editor.topbar.assistant")
                 // 0.3.4 plugins: o menu de plugins (painéis e ações "editor.menu"); some sem plugin.
                 PluginEditorMenuButton()
                 ShellBarButton(glyph: CupertinoGlyph.Gear, description: AureaText.t("editor_ajustes_projeto"), width: 40, height: EditorLayout.topBar) { openSettings() }
@@ -498,6 +503,13 @@ struct TopBarView: View {
         }
         out.append(.icons(cells, selectedIndex: Int(row.label), keepOpen: true, tag: "layer.menu.labels"))
         if row.kind != 3 {
+            // 0.4.6: espelhar (par do Menus.kt).
+            out.append(.item(AureaText.t("layer_flip_horizontal"), glyph: CupertinoGlyph.ArrowLeftRight, tag: "layer.flip.h") {
+                model.flipLayer(row.id, vertical: false)
+            })
+            out.append(.item(AureaText.t("layer_flip_vertical"), glyph: CupertinoGlyph.ArrowUpArrowDown, tag: "layer.flip.v") {
+                model.flipLayer(row.id, vertical: true)
+            })
             out.append(.header(AureaText.t("editor_grupo")))
             if row.clipToBelow || row.clipCandidate {
                 out.append(.item(AureaText.t(row.clipToBelow ? "editor_liberar_mascara_recorte" : "editor_criar_mascara_recorte"),

@@ -127,6 +127,10 @@ void set_expression_enabled(WriteCtx& w, const Binding& b, bool enabled);
 /// Opções do texto no caminho e "Mais opções".
 [[nodiscard]] Binding bind_text_path(const Layer& l, std::string_view match);
 [[nodiscard]] Binding bind_text_more(const Layer& l, std::string_view match);
+/// 0.4.6: propriedade de animador de texto do AE -> parametro do efeito Text
+/// Animator Pro `effectId`. `kind`: 0 seletor de intervalo, 1 oscilacao, 3
+/// propriedade/mais opcoes. `textSize` converte o tracking (1/1000 em -> px).
+[[nodiscard]] Binding bind_text_pro(u32 effectId, u32 kind, std::string_view match, f64 textSize);
 /// Propriedade de máscara (id estável da máscara do Aurea).
 [[nodiscard]] Binding bind_mask(const Layer& l, u32 maskId, std::string_view match);
 

@@ -37,6 +37,7 @@ public:
     /// Plugins: SPIR-V → ESSL 3.10 com o tradutor do build (shaderxlate) e compilação no driver.
     Result<ShaderHandle> create_runtime_shader(const ShaderDesc&, std::string* error) noexcept override;
     Result<PipelineHandle> create_pipeline(const PipelineDesc&) noexcept override;
+    std::string last_compile_log() const override;
     void destroy_texture(TextureHandle) noexcept override;
     void destroy_buffer(BufferHandle) noexcept override;
     void destroy_sampler(SamplerHandle) noexcept override;

@@ -221,6 +221,7 @@ bool ShaderLibrary::ensure_shader(ShaderId id) noexcept {
     auto created = backend_->create_shader(desc);
     if (!created.ok()) {
         lastError_ = std::string("shader nao criado: ") + kShaderNames[i];
+        if (const std::string driver = backend_->last_compile_log(); !driver.empty()) lastError_ += ": " + driver;
         AUREA_LOG_ERROR("%s", lastError_.c_str());
         ++failures_;
         if (!rejectedShaders_[i]) { rejectedShaders_[i] = true; ++missingShaders_; }
@@ -366,6 +367,7 @@ Result<PipelineHandle> ShaderLibrary::pipeline(const PipelineKey& key) noexcept 
     if (!created.ok()) {
         ++failures_;
         lastError_ = std::string("pipeline nao compilou: ") + (desc.debugName ? desc.debugName : "?");
+        if (const std::string driver = backend_->last_compile_log(); !driver.empty()) lastError_ += ": " + driver;
         AUREA_LOG_ERROR("%s", lastError_.c_str());
         failedKeys_[key] = kRetryAfter;
         return created.status();

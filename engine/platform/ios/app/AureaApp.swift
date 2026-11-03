@@ -23,7 +23,12 @@ struct AureaApp: App {
 
     var body: some Scene {
         WindowGroup {
-            LanguageWelcome { CreatorWelcome { ContentView() } }
+            Group {
+                // Debug no SIMULADOR (0.4.6, par do MainActivity): os testes abrem
+                // direto, sem as telas de idioma, do criador e da conta.
+                if skipEntryScreensForTesting { ContentView() }
+                else { LanguageWelcome { CreatorWelcome { ContentView() } } }
+            }
                 .id(model.themeId)
                 .environmentObject(model)
                 .environmentObject(conta)
@@ -253,4 +258,14 @@ private struct CreatorWelcome<Content: View>: View {
             }
         }.buttonStyle(.borderedProminent).frame(minHeight: 44).disabled(opened & bit != 0)
     }
+}
+
+/// Debug no simulador: pula idioma, criador e conta (só para testar; release e
+/// aparelho de verdade nunca pulam).
+var skipEntryScreensForTesting: Bool {
+    #if DEBUG && targetEnvironment(simulator)
+    return true
+    #else
+    return false
+    #endif
 }

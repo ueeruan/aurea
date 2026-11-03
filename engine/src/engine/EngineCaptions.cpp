@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <optional>
 #include <set>
 
 namespace aurea {
@@ -17,6 +18,8 @@ std::string Engine::caption_tracks() noexcept {
         w.key("segments").begin_array();
         for (const auto& s : l->captions) {
             w.begin_object().key("id").value(static_cast<i64>(s.id)).key("start").value(s.start).key("end").value(s.end).key("text").value(s.text);
+            // 0.4.6: estilo próprio do bloco (JSON das opções, o mesmo de caption_options).
+            if (s.look) w.key("look").value(presets::caption_options_json(*s.look, true));
             w.key("words").begin_array();
             for (const auto& word : s.words) w.begin_object().key("text").value(word.text).key("start").value(word.start).key("end").value(word.end).end_object();
             w.end_array().end_object();
@@ -24,6 +27,51 @@ std::string Engine::caption_tracks() noexcept {
         w.end_array().end_object();
     }
     return w.end_array().str();
+}
+
+namespace {
+/// A faixa de legendas de `id`: a própria camada ou a faixa feita da fala dela.
+Layer* caption_track_of(Composition& comp, u64 id) {
+    Layer* direct = comp.layer(LayerId::unpack(id));
+    if (direct && !direct->captions.empty()) return direct;
+    for (u32 i = 0; i < comp.order().size(); ++i) {
+        Layer* l = comp.layer(comp.order().at(i));
+        if (l && !l->captions.empty() && l->text.captionSource == id) return l;
+    }
+    return nullptr;
+}
+} // namespace
+
+std::string Engine::caption_options(u64 layerId) noexcept {
+    std::lock_guard lock(modelMutex_);
+    auto* comp = project_ ? current_composition() : nullptr;
+    const Layer* track = comp ? caption_track_of(*comp, layerId) : nullptr;
+    // "Tirar vícios" não mora na faixa (a fala já veio sem eles).
+    return track ? presets::caption_options_json(track->captionOptions, true) : std::string{};
+}
+
+bool Engine::set_caption_options(u64 layerId, const text::CaptionOptions& options) noexcept {
+    std::lock_guard lock(modelMutex_);
+    auto* comp = project_ ? current_composition() : nullptr;
+    Layer* track = comp ? caption_track_of(*comp, layerId) : nullptr;
+    if (!track || track->locked) return false;
+    text::CaptionOptions next = options;
+    next.style = std::min(next.style, text::kCaptionStyleCount - 1);
+    next.look &= text::kCaptionLookAll;
+    next.posY = std::clamp(next.posY, 0.1f, 0.9f);
+    next.sizeFrac = std::clamp(next.sizeFrac, 0.02f, 0.25f);
+    if (!next.fontPath.empty() && next.fontPath.rfind("docs:", 0) != 0) next.fontPath = store_asset_path(next.fontPath);
+    const text::CaptionOptions before = track->captionOptions;
+    // Nada mudou (a interface manda tudo a cada toque): sem passo de desfazer vazio.
+    if (presets::caption_options_json(before, true) == presets::caption_options_json(next, true)) return true;
+    history_.before_mutation(*comp, project_->timeline().current(), "estilo da legenda");
+    text::update_caption_look(before, next, std::min(comp->width(), comp->height()), track->text, track->tracks);
+    if (before.posY != next.posY)
+        track->transform.position.y = static_cast<f32>(comp->height()) * next.posY;
+    track->captionOptions = next;
+    recenter_text(*track);
+    bump_model_revision_locked(); project_->mark_dirty(); request_render();
+    return true;
 }
 
 u64 Engine::query_captions(bridge::CaptionRow* rows, u32 capacity, char* text, u32 textCapacity) noexcept {
@@ -140,6 +188,20 @@ bool Engine::edit_caption_track(u64 layerId, const std::string& command) noexcep
         nextOptions = p.caption;
         nextTransform.position = Vec3{static_cast<f32>(comp->width()) * .5f,
                                          static_cast<f32>(comp->height()) * std::clamp(p.caption.posY, 0.1f, 0.9f), 0};
+    } else if (op == "look") {
+        // 0.4.6: estilo só dos blocos escolhidos ("options" = JSON de
+        // caption_options). Vale a aparência; o agrupamento é o da faixa.
+        const auto* options = value.get("options");
+        if (!options || !options->is_string()) return false;
+        text::CaptionOptions parsed; bool removeFillers = false;
+        if (!presets::parse_caption_options(options->string, parsed, removeFillers)) return false;
+        if (!parsed.fontPath.empty() && parsed.fontPath.rfind("docs:", 0) != 0) parsed.fontPath = store_asset_path(parsed.fontPath);
+        text::CaptionOptions look;
+        text::copy_caption_appearance(parsed, look);
+        for (auto& s : next) if (selected.contains(s.id)) s.look = look;
+    } else if (op == "clear_look") {
+        // Volta ao estilo da faixa.
+        for (auto& s : next) if (selected.contains(s.id)) s.look.reset();
     } else if (op == "regroup") {
         // Reagrupa SÓ os blocos escolhidos com as opções atuais — é o
         // "regenerar este trecho" sem tocar no resto da fala.
@@ -155,6 +217,9 @@ bool Engine::edit_caption_track(u64 layerId, const std::string& command) noexcep
             for (const auto& w : s.words) words.push_back({w.text, static_cast<f64>(w.start) / fps, static_cast<f64>(w.end) / fps});
         }
         if (words.empty() || gap) return false;
+        // Os blocos novos herdam o estilo próprio do primeiro escolhido.
+        std::optional<text::CaptionOptions> look;
+        for (const auto& s : next) if (selected.contains(s.id)) { look = s.look; break; }
         words = text::normalize_caption_words(words);
         const auto groups = text::group_captions(words, current->captionOptions);
         if (groups.empty()) return false;
@@ -172,12 +237,20 @@ bool Engine::edit_caption_track(u64 layerId, const std::string& command) noexcep
                 segment.words.push_back({src.text, begin, finish});
             }
             segment.text = g.text;
+            segment.look = look;
             next.push_back(std::move(segment));
         }
     } else return false;
     std::sort(next.begin(), next.end(), [](const auto& a, const auto& b) { return a.start < b.start; });
     if (!text::valid_caption_track(next)) return false;
-    history_.before_mutation(*comp, project_->timeline().current(), "editar legendas");
+    if (op == "look" || op == "clear_look") {
+        // A interface manda a cada toque: igual ao que já está = sem passo vazio.
+        auto json_of = [](const text::CaptionSegment& s) { return s.look ? presets::caption_options_json(*s.look, true) : std::string{}; };
+        bool changed = false;
+        for (usize i = 0; i < next.size() && !changed; ++i) changed = json_of(next[i]) != json_of(layer->captions[i]);
+        if (!changed) return true;
+    }
+    history_.before_mutation(*comp, project_->timeline().current(), op == "look" || op == "clear_look" ? "estilo do bloco" : "editar legendas");
     layer->captionOptions = nextOptions;
     layer->transform = nextTransform;
     layer->captions = std::move(next);

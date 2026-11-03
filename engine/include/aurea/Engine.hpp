@@ -106,7 +106,9 @@ enum class EngineState : u8 {
 struct EngineStatus {
     EngineState state = EngineState::Uninitialized;
     Errc lastError = Errc::Ok;
-    char lastErrorDetail[128]{};
+    /// 0.4.6: 384 (era 128) para caber o começo do log do driver quando os
+    /// shaders básicos não compilam (Engine::initialize).
+    char lastErrorDetail[384]{};
 
     f32  currentFps = 0.0f;
     f32  averageFrameMs = 0.0f;
@@ -924,6 +926,19 @@ public:
     /// (liga, rgba, margem, raio), sombra (liga, rgba, dx, dy, desfoque).
     bool set_text_style(u64 layerId, const f32* values, u32 count = 18) noexcept;
     bool query_text_style(u64 layerId, f32* values, u32 capacity = 18) noexcept;
+    /// 0.4.6: texto dinâmico (TextData::dynamic). v = {ligado, de, até, casas
+    /// 0..6, separador de milhar, curva (Interpolation)}. Um passo de desfazer.
+    bool set_text_dynamic(u64 layerId, const f64* v6) noexcept;
+    /// 0.4.6: o vídeo repete além do fim da fonte (bit 9 do timeFlags do detalhe).
+    bool set_layer_media_loop(u64 layerId, bool on) noexcept;
+    /// 0.4.6: tangentes espaciais do keyframe de posição no quadro LOCAL `time`
+    /// (v6 = entrada xyz, saída xyz, px do espaço do pai; tudo zero = canto).
+    bool set_position_tangents(u64 layerId, i64 time, const f32* v6) noexcept;
+    /// O caminho de movimento como é avaliado (com a curva): [amostras n,
+    /// keyframes k, n × (x, y), k × (tempo, x, y, entrada x, y, saída x, y)],
+    /// no espaço do pai. Devolve quantos floats escreveu (0 = sem caminho).
+    u32 query_position_path(u64 layerId, f32* out, u32 capacity) noexcept;
+    bool query_text_dynamic(u64 layerId, f64* out6) noexcept;
     /// Estilo de um trecho [start, end) em caracteres: cor (opcional), peso
     /// (0 = o do texto), escala. Substitui o que havia no trecho.
     bool set_text_span(u64 layerId, u32 start, u32 end, bool hasColor, Vec4 color, u32 weight, f32 scale) noexcept;
@@ -1125,6 +1140,13 @@ public:
     [[nodiscard]] bool edit_caption_track(u64 layerId, const std::string& command) noexcept;
     [[nodiscard]] std::string save_caption_bundle(u64 layerId, const std::string& name) noexcept;
     [[nodiscard]] bool apply_caption_bundle(u64 layerId, const std::string& data) noexcept;
+    /// 0.4.6: opções da faixa de legendas (`layerId` = a faixa ou a camada da
+    /// fala) em JSON (presets::caption_options_json). Vazio = não tem faixa.
+    [[nodiscard]] std::string caption_options(u64 layerId) noexcept;
+    /// 0.4.6: troca as opções de uma faixa pronta, num passo de desfazer:
+    /// estilo, aparência, tamanho e altura aparecem na hora; agrupamento só
+    /// vale ao refazer (os blocos e os tempos ficam).
+    [[nodiscard]] bool set_caption_options(u64 layerId, const text::CaptionOptions& options) noexcept;
     /// Blocos de TODAS as faixas de legendas numa travessia, na ordem das
     /// camadas e por tempo dentro de cada faixa — é o que a timeline desenha.
     /// Devolve `count << 32 | total`: `count` blocos escritos (até `capacity`) e
@@ -1216,6 +1238,24 @@ public:
     bool set_raw_playback(bool enabled) noexcept;
     std::string playback_report() noexcept;
     void set_scene_editor(bool enabled, f32 yaw, f32 pitch, f32 distance) noexcept;
+    /// 0.4.6: vista do palco como no After Effects (só a prévia; a exportação
+    /// usa sempre a câmera ativa). Modos (kViewMode*): 0 Câmera ativa,
+    /// 1 Câmera padrão, 2 Frente, 3 Trás, 4 Esquerda, 5 Direita, 6 Topo,
+    /// 7 Base (sem perspectiva), 8..10 Vista personalizada 1..3 (perspectiva livre).
+    /// Cada modo guarda a própria órbita/zoom enquanto o motor vive.
+    static constexpr u32 kViewModeCount = 11;
+    bool set_view_mode(u32 mode) noexcept;
+    /// 0.4.6: executa uma ferramenta do assistente de IA (assistant/Assistant.hpp):
+    /// `name` e `argsJson` como o modelo mandou; devolve JSON ({"ok":…}). Nunca
+    /// lança; argumento ruim vira {"ok":false,"error":…} para o modelo corrigir.
+    [[nodiscard]] std::string assistant_call(const std::string& name, const std::string& argsJson) noexcept;
+    [[nodiscard]] u32 view_mode() noexcept;
+    /// Órbita da vista atual: personalizada usa yaw/pitch/distância; Frente..Base
+    /// só o zoom (`distance` = altura visível × a da composição). Câmera ativa
+    /// e padrão não mudam. Falso = o modo atual não orbita.
+    bool set_view_orbit(f32 yaw, f32 pitch, f32 distance) noexcept;
+    /// {modo, yaw, pitch, distância, ortográfica 0/1} da vista atual.
+    void query_view(f32 out[5]) noexcept;
     [[nodiscard]] u32 query_scene_guides(f32* lines, u32 capacity) noexcept;
     /// Cena 3D: a camada 3D visível sob o ponto (px da composição), pelo raio da
     /// câmera de navegação contra o corpo real (plano da caixa ou triângulos do
@@ -1664,6 +1704,12 @@ public:
     bool set_scene3d_bloom(bool on, f32 intensity, f32 threshold) noexcept;
     /// {qualidade, operador, exposição, bloom (0/1), força, limiar}.
     bool query_scene3d_post(f32* out6) noexcept;
+    /// 0.4.6: neblina volumétrica com raios de luz do grupo 3D. Densidade por
+    /// px do mundo (0..0,05), força dos raios do sol (0..8), cor linear (a luz
+    /// ambiente que a neblina espalha). Um passo de desfazer.
+    bool set_scene3d_fog(bool on, f32 density, f32 rays, f32 r, f32 g, f32 b) noexcept;
+    /// {ligada (0/1), densidade, raios, r, g, b}.
+    bool query_scene3d_fog(f32* out6) noexcept;
 
     /// Ambiente POR OBJETO (v22): um modelo 3D escolhe entre o ambiente do
     /// projeto (0) e o dele (1), com HDRI, intensidade, giro e exposição
@@ -1852,10 +1898,12 @@ public:
     /// selecionada (0 = nenhuma) e pode criar camadas. TUDO num passo de
     /// desfazer — nada mudou, nenhum passo. O relatório diz o que entrou e o
     /// que ficou de fora (`ae::report_json` é o JSON das pontes).
-    [[nodiscard]] ae::ImportReport import_ae_file(const char* path, u64 targetLayer) noexcept;
+    /// `textAnimatorPro` (0.4.6): os animadores de texto do .ffx viram efeitos
+    /// Text Animator Pro (editáveis) em vez do animador simples.
+    [[nodiscard]] ae::ImportReport import_ae_file(const char* path, u64 targetLayer, bool textAnimatorPro = false) noexcept;
     /// O mesmo com o conteúdo já lido (`fileName` só serve para a extensão).
     [[nodiscard]] ae::ImportReport import_ae_data(const std::string& data, const std::string& fileName,
-                                                  u64 targetLayer) noexcept;
+                                                  u64 targetLayer, bool textAnimatorPro = false) noexcept;
 
     // --- Modo Edição (timeline magnética) ------------------------------------------
     /// Ligar/desligar o modo Edição da COMPOSIÇÃO. Ele é o PADRÃO das camadas
@@ -2830,7 +2878,7 @@ private:
     StartupTimings     startup_{};
     std::atomic<EngineState> state_{EngineState::Uninitialized};
     Errc               lastError_ = Errc::Ok;
-    char               lastErrorDetail_[128]{};
+    char               lastErrorDetail_[384]{};
     /// Guarda o último erro (código padronizado + texto sem dado do usuário) e
     /// loga com o nome §115.
     void set_last_error(Status s, const char* context) noexcept;
@@ -3010,7 +3058,15 @@ private:
                                                                   ImageSequenceSpec& spec) noexcept;
 
     LayerId rawPlaybackLayer_{};
-    SceneEditorView sceneEditor_{}; ///< modelMutex protected, never serialized
+    SceneEditorView sceneEditor_{}; ///< modelMutex protected, never serialized (a vista EFETIVA)
+    /// 0.4.6: a vista pedida pela cena 3D (set_scene_editor) vence a do palco;
+    /// sem ela, vale o modo de vista do AE (`viewMode_`, com a órbita de cada um).
+    SceneEditorView workspaceView_{};
+    u32 viewMode_ = 0;
+    struct ViewOrbit { f32 yaw, pitch, distance; };
+    ViewOrbit viewOrbits_[11]{};
+    bool viewOrbitsReady_ = false;
+    void apply_scene_view_locked() noexcept;
     std::vector<u64> selection_;
     std::atomic<u32> modelRevision_{1};   ///< a UI relê listas quando muda
     /// Subidas de `modelRevision_` que mudam só um TRECHO da composição atual
@@ -3057,6 +3113,11 @@ private:
     void cancel_preview_graph_locked() noexcept;
     [[nodiscard]] bool continue_preview_graph_locked(u64 frameStart, Status& result) noexcept;
     std::atomic<u64> previewPressureUntilNs_{0}; ///< trim_memory(>= RUNNING_LOW): prévia guardada pausada até aqui
+    /// 0.4.6: só o aviso do SISTEMA (trim_memory). O preparo do export também pausa a
+    /// prévia (previewPressureUntilNs_), mas isso não é falta de memória: o
+    /// scheduler do export lia aquela pausa como aviso e rodava os primeiros 20 s
+    /// de TODO export com um quadro em voo só.
+    std::atomic<u64> osMemoryWarningUntilNs_{0};
     std::mutex offscreenRequestMutex_;       ///< one synchronous capture owns prepare through readback
     std::atomic<u32> offscreenReaders_{0};    ///< display/idle work must not steal capture graph or decode targets
     std::atomic<bool> offscreenCancelled_{false}; ///< lifecycle interrupts capture segments before joining ownership

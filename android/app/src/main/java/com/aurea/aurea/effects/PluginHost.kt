@@ -128,12 +128,13 @@ object PluginHost {
                 } ?: "arquivo"
                 val dir = File(context.cacheDir, "plugin-files").apply { mkdirs() }
                 val target = File(dir, name.replace(Regex("[^A-Za-z0-9._-]"), "_"))
-                // 1 MB é o que o script lê; copia um pouco mais para o motor recusar com a mensagem certa.
+                // 0.4.6: 64 MB é o que o script lê (era 1 MB); copia um pouco mais
+                // para o motor recusar com a mensagem certa.
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     target.outputStream().use { out ->
-                        val buffer = ByteArray(16 * 1024)
+                        val buffer = ByteArray(64 * 1024)
                         var total = 0L
-                        while (total <= (1L shl 20) + 1) {
+                        while (total <= (64L shl 20) + 1) {
                             val n = input.read(buffer)
                             if (n < 0) break
                             out.write(buffer, 0, n)

@@ -120,8 +120,16 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
                 continue;
             }
             if (!rendered.ok()) return rendered;
-            if (approximate) {
-                (void)renderer_.take_incomplete();
+            // 0.4.6: o aproximado cobre só a FONTE de vídeo atrasada. Se o
+            // quadro também ficou incompleto por algo que ainda vai chegar
+            // (modelo/textura subindo, ambiente HDRI), ele
+            // NÃO vai para o arquivo: espera e tenta de novo, como o exato.
+            // Antes o aviso era jogado fora e o MP4 saía sem essas partes.
+            const bool incomplete = approximate && renderer_.take_incomplete();
+            const bool resolvable = incomplete && (renderer_.pending_uploads() != 0 || renderer_.environment_pending());
+            if (approximate && !resolvable) {
+                if (incomplete) AUREA_LOG_WARN("export: quadro %lld aproximado ainda incompleto (%s:%u)",
+                                               static_cast<long long>(time.value), renderer_.incomplete_file() ? renderer_.incomplete_file() : "?", renderer_.incomplete_line());
                 approximate_ = true;
                 ++approximateFrames_;
                 ++approximateRun_;
@@ -130,7 +138,7 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
                                approximateFrames_);
                 return OkStatus;
             }
-            if (!renderer_.take_incomplete()) { approximateRun_ = 0; return OkStatus; }
+            if (!approximate && !renderer_.take_incomplete()) { approximateRun_ = 0; return OkStatus; }
         }
         snapshot_.release_video_frames();
         const u64 pending = gpu_->last_submitted_frame();
@@ -154,10 +162,23 @@ Status OfflineFrameRenderer::render(const Project& project, CompositionId compos
             && now - lastProgress >= (approximateFrames_ ? deadlines_.reopenAfterNs : deadlines_.reopenNs)) {
             reopened = true;
             u32 closed = 0;
+            bool neverDelivered = false;
             for (const FrameSnapshot::VideoSourceWait& w : snapshot_.videoSourceWaits) {
                 if (w.opening || (!w.missing && !w.stale)) continue;
+                neverDelivered |= w.missing;
                 media_.close_layer(w.layer);
                 ++closed;
+            }
+            // 0.4.6: a fonte não tem NENHUM quadro deste trecho (o clipe que
+            // entra na transição, no Galaxy A23): não há "mais próximo" para
+            // aproximar, e reabrir no mesmo decoder do aparelho dava no mesmo —
+            // o quadro falhava, a escada recomeçava do zero e todo degrau parava
+            // no mesmo ponto. Daqui em diante esta sessão abre a mídia no
+            // decoder compatível, e a fonte reaberta já sai por ele.
+            if (closed && neverDelivered && !softwareDecode_) {
+                set_software_decode(true);
+                AUREA_LOG_WARN("export: quadro %lld sem nenhum quadro da fonte; decodificacao compativel daqui em diante",
+                               static_cast<long long>(time.value));
             }
             if (closed) {
                 AUREA_LOG_WARN("export: quadro %lld sem o quadro exato ha %llu ms; %u fonte(s) de video reaberta(s)",

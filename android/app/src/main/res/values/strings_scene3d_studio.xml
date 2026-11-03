@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: a nova Cena 3D (layout do Blender, tema do Aurea). -->
+<resources>
+    <string name="s3d_mode_object">Modo Objeto</string>
+    <string name="s3d_mode_pose">Modo Pose</string>
+    <string name="s3d_area_timeline">Linha do tempo</string>
+    <string name="s3d_area_properties">Propriedades</string>
+    <string name="s3d_area_outliner">Outliner</string>
+    <string name="s3d_position">Posição</string>
+    <string name="s3d_rotation">Rotação</string>
+    <string name="s3d_scale">Escala</string>
+    <string name="s3d_insert_key">◆ Inserir</string>
+    <string name="s3d_insert_key_desc">Inserir chave no quadro atual</string>
+    <string name="s3d_delete_key">Apagar chave</string>
+    <string name="s3d_summary">Sumário</string>
+    <string name="s3d_nothing_selected">Nada selecionado — toque num objeto na cena ou no Outliner</string>
+    <string name="s3d_key_here">◆ chave no quadro %1$d</string>
+    <string name="s3d_no_key">◇ sem chave</string>
+    <string name="s3d_import_model">Importar modelo 3D</string>
+    <string name="s3d_import_formats">GLB · glTF · FBX · OBJ</string>
+    <string name="s3d_section_import">Importar</string>
+    <string name="s3d_section_mesh">Malha</string>
+    <string name="s3d_section_other">Outros</string>
+    <string name="s3d_cube">Cubo</string>
+    <string name="s3d_sphere">Esfera</string>
+    <string name="s3d_cylinder">Cilindro</string>
+    <string name="s3d_cone">Cone</string>
+    <string name="s3d_pyramid">Pirâmide</string>
+    <string name="s3d_torus">Toro</string>
+    <string name="s3d_empty">Vazio</string>
+    <string name="s3d_delete_named">Excluir %1$s</string>
+    <string name="s3d_add_named">Adicionar %1$s</string>
+    <string name="s3d_scene">Cena</string>
+    <string name="s3d_prev_key">Chave anterior</string>
+    <string name="s3d_next_key">Próxima chave</string>
+    <string name="s3d_start">Início</string>
+    <string name="s3d_end">Fim</string>
+    <string name="s3d_play">Reproduzir</string>
+    <string name="s3d_pause">Pausar</string>
+    <string name="s3d_autokey_on">Gravação automática ligada</string>
+    <string name="s3d_autokey_off">Gravação automática desligada</string>
+    <string name="s3d_no_rig">Este objeto não tem esqueleto</string>
+</resources>

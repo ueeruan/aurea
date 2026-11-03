@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: efeitos novos (GapEffects046.cpp). -->
+<resources>
+    <string name="fx046_name_swirl">भंवर</string>
+    <string name="fx046_name_polar">ध्रुवीय निर्देशांक</string>
+    <string name="fx046_name_tunnel">सुरंग</string>
+    <string name="fx046_name_magnify">आवर्धक</string>
+    <string name="fx046_name_long_shadow">लंबी छाया</string>
+    <string name="fx046_name_roughen">खुरदरे किनारे</string>
+    <string name="fx046_name_contour">समोच्च रेखाएं</string>
+    <string name="fx046_name_inner_glow">आंतरिक चमक</string>
+    <string name="fx046_name_lightning">बिजली</string>
+    <string name="fx046_name_voronoi">कोशिकाएँ (वोरोनोई)</string>
+</resources>

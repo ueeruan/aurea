@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: efeitos novos (GapEffects046.cpp). -->
+<resources>
+    <string name="fx046_name_swirl">Pusaran</string>
+    <string name="fx046_name_polar">Koordinat polar</string>
+    <string name="fx046_name_tunnel">Terowongan</string>
+    <string name="fx046_name_magnify">Kaca pembesar</string>
+    <string name="fx046_name_long_shadow">Bayangan panjang</string>
+    <string name="fx046_name_roughen">Tepi kasar</string>
+    <string name="fx046_name_contour">Garis kontur</string>
+    <string name="fx046_name_inner_glow">Cahaya dalam</string>
+    <string name="fx046_name_lightning">Petir</string>
+    <string name="fx046_name_voronoi">Sel (Voronoi)</string>
+</resources>

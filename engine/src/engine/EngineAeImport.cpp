@@ -133,7 +133,7 @@ std::string file_stem(const std::string& path) {
 }
 } // namespace
 
-ae::ImportReport Engine::import_ae_file(const char* path, u64 targetLayer) noexcept {
+ae::ImportReport Engine::import_ae_file(const char* path, u64 targetLayer, bool textAnimatorPro) noexcept {
     ae::ImportReport r;
     if (!path || !*path) {
         r.message = "Nenhum arquivo escolhido.";
@@ -157,10 +157,10 @@ ae::ImportReport Engine::import_ae_file(const char* path, u64 targetLayer) noexc
         r.message = "Arquivo grande demais para importar.";
         return r;
     }
-    return import_ae_data(data, path, targetLayer);
+    return import_ae_data(data, path, targetLayer, textAnimatorPro);
 }
 
-ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::string& fileName, u64 targetLayer) noexcept {
+ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::string& fileName, u64 targetLayer, bool textAnimatorPro) noexcept {
     ae::ImportReport report;
     // Script salvo em UTF-16 ou Latin-1 vira UTF-8 antes de tudo (o .ffx é
     // binário RIFX e passa direto).
@@ -367,7 +367,7 @@ ae::ImportReport Engine::import_ae_data(const std::string& raw, const std::strin
             }
             target = created;
         }
-        (void)ae::apply_ffx(doc, host, target, report);
+        (void)ae::apply_ffx(doc, host, target, report, textAnimatorPro);
         if (created.valid()) {
             if (!report.ok) {
                 // Nada do preset entrou: a camada nova sai e o projeto fica

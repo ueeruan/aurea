@@ -524,7 +524,8 @@ func fxPickerEntries(_ model: AureaModel, layerHasAudio: Bool) -> [EffectCatalog
     let textLayer = model.selectedLayer?.kind == 4
     let effects = fxPickableEffects(model.effectCatalog, layerHasAudio: layerHasAudio, layerKind: model.selectedLayer?.kind ?? 0).filter {
         (textLayer || text3D || $0.typeId != fxEffectTypeId("aurea.text.transform")) &&
-        (textLayer || text3D || $0.typeId != fxEffectTypeId("aurea.text.animator"))
+        (textLayer || text3D || $0.typeId != fxEffectTypeId("aurea.text.animator")) &&
+        (textLayer || $0.typeId != fxEffectTypeId("aurea.text.animator_pro"))   // 0.4.6: só texto 2D
     }
     let all = effects + fxPickableTools(layerKind: model.selectedLayer?.kind ?? 0).map(fxToolCatalogItem)
     return fxArrangeCatalog(all, fxEffectCategories(all))
@@ -768,7 +769,7 @@ private let fxTagByKey: [UInt32: [String]] = {
                 "aurea.ai.depth_map", FxEffectTool.cameraTrack.key, "aurea.distort.hollow_box"]),
         ("transition", ["aurea.transition.luma_dissolve", "aurea.distort.ripple_dissolve", "aurea.glitch.dissolve_shake",
                         "aurea.transition.disintegrate", "aurea.transition.noise_dissolve"]),
-        ("text", ["aurea.text.animator", "aurea.text.transform", FxEffectTool.captions.key]),
+        ("text", ["aurea.text.animator", "aurea.text.animator_pro", "aurea.text.transform", FxEffectTool.captions.key]),
         ("mask", [FxEffectTool.mask.key, "aurea.key.background_remove", "aurea.key.chroma", "aurea.key.luma", "aurea.key.matte_refine", "aurea.key.rotobrush",
                   "aurea.utility.copy_background", "aurea.transform.crop", "aurea.ai.depth_map"]),
         ("motion", ["aurea.distort.shake", "aurea.time.flow_motion_blur", "aurea.blur.directional", FxEffectTool.cameraTrack.key,

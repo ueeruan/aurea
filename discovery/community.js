@@ -1,6 +1,7 @@
 // Social profiles use the existing account session. Never trust a client email or badge.
 import { lerSessao, lerJson, json, dentroDoLimite } from './contas.js';
 import { enviarEmail } from './email.js';
+import { storeRoute } from './store.js';
 
 const BADGES = new Set(['', 'blue', 'green', 'gold']);
 const MAX_FILE = 50 * 1024 * 1024;
@@ -16,14 +17,14 @@ const nextCursor = (items) => items.length === 30 ? `${items.at(-1).createdAt}:$
 // Denunciado por HIDE_AFTER pessoas diferentes, o conteúdo sai do feed de todos
 // (menos do autor) até o admin decidir; bloqueio esconde nos dois sentidos.
 const HIDE_AFTER = 3;
-const REPORT_KINDS = new Set(['post', 'comment', 'user', 'preset', 'ai_video']);
+const REPORT_KINDS = new Set(['post', 'comment', 'user', 'preset', 'ai_video', 'store']);
 const REPORT_REASONS = new Set(['spam', 'nudity', 'violence', 'hate', 'harassment', 'illegal', 'copyright', 'other']);
 const UUID = /^[0-9a-f-]{36}$/;
 const notBlocked = (column) => `NOT EXISTS(SELECT 1 FROM community_blocks b WHERE (b.blocker=? AND b.blocked=${column}) OR (b.blocker=${column} AND b.blocked=?))`;
 const notHidden = (kind, column, owner) => `(${owner}=? OR (SELECT COUNT(*) FROM community_reports r WHERE r.target_kind='${kind}' AND r.target_id=${column} AND r.status='open') < ${HIDE_AFTER})`;
 // Bound decoded avatar dimensions too: a tiny compressed file can expand to a huge bitmap.
-function avatarMime(data) {
-  const dimensions = (width, height) => width > 0 && height > 0 && width <= 2048 && height <= 2048;
+export function avatarMime(data, maxSide = 2048) {
+  const dimensions = (width, height) => width > 0 && height > 0 && width <= maxSide && height <= maxSide;
   if (data.length >= 33 && [137,80,78,71,13,10,26,10].every((v, i) => data[i] === v)) {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
     return view.getUint32(8) === 13 && view.getUint32(12) === 0x49484452 && dimensions(view.getUint32(16), view.getUint32(20)) ? 'image/png' : null;
@@ -171,7 +172,7 @@ async function report(req, env, ctx, session) {
   if (kind === 'ai_video' ? !/^[A-Za-z0-9_.:-]{1,80}$/.test(id) : !UUID.test(id)) return problem('invalid_report');
   const details = typeof v.details === 'string' ? [...v.details.trim()].slice(0, 500).join('') : '';
   if (!(await dentroDoLimite(env, 'community-report', session.uid, { max: 30, janela: 3600 }))) return problem('rate_limited', 429);
-  const table = { post: 'community_posts', comment: 'community_comments', user: 'community_profiles' }[kind];
+  const table = { post: 'community_posts', comment: 'community_comments', user: 'community_profiles', store: 'community_store_items' }[kind];
   if (table) {
     const column = kind === 'user' ? 'uid' : 'id';
     const target = await stmt(env, `SELECT ${column} AS id FROM ${table} WHERE ${column}=?`, id).first();
@@ -321,7 +322,7 @@ export async function communityRoute(req, env, ctx, url) {
       return json({ items: rows.results.map(r => ({ kind: r.target_kind, id: r.target_id, reports: r.reports, first: r.first, last: r.last,
         reasons: String(r.reasons ?? '').split(',').filter(Boolean) })) });
     }
-    const reportMatch = /^\/api\/community\/reports\/(post|comment|user|preset|ai_video)\/([A-Za-z0-9_.:-]{1,80})$/.exec(path);
+    const reportMatch = /^\/api\/community\/reports\/(post|comment|user|preset|ai_video|store)\/([A-Za-z0-9_.:-]{1,80})$/.exec(path);
     if (reportMatch && req.method === 'PUT') {
       if (!admin) return problem('forbidden', 403);
       const { valor: v, erro } = await lerJson(req, 256); if (erro || !['removed', 'dismissed'].includes(v?.status)) return problem('invalid_status');
@@ -329,8 +330,13 @@ export async function communityRoute(req, env, ctx, url) {
       const updates = [stmt(env, 'UPDATE community_reports SET status=? WHERE target_kind=? AND target_id=?', v.status, kind, id)];
       if (v.status === 'removed' && kind === 'post') updates.push(stmt(env, 'DELETE FROM community_posts WHERE id=?', id));
       if (v.status === 'removed' && kind === 'comment') updates.push(stmt(env, 'DELETE FROM community_comments WHERE id=?', id));
+      if (v.status === 'removed' && kind === 'store') updates.push(stmt(env, "UPDATE community_store_items SET status='rejected',review_note='removido por denuncia',updated_at=? WHERE id=?", Date.now(), id));
       await env.AUREA_DB.batch(updates);
       return json({ ok: true });
+    }
+    if (path === '/api/community/store' || path.startsWith('/api/community/store/')) {
+      const handled = await storeRoute(req, env, url, path, session, admin);
+      if (handled) return handled;
     }
     const commentMatch = /^\/api\/community\/comments\/([0-9a-f-]{36})$/.exec(path);
     if (commentMatch && req.method === 'DELETE') {

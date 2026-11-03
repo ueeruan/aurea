@@ -76,7 +76,10 @@ struct SectionHeader {
 /// sólida — abre igual).
 /// v52 (0.3.6): textura própria de cada material do objeto 3D (imagem do
 /// projeto ou camada da timeline). Antes dela: o mapa de cor do arquivo.
-constexpr u32 kTimelineSectionVersion = 52;
+/// v53 (0.4.6): texto dinâmico, câmera paralela, repetir mídia, tangentes.
+/// v54 (0.4.6): opções completas da faixa de legendas (aparência própria).
+/// v55 (0.4.6): estilo próprio de cada bloco da faixa de legendas.
+constexpr u32 kTimelineSectionVersion = 55;
 
 /// Cabeçalho do arquivo.
 struct FileHeader {

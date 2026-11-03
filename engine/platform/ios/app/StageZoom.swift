@@ -493,6 +493,14 @@ struct StageFloatPills: View {
                      action: { modes.hideOverlay.toggle() }) { tint in
                     CupertinoGlyph.text(modes.hideOverlay ? CupertinoGlyph.EyeSlash : CupertinoGlyph.Eye, size: 16, color: tint)
                 }
+                // 0.4.6: com nada selecionado, o atalho para a Cena 3D (par do StageFloatPills.kt).
+                if model.selection.isEmpty {
+                    pill("stage.pill.scene3d", label: AureaText.t("scene_workspace"), state: nil, active: false,
+                         action: { model.enterSceneEditor() }) { tint in
+                        CupertinoGlyph.text(CupertinoGlyph.CubeFill, size: 16, color: tint)
+                    }
+                }
+                viewModePill
                 pill("stage.pill.zoom", label: percent, state: nil, active: view.zoom != 1, wide: true,
                      action: { view.zoomTo(1, engine: model.engine) }) { tint in
                     Text(percent).font(.aurea(size: 10, weight: .semibold).monospacedDigit())
@@ -501,6 +509,33 @@ struct StageFloatPills: View {
             }
             .padding(.top, 12).padding(.trailing, 10)
         }
+    }
+
+    /// 0.4.6: a vista do palco como no After Effects — câmera ativa (a do export),
+    /// câmera padrão, as seis ortogonais e três personalizadas. Só a prévia muda.
+    private var viewModePill: some View {
+        let mode = model.viewMode
+        let tint = mode != 0 ? AureaColors.accent : AureaColors.muted
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        func item(_ i: Int) -> some View {
+            Button { model.selectViewMode(i) } label: {
+                if i == mode { Label(AureaModel.viewModeName(i), systemImage: "checkmark") } else { Text(AureaModel.viewModeName(i)) }
+            }.accessibilityIdentifier("stage.view.\(i)")
+        }
+        return Menu {
+            Section(AureaText.t("om_view_title")) { item(0); item(1) }
+            Section { ForEach(2...7, id: \.self) { item($0) } }
+            Section { ForEach(8...10, id: \.self) { item($0) } }
+        } label: {
+            CupertinoGlyph.text(mode != 0 ? CupertinoGlyph.VideocamFill : CupertinoGlyph.Videocam, size: 16, color: tint)
+                .frame(width: 32, height: 32)
+                .background(Color(red: 0x14 / 255, green: 0x14 / 255, blue: 0x16 / 255).opacity(0xD9 / 255), in: shape)
+                .overlay(shape.stroke(mode != 0 ? AureaColors.accent : Color.white.opacity(0.08), lineWidth: 1))
+                .contentShape(shape)
+        }
+        .accessibilityLabel(AureaText.t("om_view_title"))
+        .accessibilityValue(AureaModel.viewModeName(mode))
+        .accessibilityIdentifier("stage.pill.view")
     }
 
     private func pill<Content: View>(_ id: String, label: String, state: String?, active: Bool, wide: Bool = false,

@@ -88,7 +88,8 @@ internal fun CaptionsPanel(env: PanelEnv) {
     var translateEnglish by remember { mutableStateOf(false) }
     val srt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { cap.importSrt(it) } }
     val s = cap.settings
-    fun set(f: (CaptionSettings) -> CaptionSettings) { cap.settings = f(cap.settings) }
+    // 0.4.6: com a faixa pronta, a troca aparece na hora (um passo de desfazer).
+    fun set(f: (CaptionSettings) -> CaptionSettings) = cap.update(custom = false, f = f)
 
     // Fase 8D: LazyColumn. A transcrição de um vídeo longo tem 2000–5000
     // palavras; num FlowRow dentro de um Column rolável TODAS eram compostas e
@@ -105,7 +106,9 @@ internal fun CaptionsPanel(env: PanelEnv) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)) {
         item(key = "opcoes", contentType = "opcoes") {
             Column {
-                cap.track?.let { CaptionBlockEditor(cap, store.playhead) }
+                cap.track?.let { CaptionBlockEditor(cap, store) }
+                // 0.4.6: modelos prontos antes de gerar (e trocáveis depois).
+                CaptionTemplateRow(cap)
                 CaptionPresetBrowser(cap)
 
                 // Idioma da fala num chip só; tocar abre a lista.
@@ -142,7 +145,8 @@ internal fun CaptionsPanel(env: PanelEnv) {
                     )
                 }
 
-                if (cap.captionCount > 0 || words.isNotEmpty()) {
+                // 0.4.6: posição, tamanho e aparência também antes de gerar.
+                run {
                     Label(stringResource(R.string.pn_caption_screen_height))
                     val ys = listOf(0.2f, 0.5f, 0.78f)
                     Chips(listOf(stringResource(R.string.pn_caption_pos_top), stringResource(R.string.pn_caption_pos_middle), stringResource(R.string.pn_caption_pos_bottom)), ys.indexOfFirst { kotlin.math.abs(it - s.posY) < 0.01f }) { i -> set { it.copy(posY = ys[i]) } }
@@ -151,6 +155,7 @@ internal fun CaptionsPanel(env: PanelEnv) {
                     Chips(listOf(stringResource(R.string.pn_size_small_short), stringResource(R.string.pn_size_medium_short), stringResource(R.string.pn_size_large_short)), sizes.indexOfFirst { kotlin.math.abs(it - s.sizeFrac) < 0.001f }) { i -> set { it.copy(sizeFrac = sizes[i]) } }
                     Toggle(stringResource(R.string.pn_caption_highlight_word), s.highlight) { v -> set { it.copy(highlight = v) } }
                     Toggle(stringResource(R.string.pn_caption_uppercase), s.uppercase) { v -> set { it.copy(uppercase = v) } }
+                    CaptionCustomize(cap, store)
                     if (words.isNotEmpty() && cap.captionCount == 0) {
                         Action(stringResource(R.string.pn_caption_create), primary = true, enabled = idle) { cap.generate() }
                     }

@@ -99,7 +99,57 @@ internal object Interp {
     const val STEPS = 9
     /** "back": passa do valor final e volta (`Interpolation::Overshoot`). */
     const val OVERSHOOT = 10
+    // 0.4.6: repetição e aleatórias (`ease_cycle_curve`, core/Math.hpp).
+    const val REPEAT = 11
+    const val PING_PONG = 12
+    const val WAVE = 13
+    const val RANDOM = 14
 }
+
+/** `ease_hash01` (core/Math.hpp): a mesma conta em u32. */
+internal fun easeHash01(i: Int, seed: Int): Float {
+    var h = (i * 0x9E3779B1.toInt()) xor (seed + 0x7F4A7C15)
+    h = h xor (h ushr 16); h *= 0x85EBCA6B.toInt(); h = h xor (h ushr 13); h *= 0xC2B2AE35.toInt(); h = h xor (h ushr 16)
+    return (h ushr 8).toFloat() * (1f / 16777216f)
+}
+
+/** `ease_cycle_curve` (core/Math.hpp): Degraus, Repetir, Vai e volta, Onda, Aleatório. */
+internal fun cycleCurve(interp: Int, t: Float, a: Float, b: Float, c: Float): Float {
+    if (t <= 0f) return 0f
+    if (t >= 1f) return 1f
+    return when (interp) {
+        Interp.STEPS -> { val n = (2 + roundHalfUp(a * 30f).coerceIn(0, 30)).toFloat(); kotlin.math.floor(t * n) / n }
+        Interp.REPEAT -> { val p = t * (1 + roundHalfUp(a * 15f).coerceIn(0, 15)); p - kotlin.math.floor(p) }
+        Interp.PING_PONG -> {
+            val h = 2 * roundHalfUp(a * 8f).coerceIn(0, 8) + 1
+            val p = t * h; val k = kotlin.math.floor(p).toInt(); val f = p - k
+            if (k % 2 == 0) f else 1f - f
+        }
+        Interp.WAVE -> {
+            val n = 1 + roundHalfUp(a * 15f).coerceIn(0, 15)
+            t + .5f * b.coerceIn(0f, 1f) * kotlin.math.sin(2f * Math.PI.toFloat() * n * t)
+        }
+        Interp.RANDOM -> {
+            val n = 2 + roundHalfUp(a * 30f).coerceIn(0, 30)
+            val seed = (c.coerceIn(0f, 1f) * 65535f).toInt()
+            val p = t * n; val k = minOf(kotlin.math.floor(p).toInt(), n - 1)
+            fun level(i: Int) = if (i <= 0) 0f else if (i >= n) 1f else easeHash01(i, seed)
+            val l0 = level(k); val l1 = level(k + 1); val f = p - k
+            val smooth = b.coerceIn(0f, 1f)
+            if (smooth <= 0f) l0 else {
+                val g = ((f - (1f - smooth)) / smooth).coerceIn(0f, 1f)
+                l0 + (l1 - l0) * (g * g * (3f - 2f * g))
+            }
+        }
+        else -> t
+    }
+}
+internal const val STEPS_DEFAULT = 4
+internal const val REPEAT_DEFAULT = 3
+internal const val PING_PONG_DEFAULT = 3
+internal const val WAVE_DEFAULT_CYCLES = 3
+internal const val WAVE_DEFAULT_AMPLITUDE = .3f
+internal const val RANDOM_DEFAULT_STEPS = 8
 
 /**
  * Curvas com parâmetros (`kEaseParamMarker`, core/Math.hpp): com y2 = −10 o
@@ -153,9 +203,28 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
     val hasHandles get() = isBezier || interp == Interp.LINEAR || interp == Interp.EASE_IN || interp == Interp.EASE_OUT || interp == Interp.EASE_IN_OUT
     val supportsInversion get() = interp in Interp.LINEAR..Interp.CUSTOM || interp == Interp.BOUNCE ||
         interp == Interp.OVERSHOOT || (interp == Interp.ELASTIC && y2 == EASE_PARAM_MARKER)
-    /** Família com parâmetros (Quique, Elástico, Overshoot): x1..y2 são os parâmetros. */
-    val isParametric get() = interp == Interp.BOUNCE || interp == Interp.ELASTIC || interp == Interp.OVERSHOOT
+    /** Família com parâmetros (Quique, Elástico, Overshoot e, 0.4.6, as de repetição): x1..y2 são os parâmetros. */
+    val isParametric get() = interp == Interp.BOUNCE || interp == Interp.ELASTIC || interp == Interp.OVERSHOOT || isCycle
+    /** Degraus, Repetir, Vai e volta, Onda e Aleatório (`ease_cycle_curve`). */
+    val isCycle get() = interp == Interp.STEPS || interp in Interp.REPEAT..Interp.RANDOM
     private val marked get() = y2 == EASE_PARAM_MARKER
+
+    // 0.4.6: parâmetros das curvas de repetição (a mesma codificação do motor).
+    val stepsCount get() = if (interp == Interp.STEPS && marked) 2 + roundHalfUp(x1 * 30).coerceIn(0, 30) else STEPS_DEFAULT
+    fun steps(count: Int) = Ease(Interp.STEPS, (count.coerceIn(2, 32) - 2) / 30f, 0f, 0f, EASE_PARAM_MARKER)
+    val repeatCount get() = if (interp == Interp.REPEAT && marked) 1 + roundHalfUp(x1 * 15).coerceIn(0, 15) else REPEAT_DEFAULT
+    fun repeat(count: Int) = Ease(Interp.REPEAT, (count.coerceIn(1, 16) - 1) / 15f, 0f, 0f, EASE_PARAM_MARKER)
+    val pingPongTurns get() = if (interp == Interp.PING_PONG && marked) 2 * roundHalfUp(x1 * 8).coerceIn(0, 8) + 1 else PING_PONG_DEFAULT
+    fun pingPong(turns: Int) = Ease(Interp.PING_PONG, ((turns.coerceIn(1, 17) - 1) / 2) / 8f, 0f, 0f, EASE_PARAM_MARKER)
+    val waveCycles get() = if (interp == Interp.WAVE && marked) 1 + roundHalfUp(x1 * 15).coerceIn(0, 15) else WAVE_DEFAULT_CYCLES
+    val waveAmplitude get() = if (interp == Interp.WAVE && marked) y1.coerceIn(0f, 1f) else WAVE_DEFAULT_AMPLITUDE
+    fun wave(cycles: Int = waveCycles, amplitude: Float = waveAmplitude) =
+        Ease(Interp.WAVE, (cycles.coerceIn(1, 16) - 1) / 15f, amplitude.coerceIn(0f, 1f), 0f, EASE_PARAM_MARKER)
+    val randomSteps get() = if (interp == Interp.RANDOM && marked) 2 + roundHalfUp(x1 * 30).coerceIn(0, 30) else RANDOM_DEFAULT_STEPS
+    val randomSmooth get() = if (interp == Interp.RANDOM && marked) y1.coerceIn(0f, 1f) else 0f
+    val randomSeed get() = if (interp == Interp.RANDOM && marked) x2.coerceIn(0f, 1f) else 0f
+    fun random(steps: Int = randomSteps, smooth: Float = randomSmooth, seed: Float = randomSeed) =
+        Ease(Interp.RANDOM, (steps.coerceIn(2, 32) - 2) / 30f, smooth.coerceIn(0f, 1f), seed.coerceIn(0f, 1f), EASE_PARAM_MARKER)
 
     val overshootAmount get() = if (interp == Interp.OVERSHOOT && marked) x1.coerceIn(0f, 1f) else OVERSHOOT_DEFAULT_AMOUNT
     fun overshoot(amount: Float = overshootAmount) =
@@ -210,7 +279,16 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
             }
         }
         Interp.ELASTIC -> if (marked) elasticCurve(t, x1, y1, x2 < .5f) else if (t <= 0f) 0f else if (t >= 1f) 1f else ((1-kotlin.math.exp(-6.0*t)*kotlin.math.cos(6*Math.PI*t))/(1-kotlin.math.exp(-6.0))).toFloat()
-        Interp.STEPS -> kotlin.math.floor(t.coerceIn(0f,1f)*4f)/4f
+        Interp.STEPS -> if (marked) cycleCurve(interp, t, x1, y1, x2) else kotlin.math.floor(t.coerceIn(0f,1f)*4f)/4f
+        Interp.REPEAT, Interp.PING_PONG, Interp.WAVE, Interp.RANDOM -> {
+            val e = when (interp) {
+                Interp.REPEAT -> repeat(repeatCount)
+                Interp.PING_PONG -> pingPong(pingPongTurns)
+                Interp.WAVE -> wave()
+                else -> random()
+            }
+            cycleCurve(interp, t, e.x1, e.y1, e.x2)
+        }
         Interp.OVERSHOOT -> if (marked) overshootCurve(t, x1, x2 < .5f) else overshootCurve(t, OVERSHOOT_DEFAULT_AMOUNT, false)
         // `keyframe_ease` (Curve.hpp): a força repete a MESMA bézier sobre o resultado.
         else -> {
@@ -258,8 +336,54 @@ internal data class Ease(val interp: Int, val x1: Float, val y1: Float, val x2: 
     }
 }
 
+/**
+ * 0.4.6: a ALÇA das curvas com parâmetros (Quique, Elástico, Passar do ponto e as
+ * de repetição): arrastar no gráfico mexe a curva como nas bézier. Horizontal =
+ * o parâmetro A (quantidade/oscilações/degraus/ciclos), vertical = B (força,
+ * amortecimento, amplitude, suavizar). Nulo em B = a curva só tem A.
+ */
+internal fun Ease.paramA(): Float = when (interp) {
+    Interp.BOUNCE -> (bounceCount - 1) / 7f
+    Interp.ELASTIC -> (elasticCycles - 1) / 7f
+    Interp.OVERSHOOT -> overshootAmount
+    Interp.STEPS -> (stepsCount - 2) / 30f
+    Interp.REPEAT -> (repeatCount - 1) / 15f
+    Interp.PING_PONG -> ((pingPongTurns - 1) / 2) / 8f
+    Interp.WAVE -> (waveCycles - 1) / 15f
+    Interp.RANDOM -> (randomSteps - 2) / 30f
+    else -> 0f
+}
+
+internal fun Ease.paramB(): Float? = when (interp) {
+    Interp.BOUNCE -> (bounceStrength - .1f) / .8f
+    Interp.ELASTIC -> elasticDamping
+    Interp.WAVE -> waveAmplitude
+    Interp.RANDOM -> randomSmooth
+    else -> null
+}
+
+internal fun Ease.withParams(a: Float, b: Float?): Ease {
+    val x = a.coerceIn(0f, 1f)
+    val y = (b ?: 0f).coerceIn(0f, 1f)
+    return when (interp) {
+        Interp.BOUNCE -> bounce(count = 1 + kotlin.math.round(x * 7).toInt(), strength = .1f + y * .8f)
+        Interp.ELASTIC -> elastic(cycles = 1 + kotlin.math.round(x * 7).toInt(), damping = y)
+        Interp.OVERSHOOT -> overshoot(amount = x)
+        Interp.STEPS -> steps(2 + kotlin.math.round(x * 30).toInt())
+        Interp.REPEAT -> repeat(1 + kotlin.math.round(x * 15).toInt())
+        Interp.PING_PONG -> pingPong(2 * kotlin.math.round(x * 8).toInt() + 1)
+        Interp.WAVE -> wave(cycles = 1 + kotlin.math.round(x * 15).toInt(), amplitude = y)
+        Interp.RANDOM -> random(steps = 2 + kotlin.math.round(x * 30).toInt(), smooth = y)
+        else -> this
+    }
+}
+
 /** Um preset de uma família: nome [A] e o easing do motor. */
 /** [name] nulo = preset salvo (o nome dele está em [entry]). */
+/** Onde mora a alça de parâmetros no gráfico: 15 %..85 % da largura/altura. */
+private const val PARAM_MIN = .15f
+private const val PARAM_SPAN = .7f
+
 private class CurvePreset(@StringRes val name: Int?, val ease: Ease, val entry: com.aurea.aurea.presets.PresetEntry? = null)
 
 private class CurveFamily(@StringRes val name: Int, val glyph: Char, val presets: List<CurvePreset>)
@@ -318,6 +442,11 @@ private fun nameOf(e: Ease): Int {
         Interp.BOUNCE -> R.string.pn_textpreset_bounce
         Interp.ELASTIC -> R.string.pn_textpreset_elastic
         Interp.OVERSHOOT -> R.string.curve_type_overshoot
+        Interp.STEPS -> R.string.curve_type_steps
+        Interp.REPEAT -> R.string.curve_type_repeat
+        Interp.PING_PONG -> R.string.curve_type_pingpong
+        Interp.WAVE -> R.string.curve_type_wave
+        Interp.RANDOM -> R.string.curve_type_random
         Interp.EASE_IN -> R.string.pn_ease_in
         Interp.EASE_OUT -> R.string.pn_ease_out
         Interp.EASE_IN_OUT -> R.string.pn_ease_in_out
@@ -587,31 +716,6 @@ private fun ReferenceCurvePanel(env: PanelEnv, expanded: Boolean = false, collap
         )
         CurveDivider()
         Column(Modifier.weight(1f).fillMaxHeight().background(AureaColors.CurveGraphBackground)) {
-            // Os parâmetros (Quique, Elástico, Passar do ponto) numa faixa no TOPO do gráfico.
-            if (graphMode == 0 && ease.isParametric) {
-                Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    when (ease.interp) {
-                        Interp.OVERSHOOT -> CurveParamSlider(stringResource(R.string.curve_param_amount), ease.overshootAmount, 0f..1f, 0,
-                            "curve.overshoot.amount", null, store, "overshoot") { applyEase(store, layer, start, ease.overshoot(amount = it)) }
-                        Interp.ELASTIC -> {
-                            CurveParamSlider(stringResource(R.string.curve_param_oscillations), ease.elasticCycles.toFloat(), 1f..8f, 6, "curve.elastic.cycles",
-                                stringResource(R.string.curve_param_oscillations_value, ease.elasticCycles), store, "elastic") {
-                                val n = kotlin.math.round(it).toInt().coerceIn(1, 8)
-                                if (n != ease.elasticCycles) applyEase(store, layer, start, ease.elastic(cycles = n))
-                            }
-                            CurveParamSlider(stringResource(R.string.curve_param_damping), ease.elasticDamping, 0f..1f, 0, "curve.elastic.damping", null, store,
-                                "elastic") { applyEase(store, layer, start, ease.elastic(damping = it)) }
-                        }
-                        else -> {
-                            CurveChip("×${ease.bounceCount}", tag = "curve.bounce.count") {
-                                setCurve("bounce", ease.bounce(count = ease.bounceCount % 8 + 1))
-                            }
-                            CurveParamSlider(stringResource(R.string.fx_amplitude), ease.bounceStrength, .1f.. .9f, 0, "curve.bounce.strength", null, store,
-                                "bounce") { applyEase(store, layer, start, ease.bounce(strength = it)) }
-                        }
-                    }
-                }
-            }
             // O gráfico é tempo × valor: não espelha em árabe (ver `KeepLtr`).
             KeepLtr {
                 val segmentBar: @Composable (Modifier) -> Unit = { barModifier ->
@@ -909,7 +1013,45 @@ private fun CurveGraph(
                 awaitEachGesture {
                     val down = awaitFirstDown()
                     val e0 = current
-                    if (!e0.hasHandles || size.width <= 0 || size.height <= 0) return@awaitEachGesture
+                    if (size.width <= 0 || size.height <= 0) return@awaitEachGesture
+                    if (!e0.hasHandles && e0.isParametric) {
+                        // Arrasto RELATIVO na alça de parâmetros (horizontal A, vertical B).
+                        val inset0 = CURVE_INSET.toPx()
+                        val w0 = max(1f, size.width - 2 * inset0)
+                        val h0 = max(1f, size.height - 2 * inset0)
+                        val a0 = e0.paramA()
+                        val b0 = e0.paramB()
+                        down.consume()
+                        activeHandle = 0
+                        var began = false
+                        try {
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!ch.pressed) break
+                                ch.consume()
+                                if (!began) {
+                                    if ((ch.position - down.position).getDistance() < viewConfiguration.touchSlop) continue
+                                    began = true
+                                    begin()
+                                }
+                                val d = ch.position - down.position
+                                val next = e0.withParams(a0 + d.x / (w0 * PARAM_SPAN), b0?.let { it - d.y / (h0 * PARAM_SPAN) })
+                                if (!next.same(current)) change(next)
+                            }
+                        } finally {
+                            activeHandle = -1
+                            if (began) end()
+                            else if (e0.interp == Interp.RANDOM) {
+                                // Toque sem arrastar no Aleatório: sorteia outro desenho.
+                                begin()
+                                change(e0.random(seed = (((e0.randomSeed * 65535f).toInt() + 7919) % 65536) / 65535f))
+                                end()
+                            }
+                        }
+                        return@awaitEachGesture
+                    }
+                    if (!e0.hasHandles) return@awaitEachGesture
                     val (lo, hi) = range
                     val inset = CURVE_INSET.toPx()
                     val w = max(1f, size.width - 2 * inset)
@@ -982,6 +1124,19 @@ private fun CurveGraph(
             drawPath(curve, green, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
             drawCircle(green, 3.dp.toPx(), p0)
             drawCircle(green, 3.dp.toPx(), p1)
+            if (!ease.hasHandles && ease.isParametric) {
+                // A alça de parâmetros: posição = (A, B) num quadro central do gráfico.
+                val r = 12.dp.toPx()
+                val c = Offset(inset + (PARAM_MIN + ease.paramA() * PARAM_SPAN) * w,
+                               inset + (1f - (PARAM_MIN + (ease.paramB() ?: .5f) * PARAM_SPAN)) * h)
+                val rr = if (activeHandle == 0) r * 1.2f else r
+                drawCircle(Color.White, rr, c)
+                drawCircle(green, rr, c, style = Stroke(2.dp.toPx()))
+                // Setas: só horizontal (curva de um parâmetro) ou as duas direções.
+                val a = 5.dp.toPx()
+                drawLine(green, Offset(c.x - a, c.y), Offset(c.x + a, c.y), 1.5.dp.toPx())
+                if (ease.paramB() != null) drawLine(green, Offset(c.x, c.y - a), Offset(c.x, c.y + a), 1.5.dp.toPx())
+            }
             if (ease.hasHandles) {
                 val hh = ease.handles()
                 val r = 12.dp.toPx()

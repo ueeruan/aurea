@@ -193,8 +193,10 @@ Mat4 layer_matrix(const Layer& l, FrameIndex local) noexcept {
         const Track* tr = t.find(p);
         return tr ? tr->value_or(local, fallback) : fallback;
     };
-    const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x),
-                   s(TrackProperty::PositionY, l.transform.position.y), 0.0f};
+    Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x),
+             s(TrackProperty::PositionY, l.transform.position.y), 0.0f};
+    // 0.4.6: caminho de movimento curvo (bézier espacial da posição).
+    if (Vec3 sp; spatial_position(t, l.positionTangents, l.transform.position, static_cast<f64>(local.value), sp)) { pos.x = sp.x; pos.y = sp.y; }
     const Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x),
                      s(TrackProperty::ScaleY, l.transform.scale.y), 1.0f};
     const f32 rot = s(TrackProperty::RotationZ, l.transform.rotation.z) * kDeg2Rad;
@@ -224,8 +226,11 @@ Mat4 layer_matrix_frac(const Layer& l, f64 local, f64 fps) noexcept {
         return tr ? sample_frac(*tr, local, fallback) : fallback;
     };
     const layeranim::Offset an = layeranim::whole_offset(l, local, fps);
-    const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x) + an.translate.x,
-                   s(TrackProperty::PositionY, l.transform.position.y) + an.translate.y, 0.0f};
+    Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x) + an.translate.x,
+             s(TrackProperty::PositionY, l.transform.position.y) + an.translate.y, 0.0f};
+    if (Vec3 sp; spatial_position(t, l.positionTangents, l.transform.position, local, sp)) {
+        pos.x = sp.x + an.translate.x; pos.y = sp.y + an.translate.y;
+    }
     const Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x) * an.scale.x,
                      s(TrackProperty::ScaleY, l.transform.scale.y) * an.scale.y, 1.0f};
     const f32 rot = (s(TrackProperty::RotationZ, l.transform.rotation.z) + an.rotation.z) * kDeg2Rad;
@@ -249,9 +254,12 @@ Mat4 layer_matrix_3d_frac(const Layer& l, f64 local, f64 fps) noexcept {
         return tr ? sample_frac(*tr, local, fallback) : fallback;
     };
     const layeranim::Offset an = layeranim::whole_offset(l, local, fps);
-    const Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x) + an.translate.x,
-                   s(TrackProperty::PositionY, l.transform.position.y) + an.translate.y,
-                   s(TrackProperty::PositionZ, l.transform.position.z)};
+    Vec3 pos{s(TrackProperty::PositionX, l.transform.position.x) + an.translate.x,
+             s(TrackProperty::PositionY, l.transform.position.y) + an.translate.y,
+             s(TrackProperty::PositionZ, l.transform.position.z)};
+    if (Vec3 sp; spatial_position(t, l.positionTangents, l.transform.position, local, sp)) {
+        pos = Vec3{sp.x + an.translate.x, sp.y + an.translate.y, sp.z};
+    }
     Vec3 scale{s(TrackProperty::ScaleX, l.transform.scale.x) * an.scale.x, s(TrackProperty::ScaleY, l.transform.scale.y) * an.scale.y,
                s(TrackProperty::ScaleZ, l.transform.scale.z)};
     // A profundidade acompanha a largura (Z multiplica X) em tudo que não é
@@ -776,6 +784,15 @@ scene3d::SceneCamera camera_for_frac_own(const Composition& comp, f64 timeF, u32
         cam.position = t;
         cam.fovY = std::clamp(camera_fov_frac(*l, local), 1.0f, 170.0f) * kDeg2Rad;
         cam.nearZ = std::max(0.1f, l->camera.nearPlane);
+        // 0.4.6: câmera paralela. A altura visível é a da perspectiva no plano
+        // das camadas 2D (o centro da composição em z = 0): trocar de
+        // Perspectiva para Paralela não muda o enquadramento delas.
+        if (l->camera.parallel) {
+            const Vec4 c = v * Vec4{static_cast<f32>(comp.width()) * 0.5f, static_cast<f32>(comp.height()) * 0.5f, 0.0f, 1.0f};
+            const f32 depth = c.z > 1.0f ? c.z : std::max(1.0f, l->camera.focusDistance);
+            cam.orthographic = true;
+            cam.orthoHeight = 2.0f * depth * std::tan(cam.fovY * 0.5f);
+        }
         // Lente: profundidade de campo no instante (preview e export iguais).
         if (l->camera.dofEnabled) {
             auto lens = [&](TrackProperty p, f32 fallback) {
@@ -813,7 +830,7 @@ scene3d::SceneCamera camera_for(const Composition& comp, FrameIndex time, u32 w,
 Mat4 comp_view_projection_frac(const Composition& comp, f64 time, u32 w, u32 h) noexcept {
     const scene3d::SceneCamera cam = camera_for_frac(comp, time, w, h);
     return comp_from_clip(static_cast<f32>(w), static_cast<f32>(h))
-         * cam.imageTransform * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(w) / static_cast<f32>(std::max(1u, h)), cam.nearZ) * cam.view;
+         * cam.imageTransform * scene3d::camera_projection(cam, static_cast<f32>(w) / static_cast<f32>(std::max(1u, h))) * cam.view;
 }
 
 } // namespace
@@ -880,6 +897,13 @@ bool scene_ray(const scene3d::SceneCamera& cam, u32 width, u32 height, f32 compX
     const Mat4& v = cam.view;
     const Vec3 ax{v.col[0].x, v.col[1].x, v.col[2].x}, ay{v.col[0].y, v.col[1].y, v.col[2].y},
                az{v.col[0].z, v.col[1].z, v.col[2].z};
+    if (cam.orthographic && cam.orthoHeight > 0.0f) {
+        // Paralela: raios paralelos ao eixo, saindo do ponto do plano da câmera.
+        const f32 half = cam.orthoHeight * 0.5f;
+        origin = cam.position + ax * (nx * aspect * half) + ay * (ny * half);
+        dir = az.normalized();
+        return std::isfinite(dir.x) && std::isfinite(dir.y) && std::isfinite(dir.z);
+    }
     dir = (ax * (nx * aspect * t) + ay * (ny * t) + az).normalized();
     origin = cam.position;
     return std::isfinite(dir.x) && std::isfinite(dir.y) && std::isfinite(dir.z);
@@ -952,6 +976,34 @@ bool pick_scene_point(const Composition& comp, FrameIndex time, f32 compX, f32 c
 
 scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEditorView& editor) noexcept {
     scene3d::SceneCamera cam = scene3d::default_camera(width, height);
+    if (editor.kind == SceneViewKind::DefaultCamera) return cam;
+    if (editor.kind != SceneViewKind::Orbit) {
+        // Vistas ortogonais: eixos fixos (x direita, y baixo, z frente da vista),
+        // olhando o centro da composição, sem perspectiva.
+        Vec3 x{1, 0, 0}, y{0, 1, 0}, z{0, 0, 1};
+        switch (editor.kind) {
+            case SceneViewKind::Back:   z = {0, 0, -1}; break;
+            case SceneViewKind::Left:   z = {1, 0, 0};  break;
+            case SceneViewKind::Right:  z = {-1, 0, 0}; break;
+            case SceneViewKind::Top:    z = {0, 1, 0};  y = {0, 0, -1}; break;
+            case SceneViewKind::Bottom: z = {0, -1, 0}; y = {0, 0, 1};  break;
+            default: break;
+        }
+        x = y.cross(z).normalized();
+        const f32 h = static_cast<f32>(std::max(1u, height));
+        const Vec3 target{width * 0.5f, height * 0.5f, 0};
+        // Longe o bastante para a cena toda ficar na frente (o far ortográfico é 1e6).
+        const Vec3 position = target - z * (h * 50.0f);
+        cam.position = position;
+        cam.view.col[0] = Vec4{x.x, y.x, z.x, 0};
+        cam.view.col[1] = Vec4{x.y, y.y, z.y, 0};
+        cam.view.col[2] = Vec4{x.z, y.z, z.z, 0};
+        cam.view.col[3] = Vec4{-x.dot(position), -y.dot(position), -z.dot(position), 1};
+        cam.orthographic = true;
+        cam.orthoHeight = h * std::clamp(editor.distance, 0.05f, 30.0f);
+        cam.dof = false;
+        return cam;
+    }
     const f32 yaw = editor.yaw * kDeg2Rad, pitch = editor.pitch * kDeg2Rad;
     const f32 distance = static_cast<f32>(std::max(1u, height)) * editor.distance;
     const Vec3 target{width * 0.5f, height * 0.5f, 0};
@@ -971,14 +1023,14 @@ scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEdito
 Mat4 scene_editor_projection(u32 width, u32 height, const SceneEditorView& editor) noexcept {
     const auto cam = scene_editor_camera(width, height, editor);
     return comp_from_clip(static_cast<f32>(width), static_cast<f32>(height))
-        * cam.imageTransform * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(width) / std::max(1u, height), cam.nearZ) * cam.view;
+        * cam.imageTransform * scene3d::camera_projection(cam, static_cast<f32>(width) / std::max(1u, height)) * cam.view;
 }
 
 Mat4 comp_view_projection(const Composition& comp, FrameIndex time) noexcept {
     const u32 w = std::max(1u, comp.width()), h = std::max(1u, comp.height());
     const scene3d::SceneCamera cam = camera_for(comp, time, w, h);
     return comp_from_clip(static_cast<f32>(w), static_cast<f32>(h))
-         * cam.imageTransform * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(w) / static_cast<f32>(h), cam.nearZ) * cam.view;
+         * cam.imageTransform * scene3d::camera_projection(cam, static_cast<f32>(w) / static_cast<f32>(h)) * cam.view;
 }
 
 Mat4 layer_world_3d(const Composition& comp, const Layer& l, FrameIndex time) noexcept { return world_3d(comp, l, time); }
@@ -1003,7 +1055,7 @@ Mat4 layer_comp_matrix(const Composition& comp, const Layer& l, FrameIndex time,
     const u32 w = std::max(1u, comp.width()), h = std::max(1u, comp.height());
     const scene3d::SceneCamera cam = camera_for(comp, time, w, h);
     return comp_from_clip(static_cast<f32>(w), static_cast<f32>(h))
-         * cam.imageTransform * scene3d::reverse_z_perspective(cam.fovY, static_cast<f32>(w) / static_cast<f32>(h), cam.nearZ) * cam.view
+         * cam.imageTransform * scene3d::camera_projection(cam, static_cast<f32>(w) / static_cast<f32>(h)) * cam.view
          * world_3d(comp, l, time);
 }
 
@@ -1428,7 +1480,7 @@ u32 Renderer::configure_preview_cache(u32 width, u32 height, const RenderSetting
     auto add = [&](u64 value) { key = (key ^ value) * 1099511628211ull; };
     auto number = [&](f32 value) { add(std::bit_cast<u32>(value)); };
     add(s.previewCacheRevision); add(s.previewCacheComposition); add(w); add(h);
-    add(rigSetupLayer_); add(s.sceneEditor.enabled);
+    add(rigSetupLayer_); add(s.sceneEditor.enabled); add(static_cast<u64>(s.sceneEditor.kind));
     number(s.sceneEditor.yaw); number(s.sceneEditor.pitch); number(s.sceneEditor.distance);
     number(s.heavyScale);
     const PreviewQuality q = effective_quality(s);
@@ -1571,6 +1623,33 @@ TextureHandle Renderer::cube_lut(AssetId id) noexcept {
         target[i*4+2] = to_half(v.z); target[i*4+3] = to_half(1);
     }
     uploads_.push_back(std::move(up)); luts_[key] = LutTexture{*tex, frameNumber_};
+    return *tex;
+}
+
+// 0.4.6: imagem de plugin ("textures"). Mesma faxina das LUTs (sem uso por
+// muitos quadros = sai da GPU; o plugin guarda os pixels e sobe de novo).
+TextureHandle Renderer::image_texture(u64 key, const u8* rgba, u32 width, u32 height, bool srgb) noexcept {
+    if (!backend_ || !rgba || width == 0 || height == 0 || width > 8192 || height > 8192) return {};
+    key ^= 0x504c5547494d4721ull;
+    if (auto it = luts_.find(key); it != luts_.end()) {
+        it->second.lastFrame = frameNumber_;
+        return it->second.texture;
+    }
+    TextureDesc d;
+    d.width = width;
+    d.height = height;
+    d.format = srgb ? SurfaceFormat::RGBA8_sRGB : SurfaceFormat::RGBA8;
+    d.sampled = true;
+    d.transferDst = true;
+    d.debugName = "plugin-imagem";
+    auto tex = backend_->create_texture(d);
+    if (!tex.ok()) return {};
+    PendingUpload up;
+    up.texture = *tex;
+    up.bytesPerRow = width * 4;
+    up.data.assign(rgba, rgba + usize(width) * height * 4);
+    uploads_.push_back(std::move(up));
+    luts_[key] = LutTexture{*tex, frameNumber_};
     return *tex;
 }
 
@@ -2349,9 +2428,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     // Câmera da cena para camadas 2D que vivem no espaço 3D.
     const scene3d::SceneCamera cam3d = settings.sceneEditor.enabled && !settings.finalQuality
         ? scene_editor_camera(out.compWidth, out.compHeight, settings.sceneEditor) : camera_for(comp, time, out.compWidth, out.compHeight);
-    const Mat4 viewProj3d = cam3d.imageTransform * scene3d::reverse_z_perspective(
-                                cam3d.fovY, static_cast<f32>(out.compWidth) / static_cast<f32>(std::max(1u, out.compHeight)),
-                                cam3d.nearZ) * cam3d.view;
+    const Mat4 viewProj3d = cam3d.imageTransform * scene3d::camera_projection(cam3d, static_cast<f32>(out.compWidth) / static_cast<f32>(std::max(1u, out.compHeight))) * cam3d.view;
     const Mat4 compFromClip = comp_from_clip(static_cast<f32>(out.compWidth), static_cast<f32>(out.compHeight));
     // 0.3.1 (plugins "shader3d"): a câmera da cena inteira, sempre (ativa ou padrão).
     const auto fillSceneCamera = [&](LayerPlacement& p) noexcept {
@@ -3149,16 +3226,20 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     const auto* segment = text::active_caption(l->captions, local.value);
                     if (!segment) continue;
                     captionText = l->text;
+                    // 0.4.6: bloco com estilo próprio, por cima do texto da faixa.
+                    const text::CaptionOptions blockOptions = text::caption_block_options(l->captionOptions, *segment);
+                    if (segment->look)
+                        text::apply_caption_block_look(l->captionOptions, blockOptions, std::min(comp.width(), comp.height()), captionText);
                     // CAIXA ALTA aqui, não no texto guardado: ligar/desligar a
                     // opção (ou aplicar um preset que a muda) vale na hora, e o
                     // texto original continua intacto para editar.
-                    captionText.content = l->captionOptions.uppercase ? text::upper_text(segment->text) : segment->text;
+                    captionText.content = blockOptions.uppercase ? text::upper_text(segment->text) : segment->text;
                     captionTracks = l->tracks;
                     std::vector<i64> starts;
                     for (const auto& word : segment->words) starts.push_back(word.start);
                     TextData timedText;
                     TrackSet timedTracks;
-                    text::apply_caption_animation(l->captionOptions, timedText, timedTracks, starts, segment->end);
+                    text::apply_caption_animation(blockOptions, timedText, timedTracks, starts, segment->end);
                     const u32 animatorBase = static_cast<u32>(captionText.animators.size());
                     captionText.animators.insert(captionText.animators.end(), timedText.animators.begin(), timedText.animators.end());
                     for (u32 i = 0; i < timedTracks.size(); ++i) {
@@ -3173,6 +3254,17 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     evaluatedTracking = *textData;
                     evaluatedTracking.tracking = std::clamp(tracking->value_or(local, textData->tracking), -1000.f, 1000.f);
                     textData = &evaluatedTracking;
+                }
+                // 0.4.6: texto dinâmico (contador/timecode) no instante.
+                TextData dynamicText;
+                if (textData->dynamic) {
+                    std::string expanded = text::expand_dynamic(*textData, static_cast<f64>(local.value),
+                        static_cast<f64>(l->end.value - l->start.value), static_cast<f64>(layerTime.value), fps);
+                    if (expanded != textData->content) {
+                        dynamicText = *textData;
+                        dynamicText.content = std::move(expanded);
+                        textData = &dynamicText;
+                    }
                 }
                 const auto font = text::FontManager::instance().font_for(*textData);
                 if (!font || textData->content.empty() || (textData->color.w <= 0.0f && textData->strokeWidth <= 0.0f)) continue;
@@ -3352,24 +3444,32 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 std::vector<text::GlyphAnim> anim;
                 const Vec4 emptyBounds{1e30f, 1e30f, -1e30f, -1e30f};
                 std::vector<Vec4> wordBounds(std::max(1u, L.words), emptyBounds), lineBounds(std::max(1u, L.lines), emptyBounds);
+                Vec4 allBounds = emptyBounds;   // 0.4.6: agrupamento "Tudo" do Text Animator Pro
                 for (const auto& q : L.quads) {
                     auto extend = [&](Vec4& b) { b.x = std::min(b.x, q.x0); b.y = std::min(b.y, q.y0); b.z = std::max(b.z, q.x1); b.w = std::max(b.w, q.y1); };
                     if (q.wordIndex < wordBounds.size()) extend(wordBounds[q.wordIndex]);
                     if (q.lineIndex < lineBounds.size()) extend(lineBounds[q.lineIndex]);
+                    extend(allBounds);
                 }
                 auto glyphMatrix = [&](const text::GlyphQuad& q, const text::GlyphAnim& a) {
                     f32 x0 = q.x0, x1 = q.x1, y0 = q.y0, y1 = q.y1;
                     const Vec4* group = a.anchorGrouping == 1 && q.wordIndex < wordBounds.size() ? &wordBounds[q.wordIndex]
-                                  : a.anchorGrouping == 2 && q.lineIndex < lineBounds.size() ? &lineBounds[q.lineIndex] : nullptr;
+                                  : a.anchorGrouping == 2 && q.lineIndex < lineBounds.size() ? &lineBounds[q.lineIndex]
+                                  : a.anchorGrouping == 3 ? &allBounds : nullptr;
                     if (group) {
                         x0 = group->x; y0 = group->y; x1 = group->z; y1 = group->w;
                     }
-                    const Vec3 pivot{(x0 + x1) * 0.5f, (y0 + y1) * 0.5f, 0};
+                    // Alinhamento do agrupamento (Pro): −1..1 da meia caixa a partir do centro.
+                    const Vec3 pivot{(x0 + x1) * 0.5f + a.groupAlign.x * (x1 - x0) * 0.5f,
+                                     (y0 + y1) * 0.5f + a.groupAlign.y * (y1 - y0) * 0.5f, 0};
+                    // Ponto de âncora (Pro): o glifo sai do lugar por −âncora e
+                    // gira/escala em volta de pivô + âncora.
+                    const Vec3 anchor{a.anchor.x, a.anchor.y, 0};
                     Mat4 m = Mat4::translation(pivot + a.translate + Vec3{a.trackingShift, 0, 0});
                     if (a.rotation.x != 0 || a.rotation.y != 0 || a.rotation.z != 0)
                         m = m * Mat4::from_quat(Quat::from_euler_zyx(a.rotation.x * kDeg2Rad, a.rotation.y * kDeg2Rad, a.rotation.z * kDeg2Rad));
                     m = m * a.skewTransform;
-                    return m * Mat4::scale(Vec3{a.scale.x, a.scale.y, 1}) * Mat4::translation(-pivot);
+                    return m * Mat4::scale(Vec3{a.scale.x, a.scale.y, 1}) * Mat4::translation(-pivot - anchor);
                 };
                 std::vector<Mat4> textTransforms;
                 auto evaluateGlyphs = [&](f64 lt) {
@@ -4426,6 +4526,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                     mediaUs = static_cast<i64>(std::llround(idx * 1e6 / srcFps));
                 }
                 const i64 dur = streamInfo.durationUs;
+                // 0.4.6: Repetir — o tempo da fonte dá a volta (positivo também antes do 0).
+                if (dur > 0 && l->loopMedia) mediaUs = ((mediaUs % dur) + dur) % dur;
                 if (dur > 0) mediaUs = std::clamp<i64>(mediaUs, 0, last_source_timestamp(streamInfo,src->frame_duration_us()));
                 // FLOW RETIME, "Substituir quadros duplicados" (0.3.0): o quadro da
                 // fonte que REPETE o anterior (30 dentro de 60, quadro perdido ou
@@ -5066,8 +5168,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 : camera_for_frac(comp, time.value + offset, out.compWidth, out.compHeight);
         };
         const auto projection = [&](const scene3d::SceneCamera& camera) {
-            return camera.imageTransform * scene3d::reverse_z_perspective(camera.fovY,
-                static_cast<f32>(out.compWidth) / std::max(1u, out.compHeight), camera.nearZ) * camera.view;
+            return camera.imageTransform * scene3d::camera_projection(camera, static_cast<f32>(out.compWidth) / std::max(1u, out.compHeight)) * camera.view;
         };
         // 0.3.2 MOTION BLUR 3D RÁPIDO (MotionBlurSettings::vectorBlur): o grupo
         // sai de UMA cena no centro do obturador + o passe de velocidade e a
@@ -5528,6 +5629,12 @@ void Renderer::fill_scene_context(const Composition& comp, FrameIndex time, Fram
     post.bloomIntensity = std::clamp(pp.bloomIntensity, 0.0f, 4.0f);
     post.bloomThreshold = std::max(0.0f, pp.bloomThreshold);
     post.quality = std::min(pp.quality3d, kScene3DQualityCount - 1);
+    // 0.4.6: neblina volumétrica (os campos `fog` da composição, já salvos no
+    // projeto desde a v31; fogColor.w = força dos raios do sol).
+    post.fog = pp.fog;
+    post.fogColor = Vec3{pp.fogColor.x, pp.fogColor.y, pp.fogColor.z};
+    post.fogDensity = std::isfinite(pp.fogDensity) ? std::clamp(pp.fogDensity, 0.0f, 0.05f) : 0.0f;
+    post.fogRays = std::isfinite(pp.fogColor.w) ? std::clamp(pp.fogColor.w, 0.0f, 8.0f) : 1.0f;
     const f32 groupExposure = std::isfinite(pp.exposure) ? std::clamp(pp.exposure, 0.01f, 64.0f) : 1.0f;
     // Sombra da composição (ShadowSettings): só pisos e viés — o nível de
     // qualidade escolhe mapa e amostras.

@@ -741,6 +741,120 @@ Binding bind_text_property(const Layer& l, u32 a, std::string_view m) {
     return b;
 }
 
+namespace {
+/// Menus do AE (1..) -> opcao do Pro (0..): modo, baseado em, unidades, forma, agrupamento.
+constexpr i8 kProMode[] = {-1, 0, 1, 2, 3, 4, 5};
+constexpr i8 kProBasedOn[] = {-1, 0, 1, 2, 3};
+constexpr i8 kProUnits[] = {-1, 0, 1};
+constexpr i8 kProShape[] = {-1, 0, 1, 2, 3, 4, 5};
+constexpr i8 kProGrouping[] = {-1, 0, 1, 2, 3};
+Channel pro_ch(u32 fx, u32 param, u32 comp, u8 src, f64 mul = 1.0, f64 add = 0.0) {
+    Channel c = track(TrackProperty::EffectParam, src, mul, add);
+    c.ei = fx;
+    c.pi = param_track_key(param, comp);
+    return c;
+}
+Channel pro_enum(u32 fx, u32 param, const i8* map, u8 n) {
+    Channel c = pro_ch(fx, param, 0, 0);
+    c.conv = Conv::Enum; c.map = map; c.mapN = n;
+    return c;
+}
+} // namespace
+
+Binding bind_text_pro(u32 fx, u32 kind, std::string_view m, f64 textSize) {
+    using namespace text;
+    Binding b;
+    b.label = std::string(m);
+    auto one = [&](u32 param, f64 mul = 1.0) { b.ch = {pro_ch(fx, param, 0, 0, mul)}; };
+    auto flag = [&](u32 param) { Channel c = pro_ch(fx, param, 0, 0); c.conv = Conv::Bool; b.ch = {c}; };
+    auto round = [&](u32 param) { Channel c = pro_ch(fx, param, 0, 0); c.conv = Conv::Round; b.ch = {c}; };
+    if (kind == 0) {
+        if (m == "ADBE Text Percent Start" || m == "ADBE Text Index Start") one(apStart);
+        else if (m == "ADBE Text Percent End" || m == "ADBE Text Index End") one(apEnd);
+        else if (m == "ADBE Text Percent Offset" || m == "ADBE Text Index Offset") one(apOffset);
+        else if (m == "ADBE Text Range Units") b.ch = {pro_enum(fx, apUnits, kProUnits, 3)};
+        else if (m == "ADBE Text Range Type2") b.ch = {pro_enum(fx, apBasedOn, kProBasedOn, 5)};
+        else if (m == "ADBE Text Selector Mode") b.ch = {pro_enum(fx, apMode, kProMode, 7)};
+        else if (m == "ADBE Text Selector Max Amount") one(apAmount);
+        else if (m == "ADBE Text Range Shape") b.ch = {pro_enum(fx, apShape, kProShape, 7)};
+        else if (m == "ADBE Text Selector Smoothness") one(apSmoothness);
+        else if (m == "ADBE Text Levels Max Ease") one(apEaseHigh);
+        else if (m == "ADBE Text Levels Min Ease") one(apEaseLow);
+        else if (m == "ADBE Text Randomize Order") flag(apRandom);
+        else if (m == "ADBE Text Random Seed") round(apSeed);
+        else b.unsupported = "ajuste de seletor sem equivalente";
+        return b;
+    }
+    if (kind == 2) {
+        // Seletor de expressão: a Intensidade (3 eixos) com a expressão do AE.
+        if (m == "ADBE Text Expressible Amount") {
+            b.dims = 3;
+            b.ch = {pro_ch(fx, apExprAmount, 0, 0), pro_ch(fx, apExprAmount, 1, 1), pro_ch(fx, apExprAmount, 2, 2)};
+        } else b.unsupported = "~";   // "baseado em" do seletor de expressão: o Pro usa o do intervalo
+        return b;
+    }
+    if (kind == 1) {
+        if (m == "ADBE Text Selector Mode") b.ch = {pro_enum(fx, apWigglyMode, kProMode, 7)};
+        else if (m == "ADBE Text Wiggly Max Amount") one(apWigglyMax);
+        else if (m == "ADBE Text Wiggly Min Amount") one(apWigglyMin);
+        else if (m == "ADBE Text Temporal Freq") one(apWigglyRate);
+        else if (m == "ADBE Text Character Correlation") one(apCorrelation);
+        else if (m == "ADBE Text Temporal Phase") one(apTemporalPhase);
+        else if (m == "ADBE Text Spatial Phase") one(apSpatialPhase);
+        else if (m == "ADBE Text Wiggly Lock Dim") flag(apLockDims);
+        else if (m == "ADBE Text Wiggly Random Seed" || m == "ADBE Text Random Seed") round(apWigglySeed);
+        else if (m == "ADBE Text Range Type2") b.unsupported = "~";   // o Pro usa o "baseado em" do intervalo
+        else b.unsupported = "ajuste da oscilacao sem equivalente";
+        return b;
+    }
+    // Propriedades do animador e "Mais opcoes".
+    if (m == "ADBE Text Position 3D" || m == "ADBE Text Position") {
+        b.dims = m == "ADBE Text Position" ? 2 : 3; b.spatial = true;
+        b.ch = {pro_ch(fx, apPosition, 0, 0), pro_ch(fx, apPosition, 1, 1)};
+        if (b.dims == 3) b.ch.push_back(pro_ch(fx, apPosition, 2, 2));
+    } else if (m == "ADBE Text Anchor Point 3D" || m == "ADBE Text Anchor Point") {
+        b.dims = m == "ADBE Text Anchor Point" ? 2 : 3; b.spatial = true;
+        b.ch = {pro_ch(fx, apAnchor, 0, 0), pro_ch(fx, apAnchor, 1, 1)};
+    } else if (m == "ADBE Text Scale 3D" || m == "ADBE Text Scale") {
+        b.dims = m == "ADBE Text Scale" ? 2 : 3;
+        b.ch = {pro_ch(fx, apScale, 0, 0), pro_ch(fx, apScale, 1, 1)};
+    } else if (m == "ADBE Text Skew") { one(apSkew);
+    } else if (m == "ADBE Text Skew Axis") { one(apSkewAxis);
+    } else if (m == "ADBE Text Rotation") { b.ch = {pro_ch(fx, apRotation, 2, 0)};
+    } else if (m == "ADBE Text Rotation X") { b.ch = {pro_ch(fx, apRotation, 0, 0)};
+    } else if (m == "ADBE Text Rotation Y") { b.ch = {pro_ch(fx, apRotation, 1, 0)};
+    } else if (m == "ADBE Text Opacity") { Channel c = pro_ch(fx, apOpacity, 0, 0); c.lo = 0; c.hi = 100; b.ch = {c};
+    } else if (m == "ADBE Text Fill Color" || m == "ADBE Text Stroke Color") {
+        // Cor de efeito e linear; o Pro devolve ao sRGB do texto ao pintar.
+        const u32 param = m == "ADBE Text Fill Color" ? apFill : apStroke;
+        b.dims = 4;
+        for (u8 c = 0; c < 3; ++c) { Channel ch = pro_ch(fx, param, c, c); ch.conv = Conv::SrgbToLinear; ch.lo = 0; ch.hi = 1; b.ch.push_back(ch); }
+    } else if (m == "ADBE Text Fill Hue") { one(apFillHue);
+    } else if (m == "ADBE Text Fill Saturation") { one(apFillSaturation);
+    } else if (m == "ADBE Text Fill Brightness") { one(apFillBrightness);
+    } else if (m == "ADBE Text Fill Opacity") { one(apFillOpacity);
+    } else if (m == "ADBE Text Stroke Width") { one(apStrokeWidth);
+    } else if (m == "ADBE Text Tracking Amount") { one(apTracking, std::max(1.0, textSize) / 1000.0);
+    } else if (m == "ADBE Text Line Spacing") { b.dims = 2; b.ch = {pro_ch(fx, apLineSpacing, 0, 0), pro_ch(fx, apLineSpacing, 1, 1)};
+    } else if (m == "ADBE Text Blur") { b.dims = 2; one(apBlur);
+    } else if (m == "ADBE Text Anchor Point Option") { b.ch = {pro_enum(fx, apGrouping, kProGrouping, 5)};
+    } else if (m == "ADBE Text Anchor Point Align") { b.dims = 2; b.ch = {pro_ch(fx, apGroupAlign, 0, 0), pro_ch(fx, apGroupAlign, 1, 1)};
+    } else if (m == "ADBE Text Track Type" || m == "ADBE Text Character Range" || m.substr(0, 11) == "ADBE 3DText") {
+        b.unsupported = "~";
+    } else if (m == "ADBE Text Stroke Hue" || m == "ADBE Text Stroke Saturation" || m == "ADBE Text Stroke Brightness" ||
+               m == "ADBE Text Stroke Opacity") {
+        b.unsupported = "matiz/saturacao/brilho/opacidade do contorno";
+    } else if (m == "ADBE Text Line Anchor") {
+        b.unsupported = "ancora de linha do animador";
+    } else if (m == "ADBE Text Character Offset" || m == "ADBE Text Character Change Type" ||
+               m == "ADBE Text Character Replace" || m == "ADBE Text Character Value") {
+        b.unsupported = "troca/deslocamento de caractere (use o Text Animator comum)";
+    } else {
+        b.unsupported = "propriedade de animador sem equivalente no Text Animator Pro";
+    }
+    return b;
+}
+
 Binding bind_text_selector(const Layer& l, u32 a, u32 kind, std::string_view m, u32 indexUnits) {
     Binding b;
     b.label = std::string(m);

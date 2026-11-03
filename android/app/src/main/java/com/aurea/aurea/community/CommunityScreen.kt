@@ -80,6 +80,8 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
     var edit by remember { mutableStateOf(false) }
     var composing by remember { mutableStateOf(false) }
     var legacy by remember { mutableStateOf(false) }
+    var storeOpen by remember { mutableStateOf(false) }
+    var storeSoon by remember { mutableStateOf(false) }
     var commentsFor by remember { mutableStateOf<CommunityPost?>(null) }
     var verifying by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<CommunityPost?>(null) }
@@ -187,6 +189,11 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
                         FilterChip(following, enabled = !busy, onClick = { work { following = true; loadFeed() } }, label = { Text(stringResource(R.string.social_following)) })
                         Spacer(Modifier.weight(1f))
                         TextButton(onClick = { legacy = true }) { Text(stringResource(R.string.pn_caption)) }
+                        // 0.4.6: a Loja da Comunidade (plugins, efeitos e presets).
+                        // Enquanto o armazenamento (R2) não está ativo no servidor: "Em breve".
+                        TextButton(onClick = { if (STORE_ENABLED) storeOpen = true else storeSoon = true }, modifier = Modifier.testTag("social.store")) {
+                            Text(stringResource(R.string.store_title) + if (STORE_ENABLED) "" else " · " + stringResource(R.string.store_soon))
+                        }
                     }
                 }
             } else {
@@ -256,6 +263,16 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
     if (composing) CommunityCompose(store, api, onError = ::failure, onDismiss = { composing = false }, onPosted = { composing = false; work { refresh() } })
     commentsFor?.let { post -> CommunityComments(post, me?.id, canVerify, api, ::failure, { commentsFor = null; work { loadFeed() } }, { id -> commentsFor = null; showProfile(id) },
         onReport = { c -> reporting = "comment" to c.id }) }
+    if (storeSoon) AlertDialog(onDismissRequest = { storeSoon = false }, modifier = Modifier.testTag("social.store.soon"),
+        title = { Text(stringResource(R.string.store_soon)) }, text = { Text(stringResource(R.string.store_soon_message)) },
+        confirmButton = { TextButton(onClick = { storeSoon = false }) { Text(stringResource(R.string.editor_fechar)) } })
+    if (storeOpen) androidx.compose.ui.window.Dialog(onDismissRequest = { storeOpen = false },
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+            StoreScreen(store, api, canVerify, hasProfile = !me?.username.isNullOrBlank(),
+                onEditProfile = { storeOpen = false; edit = true }, onClose = { storeOpen = false })
+        }
+    }
     if (legacy) ModalBottomSheet(onDismissRequest = { legacy = false }, containerColor = AureaColors.LightBackground) { Box(Modifier.fillMaxHeight(.88f)) { CommunityPresetsTab() } }
     if (verifying && profile != null) AlertDialog(onDismissRequest = { verifying = false }, title = { Text(stringResource(R.string.social_verification)) }, text = {
         Column { for ((badge, label) in badgeOptions) TextButton(enabled = !busy, onClick = { val id = profile!!.id; verifying = false; work {

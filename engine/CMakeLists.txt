@@ -147,6 +147,7 @@ set(AUREA_CORE_SOURCES
     src/effects/builtin/EchoEffect.cpp
     src/effects/builtin/EffectsSupport.cpp
     src/effects/builtin/DistortEffects.cpp
+    src/effects/builtin/GapEffects046.cpp
     src/effects/builtin/SurfaceDeformEffects.cpp
     src/effects/builtin/PageTurnEffect.cpp
     src/effects/builtin/OpticalStylizeEffects.cpp
@@ -242,12 +243,14 @@ set(AUREA_CORE_SOURCES
     src/text/FontManager.cpp
     src/text/FontUnpack.cpp
     src/text/TextAnimator.cpp
+    src/text/TextAnimatorPro.cpp
     src/text/TextTransform.cpp
     src/text/Captions.cpp
     src/engine/EngineCaptions.cpp
     src/engine/EngineTextExplode.cpp
     src/engine/EngineUiMode.cpp
     src/engine/EngineCaptionPresets.cpp
+    src/engine/EngineAssistant.cpp
     src/vector/Vector.cpp
     src/vector/Clipper.cpp
     src/vector/Svg.cpp

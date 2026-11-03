@@ -187,6 +187,10 @@ usize android_codecs(AVCodecID id, const VideoStreamConfig& config, bool wantHar
         const auto encoderCaps = env->GetMethodID(capClass, "getEncoderCapabilities",
             "()Landroid/media/MediaCodecInfo$EncoderCapabilities;");
         const auto supports = env->GetMethodID(videoClass, "areSizeAndRateSupported", "(IID)Z");
+        // 0.4.6: segunda passada só pelo tamanho (o export não é tempo real;
+        // ver AndroidVideoEncoder.cpp find_encoder).
+        const auto sizeSupported = env->GetMethodID(videoClass, "isSizeSupported", "(II)Z");
+        if (env->ExceptionCheck()) env->ExceptionClear();
         const auto modeSupported = env->GetMethodID(encoderClass, "isBitrateModeSupported", "(I)Z");
         const auto formatSupported = env->GetMethodID(capClass, "isFormatSupported", "(Landroid/media/MediaFormat;)Z");
         const auto formatCtor = env->GetMethodID(formatClass, "<init>", "()V");
@@ -209,6 +213,7 @@ usize android_codecs(AVCodecID id, const VideoStreamConfig& config, bool wantHar
         const jint bitrate = static_cast<jint>(config.bitrateBps ? config.bitrateBps : 12'000'000);
         const jint mode = config.rateMode == 0 ? 2 /* CBR */ : 1 /* VBR */;
         const jsize n = env->GetArrayLength(array);
+        for (int pass = 0; pass < (sizeSupported && wantHardware ? 2 : 1) && !found; ++pass)
         for (jsize i = 0; i < n && found < output.size(); ++i) {
             if (env->PushLocalFrame(32) < 0) { env->ExceptionClear(); break; }
             const jobject info = env->GetObjectArrayElement(array, i);
@@ -235,7 +240,8 @@ usize android_codecs(AVCodecID id, const VideoStreamConfig& config, bool wantHar
                             const jobject cap = env->CallObjectMethod(info, capabilities, type);
                             const jobject vc = cap ? env->CallObjectMethod(cap, videoCaps) : nullptr;
                             const jobject ec = cap ? env->CallObjectMethod(cap, encoderCaps) : nullptr;
-                            if (vc && ec && env->CallBooleanMethod(vc, supports, width, height, config.fps) &&
+                            if (vc && ec && (pass == 0 ? env->CallBooleanMethod(vc, supports, width, height, config.fps)
+                                                       : env->CallBooleanMethod(vc, sizeSupported, width, height)) &&
                                 env->CallBooleanMethod(ec, modeSupported, mode) && !env->ExceptionCheck()) {
                                 const auto codecName = static_cast<jstring>(env->CallObjectMethod(info, name));
                                 const char* textName = codecName ? env->GetStringUTFChars(codecName, nullptr) : nullptr;
@@ -251,7 +257,9 @@ usize android_codecs(AVCodecID id, const VideoStreamConfig& config, bool wantHar
                                     env->CallVoidMethod(format, setString, mimeKey, type);
                                     env->DeleteLocalRef(mimeKey);
                                     integer("width", width); integer("height", height);
-                                    integer("frame-rate", fps); integer("bitrate", bitrate);
+                                    // Passada 1: sem a taxa (isFormatSupported a confere contra o teto em tempo real).
+                                    if (pass == 0) integer("frame-rate", fps);
+                                    integer("bitrate", bitrate);
                                     integer("color-format", color); integer("bitrate-mode", mode);
                                     if (id == AV_CODEC_ID_H264 && config.profile == 1) integer("profile", 1 /* AVC Baseline */);
                                     const bool accepted = !env->ExceptionCheck() && env->CallBooleanMethod(cap, formatSupported, format);

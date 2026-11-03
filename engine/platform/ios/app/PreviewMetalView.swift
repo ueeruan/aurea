@@ -136,7 +136,7 @@ struct PreviewMetalView: UIViewRepresentable {
         private var pinchThreeD = false
         private var pinchTracker = StagePinchTracker()
         private var pinchLayer: Int64?
-        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, resize, scene, pivot, view, viewPan, rigPose, rigFix, rigIk }
+        private enum StageMode { case pending, move, pinch, idle, gizmo, shape, resize, scene, pivot, view, viewPan, rigPose, rigFix, rigIk, motionPath, viewNav }
         // Face Pivô aberta: o arrasto move o pivô (PivotDragSession).
         private var pivotSession: PivotDragSession?
         // Cena 3D: 0 pendente, 1 órbita, 2 objeto, 3 pinça.
@@ -146,6 +146,8 @@ struct PreviewMetalView: UIViewRepresentable {
         private var sceneHadSelection = false
         private var sceneLast = CGPoint.zero
         private var sceneSpan: CGFloat = 1
+        /// 0.4.6: a pinça da vista do AE (0 = ainda sem pinça).
+        private var viewNavSpan: CGFloat = 0
         private var sceneDistance0: Float = 3
         private var sceneTapAt: TimeInterval = 0
         private var sceneTapPoint = CGPoint.zero
@@ -551,6 +553,21 @@ struct PreviewMetalView: UIViewRepresentable {
             // 0.4.5: IK simples leva a cadeia; "Mover" e o resto seguem como antes.
             if model.poseIk && !model.poseMove { model.dragPoseIk(dx: dx, dy: dy) } else { model.dragPoseBone(dx: dx, dy: dy, twist: 0) }
         }
+        // 0.4.6: caminho de movimento — canto/alça pegos e se o dedo já arrastou.
+        private var pathHit: (Int, Int)?
+        private var pathMoved = false
+        private func motionPathEvent(_ pressed: [StageTouchPoint], view: UIView) {
+            if pressed.isEmpty {
+                if pathMoved { model.endGesture() }
+                else if let hit = pathHit, hit.1 == 0 { OmegaTransformStage.pathReset(model, hit: hit) }
+                pathHit = nil; stageFinger = nil; stageMode = .idle
+                return
+            }
+            guard let finger = pressed.first(where: { $0.id == stageFinger }) ?? pressed.first, let hit = pathHit else { return }
+            if !pathMoved && hypot(finger.position.x - stageDown.x, finger.position.y - stageDown.y) < 8 { return }
+            OmegaTransformStage.pathDrag(model, hit: hit, comp: compositionPoint(finger.position, view: view), first: !pathMoved)
+            pathMoved = true
+        }
         // AutoRig 3D (0.3.6): junta canônica arrastada / controlador IK em curso.
         private var rigFixBone = -1
         private var rigIkHit: (Int, Bool)?
@@ -629,6 +646,11 @@ struct PreviewMetalView: UIViewRepresentable {
                         return
                     }
                 }
+                // 0.4.6: canto ou alça do caminho de movimento sob o dedo (face Mover).
+                if let hit = OmegaTransformStage.pathHit(model, compositionPoint(first.position, view: view), reach: 22 * scaleFactor(view)) {
+                    stageMode = .motionPath; pathHit = hit; pathMoved = false
+                    return
+                }
                 if model.rigPoseActive, let hit = model.pickIkHandle(compositionPoint(first.position, view: view), reach: 36 * scaleFactor(view)) {
                     stageMode = .rigIk; rigIkHit = hit; rigMoved = false; rigBegan = false
                     rigLast = compositionPoint(first.position, view: view)
@@ -660,6 +682,11 @@ struct PreviewMetalView: UIViewRepresentable {
                     sceneHadSelection = !model.selection.isEmpty
                     scenePicked = model.scenePick(compositionPoint(first.position, view: view), radius: 36 * scaleFactor(view))
                     if scenePicked == nil, let selected = model.selectedLayer, [6,8].contains(selected.kind) { scenePicked = selected.id }
+                }
+                // 0.4.6: vistas do AE (Frente..Personalizada): sem nada escolhido e nada sob o dedo, navega a vista.
+                else if model.viewNavigable && model.selection.isEmpty
+                            && model.scenePick(compositionPoint(first.position, view: view), radius: 36 * scaleFactor(view)) == nil {
+                    stageMode = .viewNav; sceneLast = first.position; viewNavSpan = 0
                 }
                 else { recordTarget(first.position, view: view) }
                 if stageMode == .pending && handle < 0, let anchor = model.previewMarkerAnchor {
@@ -694,6 +721,15 @@ struct PreviewMetalView: UIViewRepresentable {
             }
             if stageMode == .rigFix || stageMode == .rigIk {
                 autoRigStageEvent(pressed, view: view)
+                return
+            }
+            if stageMode == .motionPath {
+                motionPathEvent(pressed, view: view)
+                return
+            }
+            if stageMode == .viewNav {
+                viewNavEvent(pressed)
+                if pressed.isEmpty { stageFinger = nil; stageMode = .idle }
                 return
             }
             if stageMode == .scene {
@@ -1092,6 +1128,24 @@ struct PreviewMetalView: UIViewRepresentable {
             default: break
             }
             if sceneMode != 0 { sceneLast = first.position }
+        }
+        /// 0.4.6 (par do viewModeGesture do Stage.kt): um dedo orbita a Vista
+        /// personalizada (as ortogonais não giram); dois dedos aproximam. Só a prévia.
+        private func viewNavEvent(_ pressed: [StageTouchPoint]) {
+            if pressed.count >= 2 {
+                let a = pressed[0].position, b = pressed[1].position
+                let span = max(1, hypot(a.x - b.x, a.y - b.y))
+                if viewNavSpan > 0 { model.navigateView(yaw: 0, pitch: 0, zoom: Float(viewNavSpan / span)) }
+                viewNavSpan = span
+                return
+            }
+            if viewNavSpan > 0 { return }   // sobrou um dedo da pinça: nada
+            guard let first = pressed.first(where: { $0.id == stageFinger }) else { return }
+            if model.viewMode >= 8 {
+                let dx = first.position.x - sceneLast.x, dy = first.position.y - sceneLast.y
+                model.navigateView(yaw: -Float(dx) * 0.35, pitch: Float(dy) * 0.35)
+            }
+            sceneLast = first.position
         }
         /// Stage.kt gizmoGesture: o eixo tocado fica travado até o dedo subir.
         private func startGizmo(at point: CGPoint, view: UIView) -> Bool {

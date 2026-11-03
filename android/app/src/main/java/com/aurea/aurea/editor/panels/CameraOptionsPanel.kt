@@ -165,7 +165,7 @@ internal fun CameraOptionsPanel(env: PanelEnv) {
             } else {
                 when (tab) {
                     CameraTabs.FOCUS -> CameraFocusTab(env, lens)
-                    CameraTabs.FOG -> CameraFogTab()
+                    CameraTabs.FOG -> CameraFogTab(env)
                     else -> CameraViewTab(env, lens)
                 }
             }
@@ -206,7 +206,11 @@ private fun ColumnScope.CameraViewTab(env: PanelEnv, lens: FloatArray) {
                 maxLines = 1,
                 style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600, color = AureaColors.Muted)),
             )
-            ProjectionButton()
+            ProjectionButton(lens.size > 10 && lens[10] >= 0.5f) { on ->
+                store.beginGesture("camera paralela")
+                store.setCameraLens(EditorStore.CAMERA_PARALLEL, if (on) 1f else 0f)
+                store.endGesture()
+            }
         }
         // "Afeta camadas abaixo" (0.1.6) logo abaixo do título: no fim da aba ele ficava
         // depois da régua de 140 dp e das lentes, fora dos 200 dp da moldura, e quem
@@ -354,19 +358,18 @@ private fun CameraValueBox(text: String, description: String, tag: String, enabl
     }
 }
 
-/** Perspectiva (a única que o motor tem) / Paralela (desabilitada, com o aviso). */
+/** Perspectiva / Paralela (0.4.6: a ortográfica do motor, `CameraData::parallel`). */
 @Composable
-private fun ProjectionButton() {
+private fun ProjectionButton(isParallel: Boolean, onParallel: (Boolean) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val perspective = stringResource(R.string.om_ap_cam_perspective)
     val parallel = stringResource(R.string.om_ap_cam_parallel)
-    val soon = stringResource(R.string.om_ap_cam_parallel_soon)
     Box {
         Box(
             Modifier
                 .size(44.dp)
                 .testTag("camera.view.projection")
-                .semantics { contentDescription = perspective }
+                .semantics { contentDescription = if (isParallel) parallel else perspective }
                 .tocavel(shrink = 1f) { open = true },
             contentAlignment = Alignment.Center,
         ) {
@@ -374,7 +377,7 @@ private fun ProjectionButton() {
                 Modifier.size(width = 40.dp, height = PanelMetrics.FieldHeight).clip(RoundedCornerShape(TfFieldDims.Radius)).background(AureaColors.Chip),
                 contentAlignment = Alignment.Center,
             ) {
-                CupertinoIcon(CupertinoGlyph.Cube, 22.dp, AureaColors.Accent)
+                CupertinoIcon(if (isParallel) CupertinoGlyph.Square else CupertinoGlyph.Cube, 22.dp, AureaColors.Accent)
             }
         }
         AnchoredMenu(
@@ -383,8 +386,12 @@ private fun ProjectionButton() {
             alignEnd = true,
             tag = "camera.view.projection.menu",
             entries = listOf(
-                MenuEntry.Item(perspective, glyph = CupertinoGlyph.Cube, selected = true, checked = true) {},
-                MenuEntry.Item(parallel, glyph = CupertinoGlyph.Square, sublabel = soon, enabled = false),
+                MenuEntry.Item(perspective, glyph = CupertinoGlyph.Cube, selected = !isParallel, checked = !isParallel) {
+                    open = false; if (isParallel) onParallel(false)
+                },
+                MenuEntry.Item(parallel, glyph = CupertinoGlyph.Square, selected = isParallel, checked = isParallel) {
+                    open = false; if (!isParallel) onParallel(true)
+                },
             ),
         )
     }
@@ -602,20 +609,9 @@ private fun ColumnScope.CameraFocusTab(env: PanelEnv, lens: FloatArray) {
 // =============================================================================
 
 @Composable
-private fun ColumnScope.CameraFogTab() {
-    Column(
-        Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(
-            stringResource(R.string.om_ap_cam_fog),
-            modifier = Modifier.padding(bottom = 6.dp),
-            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W600, color = AureaColors.Muted)),
-        )
-        Text(
-            stringResource(R.string.om_ap_cam_fog_soon),
-            modifier = Modifier.testTag("camera.fog.notice"),
-            style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp, lineHeight = 17.sp, color = AureaColors.Text)),
-        )
+private fun ColumnScope.CameraFogTab(env: PanelEnv) {
+    // 0.4.6: a névoa que a câmera vê (a volumetria da cena, com raios do sol).
+    Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp).testTag("camera.fog")) {
+        SceneFogSection(env)
     }
 }

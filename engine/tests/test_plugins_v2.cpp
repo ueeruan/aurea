@@ -548,6 +548,53 @@ AUREA_TEST(PluginsV2, NetworkClipboardAndFilesNeedConsentAndDeclaredDomains) {
     fs::remove_all(q.dir, ec);
 }
 
+// 0.4.6: plugin.getFile lê arquivos do PRÓPRIO pacote (texto, JSON, binário),
+// sem permissão; nunca sai da pasta do plugin.
+AUREA_TEST(PluginsV2, GetFileReadsOnlyThePluginsOwnPackage) {
+    const char* script = R"(
+function texto() { return plugin.getFile("dados/info.txt").text() }
+function dados() { return plugin.getFile("dados/cfg.json").json().n }
+function binario() { return plugin.getFile("b.bin").bytes() }
+function b64() { return plugin.getFile("b.bin").base64() }
+function lista() { return plugin.list("dados") }
+function existe() { return [plugin.exists("dados/info.txt"), plugin.exists("nada.txt")] }
+function fora() { return plugin.getFile("../fora.txt").text() }
+function sumiu() { return plugin.getFile("nada.txt").text() }
+function quem() { return plugin.id }
+)";
+    PanelPlugin p = make_panel_plugin("getfile", panel_manifest("com.teste.getfile"), script);
+    fs::create_directories(p.dir / "dados");
+    write_file(p.dir / "dados" / "info.txt", "ola do pacote");
+    write_file(p.dir / "dados" / "cfg.json", "{\"n\":7}");
+    write_file(p.dir / "b.bin", std::string("\x00\xff\x10", 3));
+    write_file(p.dir.parent_path() / "fora.txt", "segredo");
+    plugins::PluginRuntime rt(p.info, str(p.dir / ".dados"));
+    rt.set_granted(0);   // nenhuma permissão: o pacote é do próprio plugin
+    const plugins::PluginRuntime::ApiInstaller none;
+    const plugins::CallHooks hooks;
+    CallResult r = parse_result(rt.call("texto", "[]", "pt-BR", none, hooks));
+    AUREA_CHECK_MSG(r.ok && r.value()->string == "ola do pacote", r.raw.c_str());
+    r = parse_result(rt.call("dados", "[]", "pt-BR", none, hooks));
+    AUREA_CHECK(r.ok && r.value()->number == 7.0);
+    r = parse_result(rt.call("binario", "[]", "pt-BR", none, hooks));
+    AUREA_CHECK_MSG(r.ok && r.value()->is_array() && r.value()->array.size() == 3 && r.value()->array[1].number == 255.0, r.raw.c_str());
+    r = parse_result(rt.call("b64", "[]", "pt-BR", none, hooks));
+    AUREA_CHECK_MSG(r.ok && r.value()->string == "AP8Q", r.raw.c_str());
+    r = parse_result(rt.call("lista", "[]", "pt-BR", none, hooks));
+    AUREA_CHECK_MSG(r.ok && r.value()->is_array() && r.value()->array.size() == 2, r.raw.c_str());
+    r = parse_result(rt.call("existe", "[]", "pt-BR", none, hooks));
+    AUREA_CHECK(r.ok && r.value()->array.size() == 2 && r.value()->array[0].boolean && !r.value()->array[1].boolean);
+    r = parse_result(rt.call("fora", "[]", "pt-BR", none, hooks));
+    AUREA_CHECK_MSG(!r.ok && r.raw.find("segredo") == std::string::npos, "nada fora do pacote");
+    r = parse_result(rt.call("sumiu", "[]", "pt-BR", none, hooks));
+    AUREA_CHECK(!r.ok && r.error_text().find("nao existe no pacote") != std::string::npos);
+    r = parse_result(rt.call("quem", "[]", "pt-BR", none, hooks));
+    AUREA_CHECK(r.ok && r.value()->string == "com.teste.getfile");
+    std::error_code ec;
+    fs::remove(p.dir.parent_path() / "fora.txt", ec);
+    fs::remove_all(p.dir, ec);
+}
+
 // =============================================================================
 // Motor: instalação, consentimento, API de camadas/keyframes e desfazer
 // =============================================================================

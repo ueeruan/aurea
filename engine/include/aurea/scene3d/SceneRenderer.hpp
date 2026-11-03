@@ -275,6 +275,10 @@ struct SceneCamera {
     f32  fStop = 2.8f;
     f32  blurAmount = 1.0f;            ///< × o círculo de confusão físico
     f32  pixelsPerMeter = 1.0f;        ///< scene_pixels_per_meter(altura da composição)
+    /// 0.4.6: câmera paralela (CameraData::parallel): projeção ortográfica com
+    /// `orthoHeight` px de altura visível. Sem profundidade de campo.
+    bool orthographic = false;
+    f32  orthoHeight = 0.0f;
 };
 
 /// Profundidade de campo pela LENTE FINA. Diâmetro do círculo de confusão no
@@ -348,6 +352,11 @@ struct ScenePost {
     f32  bloomIntensity = 0.6f; ///< 0..4
     f32  bloomThreshold = 0.0f; ///< 0 = sem limiar (mistura conservadora)
     u32  quality = 0;           ///< Scene3DQuality
+    /// 0.4.6: neblina volumétrica com raios de luz (post/volume.frag).
+    bool fog = false;
+    Vec3 fogColor{0.5f, 0.5f, 0.55f};   ///< linear: a luz ambiente que a neblina espalha
+    f32  fogDensity = 0.001f;           ///< por px do mundo (1/distância de 63% de absorção)
+    f32  fogRays = 1.0f;                ///< força dos raios do sol (0 = só neblina)
 };
 
 /// Chão do grupo 3D (FloorSettings da composição; ver Ground.cpp). Plano
@@ -433,6 +442,9 @@ struct SceneStats {
     u32 visiblePrimitives = 0;   ///< primitivas × instâncias que passaram no frustum
     u32 culledPrimitives = 0;    ///< fora do frustum (não desenhadas)
     u32 shadowMapSize = 0;       ///< lado do mapa de sombra usado (0 = sem sombra)
+    bool ambientOcclusion = false;   ///< 0.4.6: a GTAO rodou neste quadro
+    bool volumetricFog = false;      ///< 0.4.6: a neblina volumétrica rodou neste quadro
+    bool screenReflections = false;  ///< 0.4.6: os reflexos de tela (SSR) rodaram neste quadro
     u64 geometryBytes = 0;
     u64 textureBytes = 0;
     u32 morphUploads = 0;       ///< unique deformed primitive streams built this frame
@@ -446,6 +458,11 @@ struct SceneStats {
 /// infinito → 0. Precisão de profundidade uniforme em cena grande, e sem
 /// plano distante cortando o cenário.
 [[nodiscard]] Mat4 reverse_z_perspective(f32 fovY, f32 aspect, f32 nearZ) noexcept;
+/// 0.4.6: a projeção da câmera — perspectiva Z reverso ou, na paralela,
+/// ortográfica Z reverso (perto = 1, `kOrthoFarZ` = 0, linear).
+inline constexpr f32 kOrthoFarZ = 1.0e6f;
+[[nodiscard]] Mat4 reverse_z_orthographic(f32 height, f32 aspect, f32 nearZ) noexcept;
+[[nodiscard]] Mat4 camera_projection(const SceneCamera& camera, f32 aspect) noexcept;
 
 /// Câmera padrão da composição (quando não há layer de câmera): no eixo
 /// central, a uma distância em que o plano Z=0 mapeia 1:1 em pixels — uma
@@ -605,6 +622,13 @@ public:
     /// Teto do lado do mapa de sombra deste quadro (4096; 2048 no preview da
     /// classe de memória LOW). A GPU continua mandando por baixo.
     void set_shadow_map_cap(u32 cap) noexcept { shadowCap_ = std::clamp(cap, 256u, 4096u); }
+    /// 0.4.6: oclusão ambiente de tela (GTAO). Ligada por padrão; a camada
+    /// BAIXO da composição (post.quality 1) desliga sozinha.
+    void set_ambient_occlusion(bool on) noexcept { ambientOcclusion_ = on; }
+    [[nodiscard]] bool ambient_occlusion() const noexcept { return ambientOcclusion_; }
+    /// 0.4.6: reflexos de tela (SSR) nas superfícies lisas. Ligados por padrão.
+    void set_screen_reflections(bool on) noexcept { screenReflections_ = on; }
+    [[nodiscard]] bool screen_reflections() const noexcept { return screenReflections_; }
     void set_quality(u32 shadowMapSize, u32 shadowFilter, f32 lodBias, bool lodHysteresis = true) noexcept {
         lodHysteresis_ = lodHysteresis;
         shadowSize_ = std::clamp(shadowMapSize, 256u, 4096u);
@@ -656,9 +680,14 @@ private:
                                  FGTexture& display, FGTexture& scene, FGTexture depth) noexcept;
     u32 dofTaps_ = 32;
     [[nodiscard]] PipelineKey shadow_key(bool skinned) const noexcept;
+    /// 0.4.6: pré-passe de profundidade da oclusão ambiente (GTAO), câmera da cena.
+    [[nodiscard]] PipelineKey ao_depth_key(bool skinned) const noexcept;
+    [[nodiscard]] PipelineKey ssr_material_key(bool skinned) const noexcept;
     u32 shadowSize_ = 2048;
     u32 shadowCap_ = 4096;      ///< set_shadow_map_cap
     u32 shadowFilter_ = 2;
+    bool ambientOcclusion_ = true;   ///< 0.4.6: GTAO (set_ambient_occlusion)
+    bool screenReflections_ = true;  ///< 0.4.6: SSR (set_screen_reflections)
     f32 lodBias_ = 1.0f;
     bool lodHysteresis_ = true;
     bool instancing_ = true;

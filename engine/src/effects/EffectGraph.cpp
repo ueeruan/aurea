@@ -137,6 +137,48 @@ u32 EffectBuildContext::fullscreen_pass(const char* name, PassStage stage, FGTex
     return pass;
 }
 
+u32 EffectBuildContext::fullscreen_pass(const char* name, PassStage stage, FGTexture target, ShaderId fragment,
+                                        const PassTexture* textures, u32 textureCount,
+                                        const void* uniforms, u32 uniformBytes, LoadOp load) noexcept {
+    if (textureCount > binding::kTextureSlots || (textureCount && !textures)) return kInvalidIndex;
+    auto pipe = shaders_.pipeline(PipelineKey::fullscreen(fragment, graph_.desc(target).format));
+    if (!pipe.ok()) return kInvalidIndex;
+    void* u = nullptr;
+    if (uniforms && uniformBytes) {
+        u = arena_.alloc(uniformBytes, 16);
+        if (!u) return kInvalidIndex;
+        std::memcpy(u, uniforms, uniformBytes);
+    }
+    // As amarrações ficam na arena do frame (vivas até a execução do grafo):
+    // a captura do passe guarda só o ponteiro e cabe no InplaceFunction.
+    struct Bind { FGTexture graph; u64 raw; u64 sampler; };
+    Bind* binds = textureCount ? static_cast<Bind*>(arena_.alloc(sizeof(Bind) * textureCount, alignof(Bind))) : nullptr;
+    if (textureCount && !binds) return kInvalidIndex;
+    for (u32 i = 0; i < textureCount; ++i)
+        binds[i] = Bind{textures[i].graph, textures[i].raw.id, shaders_.sampler(textures[i].sampler).id};
+    struct Capture {
+        PipelineHandle pipeline;
+        const Bind* binds;
+        u32 count;
+        const void* uniforms;
+        u32 uniformBytes;
+    } cap{*pipe, binds, textureCount, u, uniformBytes};
+    const u32 pass = graph_.add_raster_pass(name, stage, target, load, Vec4{0, 0, 0, 0},
+        [cap](PassContext& pc) {
+            pc.cmds.bind_pipeline(cap.pipeline);
+            for (u32 i = 0; i < cap.count; ++i) {
+                const Bind& b = cap.binds[i];
+                const TextureHandle tex = b.graph.valid() ? pc.texture(b.graph) : TextureHandle{b.raw};
+                if (tex.valid()) pc.cmds.bind_texture(i, tex, SamplerHandle{b.sampler});
+            }
+            if (cap.uniforms) pc.cmds.set_uniforms(cap.uniforms, cap.uniformBytes);
+            pc.cmds.draw(3);
+        });
+    for (u32 i = 0; i < textureCount; ++i)
+        if (textures[i].graph.valid()) graph_.read(pass, textures[i].graph);
+    return pass;
+}
+
 u32 EffectBuildContext::geometry_pass(const char* name, PassStage stage, FGTexture target, ShaderId vertex,
                                         ShaderId fragment, std::initializer_list<PassTexture> textures,
                                         const void* uniforms, u32 uniformBytes, u32 vertexCount, bool depth,

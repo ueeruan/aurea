@@ -489,9 +489,17 @@ struct FrameSnapshot {
     }
 };
 
+/// 0.4.6: tipo da vista do editor (as vistas do After Effects).
+enum class SceneViewKind : u8 {
+    Orbit = 0,          ///< perspectiva livre (cena 3D, Vista personalizada 1..3)
+    DefaultCamera = 1,  ///< câmera padrão da composição (ignora as camadas de câmera)
+    Front, Back, Left, Right, Top, Bottom,   ///< sem perspectiva; `distance` = zoom (× altura)
+};
+
 struct SceneEditorView {
     bool enabled = false;
     f32 yaw = -30.0f, pitch = 20.0f, distance = 3.0f;
+    SceneViewKind kind = SceneViewKind::Orbit;
 };
 [[nodiscard]] scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEditorView& view) noexcept;
 [[nodiscard]] Mat4 scene_editor_projection(u32 width, u32 height, const SceneEditorView& view) noexcept;
@@ -863,6 +871,8 @@ public:
     [[nodiscard]] TextureHandle curve_lut(const CurveData& curve) noexcept override;
     [[nodiscard]] TextureHandle cube_lut(AssetId id) noexcept override;
     [[nodiscard]] TextureHandle data_texture(u64 key, const Vec4* texels, u32 width, u32 height) noexcept override;
+    /// 0.4.6: imagens dos plugins ("textures"), RGBA8 por conteúdo (`key`).
+    [[nodiscard]] TextureHandle image_texture(u64 key, const u8* rgba, u32 width, u32 height, bool srgb) noexcept override;
     /// Espectro do som de uma camada no instante do `prepare` em curso (ver
     /// EffectResources). Decodifica o trecho na hora (síncrono, cache de
     /// blocos próprio) e guarda a textura por (asset, amostra, faixas).

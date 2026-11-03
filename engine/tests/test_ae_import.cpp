@@ -11,6 +11,7 @@
 
 #include "aurea/Engine.hpp"
 #include "aurea/effects/EffectRegistry.hpp"
+#include "aurea/expr/Expression.hpp"
 #include "aurea/project/AeImport.hpp"
 #include "aurea/text/TextAnimator.hpp"
 
@@ -437,6 +438,142 @@ AUREA_TEST(AeImport, SyntheticFfxTextAnimator) {
     }
     const Track* group = rig.track(layer, TrackProperty::TextAnimParam, 0, text::kAnchorGrouping);
     AUREA_CHECK(group && !group->keys.empty() && std::fabs(group->keys[0].value - 1.0f) < 1e-6f);   // palavra
+}
+
+// 0.4.6: o mesmo preset no Text Animator Pro: um efeito por animador, com o
+// "baseado em", a forma, a ordem, a âncora, o agrupamento e as keys do AE nos
+// parâmetros do efeito (editáveis no painel).
+AUREA_TEST(AeImport, SyntheticFfxTextAnimatorIntoTextAnimatorPro) {
+    const u32 ts = 24000;
+    const std::string advanced = list("tdgp", tdsb(0) + tdsn("") +
+        tdmn("ADBE Text Range Units") + prop("", 1, {2.0}, ts) +
+        tdmn("ADBE Text Range Type2") + prop("", 1, {3.0}, ts) +
+        tdmn("ADBE Text Selector Mode") + prop("", 1, {2.0}, ts) +
+        tdmn("ADBE Text Selector Max Amount") + prop("", 1, {80.0}, ts) +
+        tdmn("ADBE Text Range Shape") + prop("", 1, {2.0}, ts) +
+        tdmn("ADBE Text Selector Smoothness") + prop("", 1, {40.0}, ts) +
+        tdmn("ADBE Text Levels Max Ease") + prop("", 1, {25.0}, ts) +
+        tdmn("ADBE Text Randomize Order") + prop("", 1, {1.0}, ts) +
+        tdmn("ADBE Text Random Seed") + prop("", 1, {7.0}, ts) +
+        tdmn("ADBE Group End"));
+    const std::string range = list("tdgp", tdsb(1) + tdsn("Range Selector 1") +
+        tdmn("ADBE Text Index Start") + prop_keys("", 1, {FKey{0, {0.0}}, FKey{48000, {3.0}}}, ts) +
+        tdmn("ADBE Text Index End") + prop("", 1, {3.0}, ts) +
+        tdmn("ADBE Text Range Advanced") + advanced +
+        tdmn("ADBE Group End"));
+    const std::string wiggly = list("tdgp", tdsb(1) + tdsn("Wiggly Selector 1") +
+        tdmn("ADBE Text Wiggly Max Amount") + prop("", 1, {60.0}, ts) +
+        tdmn("ADBE Text Wiggly Min Amount") + prop("", 1, {-20.0}, ts) +
+        tdmn("ADBE Text Character Correlation") + prop("", 1, {75.0}, ts) +
+        tdmn("ADBE Text Spatial Phase") + prop("", 1, {90.0}, ts) +
+        tdmn("ADBE Group End"));
+    const std::string selectors = list("tdgp", tdsb(1) + tdsn("") + tdmn("ADBE Text Selector") + range +
+        tdmn("ADBE Text Wiggly Selector") + wiggly + tdmn("ADBE Group End"));
+    const std::string props = list("tdgp", tdsb(1) + tdsn("") +
+        tdmn("ADBE Text Anchor Point 3D") + prop("", 3, {4.0, -6.0, 0.0}, ts, 1, true) +
+        tdmn("ADBE Text Position 3D") + prop("", 3, {0.0, -120.0, 0.0}, ts, 1, true) +
+        tdmn("ADBE Text Scale 3D") + prop("", 3, {50.0, 60.0, 100.0}, ts) +
+        tdmn("ADBE Text Opacity") + prop("", 1, {0.0}, ts) +
+        tdmn("ADBE Text Fill Hue") + prop("", 1, {90.0}, ts) +
+        tdmn("ADBE Text Line Spacing") + prop("", 2, {0.0, 14.0}, ts) +
+        tdmn("ADBE Text Tracking Amount") + prop("", 1, {50.0}, ts) +
+        tdmn("ADBE Group End"));
+    const std::string animator = list("tdgp", tdsb(1) + tdsn("Animador AE") +
+        tdmn("ADBE Text Selectors") + selectors + tdmn("ADBE Text Animator Properties") + props + tdmn("ADBE Group End"));
+    const std::string more = list("tdgp", tdsb(1) + tdsn("More Options") +
+        tdmn("ADBE Text Anchor Point Option") + prop("", 1, {4.0}, ts) + tdmn("ADBE Group End"));
+    const std::string file = ffx(ts,
+        {{{{"ADBE Text Properties", -1}, {"ADBE Text Animators", -1}, {"ADBE Text Animator", 0}}, "Animador AE"},
+         {{{"ADBE Text Properties", -1}, {"ADBE Text More Options", -1}}, "More Options"}},
+        {animator, more});
+
+    AeRig rig;
+    const u64 layer = rig.text("UM DOIS TRES");
+    rig.seek(0);
+    const ae::ImportReport r = rig.e.import_ae_data(file, "texto.ffx", layer, true);
+    if (!r.ok || !r.skipped.empty()) dump(r);
+    AUREA_CHECK(r.ok);
+    AUREA_CHECK_EQ(r.animators, 1u);
+    Layer* l = rig.L(layer);
+    AUREA_CHECK(l && l->text.animators.empty());
+    if (!l) return;
+    const EffectInstance* fx = nullptr;
+    for (const EffectInstance& e : l->effects) if (e.type == effect_type_id(text::kAnimatorProEffect)) fx = &e;
+    AUREA_CHECK(fx != nullptr);
+    if (!fx) return;
+    auto at = [&](u32 p, u32 c = 0) { return fx->params[p].constant.v[c]; };
+    AUREA_CHECK_NEAR(at(text::apUnits), 1.0f, 1e-6f);        // índice
+    AUREA_CHECK_NEAR(at(text::apBasedOn), 2.0f, 1e-6f);      // palavras
+    AUREA_CHECK_NEAR(at(text::apMode), 1.0f, 1e-6f);         // subtrair
+    AUREA_CHECK_NEAR(at(text::apShape), 1.0f, 1e-6f);        // rampa sobe
+    AUREA_CHECK_NEAR(at(text::apAmount), 80.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apSmoothness), 40.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apEaseHigh), 25.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apRandom), 1.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apSeed), 7.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apEnd), 3.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apWiggly), 1.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apWigglyMax), 60.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apWigglyMin), -20.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apCorrelation), 75.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apSpatialPhase), 90.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apAnchor, 0), 4.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apAnchor, 1), -6.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apPosition, 1), -120.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apScale, 0), 50.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apScale, 1), 60.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apOpacity), 0.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apFillHue), 90.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apLineSpacing, 1), 14.0f, 1e-6f);
+    AUREA_CHECK_NEAR(at(text::apTracking), static_cast<f32>(50.0 * l->text.size / 1000.0), 1e-3f);
+    AUREA_CHECK_NEAR(at(text::apGrouping), 3.0f, 1e-6f);     // tudo
+    // O Início do intervalo (índice) chegou com as duas keys no parâmetro do efeito.
+    const Track* start = rig.track(layer, TrackProperty::EffectParam, fx->id, param_track_key(text::apStart, 0));
+    AUREA_CHECK(start && start->keys.size() == 2);
+    if (start && start->keys.size() == 2) AUREA_CHECK_NEAR(start->keys[1].value, 3.0, 1e-6);
+}
+
+// 0.4.6: um .ffx real de texto (com Seletor de Expressão) no Text Animator Pro.
+// Só roda com AUREA_FFX_TEXT=<arquivo .ffx> (o arquivo é do usuário, fora do repositório).
+AUREA_TEST(AeImport, RealTextPresetIntoTextAnimatorPro) {
+    const char* path = std::getenv("AUREA_FFX_TEXT");
+    if (!path || !*path) { std::printf("(AUREA_FFX_TEXT=<.ffx> para rodar) "); return; }
+    std::ifstream in(path, std::ios::binary);
+    const std::string file((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    AUREA_CHECK(!file.empty());
+    AeRig rig;
+    const u64 layer = rig.text("AUREA TEXTO");
+    rig.seek(0);
+    const ae::ImportReport r = rig.e.import_ae_data(file, "preset.ffx", layer, true);
+    dump(r);
+    AUREA_CHECK(r.ok);
+    Layer* l = rig.L(layer);
+    if (!l) return;
+    const EffectInstance* fx = nullptr;
+    for (const EffectInstance& e : l->effects) if (e.type == effect_type_id(text::kAnimatorProEffect)) fx = &e;
+    AUREA_CHECK(fx != nullptr);
+    if (!fx) return;
+    std::printf("\n      expressao=%g fill=(%g %g %g) escala=(%g %g) rotacao=%g opacidade=%g pos=(%g %g)",
+                fx->params[text::apExprOn].constant.v[0], fx->params[text::apFill].constant.v[0], fx->params[text::apFill].constant.v[1],
+                fx->params[text::apFill].constant.v[2], fx->params[text::apScale].constant.v[0], fx->params[text::apScale].constant.v[1],
+                fx->params[text::apRotation].constant.v[2], fx->params[text::apOpacity].constant.v[0],
+                fx->params[text::apPosition].constant.v[0], fx->params[text::apPosition].constant.v[1]);
+    // As letras entram uma depois da outra e assentam (escala volta a 1).
+    std::vector<text::GlyphUnits> units;
+    for (u32 i = 0; i < 10; ++i) units.push_back({i, i < 5 ? 0u : 1u, 0});
+    expr::Scope scope(rig.e.project()->timeline());
+    f32 first = 0, settled = 0;
+    for (const f64 frame : {0.0, 3.0, 6.0, 12.0, 24.0, 90.0}) {
+        std::vector<text::GlyphAnim> g(units.size());
+        text::evaluate_animator_effects(*l, frame, 30, units, 10, 2, 1, g);
+        std::printf("\n      quadro %4.0f: escala L1 %.3f L5 %.3f L10 %.3f | opacidade L1 %.3f L10 %.3f | rot L1 %.1f",
+                    frame, g[0].scale.x, g[4].scale.x, g[9].scale.x, g[0].opacity, g[9].opacity, g[0].rotation.z);
+        if (frame == 0.0) first = g[9].scale.x;
+        if (frame == 90.0) settled = g[0].scale.x;
+    }
+    std::printf("\n");
+    AUREA_CHECK(std::fabs(first - 1.0f) > 0.05f);    // no começo a última letra ainda não entrou
+    AUREA_CHECK_NEAR(settled, 1.0f, 0.02f);          // no fim, assentada
 }
 
 AUREA_TEST(AeImport, SyntheticFfxTextAnimatorLinkIsBaked) {

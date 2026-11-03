@@ -8,4 +8,17 @@
     <string name="curve_param_oscillations">التذبذبات</string>
     <string name="curve_param_damping">التخميد</string>
     <string name="curve_param_oscillations_value">التذبذبات: %1$d</string>
+    <!-- 0.4.6: curvas de repetição e aleatórias -->
+    <string name="curve_type_steps">خطوات</string>
+    <string name="curve_type_repeat">تكرار</string>
+    <string name="curve_type_pingpong">ذهاب وإياب</string>
+    <string name="curve_type_wave">موجة</string>
+    <string name="curve_type_random">عشوائي</string>
+    <string name="curve_param_steps">الخطوات: %1$d</string>
+    <string name="curve_param_repeats">المرات: %1$d</string>
+    <string name="curve_param_turns">أنصاف الدورات: %1$d</string>
+    <string name="curve_param_cycles">الدورات: %1$d</string>
+    <string name="curve_param_amplitude">السعة</string>
+    <string name="curve_param_smooth">تنعيم</string>
+    <string name="curve_param_seed">إعادة السحب</string>
 </resources>

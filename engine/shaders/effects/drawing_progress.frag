@@ -28,6 +28,8 @@ void main() {
     const float ink = clamp(src.a * (1.0 - light), 0.0, 1.0);
     const float k = s + p.p0.z * (1.0 - ink);
     // Fica o que a frente já passou; a ponta é a rampa de largura p0.y.
-    const float keep = smoothstep(0.0, 1.0, (p.p0.x - k) / max(p.p0.y, 1e-4));
+    float keep = smoothstep(0.0, 1.0, (p.p0.x - k) / max(p.p0.y, 1e-4));
+    // 0.4.6: o Início (p2.y ≥ 0): a frente de trás apaga o que já passou.
+    if (p.p2.y >= 0.0) keep *= 1.0 - smoothstep(0.0, 1.0, (p.p2.y - k) / max(p.p0.y, 1e-4));
     o_color = src * keep;
 }

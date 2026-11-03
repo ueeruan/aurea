@@ -133,6 +133,10 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.text.animator", EffectHuman(name = R.string.text_animator_name,
         keywords = "text animator animador texto letras palavras linhas cor blur desfoque random aleatorio",
         principal = (0..23).toList()))
+    // 0.4.6: o animador completo (referência: animador de texto do After Effects).
+    put("aurea.text.animator_pro", EffectHuman(name = R.string.text_animator_pro_name,
+        keywords = "text animator pro animador texto avancado after effects seletor intervalo indice oscilacao wiggly ancora matiz linhas",
+        principal = (0..43).toList()))
     put("aurea.stylize.bevel_alpha", EffectHuman(name = R.string.bevel_alpha_name,
         keywords = "bevel alpha bisel alfa relevo texto borda", principal = (0..4).toList()))
     put("aurea.color.gradient_map", EffectHuman(name = R.string.gradient_map_name,
@@ -221,8 +225,8 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     // Mesmos rótulos e principais no iOS (EffectsHuman.swift).
     put("aurea.draw.drawing_progress", EffectHuman(
         name = R.string.fx_name_drawing_progress,
-        keywords = "progresso do desenho drawing progress write on writeon desenhar desenho draw traco traço stroke contorno linha line art aparar trim path vetor vector caneta pen lapis tinta ink nanquim revelar reveal escrita handwriting caligrafia assinatura signature",
-        principal = listOf(0, 1, 2, 3, 4),
+        keywords = "avanço do desenho avanco do desenho drawing progress inicio fim progresso do desenho drawing progress write on writeon desenhar desenho draw traco traço stroke contorno linha line art aparar trim path vetor vector caneta pen lapis tinta ink nanquim revelar reveal escrita handwriting caligrafia assinatura signature",
+        principal = listOf(5, 0, 1, 2, 3, 4),
         params = mapOf(
             0 to ParamHuman(label = R.string.fx_progresso, decimals = 0),
             1 to ParamHuman(label = R.string.fxl_draw_order),
@@ -1859,6 +1863,27 @@ private val Table: Map<Int, EffectHuman> = buildMap {
     put("aurea.time.time_displacement", EffectHuman(name = R.string.fx045d_name_time_displacement,
         keywords = "time displacement deslocamento no tempo deslocamento temporal slit scan fenda atraso mapa luminancia brilho after effects ae kee",
         principal = listOf(0, 1, 2, 3, 4, 5), params = mapOf(2 to ParamHuman(decimals = 2), 3 to ParamHuman(decimals = 0))))
+    // 0.4.6: efeitos novos (GapEffects046.cpp).
+    put("aurea.distort.swirl", EffectHuman(name = R.string.fx046_name_swirl,
+        keywords = "swirl twirl redemoinho girar espiral vortex", principal = listOf(0, 1, 2, 3)))
+    put("aurea.distort.polar_coordinates", EffectHuman(name = R.string.fx046_name_polar,
+        keywords = "polar coordinates coordenadas polares circulo planeta tiny planet", principal = listOf(0, 1, 2)))
+    put("aurea.distort.tunnel", EffectHuman(name = R.string.fx046_name_tunnel,
+        keywords = "tunnel tunel infinito viagem warp", principal = listOf(0, 1, 2, 3, 4, 5)))
+    put("aurea.distort.magnify", EffectHuman(name = R.string.fx046_name_magnify,
+        keywords = "magnify lupa zoom ampliar lente", principal = listOf(0, 1, 2, 3, 4, 5)))
+    put("aurea.stylize.long_shadow", EffectHuman(name = R.string.fx046_name_long_shadow,
+        keywords = "long shadow sombra longa flat design", principal = listOf(0, 1, 2, 3, 4, 5)))
+    put("aurea.stylize.roughen_edges", EffectHuman(name = R.string.fx046_name_roughen,
+        keywords = "roughen edges bordas asperas corroer papel rasgado", principal = listOf(0, 1, 2, 3)))
+    put("aurea.stylize.contour_lines", EffectHuman(name = R.string.fx046_name_contour,
+        keywords = "contour lines curvas de nivel topografico mapa linhas", principal = listOf(0, 1, 2, 3, 4)))
+    put("aurea.light.inner_glow", EffectHuman(name = R.string.fx046_name_inner_glow,
+        keywords = "inner glow brilho interno luz borda dentro", principal = listOf(0, 1, 2, 3, 4)))
+    put("aurea.generate.lightning", EffectHuman(name = R.string.fx046_name_lightning,
+        keywords = "lightning raio relampago eletrico eletricidade descarga", principal = listOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)))
+    put("aurea.generate.voronoi_cells", EffectHuman(name = R.string.fx046_name_voronoi,
+        keywords = "voronoi cells celulas vitral mosaico bolhas", principal = listOf(0, 1, 2, 3, 4, 5, 6)))
 }
 
 /**

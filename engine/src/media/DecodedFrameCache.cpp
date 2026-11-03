@@ -44,6 +44,26 @@ u32 DecodedFrameCache::prefetch_capacity() const noexcept {
     return static_cast<u32>(slots > 0 ? slots - 1 : 0);
 }
 
+bool DecodedFrameCache::room_ahead(i64 afterUs) const noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (frames_.empty()) return true;
+    const u64 bytes = std::max<u64>(1, stats_.bytes / frames_.size());
+    // Sai algum que já ficou para trás (custo maior que o do próximo)? Então
+    // entra sem perder trabalho. Senão, o local e o compartilhado decidem.
+    const f64 next = cost_locked(afterUs + 1, 0);
+    bool evictable = false;
+    for (const FrameRef& f : frames_)
+        if (cost_locked(f->ptsUs, f->durationUs) > next) { evictable = true; break; }
+    if (evictable) return true;
+    if (frames_.size() + 1 > frame_limit_locked()) return false;
+    if (stats_.bytes + bytes > config_.maxBytes) return false;
+    if (memory_) {
+        const usize budget = memory_->budget(MemoryClass::DecodedFrames);
+        if (budget && memory_->used(MemoryClass::DecodedFrames) + bytes > budget) return false;
+    }
+    return true;
+}
+
 void DecodedFrameCache::attach(MemoryManager* memory) noexcept {
     MemoryManager* old = nullptr;
     {

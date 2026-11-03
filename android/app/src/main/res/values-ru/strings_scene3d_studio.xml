@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="s3d_mode_object">Режим объекта</string>
+    <string name="s3d_mode_pose">Режим позы</string>
+    <string name="s3d_area_timeline">Таймлайн</string>
+    <string name="s3d_area_properties">Свойства</string>
+    <string name="s3d_area_outliner">Аутлайнер</string>
+    <string name="s3d_position">Положение</string>
+    <string name="s3d_rotation">Поворот</string>
+    <string name="s3d_scale">Масштаб</string>
+    <string name="s3d_insert_key">◆ Вставить</string>
+    <string name="s3d_insert_key_desc">Вставить ключ в текущем кадре</string>
+    <string name="s3d_delete_key">Удалить ключ</string>
+    <string name="s3d_summary">Сводка</string>
+    <string name="s3d_nothing_selected">Ничего не выбрано — коснитесь объекта в сцене или в аутлайнере</string>
+    <string name="s3d_key_here">◆ ключ в кадре %1$d</string>
+    <string name="s3d_no_key">◇ нет ключа</string>
+    <string name="s3d_import_model">Импорт 3D-модели</string>
+    <string name="s3d_import_formats">GLB · glTF · FBX · OBJ</string>
+    <string name="s3d_section_import">Импорт</string>
+    <string name="s3d_section_mesh">Меш</string>
+    <string name="s3d_section_other">Другое</string>
+    <string name="s3d_cube">Куб</string>
+    <string name="s3d_sphere">Сфера</string>
+    <string name="s3d_cylinder">Цилиндр</string>
+    <string name="s3d_cone">Конус</string>
+    <string name="s3d_pyramid">Пирамида</string>
+    <string name="s3d_torus">Тор</string>
+    <string name="s3d_empty">Пустышка</string>
+    <string name="s3d_delete_named">Удалить %1$s</string>
+    <string name="s3d_add_named">Добавить %1$s</string>
+    <string name="s3d_scene">Сцена</string>
+    <string name="s3d_prev_key">Предыдущий ключ</string>
+    <string name="s3d_next_key">Следующий ключ</string>
+    <string name="s3d_start">Начало</string>
+    <string name="s3d_end">Конец</string>
+    <string name="s3d_play">Воспроизвести</string>
+    <string name="s3d_pause">Пауза</string>
+    <string name="s3d_autokey_on">Автозапись ключей включена</string>
+    <string name="s3d_autokey_off">Автозапись ключей выключена</string>
+    <string name="s3d_no_rig">У этого объекта нет скелета</string>
+</resources>

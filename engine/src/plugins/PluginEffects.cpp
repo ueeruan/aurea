@@ -23,6 +23,8 @@
 #include "effects/builtin/BuiltinEffects.hpp"
 
 #include <algorithm>
+#include <array>
+#include <string>
 #include <cctype>
 #include <cmath>
 #include <cstring>
@@ -34,12 +36,18 @@ namespace {
 constexpr f32 kDegToRad = 3.14159265358979323846f / 180.0f;
 
 // Nomes estáticos: as medições de GPU por passe guardam o ponteiro.
-constexpr const char* kPassNames[kMaxPasses] = {
-    "plugin-passe-1", "plugin-passe-2", "plugin-passe-3", "plugin-passe-4",
-    "plugin-passe-5", "plugin-passe-6", "plugin-passe-7", "plugin-passe-8",
-};
+const char* pass_name(u32 p) noexcept {
+    static const auto names = [] {
+        std::array<std::string, kMaxPasses> n;
+        for (u32 i = 0; i < kMaxPasses; ++i) n[i] = "plugin-passe-" + std::to_string(i + 1);
+        return n;
+    }();
+    return names[std::min(p, kMaxPasses - 1)].c_str();
+}
 
-/// O bloco `aurea` do cabeçalho (std140: 20 vec4).
+/// O bloco `aurea` do cabeçalho (std140). Na GPU vai EMPACOTADO: cabeçalho,
+/// só os `param_slots` vec4 que o plugin declara e, no 3D, a cena logo depois
+/// (o cabeçalho GLSL declara `params[param_slots]`). Ver `pack_uniforms`.
 struct PluginUniforms {
     Vec4 resolution;
     Vec4 time;
@@ -47,8 +55,8 @@ struct PluginUniforms {
     Vec4 region;
     Vec4 params[kMaxParams];
 };
-static_assert(sizeof(PluginUniforms) == 320, "layout std140 do bloco aurea dos plugins");
-static_assert(sizeof(PluginUniforms) <= binding::kMaxUniformBytes);
+constexpr usize kUniformHeaderBytes = 4 * sizeof(Vec4);
+static_assert(sizeof(PluginUniforms) == kUniformHeaderBytes + kMaxParams * sizeof(Vec4), "layout std140 do bloco aurea");
 
 /// 0.3.1, plugins "shader3d": o mesmo bloco com a cena acrescentada no FIM
 /// (os plugins "shader" seguem recebendo só os 320 bytes de antes). Mat4 é
@@ -65,8 +73,23 @@ struct PluginUniforms3D {
     Vec4 layerPos[kMaxLayerParams];    ///< xyz âncora no mundo, w = 1 ligada e visível
     Vec4 layerInfo[kMaxLayerParams];   ///< x tipo (6 nulo, 8 câmera, 9 luz), y fovY (câmera), z 3D
 };
-static_assert(sizeof(PluginUniforms3D) == 944, "layout std140 do bloco aurea dos plugins 3D");
+constexpr usize kUniformSceneBytes = sizeof(PluginUniforms3D) - sizeof(PluginUniforms);
+static_assert(kUniformSceneBytes == 3 * 64 + 3 * 16 + kMaxLayerParams * (64 + 16 + 16), "layout std140 da cena dos plugins 3D");
 static_assert(sizeof(PluginUniforms3D) <= binding::kMaxUniformBytes);
+
+/// O bloco como o shader o declara: cabeçalho, `slots` parâmetros e a cena (3D).
+u32 pack_uniforms(const PluginUniforms3D& u, u32 slots, bool scene3d, u8* out) noexcept {
+    const usize params = static_cast<usize>(slots) * sizeof(Vec4);
+    std::memcpy(out, &u.base, kUniformHeaderBytes + params);
+    if (!scene3d) return static_cast<u32>(kUniformHeaderBytes + params);
+    std::memcpy(out + kUniformHeaderBytes + params, &u.view, kUniformSceneBytes);
+    return static_cast<u32>(kUniformHeaderBytes + params + kUniformSceneBytes);
+}
+
+CommonSampler texture_sampler(const TextureDecl& t) noexcept {
+    if (t.filter == 1) return CommonSampler::NearestClamp;
+    return t.wrap == 1 ? CommonSampler::LinearRepeat : t.wrap == 2 ? CommonSampler::LinearMirror : CommonSampler::LinearClamp;
+}
 /// Vec4 por camada ligada em EffectEval::pathSamples: 4 colunas, posição, info.
 constexpr u32 kLayerWorldStride = 6;
 
@@ -150,8 +173,8 @@ std::vector<ParamStrings> make_strings(const Manifest& m) {
 // =============================================================================
 class PluginShaderEffect final : public Effect {
 public:
-    PluginShaderEffect(const Manifest& m, std::vector<ShaderId> shaders)
-        : manifest_(m), shaders_(std::move(shaders)) {
+    PluginShaderEffect(const Manifest& m, std::vector<ShaderId> shaders, PluginImages images)
+        : manifest_(m), shaders_(std::move(shaders)), images_(std::move(images)) {
         key_ = effect_key(m.id);
         name_ = localized(m.name, "pt-BR");
         strings_ = make_strings(manifest_);
@@ -170,7 +193,14 @@ public:
     /// "shader3d": o mundo de cada camada ligada, lido sob o lock do modelo e
     /// levado até a montagem em `pathSamples` (kLayerWorldStride por camada).
     void resolve_resources(EffectEval& e) const noexcept override {
-        if (!manifest_.scene3d || !e.resources || !e.layer) return;
+        if (!e.resources) return;
+        // 0.4.6: as imagens do pacote, na GPU uma vez (cache do renderer por conteúdo).
+        for (usize i = 0; i < images_.size() && i < kEffectAuxImages; ++i) {
+            const PluginImage* img = images_[i].get();
+            if (img && !img->rgba.empty())
+                e.auxImages[i] = e.resources->image_texture(img->key, img->rgba.data(), img->width, img->height, img->srgb);
+        }
+        if (!manifest_.scene3d || !e.layer) return;
         auto data = std::make_shared<std::vector<Vec4>>();
         data->reserve(kMaxLayerParams * kLayerWorldStride);
         const f64 compTime = e.time_frames() + static_cast<f64>(e.layer->start.value) - static_cast<f64>(e.layer->offset.value);
@@ -214,7 +244,8 @@ public:
 
         PluginUniforms3D u3{};
         PluginUniforms& u = u3.base;
-        const usize uniformBytes = manifest_.scene3d ? sizeof(PluginUniforms3D) : sizeof(PluginUniforms);
+        const u32 slots = param_slots(manifest_);
+        alignas(16) u8 packed[binding::kMaxUniformBytes];
         const f64 fps = e.framesPerSecond > 0.0 ? e.framesPerSecond : 30.0;
         const f64 frame = e.time_frames();
         u.time = Vec4{static_cast<f32>(frame / fps), static_cast<f32>(frame), static_cast<f32>(fps), 0.0f};
@@ -255,7 +286,7 @@ public:
             u.layer = Vec4{layerW, layerH, region.w > 0 ? static_cast<f32>(pw) / region.w : 1.0f,
                            region.h > 0 ? static_cast<f32>(ph) / region.h : 1.0f};
             const bool last = p + 1 == manifest_.passes.size();
-            const FGTexture dst = ctx.texture(last ? "plugin-saida" : kPassNames[p], pw, ph);
+            const FGTexture dst = ctx.texture(last ? "plugin-saida" : pass_name(p), pw, ph);
             PassTexture t[1 + kMaxPassInputs]{};
             u32 n = 0;
             t[n++] = PassTexture{src, {}, CommonSampler::LinearBorder};
@@ -268,13 +299,15 @@ public:
                 }
                 t[n++] = PassTexture{tex, {}, CommonSampler::LinearBorder};
             }
-            u32 added = kInvalidIndex;
-            switch (n) {
-                case 1: added = ctx.fullscreen_pass(kPassNames[p], PassStage::Effects, dst, shaders_[p], {t[0]}, &u3, uniformBytes); break;
-                case 2: added = ctx.fullscreen_pass(kPassNames[p], PassStage::Effects, dst, shaders_[p], {t[0], t[1]}, &u3, uniformBytes); break;
-                case 3: added = ctx.fullscreen_pass(kPassNames[p], PassStage::Effects, dst, shaders_[p], {t[0], t[1], t[2]}, &u3, uniformBytes); break;
-                default: added = ctx.fullscreen_pass(kPassNames[p], PassStage::Effects, dst, shaders_[p], {t[0], t[1], t[2], t[3]}, &u3, uniformBytes); break;
+            // Imagens do pacote: sem GPU para ela (prévia sem renderer), o slot
+            // recebe a fonte — nunca um descritor vazio.
+            for (usize i = 0; i < manifest_.textures.size() && n < 1 + kMaxPassInputs; ++i) {
+                const TextureHandle img = i < kEffectAuxImages ? e.auxImages[i] : TextureHandle{};
+                t[n++] = img.valid() ? PassTexture{{}, img, texture_sampler(manifest_.textures[i])}
+                                     : PassTexture{src, {}, CommonSampler::LinearClamp};
             }
+            const u32 bytes = pack_uniforms(u3, slots, manifest_.scene3d, packed);
+            const u32 added = ctx.fullscreen_pass(pass_name(p), PassStage::Effects, dst, shaders_[p], t, n, packed, bytes);
             if (added == kInvalidIndex) return Errc::PipelineCompileFailed;
             targets[p] = dst;
             result = dst;
@@ -335,6 +368,7 @@ private:
 
     Manifest manifest_;
     std::vector<ShaderId> shaders_;
+    PluginImages images_;
     std::string key_, name_;
     std::vector<ParamStrings> strings_;
     EffectInfo info_{};
@@ -580,8 +614,8 @@ bool compile_stack(const Manifest& m, const EffectRegistry& registry, std::vecto
     return true;
 }
 
-std::unique_ptr<Effect> make_shader_effect(const Manifest& m, std::vector<ShaderId> passShaders) {
-    return std::make_unique<PluginShaderEffect>(m, std::move(passShaders));
+std::unique_ptr<Effect> make_shader_effect(const Manifest& m, std::vector<ShaderId> passShaders, PluginImages images) {
+    return std::make_unique<PluginShaderEffect>(m, std::move(passShaders), std::move(images));
 }
 
 std::unique_ptr<Effect> make_stack_effect(const Manifest& m, std::vector<CompiledStackStep> steps) {

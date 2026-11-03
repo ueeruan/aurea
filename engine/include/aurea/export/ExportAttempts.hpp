@@ -30,6 +30,15 @@
 //  projeto saía diferente conforme a carga do aparelho. Agora vale do primeiro
 //  ao último quadro da tentativa, e a tela avisa o degrau.
 //
+//  0.4.6: os degraus de SOFTWARE (2, 4, 5, 6) também decodificam a mídia de
+//  origem no decoder compatível (ExportSettings::softwareDecode: software no
+//  Android, planos na CPU no iOS). A Export BETA 2 fazia isso e a decisão se
+//  perdeu: o campo continuou existindo, mas nada o ligava, e a escada só
+//  trocava encoder, tamanho e taxa. Um vídeo que o decoder do aparelho nunca
+//  entrega (Galaxy A23: projeto de 2 clipes parava sempre em ~50%, na
+//  transição) falhava igual em TODO degrau e o export recomeçava do zero até
+//  a escada acabar.
+//
 //  O degrau viaja no lugar do antigo "modo de segurança" (ExportSettings::
 //  safeMode, JNI e ponte do iOS): 0, 1 e 2 continuam significando o mesmo
 //  encoder de antes. O motor aplica o degrau ao iniciar (Engine.cpp,
@@ -67,17 +76,19 @@ struct ExportAttemptPlan {
     /// 0.3.6: tamanho no formato que todo encoder aceita (lado maior múltiplo
     /// de 16, menor par — export_frame_size), em vez do nativo exato.
     bool align16 = false;
+    /// 0.4.6: a mídia de origem no decoder compatível (ExportSettings::softwareDecode).
+    bool softwareDecode = false;
 };
 
 [[nodiscard]] constexpr ExportAttemptPlan export_attempt_plan(u32 attempt) noexcept {
     switch (attempt) {
-        case 0: return {0, false, 0, 0.0, false, 0, 0, false};
-        case 1: return {1, true, 0, 60.0, false, 32, 0, true};
-        case 2: return {2, true, 0, 60.0, false, 16, 1, true};
-        case 3: return {1, true, 720, 30.0, true, 16, 1, true};
-        case 4: return {2, true, 720, 30.0, true, 8, 2, true};
-        case 5: return {2, true, 480, 30.0, true, 4, 3, true};
-        default: return {2, true, 480, 30.0, true, 1, 4, true};
+        case 0: return {0, false, 0, 0.0, false, 0, 0, false, false};
+        case 1: return {1, true, 0, 60.0, false, 32, 0, true, false};
+        case 2: return {2, true, 0, 60.0, false, 16, 1, true, true};
+        case 3: return {1, true, 720, 30.0, true, 16, 1, true, false};
+        case 4: return {2, true, 720, 30.0, true, 8, 2, true, true};
+        case 5: return {2, true, 480, 30.0, true, 4, 3, true, true};
+        default: return {2, true, 480, 30.0, true, 1, 4, true, true};
     }
 }
 
@@ -204,12 +215,13 @@ struct ExportAttemptEffect {
     bool upscale = false;
     u32 blurCap = 0;     ///< 0 = o do projeto
     u32 gpuStep = 0;     ///< degrau de custo 3D
-    /// `withBlur` falso: o teto de motion blur e o custo 3D não contam (falha
-    /// de encoder, que menos trabalho de GPU não resolve).
+    bool softwareDecode = false;   ///< mídia no decoder compatível
+    /// `withBlur` falso: o teto de motion blur, o custo 3D e o decoder da mídia
+    /// não contam (falha de encoder, que nada disso resolve).
     [[nodiscard]] constexpr bool same_as(const ExportAttemptEffect& o, bool withBlur = true) const noexcept {
         return safeMode == o.safeMode && hevc == o.hevc && shortSide == o.shortSide && shortCapped == o.shortCapped &&
                fps == o.fps && fpsCapped == o.fpsCapped && upscale == o.upscale &&
-               (!withBlur || (blurCap == o.blurCap && gpuStep == o.gpuStep));
+               (!withBlur || (blurCap == o.blurCap && gpuStep == o.gpuStep && softwareDecode == o.softwareDecode));
     }
     /// Menos trabalho de GPU por quadro que `o`: menos amostras de motion blur
     /// ou um degrau de custo 3D acima.
@@ -233,6 +245,7 @@ struct ExportAttemptEffect {
     e.upscale = r.upscale && !p.noUpscale;
     e.blurCap = p.blurCap;
     e.gpuStep = p.gpuStep;
+    e.softwareDecode = p.softwareDecode;
     return e;
 }
 
@@ -268,8 +281,9 @@ struct ExportAttemptEffect {
                 if (e.less_blur_than(now) || fewer) return next;
                 break;
             case ExportRetryKind::Stall:
-                // Software, e menos trabalho por quadro.
-                if (e.safeMode >= 2 && (e.shortCapped || e.shortSide != now.shortSide || e.fpsCapped || e.fps != now.fps ||
+                // Software (encoder e, 0.4.6, decoder da mídia), e menos
+                // trabalho por quadro.
+                if (e.safeMode >= 2 && ((e.softwareDecode && !now.softwareDecode) || e.shortCapped || e.shortSide != now.shortSide || e.fpsCapped || e.fps != now.fps ||
                                         now.safeMode < 2 || (now.upscale && !e.upscale) || e.less_blur_than(now)))
                     return next;
                 break;

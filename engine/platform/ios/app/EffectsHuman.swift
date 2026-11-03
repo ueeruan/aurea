@@ -105,6 +105,8 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.light.shadow_studio_3", FxEffectHuman(keywords: "shadow studio 3 sombra long radial inner", principal: [0, 1, 2, 3, 4])),
     ("aurea.generate.tracery", FxEffectHuman(keywords: "tracery color detection boxes rastreio cor conexoes", principal: [0, 1, 3, 7, 14], params: [2: FxParamHuman(decimals: 2)])),
     ("aurea.text.transform", FxEffectHuman(name: "text_transform_name", keywords: "text transform texto transformar letras palavras linhas intervalo fase", principal: Array(0...17))),
+    // 0.4.6: o animador completo (referência: animador de texto do After Effects). Par do Android.
+    ("aurea.text.animator_pro", FxEffectHuman(name: "text_animator_pro_name", keywords: "text animator pro animador texto avancado after effects seletor intervalo indice oscilacao wiggly ancora matiz linhas", principal: Array(0...43))),
     ("aurea.text.animator", FxEffectHuman(name: "text_animator_name", keywords: "text animator animador texto letras palavras linhas cor blur desfoque random aleatorio", principal: Array(0...23))),
     ("aurea.stylize.bevel_alpha", FxEffectHuman(name: "bevel_alpha_name", keywords: "bevel alpha bisel alfa relevo texto borda", principal: Array(0...4))),
     ("aurea.color.gradient_map", FxEffectHuman(name: "gradient_map_name", keywords: "gradient map mapa degrade gradiente texto cor tritone cc toner", principal: Array(0...4))),
@@ -192,8 +194,8 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     // Mesmos rótulos e principais do Android (EffectsHuman.kt).
     ("aurea.draw.drawing_progress", FxEffectHuman(
         name: "fx_name_drawing_progress",
-        keywords: "progresso do desenho drawing progress write on writeon desenhar desenho draw traco traço stroke contorno linha line art aparar trim path vetor vector caneta pen lapis tinta ink nanquim revelar reveal escrita handwriting caligrafia assinatura signature",
-        principal: [0, 1, 2, 3, 4],
+        keywords: "avanço do desenho avanco do desenho drawing progress inicio fim progresso do desenho drawing progress write on writeon desenhar desenho draw traco traço stroke contorno linha line art aparar trim path vetor vector caneta pen lapis tinta ink nanquim revelar reveal escrita handwriting caligrafia assinatura signature",
+        principal: [5, 0, 1, 2, 3, 4],
         params: [
             0: FxParamHuman(label: "fx_progresso", decimals: 0),
             1: FxParamHuman(label: "fxl_draw_order"),
@@ -1616,6 +1618,17 @@ private let FxTable: [(key: String, effect: FxEffectHuman)] = [
     ("aurea.time.time_displacement", FxEffectHuman(name: "fx045d_name_time_displacement",
         keywords: "time displacement deslocamento no tempo deslocamento temporal slit scan fenda atraso mapa luminancia brilho after effects ae kee",
         principal: [0, 1, 2, 3, 4, 5], params: [2: FxParamHuman(decimals: 2), 3: FxParamHuman(decimals: 0)])),
+    // 0.4.6: efeitos novos (GapEffects046.cpp).
+    ("aurea.distort.swirl", FxEffectHuman(name: "fx046_name_swirl", keywords: "swirl twirl redemoinho girar espiral vortex", principal: [0, 1, 2, 3])),
+    ("aurea.distort.polar_coordinates", FxEffectHuman(name: "fx046_name_polar", keywords: "polar coordinates coordenadas polares circulo planeta tiny planet", principal: [0, 1, 2])),
+    ("aurea.distort.tunnel", FxEffectHuman(name: "fx046_name_tunnel", keywords: "tunnel tunel infinito viagem warp", principal: [0, 1, 2, 3, 4, 5])),
+    ("aurea.distort.magnify", FxEffectHuman(name: "fx046_name_magnify", keywords: "magnify lupa zoom ampliar lente", principal: [0, 1, 2, 3, 4, 5])),
+    ("aurea.stylize.long_shadow", FxEffectHuman(name: "fx046_name_long_shadow", keywords: "long shadow sombra longa flat design", principal: [0, 1, 2, 3, 4, 5])),
+    ("aurea.stylize.roughen_edges", FxEffectHuman(name: "fx046_name_roughen", keywords: "roughen edges bordas asperas corroer papel rasgado", principal: [0, 1, 2, 3])),
+    ("aurea.stylize.contour_lines", FxEffectHuman(name: "fx046_name_contour", keywords: "contour lines curvas de nivel topografico mapa linhas", principal: [0, 1, 2, 3, 4])),
+    ("aurea.light.inner_glow", FxEffectHuman(name: "fx046_name_inner_glow", keywords: "inner glow brilho interno luz borda dentro", principal: [0, 1, 2, 3, 4])),
+    ("aurea.generate.lightning", FxEffectHuman(name: "fx046_name_lightning", keywords: "lightning raio relampago eletrico eletricidade descarga", principal: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])),
+    ("aurea.generate.voronoi_cells", FxEffectHuman(name: "fx046_name_voronoi", keywords: "voronoi cells celulas vitral mosaico bolhas", principal: [0, 1, 2, 3, 4, 5, 6])),
 ]
 
 /// A tabela indexada pelo `typeId`, e a posição declarada (para ordenar sem

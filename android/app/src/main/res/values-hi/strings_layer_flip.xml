@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: espelhar camada. -->
+<resources>
+    <string name="layer_flip_horizontal">क्षैतिज फ़्लिप</string>
+    <string name="layer_flip_vertical">लंबवत फ़्लिप</string>
+</resources>

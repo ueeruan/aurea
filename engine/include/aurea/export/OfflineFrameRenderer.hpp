@@ -37,6 +37,16 @@ public:
         u64 reopenAfterNs = 3'000'000'000ull, approximateAfterNs = 6'000'000'000ull, approximateTotalAfterNs = 15'000'000'000ull;
     };
     void set_exact_frame_deadlines(const ExactFrameDeadlines& d) noexcept { deadlines_ = d; }
+    /// 0.4.6: decodificação compatível (MediaPriority::ExportSoftwareDecode)
+    /// para os decoders abertos daqui em diante — o degrau da escada que pede
+    /// (ExportSettings::softwareDecode), ou o próprio render ao reabrir uma
+    /// fonte que o decoder do aparelho nunca entregou.
+    void set_software_decode(bool enabled) noexcept {
+        softwareDecode_ = enabled;
+        media_.set_open_priority(enabled ? MediaPriority::ExportSoftwareDecode : MediaPriority::Preview);
+    }
+    /// Os decoders desta sessão abrem no modo compatível (pedido ou adotado).
+    [[nodiscard]] bool software_decode() const noexcept { return softwareDecode_; }
     void shutdown() noexcept;
     // Engine proved all normal/auxiliary GPU work; no renderer command may be
     // submitted after this. Source callbacks remain CPU-only until retired.
@@ -60,6 +70,7 @@ private:
     std::condition_variable wake_;
     ExactFrameDeadlines deadlines_{};
     bool approximate_ = false;
+    bool softwareDecode_ = false;
     u32 approximateFrames_ = 0;
     u32 approximateRun_ = 0;   ///< aproximados SEGUIDOS (zera no próximo exato)
 };

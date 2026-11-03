@@ -17,6 +17,7 @@
 #include "spirv_msl.hpp"
 #endif
 
+#include <algorithm>
 #include <cstdio>
 #include <exception>
 #include <stdexcept>
@@ -146,8 +147,17 @@ bool spirv_to_essl(const uint32_t* wordsIn, size_t wordCount, std::string& out, 
                 "return value * ((" + uniform + ".x & 1) != 0 ? weight.x : 1.0) * ((" + uniform + ".x & 2) != 0 ? weight.y : 1.0);\n}\n";
         }
         if (!helpers.empty()) {
+            // 0.4.6 (Mali-T820, "os shaders basicos nao compilaram"): no
+            // fragment shader ESSL não há precisão padrão de float antes de
+            // `precision highp float;`. Os auxiliares entravam logo depois do
+            // #version, ANTES dessa linha, e as constantes do ternário
+            // (`? 1.0 : 0.0`) ficavam sem precisão — Adreno e Mali novos
+            // aceitam; um compilador estrito recusa a composição e a saída.
+            // Agora entram depois das declarações de precisão.
             const auto extension = source.rfind("#extension");
-            const auto headerEnd = source.find('\n', extension == std::string::npos ? 0 : extension);
+            auto headerEnd = source.find('\n', extension == std::string::npos ? 0 : extension);
+            if (const auto precision = source.rfind("\nprecision "); precision != std::string::npos)
+                headerEnd = std::max(headerEnd, source.find('\n', precision + 1));
             source.insert(headerEnd + 1, "\n" + helpers);
         }
         char header[64];

@@ -825,6 +825,11 @@ struct SpeedPanel: View {
                     Text(AureaText.t("panel_passar_tras_frente")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
                     AureaToggle(checked: flags & 1 != 0) { v in change { $0.setLayer(id, reversed: v) } }
                 }.frame(height: 48)
+                // 0.4.6: repetir o vídeo além do fim da fonte (par do SpeedAudioPanels.kt).
+                HStack {
+                    Text(AureaText.t("layer_media_loop")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                    AureaToggle(checked: flags & 512 != 0) { v in change { _ = $0.setLayerMediaLoop(id, on: v) } }
+                }.frame(height: 48)
                 Text(AureaText.t("panel_quadros_camera_lenta")).font(.aurea(size: 13))
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {

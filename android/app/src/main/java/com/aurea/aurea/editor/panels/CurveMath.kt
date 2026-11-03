@@ -203,20 +203,23 @@ internal fun curveSlots(c: CurveCategory): List<CurveSlot?> = when (c) {
         CurveSlot(com.aurea.aurea.R.string.pn_textpreset_bounce, DefaultBounce),
         CurveSlot(com.aurea.aurea.R.string.pn_textpreset_elastic, Ease(Interp.ELASTIC, 0f, 0f, 1f, 1f).elastic()),
         CurveSlot(com.aurea.aurea.R.string.curve_type_overshoot, Ease(Interp.OVERSHOOT, 0f, 0f, 1f, 1f).overshoot()),
-        null,
+        // 0.4.6: "Oscilar" = a Onda (o linear com uma senoide por cima).
+        CurveSlot(com.aurea.aurea.R.string.curve_type_wave, Ease(Interp.WAVE, 0f, 0f, 0f, 0f).wave()),
     )
     CurveCategory.Steps -> listOf(
         CurveSlot(com.aurea.aurea.R.string.pn_curve_steps4, Ease(Interp.STEPS, 0f, 0f, 1f, 1f)),
         CurveSlot(com.aurea.aurea.R.string.pn_ease_hold, Ease(Interp.HOLD, 0f, 0f, 1f, 1f)),
-        null,
-        null,
+        // 0.4.6: repetição e aleatório.
+        CurveSlot(com.aurea.aurea.R.string.curve_type_repeat, Ease(Interp.REPEAT, 0f, 0f, 0f, 0f).repeat(REPEAT_DEFAULT)),
+        CurveSlot(com.aurea.aurea.R.string.curve_type_pingpong, Ease(Interp.PING_PONG, 0f, 0f, 0f, 0f).pingPong(PING_PONG_DEFAULT)),
+        CurveSlot(com.aurea.aurea.R.string.curve_type_random, Ease(Interp.RANDOM, 0f, 0f, 0f, 0f).random()),
     )
 }
 
 /** O grupo que contém a curva do trecho (o grupo ativo da coluna). */
 internal fun curveCategoryOf(e: Ease): CurveCategory = when (e.interp) {
-    Interp.BOUNCE, Interp.ELASTIC, Interp.OVERSHOOT -> CurveCategory.Bounces
-    Interp.STEPS, Interp.HOLD -> CurveCategory.Steps
+    Interp.BOUNCE, Interp.ELASTIC, Interp.OVERSHOOT, Interp.WAVE -> CurveCategory.Bounces
+    Interp.STEPS, Interp.HOLD, Interp.REPEAT, Interp.PING_PONG, Interp.RANDOM -> CurveCategory.Steps
     else -> CurveCategory.Curves
 }
 

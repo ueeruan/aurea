@@ -78,15 +78,18 @@ meu-efeito.aureaplugin
 ```
 
 Também é aceito um ZIP feito da pasta (o `plugin.json` dentro de uma única
-subpasta). Arquivos extras (licença, imagens de documentação) podem ir junto e
-são ignorados. O AUREA instala em `<pasta de plugins>/<id>/`:
+subpasta). **Qualquer arquivo** pode ir junto (0.4.6): imagens que o shader lê
+com `getFile` (`"textures"`, seção 3) e dados que o script lê com
+`plugin.getFile` (seção 14.5). O `pack_plugin.py` empacota a pasta inteira. O AUREA instala em `<pasta de plugins>/<id>/`:
 
 - Android: `files/plugins/` (armazenamento interno do app)
 - iOS: `Documents/Plugins/`
 
-O plugin **não tem acesso a arquivos**: o shader só lê as texturas que o motor
-amarra (a camada e as texturas intermediárias do próprio plugin) e o bloco de
-parâmetros. Não há rede, disco nem relógio de parede.
+O plugin lê **só o próprio pacote**: o shader recebe a camada, as texturas
+intermediárias e as imagens declaradas em `"textures"`; o script lê os arquivos
+do pacote com `plugin.getFile`. Nada fora da pasta do plugin — um plugin da
+comunidade não enxerga fotos nem documentos de quem o instala. Rede, área de
+transferência e arquivos escolhidos pela pessoa só com permissão (seção 14.6).
 
 ## 3. Referência do `plugin.json`
 
@@ -123,11 +126,12 @@ Texto em UTF-8. Exemplo completo (o do `rgb-wave`):
 | `description` | texto ou idiomas | não | Descrição (até 512). |
 | `category` | texto | não | Subcategoria mostrada dentro de **Plugins** (até 32). |
 | `kind` | `"shader"`, `"shader3d"` ou `"stack"` | sim | O tipo (seção 1). `shader3d` (0.3.1) é um `shader` que também recebe a câmera da cena e as camadas ligadas (seção 4, "Plugins 3D"). |
-| `params` | lista | não | Até **16** parâmetros (abaixo). |
-| `passes` | lista | shader | 1 a **8** passes (abaixo). |
-| `margin` | número | não | Quantos **px da camada** o efeito lê/desenha além da caixa da camada (0..1024). Ex.: um brilho de raio 50 declara `50`. Sem margem, o resultado é recortado à caixa. |
+| `params` | lista | não | Até **64** parâmetros (abaixo). |
+| `passes` | lista | shader | 1 a **32** passes (abaixo). |
+| `textures` | objeto | não | 0.4.6: até **8** imagens do pacote lidas no shader com `getFile(nome)` (abaixo). |
+| `margin` | número | não | Quantos **px da camada** o efeito lê/desenha além da caixa da camada (0..4096). Ex.: um brilho de raio 50 declara `50`. Sem margem, o resultado é recortado à caixa. |
 | `colorSpace` | `"linear"` ou `"srgb"` | não | `linear` (padrão): o shader vê o espaço de trabalho do motor — RGB **linear**, alfa **pré-multiplicado**. `srgb`: o motor entrega cores **sRGB de alfa reto** e converte o resultado de volta (é o que a importação ISF usa). |
-| `stack` | lista | stack | 1 a 16 efeitos embutidos (seção 5). |
+| `stack` | lista | stack | 1 a 64 efeitos embutidos (seção 5). |
 
 ### Texto por idioma
 
@@ -165,16 +169,16 @@ da pessoa, vale `en`, depois `pt-BR`, depois o primeiro declarado. O nome em
 | `color` | `"#RRGGBB"`, `"#RRGGBBAA"` ou `[r, g, b(, a)]` 0..1 **em sRGB** (como um seletor de cor) | — | `vec4` RGBA **linear**, alfa reto (no `colorSpace: srgb`, RGBA sRGB) |
 | `point` | `[x, y]` relativo à camada (0..1 = largura/altura; `[0.5, 0.5]` = centro) | -1..2 | `vec2` **no espaço `uv`** do passe (já convertido pelo motor) |
 | `angle` | graus | -360..360 | `float` em **radianos** |
-| `layer` | — (nenhuma camada) | — | um **inteiro** (a posição da camada entre os parâmetros `layer`), para usar nas funções `aurea_layer_*` (até **4** por plugin; nunca animável) |
+| `layer` | — (nenhuma camada) | — | um **inteiro** (a posição da camada entre os parâmetros `layer`), para usar nas funções `aurea_layer_*` (até **8** por plugin; nunca animável) |
 
 ### Passes (`passes`)
 
 | Campo | Descrição |
 | --- | --- |
-| `shader` | Arquivo GLSL no pacote (caminho relativo, sem `..`). Até 64 KB. |
+| `shader` | Arquivo GLSL no pacote (caminho relativo, sem `..`). Até 1 MB. |
 | `target` | Nome da textura intermediária que este passe escreve. **Obrigatório** em todo passe menos o último; o último **não** tem `target`: ele é a saída do efeito. |
 | `scale` | Resolução do passe relativa à imagem da camada: 0.125..1 (padrão 1). Um desfoque em `0.25` custa 1/16. |
-| `inputs` | Objeto `"nome": "origem"`, até 3: cada nome vira um `uniform sampler2D` no shader; a origem é `"source"` (a camada) ou o `target` de um passe **anterior**. A camada também está sempre em `aurea_source`. |
+| `inputs` | Objeto `"nome": "origem"`: cada nome vira um `uniform sampler2D` no shader; a origem é `"source"` (a camada) ou o `target` de um passe **anterior**. A camada também está sempre em `aurea_source`. Entradas + texturas do pacote: até **11** por passe. |
 
 Exemplo de dois passes (o `soft-glow`):
 
@@ -184,6 +188,37 @@ Exemplo de dois passes (o `soft-glow`):
   { "shader": "combine.frag", "inputs": { "bloom": "bloom" } }
 ]
 ```
+
+### Imagens do pacote (`textures`, `getFile`) — 0.4.6
+
+LUTs, ruídos, máscaras, logos, mapas de normal, paletas: qualquer PNG/JPG do
+pacote vira um `sampler2D` em **todos** os passes.
+
+```json
+"textures": {
+  "curve":    { "file": "textures/curve.png", "colorSpace": "data" },
+  "grainTex": { "file": "textures/grain.png", "colorSpace": "data", "wrap": "repeat" },
+  "logo":     "logo.png"
+}
+```
+
+```glsl
+vec4 aurea_main(vec2 uv) {
+    float g = texture(getFile(grainTex), uv * 4.0).r;   // getFile(nome) é o sampler
+    return texture(aurea_source, uv) * texture(logo, uv).a;
+}
+```
+
+| Campo | Valores | Padrão | Descrição |
+| --- | --- | --- | --- |
+| `file` | caminho | — | `.png`, `.jpg` ou `.jpeg` dentro do pacote; até 64 MB e 8192 px de lado. Texto simples no lugar do objeto = só o arquivo. |
+| `colorSpace` | `color`, `data` | `color` | `color`: num plugin `linear`, a GPU converte o sRGB da imagem para linear ao amostrar (a cor bate com a do motor). `data`: os bytes crus (LUT, ruído, máscara, mapa de normal, deslocamento). Num plugin `srgb` as duas dão os bytes crus. |
+| `filter` | `linear`, `nearest` | `linear` | `nearest` lê o texel exato (LUT de paleta, pixel art). |
+| `wrap` | `clamp`, `repeat`, `mirror` | `clamp` | O que se lê fora de 0..1 (`repeat` para texturas que se repetem). |
+
+O nome segue as regras dos parâmetros e não pode repetir um parâmetro ou
+entrada. O motor decodifica a imagem uma vez, sobe para a GPU uma vez e a mantém
+enquanto o efeito é usado. `AUREA_TEXTURE_COUNT` diz quantas há.
 
 ## 4. A interface do shader
 
@@ -511,16 +546,24 @@ Para um efeito de vários passes, converta para um `.aureaplugin` com `passes`.
 
 | Limite | Valor | Por quê |
 | --- | --- | --- |
-| Passes | 8 | Cada passe é uma textura e uma ida à memória; em GPU de celular a banda é o gargalo. |
-| Parâmetros | 16 | O bloco de parâmetros cabe em 320 bytes (o motor usa no máximo 1 KB por passe). |
-| Entradas por passe | 3 + a fonte | 4 texturas por passe de efeito no motor. |
-| Camadas ligadas (`layer`) | 4, só em `shader3d` | O mundo de cada camada vai no bloco de parâmetros; o bloco 3D ocupa 944 dos 1024 bytes. |
-| Shader | 64 KB por arquivo | Compilar no aparelho custa CPU e memória; shaders grandes também compilam devagar no driver. |
-| `plugin.json` | 256 KB | — |
-| Pacote | 16 MB | — |
-| `margin` | 1024 px | Cada px de margem aumenta a textura de trabalho. |
-| Pilha | 16 efeitos | — |
-| **Quadro de teste** | **250 ms em 256×256** | Shader pesado ou com laço longo **trava a GPU do celular** (o sistema pode reiniciar o driver e fechar o app). Na instalação o AUREA compila cada passe na GPU do aparelho e desenha um quadro de 256×256 com os valores padrão; se ele passar de 250 ms (medido depois de criados os pipelines), a instalação é recusada. Em 1080p o mesmo shader custaria ~30× mais. |
+0.4.6 ("plugin sem limites"): os tetos subiram até onde um celular ainda
+aguenta. O que sobrou protege a pessoa (GPU travada, memória, arquivos dela),
+não a criatividade.
+
+| Limite | Valor | Por quê |
+| --- | --- | --- |
+| Passes | 32 | Cada passe é uma textura e uma ida à memória; em GPU de celular a banda é o gargalo. Use `scale` nos passes intermediários. |
+| Parâmetros | 64 | O bloco vai empacotado: só os parâmetros declarados sobem por passe (até 4 KB no motor). |
+| Entradas + texturas por passe | 11 + a fonte | 12 slots de textura por passe no motor. |
+| Imagens do pacote (`textures`) | 8, até 64 MB e 8192 px cada | Ficam decodificadas na RAM e na GPU enquanto o efeito é usado. |
+| Camadas ligadas (`layer`) | 8, só em `shader3d` | O mundo de cada camada vai no bloco de parâmetros. |
+| Shader | 1 MB por arquivo | Compilar no aparelho custa CPU; o SPIR-V fica em cache (abrir o app não recompila). |
+| `plugin.json` | 4 MB | — |
+| Pacote | 512 MB (1 GB descompactado) | Contra pacote que infla sem fim ao extrair. |
+| `margin` | 4096 px | Cada px de margem aumenta a textura de trabalho. |
+| Pilha | 64 efeitos | — |
+| Opções de enum | 256 | — |
+| **Quadro de teste** | **1000 ms em 256×256** | Shader com laço longo **trava a GPU do celular** (o sistema pode reiniciar o driver e fechar o app). Na instalação o AUREA compila cada passe na GPU do aparelho e desenha um quadro de 256×256 com os valores padrão; se ele passar de 1 s (medido depois de criados os pipelines), a instalação é recusada. Em 1080p o mesmo shader custaria ~30× mais. |
 
 A medição é **neste aparelho**: um plugin aceito num celular rápido pode ser
 recusado num de entrada. Projete para o mais fraco. Um laço infinito ainda pode
@@ -580,22 +623,22 @@ Mensagens exatas da instalação (`<...>` = valor do seu pacote):
 | --- | --- |
 | `o arquivo nao e um pacote .aureaplugin (um ZIP com plugin.json)` | Não é ZIP (ou ZIP com método de compressão diferente de stored/deflate). Use o `pack_plugin.py`. |
 | `pacote corrompido (ZIP invalido, nome de arquivo inseguro ou CRC errado)` | ZIP danificado ou com caminho como `../x` ou absoluto. |
-| `pacote maior que 16 MB` | Tire arquivos que o plugin não usa. |
+| `pacote maior que 512 MB` | Tire arquivos que o plugin não usa. |
 | `plugin.json ausente no pacote` / `plugin.json ausente ou ilegivel no pacote` | O `plugin.json` tem de estar na raiz do ZIP (ou numa única subpasta). |
 | `plugin.json invalido: <detalhe>` | JSON malformado (vírgula sobrando, aspas). |
 | `plugin.json: falta "aureaPlugin": 1 (versao do formato)` / `... nao suportado (este app le a versao 1 do formato)` | Declare `"aureaPlugin": 1`. |
 | `plugin.json: "id" invalido "<id>": use 3 a 64 caracteres a-z, 0-9, '.', '_' ou '-' (ex.: com.estudio.brilho)` | Só minúsculas; sem espaço. |
 | `plugin.json: "version" deve ser "x.y.z" (ex.: "1.0.0")` | — |
 | `plugin.json: "kind" deve ser "shader", "shader3d" ou "stack"` | — |
-| `plugin.json: <n> parametros (limite 16)` | Junte parâmetros ou faça dois plugins. |
+| `plugin.json: <n> parametros (limite 64)` | Junte parâmetros ou faça dois plugins. |
 | `plugin.json: parametro "<id>": id invalido (letras, digitos e _, ate 32, sem palavra reservada do GLSL nem prefixo aurea/gl_)` | Ex.: `mix`, `texture`, `float`, `uv`, `main`, `time`, `source` são reservados. |
 | `plugin.json: parametro "<id>": tipo desconhecido "<t>" (use float, int, bool, enum, color, point, angle ou layer)` | — |
 | `plugin.json: parametro "layer" so em plugin "kind": "shader3d"` | Troque `"kind": "shader"` por `"shader3d"`. |
-| `plugin.json: <n> parametros "layer" (limite 4)` | Use até 4 camadas ligadas. |
+| `plugin.json: <n> parametros "layer" (limite 8)` | Use até 8 camadas ligadas. |
 | `plugin.json: parametro "<id>": "accept" deve ser uma lista (camera, null, light, any)` / `... "accept" desconhecido "<x>" (camera, null, light ou any)` | Ex.: `"accept": ["null", "camera"]`. |
 | `plugin.json: parametro "<id>": "default" fora de [min, max]` | — |
 | `plugin.json: parametro "<id>": enum precisa de "options" (lista de textos)` | — |
-| `plugin.json: <n> passes (limite 8)` | Junte passes. |
+| `plugin.json: <n> passes (limite 32)` | Junte passes. |
 | `plugin.json: passe <n>: falta "target" (so o ultimo passe escreve a saida)` | Todo passe menos o último precisa de `target`. |
 | `plugin.json: o ultimo passe nao tem "target": ele e a saida do efeito` | Tire o `target` do último. |
 | `plugin.json: passe <n>: "scale" deve estar entre 0.125 e 1` | — |
@@ -603,11 +646,11 @@ Mensagens exatas da instalação (`<...>` = valor do seu pacote):
 | `plugin.json: "margin" deve estar entre 0 e 1024 (px da camada)` | — |
 | `passe <n>: caminho de shader invalido "<arquivo>"` | Caminho relativo, sem `..`, `:` ou `/` inicial. |
 | `passe <n>: arquivo de shader ausente: <arquivo>` | O arquivo não está no pacote (maiúsculas contam). |
-| `passe <n>: <arquivo> maior que 64 KB` | — |
+| `passe <n>: <arquivo> maior que 1 MB` | — |
 | `<arquivo>:<linha>: <mensagem do glslang>` | Erro de compilação GLSL, na linha do **seu** arquivo. Ex.: `rgb_wave.frag:12: 'offst' : undeclared identifier`. Uma linha `aurea_header:...` indica conflito com o cabeçalho (ex.: redeclarar `aurea_source` ou escrever `#version`). |
 | `<arquivo>: a GPU recusou o shader: <mensagem>` | O driver deste aparelho não aceitou o shader traduzido (ESSL/MSL). Simplifique (arrays grandes, recursos raros) e reporte o aparelho. |
 | `o quadro de teste falhou: <detalhe>` | O efeito não desenhou (pipeline recusado, textura grande demais). |
-| `o quadro de teste levou <t> ms (limite 250 ms em 256x256): simplifique o shader (lacos, amostras por pixel, passes)` | Seção 7 e 8. |
+| `o quadro de teste levou <t> ms (limite 1000 ms em 256x256): simplifique o shader (lacos, amostras por pixel, passes)` | Seção 7 e 8. |
 | `a GPU reiniciou durante o quadro de teste (laco infinito ou shader pesado demais)` | Laço sem fim ou custo extremo. |
 | `a GPU esta ocupada (preview ou export); tente instalar de novo` | Um export ou captura estava com a GPU por mais de ~4 s. |
 | `ja esta instalada a versao <v> de "<id>", mais nova que <w>` | Aumente a `version` (ou remova a instalada). |
@@ -799,7 +842,7 @@ mesma ordem de fallback da seção 3. Os limites de tamanho contam **caracteres*
 | `choice` | `options` (1 a 32 textos), `default` (índice) | índice | `onChange` |
 | `text` | `default`, `placeholder`, `multiline`, `maxLength` (≤ 10000) | texto | `onChange` (ao confirmar) |
 | `list` | `items` iniciais `[{id, label, detail}]` (≤ 200) | id escolhido ou `null` | `onSelect` |
-| `image` | `src` (`.png`/`.jpg` do pacote, ≤ 2 MB), `aspect` (largura/altura) | — | — |
+| `image` | `src` (`.png`/`.jpg` do pacote, ≤ 32 MB), `aspect` (largura/altura) | — | — |
 | `label` | `text` | o texto | — |
 | `toggle` | `default` (`true`/`false`) | booleano | `onChange` |
 
@@ -940,20 +983,32 @@ ou `"#RRGGBB"`.
 | `ui.toast(texto)` / `ui.alert(texto)` | mensagens |
 | `ui.openPanel(id)` | abre outro painel do plugin no editor |
 
-**`storage`** (do plugin, persistente, 256 KB): `get(chave, padrão)`, `set(chave,
+**`storage`** (do plugin, persistente, 16 MB): `get(chave, padrão)`, `set(chave,
 valor)` (valor que vira JSON), `remove(chave)`, `keys()`.
 
 **`fetch(url, opções)`** (permissão de rede): síncrono, devolve
 `{ok, status, url, headers, text(), json()}`. Opções: `method` (`GET POST PUT
 PATCH DELETE HEAD`), `headers` (objeto), `body` (texto ou objeto → JSON),
-`timeout` (ms, 1000 a 30000). Erros: `PermissionError` (sem permissão / domínio
+`timeout` (ms, 1000 a 120000). Erros: `PermissionError` (sem permissão / domínio
 fora da lista) e `NetworkError` (sem conexão, tempo, resposta grande demais).
 
 **`clipboard.readText()` / `clipboard.writeText(texto)`** (permissão de área de transferência).
 
 **`files.pick({types: ["json", "txt", "csv"]})`** (permissão de arquivos): abre o
-seletor do sistema e devolve `{name, size, text(), json()}` (até 1 MB) ou `null`
-se a pessoa cancelar. Só o arquivo escolhido; nada mais do disco.
+seletor do sistema e devolve `{name, size, text(), json(), bytes(), base64()}`
+(até 64 MB) ou `null` se a pessoa cancelar. Só o arquivo escolhido; nada mais do disco.
+
+**`plugin`** (0.4.6, sem permissão: é o próprio pacote):
+
+| Chamada | Devolve |
+| --- | --- |
+| `plugin.getFile("dados/config.json")` | `{name, size, text(), json(), bytes(), base64()}` de um arquivo do pacote (até 64 MB). Caminho relativo; `..`, caminho absoluto ou arquivo ausente = erro. |
+| `plugin.exists("x.png")` | `true`/`false` |
+| `plugin.list("pasta")` | lista dos arquivos do pacote (relativos), opcionalmente de uma pasta |
+| `plugin.id`, `plugin.version` | identidade do plugin instalado |
+
+`bytes()` devolve uma lista de números 0..255; `base64()` o mesmo conteúdo em
+Base64 (para mandar por `fetch` ou guardar em `storage`).
 
 **`console.log/info/warn/error`**: vão para o console do plugin (Plugins > Console).
 
@@ -963,11 +1018,11 @@ se a pessoa cancelar. Só o arquivo escolhido; nada mais do disco.
 "permissions": {"network": ["open-meteo.com"], "clipboard": true, "files": true}
 ```
 
-- **`network`**: até 8 domínios, só o nome (`api.exemplo.com`, sem `https://`,
+- **`network`**: até 64 domínios, só o nome (`api.exemplo.com`, sem `https://`,
   porta ou caminho; `*` é recusado). Vale o domínio e os **subdomínios** dele
   (`open-meteo.com` libera `api.open-meteo.com`). O `fetch` só aceita `https://`,
   sem porta explícita nem `usuario@`, e **não segue redirecionamentos** (um 3xx
-  volta ao script). Resposta até 2 MB, corpo de envio até 256 KB, 15 s por padrão.
+  volta ao script). Resposta até 64 MB, corpo de envio até 32 MB, 15 s por padrão.
 - **`clipboard`** e **`files`**: como acima.
 - **Consentimento**: ao instalar, o app mostra a folha com o que o plugin pede;
   cada permissão vem com uma chave que a pessoa pode desligar antes de instalar.
@@ -980,18 +1035,20 @@ se a pessoa cancelar. Só o arquivo escolhido; nada mais do disco.
 
 | Limite | Valor | Ao estourar |
 | --- | --- | --- |
-| Tempo de CPU por chamada | 5 s (esperas de rede e do seletor não contam) | `LimitError`, a chamada para |
-| Passos por chamada | 20 milhões | `LimitError` |
-| Memória do script | 32 MB vivos | `LimitError` |
-| Profundidade de chamadas | 64 | `RangeError` |
-| Script | 512 KB | recusa na instalação |
+| Tempo de CPU por chamada | 120 s (esperas de rede e do seletor não contam; roda fora da thread da tela) | `LimitError`, a chamada para |
+| Passos por chamada | 2 bilhões | `LimitError` |
+| Memória do script | 256 MB vivos | `LimitError` |
+| Profundidade de chamadas | 256 | `RangeError` |
+| Maior texto / maior lista | 128 MB / 67 milhões de itens | `RangeError` |
+| Script | 8 MB | recusa na instalação |
+| Painéis / controles por painel / ações | 32 / 256 / 128 | recusa na instalação |
 
 Limites e cancelamento (botão **Parar** do painel) **atravessam o `try/catch`** do
 script: um laço infinito não prende o app. O contexto continua válido depois.
 Ciclos de memória (closures que se apontam) são coletados sozinhos.
 
 Erros aparecem **no painel** (com `arquivo:linha:coluna`) e no **console** do
-plugin (últimas 200 linhas, com o `console.log` do script). Um script que falha
+plugin (últimas 2000 linhas, com o `console.log` do script). Um script que falha
 não derruba o app nem o projeto; o que ele já tinha mudado desfaz num toque.
 Erro na carga do arquivo: corrija, reinstale ou use "Recarregar script" no console.
 

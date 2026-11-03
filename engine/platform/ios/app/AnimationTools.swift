@@ -44,7 +44,35 @@ struct CurveEase: Equatable {
     static let elasticDefaultCycles = 3
     static let elasticDefaultDamping: Float = 0.25
     private var marked: Bool { y2 == CurveEase.paramMarker }
-    var isParametric: Bool { interpolation == 7 || interpolation == 8 || interpolation == 10 }
+    var isParametric: Bool { interpolation == 7 || interpolation == 8 || interpolation == 10 || isCycle }
+    /// 0.4.6: Degraus (9), Repetir (11), Vai e volta (12), Onda (13), Aleatório (14)
+    /// — `ease_cycle_curve` (core/Math.hpp; CurvePanel.kt `cycleCurve`).
+    var isCycle: Bool { interpolation == 9 || (11...14).contains(interpolation) }
+    var stepsCount: Int { interpolation == 9 && marked ? 2 + min(30, max(0, curveRoundHalfUp(x1 * 30))) : 4 }
+    func steps(_ count: Int) -> CurveEase {
+        CurveEase(interpolation: 9, x1: Float(min(32, max(2, count)) - 2) / 30, y1: 0, x2: 0, y2: CurveEase.paramMarker)
+    }
+    var repeatCount: Int { interpolation == 11 && marked ? 1 + min(15, max(0, curveRoundHalfUp(x1 * 15))) : 3 }
+    func repeating(_ count: Int) -> CurveEase {
+        CurveEase(interpolation: 11, x1: Float(min(16, max(1, count)) - 1) / 15, y1: 0, x2: 0, y2: CurveEase.paramMarker)
+    }
+    var pingPongTurns: Int { interpolation == 12 && marked ? 2 * min(8, max(0, curveRoundHalfUp(x1 * 8))) + 1 : 3 }
+    func pingPong(_ turns: Int) -> CurveEase {
+        CurveEase(interpolation: 12, x1: Float((min(17, max(1, turns)) - 1) / 2) / 8, y1: 0, x2: 0, y2: CurveEase.paramMarker)
+    }
+    var waveCycles: Int { interpolation == 13 && marked ? 1 + min(15, max(0, curveRoundHalfUp(x1 * 15))) : 3 }
+    var waveAmplitude: Float { interpolation == 13 && marked ? min(1, max(0, y1)) : 0.3 }
+    func wave(cycles: Int? = nil, amplitude: Float? = nil) -> CurveEase {
+        CurveEase(interpolation: 13, x1: Float(min(16, max(1, cycles ?? waveCycles)) - 1) / 15,
+                  y1: min(1, max(0, amplitude ?? waveAmplitude)), x2: 0, y2: CurveEase.paramMarker)
+    }
+    var randomSteps: Int { interpolation == 14 && marked ? 2 + min(30, max(0, curveRoundHalfUp(x1 * 30))) : 8 }
+    var randomSmooth: Float { interpolation == 14 && marked ? min(1, max(0, y1)) : 0 }
+    var randomSeed: Float { interpolation == 14 && marked ? min(1, max(0, x2)) : 0 }
+    func random(steps: Int? = nil, smooth: Float? = nil, seed: Float? = nil) -> CurveEase {
+        CurveEase(interpolation: 14, x1: Float(min(32, max(2, steps ?? randomSteps)) - 2) / 30,
+                  y1: min(1, max(0, smooth ?? randomSmooth)), x2: min(1, max(0, seed ?? randomSeed)), y2: CurveEase.paramMarker)
+    }
     var supportsInversion: Bool { (1...7).contains(interpolation) || interpolation == 10 || (interpolation == 8 && marked) }
     var overshootAmount: Float { interpolation == 10 && marked ? min(1, max(0, x1)) : CurveEase.overshootDefaultAmount }
     func overshoot(amount: Float? = nil) -> CurveEase {
@@ -100,7 +128,11 @@ struct CurveEase: Equatable {
             if marked { return curveElastic(t, cycles: x1, damping: y1, reverse: x2 < 0.5) }
             if t <= 0 { return 0 }; if t >= 1 { return 1 }
             return Float((1-exp(-6*Double(t))*cos(6*Double.pi*Double(t)))/(1-exp(-6)))
-        case 9: return floor(min(1,max(0,t))*4)/4
+        case 9: return marked ? curveCycle(9, t, x1, y1, x2) : floor(min(1,max(0,t))*4)/4
+        case 11: let e = repeating(repeatCount); return curveCycle(11, t, e.x1, e.y1, e.x2)
+        case 12: let e = pingPong(pingPongTurns); return curveCycle(12, t, e.x1, e.y1, e.x2)
+        case 13: let e = wave(); return curveCycle(13, t, e.x1, e.y1, e.x2)
+        case 14: let e = random(); return curveCycle(14, t, e.x1, e.y1, e.x2)
         case 10: return marked ? curveOvershoot(t, amount: x1, reverse: x2 < 0.5) : curveOvershoot(t, amount: CurveEase.overshootDefaultAmount, reverse: false)
         default:
             // `keyframe_ease` (Curve.hpp): a força repete a MESMA bézier sobre o resultado.
@@ -164,6 +196,10 @@ struct CurveEase: Equatable {
         case 8: key = "pn_textpreset_elastic"
         case 9: key = "pn_curve_steps4"
         case 10: key = "curve_type_overshoot"
+        case 11: key = "curve_type_repeat"
+        case 12: key = "curve_type_pingpong"
+        case 13: key = "curve_type_wave"
+        case 14: key = "curve_type_random"
         default: key = "pn_ease_bezier_custom"
         }
         return AureaText.t(key)
@@ -332,6 +368,92 @@ func curveOvershoot(_ t: Float, amount: Float, reverse: Bool) -> Float {
     return reverse ? 1 - v : v
 }
 
+/// 0.4.6: a alça das curvas com parâmetros (par do CurvePanel.kt): horizontal = A
+/// (quantidade/oscilações/degraus/ciclos), vertical = B (força, amortecimento,
+/// amplitude, suavizar). `paramB` nulo = a curva só tem A.
+extension CurveEase {
+    var paramA: Float {
+        switch interpolation {
+        case 7: return Float(bounceCount - 1) / 7
+        case 8: return Float(elasticCycles - 1) / 7
+        case 10: return overshootAmount
+        case 9: return Float(stepsCount - 2) / 30
+        case 11: return Float(repeatCount - 1) / 15
+        case 12: return Float((pingPongTurns - 1) / 2) / 8
+        case 13: return Float(waveCycles - 1) / 15
+        case 14: return Float(randomSteps - 2) / 30
+        default: return 0
+        }
+    }
+    var paramB: Float? {
+        switch interpolation {
+        case 7: return (bounceStrength - 0.1) / 0.8
+        case 8: return elasticDamping
+        case 13: return waveAmplitude
+        case 14: return randomSmooth
+        default: return nil
+        }
+    }
+    func withParams(_ a: Float, _ b: Float?) -> CurveEase {
+        let x = min(1, max(0, a)), y = min(1, max(0, b ?? 0))
+        switch interpolation {
+        case 7: return bounce(count: 1 + Int((x * 7).rounded()), strength: 0.1 + y * 0.8)
+        case 8: return elastic(cycles: 1 + Int((x * 7).rounded()), damping: y)
+        case 10: return overshoot(amount: x)
+        case 9: return steps(2 + Int((x * 30).rounded()))
+        case 11: return repeating(1 + Int((x * 15).rounded()))
+        case 12: return pingPong(2 * Int((x * 8).rounded()) + 1)
+        case 13: return wave(cycles: 1 + Int((x * 15).rounded()), amplitude: y)
+        case 14: return random(steps: 2 + Int((x * 30).rounded()), smooth: y)
+        default: return self
+        }
+    }
+}
+/// Onde mora a alça de parâmetros no gráfico: 15 %..85 % da largura/altura.
+let curveParamMin: Float = 0.15
+let curveParamSpan: Float = 0.7
+
+/// O `std::round` do motor (meio para longe do zero) nos valores ≥ 0.
+func curveRoundHalfUp(_ x: Float) -> Int { Int(floor(x + 0.5)) }
+
+/// `ease_hash01` (core/Math.hpp): a mesma conta em u32.
+func curveHash01(_ i: UInt32, _ seed: UInt32) -> Float {
+    var h = (i &* 0x9E3779B1) ^ (seed &+ 0x7F4A7C15)
+    h ^= h >> 16; h = h &* 0x85EBCA6B; h ^= h >> 13; h = h &* 0xC2B2AE35; h ^= h >> 16
+    return Float(h >> 8) * (1 / 16777216)
+}
+
+/// `ease_cycle_curve` (core/Math.hpp; CurvePanel.kt `cycleCurve`).
+func curveCycle(_ kind: Int, _ t: Float, _ a: Float, _ b: Float, _ c: Float) -> Float {
+    if t <= 0 { return 0 }; if t >= 1 { return 1 }
+    switch kind {
+    case 9:
+        let n = Float(2 + min(30, max(0, curveRoundHalfUp(a * 30))))
+        return floor(t * n) / n
+    case 11:
+        let p = t * Float(1 + min(15, max(0, curveRoundHalfUp(a * 15))))
+        return p - floor(p)
+    case 12:
+        let h = 2 * min(8, max(0, curveRoundHalfUp(a * 8))) + 1
+        let p = t * Float(h); let k = Int(floor(p)); let f = p - Float(k)
+        return k % 2 == 0 ? f : 1 - f
+    case 13:
+        let n = Float(1 + min(15, max(0, curveRoundHalfUp(a * 15))))
+        return t + 0.5 * min(1, max(0, b)) * sin(2 * Float.pi * n * t)
+    case 14:
+        let n = 2 + min(30, max(0, curveRoundHalfUp(a * 30)))
+        let seed = UInt32(min(1, max(0, c)) * 65535)
+        let p = t * Float(n); let k = min(Int(floor(p)), n - 1)
+        func level(_ i: Int) -> Float { i <= 0 ? 0 : i >= n ? 1 : curveHash01(UInt32(i), seed) }
+        let l0 = level(k), l1 = level(k + 1), f = p - Float(k)
+        let smooth = min(1, max(0, b))
+        if smooth <= 0 { return l0 }
+        let g = min(1, max(0, (f - (1 - smooth)) / smooth))
+        return l0 + (l1 - l0) * (g * g * (3 - 2 * g))
+    default: return t
+    }
+}
+
 /// `elastic_ease` (core/Math.hpp; CurvePanel.kt `elasticCurve`): ciclos inteiros 1..8, k = 2 + 16·B.
 func curveElastic(_ t: Float, cycles: Float, damping: Float, reverse: Bool) -> Float {
     if t <= 0 { return 0 }; if t >= 1 { return 1 }
@@ -444,19 +566,23 @@ func curveSlots(_ c: CurveCategory) -> [CurveSlot?] {
         return [CurveSlot(nameKey: "pn_textpreset_bounce", ease: curveDefaultBounce),
                 CurveSlot(nameKey: "pn_textpreset_elastic", ease: CurveEase(interpolation: 8, x1: 0, y1: 0, x2: 1, y2: 1).elastic()),
                 CurveSlot(nameKey: "curve_type_overshoot", ease: CurveEase(interpolation: 10, x1: 0, y1: 0, x2: 1, y2: 1).overshoot()),
-                nil]
+                // 0.4.6: "Oscilar" = a Onda.
+                CurveSlot(nameKey: "curve_type_wave", ease: CurveEase(interpolation: 13, x1: 0, y1: 0, x2: 0, y2: 0).wave())]
     case .steps:
         return [CurveSlot(nameKey: "pn_curve_steps4", ease: CurveEase(interpolation: 9, x1: 0, y1: 0, x2: 1, y2: 1)),
                 CurveSlot(nameKey: "pn_ease_hold", ease: CurveEase(interpolation: 0, x1: 0, y1: 0, x2: 1, y2: 1)),
-                nil, nil]
+                // 0.4.6: repetição e aleatório.
+                CurveSlot(nameKey: "curve_type_repeat", ease: CurveEase(interpolation: 11, x1: 0, y1: 0, x2: 0, y2: 0).repeating(3)),
+                CurveSlot(nameKey: "curve_type_pingpong", ease: CurveEase(interpolation: 12, x1: 0, y1: 0, x2: 0, y2: 0).pingPong(3)),
+                CurveSlot(nameKey: "curve_type_random", ease: CurveEase(interpolation: 14, x1: 0, y1: 0, x2: 0, y2: 0).random())]
     }
 }
 
 /// O grupo que contém a curva do trecho (o grupo ativo).
 func curveCategoryOf(_ e: CurveEase) -> CurveCategory {
     switch e.interpolation {
-    case 7, 8, 10: return .bounces
-    case 9, 0: return .steps
+    case 7, 8, 10, 13: return .bounces
+    case 9, 0, 11, 12, 14: return .steps
     default: return .curves
     }
 }
@@ -502,6 +628,8 @@ private struct NativeCurveGraph: View {
     let onChange: (CurveEase) -> Void
     let onEnd: () -> Void
     @State private var drag: HandleDrag?
+    /// 0.4.6: arrasto da alça de parâmetros (A e B de partida, a curva de partida).
+    @State private var paramDrag: (a0: Float, b0: Float?, ease0: CurveEase, began: Bool)?
     @GestureState private var touching = false
     private struct HandleDrag {
         var first: Bool
@@ -576,6 +704,16 @@ private struct NativeCurveGraph: View {
         }
         context.stroke(curve, with: .color(curveGreen), style: StrokeStyle(lineWidth: 3, lineCap: .round))
         for p in [start, end] { context.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(curveGreen)) }
+        if !ease.hasHandles && ease.isParametric {
+            let c = CGPoint(x: curveInset + CGFloat(curveParamMin + ease.paramA * curveParamSpan) * w,
+                            y: curveInset + (1 - CGFloat(curveParamMin + (ease.paramB ?? 0.5) * curveParamSpan)) * h)
+            let r: CGFloat = paramDrag != nil ? 14.4 : 12
+            let rect = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
+            context.fill(Path(ellipseIn: rect), with: .color(.white))
+            context.stroke(Path(ellipseIn: rect), with: .color(curveGreen), lineWidth: 2)
+            line(CGPoint(x: c.x - 5, y: c.y), CGPoint(x: c.x + 5, y: c.y), curveGreen, 1.5)
+            if ease.paramB != nil { line(CGPoint(x: c.x, y: c.y - 5), CGPoint(x: c.x, y: c.y + 5), curveGreen, 1.5) }
+        }
         if ease.hasHandles {
             let hh = ease.handles
             for (index, p) in [point(hh[0], hh[1]), point(hh[2], hh[3])].enumerated() {
@@ -588,6 +726,20 @@ private struct NativeCurveGraph: View {
     }
     private func move(_ value: DragGesture.Value, size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
+        if !ease.hasHandles && ease.isParametric {
+            if paramDrag == nil { paramDrag = (ease.paramA, ease.paramB, ease, false) }
+            guard var p = paramDrag else { return }
+            if !p.began {
+                guard hypot(value.translation.width, value.translation.height) >= 3 else { return }
+                p.began = true; onBegin()
+            }
+            let w = Float(max(1, size.width - 2 * curveInset)), h = Float(max(1, size.height - 2 * curveInset))
+            let next = p.ease0.withParams(p.a0 + Float(value.translation.width) / (w * curveParamSpan),
+                                          p.b0.map { $0 - Float(value.translation.height) / (h * curveParamSpan) })
+            paramDrag = p
+            if !next.same(ease) { onChange(next) }
+            return
+        }
         if drag == nil {
             guard ease.hasHandles else { return }
             let h = ease.handles
@@ -608,6 +760,17 @@ private struct NativeCurveGraph: View {
         drag = current; onChange(current.ease)
     }
     private func finish() {
+        if let p = paramDrag {
+            paramDrag = nil
+            if p.began { onEnd() }
+            else if p.ease0.interpolation == 14 {
+                // Toque sem arrastar no Aleatório: sorteia outro desenho.
+                onBegin()
+                onChange(p.ease0.random(seed: Float((Int(p.ease0.randomSeed * 65535) + 7919) % 65536) / 65535))
+                onEnd()
+            }
+            return
+        }
         let began = drag?.began == true; drag = nil
         if began { onEnd() }
     }
@@ -700,9 +863,6 @@ struct NativeCurvePanel: View {
                     divider
                     VStack(spacing: 0) {
                         // Os parâmetros (Quique, Elástico, Passar do ponto) numa faixa no TOPO do gráfico.
-                        if graphMode == 0 && ease.interpolation == 7 { bounceControls(segment) }
-                        if graphMode == 0 && ease.interpolation == 10 { overshootControls(segment) }
-                        if graphMode == 0 && ease.interpolation == 8 { elasticControls(segment) }
                         ZStack(alignment: .bottom) {
                             if graphMode == 0 {
                                 NativeCurveGraph(ease: ease, samples: samples, progress: progress(segment), overshoot: overshoot,
@@ -1120,6 +1280,47 @@ struct NativeCurvePanel: View {
                 in: 0...1, onEditingChanged: { if $0 { model.beginGesture("elastic") } else { model.endGesture() } })
                 .accessibilityLabel(AureaText.t("curve_param_damping")).accessibilityIdentifier("curve.elastic.damping")
         }.font(.aurea(size: PanelMetrics.label)).tint(curveGreen).padding(.horizontal, 6).frame(height: 48)
+    }
+    /// 0.4.6: Degraus, Repetir, Vai e volta, Onda e Aleatório (um desfazer por arrasto).
+    @ViewBuilder private func cycleControls(_ segment: Segment) -> some View {
+        HStack(spacing: 6) {
+            switch ease.interpolation {
+            case 9:
+                cycleCount("curve_param_steps", ease.stepsCount, 2...32, "curve.steps.count", "steps") { apply(ease.steps($0), to: segment.start) }
+            case 11:
+                cycleCount("curve_param_repeats", ease.repeatCount, 1...16, "curve.repeat.count", "repeat") { apply(ease.repeating($0), to: segment.start) }
+            case 12:
+                cycleCount("curve_param_turns", ease.pingPongTurns, 1...17, "curve.pingpong.turns", "pingpong", by: 2) { apply(ease.pingPong($0), to: segment.start) }
+            case 13:
+                cycleCount("curve_param_cycles", ease.waveCycles, 1...16, "curve.wave.cycles", "wave") { apply(ease.wave(cycles: $0), to: segment.start) }
+                Slider(value: Binding(get: { ease.waveAmplitude }, set: { apply(ease.wave(amplitude: $0), to: segment.start) }),
+                    in: 0...1, onEditingChanged: { if $0 { model.beginGesture("wave") } else { model.endGesture() } })
+                    .accessibilityLabel(AureaText.t("curve_param_amplitude")).accessibilityIdentifier("curve.wave.amplitude")
+            default:
+                cycleCount("curve_param_steps", ease.randomSteps, 2...32, "curve.random.steps", "random") { apply(ease.random(steps: $0), to: segment.start) }
+                Slider(value: Binding(get: { ease.randomSmooth }, set: { apply(ease.random(smooth: $0), to: segment.start) }),
+                    in: 0...1, onEditingChanged: { if $0 { model.beginGesture("random") } else { model.endGesture() } })
+                    .accessibilityLabel(AureaText.t("curve_param_smooth")).accessibilityIdentifier("curve.random.smooth")
+                Button(AureaText.t("curve_param_seed")) {
+                    apply(ease.random(seed: Float((Int(ease.randomSeed * 65535) + 7919) % 65536) / 65535), to: segment.start)
+                }.font(.aurea(size: PanelMetrics.note)).accessibilityIdentifier("curve.random.seed")
+            }
+        }.font(.aurea(size: PanelMetrics.label)).tint(curveGreen).padding(.horizontal, 6).frame(height: 48)
+    }
+    /// Um inteiro da curva: rótulo com o valor e slider em passos (`by` 2 = só ímpares).
+    private func cycleCount(_ key: String, _ value: Int, _ range: ClosedRange<Int>, _ id: String, _ gesture: String,
+                            by: Int = 1, _ set: @escaping (Int) -> Void) -> some View {
+        HStack(spacing: 4) {
+            Text(AureaText.t(key, value)).font(.aurea(size: PanelMetrics.note)).lineLimit(1)
+            Slider(value: Binding(get: { Float(value) }, set: { raw in
+                    let lo = range.lowerBound
+                    let n = lo + Int(((raw - Float(lo)) / Float(by)).rounded()) * by
+                    let clamped = min(range.upperBound, max(lo, n))
+                    if clamped != value { set(clamped) }
+                }), in: Float(range.lowerBound)...Float(range.upperBound), step: Float(by),
+                onEditingChanged: { if $0 { model.beginGesture(gesture) } else { model.endGesture() } })
+                .accessibilityLabel(AureaText.t(key, value)).accessibilityIdentifier(id)
+        }
     }
     private func jump(_ direction: Int) {
         guard let segment, let edge = compositionFrame(direction < 0 ? segment.start.time : segment.end.time),

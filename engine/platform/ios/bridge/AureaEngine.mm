@@ -47,6 +47,7 @@
 #include "aurea/tracking/CameraTrackData.hpp"
 #include "aurea/hyper/Hyper.hpp"
 #include "aurea/hyper/HyperNeural.hpp"
+#include "aurea/assistant/Assistant.hpp"
 #include <atomic>
 #include <mutex>
 
@@ -2259,17 +2260,19 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
 
 - (NSArray<NSNumber*>*)sceneSettings {
     auto* e = self.engine; if (!e) return @[];
-    float post[6]{}, floor[8]{};
-    e->query_scene3d_post(post); e->query_scene_floor(floor);
-    // [8] (0.4.1): 1 = o chão é o "Reflective Floor". Par do Android.
+    float post[6]{}, floor[8]{}, fog[6]{};
+    e->query_scene3d_post(post); e->query_scene_floor(floor); e->query_scene3d_fog(fog);
+    // [8] (0.4.1): 1 = o chão é o "Reflective Floor". [9..14] (0.4.6): névoa
+    // (ligada, densidade, raios, cor RGB). Par do Android (nativeSceneSettings).
     return @[@(e->studio_environment()), @(floor[0]), @(post[0]), @(post[1]), @(post[2]), @(post[3]), @(post[4]), @(post[5]),
-             @(aurea::Engine::is_reflective_floor(floor) ? 1.f : 0.f)];
+             @(aurea::Engine::is_reflective_floor(floor) ? 1.f : 0.f),
+             @(fog[0]), @(fog[1]), @(fog[2]), @(fog[3]), @(fog[4]), @(fog[5])];
 }
 - (BOOL)setSceneSetting:(uint32_t)parameter value:(float)value {
     if (!self.engine || !std::isfinite(value)) return NO;
     auto& e = *self.engine;
-    float post[6]{}, floor[8]{};
-    e.query_scene3d_post(post); e.query_scene_floor(floor);
+    float post[6]{}, floor[8]{}, fog[6]{};
+    e.query_scene3d_post(post); e.query_scene_floor(floor); e.query_scene3d_fog(fog);
     switch (parameter) {
     case 0: {
         // Fonte de luz (0.3.1): só a luz. Antes este caso regravava o chão com
@@ -2301,6 +2304,13 @@ NSDictionary<NSString*, id>* font_dictionary(const aurea::text::FontEntry& font)
     case 7: return e.set_scene3d_bloom(post[3] > 0, post[4], value);
     // 0.4.1: o "Reflective Floor" num toque (Engine::apply_reflective_floor).
     case 8: return e.apply_reflective_floor();
+    // 0.4.6: névoa volumétrica — ligar (9; sem densidade nasce leve), densidade
+    // (10), raios (11); reflexos de tela (12) e oclusão ambiente (13). Par do Android.
+    case 9: return e.set_scene3d_fog(value > 0, value > 0 && fog[1] <= 0 ? 0.0006f : fog[1], fog[2], fog[3], fog[4], fog[5]);
+    case 10: return e.set_scene3d_fog(fog[0] > 0, value, fog[2], fog[3], fog[4], fog[5]);
+    case 11: return e.set_scene3d_fog(fog[0] > 0, fog[1], value, fog[3], fog[4], fog[5]);
+    case 12: e.renderer().scene_renderer().set_screen_reflections(value > 0); return YES;
+    case 13: e.renderer().scene_renderer().set_ambient_occlusion(value > 0); return YES;
     default: return false;
     }
 }
@@ -2674,6 +2684,24 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance {
     if (auto* e = self.engine) e->set_scene_editor(enabled != NO, yaw, pitch, distance);
 }
+// 0.4.6: assistente de IA (assistant/Assistant.hpp): ferramentas, instruções e execução.
+- (NSString*)assistantTools { return to_ns(aurea::assistant::tools_json()); }
+- (NSString*)assistantSystemPrompt:(NSString*)language version:(NSString*)version {
+    return to_ns(aurea::assistant::system_prompt(to_std(language), to_std(version)));
+}
+- (NSString*)assistantCall:(NSString*)name args:(NSString*)args {
+    auto* e = self.engine; if (!e) return @"{\"ok\":false,\"error\":\"engine unavailable\"}";
+    return to_ns(e->assistant_call(to_std(name), to_std(args)));
+}
+// 0.4.6: vistas do palco como no After Effects (Engine::set_view_mode).
+- (BOOL)setViewMode:(int)mode { auto* e = self.engine; return e && mode >= 0 && e->set_view_mode(static_cast<uint32_t>(mode)); }
+- (BOOL)setViewOrbitYaw:(float)yaw pitch:(float)pitch distance:(float)distance { auto* e = self.engine; return e && e->set_view_orbit(yaw, pitch, distance); }
+- (NSArray<NSNumber*>*)queryView {
+    auto* e = self.engine; if (!e) return @[@0, @0, @0, @1, @0];
+    float v[5]{};
+    e->query_view(v);
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4])];
+}
 - (long long)scenePickX:(float)x y:(float)y radius:(float)radius {
     auto* e = self.engine;
     return e ? static_cast<long long>(e->scene_pick(x, y, radius)) : 0;
@@ -2703,9 +2731,10 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 // --- Lente da câmera 3D (ver Engine::query_camera_lens) ----------------------
 - (NSArray<NSNumber*>*)cameraLens:(long long)layer {
-    float values[10]{};
-    if (!self.engine || !self.engine->query_camera_lens(static_cast<aurea::u64>(layer), values, 10)) return @[];
-    return floats_to_array(values, 10);
+    // 0.4.6: 11 valores — o [10] é a câmera paralela.
+    float values[11]{};
+    if (!self.engine || !self.engine->query_camera_lens(static_cast<aurea::u64>(layer), values, 11)) return @[];
+    return floats_to_array(values, 11);
 }
 - (float)pickFocusDistance:(long long)layer x:(float)x y:(float)y {
     if (!self.engine) return -1.f;
@@ -3527,9 +3556,12 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     return to_ns(aurea::ae::report_json(report));
 }
 - (NSString*)importAeData:(NSData*)data fileName:(NSString*)fileName layer:(uint64_t)layer {
+    return [self importAeData:data fileName:fileName layer:layer textAnimatorPro:NO];
+}
+- (NSString*)importAeData:(NSData*)data fileName:(NSString*)fileName layer:(uint64_t)layer textAnimatorPro:(BOOL)pro {
     auto* e = self.engine;
     aurea::ae::ImportReport report;
-    if (e && data) report = e->import_ae_data(std::string(static_cast<const char*>(data.bytes), data.length), to_std(fileName), layer);
+    if (e && data) report = e->import_ae_data(std::string(static_cast<const char*>(data.bytes), data.length), to_std(fileName), layer, pro);
     else report.message = e ? "arquivo vazio" : "motor indisponivel";
     return to_ns(aurea::ae::report_json(report));
 }
@@ -3858,6 +3890,36 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (NSString*)saveCaptionBundle:(long long)layer name:(NSString*)name { auto* e = self.engine; return e ? to_ns(e->save_caption_bundle(layer,to_std(name))) : @""; }
 - (BOOL)applyCaptionBundle:(long long)layer data:(NSString*)data { auto* e = self.engine; return e && e->apply_caption_bundle(layer,to_std(data)); }
 - (BOOL)editCaptionTrack:(long long)layer command:(NSString*)command { auto* e = self.engine; return e && e->edit_caption_track(layer, to_std(command)); }
+// 0.4.6: opções da legenda em JSON (presets::caption_options_json), com a aparência própria.
+- (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words optionsJSON:(NSString*)json {
+    auto* e = self.engine; if (!e) return @"Motor indisponível";
+    aurea::text::CaptionOptions o;
+    bool removeFillers = true;
+    if (!aurea::presets::parse_caption_options(to_std(json), o, removeFillers)) return @"Opções de legenda inválidas.";
+    std::vector<aurea::text::CaptionWord> parsed;
+    for (NSDictionary* item in words) {
+        NSString* word = item[@"word"];
+        const auto start = [item[@"start"] doubleValue], end = [item[@"end"] doubleValue];
+        if (![word isKindOfClass:[NSString class]] || !std::isfinite(start) || !std::isfinite(end) || end <= start) continue;
+        parsed.push_back({to_std(word), start, end});
+    }
+    if (removeFillers) parsed = aurea::text::remove_filler_words(parsed);
+    return e->create_captions(layerId, parsed, o).ok() ? @"" : @"Não foi possível gerar legendas. Confira os tempos e o áudio da camada.";
+}
+- (NSString*)captionOptions:(long long)layer { auto* e = self.engine; return e ? to_ns(e->caption_options(layer)) : @""; }
+- (BOOL)setCaptionOptions:(long long)layer json:(NSString*)json {
+    auto* e = self.engine; if (!e) return NO;
+    aurea::text::CaptionOptions o; bool removeFillers = true;
+    return aurea::presets::parse_caption_options(to_std(json), o, removeFillers) && e->set_caption_options(layer, o);
+}
+- (NSString*)captionTemplates { return to_ns(aurea::presets::caption_templates_json()); }
+- (NSString*)captionOptions:(NSString*)json withTemplate:(NSString*)templateId {
+    return to_ns(aurea::presets::caption_with_template(to_std(json), to_std(templateId)));
+}
+- (NSString*)captionPreview:(NSString*)json {
+    aurea::text::CaptionOptions o; bool removeFillers = true;
+    return aurea::presets::parse_caption_options(to_std(json), o, removeFillers) ? to_ns(aurea::presets::caption_preview_json(o)) : @"";
+}
 - (uint32_t)captionCount:(long long)layerId { auto* e = self.engine; return e ? e->caption_count(layerId) : 0; }
 - (void)removeCaptions:(long long)layerId { if (auto* e = self.engine) (void)e->remove_captions(layerId); }
 - (NSArray<NSNumber*>*)trackCurve:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param from:(int32_t)from to:(int32_t)to {
@@ -4789,6 +4851,42 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     float raw[20]{};
     for (NSUInteger i = 0; i < values.count; ++i) raw[i] = values[i].floatValue;
     return e->set_text_style(layerId, raw, static_cast<u32>(values.count));
+}
+
+- (BOOL)setPositionTangents:(long long)layerId time:(long long)time values:(NSArray<NSNumber*>*)values {
+    auto* e = self.engine;
+    if (!e || values.count < 6) return NO;
+    float v[6]{};
+    for (NSUInteger i = 0; i < 6; ++i) v[i] = values[i].floatValue;
+    return e->set_position_tangents(layerId, time, v);
+}
+- (NSArray<NSNumber*>*)positionPath:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return @[];
+    std::vector<float> buf(2 + 600 * 2 + 256 * 7);
+    const uint32_t n = e->query_position_path(layerId, buf.data(), static_cast<uint32_t>(buf.size()));
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:n];
+    for (uint32_t i = 0; i < n; ++i) [out addObject:@(buf[i])];
+    return out;
+}
+- (BOOL)setLayerMediaLoop:(long long)layerId on:(BOOL)on {
+    auto* e = self.engine;
+    return e && e->set_layer_media_loop(layerId, on);
+}
+- (NSArray<NSNumber*>*)textDynamic:(long long)layerId {
+    auto* e = self.engine;
+    double v[6]{};
+    if (!e || !e->query_text_dynamic(layerId, v)) return @[];
+    NSMutableArray<NSNumber*>* out = [NSMutableArray arrayWithCapacity:6];
+    for (double x : v) [out addObject:@(x)];
+    return out;
+}
+- (BOOL)setTextDynamic:(long long)layerId values:(NSArray<NSNumber*>*)values {
+    auto* e = self.engine;
+    if (!e || values.count < 6) return NO;
+    double raw[6]{};
+    for (NSUInteger i = 0; i < 6; ++i) raw[i] = values[i].doubleValue;
+    return e->set_text_dynamic(layerId, raw);
 }
 
 - (void)setLayer:(long long)layerId fadeIn:(int32_t)frames {

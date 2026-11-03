@@ -102,7 +102,7 @@ static_assert(sizeof(Keyframe) == 48, "easePower cabe no preenchimento");
 /// e o Quique configurável. Falso = a curva não tem essa forma de espelhar (o
 /// Quique antigo fica como está).
 inline bool mirror_parametric_ease(Keyframe& k) noexcept {
-    if (!ease_has_params(k.interp)) return false;
+    if (!ease_has_mirror_param(k.interp)) return false;
     if (k.by2 != kEaseParamMarker) {
         if (k.interp == Interpolation::Bounce) return false;
         // Sem parâmetros gravados: os padrões, que são a curva que já se via.

@@ -603,43 +603,67 @@ f64 draw_fraction(f32 amount) noexcept {
 }
 } // namespace
 
-void cut_drawn(const std::vector<Contour>& lines, f32 amount, bool sequential, bool reverse, std::vector<DrawnLine>& out) {
+void cut_drawn(const std::vector<Contour>& lines, f32 amount, bool sequential, bool reverse, std::vector<DrawnLine>& out,
+               f32 start) {
     out.clear();
     const f64 a = draw_fraction(amount);
+    const f64 s0 = std::isfinite(start) ? std::clamp(static_cast<f64>(start), 0.0, 1.0) : 0.0;
     std::vector<f64> L(lines.size());
     f64 total = 0.0;
     for (usize i = 0; i < lines.size(); ++i) { L[i] = length_of(lines[i]); total += L[i]; }
-    // `len` = quanto do contorno i aparece; `reached` = o desenho já chegou nele.
-    auto emit = [&](usize i, f64 len, bool reached) {
+    // Quanto de cada contorno a frente `f` já percorreu (e se chegou nele).
+    std::vector<f64> endLen(lines.size(), 0.0), startLen(lines.size(), 0.0);
+    std::vector<char> reached(lines.size(), 0), passed(lines.size(), 0);
+    auto walk = [&](f64 f, std::vector<f64>& len, std::vector<char>* got) {
+        if (!sequential) {
+            for (usize i = 0; i < lines.size(); ++i) { len[i] = f * L[i]; if (got) (*got)[i] = f > 0.0; }
+            return;
+        }
+        // Um comprimento só, na ordem (do último para o primeiro, invertido): o
+        // que vem antes da posição já está inteiro, o que vem depois não começou.
+        const f64 pos = f * total;
+        f64 before = 0.0;
+        for (usize k = 0; k < lines.size(); ++k) {
+            const usize i = reverse ? lines.size() - 1 - k : k;
+            len[i] = std::clamp(pos - before, 0.0, L[i]);
+            if (got) (*got)[i] = pos > before || f >= 1.0;
+            before += L[i];
+        }
+    };
+    walk(a, endLen, &reached);
+    if (s0 > 0.0) {
+        walk(s0, startLen, nullptr);
+        // O ponto solto (comprimento 0) sai quando o Início passa por ele.
+        if (sequential) {
+            const f64 pos = s0 * total;
+            f64 before = 0.0;
+            for (usize k = 0; k < lines.size(); ++k) {
+                const usize i = reverse ? lines.size() - 1 - k : k;
+                passed[i] = pos > before + L[i] || (L[i] <= 0.0 && pos > before);
+                before += L[i];
+            }
+        } else {
+            for (usize i = 0; i < lines.size(); ++i) passed[i] = L[i] <= 0.0 && s0 > 0.0;
+        }
+    }
+    for (usize i = 0; i < lines.size(); ++i) {
         const Contour& c = lines[i];
-        if (c.pts.empty() || !reached) return;
+        if (c.pts.empty() || !reached[i] || passed[i]) continue;
         if (L[i] <= 0.0) {
             // Um ponto só (o toque do lápis): a tampa aparece quando o desenho chega.
             out.push_back(DrawnLine{c, 0.0, 0.0, 0.0});
-            return;
+            continue;
         }
-        if (len >= L[i] - 1e-9) {
+        const f64 e = endLen[i], st = std::min(startLen[i], e);
+        if (e - st <= 1e-9) continue;
+        if (st <= 1e-9 && e >= L[i] - 1e-9) {
             out.push_back(DrawnLine{c, 0.0, L[i], L[i]});
-            return;
+            continue;
         }
-        if (len <= 1e-9) return;
-        const f64 from = reverse ? L[i] - len : 0.0, to = reverse ? L[i] : len;
+        const f64 from = reverse ? L[i] - e : st, to = reverse ? L[i] - st : e;
         std::vector<Contour> part;
         sub_polyline(c, from, to, part);
-        for (Contour& p : part) out.push_back(DrawnLine{std::move(p), from, to, L[i]});
-    };
-    if (!sequential) {
-        for (usize i = 0; i < lines.size(); ++i) emit(i, a * L[i], a > 0.0);
-        return;
-    }
-    // Um comprimento só, na ordem (do último para o primeiro, invertido): o
-    // que vem antes da posição já está inteiro, o que vem depois não começou.
-    const f64 pos = a * total;
-    f64 before = 0.0;
-    for (usize k = 0; k < lines.size(); ++k) {
-        const usize i = reverse ? lines.size() - 1 - k : k;
-        emit(i, std::clamp(pos - before, 0.0, L[i]), pos > before || a >= 1.0);
-        before += L[i];
+        for (Contour& q : part) out.push_back(DrawnLine{std::move(q), from, to, L[i]});
     }
 }
 
@@ -835,11 +859,12 @@ void group_paint(const VectorGroup& g, f32 tol, std::vector<Contour> lines, cons
     const bool stroke = group_strokes(g);
     // Fração 1 é o desenho de sempre (o mesmo caminho de código, bit a bit).
     const f32 u = draw ? static_cast<f32>(draw_fraction(draw->amount)) : 1.0f;
-    const bool cut = draw && u < 1.0f;
+    const f32 u0 = draw && std::isfinite(draw->start) ? std::clamp(draw->start, 0.0f, 1.0f) : 0.0f;
+    const bool cut = draw && (u < 1.0f || u0 > 0.0f);
     std::vector<DrawnLine> pieces;
     if (cut) {
         out.fillAlpha = draw_fill_alpha(u, stroke);
-        if (stroke) cut_drawn(lines, u, draw->sequential, draw->reverse, pieces);
+        if (stroke) cut_drawn(lines, u, draw->sequential, draw->reverse, pieces, u0);
         for (const DrawnLine& d : pieces) out.drawn.push_back(d.line);
     } else if (draw) {
         out.drawn = lines;
@@ -1123,12 +1148,16 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
     // Progresso do desenho: a fração de cada grupo pelo comprimento dele na
     // camada (grupo sem tinta não gasta tempo do desenho).
     const bool drawing = progress.active();
-    std::vector<f32> amounts;
+    std::vector<f32> amounts, starts;
     if (drawing) {
         std::vector<f64> lengths(list.size(), 0.0);
         for (usize i = 0; i < list.size(); ++i)
             if (group_strokes(*list[i].g) || group_fills(*list[i].g)) lengths[i] = length_under(list[i].lines, list[i].G);
         group_amounts(lengths, progress, amounts);
+        // 0.4.6: o Início pela mesma conta (a fração em que cada grupo começa a sumir).
+        DrawProgress head = progress;
+        head.amount = progress.start;
+        group_amounts(lengths, head, starts);
     }
     // Omega conteúdo (área 06): com um grupo de APAGAR (a borracha do desenho)
     // as peças são guardadas e emitidas no fim — cada grupo de apagar tira a
@@ -1187,7 +1216,7 @@ void build_mesh(const std::vector<VectorGroup>& groups, f64 frame, f32 density, 
         const u32 copies = prep.copies;
         const f32 lastAlpha = prep.lastAlpha;
         DrawProgress mine = progress;
-        if (drawing) mine.amount = amounts[gi];
+        if (drawing) { mine.amount = amounts[gi]; mine.start = gi < starts.size() ? starts[gi] : 0.0f; }
         GroupGeometry geo;
         group_paint(g, prep.tol, std::move(prep.lines), drawing ? &mine : nullptr, geo, &prep.holes);
         if (geo.fill.empty() && geo.stroke.empty()) continue;
@@ -1287,6 +1316,7 @@ u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame, const DrawPr
         // Só o progresso ativo entra: sem ele a chave é a de sempre (cache quente).
         H.u(0x44524157ull);   // "DRAW"
         H.f(static_cast<f32>(draw_fraction(progress.amount)));
+        H.f(progress.start);
         H.u(progress.sequential);
         H.u(progress.reverse);
     }

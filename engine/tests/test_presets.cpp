@@ -556,5 +556,5 @@ AUREA_TEST(Presets, ParametricCurvePresetKeepsItsParameters) {
     presets::Preset bad;
     AUREA_CHECK(!presets::parse(R"({"aurea_preset":1,"kind":"curve","curve":{"interp":2,"y2":-10}})", bad));
     AUREA_CHECK(!presets::parse(R"({"aurea_preset":1,"kind":"curve","curve":{"interp":8,"y2":-5}})", bad));
-    AUREA_CHECK(!presets::parse(R"({"aurea_preset":1,"kind":"curve","curve":{"interp":11}})", bad));
+    AUREA_CHECK(!presets::parse(R"({"aurea_preset":1,"kind":"curve","curve":{"interp":15}})", bad));   // 0.4.6: 11..14 são as curvas de repetição
 }

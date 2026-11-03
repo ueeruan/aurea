@@ -465,6 +465,12 @@ internal fun ProjectTopBar(store: EditorStore, ui: EditorUi) {
                     onRename = { store.renameProject(it) },
                 )
             }
+            // 0.4.6: o assistente de IA (OpenRouter, modelos gratuitos) que age no projeto.
+            ChromeButton(
+                CupertinoGlyph.Sparkles, stringResource(R.string.ai_open),
+                onClick = { if (store.playing) store.pause(); ui.assistant = true },
+                modifier = Modifier.testTag("editor.topbar.assistant"), size = 20.dp, height = ShellDims.TopBar,
+            )
             // 0.3.4 plugins: o menu de plugins (painéis e ações "editor.menu"); some sem plugin.
             com.aurea.aurea.effects.PluginEditorMenuButton(store, ShellDims.TopBar)
             ChromeButton(

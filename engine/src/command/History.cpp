@@ -43,6 +43,7 @@ u64 layer_bytes(const Layer& l) noexcept {
     n += l.text.content.size() + l.text.fontFamily.size() + l.text.fontPath.size();
     for (const auto& segment : l.captions) {
         n += sizeof(text::CaptionSegment) + segment.text.size();
+        if (segment.look) n += segment.look->fontFamily.size() + segment.look->fontPath.size();
         for (const auto& word : segment.words) n += sizeof(text::CaptionToken) + word.text.size();
     }
     n += l.text.spans.size() * sizeof(TextSpan) + l.text.animators.size() * sizeof(TextAnimator);

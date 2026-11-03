@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: texto dinâmico (contador/timecode). -->
+<resources>
+    <string name="text_dynamic">Teks dinamis</string>
+    <string name="text_token_counter">Penghitung</string>
+    <string name="text_token_timecode">Timecode</string>
+    <string name="text_token_time">Waktu</string>
+    <string name="text_token_frame">Frame</string>
+    <string name="text_token_insert">Sisipkan %1$s</string>
+    <string name="text_counter_from">Dari</string>
+    <string name="text_counter_to">Sampai</string>
+    <string name="text_counter_decimals">Angka desimal</string>
+    <string name="text_counter_grouping">Pemisah ribuan</string>
+</resources>

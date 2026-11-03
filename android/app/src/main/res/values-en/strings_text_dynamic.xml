@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: texto dinâmico (contador/timecode). -->
+<resources>
+    <string name="text_dynamic">Dynamic text</string>
+    <string name="text_token_counter">Counter</string>
+    <string name="text_token_timecode">Timecode</string>
+    <string name="text_token_time">Time</string>
+    <string name="text_token_frame">Frame</string>
+    <string name="text_token_insert">Insert %1$s</string>
+    <string name="text_counter_from">From</string>
+    <string name="text_counter_to">To</string>
+    <string name="text_counter_decimals">Decimal places</string>
+    <string name="text_counter_grouping">Thousands separator</string>
+</resources>

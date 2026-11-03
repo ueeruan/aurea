@@ -141,6 +141,68 @@ struct CpuManager {
 
 std::string detail_of(const Result<std::string>& r) { return std::string(r.status().detail()); }
 
+// PNG RGBA8 sem compressão (deflate "stored"), só para as texturas de teste (0.4.6).
+std::string make_png(u32 w, u32 h, const std::vector<u8>& rgba) {
+    auto be32 = [](std::string& s, u32 v) {
+        s += static_cast<char>(v >> 24); s += static_cast<char>(v >> 16);
+        s += static_cast<char>(v >> 8); s += static_cast<char>(v);
+    };
+    std::string raw;
+    for (u32 y = 0; y < h; ++y) {
+        raw += '\0';
+        raw.append(reinterpret_cast<const char*>(rgba.data()) + static_cast<usize>(y) * w * 4, static_cast<usize>(w) * 4);
+    }
+    std::string z = "\x78\x01";
+    for (usize at = 0; at < raw.size() || at == 0;) {
+        const usize n = std::min<usize>(65535, raw.size() - at);
+        const bool last = at + n >= raw.size();
+        z += static_cast<char>(last ? 1 : 0);
+        put16(z, static_cast<u32>(n));
+        put16(z, static_cast<u32>(~n & 0xFFFF));
+        z.append(raw, at, n);
+        at += n;
+        if (last) break;
+    }
+    u32 a = 1, b = 0;
+    for (const unsigned char c : raw) { a = (a + c) % 65521; b = (b + a) % 65521; }
+    be32(z, (b << 16) | a);
+    auto chunk = [&](std::string& png, const char* type, const std::string& data) {
+        be32(png, static_cast<u32>(data.size()));
+        const std::string body = std::string(type, 4) + data;
+        png += body;
+        be32(png, crc32(body));
+    };
+    std::string ihdr;
+    be32(ihdr, w); be32(ihdr, h);
+    ihdr += static_cast<char>(8); ihdr += static_cast<char>(6);
+    ihdr += '\0'; ihdr += '\0'; ihdr += '\0';
+    std::string png = "\x89PNG\r\n\x1a\n";
+    chunk(png, "IHDR", ihdr);
+    chunk(png, "IDAT", z);
+    chunk(png, "IEND", "");
+    return png;
+}
+
+/// Plugin de 1 passe que lê duas imagens do pacote (0.4.6, getFile).
+std::string texture_manifest(const std::string& id) {
+    return "{\"aureaPlugin\":1,\"id\":\"" + id + "\",\"version\":\"1.0.0\",\"name\":\"Tex\",\"kind\":\"shader\","
+           "\"params\":[{\"id\":\"forca\",\"type\":\"float\",\"default\":1}],"
+           "\"textures\":{\"lut\":{\"file\":\"luts/rg.png\",\"colorSpace\":\"data\",\"filter\":\"nearest\"},\"cor\":\"cinza.png\"},"
+           "\"passes\":[{\"shader\":\"main.frag\"}]}";
+}
+const char* kTextureShader =
+    "vec4 aurea_main(vec2 uv) {\n"
+    "    vec2 rg = texture(getFile(lut), vec2(uv.x, 0.5)).rg;\n"
+    "    float g = texture(getFile(cor), vec2(0.5)).r;\n"
+    "    return vec4(rg * forca, g, 1.0);\n"
+    "}\n";
+std::vector<std::pair<std::string, std::string>> texture_package(const std::string& id) {
+    return {{"plugin.json", texture_manifest(id)},
+            {"main.frag", kTextureShader},
+            {"luts/rg.png", make_png(2, 1, {255, 0, 0, 255, 0, 255, 0, 255})},
+            {"cinza.png", make_png(1, 1, {128, 128, 128, 255})}};
+}
+
 } // namespace
 
 // =============================================================================
@@ -182,18 +244,18 @@ AUREA_TEST(Plugins, ManifestValidationNamesFieldAndReason) {
     AUREA_CHECK_EQ(m.passes.size(), static_cast<usize>(1));
     struct Case { std::string json; const char* expect; };
     std::string nine = "{\"aureaPlugin\":1,\"id\":\"com.x.nine\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\",\"passes\":[";
-    for (int i = 0; i < 9; ++i) nine += std::string(i ? "," : "") + "{\"shader\":\"p" + std::to_string(i) + ".frag\""
-                                    + (i < 8 ? ",\"target\":\"t" + std::to_string(i) + "\"" : "") + "}";
+    for (int i = 0; i < 33; ++i) nine += std::string(i ? "," : "") + "{\"shader\":\"p" + std::to_string(i) + ".frag\""
+                                    + (i < 32 ? ",\"target\":\"t" + std::to_string(i) + "\"" : "") + "}";
     nine += "]}";
     std::string many = "{\"aureaPlugin\":1,\"id\":\"com.x.many\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\",\"params\":[";
-    for (int i = 0; i < 17; ++i) many += std::string(i ? "," : "") + "{\"id\":\"p" + std::to_string(i) + "\",\"type\":\"float\"}";
+    for (int i = 0; i < 65; ++i) many += std::string(i ? "," : "") + "{\"id\":\"p" + std::to_string(i) + "\",\"type\":\"float\"}";
     many += "],\"passes\":[{\"shader\":\"a.frag\"}]}";
     const Case cases[] = {
         {one_pass_manifest("AB"), "\"id\" invalido"},
         {one_pass_manifest("Com.Upper.Case"), "\"id\" invalido"},
         {one_pass_manifest("com.x.ver", "1.0"), "\"version\""},
-        {nine, "9 passes (limite 8)"},
-        {many, "17 parametros (limite 16)"},
+        {nine, "33 passes (limite 32)"},
+        {many, "65 parametros (limite 64)"},
         {one_pass_manifest("com.x.res", "1.0.0", "a.frag", "{\"id\":\"mix\",\"type\":\"float\"}"), "id invalido"},
         {one_pass_manifest("com.x.enum", "1.0.0", "a.frag", "{\"id\":\"mode\",\"type\":\"enum\"}"), "options"},
         {one_pass_manifest("com.x.type", "1.0.0", "a.frag", "{\"id\":\"q\",\"type\":\"vec9\"}"), "tipo desconhecido"},
@@ -224,6 +286,83 @@ AUREA_TEST(Plugins, ManifestValidationNamesFieldAndReason) {
     AUREA_CHECK_EQ(plugins::localized(c.name, "pt-BR"), std::string("Cor"));
     AUREA_CHECK(plugins::compare_versions("2.10.3", "2.9.9") > 0);
     AUREA_CHECK(plugins::compare_versions("1.0.0", "1.0.0") == 0);
+}
+
+// 0.4.6: "textures" (getFile no GLSL) — declaração, amarração e recusas.
+AUREA_TEST(Plugins, PackageTexturesAreDeclaredAfterInputsWithGetFile) {
+    plugins::Manifest m;
+    std::string err;
+    AUREA_CHECK_MSG(plugins::parse_manifest(texture_manifest("com.x.tex"), m, err), err.c_str());
+    AUREA_CHECK_EQ(m.textures.size(), static_cast<usize>(2));
+    if (m.textures.size() != 2) return;
+    AUREA_CHECK(m.textures[0].name == "lut" && m.textures[0].data && m.textures[0].filter == 1);
+    AUREA_CHECK(m.textures[1].name == "cor" && !m.textures[1].data && m.textures[1].file == "cinza.png");
+    const std::string h = plugins::shader_header(m, 0);
+    AUREA_CHECK(h.find("binding = 1) uniform sampler2D lut;") != std::string::npos);
+    AUREA_CHECK(h.find("binding = 2) uniform sampler2D cor;") != std::string::npos);
+    AUREA_CHECK(h.find("#define getFile(name) (name)") != std::string::npos);
+    AUREA_CHECK_MSG(h.find("vec4 params[1];") != std::string::npos, "o bloco declara so os parametros do plugin");
+    std::vector<u32> spirv;
+    AUREA_CHECK_MSG(plugins::compile_pass(m, 0, kTextureShader, spirv, err), err.c_str());
+    plugins::Manifest again;
+    AUREA_CHECK_MSG(plugins::parse_manifest(plugins::manifest_json(m), again, err), err.c_str());
+    AUREA_CHECK(again.textures.size() == 2 && again.textures[0].data && again.textures[0].filter == 1);
+    auto with = [](const std::string& textures, const std::string& inputs = "") {
+        return "{\"aureaPlugin\":1,\"id\":\"com.x.t\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\","
+               "\"params\":[{\"id\":\"forca\",\"type\":\"float\"}],\"textures\":" + textures
+               + ",\"passes\":[{\"shader\":\"a.frag\"" + inputs + "}]}";
+    };
+    std::string nine = "{";
+    for (int i = 0; i < 9; ++i) nine += std::string(i ? "," : "") + "\"t" + std::to_string(i) + "\":\"t.png\"";
+    nine += "}";
+    std::string eight = "{";
+    for (int i = 0; i < 8; ++i) eight += std::string(i ? "," : "") + "\"t" + std::to_string(i) + "\":\"t.png\"";
+    eight += "}";
+    struct Case { std::string json; const char* expect; };
+    const Case cases[] = {
+        {with("{\"forca\":\"a.png\"}"), "nome de um parametro"},
+        {with("{\"a\":\"a.gif\"}"), ".png, .jpg"},
+        {with("{\"a\":\"../a.png\"}"), "dentro do pacote"},
+        {with("{\"a\":{\"file\":\"a.png\",\"wrap\":\"loop\"}}"), "\"wrap\""},
+        {with(nine), "mais de 8 texturas"},
+        {with(eight, ",\"inputs\":{\"x\":\"source\",\"y\":\"source\",\"z\":\"source\",\"w\":\"source\"}"), "entradas + texturas"},
+    };
+    for (const Case& c : cases) {
+        plugins::Manifest bad;
+        std::string e;
+        AUREA_CHECK(!plugins::parse_manifest(c.json, bad, e));
+        AUREA_CHECK_MSG(e.find(c.expect) != std::string::npos, e.c_str());
+    }
+}
+
+// 0.4.6: a imagem decodifica na instalação e o SPIR-V fica em .cache (abrir o
+// app não recompila mais); outro gerenciador na mesma pasta carrega do cache.
+AUREA_TEST(Plugins, InstallDecodesTexturesAndCachesSpirv) {
+    const fs::path work = fresh_dir("texcache");
+    write_zip(work / "tex.aureaplugin", texture_package("com.x.texcache"));
+    fs::path pluginDir;
+    {
+        CpuManager cpu;
+        plugins::InstallHooks none;
+        const auto r = cpu.manager.install(str(work / "tex.aureaplugin"), none);
+        AUREA_CHECK_MSG(r.ok(), detail_of(r).c_str());
+        pluginDir = cpu.dir / "com.x.texcache";
+        u32 cached = 0;
+        std::error_code ec;
+        for (const auto& e : fs::directory_iterator(pluginDir / ".cache", ec))
+            if (e.path().extension() == ".spv") ++cached;
+        AUREA_CHECK_EQ(cached, 1u);
+        // Recarrega do disco (o que a abertura do app faz): usa o cache e registra.
+        EffectRegistry reg;
+        register_builtin_effects(reg);
+        plugins::PluginManager again(reg);
+        again.set_directory(str(cpu.dir));
+        AUREA_CHECK(again.load_all() >= 1);
+        AUREA_CHECK(reg.find(effect_type_id("plugin.com.x.texcache")) != nullptr);
+        again.shutdown();
+    }
+    std::error_code ec;
+    fs::remove_all(work, ec);
 }
 
 AUREA_TEST(Plugins, IsfConvertsToSingleSrgbPassAndCompiles) {
@@ -329,12 +468,12 @@ AUREA_TEST(Plugins, Shader3dManifestLinksCameraAndNullLayers) {
     // O que é recusado, com o motivo.
     struct Case { std::string json; const char* expect; };
     std::string five = "{\"aureaPlugin\":1,\"id\":\"com.x.cinco\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader3d\",\"params\":[";
-    for (int i = 0; i < 5; ++i) five += std::string(i ? "," : "") + "{\"id\":\"l" + std::to_string(i) + "\",\"type\":\"layer\"}";
+    for (int i = 0; i < 9; ++i) five += std::string(i ? "," : "") + "{\"id\":\"l" + std::to_string(i) + "\",\"type\":\"layer\"}";
     five += "],\"passes\":[{\"shader\":\"a.frag\"}]}";
     const Case cases[] = {
         {"{\"aureaPlugin\":1,\"id\":\"com.x.flat\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\","
          "\"params\":[{\"id\":\"alvo\",\"type\":\"layer\"}],\"passes\":[{\"shader\":\"a.frag\"}]}", "shader3d"},
-        {five, "5 parametros \"layer\" (limite 4)"},
+        {five, "9 parametros \"layer\" (limite 8)"},
         {"{\"aureaPlugin\":1,\"id\":\"com.x.acc\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader3d\","
          "\"params\":[{\"id\":\"alvo\",\"type\":\"layer\",\"accept\":[\"video\"]}],\"passes\":[{\"shader\":\"a.frag\"}]}", "accept"},
     };
@@ -383,14 +522,14 @@ AUREA_TEST(Plugins, InstallRejectsInvalidPackagesWithMessages) {
     {
         std::string json = "{\"aureaPlugin\":1,\"id\":\"com.x.nine\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\",\"passes\":[";
         std::vector<std::pair<std::string, std::string>> files;
-        for (int i = 0; i < 9; ++i) {
-            json += std::string(i ? "," : "") + "{\"shader\":\"p.frag\"" + (i < 8 ? ",\"target\":\"t" + std::to_string(i) + "\"" : "") + "}";
+        for (int i = 0; i < 33; ++i) {
+            json += std::string(i ? "," : "") + "{\"shader\":\"p.frag\"" + (i < 32 ? ",\"target\":\"t" + std::to_string(i) + "\"" : "") + "}";
         }
         json += "]}";
         files.push_back({"plugin.json", json});
         files.push_back({"p.frag", kIdentityShader});
         const auto r = install("nove.aureaplugin", files);
-        AUREA_CHECK(!r.ok() && detail_of(r).find("9 passes (limite 8)") != std::string::npos);
+        AUREA_CHECK(!r.ok() && detail_of(r).find("33 passes (limite 32)") != std::string::npos);
     }
     // Id inválido.
     {
@@ -422,12 +561,20 @@ AUREA_TEST(Plugins, InstallRejectsInvalidPackagesWithMessages) {
         const auto r = install("fora.aureaplugin", {{"plugin.json", one_pass_manifest("com.x.fora", "1.0.0", "../fora.frag")}});
         AUREA_CHECK(!r.ok() && detail_of(r).find("caminho de shader invalido") != std::string::npos);
     }
-    // Shader maior que 64 KB.
+    // Shader maior que 1 MB (0.4.6: era 64 KB).
     {
         std::string big = kIdentityShader;
-        big += "// " + std::string(70 * 1024, 'x') + "\n";
+        big += "// " + std::string(1100 * 1024, 'x') + "\n";
         const auto r = install("grande.aureaplugin", {{"plugin.json", one_pass_manifest("com.x.grande")}, {"main.frag", big}});
-        AUREA_CHECK(!r.ok() && detail_of(r).find("maior que 64 KB") != std::string::npos);
+        AUREA_CHECK(!r.ok() && detail_of(r).find("maior que 1 MB") != std::string::npos);
+    }
+    // 0.4.6: textura declarada que nao esta no pacote.
+    {
+        const auto r = install("semtex.aureaplugin", {
+            {"plugin.json", "{\"aureaPlugin\":1,\"id\":\"com.x.semtex\",\"version\":\"1.0.0\",\"name\":\"N\",\"kind\":\"shader\","
+                            "\"textures\":{\"lut\":\"luts/sumiu.png\"},\"passes\":[{\"shader\":\"main.frag\"}]}"},
+            {"main.frag", kIdentityShader}});
+        AUREA_CHECK(!r.ok() && detail_of(r).find("textura \"lut\"") != std::string::npos);
     }
     // Versão mais velha que a instalada.
     {
@@ -444,11 +591,11 @@ AUREA_TEST(Plugins, InstallRejectsInvalidPackagesWithMessages) {
     // Quadro de teste lento: recusado pelo teto de 250 ms, com o tempo na mensagem.
     {
         plugins::InstallHooks slow;
-        slow.testRender = [](const EffectRegistry&, EffectTypeId, f32& ms, std::string&) { ms = 400.0f; return true; };
+        slow.testRender = [](const EffectRegistry&, EffectTypeId, f32& ms, std::string&) { ms = 1400.0f; return true; };
         write_zip(work / "lento.aureaplugin", {{"plugin.json", one_pass_manifest("com.x.lento")}, {"main.frag", kIdentityShader}});
         const auto r = cpu.manager.install(str(work / "lento.aureaplugin"), slow);
         AUREA_CHECK(!r.ok() && r.status().code() == Errc::Timeout);
-        AUREA_CHECK(detail_of(r).find("400 ms (limite 250 ms") != std::string::npos);
+        AUREA_CHECK(detail_of(r).find("1400 ms (limite 1000 ms") != std::string::npos);
         AUREA_CHECK(!cpu.effects.find(effect_type_id("plugin.com.x.lento")));
     }
     // Nada das recusas ficou na pasta nem no catálogo; os shaders saíram do registro.
@@ -1062,7 +1209,7 @@ AUREA_TEST(PluginsGpu, ProjectKeepsPluginEffectWithoutThePluginAndRestoresOnRein
 AUREA_TEST(PluginsGpu, EveryExamplePluginRendersFiniteInTheCatalogPreview) {
     AUREA_REQUIRE_PLUGIN_GPU();
     for (const char* p : {"rgb-wave.aureaplugin", "soft-glow.aureaplugin", "dream-look.aureaplugin", "pulse-vignette.fs",
-                          "target-3d.aureaplugin"})
+                          "target-3d.aureaplugin", "film-look.aureaplugin"})
         ensure_installed(p);
     const auto list = plugin_rig().manager->list();
     AUREA_CHECK(list.size() >= 4u);
@@ -1074,6 +1221,25 @@ AUREA_TEST(PluginsGpu, EveryExamplePluginRendersFiniteInTheCatalogPreview) {
         AUREA_CHECK_MSG(s.ok(), info.id.c_str());
         AUREA_CHECK_EQ(out.size(), static_cast<usize>(128 * 96 * 4));
     }
+}
+
+// 0.4.6: as imagens do pacote chegam ao shader (getFile): "data" com os bytes
+// crus e filtro nearest; "cor" linearizada pela GPU (sRGB 128 -> 0,2158).
+AUREA_TEST(PluginsGpu, PackageTexturesReachTheShaderThroughGetFile) {
+    AUREA_REQUIRE_PLUGIN_GPU();
+    const fs::path work = fresh_dir("texgpu");
+    write_zip(work / "tex.aureaplugin", texture_package("com.x.texgpu"));
+    const auto r = plugin_rig().install(str(work / "tex.aureaplugin"));
+    AUREA_CHECK_MSG(r.ok(), detail_of(r).c_str());
+    if (!r.ok()) return;
+    Scene s(64, 32);
+    const LayerId id = s.image(uniform(64, 32, 0));
+    s.add_effect(id, "plugin.com.x.texgpu");
+    const Image out = s.render();
+    AUREA_CHECK(near4(out.at(10, 16), Vec4{1, 0, 0.2158f, 1}, 4e-3f, "metade esquerda: texel vermelho da lut"));
+    AUREA_CHECK(near4(out.at(50, 16), Vec4{0, 1, 0.2158f, 1}, 4e-3f, "metade direita: texel verde (nearest)"));
+    std::error_code ec;
+    fs::remove_all(work, ec);
 }
 
 #endif // AUREA_TEST_VULKAN

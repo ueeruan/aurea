@@ -166,6 +166,20 @@ AUREA_TEST(ExportAttempts, StallsGoToSoftwareThenSmaller) {
     AUREA_CHECK_EQ(export_next_attempt(6, ExportRetryKind::Stall, r), 0u);
 }
 
+AUREA_TEST(ExportAttempts, SoftwareStepsAlsoDecodeMediaInSoftware) {
+    // 0.4.6 (Galaxy A23: 2 clipes paravam sempre em ~50%): uma mídia que o
+    // decoder do aparelho não entrega falhava igual em todo degrau, porque a
+    // escada só trocava encoder/tamanho. O primeiro degrau de uma falha de
+    // mídia (Stall) já troca o decoder.
+    for (u32 a : {0u, 1u, 3u}) AUREA_CHECK(!export_attempt_plan(a).softwareDecode);
+    for (u32 a : {2u, 4u, 5u, 6u}) AUREA_CHECK(export_attempt_plan(a).softwareDecode);
+    const ExportRequestShape r = shape(1080, 30.0);
+    const u32 next = export_next_attempt(0, export_retry_kind(static_cast<i32>(Errc::DecodeFailed),
+        static_cast<u32>(ExportFailure::Media), false, false), r);
+    AUREA_CHECK(export_attempt_plan(next).softwareDecode);
+    AUREA_CHECK_EQ(export_attempt_short_side(next, 1080), 1080u);   // sem perder resolução
+}
+
 AUREA_TEST(ExportAttempts, GpuTimeoutsDropMotionBlurSamplesBeforePixels) {
     // 0.2.7 (3D com motion blur não exportava): o quadro passa do prazo da
     // GPU; menos amostras mantêm a resolução, e só depois vêm menos pixels.

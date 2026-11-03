@@ -652,6 +652,8 @@ std::vector<CaptionWord> parse_srt(const std::string& srt) {
 
 std::string upper_text(const std::string& s) { return upper(s); }
 
+namespace { void apply_caption_look(const CaptionOptions& opt, f32 size, TextData& t, u32 parts); }
+
 void apply_caption_style(const CaptionOptions& opt, u32 shortSide, TextData& t, TrackSet& tr, const std::vector<i64>& wf, i64 endFrame) {
     const f32 size = std::round(std::clamp(opt.sizeFrac, 0.02f, 0.25f) * static_cast<f32>(std::max(1u, shortSide)));
     t.size = size;
@@ -730,7 +732,196 @@ void apply_caption_style(const CaptionOptions& opt, u32 shortSide, TextData& t, 
             t.strokeWidth = std::max(2.0f, size * 0.08f);
             break;
     }
+    apply_caption_look(opt, size, t, kCaptionLookAll);
     apply_caption_animation(opt, t, tr, wf, endFrame);
+}
+
+namespace {
+/// Partes de `look` (só as de `parts` com o bit ligado) por cima do estilo.
+void apply_caption_look(const CaptionOptions& opt, f32 size, TextData& t, u32 parts) {
+    const u32 on = opt.look & parts;
+    if (on & kCaptionLookFont) {
+        t.fontFamily = opt.fontFamily;
+        t.fontWeight = static_cast<u16>(std::clamp<u32>(opt.fontWeight, 100, 1000));
+        t.fontItalic = opt.fontItalic;
+        t.fontPath = opt.fontPath;
+    }
+    if (on & kCaptionLookFill) t.color = opt.fill;
+    if (on & kCaptionLookStroke) {
+        t.strokeColor = opt.stroke;
+        const f32 frac = std::clamp(opt.strokeFrac, 0.0f, 0.3f);
+        t.strokeWidth = frac > 0.0f ? std::max(1.0f, size * frac) : 0.0f;
+    }
+    if (on & kCaptionLookBox) {
+        t.background = opt.box;
+        t.backgroundColor = opt.boxColor;
+        t.backgroundPadding = size * 0.3f;
+        t.backgroundRadius = size * 0.25f;
+    }
+    if (on & kCaptionLookShadow) {
+        t.shadow = opt.shadow;
+        t.shadowColor = rgb(0x000000, 0.6f);
+        t.shadowOffset = Vec2{0.0f, size * 0.06f};
+        t.shadowBlur = size * 0.12f;
+    }
+}
+
+bool same(const Vec4& a, const Vec4& b) noexcept { return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w; }
+
+/// Que partes de `look` mudaram entre as duas opções (bit ou valor).
+u32 changed_look(const CaptionOptions& a, const CaptionOptions& b) noexcept {
+    u32 out = (a.look ^ b.look) & kCaptionLookAll;
+    const u32 both = a.look & b.look;
+    if ((both & kCaptionLookFont) && (a.fontFamily != b.fontFamily || a.fontWeight != b.fontWeight ||
+                                      a.fontItalic != b.fontItalic || a.fontPath != b.fontPath)) out |= kCaptionLookFont;
+    if ((both & kCaptionLookFill) && !same(a.fill, b.fill)) out |= kCaptionLookFill;
+    if ((both & kCaptionLookStroke) && (!same(a.stroke, b.stroke) || a.strokeFrac != b.strokeFrac)) out |= kCaptionLookStroke;
+    if ((both & kCaptionLookBox) && (a.box != b.box || !same(a.boxColor, b.boxColor))) out |= kCaptionLookBox;
+    if ((both & kCaptionLookShadow) && a.shadow != b.shadow) out |= kCaptionLookShadow;
+    return out;
+}
+} // namespace
+
+void update_caption_look(const CaptionOptions& before, const CaptionOptions& after, u32 shortSide, TextData& t, TrackSet& tr) {
+    if (before.style != after.style) { apply_caption_style(after, shortSide, t, tr, {}, 0); return; }
+    const f32 size = std::round(std::clamp(after.sizeFrac, 0.02f, 0.25f) * static_cast<f32>(std::max(1u, shortSide)));
+    if (before.sizeFrac != after.sizeFrac && t.size > 0.0f) {
+        // Tudo o que é medido em px acompanha o tamanho novo.
+        const f32 k = size / t.size;
+        t.size = size;
+        t.strokeWidth *= k;
+        t.backgroundPadding *= k;
+        t.backgroundRadius *= k;
+        t.shadowBlur *= k;
+        t.shadowOffset = Vec2{t.shadowOffset.x * k, t.shadowOffset.y * k};
+    }
+    const u32 changed = changed_look(before, after);
+    if (!changed) return;
+    // O que o estilo + aparência dá agora; só as partes mexidas são copiadas.
+    TextData base = t;
+    TrackSet scratch;
+    apply_caption_style(after, shortSide, base, scratch, {}, 0);
+    if (changed & kCaptionLookFont) {
+        if (after.look & kCaptionLookFont) {
+            t.fontFamily = base.fontFamily; t.fontItalic = base.fontItalic; t.fontPath = base.fontPath;
+        } else {
+            t.fontFamily.clear(); t.fontItalic = false; t.fontPath.clear();   // de volta à fonte do aparelho
+        }
+        t.fontWeight = base.fontWeight;
+    }
+    if (changed & kCaptionLookFill) t.color = base.color;
+    if (changed & kCaptionLookStroke) { t.strokeColor = base.strokeColor; t.strokeWidth = base.strokeWidth; }
+    if (changed & kCaptionLookBox) {
+        t.background = base.background; t.backgroundColor = base.backgroundColor;
+        t.backgroundPadding = base.backgroundPadding; t.backgroundRadius = base.backgroundRadius;
+    }
+    if (changed & kCaptionLookShadow) {
+        t.shadow = base.shadow; t.shadowColor = base.shadowColor;
+        t.shadowOffset = base.shadowOffset; t.shadowBlur = base.shadowBlur;
+    }
+}
+
+void copy_caption_appearance(const CaptionOptions& from, CaptionOptions& to) {
+    to.style = std::min(from.style, kCaptionStyleCount - 1);
+    to.highlight = from.highlight;
+    to.uppercase = from.uppercase;
+    to.highlightColor = from.highlightColor;
+    to.look = from.look & kCaptionLookAll;
+    to.fontFamily = from.fontFamily;
+    to.fontWeight = from.fontWeight;
+    to.fontItalic = from.fontItalic;
+    to.fontPath = from.fontPath;
+    to.fill = from.fill;
+    to.stroke = from.stroke;
+    to.strokeFrac = from.strokeFrac;
+    to.box = from.box;
+    to.boxColor = from.boxColor;
+    to.shadow = from.shadow;
+}
+
+CaptionOptions caption_block_options(const CaptionOptions& track, const CaptionSegment& segment) {
+    CaptionOptions out = track;
+    if (segment.look) copy_caption_appearance(*segment.look, out);
+    return out;
+}
+
+void apply_caption_block_look(const CaptionOptions& track, const CaptionOptions& block, u32 shortSide, TextData& t) {
+    // O estilo refaz o texto inteiro e apagaria os animadores do usuário: as
+    // trilhas deles (TextAnimParam da camada) apontariam para os da legenda.
+    auto animators = std::move(t.animators);
+    TrackSet scratch;
+    update_caption_look(track, block, shortSide, t, scratch);
+    // Estilo trocado com a fonte da faixa e sem fonte no bloco: a do aparelho
+    // (o mesmo que tirar a fonte sem trocar o estilo).
+    if (track.style != block.style && (track.look & kCaptionLookFont) && !(block.look & kCaptionLookFont)) {
+        t.fontFamily.clear(); t.fontItalic = false; t.fontPath.clear();
+    }
+    t.animators = std::move(animators);
+}
+
+const std::vector<CaptionTemplate>& caption_templates() {
+    static const std::vector<CaptionTemplate> list = [] {
+        auto make = [](const char* id, u32 style, auto&& tweak) {
+            CaptionTemplate tpl{id, {}};
+            tpl.options.style = style;
+            tweak(tpl.options);
+            return tpl;
+        };
+        auto none = [](CaptionOptions&) {};
+        std::vector<CaptionTemplate> v;
+        v.push_back(make("highlight", 2, none));
+        v.push_back(make("classic", 0, none));
+        v.push_back(make("box", 1, none));
+        v.push_back(make("neon", 3, none));
+        v.push_back(make("karaoke", 4, none));
+        v.push_back(make("pop", 5, none));
+        v.push_back(make("soft", 6, none));
+        v.push_back(make("glow", 7, none));
+        // Modelos do Aurea: estilos da casa com aparência própria.
+        v.push_back(make("gold", 2, [](CaptionOptions& o) {
+            o.uppercase = true; o.highlightColor = rgb(0xFFC23D);
+            o.look = kCaptionLookFill | kCaptionLookShadow; o.fill = rgb(0xFFFFFF); o.shadow = true;
+        }));
+        v.push_back(make("bubble", 1, [](CaptionOptions& o) {
+            o.highlightColor = rgb(0xFF3D7F);
+            o.look = kCaptionLookFill | kCaptionLookBox; o.fill = rgb(0x111111); o.box = true; o.boxColor = rgb(0xFFFFFF, 0.95f);
+        }));
+        v.push_back(make("mint", 2, [](CaptionOptions& o) {
+            o.highlightColor = rgb(0x7CFFB2);
+            o.look = kCaptionLookStroke; o.stroke = rgb(0x0B2A1E); o.strokeFrac = 0.1f;
+        }));
+        v.push_back(make("comic", 5, [](CaptionOptions& o) {
+            o.uppercase = true;
+            o.look = kCaptionLookFill | kCaptionLookStroke; o.fill = rgb(0xFFE34D); o.stroke = rgb(0x000000); o.strokeFrac = 0.12f;
+        }));
+        v.push_back(make("tag", 1, [](CaptionOptions& o) {
+            o.uppercase = true; o.highlightColor = rgb(0xFFE34D);
+            o.look = kCaptionLookFill | kCaptionLookBox; o.fill = rgb(0xFFFFFF); o.box = true; o.boxColor = rgb(0xE5252A);
+        }));
+        v.push_back(make("minimal", 0, [](CaptionOptions& o) {
+            o.highlight = false;
+            o.look = kCaptionLookStroke | kCaptionLookShadow; o.strokeFrac = 0.0f; o.shadow = true;
+        }));
+        return v;
+    }();
+    return list;
+}
+
+void apply_caption_template(const CaptionTemplate& tpl, CaptionOptions& opt) {
+    const CaptionOptions& s = tpl.options;
+    opt.style = s.style;
+    opt.highlight = s.highlight;
+    opt.uppercase = s.uppercase;
+    opt.highlightColor = s.highlightColor;
+    // A fonte escolhida pelo usuário fica; o resto da aparência é a do modelo.
+    const bool keepFont = (opt.look & kCaptionLookFont) != 0;
+    opt.look = (s.look & ~kCaptionLookFont) | (keepFont ? kCaptionLookFont : 0u);
+    opt.fill = s.fill;
+    opt.stroke = s.stroke;
+    opt.strokeFrac = s.strokeFrac;
+    opt.box = s.box;
+    opt.boxColor = s.boxColor;
+    opt.shadow = s.shadow;
 }
 
 void apply_caption_animation(const CaptionOptions& opt, TextData& t, TrackSet& tr, const std::vector<i64>& wf, i64 endFrame) {

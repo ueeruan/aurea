@@ -111,6 +111,8 @@ internal class EditorUi {
     var showGrid by mutableStateOf(false)
     var effectsBrowser by mutableStateOf(false)
     var exporting by mutableStateOf(false)
+    /** 0.4.6: o chat do assistente de IA aberto. */
+    var assistant by mutableStateOf(false)
     var sheet by mutableStateOf<ShellSheet?>(null)
 
     /** Um dedo manipula algo no palco: o transporte vira a barra de informações. */
@@ -405,6 +407,23 @@ fun EditorScreen(store: EditorStore) {
     store.expressionTarget?.let { com.aurea.aurea.editor.panels.ExpressionSheet(store, it) }
     // Omega adicionar (área 08, P2-4): o "Fundo" das sub-páginas leva aos ajustes do projeto.
     if (ui.exporting) ExportScreen(store, onOpenProjectSettings = { ui.exporting = false; openSheet(store, ui, ShellSheet.ProjectSettings) }) { ui.exporting = false }
+    // 0.4.6: o assistente de IA; o painel que ele pede fecha o chat e abre no editor.
+    if (ui.assistant) com.aurea.aurea.assistant.AssistantSheet(store.assistant) { ui.assistant = false }
+    val assistantPanel = store.assistantPanel
+    LaunchedEffect(assistantPanel) {
+        val panel = assistantPanel ?: return@LaunchedEffect
+        store.assistantPanel = null
+        ui.assistant = false
+        when (panel) {
+            "media" -> ui.mediaBrowser = true
+            "export" -> ui.exporting = true
+            "captions" -> openPanel(store, ui, EditorPanel.Captions)
+            "effects" -> ui.effectsBrowser = true
+            "text" -> openPanel(store, ui, EditorPanel.Text)
+            "audio" -> ui.audioBrowser = true
+            "scene3d" -> store.enterSceneEditor()
+        }
+    }
     // Omega adicionar (área 08, P1-1/P1-3/P0-6): os "Ver tudo" em tela cheia.
     // Adicionar algo fecha o navegador e o painel de adicionar.
     if (ui.mediaBrowser) MediaBrowser(store, onAdded = { ui.adding = false }) { ui.mediaBrowser = false }

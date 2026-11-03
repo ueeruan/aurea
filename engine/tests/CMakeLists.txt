@@ -12,6 +12,7 @@
 add_executable(aurea_tests
     main.cpp
     test_regression_2128.cpp
+    test_text_animator_pro.cpp
     test_regression_2129.cpp
     test_regression_2130.cpp
     test_regression_2132.cpp
@@ -53,6 +54,7 @@ add_executable(aurea_tests
     test_cube_lut.cpp
     test_transform3d_keys.cpp
     test_scene_pick.cpp
+    test_assistant.cpp
     test_beta_heavy.cpp
     test_camera_lens.cpp
     test_scene_param_keys.cpp

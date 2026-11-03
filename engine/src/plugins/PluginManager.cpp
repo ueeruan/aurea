@@ -9,8 +9,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <system_error>
+
+#include "stb_image.h"   // a implementação mora em scene3d/GltfImporter.cpp
 
 namespace aurea::plugins {
 
@@ -54,7 +58,43 @@ struct Prepared {
     Manifest manifest;
     std::vector<std::vector<u32>> spirv;
     std::vector<CompiledStackStep> stack;
+    PluginImages images;   ///< 0.4.6: as "textures" decodificadas, na ordem do manifesto
 };
+
+u64 fnv64(const void* data, usize n, u64 h = 1469598103934665603ull) noexcept {
+    const auto* p = static_cast<const u8*>(data);
+    for (usize i = 0; i < n; ++i) { h ^= p[i]; h *= 1099511628211ull; }
+    return h;
+}
+
+/// 0.4.6 (otimização): o SPIR-V de cada passe fica em <plugin>/.cache, pela
+/// impressão do texto EXATO que o glslang compilaria (cabeçalho do motor +
+/// arquivo do autor + main). Abrir o app não recompila mais todos os plugins;
+/// motor novo (cabeçalho mudou) ou shader editado = outra chave, recompila.
+bool compile_pass_cached(const fs::path& root, const Manifest& m, u32 pass, std::string_view source,
+                         std::vector<u32>& spirv, std::string& error) {
+    const std::string header = shader_header(m, pass);
+    const std::string footer = shader_footer(m, pass);
+    u64 key = fnv64("aurea-plugin-spv-1", 18);
+    key = fnv64(header.data(), header.size(), key);
+    key = fnv64(source.data(), source.size(), key);
+    key = fnv64(footer.data(), footer.size(), key);
+    char name[64];
+    std::snprintf(name, sizeof(name), "passe%u-%016llx.spv", pass, static_cast<unsigned long long>(key));
+    const fs::path file = root / ".cache" / name;
+    std::vector<u8> bytes;
+    if (fileio::read_all(utf8(file), bytes, 64u << 20) && bytes.size() >= 20 && bytes.size() % 4 == 0) {
+        spirv.resize(bytes.size() / 4);
+        std::memcpy(spirv.data(), bytes.data(), bytes.size());
+        if (spirv[0] == 0x07230203u) return true;
+        spirv.clear();
+    }
+    if (!compile_pass(m, pass, source, spirv, error)) return false;
+    std::error_code ec;
+    fs::create_directories(root / ".cache", ec);
+    if (!ec) (void)fileio::write_atomic(utf8(file), spirv.data(), spirv.size() * 4);
+    return true;
+}
 
 struct Failure {
     Errc code = Errc::InvalidArgument;
@@ -93,7 +133,7 @@ bool prepare(const fs::path& root, const EffectRegistry& registry, Prepared& out
             }
             const auto size = fs::file_size(path, ec);
             if (ec || size > kMaxShaderBytes) {
-                fail = {Errc::BudgetExceeded, "shader_source", "passe " + std::to_string(p + 1) + ": " + file + " maior que 64 KB"};
+                fail = {Errc::BudgetExceeded, "shader_source", "passe " + std::to_string(p + 1) + ": " + file + " maior que 1 MB"};
                 return false;
             }
             std::string source;
@@ -102,11 +142,25 @@ bool prepare(const fs::path& root, const EffectRegistry& registry, Prepared& out
                 return false;
             }
             std::vector<u32> spirv;
-            if (!compile_pass(m, p, source, spirv, error)) {
+            if (!compile_pass_cached(root, m, p, source, spirv, error)) {
                 fail = {Errc::ShaderCompileFailed, "shader_compile", error};
                 return false;
             }
             out.spirv.push_back(std::move(spirv));
+        }
+        // 0.4.6: "textures" (o getFile do GLSL): cada imagem do pacote existe,
+        // cabe e decodifica — na instalação e a cada abertura (fica na RAM).
+        for (const TextureDecl& t : m.textures) {
+            if (!safe_relative(t.file)) {
+                fail = {Errc::InvalidArgument, "manifest", "textura \"" + t.name + "\": caminho invalido \"" + t.file + "\""};
+                return false;
+            }
+            auto img = std::make_shared<PluginImage>();
+            if (!decode_plugin_image(utf8(root / path_of(t.file)), m.id, t, m.colorSpace == ColorSpace::Srgb, *img, error)) {
+                fail = {Errc::InvalidArgument, "texture", "textura \"" + t.name + "\": " + error};
+                return false;
+            }
+            out.images.push_back(std::move(img));
         }
     } else if (m.kind == Kind::Stack) {
         if (!compile_stack(m, registry, out.stack, error)) {
@@ -125,7 +179,7 @@ bool prepare(const fs::path& root, const EffectRegistry& registry, Prepared& out
         }
         const auto size = fs::file_size(path, ec);
         if (ec || size > kMaxScriptBytes) {
-            fail = {Errc::BudgetExceeded, "script", m.script + " maior que 512 KB"};
+            fail = {Errc::BudgetExceeded, "script", m.script + " maior que 8 MB"};
             return false;
         }
         std::string source;
@@ -149,7 +203,7 @@ bool prepare(const fs::path& root, const EffectRegistry& registry, Prepared& out
                 return false;
             }
             if (fs::file_size(path, ec) > kMaxImageBytes || ec) {
-                fail = {Errc::BudgetExceeded, "ui", "imagem " + c.src + " maior que 2 MB"};
+                fail = {Errc::BudgetExceeded, "ui", "imagem " + c.src + " maior que 32 MB"};
                 return false;
             }
         }
@@ -183,7 +237,7 @@ PluginInfo info_of(const Manifest& m, const fs::path& dir) {
 
 /// O efeito do plugin (os ids de shader já registrados, se for "shader").
 std::unique_ptr<Effect> make_effect(const Prepared& p, const std::vector<ShaderId>& shaders) {
-    if (p.manifest.kind == Kind::Shader) return make_shader_effect(p.manifest, shaders);
+    if (p.manifest.kind == Kind::Shader) return make_shader_effect(p.manifest, shaders, p.images);
     return make_stack_effect(p.manifest, p.stack);
 }
 
@@ -227,7 +281,7 @@ bool unpack(const fs::path& source, const std::string& path, const fs::path& sta
     pluginRoot = staging;
     if (ext == ".fs" || ext == ".isf") {
         std::string text;
-        if (!read_text_file(source, kMaxShaderBytes, text)) { code = Errc::BudgetExceeded; message = "ISF: arquivo ilegivel ou maior que 64 KB"; return false; }
+        if (!read_text_file(source, kMaxShaderBytes, text)) { code = Errc::BudgetExceeded; message = "ISF: arquivo ilegivel ou maior que 1 MB"; return false; }
         Manifest manifest;
         std::string shaderFile, shaderText, error;
         if (!isf_to_plugin(utf8(source.filename()), text, manifest, shaderFile, shaderText, error)) {
@@ -247,7 +301,7 @@ bool unpack(const fs::path& source, const std::string& path, const fs::path& sta
         return true;
     }
     std::vector<std::string> files;
-    const Status extracted = package::extract_model_archive(path, utf8(staging), files);
+    const Status extracted = package::extract_model_archive(path, utf8(staging), files, kMaxUnpackedBytes);
     if (!extracted.ok()) { code = extracted.code(); message = package_error(extracted.code()); return false; }
     // ZIP feito da PASTA (plugin.json dentro de uma subpasta única): aceito.
     if (!fs::is_regular_file(staging / "plugin.json", ec)) {
@@ -270,6 +324,39 @@ PluginManager::~PluginManager() { shutdown(); }
 void PluginManager::set_directory(std::string directory) {
     std::lock_guard<std::mutex> lock(mutex_);
     directory_ = std::move(directory);
+}
+
+bool decode_plugin_image(const std::string& path, const std::string& pluginId, const TextureDecl& decl,
+                         bool srgbPlugin, PluginImage& out, std::string& error) {
+    std::vector<u8> bytes;
+    std::error_code ec;
+    const fs::path fp = path_of(path);
+    if (!fs::is_regular_file(fp, ec)) { error = "arquivo ausente no pacote: " + decl.file; return false; }
+    if (fs::file_size(fp, ec) > kMaxTextureBytes || ec) { error = decl.file + " maior que 64 MB"; return false; }
+    if (!fileio::read_all(path, bytes, kMaxTextureBytes)) { error = "nao foi possivel ler " + decl.file; return false; }
+    int w = 0, h = 0, comp = 0;
+    if (!stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &comp)) {
+        error = decl.file + " nao e PNG/JPG valido";
+        return false;
+    }
+    if (w <= 0 || h <= 0 || w > static_cast<int>(kMaxTextureSide) || h > static_cast<int>(kMaxTextureSide)) {
+        error = decl.file + ": lado maior que " + std::to_string(kMaxTextureSide) + " px";
+        return false;
+    }
+    stbi_uc* px = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &comp, 4);
+    if (!px) { error = decl.file + ": " + (stbi_failure_reason() ? stbi_failure_reason() : "decodificacao falhou"); return false; }
+    out.width = static_cast<u32>(w);
+    out.height = static_cast<u32>(h);
+    out.rgba.assign(px, px + static_cast<usize>(w) * static_cast<usize>(h) * 4);
+    stbi_image_free(px);
+    // Cor num plugin linear: a GPU lineariza ao amostrar (RGBA8_sRGB). Plugin
+    // sRGB ou "colorSpace": "data": os bytes como estão.
+    out.srgb = !decl.data && !srgbPlugin;
+    u64 key = fnv64(pluginId.data(), pluginId.size());
+    key = fnv64(decl.name.data(), decl.name.size(), key);
+    key = fnv64(out.rgba.data(), out.rgba.size(), key);
+    out.key = key ^ (out.srgb ? 0x5352474200000000ull : 0ull);
+    return true;
 }
 
 std::string PluginManager::directory() const {
@@ -395,7 +482,7 @@ Result<std::string> PluginManager::install(const std::string& path, const Instal
     if (!fs::is_regular_file(source, ec)) return reject(Errc::NotFound, "arquivo nao encontrado: " + path);
     const auto bytes = fs::file_size(source, ec);
     if (ec) return reject(Errc::IoError, "nao foi possivel ler o arquivo");
-    if (bytes > kMaxPackageBytes) return reject(Errc::BudgetExceeded, "pacote maior que 16 MB");
+    if (bytes > kMaxPackageBytes) return reject(Errc::BudgetExceeded, "pacote maior que 512 MB");
 
     const fs::path root = path_of(directory_);
     fs::create_directories(root, ec);
@@ -652,7 +739,7 @@ std::string PluginManager::inspect_json(const std::string& path) noexcept {
     const fs::path source = path_of(path);
     std::error_code ec;
     if (!fs::is_regular_file(source, ec)) return failure("arquivo nao encontrado");
-    if (fs::file_size(source, ec) > kMaxPackageBytes) return failure("pacote maior que 16 MB");
+    if (fs::file_size(source, ec) > kMaxPackageBytes) return failure("pacote maior que 512 MB");
     const fs::path base = root.empty() ? fs::temp_directory_path(ec) : path_of(root);
     fs::create_directories(base, ec);
     const fs::path staging = base / path_of(".lendo-" + std::to_string(monotonic_ns()));

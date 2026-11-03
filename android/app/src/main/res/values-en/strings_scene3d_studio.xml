@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="s3d_mode_object">Object Mode</string>
+    <string name="s3d_mode_pose">Pose Mode</string>
+    <string name="s3d_area_timeline">Timeline</string>
+    <string name="s3d_area_properties">Properties</string>
+    <string name="s3d_area_outliner">Outliner</string>
+    <string name="s3d_position">Location</string>
+    <string name="s3d_rotation">Rotation</string>
+    <string name="s3d_scale">Scale</string>
+    <string name="s3d_insert_key">◆ Insert</string>
+    <string name="s3d_insert_key_desc">Insert keyframe at the current frame</string>
+    <string name="s3d_delete_key">Delete keyframe</string>
+    <string name="s3d_summary">Summary</string>
+    <string name="s3d_nothing_selected">Nothing selected — tap an object in the scene or in the Outliner</string>
+    <string name="s3d_key_here">◆ key at frame %1$d</string>
+    <string name="s3d_no_key">◇ no key</string>
+    <string name="s3d_import_model">Import 3D model</string>
+    <string name="s3d_import_formats">GLB · glTF · FBX · OBJ</string>
+    <string name="s3d_section_import">Import</string>
+    <string name="s3d_section_mesh">Mesh</string>
+    <string name="s3d_section_other">Other</string>
+    <string name="s3d_cube">Cube</string>
+    <string name="s3d_sphere">Sphere</string>
+    <string name="s3d_cylinder">Cylinder</string>
+    <string name="s3d_cone">Cone</string>
+    <string name="s3d_pyramid">Pyramid</string>
+    <string name="s3d_torus">Torus</string>
+    <string name="s3d_empty">Empty</string>
+    <string name="s3d_delete_named">Delete %1$s</string>
+    <string name="s3d_add_named">Add %1$s</string>
+    <string name="s3d_scene">Scene</string>
+    <string name="s3d_prev_key">Previous keyframe</string>
+    <string name="s3d_next_key">Next keyframe</string>
+    <string name="s3d_start">Start</string>
+    <string name="s3d_end">End</string>
+    <string name="s3d_play">Play</string>
+    <string name="s3d_pause">Pause</string>
+    <string name="s3d_autokey_on">Auto keying on</string>
+    <string name="s3d_autokey_off">Auto keying off</string>
+    <string name="s3d_no_rig">This object has no skeleton</string>
+</resources>

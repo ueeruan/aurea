@@ -39,6 +39,60 @@ layout(set = 0, binding = TEX_PREFILTER) uniform samplerCube t_prefilter;
 layout(set = 0, binding = TEX_BRDF) uniform sampler2D t_brdf;
 layout(set = 0, binding = TEX_SHADOW) uniform sampler2DShadow t_shadow;
 layout(set = 0, binding = TEX_SHADOW_DEPTH) uniform sampler2D t_shadowDepth;
+layout(set = 0, binding = TEX_SSAO) uniform sampler2D t_ssao;
+layout(set = 0, binding = TEX_LOCAL_SHADOW) uniform sampler2DShadow t_localShadow;
+
+// 0.4.6: sombra das luzes locais (atlas). A face é escolhida e projetada aqui
+// com a MESMA convenção do C++ (SceneRenderer: local_face_basis) — sem matriz.
+void local_face(int face, out vec3 F, out vec3 R, out vec3 U) {
+    if (face == 0)      { F = vec3( 1, 0, 0); R = vec3(0, 0, -1); U = vec3(0, 1, 0); }
+    else if (face == 1) { F = vec3(-1, 0, 0); R = vec3(0, 0,  1); U = vec3(0, 1, 0); }
+    else if (face == 2) { F = vec3(0,  1, 0); R = vec3(1, 0, 0); U = vec3(0, 0, -1); }
+    else if (face == 3) { F = vec3(0, -1, 0); R = vec3(1, 0, 0); U = vec3(0, 0,  1); }
+    else if (face == 4) { F = vec3(0, 0,  1); R = vec3( 1, 0, 0); U = vec3(0, 1, 0); }
+    else                { F = vec3(0, 0, -1); R = vec3(-1, 0, 0); U = vec3(0, 1, 0); }
+}
+
+float local_shadow(int s, vec3 wpos, vec3 Ng) {
+    if (u.localAtlas.w < 0.5) return 1.0;
+    vec4 info = u.localShadow[s];
+    vec4 lp = u.localShadowPos[s];
+    vec3 d0 = wpos - lp.xyz;
+    vec3 F, R, U;
+    int tile = int(info.x + 0.5);
+    float tanH = 1.0;
+    if (info.y > 0.5) {
+        F = normalize(u.localShadowDir[s].xyz);
+        vec3 upRef = abs(F.y) > 0.95 ? vec3(1, 0, 0) : vec3(0, -1, 0);
+        R = normalize(cross(upRef, F));
+        U = cross(F, R);
+        tanH = lp.w;
+    } else {
+        vec3 a = abs(d0);
+        int face = a.x >= a.y && a.x >= a.z ? (d0.x >= 0.0 ? 0 : 1)
+                 : a.y >= a.z ? (d0.y >= 0.0 ? 2 : 3) : (d0.z >= 0.0 ? 4 : 5);
+        local_face(face, F, R, U);
+        tile += face;
+    }
+    float z0 = dot(d0, F);
+    if (z0 <= info.z) return 1.0;
+    // Normal offset de ~1,5 texel na distância do ponto (sem acne nas faces).
+    vec3 d = d0 + Ng * (z0 * tanH * 2.0 * u.localAtlas.z * 1.5);
+    float z = dot(d, F);
+    vec2 ndc = vec2(dot(d, R), dot(d, U)) / (z * tanH);
+    if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0) return 1.0;
+    float depth = info.w * (z - info.z) / (z * (info.w - info.z)) - u.localShadowDir[s].w;
+    float half_ = 0.5 * u.localAtlas.z;
+    vec2 cols = u.localAtlas.xy;
+    vec2 cell = vec2(float(tile % int(cols.x + 0.5)), float(tile / int(cols.x + 0.5)));
+    float sum = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        vec2 o = vec2(k == 0 || k == 2 ? -0.5 : 0.5, k < 2 ? -0.5 : 0.5) * u.localAtlas.z;
+        vec2 t = clamp(ndc * 0.5 + 0.5 + o, vec2(half_), vec2(1.0 - half_));
+        sum += texture(t_localShadow, vec3((cell + t) / cols, depth));
+    }
+    return sum * 0.25;
+}
 
 #include "../common/shadow.glsl"
 
@@ -260,6 +314,10 @@ void main() {
     // Difuso e especular separados: na transparência só o difuso é coberto.
     vec3 colorD = vec3(0.0), colorS = vec3(0.0);
     int count = int(u.lightCount.x + 0.5);
+    // 0.4.6 FOLHAGEM: recorte por transparência + dupla face (folha, mato,
+    // grama de cartão) deixa a luz ATRAVESSAR — o verso acende verde contra o
+    // sol, como no "Translucent BSDF" do Blender. Mais forte olhando para a luz.
+    bool foliage = (mode == 1 || mode == 3) && u.alpha.w > 0.5;
     for (int i = 0; i < MAX_LIGHTS; ++i) {
         if (i >= count) break;
         int type = int(u.lightPos[i].w + 0.5);
@@ -287,7 +345,13 @@ void main() {
             }
         }
         float NdotL = clamp(dot(N, L), 0.0, 1.0);
-        if (NdotL <= 0.0 || atten <= 0.0) continue;
+        float thru = 0.0;
+        if (foliage) {
+            float back = clamp(-dot(N, L), 0.0, 1.0);
+            float glow = pow(clamp(dot(-V, L), 0.0, 1.0), 6.0);
+            thru = back * (0.35 + 0.65 * glow);
+        }
+        if ((NdotL <= 0.0 && thru <= 0.0) || atten <= 0.0) continue;
         vec3 H = normalize(L + V);
         float NdotH = clamp(dot(N, H), 0.0, 1.0);
         float VdotH = clamp(dot(V, H), 0.0, 1.0);
@@ -305,15 +369,22 @@ void main() {
             ccLobe = vec3(D_GGX(NcdotH, ccA) * V_Kelemen(VdotH) * Fc * NcdotL / max(NdotL, 1e-4));
         }
         float sh = i == int(u.shadowParams.w + 0.5) ? shadow_factor(v_world, Ng, L) : 1.0;
+        int localSlot = int(u.lightSpot2[i].z + 0.5) - 1;
+        if (localSlot >= 0) sh = min(sh, local_shadow(localSlot, v_world, Ng));
         sh = mix(1.0, sh, u.lightSpot2[i].y);
         vec3 radiance = u.lightColor[i].rgb * (NdotL * atten * sh);
         colorD += diff * base_ * radiance;
+        if (thru > 0.0) colorD += diffuseColor / PI * u.lightColor[i].rgb * (thru * atten * sh);
         colorS += (spec * base_ + ccLobe) * radiance;
     }
 
     // --- Ambiente --------------------------------------------------------------
     float ao = 1.0;
     if (has_tex(3)) ao = mix(1.0, texture(t_occlusion, uv_for(3)).r, u.mr.w);
+    // 0.4.6: oclusão de tela (GTAO) — cantos, contatos e frestas escurecem a
+    // luz AMBIENTE (o sol direto e as pontuais continuam inteiros, como no Eevee).
+    if (u.aoParams.x > 0.5)
+        ao *= max(textureLod(t_ssao, gl_FragCoord.xy * u.aoParams.zw, 0.0).r, u.aoParams.y);
     vec3 R = reflect(-V, N);
     float specAO = specular_occlusion(NdotV, ao, roughness);
     vec3 diffAmb, specAmb, ccAmb = vec3(0.0);

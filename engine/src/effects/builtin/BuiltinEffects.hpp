@@ -19,6 +19,9 @@ void register_keying_effects(EffectRegistry& r);
 void register_expression_controls(EffectRegistry& r);
 void register_echo_effect(EffectRegistry& r);
 void register_distort_effects(EffectRegistry& r);
+/// 0.4.6: Redemoinho, Coordenadas polares, Túnel, Lupa, Sombra longa, Bordas
+/// ásperas, Curvas de nível, Brilho interno, Raio e Células (GapEffects046.cpp).
+void register_gap_effects_046(EffectRegistry& r);
 void register_surface_deform_effects(EffectRegistry& r);
 void register_page_turn_effect(EffectRegistry& r);
 void register_optical_stylize_effects(EffectRegistry& r);

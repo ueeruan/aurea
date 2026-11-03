@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: texto dinâmico (contador/timecode). -->
+<resources>
+    <string name="text_dynamic">نص ديناميكي</string>
+    <string name="text_token_counter">عداد</string>
+    <string name="text_token_timecode">الكود الزمني</string>
+    <string name="text_token_time">الوقت</string>
+    <string name="text_token_frame">الإطار</string>
+    <string name="text_token_insert">إدراج %1$s</string>
+    <string name="text_counter_from">من</string>
+    <string name="text_counter_to">إلى</string>
+    <string name="text_counter_decimals">المنازل العشرية</string>
+    <string name="text_counter_grouping">فاصل الآلاف</string>
+</resources>

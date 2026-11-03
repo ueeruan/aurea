@@ -144,10 +144,13 @@ void stroke_to_rings(const std::vector<Contour>& contours, f32 width, u8 cap, u8
 /// preenchimento ele acende ao longo do trecho do grupo. O repetidor desenha
 /// as cópias juntas (o comprimento do grupo é o de uma cópia).
 struct DrawProgress {
-    f32  amount = 1.0f;      ///< 0..1 do comprimento
+    f32  amount = 1.0f;      ///< 0..1 do comprimento (o FIM do trecho desenhado)
     bool sequential = true;
     bool reverse = false;
-    [[nodiscard]] bool active() const noexcept { return !(amount >= 1.0f); }
+    /// 0.4.6: o INÍCIO do trecho (0..1): com Início e Fim animados, um pedaço
+    /// do traço corre pelo desenho (o "Avanço do desenho" das referências).
+    f32  start = 0.0f;
+    [[nodiscard]] bool active() const noexcept { return !(amount >= 1.0f) || start > 0.0f; }
 };
 /// Fração final do contorno de um grupo em que o preenchimento acende.
 inline constexpr f32 kDrawFillFade = 0.10f;
@@ -163,7 +166,8 @@ struct DrawnLine {
 /// `reverse` mostra o fim em vez do começo. Contorno inteiro sai como está
 /// (fechado continua fechado); contorno de comprimento zero (um ponto, que
 /// vira só a tampa) aparece quando o desenho passa por ele.
-void cut_drawn(const std::vector<Contour>& lines, f32 amount, bool sequential, bool reverse, std::vector<DrawnLine>& out);
+void cut_drawn(const std::vector<Contour>& lines, f32 amount, bool sequential, bool reverse, std::vector<DrawnLine>& out,
+               f32 start = 0.0f);
 /// Fração desenhada de cada grupo: `lengths` = o comprimento de cada grupo na
 /// ordem do desenho (px da camada; 0 = nada a desenhar).
 void group_amounts(const std::vector<f64>& lengths, const DrawProgress& p, std::vector<f32>& out);

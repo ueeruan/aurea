@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="s3d_mode_object">وضع الكائن</string>
+    <string name="s3d_mode_pose">وضع الوضعية</string>
+    <string name="s3d_area_timeline">الخط الزمني</string>
+    <string name="s3d_area_properties">الخصائص</string>
+    <string name="s3d_area_outliner">المخطط</string>
+    <string name="s3d_position">الموضع</string>
+    <string name="s3d_rotation">الدوران</string>
+    <string name="s3d_scale">الحجم</string>
+    <string name="s3d_insert_key">◆ إدراج</string>
+    <string name="s3d_insert_key_desc">إدراج مفتاح في الإطار الحالي</string>
+    <string name="s3d_delete_key">حذف المفتاح</string>
+    <string name="s3d_summary">الملخص</string>
+    <string name="s3d_nothing_selected">لم يتم تحديد شيء — المس كائنًا في المشهد أو في المخطط</string>
+    <string name="s3d_key_here">◆ مفتاح في الإطار %1$d</string>
+    <string name="s3d_no_key">◇ بلا مفتاح</string>
+    <string name="s3d_import_model">استيراد نموذج ثلاثي الأبعاد</string>
+    <string name="s3d_import_formats">GLB · glTF · FBX · OBJ</string>
+    <string name="s3d_section_import">استيراد</string>
+    <string name="s3d_section_mesh">شبكة</string>
+    <string name="s3d_section_other">أخرى</string>
+    <string name="s3d_cube">مكعب</string>
+    <string name="s3d_sphere">كرة</string>
+    <string name="s3d_cylinder">أسطوانة</string>
+    <string name="s3d_cone">مخروط</string>
+    <string name="s3d_pyramid">هرم</string>
+    <string name="s3d_torus">حلقة</string>
+    <string name="s3d_empty">فارغ</string>
+    <string name="s3d_delete_named">حذف %1$s</string>
+    <string name="s3d_add_named">إضافة %1$s</string>
+    <string name="s3d_scene">المشهد</string>
+    <string name="s3d_prev_key">المفتاح السابق</string>
+    <string name="s3d_next_key">المفتاح التالي</string>
+    <string name="s3d_start">البداية</string>
+    <string name="s3d_end">النهاية</string>
+    <string name="s3d_play">تشغيل</string>
+    <string name="s3d_pause">إيقاف مؤقت</string>
+    <string name="s3d_autokey_on">التسجيل التلقائي مفعّل</string>
+    <string name="s3d_autokey_off">التسجيل التلقائي متوقف</string>
+    <string name="s3d_no_rig">هذا الكائن ليس له هيكل عظمي</string>
+</resources>

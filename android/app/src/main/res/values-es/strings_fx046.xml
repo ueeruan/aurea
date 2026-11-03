@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: efeitos novos (GapEffects046.cpp). -->
+<resources>
+    <string name="fx046_name_swirl">Remolino</string>
+    <string name="fx046_name_polar">Coordenadas polares</string>
+    <string name="fx046_name_tunnel">Túnel</string>
+    <string name="fx046_name_magnify">Lupa</string>
+    <string name="fx046_name_long_shadow">Sombra larga</string>
+    <string name="fx046_name_roughen">Bordes ásperos</string>
+    <string name="fx046_name_contour">Curvas de nivel</string>
+    <string name="fx046_name_inner_glow">Resplandor interior</string>
+    <string name="fx046_name_lightning">Rayo</string>
+    <string name="fx046_name_voronoi">Celdas (Voronoi)</string>
+</resources>

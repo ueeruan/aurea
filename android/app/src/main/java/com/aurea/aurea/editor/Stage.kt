@@ -174,6 +174,8 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         if (!store.rawPlayback && !ui.fullscreen) CanvasZoomMode(store, Modifier.align(Alignment.TopStart))
         // 0.4.1 (mockup "interface 03"): grade, modos de visão e zoom flutuando no canto sup-dir.
         if (!store.rawPlayback && !ui.fullscreen) StageFloatPills(store, Modifier.align(Alignment.TopEnd))
+        // 0.4.6: o nome da vista do AE escolhida (Frente, Topo, Vista personalizada 1…).
+        if (!store.rawPlayback) StageViewLabel(store, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp))
         if (store.selection.size == 1 && !store.rawPlayback) {
             Row(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
                 if (store.gizmoAxes) {
@@ -508,6 +510,15 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
         style = Stroke(1.dp.toPx()))
     // 0.4.1: o "olho" do palco escondeu contorno e alças (ver o quadro limpo).
     if (ViewModes.hideOverlay) return
+    // 0.4.6: nas vistas do AE (Frente..Personalizada) o chão e os eixos guiam, como na cena 3D.
+    if (!store.sceneEditor && store.viewMode >= 2) {
+        store.viewOrbit   // lido aqui: orbitar/aproximar redesenha as guias
+        val lines = store.sceneGuideLines()
+        for (i in lines.indices step 5) {
+            val color = when (lines[i + 4].toInt()) { 1 -> Color(0xFFFFCC55); 2 -> Color.Cyan; else -> Color.Gray.copy(alpha = .22f) }
+            drawLine(color, Offset(m.sx(lines[i]), m.sy(lines[i + 1])), Offset(m.sx(lines[i + 2]), m.sy(lines[i + 3])), 1.dp.toPx())
+        }
+    }
     if (store.sceneEditor) {
         // Lidos AQUI para a órbita pelo dedo redesenhar guias e gizmo (as
         // linhas saem do motor, que não é estado do Compose).
@@ -1013,6 +1024,38 @@ internal object SceneGestureRules {
  * Só a vista de navegação muda com a órbita — o export não. Cada arrasto de
  * objeto é UM passo de desfazer.
  */
+/**
+ * 0.4.6: navegar na vista do AE escolhida no palco (só a prévia muda). Um dedo
+ * orbita a Vista personalizada (nas ortogonais não gira); dois dedos aproximam.
+ */
+private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.viewModeGesture(
+    store: EditorStore,
+    down: androidx.compose.ui.input.pointer.PointerInputChange,
+) {
+    val degPerPx = 0.35f / 1.dp.toPx()
+    val orbit = store.viewMode >= 8
+    var last = down.position
+    var span0 = 0f
+    while (true) {
+        val e = awaitPointerEvent()
+        val pressed = e.changes.filter { it.pressed }
+        if (pressed.isEmpty()) break
+        e.changes.forEach { it.consume() }
+        if (pressed.size >= 2) {
+            val a = pressed[0].position
+            val b = pressed[1].position
+            val span = hypot(a.x - b.x, a.y - b.y).coerceAtLeast(1f)
+            if (span0 > 0f) store.navigateView(0f, 0f, span0 / span)
+            span0 = span
+            continue
+        }
+        if (span0 > 0f) continue          // sobrou um dedo da pinça: nada
+        val c = e.changes.firstOrNull { it.id == down.id } ?: break
+        if (orbit) store.navigateView(-(c.position.x - last.x) * degPerPx, (c.position.y - last.y) * degPerPx)
+        last = c.position
+    }
+}
+
 private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sceneGesture(
     store: EditorStore,
     m: StageMapper,
@@ -1345,6 +1388,36 @@ private suspend fun PointerInputScope.stageGestures(
             }
             if (m.valid) sceneGesture(store, m, edit, down, slop, haptic)
             return@awaitEachGesture
+        }
+        // 0.4.6: vistas do AE (Frente..Base, Personalizada). Sem nada escolhido e
+        // nada sob o dedo: um dedo orbita a personalizada, a pinça aproxima a vista.
+        if (m.valid && store.viewNavigable && store.selection.isEmpty() &&
+            store.scenePick(m.cx(downX), m.cy(downY), 36.dp.toPx() / m.fit) == null) {
+            viewModeGesture(store, down)
+            return@awaitEachGesture
+        }
+
+        // 0.4.6: caminho de movimento (face Mover): o canto ou a ponta de uma alça
+        // sob o dedo curva a trajetória, como no After Effects.
+        if (m.valid && store.showMotionPath) {
+            val hit = com.aurea.aurea.editor.panels.motionPathHit(store, m, downX, downY, 22.dp.toPx())
+            if (hit != null) {
+                down.consume()
+                var moved = false
+                do {
+                    val ev = awaitPointerEvent()
+                    val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                    if (!moved && kotlin.math.hypot(ch.position.x - downX, ch.position.y - downY) < slop) { if (!ch.pressed) break; continue }
+                    ch.consume()
+                    if (ch.pressed) {
+                        com.aurea.aurea.editor.panels.motionPathDrag(store, m, hit.first, hit.second, ch.position.x, ch.position.y, !moved)
+                        moved = true
+                    }
+                } while (ch.pressed)
+                if (moved) store.endGesture()
+                else if (hit.second == 0) com.aurea.aurea.editor.panels.motionPathReset(store, hit.first)
+                return@awaitEachGesture
+            }
         }
 
         // Forma 3D com parte escolhida: tocar escolhe a parte, arrastar move,

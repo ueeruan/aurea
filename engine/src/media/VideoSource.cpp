@@ -500,6 +500,11 @@ void VideoSource::thread_main() noexcept {
             }
             const bool coversLimit = deliveredEnd > limit;
             if (eos) { eos_ = true; break; }
+            // 0.4.6: adiantando (o alvo já saiu) sem lugar para o próximo no
+            // cache: para aqui. Decodificar e perder obrigava um seek ao
+            // keyframe quando o quadro fosse pedido.
+            if (req.mode == DecodeMode::Playback && req.direction > 0 && pts > req.targetUs + half
+                && !cache_.room_ahead(pts)) break;
             if (backend_->info().preciseFrameTiming ? (coversLimit || pts > limit) : pts >= limit - half) break;
         }
     }

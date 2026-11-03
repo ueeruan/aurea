@@ -811,7 +811,7 @@ void PluginRuntime::install_runtime_api() {
         if (v) cx.set(all, key, *v);
         else all.as_object()->props.erase(key);
         std::string text = cx.json_stringify(all);
-        if (text.size() > kMaxStorageBytes) cx.throw_error("RangeError", "storage passou de 256 KB");
+        if (text.size() > kMaxStorageBytes) cx.throw_error("RangeError", "storage passou de 16 MB");
         storage_ = std::move(text);
         save_storage();
     };
@@ -904,7 +904,7 @@ void PluginRuntime::install_runtime_api() {
                     req.body = cx.json_stringify(body);
                     if (!hasContentType) req.headers.emplace_back("Content-Type", "application/json");
                 }
-                if (req.body.size() > kMaxFetchBodyOut) cx.throw_error("RangeError", "fetch: corpo maior que 256 KB");
+                if (req.body.size() > kMaxFetchBodyOut) cx.throw_error("RangeError", "fetch: corpo maior que 32 MB");
             }
             const Value timeout = cx.get(opts, "timeout");
             if (!timeout.is_nullish()) req.timeoutMs = static_cast<u32>(std::clamp(cx.to_number(timeout), 1000.0, static_cast<f64>(kMaxFetchTimeoutMs)));
@@ -931,7 +931,7 @@ void PluginRuntime::install_runtime_api() {
         }
         log(1, "fetch " + req.method + " " + host + " -> " + (resp.ok ? std::to_string(resp.status) : "erro: " + resp.error));
         if (!resp.ok) cx.throw_error("NetworkError", "fetch: " + (resp.error.empty() ? std::string("sem resposta") : resp.error));
-        if (resp.body.size() > req.maxBytes) cx.throw_error("NetworkError", "fetch: resposta maior que 2 MB");
+        if (resp.body.size() > req.maxBytes) cx.throw_error("NetworkError", "fetch: resposta maior que o teto pedido");
         ObjectRef r = cx.new_object_with(weakResponse.lock());
         r->props.put("ok").value = Value::boolean(resp.status >= 200 && resp.status < 300);
         r->props.put("status").value = Value::number(resp.status);
@@ -962,7 +962,7 @@ void PluginRuntime::install_runtime_api() {
         std::shared_ptr<const HostIO> io;
         { std::lock_guard<std::mutex> lock(ioMutex_); io = io_; }
         std::string text = cx.to_string(arg(a, 0));
-        if (text.size() > (1u << 20)) cx.throw_error("RangeError", "clipboard: texto maior que 1 MB");
+        if (text.size() > (16u << 20)) cx.throw_error("RangeError", "clipboard: texto maior que 16 MB");
         return Value::boolean(io && io->clipboardWrite && io->clipboardWrite(text));
     });
     c.set_global("clipboard", Value::object(clip));
@@ -975,11 +975,34 @@ void PluginRuntime::install_runtime_api() {
         std::vector<u8> bytes;
         if (!p || !fileio::read_all(p->value.as_string(), bytes, kMaxPickedFileBytes + 1))
             cx.throw_error("Error", "nao foi possivel ler o arquivo escolhido");
-        if (bytes.size() > kMaxPickedFileBytes) cx.throw_error("RangeError", "arquivo maior que 1 MB");
+        if (bytes.size() > kMaxPickedFileBytes) cx.throw_error("RangeError", "arquivo maior que 64 MB");
         return std::string(bytes.begin(), bytes.end());
     };
     c.method(fileProto, "text", [read_file](Context& cx, const Value& self, std::vector<Value>&) { return cx.str(read_file(cx, self)); });
     c.method(fileProto, "json", [read_file](Context& cx, const Value& self, std::vector<Value>&) { return cx.json_parse(read_file(cx, self)); });
+    // 0.4.6: binário (imagem, áudio, modelo, dados próprios do plugin).
+    c.method(fileProto, "bytes", [read_file](Context& cx, const Value& self, std::vector<Value>&) {
+        const std::string raw = read_file(cx, self);
+        std::vector<Value> out;
+        out.reserve(raw.size());
+        for (const char ch : raw) out.push_back(Value::number(static_cast<u8>(ch)));
+        return Value::object(cx.new_array(std::move(out)));
+    });
+    c.method(fileProto, "base64", [read_file](Context& cx, const Value& self, std::vector<Value>&) {
+        static constexpr char kB64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        const std::string raw = read_file(cx, self);
+        std::string out;
+        out.reserve((raw.size() + 2) / 3 * 4);
+        for (usize i = 0; i < raw.size(); i += 3) {
+            const u32 n = (static_cast<u8>(raw[i]) << 16) | (i + 1 < raw.size() ? static_cast<u8>(raw[i + 1]) << 8 : 0)
+                        | (i + 2 < raw.size() ? static_cast<u8>(raw[i + 2]) : 0);
+            out += kB64[(n >> 18) & 63];
+            out += kB64[(n >> 12) & 63];
+            out += i + 1 < raw.size() ? kB64[(n >> 6) & 63] : '=';
+            out += i + 2 < raw.size() ? kB64[n & 63] : '=';
+        }
+        return cx.str(out);
+    });
     c.add_root(Value::object(fileProto));
     std::weak_ptr<script::Object> weakFile = fileProto;
     ObjectRef files = c.new_object();
@@ -1022,6 +1045,54 @@ void PluginRuntime::install_runtime_api() {
         return Value::object(f);
     });
     c.set_global("files", Value::object(files));
+
+    // --- plugin: os arquivos do PRÓPRIO pacote (0.4.6, getFile) ---
+    // Sem permissão: é o que o autor mandou junto. Nunca sai da pasta do
+    // plugin (caminho relativo, sem "..", sem unidade) — um plugin da
+    // comunidade não lê fotos nem documentos de quem o instala.
+    ObjectRef plugin = c.new_object();
+    plugin->props.put("id").value = c.str(info_.id);
+    plugin->props.put("version").value = c.str(info_.version);
+    c.method(plugin, "getFile", [this, weakFile](Context& cx, const Value&, std::vector<Value>& a) {
+        const std::string rel = cx.to_string(arg(a, 0));
+        const std::string path = package_file(rel);
+        if (path.empty()) cx.throw_error("Error", "plugin.getFile: \"" + rel + "\" nao existe no pacote do plugin");
+        std::error_code ec;
+        const u64 size = fs::file_size(path_of(path), ec);
+        if (ec || size > kMaxPackageFileBytes) cx.throw_error("RangeError", "plugin.getFile: arquivo maior que 64 MB");
+        ObjectRef f = cx.new_object_with(weakFile.lock());
+        f->props.put("name").value = cx.str(utf8(path_of(rel).filename()));
+        f->props.put("size").value = Value::number(static_cast<f64>(size));
+        script::Prop& p = f->props.put("@path");
+        p.value = cx.str(path);
+        p.hidden = true;
+        f->grow(256);
+        return Value::object(f);
+    });
+    c.method(plugin, "exists", [this](Context& cx, const Value&, std::vector<Value>& a) {
+        return Value::boolean(!package_file(cx.to_string(arg(a, 0))).empty());
+    });
+    c.method(plugin, "list", [this](Context& cx, const Value&, std::vector<Value>& a) {
+        // Arquivos do pacote (relativos), opcionalmente dentro de uma pasta.
+        const std::string folder = a.empty() || arg(a, 0).is_undefined() ? std::string() : cx.to_string(arg(a, 0));
+        if (!folder.empty() && !safe_relative(folder)) cx.throw_error("Error", "plugin.list: pasta invalida");
+        std::vector<Value> out;
+        if (!info_.directory.empty()) {
+            const fs::path root = path_of(info_.directory);
+            const fs::path base = folder.empty() ? root : root / path_of(folder);
+            std::error_code ec;
+            for (auto it = fs::recursive_directory_iterator(base, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                if (!it->is_regular_file(ec)) continue;
+                std::string rel = utf8(fs::relative(it->path(), root, ec));
+                std::replace(rel.begin(), rel.end(), '\\', '/');
+                if (rel.empty() || rel.front() == '.' || rel.rfind(".cache/", 0) == 0) continue;
+                out.push_back(cx.str(rel));
+                if (out.size() >= 100000) break;
+            }
+        }
+        return Value::object(cx.new_array(std::move(out)));
+    });
+    c.set_global("plugin", Value::object(plugin));
 }
 
 } // namespace aurea::plugins

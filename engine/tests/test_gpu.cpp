@@ -9346,7 +9346,8 @@ AUREA_TEST(Gpu, EveryCatalogEffectChangesTheProjectFrame) {
         // fica menor e o fundo claro, como no Shadow Studio.
         const bool outside = shadow ||
                              fx.type_id() == effect_type_id(effect_keys::kDropShadow) ||
-                             fx.type_id() == effect_type_id(effect_keys::kBorder);
+                             fx.type_id() == effect_type_id(effect_keys::kBorder) ||
+                             std::strcmp(key, "aurea.stylize.long_shadow") == 0;   // 0.4.6: sombra longa também
         const ParameterRegistry& params = gpu().effects.params_at(i);
         Scene s(96, 96);
         // Black shadows need exposed, lit background; a full opaque image
@@ -14581,6 +14582,7 @@ AUREA_TEST(Gpu, Scene3DTexturedModelsKeepTexturesOnPhoneBudget) {
 #include "MotionTileWallGpu.inl"
 #include "ClipMaskGpu.inl"
 #include "Scene3DImageBlurGpu.inl"
+#include "AmbientOcclusionGpu.inl"
 
 // Correção de cor (0.3.0).
 #include "ColorGradeTests.inl"

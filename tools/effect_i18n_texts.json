@@ -6087,5 +6087,845 @@
   "hi": "फ़र्श का टेक्सचर (लेयर)",
   "id": "Tekstur lantai (lapisan)",
   "ar": "ملمس الأرضية (طبقة)"
+ },
+ "Ampliação": {
+  "ar": "التكبير",
+  "en": "Magnification",
+  "es": "Ampliación",
+  "hi": "आवर्धन",
+  "id": "Perbesaran",
+  "ru": "Увеличение"
+ },
+ "Aro": {
+  "ar": "الإطار",
+  "en": "Rim",
+  "es": "Aro",
+  "hi": "किनारा",
+  "id": "Bingkai",
+  "ru": "Ободок"
+ },
+ "Bolhas": {
+  "ar": "فقاعات",
+  "en": "Bubbles",
+  "es": "Burbujas",
+  "hi": "बुलबुले",
+  "id": "Gelembung",
+  "ru": "Пузыри"
+ },
+ "Borda": {
+  "ar": "الحافة",
+  "en": "Edge",
+  "es": "Borde",
+  "hi": "किनारा",
+  "id": "Tepi",
+  "ru": "Край"
+ },
+ "Comprimento": {
+  "ar": "الطول",
+  "en": "Length",
+  "es": "Longitud",
+  "hi": "लंबाई",
+  "id": "Panjang",
+  "ru": "Длина"
+ },
+ "Concentrar": {
+  "ar": "التركيز",
+  "en": "Choke",
+  "es": "Concentrar",
+  "hi": "सिकोड़ें",
+  "id": "Pusatkan",
+  "ru": "Сжатие"
+ },
+ "Conversão": {
+  "ar": "التحويل",
+  "en": "Conversion",
+  "es": "Conversión",
+  "hi": "रूपांतरण",
+  "id": "Konversi",
+  "ru": "Преобразование"
+ },
+ "Cor da sombra": {
+  "ar": "لون الظل",
+  "en": "Shadow color",
+  "es": "Color de la sombra",
+  "hi": "छाया का रंग",
+  "id": "Warna bayangan",
+  "ru": "Цвет тени"
+ },
+ "Cor do aro": {
+  "ar": "لون الإطار",
+  "en": "Rim color",
+  "es": "Color del aro",
+  "hi": "किनारे का रंग",
+  "id": "Warna bingkai",
+  "ru": "Цвет ободка"
+ },
+ "Desvio": {
+  "ar": "الانحراف",
+  "en": "Displacement",
+  "es": "Desviación",
+  "hi": "विचलन",
+  "id": "Simpangan",
+  "ru": "Отклонение"
+ },
+ "Espessura": {
+  "ar": "السماكة",
+  "en": "Thickness",
+  "es": "Grosor",
+  "hi": "मोटाई",
+  "id": "Ketebalan",
+  "ru": "Толщина"
+ },
+ "Espessura da borda": {
+  "ar": "سماكة الحافة",
+  "en": "Edge thickness",
+  "es": "Grosor del borde",
+  "hi": "किनारे की मोटाई",
+  "id": "Ketebalan tepi",
+  "ru": "Толщина края"
+ },
+ "Evolução": {
+  "ar": "التطور",
+  "en": "Evolution",
+  "es": "Evolución",
+  "hi": "विकास",
+  "id": "Evolusi",
+  "ru": "Эволюция"
+ },
+ "Galhos": {
+  "ar": "الفروع",
+  "en": "Branches",
+  "es": "Ramas",
+  "hi": "शाखाएं",
+  "id": "Cabang",
+  "ru": "Ответвления"
+ },
+ "Nitidez": {
+  "ar": "الحدة",
+  "en": "Sharpness",
+  "es": "Nitidez",
+  "hi": "तीक्ष्णता",
+  "id": "Ketajaman",
+  "ru": "Резкость"
+ },
+ "Névoa": {
+  "ar": "ضباب",
+  "en": "Fog",
+  "es": "Niebla",
+  "hi": "धुंध",
+  "id": "Kabut",
+  "ru": "Туман"
+ },
+ "Níveis": {
+  "ar": "المستويات",
+  "en": "Levels",
+  "es": "Niveles",
+  "hi": "स्तर",
+  "id": "Tingkat",
+  "ru": "Уровни"
+ },
+ "Polar para retangular": {
+  "ar": "قطبي إلى مستطيلي",
+  "en": "Polar to rectangular",
+  "es": "Polar a rectangular",
+  "hi": "ध्रुवीय से आयताकार",
+  "id": "Polar ke persegi",
+  "ru": "Полярные в прямоугольные"
+ },
+ "Ponto final": {
+  "ar": "نقطة النهاية",
+  "en": "End point",
+  "es": "Punto final",
+  "hi": "अंत बिंदु",
+  "id": "Titik akhir",
+  "ru": "Конечная точка"
+ },
+ "Ponto inicial": {
+  "ar": "نقطة البداية",
+  "en": "Start point",
+  "es": "Punto inicial",
+  "hi": "प्रारंभ बिंदु",
+  "id": "Titik awal",
+  "ru": "Начальная точка"
+ },
+ "Retangular para polar": {
+  "ar": "مستطيلي إلى قطبي",
+  "en": "Rectangular to polar",
+  "es": "Rectangular a polar",
+  "hi": "आयताकार से ध्रुवीय",
+  "id": "Persegi ke polar",
+  "ru": "Прямоугольные в полярные"
+ },
+ "Só as linhas": {
+  "ar": "الخطوط فقط",
+  "en": "Lines only",
+  "es": "Solo las líneas",
+  "hi": "केवल रेखाएं",
+  "id": "Hanya garis",
+  "ru": "Только линии"
+ },
+ "Tamanho da célula": {
+  "ar": "حجم الخلية",
+  "en": "Cell size",
+  "es": "Tamaño de celda",
+  "hi": "कोशिका आकार",
+  "id": "Ukuran sel",
+  "ru": "Размер ячейки"
+ },
+ "Viagem": {
+  "ar": "الحركة",
+  "en": "Travel",
+  "es": "Viaje",
+  "hi": "यात्रा",
+  "id": "Perjalanan",
+  "ru": "Движение"
+ },
+ "Vitral": {
+  "ar": "زجاج ملون",
+  "en": "Stained glass",
+  "es": "Vitral",
+  "hi": "रंगीन कांच",
+  "id": "Kaca patri",
+  "ru": "Витраж"
+ },
+ "0 = a largura sai do número de faixas.": {
+  "en": "0 = width comes from the number of bands.",
+  "es": "0 = el ancho sale del número de franjas.",
+  "ru": "0 = ширина задаётся числом полос.",
+  "hi": "0 = चौड़ाई पट्टियों की संख्या से तय होती है।",
+  "id": "0 = lebar mengikuti jumlah pita.",
+  "ar": "0 = يُحدَّد العرض من عدد الشرائط."
+ },
+ "Espelhar nos dois eixos": {
+  "en": "Mirror on both axes",
+  "es": "Reflejar en ambos ejes",
+  "ru": "Отразить по обеим осям",
+  "hi": "दोनों अक्षों पर दर्पण",
+  "id": "Cerminkan di kedua sumbu",
+  "ar": "عكس على المحورين"
+ },
+ "Substituir o lado": {
+  "en": "Replace the side",
+  "es": "Reemplazar el lado",
+  "ru": "Заменить сторону",
+  "hi": "भाग बदलें",
+  "id": "Ganti sisi",
+  "ar": "استبدال الجانب"
+ },
+ "Sobrepor cópia": {
+  "en": "Overlay copy",
+  "es": "Superponer copia",
+  "ru": "Наложить копию",
+  "hi": "प्रति ऊपर रखें",
+  "id": "Tumpuk salinan",
+  "ar": "تراكب النسخة"
+ },
+ "Sobrepor cópia: a camada fica inteira e a cópia espelhada entra junto.": {
+  "en": "Overlay copy: the layer stays whole and the mirrored copy is added.",
+  "es": "Superponer copia: la capa queda entera y la copia reflejada se suma.",
+  "ru": "Наложить копию: слой остаётся целым, зеркальная копия добавляется.",
+  "hi": "प्रति ऊपर रखें: लेयर पूरी रहती है और दर्पण प्रति साथ जुड़ती है।",
+  "id": "Tumpuk salinan: layer tetap utuh dan salinan cermin ikut ditambahkan.",
+  "ar": "تراكب النسخة: تبقى الطبقة كاملة وتُضاف النسخة المعكوسة معها."
+ },
+ "Opacidade da cópia": {
+  "en": "Copy opacity",
+  "es": "Opacidad de la copia",
+  "ru": "Непрозрачность копии",
+  "hi": "प्रति की अपारदर्शिता",
+  "id": "Opasitas salinan",
+  "ar": "عتامة النسخة"
+ },
+ "Cópia atrás da camada": {
+  "en": "Copy behind the layer",
+  "es": "Copia detrás de la capa",
+  "ru": "Копия за слоем",
+  "hi": "लेयर के पीछे प्रति",
+  "id": "Salinan di belakang layer",
+  "ar": "النسخة خلف الطبقة"
+ },
+ "Cópia": {
+  "en": "Copy",
+  "es": "Copia",
+  "ru": "Копия",
+  "hi": "प्रति",
+  "id": "Salinan",
+  "ar": "نسخة"
+ },
+ "Contrair/expandir": {
+  "en": "Shrink/expand",
+  "es": "Contraer/expandir",
+  "ru": "Сжать/расширить",
+  "hi": "सिकोड़ें/फैलाएँ",
+  "id": "Kecilkan/perluas",
+  "ar": "تقليص/توسيع"
+ },
+ "Inverter (manter o fundo)": {
+  "en": "Invert (keep background)",
+  "es": "Invertir (conservar el fondo)",
+  "ru": "Инвертировать (оставить фон)",
+  "hi": "उलटें (पृष्ठभूमि रखें)",
+  "id": "Balik (pertahankan latar)",
+  "ar": "عكس (الإبقاء على الخلفية)"
+ },
+ "Borda fina": {
+  "en": "Fine edge",
+  "es": "Borde fino",
+  "ru": "Тонкий край",
+  "hi": "बारीक किनारा",
+  "id": "Tepi halus",
+  "ar": "حافة رفيعة"
+ },
+ "Pessoa": {
+  "en": "Person",
+  "es": "Persona",
+  "ru": "Человек",
+  "hi": "व्यक्ति",
+  "id": "Orang",
+  "ar": "شخص"
+ },
+ "Ondas a cada 100 px.": {
+  "en": "Waves every 100 px.",
+  "es": "Ondas cada 100 px.",
+  "ru": "Волны на каждые 100 px.",
+  "hi": "हर 100 px पर लहरें।",
+  "id": "Gelombang setiap 100 px.",
+  "ar": "موجات كل 100 بكسل."
+ },
+ "Ondas por segundo. 0 = água parada.": {
+  "en": "Waves per second. 0 = still water.",
+  "es": "Ondas por segundo. 0 = agua quieta.",
+  "ru": "Волн в секунду. 0 = спокойная вода.",
+  "hi": "प्रति सेकंड लहरें। 0 = शांत पानी।",
+  "id": "Gelombang per detik. 0 = air diam.",
+  "ar": "موجات في الثانية. 0 = ماء ساكن."
+ },
+ "Escolha a camada que fica atrás (a luz dela entra nas bordas). Sem camada, a luz é a cor abaixo.": {
+  "en": "Choose the layer behind (its light wraps the edges). Without a layer, the light is the color below.",
+  "es": "Elige la capa de atrás (su luz entra por los bordes). Sin capa, la luz es el color de abajo.",
+  "ru": "Выберите слой позади (его свет заходит на края). Без слоя свет — цвет ниже.",
+  "hi": "पीछे की लेयर चुनें (उसकी रोशनी किनारों में आती है)। लेयर के बिना, रोशनी नीचे का रंग है।",
+  "id": "Pilih layer di belakang (cahayanya masuk ke tepi). Tanpa layer, cahayanya adalah warna di bawah.",
+  "ar": "اختر الطبقة الخلفية (يدخل ضوؤها من الحواف). بدون طبقة، يكون الضوء هو اللون الذي تحتها."
+ },
+ "Quanto da linha a caneta anda antes de a área atrás dela terminar de encher.": {
+  "en": "How much of the line the pen draws before the area behind it finishes filling.",
+  "es": "Cuánto de la línea avanza la pluma antes de que el área detrás termine de llenarse.",
+  "ru": "Сколько линии проходит перо, прежде чем область за ним заполнится.",
+  "hi": "पीछे का क्षेत्र भरने से पहले पेन रेखा का कितना हिस्सा चलता है।",
+  "id": "Seberapa jauh pena menggambar garis sebelum area di belakangnya selesai terisi.",
+  "ar": "مقدار ما يرسمه القلم من الخط قبل أن تكتمل تعبئة المنطقة خلفه."
+ },
+ "Fileiras alternadas": {
+  "en": "Alternate rows",
+  "es": "Filas alternas",
+  "ru": "Чередовать ряды",
+  "hi": "वैकल्पिक पंक्तियाँ",
+  "id": "Baris berselang",
+  "ar": "صفوف متناوبة"
+ },
+ "Colunas alternadas": {
+  "en": "Alternate columns",
+  "es": "Columnas alternas",
+  "ru": "Чередовать столбцы",
+  "hi": "वैकल्पिक कॉलम",
+  "id": "Kolom berselang",
+  "ar": "أعمدة متناوبة"
+ },
+ "0%: todas as células andam a mesma distância. 100%: cada uma anda uma distância sorteada.": {
+  "en": "0%: all cells move the same distance. 100%: each moves a random distance.",
+  "es": "0%: todas las celdas se mueven la misma distancia. 100%: cada una se mueve una distancia al azar.",
+  "ru": "0%: все ячейки сдвигаются одинаково. 100%: каждая — на случайное расстояние.",
+  "hi": "0%: सभी कोशिकाएँ समान दूरी चलती हैं। 100%: हर एक रैंडम दूरी चलती है।",
+  "id": "0%: semua sel bergerak sama jauh. 100%: tiap sel bergerak sejauh acak.",
+  "ar": "0%: تتحرك كل الخلايا المسافة نفسها. 100%: تتحرك كل خلية مسافة عشوائية."
+ },
+ "Bordas da célula": {
+  "en": "Cell edges",
+  "es": "Bordes de la celda",
+  "ru": "Края ячейки",
+  "hi": "कोशिका के किनारे",
+  "id": "Tepi sel",
+  "ar": "حواف الخلية"
+ },
+ "Repetir dentro da célula": {
+  "en": "Repeat inside the cell",
+  "es": "Repetir dentro de la celda",
+  "ru": "Повтор внутри ячейки",
+  "hi": "कोशिका के अंदर दोहराएँ",
+  "id": "Ulangi di dalam sel",
+  "ar": "التكرار داخل الخلية"
+ },
+ "Imagem contínua": {
+  "en": "Continuous image",
+  "es": "Imagen continua",
+  "ru": "Непрерывное изображение",
+  "hi": "निरंतर छवि",
+  "id": "Gambar menerus",
+  "ar": "صورة متصلة"
+ },
+ "0%: todas as células giram igual. 100%: cada uma gira um valor sorteado.": {
+  "en": "0%: all cells rotate the same. 100%: each rotates a random amount.",
+  "es": "0%: todas las celdas giran igual. 100%: cada una gira un valor al azar.",
+  "ru": "0%: все ячейки поворачиваются одинаково. 100%: каждая — на случайный угол.",
+  "hi": "0%: सभी कोशिकाएँ समान घूमती हैं। 100%: हर एक रैंडम मात्रा में घूमती है।",
+  "id": "0%: semua sel berputar sama. 100%: tiap sel berputar sebesar acak.",
+  "ar": "0%: تدور كل الخلايا بالقدر نفسه. 100%: تدور كل خلية بمقدار عشوائي."
+ },
+ "Afastar os lados": {
+  "en": "Spread the sides",
+  "es": "Separar los lados",
+  "ru": "Развести стороны",
+  "hi": "भागों को दूर करें",
+  "id": "Renggangkan sisi",
+  "ar": "تباعد الجوانب"
+ },
+ "Arredondar": {
+  "en": "Round",
+  "es": "Redondear",
+  "ru": "Скруглить",
+  "hi": "गोल करें",
+  "id": "Bulatkan",
+  "ar": "تدوير"
+ },
+ "Oculto": {
+  "en": "Hidden",
+  "es": "Oculto",
+  "ru": "Скрыто",
+  "hi": "छिपा हुआ",
+  "id": "Tersembunyi",
+  "ar": "مخفي"
+ },
+ "Recorte circular": {
+  "en": "Circular hole",
+  "es": "Recorte circular",
+  "ru": "Круглый вырез",
+  "hi": "गोल छेद",
+  "id": "Lubang lingkaran",
+  "ar": "فتحة دائرية"
+ },
+ "Corte circular": {
+  "en": "Circular cut",
+  "es": "Corte circular",
+  "ru": "Круглый срез",
+  "hi": "गोल कट",
+  "id": "Potongan lingkaran",
+  "ar": "قطع دائري"
+ },
+ "Recorte quadrado": {
+  "en": "Square hole",
+  "es": "Recorte cuadrado",
+  "ru": "Квадратный вырез",
+  "hi": "चौकोर छेद",
+  "id": "Lubang persegi",
+  "ar": "فتحة مربعة"
+ },
+ "Corte quadrado": {
+  "en": "Square cut",
+  "es": "Corte cuadrado",
+  "ru": "Квадратный срез",
+  "hi": "चौकोर कट",
+  "id": "Potongan persegi",
+  "ar": "قطع مربع"
+ },
+ "Tamanho do recorte": {
+  "en": "Hole size",
+  "es": "Tamaño del recorte",
+  "ru": "Размер выреза",
+  "hi": "छेद का आकार",
+  "id": "Ukuran lubang",
+  "ar": "حجم الفتحة"
+ },
+ "Vale para os lados em recorte ou corte.": {
+  "en": "Applies to sides set to hole or cut.",
+  "es": "Vale para los lados en recorte o corte.",
+  "ru": "Действует на стороны с вырезом или срезом.",
+  "hi": "छेद या कट वाले भागों पर लागू होता है।",
+  "id": "Berlaku untuk sisi dengan lubang atau potongan.",
+  "ar": "ينطبق على الجوانب ذات الفتحة أو القطع."
+ },
+ "Precisão": {
+  "en": "Precision",
+  "es": "Precisión",
+  "ru": "Точность",
+  "hi": "सटीकता",
+  "id": "Presisi",
+  "ar": "الدقة"
+ },
+ "Mais passos: bordas mais limpas e prévia mais lenta.": {
+  "en": "More steps: cleaner edges and slower preview.",
+  "es": "Más pasos: bordes más limpios y vista previa más lenta.",
+  "ru": "Больше шагов: чище края, медленнее превью.",
+  "hi": "अधिक चरण: साफ़ किनारे और धीमा प्रीव्यू।",
+  "id": "Lebih banyak langkah: tepi lebih bersih, pratinjau lebih lambat.",
+  "ar": "خطوات أكثر: حواف أنظف ومعاينة أبطأ."
+ },
+ "Lados": {
+  "en": "Sides",
+  "es": "Lados",
+  "ru": "Стороны",
+  "hi": "भाग",
+  "id": "Sisi",
+  "ar": "الجوانب"
+ },
+ "A própria camada": {
+  "en": "The layer itself",
+  "es": "La propia capa",
+  "ru": "Сам слой",
+  "hi": "स्वयं लेयर",
+  "id": "Layer itu sendiri",
+  "ar": "الطبقة نفسها"
+ },
+ "Degradê horizontal": {
+  "en": "Horizontal gradient",
+  "es": "Degradado horizontal",
+  "ru": "Горизонтальный градиент",
+  "hi": "क्षैतिज ग्रेडिएंट",
+  "id": "Gradien horizontal",
+  "ar": "تدرج أفقي"
+ },
+ "Degradê vertical": {
+  "en": "Vertical gradient",
+  "es": "Degradado vertical",
+  "ru": "Вертикальный градиент",
+  "hi": "लंबवत ग्रेडिएंट",
+  "id": "Gradien vertikal",
+  "ar": "تدرج عمودي"
+ },
+ "Degradê radial": {
+  "en": "Radial gradient",
+  "es": "Degradado radial",
+  "ru": "Радиальный градиент",
+  "hi": "रेडियल ग्रेडिएंट",
+  "id": "Gradien radial",
+  "ar": "تدرج شعاعي"
+ },
+ "Branco = adiantado, preto = atrasado, cinza 50% = agora.": {
+  "en": "White = ahead, black = behind, 50% gray = now.",
+  "es": "Blanco = adelantado, negro = atrasado, gris 50% = ahora.",
+  "ru": "Белый = вперёд, чёрный = назад, серый 50% = сейчас.",
+  "hi": "सफ़ेद = आगे, काला = पीछे, 50% ग्रे = अभी।",
+  "id": "Putih = maju, hitam = mundur, abu 50% = sekarang.",
+  "ar": "الأبيض = متقدم، الأسود = متأخر، الرمادي 50% = الآن."
+ },
+ "Deslocamento máximo": {
+  "en": "Maximum displacement",
+  "es": "Desplazamiento máximo",
+  "ru": "Максимальное смещение",
+  "hi": "अधिकतम विस्थापन",
+  "id": "Pergeseran maksimum",
+  "ar": "أقصى إزاحة"
+ },
+ "Resolução do tempo": {
+  "en": "Time resolution",
+  "es": "Resolución del tiempo",
+  "ru": "Разрешение по времени",
+  "hi": "समय रिज़ॉल्यूशन",
+  "id": "Resolusi waktu",
+  "ar": "دقة الزمن"
+ },
+ "Inverter o mapa": {
+  "en": "Invert the map",
+  "es": "Invertir el mapa",
+  "ru": "Инвертировать карту",
+  "hi": "मैप उलटें",
+  "id": "Balik peta",
+  "ar": "عكس الخريطة"
+ },
+ "Suavizar entre os níveis": {
+  "en": "Smooth between levels",
+  "es": "Suavizar entre los niveles",
+  "ru": "Сглаживать между уровнями",
+  "hi": "स्तरों के बीच स्मूद करें",
+  "id": "Haluskan antar tingkat",
+  "ar": "تنعيم بين المستويات"
+ },
+ "Trás": {
+  "en": "Back",
+  "es": "Atrás",
+  "ru": "Сзади",
+  "hi": "पीछे",
+  "id": "Belakang",
+  "ar": "خلف"
+ },
+ "Unidades": {
+  "en": "Units",
+  "es": "Unidades",
+  "ru": "Единицы",
+  "ar": "الوحدات",
+  "hi": "इकाइयाँ",
+  "id": "Satuan"
+ },
+ "Porcentagem": {
+  "en": "Percentage",
+  "es": "Porcentaje",
+  "ru": "Проценты",
+  "ar": "النسبة المئوية",
+  "hi": "प्रतिशत",
+  "id": "Persentase"
+ },
+ "Baseado em": {
+  "en": "Based on",
+  "es": "Basado en",
+  "ru": "На основе",
+  "ar": "بناءً على",
+  "hi": "आधारित",
+  "id": "Berdasarkan"
+ },
+ "Letras": {
+  "en": "Characters",
+  "es": "Letras",
+  "ru": "Символы",
+  "ar": "الأحرف",
+  "hi": "अक्षर",
+  "id": "Karakter"
+ },
+ "Letras sem espaços": {
+  "en": "Characters excluding spaces",
+  "es": "Letras sin espacios",
+  "ru": "Символы без пробелов",
+  "ar": "الأحرف دون المسافات",
+  "hi": "रिक्त स्थान छोड़कर अक्षर",
+  "id": "Karakter tanpa spasi"
+ },
+ "Palavras": {
+  "en": "Words",
+  "es": "Palabras",
+  "ru": "Слова",
+  "ar": "الكلمات",
+  "hi": "शब्द",
+  "id": "Kata"
+ },
+ "Subtrair": {
+  "en": "Subtract",
+  "es": "Restar",
+  "ru": "Вычитание",
+  "ar": "طرح",
+  "hi": "घटाएँ",
+  "id": "Kurangi"
+ },
+ "Interseção": {
+  "en": "Intersect",
+  "es": "Intersección",
+  "ru": "Пересечение",
+  "ar": "تقاطع",
+  "hi": "प्रतिच्छेद",
+  "id": "Irisan"
+ },
+ "Mínimo": {
+  "en": "Min",
+  "es": "Mínimo",
+  "ru": "Минимум",
+  "ar": "الحد الأدنى",
+  "hi": "न्यूनतम",
+  "id": "Minimum"
+ },
+ "Diferença": {
+  "en": "Difference",
+  "es": "Diferencia",
+  "ru": "Разница",
+  "ar": "الفرق",
+  "hi": "अंतर",
+  "id": "Selisih"
+ },
+ "Suavizar alto": {
+  "en": "Ease high",
+  "es": "Suavizar alto",
+  "ru": "Сглаживание вверху",
+  "ar": "تنعيم الأعلى",
+  "hi": "ऊपरी ईज़",
+  "id": "Haluskan atas"
+ },
+ "Suavizar baixo": {
+  "en": "Ease low",
+  "es": "Suavizar bajo",
+  "ru": "Сглаживание внизу",
+  "ar": "تنعيم الأدنى",
+  "hi": "निचला ईज़",
+  "id": "Haluskan bawah"
+ },
+ "Semente aleatória": {
+  "en": "Random seed",
+  "es": "Semilla aleatoria",
+  "ru": "Случайное зерно",
+  "ar": "البذرة العشوائية",
+  "hi": "रैंडम सीड",
+  "id": "Seed acak"
+ },
+ "Seletor de oscilação": {
+  "en": "Wiggly selector",
+  "es": "Selector de oscilación",
+  "ru": "Колеблющийся селектор",
+  "ar": "محدد التذبذب",
+  "hi": "विगली सेलेक्टर",
+  "id": "Pemilih goyang"
+ },
+ "Modo da oscilação": {
+  "en": "Wiggly mode",
+  "es": "Modo de oscilación",
+  "ru": "Режим колебаний",
+  "ar": "وضع التذبذب",
+  "hi": "विगली मोड",
+  "id": "Mode goyang"
+ },
+ "Intensidade máxima": {
+  "en": "Max amount",
+  "es": "Intensidad máxima",
+  "ru": "Макс. величина",
+  "ar": "الحد الأقصى للمقدار",
+  "hi": "अधिकतम मात्रा",
+  "id": "Jumlah maksimum"
+ },
+ "Intensidade mínima": {
+  "en": "Min amount",
+  "es": "Intensidad mínima",
+  "ru": "Мин. величина",
+  "ar": "الحد الأدنى للمقدار",
+  "hi": "न्यूनतम मात्रा",
+  "id": "Jumlah minimum"
+ },
+ "Oscilações por segundo": {
+  "en": "Wiggles/second",
+  "es": "Oscilaciones por segundo",
+  "ru": "Колебаний в секунду",
+  "ar": "تذبذبات في الثانية",
+  "hi": "प्रति सेकंड विगल",
+  "id": "Goyangan per detik"
+ },
+ "Correlação": {
+  "en": "Correlation",
+  "es": "Correlación",
+  "ru": "Корреляция",
+  "ar": "الارتباط",
+  "hi": "सहसंबंध",
+  "id": "Korelasi"
+ },
+ "Fase temporal": {
+  "en": "Temporal phase",
+  "es": "Fase temporal",
+  "ru": "Временная фаза",
+  "ar": "الطور الزمني",
+  "hi": "समय कला",
+  "id": "Fase waktu"
+ },
+ "Fase espacial": {
+  "en": "Spatial phase",
+  "es": "Fase espacial",
+  "ru": "Пространственная фаза",
+  "ar": "الطور المكاني",
+  "hi": "स्थानिक कला",
+  "id": "Fase ruang"
+ },
+ "Travar dimensões": {
+  "en": "Lock dimensions",
+  "es": "Bloquear dimensiones",
+  "ru": "Связать измерения",
+  "ar": "قفل الأبعاد",
+  "hi": "आयाम लॉक करें",
+  "id": "Kunci dimensi"
+ },
+ "Semente da oscilação": {
+  "en": "Wiggly seed",
+  "es": "Semilla de oscilación",
+  "ru": "Зерно колебаний",
+  "ar": "بذرة التذبذب",
+  "hi": "विगली सीड",
+  "id": "Seed goyang"
+ },
+ "Ponto de âncora": {
+  "en": "Anchor point",
+  "es": "Punto de anclaje",
+  "ru": "Опорная точка",
+  "ar": "نقطة الارتكاز",
+  "hi": "एंकर पॉइंट",
+  "id": "Titik jangkar"
+ },
+ "Eixo da inclinação": {
+  "en": "Skew axis",
+  "es": "Eje de inclinación",
+  "ru": "Ось наклона",
+  "ar": "محور الإمالة",
+  "hi": "स्क्यू अक्ष",
+  "id": "Sumbu kemiringan"
+ },
+ "Matiz do preenchimento": {
+  "en": "Fill hue",
+  "es": "Matiz del relleno",
+  "ru": "Тон заливки",
+  "ar": "تدرج لون التعبئة",
+  "hi": "फ़िल ह्यू",
+  "id": "Rona isian"
+ },
+ "Saturação do preenchimento": {
+  "en": "Fill saturation",
+  "es": "Saturación del relleno",
+  "ru": "Насыщенность заливки",
+  "ar": "تشبع التعبئة",
+  "hi": "फ़िल संतृप्ति",
+  "id": "Saturasi isian"
+ },
+ "Brilho do preenchimento": {
+  "en": "Fill brightness",
+  "es": "Brillo del relleno",
+  "ru": "Яркость заливки",
+  "ar": "سطوع التعبئة",
+  "hi": "फ़िल चमक",
+  "id": "Kecerahan isian"
+ },
+ "Opacidade do preenchimento": {
+  "en": "Fill opacity",
+  "es": "Opacidad del relleno",
+  "ru": "Непрозрачность заливки",
+  "ar": "عتامة التعبئة",
+  "hi": "फ़िल अपारदर्शिता",
+  "id": "Opasitas isian"
+ },
+ "Espaçamento entre linhas": {
+  "en": "Line spacing",
+  "es": "Interlineado",
+  "ru": "Межстрочный интервал",
+  "ar": "تباعد الأسطر",
+  "hi": "पंक्ति अंतराल",
+  "id": "Spasi baris"
+ },
+ "Agrupamento da âncora": {
+  "en": "Anchor point grouping",
+  "es": "Agrupación del anclaje",
+  "ru": "Группировка опорной точки",
+  "ar": "تجميع نقطة الارتكاز",
+  "hi": "एंकर पॉइंट समूहन",
+  "id": "Pengelompokan jangkar"
+ },
+ "Tudo": {
+  "en": "All",
+  "es": "Todo",
+  "ru": "Все",
+  "ar": "الكل",
+  "hi": "सभी",
+  "id": "Semua"
+ },
+ "Alinhamento do agrupamento": {
+  "en": "Grouping alignment",
+  "es": "Alineación de la agrupación",
+  "ru": "Выравнивание группы",
+  "ar": "محاذاة التجميع",
+  "hi": "समूह संरेखण",
+  "id": "Perataan kelompok"
+ },
+ "Seletor de expressão": {
+  "en": "Expression selector",
+  "es": "Selector de expresión",
+  "ru": "Селектор выражения",
+  "ar": "محدد التعبير",
+  "hi": "एक्सप्रेशन सेलेक्टर",
+  "id": "Pemilih ekspresi"
+ },
+ "Intensidade da expressão": {
+  "en": "Expression amount",
+  "es": "Intensidad de la expresión",
+  "ru": "Величина выражения",
+  "ar": "مقدار التعبير",
+  "hi": "एक्सप्रेशन मात्रा",
+  "id": "Jumlah ekspresi"
  }
 }

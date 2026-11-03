@@ -8,4 +8,17 @@
     <string name="curve_param_oscillations">Oscilações</string>
     <string name="curve_param_damping">Amortecimento</string>
     <string name="curve_param_oscillations_value">Oscilações: %1$d</string>
+    <!-- 0.4.6: curvas de repetição e aleatórias -->
+    <string name="curve_type_steps">Degraus</string>
+    <string name="curve_type_repeat">Repetir</string>
+    <string name="curve_type_pingpong">Vai e volta</string>
+    <string name="curve_type_wave">Onda</string>
+    <string name="curve_type_random">Aleatório</string>
+    <string name="curve_param_steps">Degraus: %1$d</string>
+    <string name="curve_param_repeats">Vezes: %1$d</string>
+    <string name="curve_param_turns">Meias-voltas: %1$d</string>
+    <string name="curve_param_cycles">Ciclos: %1$d</string>
+    <string name="curve_param_amplitude">Amplitude</string>
+    <string name="curve_param_smooth">Suavizar</string>
+    <string name="curve_param_seed">Sortear de novo</string>
 </resources>

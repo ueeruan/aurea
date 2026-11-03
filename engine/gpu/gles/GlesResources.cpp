@@ -141,9 +141,19 @@ Status Backend::map_buffer(BufferHandle h, void*& pointer) noexcept {
         const auto* data = static_cast<const u8*>(glMapBufferRange(GL_COPY_READ_BUFFER, 0, b->gpuBytes, GL_MAP_READ_BIT));
         if (!data) return Status{Errc::InvalidState, "GLES readback map failed"};
         if (b->rgbaReadback) {
+            // 0.4.6 (export): laços por número de canais, sem o laço interno
+            // variável — o compilador vetoriza (NEON). O R8/RG8 do NV12 do
+            // export passa aqui a cada quadro (~2,6 M pixels em 1080p).
             const usize pixels = static_cast<usize>(b->readWidth) * b->readHeight;
-            for (usize i = 0; i < pixels; ++i)
-                for (u32 c = 0; c < b->readComponents; ++c) b->cpu[i * b->readComponents + c] = data[i * 4 + c];
+            u8* out = b->cpu.data();
+            switch (b->readComponents) {
+                case 1: for (usize i = 0; i < pixels; ++i) out[i] = data[i * 4]; break;
+                case 2: for (usize i = 0; i < pixels; ++i) { out[i * 2] = data[i * 4]; out[i * 2 + 1] = data[i * 4 + 1]; } break;
+                case 4: std::memcpy(out, data, pixels * 4); break;
+                default:
+                    for (usize i = 0; i < pixels; ++i)
+                        for (u32 c = 0; c < b->readComponents; ++c) out[i * b->readComponents + c] = data[i * 4 + c];
+            }
         } else std::memcpy(b->cpu.data(), data, b->desc.bytes);
         const GLboolean valid = glUnmapBuffer(GL_COPY_READ_BUFFER);
         if (!valid) return Status{Errc::DeviceLost};
@@ -200,6 +210,7 @@ void Backend::destroy_sampler(SamplerHandle h) noexcept {
 /// escopo de contexto de quem pediu.
 Result<ShaderHandle> Backend::compile_essl(const ShaderDesc& desc, const char* source, std::string* error) noexcept {
     auto& d = *impl_;
+    d.lastCompileLog.clear();
     Shader shader; shader.id = glCreateShader(desc.stage == ShaderStage::Vertex ? GL_VERTEX_SHADER
         : desc.stage == ShaderStage::Fragment ? GL_FRAGMENT_SHADER : GL_COMPUTE_SHADER);
     if (!shader.id) {
@@ -222,6 +233,7 @@ Result<ShaderHandle> Backend::compile_essl(const ShaderDesc& desc, const char* s
     if (!ok) {
         char log[8192]{}; glGetShaderInfoLog(shader.id, sizeof(log), nullptr, log);
         AUREA_LOG_ERROR("GLES shader %s: %s", desc.debugName ? desc.debugName : "", log);
+        d.lastCompileLog = log;
         if (error) *error = std::string("driver GLES: ") + log;
         glDeleteShader(shader.id); return Status{Errc::ShaderCompileFailed};
     }
@@ -273,6 +285,7 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     auto* a = find(d.shaders, desc.isCompute ? desc.computeShader.id : desc.vertexShader.id);
     auto* b = desc.isCompute ? nullptr : find(d.shaders, desc.fragmentShader.id);
     if (!a || (!desc.isCompute && !b)) return Status{Errc::InvalidArgument};
+    d.lastCompileLog.clear();
     Pipeline p; p.desc = desc; p.id = glCreateProgram();
     p.cacheKey = (a->hash * 1099511628211ull) ^ (b ? b->hash : 0);
     GLint linked = 0;
@@ -305,6 +318,7 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     if (!linked) {
         char log[8192]{}; glGetProgramInfoLog(p.id, sizeof(log), nullptr, log);
         AUREA_LOG_ERROR("GLES pipeline %s: %s", desc.debugName ? desc.debugName : "", log);
+        d.lastCompileLog = log;
         glDeleteProgram(p.id); return Status{Errc::PipelineCompileFailed};
     }
     for (u32 stage = 0; stage < 3; ++stage) for (u32 slot = 0; slot < binding::kTextureSlots; ++slot) {
@@ -314,6 +328,7 @@ Result<PipelineHandle> Backend::create_pipeline(const PipelineDesc& desc) noexce
     }
     const u64 id = d.nextId++; d.pipelines.emplace(id, std::move(p)); return PipelineHandle{id};
 }
+std::string Backend::last_compile_log() const { return impl_->lastCompileLog; }
 void Backend::destroy_pipeline(PipelineHandle h) noexcept {
     auto& d = *impl_; Impl::Scope scope(d); auto it = d.pipelines.find(h.id);
     if (scope.valid && it != d.pipelines.end()) {

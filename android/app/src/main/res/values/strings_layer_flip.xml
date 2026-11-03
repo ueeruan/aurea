@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: espelhar camada. -->
+<resources>
+    <string name="layer_flip_horizontal">Espelhar na horizontal</string>
+    <string name="layer_flip_vertical">Espelhar na vertical</string>
+</resources>

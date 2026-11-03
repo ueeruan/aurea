@@ -351,7 +351,7 @@ Keyframe param_key(Interpolation kind, f32 a, f32 b, bool reverse = false) {
 
 AUREA_TEST(Easing, OvershootPassesTheEndAndLandsExactly) {
     static_assert(static_cast<u8>(Interpolation::Overshoot) == 10, "valor gravado no projeto");
-    static_assert(kLastInterpolation == Interpolation::Overshoot);
+    static_assert(static_cast<u8>(Interpolation::Random) == 14, "0.4.6: as curvas novas entram depois do Overshoot");
     for (f32 amount : {0.0f, 0.1f, kOvershootDefaultAmount, 0.6f, 1.0f}) {
         const Keyframe k = param_key(Interpolation::Overshoot, amount, 0.0f);
         AUREA_CHECK_EQ(keyframe_ease(k, 0.0f), 0.0f);
@@ -519,4 +519,96 @@ AUREA_TEST(Easing, MirrorIsExactForParametricCurves) {
     AUREA_CHECK(!mirror_parametric_ease(oldBounce));
     Keyframe bez; bez.interp = Interpolation::Bezier;
     AUREA_CHECK(!mirror_parametric_ease(bez));
+}
+
+// 0.4.6: curvas de repetição e aleatórias (Degraus configurável, Repetir, Vai e
+// volta, Onda, Aleatório). Todas partem de 0 e pousam EXATAMENTE em 1.
+AUREA_TEST(Easing, CycleCurvesStartAtZeroLandOnOneAndRespectTheirParameters) {
+    const Interpolation kinds[] = {Interpolation::Steps, Interpolation::Repeat, Interpolation::PingPong,
+                                   Interpolation::Wave, Interpolation::Random};
+    for (Interpolation k : kinds) {
+        for (f32 a : {0.0f, 0.3f, 1.0f}) {
+            AUREA_CHECK(apply_easing(k, 0.0f, a, 0.5f, 0.2f, kEaseParamMarker) == 0.0f);
+            AUREA_CHECK(apply_easing(k, 1.0f, a, 0.5f, 0.2f, kEaseParamMarker) == 1.0f);
+        }
+        // Sem o marcador (projeto antigo / caminho sem parâmetros): os padrões.
+        AUREA_CHECK(apply_easing(k, 1.0f, 0.42f, 0.0f, 0.58f, 1.0f) == 1.0f);
+    }
+    // Degraus: 4 degraus sem marcador (como antes); 8 degraus com A = 6/30.
+    AUREA_CHECK_NEAR(apply_easing(Interpolation::Steps, 0.3f, 0.42f, 0.0f, 0.58f, 1.0f), 0.25f, 1e-6f);
+    AUREA_CHECK_NEAR(apply_easing(Interpolation::Steps, 0.3f, 6.0f / 30.0f, 0.0f, 0.0f, kEaseParamMarker), 0.25f, 1e-6f);
+    AUREA_CHECK_NEAR(apply_easing(Interpolation::Steps, 0.2f, 6.0f / 30.0f, 0.0f, 0.0f, kEaseParamMarker), 0.125f, 1e-6f);
+    // Repetir 2×: no meio volta ao começo.
+    AUREA_CHECK_NEAR(apply_easing(Interpolation::Repeat, 0.25f, 1.0f / 15.0f, 0.0f, 0.0f, kEaseParamMarker), 0.5f, 1e-5f);
+    AUREA_CHECK_NEAR(apply_easing(Interpolation::Repeat, 0.55f, 1.0f / 15.0f, 0.0f, 0.0f, kEaseParamMarker), 0.1f, 1e-5f);
+    // Vai e volta 3 meias-voltas: em 1/3 está no topo, em 2/3 no chão.
+    AUREA_CHECK_NEAR(apply_easing(Interpolation::PingPong, 1.0f / 3.0f, 1.0f / 8.0f, 0.0f, 0.0f, kEaseParamMarker), 1.0f, 1e-4f);
+    AUREA_CHECK_NEAR(apply_easing(Interpolation::PingPong, 2.0f / 3.0f, 1.0f / 8.0f, 0.0f, 0.0f, kEaseParamMarker), 0.0f, 1e-4f);
+    // Onda sem amplitude = linear.
+    AUREA_CHECK_NEAR(apply_easing(Interpolation::Wave, 0.37f, 0.5f, 0.0f, 0.0f, kEaseParamMarker), 0.37f, 1e-6f);
+    // Aleatório: determinístico, dentro de [0,1], e a semente muda o desenho.
+    const f32 r1 = apply_easing(Interpolation::Random, 0.4f, 0.2f, 0.0f, 0.1f, kEaseParamMarker);
+    AUREA_CHECK(r1 == apply_easing(Interpolation::Random, 0.4f, 0.2f, 0.0f, 0.1f, kEaseParamMarker));
+    AUREA_CHECK(r1 >= 0.0f && r1 <= 1.0f);
+    bool differs = false;
+    for (int i = 1; i < 10; ++i)
+        differs |= apply_easing(Interpolation::Random, i / 10.0f, 0.2f, 0.0f, 0.1f, kEaseParamMarker)
+                != apply_easing(Interpolation::Random, i / 10.0f, 0.2f, 0.0f, 0.9f, kEaseParamMarker);
+    AUREA_CHECK(differs);
+    // O espelho por parâmetro continua só nas curvas de mola/repique.
+    Keyframe k; k.interp = Interpolation::Repeat; k.by2 = kEaseParamMarker;
+    AUREA_CHECK(!mirror_parametric_ease(k));
+}
+
+// 0.4.6: texto dinâmico — contador e timecode a cada quadro.
+#include "aurea/text/TextAnimator.hpp"
+#include "aurea/timeline/Layer.hpp"
+AUREA_TEST(TextDynamic, CounterAndTimecodeTokensFollowTheFrame) {
+    TextData t;
+    t.dynamic = true;
+    t.content = "{#} pts · {tc}";
+    t.counterFrom = 0.0; t.counterTo = 1000.0;
+    AUREA_CHECK_EQ(text::expand_dynamic(t, 0.0, 11.0, 0.0, 30.0), std::string("0 pts · 00:00:00:00"));
+    AUREA_CHECK_EQ(text::expand_dynamic(t, 10.0, 11.0, 95.0, 30.0), std::string("1.000 pts · 00:00:03:05"));
+    t.content = "{#}"; t.counterTo = 1.5; t.counterDecimals = 2;
+    AUREA_CHECK_EQ(text::expand_dynamic(t, 5.0, 11.0, 5.0, 30.0), std::string("0,75"));
+    t.content = "{t} / {f}";
+    AUREA_CHECK_EQ(text::expand_dynamic(t, 0.0, 11.0, 3725.0, 25.0), std::string("2:29 / 3725"));
+    // Desligado: as marcas ficam como foram digitadas.
+    t.dynamic = false;
+    AUREA_CHECK_EQ(text::expand_dynamic(t, 0.0, 11.0, 3725.0, 25.0), std::string("{t} / {f}"));
+    AUREA_CHECK_EQ(text::format_counter(-0.001, 2, true), std::string("0,00"));
+    AUREA_CHECK_EQ(text::format_counter(-1234567.5, 1, true), std::string("-1.234.567,5"));
+    AUREA_CHECK_EQ(text::format_counter(1234567, 0, false), std::string("1234567"));
+}
+
+// 0.4.6: caminho de movimento curvo (bézier espacial da posição).
+#include "aurea/timeline/SpatialPath.hpp"
+AUREA_TEST(SpatialPath, TangentsBendThePathAndKeepTheKeyframesExact) {
+    TrackSet tracks;
+    Track& x = tracks.get_or_create(TrackProperty::PositionX);
+    Track& y = tracks.get_or_create(TrackProperty::PositionY);
+    (void)x.set(FrameIndex{0}, 0.0f, Interpolation::Linear);
+    (void)x.set(FrameIndex{20}, 200.0f, Interpolation::Linear);
+    (void)y.set(FrameIndex{0}, 100.0f, Interpolation::Linear);
+    (void)y.set(FrameIndex{20}, 100.0f, Interpolation::Linear);
+    std::vector<SpatialTangent> tangents;
+    Vec3 p{};
+    // Sem tangentes: falso (a posição de sempre, reta).
+    AUREA_CHECK(!spatial_position(tracks, tangents, Vec3{0, 0, 0}, 10.0, p));
+    // Alças para cima nas duas pontas: o meio do caminho sobe (Y para baixo = menor).
+    tangents.push_back(SpatialTangent{0, Vec3{0, 0, 0}, Vec3{0, -120, 0}});
+    tangents.push_back(SpatialTangent{20, Vec3{0, -120, 0}, Vec3{0, 0, 0}});
+    AUREA_CHECK(spatial_position(tracks, tangents, Vec3{0, 0, 0}, 10.0, p));
+    AUREA_CHECK_NEAR(p.x, 100.0f, 1.0f);       // simétrico: o meio do arco fica no meio
+    AUREA_CHECK(p.y < 20.0f);                   // 100 − 0,75·120 = 10 no topo do arco
+    // Nos keyframes, exatamente os valores (a função devolve falso nas pontas).
+    AUREA_CHECK(!spatial_position(tracks, tangents, Vec3{0, 0, 0}, 0.0, p));
+    AUREA_CHECK(!spatial_position(tracks, tangents, Vec3{0, 0, 0}, 20.0, p));
+    // Velocidade constante no arco: o quarto do tempo fica perto de um quarto do comprimento.
+    Vec3 q{}, r{};
+    AUREA_CHECK(spatial_position(tracks, tangents, Vec3{0, 0, 0}, 5.0, q));
+    AUREA_CHECK(spatial_position(tracks, tangents, Vec3{0, 0, 0}, 15.0, r));
+    AUREA_CHECK_NEAR(q.y, r.y, 0.5f);
+    AUREA_CHECK_NEAR(q.x + r.x, 200.0f, 1.0f);
 }

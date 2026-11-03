@@ -46,7 +46,7 @@ bool is_decoration_effect(EffectTypeId type) noexcept {
 /// texto/forma 3D, partes 3D): colam só entre camadas do mesmo tipo.
 bool kind_bound_effect(EffectTypeId type) noexcept {
     static constexpr EffectTypeId kTypes[] = {
-        effect_type_id(text::kAnimatorEffect), effect_type_id(text::kTransformEffect),
+        effect_type_id(text::kAnimatorEffect), effect_type_id(text::kAnimatorProEffect), effect_type_id(text::kTransformEffect),
         effect_type_id(effect_keys::kText3DLayout), effect_type_id(effect_keys::kShape3DLayout),
     };
     return std::find(std::begin(kTypes), std::end(kTypes), type) != std::end(kTypes)

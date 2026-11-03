@@ -98,6 +98,11 @@ internal fun Element3DPanel(env: PanelEnv) {
         else -> listOf(Tab3D.Light, Tab3D.Material, Tab3D.Parts, Tab3D.Render)
     }
     var chosen by rememberSaveable { mutableIntStateOf(-1) }
+    // 0.4.6: a Cena 3D abre o painel direto numa aba (Motion Capture → Esqueleto).
+    androidx.compose.runtime.LaunchedEffect(Element3DRequest.tab) {
+        Element3DRequest.tab?.let { if (it in tabs) chosen = it.ordinal }
+        Element3DRequest.tab = null
+    }
     val tab = tabs.firstOrNull { it.ordinal == chosen } ?: tabs.first()
     Column(Modifier.fillMaxSize()) {
         if (tabs.size > 1) {
@@ -139,6 +144,11 @@ internal fun Element3DPanel(env: PanelEnv) {
             }
         }
     }
+}
+
+/** 0.4.6: pedido de aba ao abrir o painel 3D (a Cena 3D pede o Esqueleto). */
+internal object Element3DRequest {
+    var tab by androidx.compose.runtime.mutableStateOf<Tab3D?>(null)
 }
 
 /** As abas do painel 3D (a ordem é a da tela). */

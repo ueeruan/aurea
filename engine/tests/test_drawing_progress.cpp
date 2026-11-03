@@ -281,9 +281,9 @@ AUREA_TEST(DrawingProgress, EffectContractInTheRegistry) {
     if (!fx || !params) return;
     AUREA_CHECK(std::string(fx->info().category) == "Desenho");
     AUREA_CHECK(fx->edits_vector_geometry());
-    AUREA_CHECK_EQ(params->count(), 5u);
-    const char* const ids[] = {"progress", "order", "reverse", "softness", "angle"};
-    for (u32 i = 0; i < 5 && i < params->count(); ++i) AUREA_CHECK(std::string(params->at(i).id) == ids[i]);
+    AUREA_CHECK_EQ(params->count(), 6u);
+    const char* const ids[] = {"progress", "order", "reverse", "softness", "angle", "start"};
+    for (u32 i = 0; i < 6 && i < params->count(); ++i) AUREA_CHECK(std::string(params->at(i).id) == ids[i]);
     AUREA_CHECK(params->at(0).animatable());
     AUREA_CHECK_NEAR(params->at(0).defaultValue.v[0], 100.0f, 1e-6f);
     AUREA_CHECK_EQ(params->at(1).enumCount, 2u);
@@ -324,4 +324,24 @@ AUREA_TEST(DrawingProgress, EffectContractInTheRegistry) {
     for (u32 i = 0; i < params->count(); ++i) demo[i] = inst.params[i].constant;
     AUREA_CHECK(fx->demo_values(inst, demo));
     AUREA_CHECK(demo[0].v[0] > 0.0f && demo[0].v[0] < 100.0f);
+}
+
+// 0.4.6: Início e Fim ("Avanço do desenho"): só o trecho entre os dois aparece.
+AUREA_TEST(DrawingProgress, StartAndEndKeepOnlyTheTravellingStretch) {
+    const std::vector<Contour> lines = two_lines();   // A = 100 px, B = 300 px
+    std::vector<DrawnLine> out;
+    // Sequencial 10 %..50 %: A de 40 a 100 (60) + B de 0 a 100 (100).
+    cut_drawn(lines, 0.5f, true, false, out, 0.1f);
+    AUREA_CHECK_NEAR(drawn_length(out), 160.0, 1e-3);
+    // Início em 25 % já passou o A inteiro: só B de 0 a 100.
+    cut_drawn(lines, 0.5f, true, false, out, 0.25f);
+    AUREA_CHECK_EQ(out.size(), usize{1});
+    AUREA_CHECK_NEAR(drawn_length(out), 100.0, 1e-3);
+    if (out.size() == 1) AUREA_CHECK_NEAR(out[0].from, 0.0, 1e-6);
+    // Simultâneo 25 %..50 %: A de 25 a 50 + B de 75 a 150.
+    cut_drawn(lines, 0.5f, false, false, out, 0.25f);
+    AUREA_CHECK_NEAR(drawn_length(out), 100.0, 1e-3);
+    // Início = Fim: nada.
+    cut_drawn(lines, 0.4f, true, false, out, 0.4f);
+    AUREA_CHECK(out.empty());
 }

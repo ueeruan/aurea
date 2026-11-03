@@ -787,6 +787,18 @@ NS_SWIFT_NAME(AureaEngine)
 - (int64_t)audioPositionNs;
 - (BOOL)setRawPlayback:(BOOL)enabled;
 - (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance;
+/// 0.4.6: vista do palco do AE (0 câmera ativa, 1 padrão, 2..7 frente/trás/esquerda/direita/topo/base,
+/// 8..10 vista personalizada 1..3). Só a prévia; a exportação usa a câmera ativa.
+- (BOOL)setViewMode:(int)mode;
+/// 0.4.6: assistente de IA — ferramentas (JSON "tools" da OpenAI), instruções de sistema e execução de uma ferramenta.
+- (NSString*)assistantTools;
+- (NSString*)assistantSystemPrompt:(NSString*)language version:(NSString*)version;
+/// Bloqueia (um script pode demorar): chame fora da main thread. Devolve o JSON da resposta.
+- (NSString*)assistantCall:(NSString*)name args:(NSString*)args;
+/// Órbita/zoom da vista atual (personalizada: tudo; frente..base: só o zoom).
+- (BOOL)setViewOrbitYaw:(float)yaw pitch:(float)pitch distance:(float)distance;
+/// [modo, yaw, pitch, distância, ortográfica 0/1].
+- (NSArray<NSNumber*>*)queryView;
 - (NSArray<NSNumber*>*)sceneGuides;
 /// Cena 3D: camada 3D sob o ponto (px da composição) pelo corpo real; 0 = nada.
 - (long long)scenePickX:(float)x y:(float)y radius:(float)radius NS_SWIFT_NAME(scenePick(x:y:radius:));
@@ -934,6 +946,14 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)setTextAnimator:(long long)layerId index:(uint32_t)index values:(NSArray<NSNumber*>*)values;
 - (NSArray<NSNumber*>*)textStyle:(long long)layerId;
 - (BOOL)setTextStyle:(long long)layerId values:(NSArray<NSNumber*>*)values;
+// 0.4.6: caminho de movimento curvo (Engine::set_position_tangents / query_position_path).
+- (BOOL)setPositionTangents:(long long)layerId time:(long long)time values:(NSArray<NSNumber*>*)values NS_SWIFT_NAME(setPositionTangents(_:time:values:));
+- (NSArray<NSNumber*>*)positionPath:(long long)layerId NS_SWIFT_NAME(positionPath(_:));
+// 0.4.6: repetir o vídeo além do fim da fonte (bit 9 do timeFlags).
+- (BOOL)setLayerMediaLoop:(long long)layerId on:(BOOL)on NS_SWIFT_NAME(setLayerMediaLoop(_:on:));
+// 0.4.6: texto dinâmico (Engine::set_text_dynamic) — {ligado, de, até, casas, separador, curva}.
+- (NSArray<NSNumber*>*)textDynamic:(long long)layerId;
+- (BOOL)setTextDynamic:(long long)layerId values:(NSArray<NSNumber*>*)values;
 - (NSArray<NSNumber*>*)particleParams:(long long)layerId;
 - (BOOL)setParticle:(long long)layerId param:(uint32_t)param value:(float)value;
 - (BOOL)applyParticlePreset:(long long)layerId preset:(uint32_t)preset;
@@ -956,6 +976,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString*)importAeFile:(NSString*)path layer:(uint64_t)layer NS_SWIFT_NAME(importAeFile(_:layer:));
 /// O mesmo com os bytes já lidos; `fileName` só dá a extensão.
 - (NSString*)importAeData:(NSData*)data fileName:(NSString*)fileName layer:(uint64_t)layer NS_SWIFT_NAME(importAeData(_:fileName:layer:));
+/// 0.4.6: `textAnimatorPro` = animadores de texto do .ffx viram efeitos Text Animator Pro (editáveis).
+- (NSString*)importAeData:(NSData*)data fileName:(NSString*)fileName layer:(uint64_t)layer textAnimatorPro:(BOOL)pro NS_SWIFT_NAME(importAeData(_:fileName:layer:textAnimatorPro:));
 - (NSArray<NSNumber*>*)parseCaptionPreset:(NSString*)json NS_SWIFT_NAME(parseCaptionPreset(_:));
 - (NSString*)makeCaptionPreset:(NSString*)name options:(NSDictionary<NSString*, NSNumber*>*)options NS_SWIFT_NAME(makeCaptionPreset(_:options:));
 - (NSArray<NSNumber*>*)parseCurvePreset:(NSString*)json NS_SWIFT_NAME(parseCurvePreset(_:));
@@ -1033,6 +1055,19 @@ NS_SWIFT_NAME(AureaEngine)
 - (NSString*)saveCaptionBundle:(long long)layer name:(NSString*)name;
 - (BOOL)applyCaptionBundle:(long long)layer data:(NSString*)data;
 - (BOOL)editCaptionTrack:(long long)layer command:(NSString*)command;
+/// 0.4.6: opções da legenda em JSON (o bloco "caption" do preset), com fonte,
+/// cores, contorno, fundo e sombra próprios. Vazio = gerou; senão, o erro.
+- (NSString*)createCaptions:(long long)layerId words:(NSArray<NSDictionary<NSString*, id>*>*)words optionsJSON:(NSString*)json;
+/// Opções da faixa de legendas da camada (ou da faixa feita da fala dela); vazio = sem faixa.
+- (NSString*)captionOptions:(long long)layer;
+/// Troca estilo/aparência/tamanho/altura da faixa pronta (um passo de desfazer).
+- (BOOL)setCaptionOptions:(long long)layer json:(NSString*)json;
+/// Modelos prontos: [{id, options, preview}].
+- (NSString*)captionTemplates;
+/// As opções com o modelo aplicado (estilo e aparência; fonte, posição e agrupamento ficam). Vazio = inválido.
+- (NSString*)captionOptions:(NSString*)json withTemplate:(NSString*)templateId;
+/// Aparência resolvida das opções (para desenhar a amostra).
+- (NSString*)captionPreview:(NSString*)json;
 - (void)removeCaptions:(long long)layerId;
 - (NSArray<NSNumber*>*)trackCurve:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param from:(int32_t)from to:(int32_t)to;
 - (NSArray<NSNumber*>*)trackEasing:(long long)layerId property:(uint32_t)property effect:(uint32_t)effect param:(uint32_t)param time:(int32_t)time;

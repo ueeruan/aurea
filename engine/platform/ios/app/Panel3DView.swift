@@ -8,6 +8,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// As abas do painel 3D (a ordem é a da tela; o rawValue é o mesmo do Android).
+/// 0.4.6: pedido de aba ao abrir o painel 3D (par do Element3DRequest do Android).
+enum Panel3DRequest { @MainActor static var tab: Panel3DTab? }
+
 enum Panel3DTab: Int, CaseIterable {
     case material, shape, light, anim, parts, rig, render
     var key: String { ["ui3d_tab_material", "ui3d_tab_shape", "sh_dock_environment", "ui3d_tab_anim", "shape3d_parts", "rig3d_tab", "env3d_tab_render"][rawValue] }
@@ -137,7 +140,11 @@ struct Panel3DView: View {
         // `.fileImporter` daqui ficava sob o da raiz do editor e não abria.
         // A fonte vem pelo seletor do UIKit (FontImportPicker): um segundo
         // `.fileImporter` encadeado aqui calava um dos dois.
-        .onAppear(perform: load)
+        .onAppear {
+            load()
+            // 0.4.6: a Cena 3D abre o painel direto numa aba (Motion Capture → Esqueleto).
+            if let requested = Panel3DRequest.tab { if tabs.contains(requested) { tab = requested }; Panel3DRequest.tab = nil }
+        }
         .onChange(of: model.status.modelRevision) { _ in load() }
         .onChange(of: model.localPlayhead) { _ in loadMaterials() }
         .onChange(of: layerId) { _ in finishEditing(); editingText = false; load() }
@@ -403,6 +410,8 @@ struct Panel3DView: View {
                         }
                     }
                 }
+                // 0.4.6: névoa volumétrica com raios de luz (par do SceneFogSection do Android).
+                SceneFogControls().padding(.bottom, 6)
                 envSection("scene_bloom", id: "env3d.bloom") {
                     envToggle("scene_bloom", on: sceneSettings[5] > 0.5, id: "env3d.bloom.switch") { value in finishEditing(); setScene(5, value ? 1 : 0) }
                     if sceneSettings[5] > 0.5 {
@@ -1248,5 +1257,41 @@ struct MaterialBallView: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+}
+
+/// 0.4.6: a NÉVOA da cena (volumétrica, com raios de luz) — no Render 3D e na aba
+/// Névoa da câmera: é a névoa que a câmera vê, um ajuste só. Par do Android
+/// (`SceneFogSection`, Scene3DEnvironment.kt).
+struct SceneFogControls: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var settings: [Float] = []
+    private func load() { settings = model.engine.sceneSettings().map(\.floatValue) }
+    private func set(_ index: UInt32, _ value: Float) {
+        _ = model.engine.setSceneSetting(index, value: value)
+        load(); model.refreshModel(force: true)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if settings.count >= 15 {
+                Text(AureaText.t("scene046_fog")).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.muted)
+                    .accessibilityAddTraits(.isHeader)
+                Text(AureaText.t("scene046_fog_hint")).font(.aurea(size: 11)).foregroundStyle(AureaColors.subtle)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Text(AureaText.t("scene046_fog")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
+                    AureaToggle(checked: settings[9] > 0.5) { on in set(9, on ? 1 : 0) }
+                }.frame(height: 44).accessibilityIdentifier("env3d.fog.switch")
+                if settings[9] > 0.5 {
+                    // Densidade em "por 10 mil px": 6 = névoa leve, 30 = cerração.
+                    NativePanelRuler(label: AureaText.t("scene046_fog_density"), value: settings[10] * 10000, step: 0.5, range: 0...200,
+                                     decimals: 1, keypad: true) { set(10, $0 / 10000) }
+                    NativePanelRuler(label: AureaText.t("scene046_fog_rays"), value: settings[11] * 100, step: 5, range: 0...800,
+                                     unit: "%", keypad: true) { set(11, $0 / 100) }
+                }
+            }
+        }
+        .accessibilityIdentifier("env3d.fog")
+        .onAppear { load() }.onChange(of: model.status.modelRevision) { _ in load() }
     }
 }

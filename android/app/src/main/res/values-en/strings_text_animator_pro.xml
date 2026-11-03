@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: Text Animator Pro (TextAnimatorPro.cpp). -->
+<resources>
+    <string name="text_animator_pro_name">Text Animator Pro</string>
+    <string name="text_animator_pro_add">Add Text Animator Pro</string>
+    <string name="text_animator_pro_import">Import After Effects preset (.ffx) into Pro</string>
+</resources>

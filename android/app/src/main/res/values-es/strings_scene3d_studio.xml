@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="s3d_mode_object">Modo Objeto</string>
+    <string name="s3d_mode_pose">Modo Pose</string>
+    <string name="s3d_area_timeline">Línea de tiempo</string>
+    <string name="s3d_area_properties">Propiedades</string>
+    <string name="s3d_area_outliner">Outliner</string>
+    <string name="s3d_position">Posición</string>
+    <string name="s3d_rotation">Rotación</string>
+    <string name="s3d_scale">Escala</string>
+    <string name="s3d_insert_key">◆ Insertar</string>
+    <string name="s3d_insert_key_desc">Insertar clave en el fotograma actual</string>
+    <string name="s3d_delete_key">Borrar clave</string>
+    <string name="s3d_summary">Resumen</string>
+    <string name="s3d_nothing_selected">Nada seleccionado — toca un objeto en la escena o en el Outliner</string>
+    <string name="s3d_key_here">◆ clave en el fotograma %1$d</string>
+    <string name="s3d_no_key">◇ sin clave</string>
+    <string name="s3d_import_model">Importar modelo 3D</string>
+    <string name="s3d_import_formats">GLB · glTF · FBX · OBJ</string>
+    <string name="s3d_section_import">Importar</string>
+    <string name="s3d_section_mesh">Malla</string>
+    <string name="s3d_section_other">Otros</string>
+    <string name="s3d_cube">Cubo</string>
+    <string name="s3d_sphere">Esfera</string>
+    <string name="s3d_cylinder">Cilindro</string>
+    <string name="s3d_cone">Cono</string>
+    <string name="s3d_pyramid">Pirámide</string>
+    <string name="s3d_torus">Toro</string>
+    <string name="s3d_empty">Vacío</string>
+    <string name="s3d_delete_named">Eliminar %1$s</string>
+    <string name="s3d_add_named">Añadir %1$s</string>
+    <string name="s3d_scene">Escena</string>
+    <string name="s3d_prev_key">Clave anterior</string>
+    <string name="s3d_next_key">Clave siguiente</string>
+    <string name="s3d_start">Inicio</string>
+    <string name="s3d_end">Fin</string>
+    <string name="s3d_play">Reproducir</string>
+    <string name="s3d_pause">Pausar</string>
+    <string name="s3d_autokey_on">Grabación automática activada</string>
+    <string name="s3d_autokey_off">Grabación automática desactivada</string>
+    <string name="s3d_no_rig">Este objeto no tiene esqueleto</string>
+</resources>

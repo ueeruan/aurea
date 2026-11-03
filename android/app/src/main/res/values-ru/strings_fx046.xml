@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.4.6: efeitos novos (GapEffects046.cpp). -->
+<resources>
+    <string name="fx046_name_swirl">Вихрь</string>
+    <string name="fx046_name_polar">Полярные координаты</string>
+    <string name="fx046_name_tunnel">Туннель</string>
+    <string name="fx046_name_magnify">Лупа</string>
+    <string name="fx046_name_long_shadow">Длинная тень</string>
+    <string name="fx046_name_roughen">Шероховатые края</string>
+    <string name="fx046_name_contour">Контурные линии</string>
+    <string name="fx046_name_inner_glow">Внутреннее свечение</string>
+    <string name="fx046_name_lightning">Молния</string>
+    <string name="fx046_name_voronoi">Ячейки (Вороной)</string>
+</resources>

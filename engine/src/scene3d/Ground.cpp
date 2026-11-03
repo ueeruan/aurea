@@ -348,6 +348,8 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
                     b->cameraPos = Vec4{d.block->cameraPos.x, 2.0f * h - d.block->cameraPos.y,
                                        d.block->cameraPos.z, d.block->cameraPos.w};
                     if (b->alpha.y > 2.5f) b->alpha.y = 1.0f;   // MASK por cobertura → descarte (1 amostra)
+                    b->aoParams.x = 0.0f;   // 0.4.6: o reflexo não tem a AO da vista (slot 10 vazio)
+                    b->localAtlas.w = 0.0f;  // nem o atlas das luzes locais (slot 9)
                     remap.emplace_back(d.block, b);
                     nb = b;
                 }

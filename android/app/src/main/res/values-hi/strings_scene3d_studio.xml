@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="s3d_mode_object">ऑब्जेक्ट मोड</string>
+    <string name="s3d_mode_pose">पोज़ मोड</string>
+    <string name="s3d_area_timeline">टाइमलाइन</string>
+    <string name="s3d_area_properties">गुण</string>
+    <string name="s3d_area_outliner">आउटलाइनर</string>
+    <string name="s3d_position">स्थिति</string>
+    <string name="s3d_rotation">घुमाव</string>
+    <string name="s3d_scale">स्केल</string>
+    <string name="s3d_insert_key">◆ डालें</string>
+    <string name="s3d_insert_key_desc">मौजूदा फ़्रेम पर कीफ़्रेम डालें</string>
+    <string name="s3d_delete_key">कीफ़्रेम हटाएँ</string>
+    <string name="s3d_summary">सारांश</string>
+    <string name="s3d_nothing_selected">कुछ नहीं चुना गया — दृश्य या आउटलाइनर में किसी ऑब्जेक्ट को टैप करें</string>
+    <string name="s3d_key_here">◆ फ़्रेम %1$d पर कीफ़्रेम</string>
+    <string name="s3d_no_key">◇ कोई कीफ़्रेम नहीं</string>
+    <string name="s3d_import_model">3D मॉडल आयात करें</string>
+    <string name="s3d_import_formats">GLB · glTF · FBX · OBJ</string>
+    <string name="s3d_section_import">आयात</string>
+    <string name="s3d_section_mesh">मेश</string>
+    <string name="s3d_section_other">अन्य</string>
+    <string name="s3d_cube">घन</string>
+    <string name="s3d_sphere">गोला</string>
+    <string name="s3d_cylinder">बेलन</string>
+    <string name="s3d_cone">शंकु</string>
+    <string name="s3d_pyramid">पिरामिड</string>
+    <string name="s3d_torus">टोरस</string>
+    <string name="s3d_empty">खाली</string>
+    <string name="s3d_delete_named">%1$s हटाएँ</string>
+    <string name="s3d_add_named">%1$s जोड़ें</string>
+    <string name="s3d_scene">दृश्य</string>
+    <string name="s3d_prev_key">पिछला कीफ़्रेम</string>
+    <string name="s3d_next_key">अगला कीफ़्रेम</string>
+    <string name="s3d_start">शुरुआत</string>
+    <string name="s3d_end">अंत</string>
+    <string name="s3d_play">चलाएँ</string>
+    <string name="s3d_pause">रोकें</string>
+    <string name="s3d_autokey_on">स्वचालित रिकॉर्डिंग चालू</string>
+    <string name="s3d_autokey_off">स्वचालित रिकॉर्डिंग बंद</string>
+    <string name="s3d_no_rig">इस ऑब्जेक्ट में कंकाल नहीं है</string>
+</resources>

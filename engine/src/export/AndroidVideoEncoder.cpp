@@ -201,6 +201,13 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
         const auto encCaps = env->GetMethodID(capClass, "getEncoderCapabilities",
             "()Landroid/media/MediaCodecInfo$EncoderCapabilities;");
         const auto supports = env->GetMethodID(videoClass, "areSizeAndRateSupported", "(IID)Z");
+        // 0.4.6: o export não é em tempo real. O teto de taxa do encoder
+        // (pontos de desempenho: "1080p a 30") não impede codificar um 1080p60
+        // mais devagar que o tempo real — e o encoder de hardware, mesmo assim,
+        // é muitas vezes mais rápido que o de software. Antes um 60 fps (ou um
+        // tamanho no limite) ia direto para o libopenh264: minutos por vídeo.
+        const auto sizeSupported = env->GetMethodID(videoClass, "isSizeSupported", "(II)Z");
+        if (env->ExceptionCheck()) env->ExceptionClear();
         const auto bitrateMode = env->GetMethodID(encClass, "isBitrateModeSupported", "(I)Z");
         const auto formatsField = env->GetFieldID(capClass, "colorFormats", "[I");
         const auto levelsField = env->GetFieldID(capClass, "profileLevels",
@@ -228,6 +235,9 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
         if (!array || env->ExceptionCheck()) break;
         const char* mime = hevc ? "video/hevc" : "video/avc";
         const jsize count = env->GetArrayLength(array);
+        // Passada 0: tamanho E taxa anunciados; passada 1 (só se nenhum
+        // passou): só o tamanho — a taxa do export não precisa ser sustentada.
+        for (int pass = 0; pass < (sizeSupported ? 2 : 1) && !found; ++pass)
         for (jsize i = 0; i < count && !found; ++i) {
             if (env->PushLocalFrame(32) < 0) { env->ExceptionClear(); break; }
             const jobject info = env->GetObjectArrayElement(array, i);
@@ -252,9 +262,13 @@ bool find_encoder(bool hevc, u32 width, u32 height, f64 fps, bool hardware, Code
                 if (!matches) { if (type) env->DeleteLocalRef(type); continue; }
                 const jobject cap = env->CallObjectMethod(info, capabilities, type);
                 const jobject vc = cap && !env->ExceptionCheck() ? env->CallObjectMethod(cap, videoCaps) : nullptr;
-                if (!vc || env->ExceptionCheck() ||
-                    !env->CallBooleanMethod(vc, supports, static_cast<jint>(width), static_cast<jint>(height), fps) ||
-                    env->ExceptionCheck()) break;
+                if (!vc || env->ExceptionCheck()) break;
+                const bool fits = pass == 0
+                    ? env->CallBooleanMethod(vc, supports, static_cast<jint>(width), static_cast<jint>(height), fps)
+                    : env->CallBooleanMethod(vc, sizeSupported, static_cast<jint>(width), static_cast<jint>(height));
+                if (!fits || env->ExceptionCheck()) break;
+                if (pass == 1) AUREA_LOG_INFO("export: encoder de hardware aceita %ux%u, mas anuncia menos que %.2f fps em tempo real; usado mesmo assim (export nao e tempo real)",
+                                              width, height, fps);
                 const auto codecName = static_cast<jstring>(env->CallObjectMethod(info, name));
                 const char* textName = codecName && !env->ExceptionCheck() ? env->GetStringUTFChars(codecName, nullptr) : nullptr;
                 if (!textName || std::strlen(textName) >= sizeof(out.name)) {

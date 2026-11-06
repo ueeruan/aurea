@@ -4728,4 +4728,13 @@ untuk mengedit kurvanya.</string>
     <string name="s3d_area_collapse">Ciutkan panel</string>
     <string name="s3d_area_expand">Buka panel</string>
     <string name="skeleton_tab_bone">Tulang</string>
+    <string name="fxl_floor_horizon_blend">Campuran cakrawala</string>
+    <string name="fxl_floor_scene_light">Cahaya adegan di lantai</string>
+    <string name="fxl_floor_fresnel">Pantulan menurut sudut</string>
+    <string name="panel_mask_point_curve">Lengkungkan titik ini</string>
+    <string name="panel_mask_point_corner">Jadikan titik ini sudut</string>
+    <string name="panel_mask_point_hint">Lalu tarik gagang di panggung</string>
+    <string name="layer_to_3d_object">Ubah jadi objek 3D</string>
+    <string name="layer_to_3d_object_hint">Dengan bayangan, pantulan, dan kedalaman di adegan</string>
+    <string name="layer_to_3d_failed">Lapisan ini tidak bisa diubah jadi objek 3D</string>
 </resources>

@@ -244,6 +244,8 @@ struct PreRenderCache::Impl {
         Key key; Limits limits; fs::path parent, directory;
         Lease lease;
         u64 token = 0, total = 0, written = 0, bytes = kManifest + kOwner, frameBytes = 0;
+        /// Tamanho da pasta na última contagem e os bytes desta sessão naquele momento.
+        u64 namespaceCounted = 0, bytesAtCount = 0; u32 framesSinceCount = ~0u;
         i32 direction = 1; std::atomic<bool> complete{false};
         Errc error = Errc::Ok; char detail[192]{};
         std::chrono::steady_clock::time_point cleanupRetry{};
@@ -507,8 +509,18 @@ Status PreRenderCache::write(u64 token, u64 frame, std::span<const u16> rgba, co
     struct Charge { Impl& impl; ~Charge() { std::lock_guard lock(impl.mutex); impl.working -= kScratch; } } charge{*impl_};
     Lease admission;
     if (!admission.acquire(session->parent / "namespace.lease", true)) return Errc::Busy;
+    // Varrer a pasta a cada quadro deixava o PreRender quadrático: quanto mais pronto,
+    // mais lento. Recontar de tempos em tempos pega outro processo; no meio, soma o nosso.
     u64 namespaceBytes = 0;
-    if (const Status counted = namespace_bytes(session->parent, namespaceBytes); !counted.ok()) return counted;
+    if (session->framesSinceCount >= 32) {
+        if (const Status counted = namespace_bytes(session->parent, namespaceBytes); !counted.ok()) return counted;
+        session->namespaceCounted = namespaceBytes;
+        session->bytesAtCount = session->bytes;
+        session->framesSinceCount = 0;
+    } else {
+        namespaceBytes = session->namespaceCounted + (session->bytes - session->bytesAtCount);
+        ++session->framesSinceCount;
+    }
     const auto cancelled = [&] { return !impl_->valid(token) || (cancel && cancel->load(std::memory_order_acquire)); };
     auto execute = [&]() -> Status {
         if (cancelled()) return Errc::Cancelled;
@@ -529,8 +541,12 @@ Status PreRenderCache::write(u64 token, u64 frame, std::span<const u16> rgba, co
             const auto raw = static_cast<u32>(std::min<u64>(kChunk, session->frameBytes - offset));
             compressed.clear(); zlib_compress(pixels + offset, raw, compressed);
             if (compressed.size() > kChunk * 2 + 1024) return Errc::EncodeFailed;
-            if (const Status room = disk_room(session->directory, std::max(session->bytes, namespaceBytes) + fileBytes,
-                    compressed.size() + 12, session->limits); !room.ok()) return room;
+            // O espaço livre é uma chamada ao sistema: a cada 16 MiB, não a cada 64 KiB.
+            // Faltando no meio, o fwrite abaixo também devolve StorageFull.
+            if ((offset / kChunk) % 256 == 0) {
+                if (const Status room = disk_room(session->directory, std::max(session->bytes, namespaceBytes) + fileBytes,
+                        compressed.size() + 12, session->limits); !room.ok()) return room;
+            }
             u8 block[12]; put32(block, raw); put32(block + 4, static_cast<u32>(compressed.size()));
             put32(block + 8, crc32_update(0, pixels + offset, raw));
             if (std::fwrite(block, 1, 12, file.value) != 12

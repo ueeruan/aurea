@@ -19,7 +19,8 @@ f32 finite_or(f32 v, f32 fallback) noexcept { return std::isfinite(v) ? v : fall
 
 class ReflectiveFloor final : public Effect {
 public:
-    enum : u32 { Horizon, Reflection, Falloff, Blur, Distortion, Style, Color, Tile, Perspective, Texture, Brightness, Opacity, TextureLayer };
+    enum : u32 { Horizon, Reflection, Falloff, Blur, Distortion, Style, Color, Tile, Perspective, Texture, Brightness, Opacity, TextureLayer,
+                 HorizonBlend, SceneLight, Fresnel };
     const EffectInfo& info() const noexcept override {
         static const EffectInfo i{effect_keys::kReflectiveFloor, "Reflective Floor", "3D", EffectClass::Neighborhood};
         return i;
@@ -43,6 +44,11 @@ public:
         // 0.4.1: a textura do chão pode ser uma camada do projeto (imagem ou vídeo; pode
         // ficar com o olho desligado). Cada ladrilho mostra a imagem inteira.
         p.add_layer_ref("texture_layer", "Textura do chão (camada)");
+        // 0.4.7: o que liga o chão à cena. Sem isto ele parecia uma camada colada: linha
+        // dura no encontro com o fundo, cor própria e reflexo igual em todo ângulo.
+        p.add_float("horizon_blend", "Mistura no horizonte", 35, 0, 100, kParamAnimatable, "%");
+        p.add_float("scene_light", "Luz da cena no chão", 40, 0, 100, kParamAnimatable, "%");
+        p.add_float("fresnel", "Reflexo pelo ângulo", 50, 0, 100, kParamAnimatable, "%");
     }
     i32 input_layer_param() const noexcept override { return TextureLayer; }
     u32 input_layer_count() const noexcept override { return 1; }
@@ -62,8 +68,8 @@ public:
         // pais (nulo 3D). O shader acha o ponto do chão de cada pixel pela inversa da
         // homografia px ← chão e o reflexo pelo raio refletido até o plano z = 0 da
         // composição (onde moram as camadas 2D).
-        struct Uniforms { EffectUniforms base; Vec4 q0, h0, h1, h2; Mat4 world, proj; } uu{};
-        static_assert(sizeof(Uniforms) == 112 + 64 + 128);
+        struct Uniforms { EffectUniforms base; Vec4 q0, h0, h1, h2; Mat4 world, proj; Vec4 q1; } uu{};
+        static_assert(sizeof(Uniforms) == 112 + 64 + 128 + 16);
         EffectUniforms& u = uu.base;
         u = base_uniforms(input);
         const bool space3d = e.placement && e.placement->layerWorldValid && e.placement->sceneCameraValid;
@@ -102,6 +108,9 @@ public:
         u.p3 = Vec4{std::clamp(finite_or(e.f(Texture), 70), 0.f, 100.f) * .01f,
                     std::clamp(finite_or(e.f(Brightness), 30), 0.f, 100.f) * .01f,
                     e.count > Opacity ? std::clamp(finite_or(e.f(Opacity), 100), 0.f, 100.f) * .01f : 1.f, 0.f};
+        // Projeto antigo sem estes parâmetros: zero, o chão continua como foi salvo.
+        auto extra = [&](u32 index) { return e.count > index ? std::clamp(finite_or(e.f(index), 0), 0.f, 100.f) * .01f : 0.f; };
+        uu.q1 = Vec4{extra(HorizonBlend), extra(SceneLight), extra(Fresnel), 0.f};
         (void)w; (void)h;
         u.color = e.color(Color);
         u.p3.w = texLayer ? 1.0f : 0.0f;

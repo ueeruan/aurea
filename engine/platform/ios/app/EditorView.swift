@@ -896,12 +896,14 @@ private struct ShellStageBanner: View {
         context.stroke(p, with: .color(StageInk.outlineUnder), lineWidth: under); context.stroke(p, with: .color(color), lineWidth: over)
     }
     private func drawPath(_ context: inout GraphicsContext, mask: MaskItem, selected: Bool, vector: Bool, screen: (Float, Float) -> CGPoint) {
-        let count = mask.points.count / 6, affine = model.maskAffine
-        guard count > 0, affine.count == 6 else { return }
+        let count = mask.points.count / 6, affine = model.maskAffine, row = vector ? [0, 0, 1] : model.maskPerspective
+        guard count > 0, affine.count == 6, row.count == 3 else { return }
         func point(_ index: Int, _ handle: Int = 0) -> CGPoint {
             let x = mask.points[index * 6] + (handle == 0 ? 0 : mask.points[index * 6 + handle])
             let y = mask.points[index * 6 + 1] + (handle == 0 ? 0 : mask.points[index * 6 + handle + 1])
-            return screen(affine[0] * x + affine[2] * y + affine[4], affine[1] * x + affine[3] * y + affine[5])
+            // Camada 3D: a matriz é projetiva, a conta divide pela perspectiva.
+            let raw = row[0] * x + row[1] * y + row[2], w = abs(raw) < 0.000001 ? Float(0.000001) : raw
+            return screen((affine[0] * x + affine[2] * y + affine[4]) / w, (affine[1] * x + affine[3] * y + affine[5]) / w)
         }
         var path = Path(); path.move(to: point(0))
         for i in 0..<(mask.closed ? count : max(0, count - 1)) { let j = (i + 1) % count; path.addCurve(to: point(j), control1: point(i, 4), control2: point(j, 2)) }

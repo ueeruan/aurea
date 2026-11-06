@@ -34,6 +34,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 q0, h0, h1, h2;
     mat4 world;   // mundo ← px da camada (o plano do chão)
     mat4 proj;    // px da composição (homogêneo) ← mundo
+    vec4 q1;      // mistura no horizonte, luz da cena no chão, reflexo pelo ângulo
 } p;
 
 float hash21(vec2 q) {
@@ -106,12 +107,32 @@ FloorLook floor_look(vec2 t) {
     return f;
 }
 
-/// O pixel final: o chão com o reflexo, misturado ao que já está ali.
-vec4 compose(vec4 s, FloorLook f, vec4 refl, float fall) {
+/// A cor da cena que chega neste ponto do chão: a imagem bem borrada em volta do
+/// reflexo. É o que faz o chão pegar a luz do que está em cima dele.
+vec3 scene_light(vec2 q) {
+    float amount = clamp(p.q1.y, 0.0, 1.0);
+    if (amount <= 0.0) return vec3(0.0);
+    // Raio grande com poucas amostras vira cópias da borda: o disco gira por pixel
+    // (ruído fixo, igual em toda execução) e a luz sai lisa, sem faixas.
+    float radius = 0.3 * max(p.p2.w, 1.0);
+    float spin = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    vec3 acc = vec3(0.0);
+    for (int k = 0; k < 24; ++k) {
+        float r = sqrt((float(k) + 0.5) / 24.0) * radius;
+        float a = float(k) * 2.39996 + spin;
+        acc += at(q + r * vec2(cos(a), sin(a) * 0.6)).rgb;
+    }
+    return acc * (amount * 0.6 / 24.0);
+}
+
+/// O pixel final: o chão com o reflexo, misturado ao que já está ali. `grazing` é 1
+/// olhando rente ao chão e 0 de cima: é ali que um piso real reflete mais.
+vec4 compose(vec4 s, FloorLook f, vec4 refl, float fall, vec3 light, float grazing) {
     float amount = clamp(p.p3.x, 0.0, 1.0);
-    float strength = clamp(p.p0.y, 0.0, 1.0) * fall
+    float angle = mix(1.0, 0.3 + 0.7 * grazing, clamp(p.q1.z, 0.0, 1.0));
+    float strength = clamp(p.p0.y, 0.0, 1.0) * fall * angle
                    * mix(1.0, mix(0.25, 1.0, f.wear) * mix(0.6, 1.0, 1.0 - f.grout), amount);
-    vec4 floorPx = vec4(f.color + refl.rgb * strength, 1.0);
+    vec4 floorPx = vec4(f.color + light + refl.rgb * strength, 1.0);
     // Numa camada de ajuste a entrada já traz o fundo (opaco): o chão substitui o que
     // está ali, na opacidade do chão; com entrada transparente, ele fica atrás.
     float op = clamp(p.p3.z, 0.0, 1.0);
@@ -147,6 +168,7 @@ void main() {
         FloorLook f = floor_look(t);
         // Raio refletido até z = 0 (o plano das camadas 2D da composição).
         vec4 refl = vec4(0.0);
+        vec3 light = vec3(0.0);
         float travel = 0.0;
         if (abs(r.z) > 1e-6) {
             travel = -wf.z / r.z;
@@ -157,14 +179,18 @@ void main() {
                     vec2 n2 = vec2(fbm(t * 2.0 + 3.1), fbm(t * 2.0 + 7.7)) - 0.5;
                     vec2 offset = n2 * distortion * (8.0 + 60.0 * d) * mix(1.0, 1.0 + (1.0 - f.wear) * 2.0, clamp(p.p3.x, 0.0, 1.0));
                     refl = blurred(cq.xy / cq.w + offset, max(p.p0.w, 0.0) * (0.25 + 3.0 * d));
+                    light = scene_light(cq.xy / cq.w);
                 }
             }
         }
         float fall = 1.0 - smoothstep(0.0, max(p.p0.z, 0.01) * H * 1.5, travel);
         // Muito longe, o chão some no horizonte (sem serrilhado infinito).
         float horizonFade = 1.0 - smoothstep(H * 6.0, H * 12.0, dist);
-        vec4 outPx = compose(s, f, refl, fall);
-        o_color = mix(s, outPx, horizonFade);
+        float grazing = pow(1.0 - abs(dot(dir, n)), 3.0);
+        // O chão entra aos poucos a partir da base do que está em pé nele.
+        float edge = smoothstep(0.0, max(p.q1.x * 0.5 * H, 1.0), abs(wf.z));
+        vec4 outPx = compose(s, f, refl, fall, light, grazing);
+        o_color = mix(s, outPx, horizonFade * edge);
         return;
     }
 
@@ -185,5 +211,7 @@ void main() {
     vec2 offset = n2 * distortion * (8.0 + 60.0 * d) * mix(1.0, 1.0 + (1.0 - f.wear) * 2.0, clamp(p.p3.x, 0.0, 1.0));
     vec4 refl = blurred(vec2(px.x, hy - (px.y - hy)) + offset, max(p.p0.w, 0.0) * (0.25 + 3.0 * d));
     float fall = 1.0 - smoothstep(0.0, max(p.p0.z, 0.01), d);
-    o_color = compose(s, f, refl, fall);
+    float edge = smoothstep(0.0, max(p.q1.x * 0.25 * H, 1.0), px.y - hy);
+    vec3 light = scene_light(vec2(px.x, hy - (px.y - hy)));
+    o_color = mix(s, compose(s, f, refl, fall, light, pow(1.0 - d, 3.0)), edge);
 }

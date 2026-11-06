@@ -899,6 +899,7 @@ NS_SWIFT_NAME(AureaEngine)
 - (BOOL)setMaskProps:(long long)layerId mask:(uint32_t)mask operation:(uint32_t)operation inverted:(BOOL)inverted feather:(float)feather expansion:(float)expansion opacity:(float)opacity;
 - (BOOL)keyMask:(long long)layerId mask:(uint32_t)mask;
 - (BOOL)toggleMaskKey:(long long)layerId mask:(uint32_t)mask NS_SWIFT_NAME(toggleMaskKey(_:mask:));
+- (int)toggleMaskPointCurve:(long long)layerId mask:(uint32_t)mask point:(uint32_t)point NS_SWIFT_NAME(toggleMaskPointCurve(_:mask:point:));
 - (BOOL)setMaskParam:(long long)layerId mask:(uint32_t)mask param:(uint32_t)param value:(float)value;
 - (BOOL)toggleMaskParamKey:(long long)layerId mask:(uint32_t)mask param:(uint32_t)param;
 // Rig 2D (camada de imagem; Engine::query_rig e família). Juntas: 5 floats
@@ -931,6 +932,7 @@ NS_SWIFT_NAME(AureaEngine)
 // [forma, nº de partes, 5 por parte (RGBA sRGB, 1 = tem imagem)]. Partes no
 // cabeçote: 14 floats cada (Engine::kShapePartFloats).
 - (long long)addShape3D:(uint32_t)kind name:(NSString*)name NS_SWIFT_NAME(addShape3D(kind:name:));
+- (long long)layerTo3DObject:(long long)layerId name:(NSString*)name NS_SWIFT_NAME(layerTo3DObject(_:name:));
 - (NSArray<NSNumber*>*)shape3D:(long long)layerId NS_SWIFT_NAME(shape3D(_:));
 - (BOOL)setShape3DPartStyle:(long long)layerId part:(int32_t)part color:(nullable NSArray<NSNumber*>*)color image:(nullable NSString*)image NS_SWIFT_NAME(setShape3DPartStyle(_:part:color:image:));
 - (NSArray<NSNumber*>*)shape3DParts:(long long)layerId NS_SWIFT_NAME(shape3DParts(_:));

@@ -2129,6 +2129,9 @@ enum EffectI18nTable {
     aurea.generate.reflective_floor|10|brightness|fxl_floor_brightness|
     aurea.generate.reflective_floor|11|opacity|fxl_floor_opacity|
     aurea.generate.reflective_floor|12|texture_layer|fxl_floor_texture_layer|
+    aurea.generate.reflective_floor|13|horizon_blend|fxl_floor_horizon_blend|
+    aurea.generate.reflective_floor|14|scene_light|fxl_floor_scene_light|
+    aurea.generate.reflective_floor|15|fresnel|fxl_floor_fresnel|
     aurea.time.random_edits|0|edit_length|fx027_edit_length|
     aurea.time.random_edits|1|seed|fxl_seed|
     aurea.color.grade|0|log_profile|fxl_camera_profile|fxo_none_rec_709,fxo_s_log3_sony,fxo_logc3_arri,fxo_v_log_panasonic,fxo_apple_log,fxo_cineon

@@ -280,12 +280,16 @@ struct PreviewMetalView: UIViewRepresentable {
         }
 
         private func maskLocal(_ p: CGPoint) -> SIMD2<Float>? {
-            let a = model.maskAffine
-            guard a.count == 6 else { return nil }
-            let det = a[0] * a[3] - a[1] * a[2]
-            guard abs(det) > 0.000001 else { return nil }
-            let x = Float(p.x) - a[4], y = Float(p.y) - a[5]
-            return SIMD2((a[3] * x - a[2] * y) / det, (-a[1] * x + a[0] * y) / det)
+            let m = model.maskAffine, r = model.panel == .vector ? [0, 0, 1] : model.maskPerspective
+            guard m.count == 6, r.count == 3 else { return nil }
+            // Inversa da homografia (a camada 3D é projetiva; em 2D a linha é 0, 0, 1).
+            let a = m[0], b = m[2], c = m[4], d = m[1], e = m[3], f = m[5], g = r[0], h = r[1], i = r[2]
+            let px = Float(p.x), py = Float(p.y)
+            let x = (e * i - f * h) * px + (c * h - b * i) * py + (b * f - c * e)
+            let y = (f * g - d * i) * px + (a * i - c * g) * py + (c * d - a * f)
+            let z = (d * h - e * g) * px + (b * g - a * h) * py + (a * e - b * d)
+            guard abs(z) > 0.000000001 else { return nil }
+            return SIMD2(x / z, y / z)
         }
         private func nearestMaskPoint(_ p: SIMD2<Float>, tolerance: Float) -> Int? {
             guard let mask = model.editingMask else { return nil }

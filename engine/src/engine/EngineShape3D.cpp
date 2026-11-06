@@ -124,6 +124,78 @@ Result<u64> Engine::add_shape3d(u32 kind, const char* name) noexcept {
     return lid.pack();
 }
 
+/// 0.4.7: imagem ou vídeo vira um objeto da cena. Um plano 3D só desenha a imagem: não
+/// projeta sombra, e efeitos de cena não o enxergam. Aqui nasce uma placa (cubo fino) com
+/// a própria camada como textura de todas as faces: sombra, reflexo, profundidade, luz e
+/// efeitos vêm do caminho dos modelos. A camada original fica oculta, servindo de textura.
+Result<u64> Engine::layer_to_3d_object(u64 layerId, const char* name) noexcept {
+    Vec3 position{}, rotation{}, scale{1, 1, 1};
+    f32 w = 0, h = 0;
+    FrameIndex start{0}, end{0};
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        drain_commands_locked();
+        Composition* comp = project_ ? current_composition() : nullptr;
+        const Layer* src = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        if (!src) return Status{Errc::NotFound, "camada nao existe"};
+        if (src->locked || src->adjustment || (src->kind != LayerKind::Image && src->kind != LayerKind::Video))
+            return Status{Errc::InvalidArgument, "so imagem ou video viram objeto 3D"};
+        bridge::LayerDetailPOD pod{};
+        if (!fill_layer_detail_locked(layerId, pod) || !pod.sourceWidth || !pod.sourceHeight)
+            return Status{Errc::InvalidState, "camada sem tamanho"};
+        w = static_cast<f32>(pod.sourceWidth);
+        h = static_cast<f32>(pod.sourceHeight);
+        position = src->transform.position;
+        rotation = src->transform.rotation;
+        scale = src->transform.scale;
+        // O centro do objeto é o centro da imagem, que nem sempre é a âncora.
+        position.x += (w * 0.5f - src->transform.anchor.x) * scale.x;
+        position.y += (h * 0.5f - src->transform.anchor.y) * scale.y;
+        start = src->start;
+        end = src->end;
+        history_.begin_group("transformar em objeto 3D");
+    }
+    Result<u64> made = add_shape3d(static_cast<u32>(scene3d::Shape3DKind::Cube), name);
+    u32 materials = 0;
+    if (made.ok()) {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        Composition* comp = project_ ? current_composition() : nullptr;
+        Layer* object = comp ? comp->layer(LayerId::unpack(*made)) : nullptr;
+        Layer* src = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+        const auto model = object ? models_.find(object->model.scene.pack()) : models_.end();
+        if (object && src && model != models_.end() && model->second) {
+            materials = static_cast<u32>(model->second->materials.size());
+            const Vec3 ext = model->second->bounds.extent();
+            object->model.unitScale = 1.0f / std::max({ext.x, ext.y, ext.z, 1e-3f});
+            object->transform.position = position;
+            object->transform.rotation = rotation;
+            // A escala Z multiplica a X (layer_matrix_3d_frac): a espessura vai dividida por ela.
+            const f32 wide = std::max(w * scale.x, 1.0f);
+            object->transform.scale = Vec3{wide, h * scale.y, std::max(2.0f, std::min(w, h) * 0.02f) / wide};
+            object->start = start;
+            object->end = end;
+            // A textura de camada é a composição inteira: a imagem preenche o quadro
+            // para cobrir a face toda. Ela não aparece mais, só alimenta o objeto.
+            src->threeD = false;
+            src->visible = false;
+            src->transform.anchor = Vec3{w * 0.5f, h * 0.5f, 0.0f};
+            src->transform.position = Vec3{static_cast<f32>(comp->width()) * 0.5f, static_cast<f32>(comp->height()) * 0.5f, 0.0f};
+            src->transform.rotation = Vec3{0, 0, 0};
+            src->transform.scale = Vec3{static_cast<f32>(comp->width()) / w, static_cast<f32>(comp->height()) / h, 1.0f};
+            bump_model_revision_locked();
+            project_->mark_dirty();
+        }
+    }
+    for (u32 m = 0; m < materials; ++m) (void)set_material_texture_layer(*made, m, layerId);
+    {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        history_.end_group();
+    }
+    if (made.ok() && !materials) return Status{Errc::InvalidState, "objeto sem material"};
+    request_render();
+    return made;
+}
+
 Status Engine::set_shape3d(u64 layerId, const scene3d::Shape3DSpec& in) noexcept {
     std::lock_guard<std::recursive_mutex> importing(sourceImportMutex_);
     u64 session = 0, room = 0; CompositionId composition; AssetId previous;

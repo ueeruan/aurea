@@ -149,11 +149,19 @@ private fun MaskEditor(env: PanelEnv, m: EditorStore.MaskPath, drawing: Boolean)
         m.keyCount > 0 -> KeyframeLook.Animated
         else -> KeyframeLook.None
     }
-    PropertyCustomRow(stringResource(R.string.panel_caminho), selected = true, onSelect = {}, keyframe = look) {
+    PropertyCustomRow(stringResource(R.string.panel_caminho), selected = true, onSelect = { store.toggleMaskKey(m.id) }, keyframe = look) {
         Text(
             if (m.keyCount == 0) stringResource(R.string.panel_parado_toque_trilho_animar) else pluralStringResource(R.plurals.pn_keyframes_edit_at_playhead, m.keyCount, m.keyCount),
             style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = AureaColors.Muted)),
         )
+    }
+
+    val point = store.maskPoint
+    if (point in 0 until m.count) {
+        val curved = (2..5).any { m.points[point * 6 + it] != 0f }
+        Spacer(Modifier.height(8.dp))
+        ActionCard(stringResource(if (curved) R.string.panel_mask_point_corner else R.string.panel_mask_point_curve),
+            stringResource(R.string.panel_mask_point_hint)) { store.toggleMaskPointCurve(m.id, point) }
     }
 
     KitTitle(stringResource(R.string.panel_mask_mode))

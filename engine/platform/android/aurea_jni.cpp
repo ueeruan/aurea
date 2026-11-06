@@ -1833,6 +1833,12 @@ AUREA_JNI jint AUREA_FN(nativeToggleMaskPathKey)(JNIEnv*, jclass, jlong handle, 
     return keyed ? 1 : 0;
 }
 
+AUREA_JNI jint AUREA_FN(nativeToggleMaskPointCurve)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask, jint point) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || mask < 0 || point < 0) return -1;
+    return c->engine.toggle_mask_point_curve(static_cast<u64>(layer), static_cast<u32>(mask), static_cast<u32>(point));
+}
+
 /// Floats necessários (escreve só se couberem em `out`).
 AUREA_JNI jint AUREA_FN(nativeQueryMasks)(JNIEnv* env, jclass, jlong handle, jlong layer, jfloatArray out) {
     NativeContext* c = ctx_of(handle);
@@ -2268,6 +2274,16 @@ AUREA_JNI jintArray AUREA_FN(nativeText3DPresetPreview)(JNIEnv* env, jclass, jlo
 }
 
 // --- Formas 3D (Engine::add_shape3d e família; scene3d/Shape3D.hpp) -----------
+AUREA_JNI jlong AUREA_FN(nativeLayerTo3dObject)(JNIEnv* env, jclass, jlong handle, jlong layer, jstring name) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return -static_cast<jlong>(Errc::InvalidState);
+    std::string label;
+    if (name) { const char* v = env->GetStringUTFChars(name, nullptr); if (v) { label = v; env->ReleaseStringUTFChars(name, v); } }
+    const Result<u64> r = c->engine.layer_to_3d_object(static_cast<u64>(layer), label.c_str());
+    if (!r.ok()) return -static_cast<jlong>(r.status().code());
+    return static_cast<jlong>(*r);
+}
+
 AUREA_JNI jlong AUREA_FN(nativeAddShape3d)(JNIEnv* env, jclass, jlong handle, jint kind, jstring name) {
     NativeContext* c = ctx_of(handle);
     if (!c || kind < 0) return -static_cast<jlong>(Errc::InvalidState);

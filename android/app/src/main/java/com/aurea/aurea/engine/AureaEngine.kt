@@ -799,6 +799,8 @@ class AureaEngine private constructor() {
     fun setMaskParam(layer: Long, mask: Int, param: Int, value: Float): Boolean = nativeSetMaskParam(nativeHandle, layer, mask, param, value)
     fun toggleMaskParamKey(layer: Long, mask: Int, param: Int): Boolean = nativeToggleMaskParamKey(nativeHandle, layer, mask, param)
     /** Floats necessários (Engine::query_masks); só escreve se couber em [out]. */
+    /** Canto ↔ curva do ponto: 1 virou curva, 0 virou canto, −1 nada mudou. */
+    fun toggleMaskPointCurve(layer: Long, mask: Int, point: Int): Int = nativeToggleMaskPointCurve(nativeHandle, layer, mask, point)
     fun queryMasks(layer: Long, out: FloatArray): Int = nativeQueryMasks(nativeHandle, layer, out)
     /** Síncrono (decodifica): fora da UI. Quadros rastreados, ou −Errc. */
     fun trackMask(layer: Long, mask: Int, mode: Int): Int = nativeWork.run(-5) { nativeTrackMask(nativeHandle, layer, mask, mode) }
@@ -920,6 +922,7 @@ class AureaEngine private constructor() {
     // --- Formas 3D (Engine::add_shape3d e família) -----------------------------------------
     /** Nova camada de forma 3D ([kind] = Shape3DKind 0..9). Id da camada, ou −Errc. */
     fun addShape3d(kind: Int, name: String): Long = nativeAddShape3d(nativeHandle, kind, name)
+    fun layerTo3dObject(layer: Long, name: String): Long = nativeLayerTo3dObject(nativeHandle, layer, name)
     /** Receita: out[0] forma, out[1] partes, 5 por parte (RGBA sRGB, tem imagem). −1 = não é forma. */
     fun queryShape3d(layer: Long, out: FloatArray): Int = nativeQueryShape3d(nativeHandle, layer, out)
     /** Cor ([rgba] nula = mantém) e imagem ([image] nula = mantém, "" = tira) da parte (−1 = todas). */
@@ -2044,6 +2047,7 @@ class AureaEngine private constructor() {
     private external fun nativeMaterialPreview(handle: Long, layer: Long, material: Int, size: Int): IntArray?
     private external fun nativeText3DPresetPreview(handle: Long, preset: Int, size: Int): IntArray?
     private external fun nativeAddShape3d(handle: Long, kind: Int, name: String): Long
+    private external fun nativeLayerTo3dObject(handle: Long, layer: Long, name: String): Long
     private external fun nativeQueryShape3d(handle: Long, layer: Long, out: FloatArray): Int
     private external fun nativeSetShape3dPartStyle(handle: Long, layer: Long, part: Int, rgba: FloatArray?, image: String?): Boolean
     private external fun nativeQueryShape3dParts(handle: Long, layer: Long, out: FloatArray): Int
@@ -2060,6 +2064,7 @@ class AureaEngine private constructor() {
     private external fun nativeSetMaskPath(handle: Long, layer: Long, mask: Int, pts: FloatArray?, count: Int, closed: Boolean, undo: Boolean): Boolean
     private external fun nativeSetMaskProps(handle: Long, layer: Long, mask: Int, op: Int, inverted: Boolean, feather: Float, expansion: Float, opacity: Float): Boolean
     private external fun nativeToggleMaskPathKey(handle: Long, layer: Long, mask: Int): Int
+    private external fun nativeToggleMaskPointCurve(handle: Long, layer: Long, mask: Int, point: Int): Int
     private external fun nativeSetMaskParam(handle: Long, layer: Long, mask: Int, param: Int, value: Float): Boolean
     private external fun nativeToggleMaskParamKey(handle: Long, layer: Long, mask: Int, param: Int): Boolean
     private external fun nativeQueryMasks(handle: Long, layer: Long, out: FloatArray): Int

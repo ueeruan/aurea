@@ -4746,4 +4746,13 @@
     <string name="s3d_area_collapse">Свернуть панель</string>
     <string name="s3d_area_expand">Развернуть панель</string>
     <string name="skeleton_tab_bone">Кость</string>
+    <string name="fxl_floor_horizon_blend">Смешивание у горизонта</string>
+    <string name="fxl_floor_scene_light">Свет сцены на полу</string>
+    <string name="fxl_floor_fresnel">Отражение по углу</string>
+    <string name="panel_mask_point_curve">Скруглить эту точку</string>
+    <string name="panel_mask_point_corner">Сделать точку углом</string>
+    <string name="panel_mask_point_hint">Затем потяните маркеры на сцене</string>
+    <string name="layer_to_3d_object">Превратить в 3D-объект</string>
+    <string name="layer_to_3d_object_hint">С тенью, отражением и глубиной в сцене</string>
+    <string name="layer_to_3d_failed">Не удалось превратить этот слой в 3D-объект</string>
 </resources>

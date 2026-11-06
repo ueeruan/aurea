@@ -105,6 +105,10 @@ public:
     /// Em 32 bits o prazo da prévia encolhe (address_space::source_idle_frames).
     void collect(u64 frameNumber, u32 idleFrames = 180);
 
+    /// Tocando do cache da prévia ninguém pede quadro às fontes. Sem isto elas pareciam
+    /// ociosas, fechavam no meio do trecho e o fim do cache travava reabrindo o codec.
+    void keep_sources(u64 frameNumber) noexcept;
+
     /// Drop cache-exclusive optional CPU prefetch after binding a render's
     /// exact snapshots. Preserves required samples and all external FrameRefs.
     [[nodiscard]] usize reclaim_unused_frames() noexcept;

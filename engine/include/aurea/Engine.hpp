@@ -1346,6 +1346,8 @@ public:
     bool toggle_mask_param_key(u64 layerId, u32 maskId, u32 param) noexcept;
     /// Liga/desliga o key do caminho no cabeçote (`keyed` = ficou com key).
     bool toggle_mask_path_key(u64 layerId, u32 maskId, bool* keyed = nullptr) noexcept;
+    /// Canto ↔ curva do ponto da máscara. 1 virou curva, 0 virou canto, −1 nada mudou.
+    i32 toggle_mask_point_curve(u64 layerId, u32 maskId, u32 point) noexcept;
     /// Marca o keyframe do caminho da máscara aqui — com keyframe no cabeçote,
     /// REGRAVA a forma avaliada em vez de apagá-la (ver `ensure_shape_param_key`).
     bool ensure_mask_path_key(u64 layerId, u32 maskId, bool* keyed = nullptr) noexcept;
@@ -2211,6 +2213,8 @@ public:
     /// Nova camada com a forma `kind` (Shape3DKind), centrada, uma cor por
     /// parte. `name` = nome da camada (a UI manda traduzido). Devolve a layer.
     [[nodiscard]] Result<u64> add_shape3d(u32 kind, const char* name = nullptr) noexcept;
+    /// Imagem ou vídeo vira uma placa 3D com a camada de textura (sombra, reflexo, profundidade).
+    [[nodiscard]] Result<u64> layer_to_3d_object(u64 layerId, const char* name = nullptr) noexcept;
     /// Troca a receita (cor/imagem por parte). A malha é gerada de novo; desfazível.
     Status set_shape3d(u64 layerId, const scene3d::Shape3DSpec& spec) noexcept;
     /// Receita da forma 3D da camada (falso = não é forma 3D).
@@ -3105,6 +3109,14 @@ private:
     std::atomic<u64> previewRetryDueNs_{0};   ///< retry de recurso/GPU; uma edição cancela a espera
     std::atomic<u64>  mediaReadyGen_{0};      ///< frames novos do decoder
     i64  lastRenderedFrame_ = -1;
+    /// Medição do transporte (log "perf:"): pedido → primeiro quadro apresentado e o
+    /// desvio entre o relógio de áudio e o quadro na tela.
+    u64  perfPlayAskNs_ = 0;
+    u64  perfSeekAskNs_ = 0;
+    i64  perfSeekFrame_ = -1;
+    i64  perfDriftSumUs_ = 0;
+    i64  perfDriftMaxUs_ = 0;
+    u32  perfDriftCount_ = 0;
     PreviewRefill previewRefill_;
     /// renderMutex_: tocando, segura a agulha quando a prévia para de entregar
     /// quadros (Playback.hpp). Sem ele, timeline e imagem se separavam.

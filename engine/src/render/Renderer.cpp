@@ -5572,6 +5572,10 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 base.asset = pose->asset; base.assetKey = pose->assetKey; base.world = pose->world;
                 base.layerKey = pose->layerKey; base.motionBlur = pose->motionBlur; base.castShadows = pose->castShadows;
                 base.doubleSided = pose->doubleSided;
+                // O recorte tem de sobreviver: sem isto a cópia de um objeto com
+                // efeitos, nos outros grupos, saía colorida por cima dele e o
+                // efeito "sumia" assim que o desfoque abria as amostras.
+                base.holdout = pose->holdout;
                 base.ownEnvironment = pose->ownEnvironment; base.environment = pose->environment;
                 // "Trocar textura 3D" fica na instância (não na pose): sem esta
                 // cópia os sub-quadros do desfoque saíam com o material original.

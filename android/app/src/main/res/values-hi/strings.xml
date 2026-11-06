@@ -4734,4 +4734,13 @@
     <string name="s3d_area_collapse">पैनल समेटें</string>
     <string name="s3d_area_expand">पैनल खोलें</string>
     <string name="skeleton_tab_bone">हड्डी</string>
+    <string name="fxl_floor_horizon_blend">क्षितिज मिश्रण</string>
+    <string name="fxl_floor_scene_light">फ़र्श पर दृश्य की रोशनी</string>
+    <string name="fxl_floor_fresnel">कोण के अनुसार प्रतिबिंब</string>
+    <string name="panel_mask_point_curve">इस बिंदु को वक्र बनाएँ</string>
+    <string name="panel_mask_point_corner">इस बिंदु को कोना बनाएँ</string>
+    <string name="panel_mask_point_hint">फिर मंच पर हैंडल खींचें</string>
+    <string name="layer_to_3d_object">3D ऑब्जेक्ट में बदलें</string>
+    <string name="layer_to_3d_object_hint">दृश्य में छाया, प्रतिबिंब और गहराई के साथ</string>
+    <string name="layer_to_3d_failed">इस लेयर को 3D ऑब्जेक्ट में नहीं बदला जा सका</string>
 </resources>

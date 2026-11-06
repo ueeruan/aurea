@@ -1750,7 +1750,9 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
         const TextureRef* refs[5] = {&m.baseColorTex, &m.metallicRoughnessTex, &m.normalTex, &m.occlusionTex, &m.emissiveTex};
         for (int k = 0; k < 5; ++k) {
             b->uvXform[k] = Vec4{refs[k]->offset.x, refs[k]->offset.y, refs[k]->scale.x, refs[k]->scale.y};
-            const i32 has = gm->tex[k].valid() ? 1 : 0;
+            // Cor de base vinda de uma camada mora em graphBase: sem contar ela o shader
+            // pulava a textura e o objeto saía branco.
+            const i32 has = gm->tex[k].valid() || (k == 0 && gm->graphBase.valid()) ? 1 : 0;
             if (k < 4) {
                 (&b->uvRot0.x)[k] = refs[k]->rotation;
                 b->uvSet0[k] = static_cast<i32>(refs[k]->texCoord);

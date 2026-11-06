@@ -919,6 +919,8 @@ final class AureaModel: ObservableObject {
     @Published private(set) var detail: [String: Any] = [:]
     @Published private(set) var masks: [MaskItem] = []
     @Published private(set) var maskAffine: [Float] = [1, 0, 0, 1, 0, 0]
+    /// Linha de perspectiva da matriz da máscara: (0, 0, 1) em 2D (ver Engine::query_masks).
+    @Published private(set) var maskPerspective: [Float] = [0, 0, 1]
     @Published var selectedMask: UInt32?
     @Published var maskDrawing = false
     @Published var selectedMaskPoint: Int?
@@ -2719,7 +2721,7 @@ final class AureaModel: ObservableObject {
         if panel == .vector {
             let data = engine.vectorPath(id, group: vectorGroup, path: vectorPath).map(\.floatValue)
             guard data.count >= 9, data[8] >= 0, Int(data[8]) * 6 + 9 == data.count else { masks = []; return }
-            maskAffine = Array(data.prefix(6))
+            maskAffine = Array(data.prefix(6)); maskPerspective = [0, 0, 1]
             masks = [MaskItem(id: 0, operation: 0, inverted: false, feather: 0, expansion: 0, opacity: 1, closed: data[7] > 0.5, keyed: Int(data[6]) & 4 != 0, points: Array(data.dropFirst(9)))]
             selectedMask = 0
             return
@@ -2738,11 +2740,19 @@ final class AureaModel: ObservableObject {
                                  points: Array(data[offset..<(offset + count)]), keyCount: Int(h[8])))
             offset += count
         }
+        maskPerspective = offset + 3 <= data.count ? Array(data[offset..<(offset + 3)]) : [0, 0, 1]
         masks = next
         if let selectedMask, !next.contains(where: { $0.id == selectedMask }) { self.selectedMask = nil; maskDrawing = false; selectedMaskPoint = nil }
     }
 
     var editingMask: MaskItem? { masks.first { $0.id == selectedMask } }
+
+    /// Canto ↔ curva do ponto escolhido (a regra é do motor).
+    func toggleMaskPointCurve(_ point: Int) {
+        guard let id = primarySelection, let mask = selectedMask else { return }
+        _ = engine.toggleMaskPointCurve(id, mask: mask, point: UInt32(point))
+        refreshModel(force: true); refreshMasks()
+    }
 
     func setMaskPoints(_ points: [Float], closed: Bool, undo: Bool = true) {
         guard let id = primarySelection, let mask = selectedMask else { return }

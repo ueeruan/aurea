@@ -4738,4 +4738,13 @@ para editar la curva.</string>
     <string name="s3d_area_collapse">Contraer panel</string>
     <string name="s3d_area_expand">Abrir panel</string>
     <string name="skeleton_tab_bone">Hueso</string>
+    <string name="fxl_floor_horizon_blend">Mezcla en el horizonte</string>
+    <string name="fxl_floor_scene_light">Luz de la escena en el suelo</string>
+    <string name="fxl_floor_fresnel">Reflejo según el ángulo</string>
+    <string name="panel_mask_point_curve">Curvar este punto</string>
+    <string name="panel_mask_point_corner">Dejar este punto en esquina</string>
+    <string name="panel_mask_point_hint">Después arrastra los tiradores en el escenario</string>
+    <string name="layer_to_3d_object">Convertir en objeto 3D</string>
+    <string name="layer_to_3d_object_hint">Con sombra, reflejo y profundidad en la escena</string>
+    <string name="layer_to_3d_failed">No se pudo convertir esta capa en objeto 3D</string>
 </resources>

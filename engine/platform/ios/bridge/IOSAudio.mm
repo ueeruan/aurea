@@ -443,6 +443,9 @@ public:
             const double mix = (double)audio::kMixRate;
             frames = rate > 0.0 ? (i64)llround((double)nodeTime.sampleTime * mix / rate)
                                 : (i64)nodeTime.sampleTime;
+            // lastRenderTime é o que saiu do mixer, não o que chegou ao alto-falante: sem
+            // descontar a latência o vídeo andava à frente do som (pior em Bluetooth).
+            frames -= (i64)llround(engine.outputNode.presentationLatency * mix);
             return frames >= 0;
         }
     }

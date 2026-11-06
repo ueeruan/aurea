@@ -6977,6 +6977,15 @@ enum AureaText {
         "s3d_area_collapse": "Recolher o painel",
         "s3d_area_expand": "Abrir o painel",
         "skeleton_tab_bone": "Osso",
+        "fxl_floor_horizon_blend": "Mistura no horizonte",
+        "fxl_floor_scene_light": "Luz da cena no chão",
+        "fxl_floor_fresnel": "Reflexo pelo ângulo",
+        "panel_mask_point_curve": "Curvar este ponto",
+        "panel_mask_point_corner": "Deixar este ponto em canto",
+        "panel_mask_point_hint": "Depois é só puxar as alças no palco",
+        "layer_to_3d_object": "Transformar em objeto 3D",
+        "layer_to_3d_object_hint": "Com sombra, reflexo e profundidade na cena",
+        "layer_to_3d_failed": "Não deu para transformar esta camada em objeto 3D",
     ]
     private static let en: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -13877,6 +13886,15 @@ enum AureaText {
         "s3d_area_collapse": "Collapse panel",
         "s3d_area_expand": "Expand panel",
         "skeleton_tab_bone": "Bone",
+        "fxl_floor_horizon_blend": "Horizon blend",
+        "fxl_floor_scene_light": "Scene light on floor",
+        "fxl_floor_fresnel": "Reflection by angle",
+        "panel_mask_point_curve": "Curve this point",
+        "panel_mask_point_corner": "Make this point a corner",
+        "panel_mask_point_hint": "Then drag the handles on the stage",
+        "layer_to_3d_object": "Turn into 3D object",
+        "layer_to_3d_object_hint": "With shadow, reflection and depth in the scene",
+        "layer_to_3d_failed": "This layer could not be turned into a 3D object",
     ]
     private static let es: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -20777,6 +20795,15 @@ enum AureaText {
         "s3d_area_collapse": "Contraer panel",
         "s3d_area_expand": "Abrir panel",
         "skeleton_tab_bone": "Hueso",
+        "fxl_floor_horizon_blend": "Mezcla en el horizonte",
+        "fxl_floor_scene_light": "Luz de la escena en el suelo",
+        "fxl_floor_fresnel": "Reflejo según el ángulo",
+        "panel_mask_point_curve": "Curvar este punto",
+        "panel_mask_point_corner": "Dejar este punto en esquina",
+        "panel_mask_point_hint": "Después arrastra los tiradores en el escenario",
+        "layer_to_3d_object": "Convertir en objeto 3D",
+        "layer_to_3d_object_hint": "Con sombra, reflejo y profundidad en la escena",
+        "layer_to_3d_failed": "No se pudo convertir esta capa en objeto 3D",
     ]
     private static let ru: [String: String] = [
         "add_element_aurora": "Аврора",
@@ -27677,6 +27704,15 @@ enum AureaText {
         "s3d_area_collapse": "Свернуть панель",
         "s3d_area_expand": "Развернуть панель",
         "skeleton_tab_bone": "Кость",
+        "fxl_floor_horizon_blend": "Смешивание у горизонта",
+        "fxl_floor_scene_light": "Свет сцены на полу",
+        "fxl_floor_fresnel": "Отражение по углу",
+        "panel_mask_point_curve": "Скруглить эту точку",
+        "panel_mask_point_corner": "Сделать точку углом",
+        "panel_mask_point_hint": "Затем потяните маркеры на сцене",
+        "layer_to_3d_object": "Превратить в 3D-объект",
+        "layer_to_3d_object_hint": "С тенью, отражением и глубиной в сцене",
+        "layer_to_3d_failed": "Не удалось превратить этот слой в 3D-объект",
     ]
     private static let hi: [String: String] = [
         "add_element_aurora": "ऑरोरा",
@@ -34577,6 +34613,15 @@ enum AureaText {
         "s3d_area_collapse": "पैनल समेटें",
         "s3d_area_expand": "पैनल खोलें",
         "skeleton_tab_bone": "हड्डी",
+        "fxl_floor_horizon_blend": "क्षितिज मिश्रण",
+        "fxl_floor_scene_light": "फ़र्श पर दृश्य की रोशनी",
+        "fxl_floor_fresnel": "कोण के अनुसार प्रतिबिंब",
+        "panel_mask_point_curve": "इस बिंदु को वक्र बनाएँ",
+        "panel_mask_point_corner": "इस बिंदु को कोना बनाएँ",
+        "panel_mask_point_hint": "फिर मंच पर हैंडल खींचें",
+        "layer_to_3d_object": "3D ऑब्जेक्ट में बदलें",
+        "layer_to_3d_object_hint": "दृश्य में छाया, प्रतिबिंब और गहराई के साथ",
+        "layer_to_3d_failed": "इस लेयर को 3D ऑब्जेक्ट में नहीं बदला जा सका",
     ]
     private static let ar: [String: String] = [
         "add_element_aurora": "الشفق القطبي",
@@ -41477,6 +41522,15 @@ enum AureaText {
         "s3d_area_collapse": "طي اللوحة",
         "s3d_area_expand": "فتح اللوحة",
         "skeleton_tab_bone": "عظمة",
+        "fxl_floor_horizon_blend": "مزج الأفق",
+        "fxl_floor_scene_light": "ضوء المشهد على الأرضية",
+        "fxl_floor_fresnel": "الانعكاس حسب الزاوية",
+        "panel_mask_point_curve": "تقويس هذه النقطة",
+        "panel_mask_point_corner": "جعل هذه النقطة زاوية",
+        "panel_mask_point_hint": "ثم اسحب المقابض على المسرح",
+        "layer_to_3d_object": "تحويل إلى كائن ثلاثي الأبعاد",
+        "layer_to_3d_object_hint": "مع ظل وانعكاس وعمق في المشهد",
+        "layer_to_3d_failed": "تعذر تحويل هذه الطبقة إلى كائن ثلاثي الأبعاد",
     ]
     private static let id: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -48377,6 +48431,15 @@ enum AureaText {
         "s3d_area_collapse": "Ciutkan panel",
         "s3d_area_expand": "Buka panel",
         "skeleton_tab_bone": "Tulang",
+        "fxl_floor_horizon_blend": "Campuran cakrawala",
+        "fxl_floor_scene_light": "Cahaya adegan di lantai",
+        "fxl_floor_fresnel": "Pantulan menurut sudut",
+        "panel_mask_point_curve": "Lengkungkan titik ini",
+        "panel_mask_point_corner": "Jadikan titik ini sudut",
+        "panel_mask_point_hint": "Lalu tarik gagang di panggung",
+        "layer_to_3d_object": "Ubah jadi objek 3D",
+        "layer_to_3d_object_hint": "Dengan bayangan, pantulan, dan kedalaman di adegan",
+        "layer_to_3d_failed": "Lapisan ini tidak bisa diubah jadi objek 3D",
     ]
     private static let plurals: [String: [String: [String: String]]] = [
         "pt-BR": [

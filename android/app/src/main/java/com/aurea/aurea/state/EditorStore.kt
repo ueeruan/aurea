@@ -5791,17 +5791,26 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Máscaras da camada principal; [m] = composição ← camada (a b c d tx ty). */
-    class MaskState(val layer: Long, val m: FloatArray, val masks: List<MaskPath>) {
+    /** `w` é a linha de perspectiva da matriz: (0, 0, 1) em 2D; numa camada 3D a conta divide por ela. */
+    class MaskState(val layer: Long, val m: FloatArray, val masks: List<MaskPath>, val w: FloatArray = floatArrayOf(0f, 0f, 1f)) {
         fun find(id: Int?) = masks.firstOrNull { it.id == id }
-        fun toCompX(x: Float, y: Float) = m[0] * x + m[2] * y + m[4]
-        fun toCompY(x: Float, y: Float) = m[1] * x + m[3] * y + m[5]
-        /** Composição → camada (inversa da afim); nulo se degenerada. */
+        private fun den(x: Float, y: Float): Float {
+            val d = w[0] * x + w[1] * y + w[2]
+            return if (kotlin.math.abs(d) < 1e-6f) 1e-6f else d
+        }
+        fun toCompX(x: Float, y: Float) = (m[0] * x + m[2] * y + m[4]) / den(x, y)
+        fun toCompY(x: Float, y: Float) = (m[1] * x + m[3] * y + m[5]) / den(x, y)
+        /** Composição → camada (inversa da homografia); nulo se degenerada. */
         fun toLayer(cx: Float, cy: Float): FloatArray? {
-            val det = m[0] * m[3] - m[1] * m[2]
-            if (kotlin.math.abs(det) < 1e-9f) return null
-            val px = cx - m[4]
-            val py = cy - m[5]
-            return floatArrayOf((m[3] * px - m[2] * py) / det, (-m[1] * px + m[0] * py) / det)
+            // Linhas da adjunta de [m0 m2 m4; m1 m3 m5; w0 w1 w2] aplicadas a (cx, cy, 1).
+            val a = m[0]; val b = m[2]; val c = m[4]
+            val d = m[1]; val e = m[3]; val f = m[5]
+            val g = w[0]; val h = w[1]; val i = w[2]
+            val x = (e * i - f * h) * cx + (c * h - b * i) * cy + (b * f - c * e)
+            val y = (f * g - d * i) * cx + (a * i - c * g) * cy + (c * d - a * f)
+            val z = (d * h - e * g) * cx + (b * g - a * h) * cy + (a * e - b * d)
+            if (kotlin.math.abs(z) < 1e-9f) return null
+            return floatArrayOf(x / z, y / z)
         }
         /** Vetor da composição → camada (tangentes). */
         fun toLayerVec(dx: Float, dy: Float): FloatArray? {
@@ -5865,7 +5874,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                 )
                 o += MASK_HEADER + pc * 6
             }
-            MaskState(id, b.copyOfRange(0, 6), list)
+            MaskState(id, b.copyOfRange(0, 6), list, if (o + 3 <= need) b.copyOfRange(o, o + 3) else floatArrayOf(0f, 0f, 1f))
         } else {
             null
         }
@@ -5972,6 +5981,13 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             1 -> showToast(appText(R.string.msg_keyframe_do_caminho_no_cabecote))
             0 -> showToast(appText(R.string.msg_keyframe_do_caminho_removido))
         }
+        refreshNow()
+    }
+
+    /** Canto ↔ curva do ponto escolhido (a regra é do motor). */
+    fun toggleMaskPointCurve(mask: Int, point: Int) {
+        val id = primary ?: return
+        engine.toggleMaskPointCurve(id, mask, point)
         refreshNow()
     }
 
@@ -7096,6 +7112,15 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         engine.setLayerAcceptsLights(id, on)
         refreshNow()
         refreshDetail()
+    }
+
+    /** Imagem ou vídeo vira objeto da cena: sombra, reflexo e profundidade de verdade. */
+    fun layerTo3DObject(id: Long, name: String): Long {
+        val made = engine.layerTo3dObject(id, name)
+        if (made < 0) { showToast(appText(R.string.layer_to_3d_failed)); return -1 }
+        refreshNow()
+        select(made)
+        return made
     }
 
     fun changeLayer3D(on: Boolean) {

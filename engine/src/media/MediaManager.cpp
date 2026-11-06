@@ -319,6 +319,11 @@ void MediaManager::collect(u64 frameNumber, u32 idleFrames) {
     }
 }
 
+void MediaManager::keep_sources(u64 frameNumber) noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& entry : entries_) entry.lastUsedFrame = std::max(entry.lastUsedFrame, frameNumber);
+}
+
 usize MediaManager::reclaim_unused_frames() noexcept {
     // Lock order matches source selection/statistics: manager, then cache.
     // Cache accounting uses atomic MemoryManager counters, not its registry

@@ -4776,4 +4776,13 @@
     <string name="s3d_area_collapse">طي اللوحة</string>
     <string name="s3d_area_expand">فتح اللوحة</string>
     <string name="skeleton_tab_bone">عظمة</string>
+    <string name="fxl_floor_horizon_blend">مزج الأفق</string>
+    <string name="fxl_floor_scene_light">ضوء المشهد على الأرضية</string>
+    <string name="fxl_floor_fresnel">الانعكاس حسب الزاوية</string>
+    <string name="panel_mask_point_curve">تقويس هذه النقطة</string>
+    <string name="panel_mask_point_corner">جعل هذه النقطة زاوية</string>
+    <string name="panel_mask_point_hint">ثم اسحب المقابض على المسرح</string>
+    <string name="layer_to_3d_object">تحويل إلى كائن ثلاثي الأبعاد</string>
+    <string name="layer_to_3d_object_hint">مع ظل وانعكاس وعمق في المشهد</string>
+    <string name="layer_to_3d_failed">تعذر تحويل هذه الطبقة إلى كائن ثلاثي الأبعاد</string>
 </resources>

@@ -4418,6 +4418,9 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
 - (BOOL)toggleMaskKey:(long long)layerId mask:(uint32_t)mask {
     auto* e = self.engine; return e && e->toggle_mask_path_key(layerId, mask);
 }
+- (int)toggleMaskPointCurve:(long long)layerId mask:(uint32_t)mask point:(uint32_t)point {
+    auto* e = self.engine; return e ? e->toggle_mask_point_curve(layerId, mask, point) : -1;
+}
 
 - (BOOL)setMaskParam:(long long)layerId mask:(uint32_t)mask param:(uint32_t)param value:(float)value {
     auto* e = self.engine;
@@ -4515,6 +4518,12 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     return e && effectId >= 0 && pivot >= 0
         && e->puppet_rotate_pins(layerId, static_cast<aurea::u32>(effectId), static_cast<aurea::u32>(pivot),
                                  static_cast<aurea::u32>(mask), u0, v0, u1, v1, autoKey, continuing);
+}
+- (long long)layerTo3DObject:(long long)layerId name:(NSString*)name {
+    auto* e = self.engine;
+    if (!e) return -1;
+    const aurea::Result<aurea::u64> r = e->layer_to_3d_object(static_cast<aurea::u64>(layerId), name ? name.UTF8String : nullptr);
+    return r.ok() ? static_cast<long long>(*r) : -1;
 }
 - (long long)addShape3D:(uint32_t)kind name:(NSString*)name {
     auto* e = self.engine;

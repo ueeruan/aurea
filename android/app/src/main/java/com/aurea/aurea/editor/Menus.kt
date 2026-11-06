@@ -166,6 +166,15 @@ private fun layerMenuEntries(
             keepOpen = true,
             tag = "layer.menu.threeD",
         ) { store.changeLayer3D(!threeD) }
+        if (row.kind == LayerType.Image.kind || row.kind == LayerType.Video.kind) {
+            out += MenuEntry.Item(
+                stringResource(R.string.layer_to_3d_object),
+                glyph = CupertinoGlyph.Cube,
+                sublabel = stringResource(R.string.layer_to_3d_object_hint),
+                enabled = !row.locked,
+                tag = "layer.menu.to3dObject",
+            ) { store.layerTo3DObject(id, row.name) }
+        }
     }
     // Linha Magnética: só em trecho com FONTE (vídeo, áudio ou pré-composição).
     if (media || type == LayerType.Audio || type == LayerType.Group) {

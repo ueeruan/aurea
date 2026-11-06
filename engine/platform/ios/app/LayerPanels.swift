@@ -1937,10 +1937,16 @@ struct MaskPanel: View {
         } else {
             hint("panel_arraste_pontos_palco_toque_num_ponto")
             HStack(spacing: 8) {
-                PropertyLabelChip(AureaText.t("panel_caminho"), expression: .none, keyframe: look, onTap: {})
+                PropertyLabelChip(AureaText.t("panel_caminho"), expression: .none, keyframe: look, onTap: { toggleKey() })
                 Text(m.keyCount == 0 ? AureaText.t("panel_parado_toque_trilho_animar") : AureaText.plural("pn_keyframes_edit_at_playhead", Int(m.keyCount)))
                     .font(.aurea(size: 12)).foregroundStyle(AureaColors.muted).frame(maxWidth: .infinity, alignment: .leading)
             }.frame(height: 48).aureaSelectedProperty(AureaText.t("panel_caminho"))
+            if let point = model.selectedMaskPoint, point >= 0, point * 6 + 5 < m.points.count {
+                let curved = (2...5).contains { m.points[point * 6 + $0] != 0 }
+                Color.clear.frame(height: 8)
+                NativePanelAction(curved ? "panel_mask_point_corner" : "panel_mask_point_curve",
+                                  detail: AureaText.t("panel_mask_point_hint")) { model.toggleMaskPointCurve(point) }
+            }
 
             title("panel_mask_mode")
             ChoiceChips(["panel_somar", "panel_subtrair", "panel_intersecao", "panel_diferenca", "panel_desligada"].map { AureaText.t($0) }, selected: Int(m.operation)) { update(m, operation: UInt32($0)) }

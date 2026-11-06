@@ -432,6 +432,15 @@ struct TopBarView: View {
                          glyph: CupertinoGlyph.Rhombus) { model.toggleTimelineTracks(row.id) })
         out.append(.item(AureaText.t("editor_solo"), glyph: CupertinoGlyph.Speaker2, sublabel: AureaText.t("editor_alguma_camada_solo_previa_som_so"),
                          checked: row.solo, keepOpen: true) { model.mutate { $0.setLayer(row.id, solo: !row.solo) }; refresh() })
+        // 0.4.7: imagem ou vídeo vira objeto da cena (par do Menus.kt).
+        if row.kind == 1 || row.kind == 2 {
+            out.append(.item(AureaText.t("layer_to_3d_object"), glyph: CupertinoGlyph.Cube, sublabel: AureaText.t("layer_to_3d_object_hint"),
+                             enabled: !row.locked, tag: "layer.menu.to3dObject") {
+                let made = model.engine.layerTo3DObject(row.id, name: row.name)
+                if made < 0 { model.toast = AureaText.t("layer_to_3d_failed") }
+                else { refresh(); model.select(layerId: made, additive: false) }
+            })
+        }
         // Omega chrome (área 02, P0-3): "Camada 3D" saiu da barra da camada e mora aqui.
         if row.kind != 3 {
             let intrinsic = [8, 9, 10].contains(row.kind)

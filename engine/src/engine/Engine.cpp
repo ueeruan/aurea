@@ -21,6 +21,7 @@
 #include "aurea/timeline/LayerAnimator.hpp"
 #include "aurea/timeline/ShapeGeometry.hpp"
 #include "aurea/timeline/ShapeFill.hpp"   // Omega aparência: preenchimento animável
+#include "aurea/vector/PathEdit.hpp"
 #include "aurea/vector/Vector.hpp"
 #include "aurea/animation/KeyframeOptimize.hpp"
 #include "aurea/core/Log.hpp"
@@ -3787,6 +3788,39 @@ bool Engine::toggle_mask_path_key(u64 layerId, u32 maskId, bool* keyedOut) noexc
     return true;
 }
 
+i32 Engine::toggle_mask_point_curve(u64 layerId, u32 maskId, u32 point) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
+    if (!m) return -1;
+    const i64 local = l->local_time(playback_.current()).value;
+    std::vector<MaskPoint> shape;
+    mask::evaluate_path(*m, static_cast<f64>(local), shape);
+    if (point >= shape.size()) return -1;
+    // A mesma regra do vetor (PathEdit): o ponto só de canto, como os do retângulo e os
+    // postos com um toque, não tinha alça nenhuma para puxar.
+    BezierPath path;
+    path.closed = m->closed;
+    path.v.reserve(shape.size());
+    for (const MaskPoint& p : shape) path.v.push_back(BezierVertex{p.position, p.inTangent, p.outTangent});
+    const bool curve = !vector::pathedit::point_is_curve(path, point);
+    if (!vector::pathedit::set_point_type(path, point, curve)) return -1;
+    history_.before_mutation(*comp, project_->timeline().current(), "curva da mascara");
+    bump_model_revision_locked();
+    for (usize i = 0; i < shape.size(); ++i) {
+        shape[i].inTangent = path.v[i].in;
+        shape[i].outTangent = path.v[i].out;
+    }
+    if (!m->pathKeys.empty()) put_path_key(*m, local, shape);
+    else m->points = std::move(shape);
+    m->cacheKey = 0;
+    project_->mark_dirty();
+    request_render();
+    return curve ? 1 : 0;
+}
+
 u32 Engine::query_masks(u64 layerId, f32* out, u32 capacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -3796,14 +3830,22 @@ u32 Engine::query_masks(u64 layerId, f32* out, u32 capacity) noexcept {
     const i64 local = l->local_time(t).value;
     // Tamanho primeiro: quem chama realoca se não couber.
     std::vector<MaskPoint> pts;
-    u32 need = 7;
+    u32 need = 7 + 3;   // os 3 últimos: a linha de perspectiva
     for (const Mask& m : l->masks) {
         mask::evaluate_path(m, static_cast<f64>(local), pts);
         need += kMaskHeaderFloats + static_cast<u32>(pts.size()) * 6;
     }
     if (!out || capacity < need) return need;
     const Mat4 w = layer_comp_matrix(*comp, *l, t);
-    out[0] = w.col[0].x; out[1] = w.col[0].y; out[2] = w.col[1].x; out[3] = w.col[1].y; out[4] = w.col[3].x; out[5] = w.col[3].y;
+    // Camada 3D: a matriz é PROJETIVA. Lida como afim, o caminho caía fora da tela e o
+    // toque virava ponto perto da origem da camada: a curva sumia e a máscara fechada
+    // apagava o elemento. Escala para w = 1 na âncora (a parte afim vale ali) e manda
+    // a linha de perspectiva no fim; em 2D ela é (0, 0, 1) e nada muda.
+    const f32 ax = l->transform.anchor.x, ay = l->transform.anchor.y;
+    const f32 den = w.col[0].w * ax + w.col[1].w * ay + w.col[3].w;
+    const f32 k = std::isfinite(den) && std::fabs(den) > 1e-6f ? 1.0f / den : 1.0f;
+    out[0] = w.col[0].x * k; out[1] = w.col[0].y * k; out[2] = w.col[1].x * k; out[3] = w.col[1].y * k;
+    out[4] = w.col[3].x * k; out[5] = w.col[3].y * k;
     out[6] = static_cast<f32>(l->masks.size());
     u32 o = 7;
     for (const Mask& m : l->masks) {
@@ -3829,6 +3871,7 @@ u32 Engine::query_masks(u64 layerId, f32* out, u32 capacity) noexcept {
             out[o++] = p.outTangent.x; out[o++] = p.outTangent.y;
         }
     }
+    out[o++] = w.col[0].w * k; out[o++] = w.col[1].w * k; out[o++] = w.col[3].w * k;
     return o;
 }
 
@@ -11894,6 +11937,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             // O passe de saída desenha o xadrez atrás de um fundo transparente.
             if (comp->transparent_background()) snapshot_.background = Vec4{0.0f, 0.0f, 0.0f, 0.0f};
             ++frameCounter_;
+            if (playing) media_.keep_sources(frameCounter_);
         } else if (rs.rawPlayback && rawLayer && rawAsset) {
             renderer_.prepare_raw(rawPlaybackLayer_, *rawLayer, *rawAsset, playback_.current_ns() / 1000, media_, ++frameCounter_,
                                   mode, decodeDirection, playback_.speed(), rs.mediaGeneration, snapshot_);
@@ -12131,6 +12175,32 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         forceRender_.store(true, std::memory_order_release);
         lastSkipped_ = true;
         wake_render();
+    }
+    if (s.ok() && !warming) {
+        const u64 shownNs = monotonic_ns();
+        if (perfPlayAskNs_ && playing) {
+            AUREA_LOG_INFO("perf: play->primeiro quadro %.1f ms", static_cast<f64>(shownNs - perfPlayAskNs_) * 1e-6);
+            perfPlayAskNs_ = 0;
+        }
+        if (perfSeekAskNs_ && t.value == perfSeekFrame_ && !lastIncomplete_) {
+            AUREA_LOG_INFO("perf: seek->quadro %.1f ms (cache %d)", static_cast<f64>(shownNs - perfSeekAskNs_) * 1e-6,
+                           renderer_.last_preview_cache_hit() ? 1 : 0);
+            perfSeekAskNs_ = 0;
+        }
+        if (playing) {
+            // Quanto o quadro na tela está atrás do relógio de áudio (cabe um quadro inteiro).
+            const f64 fps = playback_.fps() > 0.0 ? playback_.fps() : 30.0;
+            const i64 driftUs = (static_cast<i64>(playback_.current_ns()) - static_cast<i64>(static_cast<f64>(t.value) * 1e9 / fps)) / 1000;
+            perfDriftSumUs_ += driftUs;
+            perfDriftMaxUs_ = std::max<i64>(perfDriftMaxUs_, driftUs < 0 ? -driftUs : driftUs);
+            if (++perfDriftCount_ >= 120) {
+                AUREA_LOG_INFO("perf: desvio A/V medio %.1f ms, pico %.1f ms, perdidos %llu",
+                               static_cast<f64>(perfDriftSumUs_) / perfDriftCount_ * 1e-3, static_cast<f64>(perfDriftMaxUs_) * 1e-3,
+                               static_cast<unsigned long long>(frameScheduler_.dropped_total()));
+                perfDriftSumUs_ = perfDriftMaxUs_ = 0;
+                perfDriftCount_ = 0;
+            }
+        }
     }
     if (s.ok()) {
         frameScheduler_.presented(t, playing);
@@ -19147,7 +19217,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
         // Reprodução — tudo passa pelo PlaybackController.
         // ---------------------------------------------------------------------
         case CommandType::PlaybackPlay:
-            if (!playback_.playing() && !previewBuffering_) playWithPreviewBuffer();
+            if (!playback_.playing() && !previewBuffering_) { perfPlayAskNs_ = monotonic_ns(); playWithPreviewBuffer(); }
             return OkStatus;
         case CommandType::PlaybackPause:
             cancelPreviewBuffer();
@@ -19165,7 +19235,7 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 playback_.pause(now);
                 audio_.stop();
                 sync_timeline();
-            } else playWithPreviewBuffer();
+            } else { perfPlayAskNs_ = monotonic_ns(); playWithPreviewBuffer(); }
             return OkStatus;
         case CommandType::PlaybackSeek: {
             if (cmd.seek.time.value < 0) return Errc::InvalidArgument;
@@ -19202,6 +19272,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return OkStatus;
             }
             playback_.seek(FrameIndex{requested}, now);
+            perfSeekAskNs_ = monotonic_ns();
+            perfSeekFrame_ = requested;
             sync_timeline();
             return OkStatus;
         }

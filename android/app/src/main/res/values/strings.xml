@@ -4817,4 +4817,13 @@
     <string name="s3d_area_collapse">Recolher o painel</string>
     <string name="s3d_area_expand">Abrir o painel</string>
     <string name="skeleton_tab_bone">Osso</string>
+    <string name="fxl_floor_horizon_blend">Mistura no horizonte</string>
+    <string name="fxl_floor_scene_light">Luz da cena no chão</string>
+    <string name="fxl_floor_fresnel">Reflexo pelo ângulo</string>
+    <string name="panel_mask_point_curve">Curvar este ponto</string>
+    <string name="panel_mask_point_corner">Deixar este ponto em canto</string>
+    <string name="panel_mask_point_hint">Depois é só puxar as alças no palco</string>
+    <string name="layer_to_3d_object">Transformar em objeto 3D</string>
+    <string name="layer_to_3d_object_hint">Com sombra, reflexo e profundidade na cena</string>
+    <string name="layer_to_3d_failed">Não deu para transformar esta camada em objeto 3D</string>
 </resources>

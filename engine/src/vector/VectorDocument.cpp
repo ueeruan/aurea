@@ -21,18 +21,20 @@
 //            parada… (posição, rgba)
 //   caminho: tipo, invertido, centro x/y, tamanho x/y, arredondar, pontas,
 //            raio externo/interno, arredondar externo/interno, giro,
-//            [v3] furo, bezier, nº de keyframes, keyframe… (quadro, ease, bezier)
+//            [v3] furo, bezier, nº de keyframes, keyframe… (quadro, ease, bezier,
+//            [v4] curva, força, alças x1/y1/x2/y2)
 //   [v3] fim do doc: camada de desenho (Omega conteúdo, área 06)
 //   bezier : fechado, n, n × (p x/y, in x/y, out x/y)
 // =============================================================================
 #include "aurea/vector/Vector.hpp"
+#include "aurea/animation/Curve.hpp"
 
 #include <algorithm>
 #include <cmath>
 
 namespace aurea::vector {
 namespace {
-constexpr f32 kDocVersion = 3.0f;   // v2: afinar do contorno; v3: perfil, apagar, furo, desenho (Omega)
+constexpr f32 kDocVersion = 4.0f;   // v2: afinar do contorno; v3: perfil, apagar, furo, desenho (Omega); v4: curva dos keys de forma
 
 struct In {
     const f32* d;
@@ -132,6 +134,7 @@ void encode_document(const VectorData& data, std::vector<f32>& o, std::string& n
                 o.push_back(static_cast<f32>(k.frame));
                 o.push_back(static_cast<f32>(k.ease));
                 encode_path(k.path, o);
+                o.insert(o.end(), {static_cast<f32>(k.curve), static_cast<f32>(k.easePower), k.bx1, k.by1, k.bx2, k.by2});   // v4
             }
         }
     }
@@ -225,6 +228,11 @@ bool decode_document(const f32* data, usize count, const std::string& names, Vec
                 k.frame = static_cast<i64>(std::llround(in.f()));
                 k.ease = in.u(2);
                 if (!in.ok || !decode_path(data, count, pos, k.path)) return false;
+                if (version >= 4.0f) {
+                    k.curve = in.u(255);
+                    k.easePower = clamp_ease_power(in.u(3));
+                    k.bx1 = in.f(); k.by1 = in.f(); k.bx2 = in.f(); k.by2 = in.f();
+                }
             }
             std::stable_sort(p.keys.begin(), p.keys.end(), [](const PathKey& a, const PathKey& b) { return a.frame < b.frame; });
         }

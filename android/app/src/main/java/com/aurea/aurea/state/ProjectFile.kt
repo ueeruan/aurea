@@ -29,14 +29,18 @@ internal object ProjectFile {
     data class ExportOutcome(val code: Int, val included: Int, val skipped: Int)
 
     /** Grava o pacote do projeto em `target`. Roda em IO. */
-    fun export(context: Context, engine: AureaEngine, projectPath: String, title: String, includeMedia: Boolean, target: Uri): ExportOutcome {
+    fun export(context: Context, engine: AureaEngine, projectPath: String, title: String, includeMedia: Boolean, target: Uri,
+               requireReadable: Boolean = false): ExportOutcome {
         val tmp = try { File.createTempFile("saida-", ".$EXTENSION", context.cacheDir) }
         catch (_: Exception) { return ExportOutcome(ERR_IO, 0, 0) }
         val opened = mutableListOf<ParcelFileDescriptor>()
         try {
             val media = mutableListOf<String>()
             if (includeMedia) {
-                val refs = engine.projectFileMedia(projectPath) ?: return ExportOutcome(ERR_CORRUPT, 0, 0)
+                // Projeto que não abre não tem lista de mídia: exporta só o arquivo, em
+                // modo de resgate (ProjectPackage). Publicar exige o projeto inteiro.
+                val refs = engine.projectFileMedia(projectPath)
+                    ?: if (requireReadable) return ExportOutcome(ERR_CORRUPT, 0, 0) else emptyArray<String>()
                 for (i in 0 until refs.size / 4) {
                     val stored = refs[i * 4]
                     val resolved = refs[i * 4 + 1]

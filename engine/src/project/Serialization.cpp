@@ -149,7 +149,13 @@ public:
     /// numa versão futura (ou perde, numa anterior): a leitura do que existe é
     /// válida e o resto fica no padrão.
     void skip_to_end() noexcept { pos_ = size_; }
-    void fail() noexcept { failed_ = true; pos_ = size_; }
+    void fail(int line = __builtin_LINE()) noexcept {
+        // O log diz qual verificação parou a leitura: sem isto um projeto recusado
+        // chega ao suporte só como "danificado".
+        AUREA_LOG_WARN("projeto: leitura recusada em Serialization.cpp:%d", line);
+        failed_ = true;
+        pos_ = size_;
+    }
 
 private:
     [[nodiscard]] bool need(usize n) noexcept {
@@ -170,6 +176,10 @@ private:
 
 /// Versão da seção Timeline que está sendo LIDA (ver o histórico em read_layer).
 thread_local u32 g_readingTimelineVersion = kTimelineSectionVersion;
+/// Teto de leitura de trilhas, efeitos e máscaras por camada. NÃO é o limite do
+/// editor (kMaxTrackCount...): nem todo caminho que grava respeita aquele, e uma
+/// camada muito animada que passava dele tornava o projeto inteiro ilegível.
+constexpr u32 kReadCountLimit = 1u << 20;
 
 void write_track(ByteWriter& w, const Track& t) {
     w.u16v(static_cast<u16>(t.property));
@@ -1156,7 +1166,7 @@ void read_layer(ByteReader& r, Layer& l) {
     l.transform.motionBlurEnabled = r.boolv();
 
     const u32 trackCount = r.u32v();
-    if (trackCount > kMaxTrackCount) { r.skip_to_end(); return; }
+    if (trackCount > kReadCountLimit) { r.skip_to_end(); return; }
     l.tracks.clear();
     for (u32 i = 0; i < trackCount && r.good(); ++i) {
         Track t;
@@ -1167,7 +1177,7 @@ void read_layer(ByteReader& r, Layer& l) {
     }
 
     const u32 effectCount = r.u32v();
-    if (effectCount > kMaxEffectCount) { r.skip_to_end(); return; }
+    if (effectCount > kReadCountLimit) { r.skip_to_end(); return; }
     l.effects.clear();
     l.effects.reserve(effectCount);
     for (u32 i = 0; i < effectCount && r.good(); ++i) {
@@ -1177,7 +1187,7 @@ void read_layer(ByteReader& r, Layer& l) {
     }
 
     const u32 maskCount = r.u32v();
-    if (maskCount > kMaxMaskCount) { r.skip_to_end(); return; }
+    if (maskCount > kReadCountLimit) { r.skip_to_end(); return; }
     l.masks.clear();
     l.masks.reserve(maskCount);
     for (u32 i = 0; i < maskCount && r.good(); ++i) {
@@ -1388,7 +1398,7 @@ void read_layer(ByteReader& r, Layer& l) {
     }
     if (g_readingTimelineVersion >= 18) {
         const u32 n = r.u32v();
-        if (n > kMaxTrackCount + 1) { r.skip_to_end(); return; }
+        if (n > kReadCountLimit) { r.skip_to_end(); return; }
         for (u32 i = 0; i < n && r.good(); ++i) {
             const u8 where = r.u8v();
             const auto prop = checked_enum(r.u16v(), static_cast<TrackProperty>(static_cast<u16>(TrackProperty::_Count) - 1),
@@ -1490,7 +1500,7 @@ void read_layer(ByteReader& r, Layer& l) {
     if (g_readingTimelineVersion >= 23) {
         l.timeRemapLegacyMigrated = r.boolv();
         const u32 count = r.u32v();
-        if (count > kMaxTrackCount) { r.skip_to_end(); return; }
+        if (count > kReadCountLimit) { r.skip_to_end(); return; }
         l.timeRemapLegacyTracks.resize(count);
         for (Track& track : l.timeRemapLegacyTracks) {
             read_track(r, track);
@@ -1506,23 +1516,25 @@ void read_layer(ByteReader& r, Layer& l) {
         l.model.materials.resize(count);
         std::vector<u32> indices;
         indices.reserve(count);
-        auto validFactor = [](f32 value) { return std::isfinite(value) && value >= 0.0f && value <= 1.0f; };
+        // Valor fora da faixa num material não vale o projeto inteiro: volta à faixa.
+        auto factor = [](f32 value) { return std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.0f; };
         for (MaterialOverride& material : l.model.materials) {
             material.materialIndex = r.u32v();
             material.mask = r.u32v();
             material.baseColor = r.vec4();
             material.metallic = r.f32v();
             material.roughness = r.f32v();
-            if (material.materialIndex >= 4096 || (material.mask & ~63u) ||
-                !validFactor(material.baseColor.x) || !validFactor(material.baseColor.y) ||
-                !validFactor(material.baseColor.z) || !validFactor(material.baseColor.w) ||
-                !validFactor(material.metallic) || !validFactor(material.roughness)) {
-                r.fail(); return;
-            }
+            material.mask &= 63u;
+            material.baseColor = Vec4{factor(material.baseColor.x), factor(material.baseColor.y),
+                                      factor(material.baseColor.z), factor(material.baseColor.w)};
+            material.metallic = factor(material.metallic);
+            material.roughness = factor(material.roughness);
+            // Índice inválido ou repetido: o material fica sem efeito. Não sai da lista
+            // porque a v52 lê as texturas na mesma ordem.
+            if (material.materialIndex >= 4096 || std::find(indices.begin(), indices.end(), material.materialIndex) != indices.end())
+                material.mask = 0;
             indices.push_back(material.materialIndex);
         }
-        std::sort(indices.begin(), indices.end());
-        if (std::adjacent_find(indices.begin(), indices.end()) != indices.end()) { r.fail(); return; }
     }
     if (g_readingTimelineVersion >= 25) {
         l.captionOptions.style = r.u32v(); l.captionOptions.highlight = r.boolv(); l.captionOptions.highlightColor = r.vec4();
@@ -1535,7 +1547,7 @@ void read_layer(ByteReader& r, Layer& l) {
             segment.words.resize(words);
             for (auto& word : segment.words) { word.text = r.str(); word.start = r.i64v(); word.end = r.i64v(); }
         }
-        if (!text::valid_caption_track(l.captions)) { r.fail(); return; }
+        // A faixa inválida é consertada no fim desta função: a v55 lê um item por bloco.
     }
     if (g_readingTimelineVersion >= 27) {
         l.hasParentBasis = r.boolv();
@@ -1813,6 +1825,13 @@ void read_layer(ByteReader& r, Layer& l) {
             if (b.style >= text::kCaptionStyleCount || b.fontFamily.size() > 1024 || b.fontPath.size() > 4096) { r.fail(); return; }
             segment.look = std::move(b);
         }
+    }
+    // Um bloco de legenda fora da regra (ordem, palavra vazia, id repetido) perdia o
+    // projeto INTEIRO: a camada recusada derrubava a timeline e o .bak tinha o mesmo.
+    if (!text::valid_caption_track(l.captions)) {
+        AUREA_LOG_WARN("projeto: faixa de legendas consertada ao abrir (%llu blocos)",
+                       static_cast<unsigned long long>(l.captions.size()));
+        text::repair_caption_track(l.captions);
     }
 }
 
@@ -2233,7 +2252,10 @@ void apply_project_section(const u8* data, usize size, Project& p) {
     }
 }
 
-bool apply_timeline_section(const u8* data, usize size, Project& p) {
+/// `salvage` (abertura de último recurso): uma camada que não dá para ler encerra a
+/// leitura, mas o que veio antes dela fica; sem isto a pessoa perdia o projeto inteiro.
+/// `salvaged` conta se algo ficou de fora.
+bool apply_timeline_section(const u8* data, usize size, Project& p, bool salvage = false, bool* salvaged = nullptr) {
     ByteReader r(data, size);
     Timeline& t = p.timeline();
 
@@ -2284,7 +2306,11 @@ bool apply_timeline_section(const u8* data, usize size, Project& p) {
             const u64 layerPack = r.u64v();
             Layer layer;
             read_layer(r, layer);
-            if (!r.good()) return false;
+            if (!r.good()) {
+                if (!salvage) return false;
+                if (salvaged) *salvaged = true;
+                break;
+            }
             migrate_legacy_time_remap(layer, fps);
             // O nome vindo do arquivo é preservado (add_layer só usa o padrão
             // quando o nome está vazio).
@@ -2442,6 +2468,10 @@ bool apply_timeline_section(const u8* data, usize size, Project& p) {
     if (const CompositionId root = remapComp(CompositionId::unpack(rootPack)); root.valid()) t.set_root(root);
     else if (rootPack != 0) t.set_root(t.current());
     if (const CompositionId cur = remapComp(CompositionId::unpack(currentPack)); cur.valid()) (void)t.set_current(cur);
+    if (salvage && !r.good()) {
+        if (salvaged) *salvaged = true;
+        return !compMap.empty();
+    }
     return r.good();
 }
 
@@ -2856,8 +2886,13 @@ Status ProjectSerializer::load_bytes(Project& out, const u8* fileData, usize fil
                 report.timelineVersion = sh.version;
                 if (sh.version < kTimelineSectionVersion) report.olderFormat = true;
                 g_readingTimelineVersion = sh.version;
-                const bool valid = apply_timeline_section(effective, effectiveSize, out);
+                bool salvaged = false;
+                const bool valid = apply_timeline_section(effective, effectiveSize, out, options.tolerateCorruptSections, &salvaged);
                 g_readingTimelineVersion = kTimelineSectionVersion;
+                if (salvaged) {
+                    report.sectionsCorrupt.push_back(sh.kind);
+                    report.partial = true;
+                }
                 if (!valid) {
                     report.sectionsCorrupt.push_back(sh.kind);
                     report.partial = true;

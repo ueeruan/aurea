@@ -131,11 +131,8 @@ public:
         // Perspectiva = campo de visão de 0° a 90° na esfera da caixa; a câmera
         // nunca entra nela.
         const f32 persp = pct(kPerspective, 0.0f, 100.0f, 30.0f);
-        f32 camera = 0.0f, magnify = 1.0f;
-        if (persp > 1e-3f) {
-            camera = std::max(bound / std::tan(0.5f * persp * 0.5f * kPi), 1.5f * bound);
-            magnify = camera / (camera - bound);
-        }
+        f32 camera = 0.0f;
+        if (persp > 1e-3f) camera = std::max(bound / std::tan(0.5f * persp * 0.5f * kPi), 1.5f * bound);
         const u32 steps = std::clamp<u32>(static_cast<u32>(std::max(e.value(kPrecision).as_int(), 10)), 10u, 200u);
         u.shape = Vec4{outset, smoothing, pct(kCutout, 0.0f, 100.0f, 50.0f), static_cast<f32>(steps)};
         u.view = Vec4{c.x, c.y, camera, e.b(kShading) ? 1.0f : 0.0f};
@@ -143,8 +140,24 @@ public:
         u.sides0 = Vec4{style(kFront), style(kBack), style(kLeft), style(kRight)};
         u.sides1 = Vec4{style(kTop), style(kBottom), 0.0f, 0.0f};
 
-        const f32 reach = bound * magnify + 2.0f;
-        const Rect region = grown_region(e, in.region, Rect{c.x - reach, c.y - reach, 2.0f * reach, 2.0f * reach}, margin);
+        // A região é a da caixa PROJETADA (os 8 cantos, lados afastados
+        // inclusive), não o quadrado da esfera que a contém: menos pixels
+        // marchando e textura menor (beta, nov/2026: "a caixa deixa o projeto
+        // pesado"). Mesma projeção do shader: d = vista.xy · c / (c − vista.z).
+        f32 x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+        const Vec3 hull{half.x + outset + 1.0f, half.y + outset + 1.0f, half.z + outset + 1.0f};
+        for (u32 k = 0; k < 8; ++k) {
+            const f32 ox = (k & 1u) ? hull.x : -hull.x, oy = (k & 2u) ? hull.y : -hull.y, oz = (k & 4u) ? hull.z : -hull.z;
+            // Objeto → vista: as linhas p0..p2 são a rotação inversa (vista → objeto).
+            const f32 vx = rot.p0.x * ox + rot.p1.x * oy + rot.p2.x * oz;
+            const f32 vy = rot.p0.y * ox + rot.p1.y * oy + rot.p2.y * oz;
+            const f32 vz = rot.p0.z * ox + rot.p1.z * oy + rot.p2.z * oz;
+            const f32 k2 = camera > 0.0f ? camera / std::max(camera - vz, 1e-3f) : 1.0f;
+            x0 = std::min(x0, vx * k2); x1 = std::max(x1, vx * k2);
+            y0 = std::min(y0, vy * k2); y1 = std::max(y1, vy * k2);
+        }
+        const Rect region = grown_region(e, in.region, Rect{c.x + x0 - 2.0f, c.y + y0 - 2.0f, x1 - x0 + 4.0f, y1 - y0 + 4.0f},
+                                         margin);
         u32 w = 0, h = 0;
         ctx.region_size(region, in.texel_scale_x(), w, h);
         if (!w || !h) { out = in; return OkStatus; }

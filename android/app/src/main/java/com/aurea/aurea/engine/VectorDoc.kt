@@ -45,7 +45,19 @@ data class VPaint(
     fun copyDeep() = copy(stops = stops.map { it.copy() }.toMutableList())
 }
 
-data class VKey(var frame: Int, var ease: Int, var path: VBezier)
+/**
+ * Keyframe de forma. `ease`: 0 linear, 1 suave, 2 congelar (documentos até v3).
+ * v4: a curva do trecho que SAI do key, a mesma dos keyframes comuns —
+ * `curve` (Interpolation; [CURVE_LEGACY] = vale `ease`), força e alças. A UI
+ * só repassa: quem grava a curva é o editor de curva, pelo motor.
+ */
+data class VKey(
+    var frame: Int, var ease: Int, var path: VBezier,
+    var curve: Int = CURVE_LEGACY, var easePower: Int = 1,
+    var bx1: Float = 0.33f, var by1: Float = 0f, var bx2: Float = 0.67f, var by2: Float = 1f,
+) {
+    companion object { const val CURVE_LEGACY = 255 }
+}
 
 /** kind: 0 livre, 1 retângulo, 2 elipse, 3 polígono, 4 estrela. */
 data class VPath(
@@ -130,7 +142,10 @@ data class VectorDoc(
                 o += if (p.exclude) 1f else 0f
                 p.path.encode(o)
                 o += p.keys.size.toFloat()
-                for (k in p.keys) { o += k.frame.toFloat(); o += k.ease.toFloat(); k.path.encode(o) }
+                for (k in p.keys) {
+                    o += k.frame.toFloat(); o += k.ease.toFloat(); k.path.encode(o)
+                    o += k.curve.toFloat(); o += k.easePower.toFloat(); o += k.bx1; o += k.by1; o += k.bx2; o += k.by2   // v4
+                }
             }
         }
         o += if (drawing) 1f else 0f
@@ -140,8 +155,8 @@ data class VectorDoc(
     fun names(): String = groups.joinToString("\n") { it.name.replace('\n', ' ') }
 
     companion object {
-        /** Versão do fluxo (vector/VectorDocument.cpp): 2 = afinar do contorno; 3 = perfil, apagar, furo, desenho (Omega). */
-        const val DOC_VERSION = 3f
+        /** Versão do fluxo (vector/VectorDocument.cpp): 2 = afinar do contorno; 3 = perfil, apagar, furo, desenho (Omega); 4 = curva dos keys de forma. */
+        const val DOC_VERSION = 4f
 
         private fun putPaint(p: VPaint, o: MutableList<Float>) {
             o += p.type.toFloat(); o += p.r; o += p.g; o += p.b; o += p.a; o += p.sx; o += p.sy; o += p.ex; o += p.ey; o += p.opacity
@@ -161,7 +176,7 @@ data class VectorDoc(
             return try {
                 val r = VReader(d)
                 val version = r.f()
-                if (version != 1f && version != 2f && version != DOC_VERSION) return null
+                if (version != 1f && version != 2f && version != 3f && version != DOC_VERSION) return null
                 val nm = names?.split('\n') ?: emptyList()
                 val n = r.i()
                 val doc = VectorDoc()
@@ -184,7 +199,13 @@ data class VectorDoc(
                         )
                         if (version >= 3f) p.exclude = r.b()
                         p.path = VBezier.decode(r)
-                        repeat(r.i()) { p.keys += VKey(r.f().toInt(), r.i(), VBezier.decode(r)) }
+                        repeat(r.i()) {
+                            val k = VKey(r.f().toInt(), r.i(), VBezier.decode(r))
+                            if (version >= 4f) {
+                                k.curve = r.i(); k.easePower = r.i(); k.bx1 = r.f(); k.by1 = r.f(); k.bx2 = r.f(); k.by2 = r.f()
+                            }
+                            p.keys += k
+                        }
                         g.paths += p
                     }
                     doc.groups += g

@@ -1764,8 +1764,8 @@ std::vector<Vec4> Renderer::repeat_path(const Layer* host, u32 count, f32 phase,
     // Camada de ajuste: o plano dela é o da composição (os pixels são os da
     // pilha abaixo), não o do sólido que a representa na timeline. O mesmo no
     // fundo do Copiar fundo (os efeitos depois dele).
-    const Mat4 hostMatrix = host->adjustment || host == compSpaceHost_ ? Mat4::identity()
-                                                                       : layer_world_matrix(comp,*host,planTime_);
+    const Mat4 hostMatrix = host == compSpaceHost_ ? compSpaceFromHost_
+                          : host->adjustment ? Mat4::identity() : layer_world_matrix(comp,*host,planTime_);
     const auto toHost=affine(hostMatrix).inverse()*affine(layer_world_matrix(comp,*guide,planTime_));
     for(auto& point:contour.pts)point=toHost.apply(point);
     const double length=vector::length_of(contour); if(length<1e-6)return result;
@@ -1780,6 +1780,77 @@ std::vector<Vec4> Renderer::repeat_path(const Layer* host, u32 count, f32 phase,
     }
     return result;
 }
+
+namespace {
+/// O plano em que os efeitos depois do Copiar fundo rodam: a caixa da camada.
+struct CopyBackgroundSpace {
+    bool valid = false;
+    Mat4 compFromLocal = Mat4::identity();
+    f32 width = 0.0f, height = 0.0f;
+    Vec2 relativeScale{1.0f, 1.0f}, relativeBias{0.0f, 0.0f};
+};
+
+/// A matriz 2D inversa, ou falso se a camada estiver achatada ou em perspectiva.
+bool invert_affine(const Mat4& m, Mat4& out) noexcept {
+    if (std::fabs(m.col[0].w) > 1e-6f || std::fabs(m.col[1].w) > 1e-6f || std::fabs(m.col[3].w - 1.0f) > 1e-6f) return false;
+    const f32 a = m.col[0].x, b = m.col[0].y, c = m.col[1].x, d = m.col[1].y;
+    const f32 det = a * d - b * c;
+    if (!std::isfinite(det) || std::fabs(det) < 1e-9f) return false;
+    const f32 inv = 1.0f / det, tx = m.col[3].x, ty = m.col[3].y;
+    out = Mat4::identity();
+    out.col[0].x = d * inv;  out.col[0].y = -b * inv;
+    out.col[1].x = -c * inv; out.col[1].y = a * inv;
+    out.col[3].x = (c * ty - d * tx) * inv;
+    out.col[3].y = (b * tx - a * ty) * inv;
+    return true;
+}
+
+/// A caixa natural da camada, mais o que os efeitos leem em volta dela: um
+/// desfoque no vidro precisa do fundo além da borda. Efeito só de cor não pede
+/// margem. Com a janela invertida o resultado vale fora da camada, então a caixa
+/// cobre o quadro; a densidade segue a da tela, e a textura não cresce com isso.
+CopyBackgroundSpace copy_background_space(const RenderLayer& window, const EffectPlan& windowPlan,
+                                          const EffectPlan& backdropPlan, u8 mode, f32 compW, f32 compH) noexcept {
+    CopyBackgroundSpace space;
+    const f32 lw = static_cast<f32>(window.source.width), lh = static_cast<f32>(window.source.height);
+    if (lw < 1.0f || lh < 1.0f || window.planeGroup >= 0) return space;
+    const Mat4 m = windowPlan.hasFold ? window.compFromLayer * windowPlan.foldMatrix : window.compFromLayer;
+    Mat4 layerFromComp;
+    if (!invert_affine(m, layerFromComp)) return space;
+    // O quadro da composição no plano da camada.
+    f32 fx0 = std::numeric_limits<f32>::max(), fy0 = fx0, fx1 = -fx0, fy1 = -fx0;
+    for (const Vec2 corner : {Vec2{0, 0}, Vec2{compW, 0}, Vec2{compW, compH}, Vec2{0, compH}}) {
+        const Vec4 p = layerFromComp * Vec4{corner.x, corner.y, 0, 1};
+        fx0 = std::min(fx0, p.x); fy0 = std::min(fy0, p.y);
+        fx1 = std::max(fx1, p.x); fy1 = std::max(fy1, p.y);
+    }
+    f32 windowMargin = 0.0f, reach = 0.0f;
+    bool neighbors = false;
+    for (const EffectEval& e : windowPlan.evals) windowMargin += std::max(0.0f, e.effect->input_margin(e));
+    for (const EffectEval& e : backdropPlan.evals) {
+        reach += std::max(0.0f, e.effect->input_margin(e));
+        neighbors |= e.effect->effect_class() != EffectClass::PerPixel;
+    }
+    const f32 pad = windowMargin + (neighbors ? std::max(reach, std::max(32.0f, 0.1f * std::max(lw, lh))) : 0.0f);
+    f32 x0 = -pad, y0 = -pad, x1 = lw + pad, y1 = lh + pad;
+    if (mode == 2 || mode == 4) {
+        x0 = std::min(x0, fx0); y0 = std::min(y0, fy0);
+        x1 = std::max(x1, fx1); y1 = std::max(y1, fy1);
+    } else {
+        // Além do quadro não há fundo para ler. Fora dele a camada nem aparece.
+        const f32 cx0 = std::max(x0, fx0), cy0 = std::max(y0, fy0), cx1 = std::min(x1, fx1), cy1 = std::min(y1, fy1);
+        if (cx1 > cx0 && cy1 > cy0) { x0 = cx0; y0 = cy0; x1 = cx1; y1 = cy1; }
+    }
+    x0 = std::floor(x0); y0 = std::floor(y0); x1 = std::ceil(x1); y1 = std::ceil(y1);
+    space.width = std::max(1.0f, x1 - x0);
+    space.height = std::max(1.0f, y1 - y0);
+    space.compFromLocal = m * Mat4::translation(Vec3{x0, y0, 0.0f});
+    space.relativeScale = Vec2{lw / space.width, lh / space.height};
+    space.relativeBias = Vec2{-x0 / space.width, -y0 / space.height};
+    space.valid = true;
+    return space;
+}
+} // namespace
 
 DepthMapResult Renderer::depth_map_below(const DepthMapRequest& request) noexcept {
     DepthMapResult none;
@@ -1826,6 +1897,16 @@ DepthMapResult Renderer::depth_map_below(const DepthMapRequest& request) noexcep
     const f32 tx = m.col[3].x, ty = m.col[3].y;
     result.mapX = Vec4{d * inv, -c * inv, (c * ty - d * tx) * inv, static_cast<f32>(w)};
     result.mapY = Vec4{-b * inv, a * inv, (b * tx - a * ty) * inv, static_cast<f32>(h)};
+    // Copiar fundo no plano da camada: quem pede fala em px desse plano.
+    if (&adj == compSpaceHost_) {
+        const Mat4& q = compSpaceFromHost_;
+        auto through = [&q](Vec4 row) {
+            return Vec4{row.x * q.col[0].x + row.y * q.col[0].y, row.x * q.col[1].x + row.y * q.col[1].y,
+                        row.x * q.col[3].x + row.y * q.col[3].y + row.z, row.w};
+        };
+        result.mapX = through(result.mapX);
+        result.mapY = through(result.mapY);
+    }
     return result;
 }
 
@@ -2792,12 +2873,34 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 pl.layerWorldValid = true;
                 pl.layerWorld = world_3d(comp, *l, time);
             }
-            // Copiar fundo: só os efeitos depois dele, no plano da composição
-            // (Repetição no caminho, mapa de profundidade: ver compSpaceHost_).
+            // Copiar fundo: só os efeitos depois dele, no plano da camada (Repetição
+            // no caminho, mapa de profundidade: ver compSpaceHost_). A primeira
+            // passada só mede a margem que eles leem.
             compSpaceHost_ = copyBgBackdrop ? l : nullptr;
+            compSpaceFromHost_ = Mat4::identity();
             EffectGraph::plan(*l, *effects_, local, rl.texelScale, pl, this, out.plans[used], fps, nullptr,
                               copyBgBackdrop ? copyBgFirst : 0u);
+            if (copyBgBackdrop && copyBgWindow >= 0 && static_cast<usize>(copyBgWindow) < out.layers.size()) {
+                const CopyBackgroundSpace space = copy_background_space(
+                    out.layers[static_cast<usize>(copyBgWindow)], out.plans[static_cast<usize>(copyBgWindow)],
+                    out.plans[used], copyBgMode, static_cast<f32>(out.compWidth), static_cast<f32>(out.compHeight));
+                if (space.valid) {
+                    rl.windowLocal = true;
+                    rl.windowFromLocal = space.compFromLocal;
+                    rl.windowLocalW = space.width;
+                    rl.windowLocalH = space.height;
+                    rl.texelScale = texel_scale_for(std::min(max_scale(space.compFromLocal), 4.0f) * previewFactor);
+                    pl.compFromLayer = space.compFromLocal;
+                    pl.layerWidth = static_cast<u32>(space.width);
+                    pl.layerHeight = static_cast<u32>(space.height);
+                    pl.relativeScale = space.relativeScale;
+                    pl.relativeBias = space.relativeBias;
+                    compSpaceFromHost_ = space.compFromLocal;
+                    EffectGraph::plan(*l, *effects_, local, rl.texelScale, pl, this, out.plans[used], fps, nullptr, copyBgFirst);
+                }
+            }
             compSpaceHost_ = nullptr;
+            compSpaceFromHost_ = Mat4::identity();
             EffectPlan& adjustPlan = out.plans[used];
             // Só Transform/Agitar/Oscilar... (dobrados na matriz): a pilha fica
             // sem etapa, mas a geometria do fundo muda (antes a camada saía).
@@ -3199,6 +3302,27 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (groupOpen && !out.scenes.empty() && !sceneFx && !clipInvolved) {
                     out.scenes.back().instances.push_back(std::move(inst));
                     continue;   // entra no grupo aberto; nenhuma layer nova na pilha
+                }
+                // Com efeitos o objeto sai da cena comum, mas o chão fica nela (os
+                // efeitos não podem pegar o chão). Sem cena aberta, ela nasce aqui,
+                // por baixo: é onde caem a sombra e o reflexo dele (ver o recorte
+                // entre grupos, depois do laço).
+                if (sceneFx && !clipInvolved && comp.floor().mode != 0 && !(groupOpen && !out.scenes.empty())) {
+                    out.scenes.emplace_back();
+                    RenderLayer floorGroup;
+                    floorGroup.id = rid;
+                    floorGroup.source.kind = LayerSource::Kind::Scene3D;
+                    floorGroup.source.sceneGroup = static_cast<u32>(out.scenes.size() - 1);
+                    floorGroup.source.width = out.compWidth;
+                    floorGroup.source.height = out.compHeight;
+                    floorGroup.compFromLayer = Mat4::identity();
+                    floorGroup.texelScale = previewFactor;
+                    EffectPlan objectFx = std::move(out.plans[used]);
+                    out.plans[used].clear();
+                    out.layers.push_back(std::move(floorGroup));
+                    ++used;
+                    if (out.plans.size() <= used) out.plans.emplace_back();
+                    out.plans[used] = std::move(objectFx);
                 }
                 out.scenes.emplace_back();
                 out.scenes.back().instances.push_back(std::move(inst));
@@ -5000,7 +5124,28 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         // Partículas 3D entram no grupo como billboards (ParticleScene), não
         // como plano.
         const bool particles = rl.source.kind == LayerSource::Kind::Particles;
-        const bool asPlane = inScene3d && rl.temporal.empty() && rl.blend == BlendMode::Normal
+        // Partículas 3D (folha do Particular) vizinhas de camadas 3D: entram na cena,
+        // e a profundidade decide o que fica na frente. Sem vizinho 3D, a folha de sempre.
+        if (particularSheet && !clipInvolved && rl.matteMode == MatteMode::None && !rl.matteOnly && l->masks.empty()
+            && rl.blend == BlendMode::Normal && rl.temporal.empty() && !out.plans[used].hasFold
+            && out.plans[used].evals.size() == 1 && copyBgAt == kInvalidIndex) {
+            EffectEval only = out.plans[used].evals.front();
+            only.placement = &out.plans[used].placement;
+            auto neighbor3d = [&](i64 step) {
+                for (i64 k = static_cast<i64>(i) + step; k >= 0 && k < static_cast<i64>(order.size()); k += step) {
+                    const Layer* o = comp.layer(order.at(static_cast<u32>(k)));
+                    if (!o || !o->visible || !o->contains_time(time)) continue;
+                    if (o->kind == LayerKind::Camera || o->kind == LayerKind::Light || o->kind == LayerKind::Null) continue;
+                    return o->kind == LayerKind::Model3D || wants_3d(comp, *o, time);
+                }
+                return false;
+            };
+            if (only.effect->scene_capable(only) && (neighbor3d(-1) || neighbor3d(1))) {
+                rl.effectInScene = true;
+                rl.particle.inScene = true;
+            }
+        }
+        const bool asPlane = (inScene3d || rl.effectInScene) && rl.temporal.empty() && rl.blend == BlendMode::Normal
                           && (!particles || rl.particle.inScene) && !out.plans[used].hasFold
                           && rl.matteMode == MatteMode::None && !rl.matteOnly && !clipInvolved
                           && copyBgAt == kInvalidIndex;   // a janela do Copiar fundo é um desenho 2D próprio
@@ -5025,7 +5170,7 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 groupOpen = true;
                 if (!rl.matteOnly) lastDrawOrder = i;
             }
-            if (particles) {
+            if (particles || rl.effectInScene) {
                 out.scenes.back().particleLayers.push_back(used);
             } else {
                 rl.planeGroup = static_cast<i32>(out.scenes.size() - 1);
@@ -5123,7 +5268,8 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
                 if (src.holdout || !src.asset) continue;
                 scene3d::SceneInstance h = src;
                 h.holdout = true;
-                h.castShadows = false;
+                // A sombra continua: o objeto com efeitos projeta no chão e nos
+                // vizinhos, e recebe a deles. Só a cor é que fica no grupo dele.
                 h.ownEnvironment = false;   // sem cor: não pede mapas de ambiente
                 h.nodeTextures.clear();
                 h.materialTextures.clear();   // recorte: sem cor, sem camada para ler
@@ -5134,12 +5280,14 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
         for (usize a = 0; a < groups; ++a)
             for (usize b = a + 1; b < groups; ++b) {
                 if (!isFx[a] && !isFx[b]) continue;
-                if (!own[a] || !own[b]) continue;
-                cut(a, b);
-                cut(b, a);
+                if (own[a]) cut(a, b);
+                if (own[b]) cut(b, a);
             }
     }
     if (!out.scenes.empty()) fill_scene_context(comp, time, out, cam3d);
+    // O chão fica na cena comum: num grupo com efeitos ele viraria parte do objeto.
+    if (!fxSceneGroups.empty() && out.scenes.size() > fxSceneGroups.size())
+        for (u32 g : fxSceneGroups) if (g < out.scenes.size()) out.scenes[g].floor.mode = 0;
     // A shared exposure clock, with a fixed CPU admission budget. Rigid models
     // share their immutable pose; only deforming models need sampled geometry.
     if (!out.scenes.empty() && comp.motion_blur().enabled && comp.motion_blur().shutterAngle > 0.0f) {
@@ -7285,6 +7433,38 @@ FGTexture Renderer::adjust_full_frame(const LayerImage& fin, const Mat4& fold, f
     return t;
 }
 
+FGTexture Renderer::copy_background_local(FGTexture src, const RenderLayer& layer, u32 width, u32 height,
+                                          const TextureDesc& compDesc, f32 compW, f32 compH) noexcept {
+    Mat4 localFromComp;
+    auto pNormal = shaders_.pipeline(PipelineKey::graphics(
+        ShaderId::composite_layer_vert, ShaderId::composite_layer_frag, kWorkFormat, true, BlendMode::Normal));
+    if (!src.valid() || !pNormal.ok() || !invert_affine(layer.windowFromLocal, localFromComp)) return FGTexture{};
+    TextureDesc td = compDesc;
+    td.transferSrc = false;
+    td.sampled = true;
+    td.renderTarget = true;
+    td.width = width;
+    td.height = height;
+    const FGTexture t = graph_.create_texture("copiar-fundo-local", td);
+    struct Cap { PipelineHandle p; FGTexture src; u64 sampler; Mat4 clip; f32 w, h; } cap{
+        *pNormal, src, shaders_.sampler(CommonSampler::LinearClamp).id,
+        clip_from_comp(layer.windowLocalW, layer.windowLocalH) * localFromComp, compW, compH};
+    const u32 pass = graph_.add_raster_pass("copiar-fundo-local", PassStage::Composite, t, LoadOp::Clear, Vec4{0, 0, 0, 0},
+                                            [cap](PassContext& pc) {
+        pc.cmds.bind_pipeline(cap.p);
+        LayerPush push;
+        push.clipFromLayer = cap.clip;
+        push.region = Vec4{0.0f, 0.0f, cap.w, cap.h};
+        push.uvRect = Vec4{0.0f, 0.0f, 1.0f, 1.0f};
+        push.params = Vec4{1.0f, 0.0f, 0.0f, 0.0f};
+        pc.cmds.bind_texture(0, pc.texture(cap.src), SamplerHandle{cap.sampler});
+        pc.cmds.push_constants(&push, sizeof(push));
+        pc.cmds.draw(6);
+    });
+    graph_.read(pass, src);
+    return t;
+}
+
 void Renderer::adjust_time_input(const FrameSnapshot& snap, const RenderLayer& layer, u32 target, LayerImage& in,
                                  const TextureDesc& compDesc, u64 frameNumber) noexcept {
     if (target >= layer.adjustTime.size() || !in.valid()) return;
@@ -8427,9 +8607,33 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
             // sem a cor de fundo (ver RenderLayer::AdjustTime).
             if (adjustLayer) adjust_time_input(snap, *adjustLayer, 0, in, compDesc, frameNumber_);
             const bool bare = adjustLayer && !adjustLayer->adjustTime.empty() && adjustLayer->adjustTime[0].bare != ~0u;
+            // COPIAR FUNDO: os efeitos rodam no plano da camada, como numa camada
+            // comum. O fundo noutros instantes vira esse plano junto.
+            const bool local = adjustLayer && adjustLayer->windowLocal;
+            const Mat4 compFromPlan = local ? adjustLayer->windowFromLocal : Mat4::identity();
+            bool planReady = true;
+            if (local) {
+                u32 lw = 0, lh = 0;
+                ctx.region_size(Rect{0.0f, 0.0f, adjustLayer->windowLocalW, adjustLayer->windowLocalH},
+                                adjustLayer->texelScale, lw, lh);
+                auto toLocal = [&](FGTexture t) { return copy_background_local(t, *adjustLayer, lw, lh, compDesc, compW, compH); };
+                const FGTexture image = toLocal(in.texture);
+                planReady = image.valid();
+                if (planReady) {
+                    in.texture = image;
+                    in.region = Rect{0.0f, 0.0f, adjustLayer->windowLocalW, adjustLayer->windowLocalH};
+                    in.width = lw;
+                    in.height = lh;
+                    if (in.history.valid()) in.history = toLocal(in.history);
+                    for (u32 k = 0; k < in.neighbors.count; ++k)
+                        if (in.neighbors.texture[k].valid()) in.neighbors.texture[k] = toLocal(in.neighbors.texture[k]);
+                } else mark_incomplete(__FILE__, __LINE__);
+            }
             LayerImage fin = in;
             const EffectPlan& plan = snap.plans[d.adjustPlan];
-            (void)EffectGraph::build(plan, ctx, in, fin);
+            if (planReady) (void)EffectGraph::build(plan, ctx, in, fin);
+            else fin.texture = FGTexture{};
+            bool finInPlan = local;
             if (fin.valid() && (plan.hasFold || bare)) {
                 // A geometria dobrada (Transform, Agitar, Oscilar, Tremor... no
                 // fim da pilha) leva o fundo INTEIRO, e o que ela descobre
@@ -8440,7 +8644,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
                 // A opacidade dobrada (Piscar, Cintilar, opacidade do
                 // Transform) é a do CONTEÚDO, como numa pré-composição: o
                 // fundo aparece por baixo.
-                const FGTexture full = adjust_full_frame(fin, plan.hasFold ? plan.foldMatrix : Mat4::identity(),
+                const FGTexture full = adjust_full_frame(fin, plan.hasFold ? compFromPlan * plan.foldMatrix : compFromPlan,
                                                          plan.hasFold ? plan.foldOpacity : 1.0f,
                                                          snap.background, compDesc, compW, compH);
                 if (full.valid()) {
@@ -8448,6 +8652,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
                     fin.region = Rect{0.0f, 0.0f, compW, compH};
                     fin.width = compDesc.width;
                     fin.height = compDesc.height;
+                    finInPlan = false;
                 }
             }
             if (adjustLayer && adjustLayer->maskCount > 0 && fin.valid() && !(fin.texture == cur)) {
@@ -8459,11 +8664,12 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
                 // ou luma dela, invertidos ou não); fora dela o fundo fica
                 // intacto — entra "sobre" o fundo, como o ajuste com máscara.
                 FGTexture full = fin.texture;
-                if (!(fin.region.x == 0.0f && fin.region.y == 0.0f && fin.region.w == compW && fin.region.h == compH
+                if (finInPlan || !(fin.region.x == 0.0f && fin.region.y == 0.0f && fin.region.w == compW && fin.region.h == compH
                       && fin.width == compDesc.width && fin.height == compDesc.height)) {
                     CompositeDraw fd;
                     fd.texture = fin.texture;
                     fd.region = fin.region;
+                    if (finInPlan) fd.compFromLayer = compFromPlan;
                     fd.sampler = shaders_.sampler(CommonSampler::LinearBorder).id;
                     full = draw_to_comp(fd, compDesc, compW, compH, "copiar-fundo-efeitos");
                 }
@@ -8483,6 +8689,7 @@ void Renderer::composite_draws(FrameSnapshot& snap, FGTexture comp, const Textur
                     // fica com o fundo intacto e o próximo tenta de novo.
                     mark_incomplete(__FILE__, __LINE__);
                     fin.texture = cur;
+                    fin.region = Rect{0.0f, 0.0f, compW, compH};
                 }
             }
             rc->drawSrc = fin.valid() && !(fin.texture == cur) ;

@@ -300,9 +300,13 @@ AUREA_TEST(Transform3D, SceneLayoutPreservesAnimationAndHandlesZeroScale) {
     e.set_scene_editor(true, -30, 20, 3);
     const u32 count = e.query_scene_guides(guides, 256);
     AUREA_CHECK(count >= 20);
-    bool cameraFound = false, nullFound = false;
-    for (u32 i = 0; i < count; ++i) { cameraFound |= guides[i * 5 + 4] == 1; nullFound |= guides[i * 5 + 4] == 2; }
+    bool cameraFound = false, nullFound = false, floorFound = false, axisX = false, axisZ = false;
+    for (u32 i = 0; i < count; ++i) {
+        const f32 kind = guides[i * 5 + 4];
+        cameraFound |= kind == 1; nullFound |= kind == 2; floorFound |= kind == 3; axisX |= kind == 4; axisZ |= kind == 5;
+    }
     AUREA_CHECK(cameraFound); AUREA_CHECK(nullFound);
+    AUREA_CHECK(floorFound); AUREA_CHECK(axisX); AUREA_CHECK(axisZ);   // Cena 3D: chão quadriculado e eixos
     e.set_scene_editor(false, 0, 0, 3);
     AUREA_CHECK_EQ(e.query_scene_guides(guides, 256), 0u);
 }

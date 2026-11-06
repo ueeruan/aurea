@@ -435,7 +435,8 @@ private struct ModelOptimizePrompt: ViewModifier {
                     model.vectorFreehand = false; model.vectorEditingPoints = false; model.maskDrawing = false; model.freehandPoints = []
                 }.padding(.bottom, 10).padding(.horizontal, 8).frame(maxHeight: .infinity, alignment: .bottom)
             }
-            if !model.fullscreen && !model.rawPlayback, model.selection.count == 1, let id = model.primarySelection {
+            // Na Cena 3D as ferramentas ficam na barra da esquerda (Scene3DToolbar).
+            if !model.fullscreen && !model.rawPlayback && !model.sceneEditor, model.selection.count == 1, let id = model.primarySelection {
                 HStack(spacing: 6) {
                     let hasGizmo = !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty
                     if hasGizmo {
@@ -490,7 +491,7 @@ private struct ModelOptimizePrompt: ViewModifier {
             // Omega chrome (área 02, P1-2): o botão de modo zoom do canvas e o rótulo
             // "NN%" no canto sup-esq (o chip "250 %" saiu: o 100 % mora no número da
             // coluna de modos) e a coluna de modos presa à direita (P0-5).
-            if !model.rawPlayback && !model.fullscreen {
+            if !model.rawPlayback && !model.fullscreen && !model.sceneEditor {
                 CanvasZoomMode().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 // 0.4.1 (mockup "interface 03"): grade, modos de visão e zoom flutuando no canto sup-dir.
                 StageFloatPills().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -644,8 +645,11 @@ private struct ShellStageBanner: View {
                 let lines = model.engine.sceneGuides().map(\.floatValue)
                 for i in stride(from: 0, to: lines.count, by: 5) {
                     var line = Path(); line.move(to: screen(lines[i], lines[i + 1])); line.addLine(to: screen(lines[i + 2], lines[i + 3]))
-                    let color: Color = lines[i + 4] == 1 ? .yellow : lines[i + 4] == 2 ? .cyan : .gray.opacity(0.22)
-                    context.stroke(line, with: .color(color), lineWidth: 1)
+                    let kind = Int(lines[i + 4])
+                    // 3 chão quadriculado, 4 eixo X, 5 eixo Z (query_scene_guides).
+                    let color: Color = kind == 1 ? .yellow : kind == 2 ? .cyan : kind == 3 ? .white.opacity(0.10)
+                        : kind == 4 ? SkeletonRing.colors[0].opacity(0.75) : kind == 5 ? SkeletonRing.colors[2].opacity(0.75) : .gray.opacity(0.22)
+                    context.stroke(line, with: .color(color), lineWidth: kind >= 4 ? 1.5 : 1)
                 }
                 if model.rigFixActive {
                     // AutoRig 3D (0.3.6, RigPoseStage.kt `drawRigFixOverlay`): as 17 juntas canônicas.
@@ -675,33 +679,49 @@ private struct ShellStageBanner: View {
                     let b = model.poseBones, f = AureaModel.boneFloats, chosen = model.poseBone
                     let count = b.count / f
                     if !model.skeletonHidden {
-                        // 0.4.5: o osso escolhido (e os filhos dele) mais grosso e aceso.
+                        // Ossos como no Blender (RigPoseStage.kt): peça sólida em facetas; os ramos
+                        // laterais (ombros no peito, pernas no quadril) são só uma linha tracejada.
+                        let side = model.poseSideBones()
                         for i in 0..<count {
                             let parent = Int(b[i * f + 1])
                             guard parent >= 0, parent < count, b[i * f + 9] > 0.5, b[parent * f + 9] > 0.5 else { continue }
-                            var line = Path()
-                            line.move(to: screen(b[parent * f + 7], b[parent * f + 8])); line.addLine(to: screen(b[i * f + 7], b[i * f + 8]))
-                            let on = Int32(b[i * f]) == chosen || Int32(b[parent * f]) == chosen
-                            context.stroke(line, with: .color(StageInk.outlineUnder), style: StrokeStyle(lineWidth: on ? 6 : 4, lineCap: .round))
-                            context.stroke(line, with: .color(on ? AureaColors.accent : .white.opacity(0.85)), style: StrokeStyle(lineWidth: on ? 3.5 : 2, lineCap: .round))
+                            let a = screen(b[parent * f + 7], b[parent * f + 8]), c = screen(b[i * f + 7], b[i * f + 8])
+                            if i < side.count && side[i] {
+                                var dash = Path(); dash.move(to: a); dash.addLine(to: c)
+                                // Fio escuro por baixo: o tracejado aparece no fundo e em cima de modelo claro.
+                                context.stroke(dash, with: .color(SkeletonBoneInk.line.opacity(0.6)), lineWidth: 2)
+                                context.stroke(dash, with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            } else {
+                                SkeletonBoneInk.draw(&context, from: a, to: c, on: Int32(b[parent * f]) == chosen)
+                            }
                         }
-                        // Juntas: ponto maior que o osso, com a área de toque marcada por um anel fino.
+                        // Juntas: bolinhas de arame; a escolhida acesa; anel destaque = keyframe no cabeçote.
                         for i in 0..<count where b[i * f + 9] > 0.5 {
                             let c = screen(b[i * f + 7], b[i * f + 8])
                             let on = Int32(b[i * f]) == chosen
-                            let r: CGFloat = on ? 8 : 6
-                            context.stroke(Path(ellipseIn: CGRect(x: c.x - 13, y: c.y - 13, width: 26, height: 26)), with: .color(.white.opacity(0.22)), lineWidth: 1)
-                            circle(&context, c, r + 1.5, StageInk.outlineUnder)
-                            circle(&context, c, r, on ? AureaColors.accent : .white)
+                            // A bolinha acompanha o osso: num dedo ela não pode tampar o desenho.
+                            let parent = Int(b[i * f + 1])
+                            let bone: CGFloat = parent >= 0 && parent < count
+                                ? hypot(c.x - screen(b[parent * f + 7], b[parent * f + 8]).x, c.y - screen(b[parent * f + 7], b[parent * f + 8]).y) : .greatestFiniteMagnitude
+                            let r: CGFloat = on ? 6 : min(4.5, max(1.75, bone * 0.12))
+                            let ball = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
+                            context.fill(ball, with: .color(on ? AureaColors.accent : SkeletonBoneInk.light))
+                            context.stroke(ball, with: .color(SkeletonBoneInk.line), lineWidth: 0.75)
+                            if r >= 3 {
+                                var cross = Path()
+                                cross.move(to: CGPoint(x: c.x - r, y: c.y)); cross.addLine(to: CGPoint(x: c.x + r, y: c.y))
+                                cross.move(to: CGPoint(x: c.x, y: c.y - r)); cross.addLine(to: CGPoint(x: c.x, y: c.y + r))
+                                context.stroke(cross, with: .color(SkeletonBoneInk.line), lineWidth: 0.75)
+                            }
                             if b[i * f + 6] > 0.5 {
-                                context.stroke(Path(ellipseIn: CGRect(x: c.x - r - 4, y: c.y - r - 4, width: (r + 4) * 2, height: (r + 4) * 2)),
-                                               with: .color(AureaColors.accent), lineWidth: 2)
+                                context.stroke(Path(ellipseIn: CGRect(x: c.x - r - 3.5, y: c.y - r - 3.5, width: (r + 3.5) * 2, height: (r + 3.5) * 2)),
+                                               with: .color(AureaColors.keyframe), lineWidth: 2)
                             }
                         }
                     }
                     // Anéis do osso escolhido: X/Y/Z locais (metade de trás apagada) e o de fora (em volta do olhar).
                     let gz = model.poseGizmo
-                    if gz.count == AureaModel.boneGizmoFloats, gz[2] > 0.5, !model.poseMove, fit > 0 {
+                    if gz.count == AureaModel.boneGizmoFloats, gz[2] > 0.5, !model.poseMove, !model.poseIk, !model.sceneSelectOnly, fit > 0 {
                         let ring = Float(SkeletonRing.radius / fit)
                         let c = screen(gz[0], gz[1])
                         let outer = SkeletonRing.radius * CGFloat(AureaModel.outerRing)
@@ -844,7 +864,7 @@ private struct ShellStageBanner: View {
             }
             guard model.selection.count == 1, !selected.locked, !(model.panel == .mask && model.editingMask != nil), points.count == 4 else { return }
             if ShapeStageGeometry.enabled(model) { return }
-            if gizmo.count == 8 && !TrackballOverlay.draw(&context, model: model, screen: screen) {
+            if gizmo.count == 8 && !(model.sceneEditor && model.sceneSelectOnly) && !TrackballOverlay.draw(&context, model: model, screen: screen) {
                 // Ponta = ferramenta (Stage.kt drawGizmo): bola mover, anel girar, quadrado escala.
                 let tips = ShellStageGeometry.gizmoTips(stride(from: 0, to: 8, by: 2).map { screen(gizmo[$0], gizmo[$0 + 1]) })
                 let tool = model.gizmoTool
@@ -1137,7 +1157,7 @@ private struct BatchToolsView: View {
         guard !targets.isEmpty else { model.toast = AureaText.t(selected.allSatisfy(\.locked) ? "sh_layers_locked_unlock_to_edit" : "editor_leve_cabecote_dentro_camadas"); return }
         pause(); model.beginGesture(start ? "aparar início" : "aparar fim")
         for row in targets {
-            if start { model.trimStart(row.id, at: model.status.playhead) }
+            if start { model.trimStartToPlayhead(row.id, at: model.status.playhead) }
             else { model.trimEnd(row.id, at: model.status.playhead) }
         }
         model.endGesture()
@@ -2032,43 +2052,54 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
     }
 }
 
-/// Cena 3D "seca" (par do SceneLayoutWorkspace.kt): a cena ocupa a tela e se
-/// mexe com o dedo — arrastar o objeto move, 1 dedo no vazio gira a vista,
-/// pinça aproxima, toque duplo recentra (ver `sceneEvent`). Sem sliders nem
-/// campos XYZ: voltar, desfazer, adicionar, trocar de objeto e, conforme o
-/// escolhido, material ou luz. A órbita é só da prévia.
+/// Cena 3D no jeito do Blender no celular, com as cores do AUREA (par do
+/// SceneLayoutWorkspace.kt): duas linhas no alto (voltar, modo, Global/Local, desfazer ·
+/// menus Visualizar, Selecionar, Adicionar, Objeto), a viewport inteira no meio com
+/// ferramentas à esquerda e navegação à direita e, embaixo, a área que recolhe: Linha do
+/// tempo, Propriedades, Outliner e Esqueleto. Nada cobre a cena: o Esqueleto mora nessa
+/// área. Gestos: `sceneEvent` e `rigPoseEvent` no PreviewMetalView.swift.
 @MainActor private struct SceneLayoutWorkspace: View {
     @EnvironmentObject private var model: AureaModel
     @EnvironmentObject private var shell: ShellPresentation
     let height: CGFloat
     @State private var materials = false
     @State private var lights = false
-    @State private var hint = true
     @State private var area = 0
+    @State private var areaOpen = true
     @State private var addOpen = false
-    @State private var modeOpen = false
+    private static let skeletonArea = 3
+    private var isModel: Bool { model.selectedLayer?.kind == 10 }
+    private var bottomHeight: CGFloat {
+        guard areaOpen else { return 45 }
+        return 45 + (area == 0 ? 176 : area == Self.skeletonArea ? 312 : 248)
+    }
+    private var stageHeight: CGFloat { max(120, height - 46 - 42 - bottomHeight) }
+    private func chooseArea(_ i: Int) {
+        if i == area { areaOpen.toggle() } else { area = i; areaOpen = true }
+        model.openSkeletonPanel(i == Self.skeletonArea && areaOpen)
+    }
     var body: some View {
-        // 0.4.6: a Cena 3D no layout do Blender (par do SceneLayoutWorkspace.kt):
-        // cabeçalho, a cena viva no meio e Linha do tempo / Propriedades / Outliner embaixo.
         VStack(spacing: 0) {
             header
+            menuBar
             ZStack(alignment: .bottom) {
-                PreviewStage(height: max(120, height - 50 - 272))
-                VStack(spacing: 8) {
-                    let skeletonOpen = model.skeletonPanel && model.rigPoseMode && !model.poseBones.isEmpty
-                    if skeletonOpen {
-                        SkeletonPanelView().environmentObject(model).frame(height: (height - 322) * 0.6)
-                    } else if model.rigPoseMode && !model.poseBones.isEmpty { rigPoseBar }
-                    if model.rigFixMode && !model.humanoidJoints.isEmpty { rigFixBar }
-                }
+                PreviewStage(height: stageHeight)
+                Scene3DViewLabel().environmentObject(model)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                Scene3DToolbar().environmentObject(model)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                Scene3DNavColumn().environmentObject(model)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                if model.rigFixMode && !model.humanoidJoints.isEmpty { rigFixBar }
                 if addOpen {
                     Scene3DStudioAddMenu(onClose: { addOpen = false }).environmentObject(model)
                         .frame(maxHeight: .infinity, alignment: .top)
                 }
-            }.frame(height: max(120, height - 50 - 272)).clipped()
-            Scene3DStudioBottom(area: $area, openMaterial: { model.panel = .layer3D; materials = true },
-                                openLights: { lights = true }).environmentObject(model)
-                .frame(height: 272)
+            }.frame(height: stageHeight).clipped()
+                .environment(\.layoutDirection, .leftToRight)   // a cena 3D e os gizmos não espelham
+            Scene3DStudioBottom(area: area, open: areaOpen, isModel: isModel, onArea: chooseArea,
+                                openMaterial: openMaterial, openLights: { lights = true }).environmentObject(model)
+                .frame(height: bottomHeight)
         }
         .frame(height: height)
         .background(AureaColors.background)
@@ -2084,13 +2115,16 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                 .presentationDetents([.medium, .large])
         }
         .onChange(of: model.panel) { panel in if panel == .none { materials = false } }
+        // O painel 3D e os menus abrem o Esqueleto: ele vira a aba de baixo.
+        .onChange(of: model.skeletonPanel) { on in if on { area = Self.skeletonArea; areaOpen = true } }
+        .onChange(of: isModel) { now in if !now && area == Self.skeletonArea { area = 0 } }
     }
-    /// Voltar, Modo Objeto/Pose, Adicionar, excluir, desfazer e refazer.
+    private func openMaterial() { model.panel = .layer3D; materials = true }
+
+    /// Voltar, modo Objeto/Pose, Global/Local, desfazer e refazer.
     private var header: some View {
         let pose = model.rigPoseMode
-        let selected = model.selectedLayer
-        let canPose = selected?.kind == 10 && !model.poseBones.isEmpty
-        let addLabel = String(AureaText.t("panel_adicionar").drop(while: { $0 == "+" || $0 == " " }))
+        let canPose = isModel && !model.poseBones.isEmpty
         return HStack(spacing: 4) {
             headerIcon(CupertinoGlyph.ChevronLeft, AureaText.t("editor_voltar_editor")) { model.exitSceneEditor() }
             Menu {
@@ -2102,25 +2136,18 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                     CupertinoGlyph.text(pose ? CupertinoGlyph.PersonCropCircle : CupertinoGlyph.CubeFill, size: 15)
                     Text(AureaText.t(pose ? "s3d_mode_pose" : "s3d_mode_object")).font(.aurea(size: 13, weight: .semibold)).lineLimit(1)
                     CupertinoGlyph.text(CupertinoGlyph.ChevronDown, size: 11, color: AureaColors.muted)
-                }.foregroundStyle(AureaColors.text).padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
-            }
-            Button { addOpen.toggle() } label: {
-                HStack(spacing: 4) {
-                    CupertinoGlyph.text(CupertinoGlyph.Plus, size: 14)
-                    Text(addLabel).font(.aurea(size: 13, weight: .semibold)).lineLimit(1)
-                }.foregroundStyle(addOpen ? Color.black : AureaColors.text).padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(addOpen ? AureaColors.accent : AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
-            }.buttonStyle(.plain).accessibilityLabel(addLabel)
+                }.foregroundStyle(AureaColors.text).padding(.horizontal, 10).frame(height: 36)
+                    .background(AureaColors.editorRowPill, in: RoundedRectangle(cornerRadius: 9))
+            }.accessibilityIdentifier("scene.mode")
+            Button { model.gizmoLocalSpace.toggle() } label: {
+                Text(AureaText.t(model.gizmoLocalSpace ? "s3d_space_local" : "s3d_space_global")).font(.aurea(size: 13)).lineLimit(1)
+                    .foregroundStyle(AureaColors.text).padding(.horizontal, 10).frame(height: 36)
+                    .background(AureaColors.editorRowPill, in: RoundedRectangle(cornerRadius: 9))
+            }.buttonStyle(.plain).accessibilityLabel(model.gizmoLocalSpace ? "Local XYZ" : "World XYZ").accessibilityIdentifier("scene.space")
             Spacer(minLength: 0)
-            if let selected {
-                headerIcon(CupertinoGlyph.Trash, AureaText.t("s3d_delete_named", selected.name)) {
-                    model.select(layerId: selected.id, additive: false, openOptions: false); model.deleteSelectedLayers()
-                }
-            }
             headerIcon(CupertinoGlyph.ArrowUturnLeft, AureaText.t("editor_desfazer")) { model.undo() }
             headerIcon(CupertinoGlyph.ArrowUturnRight, AureaText.t("editor_refazer")) { model.redo() }
-        }.padding(.horizontal, 6).frame(height: 50).background(AureaColors.surface)
+        }.padding(.horizontal, 4).frame(height: 46).background(AureaColors.editorBar)
             .environment(\.layoutDirection, .leftToRight)
     }
     private func headerIcon(_ glyph: Character, _ label: String, _ action: @escaping () -> Void) -> some View {
@@ -2128,60 +2155,100 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
             CupertinoGlyph.text(glyph, size: 18).foregroundStyle(AureaColors.text).frame(width: 40, height: 40).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel(label)
     }
-    /// Os botões de baixo: adicionar, material/luz do escolhido, pose e recentrar.
-    private var pillRow: some View {
-        HStack(spacing: 8) {
-            Menu {
-                Button(AureaText.t("sh_add_text_3d")) { model.addText3D(content: AureaText.t("panel_texto"), depth: 0.25) }
-                Button(AureaText.t("panel_camera_3d")) { model.addCamera() }
-                Button(AureaText.t("real_camera_title")) { model.startRealCamera() }
-                Button(AureaText.t("sh_add_null_3d")) { model.addNull(threeD: true) }
-                Button(AureaText.t("scene_light_directional")) { model.addLight(0) }
-                Button(AureaText.t("scene_light_point")) { model.addLight(1) }
-                Button(AureaText.t("scene_light_spot")) { model.addLight(2) }
-                // O mesmo Flare 3D do Adicionar › 3D (AddLayerSheet).
-                Button(AureaText.t("scene_flare3d")) { model.addLight(3) }
-                Button(AureaText.t("sh_add_model_3d") + "…") { model.showAddLayer = true }
-            } label: { pill(CupertinoGlyph.Plus, String(AureaText.t("panel_adicionar").drop(while: { $0 == "+" || $0 == " " }))) }
-            if let layer = model.selectedLayer, layer.kind == 8 || layer.kind == 10 || (layer.kind == 4 && layer.threeD) {
-                Button { model.panel = .layer3D; materials = true } label: { pill(CupertinoGlyph.CubeFill, AureaText.t(layer.kind == 8 ? "environment_texture" : "scene_material")) }.buttonStyle(.plain)
-            }
-            if model.selectedLayer?.kind == 9 {
-                Button { lights = true } label: { pill(CupertinoGlyph.Lightbulb, AureaText.t("pn_t3d_lighting")) }.buttonStyle(.plain)
-            }
-            // Modelo com rig: posar os ossos e marcar keyframes (como no Blender).
-            if model.selectedLayer?.kind == 10 && !model.poseBones.isEmpty && !model.rigPoseMode {
-                Button { model.setRigPose(true) } label: { pill(CupertinoGlyph.PersonCropCircle, AureaText.t("rig_pose")) }.buttonStyle(.plain)
-            }
-            Button { model.resetSceneView() } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("scene_recenter")) }.buttonStyle(.plain)
+
+    // --- A linha de menus do Blender -----------------------------------------
+    private var menuBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                Menu { viewMenu } label: { menuLabel(AureaText.t("s3d_menu_view"), on: false) }.accessibilityIdentifier("scene.menu.view")
+                Menu { selectMenu } label: { menuLabel(AureaText.t("s3d_menu_select"), on: false) }.accessibilityIdentifier("scene.menu.select")
+                Button { addOpen.toggle() } label: {
+                    menuLabel(String(AureaText.t("panel_adicionar").drop(while: { $0 == "+" || $0 == " " })), on: addOpen)
+                }.buttonStyle(.plain).accessibilityIdentifier("scene.menu.add")
+                if model.rigPoseActive {
+                    Menu { poseMenu } label: { menuLabel(AureaText.t("s3d_menu_pose"), on: false) }.accessibilityIdentifier("scene.menu.pose")
+                } else {
+                    Menu { objectMenu } label: { menuLabel(AureaText.t("s3d_menu_object"), on: false) }.accessibilityIdentifier("scene.menu.object")
+                }
+            }.padding(.horizontal, 6)
+        }.frame(height: 42).background(AureaColors.editorBar)
+            .environment(\.layoutDirection, .leftToRight)
+    }
+    private func menuLabel(_ text: String, on: Bool) -> some View {
+        Text(text).font(.aurea(size: 14)).foregroundStyle(AureaColors.text).lineLimit(1)
+            .padding(.horizontal, 11).frame(height: 38)
+            .background(on ? AureaColors.editorRowPill : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+    }
+    private func checked(_ label: String, _ on: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) { if on { Label(label, systemImage: "checkmark") } else { Text(label) } }
+    }
+    @ViewBuilder private var viewMenu: some View {
+        Button(AureaText.t("s3d_view_frame")) { Scene3DNav.frameAll(model) }
+        checked(AureaText.t("s3d_view_camera"), model.sceneCameraView) { model.toggleSceneCameraView() }
+        Divider()
+        Button(AureaText.t("om_view_front")) { model.snapSceneView(yaw: 0, pitch: 0) }
+        Button(AureaText.t("om_view_back")) { model.snapSceneView(yaw: 180, pitch: 0) }
+        Button(AureaText.t("om_view_left")) { model.snapSceneView(yaw: -90, pitch: 0) }
+        Button(AureaText.t("om_view_right")) { model.snapSceneView(yaw: 90, pitch: 0) }
+        Button(AureaText.t("om_view_top")) { model.snapSceneView(yaw: model.sceneYaw, pitch: 80) }
+        Button(AureaText.t("om_view_bottom")) { model.snapSceneView(yaw: model.sceneYaw, pitch: -80) }
+        Divider()
+        checked(AureaText.t("s3d_overlays"), !ViewModeState.shared.hideOverlay) { ViewModeState.shared.hideOverlay.toggle() }
+        if model.rigPoseActive {
+            checked(AureaText.t("skeleton_show"), !model.skeletonHidden) { model.skeletonHidden.toggle() }
         }
     }
-    /// Barra do modo de pose (RigPoseBar do SceneLayoutWorkspace.kt).
-    private var rigPoseBar: some View {
-        let chosen = model.poseBone >= 0
-        return VStack(spacing: 8) {
-            Text(AureaText.t(chosen ? "rig_pose_hint_bone" : "rig_pose_hint")).font(.aurea(size: 12)).foregroundStyle(AureaColors.text)
-                .multilineTextAlignment(.center).padding(.horizontal, 12).padding(.vertical, 8)
-                .background(StageInk.floatingDark, in: RoundedRectangle(cornerRadius: 12)).padding(.horizontal, 24)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    if chosen { Button { model.togglePoseKey(all: false) } label: { pill(CupertinoGlyph.SuitDiamond, AureaText.t("rig_key_bone")) }.buttonStyle(.plain) }
-                    Button { model.togglePoseKey(all: true) } label: { pill(CupertinoGlyph.SuitDiamond, AureaText.t("rig_key_all")) }.buttonStyle(.plain)
-                    if chosen { Button { model.resetPose(all: false) } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("rig_reset_bone")) }.buttonStyle(.plain) }
-                    // 0.3.6: "Mover" desloca o osso escolhido (o quadril) em vez de girar.
-                    if chosen {
-                        Button { model.poseMove.toggle() } label: { pill(model.poseMove ? CupertinoGlyph.CheckmarkAlt : CupertinoGlyph.Move, AureaText.t("rig3d_move")) }
-                            .buttonStyle(.plain).accessibilityAddTraits(model.poseMove ? [.isSelected] : [])
-                    }
-                    Button { model.resetPose(all: true) } label: { pill(CupertinoGlyph.ArrowCounterclockwise, AureaText.t("rig_reset_all")) }.buttonStyle(.plain)
-                    // 0.4.5: o painel Esqueleto (árvore, rotação numérica, espelhar, copiar/colar).
-                    Button { model.openSkeletonPanel(true) } label: { pill(CupertinoGlyph.PersonCropCircle, AureaText.t("skeleton_title")) }
-                        .buttonStyle(.plain).accessibilityIdentifier("rig.skeleton")
-                    Button { model.setRigPose(false) } label: { pill(CupertinoGlyph.CheckmarkAlt, AureaText.t("rig_done")) }.buttonStyle(.plain)
-                }.padding(.horizontal, 12)
+    @ViewBuilder private var selectMenu: some View {
+        if model.rigPoseActive {
+            Button(AureaText.t("s3d_select_none")) { model.choosePoseBone(-1) }.disabled(model.poseBone < 0)
+            Button(AureaText.t("skeleton_bones")) { chooseArea(Self.skeletonArea) }
+        } else {
+            Button(AureaText.t("s3d_select_all")) { model.selectAll() }
+            Button(AureaText.t("s3d_select_none")) { model.clearSelection() }.disabled(model.selection.isEmpty)
+            Divider()
+            ForEach(model.layers.filter { $0.threeD }) { o in
+                checked(o.name, o.id == model.primarySelection) { model.select(layerId: o.id, additive: false, openOptions: false) }
             }
-        }.padding(.bottom, 12)
+        }
     }
+    @ViewBuilder private var poseMenu: some View {
+        Button(AureaText.t("rig_key_bone")) { model.togglePoseKey(all: false) }.disabled(model.poseBone < 0)
+        Button(AureaText.t("rig_key_all")) { model.togglePoseKey(all: true) }
+        Divider()
+        Button(AureaText.t("skeleton_copy")) { model.copyPose() }
+        Button(AureaText.t("skeleton_paste")) { model.pastePose() }.disabled(model.poseClipboard.isEmpty)
+        Button(AureaText.t("skeleton_mirror_pose")) { model.mirrorPose(all: true) }
+        Divider()
+        Button(AureaText.t("skeleton_zero_pose")) { model.zeroPose(all: true) }
+        Button(AureaText.t("rig_reset_all")) { model.resetPose(all: true) }
+    }
+    @ViewBuilder private var objectMenu: some View {
+        let selected = model.selectedLayer
+        Button(AureaText.t("s3d_insert_key_desc")) { model.toggleSceneKey() }.disabled(selected == nil)
+        Button(AureaText.t("s3d_duplicate")) {
+            model.engine.duplicateLayers(model.selection.map { NSNumber(value: $0) }); model.refreshModel(force: true)
+        }.disabled(selected == nil)
+        if isModel || (selected?.kind == 4 && selected?.threeD == true) {
+            Divider()
+            Button(AureaText.t("scene_material")) { openMaterial() }
+        }
+        if selected?.kind == 9 {
+            Divider()
+            Button(AureaText.t("pn_t3d_lighting")) { lights = true }
+        }
+        if isModel {
+            Divider()
+            Button(AureaText.t("skeleton_title")) { chooseArea(Self.skeletonArea) }
+            Button(AureaText.t("mocap_title")) { Panel3DRequest.tab = .rig; openMaterial() }
+        }
+        Divider()
+        if let selected {
+            Button(AureaText.t("s3d_delete_named", selected.name), role: .destructive) {
+                model.select(layerId: selected.id, additive: false, openOptions: false); model.deleteSelectedLayers()
+            }
+        }
+    }
+
     /// Barra do Corrigir esqueleto (RigFixBar do SceneLayoutWorkspace.kt): dica, progresso dos pesos e concluir.
     private var rigFixBar: some View {
         let working = model.autoRigState == 1
@@ -2196,19 +2263,245 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
             }.padding(.horizontal, 12)
         }.padding(.bottom, 12)
     }
-    private func roundButton(_ glyph: Character, _ key: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            CupertinoGlyph.text(glyph, size: 19).foregroundStyle(AureaColors.text)
-                .mirrorsInRtl(CupertinoGlyph.mirrorsInRtl(glyph))   // voltar e desfazer/refazer viram em árabe (HIG)
-                .frame(width: 40, height: 40).background(StageInk.floatingDark, in: Circle())
-        }.buttonStyle(.plain).accessibilityLabel(AureaText.t(key))
-    }
     private func pill(_ glyph: Character, _ label: String) -> some View {
         HStack(spacing: 6) {
             CupertinoGlyph.text(glyph, size: 16)
             Text(label).font(.aurea(size: 13, weight: .medium)).lineLimit(1)
         }.foregroundStyle(AureaColors.text).padding(.horizontal, 14).frame(height: 40)
             .background(StageInk.floatingDark, in: Capsule())
+    }
+}
+
+// =============================================================================
+// A viewport da Cena 3D (par do Scene3DViewport.kt): ferramentas à esquerda, gizmo de
+// eixos e navegação à direita e o nome do que está escolhido no canto.
+// =============================================================================
+
+private enum Scene3DNav {
+    static let fill = Color(hex: 0xE6151C24)
+    static let tool: CGFloat = 46
+    /// Vista inicial e sem zoom/pan do palco.
+    @MainActor static func frameAll(_ model: AureaModel) {
+        StageViewZoom.shared.reset(engine: model.engine)
+        model.resetSceneView()
+    }
+    /// Um eixo do gizmo: para onde aponta na tela, a profundidade e a vista que o toque abre.
+    struct Axis { let x: CGFloat; let y: CGFloat; let depth: CGFloat; let color: Color; let label: String?; let yaw: Float?; let pitch: Float }
+    /// Projeta os eixos do mundo com a mesma conta do `scene_editor_camera` do motor;
+    /// +Y do mundo aponta para baixo.
+    static func axes(yaw yawDeg: Float, pitch pitchDeg: Float) -> [Axis] {
+        let yaw = CGFloat(yawDeg) * .pi / 180, pitch = CGFloat(pitchDeg) * .pi / 180
+        let sy = sin(yaw), cy = cos(yaw), sp = sin(pitch), cp = cos(pitch)
+        let c = SkeletonRing.colors
+        return [
+            Axis(x: cy, y: sp * sy, depth: -sy * cp, color: c[0], label: "X", yaw: 90, pitch: 0),
+            Axis(x: -cy, y: -sp * sy, depth: sy * cp, color: c[0].opacity(0.45), label: nil, yaw: -90, pitch: 0),
+            Axis(x: 0, y: cp, depth: sp, color: c[1], label: "Y", yaw: nil, pitch: -80),
+            Axis(x: 0, y: -cp, depth: -sp, color: c[1].opacity(0.45), label: nil, yaw: nil, pitch: 80),
+            Axis(x: sy, y: -sp * cy, depth: cy * cp, color: c[2], label: "Z", yaw: 180, pitch: 0),
+            Axis(x: -sy, y: sp * cy, depth: -cy * cp, color: c[2].opacity(0.45), label: nil, yaw: 0, pitch: 0),
+        ]
+    }
+}
+
+extension AureaModel {
+    /// Há chave de transformação da camada escolhida no cabeçote?
+    var sceneKeyHere: Bool {
+        guard let id = primarySelection, let d = engine.layerDetail(id) else { return false }
+        let keyMask = (d["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0
+        return (0..<9).contains { keyMask & (1 << UInt32($0)) != 0 }
+    }
+    /// Marca/desmarca as 9 trilhas de posição, rotação e escala no quadro (ou o osso, na pose).
+    func toggleSceneKey() {
+        if rigPoseMode && !poseBones.isEmpty { togglePoseKey(all: poseBone < 0); return }
+        guard let id = primarySelection, let d = engine.layerDetail(id) else { return }
+        let any = sceneKeyHere
+        let values = ["position", "scale", "rotation"].flatMap { (d[$0] as? [NSNumber] ?? []).prefix(3).map(\.floatValue) }
+        let local = localPlayhead
+        beginGesture("chave da cena 3d")
+        mutate { core in
+            for p in 0..<9 {
+                // Ordem das trilhas: posição 0-2, escala 3-5, rotação 6-8 (TrackProperty).
+                if any { core.deleteKeyframe(forLayer: id, property: UInt32(p), time: local) }
+                else if p < values.count { core.insertKeyframe(forLayer: id, property: UInt32(p), time: local, value: values[p]) }
+            }
+        }
+        endGesture()
+        refreshModel(force: true)
+    }
+}
+
+/// Barra da esquerda: as ferramentas do modo (objeto ou pose) e o keyframe.
+@MainActor private struct Scene3DToolbar: View {
+    @EnvironmentObject private var model: AureaModel
+    private var poseTool: Int {
+        if model.sceneSelectOnly { return AureaModel.poseToolSelect }
+        if model.poseIk { return AureaModel.poseToolIk }
+        return model.poseMove ? AureaModel.poseToolMove : AureaModel.poseToolRotate
+    }
+    private var objectTool: Int { model.sceneSelectOnly ? AureaModel.sceneToolSelect : model.gizmoTool }
+    private var keyed: Bool {
+        guard model.rigPoseActive else { return model.sceneKeyHere }
+        let b = model.poseBones, f = AureaModel.boneFloats
+        guard let i = (0..<(b.count / f)).first(where: { Int32(b[$0 * f]) == model.poseBone }) else { return false }
+        return b[i * f + 6] > 0.5
+    }
+    var body: some View {
+        VStack(spacing: 2) {
+            if model.rigPoseActive {
+                selectTool(poseTool == AureaModel.poseToolSelect) { model.choosePoseTool(AureaModel.poseToolSelect) }
+                tool(CupertinoGlyph.ArrowCounterclockwise, "gizmo_tool_rotate", "scene.tool.rotate", on: poseTool == AureaModel.poseToolRotate) { model.choosePoseTool(AureaModel.poseToolRotate) }
+                tool(CupertinoGlyph.Move, "rig3d_move", "scene.tool.move", on: poseTool == AureaModel.poseToolMove) { model.choosePoseTool(AureaModel.poseToolMove) }
+                tool(CupertinoGlyph.Link, "skeleton_ik", "scene.tool.ik", on: poseTool == AureaModel.poseToolIk) { model.choosePoseTool(AureaModel.poseToolIk) }
+            } else {
+                selectTool(objectTool == AureaModel.sceneToolSelect) { model.chooseSceneTool(AureaModel.sceneToolSelect) }
+                tool(CupertinoGlyph.Move, "gizmo_tool_move", "scene.tool.move", on: objectTool == 0) { model.chooseSceneTool(0) }
+                tool(CupertinoGlyph.ArrowCounterclockwise, "gizmo_tool_rotate", "scene.tool.rotate", on: objectTool == 1) { model.chooseSceneTool(1) }
+                tool(CupertinoGlyph.ArrowDownRightSquare, "gizmo_tool_scale", "scene.tool.scale", on: objectTool == 2) { model.chooseSceneTool(2) }
+            }
+            Rectangle().fill(AureaColors.editorBarLine).frame(width: 34, height: 1)
+            let on = keyed
+            Button { model.toggleSceneKey() } label: {
+                CupertinoGlyph.text(on ? CupertinoGlyph.SuitDiamondFill : CupertinoGlyph.SuitDiamond, size: 21, color: on ? AureaColors.keyframe : AureaColors.text)
+                    .frame(width: Scene3DNav.tool, height: Scene3DNav.tool).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel(AureaText.t("s3d_insert_key_desc")).accessibilityIdentifier("scene.tool.key")
+        }
+        .padding(3).background(Scene3DNav.fill, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.leading, 8).padding(.top, 8)
+    }
+    private func tool(_ glyph: Character, _ key: String, _ id: String, on: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            CupertinoGlyph.text(glyph, size: 21, color: on ? AureaColors.onAction : AureaColors.text)
+                .frame(width: Scene3DNav.tool, height: Scene3DNav.tool)
+                .background(on ? AureaColors.brand : Color.clear, in: RoundedRectangle(cornerRadius: 9)).contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityLabel(AureaText.t(key)).accessibilityAddTraits(on ? [.isSelected] : []).accessibilityIdentifier(id)
+    }
+    /// Selecionar: um quadrado tracejado (o conjunto de ícones do app não tem cursor).
+    private func selectTool(_ on: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Rectangle().stroke(on ? AureaColors.onAction : AureaColors.text, style: StrokeStyle(lineWidth: 1.6, dash: [3, 2.5]))
+                .frame(width: 18, height: 18)
+                .frame(width: Scene3DNav.tool, height: Scene3DNav.tool)
+                .background(on ? AureaColors.brand : Color.clear, in: RoundedRectangle(cornerRadius: 9)).contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityLabel(AureaText.t("s3d_menu_select")).accessibilityAddTraits(on ? [.isSelected] : []).accessibilityIdentifier("scene.tool.select")
+    }
+}
+
+/// Direita: o gizmo de eixos e, embaixo, aproximar, mover a vista, câmera e enquadrar.
+@MainActor private struct Scene3DNavColumn: View {
+    @EnvironmentObject private var model: AureaModel
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            Scene3DNavGizmo().environmentObject(model)
+            VStack(spacing: 2) {
+                Scene3DNavDrag(glyph: CupertinoGlyph.Search, key: "s3d_nav_zoom", id: "scene.nav.zoom") { _, dy in
+                    model.setSceneView(yaw: model.sceneYaw, pitch: model.scenePitch, distance: model.sceneDistance * Float(exp(dy / 260)))
+                }
+                Scene3DNavDrag(glyph: CupertinoGlyph.ArrowLeftRightSquare, key: "s3d_nav_pan", id: "scene.nav.pan") { dx, dy in
+                    let view = StageViewZoom.shared
+                    view.set(zoom: view.zoom, pan: CGSize(width: view.pan.width + dx, height: view.pan.height + dy), engine: model.engine, pixelScale: UIScreen.main.scale)
+                }
+                button(model.sceneCameraView ? CupertinoGlyph.VideocamFill : CupertinoGlyph.Videocam, "s3d_view_camera", "scene.nav.camera", on: model.sceneCameraView) { model.toggleSceneCameraView() }
+                button(CupertinoGlyph.Fullscreen, "s3d_view_frame", "scene.nav.frame", on: false) { Scene3DNav.frameAll(model) }
+            }
+            .padding(3).background(Scene3DNav.fill, in: RoundedRectangle(cornerRadius: 12))
+            .padding(.trailing, 4)
+        }.padding(.trailing, 6).padding(.top, 6)
+    }
+    private func button(_ glyph: Character, _ key: String, _ id: String, on: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            CupertinoGlyph.text(glyph, size: 21, color: on ? AureaColors.onAction : AureaColors.text)
+                .frame(width: Scene3DNav.tool, height: Scene3DNav.tool)
+                .background(on ? AureaColors.brand : Color.clear, in: RoundedRectangle(cornerRadius: 9)).contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityLabel(AureaText.t(key)).accessibilityIdentifier(id)
+    }
+}
+
+/// Botão que se usa arrastando (zoom e pan), como os do canto do Blender.
+private struct Scene3DNavDrag: View {
+    let glyph: Character
+    let key: String
+    let id: String
+    let onDrag: (CGFloat, CGFloat) -> Void
+    @State private var last: CGSize = .zero
+    var body: some View {
+        CupertinoGlyph.text(glyph, size: 21, color: AureaColors.text)
+            .frame(width: Scene3DNav.tool, height: Scene3DNav.tool).contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { g in
+                onDrag(g.translation.width - last.width, g.translation.height - last.height)
+                last = g.translation
+            }.onEnded { _ in last = .zero })
+            .accessibilityLabel(AureaText.t(key)).accessibilityIdentifier(id)
+    }
+}
+
+/// O gizmo de eixos: arrastar orbita; tocar numa bola vira a vista para aquele lado.
+@MainActor private struct Scene3DNavGizmo: View {
+    @EnvironmentObject private var model: AureaModel
+    @State private var last: CGSize = .zero
+    @State private var moved = false
+    private static let size: CGFloat = 92
+    private static let reach: CGFloat = size * 0.36
+    var body: some View {
+        let axes = Scene3DNav.axes(yaw: model.sceneYaw, pitch: model.scenePitch)
+        Canvas { ctx, size in
+            let c = CGPoint(x: size.width / 2, y: size.height / 2), r = Self.reach, ball: CGFloat = 10
+            ctx.fill(Path(ellipseIn: CGRect(origin: .zero, size: size)), with: .color(Color(hex: 0x55151C24)))
+            // De trás para a frente: maior profundidade = mais longe do olho.
+            for a in axes.sorted(by: { $0.depth > $1.depth }) {
+                let p = CGPoint(x: c.x + a.x * r, y: c.y + a.y * r)
+                if a.label != nil {
+                    var line = Path(); line.move(to: c); line.addLine(to: p)
+                    ctx.stroke(line, with: .color(a.color), lineWidth: 2)
+                }
+                let radius = a.label != nil ? ball : ball * 0.8
+                ctx.fill(Path(ellipseIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2)), with: .color(a.color))
+                if let label = a.label {
+                    ctx.draw(Text(label).font(.system(size: 11, weight: .bold)).foregroundColor(Color(hex: 0xFF0F141A)), at: p)
+                }
+            }
+        }
+        .frame(width: Self.size, height: Self.size).contentShape(Circle())
+        .gesture(DragGesture(minimumDistance: 0).onChanged { g in
+            if !moved && hypot(g.translation.width, g.translation.height) < 8 { return }
+            moved = true
+            let dx = g.translation.width - last.width, dy = g.translation.height - last.height
+            last = g.translation
+            model.setSceneView(yaw: model.sceneYaw - Float(dx) * 0.7, pitch: model.scenePitch + Float(dy) * 0.7, distance: model.sceneDistance)
+        }.onEnded { g in
+            if !moved { tap(g.location) }
+            moved = false; last = .zero
+        })
+        .accessibilityLabel(AureaText.t("s3d_nav_orbit")).accessibilityIdentifier("scene.nav.gizmo")
+    }
+    private func tap(_ point: CGPoint) {
+        let c = Self.size / 2, r = Self.reach
+        let near = Scene3DNav.axes(yaw: model.sceneYaw, pitch: model.scenePitch).sorted { $0.depth < $1.depth }
+            .first { hypot(point.x - (c + $0.x * r), point.y - (c + $0.y * r)) < 18 }
+        if let near { model.snapSceneView(yaw: near.yaw ?? model.sceneYaw, pitch: near.pitch) }
+    }
+}
+
+/// O texto do canto, como no Blender: a vista, o quadro e o que está escolhido.
+@MainActor private struct Scene3DViewLabel: View {
+    @EnvironmentObject private var model: AureaModel
+    private var detail: String {
+        var parts: [String] = []
+        if let name = model.selectedLayer?.name { parts.append(name) }
+        if model.rigPoseActive && model.poseBone >= 0 {
+            let bone = model.modelNodeName(model.poseBone)
+            if !bone.isEmpty { parts.append(bone) }
+        }
+        return parts.joined(separator: " · ")
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(AureaText.t(model.sceneCameraView ? "s3d_view_camera" : "s3d_view_perspective")).foregroundStyle(AureaColors.text)
+            Text("(\(model.status.playhead))" + (detail.isEmpty ? "" : " " + detail)).foregroundStyle(AureaColors.muted)
+        }
+        .font(.aurea(size: 12)).lineLimit(1)
+        .padding(.leading, 66).padding(.top, 10).padding(.trailing, 104)
+        .allowsHitTesting(false)
     }
 }
 
@@ -2286,28 +2579,51 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
 
 @MainActor private struct Scene3DStudioBottom: View {
     @EnvironmentObject private var model: AureaModel
-    @Binding var area: Int
+    let area: Int
+    let open: Bool
+    let isModel: Bool
+    let onArea: (Int) -> Void
     let openMaterial: () -> Void
     let openLights: () -> Void
     @State private var picked: Int32? = nil
+    private var tabs: [String] {
+        ["s3d_area_timeline", "s3d_area_properties", "s3d_area_outliner"] + (isModel ? ["skeleton_title"] : [])
+    }
     var body: some View {
         VStack(spacing: 0) {
             Rectangle().fill(AureaColors.border).frame(height: 1)
-            HStack(spacing: 4) {
-                ForEach(Array(["s3d_area_timeline", "s3d_area_properties", "s3d_area_outliner"].enumerated()), id: \.offset) { i, key in
-                    Button { area = i } label: {
-                        Text(AureaText.t(key)).font(.aurea(size: 12, weight: area == i ? .semibold : .regular)).lineLimit(1)
-                            .foregroundStyle(area == i ? AureaColors.text : AureaColors.muted)
-                            .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(area == i ? AureaColors.chip : Color.clear, in: RoundedRectangle(cornerRadius: 10))
-                    }.buttonStyle(.plain).accessibilityAddTraits(area == i ? [.isSelected] : [])
+            HStack(spacing: 0) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 2) {
+                        ForEach(Array(tabs.enumerated()), id: \.offset) { i, key in
+                            let on = i == area && open
+                            Button { onArea(i) } label: {
+                                Text(AureaText.t(key)).font(.aurea(size: 13, weight: on ? .semibold : .regular)).lineLimit(1)
+                                    .foregroundStyle(on ? AureaColors.text : AureaColors.muted)
+                                    .padding(.horizontal, 9).frame(height: 36)
+                                    .background(on ? AureaColors.editorRowPill : Color.clear, in: RoundedRectangle(cornerRadius: 9))
+                            }.buttonStyle(.plain).accessibilityAddTraits(on ? [.isSelected] : []).accessibilityIdentifier("scene.area.\(i)")
+                        }
+                    }
                 }
-                Spacer()
-            }.padding(.horizontal, 6).frame(height: 40).background(AureaColors.surface)
-            switch area {
-            case 0: timeline
-            case 1: properties
-            default: outliner
+                // Recolhida, a área perde o transporte: o play fica aqui (aberta, as abas precisam do espaço).
+                if !open {
+                    let playing = model.status.playing != 0
+                    Button { playing ? model.pause() : model.play() } label: {
+                        CupertinoGlyph.text(playing ? CupertinoGlyph.PauseFill : CupertinoGlyph.PlayFill, size: 17, color: AureaColors.text).frame(width: 40, height: 40)
+                    }.buttonStyle(.plain).accessibilityLabel(AureaText.t(playing ? "s3d_pause" : "s3d_play"))
+                }
+                Button { onArea(area) } label: {
+                    CupertinoGlyph.text(open ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronUp, size: 15, color: AureaColors.muted).frame(width: 40, height: 40)
+                }.buttonStyle(.plain).accessibilityLabel(AureaText.t(open ? "s3d_area_collapse" : "s3d_area_expand")).accessibilityIdentifier("scene.area.fold")
+            }.padding(.horizontal, 4).frame(height: 44).background(AureaColors.editorBar)
+            if open {
+                switch area {
+                case 0: timeline
+                case 1: properties
+                case 2: outliner
+                default: SkeletonPanelView().environmentObject(model)
+                }
             }
         }.background(AureaColors.background)
             .environment(\.layoutDirection, .leftToRight)
@@ -2344,16 +2660,15 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                 }.buttonStyle(.plain).accessibilityLabel(AureaText.t(playing ? "s3d_pause" : "s3d_play"))
                 icon(CupertinoGlyph.ChevronRight, "s3d_next_key") { _ = model.stepToKeyframe(1) }
                 icon(CupertinoGlyph.ForwardEnd, "s3d_end") { model.seek(toFrame: Int64(end)) }
+                icon(CupertinoGlyph.SuitDiamond, "s3d_insert_key_desc") { model.toggleSceneKey() }
+                icon(CupertinoGlyph.Xmark, "s3d_delete_key") { deleteKey() }
                 Spacer()
                 Text("\(playhead)").font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.text)
-                    .padding(.horizontal, 12).padding(.vertical, 6).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(.horizontal, 8).padding(.vertical, 6).background(AureaColors.editorGlyphBox, in: RoundedRectangle(cornerRadius: 8))
             }.padding(.horizontal, 6).frame(height: 44)
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 4) {
-                        mini(AureaText.t("s3d_insert_key"), AureaText.t("s3d_insert_key_desc")) { insertKey() }
-                        mini("✕", AureaText.t("s3d_delete_key")) { deleteKey() }
-                    }.padding(.horizontal, 4).frame(height: 22)
+                    Color.clear.frame(height: 24)
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(rows, id: \.self) { id in
@@ -2362,7 +2677,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                                     Text(id == -1 ? AureaText.t("s3d_summary") : (objects.first(where: { $0.id == id })?.name ?? ""))
                                         .font(.aurea(size: 11, weight: id == -1 ? .semibold : .regular)).lineLimit(1)
                                         .foregroundStyle(id == -1 ? AureaColors.text : AureaColors.muted)
-                                        .padding(.leading, id == -1 ? 8 : 18).frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
+                                        .padding(.leading, id == -1 ? 8 : 18).frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
                                         .background(on ? AureaColors.accent.opacity(0.35) : Color.clear)
                                 }.buttonStyle(.plain)
                             }
@@ -2373,17 +2688,17 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                     let pad: CGFloat = 10, w = geo.size.width - 20
                     let x: (Int) -> CGFloat = { pad + CGFloat($0) / CGFloat(end) * w }
                     Canvas { ctx, size in
-                        ctx.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: 22)), with: .color(AureaColors.surface.opacity(0.45)))
+                        ctx.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: 24)), with: .color(AureaColors.surface.opacity(0.45)))
                         let step = end > 600 ? 60 : end > 240 ? 30 : end > 120 ? 20 : 10
                         for f in stride(from: 0, through: end, by: step) {
-                            var line = Path(); line.move(to: CGPoint(x: x(f), y: 22)); line.addLine(to: CGPoint(x: x(f), y: size.height))
+                            var line = Path(); line.move(to: CGPoint(x: x(f), y: 24)); line.addLine(to: CGPoint(x: x(f), y: size.height))
                             ctx.stroke(line, with: .color(AureaColors.border.opacity(0.5)), lineWidth: 1)
                             if (f / step) % 2 == 0 {
-                                ctx.draw(Text("\(f)").font(.system(size: 9)).foregroundColor(AureaColors.muted), at: CGPoint(x: x(f), y: 11))
+                                ctx.draw(Text("\(f)").font(.system(size: 9)).foregroundColor(AureaColors.muted), at: CGPoint(x: x(f), y: 12))
                             }
                         }
                         for (r, id) in rows.enumerated() {
-                            let cy = 22 + CGFloat(r) * 26 + 13
+                            let cy = 24 + CGFloat(r) * 34 + 17
                             for f in keys[id] ?? [] {
                                 let rr: CGFloat = id == -1 ? 6 : 5
                                 var d = Path()
@@ -2393,15 +2708,15 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                             }
                         }
                         let px = x(min(end, max(0, playhead)))
-                        var head = Path(); head.move(to: CGPoint(x: px, y: 22)); head.addLine(to: CGPoint(x: px, y: size.height))
+                        var head = Path(); head.move(to: CGPoint(x: px, y: 24)); head.addLine(to: CGPoint(x: px, y: size.height))
                         ctx.stroke(head, with: .color(AureaColors.accent), lineWidth: 2)
                     }
                     .contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 0).onChanged { g in
                         if model.status.playing != 0 { model.pause() }
                         let f = min(end, max(0, Int(((g.location.x - pad) / max(1, w) * CGFloat(end)).rounded())))
-                        let row = Int((g.startLocation.y - 22) / 26)
-                        if g.translation == .zero, g.startLocation.y > 22, row >= 0, row < rows.count,
+                        let row = Int((g.startLocation.y - 24) / 34)
+                        if g.translation == .zero, g.startLocation.y > 24, row >= 0, row < rows.count,
                            let near = (keys[rows[row]] ?? []).min(by: { abs(x($0) - g.location.x) < abs(x($1) - g.location.x) }),
                            abs(x(near) - g.location.x) < 12 {
                             picked = Int32(near); model.seek(toFrame: Int64(near)); return
@@ -2417,31 +2732,6 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
         Button(action: action) {
             CupertinoGlyph.text(glyph, size: 18, color: AureaColors.text).frame(width: 36, height: 36).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel(AureaText.t(key))
-    }
-    private func mini(_ text: String, _ label: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(text).font(.aurea(size: 10)).foregroundStyle(AureaColors.text).lineLimit(1)
-                .padding(.horizontal, 6).frame(height: 18).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 6))
-        }.buttonStyle(.plain).accessibilityLabel(label)
-    }
-    /// Marca/desmarca as 9 trilhas de posição, rotação e escala no quadro (ou o osso, na pose).
-    private func insertKey() {
-        if model.rigPoseMode && !model.poseBones.isEmpty { model.togglePoseKey(all: model.poseBone < 0); return }
-        guard let id = model.primarySelection, let d = model.engine.layerDetail(id) else { return }
-        let keyMask = (d["keyAtPlayhead"] as? NSNumber)?.uint32Value ?? 0
-        let any = (0..<9).contains { keyMask & (1 << UInt32($0)) != 0 }
-        let values = ["position", "scale", "rotation"].flatMap { (d[$0] as? [NSNumber] ?? []).prefix(3).map(\.floatValue) }
-        let local = model.localPlayhead
-        model.beginGesture("chave da cena 3d")
-        model.mutate { core in
-            for p in 0..<9 {
-                // Ordem das trilhas: posição 0-2, escala 3-5, rotação 6-8 (TrackProperty).
-                if any { core.deleteKeyframe(forLayer: id, property: UInt32(p), time: local) }
-                else if p < values.count { core.insertKeyframe(forLayer: id, property: UInt32(p), time: local, value: values[p]) }
-            }
-        }
-        model.endGesture()
-        model.refreshModel(force: true)
     }
     private func deleteKey() {
         guard let id = model.primarySelection, let layer = model.layers.first(where: { $0.id == id }) else { return }
@@ -2495,8 +2785,8 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
     private func pill(_ glyph: Character, _ label: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 6) { CupertinoGlyph.text(glyph, size: 14); Text(label).font(.aurea(size: 12)).lineLimit(1) }
-                .foregroundStyle(AureaColors.text).padding(.horizontal, 10).frame(height: 34)
-                .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                .foregroundStyle(AureaColors.text).padding(.horizontal, 12).frame(height: 40)
+                .background(AureaColors.editorRowPill, in: RoundedRectangle(cornerRadius: 10))
         }.buttonStyle(.plain)
     }
     private func vec3(_ key: String, _ raw: Any?, base: UInt32, unit: String, step: Float, decimals: Int, id: Int64) -> some View {
@@ -2508,17 +2798,17 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                 let text = String(format: "%.\(decimals)f", locale: Locale(identifier: "en_US_POSIX"), value) + unit
                 HStack(spacing: 0) {
                     Button { model.setTransform(base + UInt32(k), value: value - step, layer: id) } label: {
-                        CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 12, color: AureaColors.muted).frame(width: 32, height: 32)
+                        CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 12, color: AureaColors.muted).frame(width: 40, height: 40)
                     }.buttonStyle(.plain)
                     Text(["X", "Y", "Z"][k]).font(.aurea(size: 12)).foregroundStyle(AureaColors.muted)
                     Spacer()
                     Text(text).font(.aurea(size: 12)).foregroundStyle(AureaColors.text)
                     Spacer()
                     Button { model.setTransform(base + UInt32(k), value: value + step, layer: id) } label: {
-                        CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 12, color: AureaColors.muted).frame(width: 32, height: 32)
+                        CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 12, color: AureaColors.muted).frame(width: 40, height: 40)
                     }.buttonStyle(.plain)
                 }
-                .frame(height: 32).background(AureaColors.chip)
+                .frame(height: 40).background(AureaColors.editorGlyphBox)
                 .clipShape(RoundedRectangle(cornerRadius: k == 1 ? 0 : 10))
                 .gesture(DragGesture(minimumDistance: 4).onChanged { g in
                     model.setTransform(base + UInt32(k), value: value + Float(g.translation.width) * step * 0.1, layer: id)
@@ -2566,16 +2856,16 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
             Button(action: action) {
                 HStack(spacing: 6) {
                     if let glyph { CupertinoGlyph.text(glyph, size: 14, color: AureaColors.muted) } else { Text("◇").font(.system(size: 11)).foregroundStyle(AureaColors.muted) }
-                    Text(name).font(.aurea(size: 12)).foregroundStyle(on ? AureaColors.text : AureaColors.muted).lineLimit(1)
+                    Text(name).font(.aurea(size: 13)).foregroundStyle(on ? AureaColors.text : AureaColors.muted).lineLimit(1)
                     Spacer()
                     if keyed { Text("◆").font(.system(size: 10)).foregroundStyle(AureaColors.keyframe) }
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain)
             if let delete {
-                Button(action: delete) { CupertinoGlyph.text(CupertinoGlyph.Trash, size: 14, color: AureaColors.muted).frame(width: 30, height: 30) }
+                Button(action: delete) { CupertinoGlyph.text(CupertinoGlyph.Trash, size: 14, color: AureaColors.muted).frame(width: 44, height: 44) }
                     .buttonStyle(.plain).accessibilityLabel(AureaText.t("s3d_delete_named", name))
             }
-        }.padding(.leading, CGFloat(10 + depth * 14)).padding(.trailing, 6).frame(height: 32)
+        }.padding(.leading, CGFloat(10 + depth * 14)).padding(.trailing, 6).frame(height: 44)
             .background(on ? AureaColors.accent.opacity(0.35) : Color.clear)
     }
 }

@@ -375,6 +375,17 @@ struct RenderLayer {
     i32  windowIndex = -1;
     u8   windowMode = 1;
     f32  windowLayerMix = 0.0f;
+    /// Folha de partículas 3D desenhada dentro da cena 3D (o efeito único do plano
+    /// desta camada, ver `Effect::scene_draw`): a composição a pula.
+    bool effectInScene = false;
+    /// COPIAR FUNDO no plano da camada: o fundo vai para a caixa da camada (com a
+    /// margem que os efeitos leem) e os efeitos rodam ali, como numa camada comum.
+    /// O centro, o ruído e a escala andam com ela. `windowFromLocal` = px desse
+    /// plano → px da composição; a caixa mede `windowLocalW` × `windowLocalH`.
+    bool windowLocal = false;
+    Mat4 windowFromLocal = Mat4::identity();
+    f32  windowLocalW = 0.0f;
+    f32  windowLocalH = 0.0f;
     /// MÁSCARA DE RECORTE neste instante: id (com sal) da base que recorta
     /// esta camada (0 = não recortada). A base é a camada de baixo na pilha
     /// das que existem no instante (ver `Layer::clipToBelow`).
@@ -1003,6 +1014,9 @@ private:
     [[nodiscard]] DepthMapResult depth_map_below(const DepthMapRequest& request) noexcept;
     [[nodiscard]] FGTexture adjust_full_frame(const LayerImage& fin, const Mat4& fold, f32 opacity, Vec4 under,
                                               const TextureDesc& compDesc, f32 compW, f32 compH) noexcept;
+    /// Copiar fundo: o quadro `src` (px da composição) no plano da camada.
+    [[nodiscard]] FGTexture copy_background_local(FGTexture src, const RenderLayer& layer, u32 width, u32 height,
+                                                  const TextureDesc& compDesc, f32 compW, f32 compH) noexcept;
 
     /// Textura persistente de planos de vídeo (fallback sem zero-copy): uma
     /// por layer, reaproveitada frame a frame.
@@ -1419,8 +1433,11 @@ private:
     FrameIndex planTime_{0};
     /// Copiar fundo: a camada cujo plano do FUNDO (os efeitos depois do Copiar
     /// fundo) está sendo planejado agora. Como numa camada de ajuste, o plano
-    /// é o da composição (Repetição no caminho, mapa de profundidade...).
+    /// é o da composição (Repetição no caminho, mapa de profundidade...), ou o
+    /// plano da camada quando o fundo roda nele: `compSpaceFromHost_` leva esse
+    /// plano à composição.
     const Layer* compSpaceHost_ = nullptr;
+    Mat4 compSpaceFromHost_ = Mat4::identity();
     std::vector<PendingUpload> uploads_;
     std::unordered_map<u64, u64> textKeys_;   ///< chave sintética da camada de texto → chave dos pixels
     bool incomplete_ = false;   ///< o último quadro deixou camada de fora (recurso pendente)

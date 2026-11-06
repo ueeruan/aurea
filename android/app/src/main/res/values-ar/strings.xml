@@ -4757,4 +4757,23 @@
     <string name="ai_tool_panel">فتحت الشاشة</string>
     <string name="ai_tool_other">إجراء في المحرر</string>
     <string name="ai_close">إغلاق</string>
+    <string name="s3d_menu_view">عرض</string>
+    <string name="s3d_menu_select">تحديد</string>
+    <string name="s3d_menu_object">كائن</string>
+    <string name="s3d_menu_pose">وضعية</string>
+    <string name="s3d_space_global">عام</string>
+    <string name="s3d_space_local">محلي</string>
+    <string name="s3d_view_frame">تأطير الكل</string>
+    <string name="s3d_view_perspective">عرض منظوري</string>
+    <string name="s3d_view_camera">عرض الكاميرا</string>
+    <string name="s3d_overlays">التراكبات</string>
+    <string name="s3d_nav_zoom">تكبير: اسحب لأعلى أو لأسفل</string>
+    <string name="s3d_nav_pan">تحريك العرض: اسحب</string>
+    <string name="s3d_nav_orbit">تدوير العرض: اسحب أو اضغط على محور</string>
+    <string name="s3d_select_all">الكل</string>
+    <string name="s3d_select_none">لا شيء</string>
+    <string name="s3d_duplicate">تكرار</string>
+    <string name="s3d_area_collapse">طي اللوحة</string>
+    <string name="s3d_area_expand">فتح اللوحة</string>
+    <string name="skeleton_tab_bone">عظمة</string>
 </resources>

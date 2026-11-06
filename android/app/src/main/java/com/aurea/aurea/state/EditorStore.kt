@@ -3897,7 +3897,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     fun trimToPlayhead(layer: Long, start: Boolean, live: Boolean): Boolean {
         val amount = if (live) com.aurea.aurea.engine.EDIT_AT_PLAYHEAD else playhead.toLong()
-        val changed = engine.editClipTime(layer, if (start) 0 else 1, amount)
+        // Início: op 10 — a borda vai até o cabeçote mesmo com o ímã (o op 0 da
+        // alça faz ripple ali: a borda ficava e só o keyframe antes dela sumia).
+        val changed = engine.editClipTime(layer, if (start) 10 else 1, amount)
         refreshNow()
         return changed
     }
@@ -5201,6 +5203,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
     fun exitSceneEditor() {
         sceneEditor = false
+        sceneCameraView = false
         engine.setSceneEditor(false, sceneYaw, scenePitch, sceneDistance)
         refreshNow()
     }
@@ -5209,12 +5212,56 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         sceneYaw = ((yaw + 180f).mod(360f)) - 180f
         scenePitch = pitch.coerceIn(-80f, 80f)
         sceneDistance = distance.coerceIn(0.25f, 10f)
+        sceneCameraView = false     // orbitar sai da vista da câmera, como no Blender
         engine.setSceneEditor(sceneEditor, sceneYaw, scenePitch, sceneDistance)
         refreshNow()
     }
 
     /** Toque duplo no vazio da cena: a vista volta ao ângulo inicial. */
     fun resetSceneView() = updateSceneView(-30f, 20f, 3f)
+
+    // --- Cena 3D: ferramentas e vista (par do AureaModel.swift) ---------------------------
+    /** Ferramenta Selecionar: sem gizmo; 1 dedo só orbita e tocar escolhe. */
+    var sceneSelectOnly by mutableStateOf(false)
+        private set
+    /** Olhando pela câmera ativa (a do export) em vez da vista de navegação. */
+    var sceneCameraView by mutableStateOf(false)
+        private set
+
+    /** [SCENE_TOOL_SELECT] ou uma ferramenta do gizmo ([GIZMO_MOVE], [GIZMO_ROTATE], [GIZMO_SCALE]). */
+    fun chooseSceneTool(tool: Int) {
+        sceneSelectOnly = tool == SCENE_TOOL_SELECT
+        if (tool >= 0) gizmoTool = tool
+        refreshNow()
+    }
+
+    /** No modo de pose: selecionar, girar, mover ou IK (POSE_TOOL_*). */
+    fun choosePoseTool(tool: Int) {
+        sceneSelectOnly = tool == POSE_TOOL_SELECT
+        poseMove = tool == POSE_TOOL_MOVE
+        poseIk = tool == POSE_TOOL_IK
+    }
+
+    fun toggleSceneCameraView() {
+        sceneCameraView = !sceneCameraView
+        engine.setSceneEditor(sceneEditor && !sceneCameraView, sceneYaw, scenePitch, sceneDistance)
+        refreshNow()
+    }
+
+    /** Toque num eixo do gizmo de navegação: a vista gira até lá em ~200 ms. */
+    fun snapSceneView(yaw: Float, pitch: Float) {
+        val fromYaw = sceneYaw
+        val fromPitch = scenePitch
+        val turn = ((yaw - fromYaw + 540f).mod(360f)) - 180f
+        viewModelScope.launch {
+            for (i in 1..12) {
+                val t = i / 12f
+                val e = t * t * (3f - 2f * t)
+                updateSceneView(fromYaw + turn * e, fromPitch + (pitch - fromPitch) * e, sceneDistance)
+                kotlinx.coroutines.delay(16L)
+            }
+        }
+    }
 
     // --- 0.4.6: vistas do palco como no After Effects (só a prévia) ---------------------
     /** 0 câmera ativa, 1 padrão, 2..7 frente/trás/esquerda/direita/topo/base, 8..10 personalizada 1..3. */
@@ -9316,7 +9363,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         if (ready && project.path == path) withContext(Dispatchers.IO) { saveBlocking(path, withThumbnail = false) }
         return withContext(Dispatchers.IO) {
             val title = readMeta(File(path))?.title ?: File(path).nameWithoutExtension
-            ProjectFile.export(getApplication(), engine, path, title, true, target)
+            ProjectFile.export(getApplication(), engine, path, title, true, target, requireReadable = true)
         }
     }
 
@@ -9742,6 +9789,13 @@ const val GIZMO_LENGTH = 320f
 const val GIZMO_MOVE = 0
 const val GIZMO_ROTATE = 1
 const val GIZMO_SCALE = 2
+/** Cena 3D: a ferramenta Selecionar (sem gizmo). As outras são as GIZMO_*. */
+const val SCENE_TOOL_SELECT = -1
+/** Ferramentas do modo de pose (barra da esquerda). */
+const val POSE_TOOL_SELECT = 0
+const val POSE_TOOL_ROTATE = 1
+const val POSE_TOOL_MOVE = 2
+const val POSE_TOOL_IK = 3
 /** Intervalo mínimo entre releituras do inspetor durante o playback (10 Hz). */
 private const val DETAIL_PLAYBACK_NS = 100_000_000L
 

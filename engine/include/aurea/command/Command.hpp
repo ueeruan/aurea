@@ -207,7 +207,7 @@ struct LayerReorderPayload { LayerId layer; u32 newIndex; };
 struct LayerRangePayload { LayerId layer; FrameIndex start; FrameIndex end; FrameIndex offset; u32 setOffset; };
 struct LayerSplitPayload { LayerId layer; FrameIndex at; LayerId outSecond; };
 /// "No cabeçote": em `LayerSplitPayload::at` e no `amount` de
-/// `Engine::edit_clip_time` (aparar início/fim, ops 0 e 1), o motor usa o
+/// `Engine::edit_clip_time` (aparar início/fim, ops 0, 1 e 10), o motor usa o
 /// quadro que a prévia mostra quando o comando é aplicado — depois do pausar
 /// que veio antes no mesmo lote —, não o cabeçote que a UI tinha lido (tocando,
 /// ele vem quadros atrás). Fora do intervalo do clipe a edição é recusada.

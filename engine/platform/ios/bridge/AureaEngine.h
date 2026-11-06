@@ -470,7 +470,7 @@ NS_SWIFT_NAME(AureaEngine)
 /// Divide no quadro que a prévia mostra quando o motor aplica o comando
 /// (`kEditAtPlayhead`): com `pause` antes, é onde a reprodução parou.
 - (void)splitLayerAtPlayhead:(long long)layerId;
-/// `kEditAtPlayhead` para o `amount` de `editClipTime` (ops 0 e 1).
+/// `kEditAtPlayhead` para o `amount` de `editClipTime` (ops 0, 1 e 10).
 @property(class, nonatomic, readonly) int64_t editAtPlayhead;
 - (void)deleteLayers:(NSArray<NSNumber*>*)layerIds;
 - (void)duplicateLayers:(NSArray<NSNumber*>*)layerIds;

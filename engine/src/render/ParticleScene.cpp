@@ -342,7 +342,7 @@ bool Renderer::particle_quad_ready() noexcept {
 u32 Renderer::scene_particle_draws(const scene3d::SceneFrame& group, const scene3d::SceneFrame& frame,
                                    scene3d::SceneParticleDraw*& out) noexcept {
     out = nullptr;
-    if (!currentSnap_ || group.particleLayers.empty() || !particleFrameBuf_.valid() || !particle_quad_ready()) return 0;
+    if (!currentSnap_ || group.particleLayers.empty()) return 0;
     const u32 n = static_cast<u32>(group.particleLayers.size());
     out = arena_.alloc_array<scene3d::SceneParticleDraw>(n);
     if (!out) return 0;
@@ -355,7 +355,37 @@ u32 Renderer::scene_particle_draws(const scene3d::SceneFrame& group, const scene
         if (idx >= currentSnap_->layers.size()) continue;
         const RenderLayer& layer = currentSnap_->layers[idx];
         const ParticleSpace& ps = layer.particle;
+        if (layer.effectInScene) {
+            // Partículas 3D do efeito: o efeito preenche os uniforms, a cena desenha.
+            if (idx >= currentSnap_->plans.size() || currentSnap_->plans[idx].evals.empty()) continue;
+            const EffectPlan& plan = currentSnap_->plans[idx];
+            EffectEval e = plan.evals.front();
+            e.placement = &plan.placement;
+            e.values = plan.values.data() + e.valueOffset;
+            void* uniforms = arena_.alloc_array<Vec4>(kEffectSceneUniformBytes / sizeof(Vec4));
+            EffectSceneDraw fx;
+            if (!uniforms || !e.effect->scene_draw(e, clip, layer.opacity, uniforms, fx) || !fx.vertices) continue;
+            PipelineKey key = PipelineKey::graphics(fx.vertex, fx.fragment, SurfaceFormat::RGBA16F, true,
+                                                    fx.additive ? BlendMode::Add : BlendMode::Normal);
+            key.hasDepth = true;
+            key.depthTest = true;
+            key.depthWrite = false;
+            key.depthCompare = CompareOp::GreaterOrEqual;
+            key.depthFormat = SurfaceFormat::Depth32F;
+            key.cull = CullMode::None;
+            auto pipe = shaders_.pipeline(key);
+            if (!pipe.ok()) { mark_incomplete(__FILE__, __LINE__); continue; }
+            scene3d::SceneParticleDraw& d = out[used++];
+            d = scene3d::SceneParticleDraw{};
+            d.pipeline = *pipe;
+            d.key = key;
+            d.uniforms = uniforms;
+            d.uniformBytes = fx.uniformBytes;
+            d.vertices = fx.vertices;
+            continue;
+        }
         if (!ps.inScene || layer.source.kind != LayerSource::Kind::Particles || layer.source.particleSlots == 0) continue;
+        if (!particleFrameBuf_.valid() || !particle_quad_ready()) continue;
         // 8.2: dados extras (fonte, textura, malha, curvas) também na cena.
         const ParticleExtrasBind px = particle_extras_bind(layer.source, renderFrameNumber_);
         PipelineKey key = PipelineKey::graphics(ShaderId::particles_particles_vert, ShaderId::particles_particles_frag,

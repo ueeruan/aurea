@@ -41,6 +41,40 @@ bool valid_caption_track(const std::vector<CaptionSegment>& segments) noexcept {
     return std::adjacent_find(ids.begin(), ids.end()) == ids.end();
 }
 
+void repair_caption_track(std::vector<CaptionSegment>& segments) {
+    std::stable_sort(segments.begin(), segments.end(), [](const auto& a, const auto& b) { return a.start < b.start; });
+    if (segments.size() > 100000) segments.resize(100000);
+    std::vector<CaptionSegment> kept;
+    kept.reserve(segments.size());
+    std::vector<u64> ids;
+    u64 highest = 0;
+    for (const auto& s : segments) highest = std::max(highest, s.id);
+    i64 previous = 0;
+    for (auto& s : segments) {
+        s.start = std::max(s.start, previous);
+        s.end = std::min<i64>(s.end, 100000000);
+        if (s.end <= s.start) continue;
+        if (s.text.size() > 16384) s.text.resize(16384);
+        if (s.words.size() > 1024) s.words.resize(1024);
+        std::decay_t<decltype(s.words)> words;
+        words.reserve(s.words.size());
+        i64 last = s.start;
+        for (auto& w : s.words) {
+            w.start = std::max(w.start, last);
+            w.end = std::min(w.end, s.end);
+            if (w.text.empty() || w.text.size() > 4096 || w.end <= w.start) continue;
+            last = w.start;
+            words.push_back(std::move(w));
+        }
+        s.words = std::move(words);
+        if (!s.id || std::find(ids.begin(), ids.end(), s.id) != ids.end()) s.id = ++highest;
+        ids.push_back(s.id);
+        previous = s.end;
+        kept.push_back(std::move(s));
+    }
+    segments = std::move(kept);
+}
+
 void edit_caption_text(CaptionSegment& s, const std::string& text) {
     std::vector<std::string> words;
     for (usize p = 0; p < text.size();) {

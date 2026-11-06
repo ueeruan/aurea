@@ -28,6 +28,11 @@ AUREA_TEST(BuiltinPropertySchema, EveryEditableLightAndMaterialBindingHasOneDesc
         }
         for (u32 c = 0; c < count; ++c) AUREA_CHECK(seen[c]);
     }
+    // Beta (nov/2026): "Sombras" vale para os três tipos de luz (ponto e spot também).
+    for (const auto& property : ui::builtin_properties(ui::PropertyDomain::Light)) {
+        if (std::string_view(property.id) != "castShadows" && std::string_view(property.id) != "shadowStrength") continue;
+        for (u32 c = 0; c < property.conditionCount; ++c) AUREA_CHECK(property.conditions[c].bindingParam != 0);
+    }
     const auto json = ui::builtin_property_schema_json();
     AUREA_CHECK(!json.empty());
     AUREA_CHECK(json.find("\"version\":1") != std::string_view::npos);

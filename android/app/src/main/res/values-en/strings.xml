@@ -4766,4 +4766,23 @@ to edit the curve.</string>
     <string name="ai_tool_panel">Opened the screen</string>
     <string name="ai_tool_other">Editor action</string>
     <string name="ai_close">Close</string>
+    <string name="s3d_menu_view">View</string>
+    <string name="s3d_menu_select">Select</string>
+    <string name="s3d_menu_object">Object</string>
+    <string name="s3d_menu_pose">Pose</string>
+    <string name="s3d_space_global">Global</string>
+    <string name="s3d_space_local">Local</string>
+    <string name="s3d_view_frame">Frame all</string>
+    <string name="s3d_view_perspective">Perspective view</string>
+    <string name="s3d_view_camera">Camera view</string>
+    <string name="s3d_overlays">Overlays</string>
+    <string name="s3d_nav_zoom">Zoom: drag up or down</string>
+    <string name="s3d_nav_pan">Pan the view: drag</string>
+    <string name="s3d_nav_orbit">Orbit the view: drag, or tap an axis</string>
+    <string name="s3d_select_all">All</string>
+    <string name="s3d_select_none">None</string>
+    <string name="s3d_duplicate">Duplicate</string>
+    <string name="s3d_area_collapse">Collapse panel</string>
+    <string name="s3d_area_expand">Expand panel</string>
+    <string name="skeleton_tab_bone">Bone</string>
 </resources>

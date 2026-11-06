@@ -200,7 +200,7 @@ struct CommandSearchView: View {
         case "split": model.splitAtPlayhead(Array(model.selection))
         case "duplicate": model.engine.duplicateLayers(model.selection.map { NSNumber(value: $0) }); model.refreshModel(force: true)
         case "ripple_delete": model.deleteSelectedLayers(ripple: true)
-        case "trim_start": if let layer { model.trimStart(layer, at: model.status.playhead) }
+        case "trim_start": if let layer { model.trimStartToPlayhead(layer, at: model.status.playhead) }
         case "trim_end": if let layer { model.trimEnd(layer, at: model.status.playhead) }
         case "speed": model.openPanel(.speed)
         case "clip_edit": model.openPanel(.clipEdit)

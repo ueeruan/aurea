@@ -247,11 +247,16 @@ enum class TrackProperty : u16 {
     BonePose,          ///< osso do rig 3D (RigPose.hpp): effectIndex = nó da junta, paramIndex = 0..2 rotação XYZ ° por cima da animação
     TextPathFirstMargin, ///< texto no caminho: margem inicial (px ao longo do caminho; o valor parado é TextData::pathOffset)
     TextPathLastMargin,  ///< texto no caminho: margem final (px antes do fim do caminho)
+    /// Keys de FORMA (morph) de um caminho vetorial: effectIndex = grupo,
+    /// paramIndex = caminho; dados em VectorPath::keys (trilha virtual, como a
+    /// MeshWarp: a timeline e o editor de curva os veem como keyframes).
+    VectorPath,
     _Count,
 };
 static_assert(static_cast<u16>(TrackProperty::MeshWarp) == 44);
 static_assert(static_cast<u16>(TrackProperty::BonePose) == 45);
 static_assert(static_cast<u16>(TrackProperty::TextPathLastMargin) == 47);
+static_assert(static_cast<u16>(TrackProperty::VectorPath) == 48);
 
 enum class ExportCodec : u16 {
     H264 = 0, HEVC, AV1, ProRes,

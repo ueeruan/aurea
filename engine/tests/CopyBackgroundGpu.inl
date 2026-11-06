@@ -174,4 +174,44 @@ AUREA_TEST(CopyBackgroundGpu, EffectsBeforeItShapeTheWindowOnly) {
         between |= std::fabs(p[c] - q[c]) > 0.2f && std::fabs(e[c] - p[c]) > 0.05f && std::fabs(e[c] - q[c]) > 0.05f;
     AUREA_CHECK(between);
 }
+// Relato beta: o efeito ficava preso à tela, como um ajuste com máscara. Os efeitos
+// depois do Copiar fundo rodam no plano da camada: andando a camada e o fundo juntos,
+// a imagem dentro da janela só anda (com o centro preso à tela, ela mudava).
+AUREA_TEST(CopyBackgroundGpu, EffectCenterMovesWithTheLayer) {
+    AUREA_REQUIRE_GPU();
+    copybg::Fixture f;
+    (void)f.s.add_effect(f.shape, effect_keys::kCopyBackground);
+    EffectInstance& zoom = f.s.add_effect(f.shape, effect_keys::kZoomBlur);
+    zoom.params[1].constant = ParamValue::scalar(60.0f);
+    const FloatImage before = f.s.render();
+    constexpr u32 dx = 12, dy = 8;
+    f.s.comp->layer(f.shape)->transform.position = Vec3{48.0f + dx, 48.0f + dy, 0};
+    f.s.comp->layer(f.photo)->transform.position = Vec3{48.0f + dx, 48.0f + dy, 0};
+    const FloatImage after = f.s.render();
+    f32 worst = 0.0f;
+    for (u32 y = 31; y < 65; ++y)
+        for (u32 x = 31; x < 65; ++x) {
+            const f32* a = copybg::px_at(before, x, y);
+            const f32* b = copybg::px_at(after, x + dx, y + dy);
+            for (u32 c = 0; c < 3; ++c) worst = std::max(worst, std::fabs(a[c] - b[c]));
+        }
+    std::printf("(andou junto %.4f) ", static_cast<double>(worst));
+    AUREA_CHECK(worst < 0.01f);
+}
+
+// Desfoque no "vidro": a borda da janela lê o fundo além da camada, sem halo.
+AUREA_TEST(CopyBackgroundGpu, BlurReadsTheBackdropBeyondTheLayerEdge) {
+    AUREA_REQUIRE_GPU();
+    copybg::Fixture f;
+    const FloatImage plain = f.plain();
+    (void)f.s.add_effect(f.shape, effect_keys::kCopyBackground);
+    EffectInstance& blur = f.s.add_effect(f.shape, effect_keys::kGaussianBlur);
+    blur.params[0].constant = ParamValue::scalar(8.0f);
+    const FloatImage with = f.s.render();
+    for (u32 y = 30; y < 66; ++y) {
+        const f32* e = copybg::px_at(with, 30, y);
+        AUREA_CHECK(e[3] > 0.99f);   // nada transparente na borda de dentro
+    }
+    AUREA_CHECK(copybg::max_diff_outside(with, plain, 25, 25, 71, 71) < 0.004f);
+}
 #endif

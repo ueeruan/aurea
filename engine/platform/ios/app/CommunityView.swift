@@ -317,13 +317,14 @@ struct CommunityView: View {
                 Button(AureaText.t("social_following")) { state.run { state.following = true; try await state.loadFeed() } }
                     .fontWeight(state.following ? .bold : .regular).frame(minHeight: 44)
                 Spacer()
-                Button(AureaText.t("pn_caption")) { legacy = true }.frame(minHeight: 44)
-                // 0.4.6: a Loja da Comunidade (plugins, efeitos e presets). Par do Android.
-                // Enquanto o armazenamento (R2) não está ativo no servidor: "Em breve".
-                Button(AureaText.t("store_title") + (storeEnabled ? "" : " · " + AureaText.t("store_soon"))) {
-                    if storeEnabled { storeOpen = true } else { storeSoon = true }
-                }.frame(minHeight: 44).accessibilityIdentifier("social.store")
+                Button(AureaText.t("pn_caption")) { legacy = true }.lineLimit(1).frame(minHeight: 44)
             }.disabled(state.busy)
+            // 0.4.6: a Loja da Comunidade (plugins, efeitos e presets). Par do Android.
+            // Enquanto o armazenamento (R2) não está ativo no servidor: "Em breve".
+            // Beta (nov/2026): na linha dos filtros o nome quebrava no meio; agora tem a linha dele.
+            Button(AureaText.t("store_title") + (storeEnabled ? "" : " · " + AureaText.t("store_soon"))) {
+                if storeEnabled { storeOpen = true } else { storeSoon = true }
+            }.lineLimit(1).truncationMode(.tail).frame(minHeight: 44).accessibilityIdentifier("social.store").disabled(state.busy)
         }
     }
     private func profileHeader(_ p: SocialProfile) -> some View {

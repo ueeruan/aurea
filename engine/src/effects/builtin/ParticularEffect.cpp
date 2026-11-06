@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <utility>
 
 namespace aurea::builtin {
@@ -157,31 +158,9 @@ public:
         out.push_back(PipelineKey::fullscreen(ShaderId::effects_particular_compose_frag, work));
     }
 
-    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
-                 LayerImage& out) const override {
-        // A saída cobre o que o quadro mostra: as partículas voam para fora
-        // da caixa da camada.
-        Rect region = input.region;
-        Vec2 comp{input.region.w, input.region.h};
-        Vec2 layerSize{input.region.w, input.region.h};
-        if (e.placement) {
-            if (e.placement->compWidth && e.placement->compHeight) {
-                comp = Vec2{static_cast<f32>(e.placement->compWidth), static_cast<f32>(e.placement->compHeight)};
-            }
-            if (e.placement->layerWidth && e.placement->layerHeight) {
-                layerSize = Vec2{static_cast<f32>(e.placement->layerWidth), static_cast<f32>(e.placement->layerHeight)};
-            }
-            const Rect vis = visible_layer_rect(*e.placement);
-            if (vis.w > 0.5f && vis.h > 0.5f) {
-                region = Rect{vis.x - margin - 1.0f, vis.y - margin - 1.0f,
-                              vis.w + 2.0f * margin + 2.0f, vis.h + 2.0f * margin + 2.0f};
-            }
-        }
-        const f32 texel = std::max(input.texel_scale_x(), 1e-4f);
-        u32 w = 0, h = 0;
-        ctx.region_size(region, texel, w, h);
-        if (!w || !h) return Status{Errc::InvalidArgument, "particular: regiao vazia"};
-
+    /// Os uniforms do quadro: os mesmos na folha 2D e na cena 3D.
+    void make_uniforms(const EffectEval& e, Rect region, Vec2 comp, Vec2 layerSize, f32 texel, ParticularUniforms& u,
+                       u32& slots, u32& plexusVerts, u32& surfaceVerts, bool& draw) const noexcept {
         // --- Grade determinística de nascimentos -----------------------------
         const f32 rate = std::clamp(finite_or(e.f(kRate), 0.0f), 0.0f, kMaxRate);
         const f32 lifeMs = std::clamp(finite_or(e.f(kLife), 2000.0f), 50.0f, 30000.0f);
@@ -195,10 +174,9 @@ public:
         // partículas vivas de verdade, não um sorteio esparso da grade.
         const f32 grid = plexus ? std::clamp(rate, 1e-3f, std::min(kMaxRate, kMaxSlots / span))
                                 : std::min(kMaxRate, kMaxSlots / span);
-        const u32 slots = static_cast<u32>(std::clamp(std::ceil(span * grid), 1.0f, kMaxSlots));
-        const bool draw = rate > 0.0f && now >= 0.0f;
+        slots = static_cast<u32>(std::clamp(std::ceil(span * grid), 1.0f, kMaxSlots));
+        draw = rate > 0.0f && now >= 0.0f;
 
-        ParticularUniforms u{};
         u.region = Vec4{region.x, region.y, region.w, region.h};
         // Câmera padrão da composição: 40° na vertical, olhando o centro.
         const f32 focal = comp.y * 0.5f / std::tan(20.0f * 0.01745329252f);
@@ -246,7 +224,7 @@ public:
             u.previousParticleProjection = e.placement->previousParticleProjection;
             u.layerFromComp = e.placement->particleLayerFromComp;
         }
-        u32 plexusVerts = 0;
+        plexusVerts = 0;
         if (plexus) {
             const u32 points = std::min(slots, static_cast<u32>(std::clamp(e.e(kPlexusPoints), 2u, kMaxPlexusPoints)));
             u.plexus = Vec4{std::clamp(finite_or(e.f(kPlexusDistance), 0.0f), 0.0f, 3000.0f),
@@ -255,7 +233,7 @@ public:
             if (u.plexus.x > 0.0f) plexusVerts = points * (points - 1) / 2 * 6;
             else u.plexus = Vec4{};
         }
-        u32 surfaceVerts = 0;
+        surfaceVerts = 0;
         if (plexusVerts && e.b(kPlexusSurface)) {
             const f32 opacity = pct(e, kPlexusSurfaceOpacity, 0.0f, 100.0f);
             const u32 sp = std::min(static_cast<u32>(u.plexus.w),
@@ -265,6 +243,68 @@ public:
                 surfaceVerts = sp * (sp - 1) * (sp - 2) / 6 * 3;
             }
         }
+
+    }
+
+    // Com camadas 3D ao lado, as partículas vão para o passe da cena: a profundidade
+    // decide quem aparece, não a ordem na timeline. A rede (plexus) é desenhada em
+    // px da tela e "Mostrar origem" precisa da camada: esses ficam na folha.
+    bool scene_capable(const EffectEval& e) const noexcept override {
+        return e.placement && e.placement->particleSpace && !e.b(kPlexus) && !e.b(kShowSource);
+    }
+
+    bool scene_draw(const EffectEval& e, const Mat4& clip, f32 opacity, void* uniforms,
+                    EffectSceneDraw& out) const noexcept override {
+        if (!uniforms || !scene_capable(e)) return false;
+        static_assert(sizeof(ParticularUniforms) <= kEffectSceneUniformBytes, "uniforms do Particular na cena");
+        const Vec2 comp{static_cast<f32>(e.placement->compWidth), static_cast<f32>(e.placement->compHeight)};
+        const Vec2 layerSize{static_cast<f32>(e.placement->layerWidth), static_cast<f32>(e.placement->layerHeight)};
+        ParticularUniforms u{};
+        u32 slots = 0, plexusVerts = 0, surfaceVerts = 0;
+        bool draw = false;
+        make_uniforms(e, Rect{0.0f, 0.0f, layerSize.x, layerSize.y}, comp, layerSize, 1.0f, u, slots, plexusVerts, surfaceVerts, draw);
+        if (!draw) return false;
+        u.look.y *= std::clamp(opacity, 0.0f, 1.0f);
+        u.view.w = 1.0f;          // particular.vert: `layerFromComp` é o clip da cena
+        u.layerFromComp = clip;
+        std::memcpy(uniforms, &u, sizeof(u));
+        out.vertex = ShaderId::effects_particular_vert;
+        out.fragment = ShaderId::effects_particular_frag;
+        out.vertices = slots * 6u;
+        out.uniformBytes = static_cast<u32>(sizeof(u));
+        out.additive = e.b(kAddMode);
+        return true;
+    }
+
+    Status build(EffectBuildContext& ctx, const EffectEval& e, const LayerImage& input, f32 margin,
+                 LayerImage& out) const override {
+        // A saída cobre o que o quadro mostra: as partículas voam para fora
+        // da caixa da camada.
+        Rect region = input.region;
+        Vec2 comp{input.region.w, input.region.h};
+        Vec2 layerSize{input.region.w, input.region.h};
+        if (e.placement) {
+            if (e.placement->compWidth && e.placement->compHeight) {
+                comp = Vec2{static_cast<f32>(e.placement->compWidth), static_cast<f32>(e.placement->compHeight)};
+            }
+            if (e.placement->layerWidth && e.placement->layerHeight) {
+                layerSize = Vec2{static_cast<f32>(e.placement->layerWidth), static_cast<f32>(e.placement->layerHeight)};
+            }
+            const Rect vis = visible_layer_rect(*e.placement);
+            if (vis.w > 0.5f && vis.h > 0.5f) {
+                region = Rect{vis.x - margin - 1.0f, vis.y - margin - 1.0f,
+                              vis.w + 2.0f * margin + 2.0f, vis.h + 2.0f * margin + 2.0f};
+            }
+        }
+        const f32 texel = std::max(input.texel_scale_x(), 1e-4f);
+        u32 w = 0, h = 0;
+        ctx.region_size(region, texel, w, h);
+        if (!w || !h) return Status{Errc::InvalidArgument, "particular: regiao vazia"};
+
+        ParticularUniforms u{};
+        u32 slots = 0, plexusVerts = 0, surfaceVerts = 0;
+        bool draw = false;
+        make_uniforms(e, region, comp, layerSize, texel, u, slots, plexusVerts, surfaceVerts, draw);
 
         const bool additive = e.b(kAddMode);
         const FGTexture sprites = ctx.texture("particular-particulas", w, h);

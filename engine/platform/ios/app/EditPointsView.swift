@@ -225,7 +225,7 @@ private struct PointsColumn: View {
                     KeyframeDiamondIcon(look: look, enabled: true).padding(1)
                 }
                 cell("points.curve", AureaText.t("panel_editar_curva_propriedade"), enabled: path != nil, action: {
-                    if keyCount >= 2 { model.curveReturnPanel = .editPoints; model.openPanel(.curve) } else { curveWarning() }
+                    if keyCount >= 2, openPathCurve() {} else { curveWarning() }
                 }) { _ in
                     CurveRailIcon(enabled: true, animated: keyCount > 0)
                 }
@@ -260,6 +260,29 @@ private struct PointsColumn: View {
             AureaAlert(title: AureaText.t("om_panel_delete_all_keyframes_q"), confirmLabel: AureaText.t("panel_apagar"),
                        destructive: true, onConfirm: clear, onDismiss: close)
         }
+    }
+
+    /// Beta (nov/2026): a curva abria sem os keys da forma — eles não eram keyframes
+    /// para o editor. O motor os expõe como a trilha 48 (grupo, caminho); aqui se
+    /// escolhe o trecho do cabeçote (fora dele, o primeiro ou o último) e a curva
+    /// abre nele. Par do `selectPathCurve` do EditPoints.kt.
+    private func openPathCurve() -> Bool {
+        guard let layer = model.primarySelection else { return false }
+        let group = model.vectorGroup, contour = model.vectorPath
+        let keys = (model.keyframes[layer] ?? []).filter {
+            $0.property == 48 && $0.effectIndex == group && $0.paramIndex == contour
+        }.sorted { $0.time < $1.time }
+        guard keys.count >= 2 else { return false }
+        let nav = model.engine.keyframeNavigation(layer, property: 48, effect: group, param: contour,
+                                                 compositionFrame: model.status.playhead)
+        let local = model.localPlayhead
+        var start: Int32 = local >= keys[keys.count - 1].time ? keys[keys.count - 2].time : keys[0].time
+        if let nav, (nav["flags"]?.uint32Value ?? 0) & 8 != 0, let s = nav["segmentStart"]?.int64Value,
+           keys.contains(where: { Int64($0.time) == s }) {
+            start = Int32(s)
+        }
+        model.openCurve(property: 48, effect: group, param: contour, time: start)
+        return true
     }
 
     private func curveWarning() {

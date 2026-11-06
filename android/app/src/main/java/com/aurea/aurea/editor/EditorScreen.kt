@@ -705,8 +705,13 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
                 37 -> EditorPanel.Element3D
                 42 -> EditorPanel.Element3D   // parte da forma 3D (TrackProperty::ShapePart)
                 39 -> EditorPanel.Speed
+                48 -> EditorPanel.EditPoints   // keys de forma do contorno
                 else -> EditorPanel.Transform
             })
+            if (property == TrackProperty.VECTOR_PATH) {
+                store.selectVectorPath(effect, param)
+                EditPointsState.keysMode = true
+            }
             if (property == TrackProperty.MASK_PARAM) {
                 store.maskEdit = effect
                 store.maskDrawing = false

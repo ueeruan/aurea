@@ -81,6 +81,9 @@ struct CaptionSegment {
 };
 [[nodiscard]] const CaptionSegment* active_caption(const std::vector<CaptionSegment>& segments, i64 frame) noexcept;
 [[nodiscard]] bool valid_caption_track(const std::vector<CaptionSegment>& segments) noexcept;
+/// Deixa a faixa válida sem perder o resto do projeto: acerta a ordem, tira palavras
+/// e blocos que não dá para mostrar e troca ids repetidos. Só a leitura usa isto.
+void repair_caption_track(std::vector<CaptionSegment>& segments);
 // Matching words retain their original timestamps; inserted/replaced words
 // use only the gap between their preserved neighbours.
 void edit_caption_text(CaptionSegment& segment, const std::string& text);

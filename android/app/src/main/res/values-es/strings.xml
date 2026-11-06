@@ -4719,4 +4719,23 @@ para editar la curva.</string>
     <string name="ai_tool_panel">Abrí la pantalla</string>
     <string name="ai_tool_other">Acción en el editor</string>
     <string name="ai_close">Cerrar</string>
+    <string name="s3d_menu_view">Vista</string>
+    <string name="s3d_menu_select">Seleccionar</string>
+    <string name="s3d_menu_object">Objeto</string>
+    <string name="s3d_menu_pose">Pose</string>
+    <string name="s3d_space_global">Global</string>
+    <string name="s3d_space_local">Local</string>
+    <string name="s3d_view_frame">Encuadrar todo</string>
+    <string name="s3d_view_perspective">Vista en perspectiva</string>
+    <string name="s3d_view_camera">Vista de cámara</string>
+    <string name="s3d_overlays">Superposiciones</string>
+    <string name="s3d_nav_zoom">Acercar: arrastra arriba o abajo</string>
+    <string name="s3d_nav_pan">Mover la vista: arrastra</string>
+    <string name="s3d_nav_orbit">Girar la vista: arrastra o toca un eje</string>
+    <string name="s3d_select_all">Todo</string>
+    <string name="s3d_select_none">Nada</string>
+    <string name="s3d_duplicate">Duplicar</string>
+    <string name="s3d_area_collapse">Contraer panel</string>
+    <string name="s3d_area_expand">Abrir panel</string>
+    <string name="skeleton_tab_bone">Hueso</string>
 </resources>

@@ -4692,6 +4692,7 @@ final class AureaModel: ObservableObject {
     }
     func exitSceneEditor() {
         sceneEditor = false
+        sceneCameraView = false
         updateSceneView()
     }
     func updateSceneView() {
@@ -4705,7 +4706,47 @@ final class AureaModel: ObservableObject {
 
     func setSceneView(yaw: Float, pitch: Float, distance: Float) {
         sceneYaw = yaw; scenePitch = pitch; sceneDistance = distance
+        sceneCameraView = false     // orbitar sai da vista da câmera, como no Blender
         updateSceneView()
+    }
+
+    // MARK: Cena 3D: ferramentas e vista (par do EditorStore.kt)
+    /// Ferramenta Selecionar: sem gizmo; 1 dedo só orbita e tocar escolhe.
+    @Published private(set) var sceneSelectOnly = false
+    /// Olhando pela câmera ativa (a do export) em vez da vista de navegação.
+    @Published private(set) var sceneCameraView = false
+    /// A ferramenta Selecionar da Cena 3D; as outras são as do gizmo (0 mover, 1 girar, 2 escala).
+    static let sceneToolSelect = -1
+    /// Ferramentas do modo de pose (barra da esquerda).
+    static let poseToolSelect = 0, poseToolRotate = 1, poseToolMove = 2, poseToolIk = 3
+
+    func chooseSceneTool(_ tool: Int) {
+        sceneSelectOnly = tool == Self.sceneToolSelect
+        if tool >= 0 { gizmoTool = tool }
+    }
+    func choosePoseTool(_ tool: Int) {
+        sceneSelectOnly = tool == Self.poseToolSelect
+        poseMove = tool == Self.poseToolMove
+        poseIk = tool == Self.poseToolIk
+    }
+    func toggleSceneCameraView() {
+        sceneCameraView.toggle()
+        engine.setSceneEditor(sceneEditor && !sceneCameraView, yaw: sceneYaw, pitch: scenePitch, distance: sceneDistance)
+        refreshSelectedLayer()
+    }
+    /// Toque num eixo do gizmo de navegação: a vista gira até lá em ~200 ms.
+    func snapSceneView(yaw: Float, pitch: Float) {
+        let fromYaw = sceneYaw, fromPitch = scenePitch
+        var turn = (yaw - fromYaw + 180).truncatingRemainder(dividingBy: 360)
+        if turn < 0 { turn += 360 }
+        turn -= 180
+        Task { @MainActor in
+            for i in 1...12 {
+                let t = Float(i) / 12, e = t * t * (3 - 2 * t)
+                setSceneView(yaw: fromYaw + turn * e, pitch: fromPitch + (pitch - fromPitch) * e, distance: sceneDistance)
+                try? await Task.sleep(nanoseconds: 16_000_000)
+            }
+        }
     }
 
     /// Toque duplo no vazio da cena: a vista volta ao ângulo inicial.
@@ -6290,7 +6331,16 @@ final class AureaModel: ObservableObject {
     /// (`kEditAtPlayhead`), não o `status.playhead`, que vem quadros atrás.
     @discardableResult func trimToPlayhead(_ layerId: Int64, start: Bool) -> Bool {
         let amount = playheadIsStale ? AureaEngine.editAtPlayhead : status.playhead
-        return start ? trimStart(layerId, at: amount) : trimEnd(layerId, at: amount)
+        return start ? trimStartToPlayhead(layerId, at: amount) : trimEnd(layerId, at: amount)
+    }
+
+    /// Aparar o início NO CABEÇOTE (trio, lote e busca): op 10 — a borda vai até
+    /// `frame` mesmo com o ímã (o op 0 da alça faz ripple ali: a borda ficava e só
+    /// o keyframe antes dela sumia). Par do `trimToPlayhead` do EditorStore.kt.
+    @discardableResult func trimStartToPlayhead(_ layerId: Int64, at frame: Int64) -> Bool {
+        let changed = engine.editClipTime(layerId, operation: 10, amount: frame, previous: 0, next: 0)
+        refreshModel(force: true)
+        return changed
     }
 
     // Omega painel: (área 04) painel da camada — as regras moram no motor
@@ -6932,7 +6982,9 @@ extension AureaModel {
                         media += [refs[i], resolved, refs[i + 2]]
                         i += 4
                     }
-                } else { code = 11 }
+                } else if requireComplete { code = 11 }
+                // Sem lista de mídia o projeto não abre: exporta só o arquivo, em modo de
+                // resgate (ProjectPackage). Publicar exige o projeto inteiro.
             }
             if code == 0 {
                 try? FileManager.default.removeItem(at: directory)
@@ -7210,6 +7262,53 @@ extension AureaModel {
         guard let id = primarySelection else { return -1 }
         return engine.boneMirrorPartner(id, node: node)
     }
+    /// Por osso: é um ramo lateral (desenhado tracejado)? Quando um pai tem filhos que são o
+    /// par esquerda/direita um do outro e também um filho do meio, o do meio continua a cadeia
+    /// e o par só parte dali. Vem do espelhamento do motor, então não muda ao orbitar.
+    func poseSideBones() -> [Bool] {
+        let f = Self.boneFloats, b = poseBones, count = b.count / f
+        var key = Int(truncatingIfNeeded: primarySelection ?? 0)
+        for i in 0..<count { key = key &* 31 &+ Int(b[i * f]) &* 7 &+ Int(b[i * f + 1]) }
+        if key == poseSideKey && poseSideCache.count == count { return poseSideCache }
+        var side = [Bool](repeating: false, count: count)
+        var children: [Int: [Int]] = [:]
+        for i in 0..<count where b[i * f + 1] >= 0 { children[Int(b[i * f + 1]), default: []].append(i) }
+        for kids in children.values where kids.count >= 2 {
+            let nodes = kids.map { Int32(b[$0 * f]) }
+            let paired = kids.filter { i in
+                let partner = bonePartner(Int32(b[i * f]))
+                return partner >= 0 && nodes.contains(partner)
+            }
+            if !paired.isEmpty && paired.count < kids.count { for i in paired { side[i] = true } }
+        }
+        poseSideKey = key
+        poseSideCache = side
+        return side
+    }
+    private var poseSideKey = 0
+    private var poseSideCache: [Bool] = []
+    /// O que o dedo pegou: as juntas até `jointReach` e depois os ossos até `boneReach` do
+    /// traço. O traço pai → filho é o osso do PAI (é ele que gira aquele pedaço).
+    func pickPoseTargets(_ point: SIMD2<Float>, jointReach: Float, boneReach: Float) -> [Int32] {
+        guard !skeletonHidden else { return [] }
+        var out = pickPoseBones(point, reach: jointReach)
+        let f = Self.boneFloats, b = poseBones
+        var segments: [(Float, Int32)] = []
+        let side = poseSideBones()
+        for i in 0..<(b.count / f) {
+            let o = i * f, parent = Int(b[o + 1])
+            guard parent >= 0, !(i < side.count && side[i]), b[o + 9] > 0.5, b[parent * f + 9] > 0.5 else { continue }
+            let p = parent * f
+            let a = SIMD2<Float>(b[p + 7], b[p + 8]), v = SIMD2<Float>(b[o + 7], b[o + 8]) - a
+            let len2 = v.x * v.x + v.y * v.y
+            guard len2 > 1e-6 else { continue }
+            let t = min(1, max(0, ((point.x - a.x) * v.x + (point.y - a.y) * v.y) / len2))
+            let d = hypot(point.x - (a.x + v.x * t), point.y - (a.y + v.y * t))
+            if d < boneReach { segments.append((d, Int32(b[p]))) }
+        }
+        for s in segments.sorted(by: { $0.0 < $1.0 }) where !out.contains(s.1) { out.append(s.1) }
+        return out
+    }
     /// Juntas perto do ponto (px da composição) dentro de `reach`, da mais perto à mais longe: os NÓS.
     func pickPoseBones(_ point: SIMD2<Float>, reach: Float) -> [Int32] {
         guard !skeletonHidden else { return [] }
@@ -7224,7 +7323,7 @@ extension AureaModel {
     /// Anel sob o ponto (px da composição): 0..2 eixo local, 3 = o de fora, ou −1. `ring` = raio na composição.
     func pickPoseRing(_ point: SIMD2<Float>, ring: Float, reach: Float, core: Float) -> Int {
         let g = poseGizmo
-        guard g.count == Self.boneGizmoFloats, g[2] > 0.5, !poseMove else { return -1 }
+        guard g.count == Self.boneGizmoFloats, g[2] > 0.5, !poseMove, !poseIk, !sceneSelectOnly else { return -1 }
         let dc = hypot(point.x - g[0], point.y - g[1])
         if dc < core { return -1 }
         var best = reach, hit = -1

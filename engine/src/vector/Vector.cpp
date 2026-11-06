@@ -179,6 +179,35 @@ BezierPath lerp_path(const BezierPath& a, const BezierPath& b, f32 t) {
     return r;
 }
 
+Interpolation path_key_interpolation(const PathKey& key) noexcept {
+    if (key.curve == kPathCurveLegacy || key.curve > static_cast<u8>(kLastInterpolation))
+        return key.ease == 2 ? Interpolation::Hold : key.ease == 1 ? Interpolation::EaseInOut : Interpolation::Linear;
+    return static_cast<Interpolation>(key.curve);
+}
+
+f32 path_key_ease(const PathKey& key, f32 t) noexcept {
+    if (key.curve == kPathCurveLegacy || key.curve > static_cast<u8>(kLastInterpolation)) {
+        // Projetos antigos continuam idênticos: o "suave" deles é smoothstep.
+        if (key.ease == 2) return 0.0f;
+        return key.ease == 1 ? t * t * (3.0f - 2.0f * t) : t;
+    }
+    Keyframe curve;
+    curve.interp = static_cast<Interpolation>(key.curve);
+    curve.bx1 = key.bx1; curve.by1 = key.by1; curve.bx2 = key.bx2; curve.by2 = key.by2;
+    curve.easePower = key.easePower;
+    return keyframe_ease(curve, t);
+}
+
+void set_path_key_curve(PathKey& key, Interpolation interp, f32 bx1, f32 by1, f32 bx2, f32 by2, u8 power) noexcept {
+    key.curve = static_cast<u8>(interp);
+    // O `ease` antigo segue a curva (quem lê só ele ainda vê algo parecido).
+    key.ease = interp == Interpolation::Hold ? 2 : interp == Interpolation::Linear ? 0 : 1;
+    if (power != 0) key.easePower = clamp_ease_power(power);
+    if (interp == Interpolation::Bezier || interp == Interpolation::CustomCurve || ease_has_params(interp)) {
+        key.bx1 = bx1; key.by1 = by1; key.bx2 = bx2; key.by2 = by2;
+    }
+}
+
 BezierPath path_at(const VectorPath& p, f64 frame) {
     BezierPath b;
     switch (p.kind) {
@@ -201,9 +230,7 @@ BezierPath path_at(const VectorPath& p, f64 frame) {
             const PathKey& k1 = k[i + 1];
             const f64 span = static_cast<f64>(k1.frame - k0.frame);
             f32 u = span > 0.0 ? static_cast<f32>((frame - static_cast<f64>(k0.frame)) / span) : 1.0f;
-            if (k0.ease == 2) u = 0.0f;
-            else if (k0.ease == 1) u = u * u * (3.0f - 2.0f * u);
-            b = lerp_path(k0.path, k1.path, u);
+            b = lerp_path(k0.path, k1.path, path_key_ease(k0, u));
             break;
         }
     }
@@ -1333,7 +1360,10 @@ u64 content_hash(const std::vector<VectorGroup>& groups, f64 frame, const DrawPr
             H.u(p.exclude);   // Omega conteúdo: furo
             H.path(p.path);
             H.u(p.keys.size());
-            for (const PathKey& k : p.keys) { H.u(static_cast<u64>(k.frame)); H.u(k.ease); H.path(k.path); }
+            for (const PathKey& k : p.keys) {
+                H.u(static_cast<u64>(k.frame)); H.u(k.ease); H.path(k.path);
+                H.u(k.curve); H.u(k.easePower); H.f(k.bx1); H.f(k.by1); H.f(k.bx2); H.f(k.by2);
+            }
             if (p.keys.size() > 1) {
                 morph = true;
                 for (const PathKey& k : p.keys) {

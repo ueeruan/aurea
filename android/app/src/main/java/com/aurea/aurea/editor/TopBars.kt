@@ -874,6 +874,6 @@ private fun batchTrim(store: EditorStore, start: Boolean, intoLayers: String, lo
     }
     if (store.playing) store.pause()
     store.beginGesture(if (start) "aparar início" else "aparar fim")
-    targets.forEach { if (start) store.trimStart(it.id, t) else store.trimEnd(it.id, t) }
+    targets.forEach { if (start) store.trimToPlayhead(it.id, start = true, live = false) else store.trimEnd(it.id, t) }
     store.endGesture()
 }

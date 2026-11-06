@@ -4709,4 +4709,23 @@ untuk mengedit kurvanya.</string>
     <string name="ai_tool_panel">Membuka layar</string>
     <string name="ai_tool_other">Aksi di editor</string>
     <string name="ai_close">Tutup</string>
+    <string name="s3d_menu_view">Tampilan</string>
+    <string name="s3d_menu_select">Pilih</string>
+    <string name="s3d_menu_object">Objek</string>
+    <string name="s3d_menu_pose">Pose</string>
+    <string name="s3d_space_global">Global</string>
+    <string name="s3d_space_local">Lokal</string>
+    <string name="s3d_view_frame">Bingkai semua</string>
+    <string name="s3d_view_perspective">Tampilan perspektif</string>
+    <string name="s3d_view_camera">Tampilan kamera</string>
+    <string name="s3d_overlays">Overlay</string>
+    <string name="s3d_nav_zoom">Zoom: seret ke atas atau bawah</string>
+    <string name="s3d_nav_pan">Geser tampilan: seret</string>
+    <string name="s3d_nav_orbit">Putar tampilan: seret, atau ketuk sumbu</string>
+    <string name="s3d_select_all">Semua</string>
+    <string name="s3d_select_none">Tidak ada</string>
+    <string name="s3d_duplicate">Duplikat</string>
+    <string name="s3d_area_collapse">Ciutkan panel</string>
+    <string name="s3d_area_expand">Buka panel</string>
+    <string name="skeleton_tab_bone">Tulang</string>
 </resources>

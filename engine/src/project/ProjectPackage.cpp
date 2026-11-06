@@ -510,10 +510,16 @@ Status write_package(const std::string& aureaPath, const std::string& outPath, c
                      const std::string& appVersion, const std::vector<MediaFile>& media,
                      ExportResult* result) noexcept {
     std::lock_guard<std::mutex> writeLock(packageWriteMutex);
-    // O projeto precisa abrir aqui: não se manda adiante um arquivo quebrado.
+    // Projeto que não abre sai assim mesmo, em modo de resgate: sem isto a pessoa
+    // não tem como tirar o arquivo do aparelho, e é ele que permite recuperar. Vai
+    // marcado no manifesto, com as cópias ao lado. Publicar na comunidade não chega
+    // aqui com projeto ruim: a lista de mídia dele falha antes.
+    bool damaged = false;
     {
         Project p;
-        if (const Status s = load_project(p, aureaPath); !s.ok()) return s;
+        const Status s = load_project(p, aureaPath);
+        if (s.code() == Errc::NotFound) return s;
+        damaged = !s.ok();
     }
     File project(fileio::open_file(aureaPath, "rb"));
     if (!project.f) return Status{Errc::IoError, "projeto ilegivel"};
@@ -528,6 +534,7 @@ Status write_package(const std::string& aureaPath, const std::string& outPath, c
     std::string manifest = "aurea-project " + std::to_string(kPackageVersion) + "\n";
     manifest += "title " + escape(title) + "\n";
     manifest += "app " + escape(appVersion) + "\n";
+    if (damaged) manifest += "damaged 1\n";
     std::vector<std::pair<std::string, const MediaFile*>> entries;
     std::set<std::string> seen;
     for (const MediaFile& m : media) {
@@ -546,6 +553,13 @@ Status write_package(const std::string& aureaPath, const std::string& outPath, c
         ++r.included;
     }
     if (s.ok()) s = zip.add_file(kProjectEntry, project.f);
+    if (s.ok() && damaged) {
+        for (const auto& [entry, path] : {std::pair<const char*, std::string>{"recovery/project.aurea.bak", fileio::backup_path(aureaPath)},
+                                          std::pair<const char*, std::string>{"recovery/project.aurea.tmp", fileio::temp_path(aureaPath)}}) {
+            File copy(fileio::open_file(path, "rb"));
+            if (copy.f && s.ok()) s = zip.add_file(entry, copy.f);
+        }
+    }
     if (s.ok()) s = zip.add_bytes(kManifestEntry, manifest);
     if (s.ok()) s = zip.finish();
     r.bytes = tell(out.f);

@@ -10,6 +10,9 @@ layout(location = 0) in vec2 v_corner;
 layout(location = 1) in vec4 v_color;
 layout(location = 2) flat in float v_feather;
 layout(location = 0) out vec4 o_color;
+// Dentro do passe 3D (MRT): cor de exibição no alvo 0 e, no alvo 1, só o alfa que
+// tapa a cena HDR atrás. Na folha 2D não há alvo 1 e a escrita é descartada.
+layout(location = 1) out vec4 o_scene;
 
 void main() {
     const float d = length(v_corner);
@@ -17,4 +20,5 @@ void main() {
     const float a = v_color.a * (1.0 - smoothstep(core, 1.0, d));
     if (a <= 0.0) discard;
     o_color = vec4(v_color.rgb * a, a);
+    o_scene = vec4(0.0, 0.0, 0.0, a);
 }

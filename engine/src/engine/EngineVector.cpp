@@ -195,7 +195,7 @@ bool Engine::ensure_vector_path_key(u64 layerId, u32 group, u32 path) noexcept {
     nk.path = vector::path_at(p, static_cast<f64>(local));
     auto it = std::find_if(p.keys.begin(), p.keys.end(), [&](const PathKey& k) { return k.frame == local; });
     if (it != p.keys.end()) {
-        *it = std::move(nk);   // já havia keyframe aqui: regrava o valor do instante
+        it->path = std::move(nk.path);   // já havia keyframe aqui: regrava a forma (a curva fica)
     } else {
         p.keys.insert(std::upper_bound(p.keys.begin(), p.keys.end(), local,
                                        [](i64 f, const PathKey& x) { return f < x.frame; }),

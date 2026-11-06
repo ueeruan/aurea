@@ -184,15 +184,20 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
                 item("search") { OutlinedTextField(search, { search = it.take(25) }, label = { Text(stringResource(R.string.social_search)) }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("social.search")) }
                 items(results, key = { "search-${it.id}" }) { result -> CommunityAuthor(result, api, Modifier.fillMaxWidth().clickable(enabled = !busy) { showProfile(result.id) }) }
                 item("filters") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(!following, enabled = !busy, onClick = { work { following = false; loadFeed() } }, label = { Text(stringResource(R.string.social_all)) })
-                        FilterChip(following, enabled = !busy, onClick = { work { following = true; loadFeed() } }, label = { Text(stringResource(R.string.social_following)) })
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { legacy = true }) { Text(stringResource(R.string.pn_caption)) }
+                    Column {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(!following, enabled = !busy, onClick = { work { following = false; loadFeed() } }, label = { Text(stringResource(R.string.social_all)) })
+                            FilterChip(following, enabled = !busy, onClick = { work { following = true; loadFeed() } }, label = { Text(stringResource(R.string.social_following)) })
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = { legacy = true }) { Text(stringResource(R.string.pn_caption), maxLines = 1) }
+                        }
                         // 0.4.6: a Loja da Comunidade (plugins, efeitos e presets).
                         // Enquanto o armazenamento (R2) não está ativo no servidor: "Em breve".
+                        // Beta (nov/2026): na mesma linha dos filtros o nome era espremido e
+                        // quebrava no meio da palavra; agora tem a linha dele, numa linha só.
                         TextButton(onClick = { if (STORE_ENABLED) storeOpen = true else storeSoon = true }, modifier = Modifier.testTag("social.store")) {
-                            Text(stringResource(R.string.store_title) + if (STORE_ENABLED) "" else " · " + stringResource(R.string.store_soon))
+                            Text(stringResource(R.string.store_title) + if (STORE_ENABLED) "" else " · " + stringResource(R.string.store_soon),
+                                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         }
                     }
                 }

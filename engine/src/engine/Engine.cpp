@@ -148,15 +148,84 @@ bool is_remap_time_alias(const Layer& l, const TrackRef& ref) noexcept {
     return false;
 }
 
+// Keys de forma (TrackProperty::VectorPath, trilha virtual): effectIndex =
+// grupo, paramIndex = caminho. Os dados moram em VectorPath::keys.
+VectorPath* vector_key_path(Layer& l, const TrackRef& ref) noexcept {
+    if (ref.property != TrackProperty::VectorPath || l.kind != LayerKind::Shape || l.shape.shapeType != kShapeVector) return nullptr;
+    auto& groups = l.shape.vector.groups;
+    if (ref.effectIndex >= groups.size() || ref.effectParamIndex >= groups[ref.effectIndex].paths.size()) return nullptr;
+    return &groups[ref.effectIndex].paths[ref.effectParamIndex];
+}
+const VectorPath* vector_key_path(const Layer& l, const TrackRef& ref) noexcept {
+    return vector_key_path(const_cast<Layer&>(l), ref);
+}
+i32 path_key_at(const VectorPath& p, i64 frame) noexcept {
+    for (usize i = 0; i < p.keys.size(); ++i) if (p.keys[i].frame == frame) return static_cast<i32>(i);
+    return -1;
+}
+/// Comandos de keyframe na trilha virtual dos keys de forma (como a MeshWarp).
+/// Quem chama segura o modelo e a transação de desfazer da composição.
+Status path_key_command(Layer& layer, const Command& command, FrameIndex playhead) noexcept {
+    if (layer.locked) return Errc::InvalidState;
+    const bool moving = command.type == CommandType::KeyframeMove;
+    const bool interpolation = command.type == CommandType::KeyframeSetInterpolation
+        || command.type == CommandType::KeyframeSetBezier || command.type == CommandType::KeyframeSetEasing;
+    const TrackRef& ref = moving ? command.keyframe_move.track
+        : interpolation ? command.keyframe_interp.track : command.keyframe.track;
+    VectorPath* p = vector_key_path(layer, ref);
+    if (!p) return Errc::NotFound;
+    const FrameIndex time = moving ? command.keyframe_move.fromTime
+        : interpolation ? command.keyframe_interp.time
+        : (command.keyframe.onlyIfChanged & kAutoKeyAtPlayhead) ? layer.local_time(playhead) : command.keyframe.time;
+    if (command.type == CommandType::KeyframeInsert) {
+        if (path_key_at(*p, time.value) >= 0) return OkStatus;
+        if (p->kind != VectorPathKind::Free) vector::make_editable(*p);
+        PathKey key;
+        key.frame = time.value;
+        key.path = vector::path_at(*p, static_cast<f64>(time.value));
+        p->keys.insert(std::upper_bound(p->keys.begin(), p->keys.end(), time.value,
+                                        [](i64 f, const PathKey& x) { return f < x.frame; }), std::move(key));
+        return OkStatus;
+    }
+    const i32 at = path_key_at(*p, time.value);
+    if (at < 0) return Errc::NotFound;
+    switch (command.type) {
+        case CommandType::KeyframeDelete:
+            // Tirar o último key deixa parada a forma que se via no cabeçote.
+            if (p->keys.size() == 1) p->path = vector::path_at(*p, static_cast<f64>(layer.local_time(playhead).value));
+            p->keys.erase(p->keys.begin() + at);
+            return OkStatus;
+        case CommandType::KeyframeMove: {
+            const i64 target = command.keyframe_move.toTime.value;
+            if (target == time.value) return OkStatus;
+            if (path_key_at(*p, target) >= 0) return Errc::AlreadyExists;
+            p->keys[static_cast<usize>(at)].frame = target;
+            std::sort(p->keys.begin(), p->keys.end(), [](const PathKey& a, const PathKey& b) { return a.frame < b.frame; });
+            return OkStatus;
+        }
+        case CommandType::KeyframeSetInterpolation:
+        case CommandType::KeyframeSetBezier:
+        case CommandType::KeyframeSetEasing: {
+            // Beta (nov/2026): o editor de curva abria vazio nos keys de forma
+            // — eles só tinham linear/suave/congelar. Agora a curva é a mesma
+            // dos keyframes comuns.
+            const KeyframeInterpPayload& k = command.keyframe_interp;
+            vector::set_path_key_curve(p->keys[static_cast<usize>(at)], k.interp, k.bx1, k.by1, k.bx2, k.by2, k.power);
+            return OkStatus;
+        }
+        default: return Errc::NotSupported;   // a forma inteira não tem valor escalar nem expressão
+    }
+}
+
 const Track* read_command_track(const Layer& l, const TrackRef& ref) noexcept {
-    if (ref.property == TrackProperty::MeshWarp) return nullptr;
+    if (ref.property == TrackProperty::MeshWarp || ref.property == TrackProperty::VectorPath) return nullptr;
     if (ref.property == TrackProperty::TimeRemap || is_remap_time_alias(l, ref)) return &l.timeRemap;
     if (ref.property == TrackProperty::Speed) return l.tracks.find(ref.property);
     return l.tracks.find(ref.property, ref.effectIndex, ref.effectParamIndex);
 }
 
 Track* command_track(Layer& l, const TrackRef& ref, bool create) noexcept {
-    if (ref.property == TrackProperty::MeshWarp) return nullptr;
+    if (ref.property == TrackProperty::MeshWarp || ref.property == TrackProperty::VectorPath) return nullptr;
     if (ref.property == TrackProperty::MaskParam && (ref.effectParamIndex > 2 ||
         std::none_of(l.masks.begin(), l.masks.end(), [&](const Mask& m) { return m.id == ref.effectIndex; }))) return nullptr;
     if (ref.property == TrackProperty::TimeRemap || is_remap_time_alias(l, ref)) {
@@ -2191,6 +2260,33 @@ Status Engine::save_project_impl(const char* requestedPath, bool idleOnly, bool 
         keepBackup = !(mainFileSuspect_ && samePath);
     }
     const u64 t1 = monotonic_ns();
+
+    // Relê o que vai gravar ANTES de tocar no arquivo. Um projeto que o próprio app
+    // não abre não pode substituir o último bom: o autosave seguinte levaria o .bak
+    // junto e sobraria só "nao ha copia valida". O recusado fica ao lado, para o suporte.
+    {
+        Project reread;
+        LoadOptions check;
+        check.lazyAssets = true;
+        check.tolerateCorruptSections = false;
+        LoadReport report;
+        std::string why;
+        const Status readable = ProjectSerializer::load_bytes(reread, bytes.data(), bytes.size(), check, &report, &why);
+        if (!readable.ok() || report.partial) {
+            AUREA_LOG_WARN("projeto: gravacao recusada, o arquivo nao abriria (%s)", why.c_str());
+            fileio::AtomicWriteOptions keep;
+            keep.keepBackup = false;
+            (void)fileio::write_atomic(path + ".recusado", bytes.data(), bytes.size(), keep, nullptr);
+            const Status refused{Errc::ProjectCorrupted, "gravacao recusada: o projeto nao abriria"};
+            {
+                std::lock_guard<std::mutex> sl(saveStatsMutex_);
+                saveStats_.lastError = refused.code();
+                ++saveStats_.failures;
+            }
+            set_last_error(refused, "salvar projeto");
+            return refused;
+        }
+    }
 
     options.keepBackup = keepBackup;
     std::string error;
@@ -6342,12 +6438,30 @@ u32 Engine::query_scene_guides(f32* lines, u32 capacity) noexcept {
         p[0] = x.x / x.w; p[1] = x.y / x.w; p[2] = y.x / y.w; p[3] = y.y / y.w; p[4] = kind;
     };
     const f32 width = static_cast<f32>(comp->width()), height = static_cast<f32>(comp->height());
-    // Quadro da composição (z = 0) em quartos: grade densa por cima do objeto
-    // 3D parecia "o texto virou uma grade" (relato beta).
-    for (u32 i = 0; i <= 4; ++i) {
-        const f32 t = static_cast<f32>(i) / 4;
-        line(Vec3{width * t, 0, 0}, Vec3{width * t, height, 0}, 0);
-        line(Vec3{0, height * t, 0}, Vec3{width, height * t, 0}, 0);
+    if (workspaceView_.enabled) {
+        // Cena 3D: o quadro da composição só no contorno e o CHÃO quadriculado na
+        // base dele, com os eixos X (kind 4) e Z (kind 5) acesos, como num app 3D.
+        // No chão as linhas ficam atrás do objeto (no quadro z = 0 passavam por
+        // cima: "o texto virou uma grade", relato beta). Kind 3 = linha do chão.
+        line(Vec3{0, 0, 0}, Vec3{width, 0, 0}, 0);
+        line(Vec3{width, 0, 0}, Vec3{width, height, 0}, 0);
+        line(Vec3{width, height, 0}, Vec3{0, height, 0}, 0);
+        line(Vec3{0, height, 0}, Vec3{0, 0, 0}, 0);
+        constexpr i32 kFloorCells = 10;
+        const f32 step = height * 0.25f, reach = step * kFloorCells, cx = width * 0.5f;
+        for (i32 i = -kFloorCells; i <= kFloorCells; ++i) {
+            const f32 d = step * static_cast<f32>(i);
+            line(Vec3{cx + d, height, -reach}, Vec3{cx + d, height, reach}, i == 0 ? 5.0f : 3.0f);
+            line(Vec3{cx - reach, height, d}, Vec3{cx + reach, height, d}, i == 0 ? 4.0f : 3.0f);
+        }
+    } else {
+        // Quadro da composição (z = 0) em quartos: grade densa por cima do objeto
+        // 3D parecia "o texto virou uma grade" (relato beta).
+        for (u32 i = 0; i <= 4; ++i) {
+            const f32 t = static_cast<f32>(i) / 4;
+            line(Vec3{width * t, 0, 0}, Vec3{width * t, height, 0}, 0);
+            line(Vec3{0, height * t, 0}, Vec3{width, height * t, 0}, 0);
+        }
     }
     const auto time = playback_.current();
     for (u32 i = 0; i < comp->order().size(); ++i) {
@@ -7960,7 +8074,8 @@ u32 Engine::copy_keyframes(u64 layerId, i64 frame) noexcept {
 }
 
 namespace {
-struct SelectedTrackKey { u32 track; u32 key; bool mesh = false; };
+// mesh: track = índice do efeito. path (keys de forma): track = grupo, pathIndex = caminho.
+struct SelectedTrackKey { u32 track; u32 key; bool mesh = false; bool path = false; u32 pathIndex = 0; };
 // Time remap is stored outside TrackSet. Every selection operation must resolve
 // it through the same identity as single-key commands (including its effect alias).
 const Track& selected_track(const Layer& layer, u32 index) {
@@ -7990,6 +8105,16 @@ bool resolve_selected_keys(const Layer& layer, const i64* refs, u32 count,
             })) out.push_back({index, static_cast<u32>(key), true});
             continue;
         }
+        if (identity.property == TrackProperty::VectorPath) {
+            const VectorPath* path = vector_key_path(layer, identity);
+            const i32 key = path ? path_key_at(*path, ref[3]) : -1;
+            if (key < 0) return false;
+            if (std::none_of(out.begin(), out.end(), [&](const auto& item) {
+                return item.path && item.track == identity.effectIndex && item.pathIndex == identity.effectParamIndex
+                    && item.key == static_cast<u32>(key);
+            })) out.push_back({identity.effectIndex, static_cast<u32>(key), false, true, identity.effectParamIndex});
+            continue;
+        }
         const Track* track = read_command_track(layer, identity);
         if (!track) return false;
         const u32 key = track->find_exact(FrameIndex{ref[3]});
@@ -7999,7 +8124,7 @@ bool resolve_selected_keys(const Layer& layer, const i64* refs, u32 count,
             for (u32 t = 0; t < layer.tracks.size(); ++t) if (&layer.tracks.at(t) == track) { index = t; break; }
             if (index == kInvalidIndex) return false;
         }
-        if (std::none_of(out.begin(), out.end(), [=](const auto& item) { return !item.mesh && item.track == index && item.key == key; }))
+        if (std::none_of(out.begin(), out.end(), [=](const auto& item) { return !item.mesh && !item.path && item.track == index && item.key == key; }))
             out.push_back({index, key});
     }
     return !out.empty();
@@ -8014,14 +8139,28 @@ u32 Engine::copy_keyframe_selection(u64 layerId, const i64* refs, u32 count) noe
     std::vector<SelectedTrackKey> selected;
     if (!layer || !resolve_selected_keys(*layer, refs, count, selected)) return 0;
     i64 anchor = INT64_MAX;
+    const auto pathOf = [&](const SelectedTrackKey& item) -> const VectorPath& {
+        return layer->shape.vector.groups[item.track].paths[item.pathIndex];
+    };
     for (const auto& item : selected) {
-        const i64 time = item.mesh ? mesh_warp::animation(layer->effects[item.track])->keys[item.key].frame
-                                  : selected_track(*layer, item.track).keys[item.key].time.value;
+        const i64 time = item.path ? pathOf(item).keys[item.key].frame
+                       : item.mesh ? mesh_warp::animation(layer->effects[item.track])->keys[item.key].frame
+                                   : selected_track(*layer, item.track).keys[item.key].time.value;
         anchor = std::min(anchor, time);
     }
     std::vector<Clipboard::Key> copied;
     std::vector<Clipboard::MeshKey> meshes;
+    std::vector<Clipboard::PathKeys> paths;
     for (const auto& item : selected) {
+        if (item.path) {
+            auto it = std::find_if(paths.begin(), paths.end(), [&](const Clipboard::PathKeys& pk) {
+                return pk.group == item.track && pk.path == item.pathIndex;
+            });
+            if (it == paths.end()) { paths.push_back({item.track, item.pathIndex, {}}); it = paths.end() - 1; }
+            PathKey key = pathOf(item).keys[item.key]; key.frame -= anchor;
+            it->keys.push_back(std::move(key));
+            continue;
+        }
         if (item.mesh) {
             const auto& effect = layer->effects[item.track];
             const auto* data = mesh_warp::animation(effect);
@@ -8043,9 +8182,11 @@ u32 Engine::copy_keyframe_selection(u64 layerId, const i64* refs, u32 count) noe
         }
         copied.push_back({track.property, track.effectIndex, track.effectParamIndex, type, key, ordinal});
     }
+    for (auto& pk : paths)
+        std::sort(pk.keys.begin(), pk.keys.end(), [](const PathKey& a, const PathKey& b) { return a.frame < b.frame; });
     clipboard_.keys = std::move(copied);
     clipboard_.meshKeys = std::move(meshes);
-    clipboard_.pathKeys.clear();
+    clipboard_.pathKeys = std::move(paths);
     return static_cast<u32>(selected.size());
 }
 
@@ -8064,7 +8205,7 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
     for (u32 slot = 0; slot <= layer->tracks.size(); ++slot) {
         const u32 index = slot == layer->tracks.size() ? kInvalidIndex : slot;
         std::vector<u32> keys;
-        for (const auto& item : selected) if (!item.mesh && item.track == index) keys.push_back(item.key);
+        for (const auto& item : selected) if (!item.mesh && !item.path && item.track == index) keys.push_back(item.key);
         if (keys.empty()) continue;
         const Track& original = selected_track(*layer, index);
         Track next = original;
@@ -8111,6 +8252,35 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
                 static_cast<f64>(layer->local_time(playback_.current()).value), next.values);
         changedMeshes.emplace_back(index, std::move(next));
     }
+    struct ChangedPath { u32 group, path; VectorPath next; };
+    std::vector<ChangedPath> changedPaths;
+    for (const auto& item : selected) {
+        if (!item.path || std::any_of(changedPaths.begin(), changedPaths.end(), [&](const ChangedPath& c) {
+            return c.group == item.track && c.path == item.pathIndex;
+        })) continue;
+        const VectorPath& original = layer->shape.vector.groups[item.track].paths[item.pathIndex];
+        VectorPath next = original;
+        next.keys.clear();
+        for (u32 k = 0; k < original.keys.size(); ++k) {
+            const bool picked = std::any_of(selected.begin(), selected.end(), [&](const SelectedTrackKey& s) {
+                return s.path && s.track == item.track && s.pathIndex == item.pathIndex && s.key == k;
+            });
+            if (picked && remove) continue;
+            PathKey key = original.keys[k];
+            if (picked) {
+                const i64 target = key.frame + delta;
+                if (target < INT32_MIN || target > INT32_MAX) return 0;
+                key.frame = target;
+            }
+            next.keys.push_back(std::move(key));
+        }
+        std::sort(next.keys.begin(), next.keys.end(), [](const PathKey& a, const PathKey& b) { return a.frame < b.frame; });
+        for (usize k = 1; k < next.keys.size(); ++k) if (next.keys[k - 1].frame == next.keys[k].frame) return 0;
+        // Sem key nenhum, a forma fica parada como se via no cabeçote.
+        if (remove && next.keys.empty())
+            next.path = vector::path_at(original, static_cast<f64>(layer->local_time(playback_.current()).value));
+        changedPaths.push_back({item.track, item.pathIndex, std::move(next)});
+    }
     history_.before_mutation(*comp, project_->timeline().current(), remove ? "remover keyframes" : "mover keyframes");
     for (auto& entry : changed) {
         Track& original = selected_track(*layer, entry.first);
@@ -8118,6 +8288,7 @@ u32 Engine::edit_keyframe_selection(u64 layerId, const i64* refs, u32 count, i64
         original = std::move(entry.second);
     }
     for (auto& entry : changedMeshes) *mesh_warp::animation(layer->effects[entry.first]) = std::move(entry.second);
+    for (auto& entry : changedPaths) layer->shape.vector.groups[entry.group].paths[entry.path] = std::move(entry.next);
     bump_model_revision_locked();
     project_->mark_dirty(); request_render();
     return static_cast<u32>(selected.size());
@@ -8616,10 +8787,16 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
     constexpr i64 limit = i64{1} << 31;
     // Aparar início/fim NO CABEÇOTE (kEditAtPlayhead): o quadro vem do motor
     // depois de drenar a fila (o pausar que a UI acabou de mandar já valeu).
-    const bool atPlayhead = amount == kEditAtPlayhead && operation <= 1;
-    if (operation > 9 || (!atPlayhead && (amount <= -limit || amount >= limit))) return false;
+    const bool atPlayhead = amount == kEditAtPlayhead && (operation <= 1 || operation == 10);
+    if (operation > 10 || (!atPlayhead && (amount <= -limit || amount >= limit))) return false;
     const bool extendOnly = operation == 8 || operation == 9;
     if (extendOnly) operation -= 8;
+    // 10 = aparar o início NO CABEÇOTE (botões do painel, do lote e da busca):
+    // a borda vai até o quadro mesmo com o ímã. No op 0 o ímã fecha o buraco
+    // levando a camada de volta (a borda fica e só o conteúdo some) — certo na
+    // alça arrastada, mas no botão parecia que só o keyframe era apagado.
+    const bool edgeToFrame = operation == 10;
+    if (edgeToFrame) operation = 0;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -8687,7 +8864,7 @@ bool Engine::edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous
     // A LINHA MAGNÉTICA da camada comanda o ripple, e o modo Edição da
     // composição continua valendo como antes para as camadas que não têm a
     // opção ligada (projetos já montados não mudam de comportamento).
-    const bool magnetic = !extendOnly && (layer->magneticTrack || comp->edit_mode());
+    const bool magnetic = !extendOnly && !edgeToFrame && (layer->magneticTrack || comp->edit_mode());
     i64 ripple = 0;
     const auto trim = [&](Layer& item, i64 s, i64 e) { trim_clip_copy(item, s, e, clip_source_limit(*project_, *comp, item)); };
     if (operation == 7) {
@@ -10325,7 +10502,7 @@ namespace {
 Track* expression_track(Layer& l, u32 property, u32 effectIndex, u32 paramIndex, bool create) noexcept {
     if (property >= static_cast<u32>(TrackProperty::_Count)) return nullptr;
     const auto p = static_cast<TrackProperty>(property);
-    if (p == TrackProperty::MeshWarp) return nullptr;
+    if (p == TrackProperty::MeshWarp || p == TrackProperty::VectorPath) return nullptr;
     if (p == TrackProperty::TimeRemap) return &l.timeRemap;
     if (p == TrackProperty::EffectParam && !l.find_effect(EffectId{effectIndex, 0})) return nullptr;
     if (p == TrackProperty::TextAnimParam && effectIndex >= l.text.animators.size()) return nullptr;
@@ -10365,7 +10542,7 @@ Status Engine::set_expressions(u64 layerId, const u32* keys3, u32 count, const c
     bool anyChange = false;
     for (u32 i = 0; i < count; ++i) {
         const u32* k = keys3 + i * 3;
-        if (k[0] == static_cast<u32>(TrackProperty::MeshWarp)) return Errc::NotSupported;
+        if (k[0] == static_cast<u32>(TrackProperty::MeshWarp) || k[0] == static_cast<u32>(TrackProperty::VectorPath)) return Errc::NotSupported;
         Track* t = expression_track(*l, k[0], k[1], k[2], false);
         if (!t && !remove) {
             const auto p = k[0] < static_cast<u32>(TrackProperty::_Count) ? static_cast<TrackProperty>(k[0]) : TrackProperty::_Count;
@@ -13363,6 +13540,25 @@ u32 write_keyframe_rows(const Layer& l, bridge::KeyframeRow* out, u32 capacity) 
             out[written++] = row;
         }
     }
+    if (l.kind == LayerKind::Shape && l.shape.shapeType == kShapeVector) {
+        const auto& groups = l.shape.vector.groups;
+        for (u32 g = 0; g < groups.size(); ++g) for (u32 pi = 0; pi < groups[g].paths.size(); ++pi) {
+            for (const PathKey& key : groups[g].paths[pi].keys) {
+                if (written >= capacity) break;
+                bridge::KeyframeRow row{};
+                row.property = static_cast<u32>(TrackProperty::VectorPath);
+                row.effectIndex = g;
+                row.paramIndex = pi;
+                row.time = static_cast<i32>(key.frame);
+                row.value = 0;
+                row.interpolation = static_cast<u32>(vector::path_key_interpolation(key));
+                const i64 timelineFrame = key.frame + l.start.value - l.offset.value;
+                if (timelineFrame < l.start.value || timelineFrame > l.end.value)
+                    row.timelineFlags |= bridge::kKeyframeTimelineHidden;
+                out[written++] = row;
+            }
+        }
+    }
     return written;
 }
 } // namespace
@@ -13416,6 +13612,10 @@ bool Engine::query_keyframe_navigation(u64 layerId, u32 property, u32 effectInde
                 for (const auto& key : data->keys) visible(key.frame);
             break;
         }
+    } else if (ref.property == TrackProperty::VectorPath) {
+        const VectorPath* path = vector_key_path(*layer, ref);
+        if (!path) return false;
+        for (const PathKey& key : path->keys) visible(key.frame);
     } else if (const Track* track = read_command_track(*layer, ref)) {
         for (const auto& key : track->keys) visible(key.time.value);
     }
@@ -13454,6 +13654,9 @@ bool Engine::query_timeline_navigation(u64 layerId, i64 compositionFrame, i32 di
             for (const auto& key : data->keys) visibleKey(key.frame);
     for (const auto& mask : layer->masks)
         for (const auto& key : mask.pathKeys) visibleKey(key.frame);
+    if (layer->kind == LayerKind::Shape && layer->shape.shapeType == kShapeVector)
+        for (const VectorGroup& g : layer->shape.vector.groups)
+            for (const VectorPath& p : g.paths) for (const PathKey& key : p.keys) visibleKey(key.frame);
     return found;
 }
 
@@ -13908,6 +14111,15 @@ bool Engine::query_keyframe_easing(u64 layerId, u32 property, u32 effectIndex, u
             return false;
         }
         return false;
+    }
+    if (layer && ref.property == TrackProperty::VectorPath) {
+        const VectorPath* path = vector_key_path(*layer, ref);
+        const i32 at = path ? path_key_at(*path, frame) : -1;
+        if (at < 0) return false;
+        const PathKey& key = path->keys[static_cast<usize>(at)];
+        out4[0] = key.bx1; out4[1] = key.by1; out4[2] = key.bx2; out4[3] = key.by2;
+        if (outPower) *outPower = clamp_ease_power(key.easePower);
+        return true;
     }
     const Track* track = layer ? read_command_track(*layer, ref) : nullptr;
     if (!track) return false;
@@ -18226,6 +18438,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if(const Status depth=prepare_raster_depth_key(*l,cmd.keyframe.track,cmd.keyframe.value);!depth.ok())return depth;
             if (cmd.keyframe.track.property == TrackProperty::MeshWarp)
                 return mesh_warp::key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe.track.property == TrackProperty::VectorPath)
+                return path_key_command(*l, cmd, playback_.current());
             // Gesto de transform (kAutoKey*): o tempo é o do quadro na tela e,
             // sem keyframe na trilha, o valor parado muda — a mesma regra nas
             // duas UIs, com o estado vivo do motor. Antes a UI decidia pelo
@@ -18271,6 +18485,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!l) return Errc::NotFound;
             if (cmd.keyframe.track.property == TrackProperty::MeshWarp)
                 return mesh_warp::key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe.track.property == TrackProperty::VectorPath)
+                return path_key_command(*l, cmd, playback_.current());
             Track* track = command_track(*l, cmd.keyframe.track, false);
             if (!track || track->find_exact(cmd.keyframe.time) == kInvalidIndex) return Errc::NotFound;
             if (track->keys.size() == 1) freeze_last_shape_key(*l, *track, l->local_time(playback_.current()));
@@ -18282,6 +18498,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!l) return Errc::NotFound;
             if (cmd.keyframe_move.track.property == TrackProperty::MeshWarp)
                 return mesh_warp::key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe_move.track.property == TrackProperty::VectorPath)
+                return path_key_command(*l, cmd, playback_.current());
             Track* track = command_track(*l, cmd.keyframe_move.track, false);
             if (!track) return Errc::NotFound;
             if (track->move(cmd.keyframe_move.fromTime, cmd.keyframe_move.toTime) == kInvalidIndex) return Errc::NotFound;
@@ -18292,6 +18510,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!l) return Errc::NotFound;
             if (cmd.keyframe.track.property == TrackProperty::MeshWarp)
                 return mesh_warp::key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe.track.property == TrackProperty::VectorPath)
+                return path_key_command(*l, cmd, playback_.current());
             Track* track = command_track(*l, cmd.keyframe.track, false);
             if (!track) return Errc::NotFound;
             const u32 idx = track->find_exact(cmd.keyframe.time);
@@ -18308,6 +18528,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
             if (!l) return Errc::NotFound;
             if (cmd.keyframe_interp.track.property == TrackProperty::MeshWarp)
                 return mesh_warp::key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe_interp.track.property == TrackProperty::VectorPath)
+                return path_key_command(*l, cmd, playback_.current());
             const KeyframeInterpPayload& k = cmd.keyframe_interp;
             Track* track = command_track(*l, k.track, false);
             if (!track) return Errc::NotFound;

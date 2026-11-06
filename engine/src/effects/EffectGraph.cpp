@@ -10,6 +10,18 @@
 
 namespace aurea {
 
+namespace {
+/// Ponto relativo gravado na caixa da camada → plano em que os efeitos rodam
+/// (ver LayerPlacement::relativeScale). Fora do Copiar fundo não muda nada.
+ParamValue placed_param(ParamValue value, const ParamSpec& def, const LayerPlacement& placement) noexcept {
+    if (def.type == ParamType::Point2D && (def.flags & kParamRelative) != 0) {
+        value.v[0] = value.v[0] * placement.relativeScale.x + placement.relativeBias.x;
+        value.v[1] = value.v[1] * placement.relativeScale.y + placement.relativeBias.y;
+    }
+    return value;
+}
+} // namespace
+
 // =============================================================================
 // Utilidades de Effect.hpp
 // =============================================================================
@@ -376,7 +388,8 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
             if (!effect || !params || effect->effect_class() != EffectClass::Domain) continue;
             scratch.clear();
             for (u32 p = 0; p < params->count(); ++p)
-                scratch.push_back(evaluate_param_f(source.owner->tracks, inst, p, params->at(p), source.time));
+                scratch.push_back(placed_param(evaluate_param_f(source.owner->tracks, inst, p, params->at(p), source.time),
+                                               params->at(p), placement));
             EffectEval e;
             e.effect = effect;
             e.instance = &inst;
@@ -425,7 +438,8 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
 
         const u32 offset = static_cast<u32>(out.values.size());
         for (u32 p = 0; p < params->count(); ++p) {
-            out.values.push_back(evaluate_param_f(source.owner->tracks, inst, p, params->at(p), source.time));
+            out.values.push_back(placed_param(evaluate_param_f(source.owner->tracks, inst, p, params->at(p), source.time),
+                                              params->at(p), placement));
         }
 
         EffectEval e;

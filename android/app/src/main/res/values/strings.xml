@@ -4798,4 +4798,23 @@
     <string name="ai_tool_panel">Abri a tela</string>
     <string name="ai_tool_other">Ação no editor</string>
     <string name="ai_close">Fechar</string>
+    <string name="s3d_menu_view">Visualizar</string>
+    <string name="s3d_menu_select">Selecionar</string>
+    <string name="s3d_menu_object">Objeto</string>
+    <string name="s3d_menu_pose">Pose</string>
+    <string name="s3d_space_global">Global</string>
+    <string name="s3d_space_local">Local</string>
+    <string name="s3d_view_frame">Enquadrar tudo</string>
+    <string name="s3d_view_perspective">Vista em perspectiva</string>
+    <string name="s3d_view_camera">Vista da câmera</string>
+    <string name="s3d_overlays">Sobreposições</string>
+    <string name="s3d_nav_zoom">Aproximar: arraste para cima ou para baixo</string>
+    <string name="s3d_nav_pan">Mover a vista: arraste</string>
+    <string name="s3d_nav_orbit">Girar a vista: arraste, ou toque num eixo</string>
+    <string name="s3d_select_all">Tudo</string>
+    <string name="s3d_select_none">Nada</string>
+    <string name="s3d_duplicate">Duplicar</string>
+    <string name="s3d_area_collapse">Recolher o painel</string>
+    <string name="s3d_area_expand">Abrir o painel</string>
+    <string name="skeleton_tab_bone">Osso</string>
 </resources>

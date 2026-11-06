@@ -21,7 +21,7 @@
 
 layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 region;    // região de saída (px da camada)
-    vec4 view;      // centro da projeção (px), distância focal (px), -
+    vec4 view;      // centro da projeção (px), distância focal (px), 1 = dentro da cena 3D
     vec4 clock;     // agora (s, com a pré-rolagem), grade (slots/s), slots, taxa (/s)
     vec4 frame;     // composição (px): largura, altura; origem do emissor (px da camada)
     vec4 emitPos;   // posição x, y, z (fração do quadro), emissor esférico (0/1)
@@ -41,7 +41,7 @@ layout(set = 0, binding = AUREA_PARAMS, std140) uniform Params {
     vec4 camRight;         // xyz = eixo da câmera no mundo; w = 1 liga este modo
     vec4 camUp;
     mat4 previousParticleProjection;
-    mat4 layerFromComp;    // composição -> plano original, antes dos efeitos seguintes
+    mat4 layerFromComp;    // composição -> plano original; na cena 3D, mundo -> clip
     // Rede (plexus): distância máxima (px; 0 = desligada), espessura (px),
     // opacidade, pontos ligados (os primeiros M slots).
     vec4 plexus;
@@ -388,6 +388,11 @@ void main() {
             }
         }
         const vec3 world = center + wu * (corner.x * size * 0.5) + wv * (corner.y * sv * 0.5);
+        // Dentro do passe da cena 3D: a profundidade é a dos modelos e planos.
+        if (p.view.w > 0.5) {
+            gl_Position = p.layerFromComp * vec4(world, 1.0);
+            return;
+        }
         const vec4 c = p.compFromWorld * vec4(world, 1.0);
         const vec2 at3 = c.xy / max(c.w, 1e-6);
         const vec4 plane = p.layerFromComp * vec4(at3, 0.0, 1.0);

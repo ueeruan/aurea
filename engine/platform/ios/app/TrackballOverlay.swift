@@ -18,6 +18,7 @@ import simd
     /// Ferramenta Girar numa camada 3D (sem parte de forma 3D escolhida).
     static func active(_ model: AureaModel) -> Bool {
         guard model.gizmoTool == 1, model.selection.count == 1, let id = model.primarySelection else { return false }
+        if model.sceneEditor && model.sceneSelectOnly { return false }   // Selecionar: sem gizmo
         if Shape3DState.shared.part(model) >= 0 { return false }
         return !model.engine.gizmo(id, length: ShellStageGeometry.gizmoLength).isEmpty
     }

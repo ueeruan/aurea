@@ -69,6 +69,13 @@ enum class BoolOp : u8 { Union = 1, Subtract = 2, Intersect = 3, Exclude = 4 };
 /// Caminho bezier do VectorPath (paramétrico gerado, livre como está), no
 /// instante local `frame` (morph pelos keyframes de forma).
 [[nodiscard]] BezierPath path_at(const VectorPath& p, f64 frame);
+/// O tipo de curva do trecho que sai do key de forma: a própria (v4) ou a
+/// derivada de `ease` (0 linear, 1 suave, 2 congelar).
+[[nodiscard]] Interpolation path_key_interpolation(const PathKey& key) noexcept;
+/// Progresso 0..1 → progresso com a curva do key (a mesma conta dos keyframes).
+[[nodiscard]] f32 path_key_ease(const PathKey& key, f32 t01) noexcept;
+/// Grava a curva do trecho (o mesmo payload do KeyframeSetEasing).
+void set_path_key_curve(PathKey& key, Interpolation interp, f32 bx1, f32 by1, f32 bx2, f32 by2, u8 power) noexcept;
 /// Converte o paramétrico em caminho livre editável (mesma forma).
 void make_editable(VectorPath& p);
 /// Morph: interpolação de dois caminhos (contagens diferentes são

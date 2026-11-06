@@ -43,10 +43,17 @@ struct BezierPath {
 
 /// Keyframe de forma (morph): o caminho inteiro num quadro (tempo LOCAL da
 /// camada). Interpolação: 0 linear, 1 suave (ease in-out), 2 congelar.
+/// Documento v4: a curva do trecho que SAI do key, a mesma dos keyframes
+/// comuns (`aurea::Interpolation` + alças + força, avaliada por
+/// `keyframe_ease`). `kPathCurveLegacy` = sem curva própria: vale `ease`.
+inline constexpr u8 kPathCurveLegacy = 0xFF;
 struct PathKey {
     i64        frame = 0;
     BezierPath path;
     u8         ease = 1;
+    u8         curve = kPathCurveLegacy;
+    u8         easePower = 1;
+    f32        bx1 = 0.33f, by1 = 0.0f, bx2 = 0.67f, by2 = 1.0f;
     friend bool operator==(const PathKey&, const PathKey&) noexcept = default;
 };
 

@@ -1974,6 +1974,10 @@ public:
     /// 7 extends the out-point to the remaining source handle (amount ignored).
     /// 8/9 extend in/out to an outside playhead, keeping the opposite edge
     /// and neighbouring layers fixed even when magnetic editing is enabled.
+    /// 10 trims the in-point AT THE PLAYHEAD (panel/batch/search buttons): the
+    /// edge lands on `amount` even on a magnetic line. Op 0 ripples there (the
+    /// handle drag keeps the edge and eats the content), which made the button
+    /// look like it only deleted the keys before the playhead.
     /// Neighbours are explicit IDs; invalid/locked edits leave history untouched.
     /// Slip changes source time only. Roll/slide never ripple unrelated layers.
     bool edit_clip_time(u64 layerId, u32 operation, i64 amount, u64 previous = 0, u64 next = 0) noexcept;

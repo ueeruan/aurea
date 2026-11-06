@@ -1000,6 +1000,8 @@ object TrackProperty {
     /** Texto no caminho: margem inicial e final (px), animáveis (0.2.7). */
     const val TEXT_PATH_FIRST_MARGIN = 46
     const val TEXT_PATH_LAST_MARGIN = 47
+    /** Keys de FORMA de um caminho vetorial (trilha virtual): effect = grupo, param = caminho. */
+    const val VECTOR_PATH = 48
     const val VECTOR_PARAM = 34
     const val SHAPE_PARAM = 35
     const val PARTICLE_PARAM = 36

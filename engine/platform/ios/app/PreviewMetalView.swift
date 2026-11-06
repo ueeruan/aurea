@@ -492,66 +492,77 @@ struct PreviewMetalView: UIViewRepresentable {
             startKind = Int32(StageGeom.layerKind(model.detail))
         }
         // Pose do rig: estado do gesto em curso.
-        private var rigNear: Int32 = -1
         private var rigMoved = false
         private var rigBegan = false
-        private var rigAngle: CGFloat?
         private var rigLast = SIMD2<Float>(0, 0)
-        /// 0.4.5: anel em curso (0..2 eixo local, 3 = o de fora; −1 = nenhum), juntas sob o dedo e se o escolhido estava entre elas.
+        /// Anel sob o dedo (0..2 eixo local, 3 = o de fora; −1 = nenhum), o que ele pegou e as juntas sobrepostas.
         private var rigRing = -1
-        private var rigNearList: [Int32] = []
-        private var rigKeep = false
-        /// Um dedo gira o osso (trackball, px da composição); dois giram em volta do olhar.
-        /// No anel, gira no eixo LOCAL do osso (ou em volta do olhar, no anel de fora).
+        private var rigTargets: [Int32] = []
+        private var rigOverlap: [Int32] = []
+        /// 0 toque ou arrasto ainda em aberto, 1 anel, 2 osso, 3 órbita da vista, 4 pinça da vista.
+        private var rigAction = 0
+        private var rigSpan: CGFloat = 0
+        private var rigDistance: Float = 3
+        /// Par do `rigPoseGesture` (RigPoseStage.kt): tocar escolhe; no vazio o dedo orbita e a
+        /// pinça aproxima; do anel gira no eixo; da junta gira, leva a cadeia ou desloca.
         private func rigPoseEvent(_ pressed: [StageTouchPoint], view: UIView) {
             if pressed.isEmpty {
                 if rigBegan { model.endGesture(); model.endPoseGesture() }
-                if !rigMoved && rigRing < 0 {
-                    if rigNear < 0 { model.choosePoseBone(-1) }   // toque no vazio solta o osso
-                    else if rigKeep && rigNearList.count > 1, let i = rigNearList.firstIndex(of: model.poseBone) {
-                        model.choosePoseBone(rigNearList[(i + 1) % rigNearList.count])   // juntas sobrepostas: a próxima
-                    }
-                }
-                rigRing = -1
+                if rigAction == 0 { rigPoseTap() }
+                rigRing = -1; rigAction = 0
                 stageFinger = nil; stageMode = .idle
-                return
-            }
-            if rigRing >= 0 {
-                guard let finger = pressed.first(where: { $0.id == stageFinger }) ?? pressed.first else { return }
-                if !rigMoved && hypot(finger.position.x - stageDown.x, finger.position.y - stageDown.y) < 8 { return }
-                let point = compositionPoint(finger.position, view: view)
-                rigMoved = true
-                if point == rigLast { return }
-                if !rigBegan { model.beginGesture("girar osso"); rigBegan = true }
-                model.dragPoseRing(axis: rigRing, from: rigLast, to: point, radius: Float(SkeletonRing.radius) * scaleFactor(view))
-                rigLast = point
                 return
             }
             if pressed.count >= 2 {
                 hadMultipleTouches = true
                 let a = pressed[0].position, b = pressed[1].position
-                let angle = atan2(b.y - a.y, b.x - a.x) * 180 / .pi
-                defer { rigAngle = angle }
-                rigMoved = true
-                guard let previous = rigAngle else { return }
-                var twist = Float(angle - previous)
-                while twist > 180 { twist -= 360 }
-                while twist < -180 { twist += 360 }
-                if !rigBegan { model.beginGesture("posar osso"); rigBegan = true }
-                model.dragPoseBone(dx: 0, dy: 0, twist: twist)
+                let span = max(1, hypot(a.x - b.x, a.y - b.y))
+                if rigAction == 0 || rigAction == 3 {
+                    rigAction = 4; rigSpan = span; rigDistance = model.sceneDistance
+                } else if rigAction == 4 {
+                    model.setSceneView(yaw: model.sceneYaw, pitch: model.scenePitch, distance: rigDistance * Float(rigSpan / span))
+                }
                 return
             }
-            if rigAngle != nil { return }   // voltou a um dedo depois do giro: não vira arrasto
+            if rigAction == 4 { return }   // sobrou um dedo da pinça: nada
             guard let finger = pressed.first(where: { $0.id == stageFinger }) ?? pressed.first else { return }
-            if !rigMoved && hypot(finger.position.x - stageDown.x, finger.position.y - stageDown.y) < 8 { return }
+            if rigAction == 0 {
+                if hypot(finger.position.x - stageDown.x, finger.position.y - stageDown.y) < 8 { return }
+                if rigRing >= 0 { rigAction = 1 }
+                else if rigTargets.isEmpty || model.sceneSelectOnly { rigAction = 3; sceneLast = stageDown }
+                else {
+                    rigAction = 2
+                    if !rigTargets.contains(model.poseBone), let first = rigTargets.first { model.choosePoseBone(first) }
+                }
+            }
             let point = compositionPoint(finger.position, view: view)
-            rigMoved = true
-            let dx = point.x - rigLast.x, dy = point.y - rigLast.y
-            rigLast = point
-            if dx == 0 && dy == 0 { return }
-            if !rigBegan { model.beginGesture("posar osso"); rigBegan = true }
-            // 0.4.5: IK simples leva a cadeia; "Mover" e o resto seguem como antes.
-            if model.poseIk && !model.poseMove { model.dragPoseIk(dx: dx, dy: dy) } else { model.dragPoseBone(dx: dx, dy: dy, twist: 0) }
+            switch rigAction {
+            case 1:
+                if point == rigLast { return }
+                if !rigBegan { model.beginGesture("girar osso"); rigBegan = true }
+                model.dragPoseRing(axis: rigRing, from: rigLast, to: point, radius: Float(SkeletonRing.radius) * scaleFactor(view))
+                rigLast = point
+            case 2:
+                let dx = point.x - rigLast.x, dy = point.y - rigLast.y
+                rigLast = point
+                if dx == 0 && dy == 0 { return }
+                if !rigBegan { model.beginGesture("posar osso"); rigBegan = true }
+                if model.poseIk && !model.poseMove { model.dragPoseIk(dx: dx, dy: dy) } else { model.dragPoseBone(dx: dx, dy: dy, twist: 0) }
+            default:
+                let dx = finger.position.x - sceneLast.x, dy = finger.position.y - sceneLast.y
+                sceneLast = finger.position
+                model.setSceneView(yaw: model.sceneYaw - Float(dx) * 0.35, pitch: model.scenePitch + Float(dy) * 0.35, distance: model.sceneDistance)
+            }
+        }
+        /// Toque: escolhe o mais perto. Só muda de osso sozinho quando o escolhido está sob o
+        /// dedo junto com outras juntas: aí o toque passa para a de baixo.
+        private func rigPoseTap() {
+            if rigTargets.isEmpty {
+                if rigRing < 0 { model.choosePoseBone(-1) }   // tocar sem querer no anel não solta o osso
+                return
+            }
+            if let i = rigOverlap.firstIndex(of: model.poseBone) { model.choosePoseBone(rigOverlap[(i + 1) % rigOverlap.count]) }
+            else if let first = rigTargets.first { model.choosePoseBone(first) }
         }
         // 0.4.6: caminho de movimento — canto/alça pegos e se o dedo já arrastou.
         private var pathHit: (Int, Int)?
@@ -651,28 +662,22 @@ struct PreviewMetalView: UIViewRepresentable {
                     stageMode = .motionPath; pathHit = hit; pathMoved = false
                     return
                 }
-                if model.rigPoseActive, let hit = model.pickIkHandle(compositionPoint(first.position, view: view), reach: 36 * scaleFactor(view)) {
+                if model.rigPoseActive, !model.sceneSelectOnly, let hit = model.pickIkHandle(compositionPoint(first.position, view: view), reach: 24 * scaleFactor(view)) {
                     stageMode = .rigIk; rigIkHit = hit; rigMoved = false; rigBegan = false
                     rigLast = compositionPoint(first.position, view: view)
                     return
                 }
-                // Pose do rig (RigPoseStage.kt): anel do osso escolhido, junta perto do dedo ou
-                // osso escolhido = gira o osso. 0.4.5: anéis por eixo local e juntas sobrepostas em ciclo.
+                // Pose do rig (RigPoseStage.kt): o gesto inteiro é do esqueleto; no vazio ele
+                // orbita e aproxima a vista.
                 if model.rigPoseActive {
                     let p = compositionPoint(first.position, view: view), k = scaleFactor(view)
-                    let ring = model.poseBone >= 0
+                    rigRing = model.poseBone >= 0
                         ? model.pickPoseRing(p, ring: Float(SkeletonRing.radius) * k, reach: 16 * k, core: 18 * k) : -1
-                    let nearList = ring < 0 ? model.pickPoseBones(p, reach: 36 * k) : []
-                    if ring >= 0 || !nearList.isEmpty || model.poseBone >= 0 {
-                        rigRing = ring
-                        rigNearList = nearList
-                        // O osso escolhido entre os candidatos fica (o arrasto gira ele); senão, o mais perto.
-                        rigKeep = model.poseBone >= 0 && nearList.contains(model.poseBone)
-                        if let n = nearList.first, !rigKeep { model.choosePoseBone(n) }
-                        stageMode = .rigPose; rigNear = nearList.first ?? -1; rigMoved = false; rigBegan = false; rigAngle = nil
-                        rigLast = p
-                        return
-                    }
+                    rigTargets = model.pickPoseTargets(p, jointReach: 26 * k, boneReach: 14 * k)
+                    rigOverlap = model.pickPoseBones(p, reach: 18 * k)
+                    stageMode = .rigPose; rigAction = 0; rigBegan = false
+                    rigLast = p
+                    return
                 }
                 if !model.sceneEditor && startShape(at: first.position, view: view) { stageMode = .shape }
                 else if startGizmo(at: first.position, view: view) { stageMode = .gizmo }
@@ -1092,7 +1097,7 @@ struct PreviewMetalView: UIViewRepresentable {
                 if sceneMode != 3 && sceneMode != 4 {
                     finishStageEdit()
                     // Bug 9: sem seleção a pinça é da câmera (não escolhe o objeto sob os dedos).
-                    if sceneHadSelection, !StageViewZoom.shared.zoomLock, editableSelection(), let id = model.primarySelection,
+                    if sceneHadSelection, !StageViewZoom.shared.zoomLock, !model.sceneSelectOnly, editableSelection(), let id = model.primarySelection,
                        !model.engine.previewGestureBasis(id).isEmpty {
                         sceneMode = 4; startLayerPinch(pressed[0], pressed[1], view: view)
                     } else { sceneMode = 3; sceneSpan = span; sceneDistance0 = model.sceneDistance }
@@ -1107,7 +1112,8 @@ struct PreviewMetalView: UIViewRepresentable {
             guard let first = pressed.first(where: { $0.id == stageFinger }) else { return }
             if sceneMode == 0 && hypot(first.position.x - stageDown.x, first.position.y - stageDown.y) > 12 {
                 // Bug 9: sem seleção no toque, arrastar orbita (mesmo sobre um objeto).
-                if sceneHadSelection, let picked = scenePicked {
+                // Ferramenta Selecionar: o dedo nunca leva o objeto (só orbita; tocar escolhe).
+                if sceneHadSelection, !model.sceneSelectOnly, let picked = scenePicked {
                     if model.primarySelection != picked || model.selection.count != 1 { model.select(layerId: picked, additive: false) }
                     guard editableSelection() else { return }
                     keepTransform(); previewBasis = model.engine.previewGestureBasis(picked)
@@ -1150,6 +1156,7 @@ struct PreviewMetalView: UIViewRepresentable {
         /// Stage.kt gizmoGesture: o eixo tocado fica travado até o dedo subir.
         private func startGizmo(at point: CGPoint, view: UIView) -> Bool {
             guard editableSelection(), let id = model.primarySelection, !ShapeStageGeometry.enabled(model) else { return false }
+            if model.sceneEditor && model.sceneSelectOnly { return false }   // Selecionar: sem gizmo
             trackball?.end(); trackball = nil
             if TrackballOverlay.active(model) {
                 trackball = TrackballSession(model: model, point: point) { screenPoint($0, $1, view: view) }

@@ -135,6 +135,8 @@ void main() {
     const float texel = max(p.info.x, 1e-3);
     const vec3 h = p.p3.xyz;
     const float bound = length(h + p.shape.x) + 1.0;
+    // A caixa inteira (lados afastados inclusive) com 1 px de folga.
+    const vec3 hull = h + p.shape.x + 1.0;
 
     // O raio na vista: ortográfico (de frente, de longe) ou da câmera em +z.
     vec3 ro, rd;
@@ -145,18 +147,21 @@ void main() {
         ro = vec3(d, bound + 1.0);
         rd = vec3(0.0, 0.0, -1.0);
     }
-    // Só o trecho dentro da esfera da caixa.
-    const float bq = dot(ro, rd);
-    const float cq = dot(ro, ro) - bound * bound;
-    const float disc = bq * bq - cq;
-    if (disc <= 0.0) { o_color = vec4(0.0); return; }
-    const float sq = sqrt(disc);
-    float t = max(-bq - sq, 0.0);
-    const float tEnd = -bq + sq;
-
     // A marcha no espaço do objeto (a rotação não muda distâncias).
     const vec3 oo = hb_to_object(ro);
     const vec3 od = hb_to_object(rd);
+    // Só o trecho dentro da CAIXA (antes era a esfera que a contém): o raio
+    // que não a toca sai já e a marcha começa na borda dela — os passos
+    // gastos no vazio em volta deixavam a prévia travada (beta, nov/2026).
+    const vec3 safe = vec3(abs(od.x) < 1e-8 ? 1e-8 : od.x, abs(od.y) < 1e-8 ? 1e-8 : od.y,
+                           abs(od.z) < 1e-8 ? 1e-8 : od.z);
+    const vec3 ta = (-hull - oo) / safe;
+    const vec3 tb = (hull - oo) / safe;
+    const vec3 tn = min(ta, tb);
+    const vec3 tf = max(ta, tb);
+    float t = max(max(max(tn.x, tn.y), tn.z), 0.0);
+    const float tEnd = min(min(tf.x, tf.y), tf.z);
+    if (tEnd <= t) { o_color = vec4(0.0); return; }
     const float eps = 0.35 * texel;
     const int steps = int(clamp(p.shape.w, 10.0, 200.0));
     vec4 acc = vec4(0.0);

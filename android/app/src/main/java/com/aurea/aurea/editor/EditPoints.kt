@@ -53,6 +53,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.aurea.aurea.R
 import com.aurea.aurea.editor.panels.EditorPanel
+import com.aurea.aurea.editor.panels.curveStart
+import com.aurea.aurea.engine.TrackProperty
 import com.aurea.aurea.editor.panels.PanelEnv
 import com.aurea.aurea.engine.VBezier
 import com.aurea.aurea.engine.VPathAt
@@ -233,7 +235,7 @@ private fun PointsColumn(env: PanelEnv, at: VPathAt?) {
             }
             val keyCount = store.vectorDoc?.groups?.getOrNull(store.vectorGroup)?.paths?.getOrNull(store.vectorPath)?.keys?.size ?: 0
             PointsCell("points.curve", stringResource(R.string.panel_editar_curva_propriedade), at != null,
-                onClick = { if (keyCount >= 2) env.onOpenPanel(EditorPanel.Curve) else curveWarning = true }) {
+                onClick = { if (keyCount >= 2 && selectPathCurve(store)) env.onOpenPanel(EditorPanel.Curve) else curveWarning = true }) {
                 CurveRailIcon(enabled = true, animated = keyCount > 0)
             }
             Box(Modifier.weight(1f))
@@ -281,6 +283,25 @@ private fun PointsColumn(env: PanelEnv, at: VPathAt?) {
             onDismiss = { curveWarning = false },
         )
     }
+}
+
+/**
+ * Beta (nov/2026): o editor de curva abria sem os keys da forma — eles não eram
+ * keyframes para ele. O motor agora os expõe como a trilha `VECTOR_PATH`
+ * (grupo, caminho); aqui se escolhe o trecho do cabeçote (fora dele, o
+ * primeiro ou o último) antes de abrir a curva, como os painéis de propriedade.
+ */
+private fun selectPathCurve(store: EditorStore): Boolean {
+    val layer = store.primary ?: return false
+    val track = store.keyframes[layer].orEmpty()
+        .filter { it.property == TrackProperty.VECTOR_PATH && it.effectIndex == store.vectorGroup && it.paramIndex == store.vectorPath }
+        .sortedBy { it.time }
+    if (track.size < 2) return false
+    val local = store.detail?.takeIf { it.id == layer }?.localPlayhead
+    val start = store.curveStart(track)
+        ?: if (local != null && local >= track.last().time) track[track.size - 2] else track.first()
+    store.selectKeyframe(layer, start)
+    return true
 }
 
 /** ± ponto: "+" com a escolha ENTRE dois pontos; "−" apaga o ponto escolhido. */

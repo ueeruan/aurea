@@ -34,6 +34,9 @@ import com.aurea.aurea.ui.theme.CupertinoGlyph
 import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.LayerType
 import com.aurea.aurea.ui.theme.tocavel
+import com.aurea.aurea.ui.ds.AnchoredMenu
+import com.aurea.aurea.ui.ds.AureaSurfaceTone
+import com.aurea.aurea.ui.ds.MenuEntry
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -62,13 +65,13 @@ import androidx.compose.ui.unit.dp
 import com.aurea.aurea.state.EditorStore
 
 /**
- * Cena 3D (0.4.6): o layout do Blender adaptado ao toque, no tema do Aurea —
- * o desenho aprovado no mockup (editor/scene3d/Scene3DStudioMockup.kt), agora
- * ligado ao motor. Cabeçalho (voltar, Modo Objeto/Pose, Adicionar, desfazer,
- * refazer, excluir), a cena viva no meio (gestos do `sceneGesture` no Stage.kt:
- * 1 dedo no objeto gira, 2 movem, pinça escala; no vazio orbita; nos ossos,
- * pose) e a área de baixo com Linha do tempo (dope sheet), Propriedades
- * (campos de arrastar) e Outliner.
+ * Cena 3D no jeito do Blender no celular, com as cores do AUREA (nov/2026):
+ * duas linhas no alto (voltar, modo, Global/Local, desfazer · menus Visualizar,
+ * Selecionar, Adicionar, Objeto), a viewport inteira no meio com ferramentas à
+ * esquerda e navegação à direita (Scene3DViewport.kt) e, embaixo, a área que
+ * recolhe: Linha do tempo, Propriedades, Outliner e Esqueleto. Nada cobre a cena:
+ * o Esqueleto mora nessa área. Gestos: `sceneGesture` no Stage.kt e
+ * `rigPoseGesture` no RigPoseStage.kt.
  */
 @Composable
 internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Composable (Modifier) -> Unit) {
@@ -76,6 +79,7 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
     var lights by remember { mutableStateOf(false) }
     var addMenu by remember { mutableStateOf(false) }
     var area by remember { mutableIntStateOf(0) }
+    var areaOpen by remember { mutableStateOf(true) }
     var materialPanel by remember { mutableStateOf(EditorPanel.Element3D) }
     if (ui.adding) Dialog(onDismissRequest = { ui.adding = false }) {
         Surface { Box(Modifier.fillMaxWidth().fillMaxHeight(.8f)) { AddLayerPanel(store, ui) } }
@@ -98,71 +102,175 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
     val selected = store.layers.firstOrNull { it.id == store.primary }
     val openMaterial = { materialPanel = EditorPanel.Element3D; materials = true }
     val openLights = { lights = true }
+    val isModel = selected?.kind == LayerType.Model3D.kind
+    // O painel 3D e os menus abrem o Esqueleto: ele vira a aba de baixo.
+    LaunchedEffect(store.skeletonPanel) { if (store.skeletonPanel) { area = AREA_SKELETON; areaOpen = true } }
+    LaunchedEffect(isModel) { if (!isModel && area == AREA_SKELETON) area = 0 }
+    val chooseArea = { i: Int ->
+        if (i == area) areaOpen = !areaOpen else { area = i; areaOpen = true }
+        store.openSkeletonPanel(i == AREA_SKELETON && areaOpen)
+    }
     Column(Modifier.fillMaxSize().background(AureaColors.Background)) {
-        StudioHeader(store, selected, addMenu) { addMenu = !addMenu }
+        StudioHeader(store, selected)
+        StudioMenuBar(store, selected, addMenu, { addMenu = !addMenu }, openMaterial, openLights) { chooseArea(AREA_SKELETON) }
         Box(Modifier.fillMaxWidth().weight(1f)) {
             // A cena 3D e os gizmos não espelham em árabe (ver `KeepLtr`).
-            KeepLtr { stage(Modifier.fillMaxSize()) }
+            KeepLtr {
+                stage(Modifier.fillMaxSize())
+                SceneViewLabel(store, selected?.name, Modifier.align(Alignment.TopStart))
+                SceneToolbar(store, Modifier.align(Alignment.TopStart))
+                SceneNavColumn(store, Modifier.align(Alignment.TopEnd))
+            }
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                val skeletonOpen = store.skeletonPanel && store.rigPoseMode && store.poseBones != null
-                if (skeletonOpen) com.aurea.aurea.editor.panels.SkeletonPanel(store, Modifier.fillMaxWidth().fillMaxHeight(.6f))
-                else if (store.rigPoseMode && store.poseBones != null) RigPoseBar(store)
                 if (store.rigFixMode && store.humanoidJoints != null) RigFixBar(store)
             }
             if (addMenu) StudioAddMenu(store, ui) { addMenu = false }
         }
-        StudioBottomArea(store, area, { area = it }, openMaterial, openLights)
+        StudioBottomArea(store, isModel, area, areaOpen, chooseArea, openMaterial, openLights)
     }
 }
+
+private const val AREA_SKELETON = 3
 
 // --- Cena 3D: cabeçalho ----------------------------------------------------------
 
 @Composable
-private fun StudioHeader(store: EditorStore, selected: com.aurea.aurea.engine.LayerRow?, addOpen: Boolean, onAdd: () -> Unit) {
+private fun StudioHeader(store: EditorStore, selected: com.aurea.aurea.engine.LayerRow?) {
     KeepLtr {
-        Row(Modifier.fillMaxWidth().height(50.dp).background(AureaColors.EditorBar).padding(horizontal = 6.dp),
+        Row(Modifier.fillMaxWidth().height(46.dp).background(AureaColors.EditorBar).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically) {
             StudioIcon(CupertinoGlyph.ChevronLeft, stringResource(R.string.editor_voltar_editor), store::exitSceneEditor)
             Spacer(Modifier.width(2.dp))
             var open by remember { mutableStateOf(false) }
             val pose = store.rigPoseMode
             val noRig = stringResource(R.string.s3d_no_rig)
+            val canPose = selected?.kind == LayerType.Model3D.kind && store.poseBones != null
+            val objectMode = stringResource(R.string.s3d_mode_object)
+            val poseMode = stringResource(R.string.s3d_mode_pose)
             Box {
-                Row(Modifier.clip(RoundedCornerShape(10.dp)).background(AureaColors.EditorRowPill).tocavel { open = !open }
-                    .padding(start = 10.dp, end = 6.dp, top = 7.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.height(36.dp).clip(RoundedCornerShape(9.dp)).background(AureaColors.EditorRowPill).tocavel { open = !open }
+                    .padding(start = 10.dp, end = 8.dp).testTag("scene.mode"), verticalAlignment = Alignment.CenterVertically) {
                     CupertinoIcon(if (pose) CupertinoGlyph.PersonCropCircle else CupertinoGlyph.CubeFill, 15.dp, AureaColors.Text)
                     Spacer(Modifier.width(6.dp))
-                    Text(stringResource(if (pose) R.string.s3d_mode_pose else R.string.s3d_mode_object), color = AureaColors.Text,
-                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    Text(if (pose) poseMode else objectMode, color = AureaColors.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     Spacer(Modifier.width(4.dp))
                     CupertinoIcon(CupertinoGlyph.ChevronDown, 11.dp, AureaColors.Muted)
                 }
-                DropdownMenu(open, { open = false }, modifier = Modifier.background(AureaColors.SurfaceHigh)) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.s3d_mode_object), color = AureaColors.Text, fontSize = 13.sp) },
-                        onClick = { open = false; if (store.rigPoseMode) store.setRigPose(false) })
-                    val canPose = selected?.kind == LayerType.Model3D.kind && store.poseBones != null
-                    DropdownMenuItem(text = { Text(stringResource(R.string.s3d_mode_pose) + if (canPose) "" else " — $noRig",
-                        color = if (canPose) AureaColors.Text else AureaColors.Muted, fontSize = 13.sp) },
-                        enabled = canPose, onClick = { open = false; store.setRigPose(true) })
-                }
+                AnchoredMenu(open, { open = false }, tone = AureaSurfaceTone.Editor, width = 220.dp, tag = "scene.mode.menu", entries = listOf(
+                    MenuEntry.Item(objectMode, glyph = CupertinoGlyph.CubeFill, selected = !pose, checked = !pose) { if (store.rigPoseMode) store.setRigPose(false) },
+                    MenuEntry.Item(poseMode, glyph = CupertinoGlyph.PersonCropCircle, sublabel = if (canPose) null else noRig, selected = pose, checked = pose, enabled = canPose) { store.setRigPose(true) },
+                ))
             }
             Spacer(Modifier.width(6.dp))
-            val addLabel = stringResource(R.string.panel_adicionar).removePrefix("+ ")
-            Row(Modifier.clip(RoundedCornerShape(10.dp)).background(if (addOpen) AureaColors.Brand else AureaColors.EditorRowPill)
-                .tocavel(haptic = true, onClick = onAdd).padding(start = 8.dp, end = 12.dp, top = 7.dp, bottom = 7.dp)
-                .semantics { contentDescription = addLabel }, verticalAlignment = Alignment.CenterVertically) {
-                CupertinoIcon(CupertinoGlyph.Plus, 14.dp, if (addOpen) AureaColors.OnAction else AureaColors.Text)
-                Spacer(Modifier.width(4.dp))
-                Text(addLabel, color = if (addOpen) AureaColors.OnAction else AureaColors.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            val space = stringResource(if (store.gizmoLocalSpace) R.string.s3d_space_local else R.string.s3d_space_global)
+            val spaceDescription = stringResource(if (store.gizmoLocalSpace) R.string.i18n_local_xyz else R.string.i18n_world_xyz)
+            Row(Modifier.height(36.dp).clip(RoundedCornerShape(9.dp)).background(AureaColors.EditorRowPill).tocavel(onClick = store::toggleGizmoSpace)
+                .padding(horizontal = 10.dp).semantics { contentDescription = spaceDescription }.testTag("scene.space"), verticalAlignment = Alignment.CenterVertically) {
+                Text(space, color = AureaColors.Text, fontSize = 13.sp, maxLines = 1)
             }
             Spacer(Modifier.weight(1f))
-            if (selected != null) StudioIcon(CupertinoGlyph.Trash, stringResource(R.string.s3d_delete_named, selected.name)) {
-                store.deleteLayers(listOf(selected.id))
-            }
             StudioIcon(CupertinoGlyph.ArrowUturnLeft, stringResource(R.string.editor_desfazer), store::undo)
             StudioIcon(CupertinoGlyph.ArrowUturnRight, stringResource(R.string.editor_refazer), store::redo)
         }
+    }
+}
+
+/** A linha de menus do Blender: Visualizar, Selecionar, Adicionar e Objeto (ou Pose). */
+@Composable
+private fun StudioMenuBar(store: EditorStore, selected: com.aurea.aurea.engine.LayerRow?, addOpen: Boolean, onAdd: () -> Unit,
+                          openMaterial: () -> Unit, openLights: () -> Unit, openSkeleton: () -> Unit) {
+    val pose = rigPoseActive(store)
+    val isModel = selected?.kind == LayerType.Model3D.kind
+    val viewEntry = { label: String, yaw: Float, pitch: Float -> MenuEntry.Item(label) { store.snapSceneView(yaw, pitch) } }
+    KeepLtr {
+        Row(Modifier.fillMaxWidth().height(42.dp).background(AureaColors.EditorBar).horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            StudioMenu(stringResource(R.string.s3d_menu_view), "scene.menu.view", buildList {
+                add(MenuEntry.Item(stringResource(R.string.s3d_view_frame), glyph = CupertinoGlyph.Fullscreen) { sceneFrameAll(store) })
+                add(MenuEntry.Item(stringResource(R.string.s3d_view_camera), glyph = CupertinoGlyph.Videocam, checked = store.sceneCameraView) { store.toggleSceneCameraView() })
+                add(MenuEntry.Divider)
+                add(viewEntry(stringResource(R.string.om_view_front), 0f, 0f))
+                add(viewEntry(stringResource(R.string.om_view_back), 180f, 0f))
+                add(viewEntry(stringResource(R.string.om_view_left), -90f, 0f))
+                add(viewEntry(stringResource(R.string.om_view_right), 90f, 0f))
+                add(viewEntry(stringResource(R.string.om_view_top), store.sceneYaw, 80f))
+                add(viewEntry(stringResource(R.string.om_view_bottom), store.sceneYaw, -80f))
+                add(MenuEntry.Divider)
+                add(MenuEntry.Item(stringResource(R.string.s3d_overlays), glyph = CupertinoGlyph.Eye, checked = !ViewModes.hideOverlay, keepOpen = true) { ViewModes.hideOverlay = !ViewModes.hideOverlay })
+                if (pose) add(MenuEntry.Item(stringResource(R.string.skeleton_show), checked = !store.skeletonHidden, keepOpen = true) { store.showSkeleton(store.skeletonHidden) })
+            })
+            val objects = store.layers.filter { it.isThreeD }
+            StudioMenu(stringResource(R.string.s3d_menu_select), "scene.menu.select", buildList {
+                if (pose) {
+                    add(MenuEntry.Item(stringResource(R.string.s3d_select_none), enabled = store.poseBone >= 0) { store.choosePoseBone(-1) })
+                    add(MenuEntry.Item(stringResource(R.string.skeleton_bones), glyph = CupertinoGlyph.PersonCropCircle) { openSkeleton() })
+                } else {
+                    add(MenuEntry.Item(stringResource(R.string.s3d_select_all)) { store.selectAll() })
+                    add(MenuEntry.Item(stringResource(R.string.s3d_select_none), enabled = store.selection.isNotEmpty()) { store.clearSelection() })
+                    if (objects.isNotEmpty()) add(MenuEntry.Divider)
+                    objects.forEach { o -> add(MenuEntry.Item(o.name, glyph = LayerType.of(o.kind).glyph, checked = o.id == store.primary) { store.select(o.id, openOptions = false) }) }
+                }
+            })
+            StudioMenuLabel(stringResource(R.string.panel_adicionar).removePrefix("+ "), "scene.menu.add", addOpen, onAdd)
+            if (pose) {
+                StudioMenu(stringResource(R.string.s3d_menu_pose), "scene.menu.pose", buildList {
+                    add(MenuEntry.Item(stringResource(R.string.rig_key_bone), glyph = CupertinoGlyph.SuitDiamond, enabled = store.poseBone >= 0) { store.togglePoseKey(false) })
+                    add(MenuEntry.Item(stringResource(R.string.rig_key_all), glyph = CupertinoGlyph.SuitDiamond) { store.togglePoseKey(true) })
+                    add(MenuEntry.Divider)
+                    add(MenuEntry.Item(stringResource(R.string.skeleton_copy)) { store.copyPose() })
+                    add(MenuEntry.Item(stringResource(R.string.skeleton_paste), enabled = store.poseClipboard != null) { store.pastePose() })
+                    add(MenuEntry.Item(stringResource(R.string.skeleton_mirror_pose)) { store.mirrorPose(true) })
+                    add(MenuEntry.Divider)
+                    add(MenuEntry.Item(stringResource(R.string.skeleton_zero_pose)) { store.zeroPose(true) })
+                    add(MenuEntry.Item(stringResource(R.string.rig_reset_all), glyph = CupertinoGlyph.ArrowCounterclockwise) { store.resetPose(true) })
+                })
+            } else {
+                StudioMenu(stringResource(R.string.s3d_menu_object), "scene.menu.object", buildList {
+                    val has = selected != null
+                    add(MenuEntry.Item(stringResource(R.string.s3d_insert_key_desc), glyph = CupertinoGlyph.SuitDiamond, enabled = has) {
+                        store.primary?.let { store.toggleTransformKeyframe(IntArray(9) { i -> i }, it) }
+                    })
+                    add(MenuEntry.Item(stringResource(R.string.s3d_duplicate), glyph = CupertinoGlyph.DocOnDoc, enabled = has) { store.duplicateLayers() })
+                    if (isModel || (selected?.kind == LayerType.Text.kind && selected.isThreeD)) {
+                        add(MenuEntry.Divider)
+                        add(MenuEntry.Item(stringResource(R.string.scene_material), glyph = CupertinoGlyph.CubeFill) { openMaterial() })
+                    }
+                    if (selected?.kind == LayerType.Light.kind) {
+                        add(MenuEntry.Divider)
+                        add(MenuEntry.Item(stringResource(R.string.pn_t3d_lighting), glyph = CupertinoGlyph.Lightbulb) { openLights() })
+                    }
+                    if (isModel) {
+                        add(MenuEntry.Divider)
+                        add(MenuEntry.Item(stringResource(R.string.skeleton_title), glyph = CupertinoGlyph.PersonCropCircle) { openSkeleton() })
+                        add(MenuEntry.Item(stringResource(R.string.mocap_title), glyph = CupertinoGlyph.Videocam) {
+                            com.aurea.aurea.editor.panels.Element3DRequest.tab = com.aurea.aurea.editor.panels.Tab3D.Rig
+                            openMaterial()
+                        })
+                    }
+                    add(MenuEntry.Divider)
+                    add(MenuEntry.Item(selected?.let { stringResource(R.string.s3d_delete_named, it.name) } ?: stringResource(R.string.s3d_nothing_selected),
+                        glyph = CupertinoGlyph.Trash, enabled = has, destructive = true) { selected?.let { store.deleteLayers(listOf(it.id)) } })
+                })
+            }
+        }
+    }
+}
+
+@Composable
+private fun StudioMenu(label: String, tag: String, entries: List<MenuEntry>) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        StudioMenuLabel(label, tag, open) { open = !open }
+        AnchoredMenu(open, { open = false }, entries = entries, tone = AureaSurfaceTone.Editor, width = 240.dp, tag = "$tag.list")
+    }
+}
+
+@Composable
+private fun StudioMenuLabel(label: String, tag: String, on: Boolean, onClick: () -> Unit) {
+    Box(Modifier.height(38.dp).clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.EditorRowPill else Color.Transparent)
+        .tocavel(onClick = onClick).padding(horizontal = 11.dp).testTag(tag), contentAlignment = Alignment.Center) {
+        Text(label, color = AureaColors.Text, fontSize = 14.sp, maxLines = 1)
     }
 }
 
@@ -249,24 +357,47 @@ private fun StudioTile(glyph: Char, label: String, modifier: Modifier, onClick: 
 // --- Cena 3D: área de baixo --------------------------------------------------------
 
 @Composable
-private fun StudioBottomArea(store: EditorStore, area: Int, onArea: (Int) -> Unit, openMaterial: () -> Unit, openLights: () -> Unit) {
-    Column(Modifier.fillMaxWidth().height(272.dp).background(AureaColors.EditorCanvas).navigationBarsPadding()) {
+private fun StudioBottomArea(store: EditorStore, isModel: Boolean, area: Int, open: Boolean, onArea: (Int) -> Unit,
+                             openMaterial: () -> Unit, openLights: () -> Unit) {
+    val content = when (area) { 0 -> 176.dp; AREA_SKELETON -> 312.dp; else -> 248.dp }
+    Column(Modifier.fillMaxWidth().background(AureaColors.EditorCanvas).navigationBarsPadding()) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(AureaColors.EditorBarLine))
-        Row(Modifier.fillMaxWidth().height(40.dp).background(AureaColors.EditorBar).padding(horizontal = 6.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            listOf(R.string.s3d_area_timeline, R.string.s3d_area_properties, R.string.s3d_area_outliner).forEachIndexed { i, label ->
-                val on = i == area
-                Box(Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) AureaColors.EditorRowPill else Color.Transparent)
-                    .tocavel { onArea(i) }.padding(horizontal = 12.dp, vertical = 7.dp)) {
-                    Text(stringResource(label), color = if (on) AureaColors.Text else AureaColors.Muted, fontSize = 12.sp,
-                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+        Row(Modifier.fillMaxWidth().height(44.dp).background(AureaColors.EditorBar).padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                val tabs = buildList {
+                    add(R.string.s3d_area_timeline); add(R.string.s3d_area_properties); add(R.string.s3d_area_outliner)
+                    if (isModel) add(R.string.skeleton_title)
+                }
+                tabs.forEachIndexed { i, label ->
+                    val on = i == area && open
+                    Box(Modifier.height(36.dp).clip(RoundedCornerShape(9.dp)).background(if (on) AureaColors.EditorRowPill else Color.Transparent)
+                        .tocavel { onArea(i) }.padding(horizontal = 9.dp).testTag("scene.area.$i"), contentAlignment = Alignment.Center) {
+                        Text(stringResource(label), color = if (on) AureaColors.Text else AureaColors.Muted, fontSize = 13.sp,
+                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+                    }
                 }
             }
+            // Recolhida, a área perde o transporte: o play fica aqui (aberta, as abas precisam do espaço).
+            if (!open) {
+                val playDesc = stringResource(if (store.playing) R.string.s3d_pause else R.string.s3d_play)
+                Box(Modifier.size(40.dp).semantics { contentDescription = playDesc }.tocavel(haptic = true) { store.togglePlayback() }, contentAlignment = Alignment.Center) {
+                    CupertinoIcon(if (store.playing) CupertinoGlyph.PauseFill else CupertinoGlyph.PlayFill, 17.dp, AureaColors.Text)
+                }
+            }
+            val foldDesc = stringResource(if (open) R.string.s3d_area_collapse else R.string.s3d_area_expand)
+            Box(Modifier.size(40.dp).semantics { contentDescription = foldDesc }.tocavel { onArea(area) }.testTag("scene.area.fold"), contentAlignment = Alignment.Center) {
+                CupertinoIcon(if (open) CupertinoGlyph.ChevronDown else CupertinoGlyph.ChevronUp, 15.dp, AureaColors.Muted)
+            }
         }
-        when (area) {
-            0 -> StudioTimeline(store)
-            1 -> StudioProperties(store, openMaterial, openLights)
-            else -> StudioOutliner(store)
+        if (open) Box(Modifier.fillMaxWidth().height(content)) {
+            when (area) {
+                0 -> StudioTimeline(store)
+                1 -> StudioProperties(store, openMaterial, openLights)
+                2 -> StudioOutliner(store)
+                else -> com.aurea.aurea.editor.panels.SkeletonPanel(store, Modifier.fillMaxSize())
+            }
         }
     }
 }
@@ -305,9 +436,23 @@ private fun StudioTimeline(store: EditorStore) {
                 }
                 StudioIcon(CupertinoGlyph.ChevronRight, stringResource(R.string.s3d_next_key)) { store.stepToKeyframe(1) }
                 StudioIcon(CupertinoGlyph.ForwardEnd, stringResource(R.string.s3d_end)) { store.seek(end) }
+                StudioIcon(CupertinoGlyph.SuitDiamond, stringResource(R.string.s3d_insert_key_desc)) {
+                    if (pose) store.togglePoseKey(store.poseBone < 0)
+                    else if (layer != null) store.toggleTransformKeyframe(IntArray(9) { it }, layer)
+                }
+                StudioIcon(CupertinoGlyph.Xmark, stringResource(R.string.s3d_delete_key)) {
+                    val at = picked ?: store.playhead
+                    val d = store.detail
+                    if (layer != null && d != null && d.id == layer) {
+                        val local = at - d.startFrame + d.offsetFrames
+                        store.keyframes[layer].orEmpty().filter { it.effectIndex < 0 && it.property <= 12 && it.time == local }
+                            .forEach { store.deleteKeyframe(layer, it) }
+                    }
+                    picked = null
+                }
                 Spacer(Modifier.weight(1f))
                 Text("${store.playhead}", color = AureaColors.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(AureaColors.EditorGlyphBox).padding(horizontal = 12.dp, vertical = 6.dp))
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(AureaColors.EditorGlyphBox).padding(horizontal = 8.dp, vertical = 6.dp))
             }
             val objects = store.layers.filter { it.isThreeD }
             val rows = buildList {
@@ -318,31 +463,13 @@ private fun StudioTimeline(store: EditorStore) {
                 rows.associateWith { id -> if (id == -1L) rows.filter { it != -1L }.flatMap { transformKeyFrames(store, it) }.distinct()
                                             else transformKeyFrames(store, id) }
             }
-            val rowH = 26.dp; val rulerH = 22.dp
+            val rowH = 34.dp; val rulerH = 24.dp
             val measurer = rememberTextMeasurer()
             val keyColor = AureaColors.Text; val keyPicked = AureaColors.Keyframe; val accent = AureaColors.Brand
             val onAccent = AureaColors.OnAction; val grid = AureaColors.TickWeak; val muted = AureaColors.Muted; val bar = AureaColors.EditorBar
             Row(Modifier.fillMaxSize()) {
                 Column(Modifier.width(122.dp).fillMaxHeight().background(AureaColors.EditorBar.copy(alpha = .6f))) {
-                    Row(Modifier.height(rulerH).fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        val insertDesc = stringResource(R.string.s3d_insert_key_desc)
-                        StudioMini(stringResource(R.string.s3d_insert_key), insertDesc) {
-                            if (pose) store.togglePoseKey(store.poseBone < 0)
-                            else if (layer != null) store.toggleTransformKeyframe(IntArray(9) { it }, layer)
-                        }
-                        val deleteDesc = stringResource(R.string.s3d_delete_key)
-                        StudioMini("✕", deleteDesc) {
-                            val at = picked ?: store.playhead
-                            val d = store.detail
-                            if (layer != null && d != null && d.id == layer) {
-                                val local = at - d.startFrame + d.offsetFrames
-                                store.keyframes[layer].orEmpty().filter { it.effectIndex < 0 && it.property <= 12 && it.time == local }
-                                    .forEach { store.deleteKeyframe(layer, it) }
-                            }
-                            picked = null
-                        }
-                    }
+                    Spacer(Modifier.height(rulerH))
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         rows.forEach { id ->
                             val on = id == layer
@@ -416,15 +543,6 @@ private fun StudioTimeline(store: EditorStore) {
 }
 
 @Composable
-private fun StudioMini(text: String, description: String, onClick: () -> Unit) {
-    Box(Modifier.height(18.dp).clip(RoundedCornerShape(6.dp)).background(AureaColors.EditorRowPill)
-        .tocavel(haptic = true, onClick = onClick).padding(horizontal = 6.dp).semantics { contentDescription = description },
-        contentAlignment = Alignment.Center) {
-        Text(text, color = AureaColors.Text, fontSize = 10.sp, maxLines = 1)
-    }
-}
-
-@Composable
 private fun StudioProperties(store: EditorStore, openMaterial: () -> Unit, openLights: () -> Unit) {
     val d = store.detail?.takeIf { it.id == store.primary }
     val row = store.layers.firstOrNull { it.id == store.primary }
@@ -465,8 +583,8 @@ private fun StudioProperties(store: EditorStore, openMaterial: () -> Unit, openL
 
 @Composable
 private fun StudioMiniPill(glyph: Char, label: String, onClick: () -> Unit) {
-    Row(Modifier.height(34.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.EditorRowPill)
-        .tocavel(haptic = true, onClick = onClick).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.height(40.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.EditorRowPill)
+        .tocavel(haptic = true, onClick = onClick).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         CupertinoIcon(glyph, 14.dp, AureaColors.Text)
         Spacer(Modifier.width(6.dp))
         Text(label, color = AureaColors.Text, fontSize = 12.sp, maxLines = 1)
@@ -497,19 +615,19 @@ private fun StudioNumber(label: String, value: Float, unit: String, step: Float,
     val change by rememberUpdatedState(onChange)
     val text = "%.${decimals}f".format(java.util.Locale.ROOT, value) + unit
     KeepLtr {
-        Row(Modifier.fillMaxWidth().height(32.dp).clip(shape).background(AureaColors.EditorGlyphBox)
+        Row(Modifier.fillMaxWidth().height(40.dp).clip(shape).background(AureaColors.EditorGlyphBox)
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(onDragStart = { acc = current }) { ch, dx -> ch.consume(); acc += dx * speed; change(acc) }
             }.semantics { contentDescription = "$label $text" },
             verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(32.dp).tocavel { change(current - step) }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(40.dp).tocavel { change(current - step) }, contentAlignment = Alignment.Center) {
                 CupertinoIcon(CupertinoGlyph.ChevronLeft, 12.dp, AureaColors.Muted)
             }
             Text(label, color = AureaColors.Muted, fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
             Text(text, color = AureaColors.Text, fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
-            Box(Modifier.size(32.dp).tocavel { change(current + step) }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(40.dp).tocavel { change(current + step) }, contentAlignment = Alignment.Center) {
                 CupertinoIcon(CupertinoGlyph.ChevronRight, 12.dp, AureaColors.Muted)
             }
         }
@@ -545,43 +663,18 @@ private fun StudioOutliner(store: EditorStore) {
 @Composable
 private fun StudioOutRow(depth: Int, glyph: Char?, name: String, on: Boolean, keyed: Boolean,
                          delete: Pair<String, () -> Unit>?, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(32.dp).background(if (on) AureaColors.Brand.copy(alpha = .35f) else Color.Transparent)
+    Row(Modifier.fillMaxWidth().height(44.dp).background(if (on) AureaColors.Brand.copy(alpha = .35f) else Color.Transparent)
         .tocavel(onClick = onClick).padding(start = (10 + depth * 14).dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         if (glyph != null) CupertinoIcon(glyph, 14.dp, AureaColors.Muted)
         else Text("◇", color = AureaColors.Muted, fontSize = 11.sp)
         Spacer(Modifier.width(6.dp))
-        Text(name, color = if (on) AureaColors.Text else AureaColors.Muted, fontSize = 12.sp, maxLines = 1,
+        Text(name, color = if (on) AureaColors.Text else AureaColors.Muted, fontSize = 13.sp, maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         if (keyed) Text("◆", color = AureaColors.Keyframe, fontSize = 10.sp)
-        if (delete != null) Box(Modifier.size(30.dp).clip(RoundedCornerShape(8.dp)).tocavel(onClick = delete.second)
+        if (delete != null) Box(Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)).tocavel(onClick = delete.second)
             .semantics { contentDescription = delete.first }, contentAlignment = Alignment.Center) {
             CupertinoIcon(CupertinoGlyph.Trash, 14.dp, AureaColors.Muted)
         }
-    }
-}
-
-/**
- * Barra do modo de pose: dica, keyframe do osso / de todos, resetar e concluir.
- * O anel na junta = keyframe no cabeçote (a mesma convenção das partes 3D).
- */
-@Composable
-private fun RigPoseBar(store: EditorStore) {
-    val chosen = store.poseBone >= 0
-    Text(stringResource(if (chosen) R.string.rig_pose_hint_bone else R.string.rig_pose_hint), color = AureaColors.Text, fontSize = 12.sp,
-        textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp)
-            .background(ShellColors.FloatingDark, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 8.dp))
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (chosen) ScenePillButton(CupertinoGlyph.SuitDiamond, stringResource(R.string.rig_key_bone)) { store.togglePoseKey(false) }
-        ScenePillButton(CupertinoGlyph.SuitDiamond, stringResource(R.string.rig_key_all)) { store.togglePoseKey(true) }
-        if (chosen) ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.rig_reset_bone)) { store.resetPose(false) }
-        // 0.3.6: "Mover" desloca o osso escolhido (o quadril) em vez de girar.
-        if (chosen) ScenePillButton(if (store.poseMove) CupertinoGlyph.CheckmarkAlt else CupertinoGlyph.Move,
-            stringResource(R.string.rig3d_move)) { store.choosePoseMove(!store.poseMove) }
-        ScenePillButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.rig_reset_all)) { store.resetPose(true) }
-        // 0.4.5: o painel Esqueleto (árvore, rotação numérica, espelhar, copiar/colar).
-        ScenePillButton(CupertinoGlyph.PersonCropCircle, stringResource(R.string.skeleton_title)) { store.openSkeletonPanel(true) }
-        ScenePillButton(CupertinoGlyph.CheckmarkAlt, stringResource(R.string.rig_done)) { store.setRigPose(false) }
     }
 }
 

@@ -341,6 +341,9 @@ GroundDraw build_ground(FrameGraph& graph, Arena& arena, ShaderLibrary& shaders,
                     auto* b = static_cast<SceneBlock*>(arena.alloc(sizeof(SceneBlock), 16));
                     if (!b) continue;
                     *b = *d.block;
+                    // Recorte de um objeto com efeitos: na cena ele é um buraco,
+                    // mas no reflexo do chão aparece com o material dele.
+                    if (b->alpha.z > 1.5f) b->alpha.z = 0.0f;
                     // Exposure samples can carry a different camera for each
                     // object (including the center camera when its blur is off).
                     // Reflect that camera, as the main PBR draw does.

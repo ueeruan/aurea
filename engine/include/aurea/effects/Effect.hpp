@@ -97,6 +97,11 @@ struct LayerPlacement {
     u32  compHeight = 0;
     u32  layerWidth = 0;    ///< tamanho natural da layer (resolução cheia)
     u32  layerHeight = 0;
+    /// Copiar fundo: o plano dos efeitos é a caixa da camada com margem, não a
+    /// caixa natural. Os pontos relativos (centro...) são gravados na caixa da
+    /// camada; `valor * relativeScale + relativeBias` os leva a este plano.
+    Vec2 relativeScale{1.0f, 1.0f};
+    Vec2 relativeBias{0.0f, 0.0f};
     /// A camada é desenhada DENTRO da cena 3D (um plano no mundo), não na
     /// composição. Aí a matriz `compFromLayer` não diz onde ela aparece: o
     /// corte pela área visível da composição não vale, e usá-lo encolhia a
@@ -559,6 +564,19 @@ private:
 // -----------------------------------------------------------------------------
 // O efeito
 // -----------------------------------------------------------------------------
+/// Bytes reservados para os uniforms de `Effect::scene_draw`.
+inline constexpr u32 kEffectSceneUniformBytes = 1024;
+
+/// O que um efeito gerador desenha dentro do passe da cena 3D, com a profundidade
+/// dos modelos e planos (ver `Effect::scene_draw`).
+struct EffectSceneDraw {
+    ShaderId vertex = ShaderId::Count;
+    ShaderId fragment = ShaderId::Count;
+    u32  vertices = 0;
+    u32  uniformBytes = 0;
+    bool additive = false;
+};
+
 class Effect {
 public:
     virtual ~Effect() = default;
@@ -674,6 +692,16 @@ public:
     /// Falso = efeito comum (o padrão). `expands_stack` é a pergunta barata
     /// que o planejamento faz antes (só o plugin de pilha diz sim).
     [[nodiscard]] virtual bool expands_stack() const noexcept { return false; }
+
+    /// O efeito pode ser desenhado direto na cena 3D, em vez de numa folha 2D?
+    [[nodiscard]] virtual bool scene_capable(const EffectEval& eval) const noexcept { (void)eval; return false; }
+    /// Preenche `uniforms` (até kEffectSceneUniformBytes) e `out` para o passe da
+    /// cena; `clip` é mundo → clip da câmera da cena. Falso = nada a desenhar.
+    [[nodiscard]] virtual bool scene_draw(const EffectEval& eval, const Mat4& clip, f32 opacity,
+                                          void* uniforms, EffectSceneDraw& out) const noexcept {
+        (void)eval; (void)clip; (void)opacity; (void)uniforms; (void)out;
+        return false;
+    }
     [[nodiscard]] virtual bool expand_stack(const ParamValue* values, u32 count,
                                             std::vector<StackStep>& out) const {
         (void)values; (void)count; (void)out;

@@ -4715,4 +4715,23 @@
     <string name="ai_tool_panel">स्क्रीन खोली</string>
     <string name="ai_tool_other">एडिटर में कार्रवाई</string>
     <string name="ai_close">बंद करें</string>
+    <string name="s3d_menu_view">दृश्य</string>
+    <string name="s3d_menu_select">चुनें</string>
+    <string name="s3d_menu_object">ऑब्जेक्ट</string>
+    <string name="s3d_menu_pose">पोज़</string>
+    <string name="s3d_space_global">ग्लोबल</string>
+    <string name="s3d_space_local">लोकल</string>
+    <string name="s3d_view_frame">सब फ़्रेम करें</string>
+    <string name="s3d_view_perspective">परिप्रेक्ष्य दृश्य</string>
+    <string name="s3d_view_camera">कैमरा दृश्य</string>
+    <string name="s3d_overlays">ओवरले</string>
+    <string name="s3d_nav_zoom">ज़ूम: ऊपर या नीचे खींचें</string>
+    <string name="s3d_nav_pan">दृश्य खिसकाएँ: खींचें</string>
+    <string name="s3d_nav_orbit">दृश्य घुमाएँ: खींचें या अक्ष पर टैप करें</string>
+    <string name="s3d_select_all">सब</string>
+    <string name="s3d_select_none">कुछ नहीं</string>
+    <string name="s3d_duplicate">डुप्लिकेट</string>
+    <string name="s3d_area_collapse">पैनल समेटें</string>
+    <string name="s3d_area_expand">पैनल खोलें</string>
+    <string name="skeleton_tab_bone">हड्डी</string>
 </resources>

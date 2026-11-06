@@ -171,12 +171,14 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         // Omega chrome (área 02, P1-2): o botão de modo zoom do canvas e o
         // rótulo "NN%" no canto sup-esq (o chip "250 %" saiu: o 100 % mora no
         // número da coluna de modos).
-        if (!store.rawPlayback && !ui.fullscreen) CanvasZoomMode(store, Modifier.align(Alignment.TopStart))
+        // Na Cena 3D a vista mora na coluna da direita (Scene3DViewport.kt).
+        if (!store.rawPlayback && !ui.fullscreen && !store.sceneEditor) CanvasZoomMode(store, Modifier.align(Alignment.TopStart))
         // 0.4.1 (mockup "interface 03"): grade, modos de visão e zoom flutuando no canto sup-dir.
-        if (!store.rawPlayback && !ui.fullscreen) StageFloatPills(store, Modifier.align(Alignment.TopEnd))
+        if (!store.rawPlayback && !ui.fullscreen && !store.sceneEditor) StageFloatPills(store, Modifier.align(Alignment.TopEnd))
         // 0.4.6: o nome da vista do AE escolhida (Frente, Topo, Vista personalizada 1…).
         if (!store.rawPlayback) StageViewLabel(store, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp))
-        if (store.selection.size == 1 && !store.rawPlayback) {
+        // Na Cena 3D as ferramentas ficam na barra da esquerda (Scene3DViewport.kt).
+        if (store.selection.size == 1 && !store.rawPlayback && !store.sceneEditor) {
             Row(Modifier.align(Alignment.BottomStart).padding(8.dp)) {
                 if (store.gizmoAxes) {
                     val toolLabel = stringResource(R.string.gizmo_tool_label)
@@ -226,7 +228,7 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
         EffectParamGuide()
         // Omega chrome (área 02, P0-5): a coluna de modos de visão, presa à
         // direita da prévia (abre pelo último botão do transporte).
-        if (!store.rawPlayback && !ui.fullscreen) {
+        if (!store.rawPlayback && !ui.fullscreen && !store.sceneEditor) {
             ViewModeColumn(
                 store,
                 viewModeColumnWidth(androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp),
@@ -522,17 +524,24 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     if (store.sceneEditor) {
         // Lidos AQUI para a órbita pelo dedo redesenhar guias e gizmo (as
         // linhas saem do motor, que não é estado do Compose).
-        store.sceneYaw; store.scenePitch; store.sceneDistance
+        store.sceneYaw; store.scenePitch; store.sceneDistance; store.sceneCameraView
         val lines = store.sceneGuideLines()
         for (i in lines.indices step 5) {
-            val color = when (lines[i + 4].toInt()) { 1 -> Color(0xFFFFCC55); 2 -> Color.Cyan; else -> Color.Gray.copy(alpha = .22f) }
-            drawLine(color, Offset(m.sx(lines[i]), m.sy(lines[i + 1])), Offset(m.sx(lines[i + 2]), m.sy(lines[i + 3])), 1.dp.toPx())
+            val kind = lines[i + 4].toInt()
+            val color = when (kind) {
+                1 -> Color(0xFFFFCC55); 2 -> Color.Cyan
+                3 -> Color.White.copy(alpha = .10f)        // chão quadriculado
+                4 -> PoseAxisColors[0].copy(alpha = .75f)  // eixo X
+                5 -> PoseAxisColors[2].copy(alpha = .75f)  // eixo Z
+                else -> Color.Gray.copy(alpha = .22f)
+            }
+            drawLine(color, Offset(m.sx(lines[i]), m.sy(lines[i + 1])), Offset(m.sx(lines[i + 2]), m.sy(lines[i + 3])), (if (kind >= 4) 1.5.dp else 1.dp).toPx())
         }
         // Pose do rig (RigPoseStage.kt): juntas e ossos no lugar do gizmo da camada.
         // AutoRig 3D (0.3.6): Corrigir esqueleto e os controladores IK.
         if (rigFixActive(store)) { drawRigFixOverlay(store, m); return }
         if (rigPoseActive(store)) { drawRigPoseOverlay(store, m); drawRigIkHandles(store, m); return }
-        store.gizmo?.let { if (!drawTrackball(store, m)) drawGizmo(m, it, store.gizmoTool) }
+        if (!store.sceneSelectOnly) store.gizmo?.let { if (!drawTrackball(store, m)) drawGizmo(m, it, store.gizmoTool) }
         return
     }
     // Rig 2D: o palco é do esqueleto (juntas e ossos), sem alças da camada.
@@ -703,7 +712,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
  * trackball: só no editor de cena 3D. No resto o palco é o do app antigo,
  * POSIÇÃO e PIVÔ (pedido do dono na 0.2.7); a profundidade (Z) fica no painel.
  */
-internal val EditorStore.gizmoAxes: Boolean get() = (sceneEditor || gizmoAxesForTests) && gizmo != null
+internal val EditorStore.gizmoAxes: Boolean get() = ((sceneEditor && !sceneSelectOnly) || gizmoAxesForTests) && gizmo != null
 
 /** A face Pivô do Transformar manda no palco (fora da cena 3D solta). */
 internal fun pivotMode(store: EditorStore, ui: EditorUi): Boolean =
@@ -1069,7 +1078,8 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sce
         ?: store.primary?.takeIf { store.detail?.kind in listOf(LayerType.Null.kind, LayerType.Camera.kind, LayerType.Light.kind) }
     // Bug 9 (0.3.4): a seleção NO TOQUE decide se o gesto é do objeto ou da câmera.
     val hasSelection = store.selection.isNotEmpty()
-    val dragTarget = SceneGestureRules.dragTarget(hasSelection, picked)
+    // Ferramenta Selecionar: o dedo nunca leva o objeto (só orbita; tocar escolhe).
+    val dragTarget = if (store.sceneSelectOnly) null else SceneGestureRules.dragTarget(hasSelection, picked)
     var mode = 0            // 0 pendente, 1 órbita, 2 objeto, 3 pinça da vista, 4 pinça do objeto
     var last = down.position
     var span0 = 1f
@@ -1091,7 +1101,7 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sce
                     // Bug 9: sem seleção a pinça é da câmera (não escolhe o objeto sob os dedos).
                     val d = store.detail?.takeIf { store.selection.isNotEmpty() }
                     if (d != null && SceneGestureRules.pinchEditsObject(hasSelection,
-                            !d.locked && store.previewGestureBasis(d.id) != null, StageView.zoomLock)) {
+                            !d.locked && store.previewGestureBasis(d.id) != null, StageView.zoomLock || store.sceneSelectOnly)) {
                         mode = 4; edit.startPinch(d, a.x, a.y, b.x, b.y)
                     } else { mode = 3; span0 = span; distance0 = store.sceneDistance }
                 } else if (mode == 4) {
@@ -1377,12 +1387,13 @@ private suspend fun PointerInputScope.stageGestures(
                 rigFixGesture(store, m, down, slop)
                 return@awaitEachGesture
             }
-            if (m.valid && rigPoseActive(store) && pickIkHandle(store, m, down.position.x, down.position.y, 36.dp.toPx()) != null) {
+            if (m.valid && rigPoseActive(store) && !store.sceneSelectOnly &&
+                pickIkHandle(store, m, down.position.x, down.position.y, 24.dp.toPx()) != null) {
                 rigIkGesture(store, m, down, slop)
                 return@awaitEachGesture
             }
-            if (m.valid && rigPoseActive(store) &&
-                (store.poseBone >= 0 || pickPoseBone(store, m, down.position.x, down.position.y, 36.dp.toPx()) >= 0)) {
+            // Pose: o gesto inteiro é do esqueleto; no vazio ele orbita e aproxima a vista.
+            if (m.valid && rigPoseActive(store)) {
                 rigPoseGesture(store, m, down, slop)
                 return@awaitEachGesture
             }

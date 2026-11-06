@@ -45,9 +45,12 @@ const std::array<BuiltinPropertySpec, 9>& lights() noexcept {
         p[3] = scalar("range", "Alcance", ParamType::Float, 5, -1, d.range, 0, 5000, 0, 1'000'000, "px", 1, "light"); condition(p[3], 0, 1, 2);
         p[4] = scalar("coneAngle", "Abertura do cone", ParamType::Angle, 6, track(TrackProperty::LightConeAngle), d.coneAngle, 0, 179, 0, 179, "°", 1, "light"); condition(p[4], 0, 2);
         p[5] = scalar("penumbra", "Penumbra", ParamType::Float, 7, track(TrackProperty::LightPenumbra), d.penumbra, 0, 1, 0, 1, "%", 1, "light"); condition(p[5], 0, 2);
-        p[6] = scalar("castShadows", "Sombras", ParamType::Bool, 8, -1, d.castShadows ? 1.f : 0.f, 0, 1, 0, 1, "", 0, "shadows"); condition(p[6], 0, 0);
+        // Beta (nov/2026): ponto e spot projetam sombra desde a 0.4.6 (SceneRenderer,
+        // sombras locais), mas a chave só aparecia na direcional. O deslocamento
+        // continua só nela: as locais usam um viés fixo do atlas.
+        p[6] = scalar("castShadows", "Sombras", ParamType::Bool, 8, -1, d.castShadows ? 1.f : 0.f, 0, 1, 0, 1, "", 0, "shadows");
         p[7] = scalar("shadowBias", "Deslocamento da sombra", ParamType::Float, 9, -1, d.shadowBias, 0, .01f, 0, .1f, "", 4, "shadows"); condition(p[7], 0, 0); condition(p[7], 8, 1);
-        p[8] = scalar("shadowStrength", "Força da sombra", ParamType::Float, 10, -1, d.shadowStrength, 0, 1, 0, 1, "%", 1, "shadows"); condition(p[8], 0, 0); condition(p[8], 8, 1);
+        p[8] = scalar("shadowStrength", "Força da sombra", ParamType::Float, 10, -1, d.shadowStrength, 0, 1, 0, 1, "%", 1, "shadows"); condition(p[8], 8, 1);
         return p;
     }();
     return specs;

@@ -4727,4 +4727,23 @@
     <string name="ai_tool_panel">Открыл экран</string>
     <string name="ai_tool_other">Действие в редакторе</string>
     <string name="ai_close">Закрыть</string>
+    <string name="s3d_menu_view">Вид</string>
+    <string name="s3d_menu_select">Выбор</string>
+    <string name="s3d_menu_object">Объект</string>
+    <string name="s3d_menu_pose">Поза</string>
+    <string name="s3d_space_global">Глобально</string>
+    <string name="s3d_space_local">Локально</string>
+    <string name="s3d_view_frame">Показать всё</string>
+    <string name="s3d_view_perspective">Перспективный вид</string>
+    <string name="s3d_view_camera">Вид из камеры</string>
+    <string name="s3d_overlays">Наложения</string>
+    <string name="s3d_nav_zoom">Масштаб: тяните вверх или вниз</string>
+    <string name="s3d_nav_pan">Сдвиг вида: тяните</string>
+    <string name="s3d_nav_orbit">Вращение вида: тяните или нажмите на ось</string>
+    <string name="s3d_select_all">Всё</string>
+    <string name="s3d_select_none">Ничего</string>
+    <string name="s3d_duplicate">Дублировать</string>
+    <string name="s3d_area_collapse">Свернуть панель</string>
+    <string name="s3d_area_expand">Развернуть панель</string>
+    <string name="skeleton_tab_bone">Кость</string>
 </resources>

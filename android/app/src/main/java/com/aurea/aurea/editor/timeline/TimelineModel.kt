@@ -504,6 +504,7 @@ internal object LaneNames {
         R.string.tl_speed to "Speed", R.string.tl_animator to "Animator %1\$d · %2\$d", R.string.tl_material to "Material %1\$d · %2\$s",
         R.string.tl_alpha to "Alpha", R.string.tl_metallic to "Metallic", R.string.tl_roughness to "Roughness",
         R.string.tl_transform to "Transform", R.string.tl_3d to "3D · %1\$d",
+        R.string.om_pts_contour_n to "Contour %1\$d",
     )
     fun get(@StringRes id: Int, vararg args: Any): String {
         val context = app
@@ -561,6 +562,7 @@ private fun trackName(track: TimelineTrack, effects: List<Pair<Int, String>>): S
         42 -> LaneNames.get(R.string.tl_part, track.effect + 1, partAxisName(track.param) ?: track.param.toString())
         46 -> LaneNames.get(R.string.panel_margem_inicial)
         47 -> LaneNames.get(R.string.text027_path_last_margin)
+        48 -> LaneNames.get(R.string.om_pts_contour_n, track.param + 1)
         else -> LaneNames.get(R.string.tl_3d, track.property)
     }
 }

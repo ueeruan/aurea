@@ -203,7 +203,7 @@ private fun executeEditorCommand(id: String, store: EditorStore, ui: EditorUi) {
         "split" -> store.splitAtPlayhead()
         "duplicate" -> store.duplicateLayers()
         "ripple_delete" -> store.deleteLayers(ripple = true)
-        "trim_start" -> layer?.let { store.trimStart(it, store.playhead) }
+        "trim_start" -> layer?.let { store.trimToPlayhead(it, start = true, live = false) }
         "trim_end" -> layer?.let { store.trimEnd(it, store.playhead) }
         "speed" -> panel(EditorPanel.Speed)
         "clip_edit" -> panel(EditorPanel.ClipEdit)

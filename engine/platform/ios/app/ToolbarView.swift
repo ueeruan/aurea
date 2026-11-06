@@ -858,7 +858,7 @@ struct MultiSelectBottomBar: View {
         if model.status.playing != 0 { model.playPause() }
         model.beginGesture(start ? "aparar início" : "aparar fim")
         for row in targets {
-            if start { model.trimStart(row.id, at: model.status.playhead) } else { model.trimEnd(row.id, at: model.status.playhead) }
+            if start { model.trimStartToPlayhead(row.id, at: model.status.playhead) } else { model.trimEnd(row.id, at: model.status.playhead) }
         }
         model.endGesture()
     }

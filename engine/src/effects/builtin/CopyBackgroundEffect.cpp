@@ -8,9 +8,11 @@
 //     movimento, a opacidade de cada amostra...) moldam a JANELA: só o alfa
 //     (ou a luma) da camada sobra; a cor dela é descartada;
 //   - os efeitos DEPOIS dele agem sobre o FUNDO — as camadas abaixo na mesma
-//     composição, neste quadro, em px da composição (como uma camada de
-//     ajuste) — e o resultado só aparece dentro da janela, misturado pelo modo
-//     de mistura e pela opacidade da camada.
+//     composição, neste quadro — no PLANO DA CAMADA: o fundo é levado para a
+//     caixa dela (com a margem que os efeitos leem), então centro, escala,
+//     giro e padrões andam com a camada, como em qualquer efeito dela. O
+//     resultado só aparece dentro da janela, misturado pelo modo de mistura e
+//     pela opacidade da camada.
 //
 //  Sem efeito depois dele a janela mostra o próprio fundo: a camada some. A
 //  divisão acontece no renderer (Renderer::prepare / composite_draws); na

@@ -1645,6 +1645,11 @@ struct TimelineView: View {
         case 32: model.openPanel(.audio)
         case 33: model.openPanel(.textAnimation)
         case 34: model.openPanel(.vector)
+        case 48:
+            // Keys de forma do contorno: Editar pontos no modo keyframes.
+            model.vectorGroup = track.effect; model.chooseContour(Int(track.param))
+            EditPointsState.shared.keysMode = true
+            model.openPanel(.editPoints)
         case 43:
             model.openPanel(.mask)
             model.selectedMask = track.effect; model.maskDrawing = false; model.selectedMaskPoint = nil

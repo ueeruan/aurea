@@ -229,6 +229,39 @@ AUREA_TEST(OmegaTimeline, KeysSplitAtPlayheadUsesTheShownFrame) {
     AUREA_CHECK_EQ(r.L(r.a)->end.value, static_cast<i64>(25));
 }
 
+// Beta (nov/2026): "aparar início" do painel com o ímã ligado só apagava a
+// chave antes do cabeçote — o ripple do op 0 trazia a camada de volta e a
+// borda não saía do lugar. O op 10 (botões no cabeçote) leva a borda até lá.
+AUREA_TEST(OmegaTimeline, TrimStartButtonMovesTheEdgeEvenWithTheMagnet) {
+    for (bool line : {false, true}) for (bool live : {false, true}) {
+        StretchRig r;
+        r.L(r.b)->kind = LayerKind::Shape;
+        r.L(r.b)->trackId = 7;
+        auto& x = r.L(r.b)->tracks.get_or_create(TrackProperty::PositionX);
+        x.set(FrameIndex{0}, 0.0f);                 // chave no começo (60 na timeline)
+        x.set(FrameIndex{30}, 300.0f);              // e no fim (90)
+        if (line) r.L(r.b)->magneticTrack = true; else r.comp()->set_edit_mode(true);
+        const f32 at80 = r.L(r.b)->tracks.find(TrackProperty::PositionX)->sample(r.L(r.b)->local_time(FrameIndex{80}));
+        seek036(r.e, 70);
+        AUREA_CHECK(r.e.edit_clip_time(r.b, 10, live ? kEditAtPlayhead : 70));
+        AUREA_CHECK_EQ(r.L(r.b)->start.value, static_cast<i64>(70));
+        AUREA_CHECK_EQ(r.L(r.b)->end.value, static_cast<i64>(90));
+        // O conteúdo fica parado no tempo: a animação depois do corte é a mesma.
+        AUREA_CHECK_NEAR(r.L(r.b)->tracks.find(TrackProperty::PositionX)->sample(r.L(r.b)->local_time(FrameIndex{80})), at80, 1e-3f);
+        // A alça arrastada (op 0) segue o ripple de sempre: a borda fica.
+        r.undo();
+        AUREA_CHECK_EQ(r.L(r.b)->start.value, static_cast<i64>(60));
+        AUREA_CHECK(r.e.edit_clip_time(r.b, 0, 70));
+        AUREA_CHECK_EQ(r.L(r.b)->start.value, static_cast<i64>(60));
+        AUREA_CHECK_EQ(r.L(r.b)->end.value, static_cast<i64>(80));
+    }
+    // Fora do clipe, no cabeçote: recusado como os ops 0 e 1.
+    StretchRig r;
+    seek036(r.e, 95);
+    AUREA_CHECK(!r.e.edit_clip_time(r.b, 10, kEditAtPlayhead));
+    AUREA_CHECK_EQ(r.L(r.b)->start.value, static_cast<i64>(60));
+}
+
 AUREA_TEST(OmegaTimeline, KeysTrimAtPlayheadKeepsTheSourceWithSpeedAndOffset) {
     StretchRig r;
     r.L(r.a)->speed = 2.0f;                 // fonte = 60 + 2·t (deslocamento 60, 2×)

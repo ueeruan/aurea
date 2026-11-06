@@ -2997,6 +2997,10 @@ bool SceneRenderer::build(FrameGraph& graph, Arena& arena, const SceneFrame& fra
             const SceneParticleDraw& d = cap.parts[k];
             c.bind_pipeline(d.pipeline);
             c.set_uniforms(d.uniforms, d.uniformBytes);
+            if (d.vertices) {
+                c.draw(d.vertices, 1, 0);
+                continue;
+            }
             c.bind_storage_buffer_at(1, d.history);
             c.bind_storage_buffer(d.extras);   // 8.2: inválido = nulo (o shader não lê sem extras.z)
             if (d.texture.valid()) c.bind_texture(0, d.texture, SamplerHandle{d.sampler});

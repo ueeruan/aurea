@@ -17,6 +17,11 @@ struct Rig3DSection: View {
 
     private static let limbKeys = ["rig3d_limb_0", "rig3d_limb_1", "rig3d_limb_2", "rig3d_limb_3"]
 
+    private func title(_ key: String) -> some View {
+        Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold))
+            .foregroundStyle(AureaColors.muted).padding(.top, 8).padding(.bottom, 4)
+    }
+
     var body: some View {
         let status = model.humanoidStatus
         VStack(alignment: .leading, spacing: 0) {

@@ -923,6 +923,9 @@ final class AureaModel: ObservableObject {
     @Published private(set) var maskPerspective: [Float] = [0, 0, 1]
     @Published var selectedMask: UInt32?
     @Published var maskDrawing = false
+    // Cache de `poseSideBones` (extensão não guarda propriedade).
+    private var poseSideKey = 0
+    private var poseSideCache: [Bool] = []
     @Published var selectedMaskPoint: Int?
     /// Camadas em que a ferramenta-efeito Máscara foi posta (catálogo, busca). O
     /// cartão "Máscara" da pilha fica nelas mesmo vazio — sem caminho escolhido —
@@ -7295,8 +7298,6 @@ extension AureaModel {
         poseSideCache = side
         return side
     }
-    private var poseSideKey = 0
-    private var poseSideCache: [Bool] = []
     /// O que o dedo pegou: as juntas até `jointReach` e depois os ossos até `boneReach` do
     /// traço. O traço pai → filho é o osso do PAI (é ele que gira aquele pedaço).
     func pickPoseTargets(_ point: SIMD2<Float>, jointReach: Float, boneReach: Float) -> [Int32] {

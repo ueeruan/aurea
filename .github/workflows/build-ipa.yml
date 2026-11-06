@@ -163,9 +163,34 @@ jobs:
           xcodebuild -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath build/ios CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            SWIFT_COMPILATION_MODE=singlefile COMPILER_INDEX_STORE_ENABLE=NO \
+            SWIFT_COMPILATION_MODE=singlefile COMPILER_INDEX_STORE_ENABLE=NO -IDEBuildingContinueBuildingAfterErrors=YES \
             build 2>&1 | tee build-ios.log
           ccache -s || true
+      # 0.4.7: os logs do Actions pedem login; as anotações não. Com isto o erro de
+      # compilação aparece na página da rodada e na API, sem baixar nada.
+      - name: Publish compile errors as annotations
+        if: failure() && steps.compile.outcome == 'failure'
+        run: |
+          python3 - <<'PY'
+          import re
+          seen = []
+          for line in open('build-ios.log', errors='replace'):
+              if ' error: ' in line or line.startswith('error:') or 'fatal error:' in line:
+                  line = re.sub(r'^.*?/engine/', 'engine/', line.strip())
+                  if line not in seen:
+                      seen.append(line)
+          print(len(seen), 'erros')
+          chunk, chunks = '', []
+          for line in seen[:200]:
+              if len(chunk) + len(line) > 3500:
+                  chunks.append(chunk)
+                  chunk = ''
+              chunk += line[:400] + chr(10)
+          if chunk:
+              chunks.append(chunk)
+          for c in chunks[:9]:
+              print('::error title=iOS::' + c.replace('%', '%25').replace(chr(13), '').replace(chr(10), '%0A'))
+          PY
       - name: Validate compiled app with Foundation
         run: swift engine/platform/ios/verify/check_bundle.swift build/ios/Build/Products/Release-iphoneos/Aurea.app
       - name: Preserve symbols matching the packaged executable

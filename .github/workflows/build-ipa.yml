@@ -5,7 +5,7 @@ on:
       run_simulator:
         description: 'Run simulator parity and gestures in addition to packaging the IPA'
         required: false
-        default: true
+        default: false
         type: boolean
       capture_scenes:
         description: 'Optional comma-separated capture scenes; empty runs the full matrix'
@@ -33,7 +33,7 @@ on:
         default: false
         type: boolean
   push:
-    branches: ['codex/native-beta2-ipa', 'claude/release-2194']
+    branches: ['codex/native-beta2-ipa', 'claude/release-2194', 'claude/omega-0.3.2']
     paths: ['engine/**', '.github/workflows/build-ipa.yml']
 concurrency:
   group: native-ipa-${{ github.ref }}-${{ github.sha }}${{ inputs.capture_only && '-capture' || '' }}
@@ -163,7 +163,7 @@ jobs:
           xcodebuild -project engine/platform/ios/Aurea.xcodeproj -scheme Aurea \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath build/ios CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            SWIFT_COMPILATION_MODE=singlefile \
+            SWIFT_COMPILATION_MODE=singlefile COMPILER_INDEX_STORE_ENABLE=NO \
             build 2>&1 | tee build-ios.log
           ccache -s || true
       - name: Validate compiled app with Foundation
@@ -253,8 +253,9 @@ jobs:
             engine/platform/ios/build/core
             build/ci-mtimes.json
           key: ios-incremental-v1-${{ runner.os }}-${{ steps.xcode.outputs.build }}-${{ github.run_id }}
+  # 0.4.7: no push do ramo de trabalho sai só o IPA; a paridade fica para o disparo manual.
   simulator-parity:
-    if: github.event_name != 'workflow_dispatch' || inputs.run_simulator
+    if: (github.event_name != 'workflow_dispatch' && github.ref_name != 'claude/omega-0.3.2') || inputs.run_simulator
     runs-on: macos-15
     timeout-minutes: 60
     env:

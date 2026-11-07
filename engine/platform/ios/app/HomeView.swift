@@ -215,7 +215,8 @@ enum HomeType {
 // Presets 2, Perfil 3 — é o que fica gravado em "aurea.home.tab").
 // =============================================================================
 enum HomeTabKind: Int, CaseIterable, Identifiable {
-    case start, projects, presets, profile, mural
+    /// Home nova: o Início é Mural + Novidades; a Comunidade tem aba própria.
+    case start, projects, presets, profile, mural, community
     var id: Int { rawValue }
 }
 
@@ -266,6 +267,7 @@ struct HomeView: View {
     @State private var showNewProject = false
     @AppStorage("aurea.releaseNotes.read") private var readReleaseNotes = ""
     @State private var showReleaseNotes = false
+    @StateObject private var notices = LiveNotices()
     @State private var showDonationPrompt = false
     @State private var dialog: HomeProjectDialog?
     @State private var quick: OmegaQuickRequest?
@@ -353,7 +355,7 @@ struct HomeView: View {
 
     private var main: some View {
         VStack(spacing: 0) {
-            LiveNoticeBanners()
+            LiveNoticeBanners(notices: notices, banners: pluginTab || tab != .start)
             AppConfigBanner()
             ZStack {
                 if selecting {
@@ -363,7 +365,7 @@ struct HomeView: View {
                     .transition(.opacity)
                 } else {
                     OmegaHomeTopBar(signedInEmail: conta.email, accountMenu: $accountMenu,
-                                    onMenu: openDrawer, onReleaseNotes: { showReleaseNotes = true },
+                                    onMenu: openDrawer,
                                     onAccount: {
                                         if conta.logado { accountMenu = true }
                                         else { conta.entrando = true; showAccount = true }
@@ -381,7 +383,8 @@ struct HomeView: View {
                 } else {
                 switch tab {
                 case .mural: MuralView(onBack: { select(.start) })
-                case .start: CommunityView(profileMode: false)
+                case .start: HomeNewsFeed(notices: notices, onReleaseNotes: { showReleaseNotes = true })
+                case .community: CommunityView(profileMode: false)
                 case .profile: CommunityView(profileMode: true)
                 case .presets: OmegaPresetsTab(onQuickMenu: { quick = $0 })
                 case .projects:
@@ -512,6 +515,9 @@ struct HomeView: View {
         guard let email = conta.email else { return [] }
         return [
             .header(AureaText.t("conta_conectado", email), tag: "home.account.email"),
+            .item(AureaText.t("social_profile"), glyph: CupertinoGlyph.PersonCropCircle, tag: "home.account.profile") {
+                accountMenu = false; pluginTab = false; select(.profile)
+            },
             .item(AureaText.t("conta_sair"), glyph: CupertinoGlyph.ArrowUturnLeft, tag: "home.account.logout") { confirmLogout = true },
             .item(AureaText.t("conta_excluir"), glyph: CupertinoGlyph.Trash, destructive: true, tag: "home.account.delete") { confirmDelete = true },
         ]
@@ -606,19 +612,11 @@ struct OmegaHomeTopBar: View {
     let signedInEmail: String?
     @Binding var accountMenu: Bool
     let onMenu: () -> Void
-    let onReleaseNotes: () -> Void
     let onAccount: () -> Void
     let accountEntries: () -> [MenuEntry]
 
     var body: some View {
         ZStack {
-            HStack(spacing: 8) {
-                HomeBrandLogo().frame(width: 28, height: 28)
-                Text("AUREA").font(.aurea(size: 20, weight: .bold)).tracking(1).foregroundStyle(AureaColors.lightText)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityIdentifier("home.logo")
             HStack(spacing: 0) {
                 Button(action: onMenu) {
                     CupertinoGlyph.text(CupertinoGlyph.LineHorizontal3, size: 24, color: AureaColors.lightText)
@@ -627,12 +625,6 @@ struct OmegaHomeTopBar: View {
                     .accessibilityLabel(AureaText.t("home_tab_settings"))
                     .accessibilityIdentifier("home.menu")
                 Spacer(minLength: 0)
-                Button(action: onReleaseNotes) {
-                    CupertinoGlyph.text(CupertinoGlyph.Sparkles, size: 22, color: AureaColors.lightText)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                }.buttonStyle(AureaPressStyle())
-                    .accessibilityLabel(AureaText.t("release_notes_title"))
-                    .accessibilityIdentifier("home.releaseNotes")
                 Button(action: onAccount) { avatar.frame(width: 44, height: 44).contentShape(Rectangle()) }
                     .buttonStyle(AureaPressStyle())
                     .accessibilityLabel(signedInEmail.map { AureaText.t("om_home_account") + " · " + $0 } ?? AureaText.t("om_home_account"))
@@ -657,6 +649,77 @@ struct OmegaHomeTopBar: View {
             CupertinoGlyph.text(CupertinoGlyph.PersonCropCircle, size: 22, color: AureaColors.homeOnAvatar)
                 .frame(width: 30, height: 30).background(AureaColors.homeAvatar, in: Circle())
         }
+    }
+}
+
+/// O Início: "Novidades e notícias". Em cima os avisos do servidor (o mesmo /aviso das
+/// faixas), embaixo o que mudou nesta versão. Par do `HomeNewsFeed.kt`.
+struct HomeNewsFeed: View {
+    @ObservedObject var notices: LiveNotices
+    let onReleaseNotes: () -> Void
+    @Environment(\.openURL) private var openURL
+    private var notes: (header: String, items: [String]) {
+        let lines = AureaText.t("release_notes_body").split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let items = lines.dropFirst().map { $0.hasPrefix("•") ? String($0.dropFirst()).trimmingCharacters(in: .whitespaces) : $0 }
+        return (lines.first ?? "", Array(items))
+    }
+    var body: some View {
+        let version = notes
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                Text(AureaText.t("home_news_title")).font(OmegaHomeType.listTitle).foregroundStyle(AureaColors.lightText)
+                    .accessibilityAddTraits(.isHeader).padding(.top, 4).padding(.bottom, 2)
+                ForEach(notices.visible) { notice in
+                    card(stripe: notice.level == "problema" ? Color(hex: 0xE5484D) : notice.level == "atencao" ? Color(hex: 0xF5A524) : AureaColors.accent) {
+                        Text(notice.text).font(.aurea(size: 15)).foregroundStyle(AureaColors.lightText).fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 16) {
+                            if let link = notice.link {
+                                Button(AureaText.t("notice_more")) { openURL(link) }
+                                    .font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.lightAccentInk)
+                            }
+                            Button(AureaText.t("notice_dismiss")) { notices.dismiss(notice.id) }
+                                .font(.aurea(size: 14, weight: .medium)).foregroundStyle(AureaColors.lightTextMuted)
+                        }.buttonStyle(.plain).padding(.top, 10)
+                    }
+                    .accessibilityIdentifier("home.news.notice")
+                }
+                Button(action: onReleaseNotes) {
+                    card(stripe: AureaColors.accent) {
+                        HStack(spacing: 8) {
+                            CupertinoGlyph.text(CupertinoGlyph.Sparkles, size: 18, color: AureaColors.lightAccentInk)
+                            Text(AureaText.t("home_news_version")).font(.aurea(size: 16, weight: .bold)).foregroundStyle(AureaColors.lightText)
+                            Spacer(minLength: 0)
+                            CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 14, color: AureaColors.lightTextMuted)
+                        }
+                        if !version.header.isEmpty {
+                            Text(version.header).font(.aurea(size: 13)).foregroundStyle(AureaColors.lightTextMuted).padding(.top, 4)
+                        }
+                        // As três primeiras; o resto na tela cheia das Novidades.
+                        ForEach(Array(version.items.prefix(3).enumerated()), id: \.offset) { _, note in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("•").font(.aurea(size: 15)).foregroundStyle(AureaColors.lightAccentInk)
+                                Text(note).font(.aurea(size: 14)).foregroundStyle(AureaColors.lightText).multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }.padding(.top, 8)
+                        }
+                    }
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityIdentifier("home.releaseNotes")
+            }
+            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
+        }
+        .accessibilityIdentifier("home.news")
+    }
+    private func card<Content: View>(stripe: Color, @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 0) {
+            stripe.frame(width: 4)
+            VStack(alignment: .leading, spacing: 0) { content() }
+                .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .background(AureaColors.lightSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -699,8 +762,10 @@ struct OmegaHomeDock: View {
     var onPlugin: () -> Void = {}
     var body: some View {
         HStack(spacing: 0) {
-            tab(.start, CupertinoGlyph.House, CupertinoGlyph.HouseFill, "home_tab_start", "home.community")
-            tab(.profile, CupertinoGlyph.PersonCropCircle, CupertinoGlyph.PersonCropCircle, "social_profile", "home.profile")
+            // Home nova: o "A" do Aurea é o Início; a Comunidade tem aba própria e o Perfil
+            // abre pelo avatar da barra de cima.
+            logoTab
+            tab(.community, CupertinoGlyph.Person3, CupertinoGlyph.Person3Fill, "social_community", "home.community")
             Button(action: onCreate) {
                 CupertinoGlyph.text(CupertinoGlyph.Plus, size: 30, color: AureaColors.onAccent)
                     .frame(width: 56, height: 56).background(AureaColors.accent, in: Circle())
@@ -733,6 +798,23 @@ struct OmegaHomeDock: View {
         .shadow(color: AureaColors.lightShadow, radius: 15, x: 0, y: -2)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home.dock")
+    }
+
+    private var logoTab: some View {
+        let on = selected == .start
+        let ink = on ? AureaColors.lightText : AureaColors.lightTextMuted
+        return Button { onSelect(.start) } label: {
+            VStack(spacing: 2) {
+                HomeBrandLogo().frame(width: 24, height: 24).clipShape(RoundedRectangle(cornerRadius: 5)).opacity(on ? 1 : 0.55)
+                Text(AureaText.t("home_tab_start")).font(.aurea(size: 12, weight: on ? .semibold : .medium)).foregroundStyle(ink)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            .frame(maxWidth: 158, minHeight: 48).contentShape(Rectangle())
+            .animation(.easeInOut(duration: 0.3), value: on)
+        }.buttonStyle(.plain).frame(maxWidth: .infinity)
+            .accessibilityLabel(AureaText.t("home_tab_start"))
+            .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+            .accessibilityIdentifier("home.start")
     }
 
     private func tab(_ kind: HomeTabKind, _ glyph: Character, _ glyphOn: Character, _ label: String, _ tag: String) -> some View {

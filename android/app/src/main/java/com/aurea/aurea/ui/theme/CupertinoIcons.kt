@@ -285,6 +285,8 @@ object CupertinoGlyph {
     const val Pencil = '\uF37E'
     const val PencilOutline = '\uF73D'
     const val PersonCropCircle = '\uF419'
+    const val Person3 = '\uF47B'
+    const val Person3Fill = '\uF47C'
     const val Photo = '\uF767'
     const val PhotoFill = '\uF768'
     const val PhotoOnRectangle = '\uF76A'

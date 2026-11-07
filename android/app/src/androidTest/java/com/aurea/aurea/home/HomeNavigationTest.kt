@@ -52,7 +52,7 @@ class HomeNavigationTest {
             val store: EditorStore = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
             com.aurea.aurea.ui.AureaApp(store)
         }
-        compose.onNodeWithTag("home.community").assertIsSelected()
+        compose.onNodeWithTag("home.start").assertIsSelected()
         compose.onNodeWithTag("conta.email").assertDoesNotExist()
         // Sem login, o avatar abre a tela de entrar (P0-4).
         compose.onNodeWithTag("home.account").performClick()
@@ -78,7 +78,7 @@ class HomeNavigationTest {
                 }
             }
         }
-        val tags = listOf("home.community", "home.profile", "home.create", "home.projects", "home.presets")
+        val tags = listOf("home.start", "home.community", "home.create", "home.projects", "home.presets")
         val bounds = tags.map {
             compose.onNodeWithTag(it).assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
             compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot
@@ -89,7 +89,7 @@ class HomeNavigationTest {
         compose.onNodeWithTag("home.projects").assertIsSelected()
         tags.forEach { compose.onNodeWithTag(it).performClick() }
         compose.runOnIdle {
-            assertEquals(listOf(HomeViewModel.HOME_TAB, HomeViewModel.PROFILE_TAB, HomeViewModel.PROJECTS_TAB, HomeViewModel.PRESETS_TAB), picked)
+            assertEquals(listOf(HomeViewModel.HOME_TAB, HomeViewModel.COMMUNITY_TAB, HomeViewModel.PROJECTS_TAB, HomeViewModel.PRESETS_TAB), picked)
             assertEquals(1, created)
         }
     }
@@ -101,7 +101,7 @@ class HomeNavigationTest {
             val store: EditorStore = viewModel(factory = ViewModelProvider.AndroidViewModelFactory.getInstance(context.applicationContext as Application))
             AureaTheme { HomeScreen(store) }
         }
-        compose.onNodeWithTag("home.community").assertIsSelected()
+        compose.onNodeWithTag("home.start").assertIsSelected()
         compose.onNodeWithTag("home.projects").performClick()
         compose.onNodeWithTag("home.projects").assertIsSelected()
         compose.runOnIdle {

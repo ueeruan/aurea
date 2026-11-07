@@ -56,10 +56,13 @@ import SwiftUI
 
 struct LiveNoticeBanners: View {
     @EnvironmentObject private var model: AureaModel
-    @StateObject private var notices = LiveNotices()
+    /// O dono é a Home: o feed do Início lê a mesma lista.
+    @ObservedObject var notices: LiveNotices
+    /// No Início os avisos estão no feed; em cima ficariam repetidos.
+    var banners = true
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(notices.visible) { notice in
+            ForEach(banners ? notices.visible : []) { notice in
                 VStack(alignment: .leading, spacing: 0) {
                     Text(notice.text).aureaFont(.of(12, tracking: 0.4, lineHeight: 4.0 / 3.0))
                         .foregroundStyle(Color(hex: notice.level == "problema" ? 0xF9DEDC : notice.level == "atencao" ? 0xFFD8E4 : 0xE8DEF8))

@@ -4815,4 +4815,6 @@
     <string name="fxf_max_height">Максимальная высота</string>
     <string name="fxf_spacing">Интервал</string>
     <string name="fxf_pin_position">Штифт (позиция)</string>
+    <string name="home_news_title">Новости и обновления</string>
+    <string name="home_news_version">В этой версии</string>
 </resources>

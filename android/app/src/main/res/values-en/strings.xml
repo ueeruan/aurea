@@ -4845,4 +4845,6 @@ to edit the curve.</string>
     <string name="fxf_max_height">Maximum height</string>
     <string name="fxf_spacing">Spacing</string>
     <string name="fxf_pin_position">Pin (position)</string>
+    <string name="home_news_title">News and updates</string>
+    <string name="home_news_version">In this version</string>
 </resources>

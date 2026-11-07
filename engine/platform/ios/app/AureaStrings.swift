@@ -7130,6 +7130,8 @@ enum AureaText {
         "fxf_max_height": "Altura máxima",
         "fxf_spacing": "Espaçamento",
         "fxf_pin_position": "Pino (posição)",
+        "home_news_title": "Novidades e notícias",
+        "home_news_version": "Nesta versão",
     ]
     private static let en: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -14183,6 +14185,8 @@ enum AureaText {
         "fxf_max_height": "Maximum height",
         "fxf_spacing": "Spacing",
         "fxf_pin_position": "Pin (position)",
+        "home_news_title": "News and updates",
+        "home_news_version": "In this version",
     ]
     private static let es: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -21236,6 +21240,8 @@ enum AureaText {
         "fxf_max_height": "Altura máxima",
         "fxf_spacing": "Espaciado",
         "fxf_pin_position": "Pin (posición)",
+        "home_news_title": "Novedades y noticias",
+        "home_news_version": "En esta versión",
     ]
     private static let ru: [String: String] = [
         "add_element_aurora": "Аврора",
@@ -28289,6 +28295,8 @@ enum AureaText {
         "fxf_max_height": "Максимальная высота",
         "fxf_spacing": "Интервал",
         "fxf_pin_position": "Штифт (позиция)",
+        "home_news_title": "Новости и обновления",
+        "home_news_version": "В этой версии",
     ]
     private static let hi: [String: String] = [
         "add_element_aurora": "ऑरोरा",
@@ -35342,6 +35350,8 @@ enum AureaText {
         "fxf_max_height": "अधिकतम ऊँचाई",
         "fxf_spacing": "अंतराल",
         "fxf_pin_position": "पिन (स्थिति)",
+        "home_news_title": "समाचार और अपडेट",
+        "home_news_version": "इस संस्करण में",
     ]
     private static let ar: [String: String] = [
         "add_element_aurora": "الشفق القطبي",
@@ -42395,6 +42405,8 @@ enum AureaText {
         "fxf_max_height": "أقصى ارتفاع",
         "fxf_spacing": "التباعد",
         "fxf_pin_position": "دبوس (الموضع)",
+        "home_news_title": "الأخبار والمستجدات",
+        "home_news_version": "في هذا الإصدار",
     ]
     private static let id: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -49448,6 +49460,8 @@ enum AureaText {
         "fxf_max_height": "Tinggi maksimum",
         "fxf_spacing": "Jarak",
         "fxf_pin_position": "Pin (posisi)",
+        "home_news_title": "Berita dan pembaruan",
+        "home_news_version": "Di versi ini",
     ]
     private static let plurals: [String: [String: [String: String]]] = [
         "pt-BR": [

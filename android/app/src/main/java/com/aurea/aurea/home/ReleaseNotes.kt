@@ -55,13 +55,14 @@ import com.aurea.aurea.ui.theme.tocavel
  * por versão; a marca de "lida" só é gravada quando a pessoa fecha.
  */
 @Composable
-internal fun ReleaseNotesEntry() {
+internal fun ReleaseNotesEntry(button: Boolean = true) {
     val context = LocalContext.current
     val prefs = remember(context) { context.getSharedPreferences("aurea.releaseNotes", Context.MODE_PRIVATE) }
     val edition = "${BuildConfig.VERSION_NAME}:${BuildConfig.VERSION_CODE}"
     var showing by rememberSaveable(edition) { mutableStateOf(prefs.getString("read", null) != edition) }
     val label = stringResource(R.string.release_notes_title)
-    Box(
+    // Na Home nova o botão saiu da barra: as Novidades estão no Início (HomeNewsFeed).
+    if (button) Box(
         Modifier
             .size(44.dp)
             .testTag("home.releaseNotes")
@@ -114,7 +115,7 @@ internal fun releaseNotePages(body: String): Pair<String, List<List<String>>> {
 private const val NOTES_PER_PAGE = 4
 
 @Composable
-private fun ReleaseNotesScreen(body: String, onClose: () -> Unit) {
+internal fun ReleaseNotesScreen(body: String, onClose: () -> Unit) {
     val (header, pages) = remember(body) { releaseNotePages(body) }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize().background(AureaColors.Background).testTag("releaseNotes.screen")) {

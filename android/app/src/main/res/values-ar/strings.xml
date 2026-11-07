@@ -4845,4 +4845,6 @@
     <string name="fxf_max_height">أقصى ارتفاع</string>
     <string name="fxf_spacing">التباعد</string>
     <string name="fxf_pin_position">دبوس (الموضع)</string>
+    <string name="home_news_title">الأخبار والمستجدات</string>
+    <string name="home_news_version">في هذا الإصدار</string>
 </resources>

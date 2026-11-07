@@ -141,7 +141,8 @@ fun HomeScreen(store: EditorStore) {
                 .background(AureaColors.LightBackground)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
         ) {
-            LiveNoticeBanners(vm.notices)
+            // No Início os avisos estão no feed; em cima ficariam repetidos.
+            LiveNoticeBanners(vm.notices, banners = pluginTab || vm.tab != HomeViewModel.HOME_TAB)
             com.aurea.aurea.config.AppConfigBanner()
             val signedIn = (conta.estado as? ContaEstado.Dentro)?.email
             Crossfade(selecting, animationSpec = tween(300), label = "topo") { picking ->
@@ -165,6 +166,8 @@ fun HomeScreen(store: EditorStore) {
                         onDismissAccountMenu = { accountMenu = false },
                         accountMenu = if (signedIn == null) emptyList() else listOf(
                             MenuEntry.Header(stringResource(R.string.conta_conectado, signedIn), tag = "home.account.email"),
+                            MenuEntry.Item(stringResource(R.string.social_profile), glyph = CupertinoGlyph.PersonCropCircle,
+                                tag = "home.account.profile") { accountMenu = false; pluginTab = false; vm.selectTab(HomeViewModel.PROFILE_TAB) },
                             MenuEntry.Item(stringResource(R.string.conta_sair), glyph = CupertinoGlyph.ArrowUturnLeft,
                                 tag = "home.account.logout") { confirmLogout = true },
                             MenuEntry.Item(stringResource(R.string.conta_excluir), glyph = CupertinoGlyph.Trash,
@@ -179,7 +182,8 @@ fun HomeScreen(store: EditorStore) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (pluginTab) com.aurea.aurea.effects.PluginHomeTab(store)   // 0.3.4 plugins
                 else when (vm.tab) {
-                    HomeViewModel.HOME_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, false)
+                    HomeViewModel.HOME_TAB -> HomeNewsFeed(vm.notices)
+                    HomeViewModel.COMMUNITY_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, false)
                     HomeViewModel.MURAL_TAB -> com.aurea.aurea.community.MuralScreen(store, conta) { vm.selectTab(HomeViewModel.HOME_TAB) }
                     HomeViewModel.PROFILE_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, true)
                     HomeViewModel.PRESETS_TAB -> PresetsTab(store)
@@ -316,10 +320,13 @@ internal fun HomeDock(selected: Int, onSelect: (Int) -> Unit, onCreate: () -> Un
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            DockTab(CupertinoGlyph.House, CupertinoGlyph.HouseFill, stringResource(R.string.home_tab_start),
-                selected == HomeViewModel.HOME_TAB, "home.community") { onSelect(HomeViewModel.HOME_TAB) }
-            DockTab(CupertinoGlyph.PersonCropCircle, CupertinoGlyph.PersonCropCircle, stringResource(R.string.social_profile),
-                selected == HomeViewModel.PROFILE_TAB, "home.profile") { onSelect(HomeViewModel.PROFILE_TAB) }
+            // Home nova: o "A" do Aurea é o Início; a Comunidade tem aba própria e o Perfil
+            // abre pelo avatar da barra de cima.
+            DockLogoTab(stringResource(R.string.home_tab_start), selected == HomeViewModel.HOME_TAB, "home.start") {
+                onSelect(HomeViewModel.HOME_TAB)
+            }
+            DockTab(CupertinoGlyph.Person3, CupertinoGlyph.Person3Fill, stringResource(R.string.social_community),
+                selected == HomeViewModel.COMMUNITY_TAB, "home.community") { onSelect(HomeViewModel.COMMUNITY_TAB) }
             val createLabel = stringResource(R.string.home_new_project)
             Box(
                 Modifier
@@ -353,6 +360,33 @@ internal fun HomeDock(selected: Int, onSelect: (Int) -> Unit, onCreate: () -> Un
  * glifo cheio (quando o AUREA tem) e a cor plena; a apagada, o tom secundário.
  * A troca é um crossfade de 300 ms (a fileira da referência).
  */
+/** A aba Início do dock: o "A" do Aurea no lugar do ícone (apagado quando fora dela). */
+@Composable
+private fun RowScope.DockLogoTab(label: String, active: Boolean, tag: String, onClick: () -> Unit) {
+    val ink by animateColorAsState(if (active) AureaColors.LightText else AureaColors.LightTextMuted, tween(300), label = "aba-cor")
+    Column(
+        Modifier
+            .weight(1f)
+            .widthIn(max = 158.dp)
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .testTag(tag)
+            .semantics { selected = active; contentDescription = label }
+            .clickable(role = Role.Tab, onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
+    ) {
+        AureaLogo(24.dp, Modifier.alpha(if (active) 1f else 0.55f))
+        Text(
+            label,
+            style = OmegaHomeType.TabLabel.copy(color = ink, fontWeight = if (active) FontWeight.W600 else FontWeight.W500),
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 @Composable
 private fun RowScope.DockTab(icon: Char, iconOn: Char, label: String, active: Boolean, tag: String, onClick: () -> Unit) {
     val ink by animateColorAsState(if (active) AureaColors.LightText else AureaColors.LightTextMuted, tween(300), label = "aba-cor")

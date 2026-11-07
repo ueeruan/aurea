@@ -4803,4 +4803,6 @@
     <string name="fxf_max_height">अधिकतम ऊँचाई</string>
     <string name="fxf_spacing">अंतराल</string>
     <string name="fxf_pin_position">पिन (स्थिति)</string>
+    <string name="home_news_title">समाचार और अपडेट</string>
+    <string name="home_news_version">इस संस्करण में</string>
 </resources>

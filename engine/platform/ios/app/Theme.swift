@@ -1838,6 +1838,8 @@ enum CupertinoGlyph {
     static let Pencil: Character = "\u{F37E}"
     static let PencilOutline: Character = "\u{F73D}"
     static let PersonCropCircle: Character = "\u{F419}"
+    static let Person3: Character = "\u{F47B}"
+    static let Person3Fill: Character = "\u{F47C}"
     static let Photo: Character = "\u{F767}"
     static let PhotoFill: Character = "\u{F768}"
     static let PhotoOnRectangle: Character = "\u{F76A}"

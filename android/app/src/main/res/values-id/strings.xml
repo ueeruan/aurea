@@ -4797,4 +4797,6 @@ untuk mengedit kurvanya.</string>
     <string name="fxf_max_height">Tinggi maksimum</string>
     <string name="fxf_spacing">Jarak</string>
     <string name="fxf_pin_position">Pin (posisi)</string>
+    <string name="home_news_title">Berita dan pembaruan</string>
+    <string name="home_news_version">Di versi ini</string>
 </resources>

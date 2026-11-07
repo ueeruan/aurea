@@ -70,16 +70,9 @@ internal fun HomeTopBar(
         ) {
             CupertinoIcon(CupertinoGlyph.LineHorizontal3, 24.dp, AureaColors.LightText)
         }
-        Row(
-            Modifier.align(Alignment.Center).testTag("home.logo").semantics(mergeDescendants = true) { heading() },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AureaLogo(28.dp)
-            Spacer(Modifier.width(8.dp))
-            Text("AUREA", style = AureaType.of(20f, FontWeight.W700, 1f, AureaColors.LightText), maxLines = 1)
-        }
         Row(Modifier.align(Alignment.CenterEnd).padding(end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            ReleaseNotesEntry()
+            // A abertura das Novidades uma vez por versão (e o pedido de doação) continua.
+            ReleaseNotesEntry(button = false)
             Box {
                 val accountLabel = stringResource(R.string.om_home_account)
                 Box(

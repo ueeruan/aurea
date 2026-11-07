@@ -4807,4 +4807,6 @@ para editar la curva.</string>
     <string name="fxf_max_height">Altura máxima</string>
     <string name="fxf_spacing">Espaciado</string>
     <string name="fxf_pin_position">Pin (posición)</string>
+    <string name="home_news_title">Novedades y noticias</string>
+    <string name="home_news_version">En esta versión</string>
 </resources>

@@ -122,7 +122,7 @@ internal class LiveNotices(context: Context) {
 private fun Set<String>.takeLastSet(limit: Int) = toList().takeLast(limit).toSet()
 
 @Composable
-internal fun LiveNoticeBanners(service: LiveNotices) {
+internal fun LiveNoticeBanners(service: LiveNotices, banners: Boolean = true) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val uriHandler = LocalUriHandler.current
     LaunchedEffect(service, lifecycle) {
@@ -132,7 +132,7 @@ internal fun LiveNoticeBanners(service: LiveNotices) {
     }
     val openLink: (String) -> Unit = { runCatching { uriHandler.openUri(it) } }
     Column(Modifier.fillMaxWidth()) {
-        service.visible.forEach { notice ->
+        if (banners) service.visible.forEach { notice ->
             Surface(color = when (notice.level) {
                 "problema" -> MaterialTheme.colorScheme.errorContainer
                 "atencao" -> MaterialTheme.colorScheme.tertiaryContainer

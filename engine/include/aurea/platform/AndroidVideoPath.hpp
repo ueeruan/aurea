@@ -31,6 +31,9 @@
 // =============================================================================
 #pragma once
 
+#if defined(__ANDROID__)
+#include <unistd.h>
+#endif
 #include "aurea/core/Result.hpp"
 #include "aurea/media/DecodedPlaneBounds.hpp"
 
@@ -150,13 +153,30 @@ inline bool external_quad(uint32_t bufW, uint32_t bufH, const media::VisibleRegi
     return true;
 }
 
+/// Orçamento do cache de quadros decodificados por decoder, pela memória do aparelho.
+/// Com 48 MB fixos um vídeo 4K ficava com UM quadro de folga (sem leitura adiantada):
+/// qualquer atraso do decoder virava engasgo. Aparelho com memória sobrando guarda mais.
+inline uint64_t driver_gl_cache_budget() noexcept {
+#if defined(__ANDROID__)
+    static const uint64_t budget = [] {
+        const long pages = sysconf(_SC_PHYS_PAGES), page = sysconf(_SC_PAGE_SIZE);
+        const uint64_t gb = pages > 0 && page > 0 ? (uint64_t(pages) * uint64_t(page)) >> 30 : 0;
+        // A RAM anunciada vem um pouco abaixo do número de venda (8 GB lê ~7,3).
+        return gb >= 11 ? 160ull << 20 : gb >= 7 ? 112ull << 20 : gb >= 5 ? 72ull << 20 : 48ull << 20;
+    }();
+    return budget;
+#else
+    return 48ull << 20;
+#endif
+}
+
 /// Quantos alvos RGBA um decoder no caminho GL pode ter vivos. O VideoSource
 /// guarda `N - 5` no cache (sobram até 3 em voo na GPU, o quadro adiantado do
-/// decoder e um de folga): cache de ~48 MB de RGBA, entre 1 e 7 quadros —
-/// 1080p = 11 alvos, 4K = 6. Os alvos nascem sob demanda.
+/// decoder e um de folga): cache de `driver_gl_cache_budget` em RGBA, entre 1 e
+/// 7 quadros — com 48 MB: 1080p = 11 alvos, 4K = 6. Os alvos nascem sob demanda.
 inline uint32_t driver_gl_live_frames(uint32_t width, uint32_t height) noexcept {
     const uint64_t bytes = uint64_t(width ? width : 1) * uint64_t(height ? height : 1) * 4;
-    const uint64_t cache = (48ull << 20) / bytes;
+    const uint64_t cache = driver_gl_cache_budget() / bytes;
     return 5u + (cache < 1 ? 1u : (cache > 7 ? 7u : uint32_t(cache)));
 }
 

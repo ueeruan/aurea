@@ -97,8 +97,16 @@ class PlaybackBench(private val store: EditorStore, private val label: String) {
         delay(400)
         val ui = UiFrames()
         val samples = ArrayList<PerfStats>()
+        val playAt = SystemClock.elapsedRealtime()
         store.play()
-        delay(500)     // o primeiro meio segundo é aquecimento do decoder
+        // Do Play até o cabeçote andar: é a espera que a pessoa sente ao apertar o botão.
+        var started = -1L
+        while (SystemClock.elapsedRealtime() - playAt < 2000) {
+            engine.readStatus(statusBuffer)
+            if (statusBuffer.getLong(176) > 0L) { started = SystemClock.elapsedRealtime() - playAt; break }
+            delay(4)
+        }
+        delay(300)
         ui.start()
         val end = SystemClock.uptimeMillis() + seconds * 1000L
         val status = ArrayList<Float>(1024)
@@ -112,7 +120,7 @@ class PlaybackBench(private val store: EditorStore, private val label: String) {
         store.pause()
         delay(300)
         summary(name, samples, ui.gaps.toList(),
-            "status50=${String.format(Locale.ROOT, "%.3f", pct(status, 50))} status99=${f(pct(status, 99))} statusMax=${f(status.maxOrNull() ?: 0f)}")
+            "inicio=${started}ms status50=${String.format(Locale.ROOT, "%.3f", pct(status, 50))} status99=${f(pct(status, 99))} statusMax=${f(status.maxOrNull() ?: 0f)}")
     }
 
     private suspend fun fresh(title: String) {

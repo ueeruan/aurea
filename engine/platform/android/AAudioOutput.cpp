@@ -66,9 +66,11 @@ Status AAudioOutput::open_stream_locked() noexcept {
         AAudioStream_close(s);
         return Status{Errc::NotSupported, "saida de audio sem 48 kHz estereo float"};
     }
-    // Dois bursts: o mínimo que não estala na maioria dos aparelhos.
+    // Quatro bursts. Dois é o mínimo de um instrumento ao vivo; aqui o relógio do vídeo
+    // já desconta a latência da saída, então a folga a mais não atrasa nada na tela e
+    // segura o som quando a CPU está ocupada com decode e render (dois estalava).
     const int32_t burst = AAudioStream_getFramesPerBurst(s);
-    if (burst > 0) AAudioStream_setBufferSizeInFrames(s, burst * 2);
+    if (burst > 0) AAudioStream_setBufferSizeInFrames(s, burst * 4);
     streamBase_.store(delivered_.load());
     stream_ = reinterpret_cast<AAudioStreamStruct*>(s);
     latency_.store(static_cast<u32>(std::max<int32_t>(0, AAudioStream_getBufferSizeInFrames(s))));

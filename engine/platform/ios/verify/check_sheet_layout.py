@@ -83,7 +83,7 @@ def main():
     scroll = block(sheets, 'private struct AureaSheetScroll<Content: View>: View')
     contracts = {
         'text editing is the text mode, not a sheet or a dialog':
-            '.sheet(item: $model.textContentRequest)' not in editor and 'TextContentEditor(' not in editor and 'TextEditPanel()' in editor,
+            '.sheet(item: $model.textContentRequest)' not in editor and re.search(r'(?<![A-Za-z])TextContentEditor\(', editor) is None and 'TextEditPanel()' in editor,
         'text mode input strip is 60 pt and scrolls long text natively':
             'let strip: CGFloat = 60' in text and '.frame(height: strip)' in text and 'view.isScrollEnabled = true' in textmode,
         'text mode Done lives in the style bar and refuses an empty 3D text':

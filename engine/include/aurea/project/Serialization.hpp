@@ -79,7 +79,7 @@ struct SectionHeader {
 /// v53 (0.4.6): texto dinâmico, câmera paralela, repetir mídia, tangentes.
 /// v54 (0.4.6): opções completas da faixa de legendas (aparência própria).
 /// v55 (0.4.6): estilo próprio de cada bloco da faixa de legendas.
-constexpr u32 kTimelineSectionVersion = 55;
+constexpr u32 kTimelineSectionVersion = 56;
 
 /// Cabeçalho do arquivo.
 struct FileHeader {

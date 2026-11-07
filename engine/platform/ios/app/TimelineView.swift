@@ -1650,7 +1650,7 @@ struct TimelineView: View {
             model.vectorGroup = track.effect; model.chooseContour(Int(track.param))
             EditPointsState.shared.keysMode = true
             model.openPanel(.editPoints)
-        case 43:
+        case 43, 49:
             model.openPanel(.mask)
             model.selectedMask = track.effect; model.maskDrawing = false; model.selectedMaskPoint = nil
             model.timelineFocus = [track]

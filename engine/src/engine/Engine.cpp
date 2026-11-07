@@ -219,7 +219,8 @@ Status path_key_command(Layer& layer, const Command& command, FrameIndex playhea
 }
 
 const Track* read_command_track(const Layer& l, const TrackRef& ref) noexcept {
-    if (ref.property == TrackProperty::MeshWarp || ref.property == TrackProperty::VectorPath) return nullptr;
+    if (ref.property == TrackProperty::MeshWarp || ref.property == TrackProperty::VectorPath
+        || ref.property == TrackProperty::MaskPath) return nullptr;
     if (ref.property == TrackProperty::TimeRemap || is_remap_time_alias(l, ref)) return &l.timeRemap;
     if (ref.property == TrackProperty::Speed) return l.tracks.find(ref.property);
     return l.tracks.find(ref.property, ref.effectIndex, ref.effectParamIndex);
@@ -3578,6 +3579,8 @@ void read_points6(const f32* p, u32 n, std::vector<MaskPoint>& out) {
     }
 }
 
+Mask* mask_by_id(Layer& l, u32 id) noexcept;
+const Mask* mask_by_id(const Layer& l, u32 id) noexcept { return mask_by_id(const_cast<Layer&>(l), id); }
 Mask* mask_by_id(Layer& l, u32 id) noexcept {
     for (Mask& m : l.masks) if (m.id == id) return &m;
     return nullptr;
@@ -3618,6 +3621,64 @@ void put_path_key(Mask& m, i64 local, const std::vector<MaskPoint>& pts) {
     auto it = std::lower_bound(m.pathKeys.begin(), m.pathKeys.end(), local,
                                [](const MaskPathKey& a, i64 f) { return a.frame < f; });
     m.pathKeys.insert(it, std::move(k));
+}
+
+/// Comandos de keyframe na trilha virtual do caminho da máscara. Quem chama segura o
+/// modelo e a transação de desfazer da composição.
+Status mask_key_command(Layer& layer, const Command& command, FrameIndex playhead) noexcept {
+    if (layer.locked) return Errc::InvalidState;
+    const bool moving = command.type == CommandType::KeyframeMove;
+    const bool interpolation = command.type == CommandType::KeyframeSetInterpolation
+                            || command.type == CommandType::KeyframeSetBezier
+                            || command.type == CommandType::KeyframeSetEasing;
+    const TrackRef& ref = moving ? command.keyframe_move.track
+        : interpolation ? command.keyframe_interp.track : command.keyframe.track;
+    Mask* m = mask_by_id(layer, ref.effectIndex);
+    if (!m) return Errc::NotFound;
+    const FrameIndex time = moving ? command.keyframe_move.fromTime
+        : interpolation ? command.keyframe_interp.time
+        : (command.keyframe.onlyIfChanged & kAutoKeyAtPlayhead) ? layer.local_time(playhead) : command.keyframe.time;
+    if (command.type == CommandType::KeyframeInsert) {
+        if (path_key_at(*m, time.value) >= 0) return OkStatus;
+        std::vector<MaskPoint> shape;
+        mask::evaluate_path(*m, static_cast<f64>(time.value), shape);
+        put_path_key(*m, time.value, shape);
+        m->cacheKey = 0;
+        return OkStatus;
+    }
+    const i32 at = path_key_at(*m, time.value);
+    if (at < 0) return Errc::NotFound;
+    MaskPathKey& key = m->pathKeys[static_cast<usize>(at)];
+    switch (command.type) {
+        case CommandType::KeyframeDelete:
+            // Tirar o último key deixa parada a forma dele.
+            if (m->pathKeys.size() == 1) m->points = key.points;
+            m->pathKeys.erase(m->pathKeys.begin() + at);
+            break;
+        case CommandType::KeyframeMove: {
+            const i64 target = command.keyframe_move.toTime.value;
+            if (target == time.value) return OkStatus;
+            if (path_key_at(*m, target) >= 0) return Errc::AlreadyExists;
+            key.frame = target;
+            std::sort(m->pathKeys.begin(), m->pathKeys.end(), [](const MaskPathKey& a, const MaskPathKey& b) { return a.frame < b.frame; });
+            break;
+        }
+        case CommandType::KeyframeSetInterpolation:
+        case CommandType::KeyframeSetBezier:
+        case CommandType::KeyframeSetEasing: {
+            const KeyframeInterpPayload& k = command.keyframe_interp;
+            PathKey curve = mask::ease_of(key);
+            vector::set_path_key_curve(curve, k.interp, k.bx1, k.by1, k.bx2, k.by2, k.power);
+            key.curve = curve.curve;
+            key.interp = curve.ease == 2 ? 0 : curve.ease == 1 ? 2 : 1;
+            key.easePower = curve.easePower;
+            key.bx1 = curve.bx1; key.by1 = curve.by1; key.bx2 = curve.bx2; key.by2 = curve.by2;
+            break;
+        }
+        default: return Errc::NotSupported;   // a forma inteira não tem valor escalar nem expressão
+    }
+    m->cacheKey = 0;
+    return OkStatus;
 }
 
 } // namespace
@@ -10545,7 +10606,7 @@ namespace {
 Track* expression_track(Layer& l, u32 property, u32 effectIndex, u32 paramIndex, bool create) noexcept {
     if (property >= static_cast<u32>(TrackProperty::_Count)) return nullptr;
     const auto p = static_cast<TrackProperty>(property);
-    if (p == TrackProperty::MeshWarp || p == TrackProperty::VectorPath) return nullptr;
+    if (p == TrackProperty::MeshWarp || p == TrackProperty::VectorPath || p == TrackProperty::MaskPath) return nullptr;
     if (p == TrackProperty::TimeRemap) return &l.timeRemap;
     if (p == TrackProperty::EffectParam && !l.find_effect(EffectId{effectIndex, 0})) return nullptr;
     if (p == TrackProperty::TextAnimParam && effectIndex >= l.text.animators.size()) return nullptr;
@@ -10585,6 +10646,7 @@ Status Engine::set_expressions(u64 layerId, const u32* keys3, u32 count, const c
     bool anyChange = false;
     for (u32 i = 0; i < count; ++i) {
         const u32* k = keys3 + i * 3;
+        if (k[0] == static_cast<u32>(TrackProperty::MaskPath)) return Errc::NotSupported;
         if (k[0] == static_cast<u32>(TrackProperty::MeshWarp) || k[0] == static_cast<u32>(TrackProperty::VectorPath)) return Errc::NotSupported;
         Track* t = expression_track(*l, k[0], k[1], k[2], false);
         if (!t && !remove) {
@@ -13629,6 +13691,24 @@ u32 write_keyframe_rows(const Layer& l, bridge::KeyframeRow* out, u32 capacity) 
             }
         }
     }
+    // Keys do caminho das máscaras: sem isto eles só existiam no painel. A timeline
+    // não mostrava, não dava para arrastar, apagar nem abrir o gráfico.
+    for (const Mask& m : l.masks) {
+        for (const MaskPathKey& key : m.pathKeys) {
+            if (written >= capacity) break;
+            bridge::KeyframeRow row{};
+            row.property = static_cast<u32>(TrackProperty::MaskPath);
+            row.effectIndex = m.id;
+            row.paramIndex = 0;
+            row.time = static_cast<i32>(key.frame);
+            row.value = 0;
+            row.interpolation = static_cast<u32>(vector::path_key_interpolation(mask::ease_of(key)));
+            const i64 timelineFrame = key.frame + l.start.value - l.offset.value;
+            if (timelineFrame < l.start.value || timelineFrame > l.end.value)
+                row.timelineFlags |= bridge::kKeyframeTimelineHidden;
+            out[written++] = row;
+        }
+    }
     return written;
 }
 } // namespace
@@ -13686,6 +13766,10 @@ bool Engine::query_keyframe_navigation(u64 layerId, u32 property, u32 effectInde
         const VectorPath* path = vector_key_path(*layer, ref);
         if (!path) return false;
         for (const PathKey& key : path->keys) visible(key.frame);
+    } else if (ref.property == TrackProperty::MaskPath) {
+        const Mask* m = mask_by_id(*layer, ref.effectIndex);
+        if (!m) return false;
+        for (const MaskPathKey& key : m->pathKeys) visible(key.frame);
     } else if (const Track* track = read_command_track(*layer, ref)) {
         for (const auto& key : track->keys) visible(key.time.value);
     }
@@ -14187,6 +14271,15 @@ bool Engine::query_keyframe_easing(u64 layerId, u32 property, u32 effectIndex, u
         const i32 at = path ? path_key_at(*path, frame) : -1;
         if (at < 0) return false;
         const PathKey& key = path->keys[static_cast<usize>(at)];
+        out4[0] = key.bx1; out4[1] = key.by1; out4[2] = key.bx2; out4[3] = key.by2;
+        if (outPower) *outPower = clamp_ease_power(key.easePower);
+        return true;
+    }
+    if (layer && ref.property == TrackProperty::MaskPath) {
+        const Mask* m = mask_by_id(*layer, ref.effectIndex);
+        const i32 at = m ? path_key_at(*m, frame) : -1;
+        if (at < 0) return false;
+        const MaskPathKey& key = m->pathKeys[static_cast<usize>(at)];
         out4[0] = key.bx1; out4[1] = key.by1; out4[2] = key.bx2; out4[3] = key.by2;
         if (outPower) *outPower = clamp_ease_power(key.easePower);
         return true;
@@ -18510,6 +18603,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return mesh_warp::key_command(*l, cmd, playback_.current());
             if (cmd.keyframe.track.property == TrackProperty::VectorPath)
                 return path_key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe.track.property == TrackProperty::MaskPath)
+                return mask_key_command(*l, cmd, playback_.current());
             // Gesto de transform (kAutoKey*): o tempo é o do quadro na tela e,
             // sem keyframe na trilha, o valor parado muda — a mesma regra nas
             // duas UIs, com o estado vivo do motor. Antes a UI decidia pelo
@@ -18557,6 +18652,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return mesh_warp::key_command(*l, cmd, playback_.current());
             if (cmd.keyframe.track.property == TrackProperty::VectorPath)
                 return path_key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe.track.property == TrackProperty::MaskPath)
+                return mask_key_command(*l, cmd, playback_.current());
             Track* track = command_track(*l, cmd.keyframe.track, false);
             if (!track || track->find_exact(cmd.keyframe.time) == kInvalidIndex) return Errc::NotFound;
             if (track->keys.size() == 1) freeze_last_shape_key(*l, *track, l->local_time(playback_.current()));
@@ -18570,6 +18667,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return mesh_warp::key_command(*l, cmd, playback_.current());
             if (cmd.keyframe_move.track.property == TrackProperty::VectorPath)
                 return path_key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe_move.track.property == TrackProperty::MaskPath)
+                return mask_key_command(*l, cmd, playback_.current());
             Track* track = command_track(*l, cmd.keyframe_move.track, false);
             if (!track) return Errc::NotFound;
             if (track->move(cmd.keyframe_move.fromTime, cmd.keyframe_move.toTime) == kInvalidIndex) return Errc::NotFound;
@@ -18582,6 +18681,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return mesh_warp::key_command(*l, cmd, playback_.current());
             if (cmd.keyframe.track.property == TrackProperty::VectorPath)
                 return path_key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe.track.property == TrackProperty::MaskPath)
+                return mask_key_command(*l, cmd, playback_.current());
             Track* track = command_track(*l, cmd.keyframe.track, false);
             if (!track) return Errc::NotFound;
             const u32 idx = track->find_exact(cmd.keyframe.time);
@@ -18600,6 +18701,8 @@ Status Engine::apply_command_internal(const Command& cmd, const char* stringData
                 return mesh_warp::key_command(*l, cmd, playback_.current());
             if (cmd.keyframe_interp.track.property == TrackProperty::VectorPath)
                 return path_key_command(*l, cmd, playback_.current());
+            if (cmd.keyframe_interp.track.property == TrackProperty::MaskPath)
+                return mask_key_command(*l, cmd, playback_.current());
             const KeyframeInterpPayload& k = cmd.keyframe_interp;
             Track* track = command_track(*l, k.track, false);
             if (!track) return Errc::NotFound;

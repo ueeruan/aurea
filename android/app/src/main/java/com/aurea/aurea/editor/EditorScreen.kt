@@ -698,7 +698,7 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
                 31, 44 -> EditorPanel.Effects
                 32 -> EditorPanel.Audio
                 33 -> EditorPanel.Text
-                43 -> EditorPanel.Mask
+                43, 49 -> EditorPanel.Mask
                 34 -> EditorPanel.Vector
                 35 -> EditorPanel.Shape
                 36 -> EditorPanel.Particles
@@ -712,7 +712,7 @@ private fun TimelineHost(store: EditorStore, ui: EditorUi, modifier: Modifier, c
                 store.selectVectorPath(effect, param)
                 EditPointsState.keysMode = true
             }
-            if (property == TrackProperty.MASK_PARAM) {
+            if (property == TrackProperty.MASK_PARAM || property == TrackProperty.MASK_PATH) {
                 store.maskEdit = effect
                 store.maskDrawing = false
                 store.maskPoint = -1

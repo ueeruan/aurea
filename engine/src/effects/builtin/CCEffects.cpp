@@ -300,7 +300,7 @@ public:
         Uniforms u{};
         u.p0 = Vec4{c.x, c.y, finite_or(e.f(kAxis), 90.0f) * kDeg, finite_or(e.f(kTwist), 180.0f) * kDeg};
         u.p1 = Vec4{0.5f * clampf(e.f(kSize), 0.5f, 2000.0f, 60.0f) / 100.0f * std::max(box.h, 1.0f),
-                    clampf(e.f(kShading), 0.0f, 100.0f, 30.0f) / 100.0f, 0.0f, 0.0f};
+                    clampf(e.f(kShading), 0.0f, 100.0f, 30.0f) / 100.0f, in.tiled ? 1.0f : 0.0f, 0.0f};
         return same_region(ctx, e, ShaderId::effects_cc_twister_frag, in, u, "torcer", out);
     }
 };

@@ -882,6 +882,8 @@ private func timelineTrackName(_ track: TimelineTrack, _ effects: [EffectItem]) 
     case 48: return AureaText.t("om_pts_contour_n", param + 1)
     case 32: return AureaText.t("tl_audio", param + 1)
     case 33: return AureaText.t("tl_text_anim", effect, param + 1)
+    case 49:
+        return AureaText.t("tl_mask", effect, AureaText.t("panel_caminho"))
     case 43:
         let labels = ["tl_feather", "tl_expansion", "tl_opacity"]
         return AureaText.t("tl_mask", effect, param < labels.count ? AureaText.t(labels[param]) : String(track.param))

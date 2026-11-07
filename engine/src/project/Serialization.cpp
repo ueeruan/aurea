@@ -807,6 +807,10 @@ void write_layer(ByteWriter& w, const Layer& l) {
                 w.vec2(pt.inTangent);
                 w.vec2(pt.outTangent);
             }
+            // v56: a curva do trecho.
+            w.u8v(k.curve);
+            w.u8v(k.easePower);
+            w.f32v(k.bx1); w.f32v(k.by1); w.f32v(k.bx2); w.f32v(k.by2);
         }
     }
     // v18: expressões por trilha (a chave da trilha + ligada + fonte). Só as
@@ -1391,6 +1395,11 @@ void read_layer(ByteReader& r, Layer& l) {
                     pt.position = r.vec2();
                     pt.inTangent = r.vec2();
                     pt.outTangent = r.vec2();
+                }
+                if (g_readingTimelineVersion >= 56) {
+                    k.curve = r.u8v();
+                    k.easePower = r.u8v();
+                    k.bx1 = r.f32v(); k.by1 = r.f32v(); k.bx2 = r.f32v(); k.by2 = r.f32v();
                 }
             }
             if (i < l.masks.size()) l.masks[i].pathKeys = std::move(keys);

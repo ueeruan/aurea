@@ -548,6 +548,7 @@ private fun trackName(track: TimelineTrack, effects: List<Pair<Int, String>>): S
         33 -> LaneNames.get(R.string.tl_text_anim, track.effect + 1, track.param + 1)
         43 -> LaneNames.get(R.string.tl_mask, track.effect + 1,
             listOf(R.string.tl_feather, R.string.tl_expansion, R.string.tl_opacity).getOrNull(track.param)?.let { LaneNames.get(it) } ?: track.param.toString())
+        49 -> LaneNames.get(R.string.tl_mask, track.effect + 1, LaneNames.get(R.string.panel_caminho))
         34 -> LaneNames.get(R.string.tl_vector, track.param + 1)
         35 -> LaneNames.get(R.string.tl_shape, track.param + 1)
         36 -> LaneNames.get(R.string.tl_particles, track.param + 1)

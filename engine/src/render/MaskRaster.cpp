@@ -1,5 +1,7 @@
 #include "aurea/render/MaskRaster.hpp"
 
+#include "aurea/vector/Vector.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -20,6 +22,16 @@ bool active_in(const Layer& l, const Mask& m) noexcept {
     return active(m);
 }
 
+PathKey ease_of(const MaskPathKey& k) noexcept {
+    PathKey e;
+    // `interp` da máscara: 0 segura, 1 linear, 2 suave. No key de forma: 2, 0, 1.
+    e.ease = k.interp == 0 ? 2 : k.interp == 2 ? 1 : 0;
+    e.curve = k.curve;
+    e.easePower = k.easePower;
+    e.bx1 = k.bx1; e.by1 = k.by1; e.bx2 = k.bx2; e.by2 = k.by2;
+    return e;
+}
+
 void evaluate_path(const Mask& m, f64 localFrame, std::vector<MaskPoint>& out) {
     const std::vector<MaskPathKey>& keys = m.pathKeys;
     if (keys.empty()) { out = m.points; return; }
@@ -31,9 +43,10 @@ void evaluate_path(const Mask& m, f64 localFrame, std::vector<MaskPoint>& out) {
     const MaskPathKey& b = keys[i + 1];
     // Número de pontos diferente (ponto acrescentado no meio) ou key de
     // segurar: a forma de `a` vale até `b`.
-    if (a.interp == 0 || a.points.size() != b.points.size() || b.frame <= a.frame) { out = a.points; return; }
+    if (a.points.size() != b.points.size() || b.frame <= a.frame) { out = a.points; return; }
     f32 t = static_cast<f32>((localFrame - static_cast<f64>(a.frame)) / static_cast<f64>(b.frame - a.frame));
-    if (a.interp == 2) t = t * t * (3.0f - 2.0f * t);
+    t = vector::path_key_ease(ease_of(a), t);
+    if (t <= 0.0f) { out = a.points; return; }
     auto lerp = [t](Vec2 x, Vec2 y) { return Vec2{x.x + (y.x - x.x) * t, x.y + (y.y - x.y) * t}; };
     out.resize(a.points.size());
     for (usize k = 0; k < out.size(); ++k) {

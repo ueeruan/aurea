@@ -1827,9 +1827,9 @@ AUREA_JNI jboolean AUREA_FN(nativeToggleMaskParamKey)(JNIEnv*, jclass, jlong han
 AUREA_JNI jint AUREA_FN(nativeToggleMaskPathKey)(JNIEnv*, jclass, jlong handle, jlong layer, jint mask) {
     NativeContext* c = ctx_of(handle);
     bool keyed = false;
-    // "Marcar keyframe" do painel da máscara: regrava a forma do instante se já
-    // houver keyframe aqui (apagar é pelo menu do keyframe, na timeline).
-    if (!c || mask < 0 || !c->engine.ensure_mask_path_key(static_cast<u64>(layer), static_cast<u32>(mask), &keyed)) return -1;
+    // O losango do painel alterna, como no iOS: sem keyframe aqui marca, com keyframe
+    // aqui tira. Só regravar deixava o keyframe impossível de apagar pelo painel.
+    if (!c || mask < 0 || !c->engine.toggle_mask_path_key(static_cast<u64>(layer), static_cast<u32>(mask), &keyed)) return -1;
     return keyed ? 1 : 0;
 }
 

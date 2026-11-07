@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -76,14 +77,30 @@ internal fun MaskPanel(env: PanelEnv) {
         m.keyCount > 0 -> KeyframeLook.Animated
         else -> KeyframeLook.None
     }
+    // Os keyframes do caminho aparecem na camada enquanto a máscara está aberta aqui.
+    val maskId = m?.id
+    DisposableEffect(store, store.primary, maskId, top) {
+        val feather = store.timelineFocus?.any { it.property == TrackProperty.MASK_PARAM && it.effectIndex == maskId } == true
+        if (!feather) store.timelineFocus = if (maskId != null && top == 0) listOf(TrackKey(TrackProperty.MASK_PATH, maskId, 0)) else null
+        onDispose { store.timelineFocus = null }
+    }
+    val pathKeys = m?.let { mask ->
+        store.primary?.let { id -> store.keyframes[id].orEmpty().filter { it.property == TrackProperty.MASK_PATH && it.effectIndex == mask.id } }
+    }.orEmpty()
+    val curveFrom = store.curveStart(pathKeys)
     Row(Modifier.fillMaxSize()) {
         LeftRail(
             onBack = env.onClose,
             keyframeLook = look,
-            // O que anima na máscara é o CAMINHO: o losango grava a forma no cabeçote.
+            // O que anima na máscara é o CAMINHO: o losango marca ou tira a forma no cabeçote.
             onKeyframe = if (top == 0 && m != null && m.closed && !drawing) ({ store.toggleMaskKey(m.id) }) else null,
-            curveAnimated = false,
-            onCurve = null,
+            curveAnimated = pathKeys.isNotEmpty(),
+            onCurve = if (top == 0 && curveFrom != null) ({
+                store.primary?.let { id ->
+                    store.selectKeyframe(id, curveFrom)
+                    env.onOpenPanel(EditorPanel.Curve)
+                }
+            }) else null,
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
             ParamTabs(listOf(stringResource(R.string.panel_mascaras), stringResource(R.string.panel_recorte_outra_camada)), top, onSelect = { top = it })

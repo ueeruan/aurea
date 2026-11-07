@@ -251,12 +251,16 @@ enum class TrackProperty : u16 {
     /// paramIndex = caminho; dados em VectorPath::keys (trilha virtual, como a
     /// MeshWarp: a timeline e o editor de curva os veem como keyframes).
     VectorPath,
+    /// Keys do CAMINHO de uma máscara: effectIndex = id da máscara, paramIndex = 0;
+    /// dados em Mask::pathKeys (trilha virtual, como a VectorPath).
+    MaskPath,
     _Count,
 };
 static_assert(static_cast<u16>(TrackProperty::MeshWarp) == 44);
 static_assert(static_cast<u16>(TrackProperty::BonePose) == 45);
 static_assert(static_cast<u16>(TrackProperty::TextPathLastMargin) == 47);
 static_assert(static_cast<u16>(TrackProperty::VectorPath) == 48);
+static_assert(static_cast<u16>(TrackProperty::MaskPath) == 49);
 
 enum class ExportCodec : u16 {
     H264 = 0, HEVC, AV1, ProRes,

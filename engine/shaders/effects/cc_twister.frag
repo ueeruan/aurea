@@ -28,7 +28,11 @@ void main() {
     const float theta = p.p0.w * smoothstep(-hs, hs, t);
     const float ct = cos(theta);
     const float k = ct >= 0.0 ? max(ct, 1e-4) : min(ct, -1e-4);
-    vec4 col = cc_at(c + dir * t + nrm * (s / k));
+    vec2 from = c + dir * t + nrm * (s / k);
+    // Na dobra k vai a zero e a leitura vai ao infinito: sobre a parede do Motion Tile
+    // (p1.z) ela para na borda da região, em vez de abrir uma faixa preta.
+    if (p.p1.z > 0.5) from = clamp(from, p.src.xy + 1.0, p.src.xy + p.src.zw - 1.0);
+    vec4 col = cc_at(from);
     col.rgb *= mix(1.0, abs(ct), clamp(p.p1.y, 0.0, 1.0));
     o_color = col;
 }

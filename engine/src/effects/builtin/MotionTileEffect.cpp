@@ -400,7 +400,13 @@ public:
             // infinita: a região cresce até cobrir isso tudo,
             // em vez de parar no quadro — senão o desfoque depois
             // do Motion Tile puxava transparente da borda e escurecia o quadro.
-            Rect vis = motion_tile::projected_region(*e.placement);
+            // Efeito que pede a entrada inteira (Twister, Slant, Flow Pinch) deixa a região
+            // visível vazia de propósito. Sem ela a margem não entrava e a parede parava
+            // na caixa do quadro: o que o warp lia além disso saía preto.
+            const Rect wall = region;
+            LayerPlacement seen = *e.placement;
+            seen.preserveFullExtent = false;
+            Rect vis = motion_tile::projected_region(seen);
             if (vis.w > 0.0f && vis.h > 0.0f) {
                 // + folga: o canto do quadro cai na borda da caixa visível e o
                 // filtro bilinear da composição leria transparente ali.
@@ -409,7 +415,13 @@ public:
                 // Não recortar contra 24x a layer: abaixo de 4,2% de escala,
                 // ou após um pan longo, isso abria faixas sem imagem. Só a
                 // parte visível é rasterizada; region_size limita a textura.
-                if (std::isfinite(vis.x) && std::isfinite(vis.y) && std::isfinite(vis.w) && std::isfinite(vis.h)) region = vis;
+                if (std::isfinite(vis.x) && std::isfinite(vis.y) && std::isfinite(vis.w) && std::isfinite(vis.h)) {
+                    region = vis;
+                    if (e.placement->preserveFullExtent) {
+                        const f32 x0 = std::min(wall.x, vis.x), y0 = std::min(wall.y, vis.y);
+                        region = Rect{x0, y0, std::max(wall.x + wall.w, vis.x + vis.w) - x0, std::max(wall.y + wall.h, vis.y + vis.h) - y0};
+                    }
+                }
             }
         }
 

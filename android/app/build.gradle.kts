@@ -125,8 +125,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // Deve superar os builds 2181–2191 já distribuídos; nunca reduzir o código.
-        versionCode = 2210
-        versionName = "0.4.7-beta"
+        versionCode = 2211
+        versionName = "0.4.8-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

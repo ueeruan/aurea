@@ -1875,7 +1875,8 @@ struct MaskPanel: View {
         VStack(spacing: 0) {
             PanelHeader(title: AureaText.t("panel_mascara_recorte")) { model.panel = .none }
             HStack(spacing: 0) {
-                LeftRail(keyframeLook: look, onKeyframe: canKey ? toggleKey : nil, onBack: { model.panel = .none })
+                LeftRail(keyframeLook: look, onKeyframe: canKey ? toggleKey : nil,
+                         onCurve: curveKeys.count >= 2 && tab == 0 ? { openCurve() } : nil, onBack: { model.panel = .none })
                 VStack(spacing: 0) {
                     ParamTabs([AureaText.t("panel_mascaras"), AureaText.t("panel_recorte_outra_camada")], selected: tab) { tab = $0 }
                     ScrollView {
@@ -1889,8 +1890,26 @@ struct MaskPanel: View {
             .onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }
             .onChange(of: model.timelineFocus) { focus in
-                if focus?.contains(where: { $0.property == 43 && $0.effect == mask?.id }) == true { tab = 0 }
+                if focus?.contains(where: { ($0.property == 43 || $0.property == 49) && $0.effect == mask?.id }) == true { tab = 0 }
             }
+            // Os keyframes do caminho aparecem na camada enquanto a máscara está aberta aqui.
+            .onAppear { focusPath() }
+            .onChange(of: model.selectedMask) { _ in focusPath() }
+            .onChange(of: tab) { _ in focusPath() }
+            .onDisappear { model.timelineFocus = nil }
+    }
+    private func focusPath() {
+        if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == mask?.id }) == true { return }
+        model.timelineFocus = tab == 0 ? mask.map { [TimelineTrack(property: 49, effect: $0.id)] } : nil
+    }
+    private var curveKeys: [KeyframeItem] {
+        guard let mask else { return [] }
+        return (model.keyframes[id] ?? []).filter { Int($0.property) == 49 && $0.effectIndex == mask.id }.sorted { $0.time < $1.time }
+    }
+    private func openCurve() {
+        guard let first = curveKeys.first else { return }
+        let segment = curveKeys.dropLast().last { $0.time <= model.localPlayhead } ?? curveKeys[0]
+        model.openCurve(property: first.property, effect: first.effectIndex, param: first.paramIndex, time: segment.time)
     }
     @ViewBuilder private var masksBody: some View {
         Color.clear.frame(height: 6)

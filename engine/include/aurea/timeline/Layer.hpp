@@ -85,6 +85,10 @@ struct MaskPoint {
 /// diferente, a forma segura até o próximo key.
 struct MaskPathKey {
     i64 frame = 0;
+    /// Curva do trecho que SAI do key (a mesma dos keys de forma; 0xFF = só `interp`).
+    u8  curve = 0xFF;
+    u8  easePower = 1;
+    f32 bx1 = 0.33f, by1 = 0.0f, bx2 = 0.67f, by2 = 1.0f;
     u8  interp = 1;      ///< 0 segura, 1 linear, 2 suave (ease in-out)
     std::vector<MaskPoint> points;
 };

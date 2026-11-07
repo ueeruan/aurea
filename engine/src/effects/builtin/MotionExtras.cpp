@@ -158,13 +158,23 @@ public:
     }
     bool is_identity(const EffectEval& e) const noexcept override { return std::abs(e.f(0))<.00001f; }
     f32 input_margin(const EffectEval& e) const noexcept override {
-        if (!squeeze_ || !e.placement || is_identity(e)) return 0;
+        if (!e.placement || is_identity(e)) return 0;
         const Rect visible = visible_layer_rect(*e.placement);
         if (!(visible.w > 0 && visible.h > 0)) return 0;
         const Vec2 size = size_of(e), center = e.p2(1);
         const f32 cx = center.x * size.x, cy = center.y * size.y;
         const f32 dx = std::max(std::fabs(visible.x - cx), std::fabs(visible.x + visible.w - cx));
         const f32 dy = std::max(std::fabs(visible.y - cy), std::fabs(visible.y + visible.h - cy));
+        if (!squeeze_) {
+            // Olho de peixe: a mesma conta de lens_extra.frag no canto mais longe. Perto de
+            // 160° ela explode, e aí o teto segura a textura em tamanho que o aparelho aguenta.
+            const f32 half = std::max(1.f, std::min(size.x, size.y) * .5f);
+            const f32 r = std::hypot(dx, dy) / half;
+            const f32 fov = std::clamp(safe(e.f(0)), 0.f, 160.f) * .5f * kDeg2Rad;
+            if (e.b(2) || !(fov > 1e-4f)) return 0;
+            const f32 source = std::tan(std::min(r * fov, 1.55f)) / std::tan(fov);
+            return std::min((source - r) * half, 1.5f * std::max(size.x, size.y)) + 2.f;
+        }
         // The inverse pinch can read as far as radius/(1-|strength|).
         // Propagate that reach to Motion Tile instead of sampling its cropped edge.
         const f32 k = std::clamp(std::fabs(safe(e.f(0))) / 100.f, 0.f, .95f);

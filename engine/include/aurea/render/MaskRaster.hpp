@@ -54,6 +54,9 @@ void flatten(const std::vector<MaskPoint>& pts, bool closed, f32 tolerance, Vec2
 /// `offset` leva px da camada para px da fonte (margem do texto).
 /// Devolve o nº de máscaras ativas; `start` = valor inicial da cobertura (1
 /// se a primeira ativa subtrai/intersecta, senão 0); `key` = hash do bloco.
+/// A curva do key de máscara nas regras dos keys de forma (vector::path_key_ease).
+[[nodiscard]] PathKey ease_of(const MaskPathKey& k) noexcept;
+
 [[nodiscard]] u32 build_block(const Layer& l, f64 localFrame, Vec2 offset, f32 tolerance,
                               std::vector<Vec4>& out, f32& start, u64& key);
 

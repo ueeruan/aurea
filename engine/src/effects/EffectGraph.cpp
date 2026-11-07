@@ -569,6 +569,18 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
     //    que recorta a própria saída ao quadro visível precisa deixar isto.
     f32 margin = 0.0f;
     bool fullExtent = false;
+    // A parede do Motion Tile só existe até onde pedem. Um warp lê longe do pixel que
+    // desenha e a maioria não sabe dizer quanto: pedia 0 e o que ficava além da região
+    // saía preto. Depois de um Motion Tile todo warp pede pelo menos este alcance.
+    usize tileStage = out.stages.size();
+    for (usize s = 0; s < out.stages.size() && tileStage == out.stages.size(); ++s)
+        for (u32 k = 0; k < out.stages[s].count; ++k)
+            if (std::strcmp(out.evals[out.stages[s].begin + k].effect->info().key, effect_keys::kMotionTile) == 0) { tileStage = s; break; }
+    const auto wall_reach = [](const EffectEval& e) noexcept -> f32 {
+        const EffectInfo& info = e.effect->info();
+        if (!e.placement || info.cls != EffectClass::Domain || std::strcmp(info.category, "Distorcer") != 0) return 0.0f;
+        return 0.6f * static_cast<f32>(std::max(e.placement->layerWidth, e.placement->layerHeight));
+    };
     for (usize s = out.stages.size(); s-- > 0;) {
         EffectStage& st = out.stages[s];
         st.margin = margin;
@@ -598,7 +610,8 @@ void EffectGraph::plan_f(const Layer& layer, const EffectRegistry& registry, f64
                     }
                 }
             }
-            margin += e.effect->input_margin(e);
+            const f32 own = e.effect->input_margin(e);
+            margin += s > tileStage ? std::max(own, wall_reach(e)) : own;
         }
     }
 

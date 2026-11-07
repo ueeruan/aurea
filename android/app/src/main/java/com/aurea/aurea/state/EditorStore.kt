@@ -5957,8 +5957,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         val id = primary ?: return
         if (engine.removeMask(id, mask)) {
             if (maskEdit == mask) { maskEdit = null; maskDrawing = false; maskPoint = -1 }
-            if (selectedKeyframe?.second?.let { it.property == TrackProperty.MASK_PARAM && it.effectIndex == mask } == true) clearSelectedKeyframe()
-            if (timelineFocus?.any { it.property == TrackProperty.MASK_PARAM && it.effectIndex == mask } == true) timelineFocus = null
+            val ofMask = { p: Int -> p == TrackProperty.MASK_PARAM || p == TrackProperty.MASK_PATH }
+            if (selectedKeyframe?.second?.let { ofMask(it.property) && it.effectIndex == mask } == true) clearSelectedKeyframe()
+            if (timelineFocus?.any { ofMask(it.property) && it.effectIndex == mask } == true) timelineFocus = null
             refreshNow()
         }
     }

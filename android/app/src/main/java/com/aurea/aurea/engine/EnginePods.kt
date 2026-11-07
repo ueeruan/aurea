@@ -1002,6 +1002,7 @@ object TrackProperty {
     const val TEXT_PATH_LAST_MARGIN = 47
     /** Keys de FORMA de um caminho vetorial (trilha virtual): effect = grupo, param = caminho. */
     const val VECTOR_PATH = 48
+    const val MASK_PATH = 49
     const val VECTOR_PARAM = 34
     const val SHAPE_PARAM = 35
     const val PARTICLE_PARAM = 36

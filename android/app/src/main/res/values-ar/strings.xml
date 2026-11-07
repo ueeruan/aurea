@@ -4819,4 +4819,7 @@
     <string name="s3d_animation">الحركة</string>
     <string name="s3d_more">خيارات أخرى</string>
     <string name="pn_mask_points">النقاط</string>
+    <string name="tx_tab_style">النمط</string>
+    <string name="tx_tab_layout">التخطيط</string>
+    <string name="tx_tab_animator">المحرّك</string>
 </resources>

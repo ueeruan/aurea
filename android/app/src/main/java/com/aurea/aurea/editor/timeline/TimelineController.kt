@@ -215,6 +215,7 @@ internal class TimelineController(
     }
 
     private fun centerX() = state.width / 2f
+    private val DOUBLE_TAP_MS get() = android.view.ViewConfiguration.getDoubleTapTimeout().toLong()
     private fun frameAt(x: Float) = TimeAxis.frameAt(x, view(), pxPerFrame(), centerX())
     private fun xOf(frame: Int) = TimeAxis.xOf(frame.toDouble(), view(), pxPerFrame(), centerX())
     private fun playheadFrame() = view().toFrame()
@@ -849,6 +850,35 @@ internal class TimelineController(
     // =========================================================================
     /** Toque no olho há pouco: um toque logo depois não sai do foco (janela de 200 ms). */
     private var eyeToggledAt = 0L
+    private var lastBodyTap = NO_ID
+    private var lastBodyTapAt = 0L
+
+    /** Abre (ou fecha) as trilhas da camada, com cada eixo na sua trilha. */
+    private fun revealLanes(r: RowModel) {
+        tick()
+        pauseIfPlaying()
+        if (isExpanded(r)) {
+            expandedLayers.value = expandedLayers.value - r.segments.map { it.id }.toSet()
+            return
+        }
+        if (!isSelected(r.id)) store.select(r.id)
+        val target = expandTarget(r)
+        openGroups.value = openGroups.value + store.keyframes[target.id].orEmpty().filter { it.timelineVisible }
+            .mapNotNull { k -> trackGroup(TimelineTrack(k.property, k.effectIndex, k.paramIndex))?.let { LaneGroupKey(target.id, it) } }
+        expandedLayers.value = expandedLayers.value + target.id
+    }
+
+    /** Toque na linha entre duas chaves da trilha: abre a curva desse trecho. */
+    private fun laneCurveTap(r: RowModel, x: Float): Boolean {
+        val at = frameAt(x)
+        for (i in 0 until r.instants.size - 1) {
+            if (at >= r.instants[i] && at < r.instants[i + 1]) {
+                keyframeTap(r, i)
+                return true
+            }
+        }
+        return false
+    }
 
     /** "Seleção múltipla" da referência: o modo de escolher várias, ou 2+ escolhidas. */
     private fun multiActive() = omegaMultiSelection(store.layerSelectMode, selectionSize())
@@ -967,6 +997,17 @@ internal class TimelineController(
             }
             else -> {}
         }
+        // Dois toques no clipe: revela as trilhas de todas as propriedades da camada.
+        if (r != null && r.track == null && hit.kind == HitKind.BODY && !multiActive()) {
+            val now = System.currentTimeMillis()
+            if (r.id == lastBodyTap && now - lastBodyTapAt <= DOUBLE_TAP_MS) {
+                lastBodyTap = NO_ID
+                revealLanes(r)
+                return
+            }
+            lastBodyTap = r.id
+            lastBodyTapAt = now
+        }
         if (compact) {
             // Referência: no foco o toque curto sai dele (exceto logo depois do olho).
             if (System.currentTimeMillis() - eyeToggledAt < EYE_GRACE_MS) return
@@ -998,7 +1039,8 @@ internal class TimelineController(
             }
             HitKind.BODY, HitKind.TRIM_START, HitKind.TRIM_END -> if (r != null) {
                 if (store.keySelectMode && store.keySelection?.layer == r.id) return
-                if (r.track != null) onTrackTap(r.id, r.track.property, r.track.effect, r.track.param) else selectTap(r)
+                if (r.track == null) selectTap(r)
+                else if (!laneCurveTap(r, p.x)) onTrackTap(r.id, r.track.property, r.track.effect, r.track.param)
             }
             HitKind.NONE -> {
                 store.clearSelectedKeyframe()

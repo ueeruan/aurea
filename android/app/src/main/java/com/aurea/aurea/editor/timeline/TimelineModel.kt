@@ -523,6 +523,29 @@ private fun axisName(property: Int): String? = when (property) {
     else -> null
 }
 
+/** O nome do parâmetro do animador de texto (ids de TextAnimSection.kt). */
+private fun textAnimParamName(param: Int): Int? = when (param) {
+    0 -> R.string.panel_inicio
+    1 -> R.string.panel_fim
+    2 -> R.string.edt_selector_offset
+    3 -> R.string.panel_intensidade
+    10 -> R.string.panel_posicao_x
+    11 -> R.string.panel_posicao_y
+    12 -> R.string.pn_depth
+    13 -> R.string.fx_escala_x
+    14 -> R.string.fx_escala_y
+    15 -> R.string.edt_rotation_x
+    16 -> R.string.edt_rotation_y
+    17 -> R.string.edt_rotation_z
+    18 -> R.string.panel_opacidade
+    19 -> R.string.edt_prop_spacing
+    20 -> R.string.panel_desfoque
+    21 -> R.string.edt_prop_skew
+    22 -> R.string.panel_contorno
+    23 -> R.string.edt_prop_scramble
+    else -> null
+}
+
 /** Eixos de uma PARTE de forma 3D: posição, rotação, escala (nessa ordem). */
 private fun partAxisName(param: Int): String? {
     val base = listOf(R.string.tl_position, R.string.tl_rotation, R.string.tl_scale).getOrNull(param / 3) ?: return null
@@ -545,7 +568,8 @@ private fun trackName(track: TimelineTrack, effects: List<Pair<Int, String>>): S
         31 -> (effects.firstOrNull { it.first == track.effect }?.second ?: LaneNames.get(R.string.tl_effect)) + " · ${track.param + 1}"
         44 -> LaneNames.get(R.string.fx_name_mesh_warp)
         32 -> LaneNames.get(R.string.tl_audio, track.param + 1)
-        33 -> LaneNames.get(R.string.tl_text_anim, track.effect + 1, track.param + 1)
+        33 -> textAnimParamName(track.param)?.takeIf { LaneNames.app != null }?.let { LaneNames.get(R.string.edt_animation_n, track.effect + 1) + " · " + LaneNames.get(it) }
+            ?: LaneNames.get(R.string.tl_text_anim, track.effect + 1, track.param + 1)
         43 -> LaneNames.get(R.string.tl_mask, track.effect + 1,
             listOf(R.string.tl_feather, R.string.tl_expansion, R.string.tl_opacity).getOrNull(track.param)?.let { LaneNames.get(it) } ?: track.param.toString())
         49 -> LaneNames.get(R.string.tl_mask, track.effect + 1, LaneNames.get(R.string.panel_caminho))
@@ -561,6 +585,7 @@ private fun trackName(track: TimelineTrack, effects: List<Pair<Int, String>>): S
                 else -> track.param.toString()
             })
         42 -> LaneNames.get(R.string.tl_part, track.effect + 1, partAxisName(track.param) ?: track.param.toString())
+        29 -> LaneNames.get(R.string.text_letter_spacing)
         46 -> LaneNames.get(R.string.panel_margem_inicial)
         47 -> LaneNames.get(R.string.text027_path_last_margin)
         48 -> LaneNames.get(R.string.om_pts_contour_n, track.param + 1)
@@ -627,11 +652,11 @@ internal fun expandedRows(
 }
 
 /**
- * Altura de uma trilha de propriedade: baixa (16 dp), para caberem muitas sob
+ * Altura de uma trilha de propriedade: baixa (24 dp), para caberem muitas sob
  * as camadas. O dedo não perde o alvo: um toque que não pega nada na trilha
  * sob ele tenta a vizinha (ver [LaneTouch]), o que dá ≥ 32 dp a cada losango.
  */
-internal const val LANE_HEIGHT_DP = 16f
+internal const val LANE_HEIGHT_DP = 24f
 
 /**
  * Folga vertical de toque das trilhas baixas: a ordem das fileiras a tentar

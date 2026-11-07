@@ -60,6 +60,7 @@ class TextPath027DeviceTest {
         val maskId = store.masks!!.masks.first().id
         // …até virar o caminho dele, pela tela.
         compose.onNodeWithTag("layer.panel.colorFill").performClick()
+        compose.onNodeWithTag("text.tab.layout").performClick()
         // A fileira de chips rola na horizontal: primeiro o painel desce até ela.
         compose.onNodeWithTag("text.path.sources").performScrollTo()
         compose.onNodeWithTag("text.path.mask.0").performClick()
@@ -67,7 +68,9 @@ class TextPath027DeviceTest {
         val onPath = redPixels()
         assertTrue("a máscara-caminho não recorta ($onPath de $straight px)", onPath > straight * 6 / 10)
         // Keyframe da margem inicial no instante.
-        compose.onNodeWithTag("text.path.first.key").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("text.path.first.key").performScrollTo()
+        compose.runOnIdle { store.timelineFocus = listOf(com.aurea.aurea.engine.TrackKey(TrackProperty.TEXT_PATH_FIRST_MARGIN)) }
+        compose.onNodeWithContentDescription(context.getString(com.aurea.aurea.R.string.panel_marcar_keyframe_aqui)).assertIsEnabled().performClick()
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == TrackProperty.TEXT_PATH_FIRST_MARGIN && it.time == 0 } }
         // Forçar alinhamento e desfazer.
         compose.onNodeWithTag("text.path.force").performScrollTo().performClick()

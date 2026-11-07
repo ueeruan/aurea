@@ -1502,6 +1502,12 @@ internal class TimelinePainter(
             val label = nameLayout(r, labelWidth)
             drawText(label, alpha = if (r.track?.group == true) 0.9f else 0.6f, topLeft = Offset(m.laneLabelLeft, cy - label.size.height / 2f))
         }
+        // A linha entre as chaves: tocar nela abre a curva daquele trecho.
+        if (r.instants.size >= 2) {
+            val a = TimeAxis.xOf(r.instants.first().toDouble(), view, ppf, cx)
+            val b = TimeAxis.xOf(r.instants.last().toDouble(), view, ppf, cx)
+            drawLine(com.aurea.aurea.ui.theme.AureaColors.Accent.copy(alpha = 0.5f), Offset(a, cy), Offset(b, cy), 1.5f * m.density)
+        }
         omegaKeys(c, r, cy, w, view, ppf, cx, fps, editing = true, editH = m.omegaKeyAlt * 1.2f, altH = m.omegaKeyAlt)
     }
 

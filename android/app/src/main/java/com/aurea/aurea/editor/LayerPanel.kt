@@ -643,7 +643,8 @@ private fun onSlot(store: EditorStore, ui: EditorUi, l: PanelLayer, slot: LayerS
         LayerSlot.BlendOpacity -> openPanel(store, ui, EditorPanel.Appearance)
         LayerSlot.MoveTransform -> openPanel(store, ui, EditorPanel.Transform)
         LayerSlot.Edit -> when (edit) {
-            LayerEdit.Text -> store.openTextContentEditor()
+            // Editar texto abre as opções (a aba Texto tem o campo); o texto 3D digita direto.
+            LayerEdit.Text -> if (store.text3d != null) store.openTextContentEditor() else openPanel(store, ui, EditorPanel.Text)
             LayerEdit.Group -> store.openPrecomp(l.id)
             LayerEdit.Shape -> openPanel(store, ui, EditorPanel.ShapeEdit)
             // Omega conteúdo (área 06, P0-4/P0-5): Editar pontos e o editor de desenho.

@@ -4828,4 +4828,7 @@ to edit the curve.</string>
     <string name="s3d_animation">Animation</string>
     <string name="s3d_more">More options</string>
     <string name="pn_mask_points">Points</string>
+    <string name="tx_tab_style">Style</string>
+    <string name="tx_tab_layout">Layout</string>
+    <string name="tx_tab_animator">Animator</string>
 </resources>

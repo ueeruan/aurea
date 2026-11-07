@@ -9,6 +9,8 @@ import UniformTypeIdentifiers
 // TextPanel.kt / TextPathSection.kt. Controls are expanded in the Android order.
 struct TextAppearanceControls: View {
     @EnvironmentObject private var model: AureaModel
+    /// −1 tudo; 0 Texto, 1 Estilo, 2 Layout (as abas das opções de texto).
+    var page = -1
     @State private var text: [String: Any] = [:]
     @State private var style: [Float] = []
     private var id: Int64 { model.primarySelection ?? 0 }
@@ -22,25 +24,34 @@ struct TextAppearanceControls: View {
     private func components(_ key: String) -> [Float] { let v = (text[key] as? [NSNumber] ?? []).map(\.floatValue); return v.count >= 4 ? v : [1, 1, 1, 1] }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if page <= 0 {
             NativePanelRuler(label: AureaText.t("panel_tamanho"), value: value("size", 72), step: 0.5, range: 4...TextSizeSteps.max, unit: "px", keypad: true) { model.engine.setText(id, size: $0); refresh() }
             colorRow("panel_cor", values: components("color")) { color("color", "panel_cor") }
+            // O rótulo em cima e os três botões do mesmo tamanho: com as abas à direita a linha
+            // não comporta os dois lado a lado em nenhum idioma.
+            Text(AureaText.t("panel_alinhamento")).font(.aurea(size: 13)).padding(.top, 8)
             HStack(spacing: 6) {
-                Text(AureaText.t("panel_alinhamento")).font(.aurea(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
                 ForEach(Array(["panel_esquerda", "panel_centro", "panel_direita"].enumerated()), id: \.offset) { n, key in
-                    NativePanelChip(AureaText.t(key), selected: Int(value("alignment")) == n, horizontal: 12) { model.engine.setText(id, alignment: UInt32(n)); refresh() }
+                    NativePanelChip(AureaText.t(key), selected: Int(value("alignment")) == n, horizontal: 4, fill: true) { model.engine.setText(id, alignment: UInt32(n)); refresh() }
                 }
-            }.frame(height: 48)
+            }.padding(.bottom, 8)
+            }
+            if page == -1 || page == 1 {
             section("panel_contorno")
             colorRow("panel_cor_contorno", values: components("strokeColor")) { color("strokeColor", "panel_cor_contorno") }
             NativePanelRuler(label: AureaText.t("panel_largura_contorno"), value: value("strokeWidth"), step: 0.1, range: 0...60, unit: "px", keypad: true) { model.engine.setText(id, strokeWidth: $0); refresh() }
-            if style.count >= 20 { styleSections }
-            NativeTextDynamicSection()
-            NativeTextPathSection()
-            NativePanelChip(AureaText.t("la_animators")) { model.transformTab = 6; model.openPanel(.transform) }
+            }
+            if style.count >= 20 {
+                if page == -1 || page == 2 { layoutSections }
+                if page == -1 || page == 1 { backdropSections }
+            }
+            if page <= 0 { NativeTextDynamicSection() }
+            if page == -1 || page == 2 { NativeTextPathSection() }
+            if page == -1 { NativePanelChip(AureaText.t("la_animators")) { model.transformTab = 6; model.openPanel(.transform) } }
         }.foregroundStyle(AureaColors.text).onAppear { load() }.onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }
     }
-    private var styleSections: some View {
+    private var layoutSections: some View {
         VStack(alignment: .leading, spacing: 0) {
             NativePanelRuler(label: AureaText.t("text_line_spacing"), value: style[18] * 100, step: 0.5, range: 10...1000, unit: "%", keypad: true) { set(18, $0 / 100) }
             trackingRow
@@ -56,6 +67,10 @@ struct TextAppearanceControls: View {
                 styleRow("panel_largura_caixa", 1, 2, 10...20000)
                 if style[0] >= 2 { styleRow("panel_altura_caixa", 2, 2, 10...20000) }
             }
+        }
+    }
+    private var backdropSections: some View {
+        VStack(alignment: .leading, spacing: 0) {
             styleToggle("panel_fundo", enabled: 3, color: 4).padding(.top, 6)
             if style[3] > 0.5 {
                 styleRow("panel_margem_fundo", 8, 0.2, 0...500)
@@ -70,18 +85,15 @@ struct TextAppearanceControls: View {
         }
     }
     private func section(_ key: String) -> some View { Text(AureaText.t(key)).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 6) }
+    /// O losango fica no rótulo, como no Alight: tocar nele escolhe a propriedade e o ◆ da coluna marca.
     private var trackingRow: some View {
+        let track = TimelineTrack(property: 29)
         let keys = (model.keyframes[id] ?? []).filter { $0.property == 29 && $0.effectIndex == UInt32.max }
         let here = keys.contains { $0.time == model.localPlayhead }
         return NativePanelRuler(label: AureaText.t("text_letter_spacing"), value: style[19], step: 0.25,
-            range: -1000...1000, unit: "‰ em", keypad: true, look: here ? .keyHere : keys.isEmpty ? .none : .animated, toggleKey: {
-                guard !(model.selectedLayer?.locked ?? false) else { return }
-                model.mutate { engine in
-                    if here { engine.deleteKeyframe(forLayer: id, property: 29, time: model.localPlayhead) }
-                    else { engine.insertKeyframe(forLayer: id, property: 29, time: model.localPlayhead, value: style[19]) }
-                }
-                refresh()
-            }) { set(19, $0) }.accessibilityIdentifier("text.tracking.key")
+            range: -1000...1000, unit: "‰ em", keypad: true, look: here ? .keyHere : keys.isEmpty ? .none : .animated,
+            selected: model.timelineFocus == [track], onSelect: { model.timelineFocus = [track] }) { set(19, $0) }
+            .accessibilityIdentifier("text.tracking.key")
     }
     private func styleRow(_ key: String, _ slot: Int, _ step: Float, _ range: ClosedRange<Float>) -> some View {
         NativePanelRuler(label: AureaText.t(key), value: style[slot], step: step, range: range, unit: "px", keypad: true) { set(slot, $0) }
@@ -215,18 +227,12 @@ private struct NativeTextPathSection: View {
     }
     /// Margens animáveis (TrackProperty.TEXT_PATH_FIRST_MARGIN = 46, LAST = 47), o losango do Android.
     private func marginRow(_ key: String, property: UInt32, value: Float, identifier: String, set: @escaping (Float) -> Void) -> some View {
+        let track = TimelineTrack(property: Int(property))
         let keys = (model.keyframes[id] ?? []).filter { $0.property == property && $0.effectIndex == UInt32.max }
         let here = keys.contains { $0.time == model.localPlayhead }
         return NativePanelRuler(label: AureaText.t(key), value: value, step: 1, range: -20000...20000, unit: "px", keypad: true,
-            look: here ? .keyHere : keys.isEmpty ? .none : .animated, toggleKey: {
-                guard !(model.selectedLayer?.locked ?? false) else { return }
-                let layer = id
-                model.mutate { engine in
-                    if here { engine.deleteKeyframe(forLayer: layer, property: property, time: model.localPlayhead) }
-                    else { engine.insertKeyframe(forLayer: layer, property: property, time: model.localPlayhead, value: value) }
-                }
-                model.refreshModel(force: true); load()
-            }, identifier: identifier, set: set)
+            look: here ? .keyHere : keys.isEmpty ? .none : .animated,
+            selected: model.timelineFocus == [track], onSelect: { model.timelineFocus = [track] }, identifier: identifier, set: set)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -273,14 +279,17 @@ struct NativePanelChip: View {
     var radius: CGFloat = 8
     var fontSize: CGFloat = 12
     var bold = false
+    /// Divide a largura da linha com os botões vizinhos.
+    var fill = false
     let action: () -> Void
-    init(_ title: String, selected: Bool = false, horizontal: CGFloat = 10, height: CGFloat? = nil, radius: CGFloat = 8, fontSize: CGFloat = 12, bold: Bool = false, action: @escaping () -> Void) {
+    init(_ title: String, selected: Bool = false, horizontal: CGFloat = 10, height: CGFloat? = nil, radius: CGFloat = 8, fontSize: CGFloat = 12, bold: Bool = false, fill: Bool = false, action: @escaping () -> Void) {
         self.title = title; self.selected = selected; self.horizontal = horizontal; self.height = height; self.radius = radius; self.fontSize = fontSize; self.bold = bold; self.action = action
+        self.fill = fill
     }
     var body: some View {
         Button(action: action) {
             Text(title).font(.aurea(size: fontSize, weight: bold ? (selected ? .bold : .medium) : .regular)).foregroundStyle(selected ? AureaColors.accent : AureaColors.text).lineLimit(1)
-                .padding(.horizontal, horizontal).padding(.vertical, height == nil ? 6 : 0).frame(height: height)
+                .padding(.horizontal, horizontal).padding(.vertical, height == nil ? 6 : 0).frame(maxWidth: fill ? .infinity : nil).frame(height: height)
                 .background(selected ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: radius))
         }.buttonStyle(AureaPressStyle(shrink: 1))
     }
@@ -2175,6 +2184,8 @@ struct TextAnimationPanel: View {
 struct TextAnimationSection: View {
     var showAnimatorEffect = true
     var beforeAnimation: () -> Void = {}
+    /// Os animadores antes dos presets (a aba Animador das opções de texto).
+    var listFirst = false
     @EnvironmentObject private var model: AureaModel
     @State private var animators: [[Float]] = []
     @State private var animationError = false
@@ -2187,6 +2198,7 @@ struct TextAnimationSection: View {
     private func refresh() { model.refreshModel(force: true); load() }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if listFirst { TextAnimatorList(animators: animators, reload: refresh, beforeAnimation: beforeAnimation) }
             Text(AureaText.t("panel_animacao")).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted).padding(.top, 10)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -2216,7 +2228,7 @@ struct TextAnimationSection: View {
             }
             // Omega conteúdo (área 06, P1-11): os animadores em LISTA (linha de 37 pt que abre os
             // ajustes a partir dela) e "+ Adicionar" no fim, com os tipos.
-            TextAnimatorList(animators: animators, reload: refresh, beforeAnimation: beforeAnimation).padding(.top, 6)
+            if !listFirst { TextAnimatorList(animators: animators, reload: refresh, beforeAnimation: beforeAnimation).padding(.top, 6) }
             if showAnimatorEffect { NativePanelChip(AureaText.t("text_animator_add")) {
                 beforeAnimation()
                 model.addEffectAndFocus(fxEffectTypeId("aurea.text.animator"), layer: id)
@@ -2272,12 +2284,8 @@ private struct TextAnimatorList: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(animators.indices, id: \.self) { index in
                 VStack(spacing: 0) {
-                    if open == index {
-                        header(index)
-                        NativeTextAnimatorCard(index: UInt32(index), values: animators[index], embedded: true)
-                    } else {
-                        row(index)
-                    }
+                    header(index)
+                    if open == index { NativeTextAnimatorCard(index: UInt32(index), values: animators[index], embedded: true) }
                 }
                 .background(AureaColors.fxListSurface, in: RoundedRectangle(cornerRadius: 5))
                 .clipShape(RoundedRectangle(cornerRadius: 5))
@@ -2311,77 +2319,83 @@ private struct TextAnimatorList: View {
         return Self.props.filter { bits & $0.0 != 0 }.map { AureaText.t($0.1) }.joined(separator: ", ")
     }
 
-    /// A linha fechada: ▸ (alfa 0,3), ícone do tipo, o nome e o que ele mexe.
-    private func row(_ index: Int) -> some View {
-        let v = animators[index], list = what(v)
-        return Button { open = index } label: {
-            HStack(spacing: 0) {
-                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 18, color: AureaColors.text.opacity(0.3))
-                Color.clear.frame(width: 4, height: 1)
-                CupertinoGlyph.text(CupertinoGlyph.Textformat, size: 18, color: v[0] > 0.5 ? AureaColors.text : AureaColors.muted)
-                Color.clear.frame(width: 8, height: 1)
-                Text(AureaText.t("edt_animation_n", index + 1)).font(.aurea(size: 13, weight: .semibold))
-                Color.clear.frame(width: 8, height: 1)
-                Text(list).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 6).frame(height: 37).contentShape(Rectangle())
-        }
-        .buttonStyle(AureaPressStyle(shrink: 1))
-        .accessibilityLabel(AureaText.t("om_anim_item_cd", index + 1, list))
-        .accessibilityIdentifier("anim.item.\(index)")
-    }
-
-    /// Cabeçalho do animador aberto: ▾ · ícone · nome · liga · ⋯ · 🗑.
+    /// A linha do animador, como a lista de efeitos do Alight (37 pt). Fechada: ▸, nome, o que
+    /// ele mexe, olho e alça ≡ (soltar muda a ordem pela distância). Aberta: ▾, nome, olho, ⋮ e 🗑.
     private func header(_ index: Int) -> some View {
-        let v = animators[index]
+        let v = animators[index], list = what(v)
+        let on = v[0] > 0.5, isOpen = open == index
         return HStack(spacing: 0) {
-            Button { open = -1 } label: {
-                CupertinoGlyph.text(CupertinoGlyph.ChevronDown, size: 16).frame(width: 36, height: 40).contentShape(Rectangle())
+            Button { open = isOpen ? -1 : index } label: {
+                HStack(spacing: 6) {
+                    CupertinoGlyph.text(isOpen ? CupertinoGlyph.ChevronDown : CupertinoGlyph.ChevronRight, size: 16,
+                                        color: AureaColors.text.opacity(isOpen ? 1 : 0.3))
+                    Text(AureaText.t("edt_animation_n", index + 1)).font(.aurea(size: 13, weight: isOpen ? .bold : .semibold))
+                        .foregroundStyle(on ? AureaColors.text : AureaColors.muted).lineLimit(1)
+                    if !isOpen { Text(list).font(.aurea(size: 11)).foregroundStyle(AureaColors.muted).lineLimit(1).padding(.leading, 2) }
+                    Spacer(minLength: 0)
+                }.frame(height: 37).contentShape(Rectangle())
             }
             .buttonStyle(AureaPressStyle(shrink: 1))
-            .accessibilityLabel(AureaText.t("om_anim_collapse_cd"))
-            CupertinoGlyph.text(CupertinoGlyph.Textformat, size: 18)
-            Color.clear.frame(width: 8, height: 1)
-            Text(AureaText.t("edt_animation_n", index + 1)).font(.aurea(size: 13, weight: .bold))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            AureaToggle(checked: v[0] > 0.5) { set(index, [0: $0 ? 1 : 0]) }
-            Button { more = index } label: {
-                CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 18, color: AureaColors.fxListIcon).frame(width: 36, height: 40).contentShape(Rectangle())
+            .accessibilityLabel(AureaText.t("om_anim_item_cd", index + 1, list))
+            .accessibilityIdentifier("anim.item.\(index)")
+            Button { set(index, [0: on ? 0 : 1]) } label: {
+                CupertinoGlyph.text(on ? CupertinoGlyph.Eye : CupertinoGlyph.EyeSlash, size: 18, color: on ? AureaColors.text : AureaColors.muted)
+                    .frame(width: 34, height: 37).contentShape(Rectangle())
             }
             .buttonStyle(AureaPressStyle(shrink: 1))
-            .accessibilityLabel(AureaText.t("editor_mais"))
-            .accessibilityIdentifier("anim.item.\(index).more")
-            .aureaAnchoredMenu(isPresented: Binding(get: { more == index }, set: { if !$0 { more = -1 } }), tone: .editor, alignEnd: true,
-                               tag: "anim.item.\(index).menu") {
-                [
-                    .item(AureaText.t("om_anim_duplicate"), glyph: CupertinoGlyph.PlusSquareOnSquare, tag: "anim.item.\(index).duplicate") {
-                        if model.engine.duplicateTextAnimator(id, index: UInt32(index)) >= 0 { open = index + 1 }
-                        reload()
-                    },
-                    .item(AureaText.t("panel_mover_cima"), glyph: CupertinoGlyph.ArrowUp, enabled: index > 0) {
-                        if model.engine.moveTextAnimator(id, from: UInt32(index), to: UInt32(index - 1)) { open = index - 1 }
-                        reload()
-                    },
-                    .item(AureaText.t("panel_mover_baixo"), glyph: CupertinoGlyph.ArrowDown, enabled: index < animators.count - 1) {
-                        if model.engine.moveTextAnimator(id, from: UInt32(index), to: UInt32(index + 1)) { open = index + 1 }
-                        reload()
-                    },
-                ]
+            .accessibilityLabel(list)
+            .accessibilityAddTraits(on ? [.isSelected] : [])
+            .accessibilityIdentifier("anim.item.\(index).eye")
+            if !isOpen {
+                VStack(spacing: 2) {
+                    ForEach(0..<3, id: \.self) { _ in Rectangle().fill(AureaColors.muted).frame(width: 14, height: 1) }
+                }
+                .frame(width: 30, height: 37).contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 6).onEnded { g in
+                    let to = min(animators.count - 1, max(0, index + Int((g.translation.height / 37).rounded())))
+                    if to != index { _ = model.engine.moveTextAnimator(id, from: UInt32(index), to: UInt32(to)) }
+                    reload()
+                })
+                .accessibilityIdentifier("anim.item.\(index).grip")
             }
-            Button {
-                model.engine.removeTextAnimator(id, index: UInt32(index))
-                open = -1
-                reload()
-            } label: {
-                CupertinoGlyph.text(CupertinoGlyph.Trash, size: 18, color: AureaColors.fxListIcon).frame(width: 36, height: 40).contentShape(Rectangle())
+            if isOpen {
+                Button { more = index } label: {
+                    CupertinoGlyph.text(CupertinoGlyph.Ellipsis, size: 18, color: AureaColors.fxListIcon).frame(width: 34, height: 37).contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityLabel(AureaText.t("editor_mais"))
+                .accessibilityIdentifier("anim.item.\(index).more")
+                .aureaAnchoredMenu(isPresented: Binding(get: { more == index }, set: { if !$0 { more = -1 } }), tone: .editor, alignEnd: true,
+                                   tag: "anim.item.\(index).menu") {
+                    [
+                        .item(AureaText.t("om_anim_duplicate"), glyph: CupertinoGlyph.PlusSquareOnSquare, tag: "anim.item.\(index).duplicate") {
+                            if model.engine.duplicateTextAnimator(id, index: UInt32(index)) >= 0 { open = index + 1 }
+                            reload()
+                        },
+                        .item(AureaText.t("panel_mover_cima"), glyph: CupertinoGlyph.ArrowUp, enabled: index > 0) {
+                            if model.engine.moveTextAnimator(id, from: UInt32(index), to: UInt32(index - 1)) { open = index - 1 }
+                            reload()
+                        },
+                        .item(AureaText.t("panel_mover_baixo"), glyph: CupertinoGlyph.ArrowDown, enabled: index < animators.count - 1) {
+                            if model.engine.moveTextAnimator(id, from: UInt32(index), to: UInt32(index + 1)) { open = index + 1 }
+                            reload()
+                        },
+                    ]
+                }
+                Button {
+                    model.engine.removeTextAnimator(id, index: UInt32(index))
+                    open = -1
+                    reload()
+                } label: {
+                    CupertinoGlyph.text(CupertinoGlyph.Trash, size: 18, color: AureaColors.fxListIcon).frame(width: 34, height: 37).contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityLabel(AureaText.t("panel_remover"))
+                .accessibilityIdentifier("anim.item.\(index).delete")
             }
-            .buttonStyle(AureaPressStyle(shrink: 1))
-            .accessibilityLabel(AureaText.t("panel_remover"))
-            .accessibilityIdentifier("anim.item.\(index).delete")
         }
         .padding(.horizontal, 6)
-        .frame(height: 40)
+        .frame(height: 37)
     }
 
     private func set(_ index: Int, _ updates: [Int: Float]) {
@@ -2531,6 +2545,7 @@ private struct NativeTextAnimRuler: View {
     let param: NativeAnimParam
     let values: [Float]
     private var id: Int64 { model.primarySelection ?? 0 }
+    private var track: TimelineTrack { TimelineTrack(property: 33, effect: index, param: UInt32(param.id)) }
     private var look: KeyframeLook {
         let bit = 1 << (param.id < 10 ? param.id : param.id - 10)
         if Int(values[param.id < 10 ? 38 : 39]) & bit != 0 { return .keyHere }
@@ -2544,11 +2559,11 @@ private struct NativeTextAnimRuler: View {
     }
     var body: some View {
         NativePanelRuler(label: param.label, value: values[param.slot], step: param.step, range: param.range, unit: param.unit, decimals: param.step < 0.5 ? 1 : 0,
-            look: look, toggleKey: {
-                model.engine.toggleTextAnimKey(id, index: index, param: UInt32(param.id)); model.refreshModel(force: true)
-            }, expression: expression, onExpression: {
+            look: look, expression: expression, onExpression: {
                 model.expressionSheet = ExpressionRequest(layer: id, label: param.label, tracks: [ExpressionTrack(property: 33, effect: index, param: UInt32(param.id))], unit: param.unit)
-            }, compactUnit: true) { model.engine.setTextAnimParam(id, index: index, param: UInt32(param.id), value: $0); model.refreshModel(force: true) }
+            }, selected: model.timelineFocus == [track], onSelect: { model.timelineFocus = [track] }, compactUnit: true, identifier: "anim.\(index).\(param.id)") {
+                model.engine.setTextAnimParam(id, index: index, param: UInt32(param.id), value: $0); model.refreshModel(force: true)
+            }
     }
 }
 

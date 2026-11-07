@@ -1255,7 +1255,47 @@ private struct TextPanelView: View {
     @State private var italic = false
     @State private var fonts: [[String: Any]] = []
     @State private var query = ""
+    @State private var tab = 0
     private var layerId: Int64 { model.primarySelection ?? 0 }
+    /// A propriedade escolhida: o losango e a curva da coluna valem para ela.
+    private var railTrack: TimelineTrack? {
+        guard let focus = model.timelineFocus, focus.count == 1, [29, 33, 46, 47].contains(focus[0].property) else { return nil }
+        return focus[0]
+    }
+    private var railKeys: [KeyframeItem] {
+        guard let t = railTrack else { return [] }
+        return (model.keyframes[layerId] ?? []).filter { Int($0.property) == t.property && $0.effectIndex == t.effect && $0.paramIndex == t.param }
+            .sorted { $0.time < $1.time }
+    }
+    private var railLook: KeyframeLook {
+        let keys = railKeys
+        return keys.contains { $0.time == model.localPlayhead } ? .keyHere : keys.isEmpty ? .none : .animated
+    }
+    private func toggleRailKey() {
+        guard let t = railTrack, !(model.selectedLayer?.locked ?? false) else { return }
+        if t.property == 33 {
+            model.engine.toggleTextAnimKey(layerId, index: t.effect, param: t.param)
+            model.refreshModel(force: true)
+            return
+        }
+        // Espaçamento entre letras (29) e margens do texto no caminho (46, 47).
+        let property = UInt32(t.property), layer = layerId, time = model.localPlayhead
+        let here = railKeys.contains { $0.time == time }
+        let path = model.engine.textPathOptions(layer), style = model.engine.textStyle(layer)
+        let value = t.property == 29 ? (style.count > 19 ? style[19].floatValue : 0)
+            : path.count >= 7 ? path[t.property == 46 ? 1 : 5].floatValue : 0
+        model.mutate { engine in
+            if here { engine.deleteKeyframe(forLayer: layer, property: property, time: time) }
+            else { engine.insertKeyframe(forLayer: layer, property: property, time: time, value: value) }
+        }
+        model.refreshModel(force: true)
+    }
+    private func openRailCurve() {
+        let keys = railKeys
+        guard let first = keys.first else { return }
+        let segment = keys.dropLast().last { $0.time <= model.localPlayhead } ?? first
+        model.openCurve(property: first.property, effect: first.effectIndex, param: first.paramIndex, time: segment.time)
+    }
     private var familyNames: [String] {
         Array(Set(fonts.compactMap { $0["family"] as? String })).filter { query.trimmingCharacters(in: .whitespaces).isEmpty || $0.localizedCaseInsensitiveContains(query) }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
@@ -1265,13 +1305,32 @@ private struct TextPanelView: View {
             PanelHeader(title: AureaText.t(showingFonts ? "panel_fonte" : "text_options")) { dismissEditing(); model.panel = .none }
             if showingFonts { fontPanel }
             else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
+                // O desenho dos painéis de propriedade: a coluna fixa à esquerda, o conteúdo no
+                // centro e as abas em ícones à direita.
+                HStack(spacing: 0) {
+                    LeftRail(keyframeLook: railLook, onKeyframe: railTrack == nil ? nil : { toggleRailKey() }, curveAnimated: !railKeys.isEmpty,
+                             onCurve: railKeys.count >= 2 ? { openRailCurve() } : nil, onBack: { dismissEditing(); model.panel = .none })
+                    AureaColors.contentStrongLine.frame(width: 0.7)
+                    VStack(spacing: 0) {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                if tab == 0 {
                         ZStack(alignment: .topLeading) {
                             if content.isEmpty { Text(AureaText.t("panel_digite_texto")).font(.aurea(size: 15)).foregroundStyle(AureaColors.muted).padding(.horizontal, 12).padding(.vertical, 10).allowsHitTesting(false) }
                             NativeTextInput(text: $content, selection: $selection, editing: $editing, editable: false,
                                 alignment: (model.engine.text(forLayer: layerId)?["alignment"] as? NSNumber)?.intValue ?? 0) { _ in }
+                                .padding(.trailing, 26)
+                                // Um toque abre o teclado; segurar seleciona um trecho para o estilo próprio.
+                                .simultaneousGesture(TapGesture().onEnded { model.openTextContentEditor() })
                         }.frame(minHeight: 56).background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(alignment: .topTrailing) {
+                            Button { model.openTextContentEditor() } label: {
+                                CupertinoGlyph.text(CupertinoGlyph.Pencil, size: 18, color: AureaColors.text).frame(width: 36, height: 36).contentShape(Rectangle())
+                            }
+                            .buttonStyle(AureaPressStyle(shrink: 1))
+                            .accessibilityLabel(AureaText.t("sh_dock_edit_text"))
+                            .accessibilityIdentifier("text.panel.edit")
+                        }
                         if selection.length > 0 { spanTools.padding(.top, 6) }
                         // Omega conteúdo (área 06, P0-2): o navegador de fontes em tela cheia.
                         Button { dismissEditing(); FontBrowserRequest.shared.open = true } label: {
@@ -1282,12 +1341,31 @@ private struct TextPanelView: View {
                                 Text("  ›").font(.aurea(size: 15)).foregroundStyle(AureaColors.muted)
                             }.frame(height: 48).contentShape(RoundedRectangle(cornerRadius: 10))
                         }.buttonStyle(AureaPressStyle(shrink: 1)).padding(.top, 10)
-                        TextAppearanceControls()
-                    }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 24)
-                }.scrollDismissesKeyboard(.interactively)
+                                    TextAppearanceControls(page: 0)
+                                } else if tab == 1 {
+                                    TextAppearanceControls(page: 1)
+                                } else if tab == 2 {
+                                    TextAppearanceControls(page: 2)
+                                } else {
+                                    TextAnimationSection(listFirst: true)
+                                    NativePanelChip(AureaText.t("la_animators")) { model.transformTab = 6; model.openPanel(.transform) }.padding(.top, 6)
+                                }
+                            }.padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 24)
+                        }
+                        .scrollDismissesKeyboard(.interactively)
+                    }
+                    AureaColors.contentStrongLine.frame(width: 0.7)
+                    PanelIconTabs(tabs: [
+                        PanelIconTab(glyph: CupertinoGlyph.Textformat, label: AureaText.t("panel_texto"), id: "text.tab.text"),
+                        PanelIconTab(glyph: CupertinoGlyph.Paintbrush, label: AureaText.t("tx_tab_style"), id: "text.tab.style"),
+                        PanelIconTab(glyph: CupertinoGlyph.DocText, label: AureaText.t("tx_tab_layout"), id: "text.tab.layout"),
+                        PanelIconTab(glyph: CupertinoGlyph.Sparkles, label: AureaText.t("tx_tab_animator"), id: "text.tab.animator"),
+                    ], selected: tab, group: AureaText.t("text_options")) { tab = $0; model.timelineFocus = nil }
+                }
             }
         }.onAppear { load(); fonts = model.engine.availableFonts() }
-            .onChange(of: layerId) { _ in dismissEditing(); content = ""; selection = NSRange(location: 0, length: 0); showingFonts = false; load() }
+            .onDisappear { model.timelineFocus = nil }
+            .onChange(of: layerId) { _ in tab = 0; dismissEditing(); content = ""; selection = NSRange(location: 0, length: 0); showingFonts = false; load() }
             .onChange(of: model.status.modelRevision) { _ in load() }
     }
     /// EditorStore.importFont: TTF/OTF copiado para Documents/Media (pasta que o

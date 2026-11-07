@@ -4789,4 +4789,7 @@
     <string name="s3d_animation">Анимация</string>
     <string name="s3d_more">Другие параметры</string>
     <string name="pn_mask_points">Точки</string>
+    <string name="tx_tab_style">Стиль</string>
+    <string name="tx_tab_layout">Макет</string>
+    <string name="tx_tab_animator">Аниматор</string>
 </resources>

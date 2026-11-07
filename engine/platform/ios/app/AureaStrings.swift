@@ -7020,6 +7020,9 @@ enum AureaText {
         "s3d_animation": "Animação",
         "s3d_more": "Mais opções",
         "pn_mask_points": "Pontos",
+        "tx_tab_style": "Estilo",
+        "tx_tab_layout": "Layout",
+        "tx_tab_animator": "Animador",
     ]
     private static let en: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -13963,6 +13966,9 @@ enum AureaText {
         "s3d_animation": "Animation",
         "s3d_more": "More options",
         "pn_mask_points": "Points",
+        "tx_tab_style": "Style",
+        "tx_tab_layout": "Layout",
+        "tx_tab_animator": "Animator",
     ]
     private static let es: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -20906,6 +20912,9 @@ enum AureaText {
         "s3d_animation": "Animación",
         "s3d_more": "Más opciones",
         "pn_mask_points": "Puntos",
+        "tx_tab_style": "Estilo",
+        "tx_tab_layout": "Diseño",
+        "tx_tab_animator": "Animador",
     ]
     private static let ru: [String: String] = [
         "add_element_aurora": "Аврора",
@@ -27849,6 +27858,9 @@ enum AureaText {
         "s3d_animation": "Анимация",
         "s3d_more": "Другие параметры",
         "pn_mask_points": "Точки",
+        "tx_tab_style": "Стиль",
+        "tx_tab_layout": "Макет",
+        "tx_tab_animator": "Аниматор",
     ]
     private static let hi: [String: String] = [
         "add_element_aurora": "ऑरोरा",
@@ -34792,6 +34804,9 @@ enum AureaText {
         "s3d_animation": "एनिमेशन",
         "s3d_more": "और विकल्प",
         "pn_mask_points": "पॉइंट",
+        "tx_tab_style": "स्टाइल",
+        "tx_tab_layout": "लेआउट",
+        "tx_tab_animator": "एनिमेटर",
     ]
     private static let ar: [String: String] = [
         "add_element_aurora": "الشفق القطبي",
@@ -41735,6 +41750,9 @@ enum AureaText {
         "s3d_animation": "الحركة",
         "s3d_more": "خيارات أخرى",
         "pn_mask_points": "النقاط",
+        "tx_tab_style": "النمط",
+        "tx_tab_layout": "التخطيط",
+        "tx_tab_animator": "المحرّك",
     ]
     private static let id: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -48678,6 +48696,9 @@ enum AureaText {
         "s3d_animation": "Animasi",
         "s3d_more": "Opsi lainnya",
         "pn_mask_points": "Titik",
+        "tx_tab_style": "Gaya",
+        "tx_tab_layout": "Tata letak",
+        "tx_tab_animator": "Animator",
     ]
     private static let plurals: [String: [String: [String: String]]] = [
         "pt-BR": [

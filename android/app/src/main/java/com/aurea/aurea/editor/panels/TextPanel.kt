@@ -1,6 +1,7 @@
 package com.aurea.aurea.editor.panels
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,7 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +22,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,13 +76,58 @@ internal fun TextPanel(env: PanelEnv) {
         return
     }
     var field by remember(store.primary) { mutableStateOf(TextFieldValue(td.content)) }
+    // Um toque curto no campo abre o teclado; segurar seleciona um trecho para o estilo próprio.
+    val fieldTouch = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    LaunchedEffect(fieldTouch) {
+        var pressedAt = 0L
+        fieldTouch.interactions.collect {
+            when (it) {
+                is androidx.compose.foundation.interaction.PressInteraction.Press -> pressedAt = android.os.SystemClock.uptimeMillis()
+                is androidx.compose.foundation.interaction.PressInteraction.Release ->
+                    if (android.os.SystemClock.uptimeMillis() - pressedAt < 300L) store.openTextContentEditor()
+                else -> Unit
+            }
+        }
+    }
     val draft = field.text
     LaunchedEffect(td.content) {
         if (td.content != field.text && !store.textEditing) {
             field = TextFieldValue(td.content, TextRange(field.selection.start.coerceAtMost(td.content.length), field.selection.end.coerceAtMost(td.content.length)))
         }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 24.dp)) {
+    // O desenho dos painéis de propriedade: a coluna fixa à esquerda, o conteúdo no centro e
+    // as abas em ícones à direita. O losango e a curva valem para a propriedade escolhida.
+    var tab by rememberSaveable(store.primary) { mutableIntStateOf(0) }
+    DisposableEffect(store.primary) { onDispose { store.timelineFocus = null } }
+    val focus = store.timelineFocus?.singleOrNull()?.takeIf { it.property in TEXT_RAIL_PROPERTIES }
+    val keys = focus?.let { f -> store.primaryKeys().filter { it.property == f.property && it.effectIndex == f.effectIndex && it.paramIndex == f.paramIndex } }.orEmpty()
+    val local = store.detail?.localPlayhead
+    val curveFrom = store.curveStart(keys)
+    Row(Modifier.fillMaxSize().testTag("text.panel")) {
+        LeftRail(
+            onBack = env.onClose,
+            keyframeLook = when {
+                keys.any { it.time == local } -> com.aurea.aurea.ui.ds.KeyframeLook.KeyHere
+                keys.isNotEmpty() -> com.aurea.aurea.ui.ds.KeyframeLook.Animated
+                else -> com.aurea.aurea.ui.ds.KeyframeLook.None
+            },
+            onKeyframe = focus?.let { f -> {
+                if (f.property == com.aurea.aurea.engine.TrackProperty.TEXT_ANIM_PARAM) store.toggleTextAnimKey(f.effectIndex, f.paramIndex)
+                else store.toggleTransformKeyframe(intArrayOf(f.property))
+            } },
+            curveAnimated = keys.isNotEmpty(),
+            onCurve = if (curveFrom != null) ({
+                store.primary?.let { id ->
+                    store.selectKeyframe(id, curveFrom)
+                    env.onOpenPanel(EditorPanel.Curve)
+                }
+            }) else null,
+        )
+        Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 24.dp)) {
+                when (tab) {
+                    0 -> {
         Box(
             Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -89,9 +141,15 @@ internal fun TextPanel(env: PanelEnv) {
                 textStyle = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Text,
                     textAlign = when (td.alignment) { 1 -> TextAlign.Center; 2 -> TextAlign.Right; else -> TextAlign.Left })),
                 cursorBrush = SolidColor(AureaColors.Accent),
-                modifier = Modifier.fillMaxWidth(),
+                interactionSource = fieldTouch,
+                modifier = Modifier.fillMaxWidth().padding(end = 26.dp),
             )
             if (draft.isEmpty()) Text(stringResource(R.string.panel_digite_texto), style = AureaType.Base.merge(TextStyle(fontSize = 15.sp, color = AureaColors.Muted)))
+            val editLabel = stringResource(R.string.sh_dock_edit_text)
+            Box(Modifier.align(Alignment.TopEnd).size(36.dp).offset(x = 8.dp, y = (-6).dp).testTag("text.panel.edit")
+                .semantics { contentDescription = editLabel }.tocavel(shrink = 1f) { store.openTextContentEditor() }, contentAlignment = Alignment.Center) {
+                com.aurea.aurea.ui.theme.CupertinoIcon(com.aurea.aurea.ui.theme.CupertinoGlyph.Pencil, 18.dp, AureaColors.Text)
+            }
         }
         // Trecho selecionado no campo: estilo próprio (rich text).
         val sel = field.selection
@@ -144,21 +202,24 @@ internal fun TextPanel(env: PanelEnv) {
                     onDone = { store.endGesture() }))
             }
         }
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.panel_alinhamento), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(0 to stringResource(R.string.panel_esquerda), 1 to stringResource(R.string.panel_centro), 2 to stringResource(R.string.panel_direita)).forEach { (a, label) ->
-                    val on = td.alignment == a
-                    Box(
-                        Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                            .tocavel(onClick = { store.setTextAlignment(a) }).padding(horizontal = 12.dp, vertical = 6.dp),
-                    ) {
-                        Text(label, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
-                    }
+        // O rótulo em cima e os três botões do mesmo tamanho: com as abas à direita a linha
+        // não comporta os dois lado a lado em nenhum idioma.
+        Text(stringResource(R.string.panel_alinhamento), modifier = Modifier.padding(top = 8.dp, bottom = 6.dp), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(0 to stringResource(R.string.panel_esquerda), 1 to stringResource(R.string.panel_centro), 2 to stringResource(R.string.panel_direita)).forEach { (a, label) ->
+                val on = td.alignment == a
+                Box(
+                    Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(if (on) AureaColors.AccentDim else AureaColors.Chip)
+                        .tocavel(onClick = { store.setTextAlignment(a) }).padding(horizontal = 4.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.sp, color = if (on) AureaColors.Accent else AureaColors.Text)))
                 }
             }
         }
-        Spacer(Modifier.height(6.dp))
+        TextDynamicSection(env)
+                    }
+                    1 -> {
         Text(stringResource(R.string.panel_contorno), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.panel_cor_contorno), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
@@ -170,10 +231,27 @@ internal fun TextPanel(env: PanelEnv) {
         }
         TextRuler(env, stringResource(R.string.panel_largura_contorno), { store.textDetail?.strokeWidth ?: 0f }, "${td.strokeWidth.roundToInt()} px",
             0.1f, 0f, 60f, stringResource(R.string.panel_contorno_texto)) { store.setTextStrokeWidth(it) }
-        TextStyleSections(env)
-        TextDynamicSection(env)
-        TextPathSection(env)
-        AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() }
+        TextBackdropSection(env)
+                    }
+                    2 -> {
+                        TextLayoutSection(env)
+                        TextPathSection(env)
+                    }
+                    else -> {
+                        TextAnimSection(env, listFirst = true)
+                        Spacer(Modifier.height(6.dp))
+                        AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() }
+                    }
+                }
+            }
+        }
+        Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
+        PanelIconTabs(listOf(
+            PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Textformat, stringResource(R.string.panel_texto), "text.tab.text"),
+            PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Paintbrush, stringResource(R.string.tx_tab_style), "text.tab.style"),
+            PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.DocText, stringResource(R.string.tx_tab_layout), "text.tab.layout"),
+            PanelIconTab(com.aurea.aurea.ui.theme.CupertinoGlyph.Sparkles, stringResource(R.string.tx_tab_animator), "text.tab.animator"),
+        ), tab, stringResource(R.string.text_options)) { tab = it; store.timelineFocus = null }
     }
 }
 
@@ -201,7 +279,7 @@ private fun TextDynamicSection(env: PanelEnv) {
             style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
         AureaToggle(checked = d[0] > .5, onCheckedChange = { store.setTextDynamicValue(0, if (it) 1.0 else 0.0) })
     }
-    Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         listOf("{#}" to R.string.text_token_counter, "{tc}" to R.string.text_token_timecode,
                "{t}" to R.string.text_token_time, "{f}" to R.string.text_token_frame).forEach { (token, label) ->
             val desc = stringResource(R.string.text_token_insert, stringResource(label))
@@ -229,7 +307,7 @@ private fun TextDynamicSection(env: PanelEnv) {
             Text(stringResource(R.string.text_counter_grouping), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp)))
             AureaToggle(checked = d[4] > .5, onCheckedChange = { store.setTextDynamicValue(4, if (it) 1.0 else 0.0) })
         }
-        Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth().height(44.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // Curva do contador: Linear (1), Suave (5), Entrada (3), Saída (4).
             listOf(1 to R.string.panel_linear, 5 to R.string.pn_ease_in_out, 3 to R.string.pn_ease_in, 4 to R.string.pn_ease_out).forEach { (ease, label) ->
                 val on = d[5].toInt() == ease
@@ -242,9 +320,9 @@ private fun TextDynamicSection(env: PanelEnv) {
     }
 }
 
-/** Caixa de parágrafo, fundo e sombra (ver `set_text_style`). */
+/** Espaçamento e caixa de parágrafo (ver `set_text_style`). */
 @Composable
-private fun TextStyleSections(env: PanelEnv) {
+private fun TextLayoutSection(env: PanelEnv) {
     val store = env.store
     val st by remember(store) { derivedStateOf { store.textStyle } }
     val v = st ?: return
@@ -260,7 +338,7 @@ private fun TextStyleSections(env: PanelEnv) {
     }
     Spacer(Modifier.height(6.dp))
     Text(stringResource(R.string.panel_caixa), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(Modifier.fillMaxWidth().height(44.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         listOf(0 to stringResource(R.string.panel_livre), 1 to stringResource(R.string.panel_paragrafo), 2 to stringResource(R.string.panel_tamanho_fixo), 3 to stringResource(R.string.panel_encolher_caber)).forEach { (m, label) ->
             val on = v[0].toInt() == m
             Box(
@@ -281,6 +359,14 @@ private fun TextStyleSections(env: PanelEnv) {
             }
         }
     }
+}
+
+/** Fundo e sombra do texto (ver `set_text_style`). */
+@Composable
+private fun TextBackdropSection(env: PanelEnv) {
+    val store = env.store
+    val st by remember(store) { derivedStateOf { store.textStyle } }
+    val v = st ?: return
     Spacer(Modifier.height(6.dp))
     Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(stringResource(R.string.panel_fundo), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700)))
@@ -321,6 +407,14 @@ private fun TextStyleSections(env: PanelEnv) {
     }
 }
 
+/** As propriedades do painel de texto que o ◆ e a curva da coluna alcançam. */
+private val TEXT_RAIL_PROPERTIES = setOf(
+    com.aurea.aurea.engine.TrackProperty.TEXT_ANIM_PARAM,
+    com.aurea.aurea.engine.TrackProperty.TEXT_TRACKING,
+    com.aurea.aurea.engine.TrackProperty.TEXT_PATH_FIRST_MARGIN,
+    com.aurea.aurea.engine.TrackProperty.TEXT_PATH_LAST_MARGIN,
+)
+
 @Composable
 internal fun TextRuler(
     env: PanelEnv,
@@ -336,9 +430,22 @@ internal fun TextRuler(
     onValue: (Float) -> Unit,
 ) {
     val store = env.store
-    PropertyCustomRow(label, selected = false, onSelect = {}) {
+    // Como no Alight, o losango fica no rótulo: tocar nele escolhe a propriedade e o ◆ da
+    // coluna marca o keyframe.
+    val track = keyProperty?.let { com.aurea.aurea.engine.TrackKey(it) }
+    val id = store.primary
+    val row = store.layers.firstOrNull { it.id == id }
+    val local = store.playhead - (row?.startFrame ?: 0) + (row?.offsetFrames ?: 0)
+    val keys = if (keyProperty != null) store.keyframes[id].orEmpty().filter { it.property == keyProperty } else emptyList()
+    val look = when {
+        keys.any { it.time == local } -> com.aurea.aurea.ui.ds.KeyframeLook.KeyHere
+        keys.isNotEmpty() -> com.aurea.aurea.ui.ds.KeyframeLook.Animated
+        else -> com.aurea.aurea.ui.ds.KeyframeLook.None
+    }
+    PropertyCustomRow(label, selected = track != null && store.timelineFocus?.singleOrNull() == track,
+        onSelect = { if (track != null) store.timelineFocus = listOf(track) }, keyframe = look) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f).height(40.dp)) {
+            Box(Modifier.weight(1f).height(40.dp).then(if (track != null) Modifier.testTag(keyTag) else Modifier)) {
                 TickRuler(
                     value = value,
                     unitsPerDp = unitsPerDp,
@@ -349,7 +456,7 @@ internal fun TextRuler(
                         unitsPerDp = { unitsPerDp },
                         min = min,
                         max = max,
-                        onStart = { store.beginGesture(gesture) },
+                        onStart = { if (track != null) store.timelineFocus = listOf(track); store.beginGesture(gesture) },
                         onValue = onValue,
                         onEnd = { store.endGesture() },
                     ),
@@ -361,23 +468,6 @@ internal fun TextRuler(
                     store.beginGesture(gesture); onValue(it.coerceIn(min, max)); store.endGesture()
                 })
             })
-            if (keyProperty != null) {
-                val id = store.primary
-                val row = store.layers.firstOrNull { it.id == id }
-                val local = store.playhead - (row?.startFrame ?: 0) + (row?.offsetFrames ?: 0)
-                val keys = store.keyframes[id].orEmpty().filter { it.property == keyProperty }
-                val look = when {
-                    keys.any { it.time == local } -> com.aurea.aurea.ui.ds.KeyframeLook.KeyHere
-                    keys.isNotEmpty() -> com.aurea.aurea.ui.ds.KeyframeLook.Animated
-                    else -> com.aurea.aurea.ui.ds.KeyframeLook.None
-                }
-                val action = stringResource(if (look == com.aurea.aurea.ui.ds.KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui)
-                Box(Modifier.width(48.dp).height(48.dp).testTag(keyTag)
-                    .semantics { contentDescription = "$action · $label" }
-                    .tocavel(enabled = row?.locked == false) { store.toggleTransformKeyframe(intArrayOf(keyProperty)) }, contentAlignment = Alignment.Center) {
-                    com.aurea.aurea.ui.ds.KeyframeDiamondIcon(look, enabled = row?.locked == false)
-                }
-            }
         }
     }
 }

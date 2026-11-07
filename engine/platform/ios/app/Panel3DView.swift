@@ -130,11 +130,11 @@ struct Panel3DView: View {
             }
             // Cada aba começa no topo (antes herdava a rolagem da anterior).
             .id(currentTab)
-            .environment(\.aureaFlatParamLabel, true)
             .accessibilityIdentifier("text3d.materialScroll")
               if tabs.count > 1 {
                   AureaColors.contentStrongLine.frame(width: 0.7)
-                  tabRail
+                  PanelIconTabs(tabs: tabs.map { PanelIconTab(glyph: $0.glyph, label: AureaText.t($0.key), id: "panel3d.tab.\($0.id)") },
+                                selected: tabs.firstIndex(of: currentTab) ?? 0, group: AureaText.t("ui3d_tabs")) { tab = tabs[$0] }
               }
             }
         }
@@ -171,33 +171,6 @@ struct Panel3DView: View {
             finishEditing()
             model.text3DFontSheet = nil
         }
-    }
-
-    /// As abas em ícones, na coluna da direita (60 pt).
-    private var tabRail: some View {
-        VStack(spacing: 0) {
-            ForEach(tabs, id: \.self) { item in
-                let on = item == currentTab
-                let ink = on ? AureaColors.accent : AureaColors.text
-                Button { tab = item } label: {
-                    VStack(spacing: 3) {
-                        CupertinoGlyph.text(item.glyph, size: 20, color: ink)
-                        Text(AureaText.t(item.key)).font(.aurea(size: 9.5, weight: on ? .bold : .regular)).foregroundStyle(ink)
-                            .lineLimit(1).minimumScaleFactor(0.8)
-                    }
-                    .frame(maxWidth: .infinity).frame(height: 62)
-                    .background(on ? AureaColors.accentDim : Color.clear)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(AureaPressStyle(shrink: 1))
-                .accessibilityIdentifier("panel3d.tab.\(item.id)")
-                .accessibilityAddTraits(on ? [.isSelected] : [])
-            }
-            Spacer(minLength: 0)
-        }
-        .frame(width: 60)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(AureaText.t("ui3d_tabs"))
     }
 
     // --- Texto 3D -------------------------------------------------------------

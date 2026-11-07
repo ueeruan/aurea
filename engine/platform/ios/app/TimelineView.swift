@@ -181,6 +181,9 @@ struct TimelineView: View {
     @State private var scrubFlinging = false
     /// Depois do olho, um toque nestes 200 ms não sai do foco.
     @State private var eyeToggledAt: TimeInterval = 0
+    /// O último toque no clipe: o segundo logo depois revela as trilhas.
+    @State private var lastBodyTap: Int64 = -1
+    @State private var lastBodyTapAt: TimeInterval = 0
     /// A camada que estava no foco (o fade de 600 ms ao voltar à visão geral).
     @State private var focusedLayer: Int64?
     /// Clipe levantado pelo toque longo e ainda parado: o arrasto (só no tempo) o move;
@@ -1556,7 +1559,7 @@ struct TimelineView: View {
                 return
             }
             if let track = row.track {
-                trackTap(row, track)
+                if !laneCurveTap(row, x: point.x, width: width) { trackTap(row, track) }
                 return
             }
             if touched.kind == .header {
@@ -1635,6 +1638,35 @@ struct TimelineView: View {
     }
 
     /// Fundo de uma trilha de propriedade: abre o painel dela (o mesmo de antes).
+    /// Abre (ou fecha) as trilhas da camada, com cada eixo na sua trilha.
+    private func revealLanes(_ row: TimelineRow) {
+        UISelectionFeedbackGenerator().selectionChanged()
+        pause()
+        if row.segments.contains(where: { expandedLayers.contains($0.id) }) {
+            expandedLayers.subtract(row.segments.map(\.id))
+            return
+        }
+        if !model.selection.contains(row.id) { model.select(layerId: row.id, additive: false) }
+        let target = (row.segments.first { model.selection.contains($0.id) } ?? row.segments[0]).id
+        for key in model.keyframes[target] ?? [] where key.timelineVisible {
+            let track = TimelineTrack(property: Int(key.property), effect: key.effectIndex, param: key.paramIndex)
+            if let group = timelineTrackGroup(track) { openGroups.insert(TimelineLaneGroupKey(layer: target, track: group)) }
+        }
+        if compact && !compactByDock { showAllLayers = true }
+        expandedLayers.insert(target)
+    }
+
+    /// Toque na linha entre duas chaves da trilha: abre a curva desse trecho.
+    private func laneCurveTap(_ row: TimelineRow, x px: CGFloat, width: CGFloat) -> Bool {
+        let at = Double(timelineFrame(frame(px, width: width)))
+        guard row.instants.count >= 2 else { return false }
+        for i in 0..<(row.instants.count - 1) where at >= Double(row.instants[i]) && at < Double(row.instants[i + 1]) {
+            keyTap(row, index: i)
+            return true
+        }
+        return false
+    }
+
     private func trackTap(_ row: TimelineRow, _ track: TimelineTrack) {
         model.select(layerId: row.id, additive: false)
         switch track.property {
@@ -2638,6 +2670,17 @@ extension TimelineView {
         default:
             break
         }
+        // Dois toques no clipe: revela as trilhas de todas as propriedades da camada.
+        if let row, row.track == nil, touched.kind == .body, !omegaMulti {
+            let now = ProcessInfo.processInfo.systemUptime
+            if row.id == lastBodyTap && now - lastBodyTapAt <= 0.3 {
+                lastBodyTap = -1
+                revealLanes(row)
+                return
+            }
+            lastBodyTap = row.id
+            lastBodyTapAt = now
+        }
         if compact {
             // Referência: no foco o toque curto sai dele (exceto logo depois do olho).
             if ProcessInfo.processInfo.systemUptime - eyeToggledAt < 0.2 { return }
@@ -2664,7 +2707,10 @@ extension TimelineView {
         case .body, .trimStart, .trimEnd:
             guard let row else { return }
             if model.timelineKeySelectMode && model.timelineKeySelection?.layer == row.id { return }
-            if let track = row.track { trackTap(row, track); return }
+            if let track = row.track {
+                if !laneCurveTap(row, x: point.x, width: width) { trackTap(row, track) }
+                return
+            }
             let timelineOnly: Bool = !model.selection.isEmpty && model.selection == model.timelineOnlySelection
             switch timelineLayerTap(picking: model.timelineLayerSelectMode, compact: false, selected: model.selection.count,
                                     tappedSelected: model.selection.contains(row.id), timelineOnly: timelineOnly) {
@@ -3102,6 +3148,13 @@ extension TimelineView {
         var title = context
         title.clip(to: Path(CGRect(x: m.laneLabelX, y: rowTop, width: max(0, width - m.laneLabelX - 4), height: timelineLaneHeight)))
         title.draw(label, at: CGPoint(x: m.laneLabelX, y: cy), anchor: .leading)
+        // A linha entre as chaves: tocar nela abre a curva daquele trecho.
+        if row.instants.count >= 2, let first = row.instants.first, let last = row.instants.last {
+            var join = Path()
+            join.move(to: CGPoint(x: x(Double(first), width: width), y: cy))
+            join.addLine(to: CGPoint(x: x(Double(last), width: width), y: cy))
+            context.stroke(join, with: .color(AureaColors.accent.opacity(0.5)), lineWidth: 1.5)
+        }
         omegaKeys(&context, row: row, cy: cy, width: width, editing: true, editH: m.omegaKeyAlt * 1.2, altH: m.omegaKeyAlt)
     }
 

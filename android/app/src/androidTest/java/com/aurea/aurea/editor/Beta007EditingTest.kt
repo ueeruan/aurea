@@ -38,7 +38,11 @@ class Beta007EditingTest {
         compose.runOnIdle { store.setTextContent("AAAA"); store.setTextSize(64f); store.setTextColor(1f, 0f, 0f, 1f) }
         val id = checkNotNull(store.primary)
         compose.onNodeWithTag("layer.panel.colorFill").performClick()
-        compose.onNodeWithTag("text.tracking.key").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("text.tab.layout").performClick()
+        compose.onNodeWithTag("text.tracking.key").performScrollTo()
+        // O rótulo escolhe a propriedade; o ◆ da coluna marca o keyframe.
+        compose.runOnIdle { store.timelineFocus = listOf(com.aurea.aurea.engine.TrackKey(29)) }
+        compose.onNodeWithContentDescription(context.getString(com.aurea.aurea.R.string.panel_marcar_keyframe_aqui)).assertIsEnabled().performClick()
         compose.waitUntil(5000) { store.keyframes[id].orEmpty().any { it.property == 29 && it.time == 0 } }
         compose.runOnIdle { store.seek(60) }
         compose.waitUntil(5000) { store.detail?.localPlayhead == 60 }

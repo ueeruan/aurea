@@ -879,9 +879,18 @@ private func timelineTrackName(_ track: TimelineTrack, _ effects: [EffectItem]) 
     case 40: return AureaText.t("tl_animator", effect, param + 1)
     case 31: return (effects.first { $0.effectId == track.effect }?.name ?? AureaText.t("tl_effect")) + " · \(UInt64(track.param) + 1)"
     case 44: return AureaText.t("fx_name_mesh_warp")
+    case 29: return AureaText.t("text_letter_spacing")
+    case 46: return AureaText.t("panel_margem_inicial")
+    case 47: return AureaText.t("text027_path_last_margin")
     case 48: return AureaText.t("om_pts_contour_n", param + 1)
     case 32: return AureaText.t("tl_audio", param + 1)
-    case 33: return AureaText.t("tl_text_anim", effect, param + 1)
+    case 33:
+        let names: [Int: String] = [0: "panel_inicio", 1: "panel_fim", 2: "ios_anim_delay_between", 3: "panel_intensidade", 10: "panel_posicao_x",
+                                    11: "panel_posicao_y", 12: "pn_depth", 13: "fx_escala_x", 14: "fx_escala_y", 15: "edt_rotation_x", 16: "edt_rotation_y",
+                                    17: "edt_rotation_z", 18: "panel_opacidade", 19: "ios_spacing", 20: "panel_desfoque", 21: "ios_skew",
+                                    22: "panel_contorno", 23: "ios_scramble_letter"]
+        if let key = names[Int(track.param)] { return AureaText.t("edt_animation_n", effect) + " · " + AureaText.t(key) }
+        return AureaText.t("tl_text_anim", effect, param + 1)
     case 49:
         return AureaText.t("tl_mask", effect, AureaText.t("panel_caminho"))
     case 43:
@@ -952,7 +961,7 @@ func expandedTimelineRows(_ base: [TimelineRow], expanded: Set<Int64>, openGroup
 }
 
 /// Altura de uma trilha de propriedade: baixa (16 pt), para caberem muitas.
-let timelineLaneHeight: CGFloat = 16
+let timelineLaneHeight: CGFloat = 24
 
 /// Folga vertical de toque das trilhas baixas (par do `LaneTouch` do Android):
 /// a fileira sob o dedo e depois a trilha vizinha cujo centro está a até

@@ -4781,4 +4781,7 @@ para editar la curva.</string>
     <string name="s3d_animation">Animación</string>
     <string name="s3d_more">Más opciones</string>
     <string name="pn_mask_points">Puntos</string>
+    <string name="tx_tab_style">Estilo</string>
+    <string name="tx_tab_layout">Diseño</string>
+    <string name="tx_tab_animator">Animador</string>
 </resources>

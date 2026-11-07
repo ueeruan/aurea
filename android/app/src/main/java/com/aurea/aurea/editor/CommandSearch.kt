@@ -211,7 +211,7 @@ private fun executeEditorCommand(id: String, store: EditorStore, ui: EditorUi) {
         "extract_audio" -> store.extractAudio()
         "audio" -> panel(EditorPanel.Audio)
         "transform" -> panel(EditorPanel.Transform)
-        "text" -> store.openTextContentEditor()
+        "text" -> if (store.text3d != null) store.openTextContentEditor() else panel(EditorPanel.Text)
         "effects" -> panel(EditorPanel.Effects)
         "appearance" -> panel(EditorPanel.Appearance)
         "tracking" -> panel(EditorPanel.Tracking)

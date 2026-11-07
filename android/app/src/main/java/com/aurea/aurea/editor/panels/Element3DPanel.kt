@@ -109,7 +109,6 @@ internal fun Element3DPanel(env: PanelEnv) {
     Row(Modifier.fillMaxSize().testTag("panel3d")) {
       LeftRail(onBack = env.onClose, keyframeLook = com.aurea.aurea.ui.ds.KeyframeLook.None, onKeyframe = null, curveAnimated = false, onCurve = null)
       Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
-      androidx.compose.runtime.CompositionLocalProvider(com.aurea.aurea.ui.ds.LocalFlatParamLabel provides true) {
         Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(remember(tab) { ScrollState(0) }).padding(bottom = 24.dp)) {
             when (tab) {
                 Tab3D.Material -> {
@@ -139,33 +138,35 @@ internal fun Element3DPanel(env: PanelEnv) {
                 Tab3D.Rig -> Column(Modifier.padding(horizontal = 10.dp)) { Rig3DTab(env) }
             }
         }
-      }
       if (tabs.size > 1) {
           Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
-          Panel3DRail(tabs, tab) { chosen = it.ordinal }
+          PanelIconTabs(tabs.map { PanelIconTab(it.glyph, stringResource(it.label), "panel3d.tab.${it.name.lowercase()}") }, tabs.indexOf(tab),
+              stringResource(R.string.ui3d_tabs)) { chosen = tabs[it].ordinal }
       }
     }
 }
 
-/** As abas em ícones, na coluna da direita (60 dp). */
+/** Uma aba da coluna da direita. */
+internal class PanelIconTab(val glyph: Char, val label: String, val tag: String)
+
+/** As abas em ícones, na coluna da direita (60 dp), como nos painéis de propriedade do Alight. */
 @Composable
-private fun Panel3DRail(tabs: List<Tab3D>, selected: Tab3D, onSelect: (Tab3D) -> Unit) {
-    val group = stringResource(R.string.ui3d_tabs)
+internal fun PanelIconTabs(tabs: List<PanelIconTab>, selected: Int, group: String, onSelect: (Int) -> Unit) {
     Column(Modifier.width(60.dp).fillMaxHeight().semantics { contentDescription = group }) {
-        tabs.forEach { t ->
-            val on = t == selected
+        tabs.forEachIndexed { i, t ->
+            val on = i == selected
             val ink = if (on) AureaColors.Accent else AureaColors.Text
             Column(
-                Modifier.fillMaxWidth().height(62.dp).background(if (on) AureaColors.AccentDim else Color.Transparent)
+                Modifier.fillMaxWidth().height(62.dp).padding(3.dp).clip(RoundedCornerShape(5.dp)).background(if (on) AureaColors.AccentDim else Color.Transparent)
                     .semantics(mergeDescendants = true) { role = Role.Tab; this.selected = on }
-                    .testTag("panel3d.tab.${t.name.lowercase()}")
-                    .tocavel(shrink = 1f) { onSelect(t) },
+                    .testTag(t.tag)
+                    .tocavel(shrink = 1f) { onSelect(i) },
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
                 com.aurea.aurea.ui.theme.CupertinoIcon(t.glyph, 20.dp, ink)
                 Spacer(Modifier.height(3.dp))
-                Text(stringResource(t.label), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                Text(t.label, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = AureaType.Base.merge(TextStyle(fontSize = 9.5.sp, fontWeight = if (on) FontWeight.W700 else FontWeight.W400, color = ink)))
             }
         }

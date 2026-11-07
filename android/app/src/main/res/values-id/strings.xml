@@ -4771,4 +4771,7 @@ untuk mengedit kurvanya.</string>
     <string name="s3d_animation">Animasi</string>
     <string name="s3d_more">Opsi lainnya</string>
     <string name="pn_mask_points">Titik</string>
+    <string name="tx_tab_style">Gaya</string>
+    <string name="tx_tab_layout">Tata letak</string>
+    <string name="tx_tab_animator">Animator</string>
 </resources>

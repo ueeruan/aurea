@@ -412,7 +412,9 @@ struct LayerPanelView: View {
         case .moveTransform: model.openPanel(.transform)
         case .edit:
             switch edit {
-            case .text: model.openTextContentEditor()
+            // Editar texto abre as opções (a aba Texto tem o campo); o texto 3D digita direto.
+            case .text:
+                if model.engine.text3D(forLayer: l.id) != nil { model.openTextContentEditor() } else { model.openPanel(.text) }
             case .group: model.openGroup(l.id)
             case .shape: model.openPanel(.shapeEdit)
             // Omega conteúdo (área 06): Editar pontos e o editor de desenho.

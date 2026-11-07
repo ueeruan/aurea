@@ -531,34 +531,24 @@ struct ExpressionBadge: View {
 /// (`FxParamRowMath.labelFontSize`). O losango pequeno no canto diz que a trilha
 /// anima (cheio = marca no cabeçote); o "=" no outro canto, que tem expressão.
 /// `PropertyLabelChip` e o rótulo das linhas de Efeitos usam este mesmo desenho.
-private struct AureaFlatParamLabelKey: EnvironmentKey { static let defaultValue = false }
-extension EnvironmentValues {
-    /// Rótulo plano, sem a ficha: o painel de material e ambiente do 3D.
-    var aureaFlatParamLabel: Bool {
-        get { self[AureaFlatParamLabelKey.self] }
-        set { self[AureaFlatParamLabelKey.self] = newValue }
-    }
-}
-
 struct ParamRowLabel: View {
     let label: String
     let selected: Bool
     var keyframe: KeyframeLook = .none
     var expression: ExpressionLook = .none
     var width: CGFloat = ParamRowDims.labelW
-    @Environment(\.aureaFlatParamLabel) private var flat
 
     var body: some View {
         Text(label)
             .font(.aurea(size: 14, weight: selected ? .bold : .regular))
-            .multilineTextAlignment(flat ? .leading : .center)
-            .lineLimit(flat && !label.contains(" ") ? 1 : FxParamRowMath.labelMaxLines(label))
-            .minimumScaleFactor(flat ? 0.72 : 0.86)
+            .multilineTextAlignment(.center)
+            .lineLimit(FxParamRowMath.labelMaxLines(label))
+            .minimumScaleFactor(0.72)
             .truncationMode(.tail)
-            .foregroundStyle(selected ? AureaColors.accent : flat ? AureaColors.text : ParamRowColors.labelOffText)
+            .foregroundStyle(selected ? AureaColors.accent : ParamRowColors.labelOffText)
             .padding(.horizontal, 4)
-            .frame(width: width, height: ParamRowDims.labelH, alignment: flat ? .leading : .center)
-            .background(selected ? ParamRowColors.labelOn : flat ? Color.clear : ParamRowColors.labelOff,
+            .frame(width: width, height: ParamRowDims.labelH)
+            .background(selected ? ParamRowColors.labelOn : ParamRowColors.labelOff,
                         in: RoundedRectangle(cornerRadius: ParamRowDims.radius))
             .overlay(alignment: .topTrailing) {
                 if expression != .none {
@@ -2634,5 +2624,47 @@ struct FxDropdownBox: View {
         .accessibilityValue(text)
         .modifier(OptionalIdentifier(tag: tag))
         .padding(4)
+    }
+}
+
+/// Uma aba da coluna da direita.
+struct PanelIconTab {
+    let glyph: Character
+    let label: String
+    let id: String
+}
+
+/// As abas em ícones, na coluna da direita (60 pt), como nos painéis de propriedade do Alight.
+struct PanelIconTabs: View {
+    let tabs: [PanelIconTab]
+    let selected: Int
+    let group: String
+    let onSelect: (Int) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(tabs.enumerated()), id: \.offset) { index, item in
+                let on = index == selected
+                let ink = on ? AureaColors.accent : AureaColors.text
+                Button { onSelect(index) } label: {
+                    VStack(spacing: 3) {
+                        CupertinoGlyph.text(item.glyph, size: 20, color: ink)
+                        Text(item.label).font(.aurea(size: 9.5, weight: on ? .bold : .regular)).foregroundStyle(ink)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity).frame(height: 56)
+                    .background(on ? AureaColors.accentDim : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                    .padding(3)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(AureaPressStyle(shrink: 1))
+                .accessibilityIdentifier(item.id)
+                .accessibilityAddTraits(on ? [.isSelected] : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(width: 60)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(group)
     }
 }

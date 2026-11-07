@@ -149,6 +149,7 @@ class EditorUiCaptureTest {
         capture("editor")
         compose.onNodeWithTag("layer.panel.colorFill").performClick()
         settle()
+        compose.onNodeWithTag("text.tab.animator").performClick()
         compose.onNodeWithTag("text.transform.add").performScrollTo().performClick()
         capture("text-stack")
         back()

@@ -5,7 +5,7 @@
 #  atualização, e a divergência aparece como um erro de link no meio do build.
 # =============================================================================
 [versions]
-billing = "7.1.1"
+billing = "8.3.0"
 playServicesAds = "25.5.0"
 ump = "4.0.0"
 appset = "16.1.0"

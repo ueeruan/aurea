@@ -2170,16 +2170,11 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
     @State private var curve = false
     @State private var area = 0
     @State private var addOpen = false
-    @State private var preview = true
     /// A divisão que a pessoa escolheu; sem escolha, segue a tela.
-    @State private var splitChoice: Bool?
-    @State private var split: CGFloat = 0.5
-    @State private var splitStart: CGFloat?
     @State private var fullscreen = false
     private static let skeletonArea = 3
     private var isModel: Bool { model.selectedLayer?.kind == 10 }
     private var wide: Bool { width >= 600 }
-    private var sideBySide: Bool { splitChoice ?? wide }
     private var bottomHeight: CGFloat { wide ? 12 + 40 + (area == 0 ? 116 : 150) : 12 + 80 + 270 }
     private var viewportsHeight: CGFloat { max(120, height - 36 - (fullscreen ? 6 : bottomHeight)) }
     private func chooseArea(_ i: Int) {
@@ -2202,7 +2197,6 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
         // Deitado a altura é pouca: as barras do sistema saem para dar espaço às viewports.
         .statusBarHidden(wide)
         .persistentSystemOverlays(wide ? .hidden : .automatic)
-        .onChange(of: wide) { _ in splitChoice = nil }
         .sheet(isPresented: $model.showAddLayer) { AddLayerSheet(tab: 5, inSheet: true).environmentObject(model).environmentObject(shell) }
         // Material e luz em folha de meia altura (0.3.1): a cena fica à vista em cima.
         .sheet(isPresented: $lights) {
@@ -2248,18 +2242,7 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
     // AnyLayout: trocar a divisão ou esconder a prévia não recria o palco.
     private var viewports: some View {
         GeometryReader { geo in
-            let bar: CGFloat = preview ? 14 : 0
-            let total: CGFloat = (sideBySide ? geo.size.width : geo.size.height) - bar
-            let first: CGFloat = preview ? (total * split).rounded() : total
-            let second: CGFloat = max(0, total - first)
-            let layout = sideBySide ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
-            layout {
-                editViewport(width: sideBySide ? first : geo.size.width, height: sideBySide ? geo.size.height : first)
-                if preview {
-                    splitBar(total: total).frame(width: sideBySide ? bar : geo.size.width, height: sideBySide ? geo.size.height : bar)
-                    previewViewport(width: sideBySide ? second : geo.size.width, height: sideBySide ? geo.size.height : second)
-                }
-            }
+            editViewport(width: geo.size.width, height: geo.size.height)
         }
     }
     private func editViewport(width: CGFloat, height: CGFloat) -> some View {
@@ -2269,8 +2252,6 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
                 modeMenu
                 Divider()
                 viewMenu
-                Divider()
-                Button(AureaText.t(preview ? "s3d_preview_hide" : "s3d_preview_show")) { preview.toggle() }
             } label: {
                 Scene3DPill(label: AureaText.t("s3d_viewport_edit"), glyph: nil)
             }.padding(6).accessibilityIdentifier("scene.viewport")
@@ -2287,36 +2268,6 @@ struct ShellMediaPicker: UIViewControllerRepresentable {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .environment(\.layoutDirection, .leftToRight)   // a cena 3D e os gizmos não espelham
     }
-    private func previewViewport(width: CGFloat, height: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
-            Scene3DPreviewPane().environmentObject(model)
-            Menu {
-                Button(AureaText.t("s3d_preview_hide")) { preview = false }
-                Button(AureaText.t("s3d_split_switch")) { splitChoice = !sideBySide }
-            } label: {
-                Scene3DPill(label: AureaText.t("s3d_preview"), glyph: CupertinoGlyph.Eye)
-            }.padding(6).accessibilityIdentifier("scene.preview.menu")
-        }
-        .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .environment(\.layoutDirection, .leftToRight)
-    }
-    private func splitBar(total: CGFloat) -> some View {
-        ZStack {
-            AureaColors.editorBar
-            RoundedRectangle(cornerRadius: 2).fill(AureaColors.muted)
-                .frame(width: sideBySide ? 4 : 40, height: sideBySide ? 40 : 4)
-        }
-        .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global).onChanged { g in
-            let start = splitStart ?? split
-            splitStart = start
-            let moved = sideBySide ? g.translation.width : g.translation.height
-            split = min(0.8, max(0.25, start + moved / max(1, total)))
-        }.onEnded { _ in splitStart = nil })
-        .accessibilityLabel(AureaText.t("s3d_split_drag")).accessibilityIdentifier("scene.split")
-    }
-
     // --- Os menus ------------------------------------------------------------
     @ViewBuilder private var modeMenu: some View {
         let canPose = isModel && !model.poseBones.isEmpty
@@ -2568,35 +2519,6 @@ private struct Scene3DPill: View {
             .background(AureaColors.editorRowPill, in: RoundedRectangle(cornerRadius: 9))
     }
 }
-
-/// A viewport de prévia: o resultado pela câmera, sem grade, gizmo ou osso. O palco é um
-/// só, então isto é um render à parte da mesma cena. Acompanha o cabeçote e cada edição.
-@MainActor private struct Scene3DPreviewPane: View {
-    @EnvironmentObject private var model: AureaModel
-    @State private var frame: UIImage?
-    private var stamp: String { "\(model.status.playhead)-\(model.status.modelRevision)" }
-    var body: some View {
-        ZStack {
-            Color.black
-            if let frame { Image(uiImage: frame).resizable().scaledToFit() }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(AureaText.t("s3d_preview")).accessibilityIdentifier("scene.preview")
-        .task {
-            var last = ""
-            while !Task.isCancelled {
-                let now = stamp
-                if now != last, let shot = await model.capturePreviewFrame(640, previewQuality: true), !Task.isCancelled {
-                    last = now
-                    frame = UIImage.fromRGBA(shot.data, width: Int(shot.width), height: Int(shot.height)) ?? frame
-                }
-                let wait: UInt64 = model.status.playing != 0 ? 250_000_000 : 120_000_000
-                try? await Task.sleep(nanoseconds: wait)
-            }
-        }
-    }
-}
-
 
 // =============================================================================
 // 0.4.6: a nova Cena 3D — menu Adicionar e área de baixo (par do

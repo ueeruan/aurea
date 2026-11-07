@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="eng_group_mask_external">Jika grup diuraikan, mask grup akan memengaruhi layer lain</string>
+    <string name="editor_group_mask">Kelompokkan dan mask</string>
+    <string name="editor_group_exclude">Kelompokkan dan kecualikan</string>
+    <string name="editor_group_mask_hint">Lapisan visual terpilih paling atas memotong lapisan lain di dalam grup.</string>
+    <string name="editor_group_exclude_hint">Lapisan visual terpilih paling atas mengecualikan areanya dari lapisan lain di dalam grup.</string>
+    <string name="editor_group_mask_failed">Grup mask tidak dapat dibuat (galat %1$d).</string>
 </resources>

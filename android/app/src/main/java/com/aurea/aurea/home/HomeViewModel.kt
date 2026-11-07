@@ -238,7 +238,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             // aviso, sem nada. Num aparelho de verdade o motor frio passa dos
             // 15 s com facilidade, e era isso que os usuarios relatavam como
             // "tento criar e nao cria".
-            store.showToast(getApplication<Application>().getString(R.string.engine_not_ready))
+            store.showToast(com.aurea.aurea.ui.i18n.AppText.get(getApplication(), R.string.engine_not_ready))
         }
     }
 
@@ -260,7 +260,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val media = withContext(Dispatchers.IO) { probeMedia(uri) }
             if (media == null) {
-                store.showToast(getApplication<Application>().getString(R.string.import_failed))
+                store.showToast(com.aurea.aurea.ui.i18n.AppText.get(getApplication(), R.string.import_failed))
                 return@launch
             }
             if (!awaitEngine(store) || request != mediaCreation || destination != store.projectGeneration) return@launch

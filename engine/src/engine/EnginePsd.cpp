@@ -1,4 +1,5 @@
 #include "aurea/Engine.hpp"
+#include "aurea/DefaultNames.hpp"
 #include "aurea/project/Psd.hpp"
 #include "aurea/project/FileIO.hpp"
 #include "stb_image.h"
@@ -262,7 +263,7 @@ Result<u64> Engine::import_gif(const std::string& path, const char* name) noexce
             continue;
         }
         psd::Layer image; image.width = static_cast<u32>(w); image.height = static_cast<u32>(h);
-        image.name = "Quadro " + std::to_string(f + 1);
+        image.name = default_name(DefaultName::Frame) + " " + std::to_string(f + 1);
         image.rgba.assign(frame, frame + frameBytes);
         const auto utf = (folder / (std::to_string(images.size()) + ".png")).u8string();
         sources.emplace_back(utf.begin(), utf.end());
@@ -337,7 +338,7 @@ Result<u64> Engine::import_gif(const std::string& path, const char* name) noexce
         while (g < frames && imageOf[static_cast<usize>(g)] == imageOf[static_cast<usize>(f)]) ++g;
         const i64 a = starts[static_cast<usize>(f)];
         const i64 b = std::max(a + 1, starts[static_cast<usize>(g)]);
-        const auto layerId = gifComp->add_layer(LayerKind::Image, "Quadro " + std::to_string(f + 1));
+        const auto layerId = gifComp->add_layer(LayerKind::Image, default_name(DefaultName::Frame) + " " + std::to_string(f + 1));
         auto* l = gifComp->layer(layerId); if (!l) return Status{Errc::OutOfMemory};
         l->start = FrameIndex{a}; l->end = FrameIndex{b};
         l->source = assets[imageOf[static_cast<usize>(f)]];

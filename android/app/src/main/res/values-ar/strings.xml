@@ -4823,4 +4823,26 @@
     <string name="tx_tab_layout">التخطيط</string>
     <string name="tx_tab_animator">المحرّك</string>
     <string name="s3d_tool_hand">تحريك العرض</string>
+    <string name="layer_tracked_camera">كاميرا متتبَّعة</string>
+    <string name="layer_freehand">رسم حر</string>
+    <string name="editor_mute_audio">كتم الصوت</string>
+    <string name="editor_unmute_audio">تشغيل الصوت</string>
+    <string name="editor_audio_enabled">الصوت مفعّل</string>
+    <string name="scene_light_spot">ضوء موضعي</string>
+    <string name="scene_light_kind">نوع الضوء</string>
+    <string name="scene_light_cone">زاوية المخروط</string>
+    <string name="scene_light_penumbra">شبه الظل</string>
+    <string name="scene_shadow_bias">إزاحة الظل</string>
+    <string name="property_schema_unavailable">تعذّر تحميل عناصر التحكم لهذه الخاصية.</string>
+    <string name="fxf_arrangement">الترتيب</string>
+    <string name="fxf_height">الارتفاع</string>
+    <string name="fxf_core_radius">نصف قطر النواة</string>
+    <string name="fxf_core_strength">قوة النواة</string>
+    <string name="fxf_halo_strength">قوة الهالة</string>
+    <string name="fxf_halo_screen">هالة الشاشة</string>
+    <string name="fxf_exposure">التعريض</string>
+    <string name="fxf_strokes">الخطوط</string>
+    <string name="fxf_max_height">أقصى ارتفاع</string>
+    <string name="fxf_spacing">التباعد</string>
+    <string name="fxf_pin_position">دبوس (الموضع)</string>
 </resources>

@@ -22,6 +22,21 @@ private val UnitRes = mapOf(
     "voltas" to R.string.fxu_turns,
 )
 
+/** Rótulos do motor que a tabela gerada ainda não alcança (`tools/i18n_effect_catalog.py`). */
+private val LabelFallback = mapOf(
+    "Disposição" to R.string.fxf_arrangement,
+    "Altura" to R.string.fxf_height,
+    "Raio do núcleo" to R.string.fxf_core_radius,
+    "Força do núcleo" to R.string.fxf_core_strength,
+    "Força do halo" to R.string.fxf_halo_strength,
+    "Halo em tela" to R.string.fxf_halo_screen,
+    "Exposição" to R.string.fxf_exposure,
+    "Traços" to R.string.fxf_strokes,
+    "Altura máxima" to R.string.fxf_max_height,
+    "Espaçamento" to R.string.fxf_spacing,
+    "Pino (posição)" to R.string.fxf_pin_position,
+)
+
 /** Os parâmetros de um efeito do tipo [typeId] com rótulo, opções e unidade traduzidos. */
 internal fun localizeEffectParams(res: Resources, typeId: Int, params: List<EffectParam>): List<EffectParam> =
     // Plugin (0.3.0): os textos vêm do plugin.json, no idioma do app.
@@ -32,8 +47,9 @@ internal fun localizeEffectParams(res: Resources, typeId: Int, params: List<Effe
         val tip = if (p.tip.isEmpty()) p.tip else EffectI18nTable.tips[EffectI18nTable.slot(typeId, p.index)]?.let(res::getString) ?: p.tip
         val sectionLabel = if (p.section <= 0) p.sectionLabel
             else EffectI18nTable.sections[EffectI18nTable.slot(typeId, p.section)]?.let(res::getString) ?: p.sectionLabel
-        if (ids == null && unit == p.unit && tip == p.tip && sectionLabel == p.sectionLabel) return@map p
-        val label = ids?.let { res.getString(it[0]) } ?: p.label
+        val fallback = if (ids == null) LabelFallback[p.label] else null
+        if (ids == null && fallback == null && unit == p.unit && tip == p.tip && sectionLabel == p.sectionLabel) return@map p
+        val label = ids?.let { res.getString(it[0]) } ?: fallback?.let(res::getString) ?: p.label
         // Opções só pela identidade completa: se o motor mudou a lista, fica a dele.
         val options = if (ids != null && ids.size - 1 == p.enumLabels.size) {
             List(p.enumLabels.size) { res.getString(ids[it + 1]) }

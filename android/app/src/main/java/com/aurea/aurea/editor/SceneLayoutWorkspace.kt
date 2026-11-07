@@ -86,11 +86,7 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
     var addMenu by remember { mutableStateOf(false) }
     var area by remember { mutableIntStateOf(0) }
     var materialPanel by remember { mutableStateOf(EditorPanel.Element3D) }
-    var preview by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
-    // Em pé as viewports empilham; deitado ficam lado a lado.
     val wide = sceneWide()
-    var sideBySide by androidx.compose.runtime.saveable.rememberSaveable(wide) { mutableStateOf(wide) }
-    var split by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(.5f) }
     var fullscreen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     // Deitado a altura é pouca: as barras do sistema saem para dar espaço às viewports.
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -131,36 +127,21 @@ internal fun SceneLayoutWorkspace(store: EditorStore, ui: EditorUi, stage: @Comp
     val menus = studioMenus(store, selected, openMaterial, openLights) { chooseArea(AREA_SKELETON) }
     Column(Modifier.fillMaxSize().background(AureaColors.Background).then(if (wide) Modifier.displayCutoutPadding() else Modifier)) {
         StudioHeader(store, fullscreen) { fullscreen = !fullscreen }
-        SceneSplit(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 8.dp), preview, sideBySide, split, { split = it }, edit = {
-            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(AureaColors.EditorCanvas)) {
-                // A cena 3D e os gizmos não espelham em árabe (ver `KeepLtr`).
-                KeepLtr {
-                    stage(Modifier.fillMaxSize())
-                    ScenePill(stringResource(R.string.s3d_viewport_edit), null, "scene.viewport", Modifier.align(Alignment.TopStart).padding(6.dp), buildList {
-                        addAll(menus.mode); add(MenuEntry.Divider); addAll(menus.view)
-                        add(MenuEntry.Divider)
-                        add(MenuEntry.Item(stringResource(if (preview) R.string.s3d_preview_hide else R.string.s3d_preview_show),
-                            glyph = if (preview) CupertinoGlyph.EyeSlash else CupertinoGlyph.Eye) { preview = !preview })
-                    })
-                    SceneToolbar(store, Modifier.align(Alignment.TopStart).padding(top = 44.dp))
-                }
-                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (store.rigFixMode && store.humanoidJoints != null) RigFixBar(store)
-                }
-                if (addMenu) StudioAddMenu(store, ui) { addMenu = false }
+        Box(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 8.dp).clip(RoundedCornerShape(12.dp)).background(AureaColors.EditorCanvas)) {
+            // A cena 3D e os gizmos não espelham em árabe (ver `KeepLtr`).
+            KeepLtr {
+                stage(Modifier.fillMaxSize())
+                ScenePill(stringResource(R.string.s3d_viewport_edit), null, "scene.viewport", Modifier.align(Alignment.TopStart).padding(6.dp), buildList {
+                    addAll(menus.mode); add(MenuEntry.Divider); addAll(menus.view)
+                })
+                SceneToolbar(store, Modifier.align(Alignment.TopStart).padding(top = 44.dp))
             }
-        }, result = {
-            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(AureaColors.EditorCanvas)) {
-                ScenePreviewPane(store)
-                KeepLtr {
-                    ScenePill(stringResource(R.string.s3d_preview), CupertinoGlyph.Eye, "scene.preview.menu", Modifier.align(Alignment.TopStart).padding(6.dp), listOf(
-                        MenuEntry.Item(stringResource(R.string.s3d_preview_hide), glyph = CupertinoGlyph.EyeSlash) { preview = false },
-                        MenuEntry.Item(stringResource(R.string.s3d_split_switch), glyph = CupertinoGlyph.RectangleStack) { sideBySide = !sideBySide },
-                    ))
-                }
+            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (store.rigFixMode && store.humanoidJoints != null) RigFixBar(store)
             }
-        })
+            if (addMenu) StudioAddMenu(store, ui) { addMenu = false }
+        }
         if (!fullscreen) StudioBottomArea(store, isModel, area, chooseArea, menus, { addMenu = !addMenu }, openMaterial, openLights) {
             materialPanel = EditorPanel.Curve; materials = true
         }

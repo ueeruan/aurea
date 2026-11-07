@@ -4781,4 +4781,26 @@
     <string name="tx_tab_layout">लेआउट</string>
     <string name="tx_tab_animator">एनिमेटर</string>
     <string name="s3d_tool_hand">व्यू खिसकाएँ</string>
+    <string name="layer_tracked_camera">ट्रैक किया गया कैमरा</string>
+    <string name="layer_freehand">फ़्रीहैंड ड्रॉइंग</string>
+    <string name="editor_mute_audio">म्यूट करें</string>
+    <string name="editor_unmute_audio">आवाज़ चालू करें</string>
+    <string name="editor_audio_enabled">आवाज़ चालू</string>
+    <string name="scene_light_spot">स्पॉट लाइट</string>
+    <string name="scene_light_kind">लाइट का प्रकार</string>
+    <string name="scene_light_cone">कोन का कोण</string>
+    <string name="scene_light_penumbra">उपछाया</string>
+    <string name="scene_shadow_bias">छाया ऑफ़सेट</string>
+    <string name="property_schema_unavailable">इस प्रॉपर्टी के कंट्रोल लोड नहीं हो सके।</string>
+    <string name="fxf_arrangement">व्यवस्था</string>
+    <string name="fxf_height">ऊँचाई</string>
+    <string name="fxf_core_radius">कोर त्रिज्या</string>
+    <string name="fxf_core_strength">कोर की शक्ति</string>
+    <string name="fxf_halo_strength">हेलो की शक्ति</string>
+    <string name="fxf_halo_screen">स्क्रीन हेलो</string>
+    <string name="fxf_exposure">एक्सपोज़र</string>
+    <string name="fxf_strokes">स्ट्रोक</string>
+    <string name="fxf_max_height">अधिकतम ऊँचाई</string>
+    <string name="fxf_spacing">अंतराल</string>
+    <string name="fxf_pin_position">पिन (स्थिति)</string>
 </resources>

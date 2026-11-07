@@ -15,6 +15,7 @@
 //  request_render.
 // =============================================================================
 #include "aurea/Engine.hpp"
+#include "aurea/DefaultNames.hpp"
 
 #include "aurea/text/FontManager.hpp"
 #include "aurea/timeline/ShapeGeometry.hpp"
@@ -41,7 +42,7 @@ vector::Affine2 content_affine(const Mat4& m) noexcept {
 /// A camada de desenho nova: vetorial do tamanho da composição, com a âncora e
 /// a posição no centro (espaço da camada = espaço da composição).
 Layer* create_drawing_layer(Composition& comp, LayerId& lid) {
-    lid = comp.add_layer(LayerKind::Shape, "Desenho");
+    lid = comp.add_layer(LayerKind::Shape, default_name(DefaultName::Drawing));
     Layer* l = comp.layer(lid);
     if (!l) return nullptr;
     const f32 w = static_cast<f32>(comp.width()), h = static_cast<f32>(comp.height());

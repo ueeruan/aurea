@@ -980,6 +980,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         deviceName = engine.deviceSummary()
                         startThermalWatch()
                         engineReady = true
+                        syncDefaultNames()
                         // Plugins (0.3.0): o motor já os carregou da pasta; os textos por idioma vêm antes do catálogo.
                         refreshPlugins()
                         catalog = readCatalog()
@@ -2466,7 +2467,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             catalog = readCatalog()
             specCache.clear()
             if (result.ok) {
-                val tag = app.resources.configuration.locales[0].toLanguageTag()
+                val tag = AppText.resources(app).configuration.locales[0].toLanguageTag()
                 val name = plugins.firstOrNull { it.id == result.id }?.let { com.aurea.aurea.effects.PluginTexts.pick(it.names, tag) } ?: result.id
                 showToast(appText(R.string.plug_installed, name))
             } else {
@@ -3433,7 +3434,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
      */
     fun effectSpecs(typeId: Int): List<EffectParam> {
         // O cache guarda o texto já traduzido: trocar o idioma do app o invalida.
-        val res = getApplication<Application>().resources
+        val res = AppText.resources(getApplication())
         val locale = res.configuration.locales[0]
         if (locale != specLocale) {
             specCache.clear()
@@ -3479,7 +3480,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     private fun refreshEffectParams() {
         val id = primary ?: return
-        val res = getApplication<Application>().resources
+        val res = AppText.resources(getApplication())
         effectParams = (effects + decorations).associate { e ->
             val n = engine.queryEffectParams(id, e.effectId, rowBuffer, MAX_EFFECT_PARAM_ROWS, textBlob)
             e.effectId to localizeEffectParams(res, e.typeId, List(max(0, n)) { EffectParam.read(rowBuffer, it, textBlob) })
@@ -5360,6 +5361,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         applyGizmoComponents(id, d, TrackProperty.POSITION_X, snapshot.previous, out)
         snapshot.previous = out.toList()
     }
+    /** Nomes que o motor dá às camadas novas, no idioma do app (ordem de aurea/DefaultNames.hpp). */
+    fun syncDefaultNames() {
+        if (!engineReady) return
+        engine.setDefaultNames(arrayOf(
+            R.string.target_text, R.string.pn_text3d_title, R.string.panel_particulas, R.string.particular_title,
+            R.string.panel_legendas, R.string.panel_rastreio, R.string.layer_tracked_camera, R.string.sh_add_tab_draw,
+            R.string.layer_freehand, R.string.scene_floor, R.string.sh_dock_mask, R.string.tx_tab_animator,
+            R.string.panel_caminho, R.string.panel_traco, R.string.panel_contorno, R.string.marker_frame,
+            R.string.editor_grupo, R.string.panel_retangulo, R.string.panel_elipse, R.string.editor_poligono,
+            R.string.editor_estrela,
+        ).map { appText(it) }.toTypedArray())
+    }
+
     fun sceneGuideLines(): FloatArray {
         scenePanTick    // o chão e os eixos redesenham quando a mãozinha leva a vista
         val lines = FloatArray(1280)

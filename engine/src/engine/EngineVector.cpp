@@ -8,6 +8,7 @@
 //  request_render. `continuing` (arrasto) pula o passo de desfazer novo.
 // =============================================================================
 #include "aurea/Engine.hpp"
+#include "aurea/DefaultNames.hpp"
 
 #include "aurea/timeline/ShapeGeometry.hpp"
 #include "aurea/vector/Vector.hpp"
@@ -49,10 +50,11 @@ VectorGroup default_group(u32 kind, Vec2 center, f32 base, u32 index) {
         g.stroke.width = 6.0f;
         g.stroke.cap = 1;
         g.stroke.join = 1;
-        g.name = "Caminho " + std::to_string(index + 1);
+        g.name = default_name(DefaultName::Path) + " " + std::to_string(index + 1);
     } else {
-        static const char* kNames[] = {"Caminho", "Retângulo", "Elipse", "Polígono", "Estrela"};
-        g.name = std::string(kNames[static_cast<u32>(p.kind)]) + " " + std::to_string(index + 1);
+        static constexpr DefaultName kNames[] = {DefaultName::Path, DefaultName::Rectangle, DefaultName::Ellipse,
+                                                 DefaultName::Polygon, DefaultName::Star};
+        g.name = default_name(kNames[static_cast<u32>(p.kind)]) + " " + std::to_string(index + 1);
     }
     return g;
 }
@@ -537,7 +539,7 @@ Result<u64> Engine::add_freehand_path(u64 layerId, const f32* xy, usize count, f
     const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
     u64 result = layerId;
     if (!l) {
-        const LayerId lid = comp->add_layer(LayerKind::Shape, "Desenho à mão livre");
+        const LayerId lid = comp->add_layer(LayerKind::Shape, default_name(DefaultName::Freehand));
         result = lid.pack();
         l = comp->layer(lid);
         if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
@@ -555,7 +557,7 @@ Result<u64> Engine::add_freehand_path(u64 layerId, const f32* xy, usize count, f
     pts.reserve(count / 2);
     for (usize i = 0; i + 1 < count; i += 2) pts.push_back(inv.apply(Vec2{xy[i], xy[i + 1]}));
     VectorGroup g = default_group(0, Vec2{}, 1.0f, static_cast<u32>(l->shape.vector.groups.size()));
-    g.name = "Traço " + std::to_string(l->shape.vector.groups.size() + 1);
+    g.name = default_name(DefaultName::Stroke) + " " + std::to_string(l->shape.vector.groups.size() + 1);
     g.stroke.width = 8.0f;
     g.paths[0].path = vector::fit_curve(pts, std::clamp(error, 0.25f, 50.0f), true);
     l->shape.vector.groups.push_back(std::move(g));

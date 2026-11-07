@@ -4793,4 +4793,26 @@
     <string name="tx_tab_layout">Макет</string>
     <string name="tx_tab_animator">Аниматор</string>
     <string name="s3d_tool_hand">Сдвиг вида</string>
+    <string name="layer_tracked_camera">Отслеживаемая камера</string>
+    <string name="layer_freehand">Рисунок от руки</string>
+    <string name="editor_mute_audio">Выключить звук</string>
+    <string name="editor_unmute_audio">Включить звук</string>
+    <string name="editor_audio_enabled">Звук включён</string>
+    <string name="scene_light_spot">Прожектор</string>
+    <string name="scene_light_kind">Тип света</string>
+    <string name="scene_light_cone">Угол конуса</string>
+    <string name="scene_light_penumbra">Полутень</string>
+    <string name="scene_shadow_bias">Смещение тени</string>
+    <string name="property_schema_unavailable">Не удалось загрузить элементы управления этого свойства.</string>
+    <string name="fxf_arrangement">Расположение</string>
+    <string name="fxf_height">Высота</string>
+    <string name="fxf_core_radius">Радиус ядра</string>
+    <string name="fxf_core_strength">Сила ядра</string>
+    <string name="fxf_halo_strength">Сила ореола</string>
+    <string name="fxf_halo_screen">Экранный ореол</string>
+    <string name="fxf_exposure">Экспозиция</string>
+    <string name="fxf_strokes">Штрихи</string>
+    <string name="fxf_max_height">Максимальная высота</string>
+    <string name="fxf_spacing">Интервал</string>
+    <string name="fxf_pin_position">Штифт (позиция)</string>
 </resources>

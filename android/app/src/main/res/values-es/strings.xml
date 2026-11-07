@@ -4785,4 +4785,26 @@ para editar la curva.</string>
     <string name="tx_tab_layout">Diseño</string>
     <string name="tx_tab_animator">Animador</string>
     <string name="s3d_tool_hand">Mover la vista</string>
+    <string name="layer_tracked_camera">Cámara rastreada</string>
+    <string name="layer_freehand">Dibujo a mano alzada</string>
+    <string name="editor_mute_audio">Silenciar</string>
+    <string name="editor_unmute_audio">Activar sonido</string>
+    <string name="editor_audio_enabled">Sonido activado</string>
+    <string name="scene_light_spot">Luz focal</string>
+    <string name="scene_light_kind">Tipo de luz</string>
+    <string name="scene_light_cone">Apertura del cono</string>
+    <string name="scene_light_penumbra">Penumbra</string>
+    <string name="scene_shadow_bias">Desplazamiento de sombra</string>
+    <string name="property_schema_unavailable">No se pudieron cargar los controles de esta propiedad.</string>
+    <string name="fxf_arrangement">Disposición</string>
+    <string name="fxf_height">Altura</string>
+    <string name="fxf_core_radius">Radio del núcleo</string>
+    <string name="fxf_core_strength">Fuerza del núcleo</string>
+    <string name="fxf_halo_strength">Fuerza del halo</string>
+    <string name="fxf_halo_screen">Halo en pantalla</string>
+    <string name="fxf_exposure">Exposición</string>
+    <string name="fxf_strokes">Trazos</string>
+    <string name="fxf_max_height">Altura máxima</string>
+    <string name="fxf_spacing">Espaciado</string>
+    <string name="fxf_pin_position">Pin (posición)</string>
 </resources>

@@ -2410,6 +2410,9 @@ final class FxEffectPrefs: ObservableObject {
 /// Unidades que o motor escreve em português; "%", "px", "Hz", "°"... ficam como estão.
 private let FxUnitKeys: [String: String] = ["quadros": "fxu_frames", "px/quadro": "fxu_px_per_frame", "oitavas": "fxu_octaves", "voltas": "fxu_turns"]
 
+/// Rótulos do motor que a tabela gerada ainda não alcança (`tools/i18n_effect_catalog.py`).
+private let FxLabelFallback: [String: String] = ["Disposição": "fxf_arrangement", "Altura": "fxf_height", "Raio do núcleo": "fxf_core_radius", "Força do núcleo": "fxf_core_strength", "Força do halo": "fxf_halo_strength", "Halo em tela": "fxf_halo_screen", "Exposição": "fxf_exposure", "Traços": "fxf_strokes", "Altura máxima": "fxf_max_height", "Espaçamento": "fxf_spacing", "Pino (posição)": "fxf_pin_position"]
+
 /// Rótulo, opções e unidade de um parâmetro no idioma do app, pela IDENTIDADE
 /// (typeId + índice → tabela gerada `EffectI18nTable`). Sem entrada, o texto do motor.
 func fxLocalizedParam(_ typeId: UInt32, index: Int, label: String, unit: String, options: [String]) -> (label: String, unit: String, options: [String]) {
@@ -2421,7 +2424,7 @@ func fxLocalizedParam(_ typeId: UInt32, index: Int, label: String, unit: String,
         let pluginOptions = decl.options.count == options.count ? zip(decl.options, options).map { FxPluginTexts.pick($0.0, tag) ?? $0.1 } : options
         return (FxPluginTexts.pick(decl.labels, tag) ?? label, localizedUnit, pluginOptions)
     }
-    guard let entry else { return (label, localizedUnit, options) }
+    guard let entry else { return (FxLabelFallback[label].map { AureaText.t($0) } ?? label, localizedUnit, options) }
     // Opções só pela identidade completa: se o motor mudou a lista, fica a dele.
     let localizedOptions = entry.options.count == options.count ? entry.options.map { AureaText.t($0) } : options
     return (AureaText.t(entry.label), localizedUnit, localizedOptions)

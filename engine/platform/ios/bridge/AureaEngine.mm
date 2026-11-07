@@ -29,6 +29,7 @@
 #import <Vision/Vision.h>
 #import <CoreVideo/CoreVideo.h>
 #include "aurea/ai/BackgroundRemoval.hpp"
+#include "aurea/DefaultNames.hpp"
 
 #include "aurea/core/Log.hpp"
 #include "aurea/core/GestureMath.hpp"
@@ -2709,6 +2710,12 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 }
 - (void)panSceneViewDx:(float)dx dy:(float)dy {
     if (auto* e = self.engine) e->pan_scene_view(dx, dy);
+}
+- (void)setDefaultNames:(NSArray<NSString*>*)names {
+    std::vector<std::string> list;
+    list.reserve(names.count);
+    for (NSString* name in names) list.emplace_back(name.UTF8String ?: "");
+    aurea::set_default_names(list);
 }
 - (void)resetScenePan {
     if (auto* e = self.engine) e->reset_scene_pan();

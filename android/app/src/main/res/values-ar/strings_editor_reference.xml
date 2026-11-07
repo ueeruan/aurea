@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="eng_group_mask_external">سيؤثر قناع المجموعة في طبقات أخرى عند فك التجميع</string>
+    <string name="editor_group_mask">تجميع وإخفاء</string>
+    <string name="editor_group_exclude">تجميع واستبعاد</string>
+    <string name="editor_group_mask_hint">تقص الطبقة المرئية المحددة في الأعلى بقية الطبقات داخل المجموعة.</string>
+    <string name="editor_group_exclude_hint">تستبعد الطبقة المرئية المحددة في الأعلى مساحتها من بقية الطبقات داخل المجموعة.</string>
+    <string name="editor_group_mask_failed">تعذّر إنشاء مجموعة القناع (الخطأ %1$d).</string>
 </resources>

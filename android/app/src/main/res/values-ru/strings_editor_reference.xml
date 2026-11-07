@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="eng_group_mask_external">При разгруппировке маска группы повлияет на другие слои</string>
+    <string name="editor_group_mask">Сгруппировать с маской</string>
+    <string name="editor_group_exclude">Сгруппировать с исключением</string>
+    <string name="editor_group_mask_hint">Верхний выбранный визуальный слой обрезает остальные слои в группе.</string>
+    <string name="editor_group_exclude_hint">Верхний выбранный визуальный слой исключает свою область из остальных слоёв группы.</string>
+    <string name="editor_group_mask_failed">Не удалось создать группу с маской (ошибка %1$d).</string>
 </resources>

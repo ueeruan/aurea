@@ -4775,4 +4775,26 @@ untuk mengedit kurvanya.</string>
     <string name="tx_tab_layout">Tata letak</string>
     <string name="tx_tab_animator">Animator</string>
     <string name="s3d_tool_hand">Geser tampilan</string>
+    <string name="layer_tracked_camera">Kamera terlacak</string>
+    <string name="layer_freehand">Gambar tangan bebas</string>
+    <string name="editor_mute_audio">Bisukan</string>
+    <string name="editor_unmute_audio">Aktifkan suara</string>
+    <string name="editor_audio_enabled">Suara aktif</string>
+    <string name="scene_light_spot">Lampu sorot</string>
+    <string name="scene_light_kind">Jenis cahaya</string>
+    <string name="scene_light_cone">Sudut kerucut</string>
+    <string name="scene_light_penumbra">Penumbra</string>
+    <string name="scene_shadow_bias">Offset bayangan</string>
+    <string name="property_schema_unavailable">Kontrol properti ini tidak dapat dimuat.</string>
+    <string name="fxf_arrangement">Susunan</string>
+    <string name="fxf_height">Tinggi</string>
+    <string name="fxf_core_radius">Radius inti</string>
+    <string name="fxf_core_strength">Kekuatan inti</string>
+    <string name="fxf_halo_strength">Kekuatan halo</string>
+    <string name="fxf_halo_screen">Halo layar</string>
+    <string name="fxf_exposure">Eksposur</string>
+    <string name="fxf_strokes">Goresan</string>
+    <string name="fxf_max_height">Tinggi maksimum</string>
+    <string name="fxf_spacing">Jarak</string>
+    <string name="fxf_pin_position">Pin (posisi)</string>
 </resources>

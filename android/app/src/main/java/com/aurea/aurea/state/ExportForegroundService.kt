@@ -156,10 +156,10 @@ class ExportForegroundService : Service() {
         /** 0.3.6: aviso (não fixo) de que o sistema tirou o export do primeiro plano. */
         private fun timeoutNotification(context: Context): Notification {
             ensureChannel(context)
-            val text = context.getString(R.string.export036_timeout_text)
+            val text = com.aurea.aurea.ui.i18n.AppText.get(context, R.string.export036_timeout_text)
             return NotificationCompat.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_launcher_monochrome)
-                .setContentTitle(context.getString(R.string.export036_timeout_title))
+                .setContentTitle(com.aurea.aurea.ui.i18n.AppText.get(context, R.string.export036_timeout_title))
                 .setContentText(text)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text))
                 .setAutoCancel(true)
@@ -171,7 +171,7 @@ class ExportForegroundService : Service() {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (Build.VERSION.SDK_INT >= 26 && manager.getNotificationChannel(CHANNEL) == null) {
                 manager.createNotificationChannel(NotificationChannel(CHANNEL,
-                    context.getString(R.string.export_service_channel), NotificationManager.IMPORTANCE_LOW))
+                    com.aurea.aurea.ui.i18n.AppText.get(context, R.string.export_service_channel), NotificationManager.IMPORTANCE_LOW))
             }
         }
 
@@ -184,9 +184,9 @@ class ExportForegroundService : Service() {
             val open = openApp(context)
             return NotificationCompat.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_launcher_monochrome)
-                .setContentTitle(context.getString(R.string.export_service_title))
-                .setContentText(if (percent >= 0) context.getString(R.string.export_service_progress, percent)
-                    else context.getString(R.string.export_service_preparing))
+                .setContentTitle(com.aurea.aurea.ui.i18n.AppText.get(context, R.string.export_service_title))
+                .setContentText(if (percent >= 0) com.aurea.aurea.ui.i18n.AppText.get(context, R.string.export_service_progress, percent)
+                    else com.aurea.aurea.ui.i18n.AppText.get(context, R.string.export_service_preparing))
                 .setProgress(100, percent.coerceAtLeast(0), percent < 0)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="eng_group_mask_external">समूह को अलग करने पर उसका मास्क अन्य लेयरों को प्रभावित करेगा</string>
+    <string name="editor_group_mask">समूह बनाकर मास्क करें</string>
+    <string name="editor_group_exclude">समूह बनाकर हटाएँ</string>
+    <string name="editor_group_mask_hint">सबसे ऊपर चुनी गई विज़ुअल लेयर समूह की बाकी लेयर को काटती है।</string>
+    <string name="editor_group_exclude_hint">सबसे ऊपर चुनी गई विज़ुअल लेयर अपना क्षेत्र समूह की बाकी लेयर से हटाती है।</string>
+    <string name="editor_group_mask_failed">मास्क वाला समूह नहीं बन सका (त्रुटि %1$d)।</string>
 </resources>

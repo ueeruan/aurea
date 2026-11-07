@@ -4864,4 +4864,17 @@
     <string name="tx_tab_layout">Layout</string>
     <string name="tx_tab_animator">Animador</string>
     <string name="s3d_tool_hand">Mover a vista</string>
+    <string name="layer_tracked_camera">Câmera rastreada</string>
+    <string name="layer_freehand">Desenho à mão livre</string>
+    <string name="fxf_arrangement">Disposição</string>
+    <string name="fxf_height">Altura</string>
+    <string name="fxf_core_radius">Raio do núcleo</string>
+    <string name="fxf_core_strength">Força do núcleo</string>
+    <string name="fxf_halo_strength">Força do halo</string>
+    <string name="fxf_halo_screen">Halo em tela</string>
+    <string name="fxf_exposure">Exposição</string>
+    <string name="fxf_strokes">Traços</string>
+    <string name="fxf_max_height">Altura máxima</string>
+    <string name="fxf_spacing">Espaçamento</string>
+    <string name="fxf_pin_position">Pino (posição)</string>
 </resources>

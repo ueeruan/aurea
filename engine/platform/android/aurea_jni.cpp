@@ -15,6 +15,7 @@
 //  ANativeWindow do SurfaceView, pela thread de render do próprio motor.
 // =============================================================================
 #include <jni.h>
+#include "aurea/DefaultNames.hpp"
 #include <android/log.h>
 #include <android/native_window_jni.h>
 #include <sys/system_properties.h>
@@ -4428,6 +4429,9 @@ AUREA_JNI jboolean AUREA_FN(nativeSetRawPlayback)(JNIEnv*, jclass, jlong handle,
 }
 AUREA_JNI void AUREA_FN(nativeSetSceneEditor)(JNIEnv*, jclass, jlong handle, jboolean enabled, jfloat yaw, jfloat pitch, jfloat distance) {
     if (auto* c = ctx_of(handle)) c->engine.set_scene_editor(enabled == JNI_TRUE, yaw, pitch, distance);
+}
+AUREA_JNI void AUREA_FN(nativeSetDefaultNames)(JNIEnv* env, jclass, jobjectArray names) {
+    aurea::set_default_names(jni_string_list(env, names));
 }
 AUREA_JNI void AUREA_FN(nativePanSceneView)(JNIEnv*, jclass, jlong handle, jfloat dx, jfloat dy) {
     if (auto* c = ctx_of(handle)) c->engine.pan_scene_view(dx, dy);

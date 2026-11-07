@@ -8,6 +8,7 @@
 //  history_.before_mutation, modelRevision_, mark_dirty, request_render.
 // =============================================================================
 #include "aurea/Engine.hpp"
+#include "aurea/DefaultNames.hpp"
 
 #include "aurea/timeline/LayerAnimator.hpp"
 
@@ -140,7 +141,7 @@ i32 Engine::add_layer_animator(u64 layerId) noexcept {
     // Trilhas órfãs com este índice (não deveriam existir) saem antes.
     l->tracks.remove_if([&](const Track& t) { return t.property == TrackProperty::LayerAnimParam && t.effectIndex >= index; });
     LayerAnimator a;
-    a.name = "Animador " + std::to_string(index + 1);
+    a.name = default_name(DefaultName::Animator) + " " + std::to_string(index + 1);
     // Texto (2D ou 3D): letra a letra, como no app antigo. Forma 3D continua
     // começando pela camada inteira (por parte = escolher a unidade ou usar
     // a seção Animação das partes).

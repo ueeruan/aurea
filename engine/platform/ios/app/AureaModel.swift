@@ -1031,7 +1031,11 @@ final class AureaModel: ObservableObject {
 
     // --- Ajustes ------------------------------------------------------------
     @Published var language: AureaLanguage = .systemDefault {
-        didSet { AureaText.language = language; UserDefaults.standard.set(language.rawValue, forKey: "aurea.language") }
+        didSet {
+            AureaText.language = language
+            UserDefaults.standard.set(language.rawValue, forKey: "aurea.language")
+            syncDefaultNames()
+        }
     }
     @Published var showPerf = false
     /// Tema escolhido nos Ajustes. É a identidade da raiz: trocar reconstrói
@@ -1120,6 +1124,16 @@ final class AureaModel: ObservableObject {
                              documentsDirectory: AureaPaths.documents.path)
         device = MTLCreateSystemDefaultDevice()
         refreshProjectList()
+        syncDefaultNames()
+    }
+
+    /// Nomes que o motor dá às camadas novas, no idioma do app (ordem de aurea/DefaultNames.hpp).
+    func syncDefaultNames() {
+        engine.setDefaultNames(["target_text", "pn_text3d_title", "panel_particulas", "particular_title", "panel_legendas",
+                                "panel_rastreio", "layer_tracked_camera", "sh_add_tab_draw", "layer_freehand", "scene_floor",
+                                "sh_dock_mask", "tx_tab_animator", "panel_caminho", "panel_traco", "panel_contorno",
+                                "marker_frame", "editor_grupo", "panel_retangulo", "panel_elipse", "editor_poligono",
+                                "editor_estrela"].map { AureaText.t($0) })
     }
 
     /// Sobe o motor. Chamado quando a janela aparece (e de novo ao voltar do

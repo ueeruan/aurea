@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="eng_group_mask_external">Al desagrupar, la máscara del grupo afectaría a otras capas</string>
+    <string name="editor_group_mask">Agrupar y enmascarar</string>
+    <string name="editor_group_exclude">Agrupar y excluir</string>
+    <string name="editor_group_mask_hint">La capa visual seleccionada más arriba recorta las demás dentro del grupo.</string>
+    <string name="editor_group_exclude_hint">La capa visual seleccionada más arriba excluye su área de las demás dentro del grupo.</string>
+    <string name="editor_group_mask_failed">No se pudo crear el grupo con máscara (error %1$d).</string>
 </resources>

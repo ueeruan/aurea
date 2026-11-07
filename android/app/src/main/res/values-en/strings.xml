@@ -4832,4 +4832,17 @@ to edit the curve.</string>
     <string name="tx_tab_layout">Layout</string>
     <string name="tx_tab_animator">Animator</string>
     <string name="s3d_tool_hand">Pan view</string>
+    <string name="layer_tracked_camera">Tracked camera</string>
+    <string name="layer_freehand">Freehand drawing</string>
+    <string name="fxf_arrangement">Arrangement</string>
+    <string name="fxf_height">Height</string>
+    <string name="fxf_core_radius">Core radius</string>
+    <string name="fxf_core_strength">Core strength</string>
+    <string name="fxf_halo_strength">Halo strength</string>
+    <string name="fxf_halo_screen">Screen halo</string>
+    <string name="fxf_exposure">Exposure</string>
+    <string name="fxf_strokes">Strokes</string>
+    <string name="fxf_max_height">Maximum height</string>
+    <string name="fxf_spacing">Spacing</string>
+    <string name="fxf_pin_position">Pin (position)</string>
 </resources>

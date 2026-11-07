@@ -1,4 +1,5 @@
 #include "aurea/effects/Palette.hpp"
+#include "aurea/DefaultNames.hpp"
 #include "aurea/Engine.hpp"
 #include "aurea/media/ImageResample.hpp"
 #include "aurea/tracking/RealCameraPreviewScope.hpp"
@@ -2663,10 +2664,10 @@ Result<u64> Engine::add_text(const char* content) noexcept {
     if (!text::default_font()) return Status{Errc::NotSupported, "nenhuma fonte disponivel neste aparelho"};
     history_.before_mutation(*comp, project_->timeline().current(), "adicionar texto");
     bump_model_revision_locked();
-    const LayerId lid = comp->add_layer(LayerKind::Text, "Texto");
+    const LayerId lid = comp->add_layer(LayerKind::Text, default_name(DefaultName::Text));
     Layer* l = comp->layer(lid);
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
-    l->text.content = content && *content ? content : "Texto";
+    l->text.content = content && *content ? std::string(content) : default_name(DefaultName::Text);
     l->text.size = std::round(0.12f * static_cast<f32>(std::min(comp->width(), comp->height())));
     l->text.color = Vec4{1, 1, 1, 1};
     l->text.alignment = 1;
@@ -3511,7 +3512,7 @@ Result<u64> Engine::track_point(u64 layerId, f32 x, f32 y, bool stabilize, u32* 
     history_.before_mutation(*comp, project_->timeline().current(), stabilize ? "estabilizar" : "rastrear ponto");
     bump_model_revision_locked();
     if (!stabilize) {
-        const LayerId nid = comp->add_layer(LayerKind::Null, "Rastreio");
+        const LayerId nid = comp->add_layer(LayerKind::Null, default_name(DefaultName::Tracking));
         Layer* n = comp->layer(nid);
         l = comp->layer(LayerId::unpack(layerId));
         if (!n || !l) return Status{Errc::OutOfMemory, "camada nao criada"};
@@ -3693,7 +3694,7 @@ i32 Engine::add_mask(u64 layerId, const f32* pts6, u32 count, bool closed) noexc
     bump_model_revision_locked();
     Mask m;
     m.id = l->alloc_mask_id();
-    m.name = "Mascara " + std::to_string(m.id + 1);
+    m.name = default_name(DefaultName::Mask) + " " + std::to_string(m.id + 1);
     m.closed = closed;
     read_points6(pts6, count, m.points);
     l->masks.push_back(std::move(m));
@@ -4551,7 +4552,7 @@ Result<u64> Engine::apply_camera_track(i64 selectionFrame, Vec4 selectionRect, u
         if (layer.kind == LayerKind::Camera && layer.cameraTrackSource == LayerId::unpack(job->layerId)) cid = id;
     });
     const bool createCamera = !cid.valid() || comp->layer(cid)->cameraTrackKey != job->cacheKey;
-    if (!cid.valid()) cid = comp->add_layer(LayerKind::Camera, "Câmera rastreada");
+    if (!cid.valid()) cid = comp->add_layer(LayerKind::Camera, default_name(DefaultName::TrackedCamera));
     Layer* cam = comp->layer(cid);
     video = comp->layer(LayerId::unpack(job->layerId));
     if (!cam || !video) return Status{Errc::OutOfMemory, "camada nao criada"};
@@ -5225,7 +5226,7 @@ Result<u64> Engine::add_particles(u32 preset) noexcept {
     const bool particularPreset = preset >= particular::kPresetBase
                                && preset < particular::kPresetBase + particular::kPresetCount;
     const LayerId lid = comp->add_layer(LayerKind::ParticleSystem,
-                                        particularPreset ? "Partículas 3D" : "Partículas");
+                                        default_name(particularPreset ? DefaultName::Particles3D : DefaultName::Particles));
     Layer* l = comp->layer(lid);
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     const f32 w = static_cast<f32>(comp->width()), h = static_cast<f32>(comp->height());
@@ -5267,7 +5268,7 @@ Result<u64> Engine::add_reflective_floor() noexcept {
     // 0.4.1: o chão é um plano 3D — deitado (X 90°), na linha de 62 % da altura;
     // segue a câmera 3D e um nulo 3D pai. Desligar o 3D da camada volta ao chão
     // de tela (horizonte fixo).
-    Result<u64> made = add_effect_adjustment_layer("Reflective Floor", effect_keys::kReflectiveFloor, true);
+    Result<u64> made = add_effect_adjustment_layer(default_name(DefaultName::ReflectiveFloor).c_str(), effect_keys::kReflectiveFloor, true);
     if (!made.ok()) return made;
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -7594,7 +7595,7 @@ Result<u32> Engine::ungroup_precomp_locked(u64 layerId, std::string* why, std::v
     const Layer group = *P;
     LayerId nullId{};
     if (!identity) {
-        nullId = comp->add_layer(LayerKind::Null, "Grupo · " + group.name);
+        nullId = comp->add_layer(LayerKind::Null, default_name(DefaultName::Group) + " · " + group.name);
         if (Layer* n = comp->layer(nullId)) {
             n->start = group.start;
             n->end = group.end;
@@ -10501,7 +10502,7 @@ i32 Engine::add_text_animator(u64 layerId, u32 props) noexcept {
     *l = std::move(prepared);
     bump_model_revision_locked();
     TextAnimator a;
-    a.name = "Animador " + std::to_string(l->text.animators.size() + 1);
+    a.name = default_name(DefaultName::Animator) + " " + std::to_string(l->text.animators.size() + 1);
     a.props = props & 0x7FFu;
     const u32 index = static_cast<u32>(l->text.animators.size());
     // The default "Add animation" action must create motion, rather than an
@@ -11010,7 +11011,7 @@ Result<u32> Engine::create_captions(u64 sourceLayer, const std::vector<text::Cap
     drop_captions(*comp, key);
     const u32 shortSide = std::min(comp->width(), comp->height());
     const f32 posY = std::clamp(opt.posY, 0.1f, 0.9f);
-    const LayerId captionId = comp->add_layer(LayerKind::Text, "Legendas");
+    const LayerId captionId = comp->add_layer(LayerKind::Text, default_name(DefaultName::Captions));
     Layer* track = comp->layer(captionId);
     if (!track) return Status{Errc::OutOfMemory, "faixa de legendas"};
     track->text.captionSource = key;
@@ -11160,7 +11161,7 @@ Result<u64> Engine::add_text3d(const scene3d::Text3DSpec& requested) noexcept {
     bump_model_revision_locked();
     const AssetId assetId = add_model_asset(*project_, *scene, "Texto 3D", scene3d::encode_text3d(spec));
     models_[assetId.pack()] = scene;
-    const LayerId lid = comp->add_layer(LayerKind::Model3D, "Texto 3D");
+    const LayerId lid = comp->add_layer(LayerKind::Model3D, default_name(DefaultName::Text3D));
     Layer* l = comp->layer(lid);
     if (!l) return Status{Errc::OutOfMemory, "camada nao criada"};
     l->threeD = true;

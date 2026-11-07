@@ -19,6 +19,7 @@
 //  transform, tempo, efeitos e máscaras. Um passo de desfazer.
 // =============================================================================
 #include "aurea/Engine.hpp"
+#include "aurea/DefaultNames.hpp"
 
 #include "aurea/timeline/ShapeFill.hpp"
 #include "aurea/timeline/ShapeGeometry.hpp"
@@ -260,7 +261,7 @@ bool Engine::convert_shape_to_outline(u64 layerId) noexcept {
     const Vec2 half{std::max(0.5f, w * 0.5f - sw * 0.5f), std::max(0.5f, h * 0.5f - sw * 0.5f)};
 
     VectorGroup g;
-    g.name = "Contorno";
+    g.name = default_name(DefaultName::Outline);
     if (type == shape::kRect) {
         VectorPath p;
         p.path = vector::make_rect(centre, Vec2{half.x * 2.0f, half.y * 2.0f}, sh.cornerRadius);

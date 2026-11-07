@@ -59,7 +59,7 @@ class AssistantChat(
     private val tools by lazy { JSONArray(engine.assistantTools()) }
 
     private fun systemMessage(): JSONObject {
-        val language = app.resources.configuration.locales[0].toLanguageTag()
+        val language = com.aurea.aurea.ui.i18n.AppText.resources(app).configuration.locales[0].toLanguageTag()
         return JSONObject().put("role", "system").put("content", engine.assistantSystemPrompt(language, BuildConfig.VERSION_NAME))
     }
 

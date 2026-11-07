@@ -4429,6 +4429,12 @@ AUREA_JNI jboolean AUREA_FN(nativeSetRawPlayback)(JNIEnv*, jclass, jlong handle,
 AUREA_JNI void AUREA_FN(nativeSetSceneEditor)(JNIEnv*, jclass, jlong handle, jboolean enabled, jfloat yaw, jfloat pitch, jfloat distance) {
     if (auto* c = ctx_of(handle)) c->engine.set_scene_editor(enabled == JNI_TRUE, yaw, pitch, distance);
 }
+AUREA_JNI void AUREA_FN(nativePanSceneView)(JNIEnv*, jclass, jlong handle, jfloat dx, jfloat dy) {
+    if (auto* c = ctx_of(handle)) c->engine.pan_scene_view(dx, dy);
+}
+AUREA_JNI void AUREA_FN(nativeResetScenePan)(JNIEnv*, jclass, jlong handle) {
+    if (auto* c = ctx_of(handle)) c->engine.reset_scene_pan();
+}
 // 0.4.6: assistente de IA (assistant/Assistant.hpp): ferramentas, instruções e execução.
 AUREA_JNI jbyteArray AUREA_FN(nativeAssistantTools)(JNIEnv* env, jclass) {
     return bytes_of(env, assistant::tools_json());

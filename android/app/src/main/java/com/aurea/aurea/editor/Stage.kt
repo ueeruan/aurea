@@ -1131,7 +1131,8 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.sce
             val dx = c.position.x - last.x
             val dy = c.position.y - last.y
             when (mode) {
-                1 -> store.updateSceneView(store.sceneYaw - dx * degPerPx, store.scenePitch + dy * degPerPx, store.sceneDistance)
+                1 -> if (store.sceneHand) store.panSceneView(dx / m.fit, dy / m.fit)
+                    else store.updateSceneView(store.sceneYaw - dx * degPerPx, store.scenePitch + dy * degPerPx, store.sceneDistance)
                 2 -> edit.step(MODE_MOVE, c.position.x, c.position.y)
             }
             if (mode != 0) last = c.position

@@ -555,7 +555,12 @@ struct PreviewMetalView: UIViewRepresentable {
             default:
                 let dx = finger.position.x - sceneLast.x, dy = finger.position.y - sceneLast.y
                 sceneLast = finger.position
-                model.setSceneView(yaw: model.sceneYaw - Float(dx) * 0.35, pitch: model.scenePitch + Float(dy) * 0.35, distance: model.sceneDistance)
+                if model.sceneHand {
+                    let f = scaleFactor(view)
+                    model.panSceneView(dx: Float(dx) * f, dy: Float(dy) * f)
+                } else {
+                    model.setSceneView(yaw: model.sceneYaw - Float(dx) * 0.35, pitch: model.scenePitch + Float(dy) * 0.35, distance: model.sceneDistance)
+                }
             }
         }
         /// Toque: escolhe o mais perto. Só muda de osso sozinho quando o escolhido está sob o
@@ -1130,7 +1135,13 @@ struct PreviewMetalView: UIViewRepresentable {
             }
             let dx = first.position.x - sceneLast.x, dy = first.position.y - sceneLast.y
             switch sceneMode {
-            case 1: model.setSceneView(yaw: model.sceneYaw - Float(dx) * 0.35, pitch: model.scenePitch + Float(dy) * 0.35, distance: model.sceneDistance)
+            case 1:
+                if model.sceneHand {
+                    let f = scaleFactor(view)
+                    model.panSceneView(dx: Float(dx) * f, dy: Float(dy) * f)
+                } else {
+                    model.setSceneView(yaw: model.sceneYaw - Float(dx) * 0.35, pitch: model.scenePitch + Float(dy) * 0.35, distance: model.sceneDistance)
+                }
             case 2: if let id = scenePicked, id == model.primarySelection {
                 if previewBasis.isEmpty { let f = scaleFactor(view); model.sceneDragObject(dx: Float(dx)*f, dy: Float(dy)*f) }
                 else { stepMove(first.position, view: view, id: id) }

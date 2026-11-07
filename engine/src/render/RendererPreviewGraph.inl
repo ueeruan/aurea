@@ -14,6 +14,8 @@ bool Renderer::preview_graph_settings_match(const RenderSettings& value) const n
         && saved.sceneEditor.enabled == value.sceneEditor.enabled
         && saved.sceneEditor.yaw == value.sceneEditor.yaw && saved.sceneEditor.pitch == value.sceneEditor.pitch
         && saved.sceneEditor.distance == value.sceneEditor.distance
+        && saved.sceneEditor.targetX == value.sceneEditor.targetX && saved.sceneEditor.targetY == value.sceneEditor.targetY
+        && saved.sceneEditor.targetZ == value.sceneEditor.targetZ
         && saved.quality.motionBlurSamples == value.quality.motionBlurSamples
         && saved.quality.flowResolution == value.quality.flowResolution
         && saved.quality.ssao == value.quality.ssao

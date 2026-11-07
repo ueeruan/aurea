@@ -276,6 +276,7 @@ object CupertinoGlyph {
     const val Mic = '\uF460'
     const val MicFill = '\uF461'
     const val Move = '\uF8F8'
+    const val HandRaised = '\uF6B1'
     const val MusicNote = '\uF46B'
     const val MusicNote2 = '\uF46C'
     const val Paintbrush = '\uF72E'

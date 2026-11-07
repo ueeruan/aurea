@@ -991,7 +991,7 @@ scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEdito
         }
         x = y.cross(z).normalized();
         const f32 h = static_cast<f32>(std::max(1u, height));
-        const Vec3 target{width * 0.5f, height * 0.5f, 0};
+        const Vec3 target{width * 0.5f + editor.targetX, height * 0.5f + editor.targetY, editor.targetZ};
         // Longe o bastante para a cena toda ficar na frente (o far ortográfico é 1e6).
         const Vec3 position = target - z * (h * 50.0f);
         cam.position = position;
@@ -1006,7 +1006,7 @@ scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEdito
     }
     const f32 yaw = editor.yaw * kDeg2Rad, pitch = editor.pitch * kDeg2Rad;
     const f32 distance = static_cast<f32>(std::max(1u, height)) * editor.distance;
-    const Vec3 target{width * 0.5f, height * 0.5f, 0};
+    const Vec3 target{width * 0.5f + editor.targetX, height * 0.5f + editor.targetY, editor.targetZ};
     const Vec3 position = target + Vec3{std::sin(yaw) * std::cos(pitch) * distance,
         -std::sin(pitch) * distance, -std::cos(yaw) * std::cos(pitch) * distance};
     const Vec3 z = (target - position).normalized();
@@ -1482,6 +1482,7 @@ u32 Renderer::configure_preview_cache(u32 width, u32 height, const RenderSetting
     add(s.previewCacheRevision); add(s.previewCacheComposition); add(w); add(h);
     add(rigSetupLayer_); add(s.sceneEditor.enabled); add(static_cast<u64>(s.sceneEditor.kind));
     number(s.sceneEditor.yaw); number(s.sceneEditor.pitch); number(s.sceneEditor.distance);
+    number(s.sceneEditor.targetX); number(s.sceneEditor.targetY); number(s.sceneEditor.targetZ);
     number(s.heavyScale);
     const PreviewQuality q = effective_quality(s);
     number(q.motionBlurSamples); number(q.flowResolution); number(q.ssao);

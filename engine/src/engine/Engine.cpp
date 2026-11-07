@@ -6506,7 +6506,44 @@ bool Engine::set_raw_playback(bool enabled) noexcept {
 void Engine::set_scene_editor(bool enabled, f32 yaw, f32 pitch, f32 distance) noexcept {
     if (!std::isfinite(yaw) || !std::isfinite(pitch) || !std::isfinite(distance)) return;
     std::lock_guard<std::mutex> lock(modelMutex_);
+    const SceneEditorView before = workspaceView_;
     workspaceView_ = SceneEditorView{enabled, std::remainder(yaw, 360.0f), std::clamp(pitch, -80.0f, 80.0f), std::clamp(distance, 0.25f, 30.0f)};
+    workspaceView_.targetX = before.targetX; workspaceView_.targetY = before.targetY; workspaceView_.targetZ = before.targetZ;
+    apply_scene_view_locked();
+    request_render();
+}
+
+void Engine::pan_scene_view(f32 dx, f32 dy) noexcept {
+    if (!std::isfinite(dx) || !std::isfinite(dy)) return;
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    const Composition* comp = project_ ? current_composition() : nullptr;
+    if (!comp || !workspaceView_.enabled) return;
+    const u32 w = comp->width(), h = comp->height();
+    const scene3d::SceneCamera cam = scene_editor_camera(w, h, workspaceView_);
+    const Mat4 vp = scene_editor_projection(w, h, workspaceView_);
+    const Vec3 right{cam.view.col[0].x, cam.view.col[1].x, cam.view.col[2].x};
+    const Vec3 down{cam.view.col[0].y, cam.view.col[1].y, cam.view.col[2].y};
+    const Vec3 target{w * 0.5f + workspaceView_.targetX, h * 0.5f + workspaceView_.targetY, workspaceView_.targetZ};
+    // Quantos pixels da tela vale uma unidade do mundo no ponto olhado: é o que faz a cena
+    // acompanhar o dedo em qualquer zoom, na perspectiva e nas vistas ortogonais.
+    const Vec4 c0 = vp * Vec4{target.x, target.y, target.z, 1};
+    const Vec3 tr = target + right, td = target + down;
+    const Vec4 cx = vp * Vec4{tr.x, tr.y, tr.z, 1}, cy = vp * Vec4{td.x, td.y, td.z, 1};
+    if (c0.w <= 1e-4f || cx.w <= 1e-4f || cy.w <= 1e-4f) return;
+    const f32 sx = cx.x / cx.w - c0.x / c0.w, sy = cy.y / cy.w - c0.y / c0.w;
+    if (std::abs(sx) < 1e-6f || std::abs(sy) < 1e-6f) return;
+    const Vec3 move = right * (-dx / sx) + down * (-dy / sy);
+    const f32 limit = static_cast<f32>(std::max(w, h)) * 50.0f;
+    workspaceView_.targetX = std::clamp(workspaceView_.targetX + move.x, -limit, limit);
+    workspaceView_.targetY = std::clamp(workspaceView_.targetY + move.y, -limit, limit);
+    workspaceView_.targetZ = std::clamp(workspaceView_.targetZ + move.z, -limit, limit);
+    apply_scene_view_locked();
+    request_render();
+}
+
+void Engine::reset_scene_pan() noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    workspaceView_.targetX = workspaceView_.targetY = workspaceView_.targetZ = 0.0f;
     apply_scene_view_locked();
     request_render();
 }

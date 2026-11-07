@@ -7023,6 +7023,7 @@ enum AureaText {
         "tx_tab_style": "Estilo",
         "tx_tab_layout": "Layout",
         "tx_tab_animator": "Animador",
+        "s3d_tool_hand": "Mover a vista",
     ]
     private static let en: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -13969,6 +13970,7 @@ enum AureaText {
         "tx_tab_style": "Style",
         "tx_tab_layout": "Layout",
         "tx_tab_animator": "Animator",
+        "s3d_tool_hand": "Pan view",
     ]
     private static let es: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -20915,6 +20917,7 @@ enum AureaText {
         "tx_tab_style": "Estilo",
         "tx_tab_layout": "Diseño",
         "tx_tab_animator": "Animador",
+        "s3d_tool_hand": "Mover la vista",
     ]
     private static let ru: [String: String] = [
         "add_element_aurora": "Аврора",
@@ -27861,6 +27864,7 @@ enum AureaText {
         "tx_tab_style": "Стиль",
         "tx_tab_layout": "Макет",
         "tx_tab_animator": "Аниматор",
+        "s3d_tool_hand": "Сдвиг вида",
     ]
     private static let hi: [String: String] = [
         "add_element_aurora": "ऑरोरा",
@@ -34807,6 +34811,7 @@ enum AureaText {
         "tx_tab_style": "स्टाइल",
         "tx_tab_layout": "लेआउट",
         "tx_tab_animator": "एनिमेटर",
+        "s3d_tool_hand": "व्यू खिसकाएँ",
     ]
     private static let ar: [String: String] = [
         "add_element_aurora": "الشفق القطبي",
@@ -41753,6 +41758,7 @@ enum AureaText {
         "tx_tab_style": "النمط",
         "tx_tab_layout": "التخطيط",
         "tx_tab_animator": "المحرّك",
+        "s3d_tool_hand": "تحريك العرض",
     ]
     private static let id: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -48699,6 +48705,7 @@ enum AureaText {
         "tx_tab_style": "Gaya",
         "tx_tab_layout": "Tata letak",
         "tx_tab_animator": "Animator",
+        "s3d_tool_hand": "Geser tampilan",
     ]
     private static let plurals: [String: [String: [String: String]]] = [
         "pt-BR": [

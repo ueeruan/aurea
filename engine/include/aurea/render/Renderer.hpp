@@ -511,6 +511,8 @@ struct SceneEditorView {
     bool enabled = false;
     f32 yaw = -30.0f, pitch = 20.0f, distance = 3.0f;
     SceneViewKind kind = SceneViewKind::Orbit;
+    /// O ponto que a vista olha, somado ao centro da composição (a mãozinha da Cena 3D).
+    f32 targetX = 0.0f, targetY = 0.0f, targetZ = 0.0f;
 };
 [[nodiscard]] scene3d::SceneCamera scene_editor_camera(u32 width, u32 height, const SceneEditorView& view) noexcept;
 [[nodiscard]] Mat4 scene_editor_projection(u32 width, u32 height, const SceneEditorView& view) noexcept;

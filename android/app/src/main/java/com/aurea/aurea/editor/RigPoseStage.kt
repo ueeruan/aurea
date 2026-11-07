@@ -279,10 +279,10 @@ internal suspend fun AwaitPointerEventScope.rigPoseGesture(store: EditorStore, m
         if (hypot(c.position.x - x, c.position.y - y) >= slop) { dragged = true; break }
     }
     when {
-        pinch -> poseViewGesture(store, down, true)
+        pinch -> poseViewGesture(store, m, down, true)
         !dragged -> poseTap(store, m, x, y, ring, targets)
         ring >= 0 -> poseRingGesture(store, m, down, slop, ring, ringPx / m.fit)
-        targets.isEmpty() || store.sceneSelectOnly -> poseViewGesture(store, down, false)
+        targets.isEmpty() || store.sceneSelectOnly -> poseViewGesture(store, m, down, false)
         else -> {
             if (store.poseBone !in targets) store.choosePoseBone(targets.first())
             poseBoneGesture(store, m, down)
@@ -305,7 +305,7 @@ private fun androidx.compose.ui.unit.Density.poseTap(store: EditorStore, m: Stag
 }
 
 /** Dedo no vazio: orbita; dois dedos aproximam a vista. Só a vista muda. */
-private suspend fun AwaitPointerEventScope.poseViewGesture(store: EditorStore, down: PointerInputChange, startedPinching: Boolean) {
+private suspend fun AwaitPointerEventScope.poseViewGesture(store: EditorStore, m: StageMapper, down: PointerInputChange, startedPinching: Boolean) {
     val degPerPx = 0.35f / 1.dp.toPx()
     var last = down.position
     var span0 = 0f
@@ -325,7 +325,8 @@ private suspend fun AwaitPointerEventScope.poseViewGesture(store: EditorStore, d
         }
         if (pinching) continue      // sobrou um dedo da pinça: nada
         val c = pressed.firstOrNull { it.id == down.id } ?: pressed[0]
-        store.updateSceneView(store.sceneYaw - (c.position.x - last.x) * degPerPx, store.scenePitch + (c.position.y - last.y) * degPerPx, store.sceneDistance)
+        if (store.sceneHand) store.panSceneView((c.position.x - last.x) / m.fit, (c.position.y - last.y) / m.fit)
+        else store.updateSceneView(store.sceneYaw - (c.position.x - last.x) * degPerPx, store.scenePitch + (c.position.y - last.y) * degPerPx, store.sceneDistance)
         last = c.position
     }
 }

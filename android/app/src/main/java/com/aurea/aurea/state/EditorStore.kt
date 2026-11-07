@@ -5217,6 +5217,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     fun exitSceneEditor() {
         sceneEditor = false
         sceneCameraView = false
+        engine.resetScenePan()
         engine.setSceneEditor(false, sceneYaw, scenePitch, sceneDistance)
         refreshNow()
     }
@@ -5231,26 +5232,44 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
 
     /** Toque duplo no vazio da cena: a vista volta ao ângulo inicial. */
-    fun resetSceneView() = updateSceneView(-30f, 20f, 3f)
+    fun resetSceneView() {
+        engine.resetScenePan()
+        scenePanTick++
+        updateSceneView(-30f, 20f, 3f)
+    }
+
+    /** Mãozinha: leva a vista para os lados, para cima e para baixo (pixels da composição). */
+    fun panSceneView(dx: Float, dy: Float) {
+        if (sceneCameraView) updateSceneView(sceneYaw, scenePitch, sceneDistance)
+        engine.panSceneView(dx, dy)
+        scenePanTick++
+        refreshNow()
+    }
 
     // --- Cena 3D: ferramentas e vista (par do AureaModel.swift) ---------------------------
     /** Ferramenta Selecionar: sem gizmo; 1 dedo só orbita e tocar escolhe. */
     var sceneSelectOnly by mutableStateOf(false)
         private set
+    /** Mãozinha: sem gizmo; 1 dedo leva a vista em vez de orbitar. */
+    var sceneHand by mutableStateOf(false)
+        private set
+    private var scenePanTick by mutableStateOf(0)
     /** Olhando pela câmera ativa (a do export) em vez da vista de navegação. */
     var sceneCameraView by mutableStateOf(false)
         private set
 
     /** [SCENE_TOOL_SELECT] ou uma ferramenta do gizmo ([GIZMO_MOVE], [GIZMO_ROTATE], [GIZMO_SCALE]). */
     fun chooseSceneTool(tool: Int) {
-        sceneSelectOnly = tool == SCENE_TOOL_SELECT
+        sceneHand = tool == SCENE_TOOL_HAND
+        sceneSelectOnly = tool == SCENE_TOOL_SELECT || sceneHand
         if (tool >= 0) gizmoTool = tool
         refreshNow()
     }
 
     /** No modo de pose: selecionar, girar, mover ou IK (POSE_TOOL_*). */
     fun choosePoseTool(tool: Int) {
-        sceneSelectOnly = tool == POSE_TOOL_SELECT
+        sceneHand = tool == POSE_TOOL_HAND
+        sceneSelectOnly = tool == POSE_TOOL_SELECT || sceneHand
         poseMove = tool == POSE_TOOL_MOVE
         poseIk = tool == POSE_TOOL_IK
     }
@@ -5342,6 +5361,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         snapshot.previous = out.toList()
     }
     fun sceneGuideLines(): FloatArray {
+        scenePanTick    // o chão e os eixos redesenham quando a mãozinha leva a vista
         val lines = FloatArray(1280)
         return lines.copyOf(engine.sceneGuides(lines) * 5)
     }
@@ -9854,11 +9874,14 @@ const val GIZMO_ROTATE = 1
 const val GIZMO_SCALE = 2
 /** Cena 3D: a ferramenta Selecionar (sem gizmo). As outras são as GIZMO_*. */
 const val SCENE_TOOL_SELECT = -1
+/** Cena 3D: a mãozinha, que leva a vista. */
+const val SCENE_TOOL_HAND = -2
 /** Ferramentas do modo de pose (barra da esquerda). */
 const val POSE_TOOL_SELECT = 0
 const val POSE_TOOL_ROTATE = 1
 const val POSE_TOOL_MOVE = 2
 const val POSE_TOOL_IK = 3
+const val POSE_TOOL_HAND = 4
 /** Intervalo mínimo entre releituras do inspetor durante o playback (10 Hz). */
 private const val DETAIL_PLAYBACK_NS = 100_000_000L
 

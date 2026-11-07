@@ -1241,6 +1241,9 @@ public:
     bool set_raw_playback(bool enabled) noexcept;
     std::string playback_report() noexcept;
     void set_scene_editor(bool enabled, f32 yaw, f32 pitch, f32 distance) noexcept;
+    /// Mãozinha da Cena 3D: arrasta a vista em pixels da composição; a cena segue o dedo.
+    void pan_scene_view(f32 dx, f32 dy) noexcept;
+    void reset_scene_pan() noexcept;
     /// 0.4.6: vista do palco como no After Effects (só a prévia; a exportação
     /// usa sempre a câmera ativa). Modos (kViewMode*): 0 Câmera ativa,
     /// 1 Câmera padrão, 2 Frente, 3 Trás, 4 Esquerda, 5 Direita, 6 Topo,

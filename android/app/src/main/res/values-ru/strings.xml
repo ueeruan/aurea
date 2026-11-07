@@ -4792,4 +4792,5 @@
     <string name="tx_tab_style">Стиль</string>
     <string name="tx_tab_layout">Макет</string>
     <string name="tx_tab_animator">Аниматор</string>
+    <string name="s3d_tool_hand">Сдвиг вида</string>
 </resources>

@@ -4784,4 +4784,5 @@ para editar la curva.</string>
     <string name="tx_tab_style">Estilo</string>
     <string name="tx_tab_layout">Diseño</string>
     <string name="tx_tab_animator">Animador</string>
+    <string name="s3d_tool_hand">Mover la vista</string>
 </resources>

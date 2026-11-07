@@ -61,12 +61,16 @@ internal fun SceneToolbar(store: EditorStore, modifier: Modifier) {
         verticalArrangement = Arrangement.spacedBy(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         if (pose) {
             val tool = when {
+                store.sceneHand -> com.aurea.aurea.state.POSE_TOOL_HAND
                 store.sceneSelectOnly -> POSE_TOOL_SELECT
                 store.poseIk -> POSE_TOOL_IK
                 store.poseMove -> POSE_TOOL_MOVE
                 else -> POSE_TOOL_ROTATE
             }
             ToolSelect(selectLabel, tool == POSE_TOOL_SELECT) { store.choosePoseTool(POSE_TOOL_SELECT) }
+            ToolButton(CupertinoGlyph.HandRaised, stringResource(R.string.s3d_tool_hand), tool == com.aurea.aurea.state.POSE_TOOL_HAND, "scene.tool.hand") {
+                store.choosePoseTool(com.aurea.aurea.state.POSE_TOOL_HAND)
+            }
             ToolButton(CupertinoGlyph.ArrowCounterclockwise, stringResource(R.string.gizmo_tool_rotate), tool == POSE_TOOL_ROTATE, "scene.tool.rotate") {
                 store.choosePoseTool(POSE_TOOL_ROTATE)
             }
@@ -77,8 +81,11 @@ internal fun SceneToolbar(store: EditorStore, modifier: Modifier) {
                 store.choosePoseTool(POSE_TOOL_IK)
             }
         } else {
-            val tool = if (store.sceneSelectOnly) SCENE_TOOL_SELECT else store.gizmoTool
+            val tool = if (store.sceneHand) com.aurea.aurea.state.SCENE_TOOL_HAND else if (store.sceneSelectOnly) SCENE_TOOL_SELECT else store.gizmoTool
             ToolSelect(selectLabel, tool == SCENE_TOOL_SELECT) { store.chooseSceneTool(SCENE_TOOL_SELECT) }
+            ToolButton(CupertinoGlyph.HandRaised, stringResource(R.string.s3d_tool_hand), tool == com.aurea.aurea.state.SCENE_TOOL_HAND, "scene.tool.hand") {
+                store.chooseSceneTool(com.aurea.aurea.state.SCENE_TOOL_HAND)
+            }
             ToolButton(CupertinoGlyph.Move, stringResource(R.string.gizmo_tool_move), tool == GIZMO_MOVE, "scene.tool.move") {
                 store.chooseSceneTool(GIZMO_MOVE)
             }

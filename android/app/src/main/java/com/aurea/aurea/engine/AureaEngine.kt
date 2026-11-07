@@ -1503,6 +1503,9 @@ class AureaEngine private constructor() {
     fun setRawPlayback(enabled: Boolean): Boolean = nativeSetRawPlayback(nativeHandle, enabled)
     private external fun nativeSetRawPlayback(handle: Long, enabled: Boolean): Boolean
     fun setSceneEditor(enabled: Boolean, yaw: Float, pitch: Float, distance: Float) = nativeSetSceneEditor(nativeHandle, enabled, yaw, pitch, distance)
+    /** Mãozinha da Cena 3D: [dx] e [dy] em pixels da composição. */
+    fun panSceneView(dx: Float, dy: Float) = nativePanSceneView(nativeHandle, dx, dy)
+    fun resetScenePan() = nativeResetScenePan(nativeHandle)
     /** 0.4.6: assistente de IA — ferramentas (formato OpenAI), instruções e execução no motor. */
     fun assistantTools(): String = nativeAssistantTools().toString(Charsets.UTF_8)
     fun assistantSystemPrompt(language: String, version: String): String =
@@ -1833,6 +1836,8 @@ class AureaEngine private constructor() {
     private external fun nativeExtractAudio(handle: Long, layer: Long): Long
     private external fun nativeAddShape(handle: Long, preset: Int): Long
     private external fun nativeSetSceneEditor(handle: Long, enabled: Boolean, yaw: Float, pitch: Float, distance: Float)
+    private external fun nativePanSceneView(handle: Long, dx: Float, dy: Float)
+    private external fun nativeResetScenePan(handle: Long)
     private external fun nativeSceneGuides(handle: Long, output: FloatArray): Int
     private external fun nativeScenePick(handle: Long, x: Float, y: Float, radius: Float): Long
     private external fun nativeLayoutTransform(handle: Long, layer: Long, property: Int, value: Float): Boolean

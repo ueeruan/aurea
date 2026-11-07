@@ -4706,6 +4706,7 @@ final class AureaModel: ObservableObject {
     func exitSceneEditor() {
         sceneEditor = false
         sceneCameraView = false
+        engine.resetScenePan()
         updateSceneView()
     }
     func updateSceneView() {
@@ -4726,19 +4727,27 @@ final class AureaModel: ObservableObject {
     // MARK: Cena 3D: ferramentas e vista (par do EditorStore.kt)
     /// Ferramenta Selecionar: sem gizmo; 1 dedo só orbita e tocar escolhe.
     @Published private(set) var sceneSelectOnly = false
+    /// Mãozinha: sem gizmo; 1 dedo leva a vista em vez de orbitar.
+    @Published private(set) var sceneHand = false
+    /// O chão e os eixos redesenham quando a mãozinha leva a vista.
+    @Published private(set) var scenePanTick = 0
     /// Olhando pela câmera ativa (a do export) em vez da vista de navegação.
     @Published private(set) var sceneCameraView = false
     /// A ferramenta Selecionar da Cena 3D; as outras são as do gizmo (0 mover, 1 girar, 2 escala).
     static let sceneToolSelect = -1
+    /// A mãozinha, que leva a vista.
+    static let sceneToolHand = -2
     /// Ferramentas do modo de pose (barra da esquerda).
-    static let poseToolSelect = 0, poseToolRotate = 1, poseToolMove = 2, poseToolIk = 3
+    static let poseToolSelect = 0, poseToolRotate = 1, poseToolMove = 2, poseToolIk = 3, poseToolHand = 4
 
     func chooseSceneTool(_ tool: Int) {
-        sceneSelectOnly = tool == Self.sceneToolSelect
+        sceneHand = tool == Self.sceneToolHand
+        sceneSelectOnly = tool == Self.sceneToolSelect || sceneHand
         if tool >= 0 { gizmoTool = tool }
     }
     func choosePoseTool(_ tool: Int) {
-        sceneSelectOnly = tool == Self.poseToolSelect
+        sceneHand = tool == Self.poseToolHand
+        sceneSelectOnly = tool == Self.poseToolSelect || sceneHand
         poseMove = tool == Self.poseToolMove
         poseIk = tool == Self.poseToolIk
     }
@@ -4763,7 +4772,18 @@ final class AureaModel: ObservableObject {
     }
 
     /// Toque duplo no vazio da cena: a vista volta ao ângulo inicial.
-    func resetSceneView() { setSceneView(yaw: -30, pitch: 20, distance: 3) }
+    func resetSceneView() {
+        engine.resetScenePan()
+        scenePanTick &+= 1
+        setSceneView(yaw: -30, pitch: 20, distance: 3)
+    }
+    /// Mãozinha: leva a vista para os lados, para cima e para baixo (pixels da composição).
+    func panSceneView(dx: Float, dy: Float) {
+        if sceneCameraView { setSceneView(yaw: sceneYaw, pitch: scenePitch, distance: sceneDistance) }
+        engine.panSceneView(dx: dx, dy: dy)
+        scenePanTick &+= 1
+        refreshSelectedLayer()
+    }
 
     // MARK: 0.4.6 — vistas do palco como no After Effects (só a prévia)
     /// 0 câmera ativa, 1 padrão, 2..7 frente/trás/esquerda/direita/topo/base, 8..10 personalizada 1..3.

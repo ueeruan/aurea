@@ -792,6 +792,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (int64_t)audioPositionNs;
 - (BOOL)setRawPlayback:(BOOL)enabled;
 - (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance;
+/// Mãozinha da Cena 3D: dx e dy em pixels da composição.
+- (void)panSceneViewDx:(float)dx dy:(float)dy NS_SWIFT_NAME(panSceneView(dx:dy:));
+- (void)resetScenePan;
 /// 0.4.6: vista do palco do AE (0 câmera ativa, 1 padrão, 2..7 frente/trás/esquerda/direita/topo/base,
 /// 8..10 vista personalizada 1..3). Só a prévia; a exportação usa a câmera ativa.
 - (BOOL)setViewMode:(int)mode;

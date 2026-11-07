@@ -643,6 +643,7 @@ private struct ShellStageBanner: View {
                 }
             }
             if model.sceneEditor {
+                _ = model.scenePanTick
                 let lines = model.engine.sceneGuides().map(\.floatValue)
                 for i in stride(from: 0, to: lines.count, by: 5) {
                     var line = Path(); line.move(to: screen(lines[i], lines[i + 1])); line.addLine(to: screen(lines[i + 2], lines[i + 3]))
@@ -2494,12 +2495,13 @@ extension AureaModel {
     @EnvironmentObject private var model: AureaModel
     let height: CGFloat
     private var poseTool: Int {
+        if model.sceneHand { return AureaModel.poseToolHand }
         if model.sceneSelectOnly { return AureaModel.poseToolSelect }
         if model.poseIk { return AureaModel.poseToolIk }
         return model.poseMove ? AureaModel.poseToolMove : AureaModel.poseToolRotate
     }
-    private var objectTool: Int { model.sceneSelectOnly ? AureaModel.sceneToolSelect : model.gizmoTool }
-    private static let count = 6
+    private var objectTool: Int { model.sceneHand ? AureaModel.sceneToolHand : model.sceneSelectOnly ? AureaModel.sceneToolSelect : model.gizmoTool }
+    private static let count = 7
     var body: some View {
         let size = Scene3DNav.tool
         let rows = max(1, min(Self.count, Int((height - 4) / (size + 2))))
@@ -2507,11 +2509,13 @@ extension AureaModel {
         LazyHGrid(rows: Array(repeating: GridItem(.fixed(size), spacing: 2), count: rows), spacing: 2) {
             if model.rigPoseActive {
                 selectTool(poseTool == AureaModel.poseToolSelect) { model.choosePoseTool(AureaModel.poseToolSelect) }
+                tool(CupertinoGlyph.HandRaised, "s3d_tool_hand", "scene.tool.hand", on: poseTool == AureaModel.poseToolHand) { model.choosePoseTool(AureaModel.poseToolHand) }
                 tool(CupertinoGlyph.ArrowCounterclockwise, "gizmo_tool_rotate", "scene.tool.rotate", on: poseTool == AureaModel.poseToolRotate) { model.choosePoseTool(AureaModel.poseToolRotate) }
                 tool(CupertinoGlyph.Move, "rig3d_move", "scene.tool.move", on: poseTool == AureaModel.poseToolMove) { model.choosePoseTool(AureaModel.poseToolMove) }
                 tool(CupertinoGlyph.Link, "skeleton_ik", "scene.tool.ik", on: poseTool == AureaModel.poseToolIk) { model.choosePoseTool(AureaModel.poseToolIk) }
             } else {
                 selectTool(objectTool == AureaModel.sceneToolSelect) { model.chooseSceneTool(AureaModel.sceneToolSelect) }
+                tool(CupertinoGlyph.HandRaised, "s3d_tool_hand", "scene.tool.hand", on: objectTool == AureaModel.sceneToolHand) { model.chooseSceneTool(AureaModel.sceneToolHand) }
                 tool(CupertinoGlyph.Move, "gizmo_tool_move", "scene.tool.move", on: objectTool == 0) { model.chooseSceneTool(0) }
                 tool(CupertinoGlyph.ArrowCounterclockwise, "gizmo_tool_rotate", "scene.tool.rotate", on: objectTool == 1) { model.chooseSceneTool(1) }
                 tool(CupertinoGlyph.ArrowDownRightSquare, "gizmo_tool_scale", "scene.tool.scale", on: objectTool == 2) { model.chooseSceneTool(2) }

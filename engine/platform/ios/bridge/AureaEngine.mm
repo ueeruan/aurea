@@ -2707,6 +2707,12 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
 - (void)setSceneEditor:(BOOL)enabled yaw:(float)yaw pitch:(float)pitch distance:(float)distance {
     if (auto* e = self.engine) e->set_scene_editor(enabled != NO, yaw, pitch, distance);
 }
+- (void)panSceneViewDx:(float)dx dy:(float)dy {
+    if (auto* e = self.engine) e->pan_scene_view(dx, dy);
+}
+- (void)resetScenePan {
+    if (auto* e = self.engine) e->reset_scene_pan();
+}
 // 0.4.6: assistente de IA (assistant/Assistant.hpp): ferramentas, instruções e execução.
 - (NSString*)assistantTools { return to_ns(aurea::assistant::tools_json()); }
 - (NSString*)assistantSystemPrompt:(NSString*)language version:(NSString*)version {

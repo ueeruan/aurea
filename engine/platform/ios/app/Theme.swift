@@ -1833,6 +1833,7 @@ enum CupertinoGlyph {
     static let MusicNote: Character = "\u{F46B}"
     static let MusicNote2: Character = "\u{F46C}"
     static let Paintbrush: Character = "\u{F72E}"
+    static let HandRaised: Character = "\u{F6B1}"
     static let PauseFill: Character = "\u{F478}"
     static let Pencil: Character = "\u{F37E}"
     static let PencilOutline: Character = "\u{F73D}"

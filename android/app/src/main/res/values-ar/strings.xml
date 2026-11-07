@@ -4822,4 +4822,5 @@
     <string name="tx_tab_style">النمط</string>
     <string name="tx_tab_layout">التخطيط</string>
     <string name="tx_tab_animator">المحرّك</string>
+    <string name="s3d_tool_hand">تحريك العرض</string>
 </resources>

@@ -1777,7 +1777,7 @@ to edit the curve.</string>
     <string name="am_import_failed">Couldn\'t import: %1$s</string>
     <string name="am_import_nothing">no effect with an Aurea equivalent</string>
     <string name="release_notes_title">Aurea updates</string>
-    <string name="release_notes_body">Aurea Beta 0.4.5 (2208) • 11/01/2026\n\n• Fixes: the preview no longer freezes during playback, export works on more devices and resolutions, text letters no longer disappear after exporting, you can ungroup a single group, the curve graph no longer closes by itself, and 3D shadows follow the light again.\n• Eyedropper in every color: pick a color from the preview in the color wheel, in Chroma Key (the original background color) and in the project background color.\n• Remove video background without a green screen: analyzes the clip and cuts out the person or object, with edge refinement.\n• New effects: Hyper Glitch, Block Glitch, Shift Channels, Time Displacement, Tile Shift, Hexagon Tile, Hollow Box, Water Reflection, Light Wrap, Cinema Looks and the Ballpoint and Dust transitions. Glitchify got many more controls.\n• Easier 3D skeleton: rotation rings on the joints and a dedicated panel with the bone tree. In Puppet, rotate several pins together.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.8 (2211) • 11/07/2026\n\n• Mural: a new area on the home screen to watch community edits and post yours.\n\n• Masks: path keyframes appear on the layer, can be dragged and deleted, and the curve graph opens. On 3D text the curve follows perspective.\n\n• Motion Tile: Fish Eye, Flow Pinch, Slant, Polar and other warps no longer leave black gaps.\n\n• Motion blur: turning it on for one element no longer removes effects from the others.\n\n• Turn into 3D object: images and videos gain reflection and depth in the scene. Reflective Floor blends in better.\n\n• Safer projects: the app refuses to save a file that would not open and rescues what it can from a damaged project.</string>
     <string name="am_import_lossless_required">This preset contains effects, parameters or layers that cannot be preserved during conversion. Nothing was saved or applied.</string>
     <string name="am_import_read_failed">The file could not be read (64 MB limit), or the selected layer changed. Please try again.</string>
     <string name="world_explosive">Explosive</string>
@@ -4794,4 +4794,25 @@ to edit the curve.</string>
     <string name="layer_to_3d_object">Turn into 3D object</string>
     <string name="layer_to_3d_object_hint">With shadow, reflection and depth in the scene</string>
     <string name="layer_to_3d_failed">This layer could not be turned into a 3D object</string>
+    <string name="mural_title">Mural</string>
+    <string name="mural_tagline">Watch the community\'s edits and show yours</string>
+    <string name="mural_post">Post my edit</string>
+    <string name="mural_post_price">Post my edit for %1$s</string>
+    <string name="mural_back">Back</string>
+    <string name="mural_empty">No edits here yet. Be the first!</string>
+    <string name="mural_load_failed">The Mural could not load. Check your connection.</string>
+    <string name="mural_caption">Caption (optional)</string>
+    <string name="mural_preparing">Preparing the video…</string>
+    <string name="mural_paying">Confirming payment…</string>
+    <string name="mural_uploading">Uploading your edit…</string>
+    <string name="mural_done">Your edit is on the Mural!</string>
+    <string name="mural_too_big">Video too large. The limit is 95 MB.</string>
+    <string name="mural_failed_open">This video could not be opened.</string>
+    <string name="mural_failed">Could not post. Try again: what you paid is still valid.</string>
+    <string name="mural_pending">Your payment is still pending. Try again once it is approved.</string>
+    <string name="mural_sign_in">Sign in to post on the Mural.</string>
+    <string name="mural_profile">Create your profile in Profile before posting.</string>
+    <string name="mural_unavailable">Posting on the Mural is not available yet.</string>
+    <string name="mural_store_only">To post on the Mural, use the store app.</string>
+    <string name="mural_delete">Delete this edit from the Mural</string>
 </resources>

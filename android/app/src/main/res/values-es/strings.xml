@@ -1138,7 +1138,7 @@ para editar la curva.</string>
     <string name="consent_title">Consentimiento y responsabilidad</string>
     <string name="consent_accept">Aceptar y continuar</string>
     <string name="consent_body">Aurea es una herramienta profesional de edición, creación y producción de contenido digital. Al utilizar la aplicación, el usuario reconoce que es plenamente responsable de los contenidos que crea, edita, importa, exporta, publica o comparte a través de la plataforma.\n\nAurea no controla, fomenta, apoya ni autoriza el uso de la herramienta para actividades ilegales, abusivas, fraudulentas, perjudiciales o que vulneren los derechos de terceros.\n\nEl usuario es responsable de garantizar que dispone de las autorizaciones, licencias y derechos necesarios sobre los materiales utilizados, incluidas imágenes, vídeos, música, marcas, modelos, archivos y demás contenidos protegidos.\n\nLa libertad creativa que ofrece Aurea no implica aprobación, participación ni responsabilidad de la aplicación por lo que cada usuario decide producir o hacer con la herramienta.\n\nEl usuario acepta utilizar Aurea conforme a la legislación aplicable y asume la responsabilidad de sus propias acciones y del contenido producido o distribuido mediante la aplicación.\n\nEn la máxima medida permitida por la legislación aplicable, Aurea y sus responsables no serán responsables de los actos realizados exclusivamente por el usuario, del uso indebido de la herramienta ni de las consecuencias derivadas de contenidos creados, publicados o compartidos por el propio usuario.\n\nAurea proporciona la herramienta. El usuario es responsable del modo en que decide utilizarla.\n\nAl continuar, el usuario declara que ha leído, comprendido y acepta estos términos.</string>
-    <string name="release_notes_body">Aurea Beta 0.4.5 (2208) • 01/11/2026\n\n• Correcciones: la vista previa ya no se congela al reproducir, la exportación funciona en más dispositivos y resoluciones, las letras ya no desaparecen después de exportar, se puede desagrupar un solo grupo, el gráfico de curvas ya no se cierra solo y las sombras 3D vuelven a seguir la luz.\n• Cuentagotas en todos los colores: toma el color de la vista previa en la rueda de color, en Chroma Key (el color original del fondo) y en el color de fondo del proyecto.\n• Quitar el fondo del video sin pantalla verde: analiza el clip y recorta a la persona o el objeto, con refinado de bordes.\n• Efectos nuevos: Hyper Glitch, Block Glitch, Shift Channels, Time Displacement, Tile Shift, Hexagon Tile, Hollow Box, Reflejo en el agua, Light Wrap, Looks de cine y las transiciones Bolígrafo y Polvo. Glitchify tiene muchos más controles.\n• Esqueleto 3D más fácil: anillos de rotación en las articulaciones y un panel propio con el árbol de huesos. En Marioneta, gira varios pines juntos.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.8 (2211) • 07/11/2026\n\n• Mural: una nueva área en la pantalla de inicio para ver los edits de la comunidad y publicar el tuyo.\n\n• Máscaras: los keyframes del trazado aparecen en la capa, se pueden arrastrar y borrar, y el gráfico de curvas se abre. En texto 3D la curva sigue la perspectiva.\n\n• Motion Tile: Fish Eye, Flow Pinch, Slant, Polar y otros warps ya no dejan huecos negros.\n\n• Motion blur: activarlo en un elemento ya no quita los efectos de los demás.\n\n• Convertir en objeto 3D: imágenes y videos ganan reflejo y profundidad en la escena. Reflective Floor se integra mejor.\n\n• Proyectos más seguros: la app se niega a guardar un archivo que no abriría y rescata lo posible de un proyecto dañado.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Rellenar</string>
@@ -4747,4 +4747,25 @@ para editar la curva.</string>
     <string name="layer_to_3d_object">Convertir en objeto 3D</string>
     <string name="layer_to_3d_object_hint">Con sombra, reflejo y profundidad en la escena</string>
     <string name="layer_to_3d_failed">No se pudo convertir esta capa en objeto 3D</string>
+    <string name="mural_title">Mural</string>
+    <string name="mural_tagline">Mira los edits de la comunidad y muestra el tuyo</string>
+    <string name="mural_post">Publicar mi edit</string>
+    <string name="mural_post_price">Publicar mi edit por %1$s</string>
+    <string name="mural_back">Volver</string>
+    <string name="mural_empty">Aún no hay edits aquí. ¡Sé el primero!</string>
+    <string name="mural_load_failed">No se pudo cargar el Mural. Revisa tu conexión.</string>
+    <string name="mural_caption">Texto (opcional)</string>
+    <string name="mural_preparing">Preparando el video…</string>
+    <string name="mural_paying">Confirmando el pago…</string>
+    <string name="mural_uploading">Subiendo tu edit…</string>
+    <string name="mural_done">¡Tu edit está en el Mural!</string>
+    <string name="mural_too_big">Video demasiado grande. El límite es 95 MB.</string>
+    <string name="mural_failed_open">No se pudo abrir este video.</string>
+    <string name="mural_failed">No se pudo publicar. Inténtalo de nuevo: lo que pagaste sigue siendo válido.</string>
+    <string name="mural_pending">Tu pago sigue pendiente. Inténtalo cuando se apruebe.</string>
+    <string name="mural_sign_in">Inicia sesión para publicar en el Mural.</string>
+    <string name="mural_profile">Crea tu perfil en Perfil antes de publicar.</string>
+    <string name="mural_unavailable">Publicar en el Mural aún no está disponible.</string>
+    <string name="mural_store_only">Para publicar en el Mural, usa la app de la tienda.</string>
+    <string name="mural_delete">Eliminar este edit del Mural</string>
 </resources>

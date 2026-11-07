@@ -5,6 +5,7 @@
 #  atualização, e a divergência aparece como um erro de link no meio do build.
 # =============================================================================
 [versions]
+billing = "7.1.1"
 playServicesAds = "25.5.0"
 ump = "4.0.0"
 appset = "16.1.0"
@@ -28,6 +29,7 @@ junit = "4.13.2"
 json = "20250517"
 
 [libraries]
+billing-ktx = { group = "com.android.billingclient", name = "billing-ktx", version.ref = "billing" }
 play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 ump = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "ump" }
 # App Set ID: identidade do aparelho para o limite diario da IA (prevencao de abuso).

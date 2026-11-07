@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		CC2130000000000000000001 /* CommunityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2130000000000000000002 /* CommunityView.swift */; };
+		CC4810000000000000000001 /* MuralView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC4810000000000000000002 /* MuralView.swift */; };
 		CC4610000000000000000001 /* StoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC4610000000000000000002 /* StoreView.swift */; };
 		CA2127000000000000000001 /* Conta.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000002 /* Conta.swift */; };
 		CA2127000000000000000003 /* ContaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2127000000000000000004 /* ContaView.swift */; };
@@ -146,6 +147,7 @@
 
 /* Begin PBXFileReference section */
 		CC2130000000000000000002 /* CommunityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityView.swift; sourceTree = "<group>"; };
+		CC4810000000000000000002 /* MuralView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MuralView.swift; sourceTree = "<group>"; };
 		CC4610000000000000000002 /* StoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreView.swift; sourceTree = "<group>"; };
 		CA2127000000000000000002 /* Conta.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conta.swift; sourceTree = "<group>"; };
 		CA2127000000000000000004 /* ContaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContaView.swift; sourceTree = "<group>"; };
@@ -328,6 +330,7 @@
 				AE0000000000000000000002 /* ContentView.swift */,
 				CA2127000000000000000002 /* Conta.swift */,
 				CC2130000000000000000002 /* CommunityView.swift */,
+				CC4810000000000000000002 /* MuralView.swift */,
 				CC4610000000000000000002 /* StoreView.swift */,
 				CA2127000000000000000004 /* ContaView.swift */,
 				CA2128000000000000000002 /* ProjectTransfer.swift */,
@@ -654,6 +657,7 @@
 				AE000000000000000000003A /* ContentView.swift in Sources */,
 				CA2127000000000000000001 /* Conta.swift in Sources */,
 				CC2130000000000000000001 /* CommunityView.swift in Sources */,
+				CC4810000000000000000001 /* MuralView.swift in Sources */,
 				CC4610000000000000000001 /* StoreView.swift in Sources */,
 				CA2127000000000000000003 /* ContaView.swift in Sources */,
 				CA2128000000000000000001 /* ProjectTransfer.swift in Sources */,

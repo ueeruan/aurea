@@ -2,6 +2,7 @@
 import { lerSessao, lerJson, json, dentroDoLimite } from './contas.js';
 import { enviarEmail } from './email.js';
 import { storeRoute } from './store.js';
+import { removeMuralPost } from './mural.js';
 
 const BADGES = new Set(['', 'blue', 'green', 'gold']);
 const MAX_FILE = 50 * 1024 * 1024;
@@ -17,7 +18,7 @@ const nextCursor = (items) => items.length === 30 ? `${items.at(-1).createdAt}:$
 // Denunciado por HIDE_AFTER pessoas diferentes, o conteúdo sai do feed de todos
 // (menos do autor) até o admin decidir; bloqueio esconde nos dois sentidos.
 const HIDE_AFTER = 3;
-const REPORT_KINDS = new Set(['post', 'comment', 'user', 'preset', 'ai_video', 'store']);
+const REPORT_KINDS = new Set(['post', 'comment', 'user', 'preset', 'ai_video', 'store', 'mural']);
 const REPORT_REASONS = new Set(['spam', 'nudity', 'violence', 'hate', 'harassment', 'illegal', 'copyright', 'other']);
 const UUID = /^[0-9a-f-]{36}$/;
 const notBlocked = (column) => `NOT EXISTS(SELECT 1 FROM community_blocks b WHERE (b.blocker=? AND b.blocked=${column}) OR (b.blocker=${column} AND b.blocked=?))`;
@@ -172,7 +173,7 @@ async function report(req, env, ctx, session) {
   if (kind === 'ai_video' ? !/^[A-Za-z0-9_.:-]{1,80}$/.test(id) : !UUID.test(id)) return problem('invalid_report');
   const details = typeof v.details === 'string' ? [...v.details.trim()].slice(0, 500).join('') : '';
   if (!(await dentroDoLimite(env, 'community-report', session.uid, { max: 30, janela: 3600 }))) return problem('rate_limited', 429);
-  const table = { post: 'community_posts', comment: 'community_comments', user: 'community_profiles', store: 'community_store_items' }[kind];
+  const table = { post: 'community_posts', comment: 'community_comments', user: 'community_profiles', mural: 'mural_posts', store: 'community_store_items' }[kind];
   if (table) {
     const column = kind === 'user' ? 'uid' : 'id';
     const target = await stmt(env, `SELECT ${column} AS id FROM ${table} WHERE ${column}=?`, id).first();
@@ -322,7 +323,7 @@ export async function communityRoute(req, env, ctx, url) {
       return json({ items: rows.results.map(r => ({ kind: r.target_kind, id: r.target_id, reports: r.reports, first: r.first, last: r.last,
         reasons: String(r.reasons ?? '').split(',').filter(Boolean) })) });
     }
-    const reportMatch = /^\/api\/community\/reports\/(post|comment|user|preset|ai_video|store)\/([A-Za-z0-9_.:-]{1,80})$/.exec(path);
+    const reportMatch = /^\/api\/community\/reports\/(post|comment|user|preset|ai_video|store|mural)\/([A-Za-z0-9_.:-]{1,80})$/.exec(path);
     if (reportMatch && req.method === 'PUT') {
       if (!admin) return problem('forbidden', 403);
       const { valor: v, erro } = await lerJson(req, 256); if (erro || !['removed', 'dismissed'].includes(v?.status)) return problem('invalid_status');
@@ -332,6 +333,7 @@ export async function communityRoute(req, env, ctx, url) {
       if (v.status === 'removed' && kind === 'comment') updates.push(stmt(env, 'DELETE FROM community_comments WHERE id=?', id));
       if (v.status === 'removed' && kind === 'store') updates.push(stmt(env, "UPDATE community_store_items SET status='rejected',review_note='removido por denuncia',updated_at=? WHERE id=?", Date.now(), id));
       await env.AUREA_DB.batch(updates);
+      if (v.status === 'removed' && kind === 'mural') await removeMuralPost(env, id);
       return json({ ok: true });
     }
     if (path === '/api/community/store' || path.startsWith('/api/community/store/')) {

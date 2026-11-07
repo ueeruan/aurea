@@ -327,11 +327,13 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
          * Omega home · P0-2: Início (Comunidade) · Perfil · [+] · Projetos ·
          * Presets. Os Ajustes saíram da barra para a gaveta (P0-3).
          */
-        const val TAB_COUNT = 4
+        const val TAB_COUNT = 5
         const val HOME_TAB = 0
         const val PROJECTS_TAB = 1
         const val PRESETS_TAB = 2
         const val PROFILE_TAB = 3
+        /** 0.4.8: o Mural abre pela faixa grande do Início, não pelo dock. */
+        const val MURAL_TAB = 4
 
         private const val PREFS = "aurea.home"
         // Omega home.

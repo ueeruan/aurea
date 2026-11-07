@@ -32,6 +32,7 @@ import { rotaDeAppConfig } from "./appconfig.js";
 // "Relatar um problema" (/api/report): o texto que a pessoa escreve no app.
 import { rotaDeRelato } from "./relato.js";
 import { communityRoute } from "./community.js";
+import { muralRoute } from "./mural.js";
 import { rotaDePaginas } from "./paginas.js";
 import { rotaDeTranscricao } from "./transcribe.js";
 
@@ -95,6 +96,8 @@ async function handle(req, env, ctx, url) {
     if (entitlements) return entitlements;
     const appConfig = await rotaDeAppConfig(req, env, ctx, url);
     if (appConfig) return appConfig;
+    const mural = await muralRoute(req, env, ctx, url);
+    if (mural) return mural;
     const community = await communityRoute(req, env, ctx, url);
     if (community) return community;
     const crash = await rotaDeCrash(req, env, ctx, url);

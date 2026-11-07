@@ -173,10 +173,14 @@ fun HomeScreen(store: EditorStore) {
                     )
                 }
             }
+            // A faixa do Mural fica à vista em toda aba: a Home reabre na última usada.
+            if (!pluginTab && vm.tab != HomeViewModel.MURAL_TAB && !selecting)
+                com.aurea.aurea.community.MuralBanner { vm.selectTab(HomeViewModel.MURAL_TAB) }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (pluginTab) com.aurea.aurea.effects.PluginHomeTab(store)   // 0.3.4 plugins
                 else when (vm.tab) {
                     HomeViewModel.HOME_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, false)
+                    HomeViewModel.MURAL_TAB -> com.aurea.aurea.community.MuralScreen(store, conta) { vm.selectTab(HomeViewModel.HOME_TAB) }
                     HomeViewModel.PROFILE_TAB -> com.aurea.aurea.community.CommunityScreen(store, conta, true)
                     HomeViewModel.PRESETS_TAB -> PresetsTab(store)
                     else -> ProjectsTab(store, vm, projects, dialogs, openProject)

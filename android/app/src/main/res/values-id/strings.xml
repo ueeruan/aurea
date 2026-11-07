@@ -1136,7 +1136,7 @@ untuk mengedit kurvanya.</string>
     <string name="consent_title">Persetujuan dan Tanggung Jawab</string>
     <string name="consent_accept">Setuju dan lanjutkan</string>
     <string name="consent_body">Aurea adalah alat profesional untuk mengedit, membuat, dan memproduksi konten digital. Dengan menggunakan aplikasi ini, pengguna mengakui bahwa mereka bertanggung jawab penuh atas konten yang mereka buat, edit, impor, ekspor, publikasikan, atau bagikan melalui platform.\n\nAurea tidak mengendalikan, mendorong, mendukung, atau mengizinkan penggunaan alat ini untuk kegiatan ilegal, abusif, curang, merugikan, atau yang melanggar hak pihak ketiga.\n\nPengguna bertanggung jawab memastikan bahwa mereka memiliki izin, lisensi, dan hak yang diperlukan atas materi yang digunakan, termasuk gambar, video, musik, merek, model, berkas, dan konten terlindungi lainnya.\n\nKebebasan kreatif yang ditawarkan Aurea tidak berarti persetujuan, keterlibatan, atau tanggung jawab aplikasi atas apa yang dipilih setiap pengguna untuk dibuat atau dilakukan dengan alat ini.\n\nPengguna setuju untuk menggunakan Aurea sesuai hukum yang berlaku dan bertanggung jawab atas tindakan mereka sendiri serta konten yang diproduksi atau didistribusikan melalui aplikasi.\n\nSejauh diizinkan oleh hukum yang berlaku, Aurea dan pihak yang bertanggung jawab atasnya tidak bertanggung jawab atas tindakan yang dilakukan semata-mata oleh pengguna, penyalahgunaan alat, atau akibat dari konten yang dibuat, dipublikasikan, atau dibagikan oleh pengguna sendiri.\n\nAurea menyediakan alatnya. Pengguna bertanggung jawab atas cara mereka memilih untuk menggunakannya.\n\nDengan melanjutkan, pengguna menyatakan bahwa mereka telah membaca, memahami, dan menyetujui ketentuan ini.</string>
-    <string name="release_notes_body">Aurea Beta 0.4.5 (2208) • 01/11/2026\n\n• Perbaikan: pratinjau tidak lagi macet saat diputar, ekspor berfungsi di lebih banyak perangkat dan resolusi, huruf teks tidak lagi hilang setelah ekspor, satu grup bisa dipisahkan, grafik kurva tidak lagi menutup sendiri, dan bayangan 3D kembali mengikuti cahaya.\n• Pipet di semua warna: ambil warna dari pratinjau di roda warna, di Chroma Key (warna latar asli) dan di warna latar proyek.\n• Hapus latar video tanpa layar hijau: menganalisis klip dan memotong orang atau objek, dengan penghalusan tepi.\n• Efek baru: Hyper Glitch, Block Glitch, Shift Channels, Time Displacement, Tile Shift, Hexagon Tile, Hollow Box, Pantulan air, Light Wrap, Tampilan sinema, serta transisi Pulpen dan Debu. Glitchify kini punya jauh lebih banyak kontrol.\n• Kerangka 3D lebih mudah: cincin rotasi di sendi dan panel khusus dengan pohon tulang. Di Wayang, putar beberapa pin sekaligus.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.8 (2211) • 07/11/2026\n\n• Mural: area baru di layar utama untuk menonton edit komunitas dan memposting punyamu.\n\n• Mask: keyframe jalur muncul di lapisan, bisa diseret dan dihapus, dan grafik kurva terbuka. Pada teks 3D kurva mengikuti perspektif.\n\n• Motion Tile: Fish Eye, Flow Pinch, Slant, Polar, dan warp lain tidak lagi meninggalkan celah hitam.\n\n• Motion blur: menyalakannya pada satu elemen tidak lagi menghapus efek elemen lain.\n\n• Ubah jadi objek 3D: gambar dan video mendapat pantulan dan kedalaman di adegan. Reflective Floor lebih menyatu.\n\n• Proyek lebih aman: aplikasi menolak menyimpan file yang tidak bisa dibuka dan menyelamatkan yang bisa dari proyek rusak.</string>
     <!-- Pacote do editor antigo (2026-09-27): os efeitos e os modos de
          mesclagem que so ele tinha. -->
     <string name="fx_name_fill">Isi</string>
@@ -4737,4 +4737,25 @@ untuk mengedit kurvanya.</string>
     <string name="layer_to_3d_object">Ubah jadi objek 3D</string>
     <string name="layer_to_3d_object_hint">Dengan bayangan, pantulan, dan kedalaman di adegan</string>
     <string name="layer_to_3d_failed">Lapisan ini tidak bisa diubah jadi objek 3D</string>
+    <string name="mural_title">Mural</string>
+    <string name="mural_tagline">Tonton edit komunitas dan tunjukkan punyamu</string>
+    <string name="mural_post">Posting edit saya</string>
+    <string name="mural_post_price">Posting edit saya seharga %1$s</string>
+    <string name="mural_back">Kembali</string>
+    <string name="mural_empty">Belum ada edit di sini. Jadilah yang pertama!</string>
+    <string name="mural_load_failed">Mural gagal dimuat. Periksa koneksi Anda.</string>
+    <string name="mural_caption">Keterangan (opsional)</string>
+    <string name="mural_preparing">Menyiapkan video…</string>
+    <string name="mural_paying">Mengonfirmasi pembayaran…</string>
+    <string name="mural_uploading">Mengunggah edit Anda…</string>
+    <string name="mural_done">Edit Anda ada di Mural!</string>
+    <string name="mural_too_big">Video terlalu besar. Batasnya 95 MB.</string>
+    <string name="mural_failed_open">Video ini tidak bisa dibuka.</string>
+    <string name="mural_failed">Gagal memposting. Coba lagi: pembayaran Anda tetap berlaku.</string>
+    <string name="mural_pending">Pembayaran Anda masih tertunda. Coba lagi setelah disetujui.</string>
+    <string name="mural_sign_in">Masuk untuk memposting di Mural.</string>
+    <string name="mural_profile">Buat profil Anda di Profil sebelum memposting.</string>
+    <string name="mural_unavailable">Memposting di Mural belum tersedia.</string>
+    <string name="mural_store_only">Untuk memposting di Mural, gunakan aplikasi dari toko.</string>
+    <string name="mural_delete">Hapus edit ini dari Mural</string>
 </resources>

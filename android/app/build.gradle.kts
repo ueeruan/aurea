@@ -379,6 +379,8 @@ dependencies {
     // Optional, local device motion tracking. No Cloud Anchors or location APIs.
     implementation("com.google.ar:core:1.56.0")
     implementation(libs.androidx.core.ktx)
+    // Mural (0.4.8): a compra de uma publicação na Google Play.
+    implementation(libs.billing.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)

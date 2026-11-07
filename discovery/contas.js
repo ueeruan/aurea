@@ -419,6 +419,9 @@ async function excluirConta(req, env) {
   try {
     const r = await q("SELECT id FROM community_assets WHERE uid = ?", s.uid).all();
     arquivos = (r?.results ?? []).map((x) => x.id).filter((id) => typeof id === "string");
+    // Os vídeos do Mural vão junto (o registro cai em cascata com o perfil).
+    const mural = await q("SELECT id FROM mural_posts WHERE uid = ?", s.uid).all().catch(() => null);
+    for (const x of mural?.results ?? []) arquivos.push(`mural/${x.id}/video.mp4`, `mural/${x.id}/thumb.jpg`);
   } catch {
     // Banco sem as tabelas da comunidade (migração 0004 não aplicada): nada a apagar lá.
     arquivos = [];

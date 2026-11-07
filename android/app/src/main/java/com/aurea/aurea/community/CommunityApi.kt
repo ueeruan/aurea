@@ -51,7 +51,7 @@ internal fun JSONObject.nextCursor(): String? = optString("cursor").takeIf { it.
 // alvos são os mesmos que o servidor aceita; o que não passa aqui ele recusa.
 internal val reportReasons = listOf("spam", "nudity", "violence", "hate", "harassment", "illegal", "copyright", "other")
 internal const val REPORT_DETAILS_MAX = 500
-private val reportKinds = setOf("post", "comment", "user", "ai_video", "store")
+private val reportKinds = setOf("post", "comment", "user", "ai_video", "store", "mural")
 /** Post, comentário e perfil são UUID; o vídeo de IA é o id opaco do job. */
 internal fun isReportTarget(kind: String, id: String): Boolean =
     kind in reportKinds && id.matches(if (kind == "ai_video") Regex("[A-Za-z0-9_.:-]{1,80}") else Regex("[0-9a-f-]{36}"))

@@ -215,7 +215,7 @@ enum HomeType {
 // Presets 2, Perfil 3 — é o que fica gravado em "aurea.home.tab").
 // =============================================================================
 enum HomeTabKind: Int, CaseIterable, Identifiable {
-    case start, projects, presets, profile
+    case start, projects, presets, profile, mural
     var id: Int { rawValue }
 }
 
@@ -373,11 +373,14 @@ struct HomeView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.3), value: selecting)
+            // A faixa do Mural fica à vista em toda aba: a Home reabre na última usada.
+            if !pluginTab && tab != .mural && !selecting { MuralBanner { select(.mural) } }
             ZStack {
                 if pluginTab && pluginRuntime.homeTabLabel != nil {
                     PluginHomeTab()   // 0.3.4 plugins
                 } else {
                 switch tab {
+                case .mural: MuralView(onBack: { select(.start) })
                 case .start: CommunityView(profileMode: false)
                 case .profile: CommunityView(profileMode: true)
                 case .presets: OmegaPresetsTab(onQuickMenu: { quick = $0 })

@@ -1809,7 +1809,7 @@
     <string name="am_import_failed">Não deu para importar: %1$s</string>
     <string name="am_import_nothing">nenhum efeito com equivalente no Aurea</string>
     <string name="release_notes_title">Novidades do Aurea</string>
-    <string name="release_notes_body">Aurea Beta 0.4.5 (2208) • 01/11/2026\n\n• Correções: a prévia não trava mais tocando, a exportação volta a funcionar em mais aparelhos e resoluções, as letras não somem depois de exportar, dá para desagrupar um grupo, o gráfico de curvas não fecha sozinho e as sombras 3D voltam a seguir a luz.\n• Conta-gotas em todas as cores: pegue a cor da prévia na roda de cores, no chroma key (a cor original do fundo) e na cor de fundo do projeto.\n• Remover fundo de vídeo sem tela verde: analisa o clipe e recorta a pessoa ou o objeto, com refino de borda.\n• Efeitos novos: Hyper Glitch, Block Glitch, Shift Channels, Time Displacement, Tile Shift, Hexagon Tile, Hollow Box, Reflexo na água, Light Wrap, Looks de cinema e as transições Caneta e Poeira. O Glitchify ganhou muito mais controles.\n• Esqueleto 3D mais fácil: anéis de rotação nas articulações e um painel próprio com a árvore de ossos. No Fantoche, girar vários pinos juntos.</string>
+    <string name="release_notes_body">Aurea Beta 0.4.8 (2211) • 07/11/2026\n\n• Mural: uma nova área na tela inicial para ver os edits da comunidade e postar o seu.\n\n• Máscara: os keyframes do caminho aparecem na camada, dá para arrastar e apagar, e o gráfico de curvas abre. Em texto 3D a curva acompanha a perspectiva.\n\n• Motion Tile: Fish Eye, Flow Pinch, Slant, Polar e outros warps não deixam mais buracos pretos.\n\n• Motion blur: ligar em um elemento não apaga mais os efeitos dos outros.\n\n• Transformar em objeto 3D: imagem ou vídeo ganha reflexo e profundidade na cena. Reflective Floor mais integrado.\n\n• Projetos mais protegidos: o app recusa salvar um arquivo que não abriria e recupera o que der de um projeto danificado.</string>
     <string name="am_import_lossless_required">Este preset tem efeitos, parâmetros ou camadas que não podem ser preservados na conversão. Nada foi salvo nem aplicado.</string>
     <string name="am_import_read_failed">Não foi possível ler o arquivo (limite de 64 MB), ou a camada selecionada mudou. Tente novamente.</string>
     <string name="world_explosive">Explosivo</string>
@@ -4826,4 +4826,25 @@
     <string name="layer_to_3d_object">Transformar em objeto 3D</string>
     <string name="layer_to_3d_object_hint">Com sombra, reflexo e profundidade na cena</string>
     <string name="layer_to_3d_failed">Não deu para transformar esta camada em objeto 3D</string>
+    <string name="mural_title">Mural</string>
+    <string name="mural_tagline">Veja os edits da comunidade e mostre o seu</string>
+    <string name="mural_post">Postar meu edit</string>
+    <string name="mural_post_price">Postar meu edit por %1$s</string>
+    <string name="mural_back">Voltar</string>
+    <string name="mural_empty">Ainda não tem edits aqui. Seja o primeiro!</string>
+    <string name="mural_load_failed">Não deu para carregar o Mural. Verifique a internet.</string>
+    <string name="mural_caption">Legenda (opcional)</string>
+    <string name="mural_preparing">Preparando o vídeo…</string>
+    <string name="mural_paying">Confirmando o pagamento…</string>
+    <string name="mural_uploading">Enviando seu edit…</string>
+    <string name="mural_done">Seu edit está no Mural!</string>
+    <string name="mural_too_big">Vídeo grande demais. O limite é 95 MB.</string>
+    <string name="mural_failed_open">Não deu para abrir esse vídeo.</string>
+    <string name="mural_failed">Não deu para postar. Tente de novo: o que você pagou continua valendo.</string>
+    <string name="mural_pending">Seu pagamento ainda está em análise. Tente de novo quando ele for aprovado.</string>
+    <string name="mural_sign_in">Entre na sua conta para postar no Mural.</string>
+    <string name="mural_profile">Crie seu perfil em Perfil antes de postar.</string>
+    <string name="mural_unavailable">Postar no Mural ainda não está disponível.</string>
+    <string name="mural_store_only">Para postar no Mural, use o app da loja.</string>
+    <string name="mural_delete">Apagar este edit do Mural</string>
 </resources>

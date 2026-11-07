@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -30,6 +31,8 @@ internal object AureaDonations {
     val enabled: Boolean = !com.aurea.aurea.BuildConfig.PLAY_STORE
     var launchPromptPending by mutableStateOf(enabled)
     const val PIX = "00020126360014br.gov.bcb.pix0114+55889961267175204000053039865802BR5911Ruan  Pablo6009Sao Paulo62240520daqr16872346348818576304A1F0"
+    /** Mercado Pago: cartão de crédito, débito, Pix e saldo na mesma página. */
+    const val MERCADO_PAGO = "https://link.mercadopago.com.br/supportaureaeditor"
     const val PAYPAL = "https://www.paypal.com/donate/?business=C7C2A2UH88NGW&no_recurring=0&item_name=Manter+o+Aurea+APP+funcionando+de+gra%C3%A7a.&currency_code=BRL"
 }
 
@@ -66,6 +69,19 @@ internal fun DonationCard(exporting: Boolean = false) {
             Column(Modifier.verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.donation_detail), color = AureaColors.LightText)
+                // Mercado Pago primeiro: aceita cartão de crédito (e Pix) na mesma página.
+                androidx.compose.material3.Button(onClick = {
+                    if (exporting) copy(AureaDonations.MERCADO_PAGO)
+                    else try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AureaDonations.MERCADO_PAGO)))
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        copy(AureaDonations.MERCADO_PAGO)
+                        Toast.makeText(context, R.string.donation_copied, Toast.LENGTH_SHORT).show()
+                    }
+                }, modifier = Modifier.fillMaxWidth().testTag("donation.mercadopago"),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AureaColors.Accent, contentColor = AureaColors.OnAccent)) {
+                    Text(stringResource(if (exporting) R.string.donation_copy_mercadopago else R.string.donation_mercadopago))
+                }
                 Image(painterResource(R.drawable.donation_pix_qr), stringResource(R.string.donation_pix_qr),
                     Modifier.sizeIn(maxWidth = 240.dp, maxHeight = 240.dp).aspectRatio(1f))
                 Text("Pix · Ruan Pablo", color = AureaColors.LightTextMuted)

@@ -4805,4 +4805,6 @@
     <string name="fxf_pin_position">पिन (स्थिति)</string>
     <string name="home_news_title">समाचार और अपडेट</string>
     <string name="home_news_version">इस संस्करण में</string>
+    <string name="donation_mercadopago">कार्ड से दान करें (Mercado Pago)</string>
+    <string name="donation_copy_mercadopago">Mercado Pago लिंक कॉपी करें</string>
 </resources>

@@ -7132,6 +7132,8 @@ enum AureaText {
         "fxf_pin_position": "Pino (posição)",
         "home_news_title": "Novidades e notícias",
         "home_news_version": "Nesta versão",
+        "donation_mercadopago": "Doar com cartão (Mercado Pago)",
+        "donation_copy_mercadopago": "Copiar link do Mercado Pago",
     ]
     private static let en: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -14187,6 +14189,8 @@ enum AureaText {
         "fxf_pin_position": "Pin (position)",
         "home_news_title": "News and updates",
         "home_news_version": "In this version",
+        "donation_mercadopago": "Donate by card (Mercado Pago)",
+        "donation_copy_mercadopago": "Copy Mercado Pago link",
     ]
     private static let es: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -21242,6 +21246,8 @@ enum AureaText {
         "fxf_pin_position": "Pin (posición)",
         "home_news_title": "Novedades y noticias",
         "home_news_version": "En esta versión",
+        "donation_mercadopago": "Donar con tarjeta (Mercado Pago)",
+        "donation_copy_mercadopago": "Copiar enlace de Mercado Pago",
     ]
     private static let ru: [String: String] = [
         "add_element_aurora": "Аврора",
@@ -28297,6 +28303,8 @@ enum AureaText {
         "fxf_pin_position": "Штифт (позиция)",
         "home_news_title": "Новости и обновления",
         "home_news_version": "В этой версии",
+        "donation_mercadopago": "Пожертвовать картой (Mercado Pago)",
+        "donation_copy_mercadopago": "Скопировать ссылку Mercado Pago",
     ]
     private static let hi: [String: String] = [
         "add_element_aurora": "ऑरोरा",
@@ -35352,6 +35360,8 @@ enum AureaText {
         "fxf_pin_position": "पिन (स्थिति)",
         "home_news_title": "समाचार और अपडेट",
         "home_news_version": "इस संस्करण में",
+        "donation_mercadopago": "कार्ड से दान करें (Mercado Pago)",
+        "donation_copy_mercadopago": "Mercado Pago लिंक कॉपी करें",
     ]
     private static let ar: [String: String] = [
         "add_element_aurora": "الشفق القطبي",
@@ -42407,6 +42417,8 @@ enum AureaText {
         "fxf_pin_position": "دبوس (الموضع)",
         "home_news_title": "الأخبار والمستجدات",
         "home_news_version": "في هذا الإصدار",
+        "donation_mercadopago": "تبرّع بالبطاقة (Mercado Pago)",
+        "donation_copy_mercadopago": "نسخ رابط Mercado Pago",
     ]
     private static let id: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -49462,6 +49474,8 @@ enum AureaText {
         "fxf_pin_position": "Pin (posisi)",
         "home_news_title": "Berita dan pembaruan",
         "home_news_version": "Di versi ini",
+        "donation_mercadopago": "Donasi dengan kartu (Mercado Pago)",
+        "donation_copy_mercadopago": "Salin tautan Mercado Pago",
     ]
     private static let plurals: [String: [String: [String: String]]] = [
         "pt-BR": [

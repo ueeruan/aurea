@@ -22,6 +22,8 @@ import CoreImage.CIFilterBuiltins
 
 private enum AureaDonations {
     static let pix = "00020126360014br.gov.bcb.pix0114+55889961267175204000053039865802BR5911Ruan  Pablo6009Sao Paulo62240520daqr16872346348818576304A1F0"
+    /// Mercado Pago: cartão de crédito, débito, Pix e saldo na mesma página.
+    static let mercadoPago = "https://link.mercadopago.com.br/supportaureaeditor"
     static let paypal = "https://www.paypal.com/donate/?business=C7C2A2UH88NGW&no_recurring=0&item_name=Manter+o+Aurea+APP+funcionando+de+gra%C3%A7a.&currency_code=BRL"
     // Cache one small image; export progress must not regenerate the QR code.
     static let qr: UIImage? = {
@@ -57,6 +59,16 @@ struct DonationCard: View {
                     ScrollView {
                         VStack(spacing: 16) {
                             Text(AureaText.t("donation_detail"))
+                            // Mercado Pago primeiro: aceita cartão de crédito (e Pix) na mesma página.
+                            Button(AureaText.t(exporting ? "donation_copy_mercadopago" : "donation_mercadopago")) {
+                                if exporting { copy(AureaDonations.mercadoPago) }
+                                else if let url = URL(string: AureaDonations.mercadoPago) {
+                                    openURL(url) { accepted in
+                                        if !accepted { copy(AureaDonations.mercadoPago) }
+                                    }
+                                }
+                            }.buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
+                                .accessibilityIdentifier("donation.mercadopago")
                             if let qr = AureaDonations.qr {
                                 Image(uiImage: qr).interpolation(.none).resizable().scaledToFit()
                                     .frame(width: 216, height: 216).padding(20).background(.white)
@@ -539,7 +551,7 @@ struct HomeView: View {
                        confirmLabel: AureaText.t("donation_launch_yes"), cancelLabel: AureaText.t("donation_launch_later"),
                        onConfirm: {
                            model.donationPromptPending = false
-                           if let url = URL(string: AureaDonations.paypal) { UIApplication.shared.open(url) }
+                           if let url = URL(string: AureaDonations.mercadoPago) { UIApplication.shared.open(url) }
                        }, onDismiss: { showDonationPrompt = false; model.donationPromptPending = false })
         }
     }

@@ -4879,4 +4879,6 @@
     <string name="fxf_pin_position">Pino (posição)</string>
     <string name="home_news_title">Novidades e notícias</string>
     <string name="home_news_version">Nesta versão</string>
+    <string name="donation_mercadopago">Doar com cartão (Mercado Pago)</string>
+    <string name="donation_copy_mercadopago">Copiar link do Mercado Pago</string>
 </resources>

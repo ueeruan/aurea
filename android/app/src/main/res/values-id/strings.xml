@@ -4799,4 +4799,6 @@ untuk mengedit kurvanya.</string>
     <string name="fxf_pin_position">Pin (posisi)</string>
     <string name="home_news_title">Berita dan pembaruan</string>
     <string name="home_news_version">Di versi ini</string>
+    <string name="donation_mercadopago">Donasi dengan kartu (Mercado Pago)</string>
+    <string name="donation_copy_mercadopago">Salin tautan Mercado Pago</string>
 </resources>

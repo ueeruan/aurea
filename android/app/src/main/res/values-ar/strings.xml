@@ -4847,4 +4847,6 @@
     <string name="fxf_pin_position">دبوس (الموضع)</string>
     <string name="home_news_title">الأخبار والمستجدات</string>
     <string name="home_news_version">في هذا الإصدار</string>
+    <string name="donation_mercadopago">تبرّع بالبطاقة (Mercado Pago)</string>
+    <string name="donation_copy_mercadopago">نسخ رابط Mercado Pago</string>
 </resources>

@@ -4809,4 +4809,6 @@ para editar la curva.</string>
     <string name="fxf_pin_position">Pin (posición)</string>
     <string name="home_news_title">Novedades y noticias</string>
     <string name="home_news_version">En esta versión</string>
+    <string name="donation_mercadopago">Donar con tarjeta (Mercado Pago)</string>
+    <string name="donation_copy_mercadopago">Copiar enlace de Mercado Pago</string>
 </resources>

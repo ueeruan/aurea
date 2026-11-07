@@ -4817,4 +4817,6 @@
     <string name="fxf_pin_position">Штифт (позиция)</string>
     <string name="home_news_title">Новости и обновления</string>
     <string name="home_news_version">В этой версии</string>
+    <string name="donation_mercadopago">Пожертвовать картой (Mercado Pago)</string>
+    <string name="donation_copy_mercadopago">Скопировать ссылку Mercado Pago</string>
 </resources>

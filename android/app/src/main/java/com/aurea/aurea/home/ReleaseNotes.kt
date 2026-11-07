@@ -82,10 +82,10 @@ internal fun ReleaseNotesEntry(button: Boolean = true) {
                 AureaDonations.launchPromptPending = false
                 try {
                     context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
-                        android.net.Uri.parse(AureaDonations.PAYPAL)))
+                        android.net.Uri.parse(AureaDonations.MERCADO_PAGO)))
                 } catch (_: android.content.ActivityNotFoundException) {
                     (context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                        .setPrimaryClip(android.content.ClipData.newPlainText("Aurea", AureaDonations.PAYPAL))
+                        .setPrimaryClip(android.content.ClipData.newPlainText("Aurea", AureaDonations.MERCADO_PAGO))
                     android.widget.Toast.makeText(context, R.string.donation_copied, android.widget.Toast.LENGTH_SHORT).show()
                 }
             },

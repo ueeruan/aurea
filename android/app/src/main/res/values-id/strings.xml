@@ -4801,4 +4801,15 @@ untuk mengedit kurvanya.</string>
     <string name="home_news_version">Di versi ini</string>
     <string name="donation_mercadopago">Donasi dengan kartu (Mercado Pago)</string>
     <string name="donation_copy_mercadopago">Salin tautan Mercado Pago</string>
+    <string name="sl_title">Pustaka suaraku</string>
+    <string name="sl_import_folder">Impor folder suara</string>
+    <string name="sl_import_files">Impor suara</string>
+    <string name="sl_imported_section">Diimpor</string>
+    <string name="sl_importing">Mengimpor suara… %1$d dari %2$d</string>
+    <string name="sl_importing_start">Mencari suara di folder…</string>
+    <string name="sl_none">Tidak ada suara baru.</string>
+    <string name="sl_hint">Impor folder berisi efek suara dan musikmu: tersimpan di aplikasi, dengan pratinjau, untuk proyek apa pun.</string>
+    <string name="sl_remove_folder">Hapus dari pustaka</string>
+    <string name="sl_remove_message">Suara di “%1$s” keluar dari pustaka dan salinannya di aplikasi dihapus. Proyek yang sudah memakainya tetap menyimpannya.</string>
+    <string name="sl_imported">Suara ditambahkan ke pustaka: %1$d</string>
 </resources>

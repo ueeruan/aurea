@@ -4849,4 +4849,15 @@
     <string name="home_news_version">في هذا الإصدار</string>
     <string name="donation_mercadopago">تبرّع بالبطاقة (Mercado Pago)</string>
     <string name="donation_copy_mercadopago">نسخ رابط Mercado Pago</string>
+    <string name="sl_title">مكتبة أصواتي</string>
+    <string name="sl_import_folder">استيراد مجلد أصوات</string>
+    <string name="sl_import_files">استيراد أصوات</string>
+    <string name="sl_imported_section">المستوردة</string>
+    <string name="sl_importing">جارٍ استيراد الأصوات… %1$d من %2$d</string>
+    <string name="sl_importing_start">جارٍ البحث عن الأصوات في المجلد…</string>
+    <string name="sl_none">لم يتم العثور على أصوات جديدة.</string>
+    <string name="sl_hint">استورد مجلدات تحتوي على مؤثراتك الصوتية وموسيقاك: تبقى محفوظة في التطبيق مع المعاينة لأي مشروع.</string>
+    <string name="sl_remove_folder">إزالة من المكتبة</string>
+    <string name="sl_remove_message">ستُزال أصوات «%1$s» من المكتبة وتُحذف النسخ المحفوظة في التطبيق. المشاريع التي تستخدمها بالفعل تحتفظ بها.</string>
+    <string name="sl_imported">الأصوات المضافة إلى المكتبة: %1$d</string>
 </resources>

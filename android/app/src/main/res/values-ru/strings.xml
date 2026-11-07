@@ -4819,4 +4819,15 @@
     <string name="home_news_version">В этой версии</string>
     <string name="donation_mercadopago">Пожертвовать картой (Mercado Pago)</string>
     <string name="donation_copy_mercadopago">Скопировать ссылку Mercado Pago</string>
+    <string name="sl_title">Моя библиотека звуков</string>
+    <string name="sl_import_folder">Импортировать папку со звуками</string>
+    <string name="sl_import_files">Импортировать звуки</string>
+    <string name="sl_imported_section">Импортированные</string>
+    <string name="sl_importing">Импорт звуков… %1$d из %2$d</string>
+    <string name="sl_importing_start">Ищем звуки в папке…</string>
+    <string name="sl_none">Новых звуков не найдено.</string>
+    <string name="sl_hint">Импортируйте папки со своими звуковыми эффектами и музыкой: они сохранятся в приложении с прослушиванием для любого проекта.</string>
+    <string name="sl_remove_folder">Удалить из библиотеки</string>
+    <string name="sl_remove_message">Звуки из «%1$s» будут удалены из библиотеки вместе с копиями в приложении. Проекты, где они уже используются, их сохранят.</string>
+    <string name="sl_imported">Звуков добавлено в библиотеку: %1$d</string>
 </resources>

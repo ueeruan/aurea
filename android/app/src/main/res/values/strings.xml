@@ -4881,4 +4881,15 @@
     <string name="home_news_version">Nesta versão</string>
     <string name="donation_mercadopago">Doar com cartão (Mercado Pago)</string>
     <string name="donation_copy_mercadopago">Copiar link do Mercado Pago</string>
+    <string name="sl_title">Minha biblioteca de sons</string>
+    <string name="sl_import_folder">Importar pasta de sons</string>
+    <string name="sl_import_files">Importar sons</string>
+    <string name="sl_imported_section">Importados</string>
+    <string name="sl_importing">Importando sons… %1$d de %2$d</string>
+    <string name="sl_importing_start">Procurando sons na pasta…</string>
+    <string name="sl_none">Nenhum som novo encontrado.</string>
+    <string name="sl_hint">Importe pastas com seus efeitos sonoros e músicas: eles ficam salvos no app, com prévia, para usar em qualquer projeto.</string>
+    <string name="sl_remove_folder">Remover da biblioteca</string>
+    <string name="sl_remove_message">Os sons de “%1$s” saem da biblioteca e as cópias guardadas no app são apagadas. Os projetos que já usam esses sons continuam com eles.</string>
+    <string name="sl_imported">Sons adicionados à biblioteca: %1$d</string>
 </resources>

@@ -13,6 +13,115 @@ import UIKit
 import AVFoundation
 import UniformTypeIdentifiers
 
+// MARK: - A biblioteca de sons da pessoa (SoundLibrary)
+
+/// Pastas e arquivos que a pessoa importa (efeitos, músicas) ficam COPIADOS em
+/// Documents/Sons, para usar em qualquer projeto mesmo que o original saia do aparelho.
+/// Uma pasta importada vira uma seção; cada subpasta dela, outra ("SFX / Bells"). O índice
+/// guarda caminho relativo, título e duração. Par do Android: editor/SoundLibrary.kt.
+enum SoundLibrary {
+    struct Folder: Identifiable { let name: String; let sounds: [OmegaAudioEntry]; var id: String { name } }
+    private struct Item: Codable { var c: String; var p: String; var t: String; var d: Double }
+    private static let audio: Set<String> = ["mp3", "wav", "m4a", "aac", "caf", "aif", "aiff", "flac", "ogg", "opus", "amr"]
+    private static let maxFiles = 3000
+    static var root: URL { AureaPaths.documents.appendingPathComponent("Sons", isDirectory: true) }
+    private static var indexURL: URL { root.appendingPathComponent("index.json") }
+
+    private static func read() -> [Item] {
+        guard let data = try? Data(contentsOf: indexURL) else { return [] }
+        return (try? JSONDecoder().decode([Item].self, from: data)) ?? []
+    }
+    private static func write(_ items: [Item]) {
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(items) { try? data.write(to: indexURL, options: .atomic) }
+    }
+    private static func safe(_ name: String) -> String {
+        let bad = CharacterSet(charactersIn: "\\/:*?\"<>|").union(.controlCharacters)
+        let cleaned = name.components(separatedBy: bad).joined(separator: "_").trimmingCharacters(in: .whitespaces)
+        return String((cleaned.isEmpty ? "_" : cleaned).prefix(80))
+    }
+
+    /// As seções em ordem alfabética; arquivo apagado sai da lista. Fora da thread principal.
+    static func load() -> [Folder] {
+        let items = read()
+        let alive = items.filter { FileManager.default.fileExists(atPath: root.appendingPathComponent($0.p).path) }
+        if alive.count != items.count { write(alive) }
+        return Dictionary(grouping: alive, by: \.c).sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }.map { name, list in
+            Folder(name: name, sounds: list.sorted { $0.t.lowercased() < $1.t.lowercased() }.map {
+                OmegaAudioEntry(url: root.appendingPathComponent($0.p), title: $0.t, album: name, artist: "", genre: "",
+                                duration: $0.d, lastUsed: .distantPast)
+            })
+        }
+    }
+
+    /// Uma pasta inteira (com as subpastas). Devolve quantos sons entraram.
+    static func importFolder(_ folder: URL, progress: @escaping (Int, Int) -> Void) -> Int {
+        let scoped = folder.startAccessingSecurityScopedResource()
+        defer { if scoped { folder.stopAccessingSecurityScopedResource() } }
+        let base = folder.lastPathComponent
+        var found: [(URL, String)] = []
+        let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+        while let file = walker?.nextObject() as? URL, found.count < maxFiles {
+            guard audio.contains(file.pathExtension.lowercased()) else { continue }
+            let rel = file.deletingLastPathComponent().path.replacingOccurrences(of: folder.path, with: "")
+                .split(separator: "/").map(String.init)
+            found.append((file, ([base] + rel).joined(separator: " / ")))
+        }
+        return copy(found, progress: progress)
+    }
+
+    /// Arquivos soltos: entram na seção `category`.
+    static func importFiles(_ urls: [URL], category: String, progress: @escaping (Int, Int) -> Void) -> Int {
+        copy(urls.filter { audio.contains($0.pathExtension.lowercased()) }.map { ($0, category) }, progress: progress)
+    }
+
+    private static func copy(_ files: [(URL, String)], progress: @escaping (Int, Int) -> Void) -> Int {
+        var items = read()
+        var known = Set(items.map(\.p))
+        var added = 0
+        for (index, pair) in files.enumerated() {
+            progress(index, files.count)
+            let (source, category) = pair
+            let rel = (category.components(separatedBy: " / ").map(safe) + [safe(source.lastPathComponent)]).joined(separator: "/")
+            guard !known.contains(rel) else { continue }   // a mesma pasta importada de novo
+            let target = root.appendingPathComponent(rel)
+            try? FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let scoped = source.startAccessingSecurityScopedResource()
+            defer { if scoped { source.stopAccessingSecurityScopedResource() } }
+            guard (try? FileManager.default.copyItem(at: source, to: target)) != nil else { continue }
+            // Só entra o que o aparelho consegue tocar (a mesma pré-escuta da biblioteca).
+            guard let player = try? AVAudioPlayer(contentsOf: target) else { try? FileManager.default.removeItem(at: target); continue }
+            items.append(Item(c: category, p: rel, t: source.deletingPathExtension().lastPathComponent, d: player.duration))
+            known.insert(rel)
+            added += 1
+        }
+        progress(files.count, files.count)
+        write(items)
+        return added
+    }
+
+    /// O som está na biblioteca (e não num projeto)?
+    static func owns(_ url: URL) -> Bool { url.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path + "/") }
+
+    /// Uma cópia do som para os projetos (em Media/, como as outras importações): tirar a
+    /// seção da biblioteca depois não deixa o projeto sem áudio. Mesmo tamanho e nome = a mesma cópia.
+    static func projectCopy(_ url: URL) -> URL? {
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        try? FileManager.default.createDirectory(at: AureaPaths.media, withIntermediateDirectories: true)
+        let target = AureaPaths.media.appendingPathComponent("som-\(size)-\(safe(url.lastPathComponent))")
+        if (try? target.resourceValues(forKeys: [.fileSizeKey]).fileSize) == size { return target }
+        try? FileManager.default.removeItem(at: target)
+        return (try? FileManager.default.copyItem(at: url, to: target)) != nil ? target : nil
+    }
+
+    /// Tira a seção da biblioteca e apaga as cópias dela.
+    static func remove(_ category: String) {
+        let items = read()
+        for item in items where item.c == category { try? FileManager.default.removeItem(at: root.appendingPathComponent(item.p)) }
+        write(items.filter { $0.c != category })
+    }
+}
+
 // MARK: - A biblioteca de áudio do app
 
 struct OmegaAudioEntry: Identifiable, Equatable {
@@ -289,17 +398,32 @@ struct AudioBrowserView: View {
     @State private var category: OmegaAudioCategory?
     @State private var group: String?
     @State private var choosingFile = false
+    // A biblioteca de sons da pessoa (SoundLibrary): pastas e arquivos importados.
+    @State private var sounds: [SoundLibrary.Folder] = []
+    @State private var soundFolder: String?
+    @State private var importing: (Int, Int)?
+    @State private var removing: String?
+    @State private var choosingFolder = false
+    @State private var choosingSounds = false
 
     var body: some View {
         VStack(spacing: 0) {
-            if let category {
+            if let soundFolder {
+                BrowserTopBar(title: soundFolder, glyph: CupertinoGlyph.ChevronLeft,
+                              description: AureaText.t("om_add_back"), tag: "audio.back", action: back)
+            } else if let category {
                 BrowserTopBar(title: group ?? AureaText.t(category.key), glyph: CupertinoGlyph.ChevronLeft,
                               description: AureaText.t("om_add_back"), tag: "audio.back", action: back)
             } else {
                 BrowserTopBar(title: AureaText.t("om_audio_title"), glyph: CupertinoGlyph.Xmark,
                               description: AureaText.t("editor_fechar"), tag: "audio.close", action: dismiss)
             }
-            if let all = entries {
+            if let soundFolder {
+                trackList(sounds.first { $0.name == soundFolder }?.sounds ?? [])
+                Button(AureaText.t("sl_remove_folder")) { removing = soundFolder }
+                    .font(.aurea(size: 14)).foregroundStyle(AureaColors.muted).padding(18)
+                    .accessibilityIdentifier("sounds.remove")
+            } else if let all = entries {
                 if let category {
                     if category == .songs || group != nil {
                         trackList(group == nil ? all : all.filter { groupKey($0, category) == group })
@@ -324,6 +448,46 @@ struct AudioBrowserView: View {
             }
         }
         .onDisappear { preview.stop() }
+        .task {
+            let found = await Task.detached { SoundLibrary.load() }.value
+            sounds = found
+        }
+        .overlay {
+            if let importing {
+                VStack(spacing: 14) {
+                    ProgressView().tint(AureaColors.accent)
+                    Text(importing.1 > 0 ? AureaText.t("sl_importing", importing.0, importing.1) : AureaText.t("sl_importing_start"))
+                        .font(.aurea(size: 14)).foregroundStyle(AureaColors.text)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity).background(AureaColors.addPanel.opacity(0.85))
+                .accessibilityIdentifier("sounds.importing")
+            }
+        }
+        .alert(AureaText.t("sl_remove_folder"), isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+            Button(AureaText.t("panel_remover"), role: .destructive) {
+                guard let name = removing else { return }
+                removing = nil
+                preview.stop()
+                Task {
+                    let found = await Task.detached { SoundLibrary.remove(name); return SoundLibrary.load() }.value
+                    sounds = found; soundFolder = nil
+                }
+            }
+            Button(AureaText.t("common_cancel"), role: .cancel) { removing = nil }
+        } message: { Text(AureaText.t("sl_remove_message", removing ?? "")) }
+        .sheet(isPresented: $choosingFolder) {
+            SoundFolderPicker(folders: true) { urls in
+                choosingFolder = false
+                if let folder = urls.first { runImport { SoundLibrary.importFolder(folder, progress: $0) } }
+            }
+        }
+        .sheet(isPresented: $choosingSounds) {
+            SoundFolderPicker(folders: false) { urls in
+                choosingSounds = false
+                let label = AureaText.t("sl_imported_section")
+                if !urls.isEmpty { runImport { SoundLibrary.importFiles(urls, category: label, progress: $0) } }
+            }
+        }
         .sheet(isPresented: $choosingFile) {
             // "Arquivos do aparelho…": o seletor de arquivos de hoje; o áudio entra
             // na biblioteca (cópia em Media/) e na camada.
@@ -338,7 +502,25 @@ struct AudioBrowserView: View {
     }
 
     private func dismiss() { preview.stop(); model.omegaAudioBrowser = false }
-    private func back() { preview.stop(); if group != nil { group = nil } else { category = nil } }
+    private func back() {
+        preview.stop()
+        if soundFolder != nil { soundFolder = nil } else if group != nil { group = nil } else { category = nil }
+    }
+
+    /// Copia fora da thread principal, com o andamento na tela.
+    private func runImport(_ work: @escaping (@escaping (Int, Int) -> Void) -> Int) {
+        preview.stop()
+        importing = (0, 0)
+        Task {
+            let added = await Task.detached {
+                work { done, total in Task { @MainActor in importing = (done, total) } }
+            }.value
+            let found = await Task.detached { SoundLibrary.load() }.value
+            sounds = found
+            importing = nil
+            model.toast = added > 0 ? AureaText.t("sl_imported", added) : AureaText.t("sl_none")
+        }
+    }
 
     private func groupKey(_ entry: OmegaAudioEntry, _ category: OmegaAudioCategory) -> String {
         let unknown = AureaText.t("om_audio_unknown")
@@ -356,6 +538,23 @@ struct AudioBrowserView: View {
                 row(AureaText.t("om_audio_device_files"), count: nil, glyph: CupertinoGlyph.Folder, tag: "audio.files", chevron: false) {
                     preview.stop(); choosingFile = true
                 }
+                // Minha biblioteca de sons: importar e as seções que a pessoa já trouxe.
+                sectionTitle(AureaText.t("sl_title"))
+                row(AureaText.t("sl_import_folder"), count: nil, glyph: CupertinoGlyph.Folder, tag: "sounds.importFolder", chevron: false) {
+                    preview.stop(); choosingFolder = true
+                }
+                row(AureaText.t("sl_import_files"), count: nil, glyph: CupertinoGlyph.Plus, tag: "sounds.importFiles", chevron: false) {
+                    preview.stop(); choosingSounds = true
+                }
+                if sounds.isEmpty {
+                    Text(AureaText.t("sl_hint")).font(.aurea(size: 13)).foregroundStyle(AureaColors.muted)
+                        .multilineTextAlignment(.center).padding(.horizontal, 24).padding(.vertical, 12)
+                }
+                ForEach(Array(sounds.enumerated()), id: \.element.id) { index, folder in
+                    row(folder.name, count: AureaText.plural("om_audio_count", folder.sounds.count, folder.sounds.count),
+                        glyph: CupertinoGlyph.Waveform, tag: "sounds.folder.\(index)") { soundFolder = folder.name }
+                }
+                sectionTitle(AureaText.t("om_audio_title"))
                 ForEach(OmegaAudioCategory.allCases, id: \.self) { item in
                     let count = item == .songs ? all.count : Set(all.map { groupKey($0, item) }).count
                     row(AureaText.t(item.key), count: AureaText.plural("om_audio_count", count, count), glyph: item.glyph,
@@ -391,8 +590,10 @@ struct AudioBrowserView: View {
                     ForEach(Array(tracks.enumerated()), id: \.element.id) { index, entry in
                         TrackRow(index: index, entry: entry) {
                             preview.stop()
-                            OmegaAudioLibrary.markUsed(entry.url)
-                            model.importAudioSource(entry.url, name: entry.title)
+                            // Da biblioteca de sons: o projeto usa uma cópia própria (remover a seção não o afeta).
+                            let source = SoundLibrary.owns(entry.url) ? (SoundLibrary.projectCopy(entry.url) ?? entry.url) : entry.url
+                            OmegaAudioLibrary.markUsed(source)
+                            model.importAudioSource(source, name: entry.title)
                             model.omegaAudioBrowser = false
                             model.showAddLayer = false
                         }
@@ -400,6 +601,12 @@ struct AudioBrowserView: View {
                 }
             }
         }
+    }
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text).font(.aurea(size: 13, weight: .bold)).foregroundStyle(AureaColors.muted)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 14).padding(.top, 18).padding(.bottom, 6)
+            .accessibilityAddTraits(.isHeader)
     }
 
     /// Linha de 70: ícone quadrado, título 15 + contagem 12, seta ›.
@@ -502,5 +709,27 @@ private struct OmegaAudioFilePicker: UIViewControllerRepresentable {
         init(picked: @escaping (URL?) -> Void) { self.picked = picked }
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { picked(urls.first) }
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { picked(nil) }
+    }
+}
+
+/// O seletor da biblioteca de sons: uma pasta (sem copiar: o app lê e copia o que for
+/// áudio) ou vários arquivos de áudio de uma vez.
+private struct SoundFolderPicker: UIViewControllerRepresentable {
+    let folders: Bool
+    let picked: ([URL]) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(picked: picked) }
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = folders ? UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
+                             : UIDocumentPickerViewController(forOpeningContentTypes: [.audio], asCopy: true)
+        picker.allowsMultipleSelection = !folders
+        picker.delegate = context.coordinator
+        return picker
+    }
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let picked: ([URL]) -> Void
+        init(picked: @escaping ([URL]) -> Void) { self.picked = picked }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { picked(urls) }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { picked([]) }
     }
 }

@@ -234,6 +234,8 @@ internal object OmegaAudioPreview {
     var playing by mutableStateOf<String?>(null)
         private set
     private var player: MediaPlayer? = null
+    /** getDuration antes do prepare gera o erro -38, que parecia "formato não suportado". */
+    @Volatile private var prepared = false
 
     fun toggle(context: Context, source: String, onUnsupported: () -> Unit) {
         if (playing == source) { stop(); return }
@@ -241,9 +243,10 @@ internal object OmegaAudioPreview {
         val mp = MediaPlayer()
         player = mp
         playing = source
+        prepared = false
         try {
             if (source.startsWith("content:")) mp.setDataSource(context, Uri.parse(source)) else mp.setDataSource(source)
-            mp.setOnPreparedListener { if (player === it) it.start() }
+            mp.setOnPreparedListener { if (player === it) { prepared = true; it.start() } }
             mp.setOnCompletionListener { if (player === it) stop() }
             mp.setOnErrorListener { p, _, _ -> if (player === p) { stop(); onUnsupported() }; true }
             mp.prepareAsync()
@@ -257,12 +260,14 @@ internal object OmegaAudioPreview {
         val mp = player
         player = null
         playing = null
+        prepared = false
         if (mp != null) runCatching { mp.reset(); mp.release() }
     }
 
     /** Fração tocada (0..1) para o anel de progresso. */
     fun progress(): Float = runCatching {
         val mp = player ?: return 0f
+        if (!prepared) return 0f
         if (mp.duration > 0) (mp.currentPosition.toFloat() / mp.duration).coerceIn(0f, 1f) else 0f
     }.getOrDefault(0f)
 }
@@ -448,6 +453,29 @@ internal fun AudioBrowser(store: EditorStore, onAdded: () -> Unit, onDismiss: ()
     var unsupported by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { entries = withContext(Dispatchers.IO) { OmegaAudioLibrary.load(context) } }
     DisposableEffect(Unit) { onDispose { OmegaAudioPreview.stop() } }
+    // A biblioteca de sons da pessoa (SoundLibrary.kt): pastas e arquivos importados.
+    var sounds by remember { mutableStateOf<List<SoundLibrary.Folder>>(emptyList()) }
+    var importing by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var removing by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { sounds = withContext(Dispatchers.IO) { SoundLibrary.load(context) } }
+    fun runImport(work: ((Int, Int) -> Unit) -> Int) {
+        OmegaAudioPreview.stop()
+        importing = 0 to 0
+        scope.launch {
+            val added = withContext(Dispatchers.IO) { work { done, total -> scope.launch { importing = done to total } } }
+            sounds = withContext(Dispatchers.IO) { SoundLibrary.load(context) }
+            importing = null
+            store.showToast(if (added > 0) context.getString(R.string.sl_imported, added)
+                else context.getString(R.string.sl_none))
+        }
+    }
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree: Uri? ->
+        if (tree != null) runImport { progress -> SoundLibrary.importTree(context, tree, progress) }
+    }
+    val importedLabel = stringResource(R.string.sl_imported_section)
+    val soundFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) runImport { progress -> SoundLibrary.importFiles(context, uris, importedLabel, progress) }
+    }
     val unknown = stringResource(R.string.om_audio_unknown)
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
@@ -458,6 +486,18 @@ internal fun AudioBrowser(store: EditorStore, onAdded: () -> Unit, onDismiss: ()
     }
     fun add(entry: AudioEntry) {
         OmegaAudioPreview.stop()
+        if (SoundLibrary.owns(context, entry.source)) {
+            // Da biblioteca de sons: o projeto usa uma cópia própria (remover a seção não o afeta).
+            scope.launch {
+                val copy = withContext(Dispatchers.IO) { runCatching { SoundLibrary.projectCopy(context, entry.source) }.getOrNull() }
+                if (copy != null) {
+                    store.importAudioSource(copy, entry.title)
+                    withContext(Dispatchers.IO) { OmegaAudioLibrary.markUsed(context, copy, entry.title) }
+                }
+                onAdded(); onDismiss()
+            }
+            return
+        }
         store.importAudioSource(entry.source, entry.title)
         scope.launch(Dispatchers.IO) { OmegaAudioLibrary.markUsed(context, entry.source, entry.title) }
         onAdded(); onDismiss()
@@ -467,6 +507,7 @@ internal fun AudioBrowser(store: EditorStore, onAdded: () -> Unit, onDismiss: ()
         if (group != null) group = null else if (category != null) category = null else onDismiss()
     }
     val cat = AudioCategory.entries.firstOrNull { it.key == category }
+    val soundFolder = category?.removePrefix(SOUND_PREFIX)?.takeIf { category?.startsWith(SOUND_PREFIX) == true }
     fun keyOf(e: AudioEntry, c: AudioCategory): String = when (c) {
         AudioCategory.Albums -> e.album.ifBlank { unknown }
         AudioCategory.Artists -> e.artist.ifBlank { unknown }
@@ -476,7 +517,7 @@ internal fun AudioBrowser(store: EditorStore, onAdded: () -> Unit, onDismiss: ()
     Dialog(onDismissRequest = back, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         BackHandler(enabled = category != null) { back() }
         Column(Modifier.fillMaxSize().background(AureaColors.AddPanel).statusBarsPadding().navigationBarsPadding().testTag("audio.browser")) {
-            val title = group ?: cat?.let { stringResource(it.labelRes()) } ?: stringResource(R.string.om_audio_title)
+            val title = group ?: soundFolder ?: cat?.let { stringResource(it.labelRes()) } ?: stringResource(R.string.om_audio_title)
             if (category == null) BrowserTopBar(title, CupertinoGlyph.Xmark, stringResource(R.string.editor_fechar), "audio.close", onDismiss)
             else BrowserTopBar(title, CupertinoGlyph.ChevronLeft, stringResource(R.string.om_add_back), "audio.back", back)
             val all = entries
@@ -484,12 +525,53 @@ internal fun AudioBrowser(store: EditorStore, onAdded: () -> Unit, onDismiss: ()
                 all == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(Modifier.size(28.dp), color = AureaColors.Accent)
                 }
+                soundFolder != null -> {
+                    val folder = sounds.firstOrNull { it.name == soundFolder }
+                    Column(Modifier.fillMaxSize()) {
+                        Box(Modifier.weight(1f)) {
+                            TrackList(folder?.sounds.orEmpty(), onPreview = { e -> OmegaAudioPreview.toggle(context, e.source) { unsupported = true } },
+                                onAdd = { add(it) })
+                        }
+                        Text(stringResource(R.string.sl_remove_folder), Modifier.fillMaxWidth().testTag("sounds.remove")
+                            .tocavel(shrink = 1f) { removing = soundFolder }.padding(18.dp), textAlign = TextAlign.Center,
+                            style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Muted)))
+                    }
+                }
                 cat == null -> LazyColumn(Modifier.fillMaxSize()) {
                     item {
                         AudioListRow(stringResource(R.string.om_audio_device_files), null, CupertinoGlyph.Folder, "audio.files", chevron = false) {
                             OmegaAudioPreview.stop()
                             files.launch(arrayOf("audio/*", "application/ogg", "video/mp4", "application/octet-stream"))
                         }
+                    }
+                    // Minha biblioteca de sons: importar e as seções que a pessoa já trouxe.
+                    item {
+                        Text(stringResource(R.string.sl_title), Modifier.fillMaxWidth().padding(start = 14.dp, top = 18.dp, bottom = 6.dp),
+                            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
+                    }
+                    item {
+                        AudioListRow(stringResource(R.string.sl_import_folder), null, CupertinoGlyph.Folder, "sounds.importFolder", chevron = false) {
+                            OmegaAudioPreview.stop(); folderPicker.launch(null)
+                        }
+                    }
+                    item {
+                        AudioListRow(stringResource(R.string.sl_import_files), null, CupertinoGlyph.Plus, "sounds.importFiles", chevron = false) {
+                            OmegaAudioPreview.stop(); soundFiles.launch(arrayOf("audio/*", "application/ogg"))
+                        }
+                    }
+                    if (sounds.isEmpty()) item {
+                        Text(stringResource(R.string.sl_hint), Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
+                            textAlign = TextAlign.Center, style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, color = AureaColors.Muted)))
+                    }
+                    sounds.forEachIndexed { index, folder ->
+                        item(key = SOUND_PREFIX + folder.name) {
+                            AudioListRow(folder.name, pluralStringResource(R.plurals.om_audio_count, folder.sounds.size, folder.sounds.size),
+                                CupertinoGlyph.Waveform, "sounds.folder.$index") { category = SOUND_PREFIX + folder.name }
+                        }
+                    }
+                    item {
+                        Text(stringResource(R.string.om_audio_title), Modifier.fillMaxWidth().padding(start = 14.dp, top = 18.dp, bottom = 6.dp),
+                            style = AureaType.Base.merge(TextStyle(fontSize = 13.sp, fontWeight = FontWeight.W700, color = AureaColors.Muted)))
                     }
                     AudioCategory.entries.forEach { c ->
                         item(key = c.key) {
@@ -519,8 +601,38 @@ internal fun AudioBrowser(store: EditorStore, onAdded: () -> Unit, onDismiss: ()
             }
         }
         if (unsupported) UnsupportedAudioDialog { unsupported = false }
+        importing?.let { (done, total) ->
+            Box(Modifier.fillMaxSize().background(AureaColors.AddPanel.copy(alpha = 0.85f)).testTag("sounds.importing"),
+                contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(Modifier.size(32.dp), color = AureaColors.Accent)
+                    Spacer(Modifier.height(14.dp))
+                    Text(if (total > 0) stringResource(R.string.sl_importing, done, total) else stringResource(R.string.sl_importing_start),
+                        style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text)))
+                }
+            }
+        }
+        removing?.let { name ->
+            com.aurea.aurea.ui.ds.AureaAlert(
+                title = stringResource(R.string.sl_remove_folder),
+                message = stringResource(R.string.sl_remove_message, name),
+                confirmLabel = stringResource(R.string.panel_remover),
+                destructive = true,
+                onConfirm = {
+                    removing = null
+                    OmegaAudioPreview.stop()
+                    scope.launch {
+                        sounds = withContext(Dispatchers.IO) { SoundLibrary.remove(context, name); SoundLibrary.load(context) }
+                        category = null
+                    }
+                },
+                onDismiss = { removing = null },
+            )
+        }
     }
 }
+
+private const val SOUND_PREFIX = "som:"
 
 private fun AudioCategory.labelRes(): Int = when (this) {
     AudioCategory.Songs -> R.string.om_audio_songs

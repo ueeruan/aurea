@@ -4849,4 +4849,15 @@ to edit the curve.</string>
     <string name="home_news_version">In this version</string>
     <string name="donation_mercadopago">Donate by card (Mercado Pago)</string>
     <string name="donation_copy_mercadopago">Copy Mercado Pago link</string>
+    <string name="sl_title">My sound library</string>
+    <string name="sl_import_folder">Import a sound folder</string>
+    <string name="sl_import_files">Import sounds</string>
+    <string name="sl_imported_section">Imported</string>
+    <string name="sl_importing">Importing sounds… %1$d of %2$d</string>
+    <string name="sl_importing_start">Looking for sounds in the folder…</string>
+    <string name="sl_none">No new sounds found.</string>
+    <string name="sl_hint">Import folders with your sound effects and music: they stay saved in the app, with preview, for any project.</string>
+    <string name="sl_remove_folder">Remove from library</string>
+    <string name="sl_remove_message">The sounds in “%1$s” leave the library and the copies saved in the app are deleted. Projects that already use them keep them.</string>
+    <string name="sl_imported">Sounds added to the library: %1$d</string>
 </resources>

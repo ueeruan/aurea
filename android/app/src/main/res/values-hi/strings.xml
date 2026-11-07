@@ -4807,4 +4807,15 @@
     <string name="home_news_version">इस संस्करण में</string>
     <string name="donation_mercadopago">कार्ड से दान करें (Mercado Pago)</string>
     <string name="donation_copy_mercadopago">Mercado Pago लिंक कॉपी करें</string>
+    <string name="sl_title">मेरी साउंड लाइब्रेरी</string>
+    <string name="sl_import_folder">साउंड फ़ोल्डर इम्पोर्ट करें</string>
+    <string name="sl_import_files">साउंड इम्पोर्ट करें</string>
+    <string name="sl_imported_section">इम्पोर्ट किए गए</string>
+    <string name="sl_importing">साउंड इम्पोर्ट हो रहे हैं… %2$d में से %1$d</string>
+    <string name="sl_importing_start">फ़ोल्डर में साउंड खोजे जा रहे हैं…</string>
+    <string name="sl_none">कोई नया साउंड नहीं मिला।</string>
+    <string name="sl_hint">अपने साउंड इफ़ेक्ट और म्यूज़िक वाले फ़ोल्डर इम्पोर्ट करें: वे प्रीव्यू के साथ ऐप में सेव रहते हैं, किसी भी प्रोजेक्ट के लिए।</string>
+    <string name="sl_remove_folder">लाइब्रेरी से हटाएँ</string>
+    <string name="sl_remove_message">“%1$s” के साउंड लाइब्रेरी से हट जाएँगे और ऐप में सेव कॉपियाँ मिट जाएँगी। जिन प्रोजेक्ट में ये पहले से हैं, उनमें बने रहेंगे।</string>
+    <string name="sl_imported">लाइब्रेरी में जोड़े गए साउंड: %1$d</string>
 </resources>

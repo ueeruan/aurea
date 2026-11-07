@@ -4811,4 +4811,15 @@ para editar la curva.</string>
     <string name="home_news_version">En esta versión</string>
     <string name="donation_mercadopago">Donar con tarjeta (Mercado Pago)</string>
     <string name="donation_copy_mercadopago">Copiar enlace de Mercado Pago</string>
+    <string name="sl_title">Mi biblioteca de sonidos</string>
+    <string name="sl_import_folder">Importar carpeta de sonidos</string>
+    <string name="sl_import_files">Importar sonidos</string>
+    <string name="sl_imported_section">Importados</string>
+    <string name="sl_importing">Importando sonidos… %1$d de %2$d</string>
+    <string name="sl_importing_start">Buscando sonidos en la carpeta…</string>
+    <string name="sl_none">No se encontraron sonidos nuevos.</string>
+    <string name="sl_hint">Importa carpetas con tus efectos de sonido y música: quedan guardados en la app, con vista previa, para cualquier proyecto.</string>
+    <string name="sl_remove_folder">Quitar de la biblioteca</string>
+    <string name="sl_remove_message">Los sonidos de “%1$s” salen de la biblioteca y se borran las copias guardadas en la app. Los proyectos que ya los usan los conservan.</string>
+    <string name="sl_imported">Sonidos añadidos a la biblioteca: %1$d</string>
 </resources>

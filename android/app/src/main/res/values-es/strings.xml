@@ -4780,4 +4780,5 @@ para editar la curva.</string>
     <string name="s3d_fullscreen">Pantalla completa</string>
     <string name="s3d_animation">Animación</string>
     <string name="s3d_more">Más opciones</string>
+    <string name="pn_mask_points">Puntos</string>
 </resources>

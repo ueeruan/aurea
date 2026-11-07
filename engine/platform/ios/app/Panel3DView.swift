@@ -15,6 +15,10 @@ enum Panel3DTab: Int, CaseIterable {
     case material, shape, light, anim, parts, rig, render
     var key: String { ["ui3d_tab_material", "ui3d_tab_shape", "sh_dock_environment", "ui3d_tab_anim", "shape3d_parts", "rig3d_tab", "env3d_tab_render"][rawValue] }
     var id: String { ["material", "shape", "light", "anim", "parts", "rig", "render"][rawValue] }
+    var glyph: Character {
+        [CupertinoGlyph.CubeFill, CupertinoGlyph.Textformat, CupertinoGlyph.Lightbulb, CupertinoGlyph.Sparkles,
+         CupertinoGlyph.SquareOnSquare, CupertinoGlyph.PersonCropCircle, CupertinoGlyph.Camera][rawValue]
+    }
 }
 
 struct Panel3DView: View {
@@ -40,7 +44,8 @@ struct Panel3DView: View {
     @State private var typingActive = false
     @State private var gestureOpen = false
     @State private var tab: Panel3DTab?
-    @State private var materialAdvanced = false
+    /// Seções que a pessoa recolheu ou abriu, em relação ao padrão delas.
+    @State private var flippedSections: Set<String> = []
     /// 0.3.6 textura do material: o material que o seletor de imagem cobre
     /// (nulo = a textura do texto 3D, o uso de antes do mesmo seletor).
     @State private var materialTextureTarget: UInt32?
@@ -81,25 +86,31 @@ struct Panel3DView: View {
             PanelHeader(title: AureaText.t(text3D.isEmpty ? "panel_material_ambiente" : "text_options"), onBack: {
                 finishEditing(); model.panel = .none
             })
-            if tabs.count > 1 { tabBar.padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 4) }
+            // O desenho dos painéis de propriedade: a coluna fixa à esquerda, o conteúdo
+            // em seções no centro e as abas em ícones à direita.
+            HStack(spacing: 0) {
+              LeftRail(keyframeLook: .none, onBack: { finishEditing(); model.panel = .none })
+              AureaColors.contentStrongLine.frame(width: 0.7)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     switch currentTab {
                     case .material:
                         if isText { textMaterialTab }
                         else if isShape {
-                            Shape3DPanelSection(layerId: layerId, page: .material)
-                            // 0.3.6: a parte escolhida pode vir de uma camada da timeline
-                            // (a imagem do arquivo continua na linha "Imagem" acima).
-                            let part = Shape3DState.shared.part(model)
-                            if part >= 0 {
-                                materialTextureRow(UInt32(part), thumb: shapePartThumb(part), fallback: AureaColors.chip, allowFile: false)
+                            envSection("panel_material", id: "panel3d.material") {
+                                Shape3DPanelSection(layerId: layerId, page: .material)
+                                // 0.3.6: a parte escolhida pode vir de uma camada da timeline
+                                // (a imagem do arquivo continua na linha "Imagem" acima).
+                                let part = Shape3DState.shared.part(model)
+                                if part >= 0 {
+                                    materialTextureRow(UInt32(part), thumb: shapePartThumb(part), fallback: AureaColors.chip, allowFile: false)
+                                }
                             }
                         }
-                        else { section("panel_material"); importedMaterialSection }
+                        else { envSection("panel_material", id: "panel3d.material") { importedMaterialSection } }
                         // 0.3.6: Objeto — projeta/recebe sombra (saíram do Ambiente) e o interior.
                         objectShadowSection
-                        interiorToggle
+                        interiorToggle.padding(.horizontal, 10)
                     case .shape:
                         if isText { textShapeTab }
                     case .light:
@@ -109,17 +120,23 @@ struct Panel3DView: View {
                     case .anim:
                         if isText { NativePanelChip(AureaText.t("la_animators")) { finishEditing(); model.transformTab = 6; model.openPanel(.transform) } }
                     case .parts:
-                        partsTab
+                        partsTab.padding(.horizontal, 10)
                     case .rig:
-                        Rig3DSection(layerId: layerId)
+                        Rig3DSection(layerId: layerId).padding(.horizontal, 10)
                     }
                 }
-                .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 24)
+                .padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Cada aba começa no topo (antes herdava a rolagem da anterior).
             .id(currentTab)
+            .environment(\.aureaFlatParamLabel, true)
             .accessibilityIdentifier("text3d.materialScroll")
+              if tabs.count > 1 {
+                  AureaColors.contentStrongLine.frame(width: 0.7)
+                  tabRail
+              }
+            }
         }
         .id("panel3d:\(model.projectGeneration):\(model.composition[AureaCompositionId] ?? ""):\(layerId)")
         .background(AureaColors.background)
@@ -156,26 +173,29 @@ struct Panel3DView: View {
         }
     }
 
-    /// Controle segmentado: cada aba divide a largura; a acesa usa o destaque.
-    private var tabBar: some View {
-        HStack(spacing: 3) {
+    /// As abas em ícones, na coluna da direita (60 pt).
+    private var tabRail: some View {
+        VStack(spacing: 0) {
             ForEach(tabs, id: \.self) { item in
                 let on = item == currentTab
+                let ink = on ? AureaColors.accent : AureaColors.text
                 Button { tab = item } label: {
-                    Text(AureaText.t(item.key)).font(.aurea(size: 12.5, weight: on ? .bold : .medium))
-                        .foregroundStyle(on ? AureaColors.accent : AureaColors.text)
-                        .lineLimit(1).minimumScaleFactor(0.8)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(on ? AureaColors.accentDim : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-                        .contentShape(Rectangle())
+                    VStack(spacing: 3) {
+                        CupertinoGlyph.text(item.glyph, size: 20, color: ink)
+                        Text(AureaText.t(item.key)).font(.aurea(size: 9.5, weight: on ? .bold : .regular)).foregroundStyle(ink)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity).frame(height: 62)
+                    .background(on ? AureaColors.accentDim : Color.clear)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(AureaPressStyle(shrink: 1))
                 .accessibilityIdentifier("panel3d.tab.\(item.id)")
                 .accessibilityAddTraits(on ? [.isSelected] : [])
             }
+            Spacer(minLength: 0)
         }
-        .padding(3).frame(height: 40)
-        .background(AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+        .frame(width: 60)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(AureaText.t("ui3d_tabs"))
     }
@@ -184,8 +204,22 @@ struct Panel3DView: View {
 
     private var textMaterialTab: some View {
         VStack(alignment: .leading, spacing: 0) {
+            envSection("ui3d_ready_materials", id: "text3d.presets") {
+            horizontal {
+                ForEach([6, 0, 1, 2, 3, 4, 5] + Array(7...13), id: \.self) { index in
+                    // A bola de estúdio do material (o motor calcula; até chegar, a cor chapada).
+                    swatchChip(presetKeys[index], swatch: presetSwatches[index], thumb: presetThumb(index)) {
+                        finishEditing()
+                        model.reportText3D(model.engine.applyText3DPreset(layerId, preset: UInt32(index)))
+                        refresh()
+                    }
+                    .accessibilityIdentifier("text3d.materialPreset.\(index)")
+                }
+            }
+            }
+            envSection("panel_material", id: "text3d.material") {
             HStack(spacing: 6) {
-                Text(AureaText.t("environment_texture")).font(.aurea(size: 13))
+                Text(AureaText.t("env3d_texture")).font(.aurea(size: 13.5))
                 Spacer()
                 let hasTexture = !(text3D["texturePath"] as? String ?? "").isEmpty
                 NativePanelChip(AureaText.t(hasTexture ? "shape3d_image_change" : "shape3d_image_pick")) {
@@ -199,25 +233,11 @@ struct Panel3DView: View {
                     }.accessibilityIdentifier("text3d.texture.clear")
                 }
             }.frame(minHeight: 48)
-            section("ui3d_ready_materials")
-            horizontal {
-                ForEach([6, 0, 1, 2, 3, 4, 5] + Array(7...13), id: \.self) { index in
-                    // A bola de estúdio do material (o motor calcula; até chegar, a cor chapada).
-                    swatchChip(presetKeys[index], swatch: presetSwatches[index], thumb: presetThumb(index)) {
-                        finishEditing()
-                        model.reportText3D(model.engine.applyText3DPreset(layerId, preset: UInt32(index)))
-                        refresh()
-                    }
-                    .accessibilityIdentifier("text3d.materialPreset.\(index)")
-                }
-            }
-            gap(6)
             colorRow("panel_cor", key: "color", region: 0, height: 48)
             textRow("pn_t3d_metallic", key: "metallic", max: 1, reset: 0, gesture: "metalico")
             textRow("pn_t3d_roughness", key: "roughness", max: 1, reset: 0.35, gesture: "rugosidade")
-            advancedHeader(open: materialAdvanced) { materialAdvanced.toggle() }
-            if materialAdvanced {
-                section("ui3d_finish")
+            }
+            envSection("ui3d_finish", id: "text3d.finish", startsClosed: true) {
                 horizontal {
                     ForEach(Array(finishKeys.enumerated()), id: \.offset) { item in
                         chip(item.element, on: Int(number("surfaceFinish")) == item.offset) {
@@ -242,7 +262,7 @@ struct Panel3DView: View {
 
     private var textShapeTab: some View {
         VStack(alignment: .leading, spacing: 0) {
-            section("ui3d_text")
+            envSection("ui3d_text", id: "text3d.text") {
             HStack(spacing: 6) {
                 chip("t3d_font") { openFonts() }
                 chip("t3d_import_font") {
@@ -251,23 +271,22 @@ struct Panel3DView: View {
                     FontImportPicker.presentMultiple { urls in for url in urls { importFont(url, target: urls.count == 1 ? target : nil) } }
                 }
             }
-            row("panel_alinhamento", height: 48) {
-                HStack(spacing: 6) {
-                    ForEach(Array(["panel_esquerda", "panel_centro", "panel_direita"].enumerated()), id: \.offset) { item in
-                        chip(item.element, on: Int(number("alignment")) == item.offset) {
-                            set3D("alignment", value: Float(item.offset))
-                        }
+            Text(AureaText.t("panel_alinhamento")).font(.aurea(size: 13.5)).foregroundStyle(AureaColors.text).padding(.top, 8).padding(.bottom, 4)
+            HStack(spacing: 6) {
+                ForEach(Array(["panel_esquerda", "panel_centro", "panel_direita"].enumerated()), id: \.offset) { item in
+                    chip(item.element, on: Int(number("alignment")) == item.offset) {
+                        set3D("alignment", value: Float(item.offset))
                     }
                 }
             }
-            section("ui3d_extrusion")
+            }
+            envSection("ui3d_extrusion", id: "text3d.extrusion") {
             // 100 % = a altura da letra (a malha é gerada de novo a cada passo).
             textRow("pn_depth", key: "depth", max: 3, reset: 0.25, gesture: "profundidade do texto 3D")
             note("ui3d_depth_hint")
-            gap(6)
+            }
             // O chanfro é GEOMETRIA: frente/fundo recuados e o anel do chanfro.
-            toggleRow("pn_t3d_bevel", on: number("bevel") > 0.5) { set3D("bevel", value: $0 ? 1 : 0) }
-            if number("bevel") > 0.5 {
+            envSection("pn_t3d_bevel", id: "text3d.bevel", on: number("bevel") > 0.5, onSwitch: { set3D("bevel", value: $0 ? 1 : 0) }) {
                 textRow("pn_t3d_bevel_width", key: "bevelWidth", max: 0.2, reset: 0.02, gesture: "chanfro", step: 0.05, decimals: 1)
                 textRow("pn_t3d_bevel_depth", key: "bevelDepth", max: 0.2, reset: 0.02, gesture: "chanfro", step: 0.05, decimals: 1)
                 textRow("pn_t3d_bevel_roundness", key: "bevelRoundness", max: 1, reset: 1, gesture: "arredondamento")
@@ -281,7 +300,6 @@ struct Panel3DView: View {
                     }
                 }
             }
-            gap(10)
             actionCard("ui3d_deform_letters") {
                 finishEditing()
                 let type = fxEffectTypeId("aurea.text3d.layout")
@@ -291,6 +309,7 @@ struct Panel3DView: View {
                 }
                 model.openPanel(.effects)
             }
+            .padding(10)
         }
     }
 
@@ -333,7 +352,7 @@ struct Panel3DView: View {
         let ready = sceneSettings.count >= 8
         return VStack(alignment: .leading, spacing: 0) {
             envSection("env3d_section_sky", hint: "env3d_sky_hint", id: "env3d.sky") {
-                AureaFlowLayout(hGap: 8, vGap: 2) {
+                AureaFlowLayout(hGap: 4, vGap: 0) {
                     if ready {
                         ForEach(Array(studioLightKeys.enumerated()), id: \.offset) { i, key in
                             let on = !hdr && Int(sceneSettings[0]) == i
@@ -371,7 +390,7 @@ struct Panel3DView: View {
                 // Chão: 0 sem chão, 1 visível, 2 só sombra (compõe sobre o 2D).
                 envSection("env3d_section_floor", hint: "env3d_floor_hint", id: "env3d.floor") {
                     let floor = Int(sceneSettings[1])
-                    AureaFlowLayout(hGap: 8, vGap: 2) {
+                    AureaFlowLayout(hGap: 4, vGap: 0) {
                         // 0.4.1: "Reflective Floor" — o chão polido que espelha tudo, num toque. Par do Android.
                         let reflective = sceneSettings.count > 8 && sceneSettings[8] > 0.5
                         ForEach(Array(["scene031_floor_off", "scene031_floor_visible", "scene031_floor_shadow"].enumerated()), id: \.offset) { i, key in
@@ -395,7 +414,7 @@ struct Panel3DView: View {
         if sceneSettings.count >= 8 {
             VStack(alignment: .leading, spacing: 0) {
                 envSection("scene_quality", hint: "env3d_render_hint", id: "env3d.quality") {
-                    AureaFlowLayout(hGap: 8, vGap: 2) {
+                    AureaFlowLayout(hGap: 4, vGap: 0) {
                         ForEach(Array(["scene_auto", "scene_low", "scene_medium", "scene_high", "scene_ultra"].enumerated()), id: \.offset) { i, key in
                             let on = Int(sceneSettings[2]) == i
                             envChoice(AureaText.t(key), on: on, id: "env3d.quality.\(i)") { if !on { finishEditing(); setScene(2, Float(i)) } }
@@ -403,7 +422,7 @@ struct Panel3DView: View {
                     }
                 }
                 envSection("scene_tonemap", id: "env3d.tonemap") {
-                    AureaFlowLayout(hGap: 8, vGap: 2) {
+                    AureaFlowLayout(hGap: 4, vGap: 0) {
                         ForEach(Array(toneMapKeys.enumerated()), id: \.offset) { i, key in
                             let on = Int(sceneSettings[3]) == i
                             envChoice(AureaText.t(key), on: on, id: "env3d.tonemap.\(i)") { if !on { finishEditing(); setScene(3, Float(i)) } }
@@ -520,50 +539,74 @@ struct Panel3DView: View {
 
     // --- Peças do Ambiente (medidas de PanelMetrics: título 15, rótulo 13, nota 12, chip 36/14, toque 44) ---
 
-    /// Seção com título (e dica) e respiro: um cartão por assunto.
-    private func envSection<Content: View>(_ title: String, hint: String? = nil, id: String,
+    /// Seção do painel: uma faixa de 43 pt com a seta, o título e, se a seção liga e
+    /// desliga, o interruptor. Tocar recolhe; os controles ficam soltos embaixo dela.
+    private func envSection<Content: View>(_ title: String, hint: String? = nil, id: String, startsClosed: Bool = false,
+                                           on: Bool? = nil, onSwitch: ((Bool) -> Void)? = nil,
                                            @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(AureaText.t(title)).font(.aurea(size: PanelMetrics.title, weight: .bold)).foregroundStyle(AureaColors.text)
-                .accessibilityAddTraits(.isHeader)
-            if let hint {
-                Text(AureaText.t(hint)).font(.aurea(size: PanelMetrics.note)).lineSpacing(2).foregroundStyle(AureaColors.muted)
-                    .fixedSize(horizontal: false, vertical: true).padding(.top, 3)
+        let open = flippedSections.contains(title) == startsClosed
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                CupertinoGlyph.text(CupertinoGlyph.ChevronRight, size: 12, color: AureaColors.muted)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                Text(AureaText.t(title)).font(.aurea(size: 14)).foregroundStyle(AureaColors.text).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let on, let onSwitch {
+                    Toggle("", isOn: Binding(get: { on }, set: { onSwitch($0) })).labelsHidden().tint(AureaColors.accent)
+                }
             }
-            VStack(alignment: .leading, spacing: 0, content: content)
-                .padding(.horizontal, 12).padding(.vertical, 8)
+            .padding(.horizontal, 10).frame(height: 43)
+            .background(AureaColors.panelFrameContent)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    if flippedSections.contains(title) { flippedSections.remove(title) } else { flippedSections.insert(title) }
+                }
+            }
+            .accessibilityAddTraits([.isHeader, .isButton])
+            if open && on != false {
+                VStack(alignment: .leading, spacing: 0) {
+                    if let hint {
+                        HStack(alignment: .top, spacing: 6) {
+                            CupertinoGlyph.text(CupertinoGlyph.InfoCircle, size: 14, color: AureaColors.muted)
+                            Text(AureaText.t(hint)).font(.aurea(size: PanelMetrics.note)).lineSpacing(2).foregroundStyle(AureaColors.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }.padding(.bottom, 4)
+                    }
+                    content()
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(AureaColors.panelFrameContent, in: RoundedRectangle(cornerRadius: 14))
-                .padding(.top, 8)
+            }
         }
-        .padding(.top, 14)
+        .padding(.bottom, 1)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(id)
     }
     /// Ficha de escolha: 36 de desenho, 44 de toque; "selecionado" para o VoiceOver.
     private func envChoice(_ label: String, on: Bool, id: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(label).font(.aurea(size: PanelMetrics.chipText, weight: on ? .semibold : .medium))
+            Text(label).font(.aurea(size: 12.5, weight: on ? .semibold : .regular))
                 .foregroundStyle(on ? AureaColors.accent : AureaColors.text).lineLimit(1)
-                .padding(.horizontal, PanelMetrics.chipPad).frame(minHeight: PanelMetrics.chipHeight)
-                .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 10).frame(minHeight: 30)
+                .background(on ? AureaColors.accentDim : AureaColors.chip, in: RoundedRectangle(cornerRadius: 5))
                 .frame(minHeight: PanelMetrics.touch).contentShape(Rectangle())
         }
         .buttonStyle(AureaPressStyle(shrink: 1))
         .accessibilityAddTraits(on ? [.isSelected] : [])
         .accessibilityIdentifier(id)
     }
-    /// Linha "rótulo · interruptor" de 52 (a linha toda toca).
+    /// Linha "rótulo · interruptor" de 44 (a linha toda toca).
     private func envToggle(_ key: String, on: Bool, id: String, onChange: @escaping (Bool) -> Void) -> some View {
-        toggleRow(key, on: on, onChange: onChange).frame(minHeight: 52).accessibilityIdentifier(id)
+        toggleRow(key, on: on, onChange: onChange).frame(minHeight: 44).accessibilityIdentifier(id)
     }
     /// Linha "rótulo · conteúdo à direita".
     private func envLine<Trailing: View>(_ key: String, @ViewBuilder trailing: () -> Trailing) -> some View {
         HStack(spacing: 0) {
-            Text(AureaText.t(key)).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.text)
+            Text(AureaText.t(key)).font(.aurea(size: 13.5)).foregroundStyle(AureaColors.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
             trailing()
-        }.frame(minHeight: 52)
+        }.frame(minHeight: 44)
     }
 
     /// PARTES do objeto 3D (Element3DPanel.kt `PartsTab`): escolher a parte e
@@ -638,18 +681,6 @@ struct Panel3DView: View {
             .foregroundStyle(AureaColors.muted).fixedSize(horizontal: false, vertical: true)
     }
     private func gap(_ height: CGFloat) -> some View { Spacer().frame(height: height) }
-    /// "Avançado ▾": o resto, fechado por padrão; a linha inteira é o alvo.
-    private func advancedHeader(open: Bool, toggle: @escaping () -> Void) -> some View {
-        Button(action: toggle) {
-            HStack(spacing: 6) {
-                Text(AureaText.t("panel_avancado")).font(.aurea(size: 13, weight: .semibold)).foregroundStyle(AureaColors.muted)
-                CupertinoGlyph.text(open ? CupertinoGlyph.ChevronUp : CupertinoGlyph.ChevronDown, size: 12, color: AureaColors.muted)
-                Rectangle().fill(AureaColors.border).frame(height: 1).padding(.leading, 8)
-            }.frame(height: 44).contentShape(Rectangle())
-        }
-        .buttonStyle(AureaPressStyle(shrink: 1))
-        .accessibilityAddTraits(open ? [.isSelected] : [])
-    }
     private func actionCard(_ key: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(AureaText.t(key)).font(.aurea(size: 14, weight: .semibold)).foregroundStyle(AureaColors.text)

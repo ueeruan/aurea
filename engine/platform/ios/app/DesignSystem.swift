@@ -531,24 +531,34 @@ struct ExpressionBadge: View {
 /// (`FxParamRowMath.labelFontSize`). O losango pequeno no canto diz que a trilha
 /// anima (cheio = marca no cabeçote); o "=" no outro canto, que tem expressão.
 /// `PropertyLabelChip` e o rótulo das linhas de Efeitos usam este mesmo desenho.
+private struct AureaFlatParamLabelKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// Rótulo plano, sem a ficha: o painel de material e ambiente do 3D.
+    var aureaFlatParamLabel: Bool {
+        get { self[AureaFlatParamLabelKey.self] }
+        set { self[AureaFlatParamLabelKey.self] = newValue }
+    }
+}
+
 struct ParamRowLabel: View {
     let label: String
     let selected: Bool
     var keyframe: KeyframeLook = .none
     var expression: ExpressionLook = .none
     var width: CGFloat = ParamRowDims.labelW
+    @Environment(\.aureaFlatParamLabel) private var flat
 
     var body: some View {
         Text(label)
             .font(.aurea(size: 14, weight: selected ? .bold : .regular))
-            .multilineTextAlignment(.center)
-            .lineLimit(FxParamRowMath.labelMaxLines(label))
-            .minimumScaleFactor(0.86)
+            .multilineTextAlignment(flat ? .leading : .center)
+            .lineLimit(flat && !label.contains(" ") ? 1 : FxParamRowMath.labelMaxLines(label))
+            .minimumScaleFactor(flat ? 0.72 : 0.86)
             .truncationMode(.tail)
-            .foregroundStyle(selected ? AureaColors.accent : ParamRowColors.labelOffText)
+            .foregroundStyle(selected ? AureaColors.accent : flat ? AureaColors.text : ParamRowColors.labelOffText)
             .padding(.horizontal, 4)
-            .frame(width: width, height: ParamRowDims.labelH)
-            .background(selected ? ParamRowColors.labelOn : ParamRowColors.labelOff,
+            .frame(width: width, height: ParamRowDims.labelH, alignment: flat ? .leading : .center)
+            .background(selected ? ParamRowColors.labelOn : flat ? Color.clear : ParamRowColors.labelOff,
                         in: RoundedRectangle(cornerRadius: ParamRowDims.radius))
             .overlay(alignment: .topTrailing) {
                 if expression != .none {

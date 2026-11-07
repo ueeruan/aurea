@@ -707,6 +707,9 @@ public:
         SetExclude = 7,   ///< furo (0/1) — o contorno recorta o preenchimento do grupo
     };
     i32 edit_vector_path(u64 layerId, u32 group, u32 path, PathOp op, const f32* args, u32 argc, bool continuing) noexcept;
+    /// As mesmas operações no caminho da máscara, no espaço da camada. Caminho
+    /// animado: grava o key do cabeçote. Sem SetExclude.
+    i32 edit_mask_path(u64 layerId, u32 maskId, PathOp op, const f32* args, u32 argc, bool continuing) noexcept;
     /// Arrastar a alça de LARGURA da caixa de texto no palco (modo de texto).
     /// `dx, dy` em px da composição; o motor projeta no eixo X da camada. Pela
     /// direção do texto: esquerda + dx, centro + 2·dx, direita − dx; mínimo 50 px,

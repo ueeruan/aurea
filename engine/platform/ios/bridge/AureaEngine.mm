@@ -4315,6 +4315,12 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
     return e->edit_vector_path(static_cast<u64>(layerId), group, path, static_cast<aurea::Engine::PathOp>(op), v.empty() ? nullptr : v.data(),
                                static_cast<aurea::u32>(v.size()), continuing);
 }
+- (int32_t)editMaskPath:(long long)layerId mask:(uint32_t)mask op:(uint32_t)op args:(NSArray<NSNumber*>*)args continuing:(BOOL)continuing {
+    auto* e = self.engine; if (!e) return -1;
+    std::vector<float> v; for (NSNumber* n in args) v.push_back(n.floatValue);
+    return e->edit_mask_path(static_cast<u64>(layerId), mask, static_cast<aurea::Engine::PathOp>(op), v.empty() ? nullptr : v.data(),
+                             static_cast<aurea::u32>(v.size()), continuing);
+}
 - (BOOL)dragTextBoxWidth:(long long)layerId dx:(float)dx dy:(float)dy continuing:(BOOL)continuing {
     auto* e = self.engine; return e && e->drag_text_box_width(static_cast<u64>(layerId), dx, dy, continuing);
 }

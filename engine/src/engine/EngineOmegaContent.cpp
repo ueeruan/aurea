@@ -207,6 +207,70 @@ u32 Engine::vector_layer_flags(u64 layerId) noexcept {
 // =============================================================================
 // Editar pontos (P1-8)
 // =============================================================================
+// As operações de ponto, as mesmas para o contorno do vetor e o caminho da máscara.
+// false = argumentos inválidos. As regras são do vector/PathEdit.
+bool apply_path_op(BezierPath& b, Engine::PathOp op, const f32* args, u32 argc, i32& result, bool& changed) noexcept {
+    auto index = [&](u32 k) { return static_cast<u32>(std::max(0.0f, std::round(args[k]))); };
+    switch (op) {
+        case Engine::PathOp::MovePoints: {
+            if (argc < 3) return false;
+            const Vec2 d{args[0], args[1]};
+            std::vector<u32> idx;
+            for (u32 k = 2; k < argc; ++k) idx.push_back(index(k));
+            if (d.length_sq() <= 0.0f || idx.empty()) { result = idx.empty() ? -1 : static_cast<i32>(idx.front()); return !idx.empty(); }
+            vector::pathedit::move_points(b, idx.data(), idx.size(), d);
+            result = static_cast<i32>(idx.front());
+            changed = true;
+            break;
+        }
+        case Engine::PathOp::MoveHandle: {
+            if (argc < 6) return false;
+            const u32 i = index(0);
+            if (!vector::pathedit::move_handle(b, i, args[1] > 0.5f, Vec2{args[2], args[3]}, args[4] > 0.5f, args[5] > 0.5f)) return false;
+            result = static_cast<i32>(i);
+            changed = true;
+            break;
+        }
+        case Engine::PathOp::Insert: {
+            if (argc < 2) return false;
+            result = vector::pathedit::insert_at(b, index(0), args[1]);
+            if (result < 0) return false;
+            changed = true;
+            break;
+        }
+        case Engine::PathOp::Remove: {
+            if (argc < 1) return false;
+            const u32 i = index(0);
+            if (!vector::pathedit::remove_point(b, i)) return false;
+            result = b.v.empty() ? 0 : static_cast<i32>(std::min<usize>(i, b.v.size() - 1));
+            changed = true;
+            break;
+        }
+        case Engine::PathOp::SetType: {
+            if (argc < 2) return false;
+            const u32 i = index(0);
+            if (i >= b.v.size()) return false;
+            changed = vector::pathedit::set_point_type(b, i, args[1] > 0.5f);
+            result = static_cast<i32>(i);
+            break;
+        }
+        case Engine::PathOp::Append: {
+            if (argc < 3) return false;
+            result = static_cast<i32>(vector::pathedit::append_point(b, Vec2{args[0], args[1]}, args[2] > 0.5f));
+            changed = true;
+            break;
+        }
+        case Engine::PathOp::SetClosed: {
+            if (argc < 1) return false;
+            changed = vector::pathedit::set_closed(b, args[0] > 0.5f);
+            break;
+        }
+        default:
+            return false;
+    }
+    return true;
+}
+
 i32 Engine::edit_vector_path(u64 layerId, u32 group, u32 path, PathOp op, const f32* args, u32 argc, bool continuing) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     Composition* comp = project_ ? current_composition() : nullptr;
@@ -214,7 +278,6 @@ i32 Engine::edit_vector_path(u64 layerId, u32 group, u32 path, PathOp op, const 
     if (!l || l->locked || group >= l->shape.vector.groups.size() || path >= l->shape.vector.groups[group].paths.size()) return -1;
     if (argc > 0 && !args) return -1;
     for (u32 i = 0; i < argc; ++i) if (!std::isfinite(args[i])) return -1;
-    auto index = [&](u32 k) { return static_cast<u32>(std::max(0.0f, std::round(args[k]))); };
     VectorPath& vp = l->shape.vector.groups[group].paths[path];
 
     if (op == PathOp::SetExclude) {
@@ -236,63 +299,7 @@ i32 Engine::edit_vector_path(u64 layerId, u32 group, u32 path, PathOp op, const 
     BezierPath b = work.keys.empty() ? work.path : vector::path_at(work, static_cast<f64>(local));
     i32 result = 0;
     bool changed = false;
-    switch (op) {
-        case PathOp::MovePoints: {
-            if (argc < 3) return -1;
-            const Vec2 d{args[0], args[1]};
-            std::vector<u32> idx;
-            for (u32 k = 2; k < argc; ++k) idx.push_back(index(k));
-            if (d.length_sq() <= 0.0f || idx.empty()) return idx.empty() ? -1 : static_cast<i32>(idx.front());
-            vector::pathedit::move_points(b, idx.data(), idx.size(), d);
-            result = static_cast<i32>(idx.front());
-            changed = true;
-            break;
-        }
-        case PathOp::MoveHandle: {
-            if (argc < 6) return -1;
-            const u32 i = index(0);
-            if (!vector::pathedit::move_handle(b, i, args[1] > 0.5f, Vec2{args[2], args[3]}, args[4] > 0.5f, args[5] > 0.5f)) return -1;
-            result = static_cast<i32>(i);
-            changed = true;
-            break;
-        }
-        case PathOp::Insert: {
-            if (argc < 2) return -1;
-            result = vector::pathedit::insert_at(b, index(0), args[1]);
-            if (result < 0) return -1;
-            changed = true;
-            break;
-        }
-        case PathOp::Remove: {
-            if (argc < 1) return -1;
-            const u32 i = index(0);
-            if (!vector::pathedit::remove_point(b, i)) return -1;
-            result = b.v.empty() ? 0 : static_cast<i32>(std::min<usize>(i, b.v.size() - 1));
-            changed = true;
-            break;
-        }
-        case PathOp::SetType: {
-            if (argc < 2) return -1;
-            const u32 i = index(0);
-            if (i >= b.v.size()) return -1;
-            changed = vector::pathedit::set_point_type(b, i, args[1] > 0.5f);
-            result = static_cast<i32>(i);
-            break;
-        }
-        case PathOp::Append: {
-            if (argc < 3) return -1;
-            result = static_cast<i32>(vector::pathedit::append_point(b, Vec2{args[0], args[1]}, args[2] > 0.5f));
-            changed = true;
-            break;
-        }
-        case PathOp::SetClosed: {
-            if (argc < 1) return -1;
-            changed = vector::pathedit::set_closed(b, args[0] > 0.5f);
-            break;
-        }
-        default:
-            return -1;
-    }
+    if (!apply_path_op(b, op, args, argc, result, changed)) return -1;
     if (!changed) return result;
     if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "editar pontos");
     bump_model_revision_locked();

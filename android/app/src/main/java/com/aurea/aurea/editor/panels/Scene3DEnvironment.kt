@@ -3,6 +3,8 @@ package com.aurea.aurea.editor.panels
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,10 +26,12 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -48,6 +52,8 @@ import com.aurea.aurea.ui.ds.AureaToggle
 import com.aurea.aurea.ui.ds.SheetAction
 import com.aurea.aurea.ui.theme.AureaColors
 import com.aurea.aurea.ui.theme.AureaType
+import com.aurea.aurea.ui.theme.CupertinoGlyph
+import com.aurea.aurea.ui.theme.CupertinoIcon
 import com.aurea.aurea.ui.theme.tocavel
 
 // =============================================================================
@@ -293,22 +299,44 @@ internal fun MaterialTextureRow(env: PanelEnv, material: Int, fallback: Color, a
 
 // --- Peças (medidas de PanelMetrics: título 15, rótulo 13, nota 12, chip 36/14, toque 44) ---
 
-/** Seção com título (e dica) e respiro: um cartão por assunto. */
+/**
+ * Seção do painel: uma faixa de 43 dp com a seta, o título e, se a seção liga e
+ * desliga, o interruptor. Tocar recolhe; os controles ficam soltos embaixo dela.
+ */
 @Composable
-internal fun EnvSection(title: String, hint: String?, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(modifier.fillMaxWidth().padding(top = 14.dp)) {
-        Text(title, modifier = Modifier.semantics { heading() },
-            style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Title, fontWeight = FontWeight.W700, color = AureaColors.Text)))
-        if (hint != null) {
-            Spacer(Modifier.height(3.dp))
-            Text(hint, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted)))
+internal fun EnvSection(
+    title: String,
+    hint: String?,
+    modifier: Modifier = Modifier,
+    startOpen: Boolean = true,
+    on: Boolean? = null,
+    onSwitch: ((Boolean) -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var open by rememberSaveable(title) { mutableStateOf(startOpen) }
+    val turn by animateFloatAsState(if (open) 90f else 0f, tween(300), label = "env.section")
+    Column(modifier.fillMaxWidth().padding(bottom = 1.dp)) {
+        Row(
+            Modifier.fillMaxWidth().height(43.dp).background(AureaColors.PanelFrameContent)
+                .semantics(mergeDescendants = true) { heading() }
+                .tocavel(shrink = 1f) { open = !open }
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.rotate(turn)) { CupertinoIcon(CupertinoGlyph.ChevronRight, 12.dp, AureaColors.Muted) }
+            Spacer(Modifier.width(10.dp))
+            Text(title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, color = AureaColors.Text)))
+            if (on != null && onSwitch != null) AureaToggle(checked = on, onCheckedChange = onSwitch)
         }
-        Spacer(Modifier.height(8.dp))
-        Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(AureaColors.PanelFrameContent)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            content = content,
-        )
+        if (open && on != false) Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
+            if (hint != null) Row(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+                CupertinoIcon(CupertinoGlyph.InfoCircle, 14.dp, AureaColors.Muted)
+                Spacer(Modifier.width(6.dp))
+                Text(hint, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.Note, lineHeight = 16.sp, color = AureaColors.Muted)))
+            }
+            content()
+        }
     }
 }
 
@@ -318,8 +346,8 @@ internal fun EnvSection(title: String, hint: String?, modifier: Modifier = Modif
 private fun EnvChoices(content: @Composable () -> Unit) {
     FlowRow(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) { content() }
 }
 
@@ -333,13 +361,13 @@ private fun EnvChoice(label: String, on: Boolean, tag: String, onClick: () -> Un
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            Modifier.heightIn(min = PanelMetrics.ChipHeight).clip(RoundedCornerShape(10.dp))
+            Modifier.heightIn(min = 30.dp).clip(RoundedCornerShape(5.dp))
                 .background(if (on) AureaColors.AccentDim else AureaColors.Chip)
-                .padding(horizontal = PanelMetrics.ChipPad),
+                .padding(horizontal = 10.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = PanelMetrics.ChipText,
-                fontWeight = if (on) FontWeight.W600 else FontWeight.W500, color = if (on) AureaColors.Accent else AureaColors.Text)))
+            Text(label, maxLines = 1, style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp,
+                fontWeight = if (on) FontWeight.W600 else FontWeight.W400, color = if (on) AureaColors.Accent else AureaColors.Text)))
         }
     }
 }
@@ -349,16 +377,16 @@ private fun EnvChoice(label: String, on: Boolean, tag: String, onClick: () -> Un
 private fun EnvButton(label: String, tag: String, on: Boolean = false, onClick: () -> Unit) =
     EnvChoice(label, on, tag, onClick)
 
-/** Linha "rótulo · interruptor" de 52 dp (a linha toda toca). */
+/** Linha "rótulo · interruptor" de 44 dp (a linha toda toca). */
 @Composable
 private fun EnvToggle(label: String, on: Boolean, tag: String, onChange: (Boolean) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag(tag)
+        Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag(tag)
             .semantics(mergeDescendants = true) {}
             .tocavel(shrink = 1f) { onChange(!on) },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600)))
+        Text(label, modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp)))
         AureaToggle(checked = on, onCheckedChange = onChange)
     }
 }
@@ -366,8 +394,8 @@ private fun EnvToggle(label: String, on: Boolean, tag: String, onChange: (Boolea
 /** Linha "rótulo · conteúdo à direita". */
 @Composable
 private fun EnvLine(label: String, trailing: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 14.sp, fontWeight = FontWeight.W600)))
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp)))
         trailing()
     }
 }

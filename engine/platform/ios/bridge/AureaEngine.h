@@ -1178,6 +1178,9 @@ NS_SWIFT_NAME(AureaEngine)
 /// Bits: 1 vetorial, 2 desenho.
 - (uint32_t)vectorLayerFlags:(long long)layerId NS_SWIFT_NAME(vectorLayerFlags(_:));
 /// Operação de ponto (Engine::PathOp) no espaço do grupo. Índice escolhido ou −1.
+/// As mesmas operações de ponto no caminho da máscara (espaço da camada). Par do `editMaskPath` do AureaEngine.kt.
+- (int32_t)editMaskPath:(long long)layerId mask:(uint32_t)mask op:(uint32_t)op
+                    args:(NSArray<NSNumber*>*)args continuing:(BOOL)continuing NS_SWIFT_NAME(editMaskPath(_:mask:op:args:continuing:));
 - (int32_t)editVectorPath:(long long)layerId group:(uint32_t)group path:(uint32_t)path op:(uint32_t)op
                      args:(NSArray<NSNumber*>*)args continuing:(BOOL)continuing NS_SWIFT_NAME(editVectorPath(_:group:path:op:args:continuing:));
 /// Alça de largura da caixa de texto (dx, dy em px da composição).

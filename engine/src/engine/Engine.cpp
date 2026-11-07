@@ -3740,6 +3740,44 @@ bool Engine::set_mask_path(u64 layerId, u32 maskId, const f32* pts6, u32 count, 
     return true;
 }
 
+bool apply_path_op(BezierPath& b, Engine::PathOp op, const f32* args, u32 argc, i32& result, bool& changed) noexcept;
+
+i32 Engine::edit_mask_path(u64 layerId, u32 maskId, PathOp op, const f32* args, u32 argc, bool continuing) noexcept {
+    std::lock_guard<std::mutex> lock(modelMutex_);
+    drain_commands_locked();
+    Composition* comp = project_ ? current_composition() : nullptr;
+    Layer* l = comp ? comp->layer(LayerId::unpack(layerId)) : nullptr;
+    Mask* m = l ? mask_by_id(*l, maskId) : nullptr;
+    if (!m || l->locked || (argc > 0 && !args)) return -1;
+    for (u32 i = 0; i < argc; ++i) if (!std::isfinite(args[i])) return -1;
+    const i64 local = l->local_time(playback_.current()).value;
+    std::vector<MaskPoint> shape;
+    mask::evaluate_path(*m, static_cast<f64>(local), shape);
+    BezierPath b;
+    b.closed = m->closed;
+    b.v.reserve(shape.size());
+    for (const MaskPoint& p : shape) b.v.push_back(BezierVertex{p.position, p.inTangent, p.outTangent});
+    i32 result = 0;
+    bool changed = false;
+    if (!apply_path_op(b, op, args, argc, result, changed)) return -1;
+    if (!changed) return result;
+    if (!continuing) history_.before_mutation(*comp, project_->timeline().current(), "editar pontos");
+    std::vector<MaskPoint> pts(b.v.size());
+    for (usize i = 0; i < b.v.size(); ++i) {
+        pts[i].position = b.v[i].p;
+        pts[i].inTangent = b.v[i].in;
+        pts[i].outTangent = b.v[i].out;
+    }
+    if (!m->pathKeys.empty()) put_path_key(*m, local, pts);
+    else m->points = std::move(pts);
+    m->closed = b.closed;
+    m->cacheKey = 0;
+    bump_model_revision_locked();
+    project_->mark_dirty();
+    request_render();
+    return result;
+}
+
 bool Engine::set_mask_props(u64 layerId, u32 maskId, u32 op, bool inverted, f32 feather, f32 expansion, f32 opacity) noexcept {
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();

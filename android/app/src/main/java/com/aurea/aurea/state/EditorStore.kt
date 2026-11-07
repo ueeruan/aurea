@@ -5948,6 +5948,30 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
         refreshMasks()
     }
 
+    /** Operação de ponto no caminho da máscara (ver `Engine::PathOp`). Índice escolhido ou −1. */
+    fun editMaskPath(mask: Int, op: Int, args: FloatArray, continuing: Boolean): Int {
+        val id = primary ?: return -1
+        if (playing) pause()
+        val r = engine.editMaskPath(id, mask, op, args, continuing)
+        refreshMasks()
+        // Caminho aberto continua aceitando pontos no palco.
+        masks?.find(mask)?.let { maskDrawing = !it.closed }
+        if (!continuing) refreshNow()
+        return r
+    }
+
+    /** O caminho da máscara como o Editar pontos lê um contorno (espaço da camada). */
+    fun maskPathAt(mask: Int): com.aurea.aurea.engine.VPathAt? {
+        val state = masks ?: return null
+        val m = state.find(mask) ?: return null
+        val v = (0 until m.count).mapTo(ArrayList()) { i ->
+            val o = i * 6
+            com.aurea.aurea.engine.VVertex(m.points[o], m.points[o + 1], m.points[o + 2], m.points[o + 3], m.points[o + 4], m.points[o + 5])
+        }
+        val flags = 1 or (if (m.keyCount > 0) 2 else 0) or (if (m.keyHere) 4 else 0)
+        return com.aurea.aurea.engine.VPathAt(state.m, flags, com.aurea.aurea.engine.VBezier(v, m.closed))
+    }
+
     /** Fim de um gesto de máscara no palco: relê tudo (timeline, keyframes). */
     fun maskGestureEnd() = refreshNow()
 

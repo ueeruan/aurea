@@ -640,6 +640,7 @@ private fun DrawScope.drawStageOverlay(store: EditorStore, ui: EditorUi, m: Stag
     val masking = maskMode(store, ui)
     if (ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Mask) {
         store.masks?.let { drawMasks(m, it, store.maskEdit, store.maskPoint, store.maskDrawing) }
+        drawMaskPointMarks(store, m)
     }
 
     val selection = store.selection

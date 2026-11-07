@@ -5614,6 +5614,14 @@ AUREA_JNI jint AUREA_FN(nativeEditVectorPath)(JNIEnv* env, jclass, jlong handle,
                                       v.empty() ? nullptr : v.data(), static_cast<u32>(v.size()), continuing == JNI_TRUE);
 }
 
+AUREA_JNI jint AUREA_FN(nativeEditMaskPath)(JNIEnv* env, jclass, jlong handle, jlong layer, jint mask, jint op, jfloatArray args, jboolean continuing) {
+    NativeContext* c = ctx_of(handle);
+    if (!c || mask < 0 || op < 0) return -1;
+    const std::vector<f32> v = from_float_array(env, args);
+    return c->engine.edit_mask_path(static_cast<u64>(layer), static_cast<u32>(mask), static_cast<Engine::PathOp>(op),
+                                    v.empty() ? nullptr : v.data(), static_cast<u32>(v.size()), continuing == JNI_TRUE);
+}
+
 AUREA_JNI jboolean AUREA_FN(nativeDragTextBoxWidth)(JNIEnv*, jclass, jlong handle, jlong layer, jfloat dx, jfloat dy, jboolean continuing) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.drag_text_box_width(static_cast<u64>(layer), dx, dy, continuing == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;

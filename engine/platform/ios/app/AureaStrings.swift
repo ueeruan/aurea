@@ -7019,6 +7019,7 @@ enum AureaText {
         "s3d_fullscreen": "Tela cheia",
         "s3d_animation": "Animação",
         "s3d_more": "Mais opções",
+        "pn_mask_points": "Pontos",
     ]
     private static let en: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -13961,6 +13962,7 @@ enum AureaText {
         "s3d_fullscreen": "Full screen",
         "s3d_animation": "Animation",
         "s3d_more": "More options",
+        "pn_mask_points": "Points",
     ]
     private static let es: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -20903,6 +20905,7 @@ enum AureaText {
         "s3d_fullscreen": "Pantalla completa",
         "s3d_animation": "Animación",
         "s3d_more": "Más opciones",
+        "pn_mask_points": "Puntos",
     ]
     private static let ru: [String: String] = [
         "add_element_aurora": "Аврора",
@@ -27845,6 +27848,7 @@ enum AureaText {
         "s3d_fullscreen": "Во весь экран",
         "s3d_animation": "Анимация",
         "s3d_more": "Другие параметры",
+        "pn_mask_points": "Точки",
     ]
     private static let hi: [String: String] = [
         "add_element_aurora": "ऑरोरा",
@@ -34787,6 +34791,7 @@ enum AureaText {
         "s3d_fullscreen": "फ़ुल स्क्रीन",
         "s3d_animation": "एनिमेशन",
         "s3d_more": "और विकल्प",
+        "pn_mask_points": "पॉइंट",
     ]
     private static let ar: [String: String] = [
         "add_element_aurora": "الشفق القطبي",
@@ -41729,6 +41734,7 @@ enum AureaText {
         "s3d_fullscreen": "ملء الشاشة",
         "s3d_animation": "الحركة",
         "s3d_more": "خيارات أخرى",
+        "pn_mask_points": "النقاط",
     ]
     private static let id: [String: String] = [
         "add_element_aurora": "Aurora",
@@ -48671,6 +48677,7 @@ enum AureaText {
         "s3d_fullscreen": "Layar penuh",
         "s3d_animation": "Animasi",
         "s3d_more": "Opsi lainnya",
+        "pn_mask_points": "Titik",
     ]
     private static let plurals: [String: [String: [String: String]]] = [
         "pt-BR": [

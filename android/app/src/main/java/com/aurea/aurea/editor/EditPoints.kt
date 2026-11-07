@@ -127,13 +127,26 @@ internal object EditPointsState {
     var lasso by mutableStateOf<FloatArray?>(null)
     /** Incrementa quando a escolha vem de fora da faixa (palco, botões): a faixa centraliza. */
     var revision by mutableIntStateOf(0)
+    /** A máscara em edição; nulo = o contorno do vetor. */
+    var mask by mutableStateOf<Int?>(null)
+    /** O último ponto escolhido aqui: outro valor veio do palco. */
+    var chosen = -1
+
+    fun point(store: EditorStore): Int = if (mask != null) store.maskPoint else store.vectorPoint
+    fun setPoint(store: EditorStore, i: Int) {
+        chosen = i
+        if (mask != null) store.maskPoint = i else store.vectorPoint = i
+    }
+    fun at(store: EditorStore): VPathAt? = mask?.let { store.maskPathAt(it) } ?: store.vectorPathAt.takeIf { mask == null }
+    fun edit(store: EditorStore, op: Int, args: FloatArray, continuing: Boolean): Int =
+        mask?.let { store.editMaskPath(it, op, args, continuing) } ?: store.editVectorPath(op, args, continuing)
 
     fun reset() {
         kind = NONE; segment = -1; t = 0.5f; multi = emptySet(); pending = null; lasso = null
     }
 
     fun choosePoint(store: EditorStore, i: Int, k: Int = POINT, fromStrip: Boolean = false) {
-        store.vectorPoint = i
+        setPoint(store, i)
         kind = if (i < 0) NONE else k
         segment = -1
         pending = null
@@ -141,7 +154,7 @@ internal object EditPointsState {
     }
 
     fun chooseBetween(store: EditorStore, seg: Int, at: Float, fromStrip: Boolean = false) {
-        store.vectorPoint = -1
+        setPoint(store, -1)
         kind = BETWEEN
         segment = seg
         t = at.coerceIn(0.02f, 0.98f)
@@ -155,7 +168,7 @@ private fun atOpenEnd(store: EditorStore, path: VBezier?): Boolean {
     val p = path ?: return true
     if (p.v.isEmpty()) return true
     if (p.closed) return false
-    val i = store.vectorPoint
+    val i = EditPointsState.point(store)
     return EditPointsState.kind == EditPointsState.POINT && (i == p.v.size - 1 || (i == 0 && p.v.size > 1))
 }
 
@@ -195,7 +208,7 @@ private fun segmentLength(path: VBezier, seg: Int): Float {
 @Composable
 internal fun EditPointsPanel(env: PanelEnv) {
     val store = env.store
-    val at = store.vectorPathAt
+    val at = EditPointsState.at(store)
     // Trocar de camada ou de contorno começa sem escolha.
     LaunchedEffect(store.primary, store.vectorGroup, store.vectorPath) { EditPointsState.reset() }
     // A barra da seção: o segmento keyframes | pontos (P0-6).
@@ -214,7 +227,7 @@ private fun PointsColumn(env: PanelEnv, at: VPathAt?) {
     val store = env.store
     val path = at?.path
     val kind = EditPointsState.kind
-    val i = store.vectorPoint
+    val i = EditPointsState.point(store)
     var contours by remember { mutableStateOf(false) }
     var askDeleteKeys by remember { mutableStateOf(false) }
     var curveWarning by remember { mutableStateOf(false) }
@@ -259,7 +272,7 @@ private fun PointsColumn(env: PanelEnv, at: VPathAt?) {
             val canType = kind == EditPointsState.POINT && path != null && i in path.v.indices
             // O ícone mostra o tipo PARA O QUAL o ponto vai mudar.
             PointsCell("points.type", stringResource(if (curve) R.string.om_pts_type_corner else R.string.om_pts_type_curve), canType,
-                onClick = { store.editVectorPath(PathOps.SET_TYPE, floatArrayOf(i.toFloat(), if (curve) 0f else 1f), false) }) {
+                onClick = { EditPointsState.edit(store, PathOps.SET_TYPE, floatArrayOf(i.toFloat(), if (curve) 0f else 1f), false) }) {
                 ContentIcon(if (curve) ContentIconKind.PointCorner else ContentIconKind.PointCurve, 22.dp, it)
             }
             AddRemoveCell(store, path)
@@ -304,21 +317,76 @@ private fun selectPathCurve(store: EditorStore): Boolean {
     return true
 }
 
+/**
+ * A coluna esquerda do modo de pontos da máscara: voltar, keyframe do caminho,
+ * fechar ou abrir, tipo do ponto e ± ponto. Com uma alça escolhida, as travas.
+ */
+@Composable
+internal fun MaskPointsColumn(env: PanelEnv, m: EditorStore.MaskPath, look: KeyframeLook) {
+    val store = env.store
+    val path = EditPointsState.at(store)?.path
+    val kind = EditPointsState.kind
+    val i = store.maskPoint
+    Column(Modifier.width(60.dp).fillMaxHeight().testTag("mask.points.column")) {
+        PointsCell("mask.points.back", stringResource(R.string.panel_voltar_ferramentas), true, onClick = env.onClose) {
+            CupertinoIcon(CupertinoGlyph.ChevronLeft, 22.dp, it)
+        }
+        PointsCell("mask.points.key", stringResource(if (look == KeyframeLook.KeyHere) R.string.panel_tirar_keyframe_daqui else R.string.panel_marcar_keyframe_aqui),
+            m.closed, onClick = { store.toggleMaskKey(m.id) }) {
+            KeyframeDiamondIcon(look, enabled = true, modifier = Modifier.padding(1.dp))
+        }
+        if (kind == EditPointsState.IN || kind == EditPointsState.OUT) {
+            PointsCell("points.lock.angle", stringResource(R.string.om_pts_lock_angle), true, on = EditPointsState.lockAngle,
+                onClick = { EditPointsState.lockAngle = !EditPointsState.lockAngle; if (!EditPointsState.lockAngle) EditPointsState.lockLength = false }) {
+                ContentIcon(ContentIconKind.AngleLock, 22.dp, it)
+            }
+            PointsCell("points.lock.length", stringResource(R.string.om_pts_lock_length), EditPointsState.lockAngle, on = EditPointsState.lockLength,
+                onClick = { EditPointsState.lockLength = !EditPointsState.lockLength }) {
+                ContentIcon(ContentIconKind.LengthLock, 22.dp, it)
+            }
+        } else {
+            PointsCell("mask.points.closed", stringResource(if (m.closed) R.string.panel_abrir_caminho else R.string.panel_fechar_caminho), m.closed || m.count >= 3,
+                onClick = { EditPointsState.edit(store, PathOps.SET_CLOSED, floatArrayOf(if (m.closed) 0f else 1f), false) }) {
+                PathEndsIcon(m.closed, it)
+            }
+            val curve = isCurve(path, i)
+            val canType = kind == EditPointsState.POINT && path != null && i in path.v.indices
+            PointsCell("points.type", stringResource(if (curve) R.string.om_pts_type_corner else R.string.om_pts_type_curve), canType,
+                onClick = { EditPointsState.edit(store, PathOps.SET_TYPE, floatArrayOf(i.toFloat(), if (curve) 0f else 1f), false) }) {
+                ContentIcon(if (curve) ContentIconKind.PointCorner else ContentIconKind.PointCurve, 22.dp, it)
+            }
+        }
+        AddRemoveCell(store, path)
+    }
+}
+
+/** Fechar ou abrir o caminho: o ícone mostra o que o toque vai fazer. */
+@Composable
+private fun PathEndsIcon(closed: Boolean, tint: Color) {
+    Canvas(Modifier.width(22.dp).fillMaxHeight(0.5f)) {
+        val r = size.minDimension * 0.36f
+        val c = Offset(size.width / 2f, size.height / 2f)
+        val stroke = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round)
+        // Fechado: o toque abre, então o anel tem um vão. Aberto: o anel inteiro.
+        drawArc(tint, if (closed) -50f else 0f, if (closed) 280f else 360f, false, Offset(c.x - r, c.y - r), Size(r * 2, r * 2), style = stroke)
+    }
+}
+
 /** ± ponto: "+" com a escolha ENTRE dois pontos; "−" apaga o ponto escolhido. */
 @Composable
 private fun ColumnScope.AddRemoveCell(store: EditorStore, path: VBezier?) {
     val kind = EditPointsState.kind
-    val i = store.vectorPoint
+    val i = EditPointsState.point(store)
     val between = kind == EditPointsState.BETWEEN
     val canRemove = path != null && i in path.v.indices && kind != EditPointsState.BETWEEN && kind != EditPointsState.NONE
     PointsCell("points.addRemove", stringResource(if (between) R.string.om_pts_add else R.string.om_pts_delete), between || canRemove,
         onClick = {
             if (between) {
-                val r = store.editVectorPath(PathOps.INSERT, floatArrayOf(EditPointsState.segment.toFloat(), EditPointsState.t), false)
+                val r = EditPointsState.edit(store, PathOps.INSERT, floatArrayOf(EditPointsState.segment.toFloat(), EditPointsState.t), false)
                 if (r >= 0) EditPointsState.choosePoint(store, r)
             } else if (canRemove) {
-                val r = store.editVectorPath(PathOps.REMOVE, floatArrayOf(i.toFloat()), false)
-                val left = store.vectorPathAt?.path?.v?.size ?: 0
+                val r = EditPointsState.edit(store, PathOps.REMOVE, floatArrayOf(i.toFloat()), false)
+                val left = EditPointsState.at(store)?.path?.v?.size ?: 0
                 if (r >= 0 && left > 0) EditPointsState.choosePoint(store, r.coerceAtMost(left - 1)) else EditPointsState.choosePoint(store, -1)
             }
         }) {
@@ -368,7 +436,7 @@ private fun PointsCellBody(
 @Composable
 private fun contourEntries(store: EditorStore): List<MenuEntry> {
     val group = store.vectorDoc?.groups?.getOrNull(store.vectorGroup) ?: return emptyList()
-    val currentEmpty = (store.vectorPathAt?.path?.v?.size ?: 0) == 0
+    val currentEmpty = (EditPointsState.at(store)?.path?.v?.size ?: 0) == 0
     val fillLabel = stringResource(R.string.om_pts_fill_contour)
     val holeLabel = stringResource(R.string.om_pts_hole_contour)
     val deleteLabel = stringResource(R.string.om_pts_delete_contour)
@@ -388,11 +456,11 @@ private fun contourEntries(store: EditorStore): List<MenuEntry> {
                 MenuEntry.Item(name, selected = n == store.vectorPath) { select() },
                 MenuEntry.Item(if (p.exclude) fillLabel else holeLabel, tag = "points.contour.${n + 1}.fill") {
                     select()
-                    store.editVectorPath(PathOps.SET_EXCLUDE, floatArrayOf(if (p.exclude) 0f else 1f), false)
+                    EditPointsState.edit(store, PathOps.SET_EXCLUDE, floatArrayOf(if (p.exclude) 0f else 1f), false)
                 },
                 MenuEntry.Item(if (p.path.closed) openLabel else closeLabel, enabled = p.path.v.size >= 2, tag = "points.contour.${n + 1}.close") {
                     select()
-                    store.editVectorPath(PathOps.SET_CLOSED, floatArrayOf(if (p.path.closed) 0f else 1f), false)
+                    EditPointsState.edit(store, PathOps.SET_CLOSED, floatArrayOf(if (p.path.closed) 0f else 1f), false)
                 },
                 MenuEntry.Item(deleteLabel, destructive = true, enabled = group.paths.size > 1, tag = "points.contour.${n + 1}.delete") {
                     store.removeVectorPath(n)
@@ -411,7 +479,7 @@ private fun contourEntries(store: EditorStore): List<MenuEntry> {
 
 /** ◆ do modo keyframes: marca o keyframe da forma aqui; com keyframe aqui, tira. */
 private fun togglePathKey(store: EditorStore) {
-    val at = store.vectorPathAt ?: return
+    val at = EditPointsState.at(store) ?: return
     if (!at.keyHere) { store.toggleVectorPathKey(); return }
     val row = store.layers.firstOrNull { it.id == store.primary } ?: return
     val local = store.playhead - row.startFrame + row.offsetFrames
@@ -427,7 +495,7 @@ private fun togglePathKey(store: EditorStore) {
 
 /** Segurar ◆: apaga todos os keyframes da forma (a forma do cabeçote fica parada). Um passo de desfazer. */
 private fun clearPathKeys(store: EditorStore) {
-    val shape = store.vectorPathAt?.path?.copyDeep() ?: return
+    val shape = EditPointsState.at(store)?.path?.copyDeep() ?: return
     val g = store.vectorGroup
     val pIndex = store.vectorPath
     store.editVectorDoc { d ->
@@ -441,7 +509,7 @@ private fun clearPathKeys(store: EditorStore) {
 // Trackpad (centro)
 // =============================================================================
 @Composable
-private fun Trackpad(store: EditorStore, at: VPathAt?, modifier: Modifier) {
+internal fun Trackpad(store: EditorStore, at: VPathAt?, modifier: Modifier) {
     val path = at?.path
     val guide = stringResource(when {
         path == null || path.v.isEmpty() || atOpenEnd(store, path) -> R.string.om_pts_guide_next
@@ -495,13 +563,13 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.trackpad
             if (!c.pressed) break
             if (!moved && hypot(c.position.x - down.position.x, c.position.y - down.position.y) < slop) continue
             moved = true
-            val at = store.vectorPathAt ?: continue
+            val at = EditPointsState.at(store) ?: continue
             val path = at.path
             val dx = (c.position.x - last.x) / density
             val dy = (c.position.y - last.y) / density
             last = c.position
             if (!at.vecFromComp(dx, dy, g)) continue
-            val i = store.vectorPoint
+            val i = EditPointsState.point(store)
             when {
                 atOpenEnd(store, path) || EditPointsState.kind == EditPointsState.BETWEEN || EditPointsState.pending != null -> {
                     // O ponto pendente nasce na ponta (ou no trecho) e segue o dedo.
@@ -513,11 +581,11 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.trackpad
                     val args = FloatArray(2 + idx.size)
                     args[0] = g[0]; args[1] = g[1]
                     idx.forEachIndexed { k, p -> args[2 + k] = p.toFloat() }
-                    store.editVectorPath(PathOps.MOVE_POINTS, args, sent)
+                    EditPointsState.edit(store, PathOps.MOVE_POINTS, args, sent)
                     sent = true
                 }
                 (EditPointsState.kind == EditPointsState.IN || EditPointsState.kind == EditPointsState.OUT) && i in path.v.indices -> {
-                    store.editVectorPath(PathOps.MOVE_HANDLE, floatArrayOf(i.toFloat(), if (EditPointsState.kind == EditPointsState.OUT) 1f else 0f, g[0], g[1],
+                    EditPointsState.edit(store, PathOps.MOVE_HANDLE, floatArrayOf(i.toFloat(), if (EditPointsState.kind == EditPointsState.OUT) 1f else 0f, g[0], g[1],
                         if (EditPointsState.lockAngle) 1f else 0f, if (EditPointsState.lockLength) 1f else 0f), sent)
                     sent = true
                 }
@@ -539,7 +607,7 @@ private fun pendingStart(store: EditorStore, at: VPathAt, path: VBezier): Offset
         EditPointsState.pendingAtStart = false
         return if (at.fromComp(store.project.width / 2f, store.project.height / 2f, g)) Offset(g[0], g[1]) else Offset.Zero
     }
-    val atStart = store.vectorPoint == 0 && v.size > 1
+    val atStart = EditPointsState.point(store) == 0 && v.size > 1
     EditPointsState.pendingAtStart = atStart
     val end = if (atStart) v.first() else v.last()
     return Offset(end.x, end.y)
@@ -549,15 +617,15 @@ private fun pendingStart(store: EditorStore, at: VPathAt, path: VBezier): Offset
 private fun confirmPending(store: EditorStore) {
     val p = EditPointsState.pending ?: return
     if (EditPointsState.kind == EditPointsState.BETWEEN && EditPointsState.segment >= 0) {
-        val r = store.editVectorPath(PathOps.INSERT, floatArrayOf(EditPointsState.segment.toFloat(), EditPointsState.t), false)
+        val r = EditPointsState.edit(store, PathOps.INSERT, floatArrayOf(EditPointsState.segment.toFloat(), EditPointsState.t), false)
         if (r >= 0) {
-            val at = store.vectorPathAt
+            val at = EditPointsState.at(store)
             val q = at?.path?.v?.getOrNull(r)
-            if (q != null) store.editVectorPath(PathOps.MOVE_POINTS, floatArrayOf(p.x - q.x, p.y - q.y, r.toFloat()), true)
+            if (q != null) EditPointsState.edit(store, PathOps.MOVE_POINTS, floatArrayOf(p.x - q.x, p.y - q.y, r.toFloat()), true)
             EditPointsState.choosePoint(store, r)
         }
     } else {
-        val r = store.editVectorPath(PathOps.APPEND, floatArrayOf(p.x, p.y, if (EditPointsState.pendingAtStart) 1f else 0f), false)
+        val r = EditPointsState.edit(store, PathOps.APPEND, floatArrayOf(p.x, p.y, if (EditPointsState.pendingAtStart) 1f else 0f), false)
         if (r >= 0) EditPointsState.choosePoint(store, r)
     }
     EditPointsState.pending = null
@@ -598,7 +666,7 @@ private fun stripLayout(path: VBezier?): StripLayout {
 }
 
 @Composable
-private fun PointsStrip(store: EditorStore, path: VBezier?, modifier: Modifier) {
+internal fun PointsStrip(store: EditorStore, path: VBezier?, modifier: Modifier) {
     val layout = remember(path) { stripLayout(path) }
     val scroll = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
@@ -612,7 +680,7 @@ private fun PointsStrip(store: EditorStore, path: VBezier?, modifier: Modifier) 
         val target = when (EditPointsState.kind) {
             EditPointsState.BETWEEN -> layout.segments.firstOrNull { it.third == EditPointsState.segment }?.let { it.first + (it.second - it.first) * EditPointsState.t }
             EditPointsState.NONE -> null
-            else -> layout.stops.firstOrNull { it.index == store.vectorPoint && it.kind == EditPointsState.kind }?.y
+            else -> layout.stops.firstOrNull { it.index == EditPointsState.point(store) && it.kind == EditPointsState.kind }?.y
         }
         if (target != null) scroll.animateTo(target)
     }
@@ -688,7 +756,7 @@ private fun PointsStrip(store: EditorStore, path: VBezier?, modifier: Modifier) 
                 drawLine(base, Offset(cx, sy(y0)), Offset(cx, sy(y1)), 1.dp.toPx(), pathEffect = if (curved) dash else null)
             }
             for (s in layout.stops) {
-                val chosen = (EditPointsState.kind == s.kind && store.vectorPoint == s.index) || (s.kind == EditPointsState.POINT && s.index in EditPointsState.multi)
+                val chosen = (EditPointsState.kind == s.kind && EditPointsState.point(store) == s.index) || (s.kind == EditPointsState.POINT && s.index in EditPointsState.multi)
                 val r = if (chosen) 6.dp.toPx() else 2.5.dp.toPx()
                 val y = sy(s.y)
                 if (s.kind == EditPointsState.POINT) drawCircle(if (chosen) accent else base, r, Offset(cx, y))
@@ -708,7 +776,7 @@ private fun PointsStrip(store: EditorStore, path: VBezier?, modifier: Modifier) 
 private fun applyStripSelection(store: EditorStore, layout: StripLayout, y: Float) {
     val near = layout.stops.minByOrNull { abs(it.y - y) }
     if (near != null && abs(near.y - y) <= 12f) {
-        if (store.vectorPoint != near.index || EditPointsState.kind != near.kind) EditPointsState.choosePoint(store, near.index, near.kind, fromStrip = true)
+        if (EditPointsState.point(store) != near.index || EditPointsState.kind != near.kind) EditPointsState.choosePoint(store, near.index, near.kind, fromStrip = true)
         return
     }
     val seg = layout.segments.firstOrNull { y >= it.first && y <= it.second } ?: return
@@ -766,6 +834,17 @@ internal fun DrawScope.drawEditPointsOverlay(store: EditorStore, m: StageMapper)
         drawRect(if (chosen) AureaColors.Accent else Color.White, Offset(c.x - r, c.y - r), Size(2 * r, 2 * r))
         if (i == 0 && !path.closed && path.v.size >= 2) drawCircle(AureaColors.Accent, r * 1.9f, c, style = Stroke(1.5.dp.toPx()))
     }
+    drawPendingMarks(path, ::sx)
+    EditPointsState.lasso?.let { b ->
+        val x0 = min(b[0], b[2]); val y0 = min(b[1], b[3])
+        drawRect(AureaColors.Accent.copy(alpha = 0.12f), Offset(x0, y0), Size(abs(b[2] - b[0]), abs(b[3] - b[1])))
+        drawRect(AureaColors.Accent, Offset(x0, y0), Size(abs(b[2] - b[0]), abs(b[3] - b[1])), style = Stroke(1.dp.toPx()))
+    }
+}
+
+/** O ponto "entre" e o pendente, no caminho [path] levado à tela por [sx]. */
+private fun DrawScope.drawPendingMarks(path: VBezier, sx: (Float, Float) -> Offset) {
+    val kind = EditPointsState.kind
     if (kind == EditPointsState.BETWEEN) {
         segmentPoint(path, EditPointsState.segment, EditPointsState.t)?.let { g ->
             val c = sx(g.x, g.y)
@@ -785,11 +864,14 @@ internal fun DrawScope.drawEditPointsOverlay(store: EditorStore, m: StageMapper)
         drawCircle(ShellColors.OutlineUnder, 8.dp.toPx(), c)
         drawCircle(AureaColors.Accent, 6.5.dp.toPx(), c, style = Stroke(2.dp.toPx()))
     }
-    EditPointsState.lasso?.let { b ->
-        val x0 = min(b[0], b[2]); val y0 = min(b[1], b[3])
-        drawRect(AureaColors.Accent.copy(alpha = 0.12f), Offset(x0, y0), Size(abs(b[2] - b[0]), abs(b[3] - b[1])))
-        drawRect(AureaColors.Accent, Offset(x0, y0), Size(abs(b[2] - b[0]), abs(b[3] - b[1])), style = Stroke(1.dp.toPx()))
-    }
+}
+
+/** As marcas do Editar pontos sobre o caminho da máscara. */
+internal fun DrawScope.drawMaskPointMarks(store: EditorStore, m: StageMapper) {
+    if (EditPointsState.mask == null) return
+    val path = EditPointsState.at(store)?.path ?: return
+    val ms = store.masks ?: return
+    drawPendingMarks(path) { x, y -> Offset(m.sx(ms.toCompX(x, y)), m.sy(ms.toCompY(x, y))) }
 }
 
 private fun DrawScope.drawBezier(path: VBezier, sx: (Float, Float) -> Offset, under: Color, ink: Color, width: Float) {

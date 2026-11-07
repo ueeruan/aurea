@@ -2316,6 +2316,8 @@ class AureaEngine private constructor() {
     /** Bits: 1 vetorial, 2 desenho. */
     fun vectorLayerFlags(layer: Long): Int = nativeVectorLayerFlags(nativeHandle, layer)
     /** Operação de ponto (Engine::PathOp) no espaço do grupo. Índice escolhido ou −1. */
+    fun editMaskPath(layer: Long, mask: Int, op: Int, args: FloatArray, continuing: Boolean): Int =
+        nativeEditMaskPath(nativeHandle, layer, mask, op, args, continuing)
     fun editVectorPath(layer: Long, group: Int, path: Int, op: Int, args: FloatArray, continuing: Boolean): Int =
         nativeEditVectorPath(nativeHandle, layer, group, path, op, args, continuing)
     /** Alça de largura da caixa de texto (dx, dy em px da composição). */
@@ -2330,6 +2332,7 @@ class AureaEngine private constructor() {
     private external fun nativeAddDrawingLayer(handle: Long): Long
     private external fun nativeAddDrawingStroke(handle: Long, layer: Long, tool: Int, rgba: FloatArray, width: Float, xyp: FloatArray): Long
     private external fun nativeVectorLayerFlags(handle: Long, layer: Long): Int
+    private external fun nativeEditMaskPath(handle: Long, layer: Long, mask: Int, op: Int, args: FloatArray, continuing: Boolean): Int
     private external fun nativeEditVectorPath(handle: Long, layer: Long, group: Int, path: Int, op: Int, args: FloatArray, continuing: Boolean): Int
     private external fun nativeDragTextBoxWidth(handle: Long, layer: Long, dx: Float, dy: Float, continuing: Boolean): Boolean
     private external fun nativeResizeShapeHandle(handle: Long, layer: Long, which: Int, du: Float, dv: Float,

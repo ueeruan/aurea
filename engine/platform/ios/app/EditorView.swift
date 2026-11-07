@@ -607,6 +607,7 @@ private struct ShellStageBanner: View {
 
 
 @MainActor private struct StageOverlay: View {
+    @ObservedObject private var penState = EditPointsState.shared
     @EnvironmentObject private var model: AureaModel
     @Environment(\.displayScale) private var displayScale
     @EnvironmentObject private var shell: ShellPresentation
@@ -922,7 +923,28 @@ private struct ShellStageBanner: View {
             context.fill(Path(CGRect(x: p.x - half, y: p.y - half, width: 2 * half, height: 2 * half)), with: .color(i == model.selectedMaskPoint ? (vector ? AureaColors.accent : StageInk.maskEdit) : .white))
             if vector && i == 0 && !mask.closed && count >= 2 { context.stroke(Path(ellipseIn: CGRect(x: p.x - half * 1.9, y: p.y - half * 1.9, width: half * 3.8, height: half * 3.8)), with: .color(AureaColors.accent), lineWidth: 1.5) }
         }
-        if !vector { drawHandles(&context, count: count, vector: false, point: point) }
+        if !vector {
+            drawHandles(&context, count: count, vector: false, point: point)
+            drawPenMarks(&context, screen: { x, y in
+                let raw = row[0] * x + row[1] * y + row[2], w = abs(raw) < 0.000001 ? Float(0.000001) : raw
+                return screen((affine[0] * x + affine[2] * y + affine[4]) / w, (affine[1] * x + affine[3] * y + affine[5]) / w)
+            })
+        }
+    }
+    /// O ponto "entre" e o pendente do modo de caneta da máscara.
+    private func drawPenMarks(_ context: inout GraphicsContext, screen: (Float, Float) -> CGPoint) {
+        let pen = EditPointsState.shared
+        guard pen.mask != nil, let path = EPPath.mask(model) else { return }
+        if pen.kind == EPKind.between, let g = path.point(pen.segment, pen.t) {
+            let c = screen(g.x, g.y)
+            circle(&context, c, 7, StageInk.outlineUnder)
+            context.stroke(Path(ellipseIn: CGRect(x: c.x - 5.5, y: c.y - 5.5, width: 11, height: 11)), with: .color(AureaColors.accent), lineWidth: 2)
+        }
+        if let g = pen.pending {
+            let c = screen(g.x, g.y)
+            circle(&context, c, 8, StageInk.outlineUnder)
+            context.stroke(Path(ellipseIn: CGRect(x: c.x - 6.5, y: c.y - 6.5, width: 13, height: 13)), with: .color(AureaColors.accent), lineWidth: 2)
+        }
     }
     private func drawHandles(_ context: inout GraphicsContext, count: Int, vector: Bool, point: (Int, Int) -> CGPoint) {
         guard let selected = model.selectedMaskPoint, selected >= 0, selected < count else { return }

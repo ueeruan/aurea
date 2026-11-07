@@ -1856,12 +1856,14 @@ private struct ShapeEditGlyph: View {
 // Apagar) e o recorte por outra camada na segunda aba.
 struct MaskPanel: View {
     @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var pen = EditPointsState.shared
+    /// 0 Pontos (o modo de caneta, com o desenho do Editar pontos), 1 Máscaras, 2 Recorte.
     @State private var tab = 0
     @State private var matte: Int64 = 0
     @State private var mode = 0
     private var id: Int64 { model.primarySelection ?? 0 }
     private var mask: MaskItem? { model.editingMask }
-    private var canKey: Bool { tab == 0 && mask?.closed == true && !model.maskDrawing }
+    private var canKey: Bool { tab == 1 && mask?.closed == true && !model.maskDrawing }
     private var look: KeyframeLook { mask?.keyed == true ? .keyHere : (mask?.keyCount ?? 0) > 0 ? .animated : .none }
     private var candidates: [LayerItem] { model.layers.filter { $0.id != id && ![3, 8, 9].contains($0.kind) } }
     private func load() {
@@ -1871,26 +1873,58 @@ struct MaskPanel: View {
     private func write(_ target: Int64, _ value: Int) {
         model.engine.setTrackMatteForLayer(id, matte: target, mode: UInt32(value)); model.refreshModel(force: true); load()
     }
+    /// O modo de caneta usa o Editar pontos sobre o caminho desta máscara.
+    private func syncPen() {
+        let id = tab == 0 ? mask?.id : nil
+        guard pen.mask != id else { return }
+        pen.mask = id
+        pen.reset()
+        if id != nil, let point = model.selectedMaskPoint { pen.choosePoint(point) }
+    }
     var body: some View {
+        let editing = tab == 0 ? mask : nil
+        let path = editing == nil ? nil : EPPath.mask(model)
         VStack(spacing: 0) {
             PanelHeader(title: AureaText.t("panel_mascara_recorte")) { model.panel = .none }
             HStack(spacing: 0) {
-                LeftRail(keyframeLook: look, onKeyframe: canKey ? toggleKey : nil,
-                         onCurve: curveKeys.count >= 2 && tab == 0 ? { openCurve() } : nil, onBack: { model.panel = .none })
+                if let editing {
+                    MaskPointsColumn(mask: editing, path: path, look: look, onKey: toggleKey).frame(width: 60)
+                    AureaColors.contentStrongLine.frame(width: 0.7)
+                } else {
+                    LeftRail(keyframeLook: look, onKeyframe: canKey ? toggleKey : nil,
+                             onCurve: curveKeys.count >= 2 && tab == 1 ? { openCurve() } : nil, onBack: { model.panel = .none })
+                }
                 VStack(spacing: 0) {
-                    ParamTabs([AureaText.t("panel_mascaras"), AureaText.t("panel_recorte_outra_camada")], selected: tab) { tab = $0 }
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            if tab == 0 { masksBody } else { matteBody }
-                        }.padding(.leading, 4).padding(.trailing, 10).padding(.bottom, 16)
-                    }.accessibilityIdentifier("mask.scroll")
+                    ParamTabs([AureaText.t("pn_mask_points"), AureaText.t("panel_mascaras"), AureaText.t("panel_recorte_outra_camada")], selected: tab) { tab = $0 }
+                    if editing != nil {
+                        if model.masks.count > 1 { maskChips.padding(.horizontal, 6) }
+                        PointsTrackpad(path: path).padding(6)
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                if tab == 2 { matteBody } else { masksBody }
+                            }.padding(.leading, 4).padding(.trailing, 10).padding(.bottom, 16)
+                        }.accessibilityIdentifier("mask.scroll")
+                    }
+                }
+                if editing != nil {
+                    AureaColors.contentStrongLine.frame(width: 0.7)
+                    PointsStrip(path: path).frame(width: 60)
                 }
             }
-        }.foregroundStyle(AureaColors.text).onAppear { load() }
+        }.foregroundStyle(AureaColors.text).onAppear { load(); syncPen() }
+            .onChange(of: tab) { _ in syncPen() }
+            .onChange(of: model.selectedMask) { _ in syncPen() }
+            // A escolha da faixa vale no palco, e a do palco vale na faixa.
+            .onChange(of: pen.index) { i in if pen.mask != nil { model.selectedMaskPoint = i >= 0 ? i : nil } }
+            .onChange(of: model.selectedMaskPoint) { point in
+                if pen.mask != nil, (point ?? -1) != pen.index { pen.choosePoint(point ?? -1) }
+            }
+            .onDisappear { pen.mask = nil; pen.reset() }
             .onChange(of: id) { _ in load() }
             .onChange(of: model.status.modelRevision) { _ in load() }
             .onChange(of: model.timelineFocus) { focus in
-                if focus?.contains(where: { ($0.property == 43 || $0.property == 49) && $0.effect == mask?.id }) == true { tab = 0 }
+                if focus?.contains(where: { ($0.property == 43 || $0.property == 49) && $0.effect == mask?.id }) == true, tab == 2 { tab = 1 }
             }
             // Os keyframes do caminho aparecem na camada enquanto a máscara está aberta aqui.
             .onAppear { focusPath() }
@@ -1900,7 +1934,7 @@ struct MaskPanel: View {
     }
     private func focusPath() {
         if model.timelineFocus?.contains(where: { $0.property == 43 && $0.effect == mask?.id }) == true { return }
-        model.timelineFocus = tab == 0 ? mask.map { [TimelineTrack(property: 49, effect: $0.id)] } : nil
+        model.timelineFocus = tab != 2 ? mask.map { [TimelineTrack(property: 49, effect: $0.id)] } : nil
     }
     private var curveKeys: [KeyframeItem] {
         guard let mask else { return [] }
@@ -1915,11 +1949,11 @@ struct MaskPanel: View {
         Color.clear.frame(height: 6)
         // Os três jeitos de criar uma máscara: sempre à vista, um toque cada.
         HStack(spacing: 6) {
-            MaskShapeTool(kind: 0, label: AureaText.t("panel_desenhar_mao"), selected: model.maskDrawing && mask?.closed == false) { model.addMask(2) }
+            MaskShapeTool(kind: 0, label: AureaText.t("panel_desenhar_mao"), selected: model.maskDrawing && mask?.closed == false) { model.addMask(2); tab = 0 }
                 .accessibilityIdentifier("mask.add.draw")
-            MaskShapeTool(kind: 1, label: AureaText.t("panel_retangulo"), selected: false) { model.addMask(0) }
+            MaskShapeTool(kind: 1, label: AureaText.t("panel_retangulo"), selected: false) { model.addMask(0); tab = 0 }
                 .accessibilityIdentifier("mask.add.rect")
-            MaskShapeTool(kind: 2, label: AureaText.t("panel_elipse"), selected: false) { model.addMask(1) }
+            MaskShapeTool(kind: 2, label: AureaText.t("panel_elipse"), selected: false) { model.addMask(1); tab = 0 }
                 .accessibilityIdentifier("mask.add.ellipse")
         }
         if model.masks.isEmpty {
@@ -1927,18 +1961,23 @@ struct MaskPanel: View {
             hint("panel_mascara_mostra_so_parte_camada_escolha")
         } else {
             Color.clear.frame(height: 4)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(Array(model.masks.enumerated()), id: \.element.id) { entry in
-                        NativePanelChip(AureaText.t(entry.element.closed ? "pn_mask_n" : "pn_mask_n_open", entry.offset + 1), selected: mask?.id == entry.element.id, horizontal: 12, height: 36, radius: 9, fontSize: 12.5) {
-                            model.selectedMask = entry.element.id; model.selectedMaskPoint = nil; model.maskDrawing = !entry.element.closed
-                        }
-                    }
-                }.frame(height: 44)
+            maskChips
+            if tab == 1 {
+                if let mask { maskEditor(mask) }
+                else { hint("panel_escolha_mascara_acima_editar_palco") }
             }
-            if let mask { maskEditor(mask) }
-            else { hint("panel_escolha_mascara_acima_editar_palco") }
         }
+    }
+    private var maskChips: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 6) {
+            ForEach(Array(model.masks.enumerated()), id: \.element.id) { entry in
+                NativePanelChip(AureaText.t(entry.element.closed ? "pn_mask_n" : "pn_mask_n_open", entry.offset + 1), selected: mask?.id == entry.element.id, horizontal: 12, height: 36, radius: 9, fontSize: 12.5) {
+                    model.selectedMask = entry.element.id; model.selectedMaskPoint = nil; model.maskDrawing = !entry.element.closed
+                }
+            }
+        }.frame(height: 44)
+    }
     }
     /// A máscara escolhida, tudo numa tela só, na ordem de uso.
     @ViewBuilder private func maskEditor(_ m: MaskItem) -> some View {

@@ -54,6 +54,21 @@ struct EPPath {
         return EPPath(affine: Array(d[0..<6]), flags: Int(d[6]), closed: d[7] > 0.5, v: v)
     }
 
+    /// O caminho da máscara em edição, como um contorno (espaço da camada).
+    @MainActor static func mask(_ model: AureaModel) -> EPPath? {
+        guard let m = model.editingMask else { return nil }
+        var v: [EPVertex] = []
+        for i in 0..<(m.points.count / 6) {
+            let o = i * 6
+            v.append(EPVertex(x: m.points[o], y: m.points[o + 1], inX: m.points[o + 2], inY: m.points[o + 3], outX: m.points[o + 4], outY: m.points[o + 5]))
+        }
+        return EPPath(affine: model.maskAffine, flags: 1 | (m.keyCount > 0 ? 2 : 0) | (m.keyed ? 4 : 0), closed: m.closed, v: v)
+    }
+    /// O que o Editar pontos está editando: a máscara ou o contorno do vetor.
+    @MainActor static func current(_ model: AureaModel) -> EPPath? {
+        EditPointsState.shared.mask != nil ? mask(model) : load(model, group: model.vectorGroup, path: model.vectorPath)
+    }
+
     var keyHere: Bool { flags & 4 != 0 }
     var animated: Bool { flags & 2 != 0 }
     var segments: Int { v.count < 2 ? 0 : (closed ? v.count : v.count - 1) }
@@ -120,6 +135,8 @@ enum EPKind { static let none = 0, point = 1, inHandle = 2, outHandle = 3, betwe
     @Published var lasso: CGRect?
     /// Sobe quando a escolha vem de fora da faixa (palco, botões): a faixa centraliza.
     @Published var revision = 0
+    /// A máscara em edição; nulo = o contorno do vetor.
+    @Published var mask: UInt32?
 
     func reset() {
         kind = EPKind.none; index = -1; segment = -1; t = 0.5; multi = []; pending = nil; lasso = nil
@@ -144,6 +161,22 @@ enum EPKind { static let none = 0, point = 1, inHandle = 2, outHandle = 3, betwe
         guard let p = path, !p.v.isEmpty else { return true }
         if p.closed { return false }
         return kind == EPKind.point && (index == p.v.count - 1 || (index == 0 && p.v.count > 1))
+    }
+}
+
+extension AureaModel {
+    /// Operação de ponto no que o Editar pontos está editando. Índice escolhido ou −1.
+    @discardableResult
+    func editPoints(_ op: UInt32, _ args: [Float], continuing: Bool = false) -> Int32 {
+        guard let mask = EditPointsState.shared.mask else { return editVectorPath(op, args, continuing: continuing) }
+        guard let id = primarySelection else { return -1 }
+        if status.playing != 0 { pause() }
+        let r = engine.editMaskPath(id, mask: mask, op: op, args: args.map { NSNumber(value: $0) }, continuing: continuing)
+        refreshMasks()
+        // Caminho aberto continua aceitando pontos no palco.
+        if let m = editingMask { maskDrawing = !m.closed }
+        if !continuing { refreshModel(force: true) }
+        return r
     }
 }
 
@@ -184,7 +217,7 @@ struct EditPointsPanelView: View {
     @ObservedObject private var state = EditPointsState.shared
 
     var body: some View {
-        let path = EPPath.load(model, group: model.vectorGroup, path: model.vectorPath)
+        let path = EPPath.current(model)
         HStack(spacing: 0) {
             PointsColumn(path: path).frame(width: 60)
             AureaColors.contentStrongLine.frame(width: 0.7)
@@ -247,7 +280,7 @@ private struct PointsColumn: View {
                 let canType = kind == EPKind.point && (path?.v.indices.contains(i) ?? false)
                 // O ícone mostra o tipo PARA O QUAL o ponto vai mudar.
                 cell("points.type", AureaText.t(curve ? "om_pts_type_corner" : "om_pts_type_curve"), enabled: canType, action: {
-                    model.editVectorPath(PathOps.setType, [Float(i), curve ? 0 : 1])
+                    model.editPoints(PathOps.setType, [Float(i), curve ? 0 : 1])
                 }) { tint in ContentIcon(kind: curve ? .pointCorner : .pointCurve, size: 22, tint: tint) }
                 addRemoveCell
             }
@@ -299,11 +332,11 @@ private struct PointsColumn: View {
         let canRemove = (path?.v.indices.contains(i) ?? false) && kind != EPKind.between && kind != EPKind.none
         return cell("points.addRemove", AureaText.t(between ? "om_pts_add" : "om_pts_delete"), enabled: between || canRemove, action: {
             if between {
-                let r = model.editVectorPath(PathOps.insert, [Float(state.segment), state.t])
+                let r = model.editPoints(PathOps.insert, [Float(state.segment), state.t])
                 if r >= 0 { state.choosePoint(Int(r)) }
             } else if canRemove {
-                let r = model.editVectorPath(PathOps.remove, [Float(i)])
-                let left = EPPath.load(model, group: model.vectorGroup, path: model.vectorPath)?.v.count ?? 0
+                let r = model.editPoints(PathOps.remove, [Float(i)])
+                let left = EPPath.current(model)?.v.count ?? 0
                 if r >= 0 && left > 0 { state.choosePoint(min(Int(r), left - 1)) } else { state.choosePoint(-1) }
             }
         }) { tint in
@@ -345,10 +378,10 @@ private struct PointsColumn: View {
                                  selected: UInt32(n) == model.vectorPath, submenu: [
                 .item(name, selected: UInt32(n) == model.vectorPath) { select() },
                 .item(AureaText.t(hole ? "om_pts_fill_contour" : "om_pts_hole_contour"), tag: "points.contour.\(n + 1).fill") {
-                    select(); model.editVectorPath(PathOps.setExclude, [hole ? 0 : 1])
+                    select(); model.editPoints(PathOps.setExclude, [hole ? 0 : 1])
                 },
                 .item(AureaText.t(closed ? "panel_abrir_caminho" : "panel_fechar_caminho"), enabled: points >= 2, tag: "points.contour.\(n + 1).close") {
-                    select(); model.editVectorPath(PathOps.setClosed, [closed ? 0 : 1])
+                    select(); model.editPoints(PathOps.setClosed, [closed ? 0 : 1])
                 },
                 .item(AureaText.t("om_pts_delete_contour"), enabled: count > 1, destructive: true, tag: "points.contour.\(n + 1).delete") {
                     _ = model.engine.removeVectorPath(id, group: model.vectorGroup, path: UInt32(n))
@@ -386,13 +419,96 @@ private struct PointsColumn: View {
     }
 }
 
+// MARK: - A coluna do modo de pontos da máscara
+
+/// Voltar, keyframe do caminho, fechar ou abrir, tipo do ponto e ± ponto. Com uma
+/// alça escolhida, as travas. Par do `MaskPointsColumn` do EditPoints.kt.
+struct MaskPointsColumn: View {
+    @EnvironmentObject private var model: AureaModel
+    @ObservedObject private var state = EditPointsState.shared
+    let mask: MaskItem
+    let path: EPPath?
+    let look: KeyframeLook
+    let onKey: () -> Void
+
+    var body: some View {
+        let kind = state.kind, i = state.index
+        let between = kind == EPKind.between
+        let canRemove = (path?.v.indices.contains(i) ?? false) && kind != EPKind.between && kind != EPKind.none
+        VStack(spacing: 0) {
+            cell("mask.points.back", AureaText.t("panel_voltar_ferramentas"), enabled: true, action: { model.panel = .none }) { tint in
+                CupertinoGlyph.text(CupertinoGlyph.ChevronLeft, size: 22, color: tint).mirrorsInRtl()
+            }
+            cell("mask.points.key", AureaText.t(look == .keyHere ? "panel_tirar_keyframe_daqui" : "panel_marcar_keyframe_aqui"), enabled: mask.closed, action: onKey) { _ in
+                KeyframeDiamondIcon(look: look, enabled: true).padding(1)
+            }
+            if kind == EPKind.inHandle || kind == EPKind.outHandle {
+                cell("points.lock.angle", AureaText.t("om_pts_lock_angle"), enabled: true, on: state.lockAngle, action: {
+                    state.lockAngle.toggle()
+                    if !state.lockAngle { state.lockLength = false }
+                }) { tint in ContentIcon(kind: .angleLock, size: 22, tint: tint) }
+                cell("points.lock.length", AureaText.t("om_pts_lock_length"), enabled: state.lockAngle, on: state.lockLength,
+                     action: { state.lockLength.toggle() }) { tint in ContentIcon(kind: .lengthLock, size: 22, tint: tint) }
+            } else {
+                let count = mask.points.count / 6
+                cell("mask.points.closed", AureaText.t(mask.closed ? "panel_abrir_caminho" : "panel_fechar_caminho"), enabled: mask.closed || count >= 3, action: {
+                    model.editPoints(PathOps.setClosed, [mask.closed ? 0 : 1])
+                }) { tint in pathEnds(tint) }
+                let curve = path?.isCurve(i) ?? false
+                let canType = kind == EPKind.point && (path?.v.indices.contains(i) ?? false)
+                cell("points.type", AureaText.t(curve ? "om_pts_type_corner" : "om_pts_type_curve"), enabled: canType, action: {
+                    model.editPoints(PathOps.setType, [Float(i), curve ? 0 : 1])
+                }) { tint in ContentIcon(kind: curve ? .pointCorner : .pointCurve, size: 22, tint: tint) }
+            }
+            cell("points.addRemove", AureaText.t(between ? "om_pts_add" : "om_pts_delete"), enabled: between || canRemove, action: {
+                if between {
+                    let r = model.editPoints(PathOps.insert, [Float(state.segment), state.t])
+                    if r >= 0 { state.choosePoint(Int(r)) }
+                } else if canRemove {
+                    let r = model.editPoints(PathOps.remove, [Float(i)])
+                    let left = EPPath.current(model)?.v.count ?? 0
+                    if r >= 0 && left > 0 { state.choosePoint(min(Int(r), left - 1)) } else { state.choosePoint(-1) }
+                }
+            }) { tint in
+                CupertinoGlyph.text(between ? CupertinoGlyph.AddCircled : CupertinoGlyph.MinusCircle, size: 22, color: tint)
+            }
+        }
+    }
+
+    /// Fechar ou abrir o caminho: o ícone mostra o que o toque vai fazer.
+    private func pathEnds(_ tint: Color) -> some View {
+        let closed = mask.closed
+        return Canvas { context, size in
+            let r = min(size.width, size.height) * 0.36
+            let c = CGPoint(x: size.width / 2, y: size.height / 2)
+            var ring = Path()
+            ring.addArc(center: c, radius: r, startAngle: .degrees(closed ? -50 : 0), endAngle: .degrees(closed ? 230 : 360), clockwise: false)
+            context.stroke(ring, with: .color(tint), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+        }.frame(width: 22, height: 22)
+    }
+
+    private func cell<Icon: View>(_ tag: String, _ label: String, enabled: Bool, on: Bool = false, action: @escaping () -> Void,
+                                  @ViewBuilder icon: (Color) -> Icon) -> some View {
+        icon(on ? AureaColors.accent : AureaColors.text)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture { if enabled { action() } }
+            .opacity(enabled ? 1 : 0.3)
+            .accessibilityElement()
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction { if enabled { action() } }
+            .accessibilityIdentifier(tag)
+    }
+}
+
 // MARK: - Trackpad (centro)
 
 /// O dedo no trackpad: a diferença (1 pt = 1 px da composição, convertida para o
 /// espaço do grupo) move o ponto, a alça ou os pontos do laço. Na ponta aberta
 /// (ou ENTRE pontos) o arraste posiciona o ponto pendente e o toque o fixa. Um
 /// gesto = um passo de desfazer.
-private struct PointsTrackpad: View {
+struct PointsTrackpad: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var state = EditPointsState.shared
     let path: EPPath?
@@ -433,7 +549,7 @@ private struct PointsTrackpad: View {
         if last == nil { last = g.startLocation; moved = false; sent = false }
         if !moved && hypot(g.location.x - g.startLocation.x, g.location.y - g.startLocation.y) < 8 { return }
         moved = true
-        guard let at = EPPath.load(model, group: model.vectorGroup, path: model.vectorPath), let previous = last else { return }
+        guard let at = EPPath.current(model), let previous = last else { return }
         let dx = Float(g.location.x - previous.x), dy = Float(g.location.y - previous.y)
         last = g.location
         guard let d = at.vecFromComp(dx, dy) else { return }
@@ -444,10 +560,10 @@ private struct PointsTrackpad: View {
             state.pending = start + d
         } else if state.kind == EPKind.point && at.v.indices.contains(i) {
             let group = (state.multi.contains(i) ? state.multi : [i]).sorted()
-            model.editVectorPath(PathOps.movePoints, [d.x, d.y] + group.map { Float($0) }, continuing: sent)
+            model.editPoints(PathOps.movePoints, [d.x, d.y] + group.map { Float($0) }, continuing: sent)
             sent = true
         } else if (state.kind == EPKind.inHandle || state.kind == EPKind.outHandle) && at.v.indices.contains(i) {
-            model.editVectorPath(PathOps.moveHandle, [Float(i), state.kind == EPKind.outHandle ? 1 : 0, d.x, d.y,
+            model.editPoints(PathOps.moveHandle, [Float(i), state.kind == EPKind.outHandle ? 1 : 0, d.x, d.y,
                                                       state.lockAngle ? 1 : 0, state.lockLength ? 1 : 0], continuing: sent)
             sent = true
         }
@@ -478,16 +594,16 @@ private struct PointsTrackpad: View {
     private func confirmPending() {
         guard let p = state.pending else { return }
         if state.kind == EPKind.between && state.segment >= 0 {
-            let r = model.editVectorPath(PathOps.insert, [Float(state.segment), state.t])
+            let r = model.editPoints(PathOps.insert, [Float(state.segment), state.t])
             if r >= 0 {
-                if let q = EPPath.load(model, group: model.vectorGroup, path: model.vectorPath)?.v, q.indices.contains(Int(r)) {
-                    model.editVectorPath(PathOps.movePoints, [p.x - q[Int(r)].x, p.y - q[Int(r)].y, Float(r)], continuing: true)
+                if let q = EPPath.current(model)?.v, q.indices.contains(Int(r)) {
+                    model.editPoints(PathOps.movePoints, [p.x - q[Int(r)].x, p.y - q[Int(r)].y, Float(r)], continuing: true)
                     model.refreshModel(force: true)
                 }
                 state.choosePoint(Int(r))
             }
         } else {
-            let r = model.editVectorPath(PathOps.append, [p.x, p.y, state.pendingAtStart ? 1 : 0])
+            let r = model.editPoints(PathOps.append, [p.x, p.y, state.pendingAtStart ? 1 : 0])
             if r >= 0 { state.choosePoint(Int(r)) }
         }
         state.pending = nil
@@ -527,7 +643,7 @@ private struct StripLayout {
     }
 }
 
-private struct PointsStrip: View {
+struct PointsStrip: View {
     @EnvironmentObject private var model: AureaModel
     @ObservedObject private var state = EditPointsState.shared
     let path: EPPath?

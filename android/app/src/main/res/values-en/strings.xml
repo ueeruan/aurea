@@ -4827,4 +4827,5 @@ to edit the curve.</string>
     <string name="s3d_fullscreen">Full screen</string>
     <string name="s3d_animation">Animation</string>
     <string name="s3d_more">More options</string>
+    <string name="pn_mask_points">Points</string>
 </resources>

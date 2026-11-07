@@ -4788,4 +4788,5 @@
     <string name="s3d_fullscreen">Во весь экран</string>
     <string name="s3d_animation">Анимация</string>
     <string name="s3d_more">Другие параметры</string>
+    <string name="pn_mask_points">Точки</string>
 </resources>

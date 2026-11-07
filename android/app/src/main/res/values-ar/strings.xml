@@ -4818,4 +4818,5 @@
     <string name="s3d_fullscreen">ملء الشاشة</string>
     <string name="s3d_animation">الحركة</string>
     <string name="s3d_more">خيارات أخرى</string>
+    <string name="pn_mask_points">النقاط</string>
 </resources>

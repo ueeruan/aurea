@@ -104,19 +104,18 @@ internal fun Element3DPanel(env: PanelEnv) {
         Element3DRequest.tab = null
     }
     val tab = tabs.firstOrNull { it.ordinal == chosen } ?: tabs.first()
-    Column(Modifier.fillMaxSize()) {
-        if (tabs.size > 1) {
-            Panel3DTabs(tabs, tab, Modifier.padding(start = 18.dp, top = 10.dp, end = 18.dp, bottom = 4.dp)) { chosen = it.ordinal }
-        }
-        Column(
-            Modifier.fillMaxSize().verticalScroll(remember(tab) { ScrollState(0) })
-                .padding(start = 18.dp, top = 6.dp, end = 18.dp, bottom = 24.dp),
-        ) {
+    // O desenho dos painéis de propriedade: a coluna fixa à esquerda, o conteúdo em
+    // seções no centro e as abas em ícones à direita.
+    Row(Modifier.fillMaxSize().testTag("panel3d")) {
+      LeftRail(onBack = env.onClose, keyframeLook = com.aurea.aurea.ui.ds.KeyframeLook.None, onKeyframe = null, curveAnimated = false, onCurve = null)
+      Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
+      androidx.compose.runtime.CompositionLocalProvider(com.aurea.aurea.ui.ds.LocalFlatParamLabel provides true) {
+        Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(remember(tab) { ScrollState(0) }).padding(bottom = 24.dp)) {
             when (tab) {
                 Tab3D.Material -> {
                     when {
                         text != null -> Text3DMaterialTab(env, text)
-                        shape != null -> {
+                        shape != null -> EnvSection(stringResource(R.string.panel_material), null) {
                             Shape3DSection(env, shape, Shape3DPage.Material)
                             // 0.3.6: a parte escolhida pode vir de uma camada da timeline
                             // (a imagem do arquivo continua na linha "Imagem" acima).
@@ -126,21 +125,48 @@ internal fun Element3DPanel(env: PanelEnv) {
                                 MaterialTextureRow(env, part, Color(c[0], c[1], c[2]), allowFile = false)
                             }
                         }
-                        else -> {
-                            KitTitle(stringResource(R.string.panel_material))
-                            ImportedMaterialSection(env)
-                        }
+                        else -> EnvSection(stringResource(R.string.panel_material), null) { ImportedMaterialSection(env) }
                     }
                     // 0.3.6: Objeto — projeta/recebe sombra (saíram do Ambiente) e o interior.
                     ObjectShadowSection(store)
-                    InteriorToggle(store)
+                    Column(Modifier.padding(horizontal = 10.dp)) { InteriorToggle(store) }
                 }
                 Tab3D.Shape -> if (text != null) Text3DShapeTab(env, text)
                 Tab3D.Light -> Environment3DTab(env)
                 Tab3D.Render -> Render3DTab(env)
-                Tab3D.Anim -> if (text != null) AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() }
-                Tab3D.Parts -> PartsTab(env, shape)
-                Tab3D.Rig -> Rig3DTab(env)
+                Tab3D.Anim -> if (text != null) Box(Modifier.padding(10.dp)) { AnimChip(stringResource(R.string.la_animators), false) { env.onOpenAnimators() } }
+                Tab3D.Parts -> Column(Modifier.padding(horizontal = 10.dp)) { PartsTab(env, shape) }
+                Tab3D.Rig -> Column(Modifier.padding(horizontal = 10.dp)) { Rig3DTab(env) }
+            }
+        }
+      }
+      if (tabs.size > 1) {
+          Box(Modifier.width(0.7.dp).fillMaxHeight().background(AureaColors.ContentStrongLine))
+          Panel3DRail(tabs, tab) { chosen = it.ordinal }
+      }
+    }
+}
+
+/** As abas em ícones, na coluna da direita (60 dp). */
+@Composable
+private fun Panel3DRail(tabs: List<Tab3D>, selected: Tab3D, onSelect: (Tab3D) -> Unit) {
+    val group = stringResource(R.string.ui3d_tabs)
+    Column(Modifier.width(60.dp).fillMaxHeight().semantics { contentDescription = group }) {
+        tabs.forEach { t ->
+            val on = t == selected
+            val ink = if (on) AureaColors.Accent else AureaColors.Text
+            Column(
+                Modifier.fillMaxWidth().height(62.dp).background(if (on) AureaColors.AccentDim else Color.Transparent)
+                    .semantics(mergeDescendants = true) { role = Role.Tab; this.selected = on }
+                    .testTag("panel3d.tab.${t.name.lowercase()}")
+                    .tocavel(shrink = 1f) { onSelect(t) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                com.aurea.aurea.ui.theme.CupertinoIcon(t.glyph, 20.dp, ink)
+                Spacer(Modifier.height(3.dp))
+                Text(stringResource(t.label), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = AureaType.Base.merge(TextStyle(fontSize = 9.5.sp, fontWeight = if (on) FontWeight.W700 else FontWeight.W400, color = ink)))
             }
         }
     }
@@ -152,14 +178,14 @@ internal object Element3DRequest {
 }
 
 /** As abas do painel 3D (a ordem é a da tela). */
-internal enum class Tab3D(val label: Int) {
-    Material(R.string.ui3d_tab_material),
-    Shape(R.string.ui3d_tab_shape),
-    Light(R.string.sh_dock_environment),
-    Anim(R.string.ui3d_tab_anim),
-    Parts(R.string.shape3d_parts),
-    Rig(R.string.rig3d_tab),
-    Render(R.string.env3d_tab_render),
+internal enum class Tab3D(val label: Int, val glyph: Char) {
+    Material(R.string.ui3d_tab_material, com.aurea.aurea.ui.theme.CupertinoGlyph.CubeFill),
+    Shape(R.string.ui3d_tab_shape, com.aurea.aurea.ui.theme.CupertinoGlyph.Textformat),
+    Light(R.string.sh_dock_environment, com.aurea.aurea.ui.theme.CupertinoGlyph.Lightbulb),
+    Anim(R.string.ui3d_tab_anim, com.aurea.aurea.ui.theme.CupertinoGlyph.Sparkles),
+    Parts(R.string.shape3d_parts, com.aurea.aurea.ui.theme.CupertinoGlyph.SquareOnSquare),
+    Rig(R.string.rig3d_tab, com.aurea.aurea.ui.theme.CupertinoGlyph.PersonCropCircle),
+    Render(R.string.env3d_tab_render, com.aurea.aurea.ui.theme.CupertinoGlyph.Camera),
 }
 
 /**
@@ -215,35 +241,6 @@ private fun PartsTab(env: PanelEnv, shape: com.aurea.aurea.state.Shape3DInfo?) {
 }
 
 /** Controle segmentado: cada aba divide a largura; a acesa usa o destaque. */
-@Composable
-private fun Panel3DTabs(tabs: List<Tab3D>, selected: Tab3D, modifier: Modifier, onSelect: (Tab3D) -> Unit) {
-    val group = stringResource(R.string.ui3d_tabs)
-    Row(
-        modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(10.dp)).background(AureaColors.Chip)
-            .semantics { contentDescription = group }.padding(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        tabs.forEach { t ->
-            val on = t == selected
-            Box(
-                Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(8.dp))
-                    .background(if (on) AureaColors.AccentDim else Color.Transparent)
-                    .semantics { role = Role.Tab; this.selected = on }
-                    .testTag("panel3d.tab.${t.name.lowercase()}")
-                    .tocavel(shrink = 1f) { onSelect(t) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    stringResource(t.label), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = AureaType.Base.merge(TextStyle(fontSize = 12.5.sp,
-                        fontWeight = if (on) FontWeight.W700 else FontWeight.W500,
-                        color = if (on) AureaColors.Accent else AureaColors.Text)),
-                )
-            }
-        }
-    }
-}
-
 // --- Texto 3D -----------------------------------------------------------------
 
 /** Cor da amostra de cada material pronto (a mesma ordem do motor). */
@@ -276,19 +273,7 @@ private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
     val texturePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) store.setShapePartImage(-1, uri, textTexture = true)
     }
-    var advanced by rememberSaveable { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.environment_texture), modifier = Modifier.weight(1f), style = AureaType.BodySmall)
-        Box(Modifier.testTag("text3d.texture.pick")) {
-            KitChip(stringResource(if (hasTexture) R.string.shape3d_image_change else R.string.shape3d_image_pick), on = hasTexture) {
-                texturePicker.launch(arrayOf("image/*"))
-            }
-        }
-        if (hasTexture) Box(Modifier.testTag("text3d.texture.clear")) {
-            KitChip(stringResource(R.string.shape3d_image_clear), on = false) { store.clearText3DTexture() }
-        }
-    }
-    KitTitle(stringResource(R.string.ui3d_ready_materials))
+    EnvSection(stringResource(R.string.ui3d_ready_materials), null) {
     ChipRow {
         (listOf(Text3DPreset.CinematicMetal) + Text3DPreset.values().filter { it != Text3DPreset.CinematicMetal }).forEach { preset ->
             // A bola de estúdio do material (o motor calcula; até chegar, a cor chapada).
@@ -299,6 +284,19 @@ private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
             }
         }
     }
+    }
+    EnvSection(stringResource(R.string.panel_material), null) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.env3d_texture), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp)))
+        Box(Modifier.testTag("text3d.texture.pick")) {
+            KitChip(stringResource(if (hasTexture) R.string.shape3d_image_change else R.string.shape3d_image_pick), on = hasTexture) {
+                texturePicker.launch(arrayOf("image/*"))
+            }
+        }
+        if (hasTexture) Box(Modifier.testTag("text3d.texture.clear")) {
+            KitChip(stringResource(R.string.shape3d_image_clear), on = false) { store.clearText3DTexture() }
+        }
+    }
     ColorLine(stringResource(R.string.panel_cor), Color(info.color[0], info.color[1], info.color[2])) {
         store.beginGesture("cor do texto 3D")
         env.openColor(ColorRequest(info.color.copyOf(), onChange = { r, g, b, _ ->
@@ -307,8 +305,8 @@ private fun Text3DMaterialTab(env: PanelEnv, info: Text3DInfo) {
     }
     T3DRow(env, stringResource(R.string.pn_t3d_metallic), info.metallic, 1f, 0f, "metalico") { t, v -> t.copy(metallic = v) }
     T3DRow(env, stringResource(R.string.pn_t3d_roughness), info.roughness, 1f, 0.35f, "rugosidade") { t, v -> t.copy(roughness = v) }
-    AdvancedSection(advanced, { advanced = !advanced }) {
-        KitTitle(stringResource(R.string.ui3d_finish))
+    }
+    EnvSection(stringResource(R.string.ui3d_finish), null, startOpen = false) {
         ChipRow {
             FinishLabels.forEachIndexed { index, res ->
                 KitChip(stringResource(res), on = info.surfaceFinish == index) {
@@ -353,18 +351,20 @@ private fun Text3DShapeTab(env: PanelEnv, info: Text3DInfo) {
     val importFont = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         store.importFonts(uris, forText3d = true)
     }
-    KitTitle(stringResource(R.string.ui3d_text))
+    EnvSection(stringResource(R.string.ui3d_text), null) {
     ChipRow {
         KitChip(stringResource(R.string.t3d_font), on = false) { store.loadFonts(); fontsOpen = true }
         KitChip(stringResource(R.string.t3d_import_font), on = false) { importFont.launch(arrayOf("font/*", "application/octet-stream", "*/*")) }
     }
-    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.panel_alinhamento), modifier = Modifier.weight(1f), style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp)))
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Text(stringResource(R.string.panel_alinhamento), style = AureaType.Base.merge(TextStyle(fontSize = 13.5.sp)))
+        Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(0 to R.string.panel_esquerda, 1 to R.string.panel_centro, 2 to R.string.panel_direita).forEach { (a, label) ->
                 KitChip(stringResource(label), on = info.alignment == a) { store.text3d?.let { store.setText3D(it.copy(alignment = a)) } }
             }
         }
+    }
     }
     if (fontsOpen) AlertDialog(
         onDismissRequest = { fontsOpen = false },
@@ -384,14 +384,13 @@ private fun Text3DShapeTab(env: PanelEnv, info: Text3DInfo) {
         },
         confirmButton = { TextButton(onClick = { fontsOpen = false }) { Text(stringResource(R.string.t3d_close)) } },
     )
-    KitTitle(stringResource(R.string.ui3d_extrusion))
+    EnvSection(stringResource(R.string.ui3d_extrusion), null) {
     // 100 % = a altura da letra (a malha é gerada de novo a cada passo).
     T3DRow(env, stringResource(R.string.pn_depth), info.depth, 3f, 0.25f, "profundidade do texto 3D", step = 0.5f) { t, v -> t.copy(depth = v) }
     KitHint(stringResource(R.string.ui3d_depth_hint))
-    Spacer(Modifier.height(6.dp))
+    }
     // O chanfro é GEOMETRIA: frente/fundo recuados e o anel do chanfro.
-    ToggleLine(stringResource(R.string.pn_t3d_bevel), info.bevel) { on -> store.text3d?.let { store.setText3D(it.copy(bevel = on)) } }
-    if (info.bevel) {
+    EnvSection(stringResource(R.string.pn_t3d_bevel), null, on = info.bevel, onSwitch = { on -> store.text3d?.let { store.setText3D(it.copy(bevel = on)) } }) {
         T3DRow(env, stringResource(R.string.pn_t3d_bevel_width), info.bevelWidth, 0.2f, 0.02f, "chanfro", step = 0.05f, decimals = 1) { t, v ->
             t.copy(bevelWidth = v)
         }
@@ -408,11 +407,12 @@ private fun Text3DShapeTab(env: PanelEnv, info: Text3DInfo) {
             }
         }
     }
-    Spacer(Modifier.height(10.dp))
+    Box(Modifier.padding(10.dp)) {
     ActionCard(stringResource(R.string.ui3d_deform_letters), null) {
         val type = effectTypeId("aurea.text3d.layout")
         if (store.effects.none { it.typeId == type }) store.addEffect(type)
         env.onOpenPanel(EditorPanel.Effects)
+    }
     }
 }
 

@@ -399,6 +399,9 @@ fun ValueBox(
 // Chip do rótulo e linha de propriedade [A]
 // =============================================================================
 
+/** Rótulo plano, sem a ficha: o painel de material e ambiente do 3D. */
+val LocalFlatParamLabel = androidx.compose.runtime.staticCompositionLocalOf { false }
+
 /**
  * O RÓTULO DA LINHA (redesenho 2026-09-29): botão 70 × 36, raio 6, SEMPRE
  * sublinhado (a promessa de que toca). Escolhido = fundo escuro #121826 e texto
@@ -425,11 +428,12 @@ fun PropertyLabelChip(
     onClick: (() -> Unit)? = null,
     width: Dp = ParamRowDims.LabelW,
 ) {
+    val flat = LocalFlatParamLabel.current
     Box(
         modifier
             .size(width = width, height = ParamRowDims.LabelH)
             .clip(RoundedCornerShape(ParamRowDims.Radius))
-            .background(if (selected) ParamRowColors.LabelOn else ParamRowColors.LabelOff)
+            .background(if (selected) ParamRowColors.LabelOn else if (flat) androidx.compose.ui.graphics.Color.Transparent else ParamRowColors.LabelOff)
             .then(
                 if (onClick != null || onLongClick != null) {
                     Modifier.tocavel(shrink = 1f, onLongClick = onLongClick, onClick = { onClick?.invoke() })
@@ -438,23 +442,26 @@ fun PropertyLabelChip(
                 },
             )
             .padding(horizontal = 4.dp),
-        contentAlignment = Alignment.Center,
+        contentAlignment = if (flat) Alignment.CenterStart else Alignment.Center,
     ) {
         // Palavra longa ("Profundidade") encolhe até caber em vez de virar
         // "Profundida…" (até 70% do tamanho; depois disso, reticências).
         var shrink by remember(label) { mutableFloatStateOf(1f) }
         Text(
             label,
-            maxLines = ParamRowMath.labelMaxLines(label),
+            maxLines = if (flat && ' ' !in label) 1 else ParamRowMath.labelMaxLines(label),
             overflow = TextOverflow.Ellipsis,
-            onTextLayout = { if (it.hasVisualOverflow && shrink > 0.86f) shrink = (shrink - 0.06f).coerceAtLeast(0.86f) },
+            onTextLayout = {
+                val floor = if (flat) 0.72f else 0.86f
+                if (it.hasVisualOverflow && shrink > floor) shrink = (shrink - 0.06f).coerceAtLeast(floor)
+            },
             style = AureaType.Base.merge(
                 TextStyle(
                     fontSize = (14f * shrink).sp,
                     lineHeight = 1.1.em,
                     fontWeight = if (selected) FontWeight.W700 else FontWeight.W400,
-                    textAlign = TextAlign.Center,
-                    color = if (selected) AureaColors.Accent else ParamRowColors.LabelOffText,
+                    textAlign = if (flat) TextAlign.Start else TextAlign.Center,
+                    color = if (selected) AureaColors.Accent else if (flat) AureaColors.Text else ParamRowColors.LabelOffText,
                     textDecoration = TextDecoration.None,
                 ),
             ),

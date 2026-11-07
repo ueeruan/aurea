@@ -4859,4 +4859,5 @@
     <string name="s3d_fullscreen">Tela cheia</string>
     <string name="s3d_animation">Animação</string>
     <string name="s3d_more">Mais opções</string>
+    <string name="pn_mask_points">Pontos</string>
 </resources>

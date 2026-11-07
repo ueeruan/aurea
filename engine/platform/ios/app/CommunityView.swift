@@ -212,6 +212,8 @@ struct CommunityView: View {
     @State private var legacy = false
     @State private var storeOpen = false
     @State private var storeSoon = false
+    /// Ligada pelo servidor (GET /store/config): sem armazenamento, "Em breve".
+    @State private var storeReady = false
     @State private var verifying = false
     @State private var deleting: SocialPost?
     @State private var comments: SocialPost?
@@ -269,6 +271,7 @@ struct CommunityView: View {
         }.background(AureaColors.lightBackground).foregroundStyle(AureaColors.lightText).tint(AureaColors.lightAccentInk)
             .accessibilityIdentifier("social.screen")
             .task(id: profileMode) { await state.start(conta.sessao(), own: profileMode) }
+            .task { storeReady = await StoreAPI.ready(token: conta.sessao()?.token ?? "") }
             .task(id: search) {
                 if search.trimmingCharacters(in: .whitespaces).count < 2 { results = []; return }
                 do {
@@ -322,8 +325,8 @@ struct CommunityView: View {
             // 0.4.6: a Loja da Comunidade (plugins, efeitos e presets). Par do Android.
             // Enquanto o armazenamento (R2) não está ativo no servidor: "Em breve".
             // Beta (nov/2026): na linha dos filtros o nome quebrava no meio; agora tem a linha dele.
-            Button(AureaText.t("store_title") + (storeEnabled ? "" : " · " + AureaText.t("store_soon"))) {
-                if storeEnabled { storeOpen = true } else { storeSoon = true }
+            Button(AureaText.t("store_title") + (storeReady ? "" : " · " + AureaText.t("store_soon"))) {
+                if storeReady { storeOpen = true } else { storeSoon = true }
             }.lineLimit(1).truncationMode(.tail).frame(minHeight: 44).accessibilityIdentifier("social.store").disabled(state.busy)
         }
     }

@@ -82,6 +82,9 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
     var legacy by remember { mutableStateOf(false) }
     var storeOpen by remember { mutableStateOf(false) }
     var storeSoon by remember { mutableStateOf(false) }
+    // Ligada pelo servidor (GET /store/config): sem armazenamento, "Em breve".
+    var storeReady by remember { mutableStateOf(false) }
+    LaunchedEffect(api) { storeReady = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { api.storeReady() } }
     var commentsFor by remember { mutableStateOf<CommunityPost?>(null) }
     var verifying by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<CommunityPost?>(null) }
@@ -192,11 +195,11 @@ private fun CommunityScreenContent(store: EditorStore, conta: ContaViewModel, pr
                             TextButton(onClick = { legacy = true }) { Text(stringResource(R.string.pn_caption), maxLines = 1) }
                         }
                         // 0.4.6: a Loja da Comunidade (plugins, efeitos e presets).
-                        // Enquanto o armazenamento (R2) não está ativo no servidor: "Em breve".
+                        // Enquanto o servidor não guarda arquivos (R2): "Em breve" (GET /store/config).
                         // Beta (nov/2026): na mesma linha dos filtros o nome era espremido e
                         // quebrava no meio da palavra; agora tem a linha dele, numa linha só.
-                        TextButton(onClick = { if (STORE_ENABLED) storeOpen = true else storeSoon = true }, modifier = Modifier.testTag("social.store")) {
-                            Text(stringResource(R.string.store_title) + if (STORE_ENABLED) "" else " · " + stringResource(R.string.store_soon),
+                        TextButton(onClick = { if (storeReady) storeOpen = true else storeSoon = true }, modifier = Modifier.testTag("social.store")) {
+                            Text(stringResource(R.string.store_title) + if (storeReady) "" else " · " + stringResource(R.string.store_soon),
                                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         }
                     }

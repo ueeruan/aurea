@@ -138,6 +138,12 @@ internal open class CommunityApi(private val token: String,
     // ------------------------------------------------------------------
     // Loja da Comunidade (0.4.6): plugins, efeitos e presets.
     // ------------------------------------------------------------------
+    /**
+     * A Loja aceita envios? O servidor responde pelo bucket R2 (aurea-community-files):
+     * sem ele o botão fica "Em breve". Servidor antigo sem a rota = não.
+     */
+    fun storeReady(): Boolean = try { request("/store/config").optBoolean("uploads") } catch (_: Exception) { false }
+
     /** Pacote (.aureaplugin / preset .json) ou foto de exemplo; o servidor confere o conteúdo. */
     fun storeUpload(file: File, role: String, name: String): JSONObject {
         val max = when { role == "photo" -> 3L * 1024 * 1024; name.endsWith(".json", true) -> 1024L * 1024; else -> 20L * 1024 * 1024 }

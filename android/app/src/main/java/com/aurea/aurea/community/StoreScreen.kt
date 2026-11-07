@@ -52,12 +52,6 @@ import java.util.UUID
  * Meus Presets. Plugin publicado só aparece depois da aprovação de um admin.
  * Par do iOS: StoreView.swift.
  */
-/**
- * A loja só abre quando o servidor tem armazenamento (bucket R2
- * aurea-community-files). Até lá o botão mostra "Em breve". Par do iOS:
- * `storeEnabled` em StoreView.swift.
- */
-internal const val STORE_ENABLED = false
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

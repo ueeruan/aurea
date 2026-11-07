@@ -10,9 +10,8 @@ import ImageIO
 // Par do Android: community/StoreScreen.kt.
 
 /// A loja só abre quando o servidor tem armazenamento (bucket R2
-/// aurea-community-files). Até lá o botão mostra "Em breve". Par do Android:
-/// `STORE_ENABLED` em StoreScreen.kt.
-let storeEnabled = false
+/// aurea-community-files): `StoreAPI.ready` lê GET /store/config. Até lá o botão
+/// mostra "Em breve". Par do Android: `CommunityApi.storeReady`.
 
 struct StoreAuthor: Codable { var id: String; var username: String; var name: String; var avatar: String?; var verification: String }
 struct StorePermissions: Codable { var network: [String]; var clipboard: Bool; var files: Bool }
@@ -76,6 +75,13 @@ actor StoreAPI {
         let (data, response) = try await ContaAPI.boundedData(for: r, limit: 1_048_576)
         try Task.checkCancellation()
         return try decode(data, response, as: type)
+    }
+    /// A Loja aceita envios? O servidor responde pelo bucket R2 (aurea-community-files):
+    /// sem ele o botão fica "Em breve". Servidor antigo sem a rota = não.
+    static func ready(token: String) async -> Bool {
+        struct Config: Decodable { let uploads: Bool }
+        guard !token.isEmpty, let config = try? await StoreAPI(token: token).call("/store/config", as: Config.self) else { return false }
+        return config.uploads
     }
     /// Pacote (.aureaplugin / preset .json) ou foto; o servidor confere o conteúdo.
     func upload(_ url: URL, role: String, name: String) async throws -> StoreFile {

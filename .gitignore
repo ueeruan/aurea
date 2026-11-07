@@ -102,3 +102,20 @@ entrega/
 /discovery/.env*
 # 0.4.1: valores do Firebase do iOS (ver engine/platform/ios/Firebase.xcconfig.example).
 /engine/platform/ios/Firebase.xcconfig
+
+# Saídas dos testes do motor (gravadas na pasta de onde a suíte roda)
+__pycache__/
+*.corrompido*
+/aurea_teste_*
+/engine/aurea_teste_*
+/aurea_model_budget_tmp/
+/engine/aurea_model_budget_tmp/
+/aurea_estab_*
+/constelacao_*.png
+/engine/constelacao_*.png
+/forma_*.png
+/engine/forma_*.png
+/scene3d_*.png
+/engine/scene3d_*.png
+/*_obtido.png
+/engine/*_obtido.png

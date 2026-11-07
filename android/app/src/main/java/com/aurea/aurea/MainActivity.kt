@@ -99,11 +99,6 @@ class MainActivity : ComponentActivity() {
         opcional("config") { com.aurea.aurea.config.AppConfigStore.init(this) }
         opcional("hyper") { com.aurea.aurea.hyper.HyperEntitlements.init(this) }
         if (savedInstanceState == null) opcional("config") { com.aurea.aurea.config.AppConfigStore.refresh(force = true) }
-        // Debug-only: mockup da nova Cena 3D (editor/scene3d), sem motor e sem projeto.
-        if (BuildConfig.DEBUG && intent.getStringExtra("aureaMockup") == "scene3d") {
-            setContent { com.aurea.aurea.ui.theme.AureaTheme { com.aurea.aurea.editor.scene3d.Scene3DStudioMockup(onClose = ::finish) } }
-            return
-        }
         // Debug (0.4.6): a cena demo — e QUALQUER teste no emulador — abre direto,
         // sem as telas de boas-vindas, do criador e da conta. Só no build de
         // debug rodando em emulador; release e aparelho de verdade não mudam.

@@ -36,7 +36,7 @@ u64 stroke_hash(u64 h, const RotoStroke& s) noexcept {
     h = fnv(h, s.background ? 2 : 1);
     h = fnv(h, fbits(s.radius));
     for (const Vec2& p : s.points) h = fnv(h, (fbits(p.x) << 32) | fbits(p.y));
-    return h;
+    return s.click ? fnv(h, 0xC11C) : h;
 }
 
 f32 cdiff(const u8* a, const u8* b) noexcept {
@@ -167,6 +167,7 @@ bool roto_decode(const CurveData& curve, RotoStrokes& out) {
         s.frame = static_cast<i64>(std::llround(heads[i].x));
         s.background = heads[i].y < 0;
         s.radius = std::clamp(std::fabs(heads[i].y), 1e-4f, 1.0f);
+        s.click = counts[i].y > 0.5f;
         s.points.reserve(count);
         for (usize k = 0; k < count; ++k, ++at) {
             const auto& p = pts[at];
@@ -182,7 +183,7 @@ void roto_encode(const RotoStrokes& strokes, CurveData& curve) {
     for (const RotoStroke& s : strokes) {
         if (s.points.empty()) continue;
         curve.channel[0].push_back({static_cast<f32>(s.frame), s.background ? -s.radius : s.radius});
-        curve.channel[1].push_back({static_cast<f32>(s.points.size()), 0.0f});
+        curve.channel[1].push_back({static_cast<f32>(s.points.size()), s.click ? 1.0f : 0.0f});
         for (const Vec2& p : s.points) curve.channel[2].push_back({p.x, p.y});
     }
     curve.channel[3].push_back({kMagic, 1.0f});

@@ -3613,7 +3613,7 @@
     <string name="roto_propagate">Отследить весь клип</string>
     <string name="roto_progress">Отслеживание %1$d из %2$d</string>
     <string name="roto_done">Готово</string>
-    <string name="roto_hint">Закрасьте объект зелёным; переключитесь на Фон, чтобы убрать части. Мазки на другом кадре обновляют следующие кадры.</string>
+    <string name="roto_hint">Коснитесь объекта, чтобы выделить его, или проведите, чтобы закрасить. Режим «Фон» убирает части. Изменения на другом кадре обновляют следующие кадры.</string>
     <string name="real_camera_tracking_position">Отслеживание положения и вращения 3D активно.</string>
     <string name="real_camera_tracking_rotation">Только вращение; этот режим не измеряет положение.</string>
     <string name="real_camera_tracking_limited">Отслеживание положения приостановлено. Улучшите освещение и двигайте устройство медленно.</string>

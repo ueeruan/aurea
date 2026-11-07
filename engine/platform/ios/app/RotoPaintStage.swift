@@ -79,7 +79,7 @@ func rotoFailedKey(_ reason: Int64) -> String {
                                         y: (v.location.y - placed.origin.y) / max(placed.scale, 0.0001))
                         roto.live.append(p)
                     }
-                    .onEnded { _ in finish() })
+                    .onEnded { _ in finish(scale: placed.scale) })
                 .accessibilityElement()
                 .accessibilityLabel(AureaText.t("roto_paint"))
                 .accessibilityHint(AureaText.t("roto_hint"))
@@ -88,11 +88,20 @@ func rotoFailedKey(_ reason: Int64) -> String {
         }
     }
 
-    /// Soltar manda o traço inteiro ao motor (um passo de desfazer).
-    private func finish() {
+    /// Um toque seleciona o objeto (RotoClick no motor); arrastar pinta um traço.
+    /// Soltar manda tudo ao motor, em um passo de desfazer.
+    private func finish(scale: CGFloat) {
         let pts = roto.live
         roto.live = []
-        guard !pts.isEmpty else { return }
+        guard let first = pts.first else { return }
+        let reach = pts.map { hypot($0.x - first.x, $0.y - first.y) }.max() ?? 0
+        if reach * scale <= 10 {
+            if model.engine.rotoAddClick(x: Float(first.x), y: Float(first.y), background: roto.background, effect: roto.effect, forLayer: roto.layer) {
+                model.refreshModel(force: true)
+                roto.refresh(model)
+            }
+            return
+        }
         var xy: [NSNumber] = []
         xy.reserveCapacity(pts.count * 2)
         for p in pts { xy.append(NSNumber(value: Float(p.x))); xy.append(NSNumber(value: Float(p.y))) }

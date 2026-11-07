@@ -149,7 +149,7 @@ usize RotoService::trim_to(usize keepBytes) noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     const usize before = bytes_ + refinedBytes_;
     evict_locked(keepBytes, std::min(keepBytes, refined_cap(maxBytes_)));
-    if (!keepBytes) imageSlot_ = ImageSlot{};
+    if (!keepBytes) { imageSlot_ = ImageSlot{}; click_.clear(); }
     return before - (bytes_ + refinedBytes_);
 }
 
@@ -256,6 +256,28 @@ RotoService::Result RotoService::compute_impl(u64 track, const RotoStrokes& stro
         return out;
     };
 
+    // O objeto dos cliques do quadro `f`, na grade. Só com clique de objeto: um
+    // clique de fundo sozinho não diz o que selecionar e fica como traço.
+    auto click_matte = [&](i64 f, const DepthMapPtr& map, std::vector<f32>& out) {
+        std::vector<RotoClick::Point> points;
+        bool object = false;
+        for (const RotoStroke& s : strokes) {
+            if (s.frame != f || !s.click || s.points.empty()) continue;
+            points.push_back({s.points[0].x, s.points[0].y, !s.background});
+            object |= !s.background;
+        }
+        if (!object) return false;
+        std::vector<u8> rgb;
+        if (const RotoImagePtr image = frame_image(source, f)) roto_grid_rgb(*image, RotoClick::kInput, rgb);
+        else if (map) {
+            RotoImage grid;
+            grid.width = grid.height = kSize;
+            grid.rgb = map->foregroundRgb;
+            roto_grid_rgb(grid, RotoClick::kInput, rgb);
+        } else return false;
+        return click_.run(key_of(source.sourceKey, f), rgb.data(), points.data(), static_cast<u32>(points.size()), kSize, out);
+    };
+
     std::vector<f32> matte;
     std::vector<u8> labels;
     DepthMapPtr prev;          // mapa cru do quadro k (só se o recorte for calculado)
@@ -274,7 +296,11 @@ RotoService::Result RotoService::compute_impl(u64 track, const RotoStrokes& stro
             prev = raw(source, first, refine ? &prevImg : nullptr);
             if (!prev) return {};
             roto_rasterize(strokes, first, kSize, source.layerW, source.layerH, labels);
-            roto_segment(prev->disparity.data(), prev->foregroundRgb.data(), labels.data(), nullptr, kSize, matte);
+            // O recorte do clique entra como semente: a borda ainda segue as
+            // arestas do quadro e os traços continuam mandando.
+            std::vector<f32> picked;
+            if (click_matte(first, prev, picked)) roto_segment(nullptr, prev->foregroundRgb.data(), labels.data(), picked.data(), kSize, matte);
+            else roto_segment(prev->disparity.data(), prev->foregroundRgb.data(), labels.data(), nullptr, kSize, matte);
             store(track, first, roto_dependency(strokes, first), matte);
             (void)roto_unpack([&] { std::vector<u8> p; roto_pack(matte, p); return p; }(), matte.size(), matte);
             computed_.fetch_add(1, std::memory_order_relaxed);
@@ -306,8 +332,9 @@ RotoService::Result RotoService::compute_impl(u64 track, const RotoStrokes& stro
                 roto_rasterize(strokes, m, kSize, source.layerW, source.layerH, labels);
                 lab = labels.data();
             }
-            std::vector<f32> next;
-            roto_propagate(matte, prev->foregroundRgb.data(), cur->foregroundRgb.data(), cur->disparity.data(), lab, kSize, next);
+            std::vector<f32> next, picked;
+            if (lab && click_matte(m, cur, picked)) roto_segment(nullptr, cur->foregroundRgb.data(), lab, picked.data(), kSize, next);
+            else roto_propagate(matte, prev->foregroundRgb.data(), cur->foregroundRgb.data(), cur->disparity.data(), lab, kSize, next);
             store(track, m, roto_dependency(strokes, m), next);
             // O que continua a cadeia é o MESMO valor do cache: retomar do cache
             // (seek, export depois do preview) dá o mesmo recorte.

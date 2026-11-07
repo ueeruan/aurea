@@ -636,6 +636,8 @@ NS_SWIFT_NAME(AureaEngine)
 - (nullable NSDictionary<NSString *, id> *)colorScopes:(uint32_t)maxDim NS_SWIFT_NAME(colorScopes(_:));
 /// Roto Brush do Rotobrush IA: pontos em px da composição (x,y intercalados).
 - (BOOL)rotoAddStroke:(NSArray<NSNumber *> *)xy background:(BOOL)background radius:(float)radius effect:(uint32_t)effectId forLayer:(long long)layerId NS_SWIFT_NAME(rotoAddStroke(_:background:radius:effect:forLayer:));
+/// Um toque: a seleção por clique (px da composição).
+- (BOOL)rotoAddClickAtX:(float)x y:(float)y background:(BOOL)background effect:(uint32_t)effectId forLayer:(long long)layerId NS_SWIFT_NAME(rotoAddClick(x:y:background:effect:forLayer:));
 - (BOOL)rotoUndoStrokeForEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(rotoUndoStroke(effect:layer:));
 - (BOOL)rotoPropagateEffect:(uint32_t)effectId layer:(long long)layerId NS_SWIFT_NAME(rotoPropagate(effect:layer:));
 - (void)rotoCancel NS_SWIFT_NAME(rotoCancel());

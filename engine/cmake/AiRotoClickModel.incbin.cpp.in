@@ -1,0 +1,53 @@
+// Gerado pelo CMake a partir de engine/cmake/AiRotoClickModel.incbin.cpp.in.
+//
+// EfficientTAM-Ti embutido (ver engine/assets/rotobrush/NOTICE-EfficientTAM.txt):
+// encoder, decoder e as constantes do prompt entram no objeto como estão, pelo
+// `.incbin` do montador (Clang/GCC: Android e iOS). O MSVC (host de testes) não
+// tem `.incbin` e usa cmake/AiRotoClickModel.stub.cpp: o clique cai nos traços.
+#include <cstdint>
+
+#if defined(__APPLE__)
+#define AUREA_CLICK_SECTION ".section __TEXT,__const\n"
+#define AUREA_CLICK_SYM(name) "_" name
+#define AUREA_CLICK_LOCAL(name) ".private_extern _" name "\n"
+#else
+#define AUREA_CLICK_SECTION ".section .rodata.aurea_roto_click,\"a\"\n"
+#define AUREA_CLICK_SYM(name) name
+#define AUREA_CLICK_LOCAL(name) ".hidden " name "\n"
+#endif
+#define AUREA_CLICK_LABEL(name) ".globl " AUREA_CLICK_SYM(name) "\n" AUREA_CLICK_LOCAL(name) AUREA_CLICK_SYM(name) ":\n"
+
+__asm__(
+    AUREA_CLICK_SECTION
+    ".p2align 4\n"
+    AUREA_CLICK_LABEL("aurea_roto_click_encoder_bin")
+    ".incbin \"@AI_ROTO_CLICK_ENCODER_BIN@\"\n"
+    ".p2align 4\n"
+    AUREA_CLICK_LABEL("aurea_roto_click_decoder_bin")
+    ".incbin \"@AI_ROTO_CLICK_DECODER_BIN@\"\n"
+    ".p2align 4\n"
+    AUREA_CLICK_LABEL("aurea_roto_click_prompt")
+    ".incbin \"@AI_ROTO_CLICK_PROMPT@\"\n"
+    ".p2align 4\n"
+    AUREA_CLICK_LABEL("aurea_roto_click_encoder_param")
+    ".incbin \"@AI_ROTO_CLICK_ENCODER_PARAM@\"\n"
+    ".byte 0\n"
+    ".p2align 4\n"
+    AUREA_CLICK_LABEL("aurea_roto_click_decoder_param")
+    ".incbin \"@AI_ROTO_CLICK_DECODER_PARAM@\"\n"
+    ".byte 0\n"
+    ".text\n");
+
+extern "C" const unsigned char aurea_roto_click_encoder_bin[];
+extern "C" const unsigned char aurea_roto_click_decoder_bin[];
+extern "C" const unsigned char aurea_roto_click_prompt[];
+extern "C" const char aurea_roto_click_encoder_param[];
+extern "C" const char aurea_roto_click_decoder_param[];
+
+namespace aurea::ai::embedded {
+const unsigned char* roto_click_encoder_weights() { return aurea_roto_click_encoder_bin; }
+const char* roto_click_encoder_param() { return aurea_roto_click_encoder_param; }
+const unsigned char* roto_click_decoder_weights() { return aurea_roto_click_decoder_bin; }
+const char* roto_click_decoder_param() { return aurea_roto_click_decoder_param; }
+const unsigned char* roto_click_prompt() { return aurea_roto_click_prompt; }
+}

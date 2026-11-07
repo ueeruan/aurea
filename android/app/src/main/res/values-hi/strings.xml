@@ -3601,7 +3601,7 @@
     <string name="roto_propagate">पूरी क्लिप ट्रैक करें</string>
     <string name="roto_progress">%2$d में से %1$d ट्रैक हो रहे हैं</string>
     <string name="roto_done">हो गया</string>
-    <string name="roto_hint">वस्तु को हरे रंग से पेंट करें; हिस्से हटाने के लिए पृष्ठभूमि चुनें। दूसरे फ़्रेम के स्ट्रोक अगले फ़्रेम अपडेट करते हैं।</string>
+    <string name="roto_hint">ऑब्जेक्ट चुनने के लिए उस पर टैप करें या पेंट करने के लिए खींचें। हिस्से हटाने के लिए बैकग्राउंड चुनें। दूसरे फ़्रेम के बदलाव अगले फ़्रेम अपडेट करते हैं।</string>
     <string name="real_camera_tracking_position">3D स्थिति और घुमाव का ट्रैकिंग सक्रिय है।</string>
     <string name="real_camera_tracking_rotation">केवल घुमाव; यह मोड स्थिति नहीं मापता।</string>
     <string name="real_camera_tracking_limited">स्थिति ट्रैकिंग रुकी है। रोशनी बढ़ाएँ और डिवाइस धीरे हिलाएँ।</string>

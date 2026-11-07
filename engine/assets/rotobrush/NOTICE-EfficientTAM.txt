@@ -1,0 +1,25 @@
+AUREA Rotobrush click selection model
+
+EfficientTAM-Ti 512, Yunyang Xiong and contributors (Meta).
+Source: https://github.com/yformer/EfficientTAM
+Commit: abcd061ebd3cc6e7527d152d75b890126aaa53f6
+License: Apache-2.0, included as LICENSE-EfficientTAM.txt.
+Paper: Efficient Track Anything.
+
+Modified for AUREA: the image encoder and the mask decoder of the published
+checkpoint efficienttam_ti_512x512.pt were rewritten for export (attention as
+plain matrix products, shape-only tables as constants) and converted to ncnn
+with pnnx, weights in fp16. The recipe is in tools/efficienttam/.
+Training weights were not changed. Runtime inference is float32 on CPU.
+The memory encoder and memory attention are not shipped: this model selects the
+object on the clicked frame, and the Rotobrush propagation follows it.
+
+efficienttam-ti-prompt.bin holds, as little-endian float32, the prompt encoder
+Gaussian matrix (2x128, scaled by 2 pi), its label table (5x256), the "no mask"
+embedding (256) and the "no memory" embedding (256).
+
+efficienttam-ti-encoder.param SHA256 c179523c8ff40809f72dd5405cd812abedd3571da4e094f14e9253de855fd612
+efficienttam-ti-encoder.bin SHA256 07e704bcd45f7eb8e5a33936b7c3a1211b1fdaaa245f1b17d1e4f8c73af69519
+efficienttam-ti-decoder.param SHA256 cc3f375506610c421c72b604bf3ff4a404710ac3033e2cf39f0b51a55bf2b54e
+efficienttam-ti-decoder.bin SHA256 79b399c8410d27570ea73088cf9aebabc3f8432e01f109b9e1d2ec621f05eeec
+efficienttam-ti-prompt.bin SHA256 e8bf9793c72c1001506b83a9656ad558de0d9c017761e8e3a11e68915bf53f11

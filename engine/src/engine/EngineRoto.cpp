@@ -66,7 +66,7 @@ i64 roto_source_frame(const Project& project, const Composition& comp, const Lay
 
 } // namespace
 
-bool Engine::roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 radius, const f32* xy, u32 count) noexcept try {
+bool Engine::roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 radius, const f32* xy, u32 count, bool click) noexcept try {
     if (!xy || count == 0 || !(radius > 0.0f) || !std::isfinite(radius)) return false;
     std::lock_guard<std::mutex> lock(modelMutex_);
     drain_commands_locked();
@@ -105,6 +105,7 @@ bool Engine::roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 rad
     const f32 sw = static_cast<f32>(pod.sourceWidth), sh = static_cast<f32>(pod.sourceHeight);
     ai::RotoStroke stroke;
     stroke.background = background;
+    stroke.click = click;
     stroke.frame = roto_source_frame(*project_, *comp, *l, t);
     // Pontos com um passo mínimo de ½ raio: o rasterizador preenche entre os
     // pontos, e com ¼ o teto do canal (4000 pontos) acabava em ~20 traços.
@@ -140,7 +141,8 @@ bool Engine::roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 rad
     usize total = stroke.points.size();
     for (const auto& s : strokes) total += s.points.size();
     if (total > ai::kRotoMaxPoints || strokes.size() >= 4000) return false;   // teto do formato
-    history_.before_mutation(*comp, project_->timeline().current(), background ? "traço de fundo" : "traço de objeto");
+    history_.before_mutation(*comp, project_->timeline().current(),
+                             click ? (background ? "clique de fundo" : "clique de objeto") : background ? "traço de fundo" : "traço de objeto");
     bump_model_revision_locked();
     strokes.push_back(std::move(stroke));
     ai::roto_encode(strokes, *curve);

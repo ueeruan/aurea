@@ -3643,7 +3643,7 @@
     <string name="roto_propagate">تتبع المقطع كله</string>
     <string name="roto_progress">جارٍ التتبع %1$d من %2$d</string>
     <string name="roto_done">تم</string>
-    <string name="roto_hint">ارسم العنصر بالأخضر؛ بدّل إلى الخلفية لإزالة أجزاء. الضربات في إطار آخر تحدّث الإطارات التالية.</string>
+    <string name="roto_hint">المس الكائن لتحديده أو اسحب للرسم. استخدم الخلفية لإزالة الأجزاء. التغييرات في إطار آخر تحدّث الإطارات التالية.</string>
     <string name="real_camera_tracking_position">تتبع الموقع والدوران ثلاثي الأبعاد نشط.</string>
     <string name="real_camera_tracking_rotation">الدوران فقط؛ هذا الوضع لا يقيس الموقع.</string>
     <string name="real_camera_tracking_limited">تتبع الموقع متوقف مؤقتًا. حسّن الإضاءة وحرّك الجهاز ببطء.</string>

@@ -3678,7 +3678,7 @@
     <string name="roto_propagate">Propagar clipe</string>
     <string name="roto_progress">Propagando %1$d de %2$d</string>
     <string name="roto_done">Concluir</string>
-    <string name="roto_hint">Pinte o objeto em verde; troque para Fundo para tirar partes. Traços em outro quadro atualizam os quadros seguintes.</string>
+    <string name="roto_hint">Toque no objeto para selecioná-lo ou arraste para pintar. Use Fundo para tirar partes. Mudanças em outro quadro atualizam os quadros seguintes.</string>
     <string name="real_camera_tracking_position">Posição e rotação 3D ativas.</string>
     <string name="real_camera_tracking_rotation">Só rotação; este modo não mede posição.</string>
     <string name="real_camera_tracking_limited">Rastreamento de posição pausado. Melhore a luz e mova o aparelho devagar.</string>

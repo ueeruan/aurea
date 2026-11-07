@@ -4719,6 +4719,13 @@ static NSString* const kPluginEngineGone = @"{\"ok\":false,\"value\":null,\"erro
                               static_cast<aurea::u32>(pts.size() / 2)) ? YES : NO;
 }
 
+- (BOOL)rotoAddClickAtX:(float)x y:(float)y background:(BOOL)background effect:(uint32_t)effectId forLayer:(long long)layerId {
+    auto* e = self.engine;
+    if (!e) return NO;
+    const float xy[2] = {x, y};
+    return e->roto_add_stroke(static_cast<aurea::u64>(layerId), effectId, background == YES, 6.0f, xy, 1, true) ? YES : NO;
+}
+
 - (BOOL)rotoUndoStrokeForEffect:(uint32_t)effectId layer:(long long)layerId {
     if (auto* e = self.engine) return e->roto_undo_stroke(static_cast<aurea::u64>(layerId), effectId) ? YES : NO;
     return NO;

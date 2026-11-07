@@ -3237,6 +3237,15 @@ AUREA_JNI jboolean AUREA_FN(nativeRotoAddStroke)(JNIEnv* env, jclass, jlong hand
     return c->engine.roto_add_stroke(static_cast<u64>(layer), static_cast<u32>(effectId), background == JNI_TRUE, radius,
                                      pts.data(), static_cast<u32>(n / 2)) ? JNI_TRUE : JNI_FALSE;
 }
+/// Um toque: a seleção por clique (px da composição).
+AUREA_JNI jboolean AUREA_FN(nativeRotoAddClick)(JNIEnv*, jclass, jlong handle, jlong layer, jint effectId,
+                                                jboolean background, jfloat x, jfloat y) {
+    NativeContext* c = ctx_of(handle);
+    if (!c) return JNI_FALSE;
+    const f32 xy[2] = {x, y};
+    return c->engine.roto_add_stroke(static_cast<u64>(layer), static_cast<u32>(effectId), background == JNI_TRUE, 6.0f, xy, 1, true)
+        ? JNI_TRUE : JNI_FALSE;
+}
 AUREA_JNI jboolean AUREA_FN(nativeRotoUndoStroke)(JNIEnv*, jclass, jlong handle, jlong layer, jint effectId) {
     NativeContext* c = ctx_of(handle);
     return c && c->engine.roto_undo_stroke(static_cast<u64>(layer), static_cast<u32>(effectId)) ? JNI_TRUE : JNI_FALSE;

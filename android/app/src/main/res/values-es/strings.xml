@@ -3605,7 +3605,7 @@ para editar la curva.</string>
     <string name="roto_propagate">Propagar clip</string>
     <string name="roto_progress">Propagando %1$d de %2$d</string>
     <string name="roto_done">Listo</string>
-    <string name="roto_hint">Pinta el objeto en verde; cambia a Fondo para quitar partes. Los trazos en otro cuadro actualizan los siguientes.</string>
+    <string name="roto_hint">Toca el objeto para seleccionarlo o arrastra para pintar. Usa Fondo para quitar partes. Los cambios en otro cuadro actualizan los siguientes.</string>
     <string name="real_camera_tracking_position">Posición y rotación 3D activas.</string>
     <string name="real_camera_tracking_rotation">Solo rotación; este modo no mide la posición.</string>
     <string name="real_camera_tracking_limited">Seguimiento de posición pausado. Mejora la luz y mueve el dispositivo despacio.</string>

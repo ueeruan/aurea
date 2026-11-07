@@ -38,6 +38,9 @@ struct RotoStroke {
     bool background = false;
     f32 radius = 0.03f;          ///< fração da MENOR dimensão da camada
     std::vector<Vec2> points;    ///< 0..1 da camada
+    /// Um toque: o ponto vai para a rede de seleção (RotoClick). Versões que não
+    /// conhecem a marca leem um traço pequeno.
+    bool click = false;
 };
 using RotoStrokes = std::vector<RotoStroke>;
 
@@ -51,7 +54,7 @@ inline constexpr u32 kRotoEdgeRadiusParam = 12;     ///< "Raio da borda" (px da 
 inline constexpr u32 kRotoMaxPoints = 4000;     ///< teto do canal de curva (4096 na leitura)
 inline constexpr u32 kRotoMaxStrokePoints = 256;
 
-/// Traços ⇄ curva (canal 0: quadro e raio com sinal; 1: contagem; 2: pontos;
+/// Traços ⇄ curva (canal 0: quadro e raio com sinal; 1: contagem e marca de clique; 2: pontos;
 /// 3: marca de formato). Curva sem a marca = sem traços.
 [[nodiscard]] bool roto_decode(const CurveData& curve, RotoStrokes& out);
 void roto_encode(const RotoStrokes& strokes, CurveData& curve);

@@ -21,6 +21,7 @@
 // =============================================================================
 
 #include "aurea/ai/DepthMapService.hpp"
+#include "aurea/ai/RotoClick.hpp"
 #include "aurea/ai/RotoMatte.hpp"
 
 #include <atomic>
@@ -146,6 +147,7 @@ private:
     u64 stamp_ = 0;
     struct ImageSlot { u64 key = 0; u32 maxSide = 0; RotoImagePtr image; };
     ImageSlot imageSlot_;
+    RotoClick click_;
 
     mutable std::mutex queueMutex_;
     std::condition_variable wake_;

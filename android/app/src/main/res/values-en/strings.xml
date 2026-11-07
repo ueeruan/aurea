@@ -3646,7 +3646,7 @@ to edit the curve.</string>
     <string name="roto_propagate">Track whole clip</string>
     <string name="roto_progress">Tracking %1$d of %2$d</string>
     <string name="roto_done">Done</string>
-    <string name="roto_hint">Paint the object in green; switch to Background to remove parts. Strokes on another frame update the following frames.</string>
+    <string name="roto_hint">Tap the object to select it or drag to paint. Use Background to remove parts. Changes on another frame update the following frames.</string>
     <string name="real_camera_tracking_position">3D position and rotation active.</string>
     <string name="real_camera_tracking_rotation">Rotation only; this mode does not measure position.</string>
     <string name="real_camera_tracking_limited">Position tracking paused. Improve the lighting and move the device slowly.</string>

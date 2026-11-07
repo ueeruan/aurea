@@ -3595,7 +3595,7 @@ untuk mengedit kurvanya.</string>
     <string name="roto_propagate">Lacak seluruh klip</string>
     <string name="roto_progress">Melacak %1$d dari %2$d</string>
     <string name="roto_done">Selesai</string>
-    <string name="roto_hint">Lukis objek dengan hijau; ganti ke Latar untuk membuang bagian. Goresan di frame lain memperbarui frame berikutnya.</string>
+    <string name="roto_hint">Ketuk objek untuk memilihnya atau seret untuk mengecat. Gunakan Latar untuk membuang bagian. Perubahan di frame lain memperbarui frame berikutnya.</string>
     <string name="real_camera_tracking_position">Pelacakan posisi dan rotasi 3D aktif.</string>
     <string name="real_camera_tracking_rotation">Hanya rotasi; mode ini tidak mengukur posisi.</string>
     <string name="real_camera_tracking_limited">Pelacakan posisi dijeda. Tingkatkan pencahayaan dan gerakkan perangkat perlahan.</string>

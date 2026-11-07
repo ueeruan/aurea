@@ -1127,6 +1127,9 @@ class AureaEngine private constructor() {
     // Roto Brush do Rotobrush IA: pontos em px da composição (x,y intercalados).
     fun rotoAddStroke(layer: Long, effectId: Int, background: Boolean, radius: Float, xy: FloatArray): Boolean =
         nativeRotoAddStroke(nativeHandle, layer, effectId, background, radius, xy)
+    /** Um toque: a seleção por clique (px da composição). */
+    fun rotoAddClick(layer: Long, effectId: Int, background: Boolean, x: Float, y: Float): Boolean =
+        nativeRotoAddClick(nativeHandle, layer, effectId, background, x, y)
     fun rotoUndoStroke(layer: Long, effectId: Int): Boolean = nativeRotoUndoStroke(nativeHandle, layer, effectId)
     fun rotoPropagate(layer: Long, effectId: Int): Boolean = nativeRotoPropagate(nativeHandle, layer, effectId)
     fun rotoCancel() = nativeRotoCancel(nativeHandle)
@@ -1931,6 +1934,7 @@ class AureaEngine private constructor() {
     private external fun nativeRenderColorLooks(handle: Long, maxDim: Int, out: java.nio.ByteBuffer, size: IntArray): Boolean
     private external fun nativeComputeScopes(handle: Long, maxDim: Int, histogram: IntArray, waveform: ShortArray,
                                              parade: ShortArray, vectorscope: ShortArray, size: IntArray): Boolean
+    private external fun nativeRotoAddClick(handle: Long, layer: Long, effectId: Int, background: Boolean, x: Float, y: Float): Boolean
     private external fun nativeRotoAddStroke(handle: Long, layer: Long, effectId: Int, background: Boolean, radius: Float, xy: FloatArray): Boolean
     private external fun nativeRotoUndoStroke(handle: Long, layer: Long, effectId: Int): Boolean
     private external fun nativeRotoPropagate(handle: Long, layer: Long, effectId: Int): Boolean

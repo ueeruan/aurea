@@ -1037,7 +1037,7 @@ public:
     /// Um traço no quadro atual: `xy` em px da COMPOSIÇÃO (x,y intercalados),
     /// raio em px da composição. O motor leva à camada e guarda no efeito
     /// (um passo de desfazer). `background` = traço de fundo (vermelho).
-    bool roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 radius, const f32* xy, u32 count) noexcept;
+    bool roto_add_stroke(u64 layerId, u32 effectId, bool background, f32 radius, const f32* xy, u32 count, bool click = false) noexcept;
     /// Desfaz o último traço do quadro atual (sem traço aqui: o último de todos).
     bool roto_undo_stroke(u64 layerId, u32 effectId) noexcept;
     /// out3: [0] traços no quadro atual, [1] traços no total, [2] quadros-base.

@@ -83,7 +83,10 @@ private fun rotoEnd(store: EditorStore) {
     store.rotoChanged()
 }
 
-/** Um dedo pinta um traço; soltar manda o traço inteiro ao motor (um passo de desfazer). */
+/**
+ * Um toque seleciona o objeto (RotoClick no motor); arrastar pinta um traço. Soltar
+ * manda tudo ao motor, em um passo de desfazer.
+ */
 internal suspend fun AwaitPointerEventScope.rotoGesture(store: EditorStore, m: StageMapper, down: PointerInputChange) {
     val s = RotoPaint.session ?: return
     if (!m.valid) return
@@ -96,16 +99,22 @@ internal suspend fun AwaitPointerEventScope.rotoGesture(store: EditorStore, m: S
     }
     down.consume()
     add(down.position)
+    val slop = viewConfiguration.touchSlop
+    var moved = false
     while (true) {
         val ev = awaitPointerEvent()
         val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
         if (!ch.pressed) break
-        if (ch.positionChanged()) { add(ch.position); ch.consume() }
+        if (ch.positionChanged()) {
+            add(ch.position); ch.consume()
+            if ((ch.position - down.position).getDistance() > slop) moved = true
+        }
     }
     RotoPaint.live = emptyList()
-    if (store.engineForStress.rotoAddStroke(s.layer, s.effectId, RotoPaint.background, RotoPaint.radius, xy.toFloatArray())) {
-        store.rotoChanged()
-    }
+    val engine = store.engineForStress
+    val added = if (moved) engine.rotoAddStroke(s.layer, s.effectId, RotoPaint.background, RotoPaint.radius, xy.toFloatArray())
+                else engine.rotoAddClick(s.layer, s.effectId, RotoPaint.background, xy[0], xy[1])
+    if (added) store.rotoChanged()
 }
 
 /** O traço ao vivo e o cursor do pincel, na cor do modo. */

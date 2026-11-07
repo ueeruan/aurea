@@ -53,7 +53,9 @@ if(NOT aurea_ncnn_POPULATED)
         relu clip sigmoid mish hardswish tanh convolutiondepthwise memorydata squeeze pooling concat
         # AureaHyper (src/hyper/neural): SPAN (Swish), RIFE v4.6 (Deconvolution,
         # Eltwise), GFPGAN (Slice, UnaryOp) e o int8 da CPU.
-        swish deconvolution eltwise slice unaryop quantize dequantize requantize)
+        swish deconvolution eltwise slice unaryop quantize dequantize requantize
+        # Seleção por clique do Roto (EfficientTAM-Ti, src/ai/RotoClick.cpp).
+        gelu layernorm matmul permute softmax)
     file(STRINGS "${aurea_ncnn_SOURCE_DIR}/src/CMakeLists.txt" ai_layer_lines REGEX "^ncnn_add_layer\\(")
     foreach(line IN LISTS ai_layer_lines)
         string(REGEX REPLACE "^ncnn_add_layer\\(([A-Za-z0-9_]+).*" "\\1" name "${line}")
@@ -137,16 +139,46 @@ else()
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AiForegroundModel.incbin.cpp.in" "${ai_foreground_cpp}" @ONLY)
     set_source_files_properties("${ai_foreground_cpp}" PROPERTIES OBJECT_DEPENDS "${ai_foreground_bin};${ai_foreground_param}")
 endif()
-target_sources(aurea_core PRIVATE src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp
-               "${ai_model_cpp}" "${ai_depth_cpp}" "${ai_foreground_cpp}")
+# Seleção por clique do Roto (EfficientTAM-Ti, ~23 MB em fp16). Procedência e
+# receita: assets/rotobrush/NOTICE-EfficientTAM.txt.
+set(ai_click_dir "${CMAKE_CURRENT_SOURCE_DIR}/assets/rotobrush")
+set(AI_ROTO_CLICK_ENCODER_BIN "${ai_click_dir}/efficienttam-ti-encoder.bin")
+set(AI_ROTO_CLICK_ENCODER_PARAM "${ai_click_dir}/efficienttam-ti-encoder.param")
+set(AI_ROTO_CLICK_DECODER_BIN "${ai_click_dir}/efficienttam-ti-decoder.bin")
+set(AI_ROTO_CLICK_DECODER_PARAM "${ai_click_dir}/efficienttam-ti-decoder.param")
+set(AI_ROTO_CLICK_PROMPT "${ai_click_dir}/efficienttam-ti-prompt.bin")
+foreach(entry
+        "AI_ROTO_CLICK_ENCODER_BIN=07e704bcd45f7eb8e5a33936b7c3a1211b1fdaaa245f1b17d1e4f8c73af69519"
+        "AI_ROTO_CLICK_ENCODER_PARAM=c179523c8ff40809f72dd5405cd812abedd3571da4e094f14e9253de855fd612"
+        "AI_ROTO_CLICK_DECODER_BIN=79b399c8410d27570ea73088cf9aebabc3f8432e01f109b9e1d2ec621f05eeec"
+        "AI_ROTO_CLICK_DECODER_PARAM=cc3f375506610c421c72b604bf3ff4a404710ac3033e2cf39f0b51a55bf2b54e"
+        "AI_ROTO_CLICK_PROMPT=e8bf9793c72c1001506b83a9656ad558de0d9c017761e8e3a11e68915bf53f11")
+    string(REPLACE "=" ";" pair "${entry}")
+    list(GET pair 0 file_var)
+    list(GET pair 1 file_sha)
+    file(SHA256 "${${file_var}}" actual_sha)
+    if(NOT actual_sha STREQUAL file_sha)
+        message(FATAL_ERROR "Bundled EfficientTAM model checksum mismatch: ${${file_var}}")
+    endif()
+endforeach()
+if(MSVC)
+    set(ai_click_cpp "${CMAKE_CURRENT_SOURCE_DIR}/cmake/AiRotoClickModel.stub.cpp")
+else()
+    set(ai_click_cpp "${CMAKE_CURRENT_BINARY_DIR}/generated/AiRotoClickModel.cpp")
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AiRotoClickModel.incbin.cpp.in" "${ai_click_cpp}" @ONLY)
+    set_source_files_properties("${ai_click_cpp}" PROPERTIES OBJECT_DEPENDS
+        "${AI_ROTO_CLICK_ENCODER_BIN};${AI_ROTO_CLICK_ENCODER_PARAM};${AI_ROTO_CLICK_DECODER_BIN};${AI_ROTO_CLICK_DECODER_PARAM};${AI_ROTO_CLICK_PROMPT}")
+endif()
+target_sources(aurea_core PRIVATE src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/RotoClick.cpp
+               "${ai_model_cpp}" "${ai_depth_cpp}" "${ai_foreground_cpp}" "${ai_click_cpp}")
 target_link_libraries(aurea_core PRIVATE ncnn)
 include(${CMAKE_CURRENT_LIST_DIR}/AureaHyperNeural.cmake)
 # Model/vector allocation failures are translated to Status at this boundary.
 # The rest of the shared core retains its existing no-exceptions contract.
 if(MSVC)
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp
+    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp src/ai/RotoClick.cpp
                                 PROPERTIES COMPILE_OPTIONS /EHsc)
 else()
-    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp
+    set_source_files_properties(src/ai/Upscaler.cpp src/ai/TemporalStabilizer.cpp src/ai/DepthEstimator.cpp src/ai/ForegroundEstimator.cpp src/ai/DepthMapService.cpp src/ai/RotoService.cpp src/ai/RotoClick.cpp
                                 PROPERTIES COMPILE_OPTIONS -fexceptions)
 endif()

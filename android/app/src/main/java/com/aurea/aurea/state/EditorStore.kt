@@ -4195,6 +4195,19 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
 
     // --- Keyframes (qualquer trilha) ------------------------------------------
     /** Move um keyframe (tempo LOCAL da camada). */
+    /** As chaves de um instante (os eixos de um osso) andam juntas: um passo de desfazer. */
+    fun moveKeyframesTogether(layer: Long, keys: List<KeyframeRow>, delta: Int) {
+        if (keys.isEmpty() || delta == 0) return
+        group("mover keyframes") { keys.forEach { moveKeyframe(layer, it.property, it.effectIndex, it.paramIndex, it.time, it.time + delta) } }
+        refreshNow()
+    }
+
+    fun deleteKeyframesTogether(layer: Long, keys: List<KeyframeRow>) {
+        if (keys.isEmpty()) return
+        group("apagar keyframes") { keys.forEach { deleteKeyframe(layer, it.property, it.effectIndex, it.paramIndex, it.time) } }
+        refreshNow()
+    }
+
     fun moveKeyframe(layer: Long, key: KeyframeRow, toLocalFrame: Int) {
         if (toLocalFrame == key.time) return
         send { moveKeyframe(layer, key.property, key.effectIndex, key.paramIndex, key.time, toLocalFrame) }

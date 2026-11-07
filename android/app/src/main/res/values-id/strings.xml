@@ -4758,4 +4758,16 @@ untuk mengedit kurvanya.</string>
     <string name="mural_unavailable">Memposting di Mural belum tersedia.</string>
     <string name="mural_store_only">Untuk memposting di Mural, gunakan aplikasi dari toko.</string>
     <string name="mural_delete">Hapus edit ini dari Mural</string>
+    <string name="s3d_preview">Pratinjau</string>
+    <string name="s3d_preview_show">Tampilkan pratinjau</string>
+    <string name="s3d_preview_hide">Sembunyikan pratinjau</string>
+    <string name="s3d_split_switch">Ganti pembagian vertikal dan horizontal</string>
+    <string name="s3d_split_drag">Seret untuk mengubah ukuran viewport</string>
+    <string name="s3d_curve">Edit kurva animasi</string>
+    <string name="s3d_curve_need_keys">Untuk melihat kurva, buat minimal 2 keyframe di baris ini.</string>
+    <string name="s3d_viewport_edit">Viewport Edit</string>
+    <string name="s3d_scene_title">Adegan 3D</string>
+    <string name="s3d_fullscreen">Layar penuh</string>
+    <string name="s3d_animation">Animasi</string>
+    <string name="s3d_more">Opsi lainnya</string>
 </resources>

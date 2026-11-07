@@ -4768,4 +4768,16 @@ para editar la curva.</string>
     <string name="mural_unavailable">Publicar en el Mural aún no está disponible.</string>
     <string name="mural_store_only">Para publicar en el Mural, usa la app de la tienda.</string>
     <string name="mural_delete">Eliminar este edit del Mural</string>
+    <string name="s3d_preview">Vista previa</string>
+    <string name="s3d_preview_show">Mostrar vista previa</string>
+    <string name="s3d_preview_hide">Ocultar vista previa</string>
+    <string name="s3d_split_switch">Cambiar entre división vertical y horizontal</string>
+    <string name="s3d_split_drag">Arrastra para cambiar el tamaño de las vistas</string>
+    <string name="s3d_curve">Editar la curva de animación</string>
+    <string name="s3d_curve_need_keys">Para ver la curva, crea al menos 2 keyframes en esta fila.</string>
+    <string name="s3d_viewport_edit">Vista de edición</string>
+    <string name="s3d_scene_title">Escena 3D</string>
+    <string name="s3d_fullscreen">Pantalla completa</string>
+    <string name="s3d_animation">Animación</string>
+    <string name="s3d_more">Más opciones</string>
 </resources>

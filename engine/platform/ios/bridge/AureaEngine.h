@@ -524,6 +524,9 @@ NS_SWIFT_NAME(AureaEngine)
 - (void)gestureKeyframeForLayer:(long long)layerId property:(uint32_t)property value:(float)value wholeGroup:(BOOL)wholeGroup NS_SWIFT_NAME(gestureKeyframe(forLayer:property:value:wholeGroup:));
 - (void)deleteKeyframeForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time NS_SWIFT_NAME(deleteKeyframe(forLayer:property:time:));
 - (void)moveKeyframeForLayer:(long long)layerId property:(uint32_t)property from:(int32_t)from to:(int32_t)to;
+/// A trilha inteira (TrackRef): as chaves de osso moram em `effectIndex`. Par do `moveKeyframe`/`deleteKeyframe` do CommandBatch.kt.
+- (void)moveKeyframeForLayer:(long long)layerId property:(uint32_t)property effectIndex:(uint32_t)effectIndex paramIndex:(uint32_t)paramIndex from:(int32_t)from to:(int32_t)to NS_SWIFT_NAME(moveKeyframe(forLayer:property:effectIndex:paramIndex:from:to:));
+- (void)deleteKeyframeForLayer:(long long)layerId property:(uint32_t)property effectIndex:(uint32_t)effectIndex paramIndex:(uint32_t)paramIndex time:(int32_t)time NS_SWIFT_NAME(deleteKeyframe(forLayer:property:effectIndex:paramIndex:time:));
 - (void)setKeyframeValueForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time value:(float)value NS_SWIFT_NAME(setKeyframeValue(forLayer:property:time:value:));
 - (void)setKeyframeInterpolationForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time
                             interpolation:(uint32_t)interpolation

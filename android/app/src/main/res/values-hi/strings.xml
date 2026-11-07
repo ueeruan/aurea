@@ -4764,4 +4764,16 @@
     <string name="mural_unavailable">म्यूरल पर पोस्ट करना अभी उपलब्ध नहीं है।</string>
     <string name="mural_store_only">म्यूरल पर पोस्ट करने के लिए स्टोर वाला ऐप इस्तेमाल करें।</string>
     <string name="mural_delete">इस एडिट को म्यूरल से हटाएँ</string>
+    <string name="s3d_preview">प्रीव्यू</string>
+    <string name="s3d_preview_show">प्रीव्यू दिखाएँ</string>
+    <string name="s3d_preview_hide">प्रीव्यू छिपाएँ</string>
+    <string name="s3d_split_switch">वर्टिकल और हॉरिज़ॉन्टल विभाजन बदलें</string>
+    <string name="s3d_split_drag">व्यूपोर्ट का आकार बदलने के लिए खींचें</string>
+    <string name="s3d_curve">एनिमेशन कर्व बदलें</string>
+    <string name="s3d_curve_need_keys">कर्व देखने के लिए इस पंक्ति में कम से कम 2 कीफ़्रेम बनाएँ।</string>
+    <string name="s3d_viewport_edit">एडिट व्यूपोर्ट</string>
+    <string name="s3d_scene_title">3D सीन</string>
+    <string name="s3d_fullscreen">फ़ुल स्क्रीन</string>
+    <string name="s3d_animation">एनिमेशन</string>
+    <string name="s3d_more">और विकल्प</string>
 </resources>

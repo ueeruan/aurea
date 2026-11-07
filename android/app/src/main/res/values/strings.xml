@@ -4847,4 +4847,16 @@
     <string name="mural_unavailable">Postar no Mural ainda não está disponível.</string>
     <string name="mural_store_only">Para postar no Mural, use o app da loja.</string>
     <string name="mural_delete">Apagar este edit do Mural</string>
+    <string name="s3d_preview">Prévia</string>
+    <string name="s3d_preview_show">Mostrar a prévia</string>
+    <string name="s3d_preview_hide">Esconder a prévia</string>
+    <string name="s3d_split_switch">Trocar entre divisão vertical e horizontal</string>
+    <string name="s3d_split_drag">Arraste para redimensionar as viewports</string>
+    <string name="s3d_curve">Editar a curva da animação</string>
+    <string name="s3d_curve_need_keys">Para ver a curva, crie pelo menos 2 keyframes nessa linha.</string>
+    <string name="s3d_viewport_edit">Viewport de Edição</string>
+    <string name="s3d_scene_title">Scene 3D</string>
+    <string name="s3d_fullscreen">Tela cheia</string>
+    <string name="s3d_animation">Animação</string>
+    <string name="s3d_more">Mais opções</string>
 </resources>

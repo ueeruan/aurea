@@ -4815,4 +4815,16 @@ to edit the curve.</string>
     <string name="mural_unavailable">Posting on the Mural is not available yet.</string>
     <string name="mural_store_only">To post on the Mural, use the store app.</string>
     <string name="mural_delete">Delete this edit from the Mural</string>
+    <string name="s3d_preview">Preview</string>
+    <string name="s3d_preview_show">Show preview</string>
+    <string name="s3d_preview_hide">Hide preview</string>
+    <string name="s3d_split_switch">Switch between vertical and horizontal split</string>
+    <string name="s3d_split_drag">Drag to resize the viewports</string>
+    <string name="s3d_curve">Edit the animation curve</string>
+    <string name="s3d_curve_need_keys">To see the curve, create at least 2 keyframes on this row.</string>
+    <string name="s3d_viewport_edit">Edit Viewport</string>
+    <string name="s3d_scene_title">Scene 3D</string>
+    <string name="s3d_fullscreen">Full screen</string>
+    <string name="s3d_animation">Animation</string>
+    <string name="s3d_more">More options</string>
 </resources>

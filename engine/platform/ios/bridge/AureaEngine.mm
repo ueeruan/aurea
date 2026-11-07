@@ -1631,6 +1631,29 @@ bool aurea_vision_person_segment(void*, uint32_t model, const uint8_t* rgb, uint
     [self flush];
 }
 
+- (void)moveKeyframeForLayer:(long long)layerId property:(uint32_t)property effectIndex:(uint32_t)effectIndex paramIndex:(uint32_t)paramIndex from:(int32_t)from to:(int32_t)to {
+    if (auto* c = _batch.add(CommandType::KeyframeMove)) {
+        c->keyframe_move.track.layer = layer_of(layerId);
+        c->keyframe_move.track.property = static_cast<aurea::TrackProperty>(property);
+        c->keyframe_move.track.effectIndex = effectIndex;
+        c->keyframe_move.track.effectParamIndex = paramIndex;
+        c->keyframe_move.fromTime = aurea::FrameIndex{from};
+        c->keyframe_move.toTime = aurea::FrameIndex{to};
+    }
+    [self flush];
+}
+
+- (void)deleteKeyframeForLayer:(long long)layerId property:(uint32_t)property effectIndex:(uint32_t)effectIndex paramIndex:(uint32_t)paramIndex time:(int32_t)time {
+    if (auto* c = _batch.add(CommandType::KeyframeDelete)) {
+        c->keyframe.track.layer = layer_of(layerId);
+        c->keyframe.track.property = static_cast<aurea::TrackProperty>(property);
+        c->keyframe.track.effectIndex = effectIndex;
+        c->keyframe.track.effectParamIndex = paramIndex;
+        c->keyframe.time = aurea::FrameIndex{time};
+    }
+    [self flush];
+}
+
 - (void)setKeyframeValueForLayer:(long long)layerId property:(uint32_t)property time:(int32_t)time value:(float)value {
     if (auto* c = _batch.add(CommandType::KeyframeSetValue)) {
         c->keyframe.track.layer = layer_of(layerId);

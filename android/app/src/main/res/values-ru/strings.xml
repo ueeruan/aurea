@@ -4776,4 +4776,16 @@
     <string name="mural_unavailable">Публикация на стене пока недоступна.</string>
     <string name="mural_store_only">Для публикации на стене используйте приложение из магазина.</string>
     <string name="mural_delete">Удалить эту работу со стены</string>
+    <string name="s3d_preview">Просмотр</string>
+    <string name="s3d_preview_show">Показать просмотр</string>
+    <string name="s3d_preview_hide">Скрыть просмотр</string>
+    <string name="s3d_split_switch">Переключить вертикальное и горизонтальное деление</string>
+    <string name="s3d_split_drag">Перетащите, чтобы изменить размер окон</string>
+    <string name="s3d_curve">Изменить кривую анимации</string>
+    <string name="s3d_curve_need_keys">Чтобы увидеть кривую, создайте минимум 2 ключевых кадра в этой строке.</string>
+    <string name="s3d_viewport_edit">Окно редактирования</string>
+    <string name="s3d_scene_title">3D-сцена</string>
+    <string name="s3d_fullscreen">Во весь экран</string>
+    <string name="s3d_animation">Анимация</string>
+    <string name="s3d_more">Другие параметры</string>
 </resources>

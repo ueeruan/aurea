@@ -4806,4 +4806,16 @@
     <string name="mural_unavailable">النشر على الجدارية غير متاح بعد.</string>
     <string name="mural_store_only">للنشر على الجدارية، استخدم تطبيق المتجر.</string>
     <string name="mural_delete">حذف هذا المونتاج من الجدارية</string>
+    <string name="s3d_preview">معاينة</string>
+    <string name="s3d_preview_show">إظهار المعاينة</string>
+    <string name="s3d_preview_hide">إخفاء المعاينة</string>
+    <string name="s3d_split_switch">التبديل بين التقسيم الرأسي والأفقي</string>
+    <string name="s3d_split_drag">اسحب لتغيير حجم نوافذ العرض</string>
+    <string name="s3d_curve">تعديل منحنى الحركة</string>
+    <string name="s3d_curve_need_keys">لرؤية المنحنى، أنشئ إطارين رئيسيين على الأقل في هذا الصف.</string>
+    <string name="s3d_viewport_edit">نافذة التحرير</string>
+    <string name="s3d_scene_title">مشهد ثلاثي الأبعاد</string>
+    <string name="s3d_fullscreen">ملء الشاشة</string>
+    <string name="s3d_animation">الحركة</string>
+    <string name="s3d_more">خيارات أخرى</string>
 </resources>

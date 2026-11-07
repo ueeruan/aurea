@@ -2471,7 +2471,11 @@ public:
                                                         std::vector<u8>& out, u32& outWidth, u32& outHeight,
                                                         u32& outFrames) noexcept;
 
+    /// Nunca espera o render: com o modelo preso devolve o que o último quadro publicou.
     [[nodiscard]] EngineStatus read_status() noexcept;
+    /// Tempos por passe na GPU: cada um espera o anterior terminar, então só valem
+    /// com o painel de desempenho aberto. O total do quadro continua medido.
+    void set_detail_gpu_timers(bool enabled) noexcept { detailGpuTimers_.store(enabled, std::memory_order_relaxed); }
     [[nodiscard]] EngineTelemetry read_telemetry() noexcept;
     /// Complete preview-cache intervals for the current composition. Absolute
     /// [start, end) frame pairs; returns pairs copied (at most 30), without a GPU wait.
@@ -3098,6 +3102,10 @@ private:
     // --- Sincronização --------------------------------------------------------
     /// Protege projeto, timeline, playback, seleção e imagens.
     mutable std::mutex modelMutex_;
+    std::mutex statusCacheMutex_;   ///< só o instante de copiar statusCache_
+    EngineStatus statusCache_{};    ///< a parte do modelo, do último quadro preparado
+    std::atomic<bool> detailGpuTimers_{true};
+    void fill_status_model_locked(EngineStatus& st) noexcept;
     ModelImportReport lastModelImport_{};   ///< sob modelMutex_
     std::mutex commandSubmitMutex_; ///< publication vs session replacement; never waits for rendering
     /// Protege backend e renderer (GPU). Nunca adquirido com o do modelo já

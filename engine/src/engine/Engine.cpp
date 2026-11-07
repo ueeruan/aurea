@@ -11615,7 +11615,8 @@ RenderSettings Engine::current_render_settings() noexcept {
         drafted = true;
     }
     lastFrameDrafted_.store(drafted, std::memory_order_release);
-    rs.gpuTimers = config_.enableTelemetry;
+    rs.previewCacheBypass = refineNow_ || drafted;
+    rs.gpuTimers = config_.enableTelemetry && detailGpuTimers_.load(std::memory_order_relaxed);
     if (project_) {
         rs.viewportZoom = project_->editor_settings().viewportZoom > 0.0f
                         ? project_->editor_settings().viewportZoom : 1.0f;
@@ -11623,7 +11624,7 @@ RenderSettings Engine::current_render_settings() noexcept {
         if (const Composition* comp = current_composition(); comp && surfaceAttached_) {
             const auto scale = preview_viewport_scale(adapt().auto_mode(), comp->width(), comp->height(),
                 surface_.width, surface_.height, rs.viewportZoom, rs.previewNumerator, rs.previewDenominator,
-                (playback_.playing() || previewBuffering_) && !refineNow_ ? static_cast<f32>(comp->fps()) : 0.0f);
+                !refineNow_ ? static_cast<f32>(comp->fps()) : 0.0f);
             rs.previewNumerator = scale.numerator;
             rs.previewDenominator = scale.denominator;
         }
@@ -12058,7 +12059,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
             t = FrameIndex{candidate};
             rs.previewCacheOnly = true;
         }
-        cachedPreview = preRendered || renderer_.preview_cached(t);
+        cachedPreview = preRendered || (!rs.previewCacheBypass && renderer_.preview_cached(t));
         // Paused preview fills the same bounded decoder cache used by playback.
         // Scrubbing still coalesces to the requested frame; no speculative seeks.
         const bool buffering = !idleWarming && !playing && playback_.mode() == PlaybackMode::Paused && !caps_.thermal().severe();
@@ -12086,6 +12087,7 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
                                   decodeDirection, mode, playback_.speed(), snapshot_);
             }
         }
+        { EngineStatus published; fill_status_model_locked(published); }
     }
     const u64 tPrepared = monotonic_ns();
 
@@ -13544,7 +13546,25 @@ EngineStatus Engine::read_status() noexcept {
     }
     st.memoryPressure = memory_.pressure();
 
-    std::lock_guard<std::mutex> lock(modelMutex_);
+    // A interface lê isto a cada vsync e o render segura o modelo durante o `prepare`.
+    // Quem esperava aqui era a thread da tela; o valor do último quadro é o mesmo que
+    // está na tela, porque o comando seguinte só entra no próximo quadro.
+    std::unique_lock<std::mutex> lock(modelMutex_, std::try_to_lock);
+    if (lock.owns_lock()) {
+        fill_status_model_locked(st);
+        return st;
+    }
+    std::lock_guard<std::mutex> cached(statusCacheMutex_);
+    const EngineStatus& m = statusCache_;
+    st.previewNumerator = m.previewNumerator; st.previewDenominator = m.previewDenominator; st.previewAuto = m.previewAuto;
+    st.playhead = m.playhead; st.playing = m.playing; st.assetCount = m.assetCount; st.dirty = m.dirty;
+    st.recoveryAvailable = m.recoveryAvailable; st.duration = m.duration; st.layerCount = m.layerCount;
+    st.compFps = m.compFps; st.compWidth = m.compWidth; st.compHeight = m.compHeight;
+    st.canUndo = m.canUndo; st.canRedo = m.canRedo; st.undoDepth = m.undoDepth; st.selectedCount = m.selectedCount;
+    return st;
+}
+
+void Engine::fill_status_model_locked(EngineStatus& st) noexcept {
     st.previewNumerator = adapt().current_numerator();
     st.previewDenominator = adapt().current_denominator();
     st.previewAuto = adapt().auto_mode();
@@ -13566,7 +13586,8 @@ EngineStatus Engine::read_status() noexcept {
     st.canRedo = history_.can_redo();
     st.undoDepth = history_.depth();
     st.selectedCount = static_cast<u32>(selection_.size());
-    return st;
+    std::lock_guard<std::mutex> cached(statusCacheMutex_);
+    statusCache_ = st;
 }
 
 EngineTelemetry Engine::read_telemetry() noexcept {
@@ -16091,7 +16112,7 @@ Status Engine::render_export_frame(FrameIndex time, const OffscreenTarget& targe
     RenderSettings settings;
     settings.finalQuality = true;
     settings.boundedSceneExposure = config_.enableBoundedSceneExposure;
-    settings.gpuTimers = config_.enableTelemetry;
+    settings.gpuTimers = config_.enableTelemetry && detailGpuTimers_.load(std::memory_order_relaxed);
     settings.cancelFlag = &c.cancelRequested;
     const u64 begin = monotonic_ns();
     const Status result = c.offline->render(*c.frozenProject, c.recovery.composition, time, target,

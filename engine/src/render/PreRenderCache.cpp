@@ -1,4 +1,5 @@
 #include "aurea/render/PreRenderCache.hpp"
+#include "aurea/core/Thread.hpp"
 #include "aurea/export/ImageEncode.hpp"
 #include "stb_image.h" // implementation is already compiled in GltfImporter.cpp
 #include <algorithm>
@@ -272,7 +273,7 @@ struct PreRenderCache::Impl {
         const u32 hw = std::thread::hardware_concurrency();
         const u32 count = std::clamp<u32>(hw ? hw / 2 : 2, 2, 3);
         inflight.reserve(count);
-        for (u32 i = 0; i < count; ++i) workers.emplace_back([this, i] { run(i == 0); });
+        for (u32 i = 0; i < count; ++i) workers.emplace_back([this, i] { set_current_thread_name("aurea-prerender"); run(i == 0); });
     }
     ~Impl() {
         generation.fetch_add(1, std::memory_order_acq_rel); token.store(0, std::memory_order_release);
@@ -380,7 +381,10 @@ struct PreRenderCache::Impl {
             Read job; std::shared_ptr<Session> disposable; u64 charge = 0; bool idle = false;
             {
                 std::unique_lock lock(mutex);
-                wake.wait_for(lock, std::chrono::milliseconds(10), [&] {
+                // Sem pedido nada muda até um notify: acordar a cada 10 ms em três
+                // threads gastava CPU o tempo todo, sem pré-render nenhum em uso.
+                // 250 ms é só a rede de um `token` trocado fora do lock.
+                wake.wait_for(lock, std::chrono::milliseconds(cleaner && !garbage.empty() ? 10 : 250), [&] {
                     return stopping || !requests.empty() || (active && !valid(active->token)) || (cleaner && !garbage.empty());
                 });
                 retire_locked();
@@ -437,7 +441,9 @@ struct PreRenderCache::Impl {
                 wake.notify_all();
             } else if (idle) {
                 // In-flight producer lease / read budget full: do not busy-spin.
-                std::unique_lock lock(mutex); wake.wait_for(lock, std::chrono::milliseconds(5));
+                // Fila vazia: a espera do começo do laço já dorme, sem acordar aqui.
+                std::unique_lock lock(mutex);
+                if (!requests.empty()) wake.wait_for(lock, std::chrono::milliseconds(5));
             }
         }
     }

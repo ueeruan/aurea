@@ -4430,6 +4430,9 @@ AUREA_JNI jboolean AUREA_FN(nativeSetRawPlayback)(JNIEnv*, jclass, jlong handle,
 AUREA_JNI void AUREA_FN(nativeSetSceneEditor)(JNIEnv*, jclass, jlong handle, jboolean enabled, jfloat yaw, jfloat pitch, jfloat distance) {
     if (auto* c = ctx_of(handle)) c->engine.set_scene_editor(enabled == JNI_TRUE, yaw, pitch, distance);
 }
+AUREA_JNI void AUREA_FN(nativeSetDetailGpuTimers)(JNIEnv*, jclass, jlong handle, jboolean enabled) {
+    if (auto* c = ctx_of(handle)) c->engine.set_detail_gpu_timers(enabled == JNI_TRUE);
+}
 AUREA_JNI void AUREA_FN(nativeSetDefaultNames)(JNIEnv* env, jclass, jobjectArray names) {
     aurea::set_default_names(jni_string_list(env, names));
 }

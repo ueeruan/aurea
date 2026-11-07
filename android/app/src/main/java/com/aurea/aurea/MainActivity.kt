@@ -137,6 +137,10 @@ class MainActivity : ComponentActivity() {
         // Debug-only (0.4.6): cena 3D de demonstração no motor real — formas
         // encostadas (oclusão ambiente), sol com sombra, luz pontual e chão.
         store.syncDefaultNames()   // trocar o idioma recria a Activity; o motor continua o mesmo
+        // Debug: a bancada de desempenho (diagnostics/PlaybackBench).
+        if (BuildConfig.DEBUG) intent.getStringExtra("aureaBench")?.let { label ->
+            lifecycleScope.launch { com.aurea.aurea.diagnostics.PlaybackBench(store, label).run() }
+        }
         if (BuildConfig.DEBUG && intent.getStringExtra("aureaDemo") == "scene3d") {
             com.aurea.aurea.ui.i18n.AppLanguage.select(this, com.aurea.aurea.ui.i18n.AppLanguage.PT_BR)
             lifecycleScope.launch {

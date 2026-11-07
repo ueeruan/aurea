@@ -1470,6 +1470,7 @@ void Renderer::invalidate_preview_frames(i64 start, i64 end) noexcept {
 }
 
 u32 Renderer::configure_preview_cache(u32 width, u32 height, const RenderSettings& s) noexcept {
+    if (s.previewCacheBypass) return previewCacheCapacity_;
     if (!s.previewCacheRevision || s.finalQuality || s.rawPlayback || !backend_) {
         clear_preview_cache();
         return 0;
@@ -2466,8 +2467,13 @@ void Renderer::prepare(const Composition& comp, const Project& project, FrameInd
     }
     // Fora do playback contínuo (parado, scrub, export): o que o projeto usa e
     // ainda não foi compilado entra na fila; render() compila antes do grafo.
-    // No playback não varre — nada muda no modelo sem pausar.
-    if (prepareDepth_ == 0 && decodeMode != DecodeMode::Playback) scan_for_warmup(project);
+    // Tocando não varre: nada muda no modelo sem pausar. Parado o decoder também anda
+    // em Playback, e a varredura sumia justo depois de uma edição; a revisão resolve.
+    if (prepareDepth_ == 0 && (decodeMode != DecodeMode::Playback
+            || (!settings.previewPlaying && settings.previewCacheRevision != warmupScanRevision_))) {
+        warmupScanRevision_ = settings.previewCacheRevision;
+        scan_for_warmup(project);
+    }
     // Expressões: a timeline do quadro (camada dona, outras camadas) e o memo
     // por (propriedade, quadro). O quadro é preparado sob o lock do modelo.
     const expr::Scope exprScope(project.timeline());
@@ -9086,7 +9092,7 @@ Status Renderer::render(FrameSnapshot& snap, const RenderSettings& settings,
     cacheDesc.format = kPreviewCacheFormat;
     PreviewFrame* cached = nullptr;
     previewCacheHit_ = false;
-    const bool usePreviewCache = !settings.cachedComposition.valid()
+    const bool usePreviewCache = !settings.cachedComposition.valid() && !settings.previewCacheBypass
         && (!offscreen || offscreen->display.valid()) && !settings.finalQuality && !settings.rawPlayback
         && settings.previewCacheRevision && previewCacheCapacity_;
     if (usePreviewCache) {
@@ -10390,7 +10396,9 @@ void Renderer::read_timings(RenderTimings& t) noexcept {
     const u32 n = backend_->read_gpu_timings(timingScratch_.data(),
                                              static_cast<u32>(timingScratch_.size()), &total);
     lastGpuPasses_ = n;
-    t.gpuMeasured = n > 0;
+    // Sem os tempos por passe (painel fechado) o total do quadro continua valendo: é ele
+    // que guia a resolução automática.
+    t.gpuMeasured = n > 0 || total > 0.0f;
     if (!t.gpuMeasured) return;
     t.gpuTotalMs = total;
     t.gpuColorConvMs = t.gpuEffectsMs = t.gpuBlurMs = t.gpuGlowMs = t.gpuCompositeMs = t.gpuOutputMs = 0.0f;

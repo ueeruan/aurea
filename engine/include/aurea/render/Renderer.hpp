@@ -522,6 +522,9 @@ struct RenderSettings {
     u64 previewCacheRevision = 0;
     u64 previewCacheComposition = 0;
     bool previewCacheOnly = false; // prepare a future frame without presenting it
+    // Quadro de outra qualidade (refino parado, rascunho do dedo): passa ao lado da
+    // prévia guardada. Trocar a chave por causa dele jogava fora tudo o que estava pronto.
+    bool previewCacheBypass = false;
     bool rawPlayback = false;
     /// Prévia TOCANDO (o relógio do playback anda). Parado, no scrub, no preparo
     /// do buffer antes do play e no export: false. O TimeSlice em vídeo não
@@ -1464,6 +1467,7 @@ private:
     u64 previewCacheBudget_ = 0, previewCacheKey_ = 0, previewCacheUse_ = 0;
     bool lowMemoryDevice_ = false;   ///< set_low_memory_device
     u64 previewCacheRevision_ = 0, previewCacheComposition_ = 0;
+    u64 warmupScanRevision_ = 0;
     u32 previewCacheCapacity_ = 0;
     bool previewCacheHit_ = false;
     void publish_preview_buffer_ranges() noexcept;

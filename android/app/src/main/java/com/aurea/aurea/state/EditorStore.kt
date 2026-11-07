@@ -980,6 +980,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
                         deviceName = engine.deviceSummary()
                         startThermalWatch()
                         engineReady = true
+                        engine.setDetailGpuTimers(hudVisible)
                         syncDefaultNames()
                         // Plugins (0.3.0): o motor já os carregou da pasta; os textos por idioma vêm antes do catálogo.
                         refreshPlugins()
@@ -4596,6 +4597,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     }
     fun toggleHud() {
         hudVisible = !hudVisible
+        engine.setDetailGpuTimers(hudVisible)
         wakeStatusLoop()   // o HUD mede o FPS da UI: precisa do vsync
     }
 

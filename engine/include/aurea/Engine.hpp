@@ -2476,6 +2476,9 @@ public:
     /// Tempos por passe na GPU: cada um espera o anterior terminar, então só valem
     /// com o painel de desempenho aberto. O total do quadro continua medido.
     void set_detail_gpu_timers(bool enabled) noexcept { detailGpuTimers_.store(enabled, std::memory_order_relaxed); }
+    /// O cabeçote em quadros FRACIONÁRIOS, estimado para agora a partir do último quadro
+    /// preparado. A timeline anda a cada vsync em vez de pular quadro a quadro. Sem lock.
+    [[nodiscard]] f64 playhead_precise() const noexcept;
     [[nodiscard]] EngineTelemetry read_telemetry() noexcept;
     /// Complete preview-cache intervals for the current composition. Absolute
     /// [start, end) frame pairs; returns pairs copied (at most 30), without a GPU wait.
@@ -3105,6 +3108,10 @@ private:
     std::mutex statusCacheMutex_;   ///< só o instante de copiar statusCache_
     EngineStatus statusCache_{};    ///< a parte do modelo, do último quadro preparado
     std::atomic<bool> detailGpuTimers_{true};
+    std::atomic<i64> pubContentNs_{0};     ///< tempo de conteúdo do último quadro preparado
+    std::atomic<u64> pubWallNs_{0};        ///< relógio do aparelho nesse instante
+    std::atomic<f32> pubSpeed_{0.0f};      ///< 0 = parado
+    std::atomic<f64> pubFps_{30.0};
     void fill_status_model_locked(EngineStatus& st) noexcept;
     ModelImportReport lastModelImport_{};   ///< sob modelMutex_
     std::mutex commandSubmitMutex_; ///< publication vs session replacement; never waits for rendering

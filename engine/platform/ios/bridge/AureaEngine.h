@@ -795,6 +795,8 @@ NS_SWIFT_NAME(AureaEngine)
 /// Mãozinha da Cena 3D: dx e dy em pixels da composição.
 - (void)panSceneViewDx:(float)dx dy:(float)dy NS_SWIFT_NAME(panSceneView(dx:dy:));
 - (void)resetScenePan;
+/// O cabeçote em quadros fracionários, para agora (a timeline anda a cada vsync). Sem lock.
+- (double)playheadPrecise;
 /// Nomes das camadas novas, na ordem de aurea/DefaultNames.hpp.
 - (void)setDefaultNames:(NSArray<NSString*>*)names;
 /// 0.4.6: vista do palco do AE (0 câmera ativa, 1 padrão, 2..7 frente/trás/esquerda/direita/topo/base,

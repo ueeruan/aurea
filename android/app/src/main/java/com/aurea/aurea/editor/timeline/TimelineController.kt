@@ -211,7 +211,12 @@ internal class TimelineController(
     fun pxPerFrame(): Float = TimeAxis.pxPerFrame(state.pps, metrics.density, fps)
     fun view(): Double {
         val held = state.heldView
-        return if (held.isNaN()) store.playhead.toDouble() else held
+        if (!held.isNaN()) return held
+        // Tocando, o cabeçote fracionário: a timeline desliza em vez de pular de quadro
+        // em quadro. Longe do inteiro (um seek que o motor ainda não aplicou), vale o inteiro.
+        val smooth = store.playheadSmooth
+        val frame = store.playhead.toDouble()
+        return if (!smooth.isNaN() && kotlin.math.abs(smooth - frame) < 1.5) smooth else frame
     }
 
     private fun centerX() = state.width / 2f

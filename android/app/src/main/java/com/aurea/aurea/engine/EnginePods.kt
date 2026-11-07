@@ -244,6 +244,16 @@ class LayerRow internal constructor(
             return String(bytes, Charsets.UTF_8)
         }
 
+    /** Mesmos campos e mesmo nome, sem alocar. */
+    fun sameAs(o: LayerRow): Boolean {
+        if (id != o.id || kind != o.kind || zIndex != o.zIndex || startFrame != o.startFrame || endFrame != o.endFrame
+            || opacity != o.opacity || flags != o.flags || effectCount != o.effectCount || maskCount != o.maskCount
+            || keyframeCount != o.keyframeCount || blendMode != o.blendMode || parentIndex != o.parentIndex
+            || offsetFrames != o.offsetFrames || trackId != o.trackId || nameLength != o.nameLength) return false
+        for (i in 0 until nameLength) if (nameBlob.get(nameOffset + i) != o.nameBlob.get(o.nameOffset + i)) return false
+        return true
+    }
+
     /** O nome é `utf8` (os bytes)? Sem alocar — a timeline compara a cada revisão. */
     fun nameEquals(utf8: ByteArray): Boolean {
         if (utf8.size != (if (nameLength > 0) nameLength else 0)) return false
@@ -253,6 +263,16 @@ class LayerRow internal constructor(
 
     companion object {
         const val INVALID_INDEX = -1
+
+        /**
+         * A lista lida de novo é igual à que está na tela? Uma lista nova a cada revisão
+         * (efeito, keyframe, seleção) recompunha a timeline e os painéis sem mudar nada.
+         */
+        fun sameRows(a: List<LayerRow>, b: List<LayerRow>): Boolean {
+            if (a.size != b.size) return false
+            for (i in a.indices) if (!a[i].sameAs(b[i])) return false
+            return true
+        }
 
         internal fun read(buffer: ByteBuffer, index: Int, nameBlob: ByteBuffer): LayerRow {
             val b = index * PodLayout.LAYER_ROW_BYTES

@@ -2717,6 +2717,9 @@ static aurea::scene3d::DeviceMemoryHint ios_memory_hint() {
     for (NSString* name in names) list.emplace_back(name.UTF8String ?: "");
     aurea::set_default_names(list);
 }
+- (double)playheadPrecise {
+    auto* e = self.engine; return e ? e->playhead_precise() : 0.0;
+}
 - (void)resetScenePan {
     if (auto* e = self.engine) e->reset_scene_pan();
 }

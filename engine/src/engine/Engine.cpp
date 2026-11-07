@@ -11860,6 +11860,10 @@ Status Engine::render_frame(bool onlyIfChanged) noexcept {
         project_->timeline().set_playhead(t);
         playing = playback_.playing();
         renderSpeed = playback_.speed();
+        pubContentNs_.store(playback_.current_ns(), std::memory_order_relaxed);
+        pubSpeed_.store(playing && !playback_.held() ? renderSpeed : 0.0f, std::memory_order_relaxed);
+        pubFps_.store(comp->fps() > 0.0 ? static_cast<f64>(comp->fps()) : 30.0, std::memory_order_relaxed);
+        pubWallNs_.store(frameStart, std::memory_order_release);
         const bool busyPreview = playing || previewBuffering_;
         if (playingHint_.exchange(busyPreview) != busyPreview) media_.proxies().set_pause_reason(PreviewProxyService::Playback, busyPreview);
 
@@ -13562,6 +13566,19 @@ EngineStatus Engine::read_status() noexcept {
     st.compFps = m.compFps; st.compWidth = m.compWidth; st.compHeight = m.compHeight;
     st.canUndo = m.canUndo; st.canRedo = m.canRedo; st.undoDepth = m.undoDepth; st.selectedCount = m.selectedCount;
     return st;
+}
+
+f64 Engine::playhead_precise() const noexcept {
+    const u64 wall = pubWallNs_.load(std::memory_order_acquire);
+    const f64 fps = pubFps_.load(std::memory_order_relaxed);
+    const f64 base = static_cast<f64>(pubContentNs_.load(std::memory_order_relaxed)) * fps / 1e9;
+    const f32 speed = pubSpeed_.load(std::memory_order_relaxed);
+    if (speed == 0.0f || !wall) return base;
+    const u64 now = monotonic_ns();
+    // No máximo um quadro e meio à frente do último preparado: com o render atrasado a
+    // agulha espera por ele em vez de correr sozinha (e voltar quando ele chegar).
+    const f64 ahead = std::clamp(static_cast<f64>(now > wall ? now - wall : 0) * 1e-9 * fps * speed, -1.5, 1.5);
+    return base + ahead;
 }
 
 void Engine::fill_status_model_locked(EngineStatus& st) noexcept {

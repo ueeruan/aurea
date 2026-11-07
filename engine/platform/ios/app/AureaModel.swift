@@ -387,6 +387,14 @@ enum AureaPaths {
 @MainActor
 final class PlayheadClock: ObservableObject {
     @Published fileprivate(set) var frame: Int64 = 0
+    /// Tocando: o cabeçote fracionário (a timeline desliza a cada vsync). NaN parado.
+    @Published fileprivate(set) var precise: Double = .nan
+    /// Onde a timeline desenha: o fracionário perto do inteiro; longe dele (um seek
+    /// que o motor ainda não aplicou) vale o inteiro.
+    var view: Double {
+        let whole = Double(frame)
+        return !precise.isNaN && abs(precise - whole) < 1.5 ? precise : whole
+    }
 }
 
 @MainActor
@@ -2553,6 +2561,8 @@ final class AureaModel: ObservableObject {
         var out = AureaStatus()
         guard engine.readStatus(&out) else { return }
         if playheadClock.frame != out.playhead { playheadClock.frame = out.playhead }
+        let smooth = out.playing != 0 ? engine.playheadPrecise() : .nan
+        if !(smooth.isNaN && playheadClock.precise.isNaN) && smooth != playheadClock.precise { playheadClock.precise = smooth }
         if out.playing == 0 {
             followPlayback(false)
             refreshStatus()

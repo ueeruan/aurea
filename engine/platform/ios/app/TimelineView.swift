@@ -241,7 +241,7 @@ struct TimelineView: View {
     /// Chave do zoom/rolagem guardados: o projeto aberto.
     private var memoryKey: String { model.projectURL?.path ?? model.projectName }
     private var ppf: CGFloat { TimeAxis.pxPerFrame(pps: pps, density: 1, fps: fps) }
-    private var viewFrame: Double { heldView ?? Double(clock.frame) }
+    private var viewFrame: Double { heldView ?? clock.view }
     private var focusTracks: [TimelineTrack]? {
         model.panel == .curve ? [TimelineTrack(property: Int(model.curveProperty), effect: model.curveEffect, param: model.curveParam)] : model.timelineFocus
     }
@@ -689,7 +689,7 @@ struct TimelineView: View {
     /// Fio branco de 1 pt, com a mesma origem temporal dos clipes e losangos.
     /// A faixa do relógio interrompe o fio; a seleção não muda sua posição.
     private func drawPlayhead(_ context: inout GraphicsContext, size: CGSize) {
-        let cx = x(Double(clock.frame), width: size.width)
+        let cx = x(clock.view, width: size.width)
         let tint = AureaColors.playhead
         let top = min(m.playheadTop, size.height)
         context.fill(Path(CGRect(x: cx - m.playhead / 2, y: top, width: m.playhead, height: size.height - top)), with: .color(tint))
@@ -3042,7 +3042,7 @@ extension TimelineView {
         omegaTimeTab(&context, size: size, marked: false)
         // Cursor de 1,5, interrompido na aba; a 50 % movendo.
         let tint: Color = AureaColors.playhead
-        let px = x(Double(clock.frame), width: size.width)
+        let px = x(clock.view, width: size.width)
         var line = context
         if moveOrig != nil { line.opacity = 0.5 }
         line.fill(Path(CGRect(x: px - m.playhead / 2, y: 0, width: m.playhead, height: m.omegaTabTop + 1)), with: .color(tint))

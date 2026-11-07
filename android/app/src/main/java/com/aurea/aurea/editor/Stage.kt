@@ -97,7 +97,9 @@ internal fun PreviewStage(store: EditorStore, ui: EditorUi, modifier: Modifier) 
     // Pontos do rastreio de câmera no vídeo (painel de Rastreio aberto).
     val showTrack = ui.panel == com.aurea.aurea.editor.panels.EditorPanel.Tracking
     val showCamera = showTrack && store.cameraTrackerVisible
-    androidx.compose.runtime.LaunchedEffect(store.playhead, showCamera, store.cameraTrack, store.primary) { store.refreshCameraFeatures(showCamera) }
+    // O cabeçote só é lido com o rastreio de câmera à mostra: lido aqui, o palco
+    // inteiro recompunha a cada quadro tocando.
+    if (showCamera) CameraTrackFollower(store) else androidx.compose.runtime.LaunchedEffect(store.cameraTrack, store.primary) { store.refreshCameraFeatures(false) }
     // Zoom da vista: cada projeto abre no encaixe (o motor pode trazer um zoom
     // salvo no arquivo; aqui a vista e o motor voltam juntos a 100 %).
     androidx.compose.runtime.LaunchedEffect(store) {
@@ -2359,4 +2361,9 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.mas
         }
     }
     store.maskGestureEnd()
+}
+
+@Composable
+private fun CameraTrackFollower(store: EditorStore) {
+    androidx.compose.runtime.LaunchedEffect(store.playhead, store.cameraTrack, store.primary) { store.refreshCameraFeatures(true) }
 }

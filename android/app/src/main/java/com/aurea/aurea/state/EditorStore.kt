@@ -436,6 +436,9 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Playhead em frames da composição. */
     var playhead by mutableIntStateOf(0)
         private set
+    /** Tocando: o cabeçote fracionário (a timeline desliza a cada vsync). NaN parado. */
+    var playheadSmooth by androidx.compose.runtime.mutableDoubleStateOf(Double.NaN)
+        private set
     var playing by mutableStateOf(false)
     var preRenderPreparing by mutableStateOf(false)
         private set
@@ -1380,6 +1383,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             checkMemoryPressure()
             engine.readStatus(statusBuffer)
             status.readFrom(statusBuffer)
+            val smooth = if (status.playing) engine.playheadPrecise() else Double.NaN
+            if (!(smooth.isNaN() && playheadSmooth.isNaN()) && smooth != playheadSmooth) playheadSmooth = smooth
             updateIdle()
             publish()
             uiFrames++
@@ -1543,7 +1548,7 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
             // mesmo lock que o render usa — era trepidação no preview. Parado
             // (scrub, passo, pausa), lê na hora.
             val now = System.nanoTime()
-            if (!playing || now - lastDetailNs >= DETAIL_PLAYBACK_NS) {
+            if ((!playing && !scrubbing) || now - lastDetailNs >= DETAIL_PLAYBACK_NS) {
                 // Optimistic UI seeking can already show the target before the
                 // engine applies it. Track the native frame or the inspector
                 // can remain at the previous frame indefinitely after seeking.
@@ -1615,7 +1620,8 @@ class EditorStore(app: Application) : AndroidViewModel(app) {
     /** Relê tudo o que depende do modelo. Barato: dezenas de linhas POD. */
     private fun refreshModel() {
         curveRevision++
-        layers = readLayers()
+        val fresh = readLayers()
+        if (!LayerRow.sameRows(layers, fresh)) layers = fresh
         captionTracks = com.aurea.aurea.captions.parseCaptionTracks(engine.captionTracks())
         refreshMarkers()
         editMode = engine.editMode()

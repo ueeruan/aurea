@@ -1508,6 +1508,8 @@ class AureaEngine private constructor() {
     fun resetScenePan() = nativeResetScenePan(nativeHandle)
     /** Tempos por passe na GPU: custam desempenho, só com o painel aberto. */
     fun setDetailGpuTimers(enabled: Boolean) = nativeSetDetailGpuTimers(nativeHandle, enabled)
+    /** O cabeçote em quadros fracionários, para agora. Sem lock: pode ser chamado a cada vsync. */
+    fun playheadPrecise(): Double = nativePlayheadPrecise(nativeHandle)
     /** Nomes das camadas novas, na ordem de aurea/DefaultNames.hpp. */
     fun setDefaultNames(names: Array<String>) = nativeSetDefaultNames(names)
     /** 0.4.6: assistente de IA — ferramentas (formato OpenAI), instruções e execução no motor. */
@@ -1842,6 +1844,7 @@ class AureaEngine private constructor() {
     private external fun nativeSetSceneEditor(handle: Long, enabled: Boolean, yaw: Float, pitch: Float, distance: Float)
     private external fun nativeSetDefaultNames(names: Array<String>)
     private external fun nativeSetDetailGpuTimers(handle: Long, enabled: Boolean)
+    private external fun nativePlayheadPrecise(handle: Long): Double
     private external fun nativePanSceneView(handle: Long, dx: Float, dy: Float)
     private external fun nativeResetScenePan(handle: Long)
     private external fun nativeSceneGuides(handle: Long, output: FloatArray): Int

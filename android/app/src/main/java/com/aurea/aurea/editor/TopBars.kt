@@ -787,10 +787,10 @@ private fun RowScope.AlignCell(glyph: Char, description: String, tag: String, ti
  */
 @Composable
 internal fun MultiSelectBottomBar(store: EditorStore, modifier: Modifier) {
-    val playhead = store.playhead
     val selection = store.selection
     val layers = store.layers
-    val variant = remember(playhead, selection, layers) { store.multiTimeVariant() }
+    // Cabeçote lido no derivedStateOf: tocando, a barra só recompõe quando a variante muda.
+    val variant by remember(selection, layers) { androidx.compose.runtime.derivedStateOf { store.playhead; store.multiTimeVariant() } }
     val intoLayers = stringResource(R.string.editor_leve_cabecote_dentro_camadas)
     val lockedText = stringResource(R.string.sh_layers_locked_unlock_to_edit)
     Row(

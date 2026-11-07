@@ -170,7 +170,9 @@ private fun TransportBarContent(store: EditorStore, ui: EditorUi) {
             // 0.3.3 recursos: o marcador da 0.3.2 volta ao transporte — tocar marca ou
             // desmarca o instante (aceso num marcador); segurar abre o editor dele
             // (nome, quadro e cor).
-            val marked = store.playhead in store.markers.frames
+            // Lido num derivedStateOf: tocando, a fileira só recompõe ao entrar ou sair de
+            // um marcador (antes era a cada quadro).
+            val marked by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { store.playhead in store.markers.frames } }
             TransportIconButton(
                 if (marked) TransportIcon.BookmarkFill else TransportIcon.Bookmark,
                 stringResource(R.string.editor_marcar_ou_desmarcar_este_instante),
